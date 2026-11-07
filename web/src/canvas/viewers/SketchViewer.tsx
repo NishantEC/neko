@@ -10,7 +10,7 @@
 // page policy refuses fonts from other sites. Modelled on the owner's Canvas
 // plugin (`<data dir>/plugins/canvas`, written by Neko, 2026-11).
 import "./excalidraw-assets";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Excalidraw, MainMenu, serializeAsJSON, restore, getSceneVersion } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import { Button } from "@/ui/button";
@@ -43,8 +43,15 @@ export default function SketchViewer(props: ViewerProps) {
     }
   }, [text]);
 
-  // A new version on screen is the new baseline: nothing to save yet.
-  useEffect(() => { baseline.current = null; setDirty(false); }, [text]);
+  // A new version on screen is the new baseline: nothing to save yet. Reset
+  // during render, not in an effect: Excalidraw's first onChange fires in its
+  // own mount, before a parent effect would run, and must set the baseline.
+  const baselineFor = useRef<string | null>(null);
+  if (baselineFor.current !== text) {
+    baselineFor.current = text;
+    baseline.current = null;
+    if (dirty) setDirty(false);
+  }
 
   if (error) return <ViewerProblem message={error} />;
   if (text === null) return <p className="p-4 text-sm text-muted-foreground" aria-busy="true">Opening the sketch…</p>;

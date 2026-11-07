@@ -199,25 +199,37 @@ pub fn save(root: &Path, save: Save) -> Result<(Artifact, u32), String> {
     keep(root, save, &kind, &bytes)
 }
 
-/// Keeps `text` as the next version of `artifact_id`, in the kind of its
-/// newest version: how a viewer that edits (Excalidraw) saves. Only text
-/// kinds, and the same checks and cap as a file.
-pub fn save_text(root: &Path, artifact_id: &str, text: &str, note: &str) -> Result<(Artifact, u32), String> {
-    let artifact = get(root, artifact_id).ok_or_else(|| format!("There is no artifact {artifact_id}."))?;
-    let kind = artifact.versions.iter().max_by_key(|v| v.n).and_then(|v| kind_of(Path::new(&v.file))).unwrap_or(artifact.kind.clone());
-    if !is_text(&kind) { return Err(format!("A {kind} artifact cannot be saved as text.")); }
+/// Keeps `text` as the next version of `artifact_id`: how a viewer that edits
+/// (Excalidraw) saves. `version` is the one that was edited (None: the
+/// newest); the text is kept in that version's kind, which must be a text
+/// kind, with the same checks and cap as a file. The kind is read under the
+/// save lock, so a version saved meanwhile cannot change it.
+pub fn save_text(root: &Path, artifact_id: &str, version: Option<u32>, text: &str, note: &str) -> Result<(Artifact, u32), String> {
     if text.len() as u64 > MAX_BYTES { return Err(TOO_BIG.into()); }
+    let _guard = lock();
+    let artifact = get(root, artifact_id).ok_or_else(|| format!("There is no artifact {artifact_id}."))?;
+    let edited = match version {
+        Some(n) => artifact.versions.iter().find(|v| v.n == n).ok_or_else(|| format!("Artifact {artifact_id} has no version {n}."))?,
+        None => artifact.versions.iter().max_by_key(|v| v.n).ok_or_else(|| format!("Artifact {artifact_id} has no versions."))?,
+    };
+    let kind = kind_of(Path::new(&edited.file)).ok_or("The edited version has no kind.")?;
+    if !is_text(&kind) { return Err(format!("A {kind} artifact cannot be saved as text.")); }
     check_contents(&kind, text.as_bytes())?;
-    keep(root, Save { artifact_id: Some(artifact_id.to_string()), note: note.to_string(), ..Save::default() }, &kind, text.as_bytes())
+    keep_locked(root, Save { artifact_id: Some(artifact_id.to_string()), note: note.to_string(), ..Save::default() }, &kind, text.as_bytes())
 }
 
 fn keep(root: &Path, save: Save, kind: &str, bytes: &[u8]) -> Result<(Artifact, u32), String> {
+    let _guard = lock();
+    keep_locked(root, save, kind, bytes)
+}
+
+/// [`keep`] with the save lock already held.
+fn keep_locked(root: &Path, save: Save, kind: &str, bytes: &[u8]) -> Result<(Artifact, u32), String> {
     let title = shorten(&save.title, MAX_TITLE_CHARS);
     let note = shorten(&save.note, MAX_NOTE_CHARS);
     let workspace_id = save.workspace_id.filter(|w| !w.is_empty());
     if workspace_id.as_deref().is_some_and(|w| !valid_id(w)) { return Err("The workspace id is not valid.".into()); }
     let message_id = save.message_id.filter(|m| valid_id(m));
-    let _guard = lock();
     fs::create_dir_all(root).map_err(|e| format!("Cannot create {}: {e}", root.display()))?;
     let (dir, mut artifact) = match save.artifact_id.as_deref().filter(|id| !id.is_empty()) {
         Some(id) => {
@@ -429,15 +441,22 @@ mod tests {
         let root = tmp.path().join("artifacts");
         let sketch = source(tmp.path(), "s.excalidraw", br#"{"type":"excalidraw","elements":[]}"#);
         let (artifact, _) = save(&root, new(sketch, "Sketch")).unwrap();
-        let (edited, n) = save_text(&root, &artifact.id, r#"{"type":"excalidraw","elements":[{"id":"a"}]}"#, "Edited in Neko").unwrap();
+        let (edited, n) = save_text(&root, &artifact.id, Some(1), r#"{"type":"excalidraw","elements":[{"id":"a"}]}"#, "Edited in Neko").unwrap();
         assert_eq!((n, edited.kind.as_str(), edited.versions[1].file.as_str(), edited.versions[1].note.as_str()), (2, "excalidraw", "v2.excalidraw", "Edited in Neko"));
         assert_eq!(edited.title, "Sketch");
-        assert!(save_text(&root, &artifact.id, "{broken", "").is_err(), "the kind's checks still apply");
-        assert!(save_text(&root, "missing", "{}", "").is_err());
-        assert!(save_text(&root, "../x", "{}", "").is_err());
+        assert!(save_text(&root, &artifact.id, None, "{broken", "").is_err(), "the kind's checks still apply");
+        assert!(save_text(&root, &artifact.id, Some(9), "{}", "").unwrap_err().contains("no version 9"));
+        assert!(save_text(&root, "missing", None, "{}", "").is_err());
+        assert!(save_text(&root, "../x", None, "{}", "").is_err());
         let (model, _) = save(&root, new(source(tmp.path(), "m.glb", &tiny_glb()), "Model")).unwrap();
-        assert!(save_text(&root, &model.id, "text", "").unwrap_err().contains("cannot be saved as text"));
-        assert!(save_text(&root, &artifact.id, &"a".repeat(MAX_BYTES as usize + 1), "").unwrap_err().contains("5 MB"));
+        assert!(save_text(&root, &model.id, None, "text", "").unwrap_err().contains("cannot be saved as text"));
+        assert!(save_text(&root, &artifact.id, None, &"a".repeat(MAX_BYTES as usize + 1), "").unwrap_err().contains("5 MB"));
+        // The kind is the edited version's, not the newest one's: a sketch edited
+        // after a png became v3 is still kept as a sketch, and editing the png is refused.
+        save(&root, Save { artifact_id: Some(artifact.id.clone()), ..new(source(tmp.path(), "p.png", b"\x89PNG\r\n\x1a\nrest"), "") }).unwrap();
+        let (mixed, n) = save_text(&root, &artifact.id, Some(2), r#"{"type":"excalidraw","elements":[]}"#, "").unwrap();
+        assert_eq!((n, mixed.versions[3].file.as_str()), (4, "v4.excalidraw"));
+        assert!(save_text(&root, &artifact.id, Some(3), "{}", "").unwrap_err().contains("png"));
     }
 
     #[test]

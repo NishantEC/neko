@@ -20,20 +20,29 @@ built; Phase B, the agent seeing the app, is not). Research:
   `text/plain`; unknown (`xhtml`, `zip`) are `application/octet-stream`.
   `nosniff` is on every reply. **PDF** gets `web::PDF_CSP` (`default-src
   'none'; object-src 'self'`, no `sandbox`): Chrome's PDF viewer refuses to run
-  in a sandboxed document, and a PDF is not a page that can reach Neko. A
-  download keeps `ARTIFACT_CSP`.
-- **`EditArtifact { artifact_id, content, note }`** keeps UTF-8 text as the next
-  version in the newest version's kind (`artifacts::save_text`: text kinds
-  only, same checks and cap). The sketch viewer saves through it.
+  in a sandboxed document. So a PDF loads same-origin and unsandboxed, framed
+  without a `sandbox` attribute; accepted (reviewed 2026-11-08) because the
+  browser's viewer, not the page, runs it and the policy allows no script,
+  connection or form. A download keeps `ARTIFACT_CSP`. PDF rendering was not
+  exercised by the headless verify.
+- **`EditArtifact { artifact_id, version, content, note }`** keeps UTF-8 text
+  as the next version in the kind of `version`, the one the viewer showed
+  (unset: the newest), read under the save lock (`artifacts::save_text`: text
+  kinds only, same checks and cap; editing a png version is refused even if
+  the newest is a sketch). The sketch viewer saves through it.
 - **Showing.** `SaveArtifact.show: Option<bool>`; unset means "a Home turn is
   pending" (only the full-power chat can save files, so that is where the
   person is looking). `ShowArtifact { id, version? }` and `OpenTab { route }`
   answer `Shown { pages }`, the number of open web pages that got the event
   (`server::broadcast` now returns it; 0 means nobody saw it). Events
   `ShowArtifact` / `OpenTab`; the GPUI client ignores them. The web shell
-  mounts `obeyAgentRequests` (`canvas/artifacts.ts`): ShowArtifact sets the
-  canvas target and, when Home is not the active route, opens the artifact's
-  tab; OpenTab sets the hash after `tabHash` re-checks it.
+  mounts `obeyAgentRequests` (`canvas/artifacts.ts`). **Only one page acts:**
+  the focused one, else the one used last (each page writes its id to
+  localStorage `neko.lastFocusedPage` on focus or becoming visible, and hands
+  it back on `pagehide`); the others show a toast with "Show here" / "Open
+  here". Without this every open window jumped. ShowArtifact sets the canvas
+  target and, when Home is not the active route, opens the artifact's tab;
+  OpenTab sets the hash after `tabHash` re-checks it.
   `neko_core::viewers::tab_route` refuses schemes, `//`, `..`, spaces and
   anything outside `[A-Za-z0-9-_:/?=&.%]`. Home no longer opens the canvas on
   `ArtifactsChanged`; it opens on `ShowArtifact`, so `show: false` stays off
@@ -72,12 +81,19 @@ built; Phase B, the agent seeing the app, is not). Research:
   refused source (230 for one sketch) even though the local font loaded. The
   same module wraps `window.FontFace` to drop cross-origin sources and the
   unshipped Xiaolai ones (falling back to `local()`, which never fetches).
-  "Save as v<n+1>" is enabled once the scene version changes.
+  "Save as v<n+1>" is enabled once the scene version changes; the baseline
+  is reset during render keyed on the text (not in an effect, which would run
+  after Excalidraw's first mount `onChange`).
 - **Fences** (`chat/fences.tsx`, used by `MarkdownPre`): once a reply settles,
   a block whose language has a fence is drawn by it; streaming blocks stay
-  code. A viewer fence gets the block's text (`csv`, `tsv`), or an artifact
-  when the block is `artifact <id> [v<n>]` or a bare 12-hex id (a one-word
-  csv stays text). Built-in: csv, tsv, 3d. **Mermaid is not drawn**: the
+  code. A viewer fence gets the block's text only when the language is one of
+  the viewer's kinds (`csv`, `tsv`), or an artifact when the block is
+  `artifact <id> [v<n>]` or a bare 12-hex id (a one-word csv stays text) and
+  the artifact's kind is one the viewer draws; anything else stays code (a
+  ```3d naming a csv, or holding prose). Fence viewers mount only while within
+  400 px of the screen (`WhileOnScreen`, IntersectionObserver) and unmount
+  when they leave, keeping their height: browsers cap live WebGL contexts at
+  about 16, and a long chat may hold more ```3d blocks. Built-in: csv, tsv, 3d. **Mermaid is not drawn**: the
   library is ~30 MB of chunks (`stubs/mermaid.ts`), not cheap.
 - **The model learns.** `neko_core::viewers::capabilities(manifest)` bounds
   `viewers` (≤8, kinds via `kind_of`), `fences` (≤8), `prompt` (one line,

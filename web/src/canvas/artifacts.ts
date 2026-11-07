@@ -6,7 +6,7 @@
 //   /artifact/<id>/<n>                         version n, under its own CSP
 //   ArtifactsChanged { id, version, message_id }   pushed on every save
 //   ShowArtifact { id, version } / OpenTab { route }   an agent asks every page to show (obeyAgentRequests)
-//   EditArtifact { artifact_id, content, note }   a viewer saves the next version (editArtifact)
+//   EditArtifact { artifact_id, version, content, note }   a viewer saves the next version (editArtifact)
 //
 // Which artifact the canvas shows is kept here, outside any page, so a card,
 // a menu or an artifact's own tab can open one and Home shows it beside the
@@ -15,6 +15,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { onEvent, request, type Json } from "@/api";
 import { HOME } from "@/router";
+import { toast } from "@/ui/sonner";
 
 export interface ArtifactVersion {
   n: number;
@@ -133,12 +134,12 @@ export function showArtifact(id: string, version: number | null = null) {
   if (currentRoute() !== HOME) location.hash = artifactHref(id, version).slice(1);
 }
 
-/** Saves `content` as the next version of a text artifact (a viewer that edits); resolves to the new version. */
-export async function editArtifact(id: string, content: string, note = ""): Promise<number> {
-  const reply = await request({ EditArtifact: { artifact_id: id, content, note } });
-  const version = reply?.ArtifactSaved?.version;
-  if (typeof version !== "number") throw new Error(reply?.Error?.message ?? "The new version was not saved.");
-  return version;
+/** Saves `content` as the next version of a text artifact, in the kind of `edited` (the version the viewer showed); resolves to the new version. */
+export async function editArtifact(id: string, edited: number, content: string, note = ""): Promise<number> {
+  const reply = await request({ EditArtifact: { artifact_id: id, version: edited, content, note } });
+  const saved = reply?.ArtifactSaved?.version;
+  if (typeof saved !== "number") throw new Error(reply?.Error?.message ?? "The new version was not saved.");
+  return saved;
 }
 
 const isShow = (event: Json): event is { ShowArtifact: { id: string; version: number | null } } =>
@@ -158,15 +159,63 @@ export function tabHash(route: string): string | null {
  * Mounted once by the shell; returns the unsubscribe.
  */
 export function obeyAgentRequests(): () => void {
-  return onEvent((event) => {
+  const stopFocus = trackFocus();
+  const stop = onEvent((event) => {
     if (isShow(event)) {
       const { id, version } = event.ShowArtifact;
-      if (typeof id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(id)) showArtifact(id, typeof version === "number" ? version : null);
+      if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) return;
+      const n = typeof version === "number" ? version : null;
+      if (isActivePage()) showArtifact(id, n);
+      else toast("Neko showed an artifact in another window", { action: { label: "Show here", onClick: () => showArtifact(id, n) } });
     } else if (isOpenTab(event)) {
       const hash = tabHash(String(event.OpenTab.route ?? ""));
-      if (hash) location.hash = hash.slice(1);
+      if (!hash) return;
+      if (isActivePage()) location.hash = hash.slice(1);
+      else toast("Neko opened a page in another window", { action: { label: "Open here", onClick: () => { location.hash = hash.slice(1); } } });
     }
   });
+  return () => { stop(); stopFocus(); };
+}
+
+// ---------------------------------------------------------------------------
+// Which open page an agent's request moves
+// ---------------------------------------------------------------------------
+
+// Only one page acts on ShowArtifact / OpenTab: the one the person used last
+// (focused now, or most recently, when they are in another app watching the
+// agent work). Pages share the origin's localStorage, so each records itself
+// there when it gains focus or becomes visible; the others offer a toast.
+const PAGE_ID = Math.random().toString(36).slice(2);
+const LAST_FOCUS = "neko.lastFocusedPage";
+
+function claimFocus() {
+  try { localStorage.setItem(LAST_FOCUS, PAGE_ID); } catch { /* private mode: every page acts */ }
+}
+
+function trackFocus(): () => void {
+  if (document.hasFocus() || !localStorage.getItem(LAST_FOCUS)) claimFocus();
+  const onVisible = () => { if (document.visibilityState === "visible") claimFocus(); };
+  // A page that closes hands the claim back, so the next request is not lost on a dead page.
+  const onHide = () => { try { if (localStorage.getItem(LAST_FOCUS) === PAGE_ID) localStorage.removeItem(LAST_FOCUS); } catch { /* ignore */ } };
+  addEventListener("focus", claimFocus);
+  addEventListener("pagehide", onHide);
+  document.addEventListener("visibilitychange", onVisible);
+  return () => {
+    removeEventListener("focus", claimFocus);
+    removeEventListener("pagehide", onHide);
+    document.removeEventListener("visibilitychange", onVisible);
+  };
+}
+
+/** Whether this page is the one an agent's request should move. */
+export function isActivePage(): boolean {
+  if (document.hasFocus()) return true;
+  try {
+    const last = localStorage.getItem(LAST_FOCUS);
+    return !last || last === PAGE_ID;
+  } catch {
+    return true;
+  }
 }
 
 export function useCanvas(): CanvasTarget | null {

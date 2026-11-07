@@ -70,7 +70,10 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   const request = (body) => page.evaluate(async (body) => (await fetch("/api/request", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).json(), body);
 
   // A reply's ```csv block is a table, not code.
+  // Fence viewers mount only near the screen (a long chat would otherwise hold a WebGL context per ```3d).
   const fence = page.locator("[data-slot='reply-fence'][data-viewer='csv']").first();
+  await fence.waitFor({ state: "attached", timeout: 15000 }).catch(() => {});
+  await fence.scrollIntoViewIfNeeded().catch(() => {});
   await fence.locator("table").waitFor({ timeout: 15000 }).then(() => check(true, "a reply's ```csv block is drawn as a table"), () => check(false, "a reply's ```csv block is drawn as a table"));
   const headers = await fence.locator("th").allInnerTexts().catch(() => []);
   check(headers.join("|") === "endpoint|timeouts|retried, then ok", `the fence's header row is the first line, quotes kept (${headers.join("|")})`);
@@ -110,6 +113,20 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
     await doc.locator("h1").waitFor({ timeout: 10000 }).catch(() => {});
     check((await doc.locator("h1").innerText().catch(() => "")) === "Retry plan" && (await doc.locator("strong").count()) === 1, "the document is rendered Markdown, not shown as text");
     check((await doc.locator("[data-slot='reply-fence'][data-viewer='csv'] table").count()) === 1, "a ```csv block inside the document is a table too");
+  }
+
+  // A ```3d fence draws only what its viewer can: a model. One naming a csv, or free text, stays code.
+  if (saved["3d"] && saved.csv) {
+    const file = path.join(DATA, "viewers-fences.md");
+    writeFileSync(file, `# Fences\n\n\`\`\`3d\nartifact ${saved["3d"].id}\n\`\`\`\n\n\`\`\`3d\nartifact ${saved.csv.id}\n\`\`\`\n\n\`\`\`3d\njust some words\n\`\`\`\n`);
+    const reply = await request({ SaveArtifact: { title: "Fences", file, workspace_id: null, artifact_id: null, note: "", show: true } });
+    const id = reply?.ArtifactSaved?.artifact?.id;
+    const doc = page.locator(`[data-slot='artifact-panel'][data-artifact='${id}'] [data-slot='markdown-viewer']`);
+    await doc.locator("[data-slot='reply-fence'][data-viewer='3d'] [data-slot='model-viewer'][data-loaded='true']").waitFor({ timeout: 15000 })
+      .then(() => check(true, "a ```3d fence naming a model draws it in the document"), () => check(false, "a ```3d fence naming a model draws it in the document"));
+    check((await doc.locator("[data-slot='reply-fence'][data-viewer='3d']").count()) === 1, "a ```3d fence naming a csv, or holding free text, is not handed to the 3D viewer");
+    check((await doc.locator(".chat-markdown-codeblock[data-language='3d']").count()) === 2, "those two stay code blocks");
+    await shot("viewers-fence-3d");
   }
 
   // The 3D toolbar: wireframe and fit act on the model.
@@ -172,6 +189,17 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
       .then(() => check(true, "ShowArtifact away from Home opens the artifact in its own tab"), () => check(false, "ShowArtifact away from Home opens the artifact in its own tab"));
     await shot("viewers-tab-csv");
     await a11y("artifact tab (csv)");
+  }
+  // Only the page the person used last moves; another one offers a toast instead.
+  // The headless page always reports focus, so it is told it has none for this check.
+  {
+    await page.evaluate(() => { document.hasFocus = () => false; localStorage.setItem("neko.lastFocusedPage", "another-window"); });
+    const before = await page.evaluate(() => location.hash);
+    await request({ OpenTab: { route: "memory" } });
+    await page.getByText("Neko opened a page in another window").waitFor({ timeout: 5000 })
+      .then(() => check(true, "a page that is not the last one used offers a toast instead of moving"), () => check(false, "a page that is not the last one used offers a toast instead of moving"));
+    check((await page.evaluate(() => location.hash)) === before, "and stays where it was");
+    await page.evaluate(() => { localStorage.removeItem("neko.lastFocusedPage"); delete document.hasFocus; });
   }
   const tab = await request({ OpenTab: { route: "calendar" } });
   check(tab?.Shown?.pages >= 1, "OpenTab is accepted");

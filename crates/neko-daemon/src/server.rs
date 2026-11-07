@@ -779,8 +779,8 @@ fn save_artifact(state: &AppState, mut save: neko_core::artifacts::Save, show: O
 
 /// `EditArtifact`: a viewer saved the next version itself. Every page hears
 /// of it (the one that saved follows it to the new version).
-fn edit_artifact(state: &AppState, id: &str, content: &str, note: &str) -> Response {
-    match neko_core::artifacts::save_text(&state.artifacts, id, content, note) {
+fn edit_artifact(state: &AppState, id: &str, version: Option<u32>, content: &str, note: &str) -> Response {
+    match neko_core::artifacts::save_text(&state.artifacts, id, version, content, note) {
         Ok((artifact, version)) => {
             broadcast(state, &Event::ArtifactsChanged { id: artifact.id.clone(), version, message_id: None });
             Response::ArtifactSaved { artifact, version }
@@ -819,7 +819,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             note,
             message_id: None,
         }, show),
-        Request::EditArtifact { artifact_id, content, note } => edit_artifact(state, &artifact_id, &content, &note),
+        Request::EditArtifact { artifact_id, version, content, note } => edit_artifact(state, &artifact_id, version, &content, &note),
         Request::Artifacts { workspace_id } => Response::Artifacts { artifacts: neko_core::artifacts::list(&state.artifacts, workspace_id.as_deref()) },
         Request::Artifact { id } => match neko_core::artifacts::get(&state.artifacts, &id) {
             Some(artifact) => Response::Artifact { artifact },
@@ -1940,10 +1940,10 @@ mod tests {
         let Response::ArtifactSaved { artifact: board, .. } = handle_request_for_test(&state, Request::SaveArtifact { title: "Board".into(), file: sketch.to_string_lossy().into(), workspace_id: None, artifact_id: None, note: String::new(), show: Some(false) }) else { panic!("no board") };
         assert_eq!(board.kind, "excalidraw");
         while events.try_recv().is_ok() {}
-        let edit = Request::EditArtifact { artifact_id: board.id.clone(), content: r#"{"type":"excalidraw","elements":[{"id":"a"}]}"#.into(), note: "Edited".into() };
+        let edit = Request::EditArtifact { artifact_id: board.id.clone(), version: Some(1), content: r#"{"type":"excalidraw","elements":[{"id":"a"}]}"#.into(), note: "Edited".into() };
         let Response::ArtifactSaved { version: 2, .. } = handle_request_for_test(&state, edit) else { panic!("not edited") };
         assert!(matches!(events.try_recv(), Ok(Event::ArtifactsChanged { version: 2, message_id: None, .. })));
-        assert!(matches!(handle_request_for_test(&state, Request::EditArtifact { artifact_id: board.id.clone(), content: "{broken".into(), note: String::new() }), Response::Error { .. }));
+        assert!(matches!(handle_request_for_test(&state, Request::EditArtifact { artifact_id: board.id.clone(), version: None, content: "{broken".into(), note: String::new() }), Response::Error { .. }));
 
         // A refused file is an error, and announces nothing.
         while events.try_recv().is_ok() {}

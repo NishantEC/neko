@@ -220,7 +220,7 @@ model learns what exists from the **Installed viewers** section
 manifest `viewers` / `fences` / `prompt`), appended to the full-power chat
 instruction and routine prompts and printed by `--plugin-guide`. An agent opens
 what it made: `SaveArtifact.show` (default while a Home reply runs),
-`ShowArtifact` and `OpenTab` become `Event`s every open page obeys. Details:
+`ShowArtifact` and `OpenTab` become `Event`s that the page used last obeys (others offer a toast). Details:
 `docs/knowledge/everything-renders.md`.
 
 The web app (`web/`, served by the daemon and shown in the native window's web

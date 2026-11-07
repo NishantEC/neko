@@ -98,7 +98,7 @@ export function ArtifactFrame({
   }
   const onEdit = viewer.edits
     ? async (content: string, note?: string) => {
-        const saved = await editArtifact(artifact.id, content, note ?? "");
+        const saved = await editArtifact(artifact.id, n, content, note ?? "");
         onEdited?.(saved);
         return saved;
       }

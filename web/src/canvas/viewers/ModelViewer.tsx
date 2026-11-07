@@ -211,7 +211,10 @@ export default function ModelViewer(props: ViewerProps) {
   const mount = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<Scene | null>(null);
   const [model, setModel] = useState<{ triangles: number } | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [loadProblem, setProblem] = useState<string | null>(null);
+  // WebGL failing is kept apart: the model effect clears its own problem on every new file, never this one.
+  const [glProblem, setGlProblem] = useState<string | null>(null);
+  const problem = glProblem ?? loadProblem;
   const [wireframe, setWireframe] = useState(false);
   const [grid, setGrid] = useState(true);
 
@@ -223,7 +226,7 @@ export default function ModelViewer(props: ViewerProps) {
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     } catch {
-      setProblem("This browser can't start WebGL, so the model can't be shown here. Download it to open it elsewhere.");
+      setGlProblem("This browser can't start WebGL, so the model can't be shown here. Download it to open it elsewhere.");
       return;
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));

@@ -684,10 +684,13 @@ pub enum Request {
         show: Option<bool>,
     },
     /// Keeps `content` (UTF-8 text) as the next version of a text artifact,
-    /// in its newest version's kind: how a viewer that edits (the Excalidraw
-    /// sketch) saves. Same checks and 5 MB cap as `SaveArtifact`.
+    /// in the kind of `version`, the version that was edited (unset: the
+    /// newest): how a viewer that edits (the Excalidraw sketch) saves. Same
+    /// checks and 5 MB cap as `SaveArtifact`.
     EditArtifact {
         artifact_id: String,
+        #[serde(default)]
+        version: Option<u32>,
         content: String,
         #[serde(default)]
         note: String,
@@ -701,7 +704,7 @@ pub enum Request {
     Artifact {
         id: String,
     },
-    /// Opens an artifact on every open Neko page: on the canvas beside the
+    /// Opens an artifact in the Neko page used last (other open pages offer it in a toast): on the canvas beside the
     /// chat when Home is showing, otherwise in the artifact's own tab.
     /// `version` unset follows the newest.
     ShowArtifact {
@@ -709,7 +712,7 @@ pub enum Request {
         #[serde(default)]
         version: Option<u32>,
     },
-    /// Opens a Neko route in a tab on every open Neko page: `tasks`,
+    /// Opens a Neko route in a tab in the Neko page used last: `tasks`,
     /// `tasks?task=<id>&view=full`, `artifact?id=<id>`, a plugin page's
     /// `<plugin>:<page>`. Never another site.
     OpenTab {
@@ -991,7 +994,7 @@ pub enum Event {
         message_id: Option<String>,
     },
     /// Show this artifact now (`SaveArtifact` with `show`, or
-    /// `ShowArtifact`): every open page opens it beside the chat when Home is
+    /// `ShowArtifact`): the page used last opens it beside the chat when Home is
     /// on screen, otherwise in its own tab. `version` None follows the newest.
     ShowArtifact {
         id: String,
