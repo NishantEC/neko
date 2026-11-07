@@ -15,7 +15,15 @@ written. There is no build step and no bundler.
 ```
 
 `group` is `main`, `work` or `system` (the sidebar section). Raise `version`
-on every change.
+on every change. A plugin that adds a viewer or a reply fence also declares it
+here, so the model is told it exists (section 4):
+
+```json
+{ "title": "STL viewer", "version": "0.1.0", "entry": "index.js",
+  "viewers": [{ "id": "stl", "title": "STL viewer", "kinds": ["stl"] }],
+  "fences": ["stl"],
+  "prompt": "Save a 3D print as .stl; it opens in the STL viewer." }
+```
 
 `index.js` is an ES module whose default export receives the host:
 
@@ -53,6 +61,10 @@ runtime, for libraries that render through React (see section 3).
   `theme.get()` / `theme.subscribe(fn)`; `addSection({ id, title, component })`
   in Settings; `addTab({ id, title, component })` on a task (it gets `{ task }`);
   `inspector` (the panel on the right); `onEvent(fn)` for daemon events.
+- `registerViewer(spec)` and `registerFence(spec)`: draw an artifact kind on
+  the canvas, and a reply's fenced block (section 4). `artifacts.readText(props)`,
+  `artifacts.readBytes(props)` read what a viewer shows; `artifacts.show(id, version?)`
+  opens one beside the chat or in its tab.
 - `ui`: `PageHeader`, `Panel`, `Button`, `Input`, `Textarea`, `Select*`,
   `Switch`, `Checkbox`, `Badge`, `StatusBadge`, `Tabs*`, `Table*`, `Dialog*`,
   `DropdownMenu*`, `Tooltip*`, `Progress`, `Skeleton`, `Spinner`, `Empty*`,
@@ -90,7 +102,50 @@ Pin an exact version, keep the library's licence file next to it
 Web Workers loaded from the plugin folder and WebAssembly all work. Network
 calls go through `host.request`, not `fetch` to other sites.
 
-## 4. Changing a plugin safely
+## 4. Viewers and reply fences
+
+An artifact's **kind** is its file extension (`stl`, `glb`, `csv`…). The canvas
+and the artifact's tab draw each version with the viewer registered for its
+kind: Neko's own built-ins (page, image, PDF, document, code, table, 3D model,
+sketch) and yours are one registry. The highest `priority` wins a kind (0 by
+default); at equal priority the one registered last wins, so a plugin's viewer
+replaces a built-in for the same kind.
+
+```js
+export default function register(host) {
+  const { React } = host;
+  function Stl(props) {          // { artifact, version, kind, url, text?, theme, onEdit?, inline? }
+    const [size, setSize] = React.useState(null);
+    React.useEffect(() => { host.artifacts.readBytes(props).then((b) => setSize(b.byteLength)); }, [props.url, props.text]);
+    return React.createElement("p", { className: "p-4 text-sm" }, size === null ? "Opening…" : `${size} bytes`);
+  }
+  host.registerViewer({ id: "stl", title: "STL viewer", kinds: ["stl"], component: Stl });
+  host.registerFence({ language: "stl", viewer: "stl" });
+}
+```
+
+- A viewer gets `url` (the file, same origin, read it with `fetch` or
+  `host.artifacts.readBytes`) or, inside a reply's fence, `text`. `theme` is
+  `{ mode, appearance, id, name }` for code that draws its own colours.
+  `load: () => import("./viewer.js")` instead of `component` keeps a heavy
+  library out of the way until a file of that kind opens. Set `edits: true`
+  and the viewer gets `onEdit(text, note)`, which saves the next version of a
+  text kind and resolves to its number.
+- `registerFence({ language, viewer | component })`: a reply's
+  ```` ```<language> ```` block is drawn by the viewer (its text, or the
+  artifact it names: `artifact <id> v<n>`) or by a component that gets
+  `{ code, language }`. Blocks stay code while the reply streams, and any
+  language without a fence stays code.
+- **Declare them in `manifest.json`** (`viewers`, `fences`, and a `prompt` of
+  one or two sentences, 400 characters at most). Neko adds them to the
+  "Installed viewers" section every full-power chat and routine is given, so
+  agents save files of that kind and use the fence. A viewer the model is not
+  told about is one nobody will use. `neko-daemon --plugin-guide` ends with
+  what is installed on this Mac now.
+- Do not scan the page's DOM for links or code blocks to replace, and do not
+  serve and poll your own iframe: register a viewer or a fence.
+
+## 5. Changing a plugin safely
 
 Make a small working version and load it before refining it; never build a
 mock preview, the installed plugin is the preview. When you report, say what
@@ -113,21 +168,25 @@ looks right), and put back any state you changed while testing.
 5. Look at it as the user will, if you can see the screen (browser or desktop
    tools): light and dark themes, an empty state, a long list.
 
-## 5. What a plugin cannot do
+## 6. What a plugin cannot do
 
-It cannot change Neko's chat, its shell, the daemon or other people's Neko.
-Those are changes to Neko's own source (`web/src` for the interface), made on
-a branch and reviewed, and they reach the app through its self-update.
+It cannot change Neko's chat chrome, its shell, the daemon or other people's
+Neko; it can add viewers and fences that draw inside them (section 4). Other
+changes are to Neko's own source (`web/src` for the interface), made on a
+branch and reviewed, and they reach the app through its self-update.
 
-## 6. A plugin, or an artifact?
+## 7. A plugin, or an artifact?
 
-A plugin is a new part of Neko: a page or tool the person comes back to. A
-thing you make *for* the person to look at (a screen design, a mockup, a
-document, a report, a one-off dashboard) is an **artifact**, not a plugin:
-write it as one self-contained file (html with inline CSS and scripts, or
-svg) and run
-`neko-daemon --request '{"SaveArtifact":{"title":"…","file":"/abs/path.html","workspace_id":null,"artifact_id":null,"note":"…"}}'`.
-It opens on the canvas beside the chat, where the person switches versions and
-points at elements to comment. Save again with `"artifact_id"` for the next
-version. Artifacts run in an opaque origin with no network, so they cannot use
-`host`, `request` or anything a plugin gets.
+A plugin is a new part of Neko: a page, tool or viewer the person comes back
+to. A thing you make *for* the person to look at (a 3D model, a sketch, a
+table, a document, a screen design, a report, a one-off dashboard) is an
+**artifact**, not a plugin: write one file of its natural kind (.glb,
+.excalidraw, .csv, .md, .html with inline CSS and scripts, .svg, .png) and run
+`neko-daemon --request '{"SaveArtifact":{"title":"…","file":"/abs/path.glb","workspace_id":null,"artifact_id":null,"note":"…","show":true}}'`.
+It opens in its viewer beside the chat (or in its own tab), where the person
+switches versions and, for html, points at elements to comment. Save again
+with `"artifact_id"` for the next version; `{"ShowArtifact":{"id":"…"}}` shows
+one again. If Neko has no viewer for a kind it is kept as a download, and a
+viewer for it is a good plugin. html artifacts run in an opaque origin with no
+network; other kinds are served as files and never run, so none of them can
+use `host`, `request` or anything a plugin gets.

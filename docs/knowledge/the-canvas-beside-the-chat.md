@@ -15,6 +15,10 @@ authority for what is in and out of v1).
   regular file, 5 MB (read with `take(MAX + 1)`, so a growing file is refused
   too), kinds html (htm), svg, png, pdf, json, md, and contents that match the
   kind (UTF-8 text, an `<svg`, JSON that parses, the PNG and PDF signatures).
+  **Since 2026-11-08 any kind is kept** (the extension; glb, csv, excalidraw…)
+  and drawn by the viewer registered for it, the agent can show what it made,
+  and Home opens the canvas on `ShowArtifact` rather than on every save:
+  `everything-renders.md`.
   Ids are 1-64 of `[A-Za-z0-9_-]`; `version_file` canonicalizes and proves the
   version is a file inside the artifact's own folder, so an edited
   `meta.json` or a planted symlink leads nowhere. Saves take one lock, so

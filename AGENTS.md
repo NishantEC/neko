@@ -222,6 +222,7 @@ finished.
 - [One window of tabs (2026-11-06)](docs/knowledge/one-window-of-tabs.md) — Tab strip over the hash router, detail tabs, Neko's right-click menu, one status glyph set, crew lines in chat.
 - [Neko updates itself (2026-10-22)](docs/knowledge/neko-updates-itself.md) — Owner: Neko "should be able to write itself over".
 - [The canvas beside the chat (2026-11-06)](docs/knowledge/the-canvas-beside-the-chat.md) — Artifacts (`SaveArtifact`), `/artifact/<id>/<n>` under its own sandboxed CSP, comment mode, an artifact tab (no gallery page).
+- [Everything renders (2026-11-08)](docs/knowledge/everything-renders.md) — Any artifact type, `host.registerViewer`/`registerFence`, built-in 3D/sketch/table/doc viewers, the Installed viewers prompt section, `ShowArtifact`/`OpenTab`.
 - [Current scope: the spine, clipboard history, the first-run onboarding ](docs/knowledge/current-scope-the-spine-clipboard-history-the-first-run-onbo.md) — Slice 1 was a single-crate proof that GPUI works at all.
 - [Crate layout](docs/knowledge/crate-layout.md) — crates/…
 - [The daemon/client split, and why the hotkey is registered where it is](docs/knowledge/the-daemon-client-split-and-why-the-hotkey-is-registered-whe.md) — The daemon is resident, owns SQLite as the single writer…

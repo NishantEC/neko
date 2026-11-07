@@ -188,21 +188,40 @@ over the socket and prints the `Response`. Turning it off restores the
 read-only, approve-each-action behaviour above.
 
 **The canvas (2026-11-06).** Anything visual a full-power turn makes is an
-artifact: the agent writes one self-contained file and sends `SaveArtifact`;
-the daemon copies it into `<data dir>/artifacts/<id>/v<n>.<ext>`
-(`neko_core::artifacts`: 5 MB, html/svg/png/pdf/json/md with matching
-contents, contained paths), links it to the Home reply running then (a
-`data-neko-artifact` part) and broadcasts `ArtifactsChanged`. The web bridge
-serves `/artifact/<id>/<n>` behind the same gates as every route but under its
-own Content-Security-Policy (`web::ARTIFACT_CSP`: inline scripts allowed,
-`connect-src 'none'`, `form-action 'none'`, `sandbox allow-scripts`) in place
-of the app's (`default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; …;
-connect-src 'self'`); the app frames it in `<iframe sandbox="allow-scripts">`.
-Either way the artifact runs in an opaque origin and cannot reach the token,
-storage or API. html gets a small comment bridge that talks to its parent by
-`postMessage`. Home shows it in the inspector beside the chat, and an artifact
-can open in a tab of its own (`#/artifact?id=<id>`); there is no gallery page.
+artifact: the agent writes one file and sends `SaveArtifact`; the daemon
+copies it into `<data dir>/artifacts/<id>/v<n>.<kind>` (`neko_core::artifacts`:
+5 MB, any type since 2026-11-08, the kind being the normalised extension,
+known kinds checked against their contents, contained paths), links it to the
+Home reply running then (a `data-neko-artifact` part) and broadcasts
+`ArtifactsChanged`. The web bridge serves `/artifact/<id>/<n>` behind the same
+gates as every route but under its own Content-Security-Policy
+(`web::ARTIFACT_CSP`: inline scripts allowed, `connect-src 'none'`,
+`form-action 'none'`, `sandbox allow-scripts`; a PDF gets `PDF_CSP`, which
+runs nothing but the browser's viewer) in place of the app's (`default-src
+'self'; script-src 'self' 'wasm-unsafe-eval'; …; connect-src 'self'`). Only
+html is served as a page, framed in `<iframe sandbox="allow-scripts">` with a
+small comment bridge that talks to its parent by `postMessage`; it runs in an
+opaque origin and cannot reach the token, storage or API. Every other kind is
+served inert under its own MIME (`artifacts::mime`, `nosniff`) and read by a
+viewer. Home shows it in the inspector beside the chat, and an artifact can
+open in a tab of its own (`#/artifact?id=<id>`); there is no gallery page.
 Details: `docs/knowledge/the-canvas-beside-the-chat.md`.
+
+**Everything renders (2026-11-08).** One viewer registry: `host.registerViewer
+({ id, title, kinds, component | load, priority, edits })` and
+`host.registerFence({ language, viewer | component })` (`web/src/canvas/viewers.ts`)
+take Neko's own viewers (`builtin-viewers.tsx`: page, image, pdf, markdown,
+code, csv, 3D on three.js, the Excalidraw sketch, the heavy ones as lazy
+chunks) and a plugin's alike. The canvas and the artifact tab draw a version
+with the highest-priority viewer for its kind, else offer a download; a reply's
+fenced block whose language has a fence (```csv, ```3d) is drawn by it. The
+model learns what exists from the **Installed viewers** section
+(`neko_core::viewers::installed_section`: built-ins plus each enabled plugin's
+manifest `viewers` / `fences` / `prompt`), appended to the full-power chat
+instruction and routine prompts and printed by `--plugin-guide`. An agent opens
+what it made: `SaveArtifact.show` (default while a Home reply runs),
+`ShowArtifact` and `OpenTab` become `Event`s every open page obeys. Details:
+`docs/knowledge/everything-renders.md`.
 
 The web app (`web/`, served by the daemon and shown in the native window's web
 view) is one window of tabs (`DESIGN.md` §1). The address is still a hash route
