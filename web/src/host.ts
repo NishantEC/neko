@@ -21,6 +21,9 @@
 //   theme                            get() the theme on screen, subscribe(fn) to changes
 //   navigation                       navigate(route), hrefFor(route), useRoute()
 //   addSection / addTab              add to Settings / to the task sheet
+//   registerViewer(spec)             draws an artifact kind on the canvas and in its tab (canvas/viewers.ts)
+//   registerFence(spec)              draws a reply's ```<language> block
+//   artifacts                        readText / readBytes for a viewer; show(id, version?) opens one
 import * as React from "react";
 import * as ReactDOM from "react-dom";
 import * as jsxRuntime from "react/jsx-runtime";
@@ -35,6 +38,8 @@ import { storageFor, type PageStorage } from "@/storage";
 import { getThemeState, subscribeTheme } from "@/theme";
 import { PuzzlePiece, type Icon } from "@/ui/icons";
 import { registerBuiltin, type PageComponent, type PageGroup, type UserRegistration } from "@/registry";
+import { addFence, addViewer, readBytes, readText, type FenceSpec, type ViewerSpec } from "@/canvas/viewers";
+import { showArtifact } from "@/canvas/artifacts";
 
 export interface PageSpec {
   /** A new id is a page of its own; a built-in's id (`tasks`, `settings`, …) replaces or wraps that page. */
@@ -81,6 +86,12 @@ export interface Host {
   addSection(section: SettingsSectionExt): void;
   /** Adds a tab to the task sheet. */
   addTab(tab: TaskTabExt): void;
+  /** Draws artifacts of these kinds (file extensions) on the canvas and in their tab. The highest `priority` wins a kind; on a tie, the latest registered. */
+  registerViewer(spec: ViewerSpec): void;
+  /** Draws a chat reply's fenced block of this language, through a viewer (`viewer: id`) or a component of its own. Unknown languages stay code. */
+  registerFence(spec: FenceSpec): void;
+  /** For viewers: read what is shown, and open an artifact beside the chat or in its tab. */
+  artifacts: { readText: typeof readText; readBytes: typeof readBytes; show: typeof showArtifact };
 }
 
 const resolveIcon = (icon: PageSpec["icon"]): Icon => (typeof icon === "string" ? (pluginIcons[icon] as Icon | undefined) : icon) ?? PuzzlePiece;
@@ -100,6 +111,7 @@ function shared(id: string, source: Host["source"], storage: PageStorage) {
     storage,
     theme: { get: getThemeState, subscribe: subscribeTheme },
     navigation: { navigate, hrefFor, useRoute, HOME },
+    artifacts: { readText, readBytes, show: showArtifact },
   };
 }
 
@@ -124,6 +136,8 @@ export const builtinHost: Host = (() => {
     registerCommands,
     addSection: (section) => void addSettingsSection(section),
     addTab: (tab) => void addTaskTab(tab),
+    registerViewer: (spec) => void addViewer(spec, "builtin"),
+    registerFence: (spec) => void addFence(spec, "builtin"),
   };
   return host;
 })();
@@ -166,6 +180,9 @@ export function createUserHost(plugin: string, defaultGroup?: PageGroup): UserHo
     },
     addSection: (section) => void removers.push(addSettingsSection(section)),
     addTab: (tab) => void removers.push(addTaskTab(tab)),
+    // Namespaced `<plugin>:<id>`, and taken back when the plugin is switched off or reloaded.
+    registerViewer: (spec) => void removers.push(addViewer(spec, "user", plugin)),
+    registerFence: (spec) => void removers.push(addFence(spec, "user", plugin)),
   };
   return {
     host,

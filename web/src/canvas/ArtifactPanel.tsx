@@ -1,104 +1,115 @@
 // The canvas: one artifact, live, with its versions, Download, Open in browser
-// and Comment. Drawn in the inspector beside Home's conversation.
+// and Comment. Drawn in the inspector beside Home's conversation, and in the
+// artifact's own tab.
 //
-// **Isolation.** An artifact is shown in `<iframe sandbox="allow-scripts">`
-// (never `allow-same-origin`) and served under its own CSP with `sandbox`
-// (web.rs `ARTIFACT_CSP`): its scripts run, but in an opaque origin, so it can
-// read neither Neko's cookie nor its storage, and reach no API.
+// **Viewers.** What draws a version is the viewer registered for its kind
+// (canvas/viewers.ts: the built-ins in builtin-viewers.tsx, plus any a plugin
+// registers), else a Download. A viewer that edits (the sketch) gets
+// `onEdit`, which saves the next version and moves the panel to it.
+//
+// **Isolation.** html and svg are shown in `<iframe sandbox="allow-scripts">`
+// (never `allow-same-origin`) and served under their own CSP with `sandbox`
+// (web.rs `ARTIFACT_CSP`): their scripts run in an opaque origin, so they can
+// read neither Neko's cookie nor its storage, and reach no API. Every other
+// kind is a file the viewer reads; nothing in it runs.
 //
 // **Comment mode.** The daemon appends a small bridge to html artifacts. The
 // canvas posts `{type:"neko-comment-mode", on}`; the bridge outlines what the
 // pointer is over and, on click, posts `{type:"neko-pick", selector, text,
 // rect}` back. Only messages whose `event.source` is this very iframe are read.
-import { useEffect, useRef, useState } from "react";
+import { Component, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/ui/button";
 import { ArrowSquareOut, CursorClick, DownloadSimple, File as FileIcon } from "@/ui/icons";
 import { cn } from "@/ui/lib/utils";
 import { Pick } from "@/setup/kit";
 import { relativeTime, useNow } from "@/setup/lib";
 import {
-  artifactUrl, canComment, downloadUrl, latestVersion, useArtifact, versionKind,
+  artifactUrl, canComment, downloadUrl, editArtifact, latestVersion, useArtifact, versionKind,
   type Artifact, type CanvasTarget,
 } from "@/canvas/artifacts";
+import { useViewerRegistry, viewerFor, type ElementPick, type Viewer, type ViewerProps } from "@/canvas/viewers";
 import { artifactMenu } from "@/canvas/ArtifactCard";
 import { useContextMenu } from "@/shell/context-menu";
+import { PluginBoundary } from "@/plugins";
+import { getThemeState, useThemes } from "@/theme";
 
-/** What a click in comment mode pointed at. */
-export interface ElementPick {
-  selector: string;
-  text: string;
+export type { ElementPick };
+
+/** The theme on screen, for viewers that draw their own colours (a canvas, WebGL). */
+export function useViewerTheme(): ViewerProps["theme"] {
+  const themes = useThemes();
+  return useMemo(() => getThemeState(), [themes]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+/** A built-in viewer that throws says so in place; the rest of the panel carries on. */
+class ViewerBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(error: unknown) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+  render() {
+    return this.state.error ? <p role="alert" className="p-4 text-sm text-destructive">This viewer stopped: {this.state.error}</p> : this.props.children;
+  }
+}
+
+/** A viewer in its error boundary (a plugin's crash is reported to `PluginStatus`), loaded lazily. */
+export function ViewerSlot({ viewer, props, resetKey }: { viewer: Viewer; props: ViewerProps; resetKey: string }) {
+  const View = viewer.component;
+  const body = (
+    <Suspense fallback={<p className="p-4 text-sm text-muted-foreground" aria-busy="true">Opening the {viewer.title.toLowerCase()}…</p>}>
+      <View {...props} />
+    </Suspense>
+  );
+  return viewer.plugin
+    ? <PluginBoundary key={resetKey} plugin={viewer.plugin}>{body}</PluginBoundary>
+    : <ViewerBoundary key={resetKey}>{body}</ViewerBoundary>;
 }
 
 /**
- * One version of an artifact: a live sandboxed frame for html and svg, the
- * image for png, a download for the rest. `commenting` turns the bridge on.
+ * One version of an artifact, drawn by the viewer for its kind, or offered
+ * as a download when none is installed. `commenting` turns the html bridge
+ * on; `onEdited` hears of a version a viewer saved.
  */
 export function ArtifactFrame({
-  artifact, n, commenting = false, onPick, onCancel, className,
+  artifact, n, commenting = false, onPick, onCancel, onEdited, className,
 }: {
   artifact: Artifact;
   n: number;
   commenting?: boolean;
   onPick?: (pick: ElementPick) => void;
   onCancel?: () => void;
+  onEdited?: (n: number) => void;
   className?: string;
 }) {
-  const frame = useRef<HTMLIFrameElement>(null);
+  useViewerRegistry();
+  const theme = useViewerTheme();
   const kind = versionKind(artifact, n);
-  const src = artifactUrl(artifact.id, n);
-  const handlers = useRef({ onPick, onCancel });
-  handlers.current = { onPick, onCancel };
-  const mode = useRef(commenting);
-  mode.current = commenting;
-
-  // The frame has an opaque origin, so a message to it can only be addressed to "*".
-  const post = () => frame.current?.contentWindow?.postMessage({ type: "neko-comment-mode", on: mode.current }, "*");
-  useEffect(post, [commenting, src]);
-
-  useEffect(() => {
-    const onMessage = (event: MessageEvent) => {
-      if (!frame.current || event.source !== frame.current.contentWindow) return;
-      const data = event.data;
-      if (data?.type === "neko-pick" && typeof data.selector === "string" && data.selector) {
-        handlers.current.onPick?.({ selector: data.selector.slice(0, 300), text: typeof data.text === "string" ? data.text.slice(0, 120) : "" });
-      } else if (data?.type === "neko-comment-cancel") {
-        handlers.current.onCancel?.();
-      }
-    };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, []);
-
-  if (kind === "html" || kind === "svg") {
+  const viewer = viewerFor(kind);
+  if (!viewer) {
     return (
-      <iframe
-        ref={frame}
-        key={src}
-        src={src}
-        title={`${artifact.title}, version ${n}`}
-        sandbox="allow-scripts"
-        referrerPolicy="no-referrer"
-        onLoad={post}
-        data-slot="artifact-frame"
-        data-commenting={commenting || undefined}
-        className={cn("block h-full w-full border-0 bg-white", commenting && "ring-2 ring-inset ring-primary", className)}
-      />
-    );
-  }
-  if (kind === "png") {
-    return (
-      <div className={cn("flex h-full w-full items-center justify-center overflow-auto bg-muted/40 p-4", className)}>
-        <img src={src} alt={`${artifact.title}, version ${n}`} className="max-h-full max-w-full rounded-md shadow-sm" />
+      <div data-slot="artifact-download" className={cn("flex h-full w-full flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground", className)}>
+        <FileIcon size={28} aria-hidden />
+        <p>A .{kind} file. No viewer for it is installed; download it to open it.</p>
+        <Button variant="outline" size="sm" render={<a href={downloadUrl(artifact.id, n)} download />}>
+          <DownloadSimple /> Download
+        </Button>
       </div>
     );
   }
+  const onEdit = viewer.edits
+    ? async (content: string, note?: string) => {
+        const saved = await editArtifact(artifact.id, content, note ?? "");
+        onEdited?.(saved);
+        return saved;
+      }
+    : undefined;
   return (
-    <div className={cn("flex h-full w-full flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground", className)}>
-      <FileIcon size={28} aria-hidden />
-      <p>A {kind.toUpperCase()} file. The canvas draws html and svg; download this one to open it.</p>
-      <Button variant="outline" size="sm" render={<a href={downloadUrl(artifact.id, n)} download />}>
-        <DownloadSimple /> Download
-      </Button>
+    <div data-slot="artifact-view" data-viewer={viewer.id} data-kind={kind} className={cn("h-full w-full", className)}>
+      <ViewerSlot
+        viewer={viewer}
+        resetKey={`${artifact.id}:${n}:${viewer.id}`}
+        props={{ artifact, version: n, kind, url: artifactUrl(artifact.id, n), theme, onEdit, commenting, onPick, onCancel }}
+      />
     </div>
   );
 }
@@ -137,7 +148,7 @@ export function ArtifactPanel({
   }));
 
   return (
-    <div {...menu} data-slot="artifact-panel" data-artifact={artifact.id} data-version={n} className="flex h-full min-h-0 flex-col">
+    <div {...menu} data-slot="artifact-panel" data-artifact={artifact.id} data-version={n} data-kind={kind} className="flex h-full min-h-0 flex-col">
       <div role="toolbar" aria-label="Canvas" className="flex flex-wrap items-center gap-1.5 border-b border-border/70 px-3 py-2">
         {artifact.versions.length > 1 ? (
           <Pick label="Version" value={String(n)} onChange={(value) => onVersion?.(Number(value))} options={options} className="min-w-28" />
@@ -176,6 +187,7 @@ export function ArtifactPanel({
             onComment?.(artifact, n, pick);
           }}
           onCancel={() => setCommenting(false)}
+          onEdited={(saved) => onVersion?.(saved)}
         />
       </div>
     </div>

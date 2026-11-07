@@ -12,7 +12,7 @@ import { Suggestion, Suggestions } from "@/chat/suggestion";
 import { NekoComposer, type ComposerHandle } from "@/chat/ChatInputComposer";
 import { Inspector } from "@/shell/inspector";
 import { ArtifactPanel } from "@/canvas/ArtifactPanel";
-import { closeCanvas, onArtifactSaved, openCanvas, referenceText, useArtifact, useCanvas } from "@/canvas/artifacts";
+import { closeCanvas, openCanvas, referenceText, useArtifact, useCanvas } from "@/canvas/artifacts";
 import { Decisions, decisionsFromParts } from "@/chat/decisions";
 import { NekoTurn, UserTurn } from "@/chat/turns";
 import { chatSignature, useNekoChat } from "@/chat/sdk/chats";
@@ -41,9 +41,9 @@ export default function Home() {
   // The sidebar's workspace switcher: the chat runs in that workspace, or none for all.
   const workspaceId: string | null = useSelectedWorkspace().id || null;
 
-  // A reply that saves an artifact opens it beside the conversation; a new
-  // version of the one on screen replaces it.
-  useEffect(() => onArtifactSaved((change) => { if (change.message_id) openCanvas(change.id, change.version); }), []);
+  // What a reply saves opens beside the conversation through `ShowArtifact`
+  // (SaveArtifact shows by default while a reply runs), which the shell obeys
+  // on every page: canvas/artifacts.ts `obeyAgentRequests`.
 
   // "Ask Neko about this" (the context menu on selected text, shell/actions.ts): the quote
   // lands in the composer, whether Home was open already or opened for it.

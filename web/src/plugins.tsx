@@ -3,6 +3,7 @@
 // disk on every request, so adding or editing one needs no rebuild of this app.
 //
 //   manifest.json   { "title": "PR board", "entry": "index.js", "description": "…", "version": "0.1.0", "group": "work" }
+//                   (+ optional "viewers", "fences", "prompt": what the model is told; see docs/design/plugin-guide.md)
 //   index.js        export default function register(host) {
 //                     host.registerPage({ id: "board", title: "PR board", component: Board });
 //                   }
@@ -38,6 +39,11 @@ export interface PluginListing {
   error?: string;
   /** `previous/<entry>`: the version kept before the last change, loaded when this one fails. */
   previous_entry?: string;
+  /** What the manifest declares for the model (`neko_core::viewers`): the module's `host.registerViewer` / `registerFence` are what draw them. */
+  viewers?: { id: string; title: string; kinds: string[] }[];
+  fences?: string[];
+  /** One or two sentences an agent is told about this plugin (the Installed viewers prompt section). */
+  prompt?: string;
 }
 type Listing = PluginListing;
 

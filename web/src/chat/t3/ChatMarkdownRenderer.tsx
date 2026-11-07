@@ -12,6 +12,7 @@ import { cn } from "@/ui/lib/utils";
 import { MarkdownCodeBlock, ShikiCodeBlock, extractFenceLanguage } from "./MarkdownCodeBlock";
 import { MarkdownTable } from "./MarkdownTable";
 import { remarkReferences, useTaskIndex } from "@/chat/references";
+import { FencedBlock } from "@/chat/fences";
 
 export interface ChatMarkdownProps {
   text: string;
@@ -59,13 +60,15 @@ function components(isStreaming: boolean): Components {
       if (!codeBlock) return <pre {...props}>{children}</pre>;
       const language = extractFenceLanguage(codeBlock.className);
       const plain = <pre {...props}>{children}</pre>;
-      return (
+      const block = (
         <MarkdownCodeBlock code={codeBlock.code} language={language}>
           <Suspense fallback={plain}>
             <ShikiCodeBlock code={codeBlock.code.replace(/\n$/, "")} language={language} isStreaming={isStreaming} fallback={plain} />
           </Suspense>
         </MarkdownCodeBlock>
       );
+      // A language with a registered fence (```csv, ```3d, a plugin's) is drawn by it once the reply settles.
+      return <FencedBlock code={codeBlock.code} language={language} isStreaming={isStreaming} fallback={block} />;
     },
   };
 }

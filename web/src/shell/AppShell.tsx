@@ -29,6 +29,7 @@ import { canGoBack, canGoForward, goBack, goForward, newTab, startTabs, useTabs 
 import { TAB_PANEL_ID, TabStrip, tabElementId } from "@/shell/TabStrip";
 import { Launcher } from "@/shell/Launcher";
 import { ArtifactTab } from "@/canvas/ArtifactTab";
+import { obeyAgentRequests } from "@/canvas/artifacts";
 import { searchPalette } from "@/shell/CommandPalette";
 import { useAttention } from "@/shell/attention";
 import { AppSidebar, MobileTopBar } from "@/shell/AppSidebar";
@@ -168,6 +169,8 @@ export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useSidebarOpen();
   useAttention();
   useGlobalShortcuts();
+  // An agent's ShowArtifact / OpenTab: every open page opens the canvas or the tab.
+  useEffect(obeyAgentRequests, []);
   return (
     <TooltipProvider>
       <ContextMenuHost>

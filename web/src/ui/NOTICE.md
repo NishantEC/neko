@@ -60,6 +60,8 @@ with `// from ui-kit <path> @da20dfaeb`:
 | `work/dock/DockWorkspace.tsx`, `dock.css`, `dockLayout.ts` | Neko's own, on `dockview-react` | Replaces ui-kit' fixed chat / view-tab split on the task page (BuilderViewTabs, BuilderPanelTabs and the fused-tab helpers are no longer copied); tabs and surfaces keep the builder frame's look on Neko tokens |
 | `work/TaskBuilder.tsx` | `pages/Builder/index.tsx`, `components/BuilderDesktopHeader.tsx`, `FormBuilderMode.tsx`, `hooks/useChatPanelSize.ts`, `hooks/useCollapsedChat.ts`, `useBuilderViewMode.ts` | Task conversation in the chat panel; Changes / Plan / Details views; task actions at the header end; chat 35% default (45% max) |
 
+`three` 0.170.0 (MIT, © three.js authors; licence in `THIRD_PARTY_LICENSES/three-MIT.txt`) and `@excalidraw/excalidraw` 0.18.1 (MIT, © Excalidraw; licence in `THIRD_PARTY_LICENSES/excalidraw-MIT.txt`) are npm dependencies, not vendored source, each loaded only in its own lazy chunk (`canvas/viewers/ModelViewer.tsx`, `SketchViewer.tsx`). Excalidraw's bundled fonts (open font licences, shipped inside its package) are copied into `dist/excalidraw/fonts/` at build time by `vite.config.ts`, without the Xiaolai CJK font.
+
 `dockview` / `dockview-react` 8.6.1 (MIT, © mathuo; licence in `THIRD_PARTY_LICENSES/dockview-MIT.txt`) is an npm dependency, not vendored source. Only the free `dockview` entry point is used: its `keyboardNavigation` option needs the separate `dockview-enterprise` package and is deliberately off.
 
 Not copied: the Dashboard list patterns (form tiles, which Neko's lists are not), the

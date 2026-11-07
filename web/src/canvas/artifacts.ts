@@ -5,6 +5,8 @@
 //   request({ Artifact: { id } })              one record
 //   /artifact/<id>/<n>                         version n, under its own CSP
 //   ArtifactsChanged { id, version, message_id }   pushed on every save
+//   ShowArtifact { id, version } / OpenTab { route }   an agent asks every page to show (obeyAgentRequests)
+//   EditArtifact { artifact_id, content, note }   a viewer saves the next version (editArtifact)
 //
 // Which artifact the canvas shows is kept here, outside any page, so a card,
 // a menu or an artifact's own tab can open one and Home shows it beside the
@@ -12,6 +14,7 @@
 // an artifact lives beside the reply that made it, or in a tab of its own.
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { onEvent, request, type Json } from "@/api";
+import { HOME } from "@/router";
 
 export interface ArtifactVersion {
   n: number;
@@ -24,7 +27,7 @@ export interface ArtifactVersion {
 export interface Artifact {
   id: string;
   title: string;
-  /** `html`, `svg`, `png`, `pdf`, `json` or `md`. */
+  /** The newest version's file extension: `html`, `md`, `csv`, `glb`, `excalidraw`, `png`… (any). */
   kind: string;
   workspace_id?: string | null;
   /** The Home reply that made it. */
@@ -40,9 +43,6 @@ export interface ArtifactCardData {
   version?: number;
 }
 
-/** Kinds the canvas draws live; the others are shown as a download. */
-export const LIVE_KINDS = ["html", "svg"];
-export const isLive = (kind: string) => LIVE_KINDS.includes(kind);
 /** Only html carries the comment bridge. */
 export const canComment = (kind: string) => kind === "html";
 
@@ -117,6 +117,56 @@ export function closeCanvas() {
   if (!target) return;
   target = null;
   emit();
+}
+
+/** The route on screen (`home`, `tasks`, `artifact`…), read from the address. */
+const currentRoute = () => location.hash.replace(/^#\/?/, "").split("?")[0] || HOME;
+
+/**
+ * Shows an artifact as the agent asked (`ShowArtifact`, `SaveArtifact` with
+ * `show`): beside the chat when Home is on screen, otherwise in the
+ * artifact's own tab. The canvas target is set either way, so going back to
+ * Home finds it there.
+ */
+export function showArtifact(id: string, version: number | null = null) {
+  openCanvas(id, version);
+  if (currentRoute() !== HOME) location.hash = artifactHref(id, version).slice(1);
+}
+
+/** Saves `content` as the next version of a text artifact (a viewer that edits); resolves to the new version. */
+export async function editArtifact(id: string, content: string, note = ""): Promise<number> {
+  const reply = await request({ EditArtifact: { artifact_id: id, content, note } });
+  const version = reply?.ArtifactSaved?.version;
+  if (typeof version !== "number") throw new Error(reply?.Error?.message ?? "The new version was not saved.");
+  return version;
+}
+
+const isShow = (event: Json): event is { ShowArtifact: { id: string; version: number | null } } =>
+  !!event && typeof event === "object" && "ShowArtifact" in event;
+const isOpenTab = (event: Json): event is { OpenTab: { route: string } } =>
+  !!event && typeof event === "object" && "OpenTab" in event;
+
+/** A Neko route as the daemon checked it (`neko_core::viewers::tab_route`), checked again: never another site. */
+export function tabHash(route: string): string | null {
+  const clean = route.replace(/^#?\/?/, "");
+  if (clean.length > 300 || !/^[A-Za-z0-9\-_:/?=&.%]*$/.test(clean) || clean.includes("//") || /^[a-z]+:\/?\//i.test(clean)) return null;
+  return `#/${clean}`;
+}
+
+/**
+ * What an agent asks every open page to do (`ShowArtifact`, `OpenTab`).
+ * Mounted once by the shell; returns the unsubscribe.
+ */
+export function obeyAgentRequests(): () => void {
+  return onEvent((event) => {
+    if (isShow(event)) {
+      const { id, version } = event.ShowArtifact;
+      if (typeof id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(id)) showArtifact(id, typeof version === "number" ? version : null);
+    } else if (isOpenTab(event)) {
+      const hash = tabHash(String(event.OpenTab.route ?? ""));
+      if (hash) location.hash = hash.slice(1);
+    }
+  });
 }
 
 export function useCanvas(): CanvasTarget | null {

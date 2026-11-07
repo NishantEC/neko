@@ -21,6 +21,7 @@ import { Brain, Gauge } from "@phosphor-icons/react";
 import { Clock, Eye, Gear, GitPullRequest, House, ListChecks, Palette, SlidersHorizontal, Stack, TreeStructure, Tray, Users, Wrench, type Icon } from "@/ui/icons";
 import { HOME } from "@/router";
 import { builtinHost } from "@/host";
+import { registerBuiltinViewers } from "@/canvas/builtin-viewers";
 import type { PageGroup } from "@/registry";
 import Home from "@/pages/Home";
 import { Calendar as CalendarIcon } from "@/ui/icons";
@@ -61,3 +62,6 @@ page({
   group: "system",
   load: () => import("@/pages/customisations/Customisations"),
 });
+
+// Neko's own artifact viewers and reply fences, before any plugin loads (canvas/builtin-viewers.tsx).
+registerBuiltinViewers();

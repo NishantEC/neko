@@ -1,5 +1,7 @@
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { writeBuiltinCss } from "./scripts/themes.mjs";
@@ -24,10 +26,33 @@ function vendorChunk(id: string): string | undefined {
   return VENDOR.find(([, test]) => test.test(id))?.[0];
 }
 
+// The sketch viewer's fonts (canvas/viewers/SketchViewer.tsx), served by Neko
+// at /excalidraw/fonts/ because the page policy refuses fonts from other
+// sites. Copied from the package on every build, without Xiaolai: the 12 MB
+// CJK font would be most of the app's size for a fallback few sketches use.
+const EXCALIDRAW_FONTS = fileURLToPath(new URL("./node_modules/@excalidraw/excalidraw/dist/prod/fonts", import.meta.url));
+function excalidrawFonts(): Plugin {
+  return {
+    name: "neko-excalidraw-fonts",
+    apply: "build",
+    generateBundle() {
+      if (!existsSync(EXCALIDRAW_FONTS)) return;
+      for (const family of readdirSync(EXCALIDRAW_FONTS)) {
+        if (family === "Xiaolai" || !statSync(path.join(EXCALIDRAW_FONTS, family)).isDirectory()) continue;
+        for (const file of readdirSync(path.join(EXCALIDRAW_FONTS, family))) {
+          if (!file.endsWith(".woff2")) continue;
+          this.emitFile({ type: "asset", fileName: `excalidraw/fonts/${family}/${file}`, source: readFileSync(path.join(EXCALIDRAW_FONTS, family, file)) });
+        }
+      }
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     // The built-in themes are data (src/themes/builtin/*.json); their stylesheet is derived from it on every build.
     { name: "neko-builtin-themes", buildStart: () => void writeBuiltinCss() },
+    excalidrawFonts(),
     react(),
     tailwindcss(),
   ],

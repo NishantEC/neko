@@ -40,6 +40,14 @@ const FINAL_REPLY = `The retry is in place: a request that times out is tried tw
 | 2 | 200 ms |
 | 3 | 800 ms |
 
+Timeouts by endpoint over the last day, before the change:
+
+\`\`\`csv
+endpoint,timeouts,"retried, then ok"
+/orders,14,13
+/users,3,3
+\`\`\`
+
 The tests for the client pass.`;
 
 let counter = 0;
