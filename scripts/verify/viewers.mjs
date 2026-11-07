@@ -124,6 +124,12 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
     await sleep(400);
     await shot("viewers-3d-wireframe");
     await page.locator("[data-slot='model-viewer'] [role='switch'][aria-label='Wireframe']").click();
+    // The grid takes the theme's colours when it changes.
+    await page.emulateMedia({ colorScheme: "light" });
+    await sleep(600);
+    await shot("viewers-3d-light");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await sleep(300);
   }
 
   // The sketch: draw a rectangle, save, and the panel moves to v2.
