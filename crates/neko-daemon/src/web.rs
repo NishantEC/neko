@@ -781,6 +781,10 @@ fn serve_plugin_file(plugins: &Path, rest: &str) -> Reply {
 /// API, the same as inside the canvas's `<iframe sandbox="allow-scripts">`.
 pub const ARTIFACT_CSP: &str = "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-scripts";
 
+/// A PDF version: no scripts, no connections, no forms; only the browser's
+/// own viewer (`object-src 'self'`) inside Neko's frame.
+pub const PDF_CSP: &str = "default-src 'none'; object-src 'self'; img-src 'self' data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
+
 /// Appended to an html artifact (before `</body>`): the comment bridge. When
 /// the canvas posts `{type:"neko-comment-mode", on}`, the hovered element is
 /// outlined and a click posts back `{type:"neko-pick", selector, text, rect}`
@@ -826,12 +830,19 @@ fn serve_artifact(root: &Path, rest: &str, download: bool) -> Reply {
     let (Some(n), true) = (n, neko_core::artifacts::valid_id(id)) else { return Reply::text(404, "Not Found") };
     let Some((file, kind)) = neko_core::artifacts::version_file(root, id, n) else { return Reply::text(404, "Not Found") };
     let Ok(bytes) = fs::read(&file) else { return Reply::text(404, "Not Found") };
+    // Only html is a page; every other kind goes out as the file it is, under
+    // its own type (`nosniff` is on every reply, so it is never guessed into one).
+    let content_type = neko_core::artifacts::mime(&kind);
     let mut reply = if download || kind != "html" {
-        Reply::new(200, "OK", mime(&file), bytes)
+        Reply::new(200, "OK", content_type, bytes)
     } else {
-        Reply::new(200, "OK", mime(&file), with_comment_bridge(&String::from_utf8_lossy(&bytes)))
+        Reply::new(200, "OK", content_type, with_comment_bridge(&String::from_utf8_lossy(&bytes)))
     };
-    reply.extra.push(("Content-Security-Policy", ARTIFACT_CSP.into()));
+    // The browser's PDF viewer refuses to run in a sandboxed document, and a
+    // PDF is not a page that can reach Neko: it gets a policy that allows
+    // nothing but the viewer itself.
+    let policy = if kind == "pdf" && !download { PDF_CSP } else { ARTIFACT_CSP };
+    reply.extra.push(("Content-Security-Policy", policy.into()));
     if download {
         let title = neko_core::artifacts::get(root, id).map(|a| a.title).unwrap_or_default();
         let number = file.file_stem().and_then(|s| s.to_str()).and_then(|s| s.strip_prefix('v')).and_then(|s| s.parse().ok()).unwrap_or(n);
@@ -866,6 +877,14 @@ struct PluginInfo {
     /// The sidebar group the manifest asks for: `main`, `work` or `system`.
     #[serde(skip_serializing_if = "Option::is_none")]
     group: Option<String>,
+    /// What the manifest declares for the model (`viewers`, `fences`,
+    /// `prompt`; `neko_core::viewers::capabilities`), bounded and checked.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    viewers: Vec<neko_core::viewers::DeclaredViewer>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    fences: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt: Option<String>,
 }
 
 /// Reads `<plugins>/*/manifest.json` now (never cached). A broken plugin is
@@ -879,7 +898,7 @@ fn list_plugins(dir: &Path) -> Vec<PluginInfo> {
         if !valid_plugin_id(&id) || !entry.path().is_dir() { continue; }
         let disabled = entry.path().join(DISABLED_MARKER).exists();
         let path = entry.path().to_string_lossy().into_owned();
-        let broken = |error: String| PluginInfo { id: id.clone(), title: id.clone(), entry: String::new(), version: 0, manifest_version: None, disabled, previous_entry: None, path: path.clone(), description: None, error: Some(error), group: None };
+        let broken = |error: String| PluginInfo { id: id.clone(), title: id.clone(), entry: String::new(), version: 0, manifest_version: None, disabled, previous_entry: None, path: path.clone(), description: None, error: Some(error), group: None, viewers: Vec::new(), fences: Vec::new(), prompt: None };
         let manifest_path = entry.path().join("manifest.json");
         let manifest = match fs::File::open(&manifest_path).and_then(|f| {
             let mut text = String::new();
@@ -904,7 +923,11 @@ fn list_plugins(dir: &Path) -> Vec<PluginInfo> {
         };
         let version = fs::metadata(&file).and_then(|m| m.modified()).ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+        let capabilities = neko_core::viewers::capabilities(&json);
         plugins.push(PluginInfo {
+            viewers: capabilities.viewers,
+            fences: capabilities.fences,
+            prompt: capabilities.prompt,
             title: json.get("title").and_then(|v| v.as_str()).unwrap_or(&id).to_string(),
             description: json.get("description").and_then(|v| v.as_str()).map(str::to_string),
             entry: format!("/plugins/{id}/{}", relative.to_string_lossy()),

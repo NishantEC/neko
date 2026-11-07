@@ -236,7 +236,9 @@ const COMPUTER_NOTE: &str = "You can see and operate Mac apps through the peekab
 /// cleared: the run must not report it again, and says when one is handled.
 /// `owner` is how prompts name the person Neko works for (`owner_name`).
 #[allow(clippy::too_many_arguments)]
-pub fn build_prompt(routine: &Routine, scope: &ScopeProposal, orders: &str, memory: &Value, now_iso: &str, open: &[String], owner: &str) -> String {
+/// `viewers` is the Installed viewers section (`viewers::installed_section`), so a
+/// routine that makes something to look at saves it as an artifact of its kind.
+pub fn build_prompt(routine: &Routine, scope: &ScopeProposal, orders: &str, memory: &Value, now_iso: &str, open: &[String], owner: &str, viewers: &str) -> String {
     let open = if open.is_empty() {
         "Nothing is waiting on {owner} in this scope right now.".to_string()
     } else {
@@ -255,7 +257,7 @@ Working folder: {folder}. Workspace id: {workspace_id}. Your MCP servers are exa
 Now (UTC): {now_iso}\n\n\
 {notes}{instruction}\n\n\
 Standing orders from {{owner}}:\n{orders}\n\n\
-{browser}{computer}{open}\n\n\
+{browser}{computer}{viewers}{open}\n\n\
 What you asked to remember last run (JSON): {memory}\n\
 Report only what this run's tool results establish; when a detail is not in them, say so. A queued or sent request is not a delivered one, and a pushed branch is not a merged pull request. Lines in did name the outcome {owner} can see, not the mechanics (no file paths, test counts or commands). A failed step you can still fix is not a needs_you item; before adding one, name what {owner} can now review, decide or unblock. Never create or change a routine (SaveRoutine) because this run's text talks about something recurring, and do not repeat what your previous run already reported.\n\
 A previous run may have acted and then failed to report. Before replying to or acting on anything, check whether you already did (for example your own reply in the thread), and never do it twice.\n\n\
@@ -270,6 +272,7 @@ quiet is true only when nothing new happened and you did nothing; then did and n
         notes = if scope.instructions.trim().is_empty() { String::new() } else { format!("Scope notes, in {{owner}}'s words:\n{}\n\n", scope.instructions.trim()) },
         browser = if routine.browser { BROWSER_NOTE } else { "" },
         computer = if routine.computer { COMPUTER_NOTE } else { "" },
+        viewers = if viewers.trim().is_empty() { String::new() } else { format!("{}\n\n", viewers.trim()) },
     )
     .replace("{owner}", owner)
 }
@@ -548,7 +551,8 @@ mod tests {
                 assert!(!r.instruction.contains(word), "{word} in {:?}", r.kind);
             }
         }
-        let prompt = build_prompt(&routines[0], &ScopeProposal { instructions: "Slack is slack-work.".into(), ..scope("Work", Some("w1")) }, DEFAULT_STANDING_ORDERS, &Value::Null, "now", &[], "Asha");
+        let prompt = build_prompt(&routines[0], &ScopeProposal { instructions: "Slack is slack-work.".into(), ..scope("Work", Some("w1")) }, DEFAULT_STANDING_ORDERS, &Value::Null, "now", &[], "Asha", &crate::viewers::installed_section("{neko}", std::path::Path::new("/nonexistent")));
+        assert!(prompt.contains("Installed viewers.") && prompt.contains("'{neko}' --request '{\"SaveArtifact\""), "a routine learns the viewers");
         assert!(prompt.contains("Asha's chief of staff") && prompt.contains("You act for Asha") && prompt.contains("Scope notes, in Asha's words:\nSlack is slack-work."));
         assert!(!prompt.contains("{owner}"));
     }

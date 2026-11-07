@@ -751,11 +751,16 @@ fn plugin_health() -> &'static std::sync::Mutex<std::collections::BTreeMap<Strin
 /// `SaveArtifact`: keeps the file, links it to the Home reply running now
 /// (its card appears on that reply, and the reply's workspace is the
 /// artifact's when the agent named none), and tells every open page.
-fn save_artifact(state: &AppState, mut save: neko_core::artifacts::Save) -> Response {
+///
+/// `show` unset shows it when a Neko chat reply is running (the full-power
+/// chat is the only one that can save files, so that is where the person is
+/// watching); a routine or task run shows only when it asks to.
+fn save_artifact(state: &AppState, mut save: neko_core::artifacts::Save, show: Option<bool>) -> Response {
     let pending = {
         let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         neko_core::neko_chat::pending_turn(&db)
     };
+    let show = show.unwrap_or(pending.is_some());
     if let Some((turn, workspace)) = pending {
         save.message_id = Some(turn);
         if save.workspace_id.as_deref().unwrap_or("").is_empty() { save.workspace_id = workspace; }
@@ -765,6 +770,19 @@ fn save_artifact(state: &AppState, mut save: neko_core::artifacts::Save) -> Resp
         Ok((artifact, version)) => {
             if let Some(turn) = &message_id { neko_core::neko_chat::show_artifact(turn, &artifact, version); }
             broadcast(state, &Event::ArtifactsChanged { id: artifact.id.clone(), version, message_id });
+            if show { broadcast(state, &Event::ShowArtifact { id: artifact.id.clone(), version: Some(version) }); }
+            Response::ArtifactSaved { artifact, version }
+        }
+        Err(message) => Response::Error { message },
+    }
+}
+
+/// `EditArtifact`: a viewer saved the next version itself. Every page hears
+/// of it (the one that saved follows it to the new version).
+fn edit_artifact(state: &AppState, id: &str, content: &str, note: &str) -> Response {
+    match neko_core::artifacts::save_text(&state.artifacts, id, content, note) {
+        Ok((artifact, version)) => {
+            broadcast(state, &Event::ArtifactsChanged { id: artifact.id.clone(), version, message_id: None });
             Response::ArtifactSaved { artifact, version }
         }
         Err(message) => Response::Error { message },
@@ -793,18 +811,30 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             let all = plugin_health().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             Response::PluginStatus { plugins: all.values().filter(|h| id.as_ref().is_none_or(|id| &h.id == id)).cloned().collect() }
         }
-        Request::SaveArtifact { title, file, workspace_id, artifact_id, note } => save_artifact(state, neko_core::artifacts::Save {
+        Request::SaveArtifact { title, file, workspace_id, artifact_id, note, show } => save_artifact(state, neko_core::artifacts::Save {
             title,
             file: std::path::PathBuf::from(file),
             workspace_id,
             artifact_id,
             note,
             message_id: None,
-        }),
+        }, show),
+        Request::EditArtifact { artifact_id, content, note } => edit_artifact(state, &artifact_id, &content, &note),
         Request::Artifacts { workspace_id } => Response::Artifacts { artifacts: neko_core::artifacts::list(&state.artifacts, workspace_id.as_deref()) },
         Request::Artifact { id } => match neko_core::artifacts::get(&state.artifacts, &id) {
             Some(artifact) => Response::Artifact { artifact },
             None => Response::Error { message: format!("There is no artifact {id}.") },
+        },
+        Request::ShowArtifact { id, version } => match neko_core::artifacts::get(&state.artifacts, &id) {
+            Some(artifact) if version.is_none_or(|n| artifact.versions.iter().any(|v| v.n == n)) => {
+                Response::Shown { pages: broadcast(state, &Event::ShowArtifact { id, version }) }
+            }
+            Some(_) => Response::Error { message: format!("Artifact {id} has no version {}.", version.unwrap_or_default()) },
+            None => Response::Error { message: format!("There is no artifact {id}.") },
+        },
+        Request::OpenTab { route } => match neko_core::viewers::tab_route(&route) {
+            Some(route) => Response::Shown { pages: broadcast(state, &Event::OpenTab { route }) },
+            None => Response::Error { message: "A route is a Neko page such as \"tasks\" or \"artifact?id=…\": letters, digits and - _ : / ? = & . %, never another site.".into() },
         },
         Request::SuperAgent { on } => {
             let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1134,12 +1164,13 @@ fn error_response(e: impl std::fmt::Display) -> Response {
     }
 }
 
-fn broadcast(state: &AppState, event: &Event) {
-    state
-        .web_events
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .retain(|sender| sender.send(event.clone()).is_ok());
+/// Returns how many open web pages it reached.
+fn broadcast(state: &AppState, event: &Event) -> usize {
+    let pages = {
+        let mut senders = state.web_events.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        senders.retain(|sender| sender.send(event.clone()).is_ok());
+        senders.len()
+    };
     // Write outside the list lock: one slow client must never stall new
     // connections from registering. Failed writers are removed afterwards.
     let writers: Vec<_> = state
@@ -1162,6 +1193,7 @@ fn broadcast(state: &AppState, event: &Event) {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .retain(|w| !failed.iter().any(|f| Arc::ptr_eq(f, w)));
     }
+    pages
 }
 
 /// Called by `main.rs`'s background icon-extraction passes (startup and
@@ -1856,12 +1888,18 @@ mod tests {
         let events = WebBackend(state.clone()).subscribe();
         let page = tmp.path().join("design.html");
         std::fs::write(&page, "<html><body><h1>Hi</h1></body></html>").unwrap();
-        let save = |artifact_id: Option<String>| Request::SaveArtifact { title: "Onboarding".into(), file: page.to_string_lossy().into(), workspace_id: None, artifact_id, note: String::new() };
+        let save_with = |artifact_id: Option<String>, show: Option<bool>| Request::SaveArtifact { title: "Onboarding".into(), file: page.to_string_lossy().into(), workspace_id: None, artifact_id, note: String::new(), show };
+        let save = |artifact_id: Option<String>| save_with(artifact_id, None);
 
         // Outside a reply it is kept, linked to nothing.
         let Response::ArtifactSaved { artifact: loose, version: 1 } = handle_request_for_test(&state, save(None)) else { panic!("not saved") };
         assert!(loose.message_id.is_none() && loose.workspace_id.is_none());
         assert!(matches!(events.try_recv(), Ok(Event::ArtifactsChanged { message_id: None, version: 1, .. })));
+        assert!(events.try_recv().is_err(), "outside a reply nothing is shown unless asked");
+        let Response::ArtifactSaved { artifact: asked, .. } = handle_request_for_test(&state, save_with(None, Some(true))) else { panic!("not saved") };
+        assert!(matches!(events.try_recv(), Ok(Event::ArtifactsChanged { .. })));
+        let Ok(Event::ShowArtifact { id, version: Some(1) }) = events.try_recv() else { panic!("show: true shows it") };
+        assert_eq!(id, asked.id);
 
         // During one, it takes the reply's id and workspace, and its card appears on the reply.
         let turn = neko_core::neko_chat::begin_scoped_turn(&state.db.lock().unwrap(), "design it", Some("ws-1")).unwrap();
@@ -1869,7 +1907,11 @@ mod tests {
         assert_eq!((artifact.message_id.as_deref(), artifact.workspace_id.as_deref()), (Some(turn.as_str()), Some("ws-1")));
         let Ok(Event::ArtifactsChanged { id, version: 1, message_id }) = events.try_recv() else { panic!("no event") };
         assert_eq!((id.as_str(), message_id.as_deref()), (artifact.id.as_str(), Some(turn.as_str())));
-        let Response::ArtifactSaved { version: 2, .. } = handle_request_for_test(&state, save(Some(artifact.id.clone()))) else { panic!("no second version") };
+        let Ok(Event::ShowArtifact { id, version: Some(1) }) = events.try_recv() else { panic!("a reply's artifact is shown by default") };
+        assert_eq!(id, artifact.id);
+        let Response::ArtifactSaved { version: 2, .. } = handle_request_for_test(&state, save_with(Some(artifact.id.clone()), Some(false))) else { panic!("no second version") };
+        assert!(matches!(events.try_recv(), Ok(Event::ArtifactsChanged { version: 2, .. })));
+        assert!(events.try_recv().is_err(), "show: false keeps it off screen");
         let cards: Vec<_> = neko_core::ui_message::live_parts(&turn).unwrap().into_iter().filter(|p| p["type"] == "data-neko-artifact").collect();
         assert_eq!(cards.len(), 1);
         assert_eq!(cards[0]["data"]["version"], 2);
@@ -1879,9 +1921,33 @@ mod tests {
         let Response::Artifact { artifact: one } = handle_request_for_test(&state, Request::Artifact { id: artifact.id.clone() }) else { panic!() };
         assert_eq!(one.versions.len(), 2);
         assert!(matches!(handle_request_for_test(&state, Request::Artifact { id: "../x".into() }), Response::Error { .. }));
+
+        // ShowArtifact and OpenTab reach every open page, and say how many there were.
+        while events.try_recv().is_ok() {}
+        let Response::Shown { pages: 1 } = handle_request_for_test(&state, Request::ShowArtifact { id: artifact.id.clone(), version: Some(2) }) else { panic!("not shown") };
+        let Ok(Event::ShowArtifact { version: Some(2), .. }) = events.try_recv() else { panic!("no show event") };
+        assert!(matches!(handle_request_for_test(&state, Request::ShowArtifact { id: artifact.id.clone(), version: Some(9) }), Response::Error { .. }));
+        assert!(matches!(handle_request_for_test(&state, Request::ShowArtifact { id: "nope".into(), version: None }), Response::Error { .. }));
+        let Response::Shown { pages: 1 } = handle_request_for_test(&state, Request::OpenTab { route: "#/tasks?task=t1".into() }) else { panic!("no tab") };
+        let Ok(Event::OpenTab { route }) = events.try_recv() else { panic!("no tab event") };
+        assert_eq!(route, "tasks?task=t1");
+        assert!(matches!(handle_request_for_test(&state, Request::OpenTab { route: "https://evil.example".into() }), Response::Error { .. }));
+        assert!(events.try_recv().is_err());
+
+        // A viewer that edits saves the next version of a text kind as text.
+        let sketch = tmp.path().join("board.excalidraw");
+        std::fs::write(&sketch, r#"{"type":"excalidraw","elements":[]}"#).unwrap();
+        let Response::ArtifactSaved { artifact: board, .. } = handle_request_for_test(&state, Request::SaveArtifact { title: "Board".into(), file: sketch.to_string_lossy().into(), workspace_id: None, artifact_id: None, note: String::new(), show: Some(false) }) else { panic!("no board") };
+        assert_eq!(board.kind, "excalidraw");
+        while events.try_recv().is_ok() {}
+        let edit = Request::EditArtifact { artifact_id: board.id.clone(), content: r#"{"type":"excalidraw","elements":[{"id":"a"}]}"#.into(), note: "Edited".into() };
+        let Response::ArtifactSaved { version: 2, .. } = handle_request_for_test(&state, edit) else { panic!("not edited") };
+        assert!(matches!(events.try_recv(), Ok(Event::ArtifactsChanged { version: 2, message_id: None, .. })));
+        assert!(matches!(handle_request_for_test(&state, Request::EditArtifact { artifact_id: board.id.clone(), content: "{broken".into(), note: String::new() }), Response::Error { .. }));
+
         // A refused file is an error, and announces nothing.
         while events.try_recv().is_ok() {}
-        let refused = Request::SaveArtifact { title: "X".into(), file: "/etc/hosts".into(), workspace_id: None, artifact_id: None, note: String::new() };
+        let refused = Request::SaveArtifact { title: "X".into(), file: "/etc/hosts".into(), workspace_id: None, artifact_id: None, note: String::new(), show: None };
         assert!(matches!(handle_request_for_test(&state, refused), Response::Error { .. }));
         assert!(events.try_recv().is_err());
         neko_core::ui_message::finish(&turn, "done", 0);

@@ -65,6 +65,7 @@ pub mod terminals;
 pub mod themes;
 pub mod usage;
 pub mod verification;
+pub mod viewers;
 pub mod workbench;
 
 pub use apps::AppEntry;

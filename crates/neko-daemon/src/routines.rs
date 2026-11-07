@@ -519,7 +519,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
             } else {
                 let spec = neko_core::native_runner::RunSpec {
                     directory: folder,
-                    prompt: core::build_prompt(routine, scope, &orders, &memory, &core::now_iso(), &open, &core::owner_name())
+                    prompt: core::build_prompt(routine, scope, &orders, &memory, &core::now_iso(), &open, &core::owner_name(), &neko_core::viewers::installed_section("{neko}", &neko_core::viewers::plugins_dir()))
                         .replace("{neko}", &std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "neko-daemon".into()))
                         .replace("{mac_care}", &core::install_mac_care().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "mac-care".into())),
                     writable: true,

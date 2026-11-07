@@ -1002,6 +1002,50 @@ fn an_artifact_is_served_under_its_own_policy_with_the_comment_bridge() {
 }
 
 #[test]
+fn every_other_kind_is_served_inert_under_its_own_type() {
+    let h = start();
+    let mut glb = b"glTF\x02\x00\x00\x00\x24\x00\x00\x00\x10\x00\x00\x00JSON".to_vec();
+    glb.extend_from_slice(br#"{"asset":{}}    "#);
+    for (name, body, content_type) in [
+        ("model.glb", glb, "model/gltf-binary"),
+        ("table.csv", b"a,b\n1,2\n".to_vec(), "text/csv; charset=utf-8"),
+        ("notes.md", b"# Hi <script>alert(1)</script>".to_vec(), "text/markdown; charset=utf-8"),
+        ("sketch.excalidraw", br#"{"type":"excalidraw","elements":[]}"#.to_vec(), "application/json"),
+        ("page.xhtml", b"<html xmlns='http://www.w3.org/1999/xhtml'><script>1</script></html>".to_vec(), "application/octet-stream"),
+        ("tool.js", b"alert(1)".to_vec(), "text/plain; charset=utf-8"),
+    ] {
+        let artifact = keep(&h, name, &body, None);
+        let reply = get(h.port, &format!("/artifact/{}/1", artifact.id), &[]);
+        assert_eq!(reply.status, 200, "{name}");
+        assert!(reply.head.contains(&format!("Content-Type: {content_type}\r\n")), "{name}: {}", reply.head);
+        assert!(reply.head.contains("X-Content-Type-Options: nosniff"), "{name}");
+        assert!(reply.head.contains(&format!("Content-Security-Policy: {ARTIFACT_CSP}")), "{name}: sandboxed even when opened alone");
+        assert!(!reply.body.contains("neko-bridge"), "{name}: only html gets the bridge");
+    }
+    // A PDF gets a policy that runs nothing but the browser's viewer.
+    let pdf = keep(&h, "report.pdf", b"%PDF-1.4\n%%EOF\n", None);
+    let reply = get(h.port, &format!("/artifact/{}/1", pdf.id), &[]);
+    assert!(reply.head.contains("Content-Type: application/pdf") && reply.head.contains(&format!("Content-Security-Policy: {PDF_CSP}")), "{}", reply.head);
+    assert!(PDF_CSP.contains("default-src 'none'") && !PDF_CSP.contains("script-src") && !PDF_CSP.contains("connect-src 'self'"));
+    assert!(get(h.port, &format!("/artifact/{}/1?download=1", pdf.id), &[]).head.contains(ARTIFACT_CSP), "a download keeps the strict policy");
+}
+
+#[test]
+fn a_manifest_declares_viewers_fences_and_a_prompt_in_the_listing() {
+    let h = start();
+    let plugin = install(&h, "stl");
+    fs::write(plugin.join("manifest.json"), r#"{"title":"STL","entry":"index.js","viewers":[{"id":"stl","title":"STL viewer","kinds":["STL","bad kind"]}],"fences":["stl"],"prompt":"Save prints as .stl."}"#).unwrap();
+    install(&h, "plain");
+    let json = listing(&h);
+    let stl = json.as_array().unwrap().iter().find(|p| p["id"] == "stl").unwrap();
+    assert_eq!(stl["viewers"], serde_json::json!([{ "id": "stl", "title": "STL viewer", "kinds": ["stl"] }]));
+    assert_eq!(stl["fences"], serde_json::json!(["stl"]));
+    assert_eq!(stl["prompt"], "Save prints as .stl.");
+    let plain = json.as_array().unwrap().iter().find(|p| p["id"] == "plain").unwrap();
+    assert!(plain.get("viewers").is_none() && plain.get("fences").is_none() && plain.get("prompt").is_none(), "nothing declared, nothing listed");
+}
+
+#[test]
 fn the_artifact_route_needs_the_same_gates_and_stays_in_its_store() {
     let h = start();
     let artifact = keep(&h, "design.html", b"<p>kept</p>", None);

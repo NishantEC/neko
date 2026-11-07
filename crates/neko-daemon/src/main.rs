@@ -68,7 +68,11 @@ fn request_if_asked() -> Option<i32> {
         }
         Some("--plugin-guide") => {
             use std::io::Write;
-            let _ = std::io::stdout().lock().write_all(PLUGIN_GUIDE.as_bytes());
+            // The guide, then what is installed on this Mac right now, so an
+            // agent writing a viewer sees the kinds and fences already taken.
+            let neko = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "neko-daemon".into());
+            let installed = neko_core::viewers::installed_section(&neko, &neko_core::viewers::plugins_dir());
+            let _ = write!(std::io::stdout().lock(), "{PLUGIN_GUIDE}\n## 9. On this Mac now\n\n{installed}\n");
             return Some(0);
         }
         Some("--open-page") => return Some(open_page(&args.next().unwrap_or_default())),

@@ -662,9 +662,10 @@ pub enum Request {
         id: Option<String>,
     },
     /// Keeps a file the agent made as an artifact (`<data dir>/artifacts`):
-    /// copied in (5 MB at most; html, svg, png, pdf, json or md), recorded as
-    /// a new artifact or, with `artifact_id`, as its next version, and linked
-    /// to the Home reply running at that moment. `file` is an absolute path.
+    /// copied in (5 MB at most, any type; the kind is the file's extension:
+    /// html, md, csv, glb, excalidraw, png, pdf…), recorded as a new artifact
+    /// or, with `artifact_id`, as its next version, and linked to the Home
+    /// reply running at that moment. `file` is an absolute path.
     SaveArtifact {
         /// Required for a new artifact; empty keeps the title when adding a version.
         #[serde(default)]
@@ -677,6 +678,19 @@ pub enum Request {
         /// What changed in this version, in a few words.
         #[serde(default)]
         note: String,
+        /// Open it on every Neko page (beside the chat, or in its tab).
+        /// Unset: shown when a Neko chat reply is running, otherwise not.
+        #[serde(default)]
+        show: Option<bool>,
+    },
+    /// Keeps `content` (UTF-8 text) as the next version of a text artifact,
+    /// in its newest version's kind: how a viewer that edits (the Excalidraw
+    /// sketch) saves. Same checks and 5 MB cap as `SaveArtifact`.
+    EditArtifact {
+        artifact_id: String,
+        content: String,
+        #[serde(default)]
+        note: String,
     },
     /// Every artifact, newest first; only one workspace's with `workspace_id`.
     Artifacts {
@@ -686,6 +700,20 @@ pub enum Request {
     /// One artifact's record.
     Artifact {
         id: String,
+    },
+    /// Opens an artifact on every open Neko page: on the canvas beside the
+    /// chat when Home is showing, otherwise in the artifact's own tab.
+    /// `version` unset follows the newest.
+    ShowArtifact {
+        id: String,
+        #[serde(default)]
+        version: Option<u32>,
+    },
+    /// Opens a Neko route in a tab on every open Neko page: `tasks`,
+    /// `tasks?task=<id>&view=full`, `artifact?id=<id>`, a plugin page's
+    /// `<plugin>:<page>`. Never another site.
+    OpenTab {
+        route: String,
     },
 }
 
@@ -849,6 +877,11 @@ pub enum Response {
     Artifact {
         artifact: Artifact,
     },
+    /// `ShowArtifact` / `OpenTab` went to this many open Neko pages (0: none
+    /// is open, so nobody saw it).
+    Shown {
+        pages: usize,
+    },
     Error {
         message: String,
     },
@@ -956,6 +989,17 @@ pub enum Event {
         id: String,
         version: u32,
         message_id: Option<String>,
+    },
+    /// Show this artifact now (`SaveArtifact` with `show`, or
+    /// `ShowArtifact`): every open page opens it beside the chat when Home is
+    /// on screen, otherwise in its own tab. `version` None follows the newest.
+    ShowArtifact {
+        id: String,
+        version: Option<u32>,
+    },
+    /// Open this route in a tab (`OpenTab`), already checked to be a Neko route.
+    OpenTab {
+        route: String,
     },
 }
 

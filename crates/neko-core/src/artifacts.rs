@@ -1,13 +1,17 @@
 //! Artifacts: files Neko keeps for the person, shown on the canvas beside the
-//! chat (`docs/superpowers/specs/2026-11-06-artifact-canvas-design.md`).
+//! chat (`docs/superpowers/specs/2026-11-06-artifact-canvas-design.md`,
+//! `docs/superpowers/specs/2026-11-08-everything-renders-design.md`).
 //!
 //! `<data dir>/artifacts/<id>/` holds `meta.json` (the [`Artifact`] record)
-//! and one `v<n>.<ext>` per version. An agent writes the file wherever it
+//! and one `v<n>.<kind>` per version. An agent writes the file wherever it
 //! likes and sends `SaveArtifact`; the daemon copies it in here, so what the
 //! canvas shows can never change under it and never points outside this
-//! folder. The checks are the ones the spec names: 5 MB, a short list of file
-//! types whose contents must look like what their name says, ids made of
-//! plain characters, and every path proved to stay inside the store.
+//! folder. Any file type is kept: its **kind** is its extension, normalised
+//! ([`kind_of`]); kinds Neko knows must look like what their name says
+//! ([`check_contents`]), the rest are kept as opaque bytes. Only html is
+//! served as a page (with its sandbox and comment bridge); every other kind
+//! is served as a file under its own type ([`mime`]) and never run. Ids are
+//! plain characters and every path is proved to stay inside the store.
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -17,9 +21,16 @@ pub use neko_protocol::{Artifact, ArtifactVersion};
 
 /// The most one version may weigh.
 pub const MAX_BYTES: u64 = 5 * 1024 * 1024;
-/// The file types the store keeps. The canvas renders html and svg; the rest
-/// are shown as a download.
-pub const KINDS: [&str; 6] = ["html", "svg", "png", "pdf", "json", "md"];
+/// Kinds kept as UTF-8 text: their contents must decode, and a viewer that
+/// edits (Excalidraw) may save the next version of one as text.
+pub const TEXT_KINDS: &[&str] = &[
+    "html", "svg", "md", "csv", "tsv", "json", "excalidraw", "gltf", "obj", "txt", "log", "xml", "yaml", "toml", "ini",
+    "js", "mjs", "cjs", "ts", "tsx", "jsx", "css", "scss", "py", "rb", "rs", "go", "java", "kt", "swift", "c", "h", "cc", "cpp", "hpp",
+    "cs", "php", "sh", "bash", "zsh", "fish", "sql", "lua", "r", "dart", "scala", "ex", "exs", "hs", "ml", "vue", "svelte", "diff", "patch",
+    "graphql", "proto", "tex", "mermaid", "dot",
+];
+/// Extensions that name the same kind as another.
+const ALIASES: &[(&str, &str)] = &[("htm", "html"), ("markdown", "md"), ("jpeg", "jpg"), ("yml", "yaml"), ("tif", "tiff"), ("text", "txt")];
 pub const MAX_TITLE_CHARS: usize = 200;
 pub const MAX_NOTE_CHARS: usize = 500;
 /// Versions one artifact keeps; past this, make a new artifact.
@@ -59,43 +70,96 @@ fn shorten(text: &str, limit: usize) -> String {
     text.trim().chars().take(limit).collect()
 }
 
-/// The kind a file name says, `htm` counting as html.
-pub fn kind_of(path: &Path) -> Option<&'static str> {
+/// The kind a file name says: its extension, lowercased, with the aliases
+/// folded in (`htm` is html, `jpeg` is jpg). An extension is 1–16 ASCII
+/// letters or digits, so a kind is always safe as a file extension and in a
+/// URL. A file without one has no kind.
+pub fn kind_of(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    let ext = if ext == "htm" { "html".to_string() } else { ext };
-    KINDS.iter().copied().find(|k| *k == ext)
+    if !(1..=16).contains(&ext.len()) || !ext.bytes().all(|b| b.is_ascii_alphanumeric()) { return None; }
+    Some(ALIASES.iter().find(|(from, _)| *from == ext).map_or(ext.clone(), |(_, to)| (*to).to_string()))
 }
 
-/// Whether the bytes are what the kind says: text kinds are UTF-8 (svg with an
-/// `<svg` element, json that parses), png and pdf start with their signature.
-fn check_contents(kind: &str, bytes: &[u8]) -> Result<(), String> {
-    if bytes.is_empty() { return Err("The file is empty.".into()); }
-    let text = || std::str::from_utf8(bytes).map_err(|_| format!("A {kind} artifact must be UTF-8 text."));
+/// Whether a kind is kept as UTF-8 text.
+pub fn is_text(kind: &str) -> bool {
+    TEXT_KINDS.contains(&kind)
+}
+
+/// The type a kind is served as. Only html is a page (the web bridge gives
+/// it its sandbox and comment bridge); svg is an image, which also runs only
+/// inside the artifact sandbox. Everything else is inert: text kinds as text,
+/// known media under their own type, the rest `application/octet-stream`.
+pub fn mime(kind: &str) -> &'static str {
     match kind {
-        "html" | "md" => text().map(|_| ()),
-        "svg" => if text()?.contains("<svg") { Ok(()) } else { Err("The file has no <svg> element.".into()) },
-        "json" => serde_json::from_str::<serde_json::Value>(text()?).map(|_| ()).map_err(|e| format!("The file is not valid JSON ({e}).")),
-        "png" => if bytes.starts_with(b"\x89PNG\r\n\x1a\n") { Ok(()) } else { Err("The file is not a PNG image.".into()) },
-        "pdf" => if bytes.starts_with(b"%PDF-") { Ok(()) } else { Err("The file is not a PDF.".into()) },
-        _ => Err(format!("Neko keeps {} files as artifacts.", KINDS.join(", "))),
+        "html" => "text/html; charset=utf-8",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "avif" => "image/avif",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "pdf" => "application/pdf",
+        "json" | "excalidraw" => "application/json",
+        "md" => "text/markdown; charset=utf-8",
+        "csv" => "text/csv; charset=utf-8",
+        "tsv" => "text/tab-separated-values; charset=utf-8",
+        "glb" => "model/gltf-binary",
+        "gltf" => "model/gltf+json",
+        "stl" => "model/stl",
+        "obj" => "model/obj",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "m4a" => "audio/mp4",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        kind if is_text(kind) => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
     }
 }
 
-/// Reads the file to keep, refusing anything that is not a regular file of a
-/// kept type under [`MAX_BYTES`]. Reads at most one byte past the limit, so a
-/// file that grows while it is read is refused too.
-fn read_source(file: &Path) -> Result<(&'static str, Vec<u8>), String> {
+/// Whether the bytes are what the kind says. Text kinds are UTF-8 (svg with
+/// an `<svg` element; json, excalidraw and gltf JSON that parses); images,
+/// pdf and glb start with their signature. A kind Neko does not know is kept
+/// as it is: it is only offered as a download, or to a viewer that claims it.
+pub fn check_contents(kind: &str, bytes: &[u8]) -> Result<(), String> {
+    if bytes.is_empty() { return Err("The file is empty.".into()); }
+    let text = || std::str::from_utf8(bytes).map_err(|_| format!("A {kind} artifact must be UTF-8 text."));
+    let signature = |ok: bool, what: &str| if ok { Ok(()) } else { Err(format!("The file is not {what}.")) };
+    match kind {
+        "svg" => if text()?.contains("<svg") { Ok(()) } else { Err("The file has no <svg> element.".into()) },
+        "json" | "excalidraw" | "gltf" => serde_json::from_str::<serde_json::Value>(text()?).map(|_| ()).map_err(|e| format!("The file is not valid JSON ({e}).")),
+        "png" => signature(bytes.starts_with(b"\x89PNG\r\n\x1a\n"), "a PNG image"),
+        "jpg" => signature(bytes.starts_with(b"\xff\xd8\xff"), "a JPEG image"),
+        "gif" => signature(bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"), "a GIF image"),
+        "webp" => signature(bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP", "a WebP image"),
+        "pdf" => signature(bytes.starts_with(b"%PDF-"), "a PDF"),
+        "glb" => signature(bytes.len() >= 20 && bytes.starts_with(b"glTF"), "a binary glTF (.glb)"),
+        kind if is_text(kind) => text().map(|_| ()),
+        _ => Ok(()),
+    }
+}
+
+const TOO_BIG: &str = "Keep an artifact under 5 MB.";
+
+/// Reads the file to keep, refusing anything that is not a regular file with
+/// a kind, under [`MAX_BYTES`], whose contents match it. Reads at most one
+/// byte past the limit, so a file that grows while it is read is refused too.
+fn read_source(file: &Path) -> Result<(String, Vec<u8>), String> {
     if !file.is_absolute() { return Err("Give the file as an absolute path.".into()); }
-    let kind = kind_of(file).ok_or_else(|| format!("Neko keeps {} files as artifacts.", KINDS.join(", ")))?;
+    let kind = kind_of(file).ok_or("Give the file an extension that says what it is (.html, .md, .csv, .glb, .excalidraw…).")?;
     let meta = fs::metadata(file).map_err(|e| format!("Cannot read {}: {e}", file.display()))?;
     if !meta.is_file() { return Err(format!("{} is not a file.", file.display())); }
-    if meta.len() > MAX_BYTES { return Err("Keep an artifact under 5 MB.".into()); }
+    if meta.len() > MAX_BYTES { return Err(TOO_BIG.into()); }
     let mut bytes = Vec::with_capacity(meta.len() as usize);
     fs::File::open(file)
         .and_then(|f| f.take(MAX_BYTES + 1).read_to_end(&mut bytes))
         .map_err(|e| format!("Cannot read {}: {e}", file.display()))?;
-    if bytes.len() as u64 > MAX_BYTES { return Err("Keep an artifact under 5 MB.".into()); }
-    check_contents(kind, &bytes)?;
+    if bytes.len() as u64 > MAX_BYTES { return Err(TOO_BIG.into()); }
+    check_contents(&kind, &bytes)?;
     Ok((kind, bytes))
 }
 
@@ -132,6 +196,22 @@ fn new_artifact_id(root: &Path) -> String {
 /// `save.artifact_id`. Returns the record and the version just kept.
 pub fn save(root: &Path, save: Save) -> Result<(Artifact, u32), String> {
     let (kind, bytes) = read_source(&save.file)?;
+    keep(root, save, &kind, &bytes)
+}
+
+/// Keeps `text` as the next version of `artifact_id`, in the kind of its
+/// newest version: how a viewer that edits (Excalidraw) saves. Only text
+/// kinds, and the same checks and cap as a file.
+pub fn save_text(root: &Path, artifact_id: &str, text: &str, note: &str) -> Result<(Artifact, u32), String> {
+    let artifact = get(root, artifact_id).ok_or_else(|| format!("There is no artifact {artifact_id}."))?;
+    let kind = artifact.versions.iter().max_by_key(|v| v.n).and_then(|v| kind_of(Path::new(&v.file))).unwrap_or(artifact.kind.clone());
+    if !is_text(&kind) { return Err(format!("A {kind} artifact cannot be saved as text.")); }
+    if text.len() as u64 > MAX_BYTES { return Err(TOO_BIG.into()); }
+    check_contents(&kind, text.as_bytes())?;
+    keep(root, Save { artifact_id: Some(artifact_id.to_string()), note: note.to_string(), ..Save::default() }, &kind, text.as_bytes())
+}
+
+fn keep(root: &Path, save: Save, kind: &str, bytes: &[u8]) -> Result<(Artifact, u32), String> {
     let title = shorten(&save.title, MAX_TITLE_CHARS);
     let note = shorten(&save.note, MAX_NOTE_CHARS);
     let workspace_id = save.workspace_id.filter(|w| !w.is_empty());
@@ -156,7 +236,7 @@ pub fn save(root: &Path, save: Save) -> Result<(Artifact, u32), String> {
     let n = artifact.versions.iter().map(|v| v.n).max().unwrap_or(0) + 1;
     if n > MAX_VERSIONS { return Err(format!("{} already has {MAX_VERSIONS} versions; save a new artifact instead.", artifact.title)); }
     let file = format!("v{n}.{kind}");
-    write_atomic(&dir.join(&file), &bytes)?;
+    write_atomic(&dir.join(&file), bytes)?;
     if !title.is_empty() { artifact.title = title; }
     artifact.kind = kind.into();
     if artifact.workspace_id.is_none() { artifact.workspace_id = workspace_id; }
@@ -199,7 +279,7 @@ pub fn version_file(root: &Path, id: &str, n: u32) -> Option<(PathBuf, String)> 
     let kind = kind_of(name)?;
     let dir = root.join(id).canonicalize().ok()?;
     let file = dir.join(name).canonicalize().ok()?;
-    (file.starts_with(&dir) && file.is_file()).then(|| (file, kind.to_string()))
+    (file.starts_with(&dir) && file.is_file()).then_some((file, kind))
 }
 
 #[cfg(test)]
@@ -214,6 +294,19 @@ mod tests {
 
     fn new(file: PathBuf, title: &str) -> Save {
         Save { title: title.into(), file, ..Save::default() }
+    }
+
+    /// The smallest valid binary glTF: a header and an empty JSON chunk.
+    fn tiny_glb() -> Vec<u8> {
+        let json = br#"{"asset":{"version":"2.0"}}   "#;
+        let mut out = Vec::new();
+        out.extend_from_slice(b"glTF");
+        out.extend_from_slice(&2u32.to_le_bytes());
+        out.extend_from_slice(&(12 + 8 + json.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(json.len() as u32).to_le_bytes());
+        out.extend_from_slice(b"JSON");
+        out.extend_from_slice(json);
+        out
     }
 
     #[test]
@@ -257,22 +350,65 @@ mod tests {
     }
 
     #[test]
-    fn refuses_files_that_are_too_big_of_the_wrong_kind_or_not_what_they_claim() {
+    fn any_kind_is_kept_under_its_normalised_extension() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("artifacts");
-        let big = source(tmp.path(), "big.html", &vec![b'a'; MAX_BYTES as usize + 1]);
+        for (name, body, kind) in [
+            ("model.glb", tiny_glb(), "glb"),
+            ("scene.gltf", br#"{"asset":{"version":"2.0"}}"#.to_vec(), "gltf"),
+            ("part.STL", b"solid x\nendsolid x\n".to_vec(), "stl"),
+            ("sketch.excalidraw", br#"{"type":"excalidraw","version":2,"elements":[]}"#.to_vec(), "excalidraw"),
+            ("table.csv", b"a,b\n1,2\n".to_vec(), "csv"),
+            ("notes.markdown", b"# Notes".to_vec(), "md"),
+            ("photo.JPEG", b"\xff\xd8\xff\xe0rest".to_vec(), "jpg"),
+            ("run.sh", b"echo hi".to_vec(), "sh"),
+            ("data.parquet", b"PAR1\x00\x01".to_vec(), "parquet"),
+        ] {
+            let (artifact, _) = save(&root, new(source(tmp.path(), name, &body), name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(artifact.kind, kind, "{name}");
+            assert_eq!(artifact.versions[0].file, format!("v1.{kind}"));
+            let (file, served) = version_file(&root, &artifact.id, 1).unwrap();
+            assert_eq!((served.as_str(), fs::read(file).unwrap()), (kind, body));
+        }
+    }
+
+    #[test]
+    fn every_kind_has_an_inert_type_except_html() {
+        assert_eq!(mime("html"), "text/html; charset=utf-8");
+        assert_eq!(mime("glb"), "model/gltf-binary");
+        assert_eq!(mime("csv"), "text/csv; charset=utf-8");
+        assert_eq!(mime("md"), "text/markdown; charset=utf-8");
+        assert_eq!(mime("excalidraw"), "application/json");
+        assert_eq!(mime("jpg"), "image/jpeg");
+        // Code and markup that a browser could run are served as plain text.
+        for kind in ["js", "xml", "sh", "py", "mjs"] { assert_eq!(mime(kind), "text/plain; charset=utf-8", "{kind}"); }
+        for kind in ["xhtml", "parquet", "exe", "zip"] { assert_eq!(mime(kind), "application/octet-stream", "{kind}"); }
+        assert!(TEXT_KINDS.iter().all(|k| !mime(k).starts_with("text/html") || *k == "html"));
+    }
+
+    #[test]
+    fn refuses_files_that_are_too_big_without_a_kind_or_not_what_they_claim() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("artifacts");
+        let big = source(tmp.path(), "big.glb", &vec![b'a'; MAX_BYTES as usize + 1]);
         assert!(save(&root, new(big, "Big")).unwrap_err().contains("5 MB"));
         let exactly = source(tmp.path(), "max.md", &vec![b'a'; MAX_BYTES as usize]);
         assert!(save(&root, new(exactly, "Max")).is_ok(), "5 MB itself is allowed");
         for (name, body) in [
-            ("run.sh", b"echo hi".as_slice()),
-            ("noext", b"<html>"),
+            ("noext", b"<html>".as_slice()),
+            ("odd.ex-t", b"x"),
+            ("long.abcdefghijklmnopq", b"x"),
             ("fake.png", b"<html>not a png"),
             ("fake.pdf", b"hello"),
+            ("fake.glb", b"not a gltf binary at all"),
+            ("fake.jpg", b"GIF89a"),
             ("bad.json", b"{nope"),
+            ("bad.excalidraw", b"{nope"),
             ("bad.svg", b"<html></html>"),
             ("binary.html", b"\xff\xfe\x00"),
+            ("binary.csv", b"\xff\xfe\x00"),
             ("empty.html", b""),
+            ("empty.bin", b""),
         ] {
             assert!(save(&root, new(source(tmp.path(), name, body), "X")).is_err(), "{name} must be refused");
         }
@@ -285,6 +421,23 @@ mod tests {
         assert!(save(&root, new(ok.clone(), "")).unwrap_err().contains("title"), "a new artifact needs a title");
         assert!(save(&root, Save { artifact_id: Some("nope".into()), ..new(ok.clone(), "X") }).unwrap_err().contains("no artifact"));
         assert!(save(&root, Save { workspace_id: Some("../x".into()), ..new(ok, "X") }).is_err());
+    }
+
+    #[test]
+    fn a_viewer_saves_text_as_the_next_version_of_a_text_kind_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("artifacts");
+        let sketch = source(tmp.path(), "s.excalidraw", br#"{"type":"excalidraw","elements":[]}"#);
+        let (artifact, _) = save(&root, new(sketch, "Sketch")).unwrap();
+        let (edited, n) = save_text(&root, &artifact.id, r#"{"type":"excalidraw","elements":[{"id":"a"}]}"#, "Edited in Neko").unwrap();
+        assert_eq!((n, edited.kind.as_str(), edited.versions[1].file.as_str(), edited.versions[1].note.as_str()), (2, "excalidraw", "v2.excalidraw", "Edited in Neko"));
+        assert_eq!(edited.title, "Sketch");
+        assert!(save_text(&root, &artifact.id, "{broken", "").is_err(), "the kind's checks still apply");
+        assert!(save_text(&root, "missing", "{}", "").is_err());
+        assert!(save_text(&root, "../x", "{}", "").is_err());
+        let (model, _) = save(&root, new(source(tmp.path(), "m.glb", &tiny_glb()), "Model")).unwrap();
+        assert!(save_text(&root, &model.id, "text", "").unwrap_err().contains("cannot be saved as text"));
+        assert!(save_text(&root, &artifact.id, &"a".repeat(MAX_BYTES as usize + 1), "").unwrap_err().contains("5 MB"));
     }
 
     #[test]
@@ -301,7 +454,7 @@ mod tests {
         let page = source(tmp.path(), "page.html", b"<p>ok</p>");
         let (artifact, _) = save(&root, new(page, "T")).unwrap();
         let dir = root.join(&artifact.id);
-        for evil in ["../../secret.html", "/etc/hosts", ".v1.html"] {
+        for evil in ["../../secret.html", "/etc/hosts", ".v1.html", "v1"] {
             let mut meta = artifact.clone();
             meta.versions[0].file = evil.into();
             fs::write(dir.join("meta.json"), serde_json::to_vec(&meta).unwrap()).unwrap();
