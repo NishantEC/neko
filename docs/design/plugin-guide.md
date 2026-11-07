@@ -92,6 +92,11 @@ calls go through `host.request`, not `fetch` to other sites.
 
 ## 4. Changing a plugin safely
 
+Make a small working version and load it before refining it; never build a
+mock preview, the installed plugin is the preview. When you report, say what
+you could not verify (`ok: true` means it loaded and rendered, not that it
+looks right), and put back any state you changed while testing.
+
 1. Before you change an existing plugin, copy its current files into
    `previous/` inside the plugin folder (replace what was there). If the new
    version fails to load, every open Neko page loads `previous/` instead and
