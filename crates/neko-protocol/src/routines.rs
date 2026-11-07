@@ -46,6 +46,10 @@ pub struct Routine {
     /// accessibility tree, clicks and typing, in the background when it can).
     #[serde(default = "yes")]
     pub computer: bool,
+    /// The owner changed the instruction: Neko never rewrites it with a
+    /// newer seeded one.
+    #[serde(default)]
+    pub customized: bool,
 }
 
 fn yes() -> bool {
@@ -163,6 +167,7 @@ mod tests {
             paseo_schedule: Some("message-watch-adaptive".into()),
             browser: true,
             computer: true,
+            customized: false,
         };
         let json = serde_json::to_string(&routine).unwrap();
         assert_eq!(serde_json::from_str::<Routine>(&json).unwrap(), routine);

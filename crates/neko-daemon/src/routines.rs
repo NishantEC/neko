@@ -206,7 +206,7 @@ fn ensure_seeded(state: &AppState) -> Result<(), String> {
     // Seeded instructions written by an older build are rewritten once,
     // unless the owner edited them (a custom routine keeps its own).
     if store.instructions_version < core::INSTRUCTIONS_VERSION {
-        for routine in store.routines.iter_mut().filter(|r| r.kind != neko_protocol::routines::RoutineKind::Custom) {
+        for routine in store.routines.iter_mut().filter(|r| r.kind != neko_protocol::routines::RoutineKind::Custom && !r.customized) {
             if let Some(scope) = all.iter().find(|s| s.workspace_id.as_deref() == Some(routine.workspace_id.as_str())) {
                 let personal = scope.folders.iter().any(|f| canonical(f) == home_folder);
                 routine.instruction = core::seed_instruction(routine.kind, personal);
@@ -284,7 +284,9 @@ pub(crate) fn pick_due(store: &Store, states: &[(String, RoutineState)], now_ms:
 /// it runs and which Paseo job it replaces stay as the daemon has them, so a
 /// dialog opened before a Pause cannot undo it.
 pub(crate) fn merge_edit(existing: &Routine, edit: Routine) -> Routine {
-    Routine { id: existing.id.clone(), workspace_id: existing.workspace_id.clone(), kind: existing.kind, enabled: existing.enabled, paseo_schedule: existing.paseo_schedule.clone(), ..edit }
+    // Once the owner changes the words, they are theirs for good.
+    let customized = existing.customized || edit.instruction.trim() != existing.instruction.trim();
+    Routine { id: existing.id.clone(), workspace_id: existing.workspace_id.clone(), kind: existing.kind, enabled: existing.enabled, paseo_schedule: existing.paseo_schedule.clone(), customized, ..edit }
 }
 
 /// Runs a short helper command, killing it after `limit`.
@@ -778,7 +780,7 @@ mod tests {
     use neko_protocol::routines::{Cadence, RoutineKind};
 
     fn routine(id: &str, enabled: bool) -> Routine {
-        Routine { id: id.into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: id.into(), instruction: "x".into(), cadence: Cadence::Daily { hour: 9, minute: 0 }, enabled, model: String::new(), paseo_schedule: None, browser: true, computer: true }
+        Routine { id: id.into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: id.into(), instruction: "x".into(), cadence: Cadence::Daily { hour: 9, minute: 0 }, enabled, model: String::new(), paseo_schedule: None, browser: true, computer: true, customized: false }
     }
 
     fn due(ms: Option<i64>, running: bool) -> RoutineState {
@@ -879,6 +881,11 @@ mod tests {
         assert_eq!(merged.paseo_schedule.as_deref(), Some("p"));
         assert_eq!(merged.instruction, "new");
         assert_eq!(merged.cadence, Cadence::Daily { hour: 7, minute: 0 });
+        assert!(merged.customized, "a changed instruction is the owner's");
+        let same_words = merge_edit(&merged, Routine { instruction: "new".into(), ..routine("a", true) });
+        assert!(same_words.customized, "and stays theirs");
+        let untouched = merge_edit(&routine("b", true), Routine { cadence: Cadence::Daily { hour: 8, minute: 0 }, ..routine("b", true) });
+        assert!(!untouched.customized, "a cadence change leaves the words Neko's");
     }
 
     #[test]
