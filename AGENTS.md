@@ -180,6 +180,11 @@ panel. `scripts/render-previews.sh` renders the shells offscreen in light and
 dark without showing or focusing a window; prominent buttons look grey and
 glass looks empty there, which is the inactive offscreen window, not a defect.
 
+**Prompt golden files** (`crates/neko-core/tests/prompts/`) pin the exact chat,
+routine, memory-learning and ticket-lesson prompts. After an intended wording
+change: `NEKO_UPDATE_PROMPTS=1 cargo test -p neko-core --test prompts`, then
+review the diff. A prompt change with no golden diff did not happen.
+
 `scripts/check.sh` is the gate: clippy's always-a-defect lints, every Rust
 test and the Swift tests (~70s). `install-native.sh` runs it first and
 installs nothing on failure (`--skip-checks` overrides); `.githooks/pre-commit`
@@ -221,6 +226,7 @@ finished.
 - [The Calendar (2026-11-06)](docs/knowledge/calendar.md) — macOS Calendar via EventKit in the app, one quiet daemon row, Neko's dated work on the all-day row.
 - [One window of tabs (2026-11-06)](docs/knowledge/one-window-of-tabs.md) — Tab strip over the hash router, detail tabs, Neko's right-click menu, one status glyph set, crew lines in chat.
 - [Neko updates itself (2026-10-22)](docs/knowledge/neko-updates-itself.md) — Owner: Neko "should be able to write itself over".
+- [Tickets keep your words, lessons improve skills, long chats keep a checkpoint (2026-11-08)](docs/knowledge/tickets-learning-and-checkpoints.md) — `Task::request` and its authority line, `PATCH <n>` skill lessons shown as diffs, `chat_checkpoint`, prompt golden files.
 - [The canvas beside the chat (2026-11-06)](docs/knowledge/the-canvas-beside-the-chat.md) — Artifacts (`SaveArtifact`), `/artifact/<id>/<n>` under its own sandboxed CSP, comment mode, an artifact tab (no gallery page).
 - [Everything renders (2026-11-08)](docs/knowledge/everything-renders.md) — Any artifact type, `host.registerViewer`/`registerFence`, built-in 3D/sketch/table/doc viewers, the Installed viewers prompt section, `ShowArtifact`/`OpenTab`.
 - [Current scope: the spine, clipboard history, the first-run onboarding ](docs/knowledge/current-scope-the-spine-clipboard-history-the-first-run-onbo.md) — Slice 1 was a single-crate proof that GPUI works at all.
