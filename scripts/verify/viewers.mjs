@@ -200,6 +200,12 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
       .then(() => check(true, "a page that is not the last one used offers a toast instead of moving"), () => check(false, "a page that is not the last one used offers a toast instead of moving"));
     check((await page.evaluate(() => location.hash)) === before, "and stays where it was");
     await page.evaluate(() => { localStorage.removeItem("neko.lastFocusedPage"); delete document.hasFocus; });
+    // Leave nothing behind: the toast's timer was paused while the page said it had no focus,
+    // so it would stay open into the next area (a toast is a dialog to keyboard handlers).
+    const toast = page.locator("[data-slot='toast']", { hasText: "Neko opened a page in another window" });
+    await toast.getByRole("button", { name: "Close" }).click().catch(() => {});
+    await toast.waitFor({ state: "detached", timeout: 5000 })
+      .then(() => check(true, "the toast closes when dismissed"), () => check(false, "the toast closes when dismissed"));
   }
   const tab = await request({ OpenTab: { route: "calendar" } });
   check(tab?.Shown?.pages >= 1, "OpenTab is accepted");

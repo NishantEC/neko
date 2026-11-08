@@ -395,7 +395,11 @@ try {
   for (const file of existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".mjs")).sort() : []) {
     if (only.length && !only.some((name) => file.startsWith(name))) continue;
     console.log(`\n== ${file}`);
-    const area = (await import(pathToFileURL(path.join(dir, file)).href)).default;
+    // Areas share one page, so each starts clean: no toast the last one left open (a toast is a
+    // non-modal dialog that keyboard handlers and focus can trip over).
+    const leftover = page.locator("[data-slot='toast'] button[aria-label='Close']");
+    for (let n = await leftover.count(); n > 0; n--) await leftover.first().click({ timeout: 2000 }).catch(() => {});
+    const area =(await import(pathToFileURL(path.join(dir, file)).href)).default;
     try {
       await area({ page, shot, a11y, check, sleep, expectProblem, PORT, DATA, OUT });
     } catch (error) {

@@ -98,7 +98,8 @@ export default function Tasks() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
-      if (document.querySelector("[role=alertdialog],[role=dialog]:not([data-type]),[data-slot='command']")) return;
+      // A toast is a non-modal dialog (Base UI); only a real dialog, the palette or a confirm takes the keys.
+      if (document.querySelector("[role=alertdialog],[role=dialog]:not([data-slot=toast]),[data-slot='command']")) return;
       if (e.key === "/") { e.preventDefault(); searchBox.current?.focus(); return; }
       if (e.key === "Escape" && taskId && !isBoardDragging()) { e.preventDefault(); close(); return; }
       if (e.key !== "j" && e.key !== "k") return;

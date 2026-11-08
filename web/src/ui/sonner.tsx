@@ -60,7 +60,7 @@ function ToastList() {
     const render = item.data?.render;
     if (render) {
       return (
-        <Toast.Root key={item.id} toast={item} className={cn("relative", TOAST_MOTION)}>
+        <Toast.Root key={item.id} toast={item} data-slot="toast" className={cn("relative", TOAST_MOTION)}>
           {item.title ? <Toast.Title className="sr-only" /> : null}
           {render(item.id)}
         </Toast.Root>
@@ -72,6 +72,7 @@ function ToastList() {
       <Toast.Root
         key={item.id}
         toast={item}
+        data-slot="toast"
         className={cn(
           "relative flex items-start gap-2.5 rounded-md bg-popover p-4 text-popover-foreground smooth-shadow-ring-md",
           TOAST_MOTION,
