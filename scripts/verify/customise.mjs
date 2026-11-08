@@ -25,12 +25,18 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
     writeFileSync(path.join(plugins, name, "index.js"), source);
   };
   const nav = (text) => page.locator("[data-slot='nav-item']", { hasText: text });
+  // Pages off the rail are in its labelled "More" menu (DESIGN.md §8): open it before reading them.
+  const more = async () => {
+    if (!(await page.locator("[data-slot='sidebar-more']").count())) await page.locator("[data-slot='more-pages']").click();
+    await page.locator("[data-slot='sidebar-more']").waitFor({ timeout: 5000 });
+  };
 
   // ---- the redirect, and the sidebar without a Plugins group ------------------------------
   await page.goto(`${base}/#/plugins`);
   await page.waitForSelector("[data-slot='plugins-page']", { timeout: 10000 });
   check(await page.evaluate(() => location.hash) === "#/customisations", "#/plugins redirects to #/customisations");
   check(/Customisations/.test(await page.locator("[data-slot='plugins-page'] h1").first().innerText()), "the page is titled Customisations");
+  await more();
   check((await nav("Customisations").count()) === 1 && (await nav("Plugins").count()) === 0, "the sidebar lists Customisations and no Plugins entry");
   const labels = await page.locator("aside, [data-slot='sidebar']").first().innerText();
   check(!/^\s*Plugins\s*$/m.test(labels), "there is no Plugins group in the sidebar");
@@ -62,10 +68,11 @@ export default function register(host) {
   host.registerPage({ id: "notes", title: "My notes", icon: "Heart", component: Notes });
   host.addSection({ id: "hello", title: "Hello section", component: () => h("div", { "data-testid": "hello-section" }, "section from a page") });
 }`);
+  await more();
   await nav("My notes").waitFor({ timeout: 12000 });
   check(!(await nav("My notes").innerText()).includes("yours"), "a page of yours sits in the normal sidebar, unmarked: one registry");
   const workGroup = await page.locator("[data-slot='nav-item']").evaluateAll((els) => els.map((e) => e.textContent.replace(/\s+/g, " ").trim()));
-  check(workGroup.indexOf("My notes") > workGroup.findIndex((t) => /^Watching/.test(t)) && workGroup.indexOf("My notes") < workGroup.findIndex((t) => /^Settings/.test(t)), `the manifest's group puts it with the Work pages: ${workGroup.join(" | ")}`);
+  check(workGroup.indexOf("My notes") > workGroup.findIndex((t) => /^Watching/.test(t)) && workGroup.indexOf("My notes") < workGroup.findIndex((t) => /^Tools & skills/.test(t)), `the manifest's group puts it with the Work pages, ahead of the set-up ones: ${workGroup.join(" | ")}`);
 
   // ---- host.storage round trip -------------------------------------------------------------
   await nav("My notes").click();
@@ -81,6 +88,7 @@ export default function register(host) {
   check(bad === 400, "a storage key that tries to leave its folder is refused (400)");
 
   // ---- a user page with a built-in's id replaces it, visibly, and can be reset --------------
+  await more();
   await nav("Usage").waitFor();
   check(!(await nav("Usage").innerText()).includes("Customised"), "the replaced built-in keeps its plain sidebar row (the page itself says Customised)");
   await page.goto(`${base}/#/usage`);
@@ -95,6 +103,7 @@ export default function register(host) {
   check(existsSync(path.join(storageDir, "_neko/overrides-off.json")) && JSON.parse(readFileSync(path.join(storageDir, "_neko/overrides-off.json"), "utf8")).includes("usage"), "the reset is kept by the daemon");
   await page.reload();
   await sleep(1500);
+  await more();
   check((await page.locator("[data-testid='my-usage']").count()) === 0 && !(await nav("Usage").innerText()).includes("Customised"), "the reset survives a reload; the original is still shown");
 
   // ---- the Customisations page lists it, and can switch it back on --------------------------

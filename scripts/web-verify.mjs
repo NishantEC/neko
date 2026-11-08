@@ -355,7 +355,13 @@ try {
   await page.goto(`http://127.0.0.1:${PORT}/#/`);
   await sleep(600);
   const nav = (text) => page.locator("[data-slot='nav-item']", { hasText: text });
+  // Pages off the rail are in its labelled "More" menu (DESIGN.md §8): open it before reading them.
+  const more = async () => {
+    if (!(await page.locator("[data-slot='sidebar-more']").count())) await page.locator("[data-slot='more-pages']").click();
+    await page.locator("[data-slot='sidebar-more']").waitFor({ timeout: 5000 });
+  };
   const pluginDir = path.join(DATA, "plugins/pr-board");
+  await more();
   check((await nav("PR board").count()) === 0, "no plugin page before the plugin is installed");
   cpSync(path.join(repo, "web/plugins/pr-board"), pluginDir, { recursive: true });
   await nav("PR board").waitFor({ timeout: 10000 });
@@ -377,6 +383,7 @@ try {
   // Hot edit: change the plugin file; the page picks it up.
   const entry = path.join(pluginDir, "index.js");
   writeFileSync(entry, readFileSync(entry, "utf8").replaceAll('"PR board"', '"PR board (edited)"'));
+  await more();
   await nav("PR board (edited)").waitFor({ timeout: 10000 });
   check(true, "editing the plugin file reloads it live");
 

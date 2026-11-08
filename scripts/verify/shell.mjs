@@ -138,8 +138,16 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   check(chips.length === 1 && /^Tasks\d+$/.test(chips[0].row.replace(/\s+/g, "")) && chips[0].tone === "amber", `the only badge is the Tasks row's amber count of what waits on you (${chips.map((c) => c.row).join(" | ")})`);
   const daily = await page.locator("[data-slot='sidebar-daily'] [data-slot='nav-item']").allInnerTexts();
   const setupRows = await page.locator("[data-slot='sidebar-setup'] [data-slot='nav-item']").allInnerTexts();
-  check(["Home", "Tasks", "Pull requests", "Watching"].every((t, i) => daily[i]?.trim().startsWith(t)), `the daily pages lead the sidebar: ${daily.map((t) => t.trim()).join(", ")}`);
-  check(["Schedules", "Memory", "Profiles", "Tools & skills", "Settings", "Usage & machine"].every((t) => setupRows.some((r) => r.trim() === t)) && ![...daily, ...setupRows].some((t) => t.trim() === "Workspaces"), `the pages you set up once sit at the bottom, and Workspaces lives in the switcher: ${setupRows.join(", ")}`);
+  // DESIGN.md §8: the rail holds six places; every other page is in its labelled "More" menu.
+  const RAIL = ["Home", "Inbox", "Tasks", "Calendar", "Workspaces"];
+  check(daily.length === RAIL.length && RAIL.every((t, i) => daily[i]?.trim().startsWith(t)), `the rail holds the daily places, in order: ${daily.map((t) => t.trim()).join(", ")}`);
+  check(setupRows.length === 1 && setupRows[0].trim() === "Settings", `Settings sits alone at the rail's foot: ${setupRows.join(", ")}`);
+  await page.locator("[data-slot='more-pages']").click();
+  await page.locator("[data-slot='sidebar-more']").waitFor({ timeout: 5000 });
+  const moreRows = (await page.locator("[data-slot='sidebar-more'] [data-slot='nav-item']").allInnerTexts()).map((t) => t.trim());
+  check(["Pull requests", "Watching", "Schedules", "Memory", "Profiles", "Tools & skills", "Usage & machine"].every((t) => moreRows.includes(t)) && !moreRows.some((t) => RAIL.includes(t) || t === "Settings"), `every other page is one click away in More, labelled: ${moreRows.join(", ")}`);
+  await page.keyboard.press("Escape");
+  await page.locator("[data-slot='sidebar-more']").waitFor({ state: "detached", timeout: 3000 });
   const title = await page.title();
   check(/^\(\d+\) Neko$/.test(title), `the document title carries the count when something needs you: "${title}"`);
   const bar = page.locator("[data-slot='status-bar']");

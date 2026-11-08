@@ -133,7 +133,8 @@ function TabItem({
         onFocus={() => onFocusIndex(index)}
         className={cn(
           "flex h-full min-w-0 flex-1 items-center gap-2 rounded-[10px] ps-2.5 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
-          closable ? "pe-6" : "pe-3",
+          // Only the active tab keeps room for its close button; others are symmetric and show it over the title's end on hover.
+          closable && active ? "pe-7" : "pe-3",
         )}
       >
         {label.glyph ? <StatusGlyph status={statusOf(label.glyph)} label="" size={13} /> : label.icon ? <label.icon aria-hidden size={14} className="shrink-0" /> : null}
@@ -148,7 +149,7 @@ function TabItem({
           onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
           className={cn(
             "absolute end-1 flex size-5 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-            active ? "opacity-100" : "opacity-0 group-hover/tab:opacity-100",
+            active ? "opacity-100" : "bg-[color-mix(in_oklab,var(--background),var(--foreground)_4%)] opacity-0 shadow-[-6px_0_6px_color-mix(in_oklab,var(--background),var(--foreground)_4%)] group-hover/tab:opacity-100 focus-visible:opacity-100",
           )}
         >
           <X size={12} weight="bold" />
