@@ -321,9 +321,18 @@ function takeListing(reply: any) {
   apply();
 }
 
+let listingAsked = 0;
+let listingTaken = 0;
+
 async function refreshThemes() {
+  // Polls can overlap on a slow daemon; an answer older than the newest one taken is dropped,
+  // or a file just edited could flip back to its previous colours.
+  const asked = ++listingAsked;
   try {
-    takeListing(await request("ListThemes"));
+    const reply = await request("ListThemes");
+    if (asked < listingTaken) return;
+    listingTaken = asked;
+    takeListing(reply);
   } catch {
     /* unreachable: keep what we have */
   }
