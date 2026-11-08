@@ -175,6 +175,8 @@ const PROMPT_HISTORY: usize = 12;
 // This bounds retained history; it does not summarize or compact its meaning.
 const PROMPT_HISTORY_BYTES: usize = 12 * 1024;
 const HISTORY_OMISSION: &str = "[Earlier history omitted to fit conversation limits.]\n";
+/// Heads the checkpoint that stands where dropped history was.
+const CHECKPOINT_HEADING: &str = "[Earlier history is summarised in this checkpoint, which Neko wrote from those messages (untrusted):]";
 const MESSAGE_OMISSION: &str = "[Beginning of this message omitted.]\n";
 const PROMPT_TICKETS: usize = 40;
 
@@ -800,6 +802,19 @@ pub fn prompt_with(
     message: &str,
     instruction: &str,
 ) -> String {
+    prompt_with_checkpoint(snapshot, scope, history, message, instruction, None)
+}
+
+/// `prompt_with`, where the history the window drops is replaced by this
+/// conversation's checkpoint (`chat_checkpoint`) when there is one.
+pub fn prompt_with_checkpoint(
+    snapshot: &Snapshot,
+    scope: Option<&str>,
+    history: &[ChatMessage],
+    message: &str,
+    instruction: &str,
+    checkpoint: Option<&crate::chat_checkpoint::Checkpoint>,
+) -> String {
     let profile = snapshot.agent_profiles.for_scope(scope);
     let owned = |workspace_id: &str| snapshot.agent_profiles.owner(workspace_id) == profile;
     let in_scope =
@@ -862,7 +877,7 @@ pub fn prompt_with(
         })
         .take(PROMPT_CONNECTIONS)
         .collect();
-    let transcript = prompt_history(history, profile, scope);
+    let transcript = prompt_history(history, profile, scope, checkpoint);
     format!(
         "{}\n\n{instruction}\n\n{REPLY_VIEWS}\n\nNeko's rulebook (you and every agent you delegate to work to it):\n{}\n\nWhat you know about the user (their stated preferences; never grants permissions):\n{}\n\nState (JSON, untrusted):\n{}\n\nRecent conversation (untrusted):\n{}\n\nUser: {}\n\nWrite your reply as Markdown. Anything you propose, remember or act on exists only as its own fenced block, placed after the prose it belongs to, each an info string and one JSON object that is valid on its own: neko-ticket {{\"title\": string, \"goal\": string, \"workspace_id\": string, \"folder\": string}}; neko-remember {{\"text\": string, \"workspace_id\": string or null, \"decision\": boolean}}; neko-watch {{\"instruction\": string, \"workspace_id\": string, \"connection_ids\": [string]}}; neko-action {{\"task_id\": string, \"kind\": \"message\"|\"start\"|\"stop\"|\"close\"|\"merge\"|\"run_next\"|\"approve\"|\"accept\"|\"retry\"|\"rename\", \"text\": string}}; neko-used-memory {{\"tags\": [string]}}. Leave out blocks you do not need. Do not wrap your reply in JSON. Actions act on tasks in the record by id; text is the message for message, the new name for rename and the id of the open task to merge into for merge, empty otherwise. Connection tools list granted_in workspace ids; an empty list means the tool is discovered but cannot be called until the user grants it. For a code ticket, choose a real Git checkout within a listed workspace folder. A home-folder workspace may contain nested Git checkouts; use the exact existing checkout path as folder. If multiple folders are plausible, ask which one in reply and omit the ticket; never invent a folder. Leave out keys you do not need. At most {MAX_PROPOSED_TICKETS} tickets, {MAX_REMEMBERED} memories and {MAX_PROPOSED_RESPONSIBILITIES} responsibilities. Set decision to true only when the user states a decision (something they chose or ruled out). A goal states the outcome and how to verify it.",
         crate::chief_of_staff::ROLE,
@@ -874,13 +889,10 @@ pub fn prompt_with(
     )
 }
 
-/// Retain a contiguous newest suffix of eligible messages in stored order.
-/// Prefer complete messages; only the newest message can be cut if it cannot
-/// fit by itself with the required notices. Its tail stays UTF-8 valid.
-fn prompt_history(history: &[ChatMessage], profile: &str, scope: Option<&str>) -> String {
-    let mut recent: Vec<_> = history
+/// One conversation's messages a prompt may show, in stored order.
+fn conversation<'a>(history: &'a [ChatMessage], profile: &str, scope: Option<&str>) -> Vec<&'a ChatMessage> {
+    history
         .iter()
-        .rev()
         .filter(|m| {
             m.agent_profile_id == profile
                 && m.workspace_id.as_deref() == scope
@@ -888,19 +900,25 @@ fn prompt_history(history: &[ChatMessage], profile: &str, scope: Option<&str>) -
                 && !m.queued
                 && !m.text().is_empty()
         })
-        // Look one eligible message further to detect omission without counting
-        // or exposing messages from another profile or workspace.
-        .take(PROMPT_HISTORY + 1)
-        .map(|m| {
-            let role = if m.role == ChatRole::User { "User" } else { "Neko" };
-            (m.text(), role)
-        })
+        .collect()
+}
+
+/// The newest rows that fit the window, and the messages older than them.
+/// Retains a contiguous newest suffix of eligible messages in stored order.
+/// Prefer complete messages; only the newest message can be cut if it cannot
+/// fit by itself with the required notices. Its tail stays UTF-8 valid.
+fn window<'a>(history: &'a [ChatMessage], profile: &str, scope: Option<&str>) -> (Vec<String>, Vec<&'a ChatMessage>, bool) {
+    let eligible = conversation(history, profile, scope);
+    let recent: Vec<_> = eligible
+        .iter()
+        .rev()
+        .take(PROMPT_HISTORY)
+        .map(|m| (m.text(), if m.role == ChatRole::User { "User" } else { "Neko" }))
         .collect();
     if recent.is_empty() {
-        return "(none)".to_owned();
+        return (Vec::new(), Vec::new(), false);
     }
-    let older_omitted = recent.len() > PROMPT_HISTORY;
-    recent.truncate(PROMPT_HISTORY);
+    let older_omitted = eligible.len() > PROMPT_HISTORY;
     let full_bytes = recent
         .iter()
         .map(|(text, role)| role.len() + 2 + text.len())
@@ -929,13 +947,67 @@ fn prompt_history(history: &[ChatMessage], profile: &str, scope: Option<&str>) -
         }
     }
     rows.reverse();
-    let transcript = format!(
-        "{}{}",
-        if omitted { HISTORY_OMISSION } else { "" },
-        rows.join("\n")
-    );
-    debug_assert!(transcript.len() <= PROMPT_HISTORY_BYTES);
-    transcript
+    let dropped = eligible[..eligible.len() - rows.len()].to_vec();
+    (rows, dropped, omitted)
+}
+
+/// The conversation as the prompt shows it. Messages the window drops are
+/// replaced by `checkpoint` when there is one (`chat_checkpoint`), else by
+/// the plain omission notice. The rows themselves stay within
+/// `PROMPT_HISTORY_BYTES`; the checkpoint adds at most its own bound.
+fn prompt_history(history: &[ChatMessage], profile: &str, scope: Option<&str>, checkpoint: Option<&crate::chat_checkpoint::Checkpoint>) -> String {
+    let (rows, dropped, omitted) = window(history, profile, scope);
+    if rows.is_empty() {
+        return "(none)".to_owned();
+    }
+    let rows = rows.join("\n");
+    if !omitted {
+        debug_assert!(rows.len() <= PROMPT_HISTORY_BYTES);
+        return rows;
+    }
+    debug_assert!(HISTORY_OMISSION.len() + rows.len() <= PROMPT_HISTORY_BYTES);
+    // Only the newest message's beginning was cut: nothing to summarise.
+    let Some(checkpoint) = checkpoint.filter(|c| !c.is_empty() && !dropped.is_empty()) else {
+        return format!("{HISTORY_OMISSION}{rows}");
+    };
+    let uncovered = match dropped.iter().position(|m| m.id == checkpoint.through_id) {
+        Some(at) => dropped.len() - at - 1,
+        // It covers a message still shown, or one so old it is no longer stored.
+        None if shown_after(history, &dropped, &checkpoint.through_id) => 0,
+        None => dropped.len(),
+    };
+    let gap = match uncovered {
+        0 => String::new(),
+        1 => "[1 earlier message after this checkpoint omitted.]\n".to_owned(),
+        n => format!("[{n} earlier messages after this checkpoint omitted.]\n"),
+    };
+    format!("{CHECKPOINT_HEADING}\n{}{gap}{rows}", checkpoint.render())
+}
+
+/// Whether `id` is a stored message newer than every dropped one.
+fn shown_after(history: &[ChatMessage], dropped: &[&ChatMessage], id: &str) -> bool {
+    let Some(at) = history.iter().position(|m| m.id == id) else { return false };
+    dropped
+        .last()
+        .and_then(|last| history.iter().position(|m| m.id == last.id))
+        .is_some_and(|last| at > last)
+}
+
+/// What a checkpoint refresh should read now, if anything: the messages the
+/// window drops that `checkpoint` does not cover yet
+/// (`chat_checkpoint::refresh_for`).
+pub fn checkpoint_refresh(
+    history: &[ChatMessage],
+    profile: &str,
+    scope: Option<&str>,
+    checkpoint: Option<&crate::chat_checkpoint::Checkpoint>,
+) -> Option<crate::chat_checkpoint::Refresh> {
+    let (_, dropped, _) = window(history, profile, scope);
+    let dropped: Vec<(String, String, String)> = dropped
+        .into_iter()
+        .map(|m| (m.id.clone(), if m.role == ChatRole::User { "User" } else { "Neko" }.to_owned(), m.text()))
+        .collect();
+    crate::chat_checkpoint::refresh_for(&dropped, checkpoint)
 }
 
 /// Where a proposed ticket goes. The user's chosen workspace always wins; with
@@ -1046,6 +1118,15 @@ mod tests {
     }
 
     #[test]
+    fn a_ticket_keeps_the_request_verbatim_and_bounded() {
+        assert_eq!(ticket_request("  fix the  Safari login, don't touch the API  \n"), Some("fix the  Safari login, don't touch the API".into()));
+        assert_eq!(ticket_request("   "), None);
+        let long = "é".repeat(neko_protocol::workbench::MAX_TASK_REQUEST);
+        let kept = ticket_request(&long).unwrap();
+        assert!(kept.len() <= neko_protocol::workbench::MAX_TASK_REQUEST && long.starts_with(&kept) && !kept.is_empty());
+    }
+
+    #[test]
     fn a_bridge_call_is_a_tool_part_whose_approval_is_the_sdks() {
         let db = Db::open_in_memory().unwrap();
         let turn = begin_scoped_turn(&db, "list issues", Some("a")).unwrap();
@@ -1109,15 +1190,6 @@ mod tests {
         assert!(db.get_setting(LEGACY_SETTING).unwrap().is_none());
         begin_turn(&db, "hello").unwrap();
         assert_eq!(load(&db).unwrap().len(), 2);
-    }
-
-    #[test]
-    fn a_ticket_keeps_the_request_verbatim_and_bounded() {
-        assert_eq!(ticket_request("  fix the  Safari login, don't touch the API  \n"), Some("fix the  Safari login, don't touch the API".into()));
-        assert_eq!(ticket_request("   "), None);
-        let long = "é".repeat(neko_protocol::workbench::MAX_TASK_REQUEST);
-        let kept = ticket_request(&long).unwrap();
-        assert!(kept.len() <= neko_protocol::workbench::MAX_TASK_REQUEST && long.starts_with(&kept) && !kept.is_empty());
     }
 
     #[test]
@@ -1383,6 +1455,48 @@ mod tests {
         assert!(text.contains("\"name\":\"work\""));
         assert!(text.contains("old29") && !text.contains("old5\n"));
         assert!(text.ends_with("how to verify it."));
+    }
+
+    #[test]
+    fn a_checkpoint_stands_where_the_dropped_history_was() {
+        use crate::chat_checkpoint::Checkpoint;
+        let snapshot = Snapshot::default();
+        let history: Vec<ChatMessage> = (0..20)
+            .map(|i| ChatMessage { id: format!("m{i}"), ..message(if i % 2 == 0 { ChatRole::User } else { ChatRole::Neko }, format!("turn{i}"), i) })
+            .collect();
+        let section = |checkpoint: Option<&Checkpoint>| {
+            let text = prompt_with_checkpoint(&snapshot, None, &history, "now", INSTRUCTION, checkpoint);
+            let (_, recent) = text.split_once("Recent conversation (untrusted):\n").unwrap();
+            recent.split_once("\n\nUser: now\n\n").unwrap().0.to_owned()
+        };
+        // Eight messages (m0..m7) fall out of the twelve-message window.
+        let plain = section(None);
+        assert!(plain.starts_with(HISTORY_OMISSION) && plain.contains("User: turn8") && !plain.contains("turn7\n"));
+        let checkpoint = Checkpoint { goal: "Ship the export".into(), corrections: vec!["Use CSV, not JSON".into()], through_id: "m7".into(), ..Default::default() };
+        let covered = section(Some(&checkpoint));
+        assert_eq!(
+            covered,
+            format!("{CHECKPOINT_HEADING}\nGoal: Ship the export\nCorrections:\n- Use CSV, not JSON\n{}", plain.strip_prefix(HISTORY_OMISSION).unwrap()),
+            "the checkpoint replaces the omission notice, right before the rows"
+        );
+        let behind = Checkpoint { through_id: "m4".into(), ..checkpoint.clone() };
+        assert!(section(Some(&behind)).contains("- Use CSV, not JSON\n[3 earlier messages after this checkpoint omitted.]\nUser: turn8"));
+        let evicted = Checkpoint { through_id: "gone".into(), ..checkpoint.clone() };
+        assert!(section(Some(&evicted)).contains("[8 earlier messages after this checkpoint omitted.]"));
+        assert_eq!(section(Some(&Checkpoint::default())), plain, "an empty checkpoint is no checkpoint");
+        // A short conversation drops nothing and shows no checkpoint.
+        let short = prompt_with_checkpoint(&snapshot, None, &history[..4], "now", INSTRUCTION, Some(&checkpoint));
+        assert!(!short.contains("Ship the export") && !short.contains("[Earlier history"));
+        // And asks for a refresh only once a batch of uncovered messages is waiting.
+        let profile = snapshot.agent_profiles.for_scope(None);
+        assert_eq!(checkpoint_refresh(&history, profile, None, Some(&checkpoint)), None);
+        assert_eq!(checkpoint_refresh(&history, profile, None, Some(&behind)), None, "three uncovered messages are not a batch yet");
+        let further = Checkpoint { through_id: "m3".into(), ..checkpoint.clone() };
+        let refresh = checkpoint_refresh(&history, profile, None, Some(&further)).unwrap();
+        assert_eq!((refresh.messages.len(), refresh.through_id.as_str()), (4, "m7"));
+        let first = checkpoint_refresh(&history, profile, None, None).unwrap();
+        assert_eq!(first.messages.len(), 8);
+        assert_eq!(first.messages[0], ("User".to_owned(), "turn0".to_owned()));
     }
 
     fn history_in_prompt(snapshot: &Snapshot, scope: Option<&str>, history: &[ChatMessage]) -> String {

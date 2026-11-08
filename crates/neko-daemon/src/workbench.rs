@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 mod import;
 #[path = "workbench/memory_learning.rs"]
 mod memory_learning;
+#[path = "workbench/checkpoints.rs"]
+mod checkpoints;
 #[path = "workbench/responsibilities.rs"]
 mod responsibilities;
 #[path = "workbench/scheduled_plans.rs"]
@@ -1643,6 +1645,9 @@ fn converse(
         store::save(&guard, &current)
     })();
     if let Err(error) = recorded { return finish(&error, vec![], true); }
+    // Background extractions (the conversation checkpoint) use the stored
+    // default runtime, as memory learning and naming do.
+    let extraction_runtime = snapshot.agent_runtime.clone();
     snapshot.agent_runtime = selection.runtime;
     // Full power (the owner's default) acts like his own Claude Code session.
     let super_on = neko_chat::super_agent(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
@@ -1694,11 +1699,18 @@ fn converse(
         Ok(value) => value,
         Err(error) => return finish(&error, vec![], true),
     };
+    // History the window drops is summarised by this conversation's last
+    // checkpoint; a stale one is refreshed in the background, never awaited.
+    let profile = snapshot.agent_profiles.for_scope(chosen).to_owned();
+    let checkpoint = neko_core::chat_checkpoint::load(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &profile, chosen);
+    if let Some(refresh) = neko_chat::checkpoint_refresh(history, &profile, chosen, checkpoint.as_ref()) {
+        checkpoints::refresh_in_background(db.clone(), profile.clone(), chosen.map(str::to_owned), refresh, extraction_runtime);
+    }
     let spec = native_runner::RunSpec {
         directory,
         prompt: format!(
             "{}\n{}\n{}",
-            neko_chat::prompt_with(&snapshot, chosen, history, message, &instruction),
+            neko_chat::prompt_with_checkpoint(&snapshot, chosen, history, message, &instruction, checkpoint.as_ref()),
             chosen.map(|workspace| decision_context::context_about(&snapshot, workspace, None, message)).unwrap_or_default(),
             skill_instructions
         ),
