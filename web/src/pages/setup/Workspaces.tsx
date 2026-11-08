@@ -22,6 +22,7 @@ import { hrefFor, navigate } from "@/router";
 import { ErrorNote, FormField, Gate, EmptyBlock, RowAction, RowActions, SetupPage, registerCommands } from "@/setup/kit";
 import { Panel } from "@/setup/kit";
 import { arr, fillOwner, foldersOf, mcp, relativeTime, str, useNow, useRun, type Workspace } from "@/setup/lib";
+import { useLocal } from "@/work/useLocal";
 
 function WorkspaceDialog({ open, onOpenChange, workspace, folders: initialFolders }: {
   open: boolean;
@@ -305,12 +306,31 @@ function Connections({ scope, workspaceName }: { scope: Json; workspaceName: str
   );
 }
 
-function WorkspacePanel({ snapshot, workspace, onEdit, routines, now }: { snapshot: Json; workspace: Workspace; onEdit: () => void; routines: RoutinesState; now: number }) {
+/** Which workspaces are open, per id (localStorage, shared by every window of the app). */
+const OPEN_KEY = "neko.workspaces.open";
+
+function useOpenState(): [Record<string, boolean>, (id: string, open: boolean) => void] {
+  const [raw, set] = useLocal(OPEN_KEY, "{}");
+  let parsed: Record<string, boolean> = {};
+  try { parsed = JSON.parse(raw) ?? {}; } catch { /* a damaged value: start closed */ }
+  return [parsed, (id, open) => set(JSON.stringify({ ...parsed, [id]: open }))];
+}
+
+/**
+ * One workspace (DESIGN.md §8): a single line by default (name, open tasks, its routines,
+ * what needs you, its folder), a button that opens its detail lines under it. Only facets
+ * with something in them get a line; an empty one that you can fill is offered as one quiet
+ * link at the end ("Add a watch"), not as a "nothing yet" row. Open or closed is remembered
+ * per workspace; one with routine items waiting on you starts open.
+ */
+function WorkspacePanel({ snapshot, workspace, onEdit, routines, now, open, onToggle }: {
+  snapshot: Json; workspace: Workspace; onEdit: () => void; routines: RoutinesState; now: number; open: boolean; onToggle: () => void;
+}) {
   const { run, busy, error, clear } = useRun();
   const folders = foldersOf(snapshot, workspace);
   const watches = arr(snapshot.mcp?.responsibilities).filter((r) => r.workspace_id === workspace.id);
   const tools = arr(snapshot.mcp?.connections).filter((c) => !str(c.workspace_id) || c.workspace_id === workspace.id);
-  const open = arr(snapshot.tasks).filter((t) => t.workspace_id === workspace.id && !["Completed", "Cancelled"].includes(t.status)).length;
+  const openTasks = arr(snapshot.tasks).filter((t) => t.workspace_id === workspace.id && !["Completed", "Cancelled"].includes(t.status)).length;
   const schedules = arr(snapshot.schedules).filter((s) => s.workspace_id === workspace.id);
   const active = watches.filter((w) => w.enabled).length;
   const lastChecked = Math.max(0, ...watches.map((w) => w.last_attempt_ms ?? 0));
@@ -321,8 +341,10 @@ function WorkspacePanel({ snapshot, workspace, onEdit, routines, now }: { snapsh
   const scope = data?.scopes.find((s) => s.workspace_id === workspace.id);
   const summary = data ? routineSummary(data, workspace.id, now) : null;
   const problems: string[] = arr(scope?.problems).map(str).filter(Boolean);
+  const servers = arr(scope?.servers);
   // Shown as the agent reads them: `{owner}` is the owner's name.
   const orders = fillOwner(data?.standing_orders?.[workspace.id] ?? "", data?.owner_name);
+  const bodyId = `ws-body-${workspace.id}`;
 
   // Wakes the active watches only (a paused or suggested one is refused by the daemon), and
   // one that fails does not stop the rest; the error names the ones that did.
@@ -342,6 +364,7 @@ function WorkspacePanel({ snapshot, workspace, onEdit, routines, now }: { snapsh
     });
 
   const menu = useContextMenu(() => [
+    { label: open ? "Collapse" : "Expand", run: onToggle },
     { label: "Open in a tab", icon: ArrowSquareOut, run: () => { location.hash = workspaceHref(workspace.id).slice(1); } },
     { label: "Edit…", icon: PencilSimple, run: onEdit },
     { label: "Sync now", icon: ArrowsClockwise, disabled: active === 0 || busy, run: () => void syncNow() },
@@ -358,113 +381,159 @@ function WorkspacePanel({ snapshot, workspace, onEdit, routines, now }: { snapsh
   const watchState = watches.length === 0 ? null
     : failing ? <span className="text-warning-foreground">Needs attention</span>
     : lastChecked ? `Synced ${relativeTime(lastChecked)}` : "Not checked yet";
+  const where = folders.length ? `${folderName(folders[0])}${folders.length > 1 ? ` +${folders.length - 1}` : ""}` : null;
+  // The one line: what you would look for first. Routines in a few words; what waits on you as a status.
+  const routinesText = summary && summary.count ? `${summary.views.filter((v) => v.routine.enabled).length} of ${summary.count} routine${summary.count === 1 ? "" : "s"} on` : null;
+  // Empty facets you can fill, offered as actions instead of "nothing yet" rows.
+  const offers: { label: string; href?: string; onClick?: () => void }[] = [
+    ...(folders.length === 0 ? [{ label: "Add a folder", onClick: onEdit }] : []),
+    ...(summary && summary.count === 0 ? [{ label: "Add a routine", href: hrefFor("inbox") }] : []),
+    ...(watches.length === 0 ? [{ label: "Add a watch", href: hrefFor("watching") }] : []),
+    ...(tools.length === 0 ? [{ label: "Connect a tool", href: hrefFor("tools") }] : []),
+    ...(summary && summary.count > 0 && !orders ? [{ label: "Write standing orders", href: hrefFor("inbox") }] : []),
+  ];
 
   return (
-    <section data-slot="workspace" data-workspace={workspace.name} role="region" aria-labelledby={`ws-title-${workspace.id}`} {...menu} className="flex flex-col gap-1">
-      <div className="group/row flex min-h-8 items-center gap-3">
-        <h2 id={`ws-title-${workspace.id}`} className="min-w-0 truncate text-[15px] font-medium text-foreground">{workspace.name}</h2>
-        {open > 0 ? <span className="text-[12.5px] tabular-nums text-muted-foreground/70">{open} open</span> : null}
-        <span className="flex-1" />
-        <RowActions>
-          <RowAction label="Sync now" icon={ArrowsClockwise} disabled={active === 0 || busy} onClick={() => void syncNow()} />
-          <RowAction label={`Edit ${workspace.name}`} icon={PencilSimple} onClick={onEdit} />
-        </RowActions>
-      </div>
-      <Panel>
-        <Line
-          slot="workspace-routines"
-          label="Routines"
-          value={summary ? summary.text : routines.error ? "Couldn’t load routines right now" : "Loading routines…"}
-          meta={summary ? (
-            <>
-              {summary.needsYou > 0 ? <Said status="inProgress">{summary.needsYou} need{summary.needsYou === 1 ? "s" : ""} you</Said>
-                : summary.failing.length ? <Said status="failed">{summary.failing.length === 1 ? `${summary.failing[0]} failed` : `${summary.failing.length} failed`}</Said>
-                : null}
-              {summary.count ? <MetaLink href={hrefFor("inbox")} label={`Open the Inbox for ${workspace.name}`}>Inbox <ArrowRight size={12} /></MetaLink> : null}
-            </>
-          ) : null}
-        >
-          {summary && summary.views.length ? (
-            <ul data-slot="routine-summary" aria-label={`Routines in ${workspace.name}`} className="flex flex-wrap gap-x-4 gap-y-1.5">
-              {summary.views.map((v) => {
-                const [kind, word] = routineStatus(v);
-                const parts = itemProgress(v);
-                return (
-                  <li key={str(v.routine.id)} data-status={kind} className="inline-flex items-center gap-1.5 text-[13px] text-foreground/80">
-                    <StatusGlyph status={kind} label={word} />
-                    <span>{str(v.routine.name)}</span>
-                    {parts.total ? <ProgressRing done={parts.done} total={parts.total} /> : null}
-                  </li>
-                );
-              })}
-            </ul>
-          ) : null}
-        </Line>
-        {problems.length ? (
-          <Line
-            label="Setup notes"
-            value={<span className="text-warning-foreground">{problems.length} thing{problems.length === 1 ? "" : "s"} to tidy in the MCP config on disk; routines still run</span>}
+    <section data-slot="workspace" data-workspace={workspace.name} data-open={open || undefined} role="region" aria-labelledby={`ws-title-${workspace.id}`} {...menu} className="flex flex-col">
+      <div data-slot="workspace-head" className="group/row flex min-h-10 items-center gap-3 rounded-[10px] px-3 transition-colors hover:bg-foreground/[0.03]">
+        <h2 className="flex min-w-0 flex-1">
+          <button
+            type="button"
+            id={`ws-title-${workspace.id}`}
+            data-slot="workspace-toggle"
+            aria-expanded={open}
+            aria-controls={bodyId}
+            onClick={onToggle}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           >
-            <ShortList items={problems} noun="notes" label={`Setup notes for ${workspace.name}`} className="flex list-disc flex-col gap-1 ps-5" render={(p) => <li key={p}>{p}</li>} />
-          </Line>
-        ) : null}
-        <Line
-          label="Folders"
-          value={folders.length === 0 ? "No folders saved. Edit the workspace to add one." : <span className="font-mono text-[12px]" title={folders.join("\n")}>{folders.join(", ")}</span>}
-          meta={folders.length > 1 ? <span className="tabular-nums">{folders.length}</span> : null}
-        >
-          {folders.length > 1 ? (
-            <ShortList items={folders} noun="folders" label={`Folders in ${workspace.name}`} className="flex flex-col gap-1" render={(f) => <li key={f} className="truncate font-mono text-[12px] text-foreground/80" title={f}>{f}</li>} />
+            <CaretRight aria-hidden size={11} weight="bold" className={cn("shrink-0 text-muted-foreground/70 transition-transform duration-150 motion-reduce:transition-none", open && "rotate-90")} />
+            <span className="min-w-0 shrink-0 truncate text-[13.5px] text-foreground">{workspace.name}</span>
+            {openTasks > 0 ? <span data-slot="workspace-open-count" className="shrink-0 text-[12.5px] tabular-nums text-muted-foreground/70">{openTasks} open</span> : null}
+            {routinesText ? <span className="min-w-0 truncate text-[12.5px] text-muted-foreground">{routinesText}</span> : null}
+          </button>
+        </h2>
+        <span className="flex shrink-0 items-center gap-3 text-[12.5px] text-muted-foreground">
+          {summary && summary.needsYou > 0 ? (
+            <a href={hrefFor("inbox")} data-slot="workspace-needs-you" aria-label={`${summary.needsYou} need${summary.needsYou === 1 ? "s" : ""} you in ${workspace.name}: open the Inbox`} className="rounded-md outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60">
+              <Said status="inProgress">{summary.needsYou} need{summary.needsYou === 1 ? "s" : ""} you</Said>
+            </a>
+          ) : summary && summary.failing.length ? (
+            <Said status="failed">{summary.failing.length === 1 ? `${summary.failing[0]} failed` : `${summary.failing.length} failed`}</Said>
           ) : null}
-        </Line>
-        {scope ? <Connections scope={scope} workspaceName={workspace.name} /> : null}
-        <Line
-          label="Watching"
-          value={watches.length === 0 ? "Nothing yet. Add a watch in Watching." : `${active} active${watches.length - active > 0 ? ` · ${watches.length - active} paused or suggested` : ""}`}
-          meta={<>{watchState}<MetaLink href={hrefFor("watching")} label={`Open Watching for ${workspace.name}`}><ArrowRight size={12} /></MetaLink></>}
-        />
-        <Line
-          label="Tools in Neko"
-          value={tools.length === 0 ? "Connect tools in Tools & skills to make them available here." : (
-            <>
-              {broken.length ? <span className="text-warning-foreground">{broken.length} need{broken.length === 1 ? "s" : ""} attention · </span> : null}
-              {tools.map((c) => str(c.label)).join(", ")}
-            </>
-          )}
-          meta={<>
-            {schedules.length ? <span className="tabular-nums">{schedules.length} {schedules.length === 1 ? "schedule" : "schedules"}</span> : null}
-            <MetaLink href={hrefFor("tools")} label={`Open Tools & skills for ${workspace.name}`}><ArrowRight size={12} /></MetaLink>
-          </>}
-        >
-          {tools.length ? (
-            <ShortList
-              items={tools}
-              noun="tools"
-              label={`Tools in Neko for ${workspace.name}`}
-              className="flex flex-wrap gap-x-3 gap-y-1"
-              render={(c) => (
-                <li key={c.id} className={`text-[12.5px] ${c.enabled && str(c.error) ? "text-warning-foreground" : "text-foreground/80"}`} title={str(c.error) || undefined}>{c.label}</li>
-              )}
+          {where ? <span data-slot="workspace-folder" className="max-w-[10rem] truncate font-mono text-[12px] text-muted-foreground/80" title={folders.join("\n")}>{where}</span> : null}
+          <RowActions>
+            <RowAction label="Sync now" icon={ArrowsClockwise} disabled={active === 0 || busy} onClick={() => void syncNow()} />
+            <RowAction label={`Edit ${workspace.name}`} icon={PencilSimple} onClick={onEdit} />
+          </RowActions>
+        </span>
+      </div>
+      {open ? (
+        <div id={bodyId} data-slot="workspace-body" className="flex flex-col pb-2 ps-[calc(11px+0.5rem)]">
+          {summary && summary.count > 0 ? (
+            <Line
+              slot="workspace-routines"
+              label="Routines"
+              value={summary.text}
+              meta={<MetaLink href={hrefFor("inbox")} label={`Open the Inbox for ${workspace.name}`}>Inbox <ArrowRight size={12} /></MetaLink>}
+            >
+              <ul data-slot="routine-summary" aria-label={`Routines in ${workspace.name}`} className="flex flex-wrap gap-x-4 gap-y-1.5">
+                {summary.views.map((v) => {
+                  const [kind, word] = routineStatus(v);
+                  const parts = itemProgress(v);
+                  return (
+                    <li key={str(v.routine.id)} data-status={kind} className="inline-flex items-center gap-1.5 text-[13px] text-foreground/80">
+                      <StatusGlyph status={kind} label={word} />
+                      <span>{str(v.routine.name)}</span>
+                      {parts.total ? <ProgressRing done={parts.done} total={parts.total} /> : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </Line>
+          ) : !summary ? (
+            <Line slot="workspace-routines" label="Routines" value={routines.error ? "Couldn’t load routines right now" : "Loading routines…"} />
+          ) : null}
+          {problems.length ? (
+            <Line
+              label="Setup notes"
+              value={<span className="text-warning-foreground">{problems.length} thing{problems.length === 1 ? "" : "s"} to tidy in the MCP config on disk; routines still run</span>}
+            >
+              <ShortList items={problems} noun="notes" label={`Setup notes for ${workspace.name}`} className="flex list-disc flex-col gap-1 ps-5" render={(p) => <li key={p}>{p}</li>} />
+            </Line>
+          ) : null}
+          {folders.length ? (
+            <Line
+              label="Folders"
+              value={<span className="font-mono text-[12px]" title={folders.join("\n")}>{folders.join(", ")}</span>}
+              meta={folders.length > 1 ? <span className="tabular-nums">{folders.length}</span> : null}
+            >
+              {folders.length > 1 ? (
+                <ShortList items={folders} noun="folders" label={`Folders in ${workspace.name}`} className="flex flex-col gap-1" render={(f) => <li key={f} className="truncate font-mono text-[12px] text-foreground/80" title={f}>{f}</li>} />
+              ) : null}
+            </Line>
+          ) : null}
+          {scope && servers.length ? <Connections scope={scope} workspaceName={workspace.name} /> : null}
+          {watches.length ? (
+            <Line
+              label="Watching"
+              value={`${active} active${watches.length - active > 0 ? ` · ${watches.length - active} paused or suggested` : ""}`}
+              meta={<>{watchState}<MetaLink href={hrefFor("watching")} label={`Open Watching for ${workspace.name}`}><ArrowRight size={12} /></MetaLink></>}
             />
           ) : null}
-        </Line>
-        {/* Like the Inbox, which is where they are edited: standing orders matter only where routines run. */}
-        {(summary?.count ?? 0) > 0 ? (
-          <Line
-            slot="standing-orders"
-            label="Standing orders"
-            value={orders || "None yet."}
-            meta={<MetaLink href={hrefFor("inbox")} label={`Edit standing orders for ${workspace.name} in the Inbox`}>Edit in Inbox</MetaLink>}
-          >
-            {orders ? <p className="max-w-[70ch] whitespace-pre-wrap leading-relaxed text-foreground/80">{orders}</p> : null}
-          </Line>
-        ) : null}
-        {workspace.instructions ? (
-          <Line label="Instructions" value={workspace.instructions.split("\n")[0]}>
-            <p className="max-w-[70ch] whitespace-pre-wrap leading-relaxed text-foreground/80">{workspace.instructions}</p>
-          </Line>
-        ) : null}
-      </Panel>
+          {tools.length ? (
+            <Line
+              label="Tools in Neko"
+              value={(
+                <>
+                  {broken.length ? <span className="text-warning-foreground">{broken.length} need{broken.length === 1 ? "s" : ""} attention · </span> : null}
+                  {tools.map((c) => str(c.label)).join(", ")}
+                </>
+              )}
+              meta={<>
+                {schedules.length ? <span className="tabular-nums">{schedules.length} {schedules.length === 1 ? "schedule" : "schedules"}</span> : null}
+                <MetaLink href={hrefFor("tools")} label={`Open Tools & skills for ${workspace.name}`}><ArrowRight size={12} /></MetaLink>
+              </>}
+            >
+              <ShortList
+                items={tools}
+                noun="tools"
+                label={`Tools in Neko for ${workspace.name}`}
+                className="flex flex-wrap gap-x-3 gap-y-1"
+                render={(c) => (
+                  <li key={c.id} className={`text-[12.5px] ${c.enabled && str(c.error) ? "text-warning-foreground" : "text-foreground/80"}`} title={str(c.error) || undefined}>{c.label}</li>
+                )}
+              />
+            </Line>
+          ) : null}
+          {/* Like the Inbox, which is where they are edited: standing orders matter only where routines run. */}
+          {(summary?.count ?? 0) > 0 && orders ? (
+            <Line
+              slot="standing-orders"
+              label="Standing orders"
+              value={orders}
+              meta={<MetaLink href={hrefFor("inbox")} label={`Edit standing orders for ${workspace.name} in the Inbox`}>Edit in Inbox</MetaLink>}
+            >
+              <p className="max-w-[70ch] whitespace-pre-wrap leading-relaxed text-foreground/80">{orders}</p>
+            </Line>
+          ) : null}
+          {workspace.instructions ? (
+            <Line label="Instructions" value={workspace.instructions.split("\n")[0]}>
+              <p className="max-w-[70ch] whitespace-pre-wrap leading-relaxed text-foreground/80">{workspace.instructions}</p>
+            </Line>
+          ) : null}
+          {offers.length ? (
+            <div data-slot="workspace-offers" className="flex min-h-8 flex-wrap items-center gap-x-4 gap-y-1 px-3 ps-[calc(11px+0.5rem+0.75rem)] text-[12.5px]">
+              {offers.map((o) => o.href ? (
+                <MetaLink key={o.label} href={o.href}><Plus size={12} aria-hidden /> {o.label}</MetaLink>
+              ) : (
+                <button key={o.label} type="button" onClick={o.onClick} className="inline-flex items-center gap-1 rounded-md text-[12.5px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60">
+                  <Plus size={12} aria-hidden /> {o.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {error ? <ErrorNote error={error} title="Couldn’t sync" onDismiss={clear} /> : null}
     </section>
   );
@@ -497,9 +566,17 @@ function WorkspaceList({ snapshot, dialog, setDialog }: { snapshot: Json; dialog
   const editing = useMemo(() => workspaces.find((w) => w.id === dialog.id) ?? null, [workspaces, dialog.id]);
   const routines = useRoutines();
   const now = useNow();
+  const [stored, setOpen] = useOpenState();
   // `#/workspaces?workspace=<id>`: that workspace's own tab (shell/workspace.ts workspaceHref).
   const wanted = useHashParams().get("workspace");
   const only: Workspace | null | undefined = wanted ? workspaces.find((w) => w.id === wanted) ?? undefined : null;
+  // Remembered per workspace; until it is chosen, one with routine items waiting on you starts open
+  // (and a workspace's own tab always does).
+  const isOpen = (w: Workspace, fallback: boolean) => stored[w.id] ?? (fallback || (routines.data ? routineSummary(routines.data, w.id, now).needsYou > 0 : false));
+  const panel = (w: Workspace, fallback: boolean) => {
+    const open = isOpen(w, fallback);
+    return <WorkspacePanel key={w.id} snapshot={snapshot} workspace={w} onEdit={() => setDialog({ open: true, id: w.id })} routines={routines} now={now} open={open} onToggle={() => setOpen(w.id, !open)} />;
+  };
   return (
     <>
       {routines.error ? (
@@ -516,17 +593,15 @@ function WorkspaceList({ snapshot, dialog, setDialog }: { snapshot: Json; dialog
         <div data-slot="workspace-detail" className="flex flex-col gap-4">
           <a href="#/workspaces" className="self-start rounded text-[13px] text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring">All workspaces</a>
           {only ? (
-            <WorkspacePanel snapshot={snapshot} workspace={only} onEdit={() => setDialog({ open: true, id: only.id })} routines={routines} now={now} />
+            <Panel>{panel(only, true)}</Panel>
           ) : (
             <p className="text-[13px] text-muted-foreground">That workspace is not here any more. It may have been removed.</p>
           )}
         </div>
       ) : (
-        <div className="flex flex-col gap-8">
-          {workspaces.map((w) => (
-            <WorkspacePanel key={w.id} snapshot={snapshot} workspace={w} onEdit={() => setDialog({ open: true, id: w.id })} routines={routines} now={now} />
-          ))}
-        </div>
+        <Panel data-slot="workspace-list" className="gap-0.5">
+          {workspaces.map((w) => panel(w, false))}
+        </Panel>
       )}
       <WorkspaceDialog
         open={dialog.open}
