@@ -14,6 +14,7 @@ import { useArtifact } from "@/canvas/artifacts";
 import { StatusGlyph, statusOf } from "@/ui/status-glyph";
 import { taskTitle } from "@/shell/status";
 import { shortId } from "@/work/board/moves";
+import { UnseenDot, useUnseen } from "@/work/seen";
 import { useContextMenu, copyText } from "@/shell/context-menu";
 import {
   NEW_TAB, activateBeside, activateNth, activateTab, canGoBack, canGoForward, closeActiveTab, closeOtherTabs, closeTab,
@@ -29,12 +30,15 @@ interface Label {
   detail?: string;
   icon?: Icon;
   glyph?: string;
+  /** A finished task not opened since (work/seen.tsx). */
+  unseen?: boolean;
 }
 
 /** What a tab is called: the page's title, or the task, workspace or artifact it shows. */
 export function useTabLabel(tab: Tab): Label {
   const pages = usePages();
   const { snapshot } = useWorkbench();
+  const unseen = useUnseen();
   const artifactId = tab.key.startsWith("artifact:") ? tab.key.slice(9) : null;
   const { artifact } = useArtifact(artifactId);
   if (tab.key === NEW_TAB) return { title: "New tab", icon: Plus };
@@ -42,7 +46,8 @@ export function useTabLabel(tab: Tab): Label {
     const id = tab.key.slice(5);
     const task = (snapshot?.tasks ?? []).find((t: { id: string }) => t.id === id);
     if (!task) return { title: "Task", detail: id, icon: ListChecks };
-    return { title: taskTitle(task), detail: `${shortId(task)} · ${taskTitle(task)}`, glyph: task.status };
+    const flagged = unseen.has(id);
+    return { title: taskTitle(task), detail: `${shortId(task)} · ${taskTitle(task)}${flagged ? " · not yet seen" : ""}`, glyph: task.status, unseen: flagged };
   }
   if (tab.key.startsWith("workspace:")) {
     const id = tab.key.slice(10);
@@ -139,6 +144,7 @@ function TabItem({
       >
         {label.glyph ? <StatusGlyph status={statusOf(label.glyph)} label="" size={13} /> : label.icon ? <label.icon aria-hidden size={14} className="shrink-0" /> : null}
         <span className={cn("min-w-0 flex-1 truncate", active && "font-medium")}>{label.title}</span>
+        {label.unseen && !active ? <UnseenDot className="-ms-0.5" /> : null}
       </button>
       {closable ? (
         <button

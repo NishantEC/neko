@@ -2,6 +2,7 @@
 // side sheet (TaskSheet) share: the Details view and the task's actions.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWorkbench } from "@/useStore";
+import { useMarkSeen } from "@/work/seen";
 import { Check, CaretRight, DotsThree, GitPullRequest, X } from "@/ui/icons";
 import { Button } from "@/ui/button";
 import { Skeleton } from "@/ui/skeleton";
@@ -193,6 +194,7 @@ export interface TaskDetailProps {
 
 /** A task opened as a full page: ui-kit' builder frame (TaskBuilder). Beside the list it is TaskSheet. */
 export function TaskDetail({ id, ui, onClose, onToggleFull, onOpenTask }: TaskDetailProps) {
+  useMarkSeen(id);
   const { snapshot } = useWorkbench();
   const task: Task | undefined = (snapshot?.tasks ?? []).find((t: Task) => t.id === id);
   const [copied, setCopied] = useState(false);

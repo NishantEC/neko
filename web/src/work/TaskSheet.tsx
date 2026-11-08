@@ -14,6 +14,7 @@
 // and the sheet spans the whole page, header included.
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWorkbench } from "@/useStore";
+import { useMarkSeen } from "@/work/seen";
 import { useOpenAfterMount } from "@/hooks/useOpenAfterMount";
 import { ArrowsOutSimple, Check, Link as LinkIcon, X } from "@/ui/icons";
 import { Button } from "@/ui/button";
@@ -44,6 +45,7 @@ type Props = {
 const IGNORE_ARROWS_IN = 'input, textarea, select, [role="tab"], [contenteditable="true"]';
 
 export function TaskSheet({ id, order: list, ui, container, onSelect, onClose, onToggleFull, onOpenTask }: Props) {
+  useMarkSeen(id);
   const { snapshot } = useWorkbench();
   const task: Task | undefined = (snapshot?.tasks ?? []).find((t: Task) => t.id === id);
   const [open, setOpen] = useOpenAfterMount();

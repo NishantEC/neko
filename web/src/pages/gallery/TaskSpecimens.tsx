@@ -1,4 +1,4 @@
-// The gallery's "Task card" specimens: the real NotchCard (work/board/NotchCard.tsx) in each
+// The gallery's "Task card" specimens: the real task card (work/board/NotchCard.tsx) in each
 // state it takes on the board, and the real board column header (work/board/TaskBoard.tsx).
 // The design options these replaced (sidebar, card, columns) were decided and built; this keeps
 // the pieces documented. Static data, nothing reaches the daemon.
@@ -7,6 +7,10 @@ import { ArrowBendUpLeft, ArrowCounterClockwise, Check, DotsThree, Plus } from "
 import { Button } from "@/ui/button";
 import { clock, NotchCard, type NotchCardProps } from "@/work/board/NotchCard";
 import { ColumnHeader } from "@/work/board/TaskBoard";
+import { StatusGlyph, statusOf } from "@/ui/status-glyph";
+
+/** The task status each specimen stands for, so its glyph is the board's. */
+const STATUS: Record<string, string> = { stopped: "Failed", asks: "AwaitingApproval", approve: "AwaitingApproval", review: "ReadyForReview", running: "Building", done: "Completed" };
 
 type Kind = "stopped" | "asks" | "approve" | "review" | "running" | "done";
 
@@ -14,7 +18,7 @@ const STATES: { kind: Kind; props: NotchCardProps }[] = [
   { kind: "stopped", props: { tone: "failed", title: "Fix TypeError in meal logging when portion is null", density: "compact", state: { label: "Stopped", age: "18m" }, reason: "Actual changed files exceed verified or approved scope.", action: { label: "Start again", icon: ArrowCounterClockwise, onClick: () => {} } } },
   { kind: "asks", props: { tone: "attention", title: "Support chat drops messages after reconnect", density: "compact", state: { label: "Asks you", age: "1h" }, reason: "Should reconnects replay unread messages or only the last one?", action: { label: "Answer", icon: ArrowBendUpLeft, onClick: () => {} } } },
   { kind: "approve", props: { tone: "attention", title: "Bump expo-notifications to 0.29 and fix the iOS badge count", density: "compact", state: { label: "Needs approval", age: "2h" }, reason: "The plan touches 14 files across two packages.", action: { label: "Approve", icon: Check, onClick: () => {} } } },
-  { kind: "review", props: { tone: "review", title: "Cache food search results for 10 minutes", density: "compact", state: { label: "Ready to review", age: "35m" }, pr: 101 } },
+  { kind: "review", props: { tone: "review", title: "Cache food search results for 10 minutes", density: "compact", state: { label: "Ready to review", age: "35m" }, pr: 101, unseen: true } },
   { kind: "running", props: { tone: "running", title: "Add retry to the Stripe webhook handler", density: "compact", state: null } },
   { kind: "done", props: { tone: "done", title: "Update acme-api #101 branch onto master", density: "compact", state: null, meta: "acme-api · 2h", pr: 101 } },
 ];
@@ -35,6 +39,7 @@ export function TaskSpecimens() {
               {...props}
               data-slot="card"
               data-kind={kind}
+              notchLead={<StatusGlyph status={statusOf(STATUS[kind])} label="" size={12} />}
               live={kind === "running" ? { step: "Running tests", clock: clock(seconds) } : null}
               selected={selected === kind}
               handle={<button type="button" aria-label={`${props.title}, ${kind}`} aria-current={selected === kind ? "true" : undefined} onClick={() => setSelected((s) => (s === kind ? null : kind))} className="absolute inset-0 rounded-[16px] outline-none" />}

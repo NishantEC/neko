@@ -605,9 +605,9 @@ function WorkspaceSection() {
 
 function CardSection() {
   return (
-    <Section id="cards" eyebrow="Task card" title={<>The notched card and the board column.</>}>
+    <Section id="cards" eyebrow="Task card" title={<>The task card and the board column.</>}>
       <p className="max-w-2xl text-[13.5px] text-muted-foreground">
-        The real card (work/board/NotchCard.tsx) in each state it takes on the board: one surface whose last line is the state; when the task waits on you, a notch at the bottom-right holds the action in the state&rsquo;s colour. Below it, the real column header.
+        The real card (work/board/NotchCard.tsx) in each state it takes on the board: one quiet surface whose last line is the state, the glyph carrying the colour. A card that waits on you shows its action on hover or focus (and in its right-click menu); a finished task not opened since carries the Iris dot. Below it, the real column header.
       </p>
       <TaskSpecimens />
     </Section>

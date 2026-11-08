@@ -15,6 +15,7 @@ import { taskActions, type Ui } from "@/work/taskActions";
 import { StatusGlyph } from "@/work/tone";
 import { CardMenu, RuntimeAvatar } from "@/work/board/BoardCard";
 import { runtimeOf, shortId } from "@/work/board/moves";
+import { UnseenDot, useUnseen } from "@/work/seen";
 
 export interface ViewProps {
   snapshot: Snapshot;
@@ -49,6 +50,7 @@ function ListRow({ task, snapshot, selected, onOpen, ui, showWorkspace }: { task
   const runtime = runtimeOf(snapshot, task);
   const defaultProvider = String(snapshot?.agent_runtime?.provider || "codex");
   const where = repo ?? (showWorkspace ? workspaceName(snapshot, task) : null);
+  const unseen = useUnseen().has(task.id);
   const tip = [title, note, showWorkspace ? `Workspace: ${workspaceName(snapshot, task)}` : null, `Agent: ${runtime.model ? `${runtime.label} ${runtime.model}` : runtime.label}`].filter(Boolean).join("\n");
   return (
     <CardMenu task={task} snapshot={snapshot} onOpen={onOpen} ui={ui}>
@@ -56,11 +58,12 @@ function ListRow({ task, snapshot, selected, onOpen, ui, showWorkspace }: { task
         data-slot="task-line"
         data-selected={selected || undefined}
         className={cn(
-          "group/row flex h-10 w-full items-center gap-3 rounded-[10px] px-3 transition-colors duration-150",
+          "group/row relative flex h-10 w-full items-center gap-3 rounded-[10px] px-3 transition-colors duration-150",
           "hover:bg-foreground/[0.03] has-[[data-slot=task-row]:focus-visible]:bg-foreground/[0.04]",
           selected && "bg-foreground/[0.06] hover:bg-foreground/[0.06]",
         )}
       >
+        {unseen ? <UnseenDot className="absolute start-[3px] top-1/2 -translate-y-1/2" /> : null}
         {glyphAction ? (
           <GlyphButton status={statusOf(task.status)} label={`${glyphAction.label}: ${title}`} onClick={() => glyphAction.run?.(ui)} />
         ) : (
@@ -72,7 +75,7 @@ function ListRow({ task, snapshot, selected, onOpen, ui, showWorkspace }: { task
           data-task-id={task.id}
           data-status={task.status}
           aria-current={selected ? "true" : undefined}
-          aria-label={`${title}, ${friendlyStatus(task.status)}${repo ? `, ${repo}` : ""}`}
+          aria-label={`${title}, ${friendlyStatus(task.status)}${repo ? `, ${repo}` : ""}${unseen ? ", not yet seen" : ""}`}
           title={tip}
           onClick={() => onOpen(task.id)}
           className="flex h-full min-w-0 flex-1 items-center gap-3 rounded-md text-start text-[13.5px] outline-none focus-visible:ring-2 focus-visible:ring-ring"

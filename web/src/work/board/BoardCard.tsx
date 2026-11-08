@@ -1,11 +1,14 @@
-// A task on the board: the notched card (work/board/NotchCard.tsx) at compact density,
-// from real task data. The notch says where the task stands (Stopped, Asks you, Needs
-// approval, Ready to review, Up next; running, the live step and its clock). A task that
-// waits on you carries its one action on the card (Start again, Answer, Approve), the same
-// actions the task page runs; Done cards have no notch. The focusable element is a
-// full-size button under the content: it carries the drag listeners, the context menu
-// and the hooks the checks use (data-slot="task-row", data-card, data-task-id).
+// A task on the board: the task card (work/board/NotchCard.tsx) at compact density, from
+// real task data. Its last line says where the task stands, the glyph carrying the colour
+// (Stopped, Asks you, Needs approval, Ready to review, Up next; running, the live step and
+// its clock). A task that waits on you has one action (Start again, Answer, Approve), the
+// same the task page runs, shown on hover or focus and also in the right-click menu (DESIGN.md
+// §8). Done cards end on their meta line. A finished task not opened since carries the unseen
+// dot (work/seen.tsx). The focusable element is a full-size button under the content: it
+// carries the drag listeners, the context menu and the hooks the checks use
+// (data-slot="task-row", data-card, data-task-id).
 import { cloneElement, useEffect, useState, type ComponentProps, type ReactNode } from "react";
+import { markTaskSeen, useUnseen } from "@/work/seen";
 import { useDraggable } from "@dnd-kit/core";
 import { ArrowBendUpLeft, ArrowCounterClockwise, ArrowSquareOut, Check, Copy, Link as LinkIcon, SidebarSimple } from "@/ui/icons";
 import { cn } from "@/ui/lib/utils";
@@ -110,13 +113,14 @@ export interface CardViewProps {
 /** The card itself; the drag overlay wears the same face, without a handle. */
 export function CardFace({ task, snapshot, selected, ghost, overlay, index = 0, ui = null, onOpen = null, handle }: CardViewProps) {
   const c = cardFor(task, snapshot, ui, onOpen);
+  const unseen = useUnseen().has(task.id);
   const seconds = useSecondsSince(task.updated_at_ms, c.live);
   const props: NotchCardProps = {
     tone: c.tone,
     title: taskTitle(task),
     density: "compact",
-    // the repository rides in the notch only when no action or PR needs the room
-    state: c.done ? null : { label: c.label, age: c.age, detail: c.action || c.pr ? undefined : c.repo ?? undefined },
+    // the repository rides on the state line unless a pull request needs the room (the action lies over its end)
+    state: c.done ? null : { label: c.label, age: c.age, detail: c.pr ? undefined : c.repo ?? undefined },
     live: c.live ? { step: friendlyStatus(task.status), clock: clock(seconds) } : null,
     reason: c.reason,
     // Done cards end on their meta line: the status glyph and the id lead it.
@@ -129,6 +133,7 @@ export function CardFace({ task, snapshot, selected, ghost, overlay, index = 0, 
     notchLead: <SharedGlyph status={statusOf(task.status)} label="" size={12} />,
     pr: c.pr,
     action: overlay ? null : c.action,
+    unseen,
   };
   return (
     <NotchCard
@@ -157,7 +162,8 @@ export function cardLabel(task: Task, snapshot: Snapshot): string {
  * list or in a tab, the actions taskActions() allows (the same list the task page
  * and ⌘K use), the board moves the daemon allows, then rename, copy and delete.
  */
-export function taskMenuItems(task: Task, snapshot: Snapshot, onOpen: ((id: string) => void) | null, ui: Ui): MenuEntry[] {
+export function taskMenuItems(task: Task, snapshot: Snapshot, onOpen: ((id: string) => void) | null, ui: Ui, unseen = false): MenuEntry[] {
+  const finished = ["ReadyForReview", "Completed", "Failed"].includes(task.status);
   const moves = COLUMNS.filter((c) => !c.statuses.includes(task.status) && moveCommand(task.status, c.id).command);
   const actions = taskActions(task, snapshot);
   const act = (a: TaskAction): MenuEntry => ({
@@ -179,6 +185,7 @@ export function taskMenuItems(task: Task, snapshot: Snapshot, onOpen: ((id: stri
       run: () => moveTask(task, c.id, ui),
     })),
     "separator",
+    finished ? { label: unseen ? "Mark as seen" : "Mark as unread", run: () => void markTaskSeen(task.id, unseen) } : null,
     rename ? act(rename) : null,
     { label: `Copy id (${shortId(task)})`, icon: Copy, run: () => void copyText(shortId(task), `Copied ${shortId(task)}`) },
     { label: "Copy link", icon: LinkIcon, run: () => void copyText(`${location.origin}${location.pathname}${taskHref(task.id)}`, "Copied the link") },
@@ -189,13 +196,15 @@ export function taskMenuItems(task: Task, snapshot: Snapshot, onOpen: ((id: stri
 
 /** Gives `children` (a row or a card's button) the task's context menu. */
 export function CardMenu({ task, snapshot, onOpen, ui, children }: { task: Task; snapshot: Snapshot; onOpen: (id: string) => void; ui: Ui; children: React.ReactElement }) {
-  const menu = useContextMenu(() => taskMenuItems(task, snapshot, onOpen, ui));
+  const unseen = useUnseen().has(task.id);
+  const menu = useContextMenu(() => taskMenuItems(task, snapshot, onOpen, ui, unseen));
   return cloneElement(children, menu as Record<string, unknown>);
 }
 
 /** A card you can pick up with the pointer, or with Space and the arrow keys. Click and Enter still open the task. */
 export function DraggableCard({ task, snapshot, selected, onOpen, ui, index }: CardViewProps & { onOpen: (id: string) => void; ui: Ui }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id, data: { task } });
+  const unseen = useUnseen().has(task.id);
   // The element is already a button; dnd-kit's role/aria-pressed would only restate (or contradict) that.
   const { role: _role, "aria-pressed": _pressed, ...aria } = attributes as Record<string, any>;
   const handle = (
@@ -209,7 +218,7 @@ export function DraggableCard({ task, snapshot, selected, onOpen, ui, index }: C
         data-status={task.status}
         aria-roledescription="draggable task"
         aria-current={selected ? "true" : undefined}
-        aria-label={cardLabel(task, snapshot)}
+        aria-label={`${cardLabel(task, snapshot)}${unseen ? ", not yet seen" : ""}`}
         onClick={() => onOpen(task.id)}
       />
     </CardMenu>

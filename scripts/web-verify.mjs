@@ -314,8 +314,24 @@ try {
     const section = page.locator("[data-gallery-section='cards']");
     const kinds = await section.locator("[data-card-state]").evaluateAll((els) => els.map((e) => e.getAttribute("data-card-state")));
     check(["stopped", "asks", "approve", "review", "running", "done"].every((k) => kinds.includes(k)), `the gallery's Task card section shows the real card in every state (${kinds.join(", ")})`);
-    const notched = await section.locator("[data-slot='card'] [data-notch]").evaluateAll((els) => els.map((e) => e.closest("[data-slot='card']").getAttribute("data-kind")));
-    check(notched.length === 3 && notched.every((k) => ["stopped", "asks", "approve"].includes(k)), `only the three cards that wait on you have a notch (${notched.join(", ")})`);
+    // DESIGN.md §8: no frame on any card; the one action of a card that waits on you is hidden at
+    // rest and shows on focus or hover (it is also in the board card's right-click menu, checked in work.mjs).
+    await page.mouse.move(0, 0);
+    await sleep(250);
+    const acting = await section.locator("[data-slot='card'] [data-slot='card-action']").evaluateAll((els) => els.map((e) => [e.closest("[data-slot='card']").getAttribute("data-kind"), getComputedStyle(e).opacity]));
+    check(acting.length === 3 && acting.every(([k, o]) => ["stopped", "asks", "approve"].includes(k) && o === "0"), `only the three cards that wait on you have an action, hidden at rest (${acting.map(([k, o]) => `${k} ${o}`).join(", ")})`);
+    const framed = await section.locator("[data-slot='card']").evaluateAll((els) => els.filter((e) => getComputedStyle(e).backgroundColor !== getComputedStyle(e.querySelector("[data-slot='card-surface']")).backgroundColor).map((e) => e.getAttribute("data-kind")));
+    check(framed.length === 0, `no card wears a frame: the edge is the surface's own colour (${framed.join(", ") || "none framed"})`);
+    const approveAction = section.locator("[data-card-state='approve'] [data-slot='card-action']");
+    await approveAction.focus();
+    await sleep(250);
+    check((await approveAction.innerText()).includes("Approve") && (await approveAction.evaluate((e) => getComputedStyle(e).opacity)) === "1", "keyboard focus reaches a waiting card's Approve and shows it");
+    await approveAction.evaluate((e) => e.blur());
+    await section.locator("[data-card-state='stopped'] [data-slot='card']").hover();
+    await sleep(250);
+    check((await section.locator("[data-card-state='stopped'] [data-slot='card-action']").evaluate((e) => getComputedStyle(e).opacity)) === "1", "hovering a waiting card shows its action");
+    await page.mouse.move(0, 0);
+    check((await section.locator("[data-card-state='review'] [data-slot='unseen-dot']").count()) === 1, "a finished card not opened since carries the unseen dot");
     check((await section.locator("[data-slot='card-live']").innerText()).includes("Running tests"), "the running card shows its live step and clock");
     check((await section.locator("[data-slot='column-header-specimen'] [data-slot='group-header'], [data-slot='column-header-specimen'] [data-slot='mock-column-header']").count()) === 1, "the real board column header is shown");
     const card = section.locator("[data-card-state='asks'] button[aria-label]").first();

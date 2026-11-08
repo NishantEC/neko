@@ -26,6 +26,8 @@ import { IdLabel, StatusGlyph, statusLabel, statusOf } from "@/ui/status-glyph";
 import { Users } from "@/ui/icons";
 import { cn } from "@/ui/lib/utils";
 import { ACTION_TOOL, isToolPart, type NekoUIMessage } from "@/chat/sdk/types";
+import { UnseenDot, useUnseen } from "@/work/seen";
+import { hrefFor } from "@/router";
 
 const HIDE_KEY = "neko.chat.hideCrew";
 
@@ -79,7 +81,9 @@ export function CrewHeader({ replying }: { replying: boolean }) {
   const { snapshot } = useWorkbench();
   const { tasks } = useShellStatus();
   const [hidden, setHidden] = useHideCrew();
+  const unseen = useUnseen();
   if (!snapshot) return null;
+  const finished: Json[] = (snapshot.tasks ?? []).filter((t: Json) => unseen.has(String(t.id)));
   const running = tasks.running;
   const crew = running.length + (replying ? 1 : 0);
   const runtime = homeRuntime(snapshot);
@@ -93,6 +97,20 @@ export function CrewHeader({ replying }: { replying: boolean }) {
         {replying ? "Replying" : lead && !hidden ? <>Working on <TaskRef task={lead} />{running.length > 1 ? <span>and {running.length - 1} more</span> : null}</> : lead ? "Working" : "Idle"}
       </span>
       {!hidden ? <><span aria-hidden>·</span><span data-slot="crew-count" className="tabular-nums">{crew} in crew</span></> : null}
+      {finished.length ? (
+        <>
+          <span aria-hidden>·</span>
+          <a
+            href={finished.length === 1 ? taskHref(String(finished[0].id)) : hrefFor("tasks")}
+            data-slot="crew-unseen"
+            title={finished.map((t) => `${shortId(t)}: ${taskTitle(t)} (${statusLabel(t.status)})`).join("\n")}
+            className="inline-flex items-center gap-1.5 rounded-sm tabular-nums outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <UnseenDot />
+            {finished.length} finished, not seen
+          </a>
+        </>
+      ) : null}
       <button
         type="button"
         aria-pressed={hidden}
