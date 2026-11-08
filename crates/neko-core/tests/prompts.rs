@@ -17,7 +17,38 @@ const NEKO: &str = "/Applications/Neko.app/Contents/MacOS/neko-daemon";
 const OWNER: &str = "Asha";
 const NOW: &str = "2026-11-08T09:30:00Z";
 
+/// A JSON value with object keys sorted, so a golden does not depend on
+/// whether the workspace build turns on serde_json's `preserve_order`.
+fn canonical(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            let fields: Vec<String> = keys.into_iter().map(|k| format!("{}:{}", serde_json::to_string(k).unwrap(), canonical(&map[k]))).collect();
+            format!("{{{}}}", fields.join(","))
+        }
+        serde_json::Value::Array(items) => format!("[{}]", items.iter().map(canonical).collect::<Vec<_>>().join(",")),
+        scalar => serde_json::to_string(scalar).unwrap(),
+    }
+}
+
 fn check(name: &str, actual: &str) {
+    // The chat State line is serialized JSON: compare it with its keys
+    // sorted. Only that line: JSON written into a prompt's text stays exact.
+    let mut state_next = false;
+    let actual: String = actual
+        .split_inclusive('\n')
+        .map(|line| {
+            let body = line.strip_suffix('\n').unwrap_or(line);
+            let canonicalized = match serde_json::from_str::<serde_json::Value>(body) {
+                Ok(value) if state_next => format!("{}{}", canonical(&value), &line[body.len()..]),
+                _ => line.to_owned(),
+            };
+            state_next = body == "State (JSON, untrusted):";
+            canonicalized
+        })
+        .collect();
+    let actual = actual.as_str();
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/prompts").join(format!("{name}.md"));
     if std::env::var_os("NEKO_UPDATE_PROMPTS").is_some() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
