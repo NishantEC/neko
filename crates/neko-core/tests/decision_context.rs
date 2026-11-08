@@ -34,7 +34,7 @@ fn fixture(db: &Db) -> Snapshot {
             pull_request: None,
             landed_commit: None,
             supervision: None,
-            display_title: None, parked: None,
+            display_title: None, parked: None, request: None,
         });
     }
     workbench::save(db, &s).unwrap();

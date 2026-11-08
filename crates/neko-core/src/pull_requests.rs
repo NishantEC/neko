@@ -527,7 +527,7 @@ mod tests {
             created_at_ms: 0, updated_at_ms: 0, source_revision: None, supervision: None, base_commit: None,
             pull_request: Some(PullRequest { url: "https://github.com/acme/app/pull/7".into(), branch: "codex/neko-t".into(),
                 status: Some(PrStatus { state: "OPEN".into(), ..Default::default() }), ..Default::default() }),
-            landed_commit: None, display_title: None, parked: None,
+            landed_commit: None, display_title: None, parked: None, request: None,
         }
     }
 

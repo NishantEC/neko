@@ -18,6 +18,8 @@ export interface NekoMeta {
   author?: string;
   authorRole?: string;
   kind?: "brief" | "note";
+  /** A chat-opened task's brief: the person's own words the goal summarises. */
+  request?: string;
 }
 
 export type NekoData = {

@@ -159,7 +159,15 @@ pub struct Task {
     /// `branch` in `repository`. Running it again restores the folder first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parked: Option<ParkedWork>,
+    /// The person's own words that led to this ticket, verbatim (bounded to
+    /// `MAX_TASK_REQUEST`), when chat opened it. `goal` is the model's
+    /// summary; this is the authority on scope. `None` for other tickets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<String>,
 }
+
+/// The most of a person's message a ticket keeps as its `request`.
+pub const MAX_TASK_REQUEST: usize = 4 * 1024;
 
 /// Where a parked ticket's work lives while its folder is removed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

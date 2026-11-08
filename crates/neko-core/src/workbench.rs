@@ -1796,7 +1796,7 @@ pub fn create_task(
         pull_request: None,
         landed_commit: None,
         supervision: None,
-        display_title: None, parked: None,
+        display_title: None, parked: None, request: None,
     };
     append_event(&mut task, "system", "Queued for planning.");
     Ok(task)

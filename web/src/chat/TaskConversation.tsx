@@ -97,7 +97,18 @@ export function TaskTimeline({ messages, status, task }: { messages: NekoUIMessa
         const at = message.metadata?.atMs ?? 0;
         if (message.role === "user") {
           const brief = message.metadata?.kind === "brief";
-          return <UserTimelineRow key={message.id} text={messageText(message)} createdAt={at} label={brief ? "Request" : undefined} className={brief ? "pt-2" : "pt-6"} />;
+          const words = brief ? message.metadata?.request?.trim() : "";
+          const row = <UserTimelineRow key={message.id} text={messageText(message)} createdAt={at} label={brief ? "Request" : undefined} className={brief ? "pt-2" : "pt-6"} />;
+          if (!words) return row;
+          // The goal is Neko's summary; under it, quietly, what you actually said.
+          return (
+            <div key={message.id} className="flex flex-col items-end">
+              {row}
+              <p data-slot="task-request" className="me-1 mt-1 max-w-[80%] select-text whitespace-pre-wrap text-end text-2xs text-muted-foreground/70 line-clamp-4" title={words}>
+                In your words: “{words}”
+              </p>
+            </div>
+          );
         }
         if (message.role === "system") {
           const part = message.parts.find((p) => p.type === "data-neko-status");

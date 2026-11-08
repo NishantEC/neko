@@ -443,7 +443,7 @@ mod tests {
             id: id.into(), workspace_id: "w".into(), issue_id: None, title: format!("Task {id}"), goal: "g".into(),
             status: TaskStatus::Completed, plan: String::new(), result: String::new(), worktree: None, events: vec![],
             created_at_ms: 0, updated_at_ms: 0, source_revision: None, base_commit: None, pull_request: None,
-            landed_commit: None, supervision: None, display_title: None, parked: None,
+            landed_commit: None, supervision: None, display_title: None, parked: None, request: None,
         }
     }
 

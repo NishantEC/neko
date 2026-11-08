@@ -67,7 +67,12 @@ pub fn task_messages(task: &Task) -> Vec<Value> {
     let mut out: Vec<Value> = Vec::new();
     let goal = task.goal.trim();
     if !goal.is_empty() {
-        out.push(message("brief".into(), "user", task.created_at_ms, ChatMessage::text_parts(goal), json!({"kind": "brief"})));
+        // A chat-opened ticket also carries the person's own words.
+        let meta = match task.request.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+            Some(request) => json!({"kind": "brief", "request": request}),
+            None => json!({"kind": "brief"}),
+        };
+        out.push(message("brief".into(), "user", task.created_at_ms, ChatMessage::text_parts(goal), meta));
     }
     let echoes: Vec<String> = [&task.plan, &task.result].iter().map(|s| head(s, 160)).filter(|s| !s.is_empty()).collect();
     // The stretch of one agent being built, by index in `out`.
@@ -152,6 +157,17 @@ mod tests {
         t.status = TaskStatus::Building;
         t.events = events.into_iter().enumerate().map(|(i, (role, message))| TaskEvent { at_ms: 100 + i as i64, role: role.into(), message: message.into() }).collect();
         t
+    }
+
+    #[test]
+    fn a_chat_opened_ticket_shows_the_persons_words_under_its_goal() {
+        let mut t = task(vec![]);
+        assert!(task_messages(&t)[0]["metadata"].get("request").is_none());
+        t.request = Some("the login button does nothing on Safari, fix it".into());
+        let brief = &task_messages(&t)[0];
+        assert_eq!(brief["metadata"]["kind"], "brief");
+        assert_eq!(brief["metadata"]["request"], "the login button does nothing on Safari, fix it");
+        assert_eq!(brief["parts"][0]["text"], "Fix the login");
     }
 
     #[test]

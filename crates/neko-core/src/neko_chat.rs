@@ -643,6 +643,23 @@ pub struct ProposedTicket {
     pub folder: Option<String>,
 }
 
+/// What every agent on a chat-opened ticket is told about its `request`.
+pub const REQUEST_AUTHORITY: &str = "The goal is a summary; the request is the authority. Do not add requirements the request does not contain.";
+
+/// The person's message as a ticket keeps it: verbatim, trimmed, bounded to
+/// `MAX_TASK_REQUEST` on a character boundary; `None` when empty.
+pub fn ticket_request(message: &str) -> Option<String> {
+    let message = message.trim();
+    if message.is_empty() {
+        return None;
+    }
+    let mut end = message.len().min(neko_protocol::workbench::MAX_TASK_REQUEST);
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    Some(message[..end].to_owned())
+}
+
 /// Something the user told Neko about themselves or a workspace.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ProposedMemory {
@@ -1092,6 +1109,15 @@ mod tests {
         assert!(db.get_setting(LEGACY_SETTING).unwrap().is_none());
         begin_turn(&db, "hello").unwrap();
         assert_eq!(load(&db).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_ticket_keeps_the_request_verbatim_and_bounded() {
+        assert_eq!(ticket_request("  fix the  Safari login, don't touch the API  \n"), Some("fix the  Safari login, don't touch the API".into()));
+        assert_eq!(ticket_request("   "), None);
+        let long = "é".repeat(neko_protocol::workbench::MAX_TASK_REQUEST);
+        let kept = ticket_request(&long).unwrap();
+        assert!(kept.len() <= neko_protocol::workbench::MAX_TASK_REQUEST && long.starts_with(&kept) && !kept.is_empty());
     }
 
     #[test]
@@ -1580,7 +1606,7 @@ mod tests {
                 pull_request: None,
                 landed_commit: None,
                 supervision: None,
-                display_title: None, parked: None,
+                display_title: None, parked: None, request: None,
             });
         }
         s
