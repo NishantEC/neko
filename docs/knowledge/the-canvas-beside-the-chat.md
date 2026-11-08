@@ -58,7 +58,10 @@ authority for what is in and out of v1).
   only messages whose `event.source` is its own iframe's `contentWindow`. A
   pick becomes a chip in the composer (`ComposerHandle.reference`, a ready
   `DraftAttachment` labelled "Canvas") whose reference text is appended to the
-  message: `[artifact <id> v<n>, element <selector>: "<text>"]`.
+  message: `[artifact <id> v<n>, element <selector>: "<text>"]`. **Since
+  2026-11-08** the pick also carries the element's stamped `data-neko-id` and
+  opening tag, the message ends with a Hard scope line, the bridge reports the
+  page's errors and sends `data-neko-send` clicks: `everything-renders.md`, Phase B.
 - **Web.** `web/src/canvas/`: `artifacts.ts` (types, URLs, `useArtifacts`,
   `useArtifact`, the canvas target store `openCanvas`/`closeCanvas`/
   `useCanvas`, `referenceText`), `ArtifactPanel.tsx` (toolbar: version

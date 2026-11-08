@@ -3,7 +3,7 @@
 Owner, after DeepSeek Harness: "if I ask it to create a 3D object it creates it
 and opens it in a side panel that is a 3D viewer". Spec:
 `docs/superpowers/specs/2026-11-08-everything-renders-design.md` (Phase A
-built; Phase B, the agent seeing the app, is not). Research:
+and Phase B built; Phase B is the second half of this file). Research:
 `docs/research/deepseek-harness-outputs.md`,
 `docs/research/outputs-hermes-herdr-opendesign.md`. Builds on
 `the-canvas-beside-the-chat.md`.
@@ -115,6 +115,97 @@ built; Phase B, the agent seeing the app, is not). Research:
   ```csv fence, ShowArtifact from another tab, OpenTab and its refusal, and
   that fonts come from Neko). Rust: `artifacts::tests`, `viewers::tests`,
   `server` artifact test, `web_tests::every_other_kind_is_served_inert…`.
-- **Not built (Phase B):** `InspectApp`, artifact errors reported back,
-  stamped comment ids, artifacts that send messages. Pixel checks of the 3D
-  view in WKWebView were not run (headless Chrome only).
+- Pixel checks of the 3D view in WKWebView were not run (headless Chrome only).
+
+### Phase B: the agent sees and hears the app (2026-11-08)
+
+After herdr's rule ("don't claim a visual check you haven't made"), Open
+Design's stamped ids and Hard scope, and Hermes' `data-hermes-send`
+(`docs/research/outputs-hermes-herdr-opendesign.md`). Everything a page
+reports lives in daemon memory only (`neko_core::inspect`, statics in
+`server.rs` beside `plugin_health`); nothing is written to disk.
+
+- **InspectApp (B1).** `web/src/shell/inspect.ts`, mounted by `AppShell`,
+  sends `ReportApp { report: AppReport }` 400 ms after any change (pages,
+  tabs, viewers, canvas, artifacts drawn, plugin listing, theme, hash, focus,
+  visibility, tab titles via a MutationObserver on the strip) and once a
+  minute; `pagehide` sends `closed` with `keepalive`. Only the window used last
+  (`isActivePage`, the ShowArtifact rule) sends `full: true` with tabs (titles
+  read from the drawn tab buttons), route, pages, viewers, fences, plugins
+  (`pluginReport`), `artifacts` (every mounted `ViewerSlot` with a saved
+  artifact: id, version, kind, viewer, place `canvas`/`tab`/`reply`), `canvas`
+  and theme; the others send where they are. `inspect::App` bounds every list
+  and string, keeps ≤20 windows, forgets one silent for 3 min
+  (`WINDOW_GONE_MS`) or closed, and `"InspectApp"` answers `App { note, window,
+  age_ms, windows, plugins }` (`plugins` is the `PluginStatus` map). `note` is
+  one sentence: which window, focused or not, how long ago, its route, or "No
+  open Neko page has reported…". A light report from the reporting window keeps
+  its route and focus current between full ones.
+- **Artifact problems (B2).** `web::ARTIFACT_PROBE` is inserted right after
+  the first `<head>` (else `<html>`, the doctype, or the start), so it runs
+  before the artifact's own scripts; it has no newline, so `(line N:C)` is the
+  agent's file line. It posts `neko-problem` for `error` (uncaught, or a
+  resource that failed), `rejection` and `console` (≤20 per load, 500 chars).
+  `PageViewer` reads only messages whose `source` is its frame, ≤25 per load,
+  kinds whitelisted, and calls `reportProblem` (≤50 per version per page).
+  Viewers report through `ViewerSlot`: `ViewerProblem` reports itself (the
+  `ViewerReport` context), plugin viewers get `props.onProblem`, a crash in
+  `ViewerBoundary` or `PluginBoundary` (new `onCrash`) is a `viewer` problem,
+  and a viewer that mounted sends `ReportArtifactShown` (≤ every 5 s). The
+  daemon checks the version exists, keeps ≤20 problems per version (oldest
+  dropped; the same kind and message counts up) and ≤200 versions (least
+  recently touched dropped). `Artifact { id }` now answers `{ artifact,
+  status: [{ version, shown_at_ms, viewer, problems }] }`; empty `status`
+  means no page drew it since the daemon started.
+- **Stamped ids (B3).** `neko_core::html_ids::prepare(html, early, late)`
+  reads the document with a small tokenizer (comments, doctype, CDATA, PIs
+  skipped; `script`, `style`, `textarea`, `title`, `xmp`, `iframe`, `noembed`,
+  `noframes`, `noscript`, `plaintext` read to their end tag untouched; quoted
+  attribute values may hold `<`/`>`; `<li>`/`<p>`/`<td>`… close their open
+  twin) and inserts ` data-neko-id="n<8 hex>"` right after the tag name of every
+  element with neither `id` nor `data-neko-id`, outside `head`, except the
+  frame and void elements (`html`, `body`, `br`, `meta`…). The id is FNV-1a of
+  tag, sorted attributes and the first 512 bytes of whitespace-collapsed text,
+  so an unchanged element keeps it when siblings are added; twins get `-2`,
+  `-3`; ids already in the file are never handed out again. Broken markup stops
+  stamping, never rewrites. The bridge's pick now posts `id` (stamp or own id),
+  `tag` and `hint` (opening tag without the stamp, ≤200); `referenceText` is
+  `[artifact <id> v<n>, element <selector> (data-neko-id <nid>, <hint>): "<text>"]`,
+  and `ComposerHandle.reference(name, text, closing)` ends the message once
+  with `SCOPE_NOTE` ("Hard scope: change only the element(s) named above…").
+  The agent's file has no stamps (they are added when served), so the
+  instruction says to find the element by selector, opening tag and text.
+- **Artifacts talk back (B4).** In the bridge, a click with `e.isTrusted` on or
+  inside `[data-neko-send]` (not in comment mode, ≤ one per 0.8 s) posts
+  `neko-send`. `PageViewer` checks the source, ≤1 per second and
+  `navigator.userActivation.isActive` (activation passes up from the frame, so
+  a script cannot fake it), then `sendFromArtifact`: >500 chars is refused
+  with a toast, otherwise `Workbench SendMessage` (queued behind a running
+  reply like a typed message) with `\n[from artifact <id> v<n>: "<title>"]`.
+  The conversation is Neko's Home chat: only it can save artifacts.
+  `userMessageView` turns that line into a "From “<title>”" label in the chat
+  and the queue tray, and a trailing scope line into "Only the picked
+  element". The html line of Installed viewers documents `data-neko-send`.
+- **Instruction.** `viewers::check_section` (end of Installed viewers, so
+  chat, routines and `--plugin-guide` get it): after saving and showing, wait
+  and read `Artifact { id }` status, fix problems and save again before saying
+  it works, say "saved but not checked" when no page drew it, and check
+  `"InspectApp"` before saying something is on screen. `super_instruction`
+  describes the new reference format, the Hard scope line and `[from artifact…]`
+  messages. `docs/design/plugin-guide.md` step 5 is InspectApp.
+- **Fixed on the way:** `useArtifact` handed back the previous record for one
+  render after its id changed, so the panel briefly framed the old artifact at
+  the new one's version (seen as an aborted `/artifact/<old>/1` load in the
+  verify). It now returns null until the record matches.
+- **Verify:** `NEKO_WEB_ONLY=canvas node scripts/web-verify.mjs` (the Phase B
+  half of `scripts/verify/canvas.mjs`: stamped id stable across versions, a
+  comment's id/hint/scope line, a throwing artifact's three problems with the
+  file's line number, a data-neko-send click queued with its label and a
+  script's click ignored, InspectApp's tabs/route/viewers/fences/pages/theme).
+  Areas may call `expectProblem(marker)` to keep deliberate console errors out
+  of the run's count. Rust: `html_ids::tests`, `inspect::tests`,
+  `server::tests::pages_report_what_an_artifact_did_and_what_the_app_shows`,
+  `web::tests` (probe and bridge).
+- **Not done:** pixels (no screenshot from the daemon, per the spec's
+  non-goals); a message from an artifact in a task conversation (artifacts
+  are only made in Home's chat); the GPUI client ignores all of this.

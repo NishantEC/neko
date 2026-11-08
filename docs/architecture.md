@@ -200,7 +200,7 @@ gates as every route but under its own Content-Security-Policy
 runs nothing but the browser's viewer) in place of the app's (`default-src
 'self'; script-src 'self' 'wasm-unsafe-eval'; …; connect-src 'self'`). Only
 html is served as a page, framed in `<iframe sandbox="allow-scripts">` with a
-small comment bridge that talks to its parent by `postMessage`; it runs in an
+small comment, error and send bridge that talks to its parent by `postMessage`; it runs in an
 opaque origin and cannot reach the token, storage or API. Every other kind is
 served inert under its own MIME (`artifacts::mime`, `nosniff`) and read by a
 viewer. Home shows it in the inspector beside the chat, and an artifact can
@@ -222,6 +222,24 @@ instruction and routine prompts and printed by `--plugin-guide`. An agent opens
 what it made: `SaveArtifact.show` (default while a Home reply runs),
 `ShowArtifact` and `OpenTab` become `Event`s that the page used last obeys (others offer a toast). Details:
 `docs/knowledge/everything-renders.md`.
+
+**The agent sees and hears the app (2026-11-08, Phase B).** Open pages report
+to the daemon, which keeps it in memory only (`neko_core::inspect`, like
+`PluginStatus`): each window says where it is and the window used last sends
+its tabs, route, registered pages, viewers, fences, plugin health, the
+artifacts drawn and where, and the theme (`ReportApp`, debounced and once a
+minute); `InspectApp` answers from that with its age, or says no page
+reported. Drawing an artifact version is reported too (`ReportArtifactShown`,
+`ReportArtifactProblem`: the html probe's uncaught errors, rejections and
+`console.error`, a viewer that could not read the file), and `Artifact { id }`
+returns them as `status`. Served html gets stable `data-neko-id`s from a small
+tokenizer (`neko_core::html_ids`, never inside scripts or styles), an error
+probe after `<head>` and the comment/send bridge before `</body>`; a comment
+names the stamped id and ends with one Hard scope line, and a real click on a
+`data-neko-send` element sends its text to Neko's chat as the person's
+message, marked `[from artifact <id> v<n>: "<title>"]`. The instruction and the
+Installed viewers section tell the agent to check `status` after saving and
+`InspectApp` before claiming something is on screen.
 
 The web app (`web/`, served by the daemon and shown in the native window's web
 view) is one window of tabs (`DESIGN.md` §1). The address is still a hash route
