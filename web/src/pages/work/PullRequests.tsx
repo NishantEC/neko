@@ -2,16 +2,18 @@
 // to merge, what its agent says to close, what needs your call and what is still
 // being worked on (PullRequestsView.swift). Neko follows each one on GitHub
 // (`neko_core::pull_requests`); merging and closing wait for your click.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useWorkbench } from "@/useStore";
 import { useSelectedWorkspace } from "@/shell/workspace";
 import { taskHref } from "@/shell/status";
 import { registerCommands } from "@/shell/commands";
-import { ArrowDown, ArrowSquareOut, ArrowsClockwise, GitBranch, CheckCircle, Clock, DotsThree, GitPullRequest, Hammer, XCircle, type Icon } from "@/ui/icons";
-import { GitMerge, HandPalm } from "@/work/icons";
+import { ArrowSquareOut, ArrowsClockwise, CaretDown, Copy, DotsThree, GitPullRequest, ListChecks, Prohibit, XCircle } from "@/ui/icons";
+import { GitMerge } from "@/work/icons";
 import { toast } from "@/ui/sonner";
 import { Button } from "@/ui/button";
-import { Panel } from "@/editorial";
+import { GROUP_HEADING, Panel, RowAction, RowActions } from "@/setup/kit";
+import { GlyphButton, StatusGlyph, type StatusKind } from "@/ui/status-glyph";
+import { copyText, useContextMenu } from "@/shell/context-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/ui/empty";
 import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -25,20 +27,15 @@ import { run } from "@/work/actions";
 import { useDialogs } from "@/work/dialogs";
 import { PageContainer } from "@/shell/PageContainer";
 import { WorkHeader, WorkSkeleton } from "@/work/PageFrame";
-import { StatusLabel, TONE_DOT, TONE_TEXT, type Tone } from "@/work/tone";
 import {
   basename, pullRequestRows, pullRequestSubtitle, relative, VERDICTS, VERDICT_TITLE, type PullRequestRow, type Verdict,
 } from "@/work/model";
 import type { Ui } from "@/work/taskActions";
 
-const VERDICT_TONE: Record<Verdict, Tone> = {
-  ready: "done", merged: "done", close: "failed", needsYou: "attention", merging: "running", working: "running", closed: "neutral", unchecked: "neutral",
+/** The one status language (DESIGN.md §3): sky = ready, amber = needs you or in progress, coral = close. */
+const VERDICT_STATUS: Record<Verdict, StatusKind> = {
+  ready: "review", merged: "done", close: "failed", needsYou: "inProgress", merging: "inProgress", working: "inProgress", closed: "cancelled", unchecked: "todo",
 };
-const VERDICT_ICON: Record<Verdict, Icon> = {
-  ready: CheckCircle, close: XCircle, closed: XCircle, needsYou: HandPalm,
-  merging: GitMerge, merged: GitMerge, working: Hammer, unchecked: Clock,
-};
-const PROBLEM_ICON = { checks: XCircle, conflicts: GitBranch, behind: ArrowDown } as const;
 const MAX_FOLLOW_UPS = 4;
 
 const send = (name: string, row: PullRequestRow, done: string, extra: Record<string, unknown> = {}) =>
@@ -53,63 +50,111 @@ function askToClose(row: PullRequestRow, ui: Ui) {
   });
 }
 
+/**
+ * One pull request on one line (DESIGN.md §8): the verdict glyph (on a ready
+ * row, click it to merge), the title (opens the task), `#num · repo` and the
+ * time. What needs a look (failing checks, conflicts, behind main, the
+ * agent's reason, hand-backs) is one faint line under it. Merge, Close…,
+ * Cancel merge, Open task and GitHub appear on hover and in the right-click menu.
+ */
 function Row({ row, ui }: { row: PullRequestRow; ui: Ui }) {
-  const Icon = VERDICT_ICON[row.verdict];
-  const tone = VERDICT_TONE[row.verdict];
+  const status = VERDICT_STATUS[row.verdict];
   const merge = () => void send("SetMergeWhenReady", row, `Merging ${row.number} once its checks pass.`, { enabled: true });
-  const closeButton = (variant: "ghost" | "outline") => (
-    <Button size="sm" variant={variant} aria-label={`Close ${row.number}…`} onClick={() => askToClose(row, ui)}>Close…</Button>
-  );
-  const mergeButton = (variant: "ghost" | "outline") => (
-    <Button size="sm" variant={variant} aria-label={`Merge ${row.number}`} onClick={merge}>Merge</Button>
-  );
+  const cancelMerge = () => void send("SetMergeWhenReady", row, `Won't merge ${row.number}.`, { enabled: false });
+  const canMerge = row.verdict === "ready" || row.verdict === "close";
+  const canClose = row.verdict === "ready" || row.verdict === "close";
+  const menu = useContextMenu(() => [
+    canMerge ? { label: "Merge", icon: GitMerge, run: merge } : null,
+    row.verdict === "merging" ? { label: "Cancel merge", icon: Prohibit, run: cancelMerge } : null,
+    { label: "Open task", icon: ListChecks, run: () => { location.hash = taskHref(row.id).replace(/^#/, ""); } },
+    { label: "Open on GitHub", icon: ArrowSquareOut, run: () => void window.open(row.url, "_blank", "noreferrer") },
+    "separator",
+    { label: "Copy link", icon: Copy, run: () => void copyText(row.url, "Copied the link") },
+    canClose ? "separator" : null,
+    canClose ? { label: "Close…", icon: XCircle, destructive: true, run: () => askToClose(row, ui) } : null,
+  ]);
+  const where = [row.number || null, row.repository].filter(Boolean).join(" · ");
+  const notes: ReactNode[] = [
+    ...row.problems.map((p) => <span key={p.text} className={p.kind === "behind" ? undefined : "text-warning-foreground"}>{p.text}</span>),
+    row.draft ? <span key="draft">Draft</span> : null,
+    row.followUps > 0 ? (
+      <span
+        key="follow-ups"
+        data-slot="follow-ups"
+        title="How many times Neko has handed a failure, conflict or comment back to the task’s agent. After four it waits for you."
+      >
+        Handed back {Math.min(row.followUps, MAX_FOLLOW_UPS)} of {MAX_FOLLOW_UPS}
+      </span>
+    ) : null,
+    row.reason ? <span key="reason" className="text-foreground/75">{row.reason}</span> : null,
+  ].filter(Boolean);
   return (
-    <li data-slot="pr-row" data-verdict={row.verdict} data-task-id={row.id} className="flex items-start gap-3 px-5 py-4">
-      <Icon size={17} weight="bold" aria-label={VERDICT_TITLE[row.verdict]} role="img" className={cn("mt-0.5 shrink-0", TONE_TEXT[tone])} />
-      <div className="min-w-0 flex-1">
-        {/* The title opens the task; the actions stay sibling buttons, never nested inside it. */}
-        <a
-          href={taskHref(row.id)}
-          title={`Open the task for ${row.number || "this pull request"}`}
-          className="line-clamp-2 rounded-sm font-medium leading-[1.35] text-strong outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {row.title}
-        </a>
-        {row.meta ? <p className="mt-0.5 truncate text-[12.5px] text-muted-foreground">{row.meta}</p> : null}
-        {row.problems.length || row.followUps > 0 ? (
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            {row.problems.map((p) => {
-              const P = PROBLEM_ICON[p.kind];
-              return <StatusLabel key={p.text} tone="attention" icon={<P weight="bold" aria-hidden />}>{p.text}</StatusLabel>;
-            })}
-            {row.followUps > 0 ? (
-              <span
-                data-slot="follow-ups"
-                title="How many times Neko has handed a failure, conflict or comment back to the task’s agent. After four it waits for you."
-                className="inline-flex h-5 items-center gap-1 rounded-md bg-foreground/[0.06] px-1.5 text-[11.5px] text-muted-foreground"
-              >
-                <ArrowsClockwise size={11} aria-hidden /> Handed back {Math.min(row.followUps, MAX_FOLLOW_UPS)} of {MAX_FOLLOW_UPS}
-              </span>
-            ) : null}
-          </div>
+    <li
+      {...menu}
+      data-slot="pr-row"
+      data-verdict={row.verdict}
+      data-task-id={row.id}
+      className="group/row relative flex items-start gap-3 rounded-[10px] px-3 py-2 transition-colors hover:bg-foreground/[0.03]"
+    >
+      <span className="flex h-5 items-center">
+        {row.verdict === "ready" ? (
+          <GlyphButton status={status} label={`Merge ${row.number || "this pull request"} once its checks pass`} onClick={merge} />
+        ) : (
+          <StatusGlyph status={status} label={VERDICT_TITLE[row.verdict]} />
+        )}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 items-baseline gap-3">
+          {/* The title opens the task; the actions stay sibling buttons, never nested inside it. */}
+          <a
+            href={taskHref(row.id)}
+            title={row.meta || `Open the task for ${row.number || "this pull request"}`}
+            className="min-w-0 truncate rounded-sm text-[13.5px] text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {row.title}
+          </a>
+          <span className="ms-auto shrink-0 text-[12.5px] tabular-nums text-muted-foreground">{where}</span>
+        </div>
+        {notes.length ? (
+          <p className="truncate text-[12.5px] text-muted-foreground [&>span+span]:before:mx-1.5 [&>span+span]:before:text-muted-foreground/60 [&>span+span]:before:content-['·']" title={row.reason ?? undefined}>
+            {notes}
+          </p>
         ) : null}
-        {row.reason ? <p className="mt-1.5 line-clamp-3 text-[12.5px] leading-[1.5] text-foreground/80" title={row.reason}>{row.reason}</p> : null}
       </div>
-      <time className="hidden w-20 shrink-0 pt-0.5 text-end text-[12px] tabular-nums text-muted-foreground sm:block">{relative(row.updated)}</time>
-      <div className="flex shrink-0 items-center gap-1.5">
-        {row.verdict === "ready" ? <>{closeButton("ghost")}{mergeButton("outline")}</> : null}
-        {row.verdict === "close" ? <>{mergeButton("ghost")}{closeButton("outline")}</> : null}
-        {row.verdict === "merging" ? (
-          <Button size="sm" variant="outline" aria-label={`Cancel merging ${row.number}`} onClick={() => void send("SetMergeWhenReady", row, `Won't merge ${row.number}.`, { enabled: false })}>Cancel merge</Button>
-        ) : null}
-        {["needsYou", "working", "unchecked", "merged", "closed"].includes(row.verdict) ? (
-          <Button size="sm" variant="outline" aria-label={`Open task for ${row.number}`} asChild><a href={taskHref(row.id)}>Open task</a></Button>
-        ) : null}
-        <Button size="icon-sm" variant="ghost" aria-label={`Open ${row.number} on GitHub`} title={`Open ${row.number} on GitHub`} asChild>
-          <a href={row.url} target="_blank" rel="noreferrer"><ArrowSquareOut /></a>
-        </Button>
-      </div>
+      <time className="flex h-5 w-[4.5rem] shrink-0 items-center justify-end text-[12.5px] tabular-nums text-muted-foreground/70">{relative(row.updated)}</time>
+      {/* Over the meta and time while the row is hovered or focused, so nothing reserves room for them. */}
+      <span className="absolute end-0 top-0 flex h-9 items-center rounded-e-[10px] bg-background opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:static [@media(hover:none)]:opacity-100">
+        <RowActions className="h-full rounded-e-[10px] bg-foreground/[0.03] ps-3 pe-2 opacity-100">
+          {canMerge ? <RowAction label={`Merge ${row.number}`} icon={GitMerge} onClick={merge} /> : null}
+          {row.verdict === "merging" ? <RowAction label={`Cancel merging ${row.number}`} icon={Prohibit} onClick={cancelMerge} /> : null}
+          {canClose ? <RowAction label={`Close ${row.number}…`} icon={XCircle} onClick={() => askToClose(row, ui)} /> : null}
+          {!canMerge ? <RowAction label={`Open task for ${row.number}`} icon={ListChecks} onClick={() => { location.hash = taskHref(row.id).replace(/^#/, ""); }} /> : null}
+          <RowAction label={`Open ${row.number} on GitHub`} icon={ArrowSquareOut} href={row.url} />
+        </RowActions>
+      </span>
     </li>
+  );
+}
+
+/** A verdict group: a quiet heading with its count that folds, then its rows. */
+function Group({ verdict, count, children }: { verdict: Verdict; count: number; children: ReactNode }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <section data-slot="pr-group" data-verdict={verdict} aria-label={VERDICT_TITLE[verdict]} className="flex flex-col gap-1">
+      <h2 className={GROUP_HEADING}>
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+          className="-ms-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+        >
+          <CaretDown aria-hidden size={11} weight="bold" className={cn("transition-transform duration-150", !open && "-rotate-90")} />
+          {VERDICT_TITLE[verdict]}
+          <span className="tabular-nums text-muted-foreground/70">{count}</span>
+        </button>
+      </h2>
+      {open ? <Panel><ul className="flex flex-col">{children}</ul></Panel> : null}
+    </section>
   );
 }
 
@@ -168,9 +213,6 @@ export default function PullRequests() {
         count={snapshot ? pullRequestSubtitle(rows) : undefined}
         actions={
           <>
-            <Button variant="outline" size="sm" disabled={reviewable === 0} onClick={() => setConfirm("recheck")} title="Have each agent re-check its open pull request and give a verdict">
-              Re-check all
-            </Button>
             {ready.length ? (
               <Button size="sm" onClick={() => setConfirm("merge")} title="Merge every pull request in Ready to merge once its checks pass">
                 Merge {ready.length} ready
@@ -179,6 +221,9 @@ export default function PullRequests() {
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Pull request options" />}><DotsThree weight="bold" /></DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-64">
+                <DropdownMenuItem disabled={reviewable === 0} onClick={() => setConfirm("recheck")}>
+                  <ArrowsClockwise /> Re-check all
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => void run("CheckPullRequests", undefined, "Checking GitHub.")}>Check GitHub now</DropdownMenuItem>
                 <DropdownMenuCheckboxItem checked={showFinished} onCheckedChange={setShowFinished}>Show merged and closed</DropdownMenuCheckboxItem>
                 {repositories.length ? (
@@ -198,15 +243,15 @@ export default function PullRequests() {
                     </DropdownMenuGroup>
                   </>
                 ) : null}
+                <DropdownMenuSeparator />
+                <p className="max-w-64 px-2 py-1.5 text-[12px] leading-snug text-muted-foreground">
+                  Neko checks GitHub every 3 minutes and hands failing checks, conflicts and review comments back to the task’s agent. Merging and closing wait for you.
+                </p>
               </DropdownMenuContent>
             </DropdownMenu>
           </>
         }
-      >
-        <p className="mt-3 max-w-[72ch] text-[12.5px] leading-[1.55] text-muted-foreground">
-          Neko checks each pull request on GitHub every 3 minutes. Failing checks, conflicts and review comments go back to the task’s agent; merging and closing wait for you.
-        </p>
-      </WorkHeader>
+      />
 
       {!snapshot ? (
         error ? (
@@ -226,28 +271,20 @@ export default function PullRequests() {
           {shown.length === 0 ? (
             <p className="py-10 text-center text-[13px] text-muted-foreground">Nothing is open. {hiddenFinished} merged or closed.</p>
           ) : null}
-          {shown.map((verdict, i) => {
-            const items = grouped.get(verdict) ?? [];
-            const tone = VERDICT_TONE[verdict];
-            return (
-              <section key={verdict} data-slot="pr-group" data-verdict={verdict} aria-label={VERDICT_TITLE[verdict]} className={cn(i > 0 && "mt-7")}>
-                <div className="mb-2 flex items-center gap-2 px-1">
-                  <span aria-hidden className={cn("size-2 rounded-full", TONE_DOT[tone])} />
-                  <h2 className="text-[13px] font-semibold text-strong">{VERDICT_TITLE[verdict]}</h2>
-                  <span className="text-[12.5px] tabular-nums text-muted-foreground">{items.length}</span>
-                </div>
-                <Panel>
-                  <ul className="divide-y divide-border/70">
-                    {items.map((row) => <Row key={row.id} row={row} ui={ui} />)}
-                  </ul>
-                </Panel>
-              </section>
-            );
-          })}
+          <div className="flex flex-col gap-7">
+            {shown.map((verdict) => {
+              const items = grouped.get(verdict) ?? [];
+              return (
+                <Group key={verdict} verdict={verdict} count={items.length}>
+                  {items.map((row) => <Row key={row.id} row={row} ui={ui} />)}
+                </Group>
+              );
+            })}
+          </div>
           {!showFinished && hiddenFinished > 0 ? (
-            <div className="mt-6 text-center">
-              <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setShowFinished(true)}>Show {hiddenFinished} merged and closed</Button>
-            </div>
+            <button type="button" className="mt-6 rounded-md text-[12.5px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60" onClick={() => setShowFinished(true)}>
+              Show {hiddenFinished} merged and closed
+            </button>
           ) : null}
         </div>
       )}

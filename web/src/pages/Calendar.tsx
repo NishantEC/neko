@@ -392,14 +392,14 @@ function TimeGrid({ days, data, now, onPickDay }: { days: Date[]; data: Data; no
   const limit = expanded || days.length === 1 ? Infinity : ALL_DAY_SHOWN;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
+    <div className="overflow-hidden">
       {/* Weekday header */}
-      <div className="grid border-b border-border" style={{ gridTemplateColumns: columns }}>
+      <div className="grid border-b border-border/50" style={{ gridTemplateColumns: columns }}>
         <div className="flex items-end justify-center pb-1 text-[11px] text-muted-foreground">W{isoWeek(days[0])}</div>
         {days.map((d) => {
           const isToday = sameDay(d, today);
           return (
-            <div key={d.getTime()} className="flex items-center gap-1.5 border-s border-border px-2 py-1.5">
+            <div key={d.getTime()} className="flex items-center gap-1.5 border-s border-border/50 px-2 py-1.5">
               <span className={cn("text-[12px]", isToday ? "font-medium text-primary" : "text-muted-foreground")}>{weekdayFormat.format(d)}</span>
               <DayNumber day={d} today={isToday} onClick={days.length > 1 ? () => onPickDay(d) : undefined} />
             </div>
@@ -407,7 +407,7 @@ function TimeGrid({ days, data, now, onPickDay }: { days: Date[]; data: Data; no
         })}
       </div>
       {/* All-day row: all-day events, then Neko's dated work */}
-      <div className="grid border-b border-border" style={{ gridTemplateColumns: columns }}>
+      <div className="grid border-b border-border/50" style={{ gridTemplateColumns: columns }}>
         <div className="flex flex-col items-center justify-start gap-1 pt-1.5 text-[11px] text-muted-foreground">
           <span>All day</span>
           {tallest > ALL_DAY_SHOWN && days.length > 1 ? (
@@ -420,7 +420,7 @@ function TimeGrid({ days, data, now, onPickDay }: { days: Date[]; data: Data; no
           const items = [...events.map((e) => ({ key: e.id, node: <AllDayEvent event={e} /> })), ...neko.map((n) => ({ key: n.id, node: <NekoChip item={n} /> }))];
           const hidden = items.length - Math.min(items.length, limit);
           return (
-            <div key={days[i].getTime()} className="flex min-h-9 min-w-0 flex-col gap-0.5 border-s border-border p-1">
+            <div key={days[i].getTime()} className="flex min-h-9 min-w-0 flex-col gap-0.5 border-s border-border/50 p-1">
               {items.slice(0, limit).map((it) => <div key={it.key} className="min-w-0">{it.node}</div>)}
               {hidden > 0 ? (
                 <button type="button" onClick={() => setExpanded(true)} className="cursor-pointer rounded px-1.5 text-start text-[11px] text-muted-foreground hover:text-foreground">
@@ -448,9 +448,9 @@ function TimeGrid({ days, data, now, onPickDay }: { days: Date[]; data: Data; no
           {days.map((d) => {
             const isToday = sameDay(d, today);
             return (
-              <div key={d.getTime()} className="relative border-s border-border">
+              <div key={d.getTime()} className="relative border-s border-border/50">
                 {Array.from({ length: 23 }, (_, i) => (
-                  <div key={i} aria-hidden className="absolute inset-x-0 border-t border-border/60" style={{ top: (i + 1) * HOUR_PX }} />
+                  <div key={i} aria-hidden className="absolute inset-x-0 border-t border-border/30" style={{ top: (i + 1) * HOUR_PX }} />
                 ))}
                 {layoutDay(data.events, d).map((p) => (
                   <EventButton
@@ -498,13 +498,13 @@ function MonthGrid({ days, anchor, data, now, onPickDay }: { days: Date[]; ancho
   const weeks = Array.from({ length: days.length / 7 }, (_, i) => days.slice(i * 7, i * 7 + 7));
   const columns = "2.5rem repeat(7, minmax(0, 1fr))";
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
-      <div className="grid border-b border-border" style={{ gridTemplateColumns: columns }}>
+    <div className="overflow-hidden">
+      <div className="grid border-b border-border/50" style={{ gridTemplateColumns: columns }}>
         <div />
-        {weeks[0].map((d) => <div key={d.getTime()} className="border-s border-border px-2 py-1.5 text-[12px] text-muted-foreground">{weekdayFormat.format(d)}</div>)}
+        {weeks[0].map((d) => <div key={d.getTime()} className="border-s border-border/50 px-2 py-1.5 text-[12px] text-muted-foreground">{weekdayFormat.format(d)}</div>)}
       </div>
       {weeks.map((week) => (
-        <div key={week[0].getTime()} className="grid border-b border-border last:border-b-0" style={{ gridTemplateColumns: columns }}>
+        <div key={week[0].getTime()} className="grid border-b border-border/50 last:border-b-0" style={{ gridTemplateColumns: columns }}>
           <div className="pt-2 text-center text-[11px] tabular-nums text-muted-foreground">W{isoWeek(week[0])}</div>
           {week.map((d) => {
             const from = d.getTime();
@@ -528,7 +528,7 @@ function MonthGrid({ days, anchor, data, now, onPickDay }: { days: Date[]; ancho
             ];
             const hidden = items.length - Math.min(items.length, MONTH_SHOWN);
             return (
-              <div key={from} className="flex min-h-28 min-w-0 flex-col gap-0.5 border-s border-border p-1">
+              <div key={from} className="flex min-h-28 min-w-0 flex-col gap-0.5 border-s border-border/50 p-1">
                 <div className="px-0.5">
                   <DayNumber day={d} today={sameDay(d, today)} muted={d.getMonth() !== anchor.getMonth()} onClick={() => onPickDay(d)} />
                 </div>
@@ -556,7 +556,7 @@ function AccessNote({ status }: { status: Status | undefined }) {
   if (!status) return null;
   if (status.access === "Denied") {
     return (
-      <Alert>
+      <Alert className="border-0 bg-foreground/[0.03]">
         <Warning aria-hidden />
         <AlertTitle>Neko can’t read your calendars</AlertTitle>
         <AlertDescription>
@@ -568,7 +568,7 @@ function AccessNote({ status }: { status: Status | undefined }) {
   }
   if (status.access === "NotAsked" && !status.last_sync_ms) {
     return (
-      <Alert>
+      <Alert className="border-0 bg-foreground/[0.03]">
         <CalendarIcon aria-hidden />
         <AlertTitle>Your meetings are not here yet</AlertTitle>
         <AlertDescription>
@@ -583,12 +583,24 @@ function AccessNote({ status }: { status: Status | undefined }) {
   return null;
 }
 
+/** Where the events came from and when, for the Today button's tooltip. */
+function syncText(status: Status | undefined, now: number): string | undefined {
+  if (!status || status.access !== "Granted") return undefined;
+  return `From ${status.source || "macOS Calendar"}, synced ${relativeTime(status.last_sync_ms, now)}.`;
+}
+
+/**
+ * Said aloud always, shown only when it matters (DESIGN.md §8): an empty
+ * span, a stale sync or a truncated list. The plain "synced 1 minute ago" is
+ * the Today button's tooltip.
+ */
 function SyncLine({ status, now, empty, view }: { status: Status | undefined; now: number; empty: boolean; view: View }) {
   if (!status || status.access !== "Granted") return null;
   const stale = status.last_sync_ms != null && now - status.last_sync_ms > STALE_MS;
   const span = view === "day" ? "today" : view === "week" ? "this week" : "this month";
+  const visible = empty || stale || status.truncated;
   return (
-    <p role="status" aria-live="polite" className="text-[12.5px] text-muted-foreground">
+    <p role="status" aria-live="polite" className={visible ? "text-[12.5px] text-muted-foreground" : "sr-only"}>
       {empty ? `No meetings ${span}. ` : null}
       From {status.source || "macOS Calendar"}, synced {relativeTime(status.last_sync_ms, now)}
       {stale ? ". Neko may not be running; events update while the app is open." : "."}
@@ -612,7 +624,7 @@ export default function CalendarPage() {
 
   const actions = (
     <>
-      <Button variant="outline" size="sm" onClick={() => setAnchor(startOfDay(new Date()))} disabled={showsToday}>Today</Button>
+      <Button variant="ghost" size="sm" onClick={() => setAnchor(startOfDay(new Date()))} disabled={showsToday} title={syncText(data?.status, now)}>Today</Button>
       <div className="flex items-center">
         <Button variant="ghost" size="icon-sm" aria-label={`Previous ${view}`} onClick={() => setAnchor((a) => step(view, a, -1))}><CaretLeft /></Button>
         <Button variant="ghost" size="icon-sm" aria-label={`Next ${view}`} onClick={() => setAnchor((a) => step(view, a, 1))}><CaretRight /></Button>
@@ -625,16 +637,11 @@ export default function CalendarPage() {
     </>
   );
 
-  const title = (
-    <span className="inline-flex flex-wrap items-center gap-2">
-      {titleFor(view, anchor, days)}
-      {view !== "month" ? <span className="rounded-md bg-foreground/[0.06] px-1.5 py-0.5 text-[12px] font-medium tabular-nums text-muted-foreground">Week {week}</span> : null}
-    </span>
-  );
+  const title = <span title={syncText(data?.status, now)}>{titleFor(view, anchor, days)}</span>;
 
   const empty = !!data && data.events.length === 0;
   return (
-    <SetupPage eyebrow="Calendar" title={title} actions={actions} width="max-w-[1400px]">
+    <SetupPage title={title} count={view !== "month" ? `Week ${week}` : undefined} actions={actions} width="max-w-[1400px]">
       <div className="flex flex-col gap-3">
         <ErrorNote error={error} title="Can’t reach the Neko daemon" onDismiss={clear} />
         <AccessNote status={data?.status} />
@@ -644,7 +651,7 @@ export default function CalendarPage() {
             ? <MonthGrid days={days} anchor={anchor} data={data} now={now} onPickDay={pickDay} />
             : <TimeGrid days={days} data={data} now={now} onPickDay={pickDay} />
         ) : error ? null : (
-          <div aria-busy="true" aria-label="Loading the calendar" className="h-96 animate-pulse rounded-xl border border-border bg-card" />
+          <div aria-busy="true" aria-label="Loading the calendar" className="h-96 animate-pulse rounded-xl bg-foreground/[0.03]" />
         )}
       </div>
     </SetupPage>

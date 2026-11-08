@@ -59,7 +59,7 @@ export function AppearanceSection() {
         actions={<Button size="sm" data-slot="make-theme" onClick={() => setMaking(true)}><Sparkle /> Make me a theme</Button>}
       >
         <Panel>
-          <div className="px-6 py-3 text-sm" data-slot="your-themes">
+          <div className="px-3 py-3 text-sm" data-slot="your-themes">
             {mine.length ? (
               <p className="flex items-center gap-2 text-muted-foreground"><Palette size={15} /> {mine.length === 1 ? "1 theme of yours" : `${mine.length} themes of yours`}, marked “Yours” above. Hover a card to remove it.</p>
             ) : (
@@ -67,7 +67,7 @@ export function AppearanceSection() {
             )}
           </div>
           {problems.length ? (
-            <ul data-slot="theme-problems" className="flex flex-col gap-2 border-t border-border/70 px-6 py-3">
+            <ul data-slot="theme-problems" className="flex flex-col gap-2 px-3 py-3">
               {problems.map((p) => (
                 <li key={p.file} role="alert" className="flex items-start gap-2 text-[13px]">
                   <Warning size={15} className="mt-0.5 shrink-0 text-warning-foreground" />

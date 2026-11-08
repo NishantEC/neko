@@ -36,7 +36,7 @@ export function RulebookSection() {
   return (
     <div className="flex flex-col gap-8">
       <Section
-        eyebrow="Every agent"
+       
         title={<>Rulebook</>}
         actions={<Status tone={usingDefault ? "neutral" : "success"}>{usingDefault ? "Using Neko’s default rules" : "Using your own rules"}</Status>}
       >
@@ -51,7 +51,7 @@ export function RulebookSection() {
               className="min-h-[24rem] w-full text-[14px] leading-[1.65]"
             />
           </SettingRow>
-          {error ? <div className="border-t border-border/70 p-4"><ErrorNote error={error} title="Couldn’t save the rulebook" onDismiss={clear} /></div> : null}
+          {error ? <div className="px-3 py-2"><ErrorNote error={error} title="Couldn’t save the rulebook" onDismiss={clear} /></div> : null}
           <PanelFooter className="justify-between">
             <span className="flex items-center gap-2 text-xs text-muted-foreground">
               {dirty ? "Unsaved changes" : "Saved"} · <Kbd>⌘S</Kbd> saves

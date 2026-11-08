@@ -25,13 +25,13 @@ export function SearchSection() {
     run(async () => { await activate("folder-scope", id, action); folders.reload(); return null; });
   return (
     <div className="flex flex-col gap-8">
-      <Section eyebrow="Quick panel" title="Included folders">
+      <Section title="Included folders">
         <Panel>
-          <div className="divide-y divide-border/70" id="setting-folders" data-setting="folders">
+          <div className="flex flex-col" id="setting-folders" data-setting="folders">
             {folders.loading && !folders.data ? (
               <div className="p-5"><Skeleton className="h-4 w-64" /></div>
             ) : arr(folders.data).length === 0 ? (
-              <p className="flex items-center gap-2 px-6 py-5 text-[13px] text-muted-foreground"><FolderSimple aria-hidden /> No folders added</p>
+              <p className="flex items-center gap-2 px-3 py-5 text-[13px] text-muted-foreground"><FolderSimple aria-hidden /> No folders added</p>
             ) : arr(folders.data).map((f) => (
               <Row
                 key={str(f.id)}
@@ -47,7 +47,7 @@ export function SearchSection() {
               <Button type="submit" className="h-10" disabled={!path.trim() || busy} loading={busy}>Add folder</Button>
             </form>
           </SettingRow>
-          {error || folders.error ? <div className="border-t border-border/70 p-4"><ErrorNote error={error ?? folders.error} onDismiss={clear} /></div> : null}
+          {error || folders.error ? <div className="px-3 py-2"><ErrorNote error={error ?? folders.error} onDismiss={clear} /></div> : null}
         </Panel>
       </Section>
     </div>
@@ -75,9 +75,9 @@ export function PermissionsSection() {
   }, [snapshot]);
   return (
     <div className="flex flex-col gap-8">
-      <Section eyebrow="This Mac" title="What Neko can access">
+      <Section title="What Neko can access">
         <Panel>
-          <div className="divide-y divide-border/70">
+          <div className="flex flex-col">
             <SettingRow id="clipboard-history" title="Clipboard history" description="Saves what you copy, only on this Mac. Turning it off stops new capture; existing history stays until you clear it.">
               {clipboard.loading && clipboard.data === null ? <Skeleton className="h-5 w-9" /> : (
                 <Toggle
@@ -95,22 +95,22 @@ export function PermissionsSection() {
               <Status tone="neutral">Managed in the native app</Status>
             </SettingRow>
           </div>
-          {error || clipboard.error ? <div className="border-t border-border/70 p-4"><ErrorNote error={error ?? clipboard.error} title="Clipboard history" onDismiss={clear} /></div> : null}
+          {error || clipboard.error ? <div className="px-3 py-2"><ErrorNote error={error ?? clipboard.error} title="Clipboard history" onDismiss={clear} /></div> : null}
         </Panel>
       </Section>
-      <Section eyebrow="Workspaces" title="Workspace folders">
+      <Section title="Workspace folders">
         <Panel>
-          <div className="divide-y divide-border/70">
+          <div className="flex flex-col">
             {protectedFolders.length === 0 ? (
-              <p className="px-6 py-4 text-[13px] text-muted-foreground">None of your workspaces are in a folder macOS protects, so tasks open them without asking.</p>
+              <p className="px-3 py-4 text-[13px] text-muted-foreground">None of your workspaces are in a folder macOS protects, so tasks open them without asking.</p>
             ) : protectedFolders.map(([folder, count]) => (
               <Row key={folder} title={folder} description={`${count === 1 ? "1 workspace is" : `${count} workspaces are`} here. macOS asks once, the first time a task opens it, and there is no way to check the answer without asking.`} trailing={<Status tone="success">Asked on first use</Status>} />
             ))}
           </div>
         </Panel>
       </Section>
-      <Section eyebrow="Agents" title="Agent access">
-        <Panel><p className="px-6 py-4 text-[13px] leading-relaxed text-muted-foreground">Neko does not record your screen or control your mouse. Authorized agents are local processes with full filesystem access; their worktrees are separate copies, not a security boundary. Publishing or changing external systems needs separate authority.</p></Panel>
+      <Section title="Agent access">
+        <Panel><p className="px-3 py-4 text-[13px] leading-relaxed text-muted-foreground">Neko does not record your screen or control your mouse. Authorized agents are local processes with full filesystem access; their worktrees are separate copies, not a security boundary. Publishing or changing external systems needs separate authority.</p></Panel>
       </Section>
     </div>
   );
@@ -141,17 +141,17 @@ export function DiagnosticsSection() {
   };
   return (
     <div className="flex flex-col gap-8">
-      <Section eyebrow="Health" title="Diagnostics">
+      <Section title="Diagnostics">
         <Panel>
           <SettingRow id="diagnostics" title="Run diagnostics" description="Times each runtime and shows which installs Neko uses.">
             <Button onClick={() => void runChecks()} loading={running}><Stethoscope /> {running ? "Running…" : "Run diagnostics"}</Button>
           </SettingRow>
-          {roundTrip !== null ? <div className="flex items-center justify-between border-t border-border/70 px-6 py-3.5 text-[13px]"><span className="text-muted-foreground">Web page ↔ daemon</span><span className="font-mono">{roundTrip} ms</span></div> : null}
-          {error ? <div className="border-t border-border/70 p-4"><ErrorNote error={error} title="Diagnostics failed" onDismiss={() => setError(null)} /></div> : null}
+          {roundTrip !== null ? <div className="flex items-center justify-between px-3 py-3.5 text-[13px]"><span className="text-muted-foreground">Web page ↔ daemon</span><span className="font-mono">{roundTrip} ms</span></div> : null}
+          {error ? <div className="px-3 py-2"><ErrorNote error={error} title="Diagnostics failed" onDismiss={() => setError(null)} /></div> : null}
           {checks === null && !running ? (
-            <p className="border-t border-border/70 px-6 py-6 text-center text-[13px] text-muted-foreground">Run a check to see connection and runtime details.</p>
+            <p className="border-t border-border/70 px-3 py-6 text-center text-[13px] text-muted-foreground">Run a check to see connection and runtime details.</p>
           ) : null}
-          <div className="divide-y divide-border/70 border-t border-border/70 empty:hidden" data-slot="diagnostic-checks">
+          <div className="flex flex-col empty:hidden" data-slot="diagnostic-checks">
             {(checks ?? []).map((c) => (
               <Row
                 key={str(c.name)}
@@ -199,9 +199,9 @@ export function UpdatesSection() {
   const setAuto = (ui: boolean, native: boolean) => void run(() => command("SetSelfUpdate", { auto_ui: ui, auto_native: native }));
   return (
     <div className="flex flex-col gap-8">
-      <Section eyebrow="Neko" title="Neko updates">
+      <Section title="Neko updates">
         <Panel>
-          <div className="divide-y divide-border/70" data-slot="neko-updates">
+          <div className="flex flex-col" data-slot="neko-updates">
             <Row
               id="setting-update-version"
               title="Current version"
@@ -243,7 +243,7 @@ export function UpdatesSection() {
               </Button>
             </SettingRow>
           </div>
-          {error ? <div className="border-t border-border/70 p-4"><ErrorNote error={error} title="Update" onDismiss={clear} /></div> : null}
+          {error ? <div className="px-3 py-2"><ErrorNote error={error} title="Update" onDismiss={clear} /></div> : null}
         </Panel>
       </Section>
     </div>
@@ -259,9 +259,9 @@ export function AboutSection() {
   const tasks = arr(snapshot?.tasks).length;
   return (
     <div className="flex flex-col gap-8">
-      <Section eyebrow="Neko" title="About">
+      <Section title="About">
         <Panel>
-          <div className="divide-y divide-border/70">
+          <div className="flex flex-col">
             <Row title="Web interface" description={`Served by the Neko daemon at ${location.origin}. Everything on these pages is read from, and written back to, that daemon.`} trailing={<Status tone={connected ? "success" : "warning"}>{connected ? "Connected" : "Reconnecting…"}</Status>} />
             <Row title="This Mac" description={`${arr(snapshot?.workspaces).length} workspaces · ${tasks} tasks in history · ${arr(snapshot?.mcp?.connections).length} connections`} />
             <SettingRow id="updates" title="Updates and version" description="Neko is built from source, so an update is newer commits on main. Changes Neko’s own tasks land are applied by Neko itself (see Neko updates); the native app checks GitHub for the rest.">

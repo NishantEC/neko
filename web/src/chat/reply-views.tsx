@@ -36,7 +36,7 @@ const arr = (v: unknown): Json[] => (Array.isArray(v) ? v : []);
 const str = (v: unknown): string => (typeof v === "string" ? v : v == null ? "" : String(v));
 
 function Group({ kind, children }: { kind: string; children: ReactNode }) {
-  return <div data-slot="reply-block" data-kind={kind} className="not-prose my-3 flex flex-col gap-4 rounded-2xl border border-border bg-card p-4 text-[14px] text-foreground">{children}</div>;
+  return <div data-slot="reply-block" data-kind={kind} className="not-prose my-3 flex flex-col gap-4 rounded-2xl bg-foreground/[0.03] p-4 text-[14px] text-foreground">{children}</div>;
 }
 const Title = ({ children }: { children: ReactNode }) => <h3 className="text-[15px] font-semibold leading-snug">{children}</h3>;
 

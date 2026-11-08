@@ -20,9 +20,9 @@ export function GeneralSection() {
 
   return (
     <div className="flex flex-col gap-8">
-      <Section eyebrow="Quick access" title="Summon & startup">
+      <Section title="Summon & startup">
         <Panel>
-          <div className="divide-y divide-border/70">
+          <div className="flex flex-col">
             <SettingRow id="summon-shortcut" title="Summon shortcut" description="Recording a new shortcut needs the native app: macOS only lets that app register global keys.">
               {hotkey.loading ? <Skeleton className="h-6 w-20" /> : keys ? <span className="flex gap-1">{keys.map((k, i) => <Kbd key={i}>{k}</Kbd>)}</span> : <span className="text-[13px] text-muted-foreground">Unavailable</span>}
             </SettingRow>
@@ -37,7 +37,7 @@ export function GeneralSection() {
               ) : <span className="text-[13px] text-muted-foreground">Unavailable</span>}
             </SettingRow>
           </div>
-          {error || preferences.error ? <div className="border-t border-border/70 p-4"><ErrorNote error={error ?? preferences.error} onDismiss={clear} /></div> : null}
+          {error || preferences.error ? <div className="px-3 py-2"><ErrorNote error={error ?? preferences.error} onDismiss={clear} /></div> : null}
         </Panel>
       </Section>
     </div>

@@ -81,7 +81,7 @@ function WorkingTimer({ startedAt }: { startedAt: number }) {
 export function WorkingTimelineRow({ startedAt, label }: { startedAt?: number | null; label?: ReactNode }) {
   const text = label ?? (startedAt ? <>Working for <WorkingTimer startedAt={startedAt} /></> : "Working...");
   return (
-    <div className="border-b border-border/60 pb-2 pt-1">
+    <div className="pb-1 pt-1">
       <div data-slot="work-head" className="flex h-6 min-w-0 items-baseline gap-2 px-1 text-sm leading-relaxed text-muted-foreground tabular-nums">
         <span className="relative shrink-0 overflow-hidden whitespace-nowrap">{text}</span>
       </div>
@@ -153,7 +153,7 @@ export function TurnFoldTimelineRow({
   disabled?: boolean;
 }) {
   return (
-    <div className="group/timeline-row relative flex items-center gap-1 border-b border-border/60 pb-2 pe-0.5 pt-1">
+    <div className="group/timeline-row relative flex items-center gap-1 pb-1 pe-0.5 pt-1">
       <button
         type="button"
         data-slot="work-head"

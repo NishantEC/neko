@@ -60,25 +60,28 @@ export function ArtifactCard({ card }: { card: ArtifactCardData }) {
       data-slot="artifact-card"
       data-artifact={id}
       data-open={open || undefined}
+      // One quiet row (DESIGN.md §8): no box inside the reply. The whole row
+      // opens the canvas; the tab button appears on hover and is in the menu.
       className={cn(
-        "not-prose my-2 flex items-center gap-3 rounded-xl border bg-card/60 px-3 py-2.5 shadow-xs",
-        open ? "border-primary/50" : "border-border/70",
+        "group/row not-prose my-2 -mx-2 flex min-h-10 items-center gap-2.5 rounded-[10px] px-2 transition-colors hover:bg-foreground/[0.04]",
+        open && "bg-primary/[0.06]",
       )}
     >
-      <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.06] text-muted-foreground">
-        <FrameCorners size={18} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-foreground">{title}</p>
-        <p className="text-xs text-muted-foreground tabular-nums">
+      <button
+        type="button"
+        aria-label={`Open ${title} on the canvas`}
+        onClick={() => openCanvas(id, version)}
+        className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+      >
+        <FrameCorners aria-hidden size={16} className={cn("shrink-0", open ? "text-primary" : "text-muted-foreground")} />
+        <span className="min-w-0 truncate text-[13.5px] text-foreground">{title}</span>
+        <span className="shrink-0 text-[12.5px] tabular-nums text-muted-foreground/80">
           v{card.version ?? 1} · {(card.kind ?? "file").toUpperCase()}
-        </p>
-      </div>
-      <Button variant="ghost" size="icon-sm" aria-label={`Open ${title} in a tab`} title="Open in a tab" onClick={() => openArtifactTab(id, version)}>
+        </span>
+        <span className="ms-auto shrink-0 text-[12.5px] text-muted-foreground">{open ? "Showing" : "Open"}</span>
+      </button>
+      <Button variant="ghost" size="icon-sm" aria-label={`Open ${title} in a tab`} title="Open in a tab" onClick={() => openArtifactTab(id, version)} className="opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100">
         <ArrowSquareOut />
-      </Button>
-      <Button variant="outline" size="sm" aria-label={`Open ${title} on the canvas`} onClick={() => openCanvas(id, version)}>
-        {open ? "Showing" : "Open"}
       </Button>
     </div>
   );

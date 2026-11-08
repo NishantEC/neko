@@ -156,7 +156,7 @@ function SettingsBody() {
 
   return (
     <div className="flex h-full w-full flex-1 flex-col overflow-hidden">
-      <header className="hidden h-12 shrink-0 items-center border-b border-border px-6 md:flex">
+      <header className="hidden h-12 shrink-0 items-center px-6 md:flex">
         <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Settings</span>
           <span aria-hidden className="text-muted-foreground/50">
@@ -182,7 +182,7 @@ function SettingsBody() {
                 <section aria-label="Search results" data-slot="settings-results" className="flex flex-col gap-3">
                   <p className="text-[13px] text-muted-foreground">{hits.length ? "Choose a setting to jump to it." : `No setting matches “${query.trim()}”.`}</p>
                   {hits.length ? (
-                    <Panel><div className="divide-y divide-border/70">
+                    <Panel><div className="flex flex-col">
                       {hits.map((hit) => (
                         <Row
                           key={hit.kind === "section" ? `s.${hit.section.id}` : `t.${hit.setting.id}`}

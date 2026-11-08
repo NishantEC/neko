@@ -99,7 +99,7 @@ function RuntimePanel({ snapshot, catalog }: { snapshot: Json; catalog: ReturnTy
 
   return (
     <Panel data-slot="runtime">
-      <div className="divide-y divide-border/70">
+      <div className="flex flex-col">
         <SettingRow id="runtime" title="Runs with" description="The runtime that does the work for new conversations, tasks and background checks. Work already running isn’t interrupted.">
           {catalog.loading && !catalog.data ? <Skeleton className="h-8 w-44" /> : (
             <Pick
@@ -111,7 +111,7 @@ function RuntimePanel({ snapshot, catalog }: { snapshot: Json; catalog: ReturnTy
           )}
         </SettingRow>
         {source ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3.5 text-[13px]">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-3.5 text-[13px]">
             <span className="text-muted-foreground">Connection</span>
             <span className="flex items-center gap-2">
               <Status tone={ready ? "success" : "warning"}>{str(source.connection) || (ready ? "Ready" : "Not ready")}</Status>
@@ -145,7 +145,7 @@ function RuntimePanel({ snapshot, catalog }: { snapshot: Json; catalog: ReturnTy
             <CollapsibleTrigger render={<Button variant="outline" size="sm" className="w-fit" />}>Use an exact model ID</CollapsibleTrigger>
           </SettingRow>
           <CollapsibleContent>
-            <div className="flex items-center gap-2 px-6 pb-4">
+            <div className="flex items-center gap-2 px-3 pb-4">
               <Input aria-label="Exact model ID" value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="Or enter an exact model ID" className="font-mono" />
               <Button variant="outline" className="h-10" disabled={!validId(custom.trim())} onClick={() => { setModel(custom.trim()); setCheck(null); }}>Use ID</Button>
             </div>
@@ -153,12 +153,12 @@ function RuntimePanel({ snapshot, catalog }: { snapshot: Json; catalog: ReturnTy
         </Collapsible>
       </div>
       {check ? (
-        <div className="flex items-start gap-2 border-t border-border/70 px-6 py-3.5 text-[13px]" role="status">
+        <div className="flex items-start gap-2 px-3 py-3.5 text-[13px]" role="status">
           {check.ok ? <CheckCircle className="mt-0.5 size-4 text-success" /> : check.unavailable ? <WarningCircle className="mt-0.5 size-4 text-warning-foreground" /> : <XCircle className="mt-0.5 size-4 text-destructive" />}
           <span className="select-text">{check.message}</span>
         </div>
       ) : null}
-      {error || catalog.error || catalog.refreshError ? <div className="border-t border-border/70 p-4"><ErrorNote error={error ?? catalog.error ?? catalog.refreshError} title="Models" onDismiss={clear} /></div> : null}
+      {error || catalog.error || catalog.refreshError ? <div className="px-3 py-2"><ErrorNote error={error ?? catalog.error ?? catalog.refreshError} title="Models" onDismiss={clear} /></div> : null}
       <PanelFooter className="justify-between">
         <span className="text-xs text-muted-foreground">
           {catalog.data?.read_at_ms ? `Catalog read ${relativeTime(catalog.data.read_at_ms)}.` : "Reading models from your runtimes…"} Checking sends one short reply, so it may use quota; a failed check keeps your current model.
@@ -220,7 +220,7 @@ function PinsPanel({ snapshot, catalog }: { snapshot: Json; catalog: ReturnType<
 
   return (
     <Panel data-slot="pins">
-      <div className="divide-y divide-border/70">
+      <div className="flex flex-col">
         <SettingRow id="pins" title="Model" description="Neko decides picks a compatible model for each message, keeping any pins you set. Pinning a model pins its provider too.">
           <Pick
             label="Home chat model"
@@ -250,14 +250,14 @@ function PinsPanel({ snapshot, catalog }: { snapshot: Json; catalog: ReturnType<
           <Toggle checked={paid} onChange={setPaid} label="Allow automatic paid speed" />
         </SettingRow>
         {last ? (
-          <div className="px-6 py-3.5 text-[13px] text-muted-foreground">
+          <div className="px-3 py-3.5 text-[13px] text-muted-foreground">
             <span className="text-[12.5px] font-medium">Last run</span>{" "}
             {str(last.runtime?.model) || "default model"}{last.runtime?.reasoning_effort ? ` · ${last.runtime.reasoning_effort} effort` : ""}
             {last.automatic ? " · chosen by Neko" : " · pinned"} — {str(last.reason)}
           </div>
         ) : null}
       </div>
-      {error ? <div className="border-t border-border/70 p-4"><ErrorNote error={error} title="Couldn’t apply the pins" onDismiss={clear} /></div> : null}
+      {error ? <div className="px-3 py-2"><ErrorNote error={error} title="Couldn’t apply the pins" onDismiss={clear} /></div> : null}
       <PanelFooter className="justify-between">
         <span className="text-xs text-muted-foreground">{automatic && !paid ? "Neko decides everything." : "Some choices are pinned."} Applies to your next message.</span>
         <div className="flex gap-2">
@@ -289,7 +289,7 @@ function BudgetPanel({ snapshot }: { snapshot: Json }) {
   ];
   return (
     <Panel data-slot="budget">
-      <div className="divide-y divide-border/70">
+      <div className="flex flex-col">
         <SettingRow id="budget" title="Stop a task after" description="Counts the cost Claude Code and OpenCode report for each task and stops it when it passes this amount. Codex subscriptions don’t report a price, so they aren’t limited here. Leave empty for no limit.">
           <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (!invalid) void run(() => command("SetTaskBudget", { cents: dollars === null ? null : Math.round(dollars * 100) })); }}>
             <span className="font-mono text-[13px] text-muted-foreground">US$</span>
@@ -297,7 +297,7 @@ function BudgetPanel({ snapshot }: { snapshot: Json }) {
             <Button type="submit" size="sm" variant="outline" disabled={busy || invalid || clean === (savedText === "" ? "" : savedText)}>Save budget</Button>
           </form>
         </SettingRow>
-        {invalid ? <p className="px-6 py-3 text-[13px] text-warning-foreground">Enter an amount between 0.01 and 1000, or leave it empty.</p> : null}
+        {invalid ? <p className="px-3 py-3 text-[13px] text-warning-foreground">Enter an amount between 0.01 and 1000, or leave it empty.</p> : null}
         <SettingRow id="tickets-at-once" title="Tasks at once" description="Other tasks wait their turn and start as running ones finish. Work already running is not stopped.">
           <Pick label="Tasks at once" value={String(snapshot.max_running_tickets ?? 0)} onChange={(v) => void limit("SetMaxRunningTickets", v)} options={options([1, 2, 3, 5], snapshot.max_running_tickets, "No limit")} disabled={busy} />
         </SettingRow>
@@ -305,7 +305,7 @@ function BudgetPanel({ snapshot }: { snapshot: Json }) {
           <Pick label="Writing per repository" value={String(snapshot.max_writable_per_repository ?? 0)} onChange={(v) => void limit("SetMaxWritablePerRepository", v)} options={options([1, 2, 3, 6, 8], snapshot.max_writable_per_repository, "4 (default)")} disabled={busy} />
         </SettingRow>
       </div>
-      {error ? <div className="border-t border-border/70 p-4"><ErrorNote error={error} title="Couldn’t save" onDismiss={clear} /></div> : null}
+      {error ? <div className="px-3 py-2"><ErrorNote error={error} title="Couldn’t save" onDismiss={clear} /></div> : null}
     </Panel>
   );
 }
@@ -315,7 +315,7 @@ function WorkStylePanel({ snapshot }: { snapshot: Json }) {
   const [confirm, setConfirm] = useState(false);
   return (
     <Panel data-slot="work-style">
-      <div className="divide-y divide-border/70">
+      <div className="flex flex-col">
         <SettingRow id="plan-first" title="Plan before working" description="Off: a ticket is a normal session that writes code right away, and the agent stops for approval only on critical work. On: every ticket first gets a read-only plan to approve.">
           <Toggle checked={!!snapshot.plan_first} label="Plan before working" disabled={busy} onChange={(enabled) => void run(() => command("SetPlanFirst", { enabled }))} />
         </SettingRow>
@@ -326,7 +326,7 @@ function WorkStylePanel({ snapshot }: { snapshot: Json }) {
           <Button variant="destructive-outline" size="sm" onClick={() => setConfirm(true)}>Start over…</Button>
         </SettingRow>
       </div>
-      {error ? <div className="border-t border-border/70 p-4"><ErrorNote error={error} title="Couldn’t update" onDismiss={clear} /></div> : null}
+      {error ? <div className="px-3 py-2"><ErrorNote error={error} title="Couldn’t update" onDismiss={clear} /></div> : null}
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
@@ -371,19 +371,19 @@ export function AiSection() {
   if (!snapshot) return null;
   return (
     <div className="flex flex-col gap-8">
-      <Section eyebrow="Runtime" title={<>Agent runtime.</>}>
+      <Section title="Agent runtime">
         <RuntimePanel snapshot={snapshot} catalog={catalog} />
       </Section>
-      <Section eyebrow="Home chat" title="What Home chat may do">
+      <Section title="What Home chat may do">
         <SuperAgentPanel />
       </Section>
-      <Section eyebrow="Home chat" title="Model pins">
+      <Section title="Model pins">
         <PinsPanel snapshot={snapshot} catalog={catalog} />
       </Section>
-      <Section eyebrow="Budget" title="Budget & limits">
+      <Section title="Budget & limits">
         <BudgetPanel snapshot={snapshot} />
       </Section>
-      <Section eyebrow="Work style" title="How work starts">
+      <Section title="How work starts">
         <WorkStylePanel snapshot={snapshot} />
       </Section>
     </div>

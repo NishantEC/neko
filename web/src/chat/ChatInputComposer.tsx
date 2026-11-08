@@ -73,7 +73,7 @@ function ModeSwitch({ mode, onChange }: { mode: ComposerMode; onChange(mode: Com
     { id: "plan", label: "Plan", help: "Plan: Neko proposes a task with a plan for your approval, without changing anything" },
   ];
   return (
-    <div role="radiogroup" aria-label="Ask or Plan" data-slot="mode-switch" className="flex rounded-full bg-foreground/[0.06] p-0.5">
+    <div role="radiogroup" aria-label="Ask or Plan" data-slot="mode-switch" className="flex gap-0.5 rounded-full">
       {options.map((o) => (
         <button
           key={o.id}
@@ -84,7 +84,7 @@ function ModeSwitch({ mode, onChange }: { mode: ComposerMode; onChange(mode: Com
           onClick={() => onChange(o.id)}
           className={cn(
             "h-7 rounded-full px-3 text-[12.5px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-            mode === o.id ? "bg-card text-strong shadow-xs ring-1 ring-border" : "text-muted-foreground hover:text-foreground",
+            mode === o.id ? "bg-foreground/[0.08] text-foreground" : "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground",
           )}
         >
           {o.label}

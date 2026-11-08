@@ -54,8 +54,7 @@ export function Launcher() {
 
   return (
     <PageContainer data-slot="launcher" className="max-w-[44rem]">
-      <h1 className="text-[22px] font-semibold text-strong">New tab</h1>
-      <p className="mt-1 text-[13.5px] text-muted-foreground">Open a page here. A page that is already open in a tab is focused there.</p>
+      <h1 className="text-[20px] font-semibold text-foreground">New tab</h1>
       <InputGroup className="sky-well sky-control mt-5 border-transparent bg-transparent shadow-none">
         <InputGroupAddon><MagnifyingGlass aria-hidden /></InputGroupAddon>
         <InputGroupInput
@@ -74,7 +73,7 @@ export function Launcher() {
           if (!list.length) return null;
           return (
             <section key={group.id} aria-label={group.title}>
-              <h2 className="mb-1.5 px-3 text-[12px] font-medium text-muted-foreground">{group.title}</h2>
+              <h2 className="mb-1 px-3 text-[12.5px] font-medium text-muted-foreground">{group.title}</h2>
               <ul className="flex flex-col">
                 {list.map((p) => <PageLink key={p.id} page={p} open={openKeys.has(p.id)} />)}
               </ul>
