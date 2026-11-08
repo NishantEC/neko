@@ -645,6 +645,18 @@ pub enum Request {
         to_ms: i64,
     },
     CalendarStatus,
+    /// Finished tasks (Ready to review, Completed, Failed) the person has not
+    /// opened since they finished (`neko_core::task_seen`). Answered with
+    /// `UnseenTasks`.
+    UnseenTasks,
+    /// The person opened this task (`seen`), or asked to keep it flagged
+    /// (`seen: false`, "Mark as unread"). Answered with `UnseenTasks`, and
+    /// every open page is told with `Event::UnseenTasksChanged`.
+    MarkTaskSeen {
+        task_id: String,
+        #[serde(default = "seen_by_default")]
+        seen: bool,
+    },
     /// Home chat's full-power mode: read it, or set it with `on`.
     SuperAgent {
         on: Option<bool>,
@@ -1072,6 +1084,9 @@ pub enum Response {
         status: calendar::CalendarStatus,
     },
     CalendarStatus(calendar::CalendarStatus),
+    UnseenTasks {
+        ids: Vec<String>,
+    },
     SuperAgent {
         on: bool,
     },
@@ -1230,6 +1245,15 @@ pub enum Event {
     OpenTab {
         route: String,
     },
+    /// A task was marked seen or unread (`MarkTaskSeen`): the finished tasks
+    /// still unseen, so every window's dots agree.
+    UnseenTasksChanged {
+        ids: Vec<String>,
+    },
+}
+
+fn seen_by_default() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

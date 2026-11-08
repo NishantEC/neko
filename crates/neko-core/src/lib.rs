@@ -58,6 +58,7 @@ pub mod schedule_time;
 pub mod routines;
 pub mod scheduled_plans;
 pub mod scopes;
+pub mod task_seen;
 pub mod schedules;
 pub mod search;
 pub mod settings;

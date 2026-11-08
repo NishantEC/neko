@@ -908,6 +908,25 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             neko_core::calendar::status(&db).map_or_else(|message| Response::Error { message }, Response::CalendarStatus)
         }
+        Request::UnseenTasks => {
+            let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            neko_core::workbench::load(&db)
+                .and_then(|snapshot| neko_core::task_seen::unseen(&db, &snapshot.tasks))
+                .map_or_else(|message| Response::Error { message }, |ids| Response::UnseenTasks { ids })
+        }
+        Request::MarkTaskSeen { task_id, seen } => {
+            let marked = {
+                let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                neko_core::workbench::load(&db).and_then(|snapshot| neko_core::task_seen::mark(&db, &snapshot.tasks, &task_id, seen))
+            };
+            match marked {
+                Ok(ids) => {
+                    broadcast(state, &Event::UnseenTasksChanged { ids: ids.clone() });
+                    Response::UnseenTasks { ids }
+                }
+                Err(message) => Response::Error { message },
+            }
+        }
         Request::AgentModels { refresh } => {
             Response::AgentModels(neko_core::agent_catalog::catalog(refresh))
         }
@@ -1900,6 +1919,45 @@ mod tests {
         // Never the person's own artifacts folder.
         state.artifacts = std::env::temp_dir().join(format!("neko-test-artifacts-{}", std::process::id()));
         state
+    }
+
+    #[test]
+    fn unseen_tasks_round_trip_and_stay_out_of_the_snapshot() {
+        use neko_protocol::workbench::TaskStatus;
+        let state = test_state(Db::open_in_memory().unwrap(), Vec::new());
+        let task = |id: &str, status: TaskStatus| -> neko_protocol::workbench::Task {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "workspace_id": "w", "issue_id": null, "title": id, "goal": "Do the thing", "status": status, "plan": "",
+                "result": "", "worktree": null, "events": [], "created_at_ms": 0, "updated_at_ms": 0, "source_revision": null,
+                "base_commit": null, "pull_request": null, "landed_commit": null, "supervision": null, "display_title": null, "parked": null,
+            }))
+            .unwrap()
+        };
+        let set = |tasks: Vec<neko_protocol::workbench::Task>| {
+            let db = state.db.lock().unwrap();
+            let mut snapshot = neko_core::workbench::load(&db).unwrap();
+            if !snapshot.workspaces.iter().any(|w| w.id == "w") {
+                snapshot.workspaces.push(neko_protocol::workbench::Workspace { id: "w".into(), name: "w".into(), repository: std::env::temp_dir().to_string_lossy().into_owned(), instructions: String::new(), away_enabled: false });
+            }
+            snapshot.tasks = tasks;
+            neko_core::workbench::save(&db, &snapshot).unwrap();
+        };
+        set(vec![task("old", TaskStatus::Completed), task("new", TaskStatus::Building)]);
+        let Response::UnseenTasks { ids } = handle_request_for_test(&state, Request::UnseenTasks) else { panic!() };
+        assert!(ids.is_empty(), "what finished before the first read counts as seen");
+        set(vec![task("old", TaskStatus::Completed), task("new", TaskStatus::ReadyForReview)]);
+        let Response::UnseenTasks { ids } = handle_request_for_test(&state, Request::UnseenTasks) else { panic!() };
+        assert_eq!(ids, vec!["new".to_string()]);
+        let before = neko_core::workbench::load(&state.db.lock().unwrap()).unwrap().tasks;
+        // What the web sends: `seen` may be left out (seen).
+        let open: Request = serde_json::from_value(serde_json::json!({"MarkTaskSeen": {"task_id": "new"}})).unwrap();
+        let Response::UnseenTasks { ids } = handle_request_for_test(&state, open) else { panic!() };
+        assert!(ids.is_empty());
+        assert_eq!(neko_core::workbench::load(&state.db.lock().unwrap()).unwrap().tasks, before, "seen lives outside the snapshot");
+        let Response::UnseenTasks { ids } = handle_request_for_test(&state, Request::MarkTaskSeen { task_id: "old".into(), seen: false }) else { panic!() };
+        assert_eq!(ids, vec!["old".to_string()], "Mark as unread flags it again");
+        let missing = handle_request_for_test(&state, Request::MarkTaskSeen { task_id: "nope".into(), seen: true });
+        assert!(matches!(missing, Response::Error { .. }));
     }
 
     #[test]
