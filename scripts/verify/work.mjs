@@ -618,6 +618,13 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
       await approve.hover();
       await sleep(250);
       check((await opacity(action)) === "1", "hovering a waiting card shows its Approve");
+      // the action lies over the end of the state line, never over the glyph and the start of its words
+      const covered = await waiting.evaluateAll((els) => els.filter((e) => {
+        const act = e.querySelector("[data-slot='card-action']")?.getBoundingClientRect();
+        const words = e.querySelector("[data-slot='card-state']")?.getBoundingClientRect();
+        return act && words && words.left + 40 > act.left;
+      }).length);
+      check(covered === 0, `a shown action leaves the glyph and the state's first words readable (${covered} cards covered)`);
       commands.length = 0;
       await action.click();
       await sleep(400);

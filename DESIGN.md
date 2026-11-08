@@ -121,19 +121,25 @@ frame with no card), `Row`, `RowActions` / `RowAction`, `GlyphButton`
     card, waiting ones included; the status glyph carries the colour and the
     state's words stay muted. A card's one action (Approve, Answer, Start
     again) shows at the end of its state line on hover or focus and is in
-    its right-click menu. Selection (the open task) is the only ring.
-11. **Nothing-yet rows are not rows.** A group or facet with nothing in it
-    gets no line saying so; if the person can fill it, offer that as one
-    quiet link where it would be ("+ Add a watch"). A page of several
-    scopes shows each as one line that opens to its details (Workspaces),
-    remembering what was open.
+    its right-click menu, and it never covers the glyph or the state's first
+    words. Selection (the open task) is the only ring. In light the card's
+    surface stays a step off the page so cards still separate without a line.
+11. **Nothing-yet rows are not rows.** A facet of a scope or a block of
+    figures with nothing in it gets no line saying so (no "Nothing yet", no
+    row of zeros); if the person can fill it, offer that as one quiet link
+    where it would be ("+ Add a watch"); a whole section with nothing to show
+    is one muted line, not an empty-state block. A page of several scopes
+    shows each as one line that opens to its details (Workspaces),
+    remembering what was open. Stage groups that are always there (Tasks'
+    columns and groups) keep §3's one-line "No tasks".
 12. **Figures are lines, not boxes.** A number reads as label, value, muted
     detail on one line (`Figure` in the kit); no wells, cards or gauges
     around figures on a list page. Colour on a value only when it needs the
     person, beside words that say why.
 13. **"Done, not yet seen"** is a 6px Iris dot (Iris = *now*: what changed
-    since you last looked): before the glyph in the task list, top-right on
-    a board card, after the title on an inactive tab, and as a count in
-    Home's crew line. It is named ("Not yet seen") and opening the task
+    since you last looked): after the title in the task list and on an
+    inactive tab, top-right on a board card (away from the glyph, so it never
+    reads as part of a sky "in review" circle), and as a count in Home's crew
+    line. It is named ("Not yet seen"); opening the task while looking at it
     clears it; the right-click menu offers Mark as unread. Never bold the
     title for it (rule 7).

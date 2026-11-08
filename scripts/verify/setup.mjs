@@ -435,7 +435,10 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   await sleep(600);
   await shot("setup-usage-spend");
   const spend = await page.locator("[data-slot='spend-figures'] [data-slot='figure']").allInnerTexts();
-  check(spend.length === 4 && /^Recorded spend/.test(spend[0]), `the spend reads as one-line figures from what agents reported (${spend.map((f) => f.split(/\s{2,}|\n/)[0]).join(", ")})`);
+  // The test daemon's tasks report no price: the budget alone, and one line saying nothing is priced yet (no row of zeros).
+  const priced = await page.evaluate(async () => ((await (await fetch("/api/request", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ Workbench: "Snapshot" }) })).json()).Workbench?.tasks ?? []).some((t) => (t.events ?? []).some((e) => String(e.message).startsWith("USAGE "))));
+  check(priced ? spend.length === 4 && /^Recorded spend/.test(spend[0]) : spend.length === 1 && /^Per-task budget/.test(spend[0]) && (await page.locator("[data-slot='spend-none']").count()) === 1, `the spend reads as one-line figures (${spend.map((f) => f.split(/\s{2,}|\n/)[0]).join(", ")}${priced ? "" : "; nothing priced, so no zeros"})`);
+  check((await page.locator("[data-slot='quota-none'], [data-slot='quota-figures']").count()) === 1 && (await page.locator("[data-slot='setup-page'] [data-slot='empty']").count()) === 0, "quota with nothing to show is one quiet line, not an empty-state block");
   await page.unroute("**/api/request");
 
   // ---- ⌘K -----------------------------------------------------------------------

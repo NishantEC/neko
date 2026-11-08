@@ -64,18 +64,20 @@ page, and Neko's own right-click menu everywhere.
   old `web_harness` without `SaveArtifact` fails the canvas area; point
   `NEKO_WEB_HARNESS` at a current build.
 - **Done, not yet seen** (2026-11-08, herdr's unseen `done`): `neko_core::task_seen`
-  keeps, per task, the status the person last saw it in, in one quiet row
-  (`task_seen_v1`, `Db::set_setting_quiet`, never the snapshot). A finished task
-  (ReadyForReview, Completed, Failed) is unseen when there is no record or it
-  names another status. The first read records every finished task as seen (no
-  flood on rollout); seen ReadyForReview covers Completed; a record for a task
-  that runs again is dropped on the next read, so fail → restart → fail flags
-  again (only if some page asked while it ran). Requests `UnseenTasks`,
-  `MarkTaskSeen { task_id, seen }` (false = Mark as unread); the mark broadcasts
-  `Event::UnseenTasksChanged` so other windows agree. Web: `work/seen.tsx`
-  (`useUnseen`, `useMarkSeen` in TaskSheet and TaskDetail, `UnseenDot`), asked
-  again 250 ms after each new snapshot and on window focus. Verify:
-  `NEKO_WEB_ONLY=unseen`.
+  keeps, per task, the status the person last saw it in and when, in one quiet
+  row (`task_seen_v1`, `Db::set_setting_quiet`, never the snapshot). A finished
+  task (ReadyForReview, Completed, Failed) is unseen when there is no record, the
+  record names another status, or a scout/builder/reviewer event is newer than
+  the record (it ran and finished again, with or without a page open; PR notes
+  and parking are not agent work). The first read, or an unreadable row, records
+  every finished task as seen (no flood); seen ReadyForReview covers Completed.
+  Requests `UnseenTasks`, `MarkTaskSeen { task_id, seen }` (false = Mark as
+  unread); a mark broadcasts `Event::UnseenTasksChanged` so other windows agree.
+  Web: `work/seen.tsx` (`useUnseen`; `useMarkSeen` in TaskSheet and TaskDetail
+  marks only while the window is visible and focused, and respects Mark as
+  unread on the open task until it is reopened; `UnseenDot`), asked again 250 ms
+  after each new snapshot and on focus; replies older than a local mark are
+  dropped. Verify: `NEKO_WEB_ONLY=unseen`.
 - **Toasts are dialogs.** Base UI toasts are `role=dialog` (non-modal) and carry
   `data-slot=toast`. A key handler that bails while a dialog is open must
   exclude them (Tasks' j/k did not, and a toast left open by one verify area

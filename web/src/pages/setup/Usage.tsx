@@ -94,7 +94,7 @@ function MachineFigures({ health }: { health: Json }) {
         value={load.toFixed(1)}
         unit={`of ${cores} cores`}
         tone={load >= 20 ? "error" : loadPerCore >= 0.85 ? "warning" : "neutral"}
-        detail={load >= 20 ? "No new agents start above a load of 20." : `${loadPerCore.toFixed(2)} per core`}
+        detail={load >= 20 ? "No new agents start above a load of 20." : loadPerCore >= 0.85 ? `Busy: ${loadPerCore.toFixed(2)} per core` : `${loadPerCore.toFixed(2)} per core`}
       />
       <Figure
         label="Memory pressure"
@@ -123,11 +123,10 @@ function AgentMemory({ health }: { health: Json }) {
   const agents = arr(health.agents).slice(0, 6);
   if (agents.length === 0) return <p className="text-[13px] text-muted-foreground">No agent processes are running right now.</p>;
   return (
-    <Panel data-slot="agent-memory">
-      <BarList
-        label="Memory held by each kind of agent"
-        items={agents.map((a) => ({ name: str(a.name), value: num(a.mb), text: sizeLabel(num(a.mb)), hint: `${num(a.processes)} ${num(a.processes) === 1 ? "process" : "processes"}` }))}
-      />
+    <Panel data-slot="agent-memory" aria-label="Memory held by each kind of agent">
+      {agents.map((a) => (
+        <Figure key={str(a.name)} label={str(a.name)} value={sizeLabel(num(a.mb))} detail={`${num(a.processes)} ${num(a.processes) === 1 ? "process" : "processes"}`} />
+      ))}
     </Panel>
   );
 }
@@ -188,15 +187,16 @@ function SpendSection({ snapshot, now }: { snapshot: Json; now: number }) {
   return (
     <Section title={<span title="Read from the cost each Claude Code and OpenCode run reports. Codex subscriptions don’t report a price, so their runs aren’t counted here.">Spend</span>}>
       <Panel data-slot="spend-figures">
-        <Figure label="Recorded spend" value={usd(spend.total)} detail={`${spend.runs} priced ${spend.runs === 1 ? "run" : "runs"} · ${compact(spend.tokensIn)} in · ${compact(spend.tokensOut)} out`} />
-        <Figure label="Last 7 days" value={usd(spend.week)} detail={spend.week > 0 ? "Across every task" : "Nothing priced this week"} />
+        {/* With nothing priced yet, zeros say nothing (DESIGN.md §8 rule 11): only the budget, and one line under it. */}
+        {hasData ? <Figure label="Recorded spend" value={usd(spend.total)} detail={`${spend.runs} priced ${spend.runs === 1 ? "run" : "runs"} · ${compact(spend.tokensIn)} in · ${compact(spend.tokensOut)} out`} /> : null}
+        {hasData ? <Figure label="Last 7 days" value={usd(spend.week)} detail={spend.week > 0 ? "Across every task" : "Nothing priced this week"} /> : null}
         <Figure
           label="Per-task budget"
           value={budget == null ? "None" : usd(budget)}
           tone={share >= 1 ? "error" : share >= 0.8 ? "warning" : "neutral"}
           detail={budget == null ? "No limit set. Change it in Settings → AI & agents." : top ? `Costliest task so far: ${usd(top.cost)}${share >= 0.8 ? ` (${Math.round(share * 100)}% of the budget)` : ""}` : "No priced task yet"}
         />
-        <Figure label="Tasks with a price" value={spend.tasks.length} detail={`of ${arr(snapshot.tasks).length} in history`} />
+        {hasData ? <Figure label="Tasks with a price" value={spend.tasks.length} detail={`of ${arr(snapshot.tasks).length} in history`} /> : null}
       </Panel>
       {hasData ? (
         <>
@@ -218,7 +218,7 @@ function SpendSection({ snapshot, now }: { snapshot: Json; now: number }) {
           </Panel>
         </>
       ) : (
-        <p className="px-0 text-[13px] text-muted-foreground">No priced runs yet. When an agent that reports its cost finishes a run, its spend shows up here.</p>
+        <p data-slot="spend-none" className="text-[13px] text-muted-foreground">No priced runs yet. When an agent that reports its cost finishes a run, its spend shows up here.</p>
       )}
     </Section>
   );
@@ -285,9 +285,12 @@ function QuotaSection() {
           })}
         </Panel>
       ) : (
-        <EmptyBlock icon={Gauge} title="Quota isn’t reported by this daemon" description={unavailable ? "Vendor quota windows come from the legacy palette providers (NEKO_LEGACY_AGENTS=1); the standalone workspace doesn’t read them, so there is nothing to show here yet." : "No vendor is signed in, or none has a metered window."}>
-          <Button variant="outline" size="sm" onClick={() => { setLoading(true); void load(); }}><ArrowsClockwise /> Check again</Button>
-        </EmptyBlock>
+        <p data-slot="quota-none" className="flex flex-wrap items-baseline gap-x-3 text-[13px] text-muted-foreground" title={unavailable ? "Vendor quota windows come from the legacy palette providers (NEKO_LEGACY_AGENTS=1); the standalone workspace doesn’t read them." : undefined}>
+          {unavailable ? "This daemon doesn’t report vendor quota." : "No vendor is signed in, or none has a metered window."}
+          <button type="button" onClick={() => { setLoading(true); void load(); }} className="inline-flex items-center gap-1 rounded-md text-[12.5px] outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60">
+            <ArrowsClockwise size={12} aria-hidden /> Check again
+          </button>
+        </p>
       )}
     </Section>
   );

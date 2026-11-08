@@ -420,11 +420,14 @@ function WorkspacePanel({ snapshot, workspace, onEdit, routines, now, open, onTo
           ) : summary && summary.failing.length ? (
             <Said status="failed">{summary.failing.length === 1 ? `${summary.failing[0]} failed` : `${summary.failing.length} failed`}</Said>
           ) : null}
-          {where ? <span data-slot="workspace-folder" className="max-w-[10rem] truncate font-mono text-[12px] text-muted-foreground/80" title={folders.join("\n")}>{where}</span> : null}
-          <RowActions>
-            <RowAction label="Sync now" icon={ArrowsClockwise} disabled={active === 0 || busy} onClick={() => void syncNow()} />
-            <RowAction label={`Edit ${workspace.name}`} icon={PencilSimple} onClick={onEdit} />
-          </RowActions>
+          {/* The folder ends at the row's right edge; on hover or focus the actions take its place (as the task list's time does). */}
+          <span className="relative flex min-h-7 min-w-[3.75rem] items-center justify-end">
+            {where ? <span data-slot="workspace-folder" className="max-w-[10rem] truncate font-mono text-[12px] text-muted-foreground/80 group-hover/row:invisible group-focus-within/row:invisible [@media(hover:none)]:invisible" title={folders.join("\n")}>{where}</span> : null}
+            <RowActions className="absolute inset-y-0 end-0">
+              <RowAction label="Sync now" icon={ArrowsClockwise} disabled={active === 0 || busy} onClick={() => void syncNow()} />
+              <RowAction label={`Edit ${workspace.name}`} icon={PencilSimple} onClick={onEdit} />
+            </RowActions>
+          </span>
         </span>
       </div>
       {open ? (
