@@ -10,15 +10,17 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { toast } from "@/ui/sonner";
 import { Clock, DotsThree, PencilSimple, Play, Plus, Trash } from "@/ui/icons";
-import { Panel } from "@/setup/kit";
+import { Panel, RowAction, RowActions } from "@/setup/kit";
+import { StatusGlyph } from "@/ui/status-glyph";
+import { useContextMenu } from "@/shell/context-menu";
 import { navigate } from "@/router";
 import {
-  ConfirmDialog, EmptyBlock, ErrorNote, FormField, Gate, Pick, Section, SetupPage, Status, Toggle, registerCommands,
+  ConfirmDialog, EmptyBlock, ErrorNote, FormField, Gate, Pick, Section, SetupPage, Toggle, registerCommands,
 } from "@/setup/kit";
 import { ScopePicker, useScope } from "@/setup/scope";
 import { useSetupCommands } from "@/setup/commands";
 import {
-  RECURRENCES, WEEKDAYS, arr, parseRule, relativeTime, ruleFor, ruleSummary, schedulesCmd, str, useNow, useRun, workspaceName,
+  RECURRENCES, WEEKDAYS, arr, parseRule, relativeTime, ruleFor, ruleSummary, schedulesCmd, str, useNow, useRun,
   workspacesOf, type Recurrence,
 } from "@/setup/lib";
 
@@ -135,19 +137,31 @@ function ScheduleRow({ item, onEdit, now }: { item: Json; onEdit: () => void; no
   const { run, busy, error, clear } = useRun();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const enabled = !!item.enabled;
+  const [open, setOpen] = useState(false);
+  const runNow = () => void run(() => schedulesCmd("RunNow", { id: item.id })).then((ok) => ok && toast.success("Queued a read-only plan. It appears as a task."));
+  const menu = useContextMenu(() => [
+    { label: "Run now", icon: Play, run: runNow },
+    { label: "Edit schedule…", icon: PencilSimple, run: onEdit },
+    { label: enabled ? "Pause" : "Enable", run: () => void run(() => schedulesCmd("SetEnabled", { id: item.id, enabled: !enabled })) },
+    "separator",
+    { label: "Delete schedule…", icon: Trash, run: () => setConfirmDelete(true) },
+  ]);
   return (
-    <div data-slot="schedule" data-enabled={enabled ? "true" : "false"} className="flex flex-col gap-3 px-6 py-4">
-      <div className="flex items-start gap-3">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-[15px] font-medium leading-snug">{str(item.name)}</h3>
-            <Status tone={enabled ? "success" : "neutral"}>{enabled ? "Enabled" : "Paused"}</Status>
-          </div>
-          <p className="font-mono text-[12px] text-muted-foreground">
-            {ruleSummary(str(item.rule))} · {str(item.timezone)}
-            {item.next_due_ms != null && enabled ? ` · next ${relativeTime(item.next_due_ms, now)}` : ""}
-          </p>
-        </div>
+    <div data-slot="schedule" data-enabled={enabled ? "true" : "false"} {...menu} className="group/row flex flex-col gap-1 rounded-[10px] px-3 py-1.5 transition-colors hover:bg-foreground/[0.03]">
+      <div className="flex min-h-8 items-center gap-3">
+        <StatusGlyph status={enabled ? "inProgress" : "todo"} label={enabled ? "Enabled" : "Paused"} />
+        <button type="button" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} details for ${str(item.name)}`} onClick={() => setOpen(!open)} className="flex min-w-0 flex-1 items-baseline gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+          <span className="min-w-0 truncate text-[13.5px] text-foreground">{str(item.name)}</span>
+          <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground" title={str(item.prompt)}>{str(item.prompt)}</span>
+          <span className="shrink-0 text-[12.5px] tabular-nums text-muted-foreground/70" title={str(item.timezone)}>
+            {ruleSummary(str(item.rule))}
+            {item.next_due_ms != null && enabled ? ` · next ${relativeTime(item.next_due_ms, now)}` : enabled ? "" : " · paused"}
+          </span>
+        </button>
+        <RowActions>
+          <RowAction label={`Run ${str(item.name)} now`} icon={Play} disabled={busy} onClick={runNow} />
+          <RowAction label="Edit schedule" icon={PencilSimple} onClick={onEdit} />
+        </RowActions>
         <Toggle
           checked={enabled}
           label={`${enabled ? "Pause" : "Enable"} ${str(item.name)}`}
@@ -155,7 +169,7 @@ function ScheduleRow({ item, onEdit, now }: { item: Json; onEdit: () => void; no
           onChange={(on) => void run(() => schedulesCmd("SetEnabled", { id: item.id, enabled: on }))}
         />
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${str(item.name)}`} />}><DotsThree weight="bold" /></DropdownMenuTrigger>
+          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${str(item.name)}`} title="More actions" className="text-muted-foreground" />}><DotsThree weight="bold" /></DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => void run(() => schedulesCmd("RunNow", { id: item.id })).then((ok) => ok && toast.success("Queued a read-only plan. It appears as a task."))}><Play /> Run now</DropdownMenuItem>
             <DropdownMenuItem onClick={onEdit}><PencilSimple /> Edit schedule</DropdownMenuItem>
@@ -164,18 +178,19 @@ function ScheduleRow({ item, onEdit, now }: { item: Json; onEdit: () => void; no
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <p className="line-clamp-3 max-w-[70ch] whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">{str(item.prompt)}</p>
-      {str(item.last_result) ? (
-        <p className="max-w-[70ch] rounded-lg border border-border bg-foreground/[0.03] px-3 py-2 text-[13px] leading-relaxed text-foreground/80">
-          <span className="me-1.5 text-[12.5px] font-medium text-muted-foreground">Last run</span>
-          {str(item.last_result)}
-        </p>
+      {open ? (
+        <div className="flex flex-col gap-2 pb-1 ps-7 text-[13px]">
+          <p className="max-w-[70ch] whitespace-pre-wrap leading-relaxed text-foreground/85">{str(item.prompt)}</p>
+          <p className="text-[12.5px] text-muted-foreground">{ruleSummary(str(item.rule))} · {str(item.timezone)}</p>
+          {str(item.last_result) ? (
+            <p className="max-w-[70ch] rounded-[10px] bg-foreground/[0.03] px-3 py-2 leading-relaxed text-foreground/80">
+              <span className="me-1.5 text-[12.5px] text-muted-foreground">Last run</span>
+              {str(item.last_result)}
+            </p>
+          ) : null}
+          {str(item.last_task_id) ? <div><Button variant="ghost" size="sm" onClick={() => navigate("home")}>Last task</Button></div> : null}
+        </div>
       ) : null}
-      <div className="flex gap-2">
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => void run(() => schedulesCmd("RunNow", { id: item.id })).then((ok) => ok && toast.success("Queued a read-only plan. It appears as a task."))}><Play /> Run now</Button>
-        <Button variant="outline" size="sm" onClick={onEdit}>Edit schedule</Button>
-        {str(item.last_task_id) ? <Button variant="ghost" size="sm" onClick={() => navigate("home")}>Last task</Button> : null}
-      </div>
       <ErrorNote error={error} onDismiss={clear} />
       <ConfirmDialog
         open={confirmDelete}
@@ -210,34 +225,33 @@ function SchedulesBody({ snapshot }: { snapshot: Json }) {
   }
   return (
     <>
-      <div className="flex items-center gap-2"><ScopePicker snapshot={snapshot} label="Show schedules for" /></div>
+      <div className="flex items-center gap-2" title="Times are shown in your browser’s clock"><ScopePicker snapshot={snapshot} label="Show schedules for" /></div>
       {shown.map((w) => {
         const list = items.filter((s) => s.workspace_id === w.id);
         return (
           <Section
             key={w.id}
-            eyebrow={list.length ? `${list.length} scheduled` : "None scheduled"}
             title={w.name}
-            actions={<Button variant="outline" size="sm" onClick={() => setDraft({ value: {}, workspace: w.id })}><Plus /> New schedule</Button>}
+            count={list.length || undefined}
+            actions={<Button variant="ghost" size="xs" aria-label={`New schedule in ${w.name}`} onClick={() => setDraft({ value: {}, workspace: w.id })}><Plus /> New</Button>}
           >
             {list.length === 0 ? (
-              <Panel><p className="px-6 py-4 text-[13px] text-muted-foreground">No schedules yet. Create one for a morning brief, a weekly review, or another recurring task.</p></Panel>
+              <p className="text-[13px] text-muted-foreground">No schedules</p>
             ) : (
-              <Panel><div className="divide-y divide-border/70">
+              <Panel>
                 {list.map((s) => <ScheduleRow key={s.id} item={s} now={now} onEdit={() => setDraft({ value: s, workspace: w.id })} />)}
-              </div></Panel>
+              </Panel>
             )}
           </Section>
         );
       })}
       {!scope && orphans.length > 0 ? (
-        <Section eyebrow={`${orphans.length}`} title="Without a workspace">
-          <Panel><div className="divide-y divide-border/70">
+        <Section title="Without a workspace" count={orphans.length}>
+          <Panel>
             {orphans.map((s) => <ScheduleRow key={s.id} item={s} now={now} onEdit={() => setDraft({ value: s, workspace: "" })} />)}
-          </div></Panel>
+          </Panel>
         </Section>
       ) : null}
-      <p className="text-xs text-muted-foreground">Workspace: {workspaceName(snapshot, scope)} · times are shown in your browser’s clock.</p>
       <ScheduleEditor draft={draft} onClose={() => setDraft(null)} />
     </>
   );
@@ -246,10 +260,7 @@ function SchedulesBody({ snapshot }: { snapshot: Json }) {
 export default function Schedules() {
   useSetupCommands();
   return (
-    <SetupPage
-      eyebrow="Work"
-      title={<>Schedules</>}
-    >
+    <SetupPage title={<>Schedules</>}>
       <Gate>{(snapshot) => <SchedulesBody snapshot={snapshot} />}</Gate>
     </SetupPage>
   );

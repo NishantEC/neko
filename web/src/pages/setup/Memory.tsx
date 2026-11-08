@@ -8,15 +8,34 @@ import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
 import { Textarea } from "@/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/ui/collapsible";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/ui/tabs";
 import { Brain } from "@phosphor-icons/react";
-import { CaretDown, DotsThree, PencilSimple, Plus, Trash } from "@/ui/icons";
-import { Panel } from "@/setup/kit";
+import { Check, DotsThree, PencilSimple, Plus, Trash, X } from "@/ui/icons";
+import { Panel, RowAction, RowActions } from "@/setup/kit";
 import {
-  ConfirmDialog, EmptyBlock, ErrorNote, FormField, Gate, Pick, Row, Section, SetupPage, Status, Toggle, registerCommands,
+  ConfirmDialog, EmptyBlock, ErrorNote, FormField, Gate, Pick, Row, Section, SetupPage, Toggle, registerCommands,
 } from "@/setup/kit";
+import { GlyphButton } from "@/ui/status-glyph";
+import { copyText, useContextMenu } from "@/shell/context-menu";
+import { cn } from "@/ui/lib/utils";
+
+/** A one-line row whose long text opens in full on click (DESIGN.md §8). */
+function OneLine({ text, open, onToggle, className }: { text: string; open: boolean; onToggle: () => void; className?: string }) {
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      onClick={onToggle}
+      title={open ? undefined : text}
+      className={cn("min-w-0 flex-1 select-text rounded-md text-start text-[13.5px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/60", open ? "whitespace-pre-wrap leading-relaxed" : "truncate", className)}
+    >
+      {text}
+    </button>
+  );
+}
+
+const ROW = "group/row flex flex-col gap-1 rounded-[10px] px-3 py-1.5 transition-colors hover:bg-foreground/[0.03]";
 import { ScopePicker, useScope } from "@/setup/scope";
 import { useSetupCommands } from "@/setup/commands";
 import { arr, decisionCmd, profileFor, str, useRun, workspaceName, workspacesOf } from "@/setup/lib";
@@ -108,32 +127,33 @@ function sourceLabel(source: string): string {
 function MemoryRow({ snapshot, entry, onEdit, kindLabel }: { snapshot: Json; entry: Json; onEdit: () => void; kindLabel: string }) {
   const { run, busy, error, clear } = useRun();
   const [confirm, setConfirm] = useState(false);
+  const [open, setOpen] = useState(false);
   const source = str(entry.source);
+  const menu = useContextMenu(() => [
+    { label: "Edit…", icon: PencilSimple, run: onEdit },
+    { label: "Copy", run: () => void copyText(str(entry.text)) },
+    source ? { label: "Copy source", run: () => void copyText(source, "Copied the source") } : null,
+    "separator",
+    { label: "Forget memory…", icon: Trash, run: () => setConfirm(true) },
+  ]);
   return (
-    <div data-slot="memory" className="flex flex-col gap-2.5 px-6 py-4">
-      <div className="flex items-start gap-3">
-        <p className="min-w-0 flex-1 select-text whitespace-pre-wrap text-[14px] leading-relaxed text-foreground/90">{str(entry.text)}</p>
-        <DropdownMenu>
-          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Memory actions" />}><DotsThree weight="bold" /></DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={onEdit}><PencilSimple /> Edit</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive-foreground" onClick={() => setConfirm(true)}><Trash /> Forget memory…</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+    <div data-slot="memory" {...menu} className={ROW}>
+      <div className="flex min-h-8 items-center gap-3">
+        <OneLine text={str(entry.text)} open={open} onToggle={() => setOpen(!open)} />
+        <span className="shrink-0 text-[12.5px] text-muted-foreground/70" title={source || undefined}>{kindLabel}{source ? ` · ${sourceLabel(source)}` : ""}</span>
+        <RowActions>
+          <RowAction label="Edit memory" icon={PencilSimple} onClick={onEdit} />
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Memory actions" title="More actions" />}><DotsThree weight="bold" /></DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onEdit}><PencilSimple /> Edit</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-destructive-foreground" onClick={() => setConfirm(true)}><Trash /> Forget memory…</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </RowActions>
       </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <span className="font-medium">{kindLabel}</span>
-        <span>{entry.workspace_id ? workspaceName(snapshot, entry.workspace_id, "Workspace") : "Everywhere"}</span>
-        {source ? (
-          <Collapsible>
-            <CollapsibleTrigger render={<button type="button" className="inline-flex items-center gap-1 rounded text-xs outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" />}>
-              {sourceLabel(source)} <CaretDown aria-hidden className="size-3" />
-            </CollapsibleTrigger>
-            <CollapsibleContent><p className="select-text pt-1 font-mono text-[11px]">{source}</p></CollapsibleContent>
-          </Collapsible>
-        ) : null}
-      </div>
+      {open && source ? <p className="select-text font-mono text-[11px] text-muted-foreground">{source} · {entry.workspace_id ? workspaceName(snapshot, entry.workspace_id, "Workspace") : "Everywhere"}</p> : null}
       <ErrorNote error={error} onDismiss={clear} />
       <ConfirmDialog
         open={confirm}
@@ -151,23 +171,36 @@ function MemoryRow({ snapshot, entry, onEdit, kindLabel }: { snapshot: Json; ent
 function Proposals({ snapshot, proposals }: { snapshot: Json; proposals: Json[] }) {
   const { run, busy, error, clear } = useRun();
   return (
-    <Section eyebrow={`${proposals.length} waiting`} title="Suggested">
+    <Section title="Suggested" count={proposals.length}>
       <Panel>
-        <div className="divide-y divide-border/70">
-          {proposals.map((p) => (
-            <div key={str(p.id)} data-slot="memory-proposal" className="flex flex-col gap-3 px-6 py-4">
-              <p className="select-text whitespace-pre-wrap text-[14px] leading-relaxed">{str(p.text)}</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" disabled={busy} onClick={() => void run(() => command("DecideMemoryProposal", { id: p.id, accept: true }))}>Keep memory</Button>
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => command("DecideMemoryProposal", { id: p.id, accept: false }))}>Dismiss</Button>
-                <span className="ms-auto text-xs text-muted-foreground">{p.workspace_id ? workspaceName(snapshot, p.workspace_id, "Workspace") : "Everywhere"} · {sourceLabel(str(p.source))}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-        {error ? <div className="border-t border-border/70 p-4"><ErrorNote error={error} onDismiss={clear} /></div> : null}
+        {proposals.map((p) => <Proposal key={str(p.id)} snapshot={snapshot} p={p} busy={busy} decide={(accept) => void run(() => command("DecideMemoryProposal", { id: p.id, accept }))} />)}
+        {error ? <div className="px-3 pt-2"><ErrorNote error={error} onDismiss={clear} /></div> : null}
       </Panel>
     </Section>
+  );
+}
+
+/** A suggestion Neko noticed: nothing is remembered until you keep it (the glyph keeps it). */
+function Proposal({ snapshot, p, busy, decide }: { snapshot: Json; p: Json; busy: boolean; decide: (accept: boolean) => void }) {
+  const [open, setOpen] = useState(false);
+  const menu = useContextMenu(() => [
+    { label: "Keep memory", icon: Check, run: () => decide(true) },
+    { label: "Dismiss", icon: X, run: () => decide(false) },
+    "separator",
+    { label: "Copy", run: () => void copyText(str(p.text)) },
+  ]);
+  return (
+    <div data-slot="memory-proposal" {...menu} className={ROW}>
+      <div className="flex min-h-8 items-center gap-3">
+        <GlyphButton status="todo" disabled={busy} label="Keep memory" onClick={() => decide(true)} />
+        <OneLine text={str(p.text)} open={open} onToggle={() => setOpen(!open)} />
+        <span className="shrink-0 text-[12.5px] text-muted-foreground/70">{p.workspace_id ? workspaceName(snapshot, p.workspace_id, "Workspace") : "Everywhere"} · {sourceLabel(str(p.source))}</span>
+        <RowActions>
+          <RowAction label="Keep memory" icon={Check} disabled={busy} onClick={() => decide(true)} />
+          <RowAction label="Dismiss" icon={X} disabled={busy} onClick={() => decide(false)} />
+        </RowActions>
+      </div>
+    </div>
   );
 }
 
@@ -178,13 +211,11 @@ function MemoryOptions({ snapshot }: { snapshot: Json }) {
   const useMemory = options.use_memory ?? true;
   const set = (patch: Record<string, boolean>) => void run(() => command("SetMemoryOptions", { options: { learning, use_memory: useMemory, ...patch } }));
   return (
-    <Section eyebrow="Settings" title="Memory settings">
+    <Section title="Settings">
       <Panel>
-        <div className="divide-y divide-border/70">
-          <Row title="Suggest new memories" description="Propose context from chats and agents. Direct requests to remember something still work when this is off." trailing={<Toggle checked={learning} onChange={(v) => set({ learning: v })} label="Suggest new memories" disabled={busy} />} />
-          <Row title="Use saved memory" description="Include memory in replies and tasks. Turning this off keeps saved memories here." trailing={<Toggle checked={useMemory} onChange={(v) => set({ use_memory: v })} label="Use saved memory" disabled={busy} />} />
-        </div>
-        {error ? <div className="border-t border-border/70 p-4"><ErrorNote error={error} onDismiss={clear} /></div> : null}
+        <Row title={<span title="Propose context from chats and agents. Direct requests to remember something still work when this is off.">Suggest new memories</span>} description="from chats and agents" trailing={<Toggle checked={learning} onChange={(v) => set({ learning: v })} label="Suggest new memories" disabled={busy} />} />
+        <Row title={<span title="Include memory in replies and tasks. Turning this off keeps saved memories here.">Use saved memory</span>} description="in replies and tasks" trailing={<Toggle checked={useMemory} onChange={(v) => set({ use_memory: v })} label="Use saved memory" disabled={busy} />} />
+        {error ? <div className="px-3 pt-2"><ErrorNote error={error} onDismiss={clear} /></div> : null}
       </Panel>
     </Section>
   );
@@ -276,18 +307,34 @@ function PreferenceRow({ snapshot, item, onEdit }: { snapshot: Json; item: Json;
   const [forget, setForget] = useState(false);
   const fields = { workspace_id: item.workspace_id, id: item.id, expected_version: item.version };
   const applies = [...arr(item.applicability?.terms), ...arr(item.applicability?.task_ids).map((t) => `NEK-${str(t).slice(0, 4).toUpperCase()}`)].join(", ");
+  const [open, setOpen] = useState(false);
+  const keep = () => void run(() => decisionCmd("KeepPreference", fields));
+  const dismiss = () => void run(() => decisionCmd("DismissPreference", fields));
+  const menu = useContextMenu(() => [
+    item.state !== "confirmed" ? { label: "Keep guidance", icon: Check, run: keep } : null,
+    { label: "Edit…", icon: PencilSimple, run: onEdit },
+    item.state !== "dismissed" ? { label: "Dismiss", icon: X, run: dismiss } : null,
+    "separator",
+    { label: "Forget…", icon: Trash, run: () => setForget(true) },
+  ]);
   return (
-    <div data-slot="preference" className="flex flex-col gap-2.5 px-6 py-4">
-      <p className="select-text whitespace-pre-wrap text-[14px] leading-relaxed">{str(item.instruction)}</p>
-      <p className="text-xs text-muted-foreground">Applies to: {applies || "—"}{arr(item.exceptions).length ? ` · Except: ${arr(item.exceptions).join(", ")}` : ""}</p>
-      <p className="text-xs text-muted-foreground">{workspaceName(snapshot, item.workspace_id, "Workspace")} · version {item.version}</p>
-      <div className="flex flex-wrap items-center gap-2">
-        {item.state !== "confirmed" ? <Button size="sm" disabled={busy} onClick={() => void run(() => decisionCmd("KeepPreference", fields))}>Keep guidance</Button> : null}
-        <Button size="sm" variant="outline" onClick={onEdit}>Edit</Button>
-        {item.state !== "dismissed" ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => decisionCmd("DismissPreference", fields))}>Dismiss</Button> : null}
-        <span className="flex-1" />
-        <Button size="sm" variant="ghost" className="text-destructive-foreground" onClick={() => setForget(true)}><Trash /> Forget…</Button>
+    <div data-slot="preference" {...menu} className={ROW}>
+      <div className="flex min-h-8 items-center gap-3">
+        {item.state !== "confirmed" ? <GlyphButton status="todo" disabled={busy} label="Keep guidance" onClick={keep} /> : null}
+        <OneLine text={str(item.instruction)} open={open} onToggle={() => setOpen(!open)} />
+        <span className="max-w-[35%] shrink-0 truncate text-[12.5px] text-muted-foreground/70" title={`Applies to: ${applies || "—"}`}>{applies || "—"}</span>
+        <RowActions>
+          {item.state !== "confirmed" ? <RowAction label="Keep guidance" icon={Check} disabled={busy} onClick={keep} /> : null}
+          <RowAction label="Edit guidance" icon={PencilSimple} onClick={onEdit} />
+          {item.state !== "dismissed" ? <RowAction label="Dismiss guidance" icon={X} disabled={busy} onClick={dismiss} /> : null}
+          <RowAction label="Forget guidance…" icon={Trash} onClick={() => setForget(true)} />
+        </RowActions>
       </div>
+      {open ? (
+        <p className="text-[12.5px] text-muted-foreground">
+          Applies to: {applies || "—"}{arr(item.exceptions).length ? ` · Except: ${arr(item.exceptions).join(", ")}` : ""} · {workspaceName(snapshot, item.workspace_id, "Workspace")} · version {item.version}
+        </p>
+      ) : null}
       <ErrorNote error={error} onDismiss={clear} />
       <ConfirmDialog open={forget} onOpenChange={setForget} title="Forget this guidance?" description="Neko stops applying it. This can’t be undone." confirmLabel="Forget guidance" onConfirm={() => void run(() => decisionCmd("ForgetPreference", fields))} />
     </div>
@@ -299,15 +346,16 @@ function DecisionCard({ record }: { record: Json }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   return (
-    <div data-slot="decision" className="flex flex-col gap-2 px-6 py-4">
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-[14px] font-medium">{decisionTitle(record.action)}</p>
-          <p className="text-[13px] text-muted-foreground">{str(record.observed_outcome) || "Outcome not yet observed"}</p>
-          {str(record.correction?.text) ? <p className="mt-1 text-[13px]"><span className="text-muted-foreground">Your correction: </span>{str(record.correction.text)}</p> : null}
-        </div>
-        {record.delivery_stage === "local_accepted" ? <Status tone="success">Accepted locally</Status> : null}
-        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>Correct this decision</Button>
+    <div data-slot="decision" className={ROW}>
+      <div className="flex min-h-8 items-center gap-3">
+        <span className="shrink-0 text-[13.5px] text-foreground">{decisionTitle(record.action)}</span>
+        <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground" title={str(record.observed_outcome) || undefined}>
+          {str(record.correction?.text) ? `Your correction: ${str(record.correction.text)}` : str(record.observed_outcome) || "Outcome not yet observed"}
+        </span>
+        {record.delivery_stage === "local_accepted" ? <span className="shrink-0 text-[12.5px] text-muted-foreground/70">Accepted locally</span> : null}
+        <RowActions>
+          <RowAction label="Correct this decision" icon={PencilSimple} onClick={() => setOpen(true)} />
+        </RowActions>
       </div>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">
@@ -338,28 +386,25 @@ function WorkingStyle({ snapshot, scope, profileId }: { snapshot: Json; scope: s
   const prefs: Json[] = arr(snapshot.working_preferences).filter((p) => (!scope || p.workspace_id === scope) && p.agent_profile_id === profileId);
   const records = latestDecisions(arr(snapshot.decision_records).filter((r) => !scope || r.workspace_id === scope)).slice(0, 12);
   const group = (state: string) => prefs.filter((p) => p.state === state);
-  const sections: [string, string, string][] = [["proposed", "Needs your confirmation", "warning"], ["confirmed", "Confirmed guidance", "neutral"], ["dismissed", "Dismissed guidance", "neutral"]];
+  const sections: [string, string, string][] = [["proposed", "Needs your confirmation", "warning"], ["confirmed", "Confirmed", "neutral"], ["dismissed", "Dismissed", "neutral"]];
   return (
     <div className="flex flex-col gap-8">
-      <Section
-        eyebrow="Working style"
-        title="Working guidance"
-        actions={<Button variant="outline" size="sm" disabled={!target} onClick={() => setEditor({ value: { workspace_id: target } })}><Plus /> Add guidance</Button>}
-      >
-        {prefs.length === 0 ? <EmptyBlock icon={Brain} title="No guidance yet" description="Add guidance for a recurring situation, or correct an agent decision to suggest a rule." /> : null}
-      </Section>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[13.5px] text-muted-foreground">{prefs.length === 0 ? "No guidance yet. Add some for a recurring situation, or correct a decision below." : "Guidance shapes choices within the permissions you already gave."}</p>
+        <Button variant="ghost" size="sm" disabled={!target} onClick={() => setEditor({ value: { workspace_id: target } })}><Plus /> Add guidance</Button>
+      </div>
       {sections.map(([state, title]) => {
         const items = group(state);
         if (!items.length) return null;
         return (
-          <Section key={state} eyebrow={`${items.length}`} title={title}>
-            <Panel><div className="divide-y divide-border/70">{items.map((p) => <PreferenceRow key={str(p.id)} snapshot={snapshot} item={p} onEdit={() => setEditor({ value: p })} />)}</div></Panel>
+          <Section key={state} title={title} count={items.length} collapsible defaultOpen={state !== "dismissed"}>
+            <Panel>{items.map((p) => <PreferenceRow key={str(p.id)} snapshot={snapshot} item={p} onEdit={() => setEditor({ value: p })} />)}</Panel>
           </Section>
         );
       })}
       {records.length ? (
-        <Section eyebrow={`${records.length} most recent`} title="Recent decisions">
-          <Panel><div className="divide-y divide-border/70">{records.map((r) => <DecisionCard key={str(r.id)} record={r} />)}</div></Panel>
+        <Section title="Recent decisions" count={records.length}>
+          <Panel>{records.map((r) => <DecisionCard key={str(r.id)} record={r} />)}</Panel>
         </Section>
       ) : null}
       <PreferenceEditor draft={editor} workspaceId={target} onClose={() => setEditor(null)} />
@@ -400,28 +445,25 @@ function MemoryBody({ snapshot }: { snapshot: Json }) {
           </TabsList>
           <div className="flex items-center gap-2">
             <ScopePicker snapshot={snapshot} label="Show memory for" />
-            {tab === "memories" ? <Button onClick={() => setDraft({ value: {} })}><Plus /> Add memory</Button> : null}
+            {tab === "memories" ? <Button size="sm" onClick={() => setDraft({ value: {} })}><Plus /> Add memory</Button> : null}
           </div>
         </div>
         <TabsPanel value="memories" className="flex flex-col gap-8 pt-6">
-          <MemoryOptions snapshot={snapshot} />
           {proposals.length ? <Proposals snapshot={snapshot} proposals={proposals} /> : null}
-          <Section eyebrow={memories.length ? `${memories.length} saved` : undefined} title="Remembered">
-            {memories.length === 0 ? (
-              <EmptyBlock icon={Brain} title="Nothing yet" description="Tell Neko “remember that…” in Home, or add one here.">
-                <Button variant="outline" onClick={() => setDraft({ value: {} })}><Plus /> Add memory</Button>
-              </EmptyBlock>
-            ) : (
-              scopes.map(([name, list]) => (
-                <div key={name} className="flex flex-col gap-2">
-                  <span className="text-[12.5px] font-medium text-muted-foreground">{name} · {list.length}</span>
-                  <Panel><div className="divide-y divide-border/70">
-                    {list.map((m) => <MemoryRow key={str(m.id)} snapshot={snapshot} entry={m} kindLabel={KINDS.find((k) => k.value === m.kind)?.label ?? str(m.kind)} onEdit={() => setDraft({ value: m })} />)}
-                  </div></Panel>
-                </div>
-              ))
-            )}
-          </Section>
+          {memories.length === 0 ? (
+            <EmptyBlock icon={Brain} title="Nothing remembered yet" description="Tell Neko “remember that…” in Home, or add one here. Forgetting is permanent.">
+              <Button variant="outline" onClick={() => setDraft({ value: {} })}><Plus /> Add memory</Button>
+            </EmptyBlock>
+          ) : (
+            scopes.map(([name, list]) => (
+              <Section key={name} title={name} count={list.length} collapsible>
+                <Panel>
+                  {list.map((m) => <MemoryRow key={str(m.id)} snapshot={snapshot} entry={m} kindLabel={KINDS.find((k) => k.value === m.kind)?.label ?? str(m.kind)} onEdit={() => setDraft({ value: m })} />)}
+                </Panel>
+              </Section>
+            ))
+          )}
+          <MemoryOptions snapshot={snapshot} />
         </TabsPanel>
         <TabsPanel value="style" className="pt-6"><WorkingStyle snapshot={snapshot} scope={scope} profileId={profileId} /></TabsPanel>
       </Tabs>
@@ -433,10 +475,7 @@ function MemoryBody({ snapshot }: { snapshot: Json }) {
 export default function Memory() {
   useSetupCommands();
   return (
-    <SetupPage
-      eyebrow="Knowledge & tools"
-      title={<>Memory</>}
-    >
+    <SetupPage title={<>Memory</>}>
       <Gate>{(snapshot) => <MemoryBody snapshot={snapshot} />}</Gate>
     </SetupPage>
   );
