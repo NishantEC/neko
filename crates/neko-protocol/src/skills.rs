@@ -42,6 +42,22 @@ pub struct SkillProposal {
     /// Explicit user review of the linked audit, pinned to these instructions.
     #[serde(default)]
     pub audit_reviewed_hash: Option<String>,
+    /// Set when the proposal improves a skill that already exists: `body` is
+    /// then the diff shown for review, and accepting rewrites that file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch: Option<SkillPatch>,
+}
+
+/// A proposed improvement to one existing SKILL.md.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillPatch {
+    /// The canonical SKILL.md path being improved.
+    pub path: String,
+    /// The content the diff was made against; accepting refuses if the file
+    /// no longer has it.
+    pub base_hash: String,
+    /// The complete improved file.
+    pub revised: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

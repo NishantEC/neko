@@ -10,6 +10,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[path = "skills/lessons.rs"]
+mod lessons;
+pub use lessons::{catalog_section, learning_catalog, lesson_prompt, propose_lesson, read_lesson, unified_diff, TicketLesson};
+
 const SETTING: &str = "neko_skills_v1";
 pub const MAX_SKILL_BYTES: usize = 64 * 1024;
 pub const MAX_PROMPT_BYTES: usize = 32 * 1024;
@@ -146,7 +150,7 @@ pub fn propose(
     state.proposals.push(neko_protocol::skills::SkillProposal {
         id: crate::workbench::new_id(), workspace_id: workspace.into(), name: name.chars().take(160).collect(), body: body.into(), content_hash: hash(body), source: source.into(), audit_url,
         audit_status: "Not audited by Neko. Review the exact instructions and source; linked third-party audit results are not verified here.".into(),
-        audit_reviewed_hash: None,
+        audit_reviewed_hash: None, patch: None,
     });
     save(db, &state)
 }
@@ -249,7 +253,14 @@ fn decide_with_hook(
         {
             return Err("Open the linked audit, review its published results, then explicitly confirm that review before installing".into());
         }
-        install_exact(data, &proposal.id, &proposal.body, &mut hook)?;
+        match proposal.patch.clone() {
+            // An improvement rewrites the skill it was made from.
+            Some(patch) => {
+                let proposal = proposal.clone();
+                lessons::apply_patch(&mut state, &proposal, &patch)?;
+            }
+            None => install_exact(data, &proposal.id, &proposal.body, &mut hook)?,
+        }
     }
     state.proposals.retain(|p| p.id != id);
     hook(InstallStep::Save)?;

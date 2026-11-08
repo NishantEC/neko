@@ -189,7 +189,7 @@ pub(super) fn commit_ticket_skill(
     db: &Arc<Mutex<Db>>,
     task: &Task,
     job: &learning::Job,
-    body: Option<&str>,
+    lesson: Option<&neko_core::skills::TicketLesson>,
 ) -> Result<(), String> {
     let db = db.lock().map_err(|_| "Learning storage unavailable")?;
     let snapshot = store::load(&db)?;
@@ -197,15 +197,8 @@ pub(super) fn commit_ticket_skill(
         return Err("Skill learning source or attempt changed; no proposal saved".into());
     }
     db.atomic(|| {
-        if let Some(body) = body {
-            neko_core::skills::propose(
-                &db,
-                &task.workspace_id,
-                &format!("Learning from {}", task.title),
-                body,
-                &format!("Completed ticket {}", task.id),
-                None,
-            )?;
+        if let Some(lesson) = lesson {
+            neko_core::skills::propose_lesson(&db, &task.workspace_id, lesson, &format!("Completed ticket {}", task.id))?;
         }
         learning::finish_skill(&db, job)
     })
@@ -357,7 +350,7 @@ mod tests {
         };
         assert!(!recovered.needs_memory());
         let result = controller.finish_followup(&recovered, Some(&authority), Ok("must never be parsed again".into()), |db, task, current| {
-            commit_ticket_skill(db, task, current, Some("---\nname: recovered\ndescription: Useful bounded procedure\n---\nInspect the evidence."))
+            commit_ticket_skill(db, task, current, Some(&neko_core::skills::TicketLesson::New { name: "recovered".into(), body: "---\nname: recovered\ndescription: Useful bounded procedure\n---\nInspect the evidence.".into() }))
         });
         assert!(result.unwrap_err().contains("Invalid memory extraction"));
         let state = controller.command(Command::Snapshot).unwrap();
