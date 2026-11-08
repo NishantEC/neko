@@ -55,7 +55,7 @@ function FenceArtifact({ viewer, id, version, fallback }: { viewer: Viewer; id: 
   return (
     <div data-slot="reply-fence" data-viewer={viewer.id} data-artifact={id} className="not-prose my-2">
       <WhileOnScreen>
-        <ViewerSlot viewer={viewer} resetKey={`${id}:${n}`} props={{ artifact, version: n, kind, url: artifactUrl(id, n), theme, inline: true }} />
+        <ViewerSlot viewer={viewer} place="reply" resetKey={`${id}:${n}`} props={{ artifact, version: n, kind, url: artifactUrl(id, n), theme, inline: true }} />
       </WhileOnScreen>
     </div>
   );
@@ -66,7 +66,7 @@ function FenceText({ viewer, code, language }: { viewer: Viewer; code: string; l
   return (
     <div data-slot="reply-fence" data-viewer={viewer.id} data-language={language} className="not-prose my-2">
       <WhileOnScreen>
-        <ViewerSlot viewer={viewer} resetKey={`${language}:${code.length}`} props={{ artifact: null, version: 0, kind: language, url: null, text: code, theme, inline: true }} />
+        <ViewerSlot viewer={viewer} place="reply" resetKey={`${language}:${code.length}`} props={{ artifact: null, version: 0, kind: language, url: null, text: code, theme, inline: true }} />
       </WhileOnScreen>
     </div>
   );

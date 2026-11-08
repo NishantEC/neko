@@ -13,7 +13,7 @@
 // plugin also declares its viewers in manifest.json, so the model is told
 // about them (crates/neko-core/src/viewers.rs); what it registers here is
 // what draws them.
-import { lazy, useSyncExternalStore, type ComponentType } from "react";
+import { createContext, lazy, useSyncExternalStore, type ComponentType } from "react";
 import type { Artifact } from "@/canvas/artifacts";
 import type { getThemeState } from "@/theme";
 
@@ -21,6 +21,10 @@ import type { getThemeState } from "@/theme";
 export interface ElementPick {
   selector: string;
   text: string;
+  /** The element's `data-neko-id` (the daemon stamps one on every element without an id) or its own id. */
+  id?: string;
+  /** Its opening tag without the stamp (`<h1 class="title">`), to find it in the file. */
+  hint?: string;
 }
 
 /** What every viewer is given. */
@@ -44,6 +48,12 @@ export interface ViewerProps {
   onCancel?: () => void;
   /** Drawn inside a reply rather than on the canvas: keep it compact. */
   inline?: boolean;
+  /**
+   * Tells the agent that made the artifact what went wrong while showing it
+   * (a file that does not parse, a missing part): `Artifact { id }` lists it
+   * under the version's problems. `ViewerProblem` calls it for you.
+   */
+  onProblem?: (message: string) => void;
 }
 
 export interface ViewerSpec {
@@ -182,10 +192,15 @@ export function fenceFor(language: string): Fence | null {
 export const listViewers = () => viewers;
 export const listFences = () => fences;
 
-const subscribe = (l: () => void) => {
+/** How a viewer drawing a saved artifact reports a problem (set by `ViewerSlot`; null for a fence's own text). */
+export const ViewerReport = createContext<((message: string) => void) | null>(null);
+
+/** Calls `l` whenever a viewer or fence is added or taken back. */
+export const subscribeViewers = (l: () => void) => {
   listeners.add(l);
-  return () => listeners.delete(l);
+  return () => { listeners.delete(l); };
 };
+const subscribe = subscribeViewers;
 
 /** Re-renders when a viewer or fence is added or taken back (a plugin loading). */
 export function useViewerRegistry(): number {

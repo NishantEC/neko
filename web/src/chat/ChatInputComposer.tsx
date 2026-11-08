@@ -44,8 +44,12 @@ interface FoundFile { path: string; name: string; location: string }
 export interface ComposerHandle {
   set(text: string): void;
   focus(): void;
-  /** `name` is what the chip shows; `reference` is the text the message carries. */
-  reference(name: string, reference: string): void;
+  /**
+   * `name` is what the chip shows; `reference` is the text the message
+   * carries; `closing` ends the message once, however many chips carry it
+   * (a canvas comment's scope line).
+   */
+  reference(name: string, reference: string, closing?: string): void;
 }
 
 /** The profile Home speaks to for a workspace (TodayView.scope). */
@@ -116,8 +120,8 @@ export function NekoComposer({
       focus: () => area.current?.focus(),
       // A chip whose text goes into the message (`submission` appends it), so
       // the person types the comment and the agent reads what it is about.
-      reference: (name, reference) => {
-        addDraftAttachment(scope, { id: crypto.randomUUID(), name, type: "text/plain", isImage: false, status: "ready", reference, label: "Canvas" });
+      reference: (name, reference, closing) => {
+        addDraftAttachment(scope, { id: crypto.randomUUID(), name, type: "text/plain", isImage: false, status: "ready", reference, label: "Canvas", closing });
         area.current?.focus();
       },
     };

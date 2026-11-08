@@ -7,13 +7,15 @@
 //   ArtifactsChanged { id, version, message_id }   pushed on every save
 //   ShowArtifact { id, version } / OpenTab { route }   an agent asks every page to show (obeyAgentRequests)
 //   EditArtifact { artifact_id, version, content, note }   a viewer saves the next version (editArtifact)
+//   ReportArtifactShown / ReportArtifactProblem   what drawing a version did, for the agent (reportShown, reportProblem)
+//   a data-neko-send click in an html artifact    a message from the person (sendFromArtifact)
 //
 // Which artifact the canvas shows is kept here, outside any page, so a card,
 // a menu or an artifact's own tab can open one and Home shows it beside the
 // conversation. There is no gallery page (removed 2026-11-06, owner's call):
 // an artifact lives beside the reply that made it, or in a tab of its own.
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { onEvent, request, type Json } from "@/api";
+import { accept, command, onEvent, request, type Json } from "@/api";
 import { HOME } from "@/router";
 import { toast } from "@/ui/sonner";
 
@@ -56,11 +58,21 @@ export const latestVersion = (artifact: Artifact) => artifact.versions.reduce((m
 /** The kind of one version, from its file name (versions may differ). */
 export const versionKind = (artifact: Artifact, n: number) => artifact.versions.find((v) => v.n === n)?.file.split(".").pop()?.toLowerCase() ?? artifact.kind;
 
-/** One element of one version, written into the message so the agent knows exactly what to change. */
-export function referenceText(id: string, n: number, selector: string, text: string): string {
-  const quoted = text.replace(/\s+/g, " ").trim().slice(0, 120).replace(/"/g, "'");
-  return `[artifact ${id} v${n}, element ${selector}: "${quoted}"]`;
+/**
+ * One element of one version, written into the message so the agent knows
+ * exactly what to change: its selector, the `data-neko-id` the daemon stamped
+ * (`neko_core::html_ids`), its opening tag to find it in the file, and its text.
+ */
+export function referenceText(id: string, n: number, pick: { selector: string; text: string; id?: string; hint?: string }): string {
+  const flat = (s: string, max: number) => s.replace(/\s+/g, " ").trim().slice(0, max);
+  const quoted = flat(pick.text, 120).replace(/"/g, "'");
+  const facts = [pick.id ? `data-neko-id ${flat(pick.id, 64)}` : "", pick.hint ? flat(pick.hint, 200).replace(/[[\]]/g, "") : ""].filter(Boolean);
+  return `[artifact ${id} v${n}, element ${flat(pick.selector, 300)}${facts.length ? ` (${facts.join(", ")})` : ""}: "${quoted}"]`;
 }
+
+/** Ends a message that names canvas elements (after Open Design's "Hard scope"), once however many it names. */
+export const SCOPE_NOTE =
+  "Hard scope: change only the element(s) named above, in the next version of that artifact. Leave other elements, the layout, global CSS and design tokens as they are unless this message asks otherwise; mention anything else you notice in your reply instead.";
 
 const isChange = (event: Json): event is { ArtifactsChanged: { id: string; version: number; message_id: string | null } } =>
   !!event && typeof event === "object" && "ArtifactsChanged" in event;
@@ -94,7 +106,10 @@ export function useArtifact(id: string | null) {
     const stop = onArtifactSaved((change) => { if (change.id === id) void load(); });
     return () => { live = false; stop(); };
   }, [id]);
-  return { artifact, error };
+  // The first render after `id` changes still holds the previous record (the
+  // effect resets it after): never hand that out as this one, or the panel
+  // briefly draws the old artifact at the new one's version.
+  return { artifact: artifact && artifact.id === id ? artifact : null, error };
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +134,14 @@ export function closeCanvas() {
   target = null;
   emit();
 }
+
+/** Calls `l` whenever the canvas target changes. */
+export function subscribeCanvas(l: () => void): () => void {
+  listeners.add(l);
+  return () => { listeners.delete(l); };
+}
+
+export const getCanvas = () => target;
 
 /** The route on screen (`home`, `tasks`, `artifact`…), read from the address. */
 const currentRoute = () => location.hash.replace(/^#\/?/, "").split("?")[0] || HOME;
@@ -226,4 +249,121 @@ export function useCanvas(): CanvasTarget | null {
     },
     () => target,
   );
+}
+
+// ---------------------------------------------------------------------------
+// What drawing an artifact did, for the agent that made it
+// ---------------------------------------------------------------------------
+
+/** Where a version is drawn: beside Home's chat, in its own tab, or inside a reply. */
+export type Place = "canvas" | "tab" | "reply";
+
+export interface OnScreen {
+  id: string;
+  version: number;
+  kind: string;
+  viewer: string;
+  place: Place;
+}
+
+const onScreen = new Map<symbol, OnScreen>();
+const screenListeners = new Set<() => void>();
+
+/** Records a version as drawn until the returned function is called (InspectApp lists them). */
+export function trackOnScreen(entry: OnScreen): () => void {
+  const key = Symbol(entry.id);
+  onScreen.set(key, entry);
+  screenListeners.forEach((l) => l());
+  return () => {
+    onScreen.delete(key);
+    screenListeners.forEach((l) => l());
+  };
+}
+
+export const listOnScreen = (): OnScreen[] => [...onScreen.values()];
+export function subscribeOnScreen(l: () => void): () => void {
+  screenListeners.add(l);
+  return () => { screenListeners.delete(l); };
+}
+
+const shownAt = new Map<string, number>();
+const problemsSent = new Map<string, number>();
+const PROBLEMS_PER_VERSION = 50;
+
+/** Tells the daemon a page drew this version (`ReportArtifactShown`), at most every 5 s per viewer. */
+export function reportShown(id: string, version: number, viewer: string) {
+  if (!id || !(version > 0)) return;
+  const key = `${id}:${version}:${viewer}`;
+  const now = Date.now();
+  if (now - (shownAt.get(key) ?? 0) < 5000) return;
+  shownAt.set(key, now);
+  request({ ReportArtifactShown: { id, version, viewer } }).catch(() => {});
+}
+
+export type ProblemKind = "error" | "rejection" | "console" | "viewer";
+
+/** Tells the daemon what went wrong drawing this version (`ReportArtifactProblem`); at most 50 per version from one page. */
+export function reportProblem(id: string, version: number, kind: ProblemKind, message: string, viewer?: string) {
+  if (!id || !(version > 0) || !message.trim()) return;
+  const key = `${id}:${version}`;
+  const sent = problemsSent.get(key) ?? 0;
+  if (sent >= PROBLEMS_PER_VERSION) return;
+  problemsSent.set(key, sent + 1);
+  request({ ReportArtifactProblem: { id, version, kind, message: message.slice(0, 500), viewer: viewer ?? null } }).catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// Artifacts that talk back: data-neko-send
+// ---------------------------------------------------------------------------
+
+/** The longest text one click may send. */
+export const MAX_SEND = 500;
+
+/** The line a message from an artifact ends with: the agent reads it; the chat shows it as "from <title>". */
+export const fromArtifactLine = (id: string, n: number, title: string) =>
+  `[from artifact ${id} v${n}: "${title.replace(/["\n\r\]]/g, "'").slice(0, 80)}"]`;
+const FROM = /\n?\[from artifact ([A-Za-z0-9_-]{1,64}) v(\d+): "([^"\n]*)"\]\s*$/;
+
+/** A message's own text and, when an artifact's button sent it, which artifact. */
+export function splitFromArtifact(text: string): { body: string; from: { id: string; version: number; title: string } | null } {
+  const m = FROM.exec(text);
+  if (!m) return { body: text, from: null };
+  return { body: text.slice(0, m.index).trimEnd(), from: { id: m[1], version: Number(m[2]), title: m[3] } };
+}
+
+/**
+ * What a user message shows (the chat and the queue tray): a message an
+ * artifact's `data-neko-send` button sent says which artifact in a small
+ * label, and a canvas comment's scope line (Neko's words to the agent, not
+ * the person's) becomes a label too. The agent reads the message as stored.
+ */
+export function userMessageView(text: string): { body: string; label: string | null; from: string | null } {
+  const { body, from } = splitFromArtifact(text);
+  const scoped = body.endsWith(SCOPE_NOTE);
+  const shown = scoped ? body.slice(0, -SCOPE_NOTE.length).trimEnd() : body;
+  const label = from ? `From “${from.title}”` : scoped ? "Only the picked element" : null;
+  return { body: shown, label, from: from?.id ?? null };
+}
+
+/**
+ * Sends what a `data-neko-send` element says as the person's message, in the
+ * conversation the artifact belongs to. Artifacts are saved only from Neko's
+ * own chat (Home), so that is the one; the daemon queues it behind a reply
+ * that is running, as it does a typed message.
+ */
+export async function sendFromArtifact(artifact: Artifact, n: number, text: string): Promise<boolean> {
+  const said = text.trim();
+  if (!said) return false;
+  if (said.length > MAX_SEND) {
+    toast(`“${artifact.title}” tried to send ${said.length} characters; ${MAX_SEND} at most. Nothing was sent.`);
+    return false;
+  }
+  try {
+    accept(await command("SendMessage", { text: `${said}\n${fromArtifactLine(artifact.id, n, artifact.title)}`, workspace_id: artifact.workspace_id ?? null }));
+    toast(`Sent to Neko from “${artifact.title}”`);
+    return true;
+  } catch (e) {
+    toast(`Not sent: ${e instanceof Error ? e.message : String(e)}`);
+    return false;
+  }
 }

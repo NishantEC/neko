@@ -12,6 +12,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
 import { ComposerBanner } from "@/chat/t3/ComposerBanner";
 import type { NekoUIMessage } from "@/chat/sdk/types";
 import { messageText } from "@/chat/sdk/parts";
+import { userMessageView } from "@/canvas/artifacts";
+
+/** A queued message as the person reads it: its own words, and who sent it when an artifact did. */
+const queuedText = (m: NekoUIMessage) => {
+  const view = userMessageView(messageText(m));
+  return view.label ? `${view.body} · ${view.label}` : view.body;
+};
 
 const ghostMuted = "text-muted-foreground hover:text-foreground";
 
@@ -59,8 +66,8 @@ export function QueueTray({
                 <ComposerBanner.Icon aria-hidden />
                 <ComposerBanner.Content className="text-foreground/80">
                   <Tooltip>
-                    <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>{messageText(m)}</TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-96 break-words">{messageText(m)}</TooltipContent>
+                    <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>{queuedText(m)}</TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-96 break-words">{queuedText(m)}</TooltipContent>
                   </Tooltip>
                 </ComposerBanner.Content>
                 <ComposerBanner.Actions>

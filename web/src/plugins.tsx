@@ -240,6 +240,15 @@ const subscribePlugins = (listener: () => void) => {
   return () => listeners.delete(listener);
 };
 
+/** Each listed plugin and how it loaded in this page, for InspectApp (shell/inspect.ts). */
+export function pluginReport(): { id: string; loaded: boolean; disabled: boolean; problem: string | null }[] {
+  return state.listings.map((l) => ({ id: l.id, loaded: loaded.has(l.id), disabled: !!l.disabled, problem: problemsByPlugin.get(l.id) ?? null }));
+}
+export const subscribePluginReport = (listener: () => void): (() => void) => {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+};
+
 let watchers = 0;
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -258,7 +267,7 @@ export function usePlugins(): PluginState {
 }
 
 /** A page that throws shows its error rather than taking the app down. */
-export class PluginBoundary extends Component<{ plugin: string; children: ReactNode }, { error: Json | null }> {
+export class PluginBoundary extends Component<{ plugin: string; children: ReactNode; onCrash?: (message: string) => void }, { error: Json | null }> {
   state = { error: null };
   static getDerivedStateFromError(error: unknown) {
     return { error: error instanceof Error ? error.message : String(error) };
@@ -267,6 +276,8 @@ export class PluginBoundary extends Component<{ plugin: string; children: ReactN
     // The agent that wrote the page learns it crashed (`PluginStatus`).
     const problem = `Crashed while rendering: ${error instanceof Error ? error.message : String(error)}`;
     request({ ReportPlugin: { id: this.props.plugin, version: loaded.get(this.props.plugin) ?? 0, problem, rolled_back: false } }).catch(() => {});
+    // A viewer drawing an artifact also tells the agent that made the artifact.
+    this.props.onCrash?.(`The "${this.props.plugin}" plugin's viewer crashed: ${error instanceof Error ? error.message : String(error)}`);
   }
   render() {
     if (this.state.error) {

@@ -12,7 +12,7 @@ import { Suggestion, Suggestions } from "@/chat/suggestion";
 import { NekoComposer, type ComposerHandle } from "@/chat/ChatInputComposer";
 import { Inspector } from "@/shell/inspector";
 import { ArtifactPanel } from "@/canvas/ArtifactPanel";
-import { closeCanvas, openCanvas, referenceText, useArtifact, useCanvas } from "@/canvas/artifacts";
+import { closeCanvas, openCanvas, referenceText, SCOPE_NOTE, useArtifact, useCanvas } from "@/canvas/artifacts";
 import { Decisions, decisionsFromParts } from "@/chat/decisions";
 import { NekoTurn, UserTurn } from "@/chat/turns";
 import { chatSignature, useNekoChat } from "@/chat/sdk/chats";
@@ -102,7 +102,7 @@ export default function Home() {
             onVersion={(n) => openCanvas(canvas.id, n)}
             onComment={(artifact, n, pick) => {
               const what = pick.text ? `“${pick.text.slice(0, 40)}${pick.text.length > 40 ? "…" : ""}”` : pick.selector;
-              draft.current?.reference(`${artifact.title} v${n} · ${what}`, referenceText(artifact.id, n, pick.selector, pick.text));
+              draft.current?.reference(`${artifact.title} v${n} · ${what}`, referenceText(artifact.id, n, pick), SCOPE_NOTE);
             }}
           />
         ) : null}

@@ -164,6 +164,7 @@ export const getPages = () => snapshot;
 export const getUserEntries = () => entries;
 export const pageById = (id: string) => snapshot.find((p) => p.id === id);
 
+export const subscribePages = (listener: () => void): (() => void) => subscribe(listener);
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
   return () => listeners.delete(listener);

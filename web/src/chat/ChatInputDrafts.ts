@@ -17,6 +17,8 @@ export interface DraftAttachment {
   error?: string;
   /** Shown instead of "File" (a canvas comment's reference to an element). */
   label?: string;
+  /** Ends the message with this line, once however many attachments carry it (a canvas comment's scope). */
+  closing?: string;
 }
 
 export type ComposerMode = "ask" | "plan";
@@ -63,7 +65,9 @@ export interface Submission {
 
 export function submission(scope: string): Submission {
   const d = getDraft(scope);
-  const parts = [d.text.trim(), ...d.attachments.filter((a) => a.status === "ready" && a.reference).map((a) => a.reference as string)];
+  const ready = d.attachments.filter((a) => a.status === "ready" && a.reference);
+  const closings = [...new Set(ready.map((a) => a.closing).filter((c): c is string => !!c))];
+  const parts = [d.text.trim(), ...ready.map((a) => a.reference as string), ...closings];
   return { scope, text: parts.filter(Boolean).join("\n"), revision: d.revision };
 }
 

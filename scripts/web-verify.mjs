@@ -169,8 +169,13 @@ try {
   context = await browser.newContext({ viewport: { width: Number(process.env.NEKO_WEB_WIDTH ?? 1440), height: 900 }, deviceScaleFactor: 1, colorScheme: "dark" });
   const page = await context.newPage();
   const problems = [];
-  page.on("console", (m) => { if (m.type() === "error") problems.push(`console: ${JSON.stringify(m.text())} @${m.location().url}`); });
-  page.on("pageerror", (e) => problems.push(`pageerror: ${e.message}`));
+  // Errors an area causes on purpose (an artifact made to throw): `expectProblem("marker")`
+  // keeps any console error or page error containing the marker out of the count.
+  const expected = [];
+  const expectProblem = (marker) => expected.push(marker);
+  const unexpected = (text) => !expected.some((marker) => text.includes(marker));
+  page.on("console", (m) => { if (m.type() === "error" && unexpected(m.text())) problems.push(`console: ${JSON.stringify(m.text())} @${m.location().url}`); });
+  page.on("pageerror", (e) => { if (unexpected(String(e.message))) problems.push(`pageerror: ${e.message}`); });
   page.on("requestfailed", (r) => { if (!r.url().includes("/api/events") && !r.url().includes("/api/request")) problems.push(`request failed: ${r.url()} (${r.failure()?.errorText ?? "?"})`); });
   page.on("response", (r) => { if (r.status() >= 400) problems.push(`HTTP ${r.status()}: ${r.url()}`); });
 
@@ -376,7 +381,7 @@ try {
   check(true, "editing the plugin file reloads it live");
 
   // --- per-area checks: scripts/verify/*.mjs, one file per area -------------------------------
-  // Each file default-exports `async ({ page, shot, a11y, check, sleep, PORT, DATA, OUT })`
+  // Each file default-exports `async ({ page, shot, a11y, check, sleep, expectProblem, PORT, DATA, OUT })`
   // and opens its own pages. Optional filter: NEKO_WEB_ONLY=tasks,prs runs matching files only.
   const only = (process.env.NEKO_WEB_ONLY ?? "").split(",").filter(Boolean);
   const dir = path.join(repo, "scripts/verify");
@@ -385,7 +390,7 @@ try {
     console.log(`\n== ${file}`);
     const area = (await import(pathToFileURL(path.join(dir, file)).href)).default;
     try {
-      await area({ page, shot, a11y, check, sleep, PORT, DATA, OUT });
+      await area({ page, shot, a11y, check, sleep, expectProblem, PORT, DATA, OUT });
     } catch (error) {
       // An area that throws stops the run; say what the page logged first.
       if (problems.length) console.error(`console/network problems so far:\n  ${problems.join("\n  ")}`);

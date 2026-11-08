@@ -281,6 +281,7 @@ export const goBack = () => { if (canGoBack()) history.back(); };
 export const goForward = () => { if (canGoForward()) history.forward(); };
 
 export const getTabs = () => state;
+export const subscribeTabs = (listener: () => void): (() => void) => subscribe(listener);
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
   return () => listeners.delete(listener);

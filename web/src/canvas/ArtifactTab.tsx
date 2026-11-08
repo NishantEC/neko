@@ -24,7 +24,7 @@ export function ArtifactTab() {
         </Button>
       </header>
       <div className="min-h-0 flex-1 border-t border-border/60">
-        <ArtifactPanel target={{ id, version }} onVersion={(n) => setHashParams("artifact", { id, v: String(n) })} />
+        <ArtifactPanel target={{ id, version }} place="tab" onVersion={(n) => setHashParams("artifact", { id, v: String(n) })} />
       </div>
     </div>
   );

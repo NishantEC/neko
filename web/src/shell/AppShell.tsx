@@ -30,6 +30,7 @@ import { TAB_PANEL_ID, TabStrip, tabElementId } from "@/shell/TabStrip";
 import { Launcher } from "@/shell/Launcher";
 import { ArtifactTab } from "@/canvas/ArtifactTab";
 import { obeyAgentRequests } from "@/canvas/artifacts";
+import { startAppReports } from "@/shell/inspect";
 import { searchPalette } from "@/shell/CommandPalette";
 import { useAttention } from "@/shell/attention";
 import { AppSidebar, MobileTopBar } from "@/shell/AppSidebar";
@@ -171,6 +172,8 @@ export function AppShell() {
   useGlobalShortcuts();
   // An agent's ShowArtifact / OpenTab: every open page opens the canvas or the tab.
   useEffect(obeyAgentRequests, []);
+  // What this window shows, for InspectApp (shell/inspect.ts).
+  useEffect(startAppReports, []);
   return (
     <TooltipProvider>
       <ContextMenuHost>

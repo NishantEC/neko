@@ -17,6 +17,7 @@ import { ReplyAnswered, ReplyData } from "@/chat/reply-views";
 import { ACTION_TOOL, isToolPart, type NekoPart, type NekoUIMessage, type ToolPart } from "@/chat/sdk/types";
 import { messageText, replyText, splitTurn } from "@/chat/sdk/parts";
 import { ArtifactCard, artifactCards } from "@/canvas/ArtifactCard";
+import { userMessageView } from "@/canvas/artifacts";
 import { TurnHandoffs } from "@/chat/crew";
 import { useMessageMenu } from "@/chat/message-menu";
 
@@ -69,9 +70,10 @@ export function SettledActions({ parts }: { parts: ToolPart[] }) {
 export function UserTurn({ message }: { message: NekoUIMessage }) {
   const text = messageText(message);
   const menu = useMessageMenu(message, text, { own: true });
+  const view = userMessageView(text);
   return (
-    <div {...menu} data-slot="user-turn" className="pt-4 first:pt-6">
-      <UserTimelineRow text={text} createdAt={message.metadata?.atMs ?? 0} failed={message.metadata?.state === "failed"} />
+    <div {...menu} data-slot="user-turn" data-from-artifact={view.from ?? undefined} className="pt-4 first:pt-6">
+      <UserTimelineRow text={view.body} label={view.label} createdAt={message.metadata?.atMs ?? 0} failed={message.metadata?.state === "failed"} />
     </div>
   );
 }

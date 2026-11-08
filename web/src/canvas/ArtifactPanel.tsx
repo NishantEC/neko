@@ -24,10 +24,10 @@ import { cn } from "@/ui/lib/utils";
 import { Pick } from "@/setup/kit";
 import { relativeTime, useNow } from "@/setup/lib";
 import {
-  artifactUrl, canComment, downloadUrl, editArtifact, latestVersion, useArtifact, versionKind,
-  type Artifact, type CanvasTarget,
+  artifactUrl, canComment, downloadUrl, editArtifact, latestVersion, reportProblem, reportShown, trackOnScreen, useArtifact, versionKind,
+  type Artifact, type CanvasTarget, type OnScreen, type Place,
 } from "@/canvas/artifacts";
-import { useViewerRegistry, viewerFor, type ElementPick, type Viewer, type ViewerProps } from "@/canvas/viewers";
+import { useViewerRegistry, viewerFor, ViewerReport, type ElementPick, type Viewer, type ViewerProps } from "@/canvas/viewers";
 import { artifactMenu } from "@/canvas/ArtifactCard";
 import { useContextMenu } from "@/shell/context-menu";
 import { PluginBoundary } from "@/plugins";
@@ -42,27 +42,54 @@ export function useViewerTheme(): ViewerProps["theme"] {
 }
 
 /** A built-in viewer that throws says so in place; the rest of the panel carries on. */
-class ViewerBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+class ViewerBoundary extends Component<{ children: ReactNode; onCrash?: (message: string) => void }, { error: string | null }> {
   state = { error: null as string | null };
   static getDerivedStateFromError(error: unknown) {
     return { error: error instanceof Error ? error.message : String(error) };
+  }
+  componentDidCatch(error: unknown) {
+    this.props.onCrash?.(`The viewer crashed: ${error instanceof Error ? error.message : String(error)}`);
   }
   render() {
     return this.state.error ? <p role="alert" className="p-4 text-sm text-destructive">This viewer stopped: {this.state.error}</p> : this.props.children;
   }
 }
 
-/** A viewer in its error boundary (a plugin's crash is reported to `PluginStatus`), loaded lazily. */
-export function ViewerSlot({ viewer, props, resetKey }: { viewer: Viewer; props: ViewerProps; resetKey: string }) {
+/** Mounted once the viewer itself is (after its chunk loaded): the version counts as drawn while it stays. */
+function Drawn({ entry }: { entry: OnScreen }) {
+  const { id, version, kind, viewer, place } = entry;
+  useEffect(() => {
+    reportShown(id, version, viewer);
+    return trackOnScreen({ id, version, kind, viewer, place });
+  }, [id, version, kind, viewer, place]);
+  return null;
+}
+
+/**
+ * A viewer in its error boundary (a plugin's crash is reported to
+ * `PluginStatus`), loaded lazily. For a saved artifact, what happens is
+ * reported to the daemon for the agent that made it: that it was drawn,
+ * and any problem the viewer or a crash ran into (`Artifact { id }` status).
+ */
+export function ViewerSlot({ viewer, props, resetKey, place }: { viewer: Viewer; props: ViewerProps; resetKey: string; place: Place }) {
   const View = viewer.component;
+  const id = props.artifact?.id ?? null;
+  const version = props.version;
+  const problem = useMemo(
+    () => (id && version > 0 ? (message: string) => reportProblem(id, version, "viewer", message, viewer.id) : undefined),
+    [id, version, viewer.id],
+  );
   const body = (
-    <Suspense fallback={<p className="p-4 text-sm text-muted-foreground" aria-busy="true">Opening the {viewer.title.toLowerCase()}…</p>}>
-      <View {...props} />
-    </Suspense>
+    <ViewerReport.Provider value={problem ?? null}>
+      <Suspense fallback={<p className="p-4 text-sm text-muted-foreground" aria-busy="true">Opening the {viewer.title.toLowerCase()}…</p>}>
+        <View {...props} onProblem={problem} />
+        {id && version > 0 ? <Drawn entry={{ id, version, kind: props.kind, viewer: viewer.id, place }} /> : null}
+      </Suspense>
+    </ViewerReport.Provider>
   );
   return viewer.plugin
-    ? <PluginBoundary key={resetKey} plugin={viewer.plugin}>{body}</PluginBoundary>
-    : <ViewerBoundary key={resetKey}>{body}</ViewerBoundary>;
+    ? <PluginBoundary key={resetKey} plugin={viewer.plugin} onCrash={problem}>{body}</PluginBoundary>
+    : <ViewerBoundary key={resetKey} onCrash={problem}>{body}</ViewerBoundary>;
 }
 
 /**
@@ -71,10 +98,11 @@ export function ViewerSlot({ viewer, props, resetKey }: { viewer: Viewer; props:
  * on; `onEdited` hears of a version a viewer saved.
  */
 export function ArtifactFrame({
-  artifact, n, commenting = false, onPick, onCancel, onEdited, className,
+  artifact, n, place = "canvas", commenting = false, onPick, onCancel, onEdited, className,
 }: {
   artifact: Artifact;
   n: number;
+  place?: Place;
   commenting?: boolean;
   onPick?: (pick: ElementPick) => void;
   onCancel?: () => void;
@@ -108,6 +136,7 @@ export function ArtifactFrame({
       <ViewerSlot
         viewer={viewer}
         resetKey={`${artifact.id}:${n}:${viewer.id}`}
+        place={place}
         props={{ artifact, version: n, kind, url: artifactUrl(artifact.id, n), theme, onEdit, commenting, onPick, onCancel }}
       />
     </div>
@@ -119,9 +148,11 @@ export function ArtifactFrame({
  * comment mode; without it there is no Comment button.
  */
 export function ArtifactPanel({
-  target, onVersion, onComment,
+  target, place = "canvas", onVersion, onComment,
 }: {
   target: CanvasTarget;
+  /** Where it is drawn, for InspectApp: beside Home's chat or in the artifact's own tab. */
+  place?: Place;
   onVersion?: (n: number) => void;
   onComment?: (artifact: Artifact, n: number, pick: ElementPick) => void;
 }) {
@@ -181,6 +212,7 @@ export function ArtifactPanel({
         <ArtifactFrame
           artifact={artifact}
           n={n}
+          place={place}
           commenting={commenting}
           onPick={(pick) => {
             setCommenting(false);
