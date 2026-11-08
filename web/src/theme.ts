@@ -245,7 +245,21 @@ const asChoice = (a: any): Choice | null => (a && isMode(a.mode) && isId(a.light
 // GetAppearance reply, or the AppearanceChanged echo of an earlier save, would
 // otherwise put the previous theme back for a moment (or for good, if it lands last).
 let localEdits = 0;
-let savesInFlight = 0;
+/** Choices this page saved whose AppearanceChanged echo has not come back yet, oldest first. */
+const echoes: string[] = [];
+const keyOf = (c: Choice) => `${c.mode}|${c.light}|${c.dark}`;
+function sent() {
+  localEdits += 1;
+  echoes.push(keyOf(choice));
+  if (echoes.length > 20) echoes.shift();
+}
+/** True for the echo of one of this page's own saves (that one and any older are forgotten). */
+function ownEcho(next: Choice | null): boolean {
+  const at = next ? echoes.indexOf(keyOf(next)) : -1;
+  if (at < 0) return false;
+  echoes.splice(0, at + 1);
+  return true;
+}
 
 function adopt(next: Choice | null) {
   if (!next || (next.mode === choice.mode && next.light === choice.light && next.dark === choice.dark)) return;
@@ -280,12 +294,9 @@ async function loadAppearance() {
 async function save(next: Partial<Choice>) {
   try {
     const body = { mode: next.mode ?? null, light: next.light ?? null, dark: next.dark ?? null };
-    savesInFlight += 1;
     await request({ SetAppearance: body });
   } catch {
     /* kept locally; the next change tries again */
-  } finally {
-    savesInFlight = Math.max(0, savesInFlight - 1);
   }
 }
 
@@ -344,7 +355,8 @@ export function initTheme() {
   });
   onEvent((event) => {
     const changed = (event as any)?.AppearanceChanged;
-    if (changed && savesInFlight === 0) adopt(asChoice(changed));
+    // Another page's change is adopted; this page's own echo is not (a late one would undo a newer pick).
+    if (changed && !ownEcho(asChoice(changed))) adopt(asChoice(changed));
   });
   void loadAppearance();
   void refreshThemes();
@@ -352,8 +364,8 @@ export function initTheme() {
 }
 
 export function setMode(mode: Mode) {
-  localEdits += 1;
   choice = { ...choice, mode };
+  sent();
   persist();
   apply();
   void save({ mode });
@@ -361,8 +373,8 @@ export function setMode(mode: Mode) {
 
 /** Picks the theme for light or for dark. */
 export function setSlot(slot: Appearance, id: string) {
-  localEdits += 1;
   choice = { ...choice, [slot]: id };
+  sent();
   persist();
   apply();
   void save({ [slot]: id });
