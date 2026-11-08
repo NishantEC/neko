@@ -350,7 +350,7 @@ function UsageBody({ snapshot }: { snapshot: Json }) {
 export default function Usage() {
   useSetupCommands();
   return (
-    <SetupPage title={<>Usage &amp; machine</>} width="max-w-[980px]">
+    <SetupPage title={<>Usage &amp; machine</>}>
       <Gate>{(snapshot) => <UsageBody snapshot={snapshot} />}</Gate>
     </SetupPage>
   );

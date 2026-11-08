@@ -568,16 +568,14 @@ function AccessNote({ status }: { status: Status | undefined }) {
   }
   if (status.access === "NotAsked" && !status.last_sync_ms) {
     return (
-      <Alert className="border-0 bg-foreground/[0.03]">
-        <CalendarIcon aria-hidden />
-        <AlertTitle>Your meetings are not here yet</AlertTitle>
-        <AlertDescription>
-          <p>
-            Neko reads macOS Calendar, which already includes the Google, iCloud and Exchange accounts added in System Settings → Internet Accounts.
-            Open the Neko app and choose Allow when macOS asks about Calendar. If you chose Don’t Allow before, allow it in System Settings → Privacy & Security → Calendars.
-          </p>
-        </AlertDescription>
-      </Alert>
+      <p
+        data-slot="calendar-not-asked"
+        title="Neko reads macOS Calendar, which already includes the Google, iCloud and Exchange accounts added in System Settings → Internet Accounts. If you chose Don’t Allow before, allow it in System Settings → Privacy & Security → Calendars."
+        className="flex items-center gap-2 text-[13px] text-muted-foreground"
+      >
+        <CalendarIcon aria-hidden size={14} className="shrink-0" />
+        <span><span className="text-foreground">Your meetings are not here yet.</span> Open the Neko app and choose Allow when macOS asks about Calendar.</span>
+      </p>
     );
   }
   return null;

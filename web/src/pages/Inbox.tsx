@@ -16,7 +16,7 @@ import { ArrowSquareOut, CaretDown, Check, Copy, Link as LinkIcon, Pause, Pencil
 import { GlyphButton, ProgressRing, StatusGlyph } from "@/ui/status-glyph";
 import { itemProgress, routineStatus } from "@/setup/routine-status";
 import { copyText, useContextMenu } from "@/shell/context-menu";
-import { EmptyBlock, ErrorNote, FormField, LoadingRows, Panel, RowAction, RowActions, Section, SetupPage, Toggle } from "@/setup/kit";
+import { EmptyBlock, ErrorNote, FormField, GROUP_HEADING, LoadingRows, Panel, RowAction, RowActions, Section, SetupPage, Toggle } from "@/setup/kit";
 import { fillOwner, relativeTime, useNow } from "@/setup/lib";
 import { cn } from "@/ui/lib/utils";
 
@@ -400,7 +400,7 @@ function InboxBody() {
               {scope.problems?.length ? <SetupNotes problems={scope.problems} /> : null}
               {views.length ? (
                 <div className="mt-3 flex flex-col">
-                  <p className="px-3 pb-1 text-[12px] text-muted-foreground/80">What Neko did</p>
+                  <p className={cn(GROUP_HEADING, "px-3 pb-1")}>What Neko did</p>
                   {did.length === 0 ? <p className="px-3 py-1 text-[13px] text-muted-foreground">Nothing yet.</p> : (
                     <ul>
                       <ShortList

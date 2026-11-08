@@ -110,8 +110,8 @@ function TabItem({
       onDragLeave={() => setOver(false)}
       onDrop={onDrop}
       className={cn(
-        // Content-fitting (DESIGN.md §8): as wide as its title, never wider than 200px, shrinking to 72px before the strip scrolls.
-        "group/tab relative flex h-8 min-w-[72px] max-w-[200px] items-center rounded-[10px] text-[13px] transition-colors duration-150",
+        // Content-fitting (DESIGN.md §8): as wide as its title, never wider than 200px, shrinking to 84px before the strip scrolls.
+        "group/tab relative flex h-8 min-w-[84px] max-w-[200px] items-center rounded-[10px] text-[13px] transition-colors duration-150",
         tab.pinned || home ? "shrink-0" : "shrink",
         active ? "bg-foreground/[0.07] text-foreground" : "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground",
         over && "ring-1 ring-primary/60",
@@ -133,8 +133,8 @@ function TabItem({
         onFocus={() => onFocusIndex(index)}
         className={cn(
           "flex h-full min-w-0 flex-1 items-center gap-2 rounded-[10px] ps-2.5 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
-          // Only the active tab keeps room for its close button; others are symmetric and show it over the title's end on hover.
-          closable && active ? "pe-7" : "pe-3",
+          // One padding for every tab, so nothing shifts when a tab is chosen; the close button sits over the title's end.
+          "pe-3",
         )}
       >
         {label.glyph ? <StatusGlyph status={statusOf(label.glyph)} label="" size={13} /> : label.icon ? <label.icon aria-hidden size={14} className="shrink-0" /> : null}
@@ -149,7 +149,9 @@ function TabItem({
           onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
           className={cn(
             "absolute end-1 flex size-5 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-            active ? "opacity-100" : "bg-[color-mix(in_oklab,var(--background),var(--foreground)_4%)] opacity-0 shadow-[-6px_0_6px_color-mix(in_oklab,var(--background),var(--foreground)_4%)] group-hover/tab:opacity-100 focus-visible:opacity-100",
+            active
+              ? "bg-[color-mix(in_oklab,var(--background),var(--foreground)_7%)] opacity-0 shadow-[-6px_0_6px_color-mix(in_oklab,var(--background),var(--foreground)_7%)] group-hover/tab:opacity-100 focus-visible:opacity-100"
+              : "bg-[color-mix(in_oklab,var(--background),var(--foreground)_4%)] opacity-0 shadow-[-6px_0_6px_color-mix(in_oklab,var(--background),var(--foreground)_4%)] group-hover/tab:opacity-100 focus-visible:opacity-100",
           )}
         >
           <X size={12} weight="bold" />

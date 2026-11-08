@@ -102,14 +102,18 @@ frame with no card), `Row`, `RowActions` / `RowAction`, `GlyphButton`
    and Settings at its foot, with tooltips. Every other page is one click
    away in "More" (a labelled menu), in ⌘K and in the `+` tab. A new page
    joins "More", not the rail.
-6. **Tabs fit their title** (72–200px), with the same padding and a 2px gap;
+6. **Tabs fit their title** (84–200px), with one padding for all and a 2px gap;
    the active tab is a soft fill and medium weight, no border or underline.
    The strip has no bottom rule.
 7. **One type scale**: page title 20px semibold; group heading 12.5px medium
    muted; row title 13.5px regular; meta and secondary 12.5px muted; ids 12px
    faint tabular. Bold is for the page title only; no bold-label-plus-
    paragraph blocks inside lists.
-8. **Accessibility is not traded for calm**: hover-only actions are focusable
+8. **One column**: list and setup pages share the 880px column (the
+   `SetupPage` default), so the title and the left edge do not move from tab
+   to tab; only Tasks and the Calendar use the wide frame, and Settings keeps
+   its section rail.
+9. **Accessibility is not traded for calm**: hover-only actions are focusable
    and appear on focus; the glyph button is named for its action; every row
    action has an `aria-label` and a tooltip; collapsible groups are buttons
    with `aria-expanded`.

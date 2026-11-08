@@ -172,7 +172,13 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
     return [y("[data-slot='stage-filters']"), y("input[aria-label='Search tasks']"), y("[data-slot='segmented-control']")];
   });
   check(toolbar.every((v) => v !== null && Math.abs(v - toolbar[0]) <= 4), `stage tabs, search and the layout switch share one toolbar row (${toolbar.join(", ")})`);
-  check((await page.locator("[data-slot='nav-item']", { hasText: "Tasks" }).count()) === 1 && (await page.locator("[data-slot='nav-item']", { hasText: "Pull requests" }).count()) === 1, "Tasks and Pull requests are in the sidebar's Work group");
+  // DESIGN.md §8: Tasks is on the rail; Pull requests is one click away in its labelled "More" menu.
+  check((await page.locator("[data-slot='sidebar-daily'] [data-slot='nav-item']", { hasText: "Tasks" }).count()) === 1, "Tasks is on the rail");
+  await page.locator("[data-slot='more-pages']").click();
+  await page.locator("[data-slot='sidebar-more']").waitFor({ timeout: 5000 });
+  check((await page.locator("[data-slot='sidebar-more'] [data-slot='nav-item']", { hasText: "Pull requests" }).count()) === 1, "Pull requests is in the rail's More menu");
+  await page.keyboard.press("Escape");
+  await page.locator("[data-slot='sidebar-more']").waitFor({ state: "detached", timeout: 3000 });
   await both("work-tasks-list");
   await page.getByRole("button", { name: "Work options" }).click();
   await page.getByRole("menuitemcheckbox", { name: /Plan before working/ }).waitFor({ timeout: 3000 });

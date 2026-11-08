@@ -205,7 +205,7 @@ export default function PullRequests() {
   );
 
   return (
-    <PageContainer data-slot="prs-page" className="max-w-[1088px]">
+    <PageContainer data-slot="prs-page" className="max-w-[880px]">
       <WorkHeader
         className="px-0 pt-0 md:px-0"
         eyebrow="Work"

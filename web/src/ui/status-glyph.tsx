@@ -142,7 +142,7 @@ export function GlyphButton({ status, label, onClick, disabled, size = 14, class
 
 /** A short id beside a title (`NEK-1BB3`), faint and tabular. */
 export function IdLabel({ className, ...props }: ComponentProps<"span">) {
-  return <span data-slot="id-label" className={cn("shrink-0 text-[12px] tabular-nums text-muted-foreground/70", className)} {...props} />;
+  return <span data-slot="id-label" className={cn("shrink-0 text-[12px] tabular-nums text-muted-foreground/85", className)} {...props} />;
 }
 
 /** Work with parts: a ring filled to done/total and the count (`3/5`). Mint once every part is done. */

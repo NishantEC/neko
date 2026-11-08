@@ -138,6 +138,7 @@ function CustomisationRow({ listing, problem, entries, busy, onToggle, onReload,
         {status.tone === "error" ? <Warning aria-hidden className="size-4 shrink-0 text-destructive-foreground" /> : null}
         <h3 className="shrink-0 text-[13.5px] font-normal text-foreground" title={listing.id}>{label}</h3>
         {listing.manifest_version ? <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground/70">v{listing.manifest_version}</span> : null}
+        {listing.entry ? <span data-slot="plugin-entry" className="shrink-0 font-mono text-[11.5px] text-muted-foreground/70">{listing.entry.replace(`/plugins/${listing.id}/`, "")}</span> : null}
         <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground" title={listing.description || undefined}>{listing.description}</span>
         <span data-slot="plugin-status" className={cn("shrink-0 text-[12.5px]", TONE[status.tone])}>{status.label}</span>
         <RowActions>
@@ -234,7 +235,7 @@ export default function Customisations() {
   }
 
   return (
-    <PageContainer data-slot="plugins-page" className="flex max-w-[52rem] flex-col gap-8">
+    <PageContainer data-slot="plugins-page" className="flex max-w-[880px] flex-col gap-8">
       <>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <PageHeader

@@ -558,16 +558,32 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   await setTheme("dark");
   // Disable / enable.
   const nav = (text) => page.locator("[data-slot='nav-item']", { hasText: text });
+  // Pages off the rail are in its labelled "More" menu (DESIGN.md §8): open it to read them, close it to act on the page.
+  const more = async () => {
+    if (!(await page.locator("[data-slot='sidebar-more']").count())) await page.locator("[data-slot='more-pages']").click();
+    await page.locator("[data-slot='sidebar-more']").waitFor({ timeout: 5000 });
+  };
+  const closeMore = async () => {
+    if (await page.locator("[data-slot='sidebar-more']").count()) await page.keyboard.press("Escape");
+    await page.locator("[data-slot='sidebar-more']").waitFor({ state: "detached", timeout: 3000 });
+  };
+  await more();
   check((await nav("PR board").count()) > 0, "the plugin's page is in the sidebar while it is on");
+  await closeMore();
   await row("pr-board").getByRole("switch", { name: /Disable PR board/ }).click();
   await page.waitForFunction(() => document.querySelector("[data-slot='plugin-row'][data-plugin='pr-board']")?.getAttribute("data-status") === "off", null, { timeout: 8000 });
   check(existsSync(path.join(pluginsDir, "pr-board/.disabled")), "disabling writes a .disabled marker into the plugin's folder");
+  await more();
   await page.waitForFunction(() => ![...document.querySelectorAll("[data-slot='nav-item']")].some((e) => /PR board/.test(e.textContent)), null, { timeout: 8000 });
+  await closeMore();
   check(/Off/.test(await row("pr-board").locator("[data-slot='plugin-status']").innerText()), "a disabled plugin reads Off, and its sidebar entry is gone");
   await shot("plugins-disabled-dark");
   await row("pr-board").getByRole("switch", { name: /Enable PR board/ }).click();
   await page.waitForFunction(() => /Running/.test(document.querySelector("[data-slot='plugin-row'][data-plugin='pr-board'] [data-slot='plugin-status']")?.textContent ?? ""), null, { timeout: 10000 });
+  await more();
+  await nav("PR board").waitFor({ timeout: 5000 }).catch(() => {});
   check(!existsSync(path.join(pluginsDir, "pr-board/.disabled")) && (await nav("PR board").count()) > 0, "enabling removes the marker and the page comes back");
+  await closeMore();
   // Details in the inspector.
   await row("pr-board").getByRole("button", { name: /Details of PR board/ }).click();
   await page.locator("[data-slot='inspector']").waitFor({ timeout: 3000 });
