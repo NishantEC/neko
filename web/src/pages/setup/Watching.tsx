@@ -9,12 +9,16 @@ import { Checkbox } from "@/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/ui/dropdown-menu";
-import { ArrowsClockwise, CaretDown, CaretRight, DotsThree, Eye, Lightbulb, PencilSimple, Plus, Sparkle, Trash, WarningCircle } from "@/ui/icons";
-import { Panel } from "@/setup/kit";
+import { ArrowsClockwise, DotsThree, Eye, Lightbulb, PencilSimple, Plus, Sparkle, Trash, WarningCircle } from "@/ui/icons";
+import { Panel, RowAction, RowActions } from "@/setup/kit";
+import { GlyphButton, StatusGlyph, type StatusKind } from "@/ui/status-glyph";
+import { copyText, useContextMenu } from "@/shell/context-menu";
+import { Copy } from "@/ui/icons";
+import { cn } from "@/ui/lib/utils";
 import { navigate } from "@/router";
 import { toast } from "@/ui/sonner";
 import {
-  ConfirmDialog, EmptyBlock, ErrorNote, FormField, Gate, PanelFooter, Pick, Section, SetupPage, Status, Toggle, registerCommands,
+  ConfirmDialog, EmptyBlock, ErrorNote, FormField, Gate, Pick, Section, SetupPage, Toggle, registerCommands,
 } from "@/setup/kit";
 import { TextPromptDialog } from "@/setup/dialogs";
 import { ScopePicker, setScope, useScope } from "@/setup/scope";
@@ -25,6 +29,9 @@ import {
 } from "@/setup/lib";
 
 type Draft = { value: Json; workspace: string } | null;
+
+/** A watch's state as the one status glyph set (DESIGN.md §3). */
+const WATCH_GLYPH: Record<string, StatusKind> = { success: "inProgress", warning: "failed", neutral: "todo", error: "failed" };
 
 function reviewAccess(item: Json) {
   setScope(str(item.workspace_id));
@@ -84,28 +91,32 @@ function WatchRow({ snapshot, item, onEdit }: { snapshot: Json; item: Json; onEd
     if (a.missing.length === 0) setConfirmOn(true);
     else reviewAccess(item);
   };
+  const menu = useContextMenu(() => [
+    { label: "Check now", icon: ArrowsClockwise, disabled: !item.enabled, run: () => void a.wake() },
+    { label: "Edit…", icon: PencilSimple, run: onEdit },
+    { label: "Rename…", icon: PencilSimple, run: () => setRenaming(true) },
+    { label: item.enabled ? "Pause" : "Turn on…", run: () => toggle(!item.enabled) },
+    "separator",
+    { label: "Copy instruction", icon: Copy, run: () => void copyText(str(item.instruction), "Copied") },
+    { label: "Delete watch…", icon: Trash, run: () => setConfirmDelete(true) },
+  ]);
 
   return (
-    <div data-slot="watch" data-enabled={item.enabled ? "true" : "false"}>
-      <Collapsible open={open} onOpenChange={setOpen}>
-        <div className="flex items-start gap-3 px-6 py-4">
+    <div data-slot="watch" data-enabled={item.enabled ? "true" : "false"} {...menu}>
+      <Collapsible open={open} onOpenChange={setOpen} className={cn("group/row rounded-[10px] transition-colors hover:bg-foreground/[0.03]", open && "bg-foreground/[0.02]")}>
+        <div className="flex min-h-11 items-center gap-3 px-3 py-1.5">
+          <StatusGlyph status={WATCH_GLYPH[status.tone]} label={status.text} />
           <CollapsibleTrigger
-            render={<button type="button" aria-label={`${open ? "Hide" : "Show"} details for ${title}`} className="-m-1.5 flex min-w-0 flex-1 items-start gap-2.5 rounded-lg p-1.5 text-start outline-none transition-colors hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring" />}
+            render={<button type="button" aria-label={`${open ? "Hide" : "Show"} details for ${title}`} className="flex min-w-0 flex-1 items-baseline gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-ring" />}
           >
-            <span aria-hidden className="mt-0.5 text-muted-foreground">{open ? <CaretDown /> : <CaretRight />}</span>
-            <span className="flex min-w-0 flex-1 flex-col gap-1">
-              <span className="text-[14px] font-medium leading-snug text-foreground line-clamp-2">{title}</span>
-              {title !== str(item.instruction) ? <span className="line-clamp-1 text-[13px] text-muted-foreground">{str(item.instruction)}</span> : null}
-              <span className="flex flex-wrap items-center gap-2 pt-0.5">
-                <Status tone={status.tone}>{status.text}</Status>
-                <span className="text-xs text-muted-foreground">{workspaceName(snapshot, item.workspace_id)}</span>
-              </span>
-            </span>
+            <span className="min-w-0 truncate text-[13.5px] text-foreground" title={str(item.instruction)}>{title}</span>
+            <span className={cn("ms-auto shrink-0 text-[12.5px]", status.tone === "warning" ? "text-warning-foreground" : "text-muted-foreground")}>{status.text}</span>
+            <span className="shrink-0 text-[12.5px] text-muted-foreground/70">{workspaceName(snapshot, item.workspace_id)}</span>
           </CollapsibleTrigger>
-          <div className="flex shrink-0 items-center gap-2 pt-0.5">
-            <Toggle checked={!!item.enabled} onChange={toggle} label={`Watch ${title}`} disabled={a.busy} />
+          <RowActions>
+            <RowAction label={`Check ${title} now`} icon={ArrowsClockwise} disabled={!item.enabled || a.busy} onClick={() => void a.wake()} />
             <DropdownMenu>
-              <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${title}`} />}><DotsThree weight="bold" /></DropdownMenuTrigger>
+              <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${title}`} title="More actions" />}><DotsThree weight="bold" /></DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem disabled={!item.enabled} onClick={() => void a.wake()}><ArrowsClockwise /> Check now</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setRenaming(true)}><PencilSimple /> Rename…</DropdownMenuItem>
@@ -114,10 +125,11 @@ function WatchRow({ snapshot, item, onEdit }: { snapshot: Json; item: Json; onEd
                 <DropdownMenuItem onClick={() => setConfirmDelete(true)} className="text-destructive-foreground"><Trash /> Delete watch…</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          </div>
+          </RowActions>
+          <Toggle checked={!!item.enabled} onChange={toggle} label={`Watch ${title}`} disabled={a.busy} />
         </div>
         <CollapsibleContent>
-          <div className="flex flex-col gap-4 px-6 pb-5 ps-[3.5rem] text-[13px]">
+          <div className="flex flex-col gap-4 px-3 pb-4 ps-10 text-[13px]">
             <p className="max-w-[70ch] whitespace-pre-wrap leading-relaxed text-foreground/85">{str(item.instruction)}</p>
             <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-muted-foreground">
               <dt>Status</dt><dd className="text-foreground/85">{item.enabled ? "Watching" : "Paused"}</dd>
@@ -136,18 +148,18 @@ function WatchRow({ snapshot, item, onEdit }: { snapshot: Json; item: Json; onEd
             ) : null}
             {str(item.last_result) ? (
               <div className="flex flex-col gap-1.5">
-                <span className="text-[12.5px] font-medium text-muted-foreground">Last check result</span>
-                <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-foreground/[0.03] p-3 font-sans text-[13px] leading-relaxed text-foreground/85">{str(item.last_result)}</pre>
+                <span className="text-[12.5px] text-muted-foreground">Last check result</span>
+                <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-[10px] bg-foreground/[0.03] p-3 font-sans text-[13px] leading-relaxed text-foreground/85">{str(item.last_result)}</pre>
               </div>
             ) : null}
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" disabled={!item.enabled || a.busy} onClick={() => void a.wake()}><ArrowsClockwise /> Check now</Button>
-              <Button variant="outline" size="sm" disabled={a.busy} onClick={onEdit}>Edit watch</Button>
+            <div className="flex gap-1.5">
+              <Button variant="ghost" size="sm" disabled={!item.enabled || a.busy} onClick={() => void a.wake()}><ArrowsClockwise /> Check now</Button>
+              <Button variant="ghost" size="sm" disabled={a.busy} onClick={onEdit}>Edit watch</Button>
             </div>
           </div>
         </CollapsibleContent>
       </Collapsible>
-      {a.error ? <div className="px-6 pb-4"><ErrorNote error={a.error} onDismiss={a.clear} /></div> : null}
+      {a.error ? <div className="px-3 pb-2"><ErrorNote error={a.error} onDismiss={a.clear} /></div> : null}
       <ActivationDialog snapshot={snapshot} item={item} open={confirmOn} onOpenChange={setConfirmOn} onConfirm={() => void a.turnOn()} />
       <ConfirmDialog
         open={confirmDelete}
@@ -176,26 +188,28 @@ function SuggestionCard({ snapshot, item, onEdit }: { snapshot: Json; item: Json
   const [confirmOn, setConfirmOn] = useState(false);
   const sources = arr(item.connection_ids).map((id) => connectionLabel(snapshot, id));
   const live = !!item.enabled;
+  const title = str(item.instruction);
+  const turnOn = () => (a.missing.length ? reviewAccess(item) : setConfirmOn(true));
+  const menu = useContextMenu(() => [
+    live ? null : { label: a.missing.length ? "Review connections" : "Turn on…", run: turnOn },
+    { label: "Edit…", icon: PencilSimple, run: onEdit },
+    live ? null : { label: "Dismiss", icon: Trash, run: () => void a.remove() },
+  ]);
   return (
-    <div data-slot="suggestion" className="flex flex-col gap-3 px-6 py-4">
-      <div className="flex flex-col gap-1">
-        <p className="line-clamp-3 text-[14px] font-medium leading-snug">{str(item.instruction)}</p>
-        <p className={`text-[13px] ${a.missing.length ? "text-warning-foreground" : "text-muted-foreground"}`}>
-          {a.missing.length ? `Connection access needed for ${a.missing.join(", ")}` : "Ready to review"}
-          {sources.length ? ` · Sources: ${sources.join(", ")}` : ""}
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        {live ? (
-          <Status tone="success">Watching</Status>
-        ) : (
-          <Button size="sm" variant="outline" disabled={a.busy} onClick={() => (a.missing.length ? reviewAccess(item) : setConfirmOn(true))}>
-            {a.missing.length ? "Review connections" : "Turn on…"}
-          </Button>
+    <div data-slot="suggestion" {...menu} className="group/row flex flex-col gap-1 rounded-[10px] px-3 py-1.5 transition-colors hover:bg-foreground/[0.03]">
+      <div className="flex min-h-8 items-center gap-3">
+        {live ? <StatusGlyph status="inProgress" label="Watching" /> : (
+          <GlyphButton status="backlog" disabled={a.busy} label={a.missing.length ? `Review connections for ${title}` : `Turn on ${title}`} onClick={turnOn} />
         )}
-        <Button size="sm" variant="ghost" onClick={onEdit}>Edit</Button>
-        <span className="flex-1" />
-        {!live ? <Button size="sm" variant="ghost" disabled={a.busy} onClick={() => void a.remove()}>Dismiss</Button> : null}
+        <span className="min-w-0 flex-1 truncate text-[13.5px] text-foreground" title={title}>{title}</span>
+        <span className={cn("max-w-[40%] shrink-0 truncate text-[12.5px]", a.missing.length ? "text-warning-foreground" : "text-muted-foreground")} title={sources.join(", ")}>
+          {live ? "Watching" : a.missing.length ? `Needs access to ${a.missing.join(", ")}` : sources.join(", ") || "Ready to review"}
+        </span>
+        <RowActions>
+          {!live ? <RowAction label={a.missing.length ? "Review connections" : "Turn on…"} icon={Eye} disabled={a.busy} onClick={turnOn} /> : null}
+          <RowAction label={`Edit ${title}`} icon={PencilSimple} onClick={onEdit} />
+          {!live ? <RowAction label={`Dismiss ${title}`} icon={Trash} disabled={a.busy} onClick={() => void a.remove()} /> : null}
+        </RowActions>
       </div>
       {a.error ? <ErrorNote error={a.error} onDismiss={a.clear} /> : null}
       <ActivationDialog snapshot={snapshot} item={item} open={confirmOn} onOpenChange={setConfirmOn} onConfirm={() => void a.turnOn()} />
@@ -320,10 +334,10 @@ function NewWatchPanel({ snapshot, workspaceId }: { snapshot: Json; workspaceId:
   };
 
   return (
-    <Panel data-slot="new-watch">
-      <div className="flex flex-col gap-3 px-6 py-4">
+    <div data-slot="new-watch" className="flex flex-col rounded-xl bg-foreground/[0.03] transition-shadow focus-within:ring-2 focus-within:ring-ring/40">
+      <div className="flex flex-col gap-2.5 p-3">
         <div className="flex items-center justify-between gap-3">
-          <label htmlFor="watch-ask" className="text-[12.5px] font-medium text-muted-foreground">What should Neko keep an eye on?</label>
+          <label htmlFor="watch-ask" className="px-1 text-[12.5px] text-muted-foreground">What should Neko keep an eye on?</label>
           {tools.length > 0 ? (
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="ghost" size="xs" />}><Lightbulb /> Use an idea</DropdownMenuTrigger>
@@ -337,7 +351,8 @@ function NewWatchPanel({ snapshot, workspaceId }: { snapshot: Json; workspaceId:
         </div>
         <Textarea
           id="watch-ask"
-          rows={3}
+          rows={2}
+          className="min-h-12 resize-none !border-0 !bg-transparent px-1 !shadow-none !ring-0 !outline-none"
           value={ask}
           onChange={(e) => setAsk(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(ask); } }}
@@ -347,20 +362,20 @@ function NewWatchPanel({ snapshot, workspaceId }: { snapshot: Json; workspaceId:
           {!workspaceId && workspaces.length > 1 ? (
             <Pick label="Workspace for the new watch" value={wsId} onChange={setTarget} options={workspaces.map((w) => ({ value: w.id, label: w.name }))} />
           ) : (
-            <span className="text-xs text-muted-foreground">{workspaceName(snapshot, wsId, "Workspace")}</span>
+            <span className="px-1 text-[12.5px] text-muted-foreground">
+              {workspaceName(snapshot, wsId, "Workspace")}
+              {tools.length === 0 ? " · connect a source in Tools & skills to start" : ` · ${tools.length} ${tools.length === 1 ? "source" : "sources"}`}
+            </span>
           )}
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" disabled={busy || tools.length === 0} onClick={() => void send(WATCH_SUGGEST_PROMPT)}><Sparkle /> Suggest from tools</Button>
+          <div className="flex items-center gap-1.5">
+            <Button variant="ghost" size="sm" disabled={busy || tools.length === 0} onClick={() => void send(WATCH_SUGGEST_PROMPT)} title="Neko proposes watches from your connected tools; review access before turning one on"><Sparkle /> Suggest from tools</Button>
             <Button size="sm" disabled={busy || !ask.trim()} loading={busy} onClick={() => void send(ask)}>Set up watch</Button>
           </div>
         </div>
-        <p className="text-xs text-muted-foreground">
-          {tools.length === 0 ? "Connect a source in Tools & skills to start." : `${tools.length} connected ${tools.length === 1 ? "source" : "sources"} available. Review access before turning on a suggestion.`}
-        </p>
         <ErrorNote error={error} title="Couldn’t ask Neko" onDismiss={clear} />
       </div>
       {reply ? (
-        <div className="border-t border-border/70 px-6 py-4">
+        <div className="px-4 pb-4">
           <div className="mb-1.5 flex items-center justify-between">
             <span className="text-[13px] font-medium">{reply.pending ? "Looking through your tools…" : "Neko’s reply"}</span>
             {!reply.pending ? <Button variant="ghost" size="xs" onClick={() => setAskedAt(null)}>Hide reply</Button> : null}
@@ -368,7 +383,7 @@ function NewWatchPanel({ snapshot, workspaceId }: { snapshot: Json; workspaceId:
           {!reply.pending ? <p className="max-h-40 overflow-auto whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">{str(reply.text)}</p> : null}
         </div>
       ) : null}
-    </Panel>
+    </div>
   );
 }
 
@@ -395,37 +410,38 @@ function WatchingBody({ snapshot }: { snapshot: Json }) {
       <div className="flex flex-wrap items-center gap-2">
         <ScopePicker snapshot={snapshot} label="Show watches for" />
         <span className="flex-1" />
-        <Button variant="outline" size="sm" onClick={openEditor}><Plus /> Write it yourself…</Button>
-        <Button variant="outline" size="sm" disabled={active.length === 0} onClick={() => void checkAllWatches().then((n) => toast.success(`Asked ${n} ${n === 1 ? "watch" : "watches"} to check now.`))}>
-          <ArrowsClockwise /> Check all now
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Watching options" title="Watching options" />}><DotsThree weight="bold" /></DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={openEditor}><Plus /> Write a watch yourself…</DropdownMenuItem>
+            <DropdownMenuItem disabled={active.length === 0} onClick={() => void checkAllWatches().then((n) => toast.success(`Asked ${n} ${n === 1 ? "watch" : "watches"} to check now.`))}>
+              <ArrowsClockwise /> Check all now
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-      <Section eyebrow="New" title={<>Set up a watch.</>}>
-        <NewWatchPanel snapshot={snapshot} workspaceId={scope} />
-      </Section>
+      <NewWatchPanel snapshot={snapshot} workspaceId={scope} />
       {suggested.length > 0 ? (
-        <Section eyebrow={`${suggested.length} to review`} title="Suggestions">
-          <Panel><div className="divide-y divide-border/70">
+        <Section title="Suggestions" count={suggested.length}>
+          <Panel>
             {suggested.map((item) => <SuggestionCard key={item.id} snapshot={snapshot} item={item} onEdit={() => setDraft({ value: item, workspace: str(item.workspace_id) })} />)}
-          </div></Panel>
+          </Panel>
         </Section>
       ) : null}
-      <Section eyebrow={`${active.length} active`} title="Active watches">
+      <Section title="Active" count={active.length}>
         {active.length === 0 ? (
-          <EmptyBlock icon={Eye} title="No active watches" description={paused.length ? "Resume a paused watch or describe a new one above." : "Describe a watch above, or review a suggestion."} />
+          <p className="text-[13.5px] text-muted-foreground">{paused.length ? "No active watches. Resume a paused one or describe a new one above." : "No active watches. Describe one above, or review a suggestion."}</p>
         ) : (
-          <Panel><div className="divide-y divide-border/70">
+          <Panel>
             {active.map((item) => <WatchRow key={item.id} snapshot={snapshot} item={item} onEdit={() => setDraft({ value: item, workspace: str(item.workspace_id) })} />)}
-          </div></Panel>
+          </Panel>
         )}
       </Section>
       {paused.length > 0 ? (
-        <Section eyebrow={`${paused.length} paused`} title="Paused watches" actions={<Button variant="ghost" size="sm" aria-expanded={showPaused} onClick={() => setShowPaused(!showPaused)}>{showPaused ? "Hide" : "Show"}</Button>}>
+        <Section title="Paused" count={paused.length} actions={<Button variant="ghost" size="xs" aria-expanded={showPaused} onClick={() => setShowPaused(!showPaused)} title="Paused watches never check. Turn one on to confirm what it may do.">{showPaused ? "Hide" : "Show"}</Button>}>
           {showPaused ? (
-            <Panel><div className="divide-y divide-border/70">
+            <Panel>
               {paused.map((item) => <WatchRow key={item.id} snapshot={snapshot} item={item} onEdit={() => setDraft({ value: item, workspace: str(item.workspace_id) })} />)}
-            </div>
-              <PanelFooter className="justify-start text-xs text-muted-foreground">Paused watches never check. Turn one on to confirm what it may do.</PanelFooter>
             </Panel>
           ) : null}
         </Section>
@@ -442,10 +458,7 @@ export default function Watching() {
     [],
   );
   return (
-    <SetupPage
-      eyebrow="Work"
-      title={<>Watching</>}
-    >
+    <SetupPage title={<>Watching</>}>
       <Gate>{(snapshot) => <WatchingBody snapshot={snapshot} />}</Gate>
     </SetupPage>
   );
