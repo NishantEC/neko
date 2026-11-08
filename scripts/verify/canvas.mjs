@@ -109,12 +109,14 @@ export default async function ({ page, shot, a11y, check, sleep, expectProblem, 
   };
   const userMessages = async () => ((await page.evaluate(async () => (await fetch("/api/chat/neko")).json())).messages ?? [])
     .filter((m) => m.role === "user").map((m) => ({ id: m.id, text: (m.parts ?? []).map((p) => p.text ?? "").join("\n"), state: m.metadata?.state }));
+  // Leave the queue as found: later areas (chat, shell) wait for it to be empty. The row can
+  // appear a moment after the message is in the log, so wait for it rather than look once.
   const removeQueued = async (needle) => {
     const row = page.locator("[data-slot='queue-row']", { hasText: needle });
-    if (await row.count()) {
-      await row.first().locator("button[aria-label='Remove queued message']").click();
-      await page.waitForFunction(() => document.querySelectorAll("[data-slot='queue-row']").length === 0, null, { timeout: 10000 }).catch(() => {});
-    }
+    if (!(await row.first().waitFor({ timeout: 5000 }).then(() => true, () => false))) return;
+    await row.first().locator("button[aria-label='Remove queued message']").click();
+    await row.first().waitFor({ state: "detached", timeout: 10000 })
+      .then(() => {}, () => check(false, `the queued “${needle.slice(0, 40)}” could be removed`));
   };
 
   // B3: elements carry stable stamped ids; a comment names one and ends with the scope line.

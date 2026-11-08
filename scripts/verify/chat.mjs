@@ -55,6 +55,8 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   check(true, "a message sent mid-reply waits in the queue tray");
   // Leave the queue as found: later areas count its rows.
   await page.locator("[data-slot='queue-row']", { hasText: text }).locator("button[aria-label='Remove queued message']").click();
-  await page.waitForFunction(() => document.querySelectorAll("[data-slot='queue-row']").length === 0, null, { timeout: 10000 });
+  await page.locator("[data-slot='queue-row']", { hasText: text }).waitFor({ state: "detached", timeout: 10000 });
+  const left = await page.locator("[data-slot='queue-row']").allInnerTexts();
+  check(left.length === 0, left.length ? `the queue is empty again (left by an earlier area: ${left.map((t) => t.replace(/\s+/g, " ").slice(0, 50)).join(" | ")})` : "removing it leaves the queue empty");
   await a11y("chat");
 }
