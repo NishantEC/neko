@@ -786,25 +786,30 @@ pub const ARTIFACT_CSP: &str = "default-src 'self' data: blob:; script-src 'self
 pub const PDF_CSP: &str = "default-src 'none'; object-src 'self'; img-src 'self' data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
 /// Put first in an html artifact (after `<head>`): reports what goes wrong
-/// to the page showing it, `{type:"neko-problem", kind, message}` (kind
+/// to the page showing it, `{type:"neko-problem", id, v, kind, message}` (kind
 /// `error`, `rejection` or `console`), at most 20 per load and 500
 /// characters each; the canvas passes them to the daemon
 /// (`ReportArtifactProblem`), so the agent that made it can read them. It runs
 /// before the artifact's own scripts, so their errors are caught, and has no
 /// newline, so the line numbers it reports are those of the agent's file.
-pub const ARTIFACT_PROBE: &str = r##"<script data-neko-bridge>(function(){var n=0,P=parent;function r(k,m){if(n>=20)return;n++;try{P.postMessage({type:"neko-problem",kind:k,message:String(m).slice(0,500)},"*")}catch(_){}}function f(a){try{return a instanceof Error?(a.stack&&a.stack.indexOf(a.message)>=0?a.stack:a.name+": "+a.message):typeof a==="object"?JSON.stringify(a):String(a)}catch(_){return String(a)}}addEventListener("error",function(e){var t=e.target;if(t&&t!==window&&t.nodeType===1){r("error","Could not load <"+t.tagName.toLowerCase()+"> "+(t.currentSrc||t.src||t.href||"").slice(0,200));return}r("error",(e.message||"Error")+(e.lineno?" (line "+e.lineno+":"+e.colno+")":""))},true);addEventListener("unhandledrejection",function(e){r("rejection","Unhandled rejection: "+f(e.reason))});var c=console.error;console.error=function(){try{r("console",Array.prototype.map.call(arguments,f).join(" "))}catch(_){}return c.apply(console,arguments)}})();</script>"##;
+/// `id` and `v` name the version it was served as ([`prepare_html`] writes
+/// them in), so the canvas drops what a frame that navigated elsewhere posts.
+pub const ARTIFACT_PROBE: &str = r##"<script data-neko-bridge>(function(){var n=0,P=parent;function r(k,m){if(n>=20)return;n++;try{P.postMessage({type:"neko-problem",id:"__NEKO_ARTIFACT__",v:__NEKO_VERSION__,kind:k,message:String(m).slice(0,500)},"*")}catch(_){}}function f(a){try{return a instanceof Error?(a.stack&&a.stack.indexOf(a.message)>=0?a.stack:a.name+": "+a.message):typeof a==="object"?JSON.stringify(a):String(a)}catch(_){return String(a)}}addEventListener("error",function(e){var t=e.target;if(t&&t!==window&&t.nodeType===1){r("error","Could not load <"+t.tagName.toLowerCase()+"> "+(t.currentSrc||t.src||t.href||"").slice(0,200));return}r("error",(e.message||"Error")+(e.lineno?" (line "+e.lineno+":"+e.colno+")":""))},true);addEventListener("unhandledrejection",function(e){r("rejection","Unhandled rejection: "+f(e.reason))});var c=console.error;console.error=function(){try{r("console",Array.prototype.map.call(arguments,f).join(" "))}catch(_){}return c.apply(console,arguments)}})();</script>"##;
 
 /// Appended to an html artifact (before `</body>`): the comment and send
 /// bridge. It answers only its parent.
 ///
 /// * When the canvas posts `{type:"neko-comment-mode", on}`, the hovered
-///   element is outlined and a click posts back `{type:"neko-pick", selector,
-///   id, tag, hint, text, rect}` instead of doing what the design does: `id`
-///   is the element's `data-neko-id` (stamped by the daemon) or its own id,
-///   `hint` its opening tag without the stamp.
+///   element is outlined and a click posts back `{type:"neko-pick", id, v,
+///   selector, element, tag, hint, text, rect}` instead of doing what the
+///   design does: `element` is its `data-neko-id` (stamped by the daemon) or
+///   its own id, `hint` its opening tag without the stamp.
 /// * Otherwise a real click (not one a script made) on or inside an element
-///   with `data-neko-send="text"` posts `{type:"neko-send", text}`, at most one
-///   every 0.8 s; the canvas sends it to the conversation as the person's message.
+///   with `data-neko-send="text"` posts `{type:"neko-send", id, v, text}`, at
+///   most one every 0.8 s; the canvas puts it in the composer as a draft the
+///   person may send. Nothing an artifact posts is ever sent by itself.
+///
+/// Every message carries the artifact `id` and version `v` it was served as.
 pub const COMMENT_BRIDGE: &str = r##"<script data-neko-bridge>(function(){
 var on=false,box=null,last=0;
 function selector(el){var parts=[];while(el&&el.nodeType===1&&parts.length<6){var name=el.tagName.toLowerCase();if(el.id){parts.unshift("#"+CSS.escape(el.id));break;}if(name==="body"||name==="html"){parts.unshift(name);break;}var p=el.parentElement;if(p){var same=Array.prototype.filter.call(p.children,function(c){return c.tagName===el.tagName;});if(same.length>1)name+=":nth-of-type("+(same.indexOf(el)+1)+")";}parts.unshift(name);el=p;}return parts.join(" > ");}
@@ -816,15 +821,19 @@ addEventListener("mouseover",function(e){if(on&&e.target&&e.target.nodeType===1)
 addEventListener("mouseleave",function(){hide();});
 ["mousedown","mouseup","pointerdown","pointerup","dblclick","submit"].forEach(function(t){addEventListener(t,function(e){if(on){e.preventDefault();e.stopPropagation();}},true);});
 addEventListener("click",function(e){var el=e.target;if(!el||el.nodeType!==1)return;
-if(on){e.preventDefault();e.stopPropagation();var r=el.getBoundingClientRect();var text=(el.innerText||el.textContent||"").replace(/\s+/g," ").trim().slice(0,120);parent.postMessage({type:"neko-pick",selector:selector(el),id:el.getAttribute("data-neko-id")||el.id||"",tag:el.tagName.toLowerCase(),hint:hint(el),text:text,rect:{x:r.left,y:r.top,width:r.width,height:r.height}},"*");return;}
-if(!e.isTrusted||!el.closest)return;var s=el.closest("[data-neko-send]");if(!s)return;var said=(s.getAttribute("data-neko-send")||"").trim();var now=Date.now();if(!said||now-last<800)return;last=now;parent.postMessage({type:"neko-send",text:said.slice(0,2000)},"*");},true);
-addEventListener("keydown",function(e){if(on&&e.key==="Escape")parent.postMessage({type:"neko-comment-cancel"},"*");},true);
+if(on){e.preventDefault();e.stopPropagation();var r=el.getBoundingClientRect();var text=(el.innerText||el.textContent||"").replace(/\s+/g," ").trim().slice(0,120);parent.postMessage({type:"neko-pick",id:"__NEKO_ARTIFACT__",v:__NEKO_VERSION__,selector:selector(el),element:el.getAttribute("data-neko-id")||el.id||"",tag:el.tagName.toLowerCase(),hint:hint(el),text:text,rect:{x:r.left,y:r.top,width:r.width,height:r.height}},"*");return;}
+if(!e.isTrusted||!el.closest)return;var s=el.closest("[data-neko-send]");if(!s)return;var said=(s.getAttribute("data-neko-send")||"").trim();var now=Date.now();if(!said||now-last<800)return;last=now;parent.postMessage({type:"neko-send",id:"__NEKO_ARTIFACT__",v:__NEKO_VERSION__,text:said.slice(0,2000)},"*");},true);
+addEventListener("keydown",function(e){if(on&&e.key==="Escape")parent.postMessage({type:"neko-comment-cancel",id:"__NEKO_ARTIFACT__",v:__NEKO_VERSION__},"*");},true);
 })();</script>"##;
 
 /// An html version as it is served: stamped ids (`neko_core::html_ids`), the
 /// probe first and the comment bridge before the last `</body>` (or at the end).
-pub fn prepare_html(html: &str) -> String {
-    neko_core::html_ids::prepare(html, ARTIFACT_PROBE, COMMENT_BRIDGE)
+/// `id` (a checked artifact id) and `n` (the version number) are written into
+/// both scripts, so every message says which version it came from.
+pub fn prepare_html(html: &str, id: &str, n: u32) -> String {
+    let id: String = id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    let named = |script: &str| script.replace("__NEKO_ARTIFACT__", &id).replace("__NEKO_VERSION__", &n.to_string());
+    neko_core::html_ids::prepare(html, &named(ARTIFACT_PROBE), &named(COMMENT_BRIDGE))
 }
 
 /// A file name for a download: the title's letters and digits, then the version.
@@ -848,10 +857,12 @@ fn serve_artifact(root: &Path, rest: &str, download: bool) -> Reply {
     // Only html is a page; every other kind goes out as the file it is, under
     // its own type (`nosniff` is on every reply, so it is never guessed into one).
     let content_type = neko_core::artifacts::mime(&kind);
+    // `latest` is served as the number it is.
+    let number = file.file_stem().and_then(|s| s.to_str()).and_then(|s| s.strip_prefix('v')).and_then(|s| s.parse().ok()).unwrap_or(n);
     let mut reply = if download || kind != "html" {
         Reply::new(200, "OK", content_type, bytes)
     } else {
-        Reply::new(200, "OK", content_type, prepare_html(&String::from_utf8_lossy(&bytes)))
+        Reply::new(200, "OK", content_type, prepare_html(&String::from_utf8_lossy(&bytes), id, number))
     };
     // The browser's PDF viewer refuses to run in a sandboxed document, and a
     // PDF is not a page that can reach Neko: it gets a policy that allows
@@ -860,7 +871,6 @@ fn serve_artifact(root: &Path, rest: &str, download: bool) -> Reply {
     reply.extra.push(("Content-Security-Policy", policy.into()));
     if download {
         let title = neko_core::artifacts::get(root, id).map(|a| a.title).unwrap_or_default();
-        let number = file.file_stem().and_then(|s| s.to_str()).and_then(|s| s.strip_prefix('v')).and_then(|s| s.parse().ok()).unwrap_or(n);
         reply.extra.push(("Content-Disposition", format!("attachment; filename=\"{}\"", download_name(&title, number, &kind))));
     }
     reply

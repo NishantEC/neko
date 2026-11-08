@@ -139,7 +139,10 @@ reports lives in daemon memory only (`neko_core::inspect`, statics in
   (`WINDOW_GONE_MS`) or closed, and `"InspectApp"` answers `App { note, window,
   age_ms, windows, plugins }` (`plugins` is the `PluginStatus` map). `note` is
   one sentence: which window, focused or not, how long ago, its route, or "No
-  open Neko page has reported…". A light report from the reporting window keeps
+  open Neko page has reported since the daemon started" before any has, and
+  "No Neko window has reported in the last 3 minutes" once all went quiet.
+  `AppViewer.priority` is read leniently (1.5 becomes 1; the page also sends
+  `Math.trunc`), since one odd plugin priority failed the whole report. A light report from the reporting window keeps
   its route and focus current between full ones.
 - **Artifact problems (B2).** `web::ARTIFACT_PROBE` is inserted right after
   the first `<head>` (else `<html>`, the doctype, or the start), so it runs
@@ -148,6 +151,10 @@ reports lives in daemon memory only (`neko_core::inspect`, statics in
   resource that failed), `rejection` and `console` (≤20 per load, 500 chars).
   `PageViewer` reads only messages whose `source` is its frame, ≤25 per load,
   kinds whitelisted, and calls `reportProblem` (≤50 per version per page).
+  `web::prepare_html(html, id, n)` writes the artifact id and the real version
+  number (`latest` resolved) into the probe and the bridge, every message
+  carries `id` and `v`, and `PageViewer` drops one naming another version (a
+  frame that navigated would otherwise file v1's late errors under v2).
   Viewers report through `ViewerSlot`: `ViewerProblem` reports itself (the
   `ViewerReport` context), plugin viewers get `props.onProblem`, a crash in
   `ViewerBoundary` or `PluginBoundary` (new `onCrash`) is a `viewer` problem,
@@ -175,17 +182,36 @@ reports lives in daemon memory only (`neko_core::inspect`, statics in
   with `SCOPE_NOTE` ("Hard scope: change only the element(s) named above…").
   The agent's file has no stamps (they are added when served), so the
   instruction says to find the element by selector, opening tag and text.
-- **Artifacts talk back (B4).** In the bridge, a click with `e.isTrusted` on or
-  inside `[data-neko-send]` (not in comment mode, ≤ one per 0.8 s) posts
-  `neko-send`. `PageViewer` checks the source, ≤1 per second and
-  `navigator.userActivation.isActive` (activation passes up from the frame, so
-  a script cannot fake it), then `sendFromArtifact`: >500 chars is refused
-  with a toast, otherwise `Workbench SendMessage` (queued behind a running
-  reply like a typed message) with `\n[from artifact <id> v<n>: "<title>"]`.
-  The conversation is Neko's Home chat: only it can save artifacts.
-  `userMessageView` turns that line into a "From “<title>”" label in the chat
-  and the queue tray, and a trailing scope line into "Only the picked
-  element". The html line of Installed viewers documents `data-neko-send`.
+  After review the tokenizer follows the browser where it matters: `<!-->` and
+  `<!--->` are whole comments and `--!>` ends one; `<![CDATA[` is CDATA only
+  inside svg/math (elsewhere a bogus comment ended by `>`); a script follows
+  the script-data escaped states (`<script><!-- <script>…</script> --></script>`
+  is one script); an unclosed `head` ends at the first element that cannot be
+  in it. `PageViewer` takes a pick only in comment mode, checks the element id
+  against `^[\w-]{1,64}$`, and `referenceText` strips `[`, `]` and `"` from
+  what the page posted, so a page cannot close the bracket and write into the
+  message; the chip shows the full reference line (`attachment-detail`).
+- **Artifacts talk back (B4): drafts, never sends (owner's call after review).**
+  The first build sent the text as the person's message; the review showed a
+  script can `postMessage` the bridge's message itself and that user
+  activation is window-wide and lingers, so an artifact could message a
+  full-power agent as the person. Now: the bridge posts `neko-send` on a click
+  with `e.isTrusted` on or inside `[data-neko-send]` (≤ one per 0.8 s);
+  `PageViewer` takes it only from its own frame, for the version it was
+  served as, outside comment mode, while `document.activeElement` is the frame
+  and `navigator.userActivation.isActive`, one per 2 s (no web API lets the
+  parent consume the frame's activation, so the gap stands in for "one per
+  activation"). `offerFromArtifact` refuses >500 chars (toast), queues ≤5,
+  goes to Home and Home's composer `offer` appends the text to the draft with
+  one chip per artifact version (label "Artifact", name "From “<title>”",
+  showing its line in full) whose reference is `[from artifact <id> v<n>:
+  "<title>"]`; at most `MAX_OFFERS` (5) drafts wait in the composer. The
+  composer is focused; the person sends or clears it. `userMessageView` turns
+  that trailing line into a "From “<title>”" label in the chat and the queue
+  tray (text, not message metadata: the daemon's chat log stores text only,
+  and only the person can send it, so a typed look-alike only mislabels their
+  own message). The html line of Installed viewers and `super_instruction`
+  say it drafts.
 - **Instruction.** `viewers::check_section` (end of Installed viewers, so
   chat, routines and `--plugin-guide` get it): after saving and showing, wait
   and read `Artifact { id }` status, fix problems and save again before saying
@@ -200,8 +226,9 @@ reports lives in daemon memory only (`neko_core::inspect`, statics in
 - **Verify:** `NEKO_WEB_ONLY=canvas node scripts/web-verify.mjs` (the Phase B
   half of `scripts/verify/canvas.mjs`: stamped id stable across versions, a
   comment's id/hint/scope line, a throwing artifact's three problems with the
-  file's line number, a data-neko-send click queued with its label and a
-  script's click ignored, InspectApp's tabs/route/viewers/fences/pages/theme).
+  file's line number, a pick posted outside comment mode ignored, a
+  data-neko-send click drafting (chip and text, nothing sent), a script's click
+  or own post adding nothing, the person's send queued with its label, InspectApp's tabs/route/viewers/fences/pages/theme).
   Areas may call `expectProblem(marker)` to keep deliberate console errors out
   of the run's count. Rust: `html_ids::tests`, `inspect::tests`,
   `server::tests::pages_report_what_an_artifact_did_and_what_the_app_shows`,

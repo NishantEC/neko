@@ -33,7 +33,7 @@ pub struct Builtin {
 
 /// The built-in viewers, in the order the section lists them.
 pub const BUILTIN: &[Builtin] = &[
-    Builtin { id: "html", title: "Page", kinds: &["html"], prompt: "a live, sandboxed page (inline CSS and scripts, no network); the person can point at elements to comment, and a click on an element with data-neko-send=\"text\" (500 characters at most) sends that text to the conversation the artifact belongs to as the person's message, so buttons in an interactive artifact can ask you for things (answer by saving the next version when it asks for a change)" },
+    Builtin { id: "html", title: "Page", kinds: &["html"], prompt: "a live, sandboxed page (inline CSS and scripts, no network); the person can point at elements to comment, and a click on an element with data-neko-send=\"text\" (500 characters at most) puts that text in the chat composer as a draft marked as from the artifact, which the person reads and sends or not (an artifact never sends anything by itself), so buttons in an interactive artifact can offer requests to you (answer one by saving the next version when it asks for a change)" },
     Builtin { id: "image", title: "Image", kinds: &["png", "jpg", "gif", "webp", "avif", "bmp", "ico", "svg"], prompt: "the image itself (svg is drawn live, sandboxed)" },
     Builtin { id: "pdf", title: "PDF", kinds: &["pdf"], prompt: "the browser's PDF viewer" },
     Builtin { id: "markdown", title: "Document", kinds: &["md"], prompt: "rendered Markdown (headings, lists, tables, code)" },

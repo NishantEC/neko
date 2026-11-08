@@ -21,7 +21,7 @@ import { ComposerMenu, type ComposerMenuItem } from "@/chat/ChatInputMenu";
 import { RuntimePicker } from "@/chat/ChatInputRuntime";
 import { QueueTray } from "@/chat/queue-tray";
 import {
-  addDraftAttachment, attachFile, completeSubmission, getDraft, removeDraftAttachment, setDraftMode, setDraftText, submission, useDraft,
+  addDraftAttachment, attachFile, completeSubmission, getDraft, MAX_OFFERS, patchDraftAttachment, removeDraftAttachment, setDraftMode, setDraftText, submission, useDraft,
   type ComposerMode,
 } from "@/chat/ChatInputDrafts";
 import {
@@ -50,6 +50,12 @@ export interface ComposerHandle {
    * (a canvas comment's scope line).
    */
   reference(name: string, reference: string, closing?: string): void;
+  /**
+   * Adds `text` to the draft with a chip `name` whose `reference` line ends
+   * the message (an artifact's data-neko-send). False when the draft already
+   * holds `MAX_OFFERS` of them.
+   */
+  offer(text: string, name: string, reference: string): boolean;
 }
 
 /** The profile Home speaks to for a workspace (TodayView.scope). */
@@ -121,8 +127,22 @@ export function NekoComposer({
       // A chip whose text goes into the message (`submission` appends it), so
       // the person types the comment and the agent reads what it is about.
       reference: (name, reference, closing) => {
-        addDraftAttachment(scope, { id: crypto.randomUUID(), name, type: "text/plain", isImage: false, status: "ready", reference, label: "Canvas", closing });
+        addDraftAttachment(scope, { id: crypto.randomUUID(), name, type: "text/plain", isImage: false, status: "ready", reference, label: "Canvas", closing, detail: reference });
         area.current?.focus();
+      },
+      // What an artifact's data-neko-send button offers: its text joins the
+      // draft, and one chip per artifact says where it came from. Nothing is
+      // sent; the person reads it and presses send, or not.
+      offer: (text, name, reference) => {
+        const current = getDraft(scope);
+        const offered = current.attachments.reduce((sum, a) => sum + (a.offers ?? 0), 0);
+        if (offered >= MAX_OFFERS) return false;
+        setDraftText(scope, current.text.trim() ? `${current.text.trimEnd()}\n${text}` : text);
+        const chip = current.attachments.find((a) => a.reference === reference);
+        if (chip) patchDraftAttachment(scope, chip.id, { offers: (chip.offers ?? 0) + 1 });
+        else addDraftAttachment(scope, { id: crypto.randomUUID(), name, type: "text/plain", isImage: false, status: "ready", reference, label: "Artifact", detail: reference, offers: 1 });
+        area.current?.focus();
+        return true;
       },
     };
     const forget = setReplyActions({

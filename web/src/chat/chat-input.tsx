@@ -38,6 +38,8 @@ export interface ChatAttachment {
   error?: string;
   /** What the chip says it is when ready, instead of "File" (a canvas comment's reference). */
   label?: string;
+  /** Shown in full under the name: exactly what the chip adds to the message. */
+  detail?: string;
 }
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
@@ -286,9 +288,16 @@ export function ChatInput({
                                 ) : (
                                   <FileIcon className="size-4 shrink-0 text-secondary-label" aria-hidden />
                                 )}
-                                <span className="min-w-0 flex-1 truncate text-left" title={a.name}>
-                                  {a.name}
-                                </span>
+                                {a.detail ? (
+                                  <span className="flex min-w-0 flex-1 flex-col text-left">
+                                    <span className="truncate" title={a.name}>{a.name}</span>
+                                    <span data-slot="attachment-detail" className="break-all text-xs text-muted-foreground">{a.detail}</span>
+                                  </span>
+                                ) : (
+                                  <span className="min-w-0 flex-1 truncate text-left" title={a.name}>
+                                    {a.name}
+                                  </span>
+                                )}
                                 <span className={cn("shrink-0 text-xs", a.status === "error" ? "text-destructive" : "text-secondary-label")} title={a.error}>
                                   {attachmentStatus(a)}
                                 </span>

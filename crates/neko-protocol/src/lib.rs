@@ -784,6 +784,12 @@ pub struct ArtifactVersion {
     pub message_id: Option<String>,
 }
 
+/// A number as a whole one, truncated and clamped; anything else is 0.
+fn whole_number<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<i64, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value.as_i64().or_else(|| value.as_f64().filter(|f| f.is_finite()).map(|f| f.trunc().clamp(-1e15, 1e15) as i64)).unwrap_or(0))
+}
+
 /// What one open Neko window reports about itself (`ReportApp`). The
 /// daemon bounds every list and string before keeping it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -860,7 +866,8 @@ pub struct AppViewer {
     pub title: String,
     #[serde(default)]
     pub kinds: Vec<String>,
-    #[serde(default)]
+    /// Any number a plugin gave is read (1.5 becomes 1), so one odd viewer never voids a report.
+    #[serde(default, deserialize_with = "whole_number")]
     pub priority: i64,
     #[serde(default)]
     pub plugin: Option<String>,

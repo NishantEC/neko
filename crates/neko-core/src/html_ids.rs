@@ -11,11 +11,13 @@
 //! siblings are added before it. Identical elements are told apart by their
 //! order (`n1a2b3c4d`, `n1a2b3c4d-2`, …).
 //!
-//! The document is read by a small tokenizer, not regular expressions:
-//! comments, doctypes, CDATA and processing instructions are skipped whole;
-//! the contents of `script`, `style`, `textarea`, `title` and the other raw
-//! text elements are never looked into or changed; quoted attribute values
-//! may hold `<` and `>`. The only change is the inserted attribute, right
+//! The document is read by a small tokenizer, not regular expressions, that
+//! ends things where a browser does: comments (`<!-->`, `<!--->` and `--!>`
+//! included), doctypes, processing instructions and bogus comments are
+//! skipped whole, CDATA only inside svg and math; the contents of `script`
+//! (following its escaped states), `style`, `textarea`, `title` and the other
+//! raw text elements are never looked into or changed; quoted attribute
+//! values may hold `<` and `>`. The only change is the inserted attribute, right
 //! after the tag name, plus the two bridge scripts; no newline is added, so
 //! line numbers in an error match the agent's own file. Elements in `head`,
 //! `html`, `body` and void elements such as `br` are not stamped.
@@ -27,6 +29,8 @@ const RAW_TEXT: &[&str] = &["script", "style", "textarea", "title", "xmp", "ifra
 const VOID: &[&str] = &["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr", "keygen"];
 /// Elements never stamped: the document's frame, and what is not drawn.
 const UNSTAMPED: &[&str] = &["html", "head", "body", "meta", "link", "base", "title", "script", "style", "noscript", "template", "br", "wbr"];
+/// What may sit in `head`; any other start tag there begins the body.
+const HEAD_CONTENT: &[&str] = &["head", "html", "base", "link", "meta", "title", "style", "script", "noscript", "template"];
 /// A start tag of one of these closes an open element of the same group (`<li>` after `<li>`).
 const IMPLIED_END: &[(&str, &[&str])] = &[
     ("li", &["li"]), ("p", &["p"]), ("dt", &["dt", "dd"]), ("dd", &["dt", "dd"]), ("tr", &["tr"]),
@@ -73,6 +77,67 @@ fn raw_text_end(bytes: &[u8], from: usize, name: &str) -> Option<usize> {
             return Some(i);
         }
         at = i + 2;
+    }
+    None
+}
+
+/// The offset after a comment whose `<!--` ended just before `from`, as the
+/// HTML tokenizer reads it: `<!-->` and `<!--->` are whole comments, and
+/// `-->` or `--!>` ends one; unterminated, it runs to the end.
+fn comment_end(bytes: &[u8], from: usize) -> usize {
+    if bytes.get(from) == Some(&b'>') { return from + 1; }
+    if bytes[from.min(bytes.len())..].starts_with(b"->") { return from + 2; }
+    let mut at = from;
+    while let Some(dash) = find(bytes, at, b"--") {
+        if bytes.get(dash + 2) == Some(&b'>') { return dash + 3; }
+        if bytes[dash + 2..].starts_with(b"!>") { return dash + 4; }
+        at = dash + 1;
+    }
+    bytes.len()
+}
+
+/// Whether `<name` or `</name` at `at` (`slash` says which) is a tag of
+/// `name`: followed by whitespace, `/` or `>`.
+fn tag_at(bytes: &[u8], at: usize, name: &str, slash: bool) -> bool {
+    let open = if slash { b"</".as_slice() } else { b"<".as_slice() };
+    let after = at + open.len() + name.len();
+    bytes[at.min(bytes.len())..].starts_with(open)
+        && starts_with_ignore_case(bytes, at + open.len(), name.as_bytes())
+        && bytes.get(after).is_some_and(|b| b.is_ascii_whitespace() || *b == b'/' || *b == b'>')
+}
+
+/// Where a script's `</script` starts, following the tokenizer's script data
+/// states: after `<!--` a `<script` opens a nested ("double escaped") part in
+/// which `</script>` does not end the script, and `-->` leaves both.
+fn script_end(bytes: &[u8], from: usize) -> Option<usize> {
+    #[derive(PartialEq)]
+    enum State { Data, Escaped, DoubleEscaped }
+    let mut state = State::Data;
+    let mut i = from;
+    while i < bytes.len() {
+        match state {
+            State::Data => {
+                if bytes[i..].starts_with(b"<!--") {
+                    // `<!-->` and `<!--->` open and close at once.
+                    if bytes.get(i + 4) == Some(&b'>') { i += 5; continue; }
+                    if bytes[i + 4..].starts_with(b"->") { i += 6; continue; }
+                    state = State::Escaped;
+                    i += 4;
+                    continue;
+                }
+                if tag_at(bytes, i, "script", true) { return Some(i); }
+            }
+            State::Escaped => {
+                if bytes[i..].starts_with(b"-->") { state = State::Data; i += 3; continue; }
+                if tag_at(bytes, i, "script", true) { return Some(i); }
+                if tag_at(bytes, i, "script", false) { state = State::DoubleEscaped; i += 7; continue; }
+            }
+            State::DoubleEscaped => {
+                if bytes[i..].starts_with(b"-->") { state = State::Data; i += 3; continue; }
+                if tag_at(bytes, i, "script", true) { state = State::Escaped; i += 8; continue; }
+            }
+        }
+        i += 1;
     }
     None
 }
@@ -156,9 +221,11 @@ fn read(html: &str) -> Reading {
     while i < bytes.len() {
         if bytes[i] != b'<' { i += 1; continue; }
         let next = bytes.get(i + 1).copied().unwrap_or(0);
+        let foreign = stack.iter().any(|&e| matches!(elements[e].tag.as_str(), "svg" | "math"));
         let markup_end = if bytes[i..].starts_with(b"<!--") {
-            Some(find(bytes, i + 4, b"-->").map_or(bytes.len(), |e| e + 3))
-        } else if starts_with_ignore_case(bytes, i, b"<![cdata[") {
+            Some(comment_end(bytes, i + 4))
+        } else if foreign && bytes[i..].starts_with(b"<![CDATA[") {
+            // CDATA exists only inside svg and math; elsewhere it is a bogus comment, ended by `>`.
             Some(find(bytes, i + 9, b"]]>").map_or(bytes.len(), |e| e + 3))
         } else if next == b'!' || next == b'?' {
             let end = find(bytes, i, b">").map_or(bytes.len(), |e| e + 1);
@@ -192,6 +259,8 @@ fn read(html: &str) -> Reading {
             "head" if head.is_none() => { head = Some(end); in_head = true; }
             "html" if root.is_none() => root = Some(end),
             "body" => in_head = false,
+            // Anything that cannot sit in head starts the body, as a browser reads it.
+            tag if in_head && !HEAD_CONTENT.contains(&tag) => in_head = false,
             _ => {}
         }
         if let Some((_, closes)) = IMPLIED_END.iter().find(|(tag, _)| *tag == name) {
@@ -221,7 +290,11 @@ fn read(html: &str) -> Reading {
         text_from = i;
         if RAW_TEXT.contains(&name.as_str()) {
             // Its contents are never read as markup, nor changed.
-            i = if name == "plaintext" { bytes.len() } else { raw_text_end(bytes, i, &name).unwrap_or(bytes.len()) };
+            i = match name.as_str() {
+                "plaintext" => bytes.len(),
+                "script" => script_end(bytes, i).unwrap_or(bytes.len()),
+                _ => raw_text_end(bytes, i, &name).unwrap_or(bytes.len()),
+            };
             text_from = i;
         } else if !self_closing && !VOID.contains(&name.as_str()) {
             stack.push(elements.len() - 1);
@@ -374,6 +447,37 @@ mod tests {
         // An id an earlier version carried and the agent kept is never handed out twice.
         let kept = format!("<p data-neko-id=\"{}\">x</p><ul><li class=item>Alpha</li></ul>", ids[1]);
         assert_eq!(stamp(&kept).matches(&format!("\"{}\"", ids[1])).count(), 1);
+    }
+
+    #[test]
+    fn comments_cdata_and_scripts_end_where_a_browser_ends_them() {
+        for (html, inside) in [
+            // `<!-->` and `<!--->` are whole comments, so the script after them is a script.
+            ("<!--> <script>var s=\"--> <div>\";</script><p>a</p>", "<script>var s=\"--> <div>\";</script>"),
+            ("<!---> <script>var s=\"<div>\";</script><p>a</p>", "<script>var s=\"<div>\";</script>"),
+            // `--!>` ends a comment.
+            ("<!-- x --!><script>let a = '<b>';</script><p>a</p>", "<script>let a = '<b>';</script>"),
+            // Outside svg and math, `<![CDATA[` is a bogus comment that ends at the first `>`.
+            ("<![CDATA[ x ]><script>let t = '<i>';</script><p>a</p>", "<script>let t = '<i>';</script>"),
+            // Script data escaped states: a nested `<script>` after `<!--` keeps `</script>` inside.
+            ("<script><!-- document.write('<script>x()</script><div>'); --></script><p>a</p>", "<script><!-- document.write('<script>x()</script><div>'); --></script>"),
+            ("<script><!--></script><p>a</p>", "<script><!--></script>"),
+        ] {
+            let out = stamp(html);
+            assert!(out.contains(inside), "{html} -> {out}");
+            assert_eq!(unstamped(&out), html);
+            assert!(out.contains("<p data-neko-id=\"n"), "what follows is still read: {out}");
+        }
+        // Inside svg, CDATA is CDATA.
+        let svg = stamp("<svg><![CDATA[ <g> > ]]><rect/></svg>");
+        assert!(svg.contains("<![CDATA[ <g> > ]]>") && svg.contains("<rect data-neko-id"));
+    }
+
+    #[test]
+    fn a_head_left_open_ends_at_the_first_element_that_cannot_be_in_it() {
+        let out = stamp("<html><head><title>t</title><meta charset=utf-8><div>body text</div><p>more</p>");
+        assert!(out.contains("<div data-neko-id=\"n") && out.contains("<p data-neko-id=\"n"), "{out}");
+        assert!(out.contains("<meta charset=utf-8>"));
     }
 
     #[test]

@@ -93,6 +93,8 @@ fn bound(report: &mut AppReport) {
 pub struct App {
     windows: BTreeMap<String, AppWindow>,
     full: Option<AppReport>,
+    /// Some window has reported since the daemon started.
+    heard: bool,
 }
 
 /// `InspectApp`'s answer, before it becomes a `Response::App`.
@@ -138,6 +140,7 @@ impl App {
             }
         }
         self.windows.insert(window.page_id.clone(), window);
+        self.heard = true;
         if report.full {
             self.full = Some(report);
         } else if let Some(full) = self.full.as_mut().filter(|f| f.page_id == report.page_id) {
@@ -173,7 +176,8 @@ impl App {
                 let more = match others { 0 => String::new(), 1 => " 1 other Neko window is open.".into(), n => format!(" {n} other Neko windows are open.") };
                 format!("The Neko window used last ({state}) reported {} ago; its route is #/{route}.{more}", seconds(now - full.at_ms))
             }
-            None if windows.is_empty() => "No open Neko page has reported since the daemon started, so nothing is known about the screen: open Neko (or `neko-daemon --open-page <route>`) and ask again.".into(),
+            None if windows.is_empty() && !self.heard => "No open Neko page has reported since the daemon started, so nothing is known about the screen: open Neko (or `neko-daemon --open-page <route>`) and ask again.".into(),
+            None if windows.is_empty() => "No Neko window has reported in the last 3 minutes (open ones report once a minute), so none seems open and nothing is known about the screen: open Neko (or `neko-daemon --open-page <route>`) and ask again.".into(),
             None => format!("{} Neko window(s) are open, but none has been used since the one used last closed; what they show is not known until one is focused.", windows.len()),
         };
         let age_ms = self.full.as_ref().map(|f| (now - f.at_ms).max(0));
@@ -320,6 +324,9 @@ mod tests {
         assert!(seen.window.is_none(), "b went silent");
         assert_eq!(seen.windows.len(), 1);
         assert!(seen.note.contains("none has been used"), "{}", seen.note);
+        // Every window gone quiet: not "since the daemon started".
+        let quiet = app.inspect(WINDOW_GONE_MS * 3);
+        assert!(quiet.windows.is_empty() && quiet.note.starts_with("No Neko window has reported in the last 3 minutes"), "{}", quiet.note);
     }
 
     #[test]
@@ -334,6 +341,12 @@ mod tests {
         let shown = app.inspect(0).window.unwrap();
         assert_eq!(shown.route.len(), 300);
         assert_eq!(shown.tabs.len(), 60);
+        // A viewer with a fractional or odd priority does not void the report.
+        let parsed: AppReport = serde_json::from_value(serde_json::json!({
+            "page_id": "p", "full": true,
+            "viewers": [{ "id": "a", "priority": 1.5 }, { "id": "b", "priority": -2 }, { "id": "c", "priority": null }, { "id": "d" }],
+        })).unwrap();
+        assert_eq!(parsed.viewers.iter().map(|v| v.priority).collect::<Vec<_>>(), vec![1, -2, 0, 0]);
         for i in 0..40 { app.report(window(&format!("w{i}"), false), i).unwrap(); }
         assert!(app.inspect(50).windows.len() <= MAX_WINDOWS);
     }

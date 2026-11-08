@@ -8,14 +8,14 @@
 //   ShowArtifact { id, version } / OpenTab { route }   an agent asks every page to show (obeyAgentRequests)
 //   EditArtifact { artifact_id, version, content, note }   a viewer saves the next version (editArtifact)
 //   ReportArtifactShown / ReportArtifactProblem   what drawing a version did, for the agent (reportShown, reportProblem)
-//   a data-neko-send click in an html artifact    a message from the person (sendFromArtifact)
+//   a data-neko-send click in an html artifact    a draft in Home's composer, never a sent message (offerFromArtifact)
 //
 // Which artifact the canvas shows is kept here, outside any page, so a card,
 // a menu or an artifact's own tab can open one and Home shows it beside the
 // conversation. There is no gallery page (removed 2026-11-06, owner's call):
 // an artifact lives beside the reply that made it, or in a tab of its own.
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { accept, command, onEvent, request, type Json } from "@/api";
+import { onEvent, request, type Json } from "@/api";
 import { HOME } from "@/router";
 import { toast } from "@/ui/sonner";
 
@@ -64,10 +64,12 @@ export const versionKind = (artifact: Artifact, n: number) => artifact.versions.
  * (`neko_core::html_ids`), its opening tag to find it in the file, and its text.
  */
 export function referenceText(id: string, n: number, pick: { selector: string; text: string; id?: string; hint?: string }): string {
-  const flat = (s: string, max: number) => s.replace(/\s+/g, " ").trim().slice(0, max);
-  const quoted = flat(pick.text, 120).replace(/"/g, "'");
-  const facts = [pick.id ? `data-neko-id ${flat(pick.id, 64)}` : "", pick.hint ? flat(pick.hint, 200).replace(/[[\]]/g, "") : ""].filter(Boolean);
-  return `[artifact ${id} v${n}, element ${flat(pick.selector, 300)}${facts.length ? ` (${facts.join(", ")})` : ""}: "${quoted}"]`;
+  // What the page posted is the page's to choose: nothing in it may close the
+  // bracket and write text of its own into the message.
+  const flat = (s: string, max: number) => s.replace(/[[\]"]/g, "").replace(/\s+/g, " ").trim().slice(0, max);
+  const element = pick.id && /^[\w-]{1,64}$/.test(pick.id) ? pick.id : "";
+  const facts = [element ? `data-neko-id ${element}` : "", pick.hint ? flat(pick.hint.replace(/"/g, "'"), 200) : ""].filter(Boolean);
+  return `[artifact ${id} v${n}, element ${flat(pick.selector, 300)}${facts.length ? ` (${facts.join(", ")})` : ""}: "${flat(pick.text.replace(/"/g, "'"), 120)}"]`;
 }
 
 /** Ends a message that names canvas elements (after Open Design's "Hard scope"), once however many it names. */
@@ -316,7 +318,7 @@ export function reportProblem(id: string, version: number, kind: ProblemKind, me
 // Artifacts that talk back: data-neko-send
 // ---------------------------------------------------------------------------
 
-/** The longest text one click may send. */
+/** The longest text one click may offer. */
 export const MAX_SEND = 500;
 
 /** The line a message from an artifact ends with: the agent reads it; the chat shows it as "from <title>". */
@@ -324,7 +326,7 @@ export const fromArtifactLine = (id: string, n: number, title: string) =>
   `[from artifact ${id} v${n}: "${title.replace(/["\n\r\]]/g, "'").slice(0, 80)}"]`;
 const FROM = /\n?\[from artifact ([A-Za-z0-9_-]{1,64}) v(\d+): "([^"\n]*)"\]\s*$/;
 
-/** A message's own text and, when an artifact's button sent it, which artifact. */
+/** A message's own text and, when it carries an artifact's draft, which artifact. */
 export function splitFromArtifact(text: string): { body: string; from: { id: string; version: number; title: string } | null } {
   const m = FROM.exec(text);
   if (!m) return { body: text, from: null };
@@ -332,8 +334,8 @@ export function splitFromArtifact(text: string): { body: string; from: { id: str
 }
 
 /**
- * What a user message shows (the chat and the queue tray): a message an
- * artifact's `data-neko-send` button sent says which artifact in a small
+ * What a user message shows (the chat and the queue tray): a message that
+ * carries an artifact's `data-neko-send` draft says which artifact in a small
  * label, and a canvas comment's scope line (Neko's words to the agent, not
  * the person's) becomes a label too. The agent reads the message as stored.
  */
@@ -345,25 +347,41 @@ export function userMessageView(text: string): { body: string; label: string | n
   return { body: shown, label, from: from?.id ?? null };
 }
 
+/** An offer from an artifact, waiting for Home's composer to take it. */
+export interface Offer {
+  text: string;
+  /** What the chip says. */
+  name: string;
+  /** The line the message ends with (`fromArtifactLine`). */
+  reference: string;
+}
+
+const offers: Offer[] = [];
+export const OFFER_EVENT = "neko:artifact-offer";
+
+/** The offers waiting for the composer, oldest first, once. */
+export function takeOffers(): Offer[] {
+  return offers.splice(0, offers.length);
+}
+
 /**
- * Sends what a `data-neko-send` element says as the person's message, in the
- * conversation the artifact belongs to. Artifacts are saved only from Neko's
- * own chat (Home), so that is the one; the daemon queues it behind a reply
- * that is running, as it does a typed message.
+ * What a `data-neko-send` element says becomes a draft in Home's composer,
+ * marked as from the artifact (a chip naming it, its line ending the
+ * message), and the composer is focused. **An artifact never sends a message
+ * by itself:** the person reads the draft and presses send, or not. The
+ * draft goes to Home's chat because only that chat can save artifacts.
+ * The caller has checked the click (frame focused, person active, rate).
  */
-export async function sendFromArtifact(artifact: Artifact, n: number, text: string): Promise<boolean> {
+export function offerFromArtifact(artifact: Artifact, n: number, text: string): boolean {
   const said = text.trim();
   if (!said) return false;
   if (said.length > MAX_SEND) {
-    toast(`“${artifact.title}” tried to send ${said.length} characters; ${MAX_SEND} at most. Nothing was sent.`);
+    toast(`“${artifact.title}” offered ${said.length} characters; ${MAX_SEND} at most. Nothing was added.`);
     return false;
   }
-  try {
-    accept(await command("SendMessage", { text: `${said}\n${fromArtifactLine(artifact.id, n, artifact.title)}`, workspace_id: artifact.workspace_id ?? null }));
-    toast(`Sent to Neko from “${artifact.title}”`);
-    return true;
-  } catch (e) {
-    toast(`Not sent: ${e instanceof Error ? e.message : String(e)}`);
-    return false;
-  }
+  if (offers.length >= 5) return false;
+  offers.push({ text: said, name: `From “${artifact.title}”`, reference: fromArtifactLine(artifact.id, n, artifact.title) });
+  if (currentRoute() !== HOME) location.hash = "/";
+  dispatchEvent(new CustomEvent(OFFER_EVENT));
+  return true;
 }

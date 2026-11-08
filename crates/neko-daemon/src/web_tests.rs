@@ -986,7 +986,9 @@ fn an_artifact_is_served_under_its_own_policy_with_the_comment_bridge() {
     assert!(page.head.contains("X-Content-Type-Options: nosniff") && page.head.contains("Cache-Control: no-store"));
     // The probe runs first, the bridge sits before </body>, elements carry
     // stamped ids, and the design is otherwise untouched around them.
-    assert!(page.body.starts_with(&format!("<html>{ARTIFACT_PROBE}<body><h1 data-neko-id=\"n")), "{}", page.body);
+    let probe = ARTIFACT_PROBE.replace("__NEKO_ARTIFACT__", &artifact.id).replace("__NEKO_VERSION__", "1");
+    assert!(page.body.starts_with(&format!("<html>{probe}<body><h1 data-neko-id=\"n")), "{}", page.body);
+    assert!(get(h.port, &format!("/artifact/{}/latest", artifact.id), &[]).body.contains(&format!("id:\"{}\",v:1,", artifact.id)), "latest names its real number");
     assert!(page.body.contains("\">One</h1><script data-neko-bridge>"), "{}", page.body);
     assert!(page.body.ends_with("</script></body></html>"));
     assert_eq!(page.body, get(h.port, &format!("/artifact/{}/1", artifact.id), &[]).body, "the same ids every time");
@@ -1074,11 +1076,16 @@ fn the_artifact_route_needs_the_same_gates_and_stays_in_its_store() {
 
 #[test]
 fn the_comment_bridge_goes_before_the_last_body_close_or_at_the_end() {
-    let bare = prepare_html("<p>no body</p>");
-    assert!(bare.starts_with(ARTIFACT_PROBE) && bare.ends_with(COMMENT_BRIDGE), "{bare}");
+    let probe = ARTIFACT_PROBE.replace("__NEKO_ARTIFACT__", "0a1b2c3d4e5f").replace("__NEKO_VERSION__", "3");
+    let bare = prepare_html("<p>no body</p>", "0a1b2c3d4e5f", 3);
+    assert!(bare.starts_with(&probe) && bare.ends_with("</script>"), "{bare}");
     assert!(bare.contains("<p data-neko-id=\"n") && bare.contains(">no body</p><script data-neko-bridge>"));
-    let html = prepare_html("<BODY>a</BODY>\n");
-    assert!(html.starts_with(&format!("{ARTIFACT_PROBE}<BODY>a<script data-neko-bridge>")) && html.ends_with("</script></BODY>\n"));
+    assert!(!bare.contains("__NEKO_"), "every placeholder is filled");
+    assert_eq!(bare.matches("id:\"0a1b2c3d4e5f\",v:3").count(), 4, "every message names the version it was served as");
+    // An id is only ever letters, digits, - and _ inside the script.
+    assert!(prepare_html("<p>x</p>", "a\"b<", 1).contains("id:\"ab\",v:1"));
+    let html = prepare_html("<BODY>a</BODY>\n", "x", 1);
+    assert!(html.starts_with("<script data-neko-bridge>") && html.contains("</script><BODY>a<script data-neko-bridge>") && html.ends_with("</script></BODY>\n"));
     assert!(!ARTIFACT_PROBE.contains('\n'), "the probe adds no line, so reported line numbers are the file's");
     for part in ["neko-problem", "unhandledrejection", "console.error", "n>=20", "slice(0,500)"] {
         assert!(ARTIFACT_PROBE.contains(part), "{part}");

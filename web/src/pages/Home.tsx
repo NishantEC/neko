@@ -12,7 +12,9 @@ import { Suggestion, Suggestions } from "@/chat/suggestion";
 import { NekoComposer, type ComposerHandle } from "@/chat/ChatInputComposer";
 import { Inspector } from "@/shell/inspector";
 import { ArtifactPanel } from "@/canvas/ArtifactPanel";
-import { closeCanvas, openCanvas, referenceText, SCOPE_NOTE, useArtifact, useCanvas } from "@/canvas/artifacts";
+import { closeCanvas, OFFER_EVENT, openCanvas, referenceText, SCOPE_NOTE, takeOffers, useArtifact, useCanvas } from "@/canvas/artifacts";
+import { MAX_OFFERS } from "@/chat/ChatInputDrafts";
+import { toast } from "@/ui/sonner";
 import { Decisions, decisionsFromParts } from "@/chat/decisions";
 import { NekoTurn, UserTurn } from "@/chat/turns";
 import { chatSignature, useNekoChat } from "@/chat/sdk/chats";
@@ -64,6 +66,28 @@ export default function Home() {
     addEventListener("neko:compose", take);
     return () => {
       removeEventListener("neko:compose", take);
+      clearTimeout(timer);
+    };
+  }, []);
+
+  // What an artifact's data-neko-send button offers lands here as a draft
+  // (canvas/artifacts.ts offerFromArtifact); the person sends it, or not.
+  useEffect(() => {
+    let timer = 0;
+    const take = (tries = 20) => {
+      if (!draft.current) {
+        if (tries > 0) timer = window.setTimeout(() => take(tries - 1), 50);
+        return;
+      }
+      for (const offer of takeOffers()) {
+        if (!draft.current.offer(offer.text, offer.name, offer.reference)) toast(`The composer already holds ${MAX_OFFERS} suggestions from artifacts; send or clear them first.`);
+      }
+    };
+    const onOffer = () => take();
+    take();
+    addEventListener(OFFER_EVENT, onOffer);
+    return () => {
+      removeEventListener(OFFER_EVENT, onOffer);
       clearTimeout(timer);
     };
   }, []);

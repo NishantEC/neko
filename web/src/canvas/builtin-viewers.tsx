@@ -10,7 +10,7 @@ import { builtinHost } from "@/host";
 import { cn } from "@/ui/lib/utils";
 import ChatMarkdown from "@/chat/t3/ChatMarkdown";
 import { readText, ViewerReport, type ViewerProps } from "@/canvas/viewers";
-import { MAX_SEND, reportProblem, sendFromArtifact } from "@/canvas/artifacts";
+import { MAX_SEND, offerFromArtifact, reportProblem } from "@/canvas/artifacts";
 
 /** A viewer that could not read its file says so, in place, and the agent that made the artifact is told (`Artifact { id }` status). */
 export function ViewerProblem({ message }: { message: string }) {
@@ -51,13 +51,18 @@ const personActed = () => {
  * whose source is this very frame are read; everything in them is checked
  * and bounded, since the page's own scripts could post them too:
  *
- * - `neko-pick` / `neko-comment-cancel`: comment mode (the daemon's bridge
- *   outlines what the pointer is over and posts the pick, with its stamped
- *   `data-neko-id` and opening tag).
+ * - Every message names the artifact and version the daemon served it as
+ *   (`id`, `v`); one naming anything else (a frame that navigated) is dropped.
+ * - `neko-pick` / `neko-comment-cancel`: only in comment mode (the daemon's
+ *   bridge outlines what the pointer is over and posts the pick, with its
+ *   stamped `data-neko-id` and opening tag).
  * - `neko-problem`: an uncaught error, unhandled rejection or console.error
  *   (the daemon's probe), passed on as `ReportArtifactProblem`.
- * - `neko-send`: a click on a `data-neko-send` element; sent to the chat as
- *   the person's message, only right after the person acted, at most one a second.
+ * - `neko-send`: a click on a `data-neko-send` element. Its text becomes a
+ *   draft in Home's composer, never a sent message, and only while this frame
+ *   has focus right after the person acted, one per 2 s, 5 waiting at most.
+ *   (No web API lets the parent consume the frame's user activation, so the
+ *   2 s gap stands in for "one draft per activation".)
  */
 function PageViewer({ artifact, version, url, commenting = false, onPick, onCancel }: ViewerProps) {
   const frame = useRef<HTMLIFrameElement>(null);
@@ -66,7 +71,7 @@ function PageViewer({ artifact, version, url, commenting = false, onPick, onCanc
   const mode = useRef(commenting);
   mode.current = commenting;
   const problems = useRef(0);
-  const lastSend = useRef(0);
+  const lastOffer = useRef(0);
   // The frame has an opaque origin, so a message to it can only be addressed to "*".
   const post = () => frame.current?.contentWindow?.postMessage({ type: "neko-comment-mode", on: mode.current }, "*");
   useEffect(post, [commenting, url]);
@@ -77,19 +82,23 @@ function PageViewer({ artifact, version, url, commenting = false, onPick, onCanc
       if (!frame.current || event.source !== frame.current.contentWindow) return;
       const data = event.data;
       const { artifact: shown, version: n } = handlers.current;
-      if (data?.type === "neko-pick" && typeof data.selector === "string" && data.selector) {
-        handlers.current.onPick?.({ selector: data.selector.slice(0, 300), text: text(data.text, 120), id: text(data.id, 64) || undefined, hint: text(data.hint, 200) || undefined });
-      } else if (data?.type === "neko-comment-cancel") {
+      if (!data || typeof data !== "object") return;
+      // The bridge names the version it was served as; anything else is not this version's.
+      if (shown && (data.id !== shown.id || data.v !== n)) return;
+      if (data.type === "neko-pick" && mode.current && typeof data.selector === "string" && data.selector) {
+        const element = text(data.element, 64);
+        handlers.current.onPick?.({ selector: data.selector.slice(0, 300), text: text(data.text, 120), id: /^[\w-]{1,64}$/.test(element) ? element : undefined, hint: text(data.hint, 200) || undefined });
+      } else if (data.type === "neko-comment-cancel" && mode.current) {
         handlers.current.onCancel?.();
-      } else if (data?.type === "neko-problem" && PROBLEM_KINDS.includes(data.kind) && typeof data.message === "string") {
+      } else if (data.type === "neko-problem" && PROBLEM_KINDS.includes(data.kind) && typeof data.message === "string") {
         if (!shown || problems.current >= PROBLEMS_PER_LOAD) return;
         problems.current += 1;
         reportProblem(shown.id, n, data.kind, data.message.slice(0, 500), "html");
-      } else if (data?.type === "neko-send" && typeof data.text === "string" && shown && !mode.current) {
+      } else if (data.type === "neko-send" && typeof data.text === "string" && shown && !mode.current) {
         const now = Date.now();
-        if (now - lastSend.current < 1000 || !personActed()) return;
-        lastSend.current = now;
-        void sendFromArtifact(shown, n, data.text.slice(0, 4 * MAX_SEND));
+        if (document.activeElement !== frame.current || !personActed() || now - lastOffer.current < 2000) return;
+        lastOffer.current = now;
+        offerFromArtifact(shown, n, data.text.slice(0, 4 * MAX_SEND));
       }
     };
     window.addEventListener("message", onMessage);

@@ -49,7 +49,7 @@ export function appReport(full = isActivePage()) {
       pinned: !!t.pinned,
     })),
     pages: getPages().map((p) => ({ id: p.id, title: p.title, plugin: p.plugin ?? null })),
-    viewers: listViewers().map((v) => ({ id: v.id, title: v.title, kinds: v.kinds, priority: v.priority, plugin: v.plugin ?? null })),
+    viewers: listViewers().map((v) => ({ id: v.id, title: v.title, kinds: v.kinds, priority: Math.trunc(v.priority), plugin: v.plugin ?? null })),
     fences: listFences().map((f) => ({ language: f.language, viewer: f.viewer ?? null, plugin: f.plugin ?? null })),
     plugins: pluginReport(),
     artifacts: listOnScreen().map((a) => ({ id: a.id, version: a.version, kind: a.kind, viewer: a.viewer, place: a.place })),

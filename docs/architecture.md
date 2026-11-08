@@ -236,8 +236,8 @@ returns them as `status`. Served html gets stable `data-neko-id`s from a small
 tokenizer (`neko_core::html_ids`, never inside scripts or styles), an error
 probe after `<head>` and the comment/send bridge before `</body>`; a comment
 names the stamped id and ends with one Hard scope line, and a real click on a
-`data-neko-send` element sends its text to Neko's chat as the person's
-message, marked `[from artifact <id> v<n>: "<title>"]`. The instruction and the
+`data-neko-send` element puts its text in Home's composer as a draft marked
+`[from artifact <id> v<n>: "<title>"]`; an artifact never sends anything itself. The instruction and the
 Installed viewers section tell the agent to check `status` after saving and
 `InspectApp` before claiming something is on screen.
 

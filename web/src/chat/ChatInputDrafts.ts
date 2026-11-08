@@ -19,7 +19,14 @@ export interface DraftAttachment {
   label?: string;
   /** Ends the message with this line, once however many attachments carry it (a canvas comment's scope). */
   closing?: string;
+  /** Shown in full under the chip's name: exactly what it adds to the message. */
+  detail?: string;
+  /** How many drafts an artifact's data-neko-send added under this chip. */
+  offers?: number;
 }
+
+/** Drafts artifacts may offer before the person sends or clears them. */
+export const MAX_OFFERS = 5;
 
 export type ComposerMode = "ask" | "plan";
 
