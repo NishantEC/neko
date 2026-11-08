@@ -9,7 +9,6 @@ import { registerCommands, type PaletteCommand } from "@/shell/commands";
 import { DotsThree, ListChecks, MagnifyingGlass, Plus, TreeStructure, X } from "@/ui/icons";
 import { Kanban, Rows } from "@/work/icons";
 import { Button } from "@/ui/button";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/ui/input-group";
 import { SegmentedControl, SegmentedControlItem } from "@/ui/segmented-control";
 import { StageTabs } from "@/work/StageFilters";
 import { EditorialHeading } from "@/editorial";
@@ -146,22 +145,23 @@ export default function Tasks() {
   const countText = !snapshot ? "" : visible.length === inWorkspace ? `${inWorkspace}` : `${visible.length} of ${inWorkspace}`;
   const countLabel = !snapshot ? "Loading" : `${visible.length === inWorkspace ? taskCount(inWorkspace) : `${visible.length} of ${taskCount(inWorkspace)}`}${workspaceName ? ` in ${workspaceName}` : ""}`;
 
+  // One quiet toolbar row (DESIGN.md §8): text tabs on the left; a borderless search and the
+  // small layout switch on the right. No wells, no pills.
   const toolbar = (
-    <div className="mt-5 flex flex-wrap items-center gap-3" role="search" aria-label="Filter tasks">
+    <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2" role="search" aria-label="Filter tasks">
       <StageTabs stage={stage} counts={counts} total={total} onChange={setStage} />
-      <InputGroup className="sky-well sky-control ms-auto min-w-0 max-w-52 grow basis-24 border-transparent bg-transparent shadow-none">
-        <InputGroupAddon><MagnifyingGlass aria-hidden /></InputGroupAddon>
-        <InputGroupInput
-          ref={searchBox} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tasks" aria-label="Search tasks"
+      <label className="group/search ms-auto flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-muted-foreground transition-colors focus-within:bg-foreground/[0.04] hover:bg-foreground/[0.03]">
+        <MagnifyingGlass aria-hidden size={14} className="shrink-0" />
+        <input
+          ref={searchBox} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search" aria-label="Search tasks"
           onKeyDown={(e) => { if (e.key === "Escape") { if (search) setSearch(""); else e.currentTarget.blur(); } }}
+          className={cn("min-w-0 bg-transparent text-[13px] text-foreground outline-none transition-[width] duration-150 placeholder:text-muted-foreground motion-reduce:transition-none", search ? "w-44" : "w-20 focus:w-44")}
         />
         {search ? (
-          <InputGroupAddon align="inline-end">
-            <button type="button" aria-label="Clear search" onClick={() => { setSearch(""); searchBox.current?.focus(); }} className="rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><X size={13} /></button>
-          </InputGroupAddon>
-        ) : <InputGroupAddon align="inline-end"><Kbd>/</Kbd></InputGroupAddon>}
-      </InputGroup>
-      <SegmentedControl value={layout} onValueChange={(v) => isLayout(v) && setLayout(v)} aria-label="Layout">
+          <button type="button" aria-label="Clear search" onClick={() => { setSearch(""); searchBox.current?.focus(); }} className="rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><X size={13} /></button>
+        ) : <Kbd className="bg-transparent group-focus-within/search:hidden">/</Kbd>}
+      </label>
+      <SegmentedControl value={layout} onValueChange={(v) => isLayout(v) && setLayout(v)} aria-label="Layout" className="bg-transparent p-0.5 [&_button]:text-muted-foreground [&_button[data-pressed]]:text-foreground [&>span]:inset-y-0.5 [&>span]:bg-foreground/[0.07] [&>span]:shadow-none [&>span]:ring-0">
         <SegmentedControlItem value="list" aria-label="List" title="Show tasks as a list"><Rows /></SegmentedControlItem>
         <SegmentedControlItem value="board" aria-label="Board" title="Show tasks as a board"><Kanban /></SegmentedControlItem>
         <SegmentedControlItem value="tree" aria-label="Tree" title="Show which agent started each task"><TreeStructure /></SegmentedControlItem>
@@ -267,14 +267,14 @@ export default function Tasks() {
       onFocus={(e) => { const row = (e.target as HTMLElement).closest<HTMLElement>("[data-slot='task-row']"); if (row) setFocusedId(row.dataset.taskId ?? null); }}
       className="relative flex min-h-0 flex-1 flex-col"
     >
-      {/* The Tasks header: tighter than WorkHeader (24px top, 28px sides), title and count on one line, then one toolbar row. */}
-      <header data-slot="work-header" className="shrink-0 px-7 pt-6 pb-4">
-        <div className="flex items-center gap-3">
-          <EditorialHeading as="h1" className="text-[22px]">Tasks</EditorialHeading>
-          <span data-slot="work-subtitle" aria-label={countLabel} className="text-[13.5px] tabular-nums text-muted-foreground">
+      {/* The Tasks header (DESIGN.md §8): the title and its inline count, the overflow menu and the one primary action; then one quiet toolbar row. */}
+      <header data-slot="work-header" className="shrink-0 px-7 pt-6 pb-3">
+        <div className="flex min-h-9 items-center gap-2.5">
+          <EditorialHeading as="h1" className="text-[20px]">Tasks</EditorialHeading>
+          <span data-slot="work-subtitle" aria-label={countLabel} className="text-[14px] tabular-nums text-muted-foreground">
             {countText}{workspaceName ? <> · {workspaceName}</> : null}
           </span>
-          <div className="ms-auto flex items-center gap-2">{headerActions}</div>
+          <div className="ms-auto flex items-center gap-1.5">{headerActions}</div>
         </div>
         {toolbar}
       </header>

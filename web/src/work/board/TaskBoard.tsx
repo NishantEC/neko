@@ -73,8 +73,8 @@ export function ColumnHeader({ stage, count, children }: { stage: Stage; count: 
   return (
     <div data-slot="group-header" data-stage={stage} className="flex h-8 shrink-0 items-center gap-1.5 px-0.5">
       <SharedGlyph status={STAGE_GLYPH[stage]} label="" size={13} />
-      <h3 className="truncate text-[13.5px] font-semibold text-strong">{STAGE_TITLE[stage]}</h3>
-      <span data-slot="column-count" className="text-[12.5px] tabular-nums text-muted-foreground">{count}</span>
+      <h3 className="truncate text-[12.5px] font-medium text-muted-foreground">{STAGE_TITLE[stage]}</h3>
+      <span data-slot="column-count" className="text-[12.5px] tabular-nums text-muted-foreground/70">{count}</span>
       <span className="flex-1" />
       {children}
     </div>

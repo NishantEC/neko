@@ -181,10 +181,15 @@ function Body(props: NotchCardProps) {
  * step darker than the surface in light and lighter in dark, so it reads apart from both
  * the surface and the column. Selected, the frame turns primary; keyboard focus adds the
  * ring around the rectangle; hover brightens the frame. Nothing moves.
+ *
+ * Calm pass (DESIGN.md §8, 2026-11-08): a card with no notch has no visible frame (the frame
+ * is the surface's own colour), so only the cards that wait on you carry the frame, where it
+ * is the notch's material. Hover lifts the surface a step instead.
  */
 export function NotchCard(props: NotchCardProps) {
   const { selected, ghost, lifted, handle, corner, className, style, density = "compact", ...rest } = props;
   const data = Object.fromEntries(Object.entries(rest).filter(([k]) => k.startsWith("data-")));
+  const notched = !!(props.state || props.live) && !!props.action;
   return (
     <div
       {...data}
@@ -194,8 +199,12 @@ export function NotchCard(props: NotchCardProps) {
       className={cn(
         "group/card relative flex w-full flex-col rounded-[16px] p-[1.5px] text-start transition-[background-color,box-shadow] duration-150",
         "[--fuse-base:var(--card)] dark:[--fuse-base:var(--sky-pebble)] [--fuse:var(--fuse-base)]",
-        "[--frame:color-mix(in_oklab,var(--foreground)_11%,var(--card))] dark:[--frame:color-mix(in_oklab,var(--foreground)_17%,var(--background))]",
-        !ghost && !lifted && !selected && "hover:[--frame:color-mix(in_oklab,var(--foreground)_17%,var(--card))] dark:hover:[--frame:color-mix(in_oklab,var(--foreground)_24%,var(--background))]",
+        notched
+          ? "[--frame:color-mix(in_oklab,var(--foreground)_9%,var(--card))] dark:[--frame:color-mix(in_oklab,var(--foreground)_13%,var(--background))]"
+          : "[--frame:var(--fuse)] dark:[--frame:var(--fuse)]",
+        !ghost && !lifted && !selected && (notched
+          ? "hover:[--frame:color-mix(in_oklab,var(--foreground)_14%,var(--card))] dark:hover:[--frame:color-mix(in_oklab,var(--foreground)_19%,var(--background))]"
+          : "hover:[--fuse:color-mix(in_oklab,var(--foreground)_4%,var(--fuse-base))]"),
         selected && "[--frame:var(--primary)] dark:[--frame:var(--primary)] [--fuse:color-mix(in_oklab,var(--primary)_6%,var(--fuse-base))]",
         "bg-[var(--frame)]",
         "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-1 has-[:focus-visible]:ring-offset-background",

@@ -32,18 +32,21 @@ export function StageFilters({ stage, counts, onChange }: { stage: Stage | "all"
 }
 
 /**
- * The stage filter as ui-kit' pill tabs (the Tasks toolbar, 2026-10-28): All, then one per
- * stage with its count. Same contract as the chips: one is on at a time.
+ * The stage filter as quiet text tabs (DESIGN.md §8, 2026-11-08; was ui-kit' pill tabs in a
+ * well): All, then one per stage with a faint count. The one that is on is a soft fill, like the
+ * window's tab strip; no container, no indicator line. One is on at a time.
  */
+const QUIET_TAB = "!h-7 !grow-0 !rounded-md !px-2 !text-[13px] !font-normal text-muted-foreground hover:!bg-foreground/[0.04] data-active:!bg-foreground/[0.07] data-active:text-foreground";
+
 export function StageTabs({ stage, counts, total, onChange }: { stage: Stage | "all"; counts: Record<Stage, number>; total: number; onChange: (stage: Stage | "all") => void }) {
   return (
-    <div data-slot="stage-filters">
-      <Tabs value={stage} onValueChange={(v) => onChange(v as Stage | "all")} className="sky-tabs">
-        <TabsList aria-label="Show tasks in">
-          <TabsTab value="all" className="!px-2" aria-label={`All tasks, ${total}`}>All<span className="text-xs tabular-nums text-muted-foreground">{total}</span></TabsTab>
+    <div data-slot="stage-filters" className="min-w-0">
+      <Tabs value={stage} onValueChange={(v) => onChange(v as Stage | "all")}>
+        <TabsList variant="underline" aria-label="Show tasks in" className="flex-wrap justify-start !py-0 [&>[data-slot=tab-indicator]]:hidden">
+          <TabsTab value="all" className={QUIET_TAB} aria-label={`All tasks, ${total}`}>All<span className="text-[12px] tabular-nums text-muted-foreground/70">{total}</span></TabsTab>
           {STAGES.map((s) => (
-            <TabsTab key={s} value={s} className="!px-2" aria-label={`${STAGE_TITLE[s]}, ${counts[s]}`}>
-              {STAGE_TITLE[s]}<span className="text-xs tabular-nums text-muted-foreground">{counts[s]}</span>
+            <TabsTab key={s} value={s} className={QUIET_TAB} aria-label={`${STAGE_TITLE[s]}, ${counts[s]}`}>
+              {STAGE_TITLE[s]}<span className="text-[12px] tabular-nums text-muted-foreground/70">{counts[s]}</span>
             </TabsTab>
           ))}
         </TabsList>
