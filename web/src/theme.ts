@@ -248,17 +248,28 @@ let localEdits = 0;
 /** Choices this page saved whose AppearanceChanged echo has not come back yet, oldest first. */
 const echoes: string[] = [];
 const keyOf = (c: Choice) => `${c.mode}|${c.light}|${c.dark}`;
-function sent() {
+function sent(): string {
   localEdits += 1;
-  echoes.push(keyOf(choice));
+  const key = keyOf(choice);
+  echoes.push(key);
   if (echoes.length > 20) echoes.shift();
+  return key;
 }
-/** True for the echo of one of this page's own saves (that one and any older are forgotten). */
-function ownEcho(next: Choice | null): boolean {
+/** A save that failed sends no echo; forget its key so it cannot hide another page's change. */
+function unsent(key: string) {
+  const at = echoes.lastIndexOf(key);
+  if (at >= 0) echoes.splice(at, 1);
+}
+/**
+ * True for the echo of an older save of this page's own, which a newer pick has replaced
+ * (it and any older are forgotten). The newest one is adopted like any change: it is what
+ * the daemon holds now.
+ */
+function staleEcho(next: Choice | null): boolean {
   const at = next ? echoes.indexOf(keyOf(next)) : -1;
   if (at < 0) return false;
   echoes.splice(0, at + 1);
-  return true;
+  return echoes.length > 0;
 }
 
 function adopt(next: Choice | null) {
@@ -291,12 +302,14 @@ async function loadAppearance() {
   }
 }
 
-async function save(next: Partial<Choice>) {
+async function save(next: Partial<Choice>): Promise<boolean> {
   try {
     const body = { mode: next.mode ?? null, light: next.light ?? null, dark: next.dark ?? null };
     await request({ SetAppearance: body });
+    return true;
   } catch {
     /* kept locally; the next change tries again */
+    return false;
   }
 }
 
@@ -365,7 +378,7 @@ export function initTheme() {
   onEvent((event) => {
     const changed = (event as any)?.AppearanceChanged;
     // Another page's change is adopted; this page's own echo is not (a late one would undo a newer pick).
-    if (changed && !ownEcho(asChoice(changed))) adopt(asChoice(changed));
+    if (changed && !staleEcho(asChoice(changed))) adopt(asChoice(changed));
   });
   void loadAppearance();
   void refreshThemes();
@@ -374,19 +387,19 @@ export function initTheme() {
 
 export function setMode(mode: Mode) {
   choice = { ...choice, mode };
-  sent();
+  const key = sent();
   persist();
   apply();
-  void save({ mode });
+  void save({ mode }).then((ok) => { if (!ok) unsent(key); });
 }
 
 /** Picks the theme for light or for dark. */
 export function setSlot(slot: Appearance, id: string) {
   choice = { ...choice, [slot]: id };
-  sent();
+  const key = sent();
   persist();
   apply();
-  void save({ [slot]: id });
+  void save({ [slot]: id }).then((ok) => { if (!ok) unsent(key); });
 }
 
 /** Deletes a theme file of the person's. A built-in that it overrode comes back. */

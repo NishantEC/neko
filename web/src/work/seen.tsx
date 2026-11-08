@@ -23,10 +23,16 @@ function publish(ids: string[]) {
   listeners.forEach((l) => l());
 }
 
+/** Bumped by every mark on this page: a refresh that left before it would undo it for a moment. */
+let marks = 0;
+/** Tasks the person marked unread here: an open sheet or tab does not mark them seen again until reopened. */
+const keepUnread = new Set<string>();
+
 async function refresh() {
+  const asked = marks;
   try {
     const reply = await request("UnseenTasks");
-    if (reply?.UnseenTasks) publish(reply.UnseenTasks.ids ?? []);
+    if (reply?.UnseenTasks && asked === marks) publish(reply.UnseenTasks.ids ?? []);
   } catch {
     /* an older daemon, or one restarting: no dots until it answers */
   }
@@ -63,24 +69,52 @@ export function useUnseen(): ReadonlySet<string> {
 
 /** Marks a task seen (`seen`) or unread. The dot changes at once; the daemon's answer settles it. */
 export async function markTaskSeen(taskId: string, seen = true) {
+  const mine = ++marks;
+  if (seen) keepUnread.delete(taskId);
+  else keepUnread.add(taskId);
   const next = new Set(unseen);
   if (seen) next.delete(taskId);
   else next.add(taskId);
   publish([...next]);
   try {
     const reply = await request({ MarkTaskSeen: { task_id: taskId, seen } });
-    if (reply?.UnseenTasks) publish(reply.UnseenTasks.ids ?? []);
+    if (reply?.UnseenTasks && mine === marks) publish(reply.UnseenTasks.ids ?? []);
   } catch {
     /* a task the daemon does not have (a fixture), or an older daemon: keep the local answer */
   }
 }
 
-/** Opening a task marks it seen, and keeps it seen while it stays open (it may finish on screen). */
+/** Someone is looking: the page is on screen and its window has focus. */
+const looking = () => document.visibilityState === "visible" && document.hasFocus();
+
+/**
+ * Opening a task marks it seen, and keeps it seen while it stays open (it may finish on
+ * screen), but only while the person is looking: a task finishing in a background window
+ * waits for that window to get focus. "Mark as unread" on the open task holds until it is
+ * opened again.
+ */
 export function useMarkSeen(taskId: string | null | undefined) {
   const set = useUnseen();
   const flagged = !!taskId && set.has(taskId);
+  // Opening (or switching to) a task ends an earlier "keep unread" for it.
   useEffect(() => {
-    if (taskId && flagged) void markTaskSeen(taskId);
+    if (taskId) keepUnread.delete(taskId);
+  }, [taskId]);
+  useEffect(() => {
+    if (!taskId || !flagged || keepUnread.has(taskId)) return;
+    if (looking()) {
+      void markTaskSeen(taskId);
+      return;
+    }
+    const onLook = () => {
+      if (looking() && !keepUnread.has(taskId)) void markTaskSeen(taskId);
+    };
+    addEventListener("focus", onLook);
+    document.addEventListener("visibilitychange", onLook);
+    return () => {
+      removeEventListener("focus", onLook);
+      document.removeEventListener("visibilitychange", onLook);
+    };
   }, [taskId, flagged]);
 }
 

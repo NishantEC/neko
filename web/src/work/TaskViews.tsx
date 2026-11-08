@@ -63,7 +63,6 @@ function ListRow({ task, snapshot, selected, onOpen, ui, showWorkspace }: { task
           selected && "bg-foreground/[0.06] hover:bg-foreground/[0.06]",
         )}
       >
-        {unseen ? <UnseenDot className="absolute start-[3px] top-1/2 -translate-y-1/2" /> : null}
         {glyphAction ? (
           <GlyphButton status={statusOf(task.status)} label={`${glyphAction.label}: ${title}`} onClick={() => glyphAction.run?.(ui)} />
         ) : (
@@ -82,6 +81,7 @@ function ListRow({ task, snapshot, selected, onOpen, ui, showWorkspace }: { task
         >
           <IdLabel className="hidden w-[4.25rem] @3xl:inline">{shortId(task)}</IdLabel>
           <span className="max-w-[60%] shrink-0 truncate text-foreground">{title}</span>
+          {unseen ? <UnseenDot className="-ms-1.5" /> : null}
           <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">
             <span className="hidden @2xl:inline">{note}</span>
           </span>
