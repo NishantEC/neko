@@ -634,7 +634,7 @@ export default function CalendarPage() {
 
   const empty = !!data && data.events.length === 0;
   return (
-    <SetupPage eyebrow="Calendar" title={title} subtitle="Your meetings from macOS Calendar, and Neko’s work that has a date." actions={actions} width="max-w-[1400px]">
+    <SetupPage eyebrow="Calendar" title={title} actions={actions} width="max-w-[1400px]">
       <div className="flex flex-col gap-3">
         <ErrorNote error={error} title="Can’t reach the Neko daemon" onDismiss={clear} />
         <AccessNote status={data?.status} />

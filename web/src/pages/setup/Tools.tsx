@@ -111,7 +111,7 @@ function ToolsBody({ snapshot }: { snapshot: Json }) {
               </span>
             </div>
           ) : null}
-          <Section eyebrow={`${connections.length} ${connections.length === 1 ? "connection" : "connections"}`} title="Connections" intro={scope ? `Available in ${workspaceName(snapshot, scope)} and in every workspace.` : "Every connection, in every workspace."}>
+          <Section eyebrow={`${connections.length} ${connections.length === 1 ? "connection" : "connections"}`} title="Connections">
             {connections.length === 0 ? (
               <EmptyBlock icon={PlugsConnected} title="No connections yet" description="Browse MCP servers, import from this Mac, or add a URL manually.">
                 <div className="flex gap-2">
@@ -148,7 +148,6 @@ export default function Tools() {
     <SetupPage
       eyebrow="Knowledge & tools"
       title={<>Tools &amp; skills</>}
-      subtitle="Connections provide access. Skills provide instructions."
     >
       <Gate>{(snapshot) => <ToolsBody snapshot={snapshot} />}</Gate>
     </SetupPage>

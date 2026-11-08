@@ -3,7 +3,7 @@
 // footer strip follow ui-kit' settings layout (apps/spa/src/pages/Settings/
 // settings.ui.tsx @da20dfaeb), kept on Neko's props so the pages are unchanged.
 // Also: instrument wells, empty/loading/error states and a confirm.
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/ui/lib/utils";
 import { Button } from "@/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/ui/alert";
@@ -16,7 +16,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle,
 } from "@/ui/alert-dialog";
-import { WarningCircle, type Icon } from "@/ui/icons";
+import { CaretDown, WarningCircle, type Icon } from "@/ui/icons";
 import { FieldLabel, PageHeader } from "@/editorial";
 import { PageContainer } from "@/shell/PageContainer";
 import { useWorkbench } from "@/useStore";
@@ -25,13 +25,17 @@ import type { Tone } from "@/setup/lib";
 /**
  * The page frame: ui-kit' PageContainer column (max 1200px, px-7, pt-6, pb-24: the Tasks page's rhythm) with its PageHeader and the page actions beside it.
  * `width` narrows the column for pages that are a single list.
+ *
+ * DESIGN.md §8: the header is the title and an inline `count`, nothing under
+ * it; `actions` holds at most one primary button and an overflow menu.
  */
 export function SetupPage({
-  eyebrow, title, subtitle, actions, children, width = "max-w-[880px]", toolbar,
+  title, count, actions, children, width = "max-w-[880px]", toolbar,
 }: {
-  eyebrow: ReactNode;
+  /** Ignored (no eyebrows); kept so call sites and plugins still type-check. */
+  eyebrow?: ReactNode;
   title: ReactNode;
-  subtitle?: ReactNode;
+  count?: ReactNode;
   actions?: ReactNode;
   toolbar?: ReactNode;
   children: ReactNode;
@@ -39,9 +43,9 @@ export function SetupPage({
 }) {
   return (
     <PageContainer data-slot="setup-page" className={cn("flex flex-col gap-8", width)}>
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <PageHeader eyebrow={eyebrow} title={title} subtitle={subtitle} />
-        {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+      <div className="flex min-h-9 flex-wrap items-center justify-between gap-4">
+        <PageHeader title={title} count={count} />
+        {actions ? <div className="flex flex-wrap items-center gap-1.5">{actions}</div> : null}
       </div>
       {toolbar}
       {children}
@@ -49,51 +53,79 @@ export function SetupPage({
   );
 }
 
+/** The quiet group heading every list shares (DESIGN.md §8): small, muted, a faint count. */
+export const GROUP_HEADING = "text-[12.5px] font-medium text-muted-foreground";
+
 /**
- * A group on a page. The heading is ui-kit' settings Section header
- * (pages/Settings/settings.ui.tsx: base semibold title, one muted line, actions
- * on the right); Neko keeps it above the Panel it introduces.
+ * A group on a page: a small, quiet heading with an optional faint count and
+ * actions on the right, then its rows. No intro sentence (DESIGN.md §8); a
+ * group can collapse (`collapsible`, open by default).
  */
 export function Section({
-  title, intro, actions, children, id, className,
+  title, count, actions, children, id, className, collapsible = false, defaultOpen = true,
 }: {
   eyebrow?: ReactNode;
   title: ReactNode;
-  intro?: ReactNode;
+  count?: ReactNode;
   actions?: ReactNode;
   children?: ReactNode;
   id?: string;
   className?: string;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const shown = !collapsible || open;
+  const label = (
+    <>
+      <span className="text-balance">{title}</span>
+      {count !== undefined && count !== null && count !== "" ? <span className="tabular-nums text-muted-foreground/70">{count}</span> : null}
+    </>
+  );
   return (
-    <section id={id} data-slot="setup-section" className={cn("flex flex-col gap-3", className)}>
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="text-balance text-base font-semibold text-foreground">{title}</h2>
-          {intro ? <p className="mt-1 max-w-prose text-pretty text-sm text-muted-foreground">{intro}</p> : null}
-        </div>
-        {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
+    <section id={id} data-slot="setup-section" data-open={shown || undefined} className={cn("flex flex-col gap-1.5", className)}>
+      <div className="flex min-h-7 items-center justify-between gap-4">
+        <h2 className={cn(GROUP_HEADING, "min-w-0")}>
+          {collapsible ? (
+            <button
+              type="button"
+              aria-expanded={open}
+              onClick={() => setOpen(!open)}
+              className="-ms-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
+              <CaretDown aria-hidden size={11} weight="bold" className={cn("transition-transform duration-150", !open && "-rotate-90")} />
+              {label}
+            </button>
+          ) : (
+            <span className="flex items-center gap-1.5">{label}</span>
+          )}
+        </h2>
+        {actions ? <div className="flex shrink-0 flex-wrap items-center gap-1.5">{actions}</div> : null}
       </div>
-      {children}
+      {shown ? children : null}
     </section>
   );
 }
 
-/** ui-kit' settings card (settings.ui.tsx `Section`): one surface, no border, 20px corners. */
+/**
+ * A list's frame. No card, no border, no dividers (DESIGN.md §8): rows are
+ * separated by space and light up on hover. It bleeds 12px either side so a
+ * row's text lines up with the heading above while its hover wash has room.
+ */
 export function Panel({ children, className, ...rest }: React.ComponentProps<"div">) {
   return (
-    <div data-slot="setup-panel" {...rest} className={cn("overflow-hidden rounded-[20px] bg-card", className)}>
+    <div data-slot="setup-panel" {...rest} className={cn("-mx-3 flex flex-col", className)}>
       {children}
     </div>
   );
 }
 
-/** The card's footer strip (settings.ui.tsx): a hint on the left, the action on the right. */
+/** A row of quiet actions under a list: a hint on the left, the action on the right. */
 export function PanelFooter({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div
       data-slot="setup-panel-footer"
-      className={cn("flex min-h-[52px] flex-wrap items-center justify-end gap-x-4 gap-y-2 bg-muted px-6 py-2.5 text-sm text-muted-foreground", className)}
+      className={cn("flex min-h-10 flex-wrap items-center justify-end gap-x-4 gap-y-2 px-3 pt-2 text-[13px] text-muted-foreground", className)}
     >
       {children}
     </div>
@@ -117,10 +149,10 @@ export function Row({
 }) {
   const head = (
     <>
-      {leading ? <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center text-muted-foreground">{leading}</span> : null}
-      <span className="flex min-w-0 flex-1 flex-col text-start">
-        <span className="text-sm font-medium text-foreground">{title}</span>
-        {description ? <span className="mt-0.5 text-pretty text-xs text-muted-foreground">{description}</span> : null}
+      {leading ? <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">{leading}</span> : null}
+      <span className="flex min-w-0 flex-1 items-baseline gap-3 text-start">
+        <span className="min-w-0 shrink-0 truncate text-[13.5px] text-foreground">{title}</span>
+        {description ? <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">{description}</span> : null}
       </span>
     </>
   );
@@ -129,24 +161,24 @@ export function Row({
       id={id}
       data-slot="setup-row"
       data-highlighted={highlighted ? "" : undefined}
-      className={cn("min-h-14 px-6 py-3 transition-colors data-[highlighted]:bg-primary/10", className)}
+      className={cn("group/row rounded-[10px] px-3 py-2 transition-colors hover:bg-foreground/[0.03] data-[highlighted]:bg-primary/10", className)}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex min-h-7 items-center gap-3">
         {onClick ? (
           <button
             type="button"
             onClick={onClick}
             aria-label={label}
-            className="-m-1.5 flex min-w-0 flex-1 items-start gap-3 rounded-lg p-1.5 text-start outline-none transition-colors hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {head}
           </button>
         ) : (
-          <div className="flex min-w-0 flex-1 items-start gap-3">{head}</div>
+          <div className="flex min-w-0 flex-1 items-center gap-3">{head}</div>
         )}
-        {trailing ? <div className="flex shrink-0 items-center gap-2">{trailing}</div> : null}
+        {trailing ? <div className="flex shrink-0 items-center gap-2 text-[12.5px] text-muted-foreground">{trailing}</div> : null}
       </div>
-      {children ? <div className="mt-3 ps-8 text-[13px] text-muted-foreground">{children}</div> : null}
+      {children ? <div className="mt-1.5 ps-8 text-[13px] text-muted-foreground">{children}</div> : null}
     </div>
   );
 }
@@ -173,13 +205,13 @@ export function SettingRow({
       data-setting={id}
       data-highlighted={highlighted ? "" : undefined}
       className={cn(
-        "flex min-h-14 scroll-mt-24 px-6 py-3 transition-colors duration-500 data-[highlighted]:bg-primary/10",
+        "flex min-h-12 scroll-mt-24 rounded-[10px] px-3 py-2.5 transition-colors duration-500 data-[highlighted]:bg-primary/10",
         stacked ? "flex-col gap-2" : "flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4",
       )}
     >
       <div className="min-w-0">
-        <div className="text-sm font-medium text-foreground">{title}</div>
-        {description ? <div className="mt-0.5 max-w-prose text-pretty text-xs text-muted-foreground">{description}</div> : null}
+        <div className="text-[13.5px] text-foreground">{title}</div>
+        {description ? <div className="mt-0.5 max-w-prose text-pretty text-[12.5px] text-muted-foreground">{description}</div> : null}
       </div>
       <div className={cn("flex min-w-0 flex-wrap items-center gap-2", stacked ? "w-full" : "sm:shrink-0 sm:justify-end")}>{children}</div>
     </div>
@@ -192,6 +224,43 @@ export function Status({ tone = "neutral", children }: { tone?: Tone; children: 
       <span aria-hidden className={cn("size-1.5 rounded-full", tone === "success" ? "bg-success" : tone === "warning" ? "bg-warning" : tone === "error" ? "bg-destructive" : "bg-muted-foreground/60")} />
       {children}
     </StatusBadge>
+  );
+}
+
+/**
+ * A row's secondary actions (DESIGN.md §8): small icon buttons at its right
+ * that appear while the row is hovered or holds focus (keyboard users reach
+ * them with Tab; touch screens always see them). Every one of them is also in
+ * the row's right-click menu. The row needs `group/row`.
+ */
+export function RowActions({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <span
+      data-slot="row-actions"
+      className={cn(
+        "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100",
+        className,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** One icon button in `RowActions`: named, with its name as a tooltip. */
+export function RowAction({ label, icon: IconComponent, onClick, href, disabled }: { label: string; icon: Icon; onClick?: () => void; href?: string; disabled?: boolean }) {
+  const cls = "flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/70 disabled:pointer-events-none disabled:opacity-40";
+  if (href) {
+    return (
+      <a href={href} target="_blank" rel="noreferrer" aria-label={label} title={label} className={cls} onClick={(e) => e.stopPropagation()}>
+        <IconComponent aria-hidden size={15} />
+      </a>
+    );
+  }
+  return (
+    <button type="button" aria-label={label} title={label} disabled={disabled} className={cls} onClick={(e) => { e.stopPropagation(); onClick?.(); }}>
+      <IconComponent aria-hidden size={15} />
+    </button>
   );
 }
 
@@ -254,7 +323,7 @@ export function EmptyBlock({
   icon: IconComponent, title, description, children, className,
 }: { icon?: Icon; title: ReactNode; description?: ReactNode; children?: ReactNode; className?: string }) {
   return (
-    <Empty className={cn("border border-dashed border-border bg-card/40 p-10", className)}>
+    <Empty className={cn("border-0 px-6 py-12", className)}>
       <EmptyHeader>
         {IconComponent ? <EmptyMedia variant="icon"><IconComponent /></EmptyMedia> : null}
         <EmptyTitle>{title}</EmptyTitle>
@@ -268,14 +337,12 @@ export function EmptyBlock({
 export function LoadingRows({ rows = 3 }: { rows?: number }) {
   return (
     <Panel aria-busy="true" aria-label="Loading">
-      <div className="divide-y divide-border/70">
-        {Array.from({ length: rows }, (_, i) => (
-          <div key={i} className="flex flex-col gap-2 px-6 py-4">
-            <Skeleton className="h-4 w-48" />
-            <Skeleton className="h-3 w-80 max-w-full" />
-          </div>
-        ))}
-      </div>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+          <Skeleton className="size-3.5 rounded-full" />
+          <Skeleton className="h-4" style={{ width: `${32 + ((i * 17) % 36)}%` }} />
+        </div>
+      ))}
     </Panel>
   );
 }
@@ -345,7 +412,7 @@ export function Well({
     <div
       data-slot="well"
       data-tone={tone}
-      className={cn("flex flex-col gap-2.5 rounded-xl border border-border bg-foreground/[0.03] p-4 shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)]", className)}
+      className={cn("flex flex-col gap-2.5 rounded-xl bg-foreground/[0.03] p-4", className)}
     >
       <FieldLabel>{label}</FieldLabel>
       <div className="flex items-baseline gap-1.5">
@@ -386,7 +453,7 @@ export function FormField({
 export function BarList({ items, label }: { items: { name: string; value: number; text: string; hint?: string }[]; label: string }) {
   const max = Math.max(1, ...items.map((i) => i.value));
   return (
-    <ul aria-label={label} className="flex flex-col gap-4 px-6 py-5">
+    <ul aria-label={label} className="flex flex-col gap-4 px-3 py-3">
       {items.map((item) => (
         <li key={item.name} className="flex flex-col gap-1.5">
           <div className="flex items-baseline justify-between gap-4 text-[13px]">

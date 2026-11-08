@@ -110,8 +110,9 @@ function TabItem({
       onDragLeave={() => setOver(false)}
       onDrop={onDrop}
       className={cn(
-        "group/tab relative flex h-8 min-w-0 shrink items-center rounded-[10px] text-[13px] transition-colors duration-150",
-        tab.pinned ? "max-w-44 shrink-0" : "w-44 max-w-52 basis-44",
+        // Content-fitting (DESIGN.md §8): as wide as its title, never wider than 200px, shrinking to 72px before the strip scrolls.
+        "group/tab relative flex h-8 min-w-[72px] max-w-[200px] items-center rounded-[10px] text-[13px] transition-colors duration-150",
+        tab.pinned || home ? "shrink-0" : "shrink",
         active ? "bg-foreground/[0.07] text-foreground" : "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground",
         over && "ring-1 ring-primary/60",
         dragging === tab.id && "opacity-50",
@@ -132,7 +133,7 @@ function TabItem({
         onFocus={() => onFocusIndex(index)}
         className={cn(
           "flex h-full min-w-0 flex-1 items-center gap-2 rounded-[10px] ps-2.5 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
-          closable ? "pe-7" : "pe-2.5",
+          closable ? "pe-6" : "pe-3",
         )}
       >
         {label.glyph ? <StatusGlyph status={statusOf(label.glyph)} label="" size={13} /> : label.icon ? <label.icon aria-hidden size={14} className="shrink-0" /> : null}
@@ -219,7 +220,7 @@ export function TabStrip() {
   };
 
   return (
-    <div data-slot="tab-strip" className="flex h-11 shrink-0 items-center gap-1 border-b border-border/60 px-2">
+    <div data-slot="tab-strip" className="flex h-11 shrink-0 items-center gap-1 px-2">
       <StripButton label="Back" shortcut="⌘[" onClick={goBack} disabled={!canGoBack()}><ArrowLeft size={15} /></StripButton>
       <StripButton label="Forward" shortcut="⌘]" onClick={goForward} disabled={!canGoForward()}><ArrowRight size={15} /></StripButton>
       <div
@@ -227,7 +228,7 @@ export function TabStrip() {
         aria-label="Open tabs"
         aria-orientation="horizontal"
         onKeyDown={onKeyDown}
-        className="ms-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]"
+        className="ms-1 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]"
       >
         {tabs.map((tab, index) => (
           <TabItem

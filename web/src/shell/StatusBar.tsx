@@ -5,7 +5,7 @@
 import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { Keyboard } from "@phosphor-icons/react";
-import { Desktop, Gear, Moon, Palette, Sun, type Icon } from "@/ui/icons";
+import { Desktop, Moon, Palette, Sun, type Icon } from "@/ui/icons";
 import { setMode, setSlot, useThemes, type Mode, type ThemeInfo } from "@/theme";
 import { ThemeSwatch } from "@/themes/ThemePicker";
 import { navigate } from "@/router";
@@ -59,7 +59,7 @@ export function ThemeMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger data-slot="theme-menu" aria-label={`Theme and shortcuts (theme: ${active.name}, ${choice.mode === "system" ? "following the system" : appearance})`} title={`${active.name}${choice.mode === "system" ? " (system)" : ""}`} className={ICON_BUTTON}>
-        <Gear size={15} />
+        <Palette size={15} />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="end" className="min-w-52">
         <DropdownMenuGroup>

@@ -675,7 +675,7 @@ fn views(state: &AppState) -> Result<Response, String> {
             orders.entry(id.clone()).or_insert_with(|| store.orders_for(id).to_string());
         }
     }
-    Ok(Response::Routines { routines, standing_orders: orders, scopes })
+    Ok(Response::Routines { routines, standing_orders: orders, scopes, owner_name: core::owner_name() })
 }
 
 fn notifications(state: &AppState, after: u64) -> Result<Response, String> {

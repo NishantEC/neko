@@ -38,7 +38,6 @@ export function RulebookSection() {
       <Section
         eyebrow="Every agent"
         title={<>Rulebook</>}
-        intro={<>Neko and every agent it hands work to follow these rules: how to engineer a change, how to review one, how to treat this Mac and your repositories. Write them in plain words.</>}
         actions={<Status tone={usingDefault ? "neutral" : "success"}>{usingDefault ? "Using Neko’s default rules" : "Using your own rules"}</Status>}
       >
         <Panel data-slot="rulebook">

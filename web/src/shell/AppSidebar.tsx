@@ -15,6 +15,11 @@
 // Since the tab strip (2026-11-06, DESIGN.md §1) the sidebar is a launcher: a
 // row opens or focuses its page's tab, its right-click menu can open another
 // tab, and it starts collapsed to the icon rail (AppShell remembers the choice).
+//
+// Since the calm pass (2026-11-08, DESIGN.md §8) the rail holds six places
+// (Home, Inbox, Tasks, Calendar, Workspaces, and Settings at the foot) instead
+// of every page as an unlabelled icon. Every other page, built-in or yours, is
+// one click away in "More pages", a labelled menu, and in ⌘K and the `+` tab.
 import { useEffect, useState, type ComponentProps, type MouseEvent } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import {
@@ -25,7 +30,8 @@ import {
 } from "@/ui/dropdown-menu";
 import { Kbd } from "@/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
-import { CaretUpDown, Check, Command as CommandIcon, Gear, MagnifyingGlass, Stack, Warning } from "@/ui/icons";
+import { CaretUpDown, Check, Command as CommandIcon, DotsThree, Gear, MagnifyingGlass, Stack, Warning } from "@/ui/icons";
+import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
 import { cn } from "@/ui/lib/utils";
 import "@/pages";
 import { usePages, type PageDef } from "@/registry";
@@ -55,19 +61,23 @@ export function Mark({ className }: { className?: string }) {
 // Where each page sits
 // ---------------------------------------------------------------------------
 
-/** The daily pages, in this order; pages of yours and plugins follow them. */
-const TOP = [HOME, "tasks", "prs", "watching"];
-/** The pages you set up once, smaller, at the bottom; other system pages (Customisations, UI gallery) follow them. */
-const BOTTOM = ["schedules", "memory", "profiles", "tools", "settings", "usage"];
-/** Not listed: Workspaces is the switcher's "Manage workspaces…"; the agent tree is the Tasks page's Tree view (and ⌘K). */
-const HIDDEN = ["workspaces", "tree"];
+/** The places on the rail, in this order. Settings sits at its foot. */
+const PRIMARY = [HOME, "inbox", "tasks", "calendar", "workspaces"];
+const FOOT = "settings";
+/** In "More pages", in this order: the daily ones, then pages of yours and plugins, then the ones you set up once. */
+const MORE_DAILY = ["prs", "watching", "schedules", "memory"];
+const MORE_SETUP = ["profiles", "tools", "usage"];
+/** Not listed: the agent tree is the Tasks page's Tree view (and ⌘K). */
+const HIDDEN = ["tree"];
 
-function place(pages: PageDef[]): { top: PageDef[]; bottom: PageDef[] } {
+export function place(pages: PageDef[]): { primary: PageDef[]; more: PageDef[]; foot: PageDef | undefined } {
   const known = (ids: string[]) => ids.map((id) => pages.find((p) => p.id === id)).filter((p): p is PageDef => !!p);
-  const rest = pages.filter((p) => ![...TOP, ...BOTTOM, ...HIDDEN].includes(p.id));
+  const listed = [...PRIMARY, FOOT, ...MORE_DAILY, ...MORE_SETUP, ...HIDDEN];
+  const rest = pages.filter((p) => !listed.includes(p.id));
   return {
-    top: [...known(TOP), ...rest.filter((p) => p.group !== "system")],
-    bottom: [...known(BOTTOM), ...rest.filter((p) => p.group === "system")],
+    primary: known(PRIMARY),
+    more: [...known(MORE_DAILY), ...rest.filter((p) => p.group !== "system"), ...known(MORE_SETUP), ...rest.filter((p) => p.group === "system")],
+    foot: pages.find((p) => p.id === FOOT),
   };
 }
 
@@ -167,6 +177,46 @@ function SearchItem() {
   );
 }
 
+/**
+ * Every page that is not on the rail, labelled, in one menu. A page that is
+ * open lights the button, so the rail still says where you are.
+ */
+function MorePages({ pages, route, row }: { pages: PageDef[]; route: string; row: (p: PageDef) => React.ReactNode }) {
+  const { state } = useSidebar();
+  const [open, setOpen] = useState(false);
+  const here = pages.some((p) => p.id === route);
+  useEffect(() => setOpen(false), [route]);
+  if (!pages.length) return null;
+  const trigger = (
+    <PopoverTrigger
+      data-slot="more-pages"
+      aria-label="More pages"
+      className={cn(
+        "sky-control group/nav relative flex w-full items-center gap-3 text-sm transition-colors duration-150 hover:bg-foreground/[0.04] hover:text-foreground",
+        "px-3 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-2",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 data-[popup-open]:bg-foreground/[0.06]",
+        here ? "text-foreground" : "text-foreground/65",
+      )}
+    >
+      <DotsThree size={16} weight="bold" className="relative z-10 shrink-0" />
+      <span className="min-w-0 flex-1 truncate text-start font-medium group-data-[collapsible=icon]:hidden">More</span>
+    </PopoverTrigger>
+  );
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      {state === "collapsed" ? (
+        <Tooltip>
+          <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+          <TooltipContent side="right">More pages</TooltipContent>
+        </Tooltip>
+      ) : trigger}
+      <PopoverContent data-slot="more-pages-menu" side="right" align="start" sideOffset={10} className="sky w-56 gap-0.5 p-1.5">
+        <nav aria-label="More pages" data-slot="sidebar-more" className="flex flex-col gap-0.5">{pages.map((p) => row(p))}</nav>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function CloseMobileSidebarOnNavigate({ route }: { route: string }) {
   const { setOpenMobile } = useSidebar();
   useEffect(() => {
@@ -188,7 +238,7 @@ export function AppSidebar({ route }: { route: string }) {
   const [settled] = useState(shellAlreadyPainted);
   const still = reduce || settled;
   const { problems } = usePlugins();
-  const { top, bottom } = place(usePages());
+  const { primary, more, foot } = place(usePages());
 
   let step = 0;
   const cascade = () => {
@@ -201,8 +251,8 @@ export function AppSidebar({ route }: { route: string }) {
           transition: { duration: 0.35, ease: EASE_OUT, delay: 0.05 + i * 0.045 },
         };
   };
-  const row = (p: PageDef, small = false) => (
-    <motion.div key={p.id} {...cascade()} className="flex flex-col">
+  const row = (p: PageDef, small = false, labelled = false) => (
+    <motion.div key={p.id} {...(labelled ? {} : cascade())} className="flex flex-col">
       <WithContextMenu
         items={() => [
           { label: "Open", run: () => navigate(p.id) },
@@ -214,6 +264,8 @@ export function AppSidebar({ route }: { route: string }) {
           active={route === p.id}
           reduce={reduce}
           small={small}
+          labelled={labelled}
+          indicatorId={labelled ? "sidebar-more-active" : undefined}
           trailing={p.id === "tasks" ? <NeedsYouCount /> : undefined}
         />
       </WithContextMenu>
@@ -246,10 +298,10 @@ export function AppSidebar({ route }: { route: string }) {
           <SearchItem />
         </SidebarHeader>
 
-        <NavContent className="px-3 pt-1 pb-2 group-data-[collapsible=icon]:px-2">
-          <div aria-hidden className="mx-3 mb-2 h-px shrink-0 bg-border/60 group-data-[collapsible=icon]:mx-1" />
+        <NavContent className="px-3 pt-3 pb-2 group-data-[collapsible=icon]:px-2">
           <div data-slot="sidebar-daily" className="flex shrink-0 flex-col gap-1">
-            {top.map((p) => row(p))}
+            {primary.map((p) => row(p))}
+            <MorePages pages={more} route={route} row={(p) => row(p, true, true)} />
             {problems.map((p) => (
               <NavItem
                 key={p.plugin}
@@ -261,13 +313,12 @@ export function AppSidebar({ route }: { route: string }) {
               />
             ))}
           </div>
-          <div data-slot="sidebar-setup" className="mt-auto flex shrink-0 flex-col gap-0.5 pt-6">
-            {bottom.map((p) => row(p, true))}
+          <div data-slot="sidebar-setup" className="mt-auto flex shrink-0 flex-col gap-1 pt-6">
+            {foot ? row(foot) : null}
           </div>
         </NavContent>
 
-        <SidebarFooter className="px-0 pb-2 pt-0 gap-0">
-          <div aria-hidden className="mx-3 mb-2 h-px bg-border/60 group-data-[collapsible=icon]:mx-2" />
+        <SidebarFooter className="px-0 pb-2 pt-1 gap-0">
           <div className="flex flex-col gap-2 px-2">
             <SidebarStatus />
           </div>

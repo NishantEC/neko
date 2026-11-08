@@ -400,11 +400,11 @@ function WatchingBody({ snapshot }: { snapshot: Json }) {
           <ArrowsClockwise /> Check all now
         </Button>
       </div>
-      <Section eyebrow="New" title={<>Set up a watch.</>} intro="Describe it in plain words, or ask Neko to suggest from your connected tools.">
+      <Section eyebrow="New" title={<>Set up a watch.</>}>
         <NewWatchPanel snapshot={snapshot} workspaceId={scope} />
       </Section>
       {suggested.length > 0 ? (
-        <Section eyebrow={`${suggested.length} to review`} title="Suggestions" intro="Neko proposed these in chat. Nothing runs until you turn it on.">
+        <Section eyebrow={`${suggested.length} to review`} title="Suggestions">
           <Panel><div className="divide-y divide-border/70">
             {suggested.map((item) => <SuggestionCard key={item.id} snapshot={snapshot} item={item} onEdit={() => setDraft({ value: item, workspace: str(item.workspace_id) })} />)}
           </div></Panel>
@@ -445,7 +445,6 @@ export default function Watching() {
     <SetupPage
       eyebrow="Work"
       title={<>Watching</>}
-      subtitle="Keep up with the sources that matter. Neko checks them while it’s running and brings what needs you to Home."
     >
       <Gate>{(snapshot) => <WatchingBody snapshot={snapshot} />}</Gate>
     </SetupPage>

@@ -1057,6 +1057,10 @@ pub enum Response {
         routines: Vec<routines::RoutineView>,
         standing_orders: std::collections::BTreeMap<String, String>,
         scopes: Vec<routines::ScopeProposal>,
+        /// What standing orders' `{owner}` stands for (`neko_core::routines::owner_name`),
+        /// so a page can show them as the agent reads them.
+        #[serde(default)]
+        owner_name: String,
     },
     RoutineNotifications {
         items: Vec<routines::RoutineNotice>,

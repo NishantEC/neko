@@ -19,9 +19,7 @@ export function AppearanceSection() {
   const light = themes.filter((t) => t.appearance === "light");
   const dark = themes.filter((t) => t.appearance === "dark");
   const mine = themes.filter((t) => t.source === "user");
-  const inUse = (slot: "light" | "dark") =>
-    choice.mode === "system" ? (appearance === slot ? `In use now, and whenever the Mac is ${slot}.` : slot === "light" ? "Used whenever the Mac is light." : "Used whenever the Mac is dark.")
-    : choice.mode === slot ? "In use now." : `Used when the mode is System and the Mac is ${slot}, or when the mode is ${slot === "light" ? "Light" : "Dark"}.`;
+  const inUse = (slot: "light" | "dark") => (choice.mode === "system" ? appearance === slot : choice.mode === slot) ? "In use" : undefined;
 
   async function remove(theme: ThemeInfo) {
     try {
@@ -34,10 +32,7 @@ export function AppearanceSection() {
 
   return (
     <div className="flex flex-col gap-8" data-slot="appearance">
-      <Section
-        title="Appearance"
-        intro="Pick one theme for when the screen is light and one for when it is dark. System follows your Mac and switches between the two. This changes the web app; the native app has its own switch."
-      >
+      <Section title="Appearance">
         <Panel>
           <SettingRow id="appearance" title="Mode" description={`Showing ${active.name} (${appearance}).`}>
             <div role="radiogroup" aria-label="Mode" className="flex gap-1.5">
@@ -51,21 +46,16 @@ export function AppearanceSection() {
         </Panel>
       </Section>
 
-      <Section id="setting-light-theme" title="Light theme" intro={inUse("light")}>
+      <Section id="setting-light-theme" title="Light theme" count={inUse("light")}>
         <ThemePicker label="Light theme" themes={light} value={choice.light} onChange={(id) => setSlot("light", id)} onRemove={setRemoving} />
       </Section>
 
-      <Section id="setting-dark-theme" title="Dark theme" intro={inUse("dark")}>
+      <Section id="setting-dark-theme" title="Dark theme" count={inUse("dark")}>
         <ThemePicker label="Dark theme" themes={dark} value={choice.dark} onChange={(id) => setSlot("dark", id)} onRemove={setRemoving} />
       </Section>
 
       <Section
         title="Your themes"
-        intro={
-          <>
-            A theme is one small file in <code className="font-mono text-[12px]" data-slot="themes-dir">{themesDir ?? "<data dir>/themes"}</code>. Ask Neko to write one, or add a file yourself; it shows up here when it is saved. A file with a built-in’s id replaces it until you remove the file.
-          </>
-        }
         actions={<Button size="sm" data-slot="make-theme" onClick={() => setMaking(true)}><Sparkle /> Make me a theme</Button>}
       >
         <Panel>

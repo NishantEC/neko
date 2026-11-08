@@ -371,13 +371,13 @@ export function AiSection() {
   if (!snapshot) return null;
   return (
     <div className="flex flex-col gap-8">
-      <Section eyebrow="Runtime" title={<>Agent runtime.</>} intro="Choose the runtime and model for new work.">
+      <Section eyebrow="Runtime" title={<>Agent runtime.</>}>
         <RuntimePanel snapshot={snapshot} catalog={catalog} />
       </Section>
       <Section eyebrow="Home chat" title="What Home chat may do">
         <SuperAgentPanel />
       </Section>
-      <Section eyebrow="Home chat" title="Model pins" intro="Each pin is independent; anything left on Auto is chosen by Neko at the next run.">
+      <Section eyebrow="Home chat" title="Model pins">
         <PinsPanel snapshot={snapshot} catalog={catalog} />
       </Section>
       <Section eyebrow="Budget" title="Budget & limits">

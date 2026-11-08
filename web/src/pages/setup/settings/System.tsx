@@ -25,7 +25,7 @@ export function SearchSection() {
     run(async () => { await activate("folder-scope", id, action); folders.reload(); return null; });
   return (
     <div className="flex flex-col gap-8">
-      <Section eyebrow="Quick panel" title="Included folders" intro="Files in these folders appear when you search in the quick panel.">
+      <Section eyebrow="Quick panel" title="Included folders">
         <Panel>
           <div className="divide-y divide-border/70" id="setting-folders" data-setting="folders">
             {folders.loading && !folders.data ? (
@@ -75,7 +75,7 @@ export function PermissionsSection() {
   }, [snapshot]);
   return (
     <div className="flex flex-col gap-8">
-      <Section eyebrow="This Mac" title="What Neko can access" intro="Reading a status never triggers a macOS prompt.">
+      <Section eyebrow="This Mac" title="What Neko can access">
         <Panel>
           <div className="divide-y divide-border/70">
             <SettingRow id="clipboard-history" title="Clipboard history" description="Saves what you copy, only on this Mac. Turning it off stops new capture; existing history stays until you clear it.">
@@ -141,7 +141,7 @@ export function DiagnosticsSection() {
   };
   return (
     <div className="flex flex-col gap-8">
-      <Section eyebrow="Health" title="Diagnostics" intro="Checks installed runtimes and response times. No model request is sent.">
+      <Section eyebrow="Health" title="Diagnostics">
         <Panel>
           <SettingRow id="diagnostics" title="Run diagnostics" description="Times each runtime and shows which installs Neko uses.">
             <Button onClick={() => void runChecks()} loading={running}><Stethoscope /> {running ? "Running…" : "Run diagnostics"}</Button>
@@ -199,7 +199,7 @@ export function UpdatesSection() {
   const setAuto = (ui: boolean, native: boolean) => void run(() => command("SetSelfUpdate", { auto_ui: ui, auto_native: native }));
   return (
     <div className="flex flex-col gap-8">
-      <Section eyebrow="Neko" title="Neko updates" intro="When a Neko task lands a change in Neko’s own checkout, Neko applies it to itself: the web UI goes live at once, and the app is reinstalled once nothing is running. Changes to safety-critical code wait for you.">
+      <Section eyebrow="Neko" title="Neko updates">
         <Panel>
           <div className="divide-y divide-border/70" data-slot="neko-updates">
             <Row

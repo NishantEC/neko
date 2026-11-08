@@ -253,7 +253,6 @@ export default function Customisations() {
           <PageHeader
             eyebrow={null}
             title="Customisations"
-            subtitle="Your own pages, the built-in pages you replaced, and your styles. They live in a folder on this Mac, and Neko’s agents can change them without a rebuild."
           />
           <div className="flex items-center gap-2">
             <Button type="button" variant="outline" onClick={() => void reloadAll()} disabled={reloading}>

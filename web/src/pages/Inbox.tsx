@@ -13,17 +13,18 @@ import { SegmentedControl, SegmentedControlItem } from "@/ui/segmented-control";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
 import { toast } from "@/ui/sonner";
 import { ArrowSquareOut, CaretDown, Check, Copy, Link as LinkIcon, Pause, PencilSimple, Play, Tray } from "@/ui/icons";
-import { ProgressRing, StatusGlyph } from "@/ui/status-glyph";
+import { GlyphButton, ProgressRing, StatusGlyph } from "@/ui/status-glyph";
 import { itemProgress, routineStatus } from "@/setup/routine-status";
 import { copyText, useContextMenu } from "@/shell/context-menu";
-import { EmptyBlock, ErrorNote, FormField, LoadingRows, Panel, Section, SetupPage, Toggle } from "@/setup/kit";
-import { relativeTime, useNow } from "@/setup/lib";
+import { EmptyBlock, ErrorNote, FormField, LoadingRows, Panel, RowAction, RowActions, Section, SetupPage, Toggle } from "@/setup/kit";
+import { fillOwner, relativeTime, useNow } from "@/setup/lib";
+import { cn } from "@/ui/lib/utils";
 
 const POLL_MS = 10_000;
 /** Lists show this many before "Show more", so a scope fits on a screen. */
 const SHORT = 5;
 
-type Data = { routines: Json[]; standing_orders: Record<string, string>; scopes: Json[] };
+type Data = { routines: Json[]; standing_orders: Record<string, string>; scopes: Json[]; owner_name?: string };
 type Send = (body: Json, done?: string) => Promise<boolean>;
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -88,10 +89,10 @@ function ShortList<T>({ items, render, noun, inList = false }: { items: T[]; ren
     <>
       {shown.map(render)}
       {items.length > SHORT ? (
-        <More className="list-none px-6 py-2">
-          <Button variant="ghost" size="sm" aria-expanded={all} onClick={() => setAll(!all)}>
+        <More className="list-none px-3 py-1">
+          <button type="button" aria-expanded={all} onClick={() => setAll(!all)} className="rounded-md text-[12.5px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60">
             {all ? "Show fewer" : `Show ${items.length - SHORT} more ${noun}`}
-          </Button>
+          </button>
         </More>
       ) : null}
     </>
@@ -195,19 +196,20 @@ function RoutineEditor({ routine, onClose, send }: { routine: Json | null; onClo
   );
 }
 
-function StandingOrders({ workspaceId, text, send }: { workspaceId: string; text: string; send: Send }) {
+function StandingOrders({ workspaceId, text, owner, send }: { workspaceId: string; text: string; owner?: string; send: Send }) {
   const [draft, setDraft] = useState(text);
   const [busy, setBusy] = useState(false);
   useEffect(() => setDraft(text), [text]);
-  const firstLine = text.split("\n")[0] ?? "";
+  const firstLine = fillOwner(text.split("\n")[0] ?? "", owner);
   return (
-    <Collapsible className="px-6 py-4">
-      <CollapsibleTrigger render={<Button variant="ghost" size="sm" className="-ms-2" />}>
-        Standing orders <CaretDown />
+    <Collapsible className="group/row rounded-[10px] px-3 py-1.5 transition-colors hover:bg-foreground/[0.03]">
+      <CollapsibleTrigger className="group/so flex w-full min-w-0 items-center gap-3 rounded-md py-0.5 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+        <CaretDown aria-hidden size={12} className="shrink-0 text-muted-foreground transition-transform group-data-[panel-open]/so:rotate-0 -rotate-90" />
+        <span className="shrink-0 text-[13.5px] text-foreground">Standing orders</span>
+        <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">{firstLine}</span>
       </CollapsibleTrigger>
-      <p className="mt-1 line-clamp-1 text-[13px] text-muted-foreground">{firstLine}</p>
-      <CollapsibleContent className="mt-3 flex flex-col gap-2">
-        <FormField label="Standing orders" htmlFor={`orders-${workspaceId}`} hint="Every routine in this scope follows these. Say what Neko may do on its own and what it should leave for you.">
+      <CollapsibleContent className="mt-2 flex flex-col gap-2 ps-6">
+        <FormField label="Standing orders" htmlFor={`orders-${workspaceId}`} hint={`Every routine in this scope follows these. {owner} stands for ${owner?.trim() || "the owner"}.`}>
           <Textarea id={`orders-${workspaceId}`} rows={4} value={draft} onChange={(e) => setDraft(e.target.value)} />
         </FormField>
         {draft !== text ? (
@@ -248,20 +250,20 @@ function RoutineRow({ view, now, send, onEdit }: { view: Json; now: number; send
     : `next ${relativeTime(due, now)}`;
   const facts = [cadenceText(routine.cadence), next, last ? `last ${relativeTime(last.finished_ms ?? last.started_ms, now)}` : null].filter(Boolean).join(" · ");
   return (
-    <div data-slot="routine-row" {...menu} className="flex flex-col gap-2 px-6 py-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="font-medium text-foreground">{routine.name}</span>
+    <div data-slot="routine-row" {...menu} className="group/row flex flex-col gap-1 rounded-[10px] px-3 py-1.5 transition-colors hover:bg-foreground/[0.03]">
+      <div className="flex min-h-7 items-center gap-3">
+        <span className="shrink-0 text-[13.5px] text-foreground">{routine.name}</span>
         {status}
         {parts.total ? <ProgressRing done={parts.done} total={parts.total} /> : null}
-        <span className="text-[13px] text-muted-foreground">{facts}</span>
-        <span className="ms-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled={state.running || queued} onClick={runNow}><Play /> Run now</Button>
-          <Button variant="ghost" size="icon-sm" aria-label={`Edit ${routine.name}`} onClick={onEdit}><PencilSimple /></Button>
-          <Toggle checked={routine.enabled} label={`${routine.enabled ? "Pause" : "Resume"} ${routine.name}`} onChange={setEnabled} />
-        </span>
+        <span className="min-w-0 flex-1 truncate text-end text-[12.5px] text-muted-foreground">{facts}</span>
+        <RowActions>
+          <RowAction label={`Run ${routine.name} now`} icon={Play} disabled={state.running || queued} onClick={runNow} />
+          <RowAction label={`Edit ${routine.name}`} icon={PencilSimple} onClick={onEdit} />
+        </RowActions>
+        <Toggle checked={routine.enabled} label={`${routine.enabled ? "Pause" : "Resume"} ${routine.name}`} onChange={setEnabled} />
       </div>
       {last && !last.ok ? (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1 ps-0">
           <p className="text-[13px] text-destructive-foreground">{last.error}</p>
           {last.text ? (
             <Collapsible>
@@ -273,13 +275,19 @@ function RoutineRow({ view, now, send, onEdit }: { view: Json; now: number; send
           ) : null}
         </div>
       ) : null}
-      {state.note ? <p className="text-[13px] text-muted-foreground">{state.note}</p> : null}
+      {state.note ? <p className="truncate text-[12.5px] text-muted-foreground" title={state.note}>{state.note}</p> : null}
     </div>
   );
 }
 
-/** One thing only you can do: what, where it came from, its link and Done (also on right-click). */
-function NeedsYouItem({ item, where, onDone }: { item: Json; where: string; onDone: () => void }) {
+/**
+ * One thing only you can do, on one line: the glyph (click to mark it done),
+ * the title, where it came from and when. The detail is one truncated line
+ * under it, in full when the row is opened. Open and Done also sit at the
+ * right on hover and in the right-click menu.
+ */
+function NeedsYouItem({ item, where, when, onDone }: { item: Json; where: string; when: string; onDone: () => void }) {
+  const [expanded, setExpanded] = useState(false);
   const link = safeLink(item.link);
   const text = [item.title, item.detail].filter(Boolean).join("\n\n");
   const menu = useContextMenu(() => [
@@ -290,25 +298,40 @@ function NeedsYouItem({ item, where, onDone }: { item: Json; where: string; onDo
     link ? { label: "Copy link", icon: LinkIcon, run: () => void copyText(link, "Copied the link") } : null,
   ]);
   return (
-    <div data-slot="needs-you-item" {...menu} className="flex items-start gap-3 px-6 py-4">
-      <StatusGlyph status="inProgress" label="Needs you" className="mt-1" />
-      <div className="min-w-0 flex-1">
-        <p className="text-[12.5px] text-muted-foreground">{where}</p>
-        <p className="font-medium text-foreground">{item.title}</p>
-        {item.detail ? <p className="mt-0.5 max-w-[70ch] whitespace-pre-wrap text-[13px] text-muted-foreground">{item.detail}</p> : null}
-      </div>
-      {link ? <Button variant="outline" size="sm" aria-label={`Open ${item.title}`} render={<a href={link} target="_blank" rel="noreferrer" />}><ArrowSquareOut /> Open</Button> : null}
-      <Button variant="outline" size="sm" aria-label={`Mark “${item.title}” done`} onClick={onDone}><Check /> Done</Button>
+    <div data-slot="needs-you-item" data-expanded={expanded || undefined} {...menu} className="group/row flex items-start gap-3 rounded-[10px] px-3 py-2 transition-colors hover:bg-foreground/[0.03]">
+      <span className="flex h-5 items-center">
+        <GlyphButton status="inProgress" label={`Mark “${item.title}” done`} onClick={onDone} />
+      </span>
+      <button
+        type="button"
+        aria-expanded={item.detail ? expanded : undefined}
+        onClick={() => setExpanded(!expanded)}
+        className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        <span className="flex min-w-0 items-baseline gap-3">
+          <span className="min-w-0 truncate text-[13.5px] text-foreground">{item.title}</span>
+          <span className="ms-auto shrink-0 truncate text-[12.5px] text-muted-foreground group-hover/row:hidden group-focus-within/row:hidden">{where}</span>
+        </span>
+        {item.detail ? (
+          <span className={cn("max-w-[72ch] text-[12.5px] text-muted-foreground", expanded ? "whitespace-pre-wrap" : "truncate")}>{item.detail}</span>
+        ) : null}
+      </button>
+      <span className="flex h-5 shrink-0 items-center gap-3">
+        <span className="text-[12.5px] tabular-nums text-muted-foreground/70">{when}</span>
+        <RowActions className="hidden group-hover/row:flex group-focus-within/row:flex [@media(hover:none)]:flex">
+          {link ? <RowAction label={`Open ${item.title}`} icon={ArrowSquareOut} href={link} /> : null}
+          <RowAction label={`Mark “${item.title}” done`} icon={Check} onClick={onDone} />
+        </RowActions>
+      </span>
     </div>
   );
 }
 
 function SetupNotes({ problems }: { problems: string[] }) {
   return (
-    <div className="px-6 py-4">
-      <p className="mb-2 text-[12.5px] font-medium text-muted-foreground">Setup notes</p>
-      <ul className="flex list-disc flex-col gap-1 ps-5 text-[13px] text-muted-foreground">{problems.map((p) => <li key={p}>{p}</li>)}</ul>
-    </div>
+    <ul aria-label="Setup notes" className="flex flex-col gap-1 px-3 py-1.5 text-[12.5px] text-warning-foreground">
+      {problems.map((p) => <li key={p} className="flex gap-2"><span aria-hidden>!</span><span className="min-w-0">{p}</span></li>)}
+    </ul>
   );
 }
 
@@ -341,14 +364,12 @@ function InboxBody() {
   return (
     <>
       {error ? <ErrorNote error={`${error} The list below may be out of date.`} title="Can’t reach the Neko daemon" onDismiss={clear} /> : null}
-      <Section
-        title="Needs you"
-        intro={<span role="status" aria-live="polite">{open.length ? `${open.length} thing${open.length === 1 ? "" : "s"} only you can do.` : "Nothing needs you."}</span>}
-      >
+      <Section title="Needs you" count={open.length || undefined}>
+        <span role="status" aria-live="polite" className="sr-only">{open.length ? `${open.length} thing${open.length === 1 ? "" : "s"} only you can do.` : "Nothing needs you."}</span>
         {open.length === 0 ? (
-          <Panel><p className="px-6 py-4 text-[13px] text-muted-foreground">Neko handles the rest and lists it under each scope below.</p></Panel>
+          <p className="text-[13.5px] text-muted-foreground">Nothing needs you right now.</p>
         ) : (
-          <Panel><div className="divide-y divide-border/70">
+          <Panel>
             <ShortList
               items={open}
               noun="items"
@@ -356,12 +377,13 @@ function InboxBody() {
                 <NeedsYouItem
                   key={item.seq}
                   item={item}
-                  where={`${scopeName[routine.workspace_id] ?? "Scope"} · ${routine.name} · ${relativeTime(run.finished_ms ?? run.started_ms, now)}`}
+                  where={`${scopeName[routine.workspace_id] ?? "Scope"} · ${routine.name}`}
+                  when={relativeTime(run.finished_ms ?? run.started_ms, now)}
                   onDone={() => void done(routine.id, run.id, item.seq)}
                 />
               )}
             />
-          </div></Panel>
+          </Panel>
         )}
       </Section>
       {scopes.map((scope) => {
@@ -371,27 +393,32 @@ function InboxBody() {
           .sort((a, b) => b.at - a.at)
           .slice(0, 20);
         return (
-          <Section key={scope.workspace_id} title={scope.name} intro={(scope.folders ?? []).map(folderName).join(", ")}>
-            <Panel><div className="divide-y divide-border/70">
+          <Section key={scope.workspace_id} title={<span title={(scope.folders ?? []).map(folderName).join(", ")}>{scope.name}</span>} collapsible>
+            <Panel>
+              {views.map((v) => <RoutineRow key={v.routine.id} view={v} now={now} send={send} onEdit={() => setEditing(v.routine)} />)}
+              {views.length ? <StandingOrders workspaceId={scope.workspace_id} text={data.standing_orders[scope.workspace_id] ?? ""} owner={data.owner_name} send={send} /> : null}
+              {scope.problems?.length ? <SetupNotes problems={scope.problems} /> : null}
               {views.length ? (
-                <div className="py-2">
-                  <p className="px-6 pt-2 text-[12.5px] font-medium text-muted-foreground">What Neko did</p>
-                  {did.length === 0 ? <p className="px-6 py-2 text-[13px] text-muted-foreground">Nothing yet.</p> : (
+                <div className="mt-3 flex flex-col">
+                  <p className="px-3 pb-1 text-[12px] text-muted-foreground/80">What Neko did</p>
+                  {did.length === 0 ? <p className="px-3 py-1 text-[13px] text-muted-foreground">Nothing yet.</p> : (
                     <ul>
                       <ShortList
                         items={did}
                         noun="actions"
                         inList
-                        render={(d) => <li key={d.key} className="px-6 py-1 text-[13px] text-foreground/90"><span className="me-2 text-muted-foreground">{relativeTime(d.at, now)} · {d.name}</span>{d.line}</li>}
+                        render={(d) => (
+                          <li key={d.key} className="flex min-w-0 items-baseline gap-3 rounded-[10px] px-3 py-1 text-[13px] transition-colors hover:bg-foreground/[0.03]">
+                            <span className="min-w-0 flex-1 truncate text-foreground/90" title={d.line}>{d.line}</span>
+                            <span className="shrink-0 text-[12.5px] text-muted-foreground/70">{d.name} · {relativeTime(d.at, now)}</span>
+                          </li>
+                        )}
                       />
                     </ul>
                   )}
                 </div>
               ) : null}
-              {views.map((v) => <RoutineRow key={v.routine.id} view={v} now={now} send={send} onEdit={() => setEditing(v.routine)} />)}
-              {scope.problems?.length ? <SetupNotes problems={scope.problems} /> : null}
-              {views.length ? <StandingOrders workspaceId={scope.workspace_id} text={data.standing_orders[scope.workspace_id] ?? ""} send={send} /> : null}
-            </div></Panel>
+            </Panel>
           </Section>
         );
       })}
@@ -403,7 +430,7 @@ function InboxBody() {
 
 export default function Inbox() {
   return (
-    <SetupPage eyebrow="Today" title={<>Inbox</>} subtitle="What Neko handled for you, and what only you can do.">
+    <SetupPage title="Inbox">
       <InboxBody />
     </SetupPage>
   );

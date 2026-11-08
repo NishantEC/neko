@@ -190,7 +190,7 @@ function SpendSection({ snapshot, now }: { snapshot: Json; now: number }) {
   const top = spend.tasks[0];
   const hasData = spend.runs > 0;
   return (
-    <Section eyebrow="Spend" title={<>What agents cost.</>} intro="Read from the cost each Claude Code and OpenCode run reports. Codex subscriptions don’t report a price, so their runs aren’t counted here.">
+    <Section eyebrow="Spend" title={<>What agents cost.</>}>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-slot="spend-wells">
         <Well label="Recorded spend" value={usd(spend.total)} detail={`${spend.runs} priced ${spend.runs === 1 ? "run" : "runs"} · ${compact(spend.tokensIn)} in · ${compact(spend.tokensOut)} out`} />
         <Well label="Last 7 days" value={usd(spend.week)} tone={spend.week > 0 ? "neutral" : "success"} detail={spend.week > 0 ? "Across every task" : "Nothing priced this week"} />
@@ -241,7 +241,7 @@ function ModelSection({ snapshot }: { snapshot: Json }) {
   const data = [...counts].map(([name, runs]) => ({ name, runs })).sort((a, b) => b.runs - a.runs).slice(0, 6);
   if (data.length === 0) return null;
   return (
-    <Section eyebrow="Models" title="What ran" intro={`The last ${selections.length} dispatches, by model and effort.`}>
+    <Section eyebrow="Models" title="What ran">
       <Panel data-slot="model-use"><BarList label="Runs by model" items={data.map((d) => ({ name: d.name, value: d.runs, text: `${d.runs} ${d.runs === 1 ? "run" : "runs"}` }))} /></Panel>
     </Section>
   );
@@ -277,7 +277,7 @@ function QuotaSection() {
 
   const meters = arr(rows).filter((r) => r.meter);
   return (
-    <Section eyebrow="Vendors" title="Quota windows" intro="What each signed-in vendor has left, read from its own API.">
+    <Section eyebrow="Vendors" title="Quota windows">
       {loading ? <Skeleton className="h-28 w-full" /> : meters.length > 0 || quotas.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2">
           {quotas.map((q) => (
@@ -309,7 +309,6 @@ function UsageBody({ snapshot }: { snapshot: Json }) {
       <Section
         eyebrow="This Mac"
         title="What the Mac can take"
-        intro="Neko reads the machine every 15 seconds and decides whether new agent work may start. Running work is never touched."
         actions={
           <>
             <span className="font-mono text-[11px] text-muted-foreground" data-slot="updated">
@@ -355,7 +354,6 @@ export default function Usage() {
     <SetupPage
       eyebrow="System"
       title={<>Usage &amp; machine</>}
-      subtitle="What the Mac can take right now, and what Neko’s agents have cost."
       width="max-w-[980px]"
     >
       <Gate>{(snapshot) => <UsageBody snapshot={snapshot} />}</Gate>

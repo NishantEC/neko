@@ -1,27 +1,25 @@
-// The frame the work pages share: the eyebrow → heading → subtitle voice from
-// the design language, at the size a working page wants, with the page's
-// controls to its right.
+// The frame the work pages share: the title and an inline count (DESIGN.md
+// §8: no subtitle, no eyebrow), with the page's one primary action and its
+// overflow menu to the right.
 import type { ReactNode } from "react";
 import { cn } from "@/ui/lib/utils";
-import { EditorialHeading } from "@/editorial";
+import { PageHeader } from "@/editorial";
 import { Skeleton } from "@/ui/skeleton";
 
-export function WorkHeader({ title, subtitle, actions, children, className }: {
+export function WorkHeader({ title, count, actions, children, className }: {
   className?: string;
-  eyebrow: ReactNode;
+  /** Ignored (no eyebrows); kept so call sites still type-check. */
+  eyebrow?: ReactNode;
   title: ReactNode;
-  subtitle?: ReactNode;
+  count?: ReactNode;
   actions?: ReactNode;
   children?: ReactNode;
 }) {
   return (
     <header data-slot="work-header" className={cn("shrink-0 px-7 pt-6 pb-4", className)}>
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-        <div className="flex min-w-0 flex-col gap-2">
-          <EditorialHeading as="h1" className="text-[22px]">{title}</EditorialHeading>
-          {subtitle ? <p data-slot="work-subtitle" className="text-[13.5px] text-muted-foreground">{subtitle}</p> : null}
-        </div>
-        <div className="ms-auto flex flex-wrap items-center gap-2">{actions}</div>
+      <div className="flex min-h-9 flex-wrap items-center gap-x-6 gap-y-3">
+        <PageHeader title={title} count={count} />
+        <div className="ms-auto flex flex-wrap items-center gap-1.5">{actions}</div>
       </div>
       {children}
     </header>

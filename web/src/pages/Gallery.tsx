@@ -456,7 +456,7 @@ function Editorial() {
     <Section id="editorial" eyebrow="Editorial" title={<>One panel, divided into rows.</>}>
       <div className="grid items-start gap-8 lg:grid-cols-2">
         <div className="flex flex-col gap-8">
-          <PageHeader eyebrow="Settings · Budget" title={<>Spend, kept honest.</>} subtitle="What Neko may spend before it asks you." />
+          <PageHeader eyebrow="Settings · Budget" title={<>Spend, kept honest.</>} />
           <SectionHead eyebrow="Watching" title={<>Things Neko keeps an eye on.</>} intro="A watch checks a source on a schedule and files a task when something needs doing." />
         </div>
         <Panel className="max-w-2xl">
@@ -621,7 +621,6 @@ export default function Gallery() {
         <PageHeader
           eyebrow="Design system"
           title={<>UI gallery.</>}
-          subtitle="Every primitive, editorial and chat component Neko's web UI is built from, with realistic data. Switch light and dark in the sidebar."
         />
         <Foundations />
         <Controls />

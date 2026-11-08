@@ -118,6 +118,28 @@ export function StatusGlyph({ status, label, size = 14, className, ...props }: {
   );
 }
 
+/**
+ * The row's one permanent action, expressed as its status glyph (DESIGN.md §8):
+ * a button that completes the thing (mark done…). On hover or focus it
+ * previews the outcome as a done check; `label` names the action.
+ */
+export function GlyphButton({ status, label, onClick, disabled, size = 14, className }: { status: StatusKind; label: string; onClick: () => void; disabled?: boolean; size?: number; className?: string }) {
+  return (
+    <button
+      type="button"
+      data-slot="glyph-button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className={cn("group/glyph -m-1 flex shrink-0 items-center justify-center rounded-full p-1 outline-none transition-colors hover:bg-foreground/[0.06] focus-visible:ring-2 focus-visible:ring-ring/70 disabled:pointer-events-none", className)}
+    >
+      <StatusGlyph status={status} label="" size={size} className="group-hover/glyph:hidden group-focus-visible/glyph:hidden" />
+      <StatusGlyph status="done" label="" size={size} className="hidden group-hover/glyph:block group-focus-visible/glyph:block" />
+    </button>
+  );
+}
+
 /** A short id beside a title (`NEK-1BB3`), faint and tabular. */
 export function IdLabel({ className, ...props }: ComponentProps<"span">) {
   return <span data-slot="id-label" className={cn("shrink-0 text-[12px] tabular-nums text-muted-foreground/70", className)} {...props} />;

@@ -18,7 +18,6 @@ export default function Tree() {
   const { snapshot, error } = useWorkbench();
   const [search, setSearch] = useState("");
   const { id: workspace } = useSelectedWorkspace();
-  const workspaces: { id: string; name: string }[] = snapshot?.workspaces ?? [];
 
   const tree = useMemo(() => {
     if (!snapshot) return null;
@@ -29,14 +28,13 @@ export default function Tree() {
   const openTask = (id: string) => {
     location.hash = `/tasks?task=${encodeURIComponent(id)}`;
   };
-  const label = workspaces.find((w) => w.id === workspace)?.name ?? "All workspaces";
 
   return (
     <div data-slot="tree-page" className="flex min-h-0 flex-1 flex-col">
       <WorkHeader
         eyebrow="Work"
         title={<>Agent tree</>}
-        subtitle={tree ? `${label} · ${taskCount(tree.tasks)}` : "Loading…"}
+        count={tree ? taskCount(tree.tasks) : undefined}
         actions={
           <>
             <InputGroup className="h-8 w-56">

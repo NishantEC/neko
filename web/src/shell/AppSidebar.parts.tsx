@@ -23,6 +23,7 @@ export function NavItem({
   title,
   className,
   small = false,
+  labelled = false,
 }: {
   item: NavEntry;
   active: boolean;
@@ -33,6 +34,8 @@ export function NavItem({
   className?: string;
   /** The quieter row for the pages you set up once: 32px, 13px, a 14px icon. */
   small?: boolean;
+  /** Always shows its label and never a tooltip (rows in the "More pages" menu, which the rail's state does not touch). */
+  labelled?: boolean;
 }) {
   const ItemIcon = item.icon;
   const { state } = useSidebar();
@@ -45,7 +48,7 @@ export function NavItem({
       className={cn(
         "group/nav relative flex items-center transition-colors duration-150",
         small ? "h-8 gap-2.5 rounded-[16px] text-[13px]" : "sky-control gap-3 text-sm",
-        "px-3 group-data-[collapsible=icon]:px-2 group-data-[collapsible=icon]:justify-center",
+        labelled ? "px-2.5" : "px-3 group-data-[collapsible=icon]:px-2 group-data-[collapsible=icon]:justify-center",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
         active ? "text-foreground" : cn(small ? "text-foreground/55" : "text-foreground/65", "hover:text-foreground hover:bg-foreground/[0.04]"),
         className,
@@ -65,12 +68,12 @@ export function NavItem({
         weight={active ? "fill" : "regular"}
         className="relative z-10 shrink-0 transition-transform duration-150 group-active/nav:scale-90"
       />
-      <span className="relative z-10 min-w-0 flex-1 truncate font-medium group-data-[collapsible=icon]:hidden">{item.label}</span>
-      {trailing ? <span className="relative z-10 flex shrink-0 group-data-[collapsible=icon]:hidden">{trailing}</span> : null}
+      <span className={cn("relative z-10 min-w-0 flex-1 truncate font-medium", !labelled && "group-data-[collapsible=icon]:hidden")}>{item.label}</span>
+      {trailing ? <span className={cn("relative z-10 flex shrink-0", !labelled && "group-data-[collapsible=icon]:hidden")}>{trailing}</span> : null}
     </a>
   );
 
-  if (state !== "collapsed") return link;
+  if (state !== "collapsed" || labelled) return link;
   return (
     <Tooltip>
       <TooltipTrigger asChild>{link}</TooltipTrigger>

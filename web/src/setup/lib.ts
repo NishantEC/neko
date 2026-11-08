@@ -9,6 +9,15 @@ export const str = (v: Json): string => (typeof v === "string" ? v : "");
 export const num = (v: Json): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 export const rec = (v: Json): Record<string, Json> => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
 
+/**
+ * Standing orders as the agent reads them: `{owner}` filled with the owner's
+ * name (the daemon's `owner_name`, sent with `Routines`), or "you" when the
+ * daemon did not say. Only for showing; edits keep the placeholder.
+ */
+export function fillOwner(text: string, owner: string | null | undefined): string {
+  return text.replaceAll("{owner}", owner?.trim() || "the owner");
+}
+
 /** "3 minutes ago", "in 2 hours", "Never". */
 export function relativeTime(ms: number | null | undefined, now = Date.now()): string {
   if (!ms || ms <= 0) return "Never";

@@ -68,3 +68,48 @@ report, not verified"). When nothing needs the person, say exactly that
 Inter at the sizes the web kit defines; titles semibold, body regular, ids and
 timestamps faint and tabular. Comfortable rows (one line per item, details on
 hover or in the tab), generous outer margins, no boxes inside boxes.
+
+## 8. Calm pages: the enforceable rules (2026-11-08)
+
+The owner: "the lines, the excessive titles … these actions are divided". A
+page that breaks one of these is not finished. The kit makes the right thing
+the easy thing: `SetupPage` / `WorkHeader` / `PageHeader` (title + `count`),
+`Section` (quiet group heading + `count`, `collapsible`), `Panel` (a list
+frame with no card), `Row`, `RowActions` / `RowAction`, `GlyphButton`
+(`web/src/setup/kit.tsx`, `web/src/ui/status-glyph.tsx`).
+
+1. **Page header = title only**, with an inline faint count (`Tasks 24`). At
+   most one primary button on the right; every secondary page action goes in
+   an overflow (`…`) menu or the right-click menu. No subtitle, no eyebrow,
+   no sentence explaining the page, no section intro. Help text belongs in a
+   tooltip, an empty state or the place where the choice is made.
+2. **No lines between rows, no cards around lists.** Rows are separated by
+   space and light up on hover (`hover:bg-foreground/[0.03]`, 10px radius).
+   Group headings are small and quiet (12.5px, medium, muted, faint count),
+   and collapsible when a page has several. A hairline is allowed only where
+   two independent scroll areas meet (a split view's rail).
+3. **One line per row**: status glyph, faint id, title, then right-aligned
+   quiet meta (scope or repository, relative time). Secondary text (an error,
+   a detail) only when it needs the person, truncated to one line, in full on
+   expand, hover (`title`) or in the item's tab. Nothing that is the same on
+   every row (the owner's own name, the default runtime) is shown on a row.
+4. **Row actions on hover and focus.** Small icon buttons at the right
+   (`RowActions`), each also in the row's right-click menu. Nothing on a row
+   is permanent except the single most common action, expressed as the
+   glyph (`GlyphButton`: click the glyph to mark done). A switch that shows
+   state (on / paused) may stay.
+5. **The rail holds six places**: Home, Inbox, Tasks, Calendar, Workspaces,
+   and Settings at its foot, with tooltips. Every other page is one click
+   away in "More" (a labelled menu), in ⌘K and in the `+` tab. A new page
+   joins "More", not the rail.
+6. **Tabs fit their title** (72–200px), with the same padding and a 2px gap;
+   the active tab is a soft fill and medium weight, no border or underline.
+   The strip has no bottom rule.
+7. **One type scale**: page title 20px semibold; group heading 12.5px medium
+   muted; row title 13.5px regular; meta and secondary 12.5px muted; ids 12px
+   faint tabular. Bold is for the page title only; no bold-label-plus-
+   paragraph blocks inside lists.
+8. **Accessibility is not traded for calm**: hover-only actions are focusable
+   and appear on focus; the glyph button is named for its action; every row
+   action has an `aria-label` and a tooltip; collapsible groups are buttons
+   with `aria-expanded`.

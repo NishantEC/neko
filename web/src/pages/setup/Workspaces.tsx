@@ -437,7 +437,6 @@ export default function Workspaces() {
     <SetupPage
       eyebrow="Work"
       title={<>Workspaces</>}
-      subtitle="Each workspace is a scope: its folders, the MCP servers they set up, and the routines that run there."
       actions={<Button onClick={() => setDialog({ open: true, id: null })}><Plus /> Add workspace</Button>}
     >
       <Gate>

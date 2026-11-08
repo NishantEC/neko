@@ -151,7 +151,7 @@ function MemoryRow({ snapshot, entry, onEdit, kindLabel }: { snapshot: Json; ent
 function Proposals({ snapshot, proposals }: { snapshot: Json; proposals: Json[] }) {
   const { run, busy, error, clear } = useRun();
   return (
-    <Section eyebrow={`${proposals.length} waiting`} title="Suggested" intro="Neko noticed these. Nothing is remembered until you keep it.">
+    <Section eyebrow={`${proposals.length} waiting`} title="Suggested">
       <Panel>
         <div className="divide-y divide-border/70">
           {proposals.map((p) => (
@@ -344,7 +344,6 @@ function WorkingStyle({ snapshot, scope, profileId }: { snapshot: Json; scope: s
       <Section
         eyebrow="Working style"
         title="Working guidance"
-        intro="Contextual rules guide choices within the permissions you already gave."
         actions={<Button variant="outline" size="sm" disabled={!target} onClick={() => setEditor({ value: { workspace_id: target } })}><Plus /> Add guidance</Button>}
       >
         {prefs.length === 0 ? <EmptyBlock icon={Brain} title="No guidance yet" description="Add guidance for a recurring situation, or correct an agent decision to suggest a rule." /> : null}
@@ -359,7 +358,7 @@ function WorkingStyle({ snapshot, scope, profileId }: { snapshot: Json; scope: s
         );
       })}
       {records.length ? (
-        <Section eyebrow={`${records.length} most recent`} title="Recent decisions" intro="Scope is recorded at the time of the decision. Current permissions govern every action.">
+        <Section eyebrow={`${records.length} most recent`} title="Recent decisions">
           <Panel><div className="divide-y divide-border/70">{records.map((r) => <DecisionCard key={str(r.id)} record={r} />)}</div></Panel>
         </Section>
       ) : null}
@@ -407,7 +406,7 @@ function MemoryBody({ snapshot }: { snapshot: Json }) {
         <TabsPanel value="memories" className="flex flex-col gap-8 pt-6">
           <MemoryOptions snapshot={snapshot} />
           {proposals.length ? <Proposals snapshot={snapshot} proposals={proposals} /> : null}
-          <Section eyebrow={memories.length ? `${memories.length} saved` : undefined} title="Remembered" intro="Saved context, grouped by where it applies. Forgetting is permanent.">
+          <Section eyebrow={memories.length ? `${memories.length} saved` : undefined} title="Remembered">
             {memories.length === 0 ? (
               <EmptyBlock icon={Brain} title="Nothing yet" description="Tell Neko “remember that…” in Home, or add one here.">
                 <Button variant="outline" onClick={() => setDraft({ value: {} })}><Plus /> Add memory</Button>
@@ -437,7 +436,6 @@ export default function Memory() {
     <SetupPage
       eyebrow="Knowledge & tools"
       title={<>Memory</>}
-      subtitle="Saved context and working guidance. Suggestions wait for your approval."
     >
       <Gate>{(snapshot) => <MemoryBody snapshot={snapshot} />}</Gate>
     </SetupPage>

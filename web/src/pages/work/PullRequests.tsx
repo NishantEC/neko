@@ -165,7 +165,7 @@ export default function PullRequests() {
         className="px-0 pt-0 md:px-0"
         eyebrow="Work"
         title={<>Pull requests</>}
-        subtitle={snapshot ? pullRequestSubtitle(rows) : "Loading…"}
+        count={snapshot ? pullRequestSubtitle(rows) : undefined}
         actions={
           <>
             <Button variant="outline" size="sm" disabled={reviewable === 0} onClick={() => setConfirm("recheck")} title="Have each agent re-check its open pull request and give a verdict">

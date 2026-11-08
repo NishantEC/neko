@@ -136,7 +136,6 @@ export default function Profiles() {
     <SetupPage
       eyebrow="Knowledge & tools"
       title={<>Profiles</>}
-      subtitle="Instructions and memories for each kind of work."
       actions={<Button onClick={() => setDraft({ value: {} })}><Plus /> New profile</Button>}
     >
       <Gate>{(snapshot) => <ProfilesBody snapshot={snapshot} onEdit={setDraft} />}</Gate>
