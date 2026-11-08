@@ -24,7 +24,7 @@ with text or a symbol (principles §5):
 
 | Colour | Means |
 |---|---|
-| Iris (`--primary`) | the primary action, focus, selection, **now** (today, the current-time line) and **references** (a task id or artifact named in text, which is a link) |
+| Iris (`--primary`) | the primary action, focus, selection, **now** (today, the current-time line, and the "done, not yet seen" dot: what finished since you last looked) and **references** (a task id or artifact named in text, which is a link) |
 | Amber | needs you; in progress |
 | Sky | ready to review |
 | Mint | done; calendar events |
@@ -117,3 +117,23 @@ frame with no card), `Row`, `RowActions` / `RowAction`, `GlyphButton`
    and appear on focus; the glyph button is named for its action; every row
    action has an `aria-label` and a tooltip; collapsible groups are buttons
    with `aria-expanded`.
+10. **Cards are rows too** (board, 2026-11-08): no frame or border on any
+    card, waiting ones included; the status glyph carries the colour and the
+    state's words stay muted. A card's one action (Approve, Answer, Start
+    again) shows at the end of its state line on hover or focus and is in
+    its right-click menu. Selection (the open task) is the only ring.
+11. **Nothing-yet rows are not rows.** A group or facet with nothing in it
+    gets no line saying so; if the person can fill it, offer that as one
+    quiet link where it would be ("+ Add a watch"). A page of several
+    scopes shows each as one line that opens to its details (Workspaces),
+    remembering what was open.
+12. **Figures are lines, not boxes.** A number reads as label, value, muted
+    detail on one line (`Figure` in the kit); no wells, cards or gauges
+    around figures on a list page. Colour on a value only when it needs the
+    person, beside words that say why.
+13. **"Done, not yet seen"** is a 6px Iris dot (Iris = *now*: what changed
+    since you last looked): before the glyph in the task list, top-right on
+    a board card, after the title on an inactive tab, and as a count in
+    Home's crew line. It is named ("Not yet seen") and opening the task
+    clears it; the right-click menu offers Mark as unread. Never bold the
+    title for it (rule 7).
