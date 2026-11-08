@@ -58,6 +58,9 @@ pub struct SkillPatch {
     pub base_hash: String,
     /// The complete improved file.
     pub revised: String,
+    /// The skill's name, as the review text names it.
+    #[serde(default)]
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

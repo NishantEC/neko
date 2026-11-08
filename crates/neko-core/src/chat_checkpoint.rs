@@ -61,6 +61,9 @@ pub struct Refresh {
     pub messages: Vec<(String, String)>,
     /// The id of the newest message in `messages`.
     pub through_id: String,
+    /// The stored checkpoint's `through_id` this refresh started from (empty
+    /// for none): a refresh whose start moved meanwhile is stale.
+    pub from_id: String,
 }
 
 /// One settings row per conversation: a profile and its workspace (or none).
@@ -234,33 +237,49 @@ pub fn parse(answer: &str) -> Result<Checkpoint, String> {
     Ok(checkpoint)
 }
 
-/// What a refresh reads, from the messages the window dropped (stored order)
-/// and the checkpoint so far; `None` when there is not enough new to read.
-/// The input is bounded; whatever does not fit waits for the next refresh.
+/// What a refresh reads, from the messages the window dropped (stored order,
+/// `(id, role, text)`) and the checkpoint so far; `None` when there is not
+/// enough new to read. A checkpoint that is current catches up oldest first,
+/// a batch at a time. With none, or one older than every stored message, the
+/// refresh starts from the newest dropped messages that fit: what is closest
+/// to the conversation now, not the start of a long history.
 pub fn refresh_for(omitted: &[(String, String, String)], checkpoint: Option<&Checkpoint>) -> Option<Refresh> {
-    // (id, role, text). Messages after the one the checkpoint covers; all of
-    // them when it covers none still stored (it is older than all of them).
-    let start = checkpoint
-        .and_then(|c| omitted.iter().position(|(id, _, _)| *id == c.through_id))
-        .map_or(0, |at| at + 1);
-    let uncovered = &omitted[start..];
-    let enough = if checkpoint.is_some() { uncovered.len() >= REFRESH_BATCH } else { !uncovered.is_empty() };
-    if !enough {
-        return None;
-    }
-    let mut messages = Vec::new();
-    let mut through_id = String::new();
-    let mut bytes = 0;
-    for (id, role, text) in uncovered {
+    let from_id = checkpoint.map(|c| c.through_id.clone()).unwrap_or_default();
+    let fit = |bytes: &mut usize, text: &str, first: bool| {
         let text = clip(text, REFRESH_MESSAGE_BYTES);
-        if !messages.is_empty() && bytes + text.len() > REFRESH_INPUT_BYTES {
-            break;
+        if !first && *bytes + text.len() > REFRESH_INPUT_BYTES {
+            return None;
         }
-        bytes += text.len();
-        messages.push((role.clone(), text));
-        through_id = id.clone();
+        *bytes += text.len();
+        Some(text)
+    };
+    let mut bytes = 0;
+    match checkpoint.and_then(|c| omitted.iter().position(|(id, _, _)| *id == c.through_id)) {
+        Some(at) => {
+            let uncovered = &omitted[at + 1..];
+            if uncovered.len() < REFRESH_BATCH {
+                return None;
+            }
+            let mut messages = Vec::new();
+            let mut through_id = String::new();
+            for (id, role, text) in uncovered {
+                let Some(text) = fit(&mut bytes, text, messages.is_empty()) else { break };
+                messages.push((role.clone(), text));
+                through_id = id.clone();
+            }
+            Some(Refresh { messages, through_id, from_id })
+        }
+        None => {
+            let (through_id, _, _) = omitted.last()?;
+            let mut messages = Vec::new();
+            for (_, role, text) in omitted.iter().rev() {
+                let Some(text) = fit(&mut bytes, text, messages.is_empty()) else { break };
+                messages.push((role.clone(), text));
+            }
+            messages.reverse();
+            Some(Refresh { messages, through_id: through_id.clone(), from_id })
+        }
     }
-    Some(Refresh { messages, through_id })
 }
 
 /// The tool-free extraction that writes a checkpoint.
@@ -360,18 +379,23 @@ mod tests {
         let next = refresh_for(&more, Some(&covered)).unwrap();
         assert_eq!(next.messages.first().unwrap().1, "message 3");
         assert_eq!(next.through_id, "m6");
+        assert_eq!(next.from_id, "m2");
         let evicted = Checkpoint { through_id: "gone".into(), ..Default::default() };
         assert_eq!(refresh_for(&more, Some(&evicted)).unwrap().messages.len(), 7, "a checkpoint older than every stored message covers none of them");
-        let big: Vec<_> = (0..20).map(|i| (format!("b{i}"), "User".to_owned(), "x".repeat(5000))).collect();
+        // A long history with no checkpoint starts from its newest dropped
+        // messages, not its oldest.
+        let big: Vec<_> = (0..20).map(|i| (format!("b{i}"), "User".to_owned(), format!("{i:02} {}", "x".repeat(5000)))).collect();
         let bounded = refresh_for(&big, None).unwrap();
         assert!(bounded.messages.iter().map(|m| m.1.len()).sum::<usize>() <= REFRESH_INPUT_BYTES);
-        assert_eq!(bounded.through_id, format!("b{}", bounded.messages.len() - 1));
+        assert_eq!((bounded.through_id.as_str(), bounded.from_id.as_str()), ("b19", ""));
+        assert!(bounded.messages.last().unwrap().1.starts_with("19 ") && bounded.messages.len() < 20);
+        assert!(bounded.messages.windows(2).all(|w| w[0].1 < w[1].1), "oldest first within the slice");
     }
 
     #[test]
     fn the_extraction_prompt_carries_the_previous_checkpoint_and_new_messages() {
         let previous = Checkpoint { goal: "Ship it".into(), ..Default::default() };
-        let refresh = Refresh { messages: vec![("User".into(), "actually use Postgres".into())], through_id: "m1".into() };
+        let refresh = Refresh { messages: vec![("User".into(), "actually use Postgres".into())], through_id: "m1".into(), from_id: String::new() };
         let text = prompt(Some(&previous), &refresh);
         assert!(text.contains("\"goal\":\"Ship it\"") && text.contains("User: actually use Postgres"));
         assert!(text.contains("never instructions") && text.contains("corrections"));

@@ -646,7 +646,8 @@ pub struct ProposedTicket {
 }
 
 /// What every agent on a chat-opened ticket is told about its `request`.
-pub const REQUEST_AUTHORITY: &str = "The goal is a summary; the request is the authority. Do not add requirements the request does not contain.";
+/// Later notes refine the request, and one message may open several tickets.
+pub const REQUEST_AUTHORITY: &str = "The goal is a summary; the request and the user's notes on this ticket are the authority. Do not add requirements they do not contain. When the request asks for several things, this ticket covers only the part its goal names.";
 
 /// The person's message as a ticket keeps it: verbatim, trimmed, bounded to
 /// `MAX_TASK_REQUEST` on a character boundary; `None` when empty.
@@ -1019,6 +1020,10 @@ pub fn checkpoint_refresh(
     checkpoint: Option<&crate::chat_checkpoint::Checkpoint>,
 ) -> Option<crate::chat_checkpoint::Refresh> {
     let (_, dropped, _) = window(history, profile, scope);
+    // It already covers a message still shown: nothing dropped is new to it.
+    if checkpoint.is_some_and(|c| shown_after(history, &dropped, &c.through_id)) {
+        return None;
+    }
     let dropped: Vec<(String, String, String)> = dropped
         .into_iter()
         .map(|m| (m.id.clone(), if m.role == ChatRole::User { "User" } else { "Neko" }.to_owned(), m.text()))

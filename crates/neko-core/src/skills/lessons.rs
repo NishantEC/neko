@@ -24,14 +24,15 @@ pub enum TicketLesson {
     Patch { target: Skill, base: String, revised: String },
 }
 
-/// Skills a lesson may improve: those enabled in the ticket's workspace and
-/// Neko's own (`<data>/skills`), each once, bounded.
+/// Skills a lesson may improve: those enabled in the ticket's workspace,
+/// each once, bounded. A skill only installed (Neko's own included) is not
+/// listed: improving it would change what other workspaces run.
 pub fn learning_catalog(state: &SkillState, available: &[Skill], workspace: &str) -> Vec<Skill> {
     let mut catalog: Vec<Skill> = Vec::new();
     for skill in available {
         let enabled = state.enabled.iter().any(|e| e.workspace_id == workspace && e.path == skill.path);
         let usable_here = skill.workspace_id.as_deref().is_none_or(|w| w == workspace);
-        if usable_here && (enabled || skill.source == "Neko") && !catalog.iter().any(|s| s.path == skill.path) {
+        if usable_here && enabled && !catalog.iter().any(|s| s.path == skill.path) {
             catalog.push(skill.clone());
         }
         if catalog.len() >= MAX_CATALOG {
@@ -83,7 +84,8 @@ pub fn read_lesson(answer: &str, catalog: &[Skill], titles: &[&str]) -> Result<O
         let number: usize = number.trim_start_matches([':', ' ', '[', '#']).trim_end_matches([']', ' ']).parse().map_err(|_| "A skill patch did not name a listed skill by number")?;
         let target = number.checked_sub(1).and_then(|i| catalog.get(i)).ok_or("A skill patch named a skill that was not listed")?;
         let revised = rest.trim_start_matches(['\n', '\r']).trim_end().to_owned() + "\n";
-        if !revised.starts_with("---\n") || revised.len() > MAX_SKILL_BYTES {
+        // No carriage returns: the diff reads lines, so one would be invisible.
+        if !revised.starts_with("---\n") || revised.len() > MAX_SKILL_BYTES || revised.contains('\r') {
             return Err("A skill patch was not a complete SKILL.md".into());
         }
         let base = read(Path::new(&target.path))?;
@@ -138,7 +140,7 @@ pub fn propose_lesson(db: &Db, workspace: &str, lesson: &TicketLesson, source: &
                 audit_url: None,
                 audit_status: "Not audited by Neko. Review the exact changes; accepting rewrites that skill's file.".into(),
                 audit_reviewed_hash: None,
-                patch: Some(SkillPatch { path: target.path.clone(), base_hash: hash(base), revised: revised.clone() }),
+                patch: Some(SkillPatch { path: target.path.clone(), base_hash: hash(base), revised: revised.clone(), name: target.name.clone() }),
             });
             save(db, &state)
         }
@@ -160,8 +162,17 @@ pub(super) fn apply_patch(state: &mut SkillState, proposal: &SkillProposal, patc
     if !regular || path.file_name().and_then(|n| n.to_str()) != Some("SKILL.md") {
         return Err("The skill this improves is no longer a regular SKILL.md; nothing was written".into());
     }
-    // The diff in `body` (pinned by its hash) was made from this content.
-    if hash(&read(path)?) != patch.base_hash {
+    let current = read(path)?;
+    let new_hash = hash(&patch.revised);
+    // A retry after the file was written but the decision was not saved:
+    // only the stored hashes are left to update.
+    if hash(&current) == new_hash {
+        keep_enabled(state, patch, &new_hash);
+        return Ok(());
+    }
+    // What the user accepted (`body`, pinned by its hash) is exactly the diff
+    // from this content to the file about to be written.
+    if hash(&current) != patch.base_hash || patch.revised.contains('\r') || patch_body(&patch.name, &patch.path, &current, &patch.revised) != proposal.body {
         return Err("The skill changed since this was proposed; nothing was written".into());
     }
     let directory = path.parent().ok_or("Skill has no folder")?;
@@ -176,16 +187,20 @@ pub(super) fn apply_patch(state: &mut SkillState, proposal: &SkillProposal, patc
         let _ = fs::remove_file(&staging);
     }
     written?;
-    let new_hash = hash(&patch.revised);
+    keep_enabled(state, patch, &new_hash);
+    Ok(())
+}
+
+/// The accepted content stays enabled where the old content was.
+fn keep_enabled(state: &mut SkillState, patch: &SkillPatch, new_hash: &str) {
     for enabled in state.enabled.iter_mut().filter(|e| e.path == patch.path && e.content_hash == patch.base_hash) {
-        enabled.content_hash = new_hash.clone();
+        enabled.content_hash = new_hash.to_owned();
     }
     let (_, description) = metadata(&patch.revised, "");
     for skill in state.available.iter_mut().filter(|s| s.path == patch.path) {
-        skill.content_hash = new_hash.clone();
+        skill.content_hash = new_hash.to_owned();
         skill.description = description.clone();
     }
-    Ok(())
 }
 
 /// Line edits from `old` to `new`: (' ' | '-' | '+', line).
@@ -266,12 +281,14 @@ mod tests {
     }
 
     #[test]
-    fn the_catalog_is_the_workspaces_enabled_skills_and_nekos_own() {
+    fn the_catalog_is_the_skills_enabled_in_the_tickets_workspace() {
         let dir = tempfile::tempdir().unwrap();
         let mine = skill(&dir.path().join("a/SKILL.md"), "release-notes", "Claude");
         let neko = skill(&dir.path().join("b/SKILL.md"), "rust-tests", "Neko");
         let other = skill(&dir.path().join("c/SKILL.md"), "unrelated", "Codex");
-        let state = SkillState { enabled: vec![EnabledSkill { workspace_id: "w".into(), path: mine.path.clone(), content_hash: mine.content_hash.clone() }], ..Default::default() };
+        let mut state = SkillState { enabled: vec![EnabledSkill { workspace_id: "w".into(), path: mine.path.clone(), content_hash: mine.content_hash.clone() }], ..Default::default() };
+        assert_eq!(learning_catalog(&state, &[mine.clone(), neko.clone(), other.clone()], "w"), [mine.clone()], "a Neko skill only installed is not listed");
+        state.enabled.push(EnabledSkill { workspace_id: "w".into(), path: neko.path.clone(), content_hash: neko.content_hash.clone() });
         let catalog = learning_catalog(&state, &[mine.clone(), neko.clone(), other], "w");
         assert_eq!(catalog, [mine.clone(), neko.clone()]);
         assert!(learning_catalog(&state, std::slice::from_ref(&mine), "elsewhere").is_empty(), "enabled in another workspace only");
@@ -314,6 +331,7 @@ mod tests {
         assert_eq!(read_lesson(&format!("PATCH 1\n{base}"), &catalog, &[]).unwrap(), None, "no change is no lesson");
         assert!(read_lesson(&format!("PATCH 2\n{revised}"), &catalog, &[]).is_err(), "only listed skills");
         assert!(read_lesson(&format!("PATCH 1\n{}", revised.replace("name: rust-tests", "name: other")), &catalog, &[]).unwrap_err().contains("renamed"));
+        assert!(read_lesson(&format!("PATCH 1\n{}", revised.replace("--workspace", "--workspace\r")), &catalog, &[]).is_err(), "no invisible carriage returns");
 
         let db = Db::open_in_memory().unwrap();
         let mut state = load(&db).unwrap();
@@ -332,7 +350,16 @@ mod tests {
         // The file changed since: accepting refuses and writes nothing.
         fs::write(&file, format!("{base}4. Commit\n")).unwrap();
         assert!(super::super::decide(&db, dir.path(), &proposal.id, &proposal.content_hash, true).unwrap_err().contains("changed since"));
+        // What would be written must be exactly what the accepted diff shows.
+        let mut tampered = load(&db).unwrap();
+        tampered.proposals[0].patch.as_mut().unwrap().revised = revised.replace("Fix", "Fix everything");
+        save(&db, &tampered).unwrap();
         fs::write(&file, base).unwrap();
+        assert!(super::super::decide(&db, dir.path(), &proposal.id, &proposal.content_hash, true).unwrap_err().contains("changed since"));
+        assert_eq!(fs::read_to_string(&file).unwrap(), base);
+        let mut restored = load(&db).unwrap();
+        restored.proposals[0].patch.as_mut().unwrap().revised = revised.to_owned();
+        save(&db, &restored).unwrap();
         super::super::decide(&db, dir.path(), &proposal.id, &proposal.content_hash, true).unwrap();
         assert_eq!(fs::read_to_string(&file).unwrap(), revised);
         let after = load(&db).unwrap();
@@ -341,6 +368,30 @@ mod tests {
         assert_eq!(after.available[0].content_hash, hash(revised));
         assert!(!dir.path().join("skills").exists(), "a patch installs nothing new");
         assert_eq!(fs::read_dir(&folder).unwrap().count(), 1, "no staging file is left");
+    }
+
+    #[test]
+    fn accepting_again_after_the_file_was_written_but_not_recorded_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("SKILL.md");
+        let base = "---\nname: release-notes\ndescription: d\n---\nWrite notes.\n";
+        let revised = "---\nname: release-notes\ndescription: d\n---\nWrite notes from the merged PRs.\n";
+        fs::write(&file, base).unwrap();
+        let target = skill(&file.canonicalize().unwrap(), "release-notes", "Claude");
+        let db = Db::open_in_memory().unwrap();
+        let mut state = load(&db).unwrap();
+        state.enabled.push(EnabledSkill { workspace_id: "w".into(), path: target.path.clone(), content_hash: hash(base) });
+        save(&db, &state).unwrap();
+        let lesson = read_lesson(&format!("PATCH 1\n{revised}"), std::slice::from_ref(&target), &[]).unwrap().unwrap();
+        propose_lesson(&db, "w", &lesson, "Completed ticket t").unwrap();
+        let proposal = load(&db).unwrap().proposals[0].clone();
+        // The first accept renamed the file into place, then its save failed.
+        fs::write(&file, revised).unwrap();
+        super::super::decide(&db, dir.path(), &proposal.id, &proposal.content_hash, true).unwrap();
+        let after = load(&db).unwrap();
+        assert!(after.proposals.is_empty());
+        assert_eq!(after.enabled[0].content_hash, hash(revised), "the skill keeps working");
+        assert_eq!(fs::read_to_string(&file).unwrap(), revised);
     }
 
     #[test]
