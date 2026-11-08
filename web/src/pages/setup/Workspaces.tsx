@@ -10,18 +10,18 @@ import { command, request, type Json } from "@/api";
 import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
 import { Textarea } from "@/ui/textarea";
-import { Badge } from "@/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
-import { ArrowRight, ArrowSquareOut, ArrowsClockwise, Copy, Eye, FolderSimple, Link as LinkIcon, Note, PencilSimple, Plugs, Plus, Stack, Tray, Warning, Wrench, X } from "@/ui/icons";
+import { ArrowRight, ArrowSquareOut, ArrowsClockwise, CaretRight, Copy, Eye, FolderSimple, Link as LinkIcon, PencilSimple, Plus, Stack, Tray, Wrench, X } from "@/ui/icons";
+import { cn } from "@/ui/lib/utils";
 import { ProgressRing, StatusGlyph, type StatusKind } from "@/ui/status-glyph";
 import { itemProgress, routineStatus } from "@/setup/routine-status";
 import { copyText, useContextMenu } from "@/shell/context-menu";
 import { workspaceHref } from "@/shell/workspace";
 import { useHashParams } from "@/work/location";
 import { hrefFor, navigate } from "@/router";
-import { ErrorNote, FormField, Gate, EmptyBlock, PanelFooter, Row, SetupPage, Status, registerCommands } from "@/setup/kit";
+import { ErrorNote, FormField, Gate, EmptyBlock, RowAction, RowActions, SetupPage, registerCommands } from "@/setup/kit";
 import { Panel } from "@/setup/kit";
-import { arr, foldersOf, mcp, relativeTime, str, useNow, useRun, type Workspace } from "@/setup/lib";
+import { arr, fillOwner, foldersOf, mcp, relativeTime, str, useNow, useRun, type Workspace } from "@/setup/lib";
 
 function WorkspaceDialog({ open, onOpenChange, workspace, folders: initialFolders }: {
   open: boolean;
@@ -131,7 +131,7 @@ const SHORT = 5;
 /** Same cadence as the Inbox; a hidden page does not poll. */
 const POLL_MS = 10_000;
 
-type RoutinesData = { routines: Json[]; standing_orders: Record<string, string>; scopes: Json[] };
+type RoutinesData = { routines: Json[]; standing_orders: Record<string, string>; scopes: Json[]; owner_name?: string };
 type RoutinesState = { data: RoutinesData | null; error: string | null };
 
 const folderName = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
@@ -167,9 +167,9 @@ function ShortList<T>({ items, render, noun, label, className }: { items: T[]; r
     <div className="flex flex-col items-start gap-1">
       <ul aria-label={label} className={className}>{shown.map(render)}</ul>
       {items.length > SHORT ? (
-        <Button variant="ghost" size="xs" className="-ms-2" aria-expanded={all} onClick={() => setAll(!all)}>
+        <button type="button" aria-expanded={all} onClick={() => setAll(!all)} className="rounded-md text-[12.5px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60">
           {all ? "Show fewer" : `Show ${items.length - SHORT} more ${noun}`}
-        </Button>
+        </button>
       ) : null}
     </div>
   );
@@ -186,7 +186,7 @@ function routineSummary(data: RoutinesData, workspaceId: string, now: number) {
     .sort((a, b) => at(b.run) - at(a.run))[0];
   const needsYou = views.reduce((n, v) => n + arr(v.runs).reduce((m, r) => m + arr(r.needs_you).filter((i) => !i.done).length, 0), 0);
   const failing = views.filter((v) => v.runs?.[0] && !v.runs[0].ok).map((v) => str(v.routine.name));
-  const parts = [views.length === 0 ? "No routines here yet" : `${enabled} of ${views.length} routines on`];
+  const parts = [views.length === 0 ? "No routines here yet" : `${enabled} of ${views.length} on`];
   if (running) parts.push(`${str(running.routine.name)} is running now`);
   else if (latest) parts.push(`last: ${latest.name} ${!latest.run.ok ? "failed" : latest.run.quiet ? "was quiet" : "acted"} ${relativeTime(at(latest.run), now)}`);
   else if (views.length) parts.push("none has run yet");
@@ -196,10 +196,57 @@ function routineSummary(data: RoutinesData, workspaceId: string, now: number) {
 /** A status in words with its glyph (DESIGN.md §3); colour only on the glyph. */
 function Said({ status, children }: { status: StatusKind; children: ReactNode }) {
   return (
-    <span data-slot="said" data-status={status} className="inline-flex items-center gap-1.5 text-[13px] text-foreground/80">
-      <StatusGlyph status={status} label="" />
+    <span data-slot="said" data-status={status} className="inline-flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+      <StatusGlyph status={status} label="" size={12} />
       {children}
     </span>
+  );
+}
+
+/**
+ * One line of a workspace (DESIGN.md §8): a label, its value in muted text and
+ * quiet meta on the right. When it has more to show, the line is a button that
+ * opens the rest under it.
+ */
+function Line({ label, value, meta, children, slot }: { label: string; value: ReactNode; meta?: ReactNode; children?: ReactNode; slot?: string }) {
+  const [open, setOpen] = useState(false);
+  const more = !!children;
+  const head = (
+    <>
+      <CaretRight aria-hidden size={11} weight="bold" className={cn("shrink-0 text-muted-foreground/70 transition-transform duration-150", open && "rotate-90", !more && "invisible")} />
+      <span className="w-32 shrink-0 truncate text-[13.5px] text-foreground">{label}</span>
+      <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">{value}</span>
+    </>
+  );
+  return (
+    <div data-slot={slot ?? "workspace-line"} data-open={open || undefined} className="group/row rounded-[10px] px-3 py-1.5 transition-colors hover:bg-foreground/[0.03]">
+      <div className="flex min-h-7 items-center gap-3">
+        {more ? (
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-label={`${label}: ${open ? "hide" : "show"} details`}
+            onClick={() => setOpen(!open)}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            {head}
+          </button>
+        ) : (
+          <div className="flex min-w-0 flex-1 items-center gap-2">{head}</div>
+        )}
+        {meta ? <span className="flex shrink-0 items-center gap-3 text-[12.5px] text-muted-foreground">{meta}</span> : null}
+      </div>
+      {more && open ? <div className="mt-1.5 mb-1 flex flex-col gap-2 ps-[calc(11px+0.5rem+8rem+0.75rem)] text-[13px] text-muted-foreground">{children}</div> : null}
+    </div>
+  );
+}
+
+/** A quiet link inside a line's meta. */
+function MetaLink({ href, label, children }: { href: string; label?: string; children: ReactNode }) {
+  return (
+    <a href={href} aria-label={label} className="inline-flex items-center gap-1 rounded-md text-[12.5px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60">
+      {children}
+    </a>
   );
 }
 
@@ -210,17 +257,15 @@ function ServerGroup({ label, servers }: { label: string; servers: Json[] }) {
   for (const s of servers) origins.set(str(s.name), [...(origins.get(str(s.name)) ?? []), str(s.origin)]);
   const names = [...origins.keys()].sort((a, b) => a.localeCompare(b));
   return (
-    <div className="flex flex-col gap-1.5">
-      <p className="text-[12.5px] font-medium text-foreground/80">{label}</p>
+    <div className="flex min-w-0 items-baseline gap-3">
+      <span className="w-28 shrink-0 truncate text-[12.5px] text-muted-foreground/80">{label}</span>
       <ShortList
         items={names}
         noun="servers"
         label={label}
-        className="flex flex-wrap gap-1.5"
+        className="flex flex-wrap gap-x-3 gap-y-1"
         render={(name) => (
-          <li key={name}>
-            <Badge variant="outline" className="font-mono text-[12px] font-normal text-muted-foreground" title={origins.get(name)?.filter(Boolean).join("\n")}>{name}</Badge>
-          </li>
+          <li key={name} className="font-mono text-[12px] text-foreground/80" title={origins.get(name)?.filter(Boolean).join("\n")}>{name}</li>
         )}
       />
     </div>
@@ -240,22 +285,23 @@ function Connections({ scope, workspaceName }: { scope: Json; workspaceName: str
     ...(whole.length ? [{ label: "Whole scope", servers: whole }] : []),
     ...[...repos.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([repo, list]) => ({ label: `Only in ${repo}`, servers: list })),
   ];
+  const names = [...new Set(servers.map((s) => str(s.name)))].sort((a, b) => a.localeCompare(b));
   return (
-    <Row
-      title="Connections"
-      leading={<Plugs />}
-      description={servers.length === 0 ? "No MCP servers in these folders’ config." : "MCP servers from these folders’ own config on disk."}
+    <Line
+      label="Connections"
+      value={servers.length === 0 ? "No MCP servers in these folders’ config" : names.join(", ")}
+      meta={servers.length ? <span className="tabular-nums">{names.length}</span> : null}
     >
       {groups.length ? (
         <ShortList
           items={groups}
           noun="repositories"
           label={`Connections for ${workspaceName}`}
-          className="flex flex-col gap-3"
+          className="flex flex-col gap-1.5"
           render={(g) => <li key={g.label}><ServerGroup label={g.label} servers={g.servers} /></li>}
         />
       ) : null}
-    </Row>
+    </Line>
   );
 }
 
@@ -275,8 +321,8 @@ function WorkspacePanel({ snapshot, workspace, onEdit, routines, now }: { snapsh
   const scope = data?.scopes.find((s) => s.workspace_id === workspace.id);
   const summary = data ? routineSummary(data, workspace.id, now) : null;
   const problems: string[] = arr(scope?.problems).map(str).filter(Boolean);
-  const orders = data?.standing_orders?.[workspace.id] ?? "";
-  const attention = problems.length > 0 || (summary?.needsYou ?? 0) > 0 || (summary?.failing.length ?? 0) > 0;
+  // Shown as the agent reads them: `{owner}` is the owner's name.
+  const orders = fillOwner(data?.standing_orders?.[workspace.id] ?? "", data?.owner_name);
 
   // Wakes the active watches only (a paused or suggested one is refused by the daemon), and
   // one that fails does not stop the rest; the error names the ones that did.
@@ -300,36 +346,41 @@ function WorkspacePanel({ snapshot, workspace, onEdit, routines, now }: { snapsh
     { label: "Edit…", icon: PencilSimple, run: onEdit },
     { label: "Sync now", icon: ArrowsClockwise, disabled: active === 0 || busy, run: () => void syncNow() },
     "separator",
+    { label: "Open Inbox", icon: Tray, run: () => navigate("inbox") },
+    { label: "Open Watching", icon: Eye, run: () => navigate("watching") },
+    { label: "Open Tools & skills", icon: Wrench, run: () => navigate("tools") },
+    "separator",
     { label: "Copy name", icon: Copy, run: () => void copyText(workspace.name, "Copied the name") },
     { label: "Copy link", icon: LinkIcon, run: () => void copyText(`${location.origin}${location.pathname}${workspaceHref(workspace.id)}`, "Copied the link") },
+    { label: "Copy id", icon: Copy, run: () => void copyText(workspace.id, "Copied the id") },
   ]);
 
+  const watchState = watches.length === 0 ? null
+    : failing ? <span className="text-warning-foreground">Needs attention</span>
+    : lastChecked ? `Synced ${relativeTime(lastChecked)}` : "Not checked yet";
+
   return (
-    <Panel data-slot="workspace" data-workspace={workspace.name} role="region" aria-labelledby={`ws-title-${workspace.id}`} {...menu}>
-      <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <span aria-hidden className={`size-2 shrink-0 rounded-full ${attention ? "bg-warning" : "bg-success"}`} />
-          <h3 id={`ws-title-${workspace.id}`} className="truncate text-[17px] font-medium text-strong">{workspace.name}</h3>
-          {open > 0 ? <Badge variant="outline" className="font-mono text-[11px] font-normal text-muted-foreground">{open} open</Badge> : null}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => void syncNow()} disabled={active === 0 || busy} loading={busy} title={active === 0 ? "Nothing here is being watched right now" : "Check everything this workspace watches"}>
-            <ArrowsClockwise /> Sync now
-          </Button>
-          <Button variant="outline" size="sm" onClick={onEdit} aria-label={`Edit ${workspace.name}`}><PencilSimple /> Edit</Button>
-        </div>
+    <section data-slot="workspace" data-workspace={workspace.name} role="region" aria-labelledby={`ws-title-${workspace.id}`} {...menu} className="flex flex-col gap-1">
+      <div className="group/row flex min-h-8 items-center gap-3">
+        <h2 id={`ws-title-${workspace.id}`} className="min-w-0 truncate text-[15px] font-medium text-foreground">{workspace.name}</h2>
+        {open > 0 ? <span className="text-[12.5px] tabular-nums text-muted-foreground/70">{open} open</span> : null}
+        <span className="flex-1" />
+        <RowActions>
+          <RowAction label="Sync now" icon={ArrowsClockwise} disabled={active === 0 || busy} onClick={() => void syncNow()} />
+          <RowAction label={`Edit ${workspace.name}`} icon={PencilSimple} onClick={onEdit} />
+        </RowActions>
       </div>
-      <div className="divide-y divide-border/70 border-t border-border/70">
-        <Row
-          title="Routines"
-          leading={<Tray />}
-          description={summary ? summary.text : routines.error ? "Couldn’t load routines right now." : "Loading routines…"}
-          trailing={summary ? (
+      <Panel>
+        <Line
+          slot="workspace-routines"
+          label="Routines"
+          value={summary ? summary.text : routines.error ? "Couldn’t load routines right now" : "Loading routines…"}
+          meta={summary ? (
             <>
               {summary.needsYou > 0 ? <Said status="inProgress">{summary.needsYou} need{summary.needsYou === 1 ? "s" : ""} you</Said>
                 : summary.failing.length ? <Said status="failed">{summary.failing.length === 1 ? `${summary.failing[0]} failed` : `${summary.failing.length} failed`}</Said>
-                : summary.count ? <Said status="done">Nothing needs you</Said> : null}
-              {summary.count ? <Button variant="ghost" size="sm" aria-label={`Open the Inbox for ${workspace.name}`} render={<a href={hrefFor("inbox")} />}>Inbox <ArrowRight /></Button> : null}
+                : null}
+              {summary.count ? <MetaLink href={hrefFor("inbox")} label={`Open the Inbox for ${workspace.name}`}>Inbox <ArrowRight size={12} /></MetaLink> : null}
             </>
           ) : null}
         >
@@ -348,78 +399,74 @@ function WorkspacePanel({ snapshot, workspace, onEdit, routines, now }: { snapsh
               })}
             </ul>
           ) : null}
-        </Row>
+        </Line>
         {problems.length ? (
-          <Row
-            title="Setup notes"
-            leading={<Warning className="text-warning" />}
-            description={`${problems.length} thing${problems.length === 1 ? "" : "s"} to tidy in the MCP config on disk. Routines still run.`}
+          <Line
+            label="Setup notes"
+            value={<span className="text-warning-foreground">{problems.length} thing{problems.length === 1 ? "" : "s"} to tidy in the MCP config on disk; routines still run</span>}
           >
             <ShortList items={problems} noun="notes" label={`Setup notes for ${workspace.name}`} className="flex list-disc flex-col gap-1 ps-5" render={(p) => <li key={p}>{p}</li>} />
-          </Row>
+          </Line>
         ) : null}
-        <Row
-          title="Folders"
-          leading={<FolderSimple />}
-          description={folders.length === 0 ? "No folders saved. Edit the workspace to add one." : undefined}
+        <Line
+          label="Folders"
+          value={folders.length === 0 ? "No folders saved. Edit the workspace to add one." : <span className="font-mono text-[12px]" title={folders.join("\n")}>{folders.join(", ")}</span>}
+          meta={folders.length > 1 ? <span className="tabular-nums">{folders.length}</span> : null}
         >
-          {folders.length ? (
+          {folders.length > 1 ? (
             <ShortList items={folders} noun="folders" label={`Folders in ${workspace.name}`} className="flex flex-col gap-1" render={(f) => <li key={f} className="truncate font-mono text-[12px] text-foreground/80" title={f}>{f}</li>} />
           ) : null}
-        </Row>
+        </Line>
         {scope ? <Connections scope={scope} workspaceName={workspace.name} /> : null}
-        <Row
-          title="Watching"
-          leading={<Eye />}
-          description={watches.length === 0 ? "Nothing yet. Add a watch in Watching." : `${active} active${watches.length - active > 0 ? ` · ${watches.length - active} paused or suggested` : ""}`}
-          trailing={watches.length > 0 ? <Status tone={failing ? "warning" : lastChecked ? "success" : "neutral"}>{failing ? "Needs attention" : lastChecked ? `Synced ${relativeTime(lastChecked)}` : "Not checked yet"}</Status> : null}
+        <Line
+          label="Watching"
+          value={watches.length === 0 ? "Nothing yet. Add a watch in Watching." : `${active} active${watches.length - active > 0 ? ` · ${watches.length - active} paused or suggested` : ""}`}
+          meta={<>{watchState}<MetaLink href={hrefFor("watching")} label={`Open Watching for ${workspace.name}`}><ArrowRight size={12} /></MetaLink></>}
         />
-        <Row
-          title="Tools in Neko"
-          leading={<Wrench />}
-          description={tools.length === 0 ? "Connect tools in Tools & skills to make them available here." : broken.length ? `${broken.length} need attention` : undefined}
-          trailing={schedules.length ? <span className="font-mono text-[12px] text-muted-foreground">{schedules.length} {schedules.length === 1 ? "schedule" : "schedules"}</span> : null}
+        <Line
+          label="Tools in Neko"
+          value={tools.length === 0 ? "Connect tools in Tools & skills to make them available here." : (
+            <>
+              {broken.length ? <span className="text-warning-foreground">{broken.length} need{broken.length === 1 ? "s" : ""} attention · </span> : null}
+              {tools.map((c) => str(c.label)).join(", ")}
+            </>
+          )}
+          meta={<>
+            {schedules.length ? <span className="tabular-nums">{schedules.length} {schedules.length === 1 ? "schedule" : "schedules"}</span> : null}
+            <MetaLink href={hrefFor("tools")} label={`Open Tools & skills for ${workspace.name}`}><ArrowRight size={12} /></MetaLink>
+          </>}
         >
           {tools.length ? (
             <ShortList
               items={tools}
               noun="tools"
               label={`Tools in Neko for ${workspace.name}`}
-              className="flex flex-wrap gap-1.5"
+              className="flex flex-wrap gap-x-3 gap-y-1"
               render={(c) => (
-                <li key={c.id}>
-                  <Badge variant="outline" className={`text-[12px] font-normal ${c.enabled && str(c.error) ? "text-warning-foreground" : "text-muted-foreground"}`}>{c.label}</Badge>
-                </li>
+                <li key={c.id} className={`text-[12.5px] ${c.enabled && str(c.error) ? "text-warning-foreground" : "text-foreground/80"}`} title={str(c.error) || undefined}>{c.label}</li>
               )}
             />
           ) : null}
-        </Row>
+        </Line>
         {/* Like the Inbox, which is where they are edited: standing orders matter only where routines run. */}
         {(summary?.count ?? 0) > 0 ? (
-          <Row
-            title="Standing orders"
-            leading={<Note />}
-            description="Every routine here follows these."
-            trailing={<Button variant="ghost" size="sm" aria-label={`Edit standing orders for ${workspace.name} in the Inbox`} render={<a href={hrefFor("inbox")} />}>Edit in Inbox</Button>}
+          <Line
+            slot="standing-orders"
+            label="Standing orders"
+            value={orders || "None yet."}
+            meta={<MetaLink href={hrefFor("inbox")} label={`Edit standing orders for ${workspace.name} in the Inbox`}>Edit in Inbox</MetaLink>}
           >
-            <p className="line-clamp-3 max-w-[70ch] whitespace-pre-wrap leading-relaxed text-foreground/80">{orders || "None yet."}</p>
-          </Row>
+            {orders ? <p className="max-w-[70ch] whitespace-pre-wrap leading-relaxed text-foreground/80">{orders}</p> : null}
+          </Line>
         ) : null}
         {workspace.instructions ? (
-          <Row title="Instructions">
+          <Line label="Instructions" value={workspace.instructions.split("\n")[0]}>
             <p className="max-w-[70ch] whitespace-pre-wrap leading-relaxed text-foreground/80">{workspace.instructions}</p>
-          </Row>
+          </Line>
         ) : null}
-      </div>
-      {error ? <div className="border-t border-border/70 p-4"><ErrorNote error={error} title="Couldn’t sync" onDismiss={clear} /></div> : null}
-      <PanelFooter className="justify-between">
-        <span className="font-mono text-[11px] text-muted-foreground">{workspace.id.slice(0, 8)}</span>
-        <div className="flex gap-2">
-          <Button variant="ghost" size="sm" onClick={() => navigate("watching")}>Open Watching</Button>
-          <Button variant="ghost" size="sm" onClick={() => navigate("tools")}>Open Tools &amp; skills</Button>
-        </div>
-      </PanelFooter>
-    </Panel>
+      </Panel>
+      {error ? <ErrorNote error={error} title="Couldn’t sync" onDismiss={clear} /> : null}
+    </section>
   );
 }
 
@@ -435,9 +482,8 @@ export default function Workspaces() {
 
   return (
     <SetupPage
-      eyebrow="Work"
       title={<>Workspaces</>}
-      actions={<Button onClick={() => setDialog({ open: true, id: null })}><Plus /> Add workspace</Button>}
+      actions={<Button size="sm" onClick={() => setDialog({ open: true, id: null })}><Plus /> Add workspace</Button>}
     >
       <Gate>
         {(snapshot) => <WorkspaceList snapshot={snapshot} dialog={dialog} setDialog={setDialog} />}
@@ -476,7 +522,7 @@ function WorkspaceList({ snapshot, dialog, setDialog }: { snapshot: Json; dialog
           )}
         </div>
       ) : (
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-8">
           {workspaces.map((w) => (
             <WorkspacePanel key={w.id} snapshot={snapshot} workspace={w} onEdit={() => setDialog({ open: true, id: w.id })} routines={routines} now={now} />
           ))}
