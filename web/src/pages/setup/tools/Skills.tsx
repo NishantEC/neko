@@ -7,7 +7,7 @@ import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/ui/collapsible";
 import { ArrowSquareOut, ArrowsClockwise, Books, CaretDown, CaretRight, MagnifyingGlass, Plus, WarningCircle } from "@/ui/icons";
-import { EmptyBlock, ErrorNote, FormField, PanelFooter, Row, Status } from "@/setup/kit";
+import { EmptyBlock, ErrorNote, FormField, PanelFooter, Row } from "@/setup/kit";
 import { Panel } from "@/setup/kit";
 import { arr, skillsCmd, str, useRun } from "@/setup/lib";
 
@@ -18,17 +18,17 @@ function SkillRow({ skill, workspace, enabled, run, busy }: { skill: Json; works
   return (
     <Collapsible open={open} onOpenChange={setOpen} data-slot="skill">
       <CollapsibleTrigger
-        render={<button type="button" aria-label={`${str(skill.name)}, ${!record ? "available" : changed ? "changed" : "enabled"}`} className="flex w-full items-start gap-3 px-6 py-4 text-start outline-none transition-colors hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring" />}
+        render={<button type="button" aria-label={`${str(skill.name)}, ${!record ? "available" : changed ? "changed" : "enabled"}`} className="flex min-h-11 w-full items-center gap-3 rounded-[10px] px-3 py-1.5 text-start outline-none transition-colors hover:bg-foreground/[0.03] focus-visible:ring-2 focus-visible:ring-ring" />}
       >
-        <span aria-hidden className="mt-0.5 text-muted-foreground">{open ? <CaretDown /> : <CaretRight />}</span>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="text-[14px] font-medium">{str(skill.name)}</span>
-          <span className="line-clamp-2 text-[13px] text-muted-foreground">{str(skill.description)}</span>
+        <span aria-hidden className="text-muted-foreground">{open ? <CaretDown size={12} /> : <CaretRight size={12} />}</span>
+        <span className="flex min-w-0 flex-1 items-baseline gap-3">
+          <span className="shrink-0 text-[13.5px]">{str(skill.name)}</span>
+          <span className="min-w-0 truncate text-[12.5px] text-muted-foreground" title={str(skill.description)}>{str(skill.description)}</span>
         </span>
-        <Status tone={changed ? "warning" : record ? "success" : "neutral"}>{!record ? "Available" : changed ? "Changed" : "Enabled"}</Status>
+        <span className={`shrink-0 text-[12.5px] ${changed ? "text-warning-foreground" : "text-muted-foreground/70"}`}>{!record ? "Available" : changed ? "Changed" : "Enabled"}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="flex flex-col gap-3 px-6 pb-5 ps-[3.5rem] text-[13px]">
+        <div className="flex flex-col gap-3 px-3 pb-4 ps-9 text-[13px]">
           <p className="select-text break-all font-mono text-xs text-muted-foreground">{str(skill.path)}</p>
           {changed ? <p className="flex items-center gap-2 text-warning-foreground"><WarningCircle /> Instructions changed. Review them before enabling the updated version.</p> : null}
           <div className="flex flex-wrap gap-2">
@@ -58,15 +58,15 @@ function Proposal({ proposal, run, busy }: { proposal: Json; run: (s: () => Prom
   const decide = (accept: boolean) => void run(() => skillsCmd("DecideProposal", { id: proposal.id, content_hash: proposal.content_hash, accept }));
   return (
     <Collapsible data-slot="skill-proposal" data-key={key}>
-      <CollapsibleTrigger render={<button type="button" className="flex w-full items-start gap-3 px-6 py-4 text-start outline-none transition-colors hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring" />}>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="text-[14px] font-medium">{str(proposal.name)}</span>
-          <span className="text-[13px] text-muted-foreground">Suggested skill · Review instructions</span>
+      <CollapsibleTrigger render={<button type="button" className="flex min-h-11 w-full items-center gap-3 rounded-[10px] px-3 py-1.5 text-start outline-none transition-colors hover:bg-foreground/[0.03] focus-visible:ring-2 focus-visible:ring-ring" />}>
+        <span className="flex min-w-0 flex-1 items-baseline gap-3">
+          <span className="shrink-0 text-[13.5px]">{str(proposal.name)}</span>
+          <span className="truncate text-[12.5px] text-muted-foreground">Suggested skill · review instructions</span>
         </span>
         <CaretDown aria-hidden className="text-muted-foreground" />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="flex flex-col gap-3 px-6 pb-5 text-[13px]">
+        <div className="flex flex-col gap-3 px-3 pb-4 text-[13px]">
           <p className="select-text break-all text-muted-foreground">{str(proposal.source)}</p>
           <p className="text-muted-foreground">{str(proposal.audit_status)}</p>
           {auditUrl ? (
@@ -84,7 +84,7 @@ function Proposal({ proposal, run, busy }: { proposal: Json; run: (s: () => Prom
               </div>
             </>
           ) : null}
-          <pre className="max-h-60 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-foreground/[0.03] p-3 font-mono text-xs" aria-label="Proposed skill instructions">{str(proposal.body)}</pre>
+          <pre className="max-h-60 overflow-auto whitespace-pre-wrap rounded-[10px] bg-foreground/[0.03] p-3 font-mono text-xs" aria-label="Proposed skill instructions">{str(proposal.body)}</pre>
           <p className="text-xs text-muted-foreground">Accept saves these exact instructions. Enable separately after installation.</p>
           <div className="flex gap-2">
             <Button size="sm" disabled={!reviewed || busy} onClick={() => decide(true)}>Accept &amp; save reviewed content</Button>
@@ -112,15 +112,14 @@ export function SkillsTab({ snapshot, workspace }: { snapshot: Json; workspace: 
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-[60ch] text-[13px] text-muted-foreground">Instructions from this workspace’s folders. A skill cannot access tools on its own.</p>
-        <Button variant="outline" size="sm" disabled={busy} loading={busy} onClick={() => void run(() => skillsCmd("Refresh"))}><ArrowsClockwise /> Refresh</Button>
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <MagnifyingGlass aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search skills" placeholder="Search skills" className="ps-9!" />
+        </div>
+        <Button variant="ghost" size="sm" disabled={busy} loading={busy} title="Read skills again from this workspace’s folders. A skill cannot access tools on its own." onClick={() => void run(() => skillsCmd("Refresh"))}><ArrowsClockwise /> Refresh</Button>
       </div>
       <ErrorNote error={error} title="Couldn’t update skills" onDismiss={clear} />
-      <div className="relative">
-        <MagnifyingGlass aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search skills" placeholder="Search skills" className="ps-9!" />
-      </div>
       {unavailable.map((r) => (
         <Panel key={r.path}>
           <Row title="Unavailable enabled skill" description="Runs stop until these instructions are restored or disabled.">
@@ -130,19 +129,19 @@ export function SkillsTab({ snapshot, workspace }: { snapshot: Json; workspace: 
         </Panel>
       ))}
       {visible.length > 0 ? (
-        <Panel><div className="divide-y divide-border/70">
+        <Panel>
           {visible.map((s) => <SkillRow key={str(s.path)} skill={s} workspace={workspace} enabled={enabled} run={run} busy={busy} />)}
-        </div></Panel>
+        </Panel>
       ) : (
         <EmptyBlock icon={Books} title={search ? `No skills match “${search}”` : "No local skills available yet"} description={search ? undefined : "Refresh local skills, or fetch an instruction file below."} />
       )}
       <Panel>
         <Collapsible open={showFind} onOpenChange={setShowFind}>
-          <CollapsibleTrigger render={<button type="button" className="flex w-full items-center gap-2 px-6 py-4 text-start text-[14px] font-medium outline-none hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring" />}>
+          <CollapsibleTrigger render={<button type="button" className="flex min-h-10 w-full items-center gap-2 rounded-[10px] px-3 text-start text-[13.5px] text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.03] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" />}>
             <Plus aria-hidden /> Find a skill
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="flex flex-col gap-3 border-t border-border/70 px-6 py-4">
+            <div className="flex flex-col gap-3 px-3 py-3">
               <a className="inline-flex w-fit items-center gap-1.5 text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" href="https://skills.sh" target="_blank" rel="noreferrer noopener">Browse skills.sh <ArrowSquareOut /></a>
               <FormField label="GitHub SKILL.md URL" htmlFor="skill-url" hint="Only the instruction file is previewed. Scripts and references are not installed.">
                 <Input id="skill-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/…/SKILL.md" className="font-mono" />
@@ -155,9 +154,9 @@ export function SkillsTab({ snapshot, workspace }: { snapshot: Json; workspace: 
         </Collapsible>
       </Panel>
       {proposals.length > 0 ? (
-        <Panel><div className="divide-y divide-border/70">
+        <Panel>
           {proposals.map((p) => <Proposal key={str(p.id)} proposal={p} run={run} busy={busy} />)}
-        </div></Panel>
+        </Panel>
       ) : null}
     </div>
   );

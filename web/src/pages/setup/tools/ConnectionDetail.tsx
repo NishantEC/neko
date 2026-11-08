@@ -193,7 +193,7 @@ export function ConnectionDetail({ snapshot, connection, onClose }: { snapshot: 
             ) : filtered.length === 0 ? (
               <p className="px-1 py-4 text-[13px] text-muted-foreground">No tools match “{search}”.</p>
             ) : (
-              <div className="divide-y divide-border/70 rounded-xl border border-border px-3">
+              <div className="rounded-xl border border-border px-3">
                 {filtered.map((t) => <ToolRow key={str(t.name)} tool={t} />)}
               </div>
             )}

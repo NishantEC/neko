@@ -11,7 +11,7 @@ import { ArrowsClockwise } from "@/ui/icons";
 import { Panel } from "@/setup/kit";
 import { Bar, BarChart as RechartsBarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/ui/chart";
-import { BarList, EmptyBlock, ErrorNote, Gate, Row, Section, SetupPage, Status, Well } from "@/setup/kit";
+import { BarList, EmptyBlock, ErrorNote, Gate, Row, Section, SetupPage, Well } from "@/setup/kit";
 import { useSetupCommands } from "@/setup/commands";
 import { arr, num, rec, relativeTime, sizeLabel, str, useNow, type Tone } from "@/setup/lib";
 import { Gauge } from "@phosphor-icons/react";
@@ -190,7 +190,7 @@ function SpendSection({ snapshot, now }: { snapshot: Json; now: number }) {
   const top = spend.tasks[0];
   const hasData = spend.runs > 0;
   return (
-    <Section eyebrow="Spend" title={<>What agents cost.</>}>
+    <Section title={<span title="Read from the cost each Claude Code and OpenCode run reports. Codex subscriptions don’t report a price, so their runs aren’t counted here.">Spend</span>}>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-slot="spend-wells">
         <Well label="Recorded spend" value={usd(spend.total)} detail={`${spend.runs} priced ${spend.runs === 1 ? "run" : "runs"} · ${compact(spend.tokensIn)} in · ${compact(spend.tokensOut)} out`} />
         <Well label="Last 7 days" value={usd(spend.week)} tone={spend.week > 0 ? "neutral" : "success"} detail={spend.week > 0 ? "Across every task" : "Nothing priced this week"} />
@@ -205,8 +205,8 @@ function SpendSection({ snapshot, now }: { snapshot: Json; now: number }) {
       </div>
       {hasData ? (
         <Panel>
-          <div className="px-6 pt-4">
-            <p className="text-[12.5px] font-medium text-muted-foreground">Spend per day · last 14 days (USD)</p>
+          <div className="px-3 pt-2">
+            <p className="text-[12.5px] text-muted-foreground">Per day · last 14 days (USD)</p>
             <ChartContainer config={{ cost: { label: "Spend (USD)", color: "var(--chart-1)" } }} className="mt-3 aspect-auto h-44 w-full" data-slot="spend-chart">
               <RechartsBarChart accessibilityLayer data={spend.days} margin={{ top: 8, right: 4, left: 8, bottom: 0 }}>
                 <CartesianGrid vertical={false} />
@@ -217,14 +217,14 @@ function SpendSection({ snapshot, now }: { snapshot: Json; now: number }) {
               </RechartsBarChart>
             </ChartContainer>
           </div>
-          <div className="divide-y divide-border/70 border-t border-border/70">
+          <div className="mt-3 flex flex-col">
             {spend.tasks.slice(0, 5).map((t) => (
-              <Row key={t.id} title={<span className="line-clamp-1">{t.title}</span>} description={`${t.runs} ${t.runs === 1 ? "run" : "runs"}`} trailing={<span className="font-mono text-[13px] tabular-nums">{usd(t.cost)}</span>} />
+              <Row key={t.id} title={t.title} description={`${t.runs} ${t.runs === 1 ? "run" : "runs"}`} trailing={<span className="tabular-nums text-foreground">{usd(t.cost)}</span>} />
             ))}
           </div>
         </Panel>
       ) : (
-        <EmptyBlock icon={Gauge} title="No priced runs yet" description="When an agent that reports its cost finishes a run, its spend shows up here." />
+        <p className="text-[13px] text-muted-foreground">No priced runs yet. When an agent that reports its cost finishes a run, its spend shows up here.</p>
       )}
     </Section>
   );
@@ -241,7 +241,7 @@ function ModelSection({ snapshot }: { snapshot: Json }) {
   const data = [...counts].map(([name, runs]) => ({ name, runs })).sort((a, b) => b.runs - a.runs).slice(0, 6);
   if (data.length === 0) return null;
   return (
-    <Section eyebrow="Models" title="What ran">
+    <Section title="Models" count={`last ${selections.length} runs`}>
       <Panel data-slot="model-use"><BarList label="Runs by model" items={data.map((d) => ({ name: d.name, value: d.runs, text: `${d.runs} ${d.runs === 1 ? "run" : "runs"}` }))} /></Panel>
     </Section>
   );
@@ -277,7 +277,7 @@ function QuotaSection() {
 
   const meters = arr(rows).filter((r) => r.meter);
   return (
-    <Section eyebrow="Vendors" title="Quota windows">
+    <Section title={<span title="What each signed-in vendor has left, read from its own API.">Quota</span>}>
       {loading ? <Skeleton className="h-28 w-full" /> : meters.length > 0 || quotas.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2">
           {quotas.map((q) => (
@@ -307,14 +307,13 @@ function UsageBody({ snapshot }: { snapshot: Json }) {
   return (
     <>
       <Section
-        eyebrow="This Mac"
-        title="What the Mac can take"
+        title={<span title="Neko reads the machine every 15 seconds and decides whether new agent work may start. Running work is never touched.">This Mac</span>}
         actions={
           <>
-            <span className="font-mono text-[11px] text-muted-foreground" data-slot="updated">
+            <span className="text-[12px] tabular-nums text-muted-foreground/70" data-slot="updated">
               {machine.fetchedAt ? `Updated ${Math.max(0, Math.round((now - machine.fetchedAt) / 1000))}s ago` : "Reading…"}
             </span>
-            <Button variant="outline" size="sm" onClick={() => void machine.refresh()}><ArrowsClockwise /> Refresh</Button>
+            <Button variant="ghost" size="icon-sm" aria-label="Refresh the machine reading" title="Refresh" onClick={() => void machine.refresh()}><ArrowsClockwise /></Button>
           </>
         }
       >
@@ -325,17 +324,17 @@ function UsageBody({ snapshot }: { snapshot: Json }) {
           <EmptyBlock icon={Gauge} title="No reading yet" description="The daemon hasn’t sampled the machine. It does so every 15 seconds while it runs." />
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3" data-slot="machine-state" data-tone={state?.tone}>
-              <Status tone={state!.tone}>{state!.title}</Status>
-              <span className="text-[13px] text-muted-foreground">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1" data-slot="machine-state" data-tone={state?.tone}>
+              <span className={`text-[13.5px] ${state!.tone === "warning" ? "text-warning-foreground" : state!.tone === "error" ? "text-destructive-foreground" : "text-foreground"}`}>{state!.title}</span>
+              <span className="text-[12.5px] text-muted-foreground">
                 {state!.detail ?? (health.night ? "Night hours: one heavy job at a time." : "New agent work starts normally.")}
                 {num(health.slowed) > 0 ? ` Slowed ${num(health.slowed)} build and test ${num(health.slowed) === 1 ? "process" : "processes"}; nothing was stopped.` : ""}
               </span>
-              <span className="ms-auto font-mono text-[11px] text-muted-foreground">read {relativeTime(num(health.at_ms), now)}</span>
+              <span className="ms-auto text-[12px] tabular-nums text-muted-foreground/70">read {relativeTime(num(health.at_ms), now)}</span>
             </div>
             <MachineWells health={health} />
             <div className="flex flex-col gap-3">
-              <p className="text-[12.5px] font-medium text-muted-foreground">Memory held by agents</p>
+              <p className="text-[12.5px] text-muted-foreground">Memory held by agents</p>
               <AgentMemory health={health} />
             </div>
           </>
@@ -351,11 +350,7 @@ function UsageBody({ snapshot }: { snapshot: Json }) {
 export default function Usage() {
   useSetupCommands();
   return (
-    <SetupPage
-      eyebrow="System"
-      title={<>Usage &amp; machine</>}
-      width="max-w-[980px]"
-    >
+    <SetupPage title={<>Usage &amp; machine</>} width="max-w-[980px]">
       <Gate>{(snapshot) => <UsageBody snapshot={snapshot} />}</Gate>
     </SetupPage>
   );

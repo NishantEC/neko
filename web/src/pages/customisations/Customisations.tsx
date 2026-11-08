@@ -7,10 +7,11 @@
 // daemon (GET /api/plugins) and is managed through POST /api/plugins/<name>/
 // enable|disable and DELETE /api/plugins/<name>. `#/plugins` still lands here.
 import { useEffect, useMemo, useState } from "react";
-import { PageHeader, Panel } from "@/editorial";
+import { PageHeader } from "@/editorial";
+import { Panel, RowAction, RowActions } from "@/setup/kit";
+import { useContextMenu } from "@/shell/context-menu";
 import { PageContainer } from "@/shell/PageContainer";
 import { Button } from "@/ui/button";
-import { Badge } from "@/ui/badge";
 import { Switch } from "@/ui/switch";
 import { Skeleton } from "@/ui/skeleton";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/ui/empty";
@@ -38,9 +39,9 @@ function statusOf(listing: PluginListing, problem: string | undefined, pages: nu
 }
 
 const TONE: Record<Status["tone"], string> = {
-  ok: "bg-success/15 text-success-foreground",
-  off: "bg-foreground/[0.07] text-muted-foreground",
-  error: "bg-destructive/15 text-destructive-foreground",
+  ok: "text-muted-foreground",
+  off: "text-muted-foreground/70",
+  error: "text-destructive-foreground",
 };
 
 const LABEL = "text-[12px] font-medium text-muted-foreground";
@@ -66,7 +67,7 @@ function Details({ listing }: { listing: PluginListing }) {
       {listing.description ? <p className="text-muted-foreground">{listing.description}</p> : null}
       <section className="flex flex-col gap-1">
         <span className={LABEL}>manifest.json</span>
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-border bg-foreground/[0.03] p-3 font-mono text-[12px] text-foreground">{manifest ?? "Reading…"}</pre>
+        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-[10px] bg-foreground/[0.03] p-3 font-mono text-[12px] text-foreground">{manifest ?? "Reading…"}</pre>
       </section>
       {listing.path ? (
         <section className="flex flex-col gap-1">
@@ -122,59 +123,45 @@ function CustomisationRow({ listing, problem, entries, busy, onToggle, onReload,
   const status = statusOf(listing, problem, entries.length);
   const lastError = listing.error ?? problem;
   const label = listing.title || listing.id;
+  const copyPath = () => void copyText(listing.path as string, "Folder path copied");
+  const menu = useContextMenu(() => [
+    { label: "Details", icon: Info, run: onDetails },
+    { label: "Reload this one", icon: ArrowsClockwise, disabled: busy || listing.disabled, run: onReload },
+    { label: listing.disabled ? "Enable" : "Disable", run: () => onToggle(!!listing.disabled) },
+    listing.path ? { label: "Copy the folder path", icon: Copy, run: copyPath } : null,
+    "separator",
+    { label: "Remove…", icon: Trash, disabled: busy, run: onRemove },
+  ]);
   return (
-    <li data-slot="plugin-row" data-plugin={listing.id} data-status={status.tone} className="flex flex-col gap-3 px-6 py-4">
-      <div className="flex items-start gap-3.5">
-        <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl bg-foreground/[0.06] text-foreground">
-          {status.tone === "error" ? <Warning className="text-warning-foreground" /> : <SlidersHorizontal />}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-            <h3 className="text-[15px] font-semibold text-strong">{label}</h3>
-            {listing.manifest_version ? <Badge variant="outline" className="h-5 rounded-full px-2 font-mono text-[11px] font-normal text-muted-foreground">v{listing.manifest_version}</Badge> : null}
-            <span data-slot="plugin-status" className={cn("rounded-full px-2 py-0.5 text-[11.5px] font-medium", TONE[status.tone])}>{status.label}</span>
-          </div>
-          {listing.description ? <p className="mt-0.5 text-[13px] text-muted-foreground">{listing.description}</p> : null}
-          <dl className="mt-2 grid grid-cols-[56px_1fr] gap-x-3 gap-y-0.5 text-[12px]">
-            <dt className="text-muted-foreground">Name</dt><dd className="font-mono text-foreground">{listing.id}</dd>
-            <dt className="text-muted-foreground">Entry</dt><dd className="truncate font-mono text-foreground">{listing.entry ? listing.entry.replace(`/plugins/${listing.id}/`, "") : "—"}</dd>
-            {listing.path ? (<><dt className="text-muted-foreground">Folder</dt><dd className="truncate font-mono text-muted-foreground" title={listing.path}>{listing.path}</dd></>) : null}
-          </dl>
-          {entries.length > 0 ? (
-            <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
-              Pages:
-              {entries.map((entry) => <EntryLine key={entry.pageId} entry={entry} />)}
-            </p>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-1 self-start">
-          <Switch
-            checked={!listing.disabled}
-            disabled={busy}
-            onCheckedChange={(on) => onToggle(!!on)}
-            aria-label={`${listing.disabled ? "Enable" : "Disable"} ${label}`}
-            className="me-2 mt-1"
-          />
-          <Button type="button" variant="ghost" size="icon-sm" aria-label={`Details of ${label}`} title="Details" onClick={onDetails}>
-            <Info />
-          </Button>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label={`Reload ${label}`} title="Reload this one" disabled={busy || listing.disabled} onClick={onReload}>
-            <ArrowsClockwise />
-          </Button>
-          {listing.path ? (
-            <Button type="button" variant="ghost" size="icon-sm" aria-label={`Copy the folder path of ${label}`} title="Copy the folder path" onClick={() => void copyText(listing.path as string, "Folder path copied")}>
-              <Copy />
-            </Button>
-          ) : null}
-          <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove ${label}`} title="Remove this" disabled={busy} className="text-destructive-foreground hover:bg-destructive/10" onClick={onRemove}>
-            <Trash />
-          </Button>
-        </div>
+    <li data-slot="plugin-row" data-plugin={listing.id} data-status={status.tone} {...menu} className="group/row flex flex-col gap-1 rounded-[10px] px-3 py-1.5 transition-colors hover:bg-foreground/[0.03]">
+      <div className="flex min-h-8 items-center gap-3">
+        {status.tone === "error" ? <Warning aria-hidden className="size-4 shrink-0 text-destructive-foreground" /> : null}
+        <h3 className="shrink-0 text-[13.5px] font-normal text-foreground" title={listing.id}>{label}</h3>
+        {listing.manifest_version ? <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground/70">v{listing.manifest_version}</span> : null}
+        <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground" title={listing.description || undefined}>{listing.description}</span>
+        <span data-slot="plugin-status" className={cn("shrink-0 text-[12.5px]", TONE[status.tone])}>{status.label}</span>
+        <RowActions>
+          <RowAction label={`Details of ${label}`} icon={Info} onClick={onDetails} />
+          <RowAction label={`Reload ${label}`} icon={ArrowsClockwise} disabled={busy || listing.disabled} onClick={onReload} />
+          {listing.path ? <RowAction label={`Copy the folder path of ${label}`} icon={Copy} onClick={copyPath} /> : null}
+          <RowAction label={`Remove ${label}`} icon={Trash} disabled={busy} onClick={onRemove} />
+        </RowActions>
+        <Switch
+          checked={!listing.disabled}
+          disabled={busy}
+          onCheckedChange={(on) => onToggle(!!on)}
+          aria-label={`${listing.disabled ? "Enable" : "Disable"} ${label}`}
+        />
       </div>
+      {entries.length > 0 ? (
+        <p className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
+          {entries.map((entry) => <EntryLine key={entry.pageId} entry={entry} />)}
+        </p>
+      ) : null}
       {lastError ? (
-        <div role="alert" data-slot="plugin-error" className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2">
-          <span className="text-[12px] font-medium text-destructive-foreground">Last error</span>
-          <pre className="mt-1 select-text whitespace-pre-wrap font-mono text-[12px] text-destructive-foreground">{lastError}</pre>
+        <div role="alert" data-slot="plugin-error" className="flex flex-col gap-0.5">
+          <span className="text-[12px] text-destructive-foreground">Last error</span>
+          <pre className="select-text whitespace-pre-wrap font-mono text-[12px] text-destructive-foreground">{lastError}</pre>
         </div>
       ) : null}
     </li>
@@ -183,13 +170,13 @@ function CustomisationRow({ listing, problem, entries, busy, onToggle, onReload,
 
 function PathRow({ slot, label, path, note, onCopy }: { slot: string; label: string; path: string | undefined; note?: string; onCopy(): void }) {
   return (
-    <div className="flex items-center gap-3 px-6 py-3">
-      <span className={cn(LABEL, "w-20 shrink-0")}>{label}</span>
-      <code data-slot={slot} className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-foreground" title={path}>{path ?? "…"}</code>
+    <div className="group/row flex min-h-9 items-center gap-3 rounded-[10px] px-3 py-1 transition-colors hover:bg-foreground/[0.03]">
+      <span className="w-20 shrink-0 text-[13.5px] text-foreground">{label}</span>
+      <code data-slot={slot} className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground" title={path}>{path ?? "…"}</code>
       {note ? <span className="shrink-0 text-[12px] text-muted-foreground">{note}</span> : null}
-      <Button type="button" variant="ghost" size="xs" disabled={!path} onClick={onCopy}>
-        <Copy /> Copy path
-      </Button>
+      <RowActions>
+        <RowAction label={`Copy the ${label.toLowerCase()} path`} icon={Copy} disabled={!path} onClick={onCopy} />
+      </RowActions>
     </div>
   );
 }
@@ -254,18 +241,18 @@ export default function Customisations() {
             eyebrow={null}
             title="Customisations"
           />
-          <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" onClick={() => void reloadAll()} disabled={reloading}>
-              <ArrowsClockwise className={cn(reloading && "animate-spin")} /> Reload
+          <div className="flex items-center gap-1.5">
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="Reload all customisations" title="Reload all" onClick={() => void reloadAll()} disabled={reloading}>
+              <ArrowsClockwise className={cn(reloading && "animate-spin")} />
             </Button>
-            <Button type="button" onClick={() => setBuilding(true)} data-slot="change-neko">
+            <Button type="button" size="sm" onClick={() => setBuilding(true)} data-slot="change-neko">
               <Sparkle /> Change Neko
             </Button>
           </div>
         </div>
 
         <Panel>
-          <div className="divide-y divide-border/70">
+          <div className="flex flex-col">
             <PathRow slot="plugin-folder" label="Pages" path={custom?.plugins_dir} onCopy={() => custom && void copyText(custom.plugins_dir, "Folder path copied")} />
             <PathRow
               slot="css-path"
@@ -275,15 +262,14 @@ export default function Customisations() {
               onCopy={() => custom && void copyText(custom.css_path, "File path copied")}
             />
           </div>
-          <p className="border-t border-border/70 px-6 py-3 text-[12.5px] text-muted-foreground">
-            Paste a path into Finder with Go to Folder (⇧⌘G). Styles in <code className="font-mono text-[12px]">custom.css</code> apply as you save; restyle anything with the app’s variables
-            (<code className="font-mono text-[12px]">--background</code>, <code className="font-mono text-[12px]">--foreground</code>, <code className="font-mono text-[12px]">--primary</code>, <code className="font-mono text-[12px]">--card</code>, <code className="font-mono text-[12px]">--border</code>, <code className="font-mono text-[12px]">--radius</code>).
+          <p className="px-3 pt-1 text-[12px] text-muted-foreground/80" title="Restyle anything with the app’s variables: --background, --foreground, --primary, --card, --border, --radius.">
+            Go to Folder (⇧⌘G) in Finder opens a path. <code className="font-mono text-[11.5px]">custom.css</code> applies as you save.
           </p>
         </Panel>
 
         {!listed && !failed ? (
           <Panel>
-            <div className="space-y-4 p-5" aria-busy="true" role="status" aria-label="Loading customisations">
+            <div className="space-y-4 px-3 py-3" aria-busy="true" role="status" aria-label="Loading customisations">
               <Skeleton className="h-5 w-48" />
               <Skeleton className="h-4 w-full" />
               <Skeleton className="h-5 w-40" />
@@ -291,7 +277,7 @@ export default function Customisations() {
             </div>
           </Panel>
         ) : failed && listings.length === 0 ? (
-          <Empty data-slot="plugins-error" className="border border-dashed">
+          <Empty data-slot="plugins-error" className="border-0">
             <EmptyHeader>
               <EmptyMedia variant="icon"><Warning /></EmptyMedia>
               <EmptyTitle>Neko’s daemon did not answer</EmptyTitle>
@@ -300,7 +286,7 @@ export default function Customisations() {
             <EmptyContent><Button type="button" variant="outline" onClick={() => void reloadAll()}>Try now</Button></EmptyContent>
           </Empty>
         ) : listings.length === 0 ? (
-          <Empty data-slot="plugins-empty" className="border border-dashed">
+          <Empty data-slot="plugins-empty" className="border-0">
             <EmptyHeader>
               <EmptyMedia variant="icon"><SlidersHorizontal /></EmptyMedia>
               <EmptyTitle>Nothing customised yet</EmptyTitle>
@@ -308,12 +294,12 @@ export default function Customisations() {
                 A page of yours is a folder with a <code className="font-mono text-[12px]">manifest.json</code> and an ES module. Give it a built-in page’s id and it replaces that page. Describe what you want and Neko writes it for you.
               </EmptyDescription>
             </EmptyHeader>
-            <pre className="max-w-full overflow-x-auto rounded-xl border border-border bg-foreground/[0.03] px-4 py-3 text-start font-mono text-[12px] text-muted-foreground">{MANIFEST_EXAMPLE}</pre>
+            <pre className="max-w-full overflow-x-auto rounded-[10px] bg-foreground/[0.03] px-4 py-3 text-start font-mono text-[12px] text-muted-foreground">{MANIFEST_EXAMPLE}</pre>
             <EmptyContent><Button type="button" onClick={() => setBuilding(true)}><Sparkle /> Change Neko</Button></EmptyContent>
           </Empty>
         ) : (
           <Panel>
-            <ul aria-label="Your customisations" className="divide-y divide-border/70">
+            <ul aria-label="Your customisations" className="flex flex-col">
               {listings.map((listing) => (
                 <CustomisationRow
                   key={listing.id}

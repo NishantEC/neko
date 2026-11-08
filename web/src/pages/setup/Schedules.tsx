@@ -161,6 +161,15 @@ function ScheduleRow({ item, onEdit, now }: { item: Json; onEdit: () => void; no
         <RowActions>
           <RowAction label={`Run ${str(item.name)} now`} icon={Play} disabled={busy} onClick={runNow} />
           <RowAction label="Edit schedule" icon={PencilSimple} onClick={onEdit} />
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${str(item.name)}`} title="More actions" className="text-muted-foreground" />}><DotsThree weight="bold" /></DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={runNow}><Play /> Run now</DropdownMenuItem>
+              <DropdownMenuItem onClick={onEdit}><PencilSimple /> Edit schedule</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setConfirmDelete(true)} className="text-destructive-foreground"><Trash /> Delete schedule…</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </RowActions>
         <Toggle
           checked={enabled}
@@ -168,15 +177,6 @@ function ScheduleRow({ item, onEdit, now }: { item: Json; onEdit: () => void; no
           disabled={busy}
           onChange={(on) => void run(() => schedulesCmd("SetEnabled", { id: item.id, enabled: on }))}
         />
-        <DropdownMenu>
-          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${str(item.name)}`} title="More actions" className="text-muted-foreground" />}><DotsThree weight="bold" /></DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => void run(() => schedulesCmd("RunNow", { id: item.id })).then((ok) => ok && toast.success("Queued a read-only plan. It appears as a task."))}><Play /> Run now</DropdownMenuItem>
-            <DropdownMenuItem onClick={onEdit}><PencilSimple /> Edit schedule</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setConfirmDelete(true)} className="text-destructive-foreground"><Trash /> Delete schedule…</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
       {open ? (
         <div className="flex flex-col gap-2 pb-1 ps-7 text-[13px]">

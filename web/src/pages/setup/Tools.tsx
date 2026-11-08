@@ -6,10 +6,14 @@ import type { Json } from "@/api";
 import { Button } from "@/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/ui/tabs";
-import { ArrowDown, CaretRight, Globe, Plus, PlugsConnected, Terminal, Wrench, WarningCircle } from "@/ui/icons";
+import { ArrowDown, Globe, Plus, PlugsConnected, Terminal, Wrench, WarningCircle } from "@/ui/icons";
 import { Panel } from "@/setup/kit";
 import { navigate } from "@/router";
-import { EmptyBlock, Gate, Pick, Row, Section, SetupPage, Status, registerCommands } from "@/setup/kit";
+import { EmptyBlock, Gate, Pick, Row, Section, SetupPage, registerCommands } from "@/setup/kit";
+import type { Tone } from "@/setup/lib";
+
+/** A status in words, coloured only when it needs you (DESIGN.md §2). */
+const TONE_TEXT: Record<Tone, string> = { neutral: "text-muted-foreground", success: "text-muted-foreground", warning: "text-warning-foreground", error: "text-destructive-foreground" };
 import { ScopePicker, useScope } from "@/setup/scope";
 import { useSetupCommands } from "@/setup/commands";
 import {
@@ -38,16 +42,15 @@ function ConnectionRow({ snapshot, connection, onOpen }: { snapshot: Json; conne
           label={`${str(connection.label)}, ${scope}, ${status}, ${summary}`}
           trailing={
             <>
-              <Status tone={connectionTone(connection)}>{status}</Status>
-              {summary !== status ? <span className="font-mono text-xs text-muted-foreground">{summary}</span> : null}
-              <CaretRight aria-hidden className="text-muted-foreground" />
+              {summary !== status ? <span className="text-muted-foreground/70">{summary}</span> : null}
+              <span className={TONE_TEXT[connectionTone(connection)]}>{status}</span>
             </>
           }
         />
       </div>
       {reconnect.action ? (
-        <div className="py-3.5 pe-4">
-          <Button size="sm" disabled={reconnect.busy} loading={reconnect.busy} onClick={() => void reconnect.go()}>
+        <div className="flex items-center py-2 pe-3">
+          <Button size="xs" variant="outline" disabled={reconnect.busy} loading={reconnect.busy} onClick={() => void reconnect.go()}>
             {reconnect.action.label}
           </Button>
         </div>
@@ -92,7 +95,7 @@ function ToolsBody({ snapshot }: { snapshot: Json }) {
             ) : null}
             {tab === "connections" ? (
               <DropdownMenu>
-                <DropdownMenuTrigger render={<Button />}><Plus /> Add connection</DropdownMenuTrigger>
+                <DropdownMenuTrigger render={<Button size="sm" />}><Plus /> Add connection</DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => setDialog("registry")}><Globe /> Browse MCP servers</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setDialog("import")}><ArrowDown /> Import from this Mac</DropdownMenuItem>
@@ -104,14 +107,14 @@ function ToolsBody({ snapshot }: { snapshot: Json }) {
         </div>
         <TabsPanel value="connections" className="flex flex-col gap-6 pt-6">
           {broken.length > 0 ? (
-            <div data-slot="attention" className="flex items-center gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-[13px]">
+            <div data-slot="attention" className="flex items-center gap-2.5 text-[13px]">
               <WarningCircle aria-hidden className="size-4 shrink-0 text-warning-foreground" />
-              <span className="flex-1 text-foreground/90">
+              <span className="flex-1 text-warning-foreground">
                 {broken.length === 1 ? `${str(broken[0].label)} needs attention.` : `${broken.length} connections need attention.`} Agents and watches that use them can’t run until they’re reconnected.
               </span>
             </div>
           ) : null}
-          <Section eyebrow={`${connections.length} ${connections.length === 1 ? "connection" : "connections"}`} title="Connections">
+          <Section title="Connections" count={connections.length || undefined}>
             {connections.length === 0 ? (
               <EmptyBlock icon={PlugsConnected} title="No connections yet" description="Browse MCP servers, import from this Mac, or add a URL manually.">
                 <div className="flex gap-2">
@@ -120,9 +123,9 @@ function ToolsBody({ snapshot }: { snapshot: Json }) {
                 </div>
               </EmptyBlock>
             ) : (
-              <Panel><div className="divide-y divide-border/70">
+              <Panel>
                 {sorted.map((c) => <ConnectionRow key={str(c.id)} snapshot={snapshot} connection={c} onOpen={() => setOpenId(str(c.id))} />)}
-              </div></Panel>
+              </Panel>
             )}
           </Section>
         </TabsPanel>
@@ -145,10 +148,7 @@ function ToolsBody({ snapshot }: { snapshot: Json }) {
 export default function Tools() {
   useSetupCommands();
   return (
-    <SetupPage
-      eyebrow="Knowledge & tools"
-      title={<>Tools &amp; skills</>}
-    >
+    <SetupPage title={<>Tools &amp; skills</>}>
       <Gate>{(snapshot) => <ToolsBody snapshot={snapshot} />}</Gate>
     </SetupPage>
   );

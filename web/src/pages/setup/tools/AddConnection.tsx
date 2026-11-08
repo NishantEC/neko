@@ -243,12 +243,12 @@ export function RegistryDialog({
         <ErrorNote error={searchError} title="Registry search" />
         <div className="flex flex-col gap-1">
           <span className="text-[12.5px] font-medium text-muted-foreground">Featured</span>
-          <div className="overflow-hidden rounded-xl border border-border divide-y divide-border/70">{row(SENTRY, "Official Sentry server")}</div>
+          <div className="overflow-hidden rounded-xl border border-border">{row(SENTRY, "Official Sentry server")}</div>
         </div>
         {results.length > 0 ? (
           <div className="flex flex-col gap-1">
             <span className="text-[12.5px] font-medium text-muted-foreground">Registry results · {results.length}</span>
-            <div className="overflow-hidden rounded-xl border border-border divide-y divide-border/70">{results.map((r) => row(r, "Community listing · verify publisher"))}</div>
+            <div className="overflow-hidden rounded-xl border border-border">{results.map((r) => row(r, "Community listing · verify publisher"))}</div>
           </div>
         ) : null}
         <a className="inline-flex items-center gap-1.5 text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" href="https://registry.modelcontextprotocol.io" target="_blank" rel="noreferrer noopener">
@@ -325,7 +325,7 @@ export function ImportDialog({
         {candidates.length === 0 ? (
           <p className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-[13px] text-muted-foreground">No new connections found. Scan again after adding a tool in Codex, Claude, or a project folder.</p>
         ) : (
-          <div className="divide-y divide-border/70 overflow-hidden rounded-xl border border-border">
+          <div className="overflow-hidden rounded-xl border border-border">
             {candidates.map((c) => {
               const local = rec(c.metadata).transport !== "http";
               const problem = str(c.problem);
