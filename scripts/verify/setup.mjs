@@ -140,8 +140,32 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   const workspaceCount = await page.locator("[data-slot='workspace']").count();
   check(workspaceCount >= 2 && (await page.locator("[data-slot='workspace'][data-workspace='acme-web']").count()) === 1, `Workspaces lists the seeded workspaces (${workspaceCount})`);
   const acme-apiPanel = page.locator("[data-slot='workspace'][data-workspace='acme-api']");
-  check((await acme-apiPanel.innerText()).includes("1 active"), "acme-api shows its watch summary (1 active, 1 paused)");
-  await both("workspaces", "[data-slot='workspace']", "Workspaces");
+  // DESIGN.md §8: each workspace is one line until opened (none of the seeded ones has routine
+  // items waiting, so all start closed); open is remembered per workspace.
+  await page.evaluate(() => localStorage.removeItem("neko.workspaces.open"));
+  await page.reload();
+  await page.waitForSelector("[data-slot='workspace']", { timeout: 15000 });
+  await sleep(600);
+  const closed = await page.locator("[data-slot='workspace']").evaluateAll((els) => els.map((e) => [e.getAttribute("data-workspace"), !!e.querySelector("[data-slot='workspace-body']"), Math.round(e.getBoundingClientRect().height), e.querySelector("[data-slot='workspace-toggle']")?.getAttribute("aria-expanded")]));
+  check(closed.every(([, body, h, expanded]) => !body && h <= 48 && expanded === "false"), `every workspace starts as one line (${closed.map(([n, , h]) => `${n} ${h}px`).join(", ")})`);
+  check(!/Nothing yet|No MCP servers|None yet/.test(await page.locator("[data-slot='workspace-list']").innerText()), "no “nothing yet” rows while closed");
+  const acme-apiLine = (await acme-apiPanel.locator("[data-slot='workspace-head']").innerText()).replace(/\s+/g, " ");
+  check(/acme-api/.test(acme-apiLine) && /acme-api|\//.test(await acme-apiPanel.locator("[data-slot='workspace-folder']").innerText()), `acme-api's one line names it and its folder (“${acme-apiLine}”)`);
+  await both("workspaces", "[data-slot='workspace']", "Workspaces (closed)");
+  await acme-apiPanel.locator("[data-slot='workspace-toggle']").click();
+  await acme-apiPanel.locator("[data-slot='workspace-body']").waitFor({ timeout: 3000 });
+  check((await acme-apiPanel.innerText()).includes("1 active"), "opening acme-api shows its watch summary (1 active, 1 paused)");
+  check(!/Nothing yet|No MCP servers in these|None yet/.test(await acme-apiPanel.innerText()), "an open workspace has no “nothing yet” rows either");
+  const acme-webPanel = page.locator("[data-slot='workspace'][data-workspace='acme-web']");
+  await acme-webPanel.locator("[data-slot='workspace-toggle']").click();
+  const offers = await acme-webPanel.locator("[data-slot='workspace-offers']").innerText().catch(() => "");
+  check(/Add a watch/.test(offers), `an empty facet is offered as an action instead (acme-web: “${offers.replace(/\s+/g, " ")}”)`);
+  await acme-webPanel.locator("[data-slot='workspace-toggle']").click();
+  await page.reload();
+  await acme-apiPanel.locator("[data-slot='workspace-body']").waitFor({ timeout: 8000 })
+    .then(() => check(true, "acme-api stays open after a reload, acme-web stays closed"), () => check(false, "acme-api stays open after a reload"));
+  check((await acme-webPanel.locator("[data-slot='workspace-body']").count()) === 0, "and acme-web is closed");
+  await both("workspaces-open", "[data-slot='workspace-body']", "Workspaces (acme-api open)");
   // Sync now with a paused watch beside an active one: the paused one is skipped, not an error.
   await acme-apiPanel.getByRole("button", { name: "Sync now" }).click();
   await sleep(1500);
@@ -395,15 +419,23 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
     } else await route.continue();
   });
   await page.reload();
-  await page.waitForSelector("[data-slot='machine-wells']", { timeout: 15000 });
-  const wells = await page.locator("[data-slot='machine-wells'] [data-slot='well']").count();
-  check(wells === 4, "the machine strip shows load, memory, disk and cooling wells");
+  await page.waitForSelector("[data-slot='machine-figures']", { timeout: 15000 });
+  const figures = await page.locator("[data-slot='machine-figures'] [data-slot='figure']").allInnerTexts();
+  check(figures.length === 4 && ["Load", "Memory pressure", "Free disk", "Cooling"].every((l, i) => figures[i]?.startsWith(l)), `the machine reads as four one-line figures: ${figures.map((f) => f.replace(/\s+/g, " ")).join(" | ")}`);
   check((await page.locator("[data-slot='machine-state']").innerText()).includes("Memory tight"), "a capped Mac is called out in words");
-  await both("usage", "[data-slot='machine-wells']", "Usage & machine");
+  // DESIGN.md §8: no boxed wells or cards; one column; quiet group headings.
+  const boxed = await page.locator("[data-slot='setup-page'] [data-slot='well'], [data-slot='setup-page'] [data-slot='card']").count();
+  const look = await page.locator("[data-slot='figure']").first().evaluate((e) => { const s = getComputedStyle(e); return { bg: s.backgroundColor, border: s.borderTopWidth, h: Math.round(e.getBoundingClientRect().height) }; });
+  check(boxed === 0 && (look.bg === "rgba(0, 0, 0, 0)" || look.bg === "transparent") && look.border === "0px" && look.h <= 44, `figures are calm lines, not boxes (${boxed} boxed; first ${look.h}px, background ${look.bg})`);
+  const columns = await page.locator("[data-slot='machine-figures'] [data-slot='figure']").evaluateAll((els) => new Set(els.map((e) => Math.round(e.getBoundingClientRect().left))).size);
+  check(columns === 1, "the figures share one column");
+  check((await page.locator("[data-slot='setup-page'] header p, [data-slot='page-header'] p").count()) === 0, "the page header is the title only");
+  await both("usage", "[data-slot='machine-figures']", "Usage & machine");
   await page.locator("[data-slot='setup-page']").evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
   await sleep(600);
   await shot("setup-usage-spend");
-  check((await page.locator("[data-slot='spend-wells']").count()) === 1, "the spend wells render from what agents reported");
+  const spend = await page.locator("[data-slot='spend-figures'] [data-slot='figure']").allInnerTexts();
+  check(spend.length === 4 && /^Recorded spend/.test(spend[0]), `the spend reads as one-line figures from what agents reported (${spend.map((f) => f.split(/\s{2,}|\n/)[0]).join(", ")})`);
   await page.unroute("**/api/request");
 
   // ---- ⌘K -----------------------------------------------------------------------

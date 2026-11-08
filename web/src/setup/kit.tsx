@@ -436,6 +436,36 @@ export function Well({
   );
 }
 
+/**
+ * A figure as one calm line (DESIGN.md §8): its label, the value in tabular figures, then a muted
+ * detail. No box and no track; colour only on a value that needs the person (warning, error),
+ * always beside words that say why. The calm replacement for `Well` on list pages.
+ */
+export function Figure({
+  label, value, unit, detail, tone = "neutral", title, className,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+  unit?: ReactNode;
+  detail?: ReactNode;
+  tone?: Tone;
+  /** The detail in full, on hover. */
+  title?: string;
+  className?: string;
+}) {
+  const color = tone === "error" ? "text-destructive-foreground" : tone === "warning" ? "text-warning-foreground" : "text-foreground";
+  return (
+    <div data-slot="figure" data-tone={tone} title={title} className={cn("flex min-h-9 items-baseline gap-3 rounded-[10px] px-3 py-2 transition-colors hover:bg-foreground/[0.03]", className)}>
+      <span className="w-40 shrink-0 truncate text-[13.5px] text-foreground">{label}</span>
+      <span data-slot="figure-value" className={cn("shrink-0 text-[13.5px] tabular-nums", color)}>
+        {value}
+        {unit ? <span className="ms-1 text-[12.5px] text-muted-foreground">{unit}</span> : null}
+      </span>
+      {detail ? <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">{detail}</span> : null}
+    </div>
+  );
+}
+
 /** A labelled form control for dialogs. */
 export function FormField({
   label, htmlFor, hint, children, className,

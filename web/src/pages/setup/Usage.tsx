@@ -6,12 +6,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { onEvent, request, type Json } from "@/api";
 import { Button } from "@/ui/button";
-import { Skeleton } from "@/ui/skeleton";
 import { ArrowsClockwise } from "@/ui/icons";
 import { Panel } from "@/setup/kit";
 import { Bar, BarChart as RechartsBarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/ui/chart";
-import { BarList, EmptyBlock, ErrorNote, Gate, Row, Section, SetupPage, Well } from "@/setup/kit";
+import { BarList, EmptyBlock, ErrorNote, Figure, Gate, GROUP_HEADING, LoadingRows, Row, Section, SetupPage } from "@/setup/kit";
+import { cn } from "@/ui/lib/utils";
 import { useSetupCommands } from "@/setup/commands";
 import { arr, num, rec, relativeTime, sizeLabel, str, useNow, type Tone } from "@/setup/lib";
 import { Gauge } from "@phosphor-icons/react";
@@ -79,7 +79,7 @@ function machineState(h: Json): { tone: Tone; title: string; detail?: string } {
   return { tone: "success", title: `Mac OK · load ${Math.round(num(h.load))}` };
 }
 
-function MachineWells({ health }: { health: Json }) {
+function MachineFigures({ health }: { health: Json }) {
   const load = num(health.load);
   const cores = Math.max(1, num(health.cores));
   const loadPerCore = load / cores;
@@ -87,40 +87,35 @@ function MachineWells({ health }: { health: Json }) {
   const swapTotal = num(health.swap_total_gb);
   const disk = num(health.free_disk_gb);
   const throttle = num(health.kernel_task_cpu);
-  const tone = (t: Tone) => t;
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-slot="machine-wells">
-      <Well
+    <Panel data-slot="machine-figures">
+      <Figure
         label="Load"
         value={load.toFixed(1)}
-        unit={`/ ${cores} cores`}
-        fraction={loadPerCore}
-        tone={tone(load >= 20 ? "error" : loadPerCore >= 0.85 ? "warning" : "success")}
+        unit={`of ${cores} cores`}
+        tone={load >= 20 ? "error" : loadPerCore >= 0.85 ? "warning" : "neutral"}
         detail={load >= 20 ? "No new agents start above a load of 20." : `${loadPerCore.toFixed(2)} per core`}
       />
-      <Well
+      <Figure
         label="Memory pressure"
         value={pressure.charAt(0).toUpperCase() + pressure.slice(1)}
-        fraction={pressure === "critical" ? 1 : pressure === "warning" ? 0.6 : 0.2}
-        tone={pressure === "critical" ? "error" : pressure === "warning" ? "warning" : "success"}
+        tone={pressure === "critical" ? "error" : pressure === "warning" ? "warning" : "neutral"}
         detail={`${num(health.compressed_gb).toFixed(1)} GB compressed · swap ${num(health.swap_used_gb).toFixed(1)} of ${swapTotal.toFixed(1)} GB`}
       />
-      <Well
+      <Figure
         label="Free disk"
         value={disk.toFixed(0)}
         unit="GB"
-        fraction={Math.min(1, disk / 100)}
-        tone={disk < 15 ? "error" : disk < 30 ? "warning" : "success"}
+        tone={disk < 15 ? "error" : disk < 30 ? "warning" : "neutral"}
         detail={disk < 15 ? "Under 15 GB: nothing new starts." : "Neko holds new work under 15 GB."}
       />
-      <Well
+      <Figure
         label="Cooling"
         value={throttle >= 50 ? "Throttling" : "Normal"}
-        fraction={Math.min(1, throttle / 100)}
-        tone={throttle >= 50 ? "warning" : "success"}
+        tone={throttle >= 50 ? "warning" : "neutral"}
         detail={throttle >= 50 ? `macOS is throttling (kernel_task ${throttle.toFixed(0)}%)` : `kernel_task ${throttle.toFixed(0)}%`}
       />
-    </div>
+    </Panel>
   );
 }
 
@@ -189,42 +184,41 @@ function SpendSection({ snapshot, now }: { snapshot: Json; now: number }) {
   const budget = budgetCents == null ? null : budgetCents / 100;
   const top = spend.tasks[0];
   const hasData = spend.runs > 0;
+  const share = budget && top ? top.cost / budget : 0;
   return (
     <Section title={<span title="Read from the cost each Claude Code and OpenCode run reports. Codex subscriptions don’t report a price, so their runs aren’t counted here.">Spend</span>}>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-slot="spend-wells">
-        <Well label="Recorded spend" value={usd(spend.total)} detail={`${spend.runs} priced ${spend.runs === 1 ? "run" : "runs"} · ${compact(spend.tokensIn)} in · ${compact(spend.tokensOut)} out`} />
-        <Well label="Last 7 days" value={usd(spend.week)} tone={spend.week > 0 ? "neutral" : "success"} detail={spend.week > 0 ? "Across every task" : "Nothing priced this week"} />
-        <Well
+      <Panel data-slot="spend-figures">
+        <Figure label="Recorded spend" value={usd(spend.total)} detail={`${spend.runs} priced ${spend.runs === 1 ? "run" : "runs"} · ${compact(spend.tokensIn)} in · ${compact(spend.tokensOut)} out`} />
+        <Figure label="Last 7 days" value={usd(spend.week)} detail={spend.week > 0 ? "Across every task" : "Nothing priced this week"} />
+        <Figure
           label="Per-task budget"
           value={budget == null ? "None" : usd(budget)}
-          fraction={budget && top ? top.cost / budget : undefined}
-          tone={budget && top && top.cost / budget >= 1 ? "error" : budget && top && top.cost / budget >= 0.8 ? "warning" : "neutral"}
-          detail={budget == null ? "No limit set. Change it in Settings → AI & agents." : top ? `Costliest task so far: ${usd(top.cost)}` : "No priced task yet"}
+          tone={share >= 1 ? "error" : share >= 0.8 ? "warning" : "neutral"}
+          detail={budget == null ? "No limit set. Change it in Settings → AI & agents." : top ? `Costliest task so far: ${usd(top.cost)}${share >= 0.8 ? ` (${Math.round(share * 100)}% of the budget)` : ""}` : "No priced task yet"}
         />
-        <Well label="Tasks with a price" value={spend.tasks.length} detail={`${arr(snapshot.tasks).length} tasks in history`} />
-      </div>
+        <Figure label="Tasks with a price" value={spend.tasks.length} detail={`of ${arr(snapshot.tasks).length} in history`} />
+      </Panel>
       {hasData ? (
-        <Panel>
-          <div className="px-3 pt-2">
-            <p className="text-[12.5px] text-muted-foreground">Per day · last 14 days (USD)</p>
-            <ChartContainer config={{ cost: { label: "Spend (USD)", color: "var(--chart-1)" } }} className="mt-3 aspect-auto h-44 w-full" data-slot="spend-chart">
-              <RechartsBarChart accessibilityLayer data={spend.days} margin={{ top: 8, right: 4, left: 8, bottom: 0 }}>
-                <CartesianGrid vertical={false} />
-                <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} interval={1} />
-                <YAxis tickLine={false} axisLine={false} width={44} tickFormatter={(v) => `$${v}`} />
-                <ChartTooltip cursor={false} content={<ChartTooltipContent formatter={(v) => `$${Number(v).toFixed(2)}`} />} />
-                <Bar dataKey="cost" fill="var(--color-cost)" radius={[4, 4, 0, 0]} isAnimationActive={false} />
-              </RechartsBarChart>
-            </ChartContainer>
-          </div>
-          <div className="mt-3 flex flex-col">
+        <>
+          <h3 className={cn(GROUP_HEADING, "mt-4")}>Per day <span className="tabular-nums text-muted-foreground/70">last 14 days, USD</span></h3>
+          <ChartContainer config={{ cost: { label: "Spend (USD)", color: "var(--chart-1)" } }} className="aspect-auto h-44 w-full" data-slot="spend-chart">
+            <RechartsBarChart accessibilityLayer data={spend.days} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
+              <CartesianGrid vertical={false} />
+              <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} interval={1} />
+              <YAxis tickLine={false} axisLine={false} width={44} tickFormatter={(v) => `$${v}`} />
+              <ChartTooltip cursor={false} content={<ChartTooltipContent formatter={(v) => `$${Number(v).toFixed(2)}`} />} />
+              <Bar dataKey="cost" fill="var(--color-cost)" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            </RechartsBarChart>
+          </ChartContainer>
+          <h3 className={cn(GROUP_HEADING, "mt-4")}>Costliest tasks</h3>
+          <Panel data-slot="spend-tasks">
             {spend.tasks.slice(0, 5).map((t) => (
               <Row key={t.id} title={t.title} description={`${t.runs} ${t.runs === 1 ? "run" : "runs"}`} trailing={<span className="tabular-nums text-foreground">{usd(t.cost)}</span>} />
             ))}
-          </div>
-        </Panel>
+          </Panel>
+        </>
       ) : (
-        <p className="text-[13px] text-muted-foreground">No priced runs yet. When an agent that reports its cost finishes a run, its spend shows up here.</p>
+        <p className="px-0 text-[13px] text-muted-foreground">No priced runs yet. When an agent that reports its cost finishes a run, its spend shows up here.</p>
       )}
     </Section>
   );
@@ -278,16 +272,18 @@ function QuotaSection() {
   const meters = arr(rows).filter((r) => r.meter);
   return (
     <Section title={<span title="What each signed-in vendor has left, read from its own API.">Quota</span>}>
-      {loading ? <Skeleton className="h-28 w-full" /> : meters.length > 0 || quotas.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2">
+      {loading ? <LoadingRows rows={2} /> : meters.length > 0 || quotas.length > 0 ? (
+        <Panel data-slot="quota-figures">
           {quotas.map((q) => (
-            <Well key={str(q.vendor)} label={str(q.label)} value={q.percent_left == null ? "Unknown" : `${q.percent_left}%`} unit={q.percent_left == null ? undefined : "left"} fraction={q.percent_left == null ? undefined : 1 - q.percent_left / 100} tone={q.percent_left == null ? "neutral" : q.percent_left < 10 ? "error" : q.percent_left < 30 ? "warning" : "success"} />
+            <Figure key={str(q.vendor)} label={str(q.label)} value={q.percent_left == null ? "Unknown" : `${q.percent_left}%`} unit={q.percent_left == null ? undefined : "left"} tone={q.percent_left == null ? "neutral" : q.percent_left < 10 ? "error" : q.percent_left < 30 ? "warning" : "neutral"} detail={q.percent_left != null && q.percent_left < 30 ? "Running low" : undefined} />
           ))}
           {meters.map((r) => {
             const stats = arr(r.meter.stats);
-            return <Well key={str(r.id)} label={`${str(r.group_label) ? `${str(r.group_label)} · ` : ""}${str(r.title)}`} value={str(stats[0]?.value) || `${Math.round(num(r.meter.fraction) * 100)}%`} unit={str(stats[0]?.label)} fraction={num(r.meter.fraction)} tone={num(r.meter.fraction) >= 0.9 ? "error" : num(r.meter.fraction) >= 0.7 ? "warning" : "success"} detail={[str(r.subtitle), ...stats.slice(1).map((s) => `${s.value} ${s.label}`)].filter(Boolean).join(" · ")} />;
+            const used = num(r.meter.fraction);
+            const detail = [used >= 0.7 ? `${Math.round(used * 100)}% used` : "", str(r.subtitle), ...stats.slice(1).map((s) => `${s.value} ${s.label}`)].filter(Boolean).join(" · ");
+            return <Figure key={str(r.id)} label={`${str(r.group_label) ? `${str(r.group_label)} · ` : ""}${str(r.title)}`} value={str(stats[0]?.value) || `${Math.round(used * 100)}%`} unit={str(stats[0]?.label)} tone={used >= 0.9 ? "error" : used >= 0.7 ? "warning" : "neutral"} detail={detail} title={detail} />;
           })}
-        </div>
+        </Panel>
       ) : (
         <EmptyBlock icon={Gauge} title="Quota isn’t reported by this daemon" description={unavailable ? "Vendor quota windows come from the legacy palette providers (NEKO_LEGACY_AGENTS=1); the standalone workspace doesn’t read them, so there is nothing to show here yet." : "No vendor is signed in, or none has a metered window."}>
           <Button variant="outline" size="sm" onClick={() => { setLoading(true); void load(); }}><ArrowsClockwise /> Check again</Button>
@@ -319,7 +315,7 @@ function UsageBody({ snapshot }: { snapshot: Json }) {
       >
         {machine.error ? <ErrorNote title={health ? "Showing the last reading" : "Couldn’t read the machine"} error={machine.error} /> : null}
         {machine.loading && !health ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-32" />)}</div>
+          <LoadingRows rows={4} />
         ) : !health ? (
           <EmptyBlock icon={Gauge} title="No reading yet" description="The daemon hasn’t sampled the machine. It does so every 15 seconds while it runs." />
         ) : (
@@ -332,11 +328,9 @@ function UsageBody({ snapshot }: { snapshot: Json }) {
               </span>
               <span className="ms-auto text-[12px] tabular-nums text-muted-foreground/70">read {relativeTime(num(health.at_ms), now)}</span>
             </div>
-            <MachineWells health={health} />
-            <div className="flex flex-col gap-3">
-              <p className="text-[12.5px] text-muted-foreground">Memory held by agents</p>
-              <AgentMemory health={health} />
-            </div>
+            <MachineFigures health={health} />
+            <h3 className={cn(GROUP_HEADING, "mt-4")}>Memory held by agents</h3>
+            <AgentMemory health={health} />
           </>
         )}
       </Section>
