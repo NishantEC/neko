@@ -165,7 +165,14 @@ looks right), and put back any state you changed while testing.
    failed, and `rolled_back: true` means the previous version is showing. Fix
    and repeat until it is `ok`. A plugin that never reports was not loaded by
    any page yet: open it again.
-5. Look at it as the user will, if you can see the screen (browser or desktop
+5. Check what the window shows: `neko-daemon --request '"InspectApp"'` returns
+   what the Neko window used last reported (its tabs and route, every
+   registered page, viewer and fence with the plugin that added it, how each
+   plugin loaded, the artifacts drawn and where, the theme) and how long ago.
+   A page or viewer missing there is not registered, whatever your code says;
+   "no page has reported" means nothing is known about the screen. Do not
+   claim a visual check you have not made.
+6. Look at it as the user will, if you can see the screen (browser or desktop
    tools): light and dark themes, an empty state, a long list.
 
 ## 6. What a plugin cannot do

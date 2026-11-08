@@ -748,6 +748,33 @@ fn plugin_health() -> &'static std::sync::Mutex<std::collections::BTreeMap<Strin
     HEALTH.get_or_init(Default::default)
 }
 
+/// What the open Neko windows last said about themselves (`ReportApp`), in memory.
+fn app_reports() -> std::sync::MutexGuard<'static, neko_core::inspect::App> {
+    static APP: std::sync::OnceLock<std::sync::Mutex<neko_core::inspect::App>> = std::sync::OnceLock::new();
+    APP.get_or_init(Default::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// What open pages saw while drawing artifact versions, in memory.
+fn artifact_reports() -> std::sync::MutexGuard<'static, neko_core::inspect::Artifacts> {
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<neko_core::inspect::Artifacts>> = std::sync::OnceLock::new();
+    SEEN.get_or_init(Default::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// An artifact and version that exist, or the words for why not.
+fn known_version(state: &AppState, id: &str, version: u32) -> Result<(), String> {
+    match neko_core::artifacts::get(&state.artifacts, id) {
+        Some(artifact) if artifact.versions.iter().any(|v| v.n == version) => Ok(()),
+        Some(_) => Err(format!("Artifact {id} has no version {version}.")),
+        None => Err(format!("There is no artifact {id}.")),
+    }
+}
+
+fn inspect_app() -> Response {
+    let seen = app_reports().inspect(neko_core::workbench::now_ms());
+    let plugins = plugin_health().lock().unwrap_or_else(std::sync::PoisonError::into_inner).values().cloned().collect();
+    Response::App { note: seen.note, window: seen.window, age_ms: seen.age_ms, windows: seen.windows, plugins }
+}
+
 /// `SaveArtifact`: keeps the file, links it to the Home reply running now
 /// (its card appears on that reply, and the reply's workspace is the
 /// artifact's when the agent named none), and tells every open page.
@@ -822,9 +849,28 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         Request::EditArtifact { artifact_id, version, content, note } => edit_artifact(state, &artifact_id, version, &content, &note),
         Request::Artifacts { workspace_id } => Response::Artifacts { artifacts: neko_core::artifacts::list(&state.artifacts, workspace_id.as_deref()) },
         Request::Artifact { id } => match neko_core::artifacts::get(&state.artifacts, &id) {
-            Some(artifact) => Response::Artifact { artifact },
+            Some(artifact) => Response::Artifact { status: artifact_reports().status(&artifact.id), artifact },
             None => Response::Error { message: format!("There is no artifact {id}.") },
         },
+        Request::ReportArtifactProblem { id, version, kind, message, viewer } => match known_version(state, &id, version) {
+            Ok(()) => match artifact_reports().problem(&id, version, &kind, &message, viewer.as_deref(), neko_core::workbench::now_ms()) {
+                Ok(()) => Response::Noted,
+                Err(message) => Response::Error { message },
+            },
+            Err(message) => Response::Error { message },
+        },
+        Request::ReportArtifactShown { id, version, viewer } => match known_version(state, &id, version) {
+            Ok(()) => {
+                artifact_reports().shown(&id, version, &viewer, neko_core::workbench::now_ms());
+                Response::Noted
+            }
+            Err(message) => Response::Error { message },
+        },
+        Request::ReportApp { report } => match app_reports().report(report, neko_core::workbench::now_ms()) {
+            Ok(()) => Response::Noted,
+            Err(message) => Response::Error { message },
+        },
+        Request::InspectApp => inspect_app(),
         Request::ShowArtifact { id, version } => match neko_core::artifacts::get(&state.artifacts, &id) {
             Some(artifact) if version.is_none_or(|n| artifact.versions.iter().any(|v| v.n == n)) => {
                 Response::Shown { pages: broadcast(state, &Event::ShowArtifact { id, version }) }
@@ -1918,7 +1964,7 @@ mod tests {
 
         let Response::Artifacts { artifacts } = handle_request_for_test(&state, Request::Artifacts { workspace_id: Some("ws-1".into()) }) else { panic!() };
         assert_eq!(artifacts.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec![artifact.id.as_str()]);
-        let Response::Artifact { artifact: one } = handle_request_for_test(&state, Request::Artifact { id: artifact.id.clone() }) else { panic!() };
+        let Response::Artifact { artifact: one, .. } = handle_request_for_test(&state, Request::Artifact { id: artifact.id.clone() }) else { panic!() };
         assert_eq!(one.versions.len(), 2);
         assert!(matches!(handle_request_for_test(&state, Request::Artifact { id: "../x".into() }), Response::Error { .. }));
 
@@ -1951,6 +1997,55 @@ mod tests {
         assert!(matches!(handle_request_for_test(&state, refused), Response::Error { .. }));
         assert!(events.try_recv().is_err());
         neko_core::ui_message::finish(&turn, "done", 0);
+    }
+
+    #[test]
+    fn pages_report_what_an_artifact_did_and_what_the_app_shows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut state = test_state(Db::open_in_memory().unwrap(), Vec::new());
+        state.artifacts = tmp.path().join("artifacts");
+        let state = Arc::new(state);
+        let page = tmp.path().join("broken.html");
+        std::fs::write(&page, "<html><body><script>nope()</script></body></html>").unwrap();
+        let Response::ArtifactSaved { artifact, version: 1 } = handle_request_for_test(&state, Request::SaveArtifact { title: "Broken".into(), file: page.to_string_lossy().into(), workspace_id: None, artifact_id: None, note: String::new(), show: Some(false) }) else { panic!("not saved") };
+        let Response::Artifact { status, .. } = handle_request_for_test(&state, Request::Artifact { id: artifact.id.clone() }) else { panic!() };
+        assert!(status.is_empty(), "no page has drawn it yet");
+
+        let problem = |version: u32, kind: &str| Request::ReportArtifactProblem { id: artifact.id.clone(), version, kind: kind.into(), message: "ReferenceError: nope is not defined (line 1:23)".into(), viewer: Some("html".into()) };
+        assert!(matches!(handle_request_for_test(&state, Request::ReportArtifactShown { id: artifact.id.clone(), version: 1, viewer: "html".into() }), Response::Noted));
+        assert!(matches!(handle_request_for_test(&state, problem(1, "error")), Response::Noted));
+        assert!(matches!(handle_request_for_test(&state, problem(1, "error")), Response::Noted));
+        assert!(matches!(handle_request_for_test(&state, problem(2, "error")), Response::Error { .. }), "a version that does not exist");
+        assert!(matches!(handle_request_for_test(&state, problem(1, "made-up")), Response::Error { .. }));
+        assert!(matches!(handle_request_for_test(&state, Request::ReportArtifactShown { id: "nope".into(), version: 1, viewer: "html".into() }), Response::Error { .. }));
+        let Response::Artifact { status, .. } = handle_request_for_test(&state, Request::Artifact { id: artifact.id.clone() }) else { panic!() };
+        assert_eq!(status.len(), 1);
+        assert!(status[0].shown_at_ms.is_some() && status[0].viewer.as_deref() == Some("html"));
+        assert_eq!((status[0].problems.len(), status[0].problems[0].count), (1, 2));
+        let json = serde_json::to_value(Response::Artifact { artifact: artifact.clone(), status }).unwrap();
+        assert!(json["Artifact"]["status"][0]["problems"][0]["message"].as_str().unwrap().contains("nope is not defined"));
+
+        // InspectApp answers with the window used last, and the open windows.
+        let page_id = format!("p{}", neko_core::workbench::now_ms());
+        let report = neko_protocol::AppReport {
+            page_id: page_id.clone(),
+            full: true,
+            focused: true,
+            visible: true,
+            route: format!("artifact?id={}", artifact.id),
+            tabs: vec![neko_protocol::AppTab { key: format!("artifact:{}", artifact.id), title: "Broken".into(), href: format!("#/artifact?id={}", artifact.id), active: true, pinned: false }],
+            artifacts: vec![neko_protocol::AppArtifact { id: artifact.id.clone(), version: 1, kind: "html".into(), viewer: Some("html".into()), place: "tab".into() }],
+            ..Default::default()
+        };
+        assert!(matches!(handle_request_for_test(&state, Request::ReportApp { report }), Response::Noted));
+        let Response::App { note, window: Some(window), age_ms: Some(_), windows, .. } = handle_request_for_test(&state, Request::InspectApp) else { panic!("no app") };
+        assert_eq!(window.page_id, page_id);
+        assert_eq!(window.artifacts[0].place, "tab");
+        assert!(windows.iter().any(|w| w.page_id == page_id && w.reporting));
+        assert!(note.contains("focused"), "{note}");
+        // The wire form an agent sends is a bare string.
+        assert!(matches!(serde_json::from_str::<Request>("\"InspectApp\"").unwrap(), Request::InspectApp));
+        handle_request_for_test(&state, Request::ReportApp { report: neko_protocol::AppReport { page_id, closed: true, ..Default::default() } });
     }
 
     #[test]

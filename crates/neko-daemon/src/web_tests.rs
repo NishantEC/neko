@@ -984,9 +984,12 @@ fn an_artifact_is_served_under_its_own_policy_with_the_comment_bridge() {
     assert!(ARTIFACT_CSP.contains("connect-src 'none'") && ARTIFACT_CSP.contains("sandbox allow-scripts") && !ARTIFACT_CSP.contains("allow-same-origin"));
     assert!(ARTIFACT_CSP.contains("frame-ancestors 'self'"));
     assert!(page.head.contains("X-Content-Type-Options: nosniff") && page.head.contains("Cache-Control: no-store"));
-    // The bridge sits before </body>, the design is untouched around it.
-    assert!(page.body.starts_with("<html><body><h1>One</h1><script data-neko-bridge>"), "{}", page.body);
+    // The probe runs first, the bridge sits before </body>, elements carry
+    // stamped ids, and the design is otherwise untouched around them.
+    assert!(page.body.starts_with(&format!("<html>{ARTIFACT_PROBE}<body><h1 data-neko-id=\"n")), "{}", page.body);
+    assert!(page.body.contains("\">One</h1><script data-neko-bridge>"), "{}", page.body);
     assert!(page.body.ends_with("</script></body></html>"));
+    assert_eq!(page.body, get(h.port, &format!("/artifact/{}/1", artifact.id), &[]).body, "the same ids every time");
     assert!(page.body.contains("neko-comment-mode") && page.body.contains("neko-pick") && page.body.contains("e.source!==parent"));
     // A download is the file as saved, without the bridge, named for its title.
     let download = get(h.port, &format!("/artifact/{}/1?download=1", artifact.id), &[]);
@@ -1071,9 +1074,18 @@ fn the_artifact_route_needs_the_same_gates_and_stays_in_its_store() {
 
 #[test]
 fn the_comment_bridge_goes_before_the_last_body_close_or_at_the_end() {
-    assert!(with_comment_bridge("<p>no body</p>").starts_with("<p>no body</p><script data-neko-bridge>"));
-    let html = with_comment_bridge("<BODY>a</BODY>\n");
-    assert!(html.starts_with("<BODY>a<script data-neko-bridge>") && html.ends_with("</script></BODY>\n"));
+    let bare = prepare_html("<p>no body</p>");
+    assert!(bare.starts_with(ARTIFACT_PROBE) && bare.ends_with(COMMENT_BRIDGE), "{bare}");
+    assert!(bare.contains("<p data-neko-id=\"n") && bare.contains(">no body</p><script data-neko-bridge>"));
+    let html = prepare_html("<BODY>a</BODY>\n");
+    assert!(html.starts_with(&format!("{ARTIFACT_PROBE}<BODY>a<script data-neko-bridge>")) && html.ends_with("</script></BODY>\n"));
+    assert!(!ARTIFACT_PROBE.contains('\n'), "the probe adds no line, so reported line numbers are the file's");
+    for part in ["neko-problem", "unhandledrejection", "console.error", "n>=20", "slice(0,500)"] {
+        assert!(ARTIFACT_PROBE.contains(part), "{part}");
+    }
+    for part in ["data-neko-send", "e.isTrusted", "neko-send", "data-neko-id", "hint:hint(el)"] {
+        assert!(COMMENT_BRIDGE.contains(part), "{part}");
+    }
     assert_eq!(download_name("  Café / Plan!! ", 3, "svg"), "caf-plan-v3.svg");
     assert_eq!(download_name("", 1, "html"), "artifact-v1.html");
 }

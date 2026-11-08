@@ -33,7 +33,7 @@ pub struct Builtin {
 
 /// The built-in viewers, in the order the section lists them.
 pub const BUILTIN: &[Builtin] = &[
-    Builtin { id: "html", title: "Page", kinds: &["html"], prompt: "a live, sandboxed page (inline CSS and scripts, no network); the person can point at elements to comment" },
+    Builtin { id: "html", title: "Page", kinds: &["html"], prompt: "a live, sandboxed page (inline CSS and scripts, no network); the person can point at elements to comment, and a click on an element with data-neko-send=\"text\" (500 characters at most) sends that text to the conversation the artifact belongs to as the person's message, so buttons in an interactive artifact can ask you for things (answer by saving the next version when it asks for a change)" },
     Builtin { id: "image", title: "Image", kinds: &["png", "jpg", "gif", "webp", "avif", "bmp", "ico", "svg"], prompt: "the image itself (svg is drawn live, sandboxed)" },
     Builtin { id: "pdf", title: "PDF", kinds: &["pdf"], prompt: "the browser's PDF viewer" },
     Builtin { id: "markdown", title: "Document", kinds: &["md"], prompt: "rendered Markdown (headings, lists, tables, code)" },
@@ -191,7 +191,16 @@ pub fn installed_section(neko: &str, plugins: &Path) -> String {
     for plugin in plugins.iter().filter(|p| p.capabilities.prompt.is_some()) {
         out.push_str(&format!("\n{} (plugin \"{}\"): {}", plugin.title, plugin.id, plugin.capabilities.prompt.as_deref().unwrap_or_default()));
     }
+    out.push_str(&check_section(neko));
     out
+}
+
+/// How to check what is on the person's screen instead of assuming it
+/// (herdr's rule: do not claim a visual check you have not made).
+pub fn check_section(neko: &str) -> String {
+    format!(
+        "\nChecking your work. Saving or registering something does not put it on the screen. After you save and show an artifact, wait a few seconds and run `'{neko}' --request '{{\"Artifact\":{{\"id\":\"…\"}}}}'`: its \"status\" says, per version, whether an open Neko page drew it (\"shown_at_ms\", \"viewer\") and the errors the page saw (\"problems\": uncaught exceptions with line numbers, unhandled rejections, console.error, a viewer that could not read the file). Fix every problem and save the next version before you say it works; if no page drew it, say it is saved but not checked. `'{neko}' --request '\"InspectApp\"'` reports what the Neko window used last shows (tabs, the active route, the artifacts drawn and where, the registered pages, viewers and fences, how each plugin loaded, the theme) and how long ago it reported; check it before you say something is on the person's screen, and say so when no page has reported."
+    )
 }
 
 #[cfg(test)]
@@ -246,7 +255,9 @@ mod tests {
         }
         assert!(text.contains("- STL viewer (.stl, from the \"stl\" plugin)."));
         assert!(text.contains("```csv for") && text.contains("```3d for") && text.contains("```stl (the \"stl\" plugin)"));
-        assert!(text.ends_with("STL viewer (plugin \"stl\"): Save 3D prints as .stl."));
+        assert!(text.contains("\nSTL viewer (plugin \"stl\"): Save 3D prints as .stl.\nChecking your work."));
+        assert!(text.contains("data-neko-send=\"text\""), "html artifacts can talk back");
+        assert!(text.contains("'\"InspectApp\"'") && text.contains("\"problems\"") && text.contains("before you say it works"));
         assert!(!text.contains("never shown") && !text.contains("Board"), "disabled and page-only plugins add nothing");
         assert!(!text.contains("mermaid"), "Neko does not draw mermaid");
         // No plugins folder at all: the built-ins alone.

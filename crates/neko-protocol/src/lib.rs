@@ -700,10 +700,43 @@ pub enum Request {
         #[serde(default)]
         workspace_id: Option<String>,
     },
-    /// One artifact's record.
+    /// One artifact's record, and what open Neko pages saw when they drew its
+    /// versions (`status`: when a page last showed each one, with which
+    /// viewer, and the errors it reported). Read it after saving and showing:
+    /// fix the errors and save again before saying an artifact works.
     Artifact {
         id: String,
     },
+    /// An open Neko page saw a problem while drawing one version of an
+    /// artifact: `kind` is `error` (an uncaught exception, or a resource
+    /// that failed to load), `rejection` (an unhandled promise rejection),
+    /// `console` (`console.error`) or `viewer` (the viewer could not show
+    /// the file). Kept in memory, the last few per version, for `Artifact`.
+    ReportArtifactProblem {
+        id: String,
+        version: u32,
+        kind: String,
+        message: String,
+        #[serde(default)]
+        viewer: Option<String>,
+    },
+    /// An open Neko page drew one version of an artifact with `viewer`.
+    ReportArtifactShown {
+        id: String,
+        version: u32,
+        viewer: String,
+    },
+    /// The web app says what one open Neko window shows (debounced, and once
+    /// a minute while it is open): the window used last sends everything
+    /// (`full`), the others only where they are. Kept in memory.
+    ReportApp {
+        report: AppReport,
+    },
+    /// What the Neko window the person used last shows: its tabs, the active
+    /// route, the registered pages, viewers and fences, how each plugin
+    /// loaded, the artifacts drawn on screen and the theme, plus every open
+    /// window. Check it before saying something is on the person's screen.
+    InspectApp,
     /// Opens an artifact in the Neko page used last (other open pages offer it in a toast): on the canvas beside the
     /// chat when Home is showing, otherwise in the artifact's own tab.
     /// `version` unset follows the newest.
@@ -749,6 +782,171 @@ pub struct ArtifactVersion {
     /// The Home reply this version was made in, when one was running.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message_id: Option<String>,
+}
+
+/// What one open Neko window reports about itself (`ReportApp`). The
+/// daemon bounds every list and string before keeping it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppReport {
+    /// Random per page load.
+    pub page_id: String,
+    /// Everything below is filled (the window used last); otherwise only
+    /// `focused`, `visible`, `route` and `title`.
+    #[serde(default)]
+    pub full: bool,
+    /// The page is closing: forget it.
+    #[serde(default)]
+    pub closed: bool,
+    #[serde(default)]
+    pub focused: bool,
+    #[serde(default)]
+    pub visible: bool,
+    /// The address after `#/` (`tasks?task=…`); empty is Home.
+    #[serde(default)]
+    pub route: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub tabs: Vec<AppTab>,
+    #[serde(default)]
+    pub pages: Vec<AppPage>,
+    #[serde(default)]
+    pub viewers: Vec<AppViewer>,
+    #[serde(default)]
+    pub fences: Vec<AppFence>,
+    /// How each plugin loaded in this window.
+    #[serde(default)]
+    pub plugins: Vec<AppPlugin>,
+    /// Artifacts drawn right now: on the canvas beside the chat, in a tab or in a reply.
+    #[serde(default)]
+    pub artifacts: Vec<AppArtifact>,
+    /// What the canvas beside Home's chat holds (on screen when Home is the route).
+    #[serde(default)]
+    pub canvas: Option<AppArtifact>,
+    #[serde(default)]
+    pub theme: Option<AppTheme>,
+    /// When the daemon received it.
+    #[serde(default)]
+    pub at_ms: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppTab {
+    pub key: String,
+    #[serde(default)]
+    pub title: String,
+    /// The address it shows (`#/tasks`).
+    pub href: String,
+    #[serde(default)]
+    pub active: bool,
+    #[serde(default)]
+    pub pinned: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppPage {
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    /// The plugin that registered it; none for Neko's own.
+    #[serde(default)]
+    pub plugin: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppViewer {
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub kinds: Vec<String>,
+    #[serde(default)]
+    pub priority: i64,
+    #[serde(default)]
+    pub plugin: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppFence {
+    pub language: String,
+    #[serde(default)]
+    pub viewer: Option<String>,
+    #[serde(default)]
+    pub plugin: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppPlugin {
+    pub id: String,
+    #[serde(default)]
+    pub loaded: bool,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
+    pub problem: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppArtifact {
+    pub id: String,
+    /// 0: the newest, whichever it is.
+    #[serde(default)]
+    pub version: u32,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub viewer: Option<String>,
+    /// `canvas` (beside Home's chat), `tab` (its own tab) or `reply` (inside a chat reply).
+    #[serde(default)]
+    pub place: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppTheme {
+    /// `system`, `light` or `dark`: what the person chose.
+    #[serde(default)]
+    pub mode: String,
+    /// `light` or `dark`: what is on screen.
+    #[serde(default)]
+    pub appearance: String,
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+}
+
+/// One open Neko window, as `InspectApp` lists them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppWindow {
+    pub page_id: String,
+    pub focused: bool,
+    pub visible: bool,
+    pub route: String,
+    pub title: String,
+    pub at_ms: i64,
+    /// This is the window `InspectApp`'s `window` describes.
+    pub reporting: bool,
+}
+
+/// What open pages saw when they drew one version of an artifact.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactVersionStatus {
+    pub version: u32,
+    /// When a page last drew it; None: no page has since the daemon started.
+    pub shown_at_ms: Option<i64>,
+    pub viewer: Option<String>,
+    /// Oldest first, at most a few; the same message again raises `count`.
+    pub problems: Vec<ArtifactProblem>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactProblem {
+    /// `error`, `rejection`, `console` or `viewer`.
+    pub kind: String,
+    pub message: String,
+    pub count: u32,
+    pub first_ms: i64,
+    pub last_ms: i64,
 }
 
 /// What the web app last reported about loading one plugin.
@@ -879,6 +1077,23 @@ pub enum Response {
     },
     Artifact {
         artifact: Artifact,
+        /// Only versions an open page has drawn or reported on since the daemon started.
+        #[serde(default)]
+        status: Vec<ArtifactVersionStatus>,
+    },
+    /// A page's report (`ReportApp`, `ReportArtifactProblem`, `ReportArtifactShown`) was kept.
+    Noted,
+    /// `InspectApp`.
+    App {
+        /// One sentence: which window reported and how long ago, or that none has.
+        note: String,
+        /// What the window used last shows; None when no open page has reported.
+        window: Option<AppReport>,
+        /// How long ago `window` was reported.
+        age_ms: Option<i64>,
+        windows: Vec<AppWindow>,
+        /// How each plugin last loaded in any open page (`PluginStatus`).
+        plugins: Vec<PluginHealth>,
     },
     /// `ShowArtifact` / `OpenTab` went to this many open Neko pages (0: none
     /// is open, so nobody saw it).

@@ -785,31 +785,46 @@ pub const ARTIFACT_CSP: &str = "default-src 'self' data: blob:; script-src 'self
 /// own viewer (`object-src 'self'`) inside Neko's frame.
 pub const PDF_CSP: &str = "default-src 'none'; object-src 'self'; img-src 'self' data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
-/// Appended to an html artifact (before `</body>`): the comment bridge. When
-/// the canvas posts `{type:"neko-comment-mode", on}`, the hovered element is
-/// outlined and a click posts back `{type:"neko-pick", selector, text, rect}`
-/// instead of doing what the design does. It answers only its parent.
+/// Put first in an html artifact (after `<head>`): reports what goes wrong
+/// to the page showing it, `{type:"neko-problem", kind, message}` (kind
+/// `error`, `rejection` or `console`), at most 20 per load and 500
+/// characters each; the canvas passes them to the daemon
+/// (`ReportArtifactProblem`), so the agent that made it can read them. It runs
+/// before the artifact's own scripts, so their errors are caught, and has no
+/// newline, so the line numbers it reports are those of the agent's file.
+pub const ARTIFACT_PROBE: &str = r##"<script data-neko-bridge>(function(){var n=0,P=parent;function r(k,m){if(n>=20)return;n++;try{P.postMessage({type:"neko-problem",kind:k,message:String(m).slice(0,500)},"*")}catch(_){}}function f(a){try{return a instanceof Error?(a.stack&&a.stack.indexOf(a.message)>=0?a.stack:a.name+": "+a.message):typeof a==="object"?JSON.stringify(a):String(a)}catch(_){return String(a)}}addEventListener("error",function(e){var t=e.target;if(t&&t!==window&&t.nodeType===1){r("error","Could not load <"+t.tagName.toLowerCase()+"> "+(t.currentSrc||t.src||t.href||"").slice(0,200));return}r("error",(e.message||"Error")+(e.lineno?" (line "+e.lineno+":"+e.colno+")":""))},true);addEventListener("unhandledrejection",function(e){r("rejection","Unhandled rejection: "+f(e.reason))});var c=console.error;console.error=function(){try{r("console",Array.prototype.map.call(arguments,f).join(" "))}catch(_){}return c.apply(console,arguments)}})();</script>"##;
+
+/// Appended to an html artifact (before `</body>`): the comment and send
+/// bridge. It answers only its parent.
+///
+/// * When the canvas posts `{type:"neko-comment-mode", on}`, the hovered
+///   element is outlined and a click posts back `{type:"neko-pick", selector,
+///   id, tag, hint, text, rect}` instead of doing what the design does: `id`
+///   is the element's `data-neko-id` (stamped by the daemon) or its own id,
+///   `hint` its opening tag without the stamp.
+/// * Otherwise a real click (not one a script made) on or inside an element
+///   with `data-neko-send="text"` posts `{type:"neko-send", text}`, at most one
+///   every 0.8 s; the canvas sends it to the conversation as the person's message.
 pub const COMMENT_BRIDGE: &str = r##"<script data-neko-bridge>(function(){
-var on=false,box=null;
+var on=false,box=null,last=0;
 function selector(el){var parts=[];while(el&&el.nodeType===1&&parts.length<6){var name=el.tagName.toLowerCase();if(el.id){parts.unshift("#"+CSS.escape(el.id));break;}if(name==="body"||name==="html"){parts.unshift(name);break;}var p=el.parentElement;if(p){var same=Array.prototype.filter.call(p.children,function(c){return c.tagName===el.tagName;});if(same.length>1)name+=":nth-of-type("+(same.indexOf(el)+1)+")";}parts.unshift(name);el=p;}return parts.join(" > ");}
+function hint(el){var h="<"+el.tagName.toLowerCase();Array.prototype.forEach.call(el.attributes,function(a){if(a.name!=="data-neko-id")h+=" "+a.name+(a.value?'="'+a.value.slice(0,60).replace(/"/g,"&quot;")+'"':"");});return (h+">").slice(0,200);}
 function show(el){if(!box){box=document.createElement("div");box.setAttribute("data-neko-bridge","");box.style.cssText="position:fixed;pointer-events:none;z-index:2147483647;border:2px solid #2f6feb;background:rgba(47,111,235,.12);border-radius:3px;display:none";document.documentElement.appendChild(box);}var r=el.getBoundingClientRect();box.style.left=r.left+"px";box.style.top=r.top+"px";box.style.width=r.width+"px";box.style.height=r.height+"px";box.style.display="block";}
 function hide(){if(box)box.style.display="none";}
 addEventListener("message",function(e){if(e.source!==parent)return;var d=e.data;if(d&&d.type==="neko-comment-mode"){on=!!d.on;document.documentElement.style.cursor=on?"crosshair":"";if(!on)hide();}});
 addEventListener("mouseover",function(e){if(on&&e.target&&e.target.nodeType===1)show(e.target);},true);
 addEventListener("mouseleave",function(){hide();});
 ["mousedown","mouseup","pointerdown","pointerup","dblclick","submit"].forEach(function(t){addEventListener(t,function(e){if(on){e.preventDefault();e.stopPropagation();}},true);});
-addEventListener("click",function(e){if(!on)return;e.preventDefault();e.stopPropagation();var el=e.target;if(!el||el.nodeType!==1)return;var r=el.getBoundingClientRect();var text=(el.innerText||el.textContent||"").replace(/\s+/g," ").trim().slice(0,120);parent.postMessage({type:"neko-pick",selector:selector(el),text:text,rect:{x:r.left,y:r.top,width:r.width,height:r.height}},"*");},true);
+addEventListener("click",function(e){var el=e.target;if(!el||el.nodeType!==1)return;
+if(on){e.preventDefault();e.stopPropagation();var r=el.getBoundingClientRect();var text=(el.innerText||el.textContent||"").replace(/\s+/g," ").trim().slice(0,120);parent.postMessage({type:"neko-pick",selector:selector(el),id:el.getAttribute("data-neko-id")||el.id||"",tag:el.tagName.toLowerCase(),hint:hint(el),text:text,rect:{x:r.left,y:r.top,width:r.width,height:r.height}},"*");return;}
+if(!e.isTrusted||!el.closest)return;var s=el.closest("[data-neko-send]");if(!s)return;var said=(s.getAttribute("data-neko-send")||"").trim();var now=Date.now();if(!said||now-last<800)return;last=now;parent.postMessage({type:"neko-send",text:said.slice(0,2000)},"*");},true);
 addEventListener("keydown",function(e){if(on&&e.key==="Escape")parent.postMessage({type:"neko-comment-cancel"},"*");},true);
 })();</script>"##;
 
-/// The html with the bridge before its last `</body>`, or at the end when it has none.
-pub fn with_comment_bridge(html: &str) -> String {
-    let at = html.to_ascii_lowercase().rfind("</body>").unwrap_or(html.len());
-    let mut out = String::with_capacity(html.len() + COMMENT_BRIDGE.len());
-    out.push_str(&html[..at]);
-    out.push_str(COMMENT_BRIDGE);
-    out.push_str(&html[at..]);
-    out
+/// An html version as it is served: stamped ids (`neko_core::html_ids`), the
+/// probe first and the comment bridge before the last `</body>` (or at the end).
+pub fn prepare_html(html: &str) -> String {
+    neko_core::html_ids::prepare(html, ARTIFACT_PROBE, COMMENT_BRIDGE)
 }
 
 /// A file name for a download: the title's letters and digits, then the version.
@@ -822,7 +837,7 @@ fn download_name(title: &str, n: u32, kind: &str) -> String {
 }
 
 /// `GET /artifact/<id>/<n>`: version `n` of an artifact (`latest` for the
-/// newest) under [`ARTIFACT_CSP`], html with the comment bridge; with
+/// newest) under [`ARTIFACT_CSP`], html stamped and bridged ([`prepare_html`]); with
 /// `?download=1`, the file as it was saved, as an attachment.
 fn serve_artifact(root: &Path, rest: &str, download: bool) -> Reply {
     let Some((id, n)) = rest.split_once('/') else { return Reply::text(404, "Not Found") };
@@ -836,7 +851,7 @@ fn serve_artifact(root: &Path, rest: &str, download: bool) -> Reply {
     let mut reply = if download || kind != "html" {
         Reply::new(200, "OK", content_type, bytes)
     } else {
-        Reply::new(200, "OK", content_type, with_comment_bridge(&String::from_utf8_lossy(&bytes)))
+        Reply::new(200, "OK", content_type, prepare_html(&String::from_utf8_lossy(&bytes)))
     };
     // The browser's PDF viewer refuses to run in a sandboxed document, and a
     // PDF is not a page that can reach Neko: it gets a policy that allows
