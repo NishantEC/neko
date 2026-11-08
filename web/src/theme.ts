@@ -241,6 +241,12 @@ function persist() {
 
 const asChoice = (a: any): Choice | null => (a && isMode(a.mode) && isId(a.light) && isId(a.dark) ? { mode: a.mode, light: a.light, dark: a.dark } : null);
 
+// A choice made on this page wins over daemon answers that left before it: a slow
+// GetAppearance reply, or the AppearanceChanged echo of an earlier save, would
+// otherwise put the previous theme back for a moment (or for good, if it lands last).
+let localEdits = 0;
+let savesInFlight = 0;
+
 function adopt(next: Choice | null) {
   if (!next || (next.mode === choice.mode && next.light === choice.light && next.dark === choice.dark)) return;
   choice = next;
@@ -249,10 +255,12 @@ function adopt(next: Choice | null) {
 }
 
 async function loadAppearance() {
+  const edits = localEdits;
   try {
     const reply = (await request("GetAppearance"))?.Appearance;
     if (!reply) return;
     if (reply.stored) {
+      if (edits !== localEdits) return;
       adopt(asChoice(reply));
       return;
     }
@@ -272,9 +280,12 @@ async function loadAppearance() {
 async function save(next: Partial<Choice>) {
   try {
     const body = { mode: next.mode ?? null, light: next.light ?? null, dark: next.dark ?? null };
+    savesInFlight += 1;
     await request({ SetAppearance: body });
   } catch {
     /* kept locally; the next change tries again */
+  } finally {
+    savesInFlight = Math.max(0, savesInFlight - 1);
   }
 }
 
@@ -333,7 +344,7 @@ export function initTheme() {
   });
   onEvent((event) => {
     const changed = (event as any)?.AppearanceChanged;
-    if (changed) adopt(asChoice(changed));
+    if (changed && savesInFlight === 0) adopt(asChoice(changed));
   });
   void loadAppearance();
   void refreshThemes();
@@ -341,6 +352,7 @@ export function initTheme() {
 }
 
 export function setMode(mode: Mode) {
+  localEdits += 1;
   choice = { ...choice, mode };
   persist();
   apply();
@@ -349,6 +361,7 @@ export function setMode(mode: Mode) {
 
 /** Picks the theme for light or for dark. */
 export function setSlot(slot: Appearance, id: string) {
+  localEdits += 1;
   choice = { ...choice, [slot]: id };
   persist();
   apply();
