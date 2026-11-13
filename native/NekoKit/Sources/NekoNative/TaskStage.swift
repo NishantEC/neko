@@ -93,7 +93,7 @@ struct TaskText {
         let root = snapshot["task_roots"][task.recordID].string
         return root.isEmpty ? nil : URL(fileURLWithPath: root).lastPathComponent
     }
-    /// "Sentry · SERVICE-PROD-P5E" or "Linear · ENG-1427" when a watch filed it.
+    /// "Sentry · APP-PROD-P5E" or "Linear · ENG-1427" when a watch filed it.
     var source: String? {
         guard let observed = snapshot["mcp"]["sources"].array.first(where: { $0["task_id"].string == task.recordID }) else { return nil }
         let label = snapshot["mcp"]["connections"].array.first { $0["id"] == observed["connection_id"] }?["label"].string ?? ""

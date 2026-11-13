@@ -547,7 +547,7 @@ mod tests {
         let reflect = routines.iter().find(|r| r.kind == RoutineKind::Reflect).unwrap();
         assert!(reflect.instruction.contains("'{neko}' --request") && !reflect.browser && !reflect.computer);
         for r in &routines {
-            for word in ["Asha", "Acme", "Client A", "NishantEC", "slack-client-a", "/Users/example"] {
+            for word in ["Taylor", "Acme", "Client A", "TaylorEC", "slack-client-a", "/Users/example"] {
                 assert!(!r.instruction.contains(word), "{word} in {:?}", r.kind);
             }
         }

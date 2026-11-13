@@ -22,7 +22,6 @@ The user clarified on 2026-10-06 that Orbit is a reference for design elements, 
 
 The comparison contains existing message, task-row, attachment, Ask/Plan, model/effort/speed and Send component specimens. Their arrangement is a style sheet, not a proposed screen layout. Model, status, file and conversation values are sample content. Neither version proposes tabs, inspectors, terminals, navigation changes or new workflow steps.
 
-![Component styling comparison](../evidence/orbit-visual-style-2026-10-06/component-comparison.png)
 
 ## Verification
 

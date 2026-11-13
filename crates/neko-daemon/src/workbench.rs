@@ -1540,7 +1540,7 @@ fn scripted_reply(db: &Arc<Mutex<Db>>, cancel: &AtomicBool, pending: &str, messa
     pause(350);
     send(ui::tool_input("c1", "Bash", &json!({"command": "gh pr list --state open --json number,title"})));
     pause(450);
-    send(ui::tool_output("c1", json!({"exit_code": 0, "output": "102 Fix the sync\n4616 Cache the index\n410 Retry on 502"})));
+    send(ui::tool_output("c1", json!({"exit_code": 0, "output": "102 Fix the sync\n103 Cache the index\n410 Retry on 502"})));
     send(json!({"type": "start-step"}));
     let mut body = String::from("Three of the five only need an approving review: **acme-api #102**, **acme-api #103** and **acme-web #110**.\n\nTheir checks pass and none has a conflict.\n\n| PR | Blocker |\n|---|---|\n| acme-api #101 | Branch is behind `master` |\n| acme-api #104 | Reviewer asked for a change |\n");
     if message.to_lowercase().contains("pick") {

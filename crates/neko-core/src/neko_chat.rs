@@ -1105,7 +1105,7 @@ mod tests {
         let neko = "/Applications/Neko.app/Contents/MacOS/neko-daemon";
         let empty = tempfile::tempdir().unwrap();
         let text = super_instruction(neko, "Asha", &crate::viewers::installed_section(neko, empty.path()));
-        assert!(text.starts_with("You are Neko, Asha's chief of staff") && !text.contains("Asha") && !text.contains("/Users/"));
+        assert!(text.starts_with("You are Neko, Asha's chief of staff") && !text.contains("Taylor") && !text.contains("/Users/"));
         assert!(text.contains("--protocol"));
         assert!(text.contains("'/Applications/Neko.app/Contents/MacOS/neko-daemon' --request"));
         assert!(text.contains("{\"Workbench\": <Command>}"));
@@ -1464,7 +1464,7 @@ mod tests {
             .workspaces
             .push(neko_protocol::workbench::Workspace {
                 id: "w".into(),
-                name: "work".into(),
+                name: "northwind".into(),
                 repository: "/r".into(),
                 instructions: String::new(),
                 away_enabled: false,
@@ -1473,7 +1473,7 @@ mod tests {
             .map(|i| message(ChatRole::User, format!("old{i}"), i))
             .collect();
         let text = prompt(&snapshot, None, &history, "status?");
-        assert!(text.contains("\"name\":\"work\""));
+        assert!(text.contains("\"name\":\"northwind\""));
         assert!(text.contains("old29") && !text.contains("old5\n"));
         assert!(text.ends_with("how to verify it."));
     }
@@ -1715,7 +1715,7 @@ mod tests {
     fn two_workspaces() -> Snapshot {
         use neko_protocol::workbench::{Task, Workspace};
         let mut s = Snapshot::default();
-        for (id, name) in [("a", "work"), ("b", "clientco")] {
+        for (id, name) in [("a", "northwind"), ("b", "clientco")] {
             s.workspaces.push(Workspace {
                 id: id.into(),
                 name: name.into(),
@@ -1751,7 +1751,7 @@ mod tests {
     fn a_scoped_prompt_hides_other_workspaces_tickets() {
         let s = two_workspaces();
         let text = prompt(&s, Some("a"), &[], "hi");
-        assert!(text.contains("secret-work"));
+        assert!(text.contains("secret-northwind"));
         assert!(!text.contains("secret-clientco"));
         assert!(text.contains("\"name\":\"clientco\"") && !text.contains("/clientco"));
     }
@@ -1768,13 +1768,13 @@ mod tests {
         let history = vec![message(ChatRole::Neko, "DEFAULT_PRIVATE_HISTORY".into(), 1)];
         let text = prompt(&state, Some("b"), &history, "status");
         assert!(text.contains("PERSONAL_STYLE"));
-        assert!(!text.contains("work"));
+        assert!(!text.contains("northwind"));
         assert!(!text.contains("DEFAULT_PRIVATE_HISTORY"));
         let unscoped = prompt(&state, None, &history, "status");
         assert!(!unscoped.contains("DEFAULT_PRIVATE_HISTORY"));
-        assert!(!unscoped.contains("secret-work"));
+        assert!(!unscoped.contains("secret-northwind"));
         assert_eq!(
-            ticket_workspace(&state, None, Some("a"), "fix work")
+            ticket_workspace(&state, None, Some("a"), "fix northwind")
                 .unwrap()
                 .id,
             "b"
@@ -1799,7 +1799,7 @@ mod tests {
         );
         // ...but honoured when the user named it.
         assert_eq!(
-            ticket_workspace(&s, None, Some("b"), "fix the crash in Client A")
+            ticket_workspace(&s, None, Some("b"), "fix the crash in Clientco")
                 .unwrap()
                 .id,
             "b"

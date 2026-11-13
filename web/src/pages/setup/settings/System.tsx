@@ -12,6 +12,7 @@ import { confirm } from "@/shell/confirm";
 import { useWorkbench } from "@/useStore";
 import { ErrorNote, Row, Section, SettingRow, Status, Toggle } from "@/setup/kit";
 import { activate, arr, foldersOf, num, providerRows, rec, relativeTime, str, useLoad, useNow, useRun, workspacesOf } from "@/setup/lib";
+const PROJECT_REPOSITORY = "https://github.com/NishantEC/neko"; // privacy-ok: the project's own public repository
 
 // ---------------------------------------------------------------------------
 // Quick panel folders
@@ -265,7 +266,7 @@ export function AboutSection() {
             <Row title="Web interface" description={`Served by the Neko daemon at ${location.origin}. Everything on these pages is read from, and written back to, that daemon.`} trailing={<Status tone={connected ? "success" : "warning"}>{connected ? "Connected" : "Reconnecting…"}</Status>} />
             <Row title="This Mac" description={`${arr(snapshot?.workspaces).length} workspaces · ${tasks} tasks in history · ${arr(snapshot?.mcp?.connections).length} connections`} />
             <SettingRow id="updates" title="Updates and version" description="Neko is built from source, so an update is newer commits on main. Changes Neko’s own tasks land are applied by Neko itself (see Neko updates); the native app checks GitHub for the rest.">
-              <Button variant="outline" render={<a href="https://github.com/NishantEC/neko/commits/main" target="_blank" rel="noreferrer noopener" />}>Open commits on GitHub <ArrowSquareOut /></Button>
+              <Button variant="outline" render={<a href={`${PROJECT_REPOSITORY}/commits/main`} target="_blank" rel="noreferrer noopener" />}>Open commits on GitHub <ArrowSquareOut /></Button>
             </SettingRow>
             <Row title="Update by hand" description="From a source checkout on main with nothing uncommitted:">
               <code className="select-text rounded-lg border border-border bg-foreground/[0.03] px-2.5 py-1.5 font-mono text-xs text-foreground/85">git pull &amp;&amp; bash scripts/install-native.sh</code>

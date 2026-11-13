@@ -23,7 +23,7 @@ export const finishedReply: NekoUIMessage = {
   parts: [
     { type: "step-start" },
     { type: "reasoning", text: "List the open pull requests, then check each one's merge state.", state: "done" },
-    bash("g1", "gh pr list --state open --json number,title,statusCheckRollup", "101 Update the branch\n4628 Fix the sync"),
+    bash("g1", "gh pr list --state open --json number,title,statusCheckRollup", "101 Update the branch\n102 Fix the sync"),
     bash("g2", "gh pr view 101 --json reviews,mergeStateStatus", "{\"mergeStateStatus\":\"BEHIND\"}"),
     { type: "dynamic-tool", toolName: "Read", toolCallId: "g3", state: "output-available", input: { file_path: "/Users/you/neko/crates/neko-core/src/neko_chat.rs" }, output: { output: "…" } },
     bash("g4", "git log --oneline -5", "fatal: not a git repository", 128),
@@ -56,7 +56,7 @@ export const runningReply: NekoUIMessage = {
     bash("r2", "cargo test -p neko-core chat -- --nocapture", "running 12 tests"),
     {
       type: "dynamic-tool", toolName: "save_issue", toolCallId: "c2", state: "approval-requested",
-      input: { title: "Update acme-api #101 branch", team: "HEA", description: "Rebase onto master and rerun checks" },
+      input: { title: "Update acme-api #101 branch", team: "ENG", description: "Rebase onto master and rerun checks" },
       approval: { id: "c2" }, toolMetadata: { connectionId: "linear" },
     },
     {
@@ -74,7 +74,7 @@ export const queued: NekoUIMessage[] = [
 
 export const sampleArgs = {
   title: "Update acme-api #101 branch",
-  team: "HEA",
+  team: "ENG",
   labels: ["merge", "acme-api"],
   description: "Rebase onto master and rerun checks",
   notify: { slack: true, email: false },

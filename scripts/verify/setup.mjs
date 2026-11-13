@@ -58,20 +58,20 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   const snapshot = async () => (await api({ Workbench: "Snapshot" })).Workbench;
 
   // ---- seed ---------------------------------------------------------------------
-  const acme-api = path.join(DATA, "acme-api");
-  const acme-web = path.join(DATA, "acme-web");
-  mkdirSync(acme-api, { recursive: true });
-  mkdirSync(acme-web, { recursive: true });
+  const apiDir = path.join(DATA, "orders-api");
+  const webDir = path.join(DATA, "orders-web");
+  mkdirSync(apiDir, { recursive: true });
+  mkdirSync(webDir, { recursive: true });
   const fixture = path.join(DATA, "mcp-fixture.mjs");
   writeFileSync(fixture, FIXTURE);
 
   const save = (name, dir, instructions) =>
     wb("SaveWorkspaceWithFolders", { workspace: { id: "", name, repository: dir, instructions, away_enabled: false }, folders: [dir] });
-  await save("acme-api", acme-api, "Prefer small pull requests. Run the unit tests before asking for review.");
-  await save("acme-web", acme-web, "");
+  await save("orders-api", apiDir, "Prefer small pull requests. Run the unit tests before asking for review.");
+  await save("orders-web", webDir, "");
   let snap = await snapshot();
-  const acme-apiId = snap.workspaces.find((w) => w.name === "acme-api").id;
-  const acme-webId = snap.workspaces.find((w) => w.name === "acme-web").id;
+  const apiId = snap.workspaces.find((w) => w.name === "orders-api").id;
+  const webId = snap.workspaces.find((w) => w.name === "orders-web").id;
 
   await wb("Mcp", { AddConnection: { workspace_id: "", label: "Sentry", config: { transport: "http", url: "https://mcp.example.invalid/mcp" }, trust_local_process: false, credentials: null } });
   await wb("Mcp", { AddConnection: { workspace_id: "", label: "Linear (fixture)", config: { transport: "stdio", command: process.execPath, args: [fixture], cwd: null }, trust_local_process: true, credentials: null } });
@@ -85,17 +85,17 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   check(!!sentry.error, `the unreachable connection reports an error ("${sentry.error}")`);
 
   const watch = (instruction, ids, enabled) => ({
-    id: "", workspace_id: acme-apiId, instruction, connection_ids: ids, enabled, prepare_low_risk: false,
+    id: "", workspace_id: apiId, instruction, connection_ids: ids, enabled, prepare_low_risk: false,
     next_due_ms: Date.now(), last_attempt_ms: null, last_result: "", failures: 0,
   });
   await wb("Mcp", { SaveResponsibility: { responsibility: watch("New Linear issues assigned to me, and anything of mine that becomes blocked", [linear.id], true) } });
   await wb("Mcp", { SaveResponsibility: { responsibility: watch("New or spiking Sentry errors in my projects", [sentry.id], false) } });
-  await wb("Schedules", { Save: { schedule: { id: "", name: "Morning brief", prompt: "Summarise what changed overnight in acme-api and what needs me today.", workspace_id: acme-apiId, rule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=9;BYMINUTE=0", timezone: "Asia/Kolkata", anchor_ms: Date.now(), enabled: false } } });
-  await wb("Schedules", { Save: { schedule: { id: "", name: "Friday review", prompt: "List open pull requests older than three days.", workspace_id: acme-webId, rule: "FREQ=WEEKLY;BYDAY=FR;BYHOUR=16;BYMINUTE=30", timezone: "Asia/Kolkata", anchor_ms: Date.now(), enabled: false } } });
+  await wb("Schedules", { Save: { schedule: { id: "", name: "Morning brief", prompt: "Summarise what changed overnight in orders-api and what needs me today.", workspace_id: apiId, rule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=9;BYMINUTE=0", timezone: "Asia/Kolkata", anchor_ms: Date.now(), enabled: false } } });
+  await wb("Schedules", { Save: { schedule: { id: "", name: "Friday review", prompt: "List open pull requests older than three days.", workspace_id: webId, rule: "FREQ=WEEKLY;BYDAY=FR;BYHOUR=16;BYMINUTE=30", timezone: "Asia/Kolkata", anchor_ms: Date.now(), enabled: false } } });
   const memory = (kind, workspace, text) => wb("SaveMemory", { entry: { id: "", agent_profile_id: "default", kind, workspace_id: workspace, text, source: "user", created_at_ms: Date.now(), updated_at_ms: Date.now() } });
   await memory("profile", null, "I prefer small pull requests, with the failing test written first.");
-  await memory("workspace", acme-apiId, "acme-api: run `pnpm test --filter api` before pushing; CI is slow.");
-  await memory("decision", acme-apiId, "Never auto-merge changes under billing/. Always ask.");
+  await memory("workspace", apiId, "orders-api: run `pnpm test --filter api` before pushing; CI is slow.");
+  await memory("decision", apiId, "Never auto-merge changes under billing/. Always ask.");
   await wb("AgentProfiles", { Save: { profile: { id: "", name: "Reviewer", instructions: "Review like a staff engineer: terse, specific, and kind." } } });
   snap = await snapshot();
   check(snap.mcp.responsibilities.length === 2 && snap.schedules.length === 2 && snap.memory.length === 3, "seeded watches, schedules and memories");
@@ -138,8 +138,8 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   // ---- Workspaces ---------------------------------------------------------------
   await open("workspaces", "[data-slot='workspace']");
   const workspaceCount = await page.locator("[data-slot='workspace']").count();
-  check(workspaceCount >= 2 && (await page.locator("[data-slot='workspace'][data-workspace='acme-web']").count()) === 1, `Workspaces lists the seeded workspaces (${workspaceCount})`);
-  const acme-apiPanel = page.locator("[data-slot='workspace'][data-workspace='acme-api']");
+  check(workspaceCount >= 2 && (await page.locator("[data-slot='workspace'][data-workspace='orders-web']").count()) === 1, `Workspaces lists the seeded workspaces (${workspaceCount})`);
+  const apiPanel = page.locator("[data-slot='workspace'][data-workspace='orders-api']");
   // DESIGN.md §8: each workspace is one line until opened (none of the seeded ones has routine
   // items waiting, so all start closed); open is remembered per workspace.
   await page.evaluate(() => localStorage.removeItem("neko.workspaces.open"));
@@ -149,27 +149,27 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   const closed = await page.locator("[data-slot='workspace']").evaluateAll((els) => els.map((e) => [e.getAttribute("data-workspace"), !!e.querySelector("[data-slot='workspace-body']"), Math.round(e.getBoundingClientRect().height), e.querySelector("[data-slot='workspace-toggle']")?.getAttribute("aria-expanded")]));
   check(closed.every(([, body, h, expanded]) => !body && h <= 48 && expanded === "false"), `every workspace starts as one line (${closed.map(([n, , h]) => `${n} ${h}px`).join(", ")})`);
   check(!/Nothing yet|No MCP servers|None yet/.test(await page.locator("[data-slot='workspace-list']").innerText()), "no “nothing yet” rows while closed");
-  const acme-apiLine = (await acme-apiPanel.locator("[data-slot='workspace-head']").innerText()).replace(/\s+/g, " ");
-  check(/acme-api/.test(acme-apiLine) && /acme-api|\//.test(await acme-apiPanel.locator("[data-slot='workspace-folder']").innerText()), `acme-api's one line names it and its folder (“${acme-apiLine}”)`);
+  const apiLine = (await apiPanel.locator("[data-slot='workspace-head']").innerText()).replace(/\s+/g, " ");
+  check(/orders-api/.test(apiLine) && /orders-api|\//.test(await apiPanel.locator("[data-slot='workspace-folder']").innerText()), `orders-api's one line names it and its folder (“${apiLine}”)`);
   await both("workspaces", "[data-slot='workspace']", "Workspaces (closed)");
-  await acme-apiPanel.locator("[data-slot='workspace-toggle']").click();
-  await acme-apiPanel.locator("[data-slot='workspace-body']").waitFor({ timeout: 3000 });
-  check((await acme-apiPanel.innerText()).includes("1 active"), "opening acme-api shows its watch summary (1 active, 1 paused)");
-  check(!/Nothing yet|No MCP servers in these|None yet/.test(await acme-apiPanel.innerText()), "an open workspace has no “nothing yet” rows either");
-  const acme-webPanel = page.locator("[data-slot='workspace'][data-workspace='acme-web']");
-  await acme-webPanel.locator("[data-slot='workspace-toggle']").click();
-  const offers = await acme-webPanel.locator("[data-slot='workspace-offers']").innerText().catch(() => "");
-  check(/Add a watch/.test(offers), `an empty facet is offered as an action instead (acme-web: “${offers.replace(/\s+/g, " ")}”)`);
-  await acme-webPanel.locator("[data-slot='workspace-toggle']").click();
+  await apiPanel.locator("[data-slot='workspace-toggle']").click();
+  await apiPanel.locator("[data-slot='workspace-body']").waitFor({ timeout: 3000 });
+  check((await apiPanel.innerText()).includes("1 active"), "opening orders-api shows its watch summary (1 active, 1 paused)");
+  check(!/Nothing yet|No MCP servers in these|None yet/.test(await apiPanel.innerText()), "an open workspace has no “nothing yet” rows either");
+  const webPanel = page.locator("[data-slot='workspace'][data-workspace='orders-web']");
+  await webPanel.locator("[data-slot='workspace-toggle']").click();
+  const offers = await webPanel.locator("[data-slot='workspace-offers']").innerText().catch(() => "");
+  check(/Add a watch/.test(offers), `an empty facet is offered as an action instead (orders-web: “${offers.replace(/\s+/g, " ")}”)`);
+  await webPanel.locator("[data-slot='workspace-toggle']").click();
   await page.reload();
-  await acme-apiPanel.locator("[data-slot='workspace-body']").waitFor({ timeout: 8000 })
-    .then(() => check(true, "acme-api stays open after a reload, acme-web stays closed"), () => check(false, "acme-api stays open after a reload"));
-  check((await acme-webPanel.locator("[data-slot='workspace-body']").count()) === 0, "and acme-web is closed");
-  await both("workspaces-open", "[data-slot='workspace-body']", "Workspaces (acme-api open)");
+  await apiPanel.locator("[data-slot='workspace-body']").waitFor({ timeout: 8000 })
+    .then(() => check(true, "orders-api stays open after a reload, orders-web stays closed"), () => check(false, "orders-api stays open after a reload"));
+  check((await webPanel.locator("[data-slot='workspace-body']").count()) === 0, "and orders-web is closed");
+  await both("workspaces-open", "[data-slot='workspace-body']", "Workspaces (orders-api open)");
   // Sync now with a paused watch beside an active one: the paused one is skipped, not an error.
-  await acme-apiPanel.getByRole("button", { name: "Sync now" }).click();
+  await apiPanel.getByRole("button", { name: "Sync now" }).click();
   await sleep(1500);
-  check(!/Couldn.t sync/.test(await acme-apiPanel.innerText()), "Sync now wakes the active watches and skips the paused one");
+  check(!/Couldn.t sync/.test(await apiPanel.innerText()), "Sync now wakes the active watches and skips the paused one");
   await page.getByRole("button", { name: "Add workspace" }).first().click();
   await dialog().waitFor();
   await dialog().getByLabel("Name", { exact: true }).fill("scratch");

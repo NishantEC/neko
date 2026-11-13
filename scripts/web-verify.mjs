@@ -42,7 +42,7 @@ if (!process.env.NEKO_WEB_SEED) {
   writeFileSync(SEED, JSON.stringify(webSeed()));
   process.env.NEKO_WEB_SEED = SEED;
 }
-const TARGET = process.env.CARGO_TARGET_DIR ?? "/Users/example/Documents/neko/target";
+const TARGET = process.env.CARGO_TARGET_DIR ?? path.join(repo, "target");
 const HARNESS = process.env.NEKO_WEB_HARNESS ?? path.join(TARGET, "debug/web_harness");
 const LEASE = process.env.NEKO_WEB_LEASE ?? "neko-web-foundation";
 const CHROME = "http://127.0.0.1:9333";

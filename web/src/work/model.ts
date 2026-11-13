@@ -106,7 +106,7 @@ export function sourceName(label: string): string {
   return label;
 }
 
-/** "Sentry · SERVICE-PROD-P5E" or "Linear · ENG-1427" when a watch filed it. */
+/** "Sentry · APP-PROD-P5E" or "Linear · ENG-1427" when a watch filed it. */
 export function sourceOf(snapshot: Snapshot, task: Task): string | null {
   const observed = arr(snapshot?.mcp?.sources).find((s) => s.task_id === task.id);
   if (!observed) return null;

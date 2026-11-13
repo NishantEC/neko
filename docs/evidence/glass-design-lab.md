@@ -21,14 +21,7 @@ page does not claim filesystem isolation. Production composers are unchanged.
 
 ## Actual installed-app screenshots
 
-| Layout or state | Screenshot |
-| --- | --- |
-| Inline, dark | [Open](glass-design-lab/inline-dark.png) |
-| Context, dark | [Open](glass-design-lab/context-dark.png) |
-| Inline, light | [Open](glass-design-lab/inline-light.png) |
-| Context, light | [Open](glass-design-lab/context-light.png) |
-| Native agent popover | [Open](glass-design-lab/agents-dark.png) |
-| Sent message above composer | [Open](glass-design-lab/send-visible-dark.png) |
+(The screenshots were removed from the public repository because they showed live work data.)
 
 Captured from the installed window on real Mac hardware running macOS 26.5.1
 (25F80), at 1280 × 820 points / 2560 × 1640 pixels. Reduce Transparency,

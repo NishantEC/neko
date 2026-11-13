@@ -33,8 +33,6 @@ fallback branches were inspected in source, not exercised through system setting
 
 | Native app capture | Result |
 | --- | --- |
-| [Inline, one task](pearl-task-control/inline-single.png) | Neko label and new pearl material |
-| [Inline, split task](pearl-task-control/inline-split.png) | Two child beads and derived “2 subtasks” label |
 | [Waiting subtask](pearl-task-control/waiting-subtask.png) | Native detail sheet explains the dependency |
 
 The installed app's accessibility state confirmed all three scenarios:

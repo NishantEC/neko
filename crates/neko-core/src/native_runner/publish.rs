@@ -324,13 +324,13 @@ mod tests {
     #[test]
     fn recognizes_only_github_remotes() {
         for remote in [
-            "git@github.com:NishantEC/neko.git",
-            "ssh://git@github.com/NishantEC/neko.git",
-            "https://github.com/NishantEC/neko",
-            "https://github.com/NishantEC/neko.git\n",
-            "https://token@github.com/NishantEC/neko.git",
+            "git@github.com:example-owner/neko.git",
+            "ssh://git@github.com/example-owner/neko.git",
+            "https://github.com/example-owner/neko",
+            "https://github.com/example-owner/neko.git\n",
+            "https://token@github.com/example-owner/neko.git",
         ] {
-            assert_eq!(github_repository(remote).as_deref(), Some("NishantEC/neko"), "{remote}");
+            assert_eq!(github_repository(remote).as_deref(), Some("example-owner/neko"), "{remote}");
         }
         for remote in ["https://gitlab.com/a/b.git", "/tmp/bare.git", "git@github.com:only-owner", "https://github.com/a/../b", "https://github.com/a/b c"] {
             assert_eq!(github_repository(remote), None, "{remote}");

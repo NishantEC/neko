@@ -8,7 +8,7 @@ import NekoKit
 /// touch uncommitted work.
 enum Updates {
     struct UpdateError: Error, Equatable { let message: String }
-    static let repository = "NishantEC/neko"
+    static let repository = "NishantEC/neko" // privacy-ok: the project's own public repository
     static let lastCheckKey = "neko.updates.lastCheck"
 
     struct Build: Equatable {

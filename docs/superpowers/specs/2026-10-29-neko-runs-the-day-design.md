@@ -139,7 +139,7 @@ but told to act:
 | Client A | slack-client-a DMs and mentions, Jira ENG, GitHub client-a-ai review comments | yes | client-a-ai |
 | Acme | slack-work DMs and mentions, Linear HEA, GitHub Acme review comments | yes | Acme |
 | Client B | Linear (linear-b), GitHub | yes | its org |
-| Asha (personal) | Gmail, Calendar, GitHub NishantEC, linear-personal | yes, plus Sibling app and machine lines from the old digest | NishantEC |
+| Asha (personal) | Gmail, Calendar, GitHub example-owner, linear-personal | yes, plus Sibling app and machine lines from the old digest | example-owner |
 
 **Paseo cutover.** After the first successful run of a kind, the daemon runs
 `paseo schedule pause <id>` for the matching schedule (`message-watch-adaptive`,

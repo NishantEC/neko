@@ -57,7 +57,7 @@ and "there is no restriction. It can do whatever it wants". Design:
   `~/.claude.json` keeps the previous result.
 - **What the first day showed (2026-10-30):** the personal scope reported
   work-org PRs (its "my PRs" crossed orgs), so its hint now limits it to
-  repositories NishantEC owns; two routines raised the same item, so an item
+  repositories example-owner owns; two routines raised the same item, so an item
   whose title matches an open one in the same workspace is dropped
   (`open_titles`); the PR sweep listed conflicts instead of rebasing, so it
   is told to work in a /tmp worktree, resolve clear conflicts, test, push and
