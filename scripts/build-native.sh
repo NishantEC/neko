@@ -4,22 +4,26 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 configuration="${NEKO_NATIVE_CONFIGURATION:-release}"
+# Cargo's output folder: $CARGO_TARGET_DIR when set (the updater builds into the
+# user's cache folder, not inside its clone), else ./target.
+target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
+case "$target_dir" in /*) ;; *) target_dir="$repo_root/$target_dir" ;; esac
 if [[ "$configuration" == debug ]]; then
   cargo build -p neko-daemon --bin neko-daemon
 else
   cargo build --release -p neko-daemon --bin neko-daemon
 fi
 swift build --package-path native/NekoKit -c "$configuration"
-bundle="$repo_root/target/native/Neko.app"
+bundle="$target_dir/native/Neko.app"
 bundle_id=dev.neko.launcher
 if [[ "${NEKO_NATIVE_PREVIEW:-0}" == 1 ]]; then
-  bundle="$repo_root/target/native/Neko Native Preview.app"
+  bundle="$target_dir/native/Neko Native Preview.app"
   bundle_id=dev.neko.native-preview
 fi
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 cp scripts/Neko-Info.plist "$bundle/Contents/Info.plist"
 cp "native/NekoKit/.build/$configuration/NekoNative" "$bundle/Contents/MacOS/neko"
-cp "target/$configuration/neko-daemon" "$bundle/Contents/MacOS/neko-daemon"
+cp "$target_dir/$configuration/neko-daemon" "$bundle/Contents/MacOS/neko-daemon"
 cp packaging/icon/neko.icns "$bundle/Contents/Resources/neko.icns"
 # The web UI the daemon serves (Contents/Resources/web). Built from web/
 # when its sources are present; an older build is replaced, never mixed.

@@ -1,7 +1,7 @@
 // "Change Neko": asks what should be different, then sends Neko one chat message
 // that opens a task to make the change, either as a page in the plugins folder
-// (live in seconds, only yours) or in the neko checkout (goes live through
-// self-update once it lands, with the previous UI kept). The words Neko is
+// (live in seconds, only yours) or in the development checkout (reaches the
+// installed app through the updater once it is pushed, with the previous UI kept). The words Neko is
 // given are the constant in prompt.ts, shown here before sending.
 import { useEffect, useState } from "react";
 import { accept, command } from "@/api";

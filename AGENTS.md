@@ -150,12 +150,19 @@ it at 0. Also, queueing the deferred value already waiting no longer bumps
 `data_revision`. Anything `load` reads must be written through `Db`'s
 methods: a raw SQL write on the daemon's own connection would be served
 stale (other connections' commits are seen through `data_version`). Left: the
-self-update tick runs `git` every 10 s (~1.5% here, mostly waiting).
-**Web-only changes ship without a reinstall** (2026-10-27): commit `web/`,
-then `bash scripts/ship-web.sh` (~1 min; `--rollback` undoes). It swaps
-`<data>/web-live`, which the running daemon serves per request; anything
-outside `web/` since the installed app still needs `install-native.sh`. See
-`docs/knowledge/neko-updates-itself.md`.
+self-update tick runs `git` every 10 s (~1.5% here, mostly waiting; since
+2026-11-13 the tick makes no network call, it looks at the published
+repository every 10 minutes with one `ls-remote`).
+**The installed app updates itself from the published repository**
+(2026-11-13): a clean clone at `<data>/source` (never the development
+checkout, never committed to), web-only ranges swap in a new UI by themselves,
+anything else runs `scripts/install-native.sh` from the clone, Cargo's output
+is in `~/Library/Caches/neko/target`. Tasks that change Neko work in the
+Development checkout (Settings → Neko updates) and push to the published
+`main`. `bash scripts/ship-web.sh` (~1 min; `--rollback` undoes) is now only a
+preview of unpublished web work from the development checkout: it swaps
+`<data>/web-live`, which the daemon serves per request, until the updater next
+swaps in a published build. See `docs/knowledge/neko-updates-itself.md`.
 ## Native design system and the check gate (2026-10-14)
 
 `native/NekoKit/Sources/NekoNative/DesignSystem/` owns every visual value
@@ -227,7 +234,7 @@ finished.
 - [The Calendar (2026-11-06)](docs/knowledge/calendar.md) — macOS Calendar via EventKit in the app, one quiet daemon row, Neko's dated work on the all-day row.
 - [One window of tabs (2026-11-06)](docs/knowledge/one-window-of-tabs.md) — Tab strip over the hash router, detail tabs, Neko's right-click menu, one status glyph set, crew lines in chat.
 - [A friend can install it: one command, one calm first run (2026-11-13)](docs/knowledge/first-run.md) — `scripts/install.sh`, the GPUI client as its own workspace, routines and Calendar off until switched on, the web first-run setup, the update source setting.
-- [Neko updates itself (2026-10-22)](docs/knowledge/neko-updates-itself.md) — Owner: Neko "should be able to write itself over".
+- [Neko updates itself (2026-10-22, rewritten 2026-11-13)](docs/knowledge/neko-updates-itself.md) — The use copy follows the published repository from its own clone; the development checkout is separate.
 - [Tickets keep your words, lessons improve skills, long chats keep a checkpoint (2026-11-08)](docs/knowledge/tickets-learning-and-checkpoints.md) — `Task::request` and its authority line, `PATCH <n>` skill lessons shown as diffs, `chat_checkpoint`, prompt golden files.
 - [The canvas beside the chat (2026-11-06)](docs/knowledge/the-canvas-beside-the-chat.md) — Artifacts (`SaveArtifact`), `/artifact/<id>/<n>` under its own sandboxed CSP, comment mode, an artifact tab (no gallery page).
 - [Everything renders (2026-11-08)](docs/knowledge/everything-renders.md) — Any artifact type, `host.registerViewer`/`registerFence`, built-in 3D/sketch/table/doc viewers, the Installed viewers prompt section, `ShowArtifact`/`OpenTab`.

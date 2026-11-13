@@ -59,14 +59,10 @@ import NekoKit
         XCTAssertEqual(PresenceState.from(snapshot: snap("Completed", pending: true), previous: nil)?.label, "Neko is replying")
     }
 
-    func testUpdatesCompareAndRefuseUnsafeCheckouts() throws {
+    func testUpdatesCompareWithGitHub() throws {
         let behind = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"ahead_by":3,"commits":[{"sha":"aaa"},{"sha":"bbbbbbbbbb"}]}"#.utf8))
         XCTAssertEqual(Updates.parse(behind), .behind(3, latest: "bbbbbbbbbb"))
         XCTAssertEqual(Updates.parse(try JSONDecoder().decode(JSONValue.self, from: Data(#"{"ahead_by":0}"#.utf8))), .upToDate)
-        XCTAssertNil(Updates.blocker(gitStatus: "", branch: "main"))
-        XCTAssertNotNil(Updates.blocker(gitStatus: " M README.md\n", branch: "main"))
-        XCTAssertNotNil(Updates.blocker(gitStatus: "", branch: "codex/kibu-parity"))
-        XCTAssertEqual(Updates.shellQuote("/a b/it's"), "'/a b/it'\\''s'")
     }
 
     func testSlashCommandsParseLocallyAndOrdinaryTextPassesThrough() {

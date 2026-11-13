@@ -36,8 +36,10 @@ schedule only when it names one, and seeded routines never do), Peekaboo
 (`scopes::peekaboo`, config simply lacks it), `~/.claude.json` (optional;
 discovery runs without it), `gh` (a clear "install and `gh auth login`" error
 only when a PR is opened), Codex in ChatGPT.app (one candidate among several,
-`NEKO_CODEX_PATH` overrides), `refs/` (comments only), self-update (dormant
-unless a `land_on_main` repository is Neko's own checkout). Fixed:
+`NEKO_CODEX_PATH` overrides), `refs/` (comments only), self-update (since
+2026-11-13 it follows the published repository from its own clone, so a friend's
+install updates itself with no checkout of their own; the development checkout
+is empty by default). Fixed:
 - **Routines were on from the first tick.** A fresh data folder made a
   workspace for every scope on disk, seeded routines `enabled: true` and ran
   Claude Code on them within minutes. Now `routines_master_v1` (`on`/`off`) gates

@@ -1,11 +1,13 @@
 #!/bin/bash
-# Neko reinstalling itself after a landed change (see AGENTS.md, "Neko updates
-# itself"). The daemon starts this in its own process group and does not wait:
-# the install below stops that daemon, and this script outlives it.
+# Neko reinstalling itself from its own clone of the published repository (see
+# docs/knowledge/neko-updates-itself.md). The daemon starts this in its own
+# process group and does not wait: the install below stops that daemon, and this
+# script outlives it. The daemon sets CARGO_TARGET_DIR (the user's cache folder),
+# which install-native.sh and build-native.sh honour.
 #
 #   bash scripts/self-update.sh --checkout <repo> --data-dir <dir> --commit <sha> [--web-port <port>]
 #
-# 1. refuses unless the checkout is exactly <sha> with nothing uncommitted;
+# 1. refuses unless the clone is exactly <sha> with nothing uncommitted;
 # 2. waits for ~/.agents/bin/machine-ok, then runs scripts/install-native.sh
 #    (its checks run first; cargo uses two jobs);
 # 3. relaunches /Applications/Neko.app and checks it is healthy: the daemon
@@ -15,7 +17,7 @@
 #    relaunches that; healthy: keeps exactly one backup;
 # 5. writes <data dir>/self-update/result.json, which the (new) daemon reads.
 #
-# Safety-critical: changes to this file wait for the owner's click.
+# Safety-critical (self_update::SENSITIVE): the plan names changes to this file.
 set -uo pipefail
 
 checkout='' data_dir='' commit='' web_port=4747

@@ -151,10 +151,11 @@ struct PreferencesView: View {
         checkingUpdates = true
         Task { updateStatus = await Updates.check(); checkingUpdates = false }
     }
+    /// Asks the daemon to look at the published source now and apply what is new.
     private func runUpdate() {
-        switch Updates.update() {
-        case .success(let log): updateNote = "Updating in the background. Neko will quit, rebuild and reopen. Log: \(log.path)"
-        case .failure(let reason): updateNote = reason.message
+        Task {
+            let sent = await model.workbench(.command("UpdateNekoNow"))
+            updateNote = sent ? "Checking now. Neko updates itself and restarts if the app changed; progress is in Settings, Neko updates in the web UI." : "Couldn’t reach Neko’s daemon to start the update."
         }
     }
     private enum BudgetValue: Equatable { case none, cents(Int), invalid }
@@ -398,7 +399,7 @@ struct PreferencesView: View {
                         Button(checkingUpdates ? "Checking…" : "Check for updates") { checkUpdates() }.disabled(checkingUpdates)
                         if case .behind = updateStatus { Button("Update now") { runUpdate() }.nekoButton(.primary) }
                     }.padding(.top, 8).settingsTarget(.updates)
-                    LabeledContent("Updates come from") { TextField(Updates.defaultRepository, text: $updateRepository).labelsHidden().textFieldStyle(.roundedBorder).frame(width: 220).onSubmit { updateStatus = nil } }
+                    LabeledContent("Updates come from") { TextField(Updates.defaultRepository, text: $updateRepository).labelsHidden().textFieldStyle(.roundedBorder).frame(width: 220).onSubmit { updateStatus = nil; Task { await model.syncUpdateSource() } } }
                         .help("A GitHub repository as owner/name. Leave empty for the project’s own.")
                     if let updateStatus { Text(updateStatus.message).font(NekoFont.body).foregroundStyle(.secondary).multilineTextAlignment(.center) }
                     if let updateNote { Text(updateNote).font(NekoFont.meta).foregroundStyle(.secondary).multilineTextAlignment(.center).textSelection(.enabled) }

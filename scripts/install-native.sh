@@ -4,7 +4,11 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 application='/Applications/Neko.app'
 data_directory="$HOME/Library/Application Support/neko"
-bundle="$repo_root/target/native/Neko.app"
+# Where scripts/build-native.sh puts the bundle: $CARGO_TARGET_DIR (the updater's
+# cache folder) when set, else ./target.
+target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
+case "$target_dir" in /*) ;; *) target_dir="$repo_root/$target_dir" ;; esac
+bundle="$target_dir/native/Neko.app"
 dry_run=0
 clean_data=0
 # Successful installs keep this many app backups (including the new one).

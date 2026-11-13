@@ -3,7 +3,7 @@ import NekoKit
 
 @main struct NekoNativeApp: App {
     @NSApplicationDelegateAdaptor(NekoAppDelegate.self) private var appDelegate
-    @StateObject private var model = AppModel()
+    @StateObject private var model: AppModel = { let model = AppModel(); model.syncsUpdateSource = true; return model }()
     @Environment(\.openWindow) private var openWindow
     @AppStorage("nekoAppearance") private var appearance = NekoAppearance.system.rawValue
     init() { NativeLifecycle.startDaemon() }

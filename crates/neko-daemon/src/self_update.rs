@@ -228,12 +228,21 @@ fn tick_with(state: &Arc<AppState>, data: &Path, bundle: Option<String>, source:
     if stale_web {
         core::clear_web(data);
     }
+    // The folder the app was built in, when the person had set it to land on main.
+    let built_in = core::bundle_source_path().map(|p| p.to_string_lossy().into_owned());
     with_snapshot(state, |s| {
+        let built_in = built_in.filter(|p| s.land_on_main.contains(p.as_str()));
         let u = &mut s.self_update;
         // Before 2026-11-13 the updater built from the development checkout
         // and recorded it here. It is now only a development checkout.
         if let Some(old) = u.checkout.as_deref().filter(|old| Path::new(old) != clone && Path::new(old).join(".git").exists()) {
             if u.dev_checkout.is_none() { u.dev_checkout = Some(old.to_owned()); }
+        } else if u.checkout.is_none() && u.dev_checkout.is_none() {
+            // The updater never recorded a checkout, but the app was built in a
+            // folder the person had set to land on main: that is the one they develop in.
+            if let Some(built_in) = built_in {
+                u.dev_checkout = Some(built_in);
+            }
         }
         u.checkout = Some(clone_text.clone());
         if applied.is_some() { u.applied_through = applied.clone(); }

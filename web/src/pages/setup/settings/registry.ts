@@ -16,7 +16,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "search", title: "Quick panel", group: "This Mac", summary: "Choose which folders appear in the quick panel.", keywords: ["quick panel", "palette", "folders", "files", "spotlight"] },
   { id: "permissions", title: "Permissions", group: "This Mac", summary: "Review what Neko can access on this Mac.", keywords: ["privacy", "full disk access", "accessibility", "clipboard"] },
   { id: "diagnostics", title: "Diagnostics", group: "This Mac", summary: "Check local runtimes and the connection to Neko.", keywords: ["health", "debug", "logs", "troubleshoot", "connection"] },
-  { id: "updates", title: "Neko updates", group: "This Mac", summary: "Neko applying its own landed changes: version, pending update, rollbacks.", keywords: ["update", "upgrade", "version", "self-update", "rollback", "reinstall", "auto-update"] },
+  { id: "updates", title: "Neko updates", group: "This Mac", summary: "Where updates come from, the last check, the version in use, and anything pending or failed.", keywords: ["update", "upgrade", "version", "self-update", "rollback", "reinstall", "auto-update"] },
   { id: "about", title: "About", group: "This Mac", summary: "Version, updates and where this page comes from.", keywords: ["version", "update", "build"] },
 ];
 
@@ -57,7 +57,9 @@ export const SETTINGS: SettingDef[] = [
   { id: "pending-update", section: "updates", title: "Apply update", keywords: ["pending", "waiting", "safety", "approve"] },
   { id: "auto-update-ui", section: "updates", title: "Update the web UI automatically", keywords: ["auto-update", "live", "reload"] },
   { id: "auto-update-app", section: "updates", title: "Reinstall the app automatically", keywords: ["auto-update", "install", "native", "daemon"] },
-  { id: "update-now", section: "updates", title: "Update Neko now", keywords: ["upgrade", "rebuild", "install"] },
+  { id: "update-check", section: "updates", title: "Update now", keywords: ["upgrade", "rebuild", "install", "check", "last check"] },
+  { id: "update-source", section: "updates", title: "Updates come from", keywords: ["repository", "github", "source", "fork"] },
+  { id: "dev-checkout", section: "updates", title: "Development checkout", keywords: ["develop", "checkout", "land", "push", "folder"] },
   { id: "roll-back-web", section: "updates", title: "Roll back the web UI", keywords: ["undo", "previous", "revert", "web-live.prev", "ui"] },
   { id: "updates", section: "about", title: "Updates and version", keywords: ["version", "update", "build", "about"] },
 ];

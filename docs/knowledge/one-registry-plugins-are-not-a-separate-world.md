@@ -15,7 +15,7 @@ Host/Origin/token gates); `<data dir>/custom.css` is served live and linked last
 `host.addSection` / `host.addTab` extend Settings and the task sheet. The Plugins
 page is **Customisations** (`#/plugins` redirects); **Change Neko** tells Neko to
 choose a page/style of the user's (live in seconds) or an edit of the app source in
-the neko checkout (live through self-update, previous UI kept; Settings → Neko
+the development checkout (pushed to the published main, then live through the updater, previous UI kept; Settings → Neko
 updates has **Roll back the web UI**, `RollBackWebUi`). User pages keep the
 authority they had (a browser page with the bridge token); the daemon gained
 storage and the stylesheet only. `scripts/verify/customise.mjs` checks all of it.

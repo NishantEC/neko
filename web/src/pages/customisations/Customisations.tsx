@@ -191,7 +191,7 @@ export default function Customisations() {
   const [busy, setBusy] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const detail = listings.find((l) => l.id === detailId) ?? null;
-  const checkout = typeof snapshot?.self_update?.checkout === "string" ? snapshot.self_update.checkout : null;
+  const checkout = typeof snapshot?.self_update?.dev_checkout === "string" ? snapshot.self_update.dev_checkout : null;
   const places = custom ? { pluginsDir: custom.plugins_dir, cssPath: custom.css_path, checkout } : null;
 
   useEffect(

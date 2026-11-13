@@ -130,7 +130,11 @@ import NekoKit
                 guard case .object = result["Workbench"] else { throw invalidResponse() }
                 acceptSnapshot(result["Workbench"])
             }
-            if !connected { connected = true }
+            if !connected {
+                connected = true
+                // The daemon builds updates from the source the person chose (or the default).
+                if syncsUpdateSource { Task { await syncUpdateSource() } }
+            }
             if connectionError != nil { connectionError = nil }
             // A connection failure from before the daemon was up is no longer true.
             if let error, AppModel.isConnectionError(error) { self.error = nil }
@@ -140,6 +144,20 @@ import NekoKit
             if connectionError != error.localizedDescription { connectionError = error.localizedDescription }
         }
     }
+    /// Tells the daemon where updates come from (Settings, About, "Updates come
+    /// from"): its updater clones that source over https. Empty means the
+    /// project's public one. Sent once per connection and when the setting is
+    /// submitted; a failure is retried at the next connection.
+    func syncUpdateSource() async {
+        let source = Updates.normalizedRepository(UserDefaults.standard.string(forKey: Updates.repositoryKey) ?? "") ?? ""
+        guard source != syncedUpdateSource else { return }
+        if (try? await request(.object(["Workbench": .command("SetUpdateSource", ["repository": .string(source)])]))) != nil {
+            syncedUpdateSource = source
+        }
+    }
+    private var syncedUpdateSource: String?
+    /// Only the running app tells the daemon its update source on connect (tests count requests).
+    var syncsUpdateSource = false
     @discardableResult func workbench(_ command: JSONValue) async -> Bool {
         guard !busy else { error = "Another change is still saving. Please try again."; return false }
         generation += 1

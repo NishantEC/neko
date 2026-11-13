@@ -1,6 +1,9 @@
 #!/bin/bash
-# Ship a web-only change to the running Neko without reinstalling the app
-# (see docs/knowledge/neko-updates-itself.md, "Shipping a web change by hand").
+# Ship a web-only change from the DEVELOPMENT checkout to the running Neko
+# without reinstalling the app (see docs/knowledge/neko-updates-itself.md,
+# "Shipping a web change by hand"). The installed app otherwise follows the
+# published main by itself; this is only a preview of unpublished web work, and
+# the updater swaps in the published build when main next changes.
 #
 #   bash scripts/ship-web.sh             build web/ at HEAD and make it live
 #   bash scripts/ship-web.sh --rollback  go back to the previous live build
@@ -10,15 +13,14 @@
 # Same mechanism as the daemon's own updater: the build goes to
 # <data>/web-builds/<short commit>, `web-live` (a symlink the daemon serves
 # from, per request) is swapped in one rename and the old target is kept as
-# `web-live.prev`. The daemon adopts the build on its next tick (≤10 s),
-# records it in Settings → Neko updates and tells open pages to reload; a
-# newer app installed later outranks it.
+# `web-live.prev`. The daemon adopts a build whose commit it knows (the
+# published history) on its next tick (≤10 s), records it in Settings → Neko
+# updates and tells open pages to reload; a newer app installed later outranks
+# it.
 #
 # It refuses when anything other than web/ or docs changed since the
 # installed app (`NekoGitCommit`): that UI might need a daemon the app does
-# not have yet. Run scripts/install-native.sh for those. Nothing here touches
-# the safety-critical paths (`self_update::SENSITIVE`); those still wait for
-# the owner's "Apply update".
+# not have yet. Run scripts/install-native.sh for those.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,7 +32,7 @@ for arg in "$@"; do
   case "$arg" in
     --rollback) mode=rollback ;;
     --force) force=1 ;;
-    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
+    -h|--help) sed -n "2,22p" "$0"; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$arg" >&2; exit 2 ;;
   esac
 done

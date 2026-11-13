@@ -83,9 +83,10 @@ under the daemon's 4096-byte limit; measured by the dialog and by `scripts/verif
 that tells Neko to pick the lighter route:
 
 - **A page, override or style of yours** (plugins folder / `custom.css`): live in seconds, only yours.
-- **The app's source** in the neko checkout (`self_update.checkout`, `web/src` for the UI) for what a page
-  cannot reach (chat, shell, daemon, a fix everyone should get). A UI-only change that lands on `main` goes
-  live through self-update; the previous web UI is kept as `web-live.prev`.
+- **The app's source** in the development checkout (`self_update.dev_checkout`, `web/src` for the UI) for
+  what a page cannot reach (chat, shell, daemon, a fix everyone should get). A change that lands on `main`
+  there is pushed to the published repository and reaches the installed app through the updater (a UI-only
+  change goes live by itself); the previous web UI is kept as `web-live.prev`.
 
 Settings → Neko updates has **Roll back the web UI** (`Command::RollBackWebUi` →
 `self_update::roll_back_web`: `web-live` returns to `web-live.prev`, or is dropped so the app's own UI
@@ -98,4 +99,5 @@ Sec-Fetch-Site / token gate as everything else decides who may call the daemon, 
 what `request(...)` can do. The daemon gained storage and the stylesheet only; no new command
 authority, no filesystem reach beyond `plugin-data/` and `custom.css`. "Open folder" is a copied path
 (there is deliberately no daemon "reveal in Finder" endpoint). `web.rs` and the updater are on the
-self-update `SENSITIVE` list, so a change to them waits for the owner's click.
+self-update `SENSITIVE` list, which the update plan names (the installed app follows the published
+`main`, so only switching auto-update off makes an update wait for a click).

@@ -2,10 +2,11 @@ import Foundation
 import NekoKit
 
 /// Neko is built from source, so an update is newer commits on GitHub's
-/// main branch. The build stamps its commit and source checkout into the
-/// app; checking reads GitHub's public API; updating fast-forwards that
-/// checkout and runs the existing installer, refusing anything that could
-/// touch uncommitted work.
+/// main branch. The build stamps its commit into the app; checking reads
+/// GitHub's public API. Applying an update is the daemon's job: it keeps its
+/// own clean clone of the published repository and rebuilds from that
+/// (Settings → Neko updates in the web UI), so this file never touches a
+/// checkout.
 enum Updates {
     struct UpdateError: Error, Equatable { let message: String }
     /// Where "newer commits" are looked for: the project's public repository
@@ -81,45 +82,4 @@ enum Updates {
         let latest = value["commits"].array.last?["sha"].string ?? ""
         return .behind(ahead, latest: latest)
     }
-
-    /// Why an in-place update isn't safe, or nil when it is.
-    static func blocker(gitStatus: String, branch: String) -> String? {
-        if branch != "main" { return "The source checkout is on \(branch), not main. Switch to main, then update." }
-        if !gitStatus.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "The source checkout has uncommitted changes. Commit or stash them, then update." }
-        return nil
-    }
-
-    /// Fast-forward the checkout and reinstall in a detached process (the
-    /// installer stops this app). Output goes to a log Neko can show.
-    static func update() -> Result<URL, UpdateError> {
-        guard let build = Build.current, let source = build.source, FileManager.default.fileExists(atPath: source + "/scripts/install-native.sh") else {
-            return .failure(UpdateError(message: "This build doesn’t know its source checkout. Update with: git pull && bash scripts/install-native.sh"))
-        }
-        let git = { (args: [String]) -> String in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = ["-C", source] + args
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = FileHandle.nullDevice
-            guard (try? process.run()) != nil else { return "" }
-            process.waitUntilExit()
-            return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        }
-        if let reason = blocker(gitStatus: git(["status", "--porcelain"]), branch: git(["rev-parse", "--abbrev-ref", "HEAD"]).trimmingCharacters(in: .whitespacesAndNewlines)) {
-            return .failure(UpdateError(message: reason))
-        }
-        let log = FileManager.default.temporaryDirectory.appendingPathComponent("neko-update-\(Int(Date().timeIntervalSince1970)).log")
-        let script = "cd \(shellQuote(source)) && git pull --ff-only && bash scripts/install-native.sh && open /Applications/Neko.app"
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/nohup")
-        process.arguments = ["/bin/bash", "-c", script + " > \(shellQuote(log.path)) 2>&1"]
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do { try process.run() } catch { return .failure(UpdateError(message: "Couldn’t start the update: \(error.localizedDescription)")) }
-        return .success(log)
-    }
-
-    static func shellQuote(_ text: String) -> String { "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 }

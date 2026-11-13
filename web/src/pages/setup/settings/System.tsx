@@ -1,6 +1,6 @@
 // "This Mac": the quick panel's folders, permissions, diagnostics, Neko
 // updates and About.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { command, request } from "@/api";
 import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
@@ -170,73 +170,97 @@ export function DiagnosticsSection() {
 }
 
 // ---------------------------------------------------------------------------
-// Neko updates: Neko applying landed changes to itself
+// Neko updates: the installed app following the published repository
 // ---------------------------------------------------------------------------
 
 const shortSha = (sha: unknown) => str(sha).slice(0, 8);
+const DEFAULT_SOURCE = PROJECT_REPOSITORY.replace("https://github.com/", "");
 
-function UpdateRecordRow({ id, title, record, tone }: { id: string; title: string; record: any; tone: "success" | "warning" | "error" }) {
-  const now = useNow();
-  if (!record) return <Row title={title} description="None yet." />;
+/** The folder where Neko's own tasks change Neko. Empty means none. */
+function DevCheckoutRow({ current, busy, onSave }: { current: string; busy: boolean; onSave: (path: string) => void }) {
+  const [path, setPath] = useState(current);
+  useEffect(() => setPath(current), [current]);
   return (
-    <Row
-      id={`setting-${id}`}
-      title={title}
-      description={<span className="select-text">{str(record.summary)}</span>}
-      trailing={<><Status tone={tone}>{shortSha(record.commit)}</Status><span className="font-mono text-xs text-muted-foreground">{relativeTime(num(record.at_ms), now)}</span></>}
-    />
+    <SettingRow id="dev-checkout" title="Development checkout" description="Where Neko’s own tasks change Neko. They push to the published main; the updater never touches it." stacked>
+      <form className="flex w-full gap-2" onSubmit={(e) => { e.preventDefault(); if (path.trim() !== current) onSave(path.trim()); }}>
+        <Input aria-label="Development checkout" value={path} onChange={(e) => setPath(e.target.value)} placeholder="None" className="font-mono" />
+        <Button type="submit" variant="outline" className="h-10" disabled={busy || path.trim() === current}>Save</Button>
+      </form>
+    </SettingRow>
   );
 }
 
 export function UpdatesSection() {
   const { snapshot } = useWorkbench();
+  const now = useNow();
   const { run, busy, error, clear } = useRun();
   if (!snapshot) return <Panel><div className="p-5"><Skeleton className="h-4 w-64" /></div></Panel>;
   const u = rec(snapshot.self_update);
+  const check = rec(u.check);
   const autoUi = u.auto_ui !== false;
   const autoNative = u.auto_native !== false;
   const pending = u.pending ? rec(u.pending) : null;
   const working = u.installing ? `Reinstalling at ${shortSha(rec(u.installing).to)}…` : str(u.status);
+  const failure = u.last_failure ? rec(u.last_failure) : null;
+  const rollback = u.last_rollback ? rec(u.last_rollback) : null;
+  const update = u.last_update ? rec(u.last_update) : null;
+  // The newest thing that went wrong, when it is newer than the last success.
+  const trouble = [failure, rollback].filter((r): r is Record<string, any> => !!r && num(r.at_ms) > num(update?.at_ms)).sort((x, y) => num(y.at_ms) - num(x.at_ms))[0] ?? null;
   const setAuto = (ui: boolean, native: boolean) => void run(() => command("SetSelfUpdate", { auto_ui: ui, auto_native: native }));
   return (
     <div className="flex flex-col gap-8">
       <Section title="Neko updates">
         <Panel>
           <div className="flex flex-col" data-slot="neko-updates">
+            <Row id="setting-update-source" title="Updates come from" description={<span className="select-text font-mono text-xs">{str(u.source) || DEFAULT_SOURCE}</span>} />
+            <Row
+              id="setting-update-check"
+              title="Last check"
+              description={<span className="select-text">{check.error ? `Couldn’t reach it: ${str(check.error)}` : num(check.at_ms) > 0 ? relativeTime(num(check.at_ms), now) : "Not yet"}</span>}
+              trailing={<Button variant="outline" size="sm" onClick={() => void run(() => command("UpdateNekoNow"))} disabled={busy || !!u.requested || !!u.installing}><ArrowsClockwise /> Update now</Button>}
+            />
             <Row
               id="setting-update-version"
-              title="Current version"
-              description={u.checkout ? <span className="select-text break-all font-mono text-xs">{str(u.checkout)}</span> : "Neko’s own checkout appears once “Land on main” is on for it."}
+              title="In use"
+              description={update ? <span className="select-text">{str(update.summary)}</span> : undefined}
               trailing={<>
                 <Status tone="neutral">App {u.native_commit ? shortSha(u.native_commit) : "unknown"}</Status>
                 <Status tone={u.web_commit ? "success" : "neutral"}>UI {u.web_commit ? shortSha(u.web_commit) : "from the app"}</Status>
               </>}
             />
-            {working ? <Row title="Now" description={<span data-slot="update-status">{working}</span>} /> : null}
             {pending ? (
-              <SettingRow id="pending-update" title={`Update waiting: ${shortSha(pending.to)}`} description={<span className="select-text">{str(pending.reason)}{arr(pending.sensitive).length ? <> <span className="font-mono">{arr(pending.sensitive).map(str).join(", ")}</span></> : null}</span>}>
-                <Button onClick={() => void run(() => command("ApplyPendingUpdate"))} disabled={busy} loading={busy}><ArrowsClockwise /> Apply update</Button>
-              </SettingRow>
-            ) : null}
-            <UpdateRecordRow id="last-update" title="Last update" record={u.last_update} tone="success" />
-            {u.last_failure ? <UpdateRecordRow id="last-update-failure" title="Last failure" record={u.last_failure} tone="warning" /> : null}
-            <UpdateRecordRow id="last-rollback" title="Last rollback" record={u.last_rollback} tone="error" />
-            <SettingRow id="auto-update-ui" title="Update the web UI automatically" description="Rebuilds the web UI from a landed change, checks it and swaps it in. Open pages reload when you are not typing.">
+              <Row
+                id="setting-pending-update"
+                title={`Update waiting: ${shortSha(pending.to)}`}
+                description={<span className="select-text">{str(pending.reason)}</span>}
+                trailing={<Button size="sm" onClick={() => void run(() => command("ApplyPendingUpdate"))} disabled={busy} loading={busy}><ArrowsClockwise /> Apply update</Button>}
+              />
+            ) : working ? (
+              <Row id="setting-update-pending" title="Now" description={<span data-slot="update-status">{working}</span>} />
+            ) : trouble ? (
+              <Row
+                id="setting-update-failure"
+                title={trouble === rollback ? "Rolled back" : "Failed"}
+                description={<span className="select-text">{str(trouble.summary)}</span>}
+                trailing={<><Status tone={trouble === rollback ? "error" : "warning"}>{shortSha(trouble.commit)}</Status><span className="font-mono text-xs text-muted-foreground">{relativeTime(num(trouble.at_ms), now)}</span></>}
+              />
+            ) : (
+              <Row id="setting-update-pending" title="Pending" description="Nothing waiting or failed." />
+            )}
+            <SettingRow id="auto-update-ui" title="Update the web UI automatically" description="Builds the published web UI, checks it and swaps it in.">
               <Toggle checked={autoUi} label="Update the web UI automatically" disabled={busy} onChange={(v) => setAuto(v, autoNative)} />
             </SettingRow>
-            <SettingRow id="auto-update-app" title="Reinstall the app automatically" description="Waits until no task is running or publishing and the Mac is not busy, then reinstalls, restarts and checks Neko. An unhealthy update is rolled back to the previous app.">
+            <SettingRow id="auto-update-app" title="Reinstall the app automatically" description="When Neko is idle and the Mac is calm. An unhealthy update is rolled back.">
               <Toggle checked={autoNative} label="Reinstall the app automatically" disabled={busy} onChange={(v) => setAuto(autoUi, v)} />
             </SettingRow>
-            <SettingRow id="update-now" title="Update Neko now" description="Applies everything new on the checkout’s main branch, safety-critical changes included.">
-              <Button variant="outline" onClick={() => void run(() => command("UpdateNekoNow"))} disabled={busy}>Update now</Button>
-            </SettingRow>
-            <SettingRow id="roll-back-web" title="Roll back the web UI" description="Neko keeps the web UI it replaced (web-live.prev). This switches back to it, or to the one the app shipped with when there is none. Your pages and styles are not touched. Open pages reload when you are not typing.">
+            <DevCheckoutRow current={str(u.dev_checkout)} busy={busy} onSave={(path) => void run(() => command("SetDevCheckout", { path }))} />
+            <SettingRow id="roll-back-web" title="Roll back the web UI" description="Back to the build it replaced, or the one the app shipped with.">
               <Button
                 variant="outline"
                 disabled={busy}
                 onClick={() => void confirm({
                   title: "Roll back the web UI?",
-                  description: "The web UI goes back to the previous build. Pages reload on their own. The change that went live is not undone in the source; update again to get it back.",
+                  description: "The web UI goes back to the previous build. Pages reload on their own. The next published change brings the newer one back.",
                   action: "Roll back",
                 }).then((ok) => ok && run(() => command("RollBackWebUi")))}
               >
@@ -265,7 +289,7 @@ export function AboutSection() {
           <div className="flex flex-col">
             <Row title="Web interface" description={`Served by the Neko daemon at ${location.origin}. Everything on these pages is read from, and written back to, that daemon.`} trailing={<Status tone={connected ? "success" : "warning"}>{connected ? "Connected" : "Reconnecting…"}</Status>} />
             <Row title="This Mac" description={`${arr(snapshot?.workspaces).length} workspaces · ${tasks} tasks in history · ${arr(snapshot?.mcp?.connections).length} connections`} />
-            <SettingRow id="updates" title="Updates and version" description="Neko is built from source, so an update is newer commits on main. Changes Neko’s own tasks land are applied by Neko itself (see Neko updates); the native app checks GitHub for the rest.">
+            <SettingRow id="updates" title="Updates and version" description="Neko is built from source, so an update is newer commits on main. The installed app follows the published main by itself (see Neko updates), and the native app can check GitHub too.">
               <Button variant="outline" render={<a href={`${PROJECT_REPOSITORY}/commits/main`} target="_blank" rel="noreferrer noopener" />}>Open commits on GitHub <ArrowSquareOut /></Button>
             </SettingRow>
             <Row title="Update by hand" description="From a source checkout on main with nothing uncommitted:">

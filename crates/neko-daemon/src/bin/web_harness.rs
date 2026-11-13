@@ -86,8 +86,9 @@ fn main() {
         }
     }
     // `NEKO_WEB_SELF_UPDATE=1` runs the real self-update thread (against the
-    // checkout named by `NEKO_SELF_CHECKOUT`); otherwise Settings → Neko
-    // updates is shown sample history and a pending update.
+    // remote named by `NEKO_UPDATE_REMOTE`, cloned to `NEKO_UPDATE_SOURCE_DIR`);
+    // otherwise Settings → Neko updates is shown sample history and a pending
+    // update.
     let self_update = std::env::var_os("NEKO_WEB_SELF_UPDATE").is_some_and(|v| v == "1");
     if !self_update {
         if let Err(e) = seed_update_history(&db) {
@@ -165,14 +166,15 @@ fn seed_inbox(state: &server::AppState) -> Result<(), String> {
     neko_core::routines::push_run(&db, &routine.id, run)
 }
 
-/// Sample self-update state: an applied update, a rollback, and an update
-/// waiting for the owner's click because it changes safety-critical code.
+/// Sample self-update state: an applied update, a rollback, a recent check,
+/// and an update waiting for a click because auto-update is off for the app.
 fn seed_update_history(db: &Db) -> Result<(), String> {
     use neko_protocol::workbench::{UpdatePlan, UpdateRecord};
     let mut snapshot = neko_core::workbench::load(db)?;
     let now = neko_core::workbench::now_ms();
     let u = &mut snapshot.self_update;
-    u.checkout = Some("/Users/you/Documents/neko".into());
+    u.checkout = Some("/Users/example/Library/Application Support/neko/source".into());
+    u.check = neko_protocol::workbench::UpdateCheck { at_ms: now - 4 * 60_000, remote_head: Some("d03c977a9b10".into()), error: String::new() };
     u.native_commit = Some("9acc5352f3c1".into());
     u.web_commit = Some("c7b6c58d0e4f".into());
     u.last_update = Some(UpdateRecord { commit: "c7b6c58d0e4f".into(), at_ms: now - 42 * 60_000, summary: "Neko updated itself to c7b6c58d (UI live).".into() });
@@ -180,7 +182,7 @@ fn seed_update_history(db: &Db) -> Result<(), String> {
     u.pending = Some(UpdatePlan {
         from: Some("c7b6c58d0e4f".into()), to: "d03c977a9b10".into(), task_id: None, web: true, native: true,
         sensitive: vec!["crates/neko-daemon/src/web.rs".into()],
-        reason: "It changes safety-critical code (crates/neko-daemon/src/web.rs), so it waits for your click.".into(),
+        reason: "Auto-update is off for the app.".into(),
         approved: false, at_ms: now - 5 * 60_000,
     });
     neko_core::workbench::save(db, &snapshot)
