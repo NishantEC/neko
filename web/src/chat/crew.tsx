@@ -28,6 +28,7 @@ import { cn } from "@/ui/lib/utils";
 import { ACTION_TOOL, isToolPart, type NekoUIMessage } from "@/chat/sdk/types";
 import { UnseenDot, useUnseen } from "@/work/seen";
 import { hrefFor } from "@/router";
+import { goalsOf, isLive } from "@/work/goals";
 
 const HIDE_KEY = "neko.chat.hideCrew";
 
@@ -86,6 +87,8 @@ export function CrewHeader({ replying }: { replying: boolean }) {
   const finished: Json[] = (snapshot.tasks ?? []).filter((t: Json) => unseen.has(String(t.id)));
   const running = tasks.running;
   const crew = running.length + (replying ? 1 : 0);
+  // Goals that are working or parked for a reason, not the paused or finished ones.
+  const activeGoals = goalsOf(snapshot).filter((g: Json) => isLive(g) && g.status !== "Paused").length;
   const runtime = homeRuntime(snapshot);
   const lead = running[0];
   return (
@@ -97,6 +100,7 @@ export function CrewHeader({ replying }: { replying: boolean }) {
         {replying ? "Replying" : lead && !hidden ? <>Working on <TaskRef task={lead} />{running.length > 1 ? <span>and {running.length - 1} more</span> : null}</> : lead ? "Working" : "Idle"}
       </span>
       {!hidden ? <><span aria-hidden>·</span><span data-slot="crew-count" className="tabular-nums">{crew} in crew</span></> : null}
+      {activeGoals ? <><span aria-hidden>·</span><span data-slot="crew-goals" className="tabular-nums">{activeGoals} {activeGoals === 1 ? "goal" : "goals"}</span></> : null}
       {finished.length ? (
         <>
           <span aria-hidden>·</span>

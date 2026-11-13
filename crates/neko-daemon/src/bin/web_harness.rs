@@ -218,6 +218,29 @@ fn seed_from(db: &Db, path: &Path) -> Result<(), String> {
     let nowhere = neko_protocol::support_dir().join("no-checkout");
     for workspace in &mut snapshot.workspaces { workspace.repository = nowhere.to_string_lossy().into_owned(); }
     neko_core::workbench::save(db, &snapshot)?;
+    // Goals are rows of their own; the blocked and the paused one raise their Inbox items.
+    for source_goal in &source.goals {
+        let mut goal = source_goal.clone();
+        let (ledger, journal) = (std::mem::take(&mut goal.ledger), std::mem::take(&mut goal.journal));
+        let subject = goal.subject();
+        let item = match goal.status {
+            neko_protocol::goals::GoalStatus::Blocked => goal.blocked.as_ref().map(|b| (b.question.clone(), format!("If you do not answer, Neko will go with: {}", b.default_answer))),
+            neko_protocol::goals::GoalStatus::Paused => Some(("Extend by 10 turns?".to_owned(), format!("Paused: it used its {} turns.\nGoal: {}", goal.budget.max_turns, goal.objective))),
+            _ => None,
+        };
+        // Only for a run that checks the goals (`NEKO_WEB_ONLY=goals`): the Inbox area counts its items.
+        let item = item.filter(|_| std::env::var_os("NEKO_WEB_GOAL_ITEMS").is_some());
+        if let Some((title, detail)) = item {
+            let seq = routines::raise_goal_item(db, &goal.workspace_id, &title, &detail, &format!("goal:{}", goal.id))?;
+            match goal.status {
+                neko_protocol::goals::GoalStatus::Blocked => if let Some(b) = goal.blocked.as_mut() { b.inbox_seq = Some(seq); },
+                _ => goal.extend_seq = Some(seq),
+            }
+        }
+        neko_core::goals::create(db, goal)?;
+        for entry in ledger { neko_core::goals::push_ledger(db, &subject, entry)?; }
+        for entry in journal { neko_core::goals::push_journal(db, &subject, entry)?; }
+    }
 
     let mut conversation: Vec<ChatMessage> = source.conversation.iter().rev().take(8).rev().cloned().collect();
     // A saved snapshot from before the AI SDK stored `text`; read it back as one text part.

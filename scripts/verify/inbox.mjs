@@ -8,8 +8,8 @@
 export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   const base = `http://127.0.0.1:${PORT}`;
   await page.goto(`${base}/#/inbox`);
-  await page.waitForSelector("[data-slot='needs-you-item']");
-  check((await page.locator("[data-slot='needs-you-item']").count()) === 3, "three items are open");
+  await page.waitForSelector("[data-slot='needs-you-item']:not([data-goal])");
+  check((await page.locator("[data-slot='needs-you-item']:not([data-goal])").count()) === 3, "three items are open");
 
   const group = page.getByRole("button", { name: /Closed recently/ });
   check((await group.getAttribute("aria-expanded")) === "false", "Closed recently starts collapsed");
@@ -32,17 +32,17 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await menu.waitFor();
   check(/Reopen/.test(await menu.innerText()), "the right-click menu offers Reopen");
   await menu.getByText("Reopen", { exact: true }).click();
-  await page.waitForFunction(() => document.querySelectorAll("[data-slot='needs-you-item']").length === 4);
+  await page.waitForFunction(() => document.querySelectorAll("[data-slot='needs-you-item']:not([data-goal])").length === 4);
   check((await rows.count()) === 4, "a reopened item leaves Closed recently and returns to Needs you");
 
   // Reopen from the row action.
   await rows.first().hover();
   await rows.first().getByRole("button", { name: /^Reopen/ }).click();
-  await page.waitForFunction(() => document.querySelectorAll("[data-slot='needs-you-item']").length === 5);
+  await page.waitForFunction(() => document.querySelectorAll("[data-slot='needs-you-item']:not([data-goal])").length === 5);
   check((await rows.count()) === 3, "the row action reopens too");
 
   // Marking one done closes it with "Done by you".
-  await page.locator("[data-slot='needs-you-item']").first().getByRole("button", { name: /Mark .* done/ }).first().click();
+  await page.locator("[data-slot='needs-you-item']:not([data-goal])").first().getByRole("button", { name: /Mark .* done/ }).first().click();
   await rows.first().waitFor();
   await page.waitForFunction(() => [...document.querySelectorAll("[data-slot='closed-item']")].some((r) => r.textContent.includes("Done by you")));
   check(true, "marking an item done lands it in Closed recently");

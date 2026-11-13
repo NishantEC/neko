@@ -98,6 +98,9 @@ function startDaemon() {
       NEKO_DATA_DIR: DATA, NEKO_WEB_PORT: String(PORT),
       NEKO_WEB_DIR: path.join(repo, "web/dist"), NEKO_WEB_STREAM: "1",
       NEKO_WEB_SEED: SEED,
+      // The goals' Inbox items would crowd the Inbox area's counts, so they are only
+      // raised for a run that asks for the goals area (NEKO_WEB_ONLY=goals).
+      ...((process.env.NEKO_WEB_ONLY ?? "").split(",").includes("goals") ? { NEKO_WEB_GOAL_ITEMS: "1" } : {}),
     },
     stdio: ["ignore", "inherit", "inherit"],
   });

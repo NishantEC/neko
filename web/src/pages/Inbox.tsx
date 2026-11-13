@@ -18,6 +18,7 @@ import { itemProgress, routineStatus } from "@/setup/routine-status";
 import { copyText, useContextMenu } from "@/shell/context-menu";
 import { EmptyBlock, ErrorNote, FormField, GROUP_HEADING, LoadingRows, Panel, RowAction, RowActions, Section, SetupPage, Toggle } from "@/setup/kit";
 import { fillOwner, relativeTime, useNow } from "@/setup/lib";
+import { GoalItemActions } from "@/work/goals";
 import { cn } from "@/ui/lib/utils";
 
 const POLL_MS = 10_000;
@@ -294,6 +295,8 @@ function RoutineRow({ view, now, send, onEdit }: { view: Json; now: number; send
 function NeedsYouItem({ item, where, when, onDone }: { item: Json; where: string; when: string; onDone: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const link = safeLink(item.link);
+  // An item a goal raised ("Extend by 10 turns?", or its one question) carries `goal:<id>`.
+  const goalId = typeof item.link === "string" && item.link.startsWith("goal:") ? item.link.slice(5) : null;
   const text = [item.title, item.detail].filter(Boolean).join("\n\n");
   const menu = useContextMenu(() => [
     { label: "Mark done", icon: Check, run: onDone },
@@ -303,7 +306,8 @@ function NeedsYouItem({ item, where, when, onDone }: { item: Json; where: string
     link ? { label: "Copy link", icon: LinkIcon, run: () => void copyText(link, "Copied the link") } : null,
   ]);
   return (
-    <div data-slot="needs-you-item" data-expanded={expanded || undefined} {...menu} className="group/row flex items-start gap-3 rounded-[10px] px-3 py-2 transition-colors hover:bg-foreground/[0.03]">
+    <div className="flex min-w-0 flex-col">
+    <div data-slot="needs-you-item" data-goal={goalId || undefined} data-expanded={expanded || undefined} {...menu} className="group/row flex items-start gap-3 rounded-[10px] px-3 py-2 transition-colors hover:bg-foreground/[0.03]">
       <span className="flex h-5 items-center">
         <GlyphButton status="inProgress" label={`Mark “${item.title}” done`} onClick={onDone} />
       </span>
@@ -328,6 +332,8 @@ function NeedsYouItem({ item, where, when, onDone }: { item: Json; where: string
           <RowAction label={`Mark “${item.title}” done`} icon={Check} onClick={onDone} />
         </RowActions>
       </span>
+    </div>
+    {goalId ? <div className="ps-11 pe-3"><GoalItemActions goalId={goalId} /></div> : null}
     </div>
   );
 }
@@ -450,7 +456,7 @@ function InboxBody() {
         </Section>
       ) : null}
       {scopes.map((scope) => {
-        const views = data.routines.filter((v) => v.routine.workspace_id === scope.workspace_id);
+        const views = data.routines.filter((v) => v.routine.workspace_id === scope.workspace_id && !String(v.routine.id).startsWith("goals:"));
         const did = views
           .flatMap((v) => (v.runs ?? []).filter((r: Json) => r.ok).flatMap((r: Json) => (r.did ?? []).map((line: string, i: number) => ({ line, at: r.finished_ms ?? r.started_ms, key: `${r.id}-${i}`, name: v.routine.name }))))
           .sort((a, b) => b.at - a.at)

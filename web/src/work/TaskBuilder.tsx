@@ -11,6 +11,7 @@
 // chat work) unchanged; the header end is the task's own actions. The chat panel
 // opens wider than ui-kit' (35% default, 45% max, against 25% / 30%) because
 // a task conversation carries work logs and tables a form chat does not.
+import { TaskGoal } from "@/work/goals";
 import { useCallback, useEffect, useState, type ReactNode, type RefObject } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { GitDiff, ShieldCheck } from "@phosphor-icons/react";
@@ -193,6 +194,7 @@ export function TaskBuilder({
           renderContent={(value) =>
             value === "chat" ? (
               <div data-slot="task-chat" className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-card">
+                <div className="mx-auto w-full max-w-(--chat-content-max-width) shrink-0 px-3 pt-1"><TaskGoal taskId={task.id} /></div>
                 <TaskConversation task={task} showResult={false} />
                 <div className="mx-auto w-full max-w-(--chat-content-max-width) shrink-0 px-3 pt-1 pb-3">
                   <TaskComposer task={task} ui={ui} />

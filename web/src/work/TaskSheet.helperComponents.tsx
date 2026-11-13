@@ -2,6 +2,7 @@
 // (ResponseDetailBody). The response's heading, meta row and Answers / AI summary
 // tabs became the task's: its title, a status pill with where it lives, its
 // actions, then Conversation / Changes / Details. Colours stay Neko's tokens.
+import { TaskGoal } from "@/work/goals";
 import type { CSSProperties } from "react";
 import { GitPullRequest } from "@/ui/icons";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/ui/tabs";
@@ -70,6 +71,7 @@ export function TaskSheetBody({ task, snapshot, ui, tab, onTab, onOpenTask, swap
         </div>
         <TabsPanel value="conversation" className="flex min-h-0 flex-col">
           <div key={task.id} className={cn("flex min-h-0 flex-1 flex-col", swapFade)}>
+            <div className="shrink-0 px-3"><TaskGoal taskId={task.id} /></div>
             <TaskConversation task={task} />
           </div>
         </TabsPanel>

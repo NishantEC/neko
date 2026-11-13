@@ -150,5 +150,38 @@ export function webSeed(now = Date.now()) {
   // Each task's repository (the pull-request page and the land-on-main switch read these).
   const task_roots = Object.fromEntries(tasks.map((t) => [t.id, WORKSPACES.find((w) => w.id === t.workspace_id).repository]));
 
-  return { task_roots, workspaces: WORKSPACES, connections: [], issues: [], tasks, heartbeat_ms: 0, conversation, fixture_mcp: { responsibilities: watches, sources } };
+  // Goals that keep working (docs/knowledge/goals-that-keep-working.md): one running on a
+  // ticket with a failing check, one blocked on a question and set in Home's chat, one
+  // paused at its turn cap. The harness stores them as rows and raises the Inbox items.
+  const ticket = (title) => tasks.find((t) => t.title === title).id;
+  const goal = (fields) => ({
+    id: id("goal"), workspace_id: "ws-api", objective: "", done_check: "", constraints: "", budget: { max_turns: 20, max_wall_ms: 43_200_000, max_cost_cents: null },
+    ticket_id: null, conversation_id: null, status: "Running", turns: 1, in_turn: true, created_ms: now - 3 * HOUR, updated_ms: now - 10 * MINUTE, wall_ms: 40 * MINUTE, last_tick_ms: now,
+    last_check: null, verdict: "", reason: "", wait: null, blocked: null, hold_until_ms: null, paused_reason: "", extend_seq: null, stall_resumes: 0, judge_failures: 0, ledger: [], journal: [], ...fields,
+  });
+  const failing = { command: "pnpm test src/http", exit_code: 101, tail: "FAIL src/http/client.spec.ts\n  retries a timed-out request\n    expected 3 calls, received 2", at_ms: now - 12 * MINUTE, source: "neko" };
+  const goals = [
+    goal({
+      objective: "Retry timed-out webhook sends until the sender's tests pass", done_check: "pnpm test src/http", constraints: "Do not change the public client API",
+      ticket_id: ticket("Add a retry to the webhook sender"), turns: 4, last_check: failing, verdict: "CONTINUE", reason: "The third attempt is not counted.",
+      ledger: [{ ...failing, exit_code: 1, tail: "1 failing", at_ms: now - 80 * MINUTE }, { ...failing, at_ms: now - 45 * MINUTE }, failing],
+      journal: [
+        { at_ms: now - 80 * MINUTE, turn: 1, plan: "Wrap the send in a bounded back-off, then cover it", done: "Wrote the back-off", next: "Cover the third attempt", session_id: "sess-1", note: "CONTINUE" },
+        { at_ms: now - 45 * MINUTE, turn: 2, plan: "", done: "Added the spec", next: "Fix the off-by-one", session_id: "sess-1", note: "CONTINUE" },
+        { at_ms: now - 30 * MINUTE, turn: 3, plan: "", done: "", next: "", session_id: "sess-1", note: "Stalled with no output for ten minutes; resumed once" },
+      ],
+    }),
+    goal({
+      objective: "Keep the reports job covered by tests", ticket_id: ticket("Cover the reports job with a test"), conversation_id: "home:default:*", status: "Blocked", turns: 2, in_turn: false,
+      blocked: { question: "Which database should the reports job tests run against?", default_answer: "The in-memory fixture", inbox_seq: null },
+      journal: [{ at_ms: now - 20 * MINUTE, turn: 2, plan: "", done: "Found two test databases", next: "Pick one", session_id: null, note: "BLOCKED" }],
+    }),
+    goal({
+      objective: "Document the reports job's retries", done_check: "", ticket_id: ticket("Document the reports job's retries"), status: "Paused", turns: 20, in_turn: false,
+      paused_reason: "Paused: it used its 20 turns.", verdict: "CONTINUE", reason: "The doc still lacks the failure cases.",
+      journal: [{ at_ms: now - 5 * MINUTE, turn: 20, plan: "", done: "Described the happy path", next: "Add the failure cases", session_id: null, note: "Paused: it used its 20 turns." }],
+    }),
+  ];
+
+  return { task_roots, workspaces: WORKSPACES, connections: [], issues: [], tasks, goals, heartbeat_ms: 0, conversation, fixture_mcp: { responsibilities: watches, sources } };
 }

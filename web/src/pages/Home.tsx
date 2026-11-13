@@ -21,6 +21,7 @@ import { chatSignature, useNekoChat } from "@/chat/sdk/chats";
 import { registerCommands } from "@/shell/commands";
 import { takeComposeRequest } from "@/shell/actions";
 import { CrewHeader } from "@/chat/crew";
+import { HomeGoals } from "@/work/goals";
 
 const SUGGESTIONS = [
   "What needs my attention right now?",
@@ -134,6 +135,7 @@ export default function Home() {
       <div className="mx-auto w-full max-w-(--chat-content-max-width) shrink-0 px-6 pt-2">
         <CrewHeader replying={!!pendingTurn} />
       </div>
+      <HomeGoals />
       <Conversation className="min-h-0 flex-1">
         <ConversationContent className="mx-auto w-full max-w-(--chat-content-max-width) gap-0 px-6 pt-0 pb-6">
           {!snapshot && <p className="mt-24 text-center text-muted-foreground">{error ?? "Connecting to Neko…"}</p>}

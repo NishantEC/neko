@@ -14,6 +14,7 @@ import { MonoLabel } from "@/editorial";
 import { MessageResponse } from "@/chat/message";
 import { cn } from "@/ui/lib/utils";
 import { TaskBuilder } from "@/work/TaskBuilder";
+import { TaskGoal } from "@/work/goals";
 import { Block, CommandRow } from "@/work/Thread";
 import { setLandOnMain, landsOnMain, repositoryPath, taskActions, type TaskAction, type Ui } from "@/work/taskActions";
 import {
@@ -45,6 +46,7 @@ export function Details({ task, snapshot, open }: { task: Task; snapshot: any; o
   const shown = all ? events : events.slice(-EVENT_CAP);
   return (
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-8 pb-10">
+      <TaskGoal taskId={task.id} />
       {assessment ? (
         <section data-slot="risk">
           <MonoLabel className="text-[10.5px]">Risk · {String(assessment.risk ?? "").replace(/^./, (c: string) => c.toUpperCase())}</MonoLabel>
