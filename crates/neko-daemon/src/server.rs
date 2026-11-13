@@ -975,7 +975,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             Ok((files, patch, truncated)) => Response::TaskChanges { files, patch, truncated },
             Err(message) => Response::Error { message },
         },
-        Request::TaskCheckpoints { task_id } => match state.workbench.checkpoint_list(&task_id) {
+        Request::TaskCheckpoints { task_id } => match state.workbench.checkpoint_list(&task_id, false) {
             Ok(list) => Response::TaskCheckpoints(list),
             Err(message) => Response::Error { message },
         },

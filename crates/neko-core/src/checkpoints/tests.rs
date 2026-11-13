@@ -183,8 +183,38 @@ fn undo_refuses_while_a_run_works_in_the_folder() {
     let f = fixture();
     let n = run(&f, |d| fs::write(d.join("a.txt"), "x\n").unwrap());
     assert_eq!(undo(&f.db, "t", &f.wt, undo_opts(n), true, 3_000), Err(Refusal::Busy));
+    // A run with no end and no worker (the daemon stopped) can be undone like any other.
     let unfinished = begin_run(&f.db, "t", &f.wt, 5_000).unwrap();
-    assert_eq!(undo(&f.db, "t", &f.wt, undo_opts(unfinished), false, 6_000), Err(Refusal::Busy));
+    assert!(undo(&f.db, "t", &f.wt, undo_opts(unfinished), false, 6_000).is_ok());
+}
+
+#[test]
+fn undo_never_overwrites_a_file_over_the_size_guard() {
+    let f = fixture();
+    let n = run(&f, |d| fs::write(d.join("a.txt"), "small\n").unwrap());
+    let big = vec![9u8; (MAX_FILE_BYTES + 10) as usize];
+    // After the run, a.txt grows past the guard: no checkpoint can hold it.
+    fs::write(f.wt.join("a.txt"), &big).unwrap();
+    let _ = undo(&f.db, "t", &f.wt, UndoOptions { run: n, snapshot_unsaved: true, ..Default::default() }, false, 3_000);
+    assert_eq!(fs::read(f.wt.join("a.txt")).unwrap(), big, "a file Neko could not save is left as it is");
+}
+
+#[test]
+fn a_failed_restore_puts_the_files_back() {
+    let f = fixture();
+    // Run 1 turns the file `a.txt` into a folder; an ignored file then lands in it.
+    let n = run(&f, |d| {
+        fs::remove_file(d.join("a.txt")).unwrap();
+        fs::create_dir(d.join("a.txt")).unwrap();
+        fs::write(d.join("a.txt/inner.txt"), "i\n").unwrap();
+    });
+    fs::write(f.wt.join("a.txt/inner.txt"), "mine\n").unwrap();
+    let after = fs::read_to_string(f.wt.join("a.txt/inner.txt")).unwrap();
+    let _ = undo(&f.db, "t", &f.wt, UndoOptions { run: n, snapshot_unsaved: true, ..Default::default() }, false, 3_000);
+    // Whatever happened, nothing the person had was lost: either undone with a redo, or untouched.
+    let kept = f.wt.join("a.txt/inner.txt").exists() || redo(&f.db, "t", &f.wt, false).is_ok();
+    assert!(kept);
+    assert_eq!(fs::read_to_string(f.wt.join("a.txt/inner.txt")).unwrap(), after);
 }
 
 fn with_remote(f: &Fixture) -> PathBuf {

@@ -1059,7 +1059,7 @@ impl Controller {
             };
             store::append_event(t, role, "Agent started in an isolated task worktree");
         })?;
-        if !planning {
+        if !planning && !claim.read_only_reply {
             run.begin(&self.db, &task.id, &directory);
         }
         let rules = neko_core::rulebook::text(&snapshot);

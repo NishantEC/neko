@@ -262,7 +262,7 @@ impl Controller {
             let snapshot = store::load(&*self.db.lock().map_err(|_| "Task storage unavailable")?)?;
             self.crew_task(&snapshot, scope, role, &id)?;
         }
-        let list = self.checkpoint_list(&id)?;
+        let list = self.checkpoint_list(&id, true)?;
         let runs: Vec<Value> = list.runs.iter().map(|r| json!({"run": r.n, "outcome": r.outcome, "files": r.files, "added": r.added, "removed": r.removed, "undone": r.undone, "skipped_large_files": r.skipped_count})).collect();
         let wanted = if args.get("whole").and_then(Value::as_bool).unwrap_or(false) { Some(None) } else { args.get("run").and_then(Value::as_u64).map(|n| Some(n as u32)) };
         let mut out = json!({"task_id": id, "runs": runs, "redo_available": list.redo, "unsaved_changes": list.unsaved});
@@ -289,7 +289,7 @@ impl Controller {
         };
         let dir = run_checkpoints::folder_of(&task)?;
         let options = neko_core::checkpoints::UndoOptions { run, through_later: back, snapshot_unsaved: snapshot_first, revert, pull_request_open: task.pull_request.as_ref().is_some_and(|p| p.is_open()) };
-        let running = self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().any(|a| a.task_id == id);
+        let running = self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().any(|a| a.task_id == id) || publish::in_flight_now(&id);
         match neko_core::checkpoints::preview_undo(&self.db, &id, &dir, options, running) {
             Err(refusal) => Ok(json!({"can_undo": false, "reason": refusal.code(), "message": refusal.message(), "note": "Nothing was changed. Tell the person why, and offer the option the message names; call undo_run again with it."}).to_string()),
             Ok(runs) => {

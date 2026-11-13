@@ -69,6 +69,12 @@ same checks and returns the `neko-action` block (`kind: undo_run`, `text: "3"`,
 optionally `back`, `snapshot`, `revert`) the model puts after its reply, so the
 person confirms with the existing one-click chat action. Read-only chat has neither.
 
+Safety: snapshots, undo, redo and expiry take turns (one process-wide lock), an
+undo is refused while a worker or a publish holds the ticket, a restore that fails
+half way puts the files back, and a file over the size guard or a folder holding
+ignored files is never overwritten (the undo refuses instead). The task view does
+not check for unsaved edits (that runs `git add -A`); the undo and the crew tools do.
+
 ### Housekeeping
 
 `parking_tick` expires checkpoints older than 14 days and a Completed ticket's
@@ -91,6 +97,7 @@ local bare remote).
 
 ### Not done
 
+- Redo has no pushed-history check; commits made outside any run since the run's start are rewound or reverted with it.
 - The native (Swift) app does not show runs or undo.
 - A goal's journal does not get the undo as its own entry; the ticket's events do.
 - No run starts directly in a person's own checkout yet, so that path is covered by

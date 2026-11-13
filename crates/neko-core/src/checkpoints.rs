@@ -306,6 +306,11 @@ fn safe_relative(path: &str) -> bool {
     !path.is_empty() && Path::new(path).components().all(|c| matches!(c, std::path::Component::Normal(_)))
 }
 
+/// A file over the size guard: no snapshot holds it, so a restore never overwrites or deletes it.
+fn left_alone(file: &Path) -> bool {
+    std::fs::symlink_metadata(file).is_ok_and(|m| m.is_file() && m.len() > MAX_FILE_BYTES)
+}
+
 /// Makes the folder's files match `target_tree`. `current_tree` is the tree of
 /// the folder as it is now (the safety snapshot just taken): files only it has
 /// are deleted, files that differ are written. Ignored files, files over the
@@ -317,6 +322,9 @@ pub fn restore_tree(dir: &Path, current_tree: &str, target_tree: &str) -> Result
             continue;
         }
         let file = top.join(&path);
+        if left_alone(&file) {
+            continue;
+        }
         if std::fs::symlink_metadata(&file).is_ok_and(|m| !m.is_dir()) {
             std::fs::remove_file(&file).map_err(|e| format!("Cannot remove {path}: {e}"))?;
         }
@@ -331,7 +339,11 @@ pub fn restore_tree(dir: &Path, current_tree: &str, target_tree: &str) -> Result
     }
     let mut write: Vec<u8> = Vec::new();
     for path in names(&top, current_tree, target_tree, "ACMRT")? {
-        if safe_relative(&path) {
+        if safe_relative(&path) && !left_alone(&top.join(&path)) {
+            let here = top.join(&path);
+            if here.is_dir() && std::fs::read_dir(&here).is_ok_and(|mut d| d.next().is_some()) {
+                return Err(format!("{path} is now a folder that holds files no checkpoint has (ignored or too large to save), so it cannot become a file again. Nothing was changed."));
+            }
             write.extend_from_slice(path.as_bytes());
             write.push(0);
         }
@@ -407,6 +419,14 @@ pub fn row(db: &Mutex<Db>, task_id: &str) -> Result<Row, String> {
     read_key(&lock(db), &format!("{ROW}{task_id}"))
 }
 
+/// Snapshots, undo, redo and expiry take turns, so an undo never restores while a run's
+/// start snapshot is being taken, and neither overwrites the other's row.
+static OPS: Mutex<()> = Mutex::new(());
+
+fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    OPS.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Rows and the index are read and written whole; one writer at a time keeps the index whole.
 static ROWS: Mutex<()> = Mutex::new(());
 
@@ -464,6 +484,7 @@ fn enforce_cap(dir: &Path, task_id: &str, row: &mut Row) {
 /// Starts a run: snapshots the folder under `<n>-start`. Returns the run number.
 /// A new run ends the chance to redo an earlier undo.
 pub fn begin_run(db: &Mutex<Db>, task_id: &str, dir: &Path, now_ms: i64) -> Result<u32, String> {
+    let _turn = one_at_a_time();
     let mut row = row(db, task_id)?;
     let n = row.next_run + 1;
     let start = capture(dir, &ref_for(task_id, &format!("{n}-start")), &format!("Neko checkpoint: start of run {n}"))?;
@@ -492,6 +513,7 @@ pub fn begin_run(db: &Mutex<Db>, task_id: &str, dir: &Path, now_ms: i64) -> Resu
 
 /// Ends a run: snapshots the folder under `<n>-end`. Returns the run as stored.
 pub fn end_run(db: &Mutex<Db>, task_id: &str, n: u32, dir: &Path, outcome: Outcome, now_ms: i64) -> Result<Run, String> {
+    let _turn = one_at_a_time();
     let end = capture(dir, &ref_for(task_id, &format!("{n}-end")), &format!("Neko checkpoint: end of run {n}"))?;
     let mut row = row(db, task_id)?;
     let run = row.runs.iter_mut().find(|r| r.n == n).ok_or("That run's checkpoint is gone")?;
@@ -658,9 +680,6 @@ fn check_undo(row: &Row, dir: &Path, options: &UndoOptions, running: bool) -> Re
     if run.undone {
         return Err(Refusal::Nothing(format!("Run {} is already undone.", run.n)));
     }
-    if run.end.is_none() {
-        return Err(Refusal::Busy);
-    }
     let later: Vec<u32> = row.runs.iter().filter(|r| r.n > run.n && !r.undone).map(|r| r.n).collect();
     if !later.is_empty() && !options.through_later {
         return Err(Refusal::LaterRuns(later));
@@ -705,6 +724,7 @@ pub fn preview_undo(db: &Mutex<Db>, task_id: &str, dir: &Path, options: UndoOpti
 /// working in the folder now. Nothing is changed unless every check passes; a
 /// safety checkpoint is taken first so the undo can be redone.
 pub fn undo(db: &Mutex<Db>, task_id: &str, dir: &Path, options: UndoOptions, running: bool, now_ms: i64) -> Result<Done, Refusal> {
+    let _turn = one_at_a_time();
     let mut row = row(db, task_id)?;
     let (run, unsaved) = check_undo(&row, dir, &options, running)?;
     if unsaved {
@@ -715,27 +735,38 @@ pub fn undo(db: &Mutex<Db>, task_id: &str, dir: &Path, options: UndoOptions, run
     let safety = push_extra(&mut row, task_id, dir, ExtraKind::Safety, &format!("before undoing run {}", run.n), now_ms)?;
     let mut undone: Vec<u32> = row.runs.iter().filter(|r| r.n >= run.n && !r.undone).map(|r| r.n).collect();
     undone.sort_unstable();
-    // The files first; the history only when asked (a revert keeps it).
-    restore_tree(dir, &safety.point.tree, &run.start.tree)?;
-    // A revert keeps the history: one new commit whose tree is the committed state the run
-    // started from (the run's uncommitted work was only ever in the files).
-    let mut reverted_by_commit = false;
-    if options.revert {
-        if let (Some(head), Some(start)) = (head_of(dir), run.start.head.as_deref()) {
-            let target = git(dir, &["rev-parse", &format!("{start}^{{tree}}")])?;
-            if git(dir, &["rev-parse", "HEAD^{tree}"])? != target {
-                let commit = text(&git_files(dir, None, &["-c", "commit.gpgsign=false", "commit-tree", &target, "-p", &head, "-m", &format!("Revert run {} (Neko)", run.n)], &[])?);
-                git(dir, &["update-ref", "-m", &format!("neko: revert run {}", run.n), "HEAD", &commit, &head])?;
-                reset_index(dir, Some(&commit))?;
-                reverted_by_commit = true;
+    // The files first, then the history (a revert keeps it). Whatever fails puts the files back.
+    let applied: Result<bool, String> = (|| {
+        restore_tree(dir, &safety.point.tree, &run.start.tree)?;
+        // A revert keeps the history: one new commit whose tree is the committed state the run
+        // started from (the run's uncommitted work was only ever in the files).
+        let mut reverted_by_commit = false;
+        if options.revert {
+            if let (Some(head), Some(start)) = (head_of(dir), run.start.head.as_deref()) {
+                let target = git(dir, &["rev-parse", &format!("{start}^{{tree}}")])?;
+                if git(dir, &["rev-parse", "HEAD^{tree}"])? != target {
+                    let commit = text(&git_files(dir, None, &["-c", "commit.gpgsign=false", "commit-tree", &target, "-p", &head, "-m", &format!("Revert run {} (Neko)", run.n)], &[])?);
+                    git(dir, &["update-ref", "-m", &format!("neko: revert run {}", run.n), "HEAD", &commit, &head])?;
+                    reset_index(dir, Some(&commit))?;
+                    reverted_by_commit = true;
+                }
             }
         }
-    }
-    if !reverted_by_commit && !options.revert {
-        reset_index(dir, run.start.head.as_deref())?;
-    } else if !reverted_by_commit {
-        reset_index(dir, head_of(dir).as_deref())?;
-    }
+        if !reverted_by_commit && !options.revert {
+            reset_index(dir, run.start.head.as_deref())?;
+        } else if !reverted_by_commit {
+            reset_index(dir, head_of(dir).as_deref())?;
+        }
+        Ok(reverted_by_commit)
+    })();
+    let reverted_by_commit = match applied {
+        Ok(reverted) => reverted,
+        Err(error) => {
+            let _ = restore_tree(dir, &run.start.tree, &safety.point.tree);
+            delete_refs(dir, &[ref_for(task_id, &safety.id)]);
+            return Err(Refusal::Failed(error));
+        }
+    };
     for r in &mut row.runs {
         if undone.contains(&r.n) {
             r.undone = true;
@@ -756,6 +787,7 @@ pub fn undo(db: &Mutex<Db>, task_id: &str, dir: &Path, options: UndoOptions, run
 
 /// Undoes the last undo: restores the safety checkpoint it took.
 pub fn redo(db: &Mutex<Db>, task_id: &str, dir: &Path, running: bool) -> Result<Done, Refusal> {
+    let _turn = one_at_a_time();
     if running {
         return Err(Refusal::Busy);
     }
@@ -765,16 +797,21 @@ pub fn redo(db: &Mutex<Db>, task_id: &str, dir: &Path, running: bool) -> Result<
     if !matching(dir, &row)? {
         return Err(Refusal::Unsaved);
     }
-    let current = capture(dir, &ref_for(task_id, "redo-from"), "Neko checkpoint: before redo")?;
-    restore_tree(dir, &current.tree, &extra.point.tree)?;
-    match (&extra.point.head, head_of(dir)) {
+    let move_to = match (&extra.point.head, head_of(dir)) {
         (Some(target), Some(now)) if *target != now => {
             if !is_ancestor(dir, &now, target) && !is_ancestor(dir, target, &now) {
                 return Err(Refusal::Failed("The branch moved to different history since the undo, so the redo cannot move it back.".into()));
             }
-            reset_index(dir, Some(target))?;
+            Some(target.clone())
         }
-        (head, _) => reset_index(dir, head.as_deref())?,
+        (head, _) => head.clone(),
+    };
+    let current = capture(dir, &ref_for(task_id, "redo-from"), "Neko checkpoint: before redo")?;
+    let applied = restore_tree(dir, &current.tree, &extra.point.tree).and_then(|()| reset_index(dir, move_to.as_deref()));
+    if let Err(error) = applied {
+        let _ = restore_tree(dir, &extra.point.tree, &current.tree);
+        delete_refs(dir, &[ref_for(task_id, "redo-from")]);
+        return Err(Refusal::Failed(error));
     }
     delete_refs(dir, &[ref_for(task_id, "redo-from")]);
     for r in &mut row.runs {
@@ -794,6 +831,7 @@ pub fn redo(db: &Mutex<Db>, task_id: &str, dir: &Path, running: bool) -> Result<
 
 /// Snapshots edits made outside any run, on request.
 pub fn snapshot_unsaved(db: &Mutex<Db>, task_id: &str, dir: &Path, now_ms: i64) -> Result<(), String> {
+    let _turn = one_at_a_time();
     let mut row = row(db, task_id)?;
     let extra = push_extra(&mut row, task_id, dir, ExtraKind::Manual, "changes made outside any run", now_ms)?;
     row.expected_tree = extra.point.tree;
@@ -830,6 +868,7 @@ fn collect(task_id: &str, run: &Run) -> Vec<String> {
 
 /// Deletes all of a ticket's checkpoints (it is Completed and parked, or gone), then `git gc --auto`.
 pub fn delete_task(db: &Mutex<Db>, task_id: &str, folder: Option<&Path>) -> Result<(), String> {
+    let _turn = one_at_a_time();
     let row = row(db, task_id)?;
     if let Some(dir) = repo_dir(&row, folder) {
         let mut refs: Vec<String> = row.runs.iter().flat_map(|r| collect(task_id, r)).collect();
@@ -843,6 +882,7 @@ pub fn delete_task(db: &Mutex<Db>, task_id: &str, folder: Option<&Path>) -> Resu
 
 /// Deletes checkpoints older than `KEEP_MS`. Returns how many refs were dropped.
 pub fn expire(db: &Mutex<Db>, now_ms: i64) -> usize {
+    let _turn = one_at_a_time();
     let mut dropped = 0;
     for task_id in tasks_with_checkpoints(db) {
         let Ok(mut row) = row(db, &task_id) else { continue };
@@ -851,7 +891,7 @@ pub fn expire(db: &Mutex<Db>, now_ms: i64) -> usize {
         let mut doomed = Vec::new();
         let keep = row.redo.as_ref().map(|r| r.extra_id.clone());
         row.runs.retain(|run| {
-            let expired = old(if run.ended_ms > 0 { run.ended_ms } else { run.started_ms }) && run.outcome != Outcome::Running;
+            let expired = old(if run.ended_ms > 0 { run.ended_ms } else { run.started_ms });
             if expired {
                 doomed.extend(collect(&task_id, run));
             }

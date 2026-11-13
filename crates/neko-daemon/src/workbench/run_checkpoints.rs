@@ -83,13 +83,13 @@ impl Controller {
     }
 
     /// One line per run, for the task view.
-    pub fn checkpoint_list(&self, task_id: &str) -> Result<CheckpointList, String> {
+    pub fn checkpoint_list(&self, task_id: &str, check_unsaved: bool) -> Result<CheckpointList, String> {
         let task = self.task_for_checkpoints(task_id)?;
         let row = cp::row(&self.db, task_id)?;
         let folder = folder_of(&task).ok();
         let busy = self.working_on(task_id);
         let unsaved = match (&folder, row.expected_tree.is_empty()) {
-            (Some(dir), false) if !busy => cp::unsaved(dir, &row).unwrap_or(false),
+            (Some(dir), false) if !busy && check_unsaved => cp::unsaved(dir, &row).unwrap_or(false),
             _ => false,
         };
         Ok(CheckpointList {
@@ -128,7 +128,7 @@ impl Controller {
         let dir = folder_of(&task)?;
         // The folder stays for the length of the restore.
         let _held = parking::InUse::take(&task_id);
-        let running = self.working_on(&task_id);
+        let running = self.working_on(&task_id) || publish::in_flight_now(&task_id);
         let now = store::now_ms();
         let message = match command {
             CheckpointCommand::Undo { run, through_later, snapshot_unsaved, revert, .. } => {
@@ -211,7 +211,7 @@ mod tests {
         let (c, _dir, worktree) = fixture(TaskStatus::ReadyForReview);
         a_run(&c, &worktree, "two\n");
         a_run(&c, &worktree, "three\n");
-        let list = c.checkpoint_list("t").unwrap();
+        let list = c.checkpoint_list("t", true).unwrap();
         assert_eq!(list.runs.len(), 2);
         assert_eq!((list.runs[0].files, list.runs[0].added, list.runs[0].removed), (1, 1, 1));
         assert_eq!(list.runs[1].outcome, "done");
@@ -229,13 +229,13 @@ mod tests {
         // A worker in the folder: refused.
         c.active.lock().unwrap().push(Active { task_id: "t".into(), cancelled: Arc::new(AtomicBool::new(false)) });
         assert!(c.checkpoint_command(undo(2, false)).unwrap_err().starts_with("checkpoint:busy:"));
-        assert!(c.checkpoint_list("t").unwrap().busy);
+        assert!(c.checkpoint_list("t", true).unwrap().busy);
         c.active.lock().unwrap().clear();
 
         let snapshot = c.checkpoint_command(undo(1, true)).unwrap();
         assert_eq!(std::fs::read_to_string(worktree.join("a.txt")).unwrap(), "one\n");
         assert!(snapshot.tasks[0].events.iter().any(|e| e.message.starts_with("checkpoint: Undid run 1, run 2")), "the ticket's history says so");
-        let list = c.checkpoint_list("t").unwrap();
+        let list = c.checkpoint_list("t", true).unwrap();
         assert!(list.runs.iter().all(|r| r.undone));
         assert_eq!(list.redo.as_deref(), Some("undo of run 1"));
         // The next agent turn is told, once.
@@ -247,10 +247,10 @@ mod tests {
 
         // Edits no checkpoint holds: refused, then kept on request.
         std::fs::write(worktree.join("a.txt"), "mine\n").unwrap();
-        assert!(c.checkpoint_list("t").unwrap().unsaved);
+        assert!(c.checkpoint_list("t", true).unwrap().unsaved);
         assert!(c.checkpoint_command(undo(2, false)).unwrap_err().starts_with("checkpoint:unsaved_changes:"));
         c.checkpoint_command(CheckpointCommand::SnapshotUnsaved { task_id: "t".into() }).unwrap();
-        assert!(!c.checkpoint_list("t").unwrap().unsaved);
+        assert!(!c.checkpoint_list("t", true).unwrap().unsaved);
     }
 
     #[test]
@@ -263,7 +263,7 @@ mod tests {
         let slot = RunSlot::default();
         slot.begin(&c.db, "t", &worktree);
         slot.end(&c.db, false, &AtomicBool::new(false));
-        let list = c.checkpoint_list("t").unwrap();
+        let list = c.checkpoint_list("t", true).unwrap();
         assert_eq!(list.runs[0].outcome, "cancelled");
         assert_eq!(list.runs[0].added, 1);
         assert_eq!(list.runs[1].outcome, "failed");
@@ -280,7 +280,7 @@ mod tests {
             store::save(&db, &snapshot).unwrap();
         }
         assert!(c.checkpoint_command(undo(1, false)).unwrap_err().contains("parked"));
-        assert!(!c.checkpoint_list("t").unwrap().restorable);
+        assert!(!c.checkpoint_list("t", true).unwrap().restorable);
         assert!(c.checkpoint_diff("t", Some(1)).unwrap().1.contains("+two"));
     }
 
