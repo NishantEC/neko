@@ -131,7 +131,7 @@ mod tests {
         // A restart reads the row the last process wrote.
         let mut fresh = Ledger::default();
         fresh.tick(&db, 400 * MIN);
-        assert_eq!(fresh.downtime().map(|(since, _)| since), Some(100 * MIN + 60_000 * 0 + ledger.persisted_ms - 100 * MIN));
+        assert_eq!(fresh.downtime().map(|(since, _)| since), Some(ledger.persisted_ms));
     }
 
     #[test]

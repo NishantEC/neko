@@ -183,7 +183,7 @@ pub fn ownership(entry: Option<&Entry>, current_hash: &str) -> Ownership {
 pub fn attach(db: &Db, state: &mut SkillState) {
     let row = read_row(db);
     state.curator = Curation {
-        on: !row.off,
+        off: row.off,
         last_run_ms: last_run_ms(db),
         skills: row
             .entries

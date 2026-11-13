@@ -122,7 +122,7 @@ mod tests {
     fn the_day_starts_at_local_midnight() {
         let tz = chrono::FixedOffset::east_opt(5 * 3600 + 1800).unwrap();
         // 2026-11-14 01:00 local is 2026-11-13 19:30 UTC.
-        let now = 1_794_598_800_000 - 3_600_000 * 0 + 0;
+        let now = 1_794_598_800_000;
         let start = day_start_ms(now, &tz);
         assert!(start <= now && now - start < 86_400_000);
         use chrono::TimeZone;

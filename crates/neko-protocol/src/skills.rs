@@ -35,8 +35,8 @@ pub struct SkillState {
 /// The skill curator as the app shows it (`neko_core::skills::curator`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Curation {
-    /// The once-a-day pass is on (it is, unless the person switched it off).
-    pub on: bool,
+    /// The person switched the once-a-day pass off (it is on by default).
+    pub off: bool,
     pub last_run_ms: i64,
     /// Skills the curator tracks: Neko-written ones, and any a lesson improved.
     pub skills: Vec<CuratedSkill>,

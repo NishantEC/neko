@@ -174,8 +174,8 @@ export function SkillsTab({ snapshot, workspace }: { snapshot: Json; workspace: 
       <Panel data-slot="skill-curator">
         <Row title="Skill curator" description="Once a day, when the Mac is idle, tidies the lessons a skill has gathered: merges duplicates and drops what a newer lesson contradicts. Changes show as a diff. It applies by itself only to skills Neko wrote and you have not edited; everything else is a proposal. Nothing is deleted: removed text moves to an Archive section.">
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => void run(() => skillsCmd("SetCurator", { on: !curator.on }))}>{curator.on === false ? "Turn the curator on" : "Turn the curator off"}</Button>
-            <span className="text-xs text-muted-foreground">{curator.on === false ? "Off." : curator.last_run_ms ? `Last pass ${new Date(Number(curator.last_run_ms)).toLocaleString()}.` : "Has not run yet."}</span>
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void run(() => skillsCmd("SetCurator", { on: !!curator.off }))}>{curator.off ? "Turn the curator on" : "Turn the curator off"}</Button>
+            <span className="text-xs text-muted-foreground">{curator.off ? "Off." : curator.last_run_ms ? `Last pass ${new Date(Number(curator.last_run_ms)).toLocaleString()}.` : "Has not run yet."}</span>
           </div>
         </Row>
         {recent.slice(0, 3).map((r) => (
