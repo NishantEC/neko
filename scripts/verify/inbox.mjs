@@ -26,20 +26,24 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await shot("inbox-closed");
   await a11y("inbox with closed items");
 
-  // Reopen from the right-click menu.
-  await rows.first().click({ button: "right" });
+  // Reopen from the right-click menu. Other areas (goals) may have closed items of their own, so
+  // work from the seeded reasons and the list is capped, so look for the row itself instead of counting.
+  const open = () => page.locator("[data-slot='needs-you-item']:not([data-goal])");
+  const openBefore = await open().count();
+  await rows.filter({ hasText: "PR merged" }).first().click({ button: "right" });
   const menu = page.locator("[data-slot='neko-context-menu']");
   await menu.waitFor();
   check(/Reopen/.test(await menu.innerText()), "the right-click menu offers Reopen");
   await menu.getByText("Reopen", { exact: true }).click();
-  await page.waitForFunction(() => document.querySelectorAll("[data-slot='needs-you-item']:not([data-goal])").length === 4);
-  check((await rows.count()) === 4, "a reopened item leaves Closed recently and returns to Needs you");
+  await page.waitForFunction((n) => document.querySelectorAll("[data-slot='needs-you-item']:not([data-goal])").length === n, openBefore + 1);
+  check((await rows.filter({ hasText: "PR merged" }).count()) === 0, "a reopened item leaves Closed recently and returns to Needs you");
 
   // Reopen from the row action.
-  await rows.first().hover();
-  await rows.first().getByRole("button", { name: /^Reopen/ }).click();
-  await page.waitForFunction(() => document.querySelectorAll("[data-slot='needs-you-item']:not([data-goal])").length === 5);
-  check((await rows.count()) === 3, "the row action reopens too");
+  const target = rows.filter({ hasText: "Expired" }).first();
+  await target.hover();
+  await target.getByRole("button", { name: /^Reopen/ }).click();
+  await page.waitForFunction((n) => document.querySelectorAll("[data-slot='needs-you-item']:not([data-goal])").length === n, openBefore + 2);
+  check((await rows.filter({ hasText: "Expired" }).count()) === 0, "the row action reopens too");
 
   // Marking one done closes it with "Done by you".
   await page.locator("[data-slot='needs-you-item']:not([data-goal])").first().getByRole("button", { name: /Mark .* done/ }).first().click();
