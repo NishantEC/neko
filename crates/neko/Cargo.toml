@@ -15,6 +15,7 @@ gpui_platform = { path = "../../.gpui-fork-patched/crates/gpui_platform" }
 name = "neko"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [[bin]]
 name = "neko"
