@@ -1672,6 +1672,11 @@ impl StallGuard {
         self.running.set(self.running.get().saturating_add(1));
     }
 
+    /// A tool that is not a shell command (an edit, a subagent) ended.
+    pub(crate) fn tool_finished(&self) {
+        self.running.set(self.running.get().saturating_sub(1));
+    }
+
     pub(crate) fn command_finished(&self, command: Option<&str>, exit_code: Option<i64>, output: Option<&str>) -> Result<(), String> {
         self.running.set(self.running.get().saturating_sub(1));
         if exit_code == Some(0) {

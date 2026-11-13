@@ -200,7 +200,7 @@ pub(crate) struct Parser {
     pub failure: Option<String>,
     pub completed: bool,
     last_text: Option<String>,
-    stall: super::StallGuard,
+    stall: std::rc::Rc<super::StallGuard>,
     /// Report the run as AI SDK chunks (`chunks::STREAM_EVENT` events).
     stream_text: bool,
     claude: super::chunks::ClaudeChunks,
@@ -208,7 +208,12 @@ pub(crate) struct Parser {
 
 impl Parser {
     pub(crate) fn new(agent: Agent, extraction: bool) -> Self {
-        Self { agent, extraction, commands: Default::default(), answer: None, failure: None, completed: false, last_text: None, stall: super::StallGuard::new(), stream_text: false, claude: Default::default() }
+        Self { agent, extraction, commands: Default::default(), answer: None, failure: None, completed: false, last_text: None, stall: std::rc::Rc::new(super::StallGuard::new()), stream_text: false, claude: Default::default() }
+    }
+
+    /// The run's quiet-stall guard, shared with the process loop.
+    pub(crate) fn stall_guard(&self) -> std::rc::Rc<super::StallGuard> {
+        self.stall.clone()
     }
 
     /// Also report the reply text as it is written (never for extraction).
@@ -233,12 +238,15 @@ impl Parser {
     /// A line from a subagent (it has a parent tool use), not the main session.
     fn claude_parent_of(&self, value: &serde_json::Value) -> bool { !value["parent_tool_use_id"].is_null() }
 
-    fn receipt(&self, command: Option<&str>, exit_code: Option<i64>, output: Option<&str>, on_event: &mut dyn FnMut(String)) -> Result<(), String> {
+    /// `started`: the tool's start was already counted (Claude Code reports
+    /// it). OpenCode reports a tool only when it ends, so it is counted here,
+    /// and only the repeated-failure check applies to it, never the quiet limit.
+    fn receipt(&self, command: Option<&str>, exit_code: Option<i64>, output: Option<&str>, started: bool, on_event: &mut dyn FnMut(String)) -> Result<(), String> {
         on_event("Command completed".into());
         on_event(crate::workbench::verification_command_event(command, exit_code, output));
-        // Start events are not tracked for these CLIs, so only the repeated
-        // identical failure check applies, never the quiet limit.
-        self.stall.command_started();
+        if !started {
+            self.stall.command_started();
+        }
         self.stall.command_finished(command, exit_code, output)
     }
 
@@ -253,6 +261,9 @@ impl Parser {
                                 return Err("Extraction attempted a tool call; output discarded".into());
                             }
                             let name = block["name"].as_str().unwrap_or("");
+                            // A tool in flight is not silence: a long build or a
+                            // subagent may say nothing until it ends.
+                            self.stall.command_started();
                             if name == "Bash" {
                                 let command = block["input"]["command"].as_str().map(str::to_owned);
                                 self.commands.insert(block["id"].as_str().unwrap_or("").to_owned(), command);
@@ -285,7 +296,10 @@ impl Parser {
                         let bash = text.as_deref().filter(|_| is_bash).map(|t| { let (code, body) = claude_exit(t, block["is_error"].as_bool() == Some(true)); (code, body.to_owned()) });
                         self.claude.tool_result(block, bash, on_event);
                     }
-                    let Some(command) = self.commands.remove(id) else { continue };
+                    let Some(command) = self.commands.remove(id) else {
+                        self.stall.tool_finished();
+                        continue;
+                    };
                     let output = match &block["content"] {
                         serde_json::Value::String(s) => Some(s.clone()),
                         serde_json::Value::Array(parts) => parts.iter().map(|p| p["text"].as_str()).collect::<Option<Vec<_>>>().map(|parts| parts.join("\n")),
@@ -296,7 +310,7 @@ impl Parser {
                         let (code, body) = claude_exit(output, is_error);
                         (Some(code), Some(body))
                     }).unwrap_or((is_error.then_some(1), None));
-                    self.receipt(command.as_deref(), exit_code, body, on_event)?;
+                    self.receipt(command.as_deref(), exit_code, body, true, on_event)?;
                 }
             }
             Some("stream_event") if self.stream_text && value["parent_tool_use_id"].is_null() => {
@@ -336,7 +350,7 @@ impl Parser {
                 if tool == "bash" && matches!(state["status"].as_str(), Some("completed" | "error")) {
                     let exit = state["metadata"]["exit"].as_i64().or_else(|| (state["status"] == "error").then_some(1));
                     let output = state["output"].as_str().or_else(|| state["error"].as_str());
-                    self.receipt(state["input"]["command"].as_str(), exit, output, on_event)?;
+                    self.receipt(state["input"]["command"].as_str(), exit, output, false, on_event)?;
                 } else if matches!(tool, "edit" | "write" | "patch" | "multiedit") {
                     on_event("Updating workspace files".into());
                 }
@@ -505,7 +519,12 @@ pub(crate) fn run_with(
     let mut parser = Parser::new(agent, extraction).streaming(stream_text);
     let mut pending: Vec<u8> = Vec::new();
     let mut oversized = false;
-    let output = execute(command, prompt.as_bytes(), cancel, spec.timeout, |bytes| {
+    // Claude Code reports each tool's start and end, so ten minutes of silence
+    // with no tool in flight means a stalled model. OpenCode reports a tool
+    // only when it ends, so silence proves nothing there: the wall clock bounds it.
+    let guard = parser.stall_guard();
+    let quiet = (agent == Agent::Claude && !extraction).then_some((&*guard, super::QUIET_LIMIT));
+    let output = execute_watched(command, prompt.as_bytes(), cancel, spec.timeout, quiet, |bytes| {
         for &byte in bytes {
             if byte == b'\n' {
                 // An oversized event (a huge tool result) is skipped, not fatal.
@@ -695,6 +714,21 @@ mod tests {
         assert!(receipts[0].contains("\"exit_code\":101") && receipts[0].contains("cargo test"));
         assert!(receipts[1].contains("\"exit_code\":0"));
         assert!(events.iter().any(|e| e.starts_with("USAGE ") && e.contains("0.02")));
+    }
+
+    #[test]
+    fn claude_silence_only_counts_while_no_tool_is_in_flight() {
+        let mut p = Parser::new(Agent::Claude, false);
+        let guard = p.stall_guard();
+        let mut line = |l: &str| p.line(l.as_bytes(), &mut |_| {}).unwrap();
+        assert!(!guard.quiet_allowed(), "nothing running: silence is a stall");
+        line(r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cargo build"}}]}}"#);
+        line(r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Task","input":{}}]}}"#);
+        assert!(guard.quiet_allowed(), "a build and a subagent are in flight");
+        line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}"#);
+        assert!(guard.quiet_allowed(), "the subagent still runs");
+        line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"ok"}]}}"#);
+        assert!(!guard.quiet_allowed());
     }
 
     #[test]
