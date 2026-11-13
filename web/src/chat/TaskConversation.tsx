@@ -29,6 +29,8 @@ import { chatFor, sendText, taskSignature, useNekoChat } from "@/chat/sdk/chats"
 import { isToolPart, type NekoUIMessage } from "@/chat/sdk/types";
 import { messageText, receiptOfPart } from "@/chat/sdk/parts";
 import { HandoffRow, useHideCrew } from "@/chat/crew";
+import { useWorkbench } from "@/useStore";
+import { isTurnRunning, ModePicker, QueuedMessages, queuedFor, useQueueSend, type DeliveryMode } from "@/work/queue";
 
 const RECENT = 3;
 
@@ -245,15 +247,22 @@ export function TaskComposer({ task, ui }: { task: Task; ui: Ui }) {
   };
   const running = ["Queued", "Planning", "Building", "Reviewing"].includes(task.status);
   const stop = taskActions(task, {}).find((a) => a.id === "stop");
+  // While a turn runs a message queues (the daemon's durable queue) and the person picks when it
+  // arrives: after the turn (default), steer now (⌘↩), or interrupt and restart.
+  const { snapshot } = useWorkbench();
+  const inTurn = isTurnRunning(task.status);
+  const queued = queuedFor(snapshot, id);
+  const [mode, setMode] = useState<DeliveryMode>("after_turn");
+  const enqueue = useQueueSend(id);
 
-  const send = async () => {
+  const send = async (as?: DeliveryMode) => {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     setSending(true);
     setError(null);
-    // The reply goes the SDK's way; the daemon runs `ReplyToTask` and the
+    // A reply to a task between turns goes the SDK's way; the daemon runs `ReplyToTask` and the
     // conversation refills from its log.
-    const sent = await sendText(chatFor(`task:${id}`), trimmed);
+    const sent = inTurn ? await enqueue(trimmed, as ?? mode) : await sendText(chatFor(`task:${id}`), trimmed);
     if (sent.ok) change("");
     else setError(`${sent.error} Your text is still here.`);
     setSending(false);
@@ -270,16 +279,28 @@ export function TaskComposer({ task, ui }: { task: Task; ui: Ui }) {
     <ChatInput
       text={text}
       onTextChange={change}
-      onSendMessage={send}
+      onSendMessage={() => void send()}
       sending={sending}
       isGenerating={running}
       onStop={() => stop?.run?.(ui)}
       error={error}
       maxLength={2048}
       placeholder={PLACEHOLDER[task.status] ?? "Redirect the agent. It pauses and replans…"}
-      tray={tray}
+      tray={tray || inTurn || queued.length ? (
+        <>
+          {tray}
+          {inTurn || queued.length ? (
+            <ComposerBanner.Attachment>
+              <ComposerBanner.Root data-slot="queue-tray" variant="default" density="comfortable">
+                <QueuedMessages taskId={id} queued={queued} />
+                {inTurn ? <ModePicker mode={mode} onMode={setMode} /> : null}
+              </ComposerBanner.Root>
+            </ComposerBanner.Attachment>
+          ) : null}
+        </>
+      ) : null}
       onKeyDown={(e) => {
-        if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) void send();
+        if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) void send(inTurn && (e.metaKey || e.ctrlKey) ? "steer_now" : undefined);
       }}
     />
   );

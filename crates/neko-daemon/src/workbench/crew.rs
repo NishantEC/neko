@@ -272,7 +272,7 @@ impl Controller {
                 (met, state, detail)
             };
             let waited = started.elapsed();
-            if met || waited >= deadline || !scope.crew.is_some() || scope.cancelled.load(Ordering::Acquire) {
+            if met || waited >= deadline || scope.cancelled.load(Ordering::Acquire) {
                 let ended = scope.cancelled.load(Ordering::Acquire);
                 return Ok(json!({"met": met, "timed_out": !met && !ended, "run_ended": ended, "state": state, "waited_seconds": waited.as_secs(), "status": detail}).to_string());
             }

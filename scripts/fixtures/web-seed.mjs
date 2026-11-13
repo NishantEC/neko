@@ -112,6 +112,7 @@ export function webSeed(now = Date.now()) {
     task(now, { title: "Move the uploads bucket to the new region", status: "Cancelled", ago: 7 * HOUR }),
     task(now, { title: "Add a retry to the webhook sender", status: "ReadyForReview", ago: 6 * HOUR, result: REVIEWED, pr: pullRequest("acme-api", 105, { state: "OPEN" }) }),
     task(now, { title: "Speed up the search index rebuild", status: "Failed", workspace: "ws-web", ago: 6 * HOUR, result: "Its checks failed twice: the benchmark is flaky on this machine." }),
+    task(now, { title: "Rework the export batching", status: "Building", ago: 40 * MINUTE }),
     task(now, { title: "Make the order list sortable by date", status: "AwaitingApproval", workspace: "ws-web", ago: 5 * HOUR }),
     task(now, { title: "Validate phone numbers on the profile form", status: "AwaitingApproval", workspace: "ws-web", ago: 4.5 * HOUR }),
     task(now, { title: "Fix the crash when a breadcrumb is circular", status: "AwaitingApproval", ago: 4 * HOUR }),

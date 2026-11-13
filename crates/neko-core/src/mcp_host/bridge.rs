@@ -303,6 +303,18 @@ mod tests {
         assert!(action("neko_call_tool", serde_json::json!({})).is_err());
     }
     #[test]
+    fn crew_tools_map_to_crew_actions_and_every_one_has_a_definition() {
+        for tool in neko_protocol::crew::TOOLS {
+            assert!(matches!(action(tool, serde_json::json!({})).unwrap(), BridgeAction::Crew { .. }), "{tool}");
+        }
+        assert!(action("list_tasks", serde_json::json!("x")).is_err());
+        let mut defined: Vec<String> = crew_definitions().iter().map(|t| t.name.to_string()).collect();
+        let mut roles: Vec<String> = neko_protocol::crew::TOOLS.iter().map(|t| t.to_string()).collect();
+        defined.sort();
+        roles.sort();
+        assert_eq!(defined, roles, "the schema table and the role table list the same tools");
+    }
+    #[test]
     fn input_frame_is_bounded_before_json_parsing() {
         use tokio::io::AsyncReadExt;
         tokio::runtime::Builder::new_current_thread()

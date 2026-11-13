@@ -405,3 +405,19 @@ fn schedule_makes_a_one_off_and_refuses_the_past() {
     assert!(call(&c, &lease, "schedule", json!({"name": "Past", "prompt": "x", "at_unix_ms": 1000})).is_err());
     assert!(call(&c, &lease, "schedule", json!({"name": "None", "prompt": "x"})).is_err());
 }
+
+#[test]
+fn a_delegated_task_is_linked_to_the_reply_that_opened_it_for_its_crew_line() {
+    let (c, db, _workspace, _repo) = fixture();
+    let pending = neko_chat::begin_turn(&db.lock().unwrap(), "Fix the login and the export").unwrap();
+    let lease = c.mcp.crew_lease(&format!("chat:{pending}"), CrewRole::Full).unwrap();
+    let first = make_task(&c, &lease, "login");
+    let second = make_task(&c, &lease, "export");
+    // Linked while the turn still runs, and kept when it finishes with no proposals of its own.
+    let linked = neko_chat::load(&db.lock().unwrap()).unwrap().into_iter().find(|m| m.id == pending).unwrap();
+    assert_eq!(linked.ticket_ids, [first.clone(), second.clone()]);
+    neko_chat::finish_turn(&db.lock().unwrap(), &pending, "Opened two tasks.", vec![], false).unwrap();
+    let done = neko_chat::load(&db.lock().unwrap()).unwrap().into_iter().find(|m| m.id == pending).unwrap();
+    assert!(!done.pending);
+    assert_eq!(done.ticket_ids, [first, second]);
+}
