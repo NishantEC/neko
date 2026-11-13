@@ -22,9 +22,9 @@ the daemon, not that list, is the authority), OpenCode through its config.
 
 | Tool | Full chat | Read-only chat | A ticket's own run |
 | --- | --- | --- | --- |
-| `list_tasks`, `task_status` | yes | yes (its workspace when scoped) | yes (its ticket's workspace) |
+| `list_tasks`, `task_status` | yes | yes (its workspace when scoped, else only the active profile's workspaces) | yes (its ticket's workspace) |
 | `wait_for` (task or goal, until a state or a timeout, max 30 min) | yes | no | yes |
-| `create_task` (title, request in the person's words, workspace, folder, optional goal) | yes | no | sub-tasks of its own ticket only, same workspace, never from a read-only ticket or a watch's ticket |
+| `create_task` (title, request in the person's words, workspace, folder, optional goal) | yes | no | sub-tasks of its own ticket only, same workspace; never from planning, a read-only ticket, a watch's ticket or a ticket that is itself a delegated sub-task (no chains) |
 | `steer_task`, `cancel_task`, `schedule` | yes | no | no |
 | `save_artifact`, `show_artifact` | yes | no | no |
 
@@ -38,14 +38,18 @@ watches get none. Dropping the lease (run end, Stop) ends the capability and any
 Behaviour worth knowing:
 
 - **Idempotent.** Mutating calls (`create_task`, `steer_task`, `cancel_task`,
-  `schedule`) cache their result under `run id + tool + arguments` (or the caller's
-  `idempotency_key`), bounded to 200 rows in `neko_crew_idem_v1`; a repeat returns
-  the first result with `duplicate: true` and does nothing.
+  `schedule`) run one at a time and cache their result under `run id + tool +
+  arguments` (or the caller's `idempotency_key`), 200 rows in `neko_crew_idem_v1`;
+  an identical call within two minutes is a retry and returns the first result
+  with `duplicate: true`, doing nothing. After that, or with another
+  `idempotency_key`, it is a new request. Every call also re-checks the agent
+  profile revision the lease was issued under.
 - **Audited.** Each mutating call leaves a `crew` event on the task
   ("chat: queued a message (steer now): …", "Opened by chat: …", "cancelled the
   task").
-- **create_task** makes an ordinary ticket (`CreateTask[InFolder]`, `request` kept
-  verbatim). From the full chat it builds without a plan approval
+- **create_task** makes an ordinary ticket (`CreateTask[InFolder]`). Only the full chat's `request` is kept as the ticket's
+  `request` (the person's words); a sub-task's text is an agent's and is never
+  presented to its builder as the person's. From the full chat it builds without a plan approval
   (`start_when_planned`, as for a goal: the person asked their own chat); a
   sub-task still waits for approval. A `goal` object attaches a goal, which waits
   **paused** until the person reads its check, same as a `neko-goal` block. The
@@ -79,14 +83,16 @@ task (`neko_cmdq_v1:<task_id>`) and an index, **never the snapshot** (readers ge
 has an id, a kind (send, steer, interrupt, answer), a mode, text, a state (queued,
 delivered, cancelled, dropped), its source and how it was delivered. The same
 `(task, id)` never queues twice, even after delivery, so a web retry is one
-message. 32 queued per task; 12 settled kept.
+message. 32 queued per task, 2 KB each (what a reply or note accepts); 12 settled
+kept per task. Readers' snapshots carry only the queued ones; `task_status` reads
+the task's own rows.
 
 Delivery (`Controller::deliver_queued`, every scheduler tick and right after a
 message is queued; `plan()` is the whole rule):
 
 | Mode | Task is in a turn | Task is between turns |
 | --- | --- | --- |
-| `after_turn` (default) | waits | delivered as a reply (a task that has not started takes a note) |
+| `after_turn` (default) | waits (a build's turn includes its independent review) | delivered as a reply (a task that has not started takes a note) |
 | `steer_now` | into the live session if the runtime takes input mid-turn, **else waits for the turn boundary** (the entry says so) | same as above |
 | `interrupt_restart` | stops the worker and restarts the turn with the message (`ReplyToTask`) | same as a reply |
 
@@ -94,9 +100,13 @@ No runtime Neko drives takes input mid-turn today (`claude -p` and `codex exec`
 read their prompt once), so the real injector declines and `steer_now` arrives at
 the next boundary, with a visible reason. The seam is `deliver_queued_with(live)`;
 a runtime that can will plug in there. Further messages join a reply that already
-waits, in order. A cancelled task's entries are dropped with a reason; a taken-back
-one is never delivered. Delivery is at-least-once: the entry is settled right after
-the command applies, so a crash in between could deliver it again.
+waits, in order, and reach the agent as user notes. One delivery pass runs at a time
+(a process-wide lock shared with Cancel, and each entry is re-checked under it), so a
+message goes out once and a taken-back one never does. A message the agent cannot
+take (its reply inbox holds 32 unread) waits; any other failure drops that entry
+with the error and the rest carry on. A cancelled task's entries are dropped with a
+reason. Delivery is at-least-once across a crash: the entry is settled right after
+the command applies.
 
 Web (`web/src/work/queue.tsx`, `TaskComposer`): while a task is planning, building
 or reviewing, the composer shows the three modes (default after this turn; ⌘↩ sends

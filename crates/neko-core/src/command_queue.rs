@@ -77,7 +77,7 @@ pub fn enqueue(
         return Err("A message cannot be empty".into());
     }
     if text.len() > MAX_QUEUED_TEXT {
-        return Err(format!("A message is limited to {} KB", MAX_QUEUED_TEXT / 1024));
+        return Err(format!("A message is limited to {MAX_QUEUED_TEXT} bytes"));
     }
     let mut rows = of_task(db, task_id)?;
     if let Some(id) = id.filter(|id| !id.is_empty()) {
@@ -141,15 +141,6 @@ pub fn queued(db: &Db) -> Result<Vec<QueuedMessage>, String> {
     let mut out = Vec::new();
     for task in tasks_with_entries(db)? {
         out.extend(of_task(db, &task)?.into_iter().filter(|m| m.state == QueueState::Queued));
-    }
-    Ok(out)
-}
-
-/// What readers see: every task's queued entries and its recent settled ones.
-pub fn all(db: &Db) -> Result<Vec<QueuedMessage>, String> {
-    let mut out = Vec::new();
-    for task in tasks_with_entries(db)? {
-        out.extend(of_task(db, &task)?);
     }
     Ok(out)
 }

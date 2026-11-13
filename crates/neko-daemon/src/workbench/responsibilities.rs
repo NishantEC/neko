@@ -443,7 +443,7 @@ impl Controller {
         cancel: &AtomicBool,
         on_event: impl FnMut(String),
     ) -> Result<String, String> {
-        self.with_lease(run_id, authority, cancel, false, |bridge| {
+        self.with_lease(run_id, authority, cancel, None, |bridge| {
             native_runner::run_with_bridge(spec, bridge, cancel, on_event)
         })
     }
@@ -454,10 +454,12 @@ impl Controller {
         run_id: &str,
         authority: &RunAuthority,
         cancel: &AtomicBool,
+        may_open_tasks: bool,
         on_event: impl FnMut(String),
     ) -> Result<String, String> {
-        // A ticket's own builder and planner runs get the crew tools for that ticket.
-        self.with_lease(run_id, authority, cancel, true, |bridge| {
+        // A ticket's own builder and planner runs get the crew tools for that ticket;
+        // only a builder may open sub-tasks (planning starts unapproved).
+        self.with_lease(run_id, authority, cancel, Some(may_open_tasks), |bridge| {
             native_runner::run_session_with_bridge(spec, bridge, session, cancel, on_event)
         })
     }
@@ -466,7 +468,7 @@ impl Controller {
         run_id: &str,
         authority: &RunAuthority,
         cancel: &AtomicBool,
-        crew: bool,
+        crew: Option<bool>,
         run: impl FnOnce(&native_runner::BridgeConfig) -> Result<String, String>,
     ) -> Result<String, String> {
         if cancel.load(Ordering::Acquire) {
@@ -487,10 +489,12 @@ impl Controller {
             authority.connections.clone(),
             authority.profile_revision,
         )?;
-        if crew {
+        if let Some(may_open) = crew {
             if let Some(ticket_id) = authority.task.clone() {
-                // Watches and read-only tickets may look and wait, never open work.
-                let may_create = authority.responsibility.is_none() && !state.task_read_only.contains(&ticket_id);
+                // Watches, read-only tickets, planning, and tickets that are themselves a
+                // delegated sub-task may look and wait, never open work (no chains of tasks).
+                let delegated = neko_core::crew::origin_of(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &ticket_id).ok().flatten().is_some_and(|o| o.starts_with("ticket:"));
+                let may_create = may_open && authority.responsibility.is_none() && !state.task_read_only.contains(&ticket_id) && !delegated;
                 self.mcp.grant_crew(&lease, neko_protocol::crew::CrewRole::Task { ticket_id, may_create });
             }
         }
@@ -838,7 +842,7 @@ mod tests {
         .unwrap();
         let cancel = AtomicBool::new(false);
         let mut token = String::new();
-        let result = controller.with_lease("run", &authority, &cancel, false, |bridge| {
+        let result = controller.with_lease("run", &authority, &cancel, None, |bridge| {
             token = bridge.token.clone();
             let request = || neko_protocol::mcp_host::BridgeRequest {
                 token: Secret(bridge.token.clone()),
@@ -894,7 +898,7 @@ mod tests {
                 task_id: "t".into(),
                 cancelled: cancel.clone(),
             });
-        let result = controller.with_lease("task-run", &authority, &cancel, true, |bridge| {
+        let result = controller.with_lease("task-run", &authority, &cancel, Some(true), |bridge| {
             controller
                 .command(Command::CancelTask {
                     task_id: "t".into(),
@@ -935,7 +939,7 @@ mod tests {
         }
         assert!(
             controller
-                .with_lease("run", &authority, &AtomicBool::new(false), false, |_| panic!(
+                .with_lease("run", &authority, &AtomicBool::new(false), None, |_| panic!(
                     "revoked authority must not launch a model"
                 ))
                 .is_err()
@@ -1003,7 +1007,7 @@ mod tests {
             .unwrap();
             assert!(
                 controller
-                    .with_lease("builder", &authority, &AtomicBool::new(false), true, |_| panic!(
+                    .with_lease("builder", &authority, &AtomicBool::new(false), Some(true), |_| panic!(
                         "revoked automatic authority must never launch builder"
                     ))
                     .is_err(),

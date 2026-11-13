@@ -15,6 +15,14 @@ use serde_json::{json, Value};
 const WAIT_POLL: Duration = Duration::from_millis(1000);
 const MAX_ARGUMENT_BYTES: usize = 262_144;
 
+/// One delivery at a time (the tick, a steer call and the web can all ask), and a
+/// taken-back message cannot slip out while one is in flight. Order: this, then the
+/// controller's own locks.
+static DELIVERY: Mutex<()> = Mutex::new(());
+/// Mutating tool calls run one at a time, so two identical calls cannot both miss the
+/// idempotency cache and both do the work.
+static MUTATING: Mutex<()> = Mutex::new(());
+
 /// What the delivery loop does with one queued message right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Plan {
@@ -80,10 +88,12 @@ fn required(args: &Value, key: &str) -> Result<String, String> {
 }
 
 /// Whether the run's role may see this task at all.
-fn visible(role: &CrewRole, scope_workspace: &str, own_workspace: Option<&str>, task: &Task) -> bool {
+fn visible(role: &CrewRole, scope_workspace: &str, own_workspace: Option<&str>, task: &Task, snapshot: &Snapshot) -> bool {
     match role {
         CrewRole::Full => true,
-        CrewRole::ReadOnly => scope_workspace.is_empty() || task.workspace_id == scope_workspace,
+        // Without a chosen workspace, only the active agent profile's own workspaces.
+        CrewRole::ReadOnly if scope_workspace.is_empty() => snapshot.agent_profiles.owner(&task.workspace_id) == snapshot.agent_profiles.active_profile_id,
+        CrewRole::ReadOnly => task.workspace_id == scope_workspace,
         CrewRole::Task { .. } => own_workspace.is_some_and(|w| w == task.workspace_id),
     }
 }
@@ -107,10 +117,15 @@ impl Controller {
         if !args.is_object() {
             return Err("Arguments must be a JSON object".into());
         }
+        // The same fence `bridge()` applies: a run started under another profile revision has no authority now.
+        if store::load(&*self.db.lock().map_err(|_| "Task storage unavailable")?)?.agent_profiles.revision != scope.profile_revision {
+            return Err("Agent profile authority changed; start a new run".into());
+        }
         let mutating = matches!(tool, "create_task" | "steer_task" | "cancel_task" | "schedule");
         let key = rows::idem_key(&scope.run_id, tool, &args);
+        let _one_at_a_time = mutating.then(|| MUTATING.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
         if mutating {
-            let cached = rows::cached_result(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &key)?;
+            let cached = rows::cached_result(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &key, store::now_ms())?;
             if let Some(cached) = cached {
                 let mut value: Value = serde_json::from_str(&cached).unwrap_or_else(|_| json!({"result": cached}));
                 if let Some(object) = value.as_object_mut() {
@@ -132,7 +147,7 @@ impl Controller {
             _ => Err(format!("Unknown tool {tool}")),
         };
         if let (true, Ok(text)) = (mutating, &result) {
-            let _ = rows::cache_result(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &key, text);
+            let _ = rows::cache_result(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &key, text, store::now_ms());
         }
         result
     }
@@ -160,7 +175,7 @@ impl Controller {
             .tasks
             .iter()
             .find(|t| t.id == id)
-            .filter(|t| visible(role, &scope.workspace_id, own.as_deref(), t))
+            .filter(|t| visible(role, &scope.workspace_id, own.as_deref(), t, snapshot))
             .ok_or_else(|| format!("No task {id} that this run can see"))
     }
 
@@ -176,7 +191,7 @@ impl Controller {
         let mut tasks: Vec<&Task> = snapshot
             .tasks
             .iter()
-            .filter(|t| visible(role, &scope.workspace_id, own.as_deref(), t))
+            .filter(|t| visible(role, &scope.workspace_id, own.as_deref(), t, &snapshot))
             .filter(|t| workspace.as_ref().is_none_or(|w| &t.workspace_id == w))
             .filter(|t| status.as_ref().is_none_or(|s| norm(&format!("{:?}", t.status)) == *s))
             .collect();
@@ -202,7 +217,7 @@ impl Controller {
         Ok(json!({"tasks": list, "total": tasks.len(), "open_delegated": open, "delegation_cap": rows::cap(&db)?}).to_string())
     }
 
-    fn status_json(snapshot: &Snapshot, task: &Task) -> Value {
+    fn status_json(snapshot: &Snapshot, queue_rows: &[QueuedMessage], task: &Task) -> Value {
         let goal = snapshot.goals.iter().find(|g| g.ticket_id.as_deref() == Some(&task.id));
         let summary = if !task.result.trim().is_empty() {
             task.result.clone()
@@ -219,16 +234,17 @@ impl Controller {
                 "turns": g.turns, "max_turns": g.budget.max_turns, "verdict": g.verdict, "reason": clip(&g.reason, 300),
                 "evidence": g.ledger.iter().rev().take(3).map(|c| json!({"command": clip(&c.command, 160), "exit_code": c.exit_code, "passed": c.passed(), "source": c.source, "tail": clip(&c.tail, 300)})).collect::<Vec<_>>(),
             })),
-            "queued_messages": snapshot.queued_messages.iter().filter(|m| m.task_id == task.id).map(|m| json!({"id": m.id, "mode": m.mode, "state": m.state, "text": clip(&m.text, 120), "detail": m.detail})).collect::<Vec<_>>(),
+            "queued_messages": queue_rows.iter().map(|m| json!({"id": m.id, "mode": m.mode, "state": m.state, "text": clip(&m.text, 120), "detail": m.detail})).collect::<Vec<_>>(),
             "recent_events": task.events.iter().rev().take(5).rev().map(|e| json!({"role": e.role, "message": clip(&e.message, 200)})).collect::<Vec<_>>(),
         })
     }
 
     fn crew_status(&self, scope: &neko_core::mcp_host::capability::Scope, role: &CrewRole, args: &Value) -> Result<String, String> {
         let id = required(args, "task_id")?;
-        let snapshot = store::load(&*self.db.lock().map_err(|_| "Task storage unavailable")?)?;
+        let db = self.db.lock().map_err(|_| "Task storage unavailable")?;
+        let snapshot = store::load(&db)?;
         let task = self.crew_task(&snapshot, scope, role, &id)?;
-        Ok(Self::status_json(&snapshot, task).to_string())
+        Ok(Self::status_json(&snapshot, &queue::of_task(&db, &id)?, task).to_string())
     }
 
     fn crew_wait(&self, scope: &neko_core::mcp_host::capability::Scope, role: &CrewRole, args: &Value) -> Result<String, String> {
@@ -242,7 +258,14 @@ impl Controller {
         let started = Instant::now();
         let deadline = Duration::from_secs_f64(seconds);
         loop {
-            let snapshot = store::load(&*self.db.lock().map_err(|_| "Task storage unavailable")?)?;
+            let (snapshot, queues) = {
+                let db = self.db.lock().map_err(|_| "Task storage unavailable")?;
+                let snapshot = store::load(&db)?;
+                let ids = [task_id.clone(), goal_id.as_ref().and_then(|g| snapshot.goals.iter().find(|x| &x.id == g)).and_then(|g| g.ticket_id.clone())];
+                let queues: Vec<QueuedMessage> = ids.into_iter().flatten().map(|id| queue::of_task(&db, &id)).collect::<Result<Vec<_>, _>>()?.concat();
+                (snapshot, queues)
+            };
+            let queue_of = |id: &str| -> Vec<QueuedMessage> { queues.iter().filter(|m| m.task_id == id).cloned().collect() };
             let (met, state, detail) = if let Some(id) = &task_id {
                 let task = self.crew_task(&snapshot, scope, role, id)?;
                 let state = format!("{:?}", task.status);
@@ -251,7 +274,7 @@ impl Controller {
                     Some("finished") => matches!(task.status, TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled),
                     Some(other) => norm(&state) == other,
                 };
-                (met, state, Self::status_json(&snapshot, task))
+                (met, state, Self::status_json(&snapshot, &queue_of(&task.id), task))
             } else {
                 let id = goal_id.clone().unwrap_or_default();
                 let goal = snapshot.goals.iter().find(|g| g.id == id).ok_or_else(|| format!("No goal {id}"))?;
@@ -268,7 +291,7 @@ impl Controller {
                     Some(other) => norm(&state) == other,
                 };
                 let ticket = goal.ticket_id.as_ref().and_then(|t| snapshot.tasks.iter().find(|x| &x.id == t));
-                let detail = ticket.map(|t| Self::status_json(&snapshot, t)).unwrap_or_else(|| json!({"goal_id": goal.id, "status": state.clone(), "reason": goal.reason}));
+                let detail = ticket.map(|t| Self::status_json(&snapshot, &queue_of(&t.id), t)).unwrap_or_else(|| json!({"goal_id": goal.id, "status": state.clone(), "reason": goal.reason}));
                 (met, state, detail)
             };
             let waited = started.elapsed();
@@ -317,7 +340,10 @@ impl Controller {
         let mut after = after;
         let task_id = {
             let task = after.tasks.last_mut().ok_or("The task was not created")?;
-            task.request = neko_chat::ticket_request(&request);
+            // Only the person's own chat carries their words; an agent's text is never presented as theirs.
+            if matches!(role, CrewRole::Full) {
+                task.request = neko_chat::ticket_request(&request);
+            }
             store::append_event(task, "crew", &format!("Opened by {}: {}", role.label(), clip(&request, 200)));
             task.id.clone()
         };
@@ -351,7 +377,7 @@ impl Controller {
             "task_id": task_id, "ref": short_ref(task), "title": title_of(task), "status": "Queued", "workspace_id": workspace,
             "goal_id": goal_id,
             "note": if goal_id.is_some() { "Queued. Neko starts it when the machine has room. The goal is paused until the person reads its check and resumes it." } else if matches!(role, CrewRole::Full) { "Queued. Neko plans it and starts it when the machine has room (a burst of tasks waits its turn). Use wait_for or task_status to follow it." } else { "Queued as a sub-task. It is planned and waits for the person's approval before it builds." },
-            "open_delegated": rows::open_delegated(&db, &snapshot_with(&after), &origin)?.len(),
+            "open_delegated": rows::open_delegated(&db, &after, &origin)?.len(),
             "delegation_cap": rows::cap(&db)?,
         }).to_string())
     }
@@ -460,6 +486,7 @@ impl Controller {
                 self.deliver_queued()?;
             }
             CrewCommand::CancelQueued { task_id, id } => {
+                let _delivery = DELIVERY.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 let db = self.db.lock().map_err(|_| "Task storage unavailable")?;
                 if queue::settle(&db, &task_id, &id, QueueState::Cancelled, "Taken back before it was delivered.", store::now_ms())?.is_none() {
                     return Err("That message was already delivered or taken back".into());
@@ -481,6 +508,7 @@ impl Controller {
     /// read their prompt once), so the real one declines and steer-now falls back to
     /// the turn boundary.
     pub(super) fn deliver_queued_with(&self, live: &dyn Fn(&str, &str) -> bool) -> Result<usize, String> {
+        let _delivery = DELIVERY.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let waiting = queue::queued(&*self.db.lock().map_err(|_| "Task storage unavailable")?)?;
         if waiting.is_empty() {
             return Ok(0);
@@ -492,6 +520,10 @@ impl Controller {
             let settle = |state: QueueState, detail: &str| -> Result<(), String> {
                 queue::settle(&*self.db.lock().map_err(|_| "Task storage unavailable")?, &entry.task_id, &entry.id, state, detail, now).map(|_| ())
             };
+            // Taken back or delivered by another pass since the list was read.
+            if !snapshot.queued_messages.iter().any(|m| m.task_id == entry.task_id && m.id == entry.id) {
+                continue;
+            }
             let Some(task) = snapshot.tasks.iter().find(|t| t.id == entry.task_id) else {
                 settle(QueueState::Dropped, "The task no longer exists.")?;
                 continue;
@@ -513,17 +545,26 @@ impl Controller {
                     continue;
                 }
                 Plan::Inject => "Delivered into the live session.",
-                Plan::Reply if running => {
-                    self.command(Command::ReplyToTask { task_id: entry.task_id.clone(), text: entry.text.clone() })?;
-                    "Stopped the turn and restarted it with the message."
-                }
-                Plan::Reply => {
-                    self.command(Command::ReplyToTask { task_id: entry.task_id.clone(), text: entry.text.clone() })?;
-                    "Delivered as a reply; the agent picked it up at the turn boundary."
-                }
-                Plan::Note => {
-                    self.command(Command::AddTicketNote { task_id: entry.task_id.clone(), text: entry.text.clone() })?;
-                    "Delivered as a note; the agent reads it when it starts."
+                step @ (Plan::Reply | Plan::Note) => {
+                    let command = if step == Plan::Reply {
+                        Command::ReplyToTask { task_id: entry.task_id.clone(), text: entry.text.clone() }
+                    } else {
+                        Command::AddTicketNote { task_id: entry.task_id.clone(), text: entry.text.clone() }
+                    };
+                    if let Err(error) = self.command(command) {
+                        // One message that cannot be delivered must not hold up the rest. A full
+                        // reply inbox clears as the agent reads it, so that one waits.
+                        if error.contains("unread replies") {
+                            continue;
+                        }
+                        settle(QueueState::Dropped, &format!("Not delivered: {error}"))?;
+                        continue;
+                    }
+                    match (step, running) {
+                        (Plan::Reply, true) => "Stopped the turn and restarted it with the message.",
+                        (Plan::Reply, false) => "Delivered as a reply; the agent picked it up at the turn boundary.",
+                        _ => "Delivered as a note; the agent reads it when it starts.",
+                    }
                 }
             };
             settle(QueueState::Delivered, how)?;
@@ -539,11 +580,6 @@ fn origin_of(role: &CrewRole) -> String {
         CrewRole::Task { ticket_id, .. } => format!("ticket:{ticket_id}"),
         _ => rows::CHAT.to_owned(),
     }
-}
-
-/// The snapshot as the cap check needs it (tasks only).
-fn snapshot_with(after: &Snapshot) -> Snapshot {
-    after.clone()
 }
 
 #[cfg(test)]

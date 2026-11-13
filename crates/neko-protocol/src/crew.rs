@@ -2,7 +2,8 @@
 //! orchestration tools. See docs/knowledge/the-chat-directs-the-crew.md.
 use serde::{Deserialize, Serialize};
 
-pub const MAX_QUEUED_TEXT: usize = 8 * 1024;
+/// What a reply or ticket note accepts (`MAX_NOTE_BYTES`); a larger message could never be delivered.
+pub const MAX_QUEUED_TEXT: usize = 2048;
 /// Open delegated tasks one chat (or one ticket) may have, unless raised.
 pub const DEFAULT_DELEGATION_CAP: u32 = 8;
 /// The longest `wait_for` may block, in seconds.

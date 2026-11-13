@@ -12,7 +12,8 @@ const ORIGINS: &str = "neko_crew_origin_v1";
 const CAP: &str = "neko_crew_cap_v1";
 const IDEM: &str = "neko_crew_idem_v1";
 const MAX_IDEM: usize = 200;
-const MAX_ORIGINS: usize = 500;
+/// An identical call this soon after the last is a retry; later it is a new request.
+pub const IDEM_WINDOW_MS: i64 = 120_000;
 
 /// Who delegated a task: `chat` for the full-power chat, `ticket:<id>` for a sub-task.
 pub const CHAT: &str = "chat";
@@ -42,14 +43,17 @@ pub fn set_cap(db: &Db, limit: u32) -> Result<(), String> {
 pub fn record_origin(db: &Db, task_id: &str, origin: &str) -> Result<(), String> {
     let mut origins: BTreeMap<String, String> = read(db, ORIGINS)?;
     origins.insert(task_id.to_owned(), origin.to_owned());
-    // Oldest ids are not ordered; when the map is large, drop entries for tasks that are gone.
-    if origins.len() > MAX_ORIGINS {
-        let keys: Vec<String> = origins.keys().take(origins.len() - MAX_ORIGINS).cloned().collect();
-        for key in keys {
-            origins.remove(&key);
-        }
-    }
     write(db, ORIGINS, &origins)
+}
+
+/// Forgets a deleted task's origin (rows are removed with their task, never by count,
+/// so an open task never loses the origin the cap counts it under).
+pub fn forget_origin(db: &Db, task_id: &str) -> Result<(), String> {
+    let mut origins: BTreeMap<String, String> = read(db, ORIGINS)?;
+    if origins.remove(task_id).is_some() {
+        write(db, ORIGINS, &origins)?;
+    }
+    Ok(())
 }
 
 pub fn origin_of(db: &Db, task_id: &str) -> Result<Option<String>, String> {
@@ -90,14 +94,14 @@ pub fn idem_key(run_id: &str, tool: &str, arguments: &serde_json::Value) -> Stri
     format!("{run_id}|{tool}|{:016x}", hasher.finish())
 }
 
-pub fn cached_result(db: &Db, key: &str) -> Result<Option<String>, String> {
-    Ok(read::<Vec<(String, String)>>(db, IDEM)?.into_iter().find(|(k, _)| k == key).map(|(_, v)| v))
+pub fn cached_result(db: &Db, key: &str, now_ms: i64) -> Result<Option<String>, String> {
+    Ok(read::<Vec<(String, String, i64)>>(db, IDEM)?.into_iter().find(|(k, _, at)| k == key && now_ms - at < IDEM_WINDOW_MS).map(|(_, v, _)| v))
 }
 
-pub fn cache_result(db: &Db, key: &str, result: &str) -> Result<(), String> {
-    let mut rows: Vec<(String, String)> = read(db, IDEM)?;
-    rows.retain(|(k, _)| k != key);
-    rows.push((key.to_owned(), result.chars().take(4000).collect()));
+pub fn cache_result(db: &Db, key: &str, result: &str, now_ms: i64) -> Result<(), String> {
+    let mut rows: Vec<(String, String, i64)> = read(db, IDEM)?;
+    rows.retain(|(k, _, at)| k != key && now_ms - at < IDEM_WINDOW_MS);
+    rows.push((key.to_owned(), result.chars().take(4000).collect(), now_ms));
     let excess = rows.len().saturating_sub(MAX_IDEM);
     rows.drain(..excess);
     write(db, IDEM, &rows)
@@ -128,12 +132,13 @@ mod tests {
     #[test]
     fn cached_results_are_bounded_and_found_by_key() {
         let db = Db::open_in_memory().unwrap();
-        cache_result(&db, "k", "{\"ok\":1}").unwrap();
-        assert_eq!(cached_result(&db, "k").unwrap().as_deref(), Some("{\"ok\":1}"));
+        cache_result(&db, "k", "{\"ok\":1}", 1000).unwrap();
+        assert_eq!(cached_result(&db, "k", 1500).unwrap().as_deref(), Some("{\"ok\":1}"));
+        assert!(cached_result(&db, "k", 1000 + IDEM_WINDOW_MS).unwrap().is_none(), "a repeat after the window is a new request");
         for n in 0..(MAX_IDEM + 10) {
-            cache_result(&db, &format!("n{n}"), "x").unwrap();
+            cache_result(&db, &format!("n{n}"), "x", 2000).unwrap();
         }
-        assert!(cached_result(&db, "k").unwrap().is_none());
-        assert!(cached_result(&db, &format!("n{}", MAX_IDEM + 9)).unwrap().is_some());
+        assert!(cached_result(&db, "k", 2000).unwrap().is_none());
+        assert!(cached_result(&db, &format!("n{}", MAX_IDEM + 9), 2000).unwrap().is_some());
     }
 }

@@ -1140,7 +1140,7 @@ impl Controller {
                     let _ = self.record_progress_event(&task.id, authority, role, &event);
                     if usage { self.stop_if_over_budget(&task.id, cancel); }
                 };
-                let run = match self.run_native_session(&spec, &session, &store::new_id(), authority, cancel, &on_event) {
+                let run = match self.run_native_session(&spec, &session, &store::new_id(), authority, cancel, !planning, &on_event) {
                     // Only an explicitly missing saved session falls back.
                     // Quota, transport and tool failures retain its context.
                     Err(error)
@@ -1154,7 +1154,7 @@ impl Controller {
                             }
                             Ok(())
                         })?;
-                        self.run_native_session(&spec, &native_runner::Session::Start, &store::new_id(), authority, cancel, &on_event)
+                        self.run_native_session(&spec, &native_runner::Session::Start, &store::new_id(), authority, cancel, !planning, &on_event)
                     }
                     other => other,
                 };

@@ -70,7 +70,7 @@ fn crew_definitions() -> Vec<Tool> {
         Tool::new(name, description, schema.as_object().unwrap().clone())
     }
     let text = |d: &str| serde_json::json!({"type": "string", "description": d});
-    let key = text("Optional. Repeating a call with the same key does the work once.");
+    let key = text("Optional. Repeating a call with the same key does the work once. Without one, an identical call within two minutes is treated as a retry.");
     vec![
         tool("list_tasks", "List Neko tasks this run can see: id, ref, title, status, goal. Filters: workspace_id, status, mine (only tasks this run delegated), limit.", serde_json::json!({"workspace_id": text("Only this workspace"), "status": text("A task status such as Building or ReadyForReview"), "mine": {"type": "boolean"}, "limit": {"type": "number"}}), &[]),
         tool("task_status", "One task's state, last turn summary, goal and its evidence, queued messages and recent events. Trust this, not the task's own claims, before saying it is done.", serde_json::json!({"task_id": text("The task id")}), &["task_id"]),

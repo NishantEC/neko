@@ -372,7 +372,8 @@ fn load_stored(db: &Db) -> Result<Snapshot, String> {
         goal.wall_ms = 0;
         goal.last_tick_ms = 0;
     }
-    snapshot.queued_messages = crate::command_queue::all(db)?;
+    // Only what still waits: settled entries are the task's record, not every reader's.
+    snapshot.queued_messages = crate::command_queue::queued(db)?;
     snapshot.import_preview = crate::setup_import::load_preview(db)?;
     crate::decision_context::attach(db, &mut snapshot)?;
     Ok(snapshot)
@@ -422,6 +423,7 @@ fn persist(db: &Db, snapshot: &Snapshot, deferred: bool) -> Result<(), String> {
                     // Its evidence ledger and journal go with it.
                     crate::goals::forget_subject(db, &id)?;
                     crate::command_queue::forget_task(db, &id)?;
+                    crate::crew::forget_origin(db, &id)?;
                 }
             }
         }
