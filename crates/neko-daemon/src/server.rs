@@ -816,9 +816,37 @@ fn edit_artifact(state: &AppState, id: &str, version: Option<u32>, content: &str
     }
 }
 
+/// A bridge call: an orchestration tool (checked against the lease's crew role
+/// by the controller) or a connection tool (the MCP host).
+fn crew_or_connection(state: &AppState, request: neko_protocol::mcp_host::BridgeRequest, ctx: &RequestContext) -> Result<String, String> {
+    let neko_protocol::mcp_host::BridgeAction::Crew { tool, arguments_json } = &request.action else {
+        return state.workbench.mcp.bridge(request);
+    };
+    let artifacts = |tool: &str, args: serde_json::Value| -> Result<String, String> {
+        let text = |key: &str| args.get(key).and_then(|v| v.as_str()).map(str::to_owned);
+        let request = if tool == "save_artifact" {
+            Request::SaveArtifact {
+                title: text("title").ok_or("title is required")?,
+                file: text("file").ok_or("file is required (an absolute path)")?,
+                workspace_id: text("workspace_id"),
+                artifact_id: text("artifact_id"),
+                note: text("note").unwrap_or_default(),
+                show: args.get("show").and_then(|v| v.as_bool()),
+            }
+        } else {
+            Request::ShowArtifact { id: text("id").ok_or("id is required")?, version: args.get("version").and_then(|v| v.as_u64()).map(|v| v as u32) }
+        };
+        match handle_request(state, request, ctx) {
+            Response::Error { message } => Err(message),
+            other => serde_json::to_string(&other).map_err(|e| e.to_string()),
+        }
+    };
+    state.workbench.crew_call(&request.token.0, tool, arguments_json, &artifacts)
+}
+
 fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> Response {
     match request {
-        Request::McpBridge(request) => match state.workbench.mcp.bridge(request) {
+        Request::McpBridge(request) => match crew_or_connection(state, request, ctx) {
             Ok(json) => Response::McpBridge { json },
             Err(message) => Response::Error { message },
         },

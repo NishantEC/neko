@@ -372,6 +372,7 @@ fn load_stored(db: &Db) -> Result<Snapshot, String> {
         goal.wall_ms = 0;
         goal.last_tick_ms = 0;
     }
+    snapshot.queued_messages = crate::command_queue::all(db)?;
     snapshot.import_preview = crate::setup_import::load_preview(db)?;
     crate::decision_context::attach(db, &mut snapshot)?;
     Ok(snapshot)
@@ -420,6 +421,7 @@ fn persist(db: &Db, snapshot: &Snapshot, deferred: bool) -> Result<(), String> {
                     db.delete_task_rows(&id).map_err(|e| e.to_string())?;
                     // Its evidence ledger and journal go with it.
                     crate::goals::forget_subject(db, &id)?;
+                    crate::command_queue::forget_task(db, &id)?;
                 }
             }
         }
@@ -559,6 +561,7 @@ fn encode(snapshot: &Snapshot) -> Result<Snapshot, String> {
     compacted.working_preferences.clear();
     compacted.skills = Default::default();
     compacted.goals.clear();
+    compacted.queued_messages.clear();
     compacted.import_preview = Default::default();
     compacted.mcp.receipts.clear();
     // The last look at the published repository changes on a timer.
@@ -762,6 +765,7 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         Command::Schedules(command) => crate::scheduled_plans::apply(&mut snapshot, command)?,
         // Goals are driven by the daemon's controller, which owns their loop.
         Command::Goals(_) => return Err("Goals are handled by the daemon".into()),
+        Command::Crew(_) => return Err("The crew queue is handled by the daemon".into()),
         Command::Mcp(command) => {
             crate::mcp_host::store::apply_command(&mut snapshot, command, now_ms())?
         }

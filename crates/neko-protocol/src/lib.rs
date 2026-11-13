@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod agent_profiles;
 pub mod calendar;
+pub mod crew;
 pub mod phone;
 pub mod agent_models;
 pub mod decision_context;

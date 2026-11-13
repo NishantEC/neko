@@ -456,6 +456,10 @@ pub struct Snapshot {
     /// never part of the stored snapshot (see `neko_core::goals`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub goals: Vec<crate::goals::Goal>,
+    /// Messages waiting for (or recently delivered to) running agents, from
+    /// their own rows; never part of the stored snapshot (`neko_core::command_queue`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queued_messages: Vec<crate::crew::QueuedMessage>,
     #[serde(default = "crate::mcp_host::legacy_state")]
     pub mcp: crate::mcp_host::McpState,
     pub workspaces: Vec<Workspace>,
@@ -884,6 +888,7 @@ pub enum Command {
     AgentProfiles(crate::agent_profiles::ProfileCommand),
     Schedules(crate::scheduled_plans::ScheduleCommand),
     Goals(crate::goals::GoalCommand),
+    Crew(crate::crew::CrewCommand),
     SetupImport(crate::setup_import::ImportCommand),
     /// Read-only proposal; approval remains a separate explicit command.
     ProposeSplit {

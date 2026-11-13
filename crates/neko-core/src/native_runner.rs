@@ -128,7 +128,12 @@ fn configure_bridge(command: &mut Command, bridge: &BridgeConfig) -> Result<(), 
     }
     let executable = serde_json::to_string(&bridge.executable.to_string_lossy())
         .map_err(|_| "Invalid bridge executable")?;
-    command.args(["-c", &format!("mcp_servers.neko={{command={executable},args=[\"--mcp-bridge\"],env_vars=[\"NEKO_MCP_TOKEN\",\"NEKO_MCP_SOCKET\"],required=true,tool_timeout_sec=600,enabled_tools=[\"neko_list_tools\",\"neko_call_tool\"],default_tools_approval_mode=\"prompt\",tools={{neko_list_tools={{approval_mode=\"approve\"}},neko_call_tool={{approval_mode=\"approve\"}}}}}}")]);
+    // The orchestration tools ride the same bridge; the daemon lists to a run only
+    // the ones its lease's crew role allows, so enabling the names here grants nothing.
+    let crew: Vec<&str> = neko_protocol::crew::TOOLS.to_vec();
+    let enabled = std::iter::once("neko_list_tools").chain(std::iter::once("neko_call_tool")).chain(crew.iter().copied()).map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(",");
+    let approved = std::iter::once("neko_list_tools").chain(std::iter::once("neko_call_tool")).chain(crew.iter().copied()).map(|n| format!("{n}={{approval_mode=\"approve\"}}")).collect::<Vec<_>>().join(",");
+    command.args(["-c", &format!("mcp_servers.neko={{command={executable},args=[\"--mcp-bridge\"],env_vars=[\"NEKO_MCP_TOKEN\",\"NEKO_MCP_SOCKET\"],required=true,tool_timeout_sec=1900,enabled_tools=[{enabled}],default_tools_approval_mode=\"prompt\",tools={{{approved}}}}}")]);
     command.args(["-c", "shell_environment_policy.exclude=[\"NEKO_MCP_*\"]"]);
     if bridge.sources_through_bridge {
         for name in user_codex_mcp_servers() {

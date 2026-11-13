@@ -443,7 +443,7 @@ impl Controller {
         cancel: &AtomicBool,
         on_event: impl FnMut(String),
     ) -> Result<String, String> {
-        self.with_lease(run_id, authority, cancel, |bridge| {
+        self.with_lease(run_id, authority, cancel, false, |bridge| {
             native_runner::run_with_bridge(spec, bridge, cancel, on_event)
         })
     }
@@ -456,7 +456,8 @@ impl Controller {
         cancel: &AtomicBool,
         on_event: impl FnMut(String),
     ) -> Result<String, String> {
-        self.with_lease(run_id, authority, cancel, |bridge| {
+        // A ticket's own builder and planner runs get the crew tools for that ticket.
+        self.with_lease(run_id, authority, cancel, true, |bridge| {
             native_runner::run_session_with_bridge(spec, bridge, session, cancel, on_event)
         })
     }
@@ -465,6 +466,7 @@ impl Controller {
         run_id: &str,
         authority: &RunAuthority,
         cancel: &AtomicBool,
+        crew: bool,
         run: impl FnOnce(&native_runner::BridgeConfig) -> Result<String, String>,
     ) -> Result<String, String> {
         if cancel.load(Ordering::Acquire) {
@@ -485,6 +487,13 @@ impl Controller {
             authority.connections.clone(),
             authority.profile_revision,
         )?;
+        if crew {
+            if let Some(ticket_id) = authority.task.clone() {
+                // Watches and read-only tickets may look and wait, never open work.
+                let may_create = authority.responsibility.is_none() && !state.task_read_only.contains(&ticket_id);
+                self.mcp.grant_crew(&lease, neko_protocol::crew::CrewRole::Task { ticket_id, may_create });
+            }
+        }
         let bridge = native_runner::BridgeConfig {
             executable: std::env::current_exe().map_err(|_| "Cannot locate Neko MCP bridge")?,
             socket: neko_protocol::socket_path(),
@@ -829,7 +838,7 @@ mod tests {
         .unwrap();
         let cancel = AtomicBool::new(false);
         let mut token = String::new();
-        let result = controller.with_lease("run", &authority, &cancel, |bridge| {
+        let result = controller.with_lease("run", &authority, &cancel, false, |bridge| {
             token = bridge.token.clone();
             let request = || neko_protocol::mcp_host::BridgeRequest {
                 token: Secret(bridge.token.clone()),
@@ -885,7 +894,7 @@ mod tests {
                 task_id: "t".into(),
                 cancelled: cancel.clone(),
             });
-        let result = controller.with_lease("task-run", &authority, &cancel, |bridge| {
+        let result = controller.with_lease("task-run", &authority, &cancel, true, |bridge| {
             controller
                 .command(Command::CancelTask {
                     task_id: "t".into(),
@@ -926,7 +935,7 @@ mod tests {
         }
         assert!(
             controller
-                .with_lease("run", &authority, &AtomicBool::new(false), |_| panic!(
+                .with_lease("run", &authority, &AtomicBool::new(false), false, |_| panic!(
                     "revoked authority must not launch a model"
                 ))
                 .is_err()
@@ -994,7 +1003,7 @@ mod tests {
             .unwrap();
             assert!(
                 controller
-                    .with_lease("builder", &authority, &AtomicBool::new(false), |_| panic!(
+                    .with_lease("builder", &authority, &AtomicBool::new(false), true, |_| panic!(
                         "revoked automatic authority must never launch builder"
                     ))
                     .is_err(),

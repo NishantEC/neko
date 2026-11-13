@@ -421,7 +421,12 @@ pub fn finish_turn_noting(
     }
     if let Some(parts) = ui_message::finish(id, state, now) { turn.parts = parts; }
     ui_message::trim_parts(&mut turn.parts);
-    turn.ticket_ids = ticket_ids;
+    // Tickets the turn delegated through its tools (`link_ticket`) stay linked.
+    for id in ticket_ids {
+        if !turn.ticket_ids.contains(&id) {
+            turn.ticket_ids.push(id);
+        }
+    }
     turn.responsibility_ids = responsibility_ids;
     turn.pending = false;
     turn.failed = failed;
@@ -699,6 +704,19 @@ pub struct ProposedMemory {
 
 /// Writes the parts of a reply in flight (deferred: a crash may lose the last
 /// couple of seconds of it, never a decision; `finish_turn` writes the whole).
+/// Links a ticket a pending turn delegated through its tools to that reply, so
+/// the chat shows its crew line while the turn still runs. Whether it was linked.
+pub fn link_ticket(db: &Db, turn_id: &str, task_id: &str) -> Result<bool, String> {
+    let mut messages = load(db)?;
+    let Some(turn) = messages.iter_mut().find(|m| m.id == turn_id && m.pending) else { return Ok(false) };
+    if !turn.ticket_ids.iter().any(|id| id == task_id) {
+        turn.ticket_ids.push(task_id.to_owned());
+    }
+    let json = serde_json::to_string(&messages).map_err(|e| e.to_string())?;
+    db.set_setting(SETTING, &json).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 pub fn persist_parts(db: &Db, turn_id: &str, parts: Vec<Value>) -> Result<(), String> {
     let mut messages = load(db)?;
     let Some(turn) = messages.iter_mut().find(|m| m.id == turn_id && m.pending) else { return Ok(()) };

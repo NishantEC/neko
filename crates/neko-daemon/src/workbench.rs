@@ -38,6 +38,8 @@ mod triage;
 mod pull_requests;
 #[path = "workbench/goals.rs"]
 pub(crate) mod goals;
+#[path = "workbench/crew.rs"]
+mod crew;
 
 struct TaskClaim {
     task: Task,
@@ -106,6 +108,7 @@ impl Controller {
             ),
             Command::Schedules(command) => self.schedule_command(command),
             Command::Goals(command) => self.goal_command(command),
+            Command::Crew(command) => self.crew_command(command),
             Command::SetupImport(command) => self.import_command(command),
             Command::Skills(command) => {
                 use neko_protocol::skills::SkillCommand;
@@ -685,6 +688,9 @@ impl Controller {
         }
         if let Err(error) = self.schedule_tick(store::now_ms()) {
             eprintln!("neko schedules: {error}");
+        }
+        if let Err(error) = self.deliver_queued() {
+            eprintln!("neko crew queue: {error}");
         }
         self.tick_with(|controller, claim, cancel| controller.execute(claim, cancel))
     }
@@ -1777,6 +1783,7 @@ fn converse(
             }
         }
     };
+    let crew_role = if super_on { neko_protocol::crew::CrewRole::Full } else { neko_protocol::crew::CrewRole::ReadOnly };
     let mut run_with = |spec: &native_runner::RunSpec| -> Result<String, String> {
         if cancel.load(Ordering::Acquire) {
             return Err("Cancelled".into());
@@ -1804,6 +1811,8 @@ fn converse(
                 connections,
                 snapshot.agent_profiles.revision,
             )?;
+            // The full-power chat directs the crew; a read-only one can only look.
+            mcp.grant_crew(&lease, crew_role.clone());
             let bridge = native_runner::BridgeConfig {
                 executable: std::env::current_exe().map_err(|e| e.to_string())?,
                 socket: neko_protocol::socket_path(),
@@ -1811,6 +1820,16 @@ fn converse(
                 sources_through_bridge: false,
             };
             // Lease drop also cancels any approval waiter and in-flight call.
+            native_runner::run_with_bridge_streaming(spec, &bridge, cancel, &mut progress)
+        } else if let Ok(lease) = mcp.crew_lease(&format!("chat:{pending}"), crew_role.clone()) {
+            // Several workspaces and none chosen: no connection tools, but the
+            // crew tools still work (they name their workspace).
+            let bridge = native_runner::BridgeConfig {
+                executable: std::env::current_exe().map_err(|e| e.to_string())?,
+                socket: neko_protocol::socket_path(),
+                token: lease.token().into(),
+                sources_through_bridge: false,
+            };
             native_runner::run_with_bridge_streaming(spec, &bridge, cancel, &mut progress)
         } else {
             native_runner::run_streaming(spec, cancel, &mut progress)

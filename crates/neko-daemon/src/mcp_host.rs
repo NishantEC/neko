@@ -923,11 +923,38 @@ impl Host {
             connection_ids,
             expires_ms: store::now_ms() + 1_800_000,
             cancelled: Arc::new(AtomicBool::new(false)),
+            crew: None,
         })?;
         Ok(Lease {
             host: self.clone(),
             token,
         })
+    }
+
+    /// A capability that carries only a crew role (no connections), for a run
+    /// that has no tool workspace: the chat with several workspaces.
+    pub fn crew_lease(self: &Arc<Self>, run_id: &str, role: neko_protocol::crew::CrewRole) -> Result<Lease, String> {
+        let revision = store::load(&*self.db.lock().map_err(|_| "Workspace storage unavailable")?)?.agent_profiles.revision;
+        let token = self.registry.issue(Scope {
+            profile_revision: revision,
+            run_id: run_id.into(),
+            workspace_id: String::new(),
+            connection_ids: Vec::new(),
+            expires_ms: store::now_ms() + 1_800_000,
+            cancelled: Arc::new(AtomicBool::new(false)),
+            crew: Some(role),
+        })?;
+        Ok(Lease { host: self.clone(), token })
+    }
+
+    /// Gives an issued lease its crew role.
+    pub fn grant_crew(&self, lease: &Lease, role: neko_protocol::crew::CrewRole) {
+        self.registry.set_crew(&lease.token, Some(role));
+    }
+
+    /// The live scope behind a crew call's token.
+    pub fn crew_scope(&self, token: &str) -> Result<Scope, String> {
+        self.registry.get(token, store::now_ms())
     }
 
     /// One tool call or catalog read for a run. A call refused because the
@@ -980,6 +1007,8 @@ impl Host {
             return Err("Agent profile authority changed; start a new run".into());
         }
         match request.action {
+            // Orchestration tools are answered by the controller (server.rs), never here.
+            BridgeAction::Crew { .. } => Err("Orchestration tools are served by the controller".into()),
             BridgeAction::List => {
                 let mut tools = Vec::new();
                 for id in &scope.connection_ids {
@@ -1896,6 +1925,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
             connection_ids: vec!["c".into()],
             expires_ms: i64::MAX,
             cancelled: Arc::new(AtomicBool::new(false)),
+            crew: None,
         };
         assert!(
             h.prepare_call(
@@ -1967,6 +1997,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
                 connection_ids: vec![id.clone()],
                 expires_ms: i64::MAX,
                 cancelled: Arc::new(AtomicBool::new(false)),
+                crew: None,
             })
             .unwrap();
         let request = || BridgeRequest {

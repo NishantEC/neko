@@ -257,6 +257,12 @@ pub enum BridgeAction {
         tool_name: String,
         arguments_json: String,
     },
+    /// An orchestration tool (`crew::TOOLS`), or `"tools"` for the names this
+    /// lease may use. Checked against the lease's crew role in the daemon.
+    Crew {
+        tool: String,
+        arguments_json: String,
+    },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BridgeRequest {

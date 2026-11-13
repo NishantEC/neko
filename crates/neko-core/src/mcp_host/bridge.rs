@@ -52,8 +52,36 @@ fn action(name: &str, args: serde_json::Value) -> Result<BridgeAction, String> {
                 arguments_json: arguments.to_string(),
             })
         }
+        crew if neko_protocol::crew::TOOLS.contains(&crew) => {
+            if !args.is_object() {
+                return Err("Arguments must be an object".into());
+            }
+            Ok(BridgeAction::Crew { tool: crew.into(), arguments_json: args.to_string() })
+        }
         _ => Err("Unsupported tool".into()),
     }
+}
+
+/// The orchestration tools (`neko_protocol::crew::TOOLS`); which of them a run
+/// is shown is the daemon's answer for its lease, never this table.
+fn crew_definitions() -> Vec<Tool> {
+    fn tool(name: &'static str, description: &'static str, properties: serde_json::Value, required: &[&str]) -> Tool {
+        let schema = serde_json::json!({"type": "object", "properties": properties, "required": required});
+        Tool::new(name, description, schema.as_object().unwrap().clone())
+    }
+    let text = |d: &str| serde_json::json!({"type": "string", "description": d});
+    let key = text("Optional. Repeating a call with the same key does the work once.");
+    vec![
+        tool("list_tasks", "List Neko tasks this run can see: id, ref, title, status, goal. Filters: workspace_id, status, mine (only tasks this run delegated), limit.", serde_json::json!({"workspace_id": text("Only this workspace"), "status": text("A task status such as Building or ReadyForReview"), "mine": {"type": "boolean"}, "limit": {"type": "number"}}), &[]),
+        tool("task_status", "One task's state, last turn summary, goal and its evidence, queued messages and recent events. Trust this, not the task's own claims, before saying it is done.", serde_json::json!({"task_id": text("The task id")}), &["task_id"]),
+        tool("create_task", "Open a Neko task for real work. `request` is the person's words, verbatim. It queues; a burst waits its turn and one chat may have a limited number open. A goal ({objective, done_check, constraints, max_turns}) keeps it working until done_check passes; it waits paused until the person has read the check.", serde_json::json!({"title": text("Short title"), "request": text("What the person asked, in their words"), "workspace_id": text("Workspace id; optional when the chat has one"), "folder": text("Absolute path of a repository checkout inside the workspace"), "goal": {"type": "object", "description": "Optional: keep working until proven done"}, "idempotency_key": key}), &["title", "request"]),
+        tool("steer_task", "Send a message to a task's agent. mode: after_turn (default; waits for the running turn to end), steer_now (into the live session when the runtime can take it, else at the turn boundary), interrupt_restart (stop the turn and restart with the message). Queued is not delivered: check task_status.", serde_json::json!({"task_id": text("The task id"), "message": text("What to tell the agent"), "mode": {"type": "string", "enum": ["after_turn", "steer_now", "interrupt_restart"]}, "idempotency_key": key}), &["task_id", "message"]),
+        tool("wait_for", "Block until a task or goal reaches a state or the timeout (at most 30 minutes). Give task_id or goal_id. until: settled (default for tasks: ready for review, completed, failed, cancelled or waiting for plan approval), finished, or a status name. Returns met, timed_out and the status. A timeout is not a failure: report progress and wait again, or check back later.", serde_json::json!({"task_id": text("A task id"), "goal_id": text("Or a goal id"), "until": text("settled, finished, or a status name"), "timeout_seconds": {"type": "number"}}), &[]),
+        tool("cancel_task", "Cancel a task.", serde_json::json!({"task_id": text("The task id"), "reason": text("Why"), "idempotency_key": key}), &["task_id"]),
+        tool("schedule", "Schedule a read-only plan: once (at_unix_ms or in_minutes) or recurring (recurrence: an RRULE such as FREQ=DAILY;BYHOUR=9, with timezone). Each run opens a task for the person's approval; nothing changes by itself.", serde_json::json!({"name": text("Short name"), "prompt": text("What to plan each time"), "workspace_id": text("Workspace id"), "at_unix_ms": {"type": "number"}, "in_minutes": {"type": "number"}, "recurrence": text("RRULE"), "timezone": text("IANA timezone for a recurrence"), "idempotency_key": key}), &["name", "prompt"]),
+        tool("save_artifact", "Keep a file as a Neko artifact (a page, table, diagram, document) and show it on the canvas beside the chat. Give artifact_id to add a new version.", serde_json::json!({"title": text("Title"), "file": text("Absolute path of the file"), "workspace_id": text("Workspace id"), "artifact_id": text("Existing artifact id for a new version"), "note": text("What changed"), "show": {"type": "boolean"}}), &["title", "file"]),
+        tool("show_artifact", "Open an existing artifact on the person's canvas.", serde_json::json!({"id": text("Artifact id"), "version": {"type": "number"}}), &["id"]),
+    ]
 }
 
 fn definitions() -> Vec<Tool> {
@@ -90,8 +118,18 @@ impl ServerHandler for Bridge {
         _: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
+        let (socket, token) = (self.socket.clone(), self.token.clone());
+        let allowed = tokio::task::spawn_blocking(move || exchange(socket, token, BridgeAction::Crew { tool: "tools".into(), arguments_json: "{}".into() }))
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .map(|v| v["tools"].as_array().map(|a| a.iter().filter_map(|n| n.as_str().map(str::to_owned)).collect::<Vec<_>>()).unwrap_or_default())
+            .unwrap_or_default();
+        let mut tools = definitions();
+        tools.extend(crew_definitions().into_iter().filter(|t| allowed.iter().any(|n| n.as_str() == t.name.as_ref())));
         Ok(ListToolsResult {
-            tools: definitions(),
+            tools,
             ..Default::default()
         })
     }
@@ -127,7 +165,7 @@ fn exchange(socket: PathBuf, token: String, action: BridgeAction) -> Result<Stri
     };
     let stream = UnixStream::connect(socket).map_err(|_| "Neko daemon is unavailable")?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(600)))
+        .set_read_timeout(Some(Duration::from_secs(1900)))
         .map_err(|_| "Cannot configure bridge timeout")?;
     stream
         .set_write_timeout(Some(Duration::from_secs(5)))
@@ -145,7 +183,7 @@ fn exchange(socket: PathBuf, token: String, action: BridgeAction) -> Result<Stri
     .map_err(|_| "Cannot send MCP request")?;
     let start = Instant::now();
     for _ in 0..1024 {
-        if start.elapsed() > Duration::from_secs(600) {
+        if start.elapsed() > Duration::from_secs(1900) {
             break;
         }
         match neko_protocol::read_frame(&stream).map_err(|_| "Neko bridge connection failed")? {

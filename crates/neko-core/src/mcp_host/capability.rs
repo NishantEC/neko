@@ -15,6 +15,8 @@ pub struct Scope {
     pub connection_ids: Vec<String>,
     pub expires_ms: i64,
     pub cancelled: Arc<AtomicBool>,
+    /// What this run may ask of the crew (orchestration tools); None for none.
+    pub crew: Option<neko_protocol::crew::CrewRole>,
 }
 #[derive(Default)]
 pub struct Registry(Mutex<HashMap<String, Scope>>);
@@ -55,6 +57,14 @@ impl Registry {
             .cloned()
             .ok_or_else(|| "Invalid or expired run capability".into())
     }
+    /// Gives a run's capability a crew role (the lease is already issued).
+    pub fn set_crew(&self, token: &str, role: Option<neko_protocol::crew::CrewRole>) {
+        if let Ok(mut scopes) = self.0.lock() {
+            if let Some(scope) = scopes.get_mut(token) {
+                scope.crew = role;
+            }
+        }
+    }
     pub fn revoke(&self, token: &str) {
         if let Ok(mut scopes) = self.0.lock() {
             if let Some(s) = scopes.remove(token) {
@@ -78,6 +88,7 @@ mod tests {
                 connection_ids: vec!["c".into()],
                 expires_ms: 100,
                 cancelled: Arc::new(AtomicBool::new(false)),
+                crew: None,
             })
             .unwrap();
         assert!(registry.get("unknown", 1).is_err());
@@ -98,6 +109,7 @@ mod tests {
                 connection_ids: vec!["c".into()],
                 expires_ms: 100,
                 cancelled: cancel.clone(),
+                crew: None,
             })
             .unwrap();
         cancel.store(true, Ordering::SeqCst);
