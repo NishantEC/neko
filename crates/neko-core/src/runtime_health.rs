@@ -20,32 +20,30 @@ pub const PROBE_EVERY_MS: i64 = 30 * 60 * 1000;
 /// tool) is the run's own failure.
 pub fn is_auth_failure(error: &str) -> bool {
     let text = error.to_lowercase();
+    // Claude Code's own wording only. Generic words ("unauthorized",
+    // "session expired", "not signed in", "status 401") are left out: a
+    // run's error carries Claude Code's stderr, where an MCP server or tool
+    // reporting its own sign-in would otherwise send every run to Codex.
     const MARKERS: &[&str] = &[
         "oauth session expired",
         "oauth token has expired",
         "oauth token revoked",
-        "session expired",
         "organization has disabled",
         "disabled claude subscription",
         "subscription has been disabled",
         "not logged in",
-        "not signed in",
         "please run /login",
         "claude /login",
         "invalid api key",
         "invalid x-api-key",
         "authentication_error",
-        "authentication failed",
         "failed to authenticate",
-        "unauthorized",
         "api error: 401",
-        "status 401",
         "credit balance is too low",
         "usage limit reached",
         "hit your limit",
         "out of extra usage",
         "reached your usage limit",
-        "login required",
     ];
     MARKERS.iter().any(|m| text.contains(m))
 }
@@ -159,6 +157,10 @@ mod tests {
             "Scope folder missing: /tmp/x",
             "Claude Code is not installed. Install it, or set NEKO_CLAUDE_PATH to its absolute path.",
             "Cannot read routine_state_v1:a: expected value",
+            "MCP server linear: HTTP status 401 Unauthorized",
+            "Jira session expired; sign in again",
+            "Gmail not signed in",
+            "Authentication failed for the remote repository",
             "",
         ] {
             assert!(!is_auth_failure(error), "{error}");

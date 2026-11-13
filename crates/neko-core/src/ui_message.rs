@@ -395,6 +395,8 @@ impl ReplyStream {
 
 struct Live {
     parts: Vec<Value>,
+    /// What the reply held when it began, for `restart`.
+    initial: Vec<Value>,
     stream: ReplyStream,
     subscribers: Vec<Sender<Value>>,
     started_ms: i64,
@@ -417,7 +419,7 @@ fn start_chunk(id: &str, started_ms: i64, at_ms: i64) -> Value {
 /// is kept.
 pub fn begin(id: &str, parts: Vec<Value>, started_ms: i64) {
     hub().insert(id.to_owned(), Live {
-        parts, stream: ReplyStream::new(), subscribers: Vec::new(), started_ms,
+        initial: parts.clone(), parts, stream: ReplyStream::new(), subscribers: Vec::new(), started_ms,
         open_reasoning: None, text_bytes: 0, persisted: Instant::now(), dirty: false,
     });
 }
@@ -467,6 +469,24 @@ pub fn emit(id: &str, chunk: &Value) -> Option<Vec<Value>> {
         return Some(live.parts.clone());
     }
     None
+}
+
+/// A failed attempt is dropped before another runtime answers the same
+/// reply (the Claude Code login fallback): its parts, open text and
+/// proposals go, so the error it streamed is not kept above the answer.
+/// Followers keep their stream; the stored reply is the final parts.
+pub fn restart(id: &str) {
+    let mut hub = hub();
+    let Some(live) = hub.get_mut(id) else { return };
+    live.parts = live.initial.clone();
+    // Close the dropped text for followers; new text ids do not reuse its.
+    for c in live.stream.end() {
+        for s in &live.subscribers { let _ = s.send(c.clone()); }
+    }
+    live.stream = ReplyStream { counter: live.stream.counter, ..ReplyStream::new() };
+    live.open_reasoning = None;
+    live.text_bytes = 0;
+    live.dirty = true;
 }
 
 /// A runtime that never streamed: the answer becomes the reply's text.

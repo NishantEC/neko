@@ -1794,11 +1794,15 @@ fn converse(
             let first = run_with(&spec);
             match &first {
                 Ok(_) if spec.runtime.provider == "claude" => {
-                    let _ = health::mark_good(&lock());
+                    // Also closes the outage's Inbox item.
+                    crate::routines::claude_works(&lock());
                     first
                 }
                 Err(error) if on_claude && health::is_auth_failure(error) && !cancel.load(Ordering::Acquire) => {
-                    let _ = health::mark_bad(&lock(), error, now);
+                    let _ = health::mark_bad(&lock(), error, neko_core::workbench::now_ms());
+                    // Claude Code streams its login error as reply text;
+                    // the Codex answer must not land under it.
+                    neko_core::ui_message::restart(pending);
                     run_with(&codex_spec())
                 }
                 _ => first,

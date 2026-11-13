@@ -669,7 +669,7 @@ fn run_agent(state: &AppState, routine: &Routine, spec: &neko_core::native_runne
     if bad && fallback && before.probe_due(now) {
         let _ = health::note_try(&db(state), now);
         if runner::probe_claude(PROBE_LIMIT).is_ok() {
-            claude_works(state);
+            claude_works(&db(state));
             bad = false;
         }
     }
@@ -702,9 +702,8 @@ fn run_agent(state: &AppState, routine: &Routine, spec: &neko_core::native_runne
     }
     match runner::run_claude_scoped(spec, config, routine.browser, cancel, |_| {}) {
         Ok(text) => {
-            if bad {
-                claude_works(state);
-            }
+            // Always: a chat may have marked the login bad during this run.
+            claude_works(&db(state));
             AgentRun { result: Ok(text), meta }
         }
         Err(error) if health::is_auth_failure(&error) => {
@@ -723,11 +722,11 @@ fn run_agent(state: &AppState, routine: &Routine, spec: &neko_core::native_runne
 }
 
 /// Claude Code answers again: forget the outage and close its Inbox item.
-fn claude_works(state: &AppState) {
-    let db = db(state);
-    if let Ok(Some(before)) = neko_core::runtime_health::mark_good(&db) {
+/// The home chat calls it too, so a chat that finds Claude working closes it.
+pub(crate) fn claude_works(db: &neko_core::Db) {
+    if let Ok(Some(before)) = neko_core::runtime_health::mark_good(db) {
         if let Some((workspace, title)) = before.notice {
-            let _ = resolve_items(&db, &workspace, &[title]);
+            let _ = resolve_items(db, &workspace, &[title]);
         }
     }
 }
@@ -736,6 +735,16 @@ fn claude_works(state: &AppState) {
 fn add_outage_notice(db: &neko_core::Db, routine: &Routine, meta: &AgentMeta, needs_you: &mut Vec<NeedsYou>) -> Result<(), String> {
     if !meta.new_outage {
         return Ok(());
+    }
+    // Checked again under this lock: while this run was on Codex another run
+    // may have raised the notice, or a probe or chat may have ended the outage.
+    let health = neko_core::runtime_health::load(db);
+    if !health.is_bad() || health.notice.is_some() {
+        return Ok(());
+    }
+    // An item from an earlier outage still open here is adopted, not doubled.
+    if open_titles(db, &routine.workspace_id)?.contains(&title_key(SIGNED_OUT_TITLE)) {
+        return neko_core::runtime_health::set_notice(db, &routine.workspace_id, SIGNED_OUT_TITLE);
     }
     let detail = if meta.fallback {
         "Routines are running on Codex until it is back. To fix it, run `claude /login` in a terminal; this clears itself when Claude Code works again."
@@ -1069,12 +1078,19 @@ mod tests {
         assert!(items[0].detail.contains("claude /login") && items[0].detail.contains("Codex"));
         let health = neko_core::runtime_health::load(&db);
         assert_eq!(health.notice, Some(("w".into(), SIGNED_OUT_TITLE.into())));
+        let mut again = Vec::new();
+        add_outage_notice(&db, &r, &AgentMeta { new_outage: true, fallback: true, ..Default::default() }, &mut again).unwrap();
+        assert!(again.is_empty(), "a concurrent run in the same outage raises nothing");
         // The run that raised it is saved, then Claude works again.
         let run = RoutineRun { id: "x".into(), routine_id: "a".into(), ok: true, needs_you: items, ..Default::default() };
         core::push_run(&db, "a", run).unwrap();
         let (workspace, title) = health.notice.unwrap();
         resolve_items(&db, &workspace, &[title]).unwrap();
         assert!(core::load_runs(&db, "a").unwrap()[0].needs_you[0].done);
+        // An outage that ended while a run was on Codex raises nothing.
+        neko_core::runtime_health::mark_good(&db).unwrap();
+        add_outage_notice(&db, &r, &AgentMeta { new_outage: true, fallback: true, ..Default::default() }, &mut again).unwrap();
+        assert!(again.is_empty());
     }
 
     #[test]

@@ -384,6 +384,11 @@ pub fn codex_scope(config: &serde_json::Value, user_servers: &[String]) -> Codex
                 }
                 "http" => {
                     let Some(url) = server["url"].as_str() else { scope.skipped.push(format!("{name} (no url)")); continue };
+                    // A token in the URL would show in the process list.
+                    if url.contains('?') || url.contains('@') {
+                        scope.skipped.push(format!("{name} (credentials in its url)"));
+                        continue;
+                    }
                     if server["headers"].as_object().is_some_and(|h| !h.is_empty()) {
                         scope.skipped.push(format!("{name} (needs request headers)"));
                         continue;
@@ -442,7 +447,7 @@ pub fn probe_claude(limit: Duration) -> Result<(), String> {
     if let Ok(path) = std::env::join_paths(cli_workers::agent_directories()) {
         command.env("PATH", path);
     }
-    if let Some(dir) = std::env::temp_dir().canonicalize().ok() {
+    if let Ok(dir) = std::env::temp_dir().canonicalize() {
         command.current_dir(dir);
     }
     let mut child = command.spawn().map_err(|e| e.to_string())?;
@@ -565,7 +570,7 @@ fn run_configured_scoped(
             command.env(name, value);
         }
     }
-    let disabled =if extraction { AMBIENT_DISABLED_FEATURES } else { UNATTENDED_DISABLED_FEATURES };
+    let disabled = if extraction { AMBIENT_DISABLED_FEATURES } else { UNATTENDED_DISABLED_FEATURES };
     for feature in disabled {
         command.args(["-c", &format!("features.{feature}=false")]);
     }
