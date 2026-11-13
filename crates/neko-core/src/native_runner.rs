@@ -1228,7 +1228,7 @@ fn prompt_with_git(prompt: &str) -> String {
     )
 }
 
-fn git_command(directory: &Path) -> Command {
+pub(crate) fn git_command(directory: &Path) -> Command {
     let mut command =
         Command::new(developer_git().unwrap_or_else(|| PathBuf::from("/usr/bin/git")));
     command.current_dir(directory).args([
@@ -1288,7 +1288,7 @@ pub(crate) fn git_output(
 
 // --no-textconv does not disable clean/process filters used when Git compares
 // working files. Host evidence collection must never execute repository code.
-fn git_without_filters(directory: &Path, cancel: &AtomicBool) -> Result<Command, String> {
+pub(crate) fn git_without_filters(directory: &Path, cancel: &AtomicBool) -> Result<Command, String> {
     let names = git_output(directory, &["config", "--name-only", "--list"], cancel)?;
     let mut command = git_command(directory);
     for name in names.lines().filter(|n| {
