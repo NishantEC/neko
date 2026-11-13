@@ -223,6 +223,7 @@ finished.
 - [One registry: plugins are not a separate world (2026-10-22)](docs/knowledge/one-registry-plugins-are-not-a-separate-world.md) — Owner: "plugins and all are a different thing in our heads, it should…
 - [Chat is the AI SDK's (2026-10-22)](docs/knowledge/chat-is-the-ai-sdk-s.md) — Owner decision: Neko's chat protocol is the Vercel AI SDK's (ai, @ai-sdk/react).
 - [Neko runs the day (2026-10-29)](docs/knowledge/neko-runs-the-day.md) — Scopes from MCP config on disk, routines that act and report, the Inbox, notifications.
+- [Neko reaches your phone (2026-11-13)](docs/knowledge/phone-push.md) — Needs-you items pushed to Apple Reminders (EventKit in the app) and optional ntfy when away; idle, quiet hours, 6/hour cap, two-way done.
 - [The Calendar (2026-11-06)](docs/knowledge/calendar.md) — macOS Calendar via EventKit in the app, one quiet daemon row, Neko's dated work on the all-day row.
 - [One window of tabs (2026-11-06)](docs/knowledge/one-window-of-tabs.md) — Tab strip over the hash router, detail tabs, Neko's right-click menu, one status glyph set, crew lines in chat.
 - [Neko updates itself (2026-10-22)](docs/knowledge/neko-updates-itself.md) — Owner: Neko "should be able to write itself over".

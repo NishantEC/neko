@@ -186,6 +186,7 @@ enum OpenNeko: String, CaseIterable, Identifiable {
         PresenceController.shared.start(model: model)
         RoutineNotifier.shared.start(model: model)
         CalendarBridge.shared.start()
+        PhoneBridge.shared.start()
         await model.start()
         await PaletteController.shared.configure(model: model)
     }

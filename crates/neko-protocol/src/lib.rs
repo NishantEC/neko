@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod agent_profiles;
 pub mod calendar;
+pub mod phone;
 pub mod agent_models;
 pub mod decision_context;
 pub mod mcp_host;
@@ -657,6 +658,32 @@ pub enum Request {
         to_ms: i64,
     },
     CalendarStatus,
+    /// The phone channels' settings and status. Answered with `Phone`.
+    PhoneSettings,
+    /// Saves the settings (an empty ntfy topic is generated). Answered with `Phone`.
+    SetPhoneSettings {
+        settings: phone::PhoneSettings,
+    },
+    /// The app's Reminders report, sent every few seconds: its access, the ids
+    /// of the reminders it finds in Neko's list (`present`) and those the
+    /// person completed (`completed`). Answered with `PhonePlan`.
+    PhoneRemindersSync {
+        access: phone::RemindersAccess,
+        #[serde(default)]
+        present: Vec<String>,
+        #[serde(default)]
+        completed: Vec<String>,
+    },
+    /// What the app did with the last plan. Answered with `Phone`.
+    PhoneRemindersDone {
+        #[serde(default)]
+        created: Vec<phone::ReminderCreated>,
+        #[serde(default)]
+        deleted: Vec<String>,
+    },
+    /// Sends a test push on every channel that is on, ignoring quiet hours
+    /// and whether the person is at the Mac. Answered with `PhoneTest`.
+    PhoneTest,
     /// Finished tasks (Ready to review, Completed, Failed) the person has not
     /// opened since they finished (`neko_core::task_seen`). Answered with
     /// `UnseenTasks`.
@@ -1099,6 +1126,15 @@ pub enum Response {
         status: calendar::CalendarStatus,
     },
     CalendarStatus(calendar::CalendarStatus),
+    Phone {
+        settings: phone::PhoneSettings,
+        status: phone::PhoneStatus,
+    },
+    PhonePlan(phone::ReminderPlan),
+    /// One line per channel that was tried.
+    PhoneTest {
+        lines: Vec<String>,
+    },
     UnseenTasks {
         ids: Vec<String>,
     },

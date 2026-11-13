@@ -1,5 +1,6 @@
 mod codex;
 mod mcp_host;
+mod phone;
 mod routines;
 mod self_update;
 mod server;
@@ -263,6 +264,7 @@ fn main() {
 
     // Routines: recurring scoped runs that act and report (`routines.rs`).
     routines::spawn(state.clone());
+    phone::spawn(state.clone());
     server::spawn_web_bridge(state.clone());
     // Neko applying landed changes to itself (see `self_update.rs`).
     self_update::spawn(state.clone());

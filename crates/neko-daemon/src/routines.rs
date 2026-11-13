@@ -439,6 +439,32 @@ fn each_item(db: &neko_core::Db, workspace: Option<&str>, f: &mut dyn FnMut(&Rou
     Ok(())
 }
 
+/// Every needs-you item of every routine, open or closed, once per `seq`
+/// (the phone channels read these).
+pub(crate) fn all_items(db: &neko_core::Db) -> Result<Vec<NeedsYou>, String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut items = Vec::new();
+    for routine in core::load(db)?.routines {
+        for run in core::load_runs(db, &routine.id).unwrap_or_default() {
+            items.extend(run.needs_you.into_iter().filter(|i| i.seq == 0 || seen.insert(i.seq)));
+        }
+    }
+    Ok(items)
+}
+
+/// Closes the open items with these seqs (the owner completed their
+/// reminders on the phone).
+pub(crate) fn close_seqs(db: &neko_core::Db, seqs: &[u64], reason: &str) -> Result<(), String> {
+    let now = neko_core::workbench::now_ms();
+    each_item(db, None, &mut |_, _, item| {
+        if item.done || !seqs.contains(&item.seq) {
+            return false;
+        }
+        inbox::close(item, reason, now);
+        true
+    })
+}
+
 /// Closes every open item in the workspace whose title is in `titles`.
 fn close_titles(db: &neko_core::Db, workspace_id: &str, titles: &[String], reason: &str) -> Result<(), String> {
     if titles.is_empty() {

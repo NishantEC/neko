@@ -110,6 +110,10 @@ pub struct NeedsYou {
     /// it again (only age-out and the owner do).
     #[serde(default)]
     pub kept: bool,
+    /// The routine marked it as unable to wait for morning: it is pushed to
+    /// the phone even during quiet hours.
+    #[serde(default)]
+    pub urgent: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

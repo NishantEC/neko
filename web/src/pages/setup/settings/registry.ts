@@ -2,7 +2,7 @@
 // that search can open. Ranking is the native app's (SettingsSearch.swift):
 // title prefix, a word in the title, a keyword, then a substring.
 
-export type SectionId = "general" | "appearance" | "ai" | "rulebook" | "search" | "permissions" | "diagnostics" | "updates" | "about";
+export type SectionId = "general" | "appearance" | "ai" | "rulebook" | "phone" | "search" | "permissions" | "diagnostics" | "updates" | "about";
 
 export interface SectionDef { id: SectionId; title: string; summary: string; group: string; keywords: string[] }
 export interface SettingDef { id: string; section: SectionId; title: string; keywords: string[] }
@@ -12,6 +12,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "appearance", title: "Appearance", group: "Neko", summary: "Light and dark themes, and your own.", keywords: ["theme", "dark", "light", "mode", "colour", "color", "glass", "gruvbox", "nord", "catppuccin"] },
   { id: "ai", title: "AI & agents", group: "Neko", summary: "Choose the runtime and model for new work, and what a task may cost.", keywords: ["model", "runtime", "codex", "claude", "budget", "agents"] },
   { id: "rulebook", title: "Rulebook", group: "Neko", summary: "The rules Neko and every agent it hands work to follow.", keywords: ["rules", "standards", "engineering", "review", "instructions", "policy"] },
+  { id: "phone", title: "Phone", group: "Neko", summary: "Reach you on your phone when something needs you and you are away.", keywords: ["push", "notification", "ntfy", "reminders", "iphone", "alert", "quiet hours", "away"] },
   { id: "search", title: "Quick panel", group: "This Mac", summary: "Choose which folders appear in the quick panel.", keywords: ["quick panel", "palette", "folders", "files", "spotlight"] },
   { id: "permissions", title: "Permissions", group: "This Mac", summary: "Review what Neko can access on this Mac.", keywords: ["privacy", "full disk access", "accessibility", "clipboard"] },
   { id: "diagnostics", title: "Diagnostics", group: "This Mac", summary: "Check local runtimes and the connection to Neko.", keywords: ["health", "debug", "logs", "troubleshoot", "connection"] },
@@ -39,6 +40,10 @@ export const SETTINGS: SettingDef[] = [
   { id: "inbox-age-out", section: "ai", title: "Inbox items age out after", keywords: ["inbox", "routines", "needs you", "stale", "expire", "days", "clean up"] },
   { id: "plan-first", section: "ai", title: "Plan before working", keywords: ["approval", "read-only", "plan"] },
   { id: "start-over", section: "ai", title: "Start over", keywords: ["reset", "clear", "delete tasks", "delete tickets", "fresh", "wipe"] },
+  { id: "phone-reminders", section: "phone", title: "Apple Reminders", keywords: ["phone", "push", "icloud", "iphone", "notification"] },
+  { id: "phone-ntfy", section: "phone", title: "ntfy", keywords: ["phone", "push", "topic", "server", "notification"] },
+  { id: "phone-quiet", section: "phone", title: "Quiet hours", keywords: ["phone", "night", "sleep", "do not disturb"] },
+  { id: "phone-test", section: "phone", title: "Send a test", keywords: ["phone", "push", "check"] },
   { id: "rulebook", section: "rulebook", title: "Rulebook text", keywords: ["rules", "standards", "default", "reset"] },
   { id: "folders", section: "search", title: "Included folders", keywords: ["files", "quick panel", "scope", "directories"] },
   { id: "add-folder", section: "search", title: "Add a folder", keywords: ["folder", "directory", "path"] },

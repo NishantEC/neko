@@ -898,6 +898,11 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         | Request::SetInboxAgeOutDays { .. }
         | Request::SetStandingOrders { .. }
         | Request::RoutineNotifications { .. }) => crate::routines::handle(state, request),
+        request @ (Request::PhoneSettings
+        | Request::SetPhoneSettings { .. }
+        | Request::PhoneRemindersSync { .. }
+        | Request::PhoneRemindersDone { .. }
+        | Request::PhoneTest) => crate::phone::handle(state, request),
         Request::SetCalendarEvents { events, source, access } => {
             let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             match neko_core::calendar::store(&db, events, &source, access, neko_core::workbench::now_ms()) {
@@ -1506,7 +1511,7 @@ fn quota_summaries() -> Vec<neko_protocol::QuotaSummary> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use neko_core::clipboard::ClipboardContentKind;
     use neko_protocol::SearchItem;
@@ -1921,6 +1926,11 @@ mod tests {
         // Never the person's own artifacts folder.
         state.artifacts = std::env::temp_dir().join(format!("neko-test-artifacts-{}", std::process::id()));
         state
+    }
+
+    /// For the phone tests in another module.
+    pub(crate) fn test_state_for_phone() -> AppState {
+        test_state(Db::open_in_memory().unwrap(), Vec::new())
     }
 
     #[test]

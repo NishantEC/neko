@@ -24,6 +24,10 @@
     <true/>
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>Neko shows your meetings on its Calendar beside the work it has planned. Events stay on this Mac.</string>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>When you turn on Phone, Neko puts a reminder in its own Neko list for each thing that needs you, so your phone can tell you, and removes it when it is done.</string>
+    <key>NSRemindersUsageDescription</key>
+    <string>When you turn on Phone, Neko puts a reminder in its own Neko list for each thing that needs you, so your phone can tell you, and removes it when it is done.</string>
     <key>NSDesktopFolderUsageDescription</key>
     <string>Neko searches your Desktop and opens workspaces kept there.</string>
     <key>NSDocumentsFolderUsageDescription</key>

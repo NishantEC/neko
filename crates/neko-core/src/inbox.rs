@@ -20,6 +20,7 @@ pub const EXPIRED: &str = "Expired";
 pub const AGED_OUT: &str = "Aged out";
 pub const BY_ROUTINE: &str = "Resolved by routine";
 pub const BY_YOU: &str = "Done by you";
+pub const ON_PHONE: &str = "Done on your phone";
 
 /// One open item as the prompt lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]

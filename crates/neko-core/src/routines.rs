@@ -294,6 +294,7 @@ A previous run may have acted and then failed to report. Before replying to or a
 End your reply with exactly one fenced json block and nothing after it:\n\
 ```json\n{{\"quiet\": false, \"did\": [\"one line per thing you did, with who/where\"], \"needs_you\": [{{\"title\": \"short\", \"detail\": \"what {{owner}} must do and why\", \"link\": \"https://...\", \"expires\": \"2026-01-31T15:00:00Z\"}}], \"resolved\": [\"exact title of an item above that is no longer true\"], \"memory\": {{}}}}\n```\n\
 expires is optional: set it (ISO time, UTC) whenever an item is tied to a time, such as a reply needed before a call or a window that ends, and Neko closes the item then; leave it out for anything open-ended. An item that names a GitHub pull request closes itself when that pull request is merged or closed, so put the pull request's link on it.\n\
+urgent is optional and rare: add \"urgent\": true only to an item that cannot wait until morning (someone is blocked on {{owner}} right now, or a deadline is within hours), because it may reach {{owner}}'s phone at night; leave it out otherwise.\n\
 quiet is true only when nothing new happened and you did nothing; then did and needs_you are empty. memory is handed back to you next run: keep it small (timestamps, ids, who you are waiting on).",
         name = routine.name,
         scope_name = scope.name,
@@ -397,6 +398,7 @@ pub fn parse_reply(text: &str) -> Result<Parsed, String> {
                         link: item.get("link").and_then(Value::as_str).map(clip).filter(|l| l.starts_with("http")),
                         done: false,
                         expires_ms: item.get("expires").and_then(Value::as_str).and_then(crate::inbox::parse_time_ms),
+                        urgent: item.get("urgent").and_then(Value::as_bool).unwrap_or(false),
                         ..Default::default()
                     })
                 })
