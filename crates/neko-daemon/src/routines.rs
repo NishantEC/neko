@@ -633,6 +633,18 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
 
 /// Raised once per outage, resolved when Claude Code works again.
 const SIGNED_OUT_TITLE: &str = "Claude Code is signed out or its account changed";
+const LIMIT_TITLE: &str = "Claude Code hit its usage limit";
+
+/// The outage's notice title and what to do, from the error that started it.
+fn outage_words(reason: &str, fallback: bool) -> (&'static str, &'static str) {
+    let limit = neko_core::runtime_health::is_usage_limit(reason);
+    match (limit, fallback) {
+        (true, true) => (LIMIT_TITLE, "Routines are running on Codex until the limit resets or you add usage; this clears itself when Claude Code works again."),
+        (true, false) => (LIMIT_TITLE, "No other agent is installed, so routines will keep failing until the limit resets or you add usage. This clears itself when Claude Code works again."),
+        (false, true) => (SIGNED_OUT_TITLE, "Routines are running on Codex until it is back. To fix it, run `claude /login` in a terminal; this clears itself when Claude Code works again."),
+        (false, false) => (SIGNED_OUT_TITLE, "No other agent is installed, so routines will keep failing until you run `claude /login` in a terminal. This clears itself when Claude Code works again."),
+    }
+}
 
 /// What the agent call tells the run's record.
 #[derive(Default)]
@@ -683,7 +695,12 @@ fn run_agent(state: &AppState, routine: &Routine, spec: &neko_core::native_runne
             runtime: AgentRuntime { provider: "codex".into(), ..Default::default() },
         };
         runner::run_codex_scoped(&codex_spec, config, cancel, |_| {}).map(|(text, skipped)| {
-            let mut note = String::from("Claude Code is signed out, so this run used Codex.");
+            let reason = neko_core::runtime_health::load(&db(state)).reason;
+            let mut note = String::from(if neko_core::runtime_health::is_usage_limit(&reason) {
+                "Claude Code is out of usage, so this run used Codex."
+            } else {
+                "Claude Code is signed out, so this run used Codex."
+            });
             if !skipped.is_empty() {
                 note.push_str(&format!(" Not available there: {}.", skipped.join(", ")));
             }
@@ -743,16 +760,15 @@ fn add_outage_notice(db: &neko_core::Db, routine: &Routine, meta: &AgentMeta, ne
         return Ok(());
     }
     // An item from an earlier outage still open here is adopted, not doubled.
-    if open_titles(db, &routine.workspace_id)?.contains(&title_key(SIGNED_OUT_TITLE)) {
-        return neko_core::runtime_health::set_notice(db, &routine.workspace_id, SIGNED_OUT_TITLE);
+    let (title, detail) = outage_words(&health.reason, meta.fallback);
+    let open = open_titles(db, &routine.workspace_id)?;
+    for existing in [SIGNED_OUT_TITLE, LIMIT_TITLE] {
+        if open.contains(&title_key(existing)) {
+            return neko_core::runtime_health::set_notice(db, &routine.workspace_id, existing);
+        }
     }
-    let detail = if meta.fallback {
-        "Routines are running on Codex until it is back. To fix it, run `claude /login` in a terminal; this clears itself when Claude Code works again."
-    } else {
-        "No other agent is installed, so routines will keep failing until you run `claude /login` in a terminal. This clears itself when Claude Code works again."
-    };
-    needs_you.push(NeedsYou { seq: 0, title: SIGNED_OUT_TITLE.into(), detail: detail.into(), link: None, done: false });
-    neko_core::runtime_health::set_notice(db, &routine.workspace_id, SIGNED_OUT_TITLE)
+    needs_you.push(NeedsYou { seq: 0, title: title.into(), detail: detail.into(), link: None, done: false });
+    neko_core::runtime_health::set_notice(db, &routine.workspace_id, title)
 }
 
 /// The id of an active schedule called `name` in `paseo schedule ls --json`.

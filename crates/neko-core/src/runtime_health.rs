@@ -48,6 +48,15 @@ pub fn is_auth_failure(error: &str) -> bool {
     MARKERS.iter().any(|m| text.contains(m))
 }
 
+/// The auth failure is a spent usage or credit limit rather than a sign-in
+/// problem, so the notice says to wait or top up instead of `/login`.
+pub fn is_usage_limit(error: &str) -> bool {
+    let text = error.to_lowercase();
+    ["credit balance is too low", "usage limit reached", "hit your limit", "out of extra usage", "reached your usage limit"]
+        .iter()
+        .any(|m| text.contains(m))
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Health {
     /// When the login was first seen bad in this outage; None when fine.
@@ -183,6 +192,8 @@ mod tests {
         let health = load(&db);
         assert_eq!(health.bad_since_ms, Some(10));
         assert_eq!(health.last_try_ms, 20);
+        assert!(is_usage_limit("Claude AI usage limit reached|1731500000"));
+        assert!(!is_usage_limit("OAuth session expired"));
         set_notice(&db, "w", "Claude Code is signed out").unwrap();
         let before = mark_good(&db).unwrap().unwrap();
         assert_eq!(before.notice, Some(("w".into(), "Claude Code is signed out".into())));
