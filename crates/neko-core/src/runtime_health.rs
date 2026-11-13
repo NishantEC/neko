@@ -65,6 +65,13 @@ pub fn is_codex_usage_limit(error: &str) -> bool {
         .any(|m| text.contains(m))
 }
 
+/// A usage limit that resets by itself (a window), as opposed to credit or extra usage that
+/// runs out until someone tops it up: only the first is worth parking work for.
+pub fn is_resettable_limit(error: &str) -> bool {
+    let text = error.to_lowercase();
+    is_any_usage_limit(error) && !["credit balance is too low", "out of extra usage", "insufficient_quota"].iter().any(|m| text.contains(m))
+}
+
 /// Either runtime says its usage limit is spent.
 pub fn is_any_usage_limit(error: &str) -> bool {
     is_usage_limit(error) || is_codex_usage_limit(error)

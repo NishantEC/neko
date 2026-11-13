@@ -426,3 +426,81 @@ fn redo_checks_pushed_history_like_undo_does() {
     assert!(["failed", "unsaved_changes", "foreign_commits"].contains(&refusal.code()), "{refusal}");
     assert_eq!(fs::read_to_string(f.wt.join("mine.txt")).unwrap(), "m\n");
 }
+
+#[test]
+fn commits_made_while_the_daemon_was_down_are_not_swallowed_by_a_stale_runs_span() {
+    let f = fixture();
+    // Run 1 starts and the daemon stops: no end.
+    let first = begin_run(&f.db, "t", &f.wt, 1_000).unwrap();
+    persons_commit(&f.wt, "mine.txt", "mine\n");
+    // The next run's start closes run 1 "late"; run 2 does its own work.
+    run(&f, |d| fs::write(d.join("later.txt"), "x\n").unwrap());
+    let head = g(&f.wt, &["rev-parse", "HEAD"]);
+    let refusal = undo(&f.db, "t", &f.wt, UndoOptions { run: first, through_later: true, ..Default::default() }, false, 4_000).unwrap_err();
+    assert_eq!(refusal.code(), "foreign_commits", "{refusal}");
+    assert_eq!(g(&f.wt, &["rev-parse", "HEAD"]), head, "the person's commit is still there");
+}
+
+#[test]
+fn rewritten_history_is_never_rewound_and_a_revert_reverses_only_the_run() {
+    let f = fixture();
+    let n = run(&f, commit_in_run);
+    // The branch is replaced by an unrelated root commit with the same files (a rebase, say).
+    let tree = g(&f.wt, &["rev-parse", "HEAD^{tree}"]);
+    let root = g(&f.wt, &["commit-tree", &tree, "-m", "rewritten"]);
+    g(&f.wt, &["update-ref", "refs/heads/codex/neko-t", &root]);
+    g(&f.wt, &["reset", "-q", "--mixed", &root]);
+    let refusal = undo(&f.db, "t", &f.wt, undo_opts(n), false, 3_000).unwrap_err();
+    assert_eq!(refusal.code(), "failed", "{refusal}");
+    assert!(refusal.message().contains("rewritten"), "{refusal}");
+    assert_eq!(g(&f.wt, &["rev-parse", "HEAD"]), root);
+    let done = undo(&f.db, "t", &f.wt, UndoOptions { run: n, revert: true, ..Default::default() }, false, 3_000).unwrap();
+    assert!(done.reverted_by_commit);
+    assert_eq!(fs::read_to_string(f.wt.join("a.txt")).unwrap(), "one\n");
+    assert_eq!(g(&f.wt, &["rev-parse", "HEAD~1"]), root, "history kept; the revert is a new commit on top");
+}
+
+#[test]
+fn back_to_here_with_a_revert_over_foreign_commits_is_refused() {
+    let f = fixture();
+    let first = run(&f, commit_in_run);
+    run(&f, |d| fs::write(d.join("later.txt"), "x\n").unwrap());
+    persons_commit(&f.wt, "mine.txt", "mine\n");
+    let refusal = undo(&f.db, "t", &f.wt, UndoOptions { run: first, through_later: true, revert: true, ..Default::default() }, false, 4_000).unwrap_err();
+    assert_eq!(refusal.code(), "failed", "{refusal}");
+    assert!(refusal.message().contains("one at a time"), "{refusal}");
+    assert_eq!(fs::read_to_string(f.wt.join("mine.txt")).unwrap(), "mine\n");
+}
+
+#[test]
+fn neko_own_commits_after_a_run_are_not_foreign() {
+    let f = fixture();
+    let n = run(&f, commit_in_run);
+    // Neko parks the folder: a work-in-progress commit with its known subject.
+    g(&f.wt, &["commit", "-q", "--allow-empty", "-m", crate::native_runner::parking::PARK_SUBJECT]);
+    // Publishing commits too; an unrecorded commit is foreign, a recorded one is not.
+    let before = head_commit(&f.wt);
+    g(&f.wt, &["commit", "-q", "--allow-empty", "-m", "publish"]);
+    let refusal = undo(&f.db, "t", &f.wt, undo_opts(n), false, 3_000).unwrap_err();
+    assert_eq!(refusal.code(), "foreign_commits", "{refusal}");
+    assert!(!refusal.message().contains(crate::native_runner::parking::PARK_SUBJECT), "the parking commit is not named: {refusal}");
+    record_own_range(&f.db, "t", &f.wt, before.as_deref());
+    let done = undo(&f.db, "t", &f.wt, undo_opts(n), false, 4_000);
+    assert!(done.is_ok(), "{done:?}");
+}
+
+#[test]
+fn a_dropped_runs_commits_stay_neko_own() {
+    let f = fixture();
+    let n = run(&f, commit_in_run);
+    let row = row(&f.db, "t").unwrap();
+    let mut own = Vec::new();
+    remember_span(&f.wt, &mut own, &row.runs[(n - 1) as usize]);
+    assert_eq!(own, vec![g(&f.wt, &["rev-parse", "HEAD"])]);
+    // A stale-closed run vouches for nothing.
+    let mut stale = row.runs[0].clone();
+    stale.closed_late = true;
+    let mut none = Vec::new();
+    remember_span(&f.wt, &mut none, &stale);
+    assert!(none.is_empty());
+}

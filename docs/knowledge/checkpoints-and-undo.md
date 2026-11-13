@@ -47,6 +47,7 @@ Redo | SnapshotUnsaved)`. All refusals are decided before anything changes
 | `unsaved_changes` | the folder's tree is not the one the last run, undo or redo left (edits no checkpoint holds) | "Snapshot them first, then undo" (`snapshot_unsaved`) |
 | `pushed` | a commit made since the run started is on a remote-tracking branch, or the ticket has an open pull request and commits were made | "Add a revert commit instead" (`revert`: files restored, history kept, one new commit) |
 | `foreign_commits` | commits on the branch after the run's start that no Neko run made (not between a recorded run's start and end HEAD, not a revert commit Neko added: `Row::own_commits`), the person's own for instance | no rewind. Only "Add a revert commit instead": a three-way merge-tree reverses just this run's changes (end checkpoint as base) as a new commit, and refuses if it conflicts. The refusal names the commits |
+| (rewritten history) | the run's start is no longer an ancestor of HEAD (rebase, amend, reset): code `failed`, same revert-only offer, never the start-tree revert | "Add a revert commit instead" |
 | `busy` | a worker holds the ticket, or the run has no end yet | stop it first |
 
 The ticket's folder must be one of Neko's task worktrees and exist (a parked
@@ -103,3 +104,12 @@ local bare remote).
 - No run starts directly in a person's own checkout yet, so that path is covered by
   tests of the functions only.
 - Planning (read-only) runs are not checkpointed; reviews are part of the build's run.
+
+### What counts as Neko's own commit
+
+`history_since` treats a commit as Neko's when it lies between a run's start and end HEAD (a run
+closed late by the next run's start after a daemon stop vouches for none), is a revert commit
+Neko added, was recorded by `record_own_range` (publishing), or has the parking subject. A dropped
+run's span moves into `own_commits` (bounded, 2000). Over foreign or rewritten history "back to
+here" is refused (one run at a time, newest first), and a failed attempt restores the files from
+the current state and moves the branch back.

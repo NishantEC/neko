@@ -406,6 +406,10 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
                 Ok((r.id.clone(), saved))
             })
             .collect::<Result<Vec<_>, String>>()?;
+        // Nothing overdue any more: the downtime is dealt with, and a routine enabled later is not "missed".
+        if !store.routines.iter().any(|r| r.enabled && states.iter().find(|(i, _)| *i == r.id).is_some_and(|(_, s)| s.run_requested || s.next_due_ms.is_some_and(|d| d <= now))) {
+            routine_care::clear_downtime();
+        }
         let Some(id) = pick_due(&store, &states, now, &|cadence| core::in_window_local(cadence, now)) else { return Ok(()) };
         let routine = store.routines.iter().find(|r| r.id == id).cloned().ok_or("Routine vanished")?;
         let picked = states.iter().find(|(i, _)| *i == id).map(|(_, s)| s.clone()).unwrap_or_default();
@@ -423,7 +427,7 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
                 core::save_state(&db, &routine.id, &skipped)?;
                 return Ok(());
             }
-            routine_care::Plan::Run(missed) => routine_missed = missed,
+            routine_care::Plan::Run(missed) => routine_missed = missed.or(picked.missed.clone()),
         }
         let scope = scopes(state, false)?.into_iter().find(|s| s.workspace_id.as_deref() == Some(routine.workspace_id.as_str()));
         (routine, scope)
@@ -1021,7 +1025,7 @@ fn park_for_limit(state: &mut RoutineState, until_ms: i64) {
 
 /// The hold a failed run earns: every runtime tried (and any that is installed) is out of usage.
 fn usage_hold(errors: &[&str], now_ms: i64) -> Option<i64> {
-    (!errors.is_empty() && errors.iter().all(|e| neko_core::runtime_health::is_any_usage_limit(e))).then(|| neko_core::runtime_health::hold_until(errors, now_ms, &chrono::Local))
+    (!errors.is_empty() && errors.iter().all(|e| neko_core::runtime_health::is_resettable_limit(e))).then(|| neko_core::runtime_health::hold_until(errors, now_ms, &chrono::Local))
 }
 
 struct AgentRun {
@@ -1351,7 +1355,10 @@ mod tests {
         let codex = "{\"type\":\"usage_limit_reached\",\"resets_in_seconds\":900}";
         assert_eq!(usage_hold(&[claude.as_str(), codex], now), Some(now + 900_000));
         // No reset in the error: an hour.
-        assert_eq!(usage_hold(&["Credit balance is too low"], now), Some(now + 3_600_000));
+        assert_eq!(usage_hold(&["You've hit your limit"], now), Some(now + 3_600_000));
+        // Credit or extra usage that must be topped up is not a window: a failure, with the usual notice.
+        assert_eq!(usage_hold(&["Credit balance is too low"], now), None);
+        assert_eq!(usage_hold(&["You're out of extra usage"], now), None);
         // One runtime still works or failed for another reason: no hold.
         assert_eq!(usage_hold(&[claude.as_str(), "timed out after 900s"], now), None);
         assert_eq!(usage_hold(&[], now), None);

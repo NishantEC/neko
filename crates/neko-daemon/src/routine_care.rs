@@ -54,6 +54,11 @@ pub(crate) fn note_tick(db: &neko_core::Db, now_ms: i64) -> Option<(i64, i64)> {
     ledger.downtime()
 }
 
+/// The downtime has been dealt with: nothing overdue is left to attribute to it.
+pub(crate) fn clear_downtime() {
+    LEDGER.lock().unwrap_or_else(std::sync::PoisonError::into_inner).down = None;
+}
+
 /// What to do with a routine that is due.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Plan {
@@ -148,6 +153,17 @@ mod tests {
         assert!(state.next_due_ms.unwrap() > 70 * MIN);
         let picked = crate::routines::pick_due(&core::Store { routines: vec![messages.clone()], ..Default::default() }, &[("r".into(), state.clone())], 70 * MIN, &|_| true);
         assert_eq!(picked, None, "run once, not N times");
+    }
+
+    #[test]
+    fn a_cleared_downtime_no_longer_marks_anything_missed() {
+        let db = neko_core::Db::open_in_memory().unwrap();
+        let mut ledger = Ledger::default();
+        ledger.tick(&db, 100 * MIN);
+        ledger.tick(&db, 200 * MIN);
+        assert!(ledger.downtime().is_some());
+        ledger.down = None;
+        assert_eq!(ledger.downtime(), None);
     }
 
     #[test]

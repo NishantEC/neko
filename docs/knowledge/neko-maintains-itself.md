@@ -30,6 +30,11 @@ a project. Each piece stores its own small rows; none of them touches the workbe
   file as it is). Locked, edited and not-Neko-written skills only get the proposal; an
   untouched Neko-written one is accepted by the same `decide` a click uses, and the applied
   diff is kept (last 10) and shown under Tools, Skills.
+- **Auto-apply is selection only.** `Consolidated::auto_safe`: the frontmatter is byte for
+  byte the original's, every result line already existed in the file and at least half the
+  original's lines are kept. Anything added or reworded (lessons can come from outside text) is
+  only proposed ("changed wording"). Unclosed frontmatter, in the file or the answer, is refused;
+  changed frontmatter lines are archived too. Entries evict unlocked ones first.
 - **Off switch** `SkillCommand::SetCurator`. State is attached when `skills::load` reads
   (`SkillState::curator`), never stored in `neko_skills_v1`.
 
@@ -51,7 +56,8 @@ When every runtime a run could use reports a usage limit (Claude via
 runtime for another reason is not a hold) the routine is parked: `RoutineState::hold`,
 `next_due_ms` at the reset the error names (`limit_reset_ms`: Claude's `|<epoch>`, Codex's
 `resets_in_seconds`, a clock time after "resets" or "try again at"; the earliest of the
-runtimes wins), else +1 hour, at most a week. No failure is counted, no alert and no run is
+runtimes wins), else +1 hour, at most a week. Credit or extra usage that must be topped up
+(`is_resettable_limit` false) is not a window: it stays a failure with the usual notice. No failure is counted, no alert and no run is
 added; the row says "Held until 14:00 (usage limit)" (`routine-status.ts`).
 
 ### Spill (`neko_core::spill`)

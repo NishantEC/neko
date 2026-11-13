@@ -44,7 +44,16 @@ pub(super) fn publish_task(db: &Arc<Mutex<Db>>, task_id: &str, cancel: &AtomicBo
     let _held = super::parking::InUse::take(task_id);
     let outcome = super::parking::ensure_restored(db, task_id, cancel)
         .map_err(Failure::from)
-        .and_then(|()| publish_unlocked(db, task_id, cancel));
+        .and_then(|()| {
+            // Commits publishing makes on the branch are Neko's, not the person's: an undo must not refuse over them.
+            let folder = store::load(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)).ok().and_then(|s| s.tasks.iter().find(|t| t.id == task_id).and_then(|t| super::run_checkpoints::folder_of(t).ok()));
+            let before = folder.as_deref().and_then(neko_core::checkpoints::head_commit);
+            let result = publish_unlocked(db, task_id, cancel);
+            if let Some(folder) = &folder {
+                neko_core::checkpoints::record_own_range(db, task_id, folder, before.as_deref());
+            }
+            result
+        });
     in_flight().lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(task_id);
     let main = native_runner::publish::LANDING_BRANCH;
     let message = match &outcome {

@@ -26,6 +26,8 @@ pub const MAX_PER_TASK: usize = 50;
 pub const KEEP_MS: i64 = 14 * 24 * 60 * 60 * 1000;
 /// Skipped files listed per snapshot (the count is kept in full).
 const MAX_SKIPPED_LISTED: usize = 20;
+/// Commits remembered as Neko's own per ticket.
+const MAX_OWN_COMMITS: usize = 2000;
 /// The most of a diff returned for display.
 pub const MAX_DIFF_BYTES: usize = 512 * 1024;
 
@@ -75,6 +77,9 @@ pub struct Run {
     pub removed: usize,
     /// Restored away by an undo (until a redo brings it back).
     pub undone: bool,
+    /// Closed by the next run's start after the daemon stopped mid-run: its end is not
+    /// where the run ended, so it vouches for no commits.
+    pub closed_late: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -472,6 +477,7 @@ fn enforce_cap(dir: &Path, task_id: &str, row: &mut Row) {
             doomed.push(ref_for(task_id, &row.extras.remove(i).id));
         } else if row.runs.len() > 1 {
             let run = row.runs.remove(1);
+            remember_span(dir, &mut row.own_commits, &run);
             doomed.push(ref_for(task_id, &format!("{}-start", run.n)));
             if run.end.is_some() {
                 doomed.push(ref_for(task_id, &format!("{}-end", run.n)));
@@ -498,6 +504,7 @@ pub fn begin_run(db: &Mutex<Db>, task_id: &str, dir: &Path, now_ms: i64) -> Resu
         stale.end = Some(start.clone());
         stale.ended_ms = now_ms;
         stale.outcome = Outcome::Cancelled;
+        stale.closed_late = true;
         let (files, added, removed) = stat(dir, &stale.start.commit, &start.commit).unwrap_or_default();
         (stale.files, stale.added, stale.removed) = (files, added, removed);
     }
@@ -671,30 +678,87 @@ fn pushed_reason(dir: &Path, start_head: &Option<String>, pull_request_open: boo
     Ok(None)
 }
 
-/// Commits on HEAD after `since` that no Neko run made: not between a recorded run's
-/// start and end HEAD, and not a revert commit Neko added. Oldest first, as
-/// `<short id> <subject>`. Empty when HEAD is `since` or not a descendant of it.
-fn foreign_commits(dir: &Path, row: &Row, since: &str) -> Result<Vec<String>, String> {
-    let Some(now) = head_of(dir) else { return Ok(Vec::new()) };
-    if now == since || !is_ancestor(dir, since, &now) {
-        return Ok(Vec::new());
+/// Where HEAD stands relative to the commit a run started from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum History {
+    /// Nothing but what Neko's runs made (or HEAD has not moved).
+    Same,
+    /// Commits no Neko run made (the person's own, say) came after: `<short id> <subject>`
+    /// lines, the first ten and a count.
+    Foreign(Vec<String>),
+    /// The start is no longer an ancestor of HEAD (rebased, amended, reset): ownership is unknowable.
+    Rewritten,
+}
+
+/// The commits a run vouches for: start..end HEAD of a run that ended on its own.
+fn run_span(dir: &Path, run: &Run) -> Vec<String> {
+    if run.closed_late {
+        return Vec::new();
+    }
+    match (run.start.head.as_deref(), run.end.as_ref().and_then(|e| e.head.as_deref())) {
+        (Some(start), Some(end)) if start != end && is_ancestor(dir, start, end) => git(dir, &["rev-list", &format!("{start}..{end}")]).map(|o| o.lines().map(str::to_owned).collect()).unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+/// Keeps a run's commits as Neko's after the run's own record is dropped (bounded).
+fn remember_span(dir: &Path, row_own: &mut Vec<String>, run: &Run) {
+    row_own.extend(run_span(dir, run));
+    let extra = row_own.len().saturating_sub(MAX_OWN_COMMITS);
+    row_own.drain(..extra);
+}
+
+fn history_since(dir: &Path, row: &Row, since: &str) -> Result<History, String> {
+    let Some(now) = head_of(dir) else { return Ok(History::Same) };
+    if now == since {
+        return Ok(History::Same);
+    }
+    if !is_ancestor(dir, since, &now) {
+        return Ok(History::Rewritten);
     }
     let mut owned: std::collections::HashSet<String> = row.own_commits.iter().cloned().collect();
     for run in &row.runs {
-        if let (Some(start), Some(end)) = (run.start.head.as_deref(), run.end.as_ref().and_then(|e| e.head.as_deref())) {
-            if start != end && is_ancestor(dir, start, end) {
-                owned.extend(git(dir, &["rev-list", &format!("{start}..{end}")])?.lines().map(str::to_owned));
-            }
+        owned.extend(run_span(dir, run));
+    }
+    let log = git(dir, &["log", "--reverse", "--format=%H%x09%h %s", &format!("{since}..HEAD")])?;
+    let (mut shown, mut count) = (Vec::new(), 0_usize);
+    for line in log.lines() {
+        let Some((full, label)) = line.split_once('\t') else { continue };
+        // Neko's own work-in-progress commit when it parks a folder.
+        let parked = label.split_once(' ').is_some_and(|(_, subject)| subject == crate::native_runner::parking::PARK_SUBJECT);
+        if owned.contains(full) || parked {
+            continue;
+        }
+        count += 1;
+        if shown.len() < 10 {
+            shown.push(label.chars().take(100).collect::<String>());
         }
     }
-    let mut out = Vec::new();
-    for commit in commits_since(dir, since)? {
-        if !owned.contains(&commit) {
-            let subject = git(dir, &["log", "-1", "--format=%h %s", &commit])?;
-            out.push(subject.chars().take(100).collect());
-        }
+    if count > shown.len() {
+        shown.push(format!("and {} more", count - shown.len()));
     }
-    Ok(out)
+    Ok(if count == 0 { History::Same } else { History::Foreign(shown) })
+}
+
+/// Records commits Neko made on the ticket's branch outside a run (publishing) as its own,
+/// so an undo does not mistake them for the person's.
+pub fn record_own_range(db: &Mutex<Db>, task_id: &str, dir: &Path, from_head: Option<&str>) {
+    let _turn = one_at_a_time();
+    let (Some(from), Some(now)) = (from_head, head_of(dir)) else { return };
+    if from == now || !is_ancestor(dir, from, &now) {
+        return;
+    }
+    let Ok(log) = git(dir, &["rev-list", &format!("{from}..HEAD")]) else { return };
+    let Ok(mut row) = row(db, task_id) else { return };
+    row.own_commits.extend(log.lines().map(str::to_owned));
+    let extra = row.own_commits.len().saturating_sub(MAX_OWN_COMMITS);
+    row.own_commits.drain(..extra);
+    let _ = save_row(db, task_id, &row);
+}
+
+/// The commit a ticket's folder is at, for `record_own_range`.
+pub fn head_commit(dir: &Path) -> Option<String> {
+    head_of(dir)
 }
 
 /// A three-way revert of one run's own changes on top of `ours` (a commit): the
@@ -729,18 +793,30 @@ fn check_undo(row: &Row, dir: &Path, options: &UndoOptions, running: bool) -> Re
     if !later.is_empty() && !options.through_later {
         return Err(Refusal::LaterRuns(later));
     }
-    let foreign = match run.start.head.as_deref() {
-        Some(start) => foreign_commits(dir, row, start)?,
-        None => Vec::new(),
+    let history = match run.start.head.as_deref() {
+        Some(start) => history_since(dir, row, start)?,
+        None => History::Same,
     };
-    if !foreign.is_empty() {
-        if !options.revert {
-            return Err(Refusal::Foreign(foreign));
+    match &history {
+        History::Foreign(list) if !options.revert => return Err(Refusal::Foreign(list.clone())),
+        History::Rewritten if !options.revert => {
+            return Err(Refusal::Failed("The branch's history was rewritten since this run started (rebased, amended or reset), so it cannot be rewound safely. A revert commit can undo only this run's own changes, if they apply cleanly.".into()));
+        }
+        _ => {}
+    }
+    let three_way = history != History::Same;
+    if three_way {
+        let why = match &history {
+            History::Foreign(list) => format!(" Commits made outside Neko: {}.", list.join("; ")),
+            _ => " The branch's history was rewritten since the run started.".to_owned(),
+        };
+        if !later.is_empty() {
+            return Err(Refusal::Failed(format!("Undoing back over later runs cannot be combined with commits made outside Neko or rewritten history: undo the runs one at a time, newest first.{why}")));
         }
         // The only thing offered: reverse this run's own changes as a new commit; it must apply cleanly.
         if let Some(head) = head_of(dir) {
             if let Err(error) = reverse_run_on(dir, &head, &run) {
-                return Err(Refusal::Failed(format!("{error} Commits made outside Neko: {}.", foreign.join("; "))));
+                return Err(Refusal::Failed(format!("{error}{why}")));
             }
         }
     } else if !options.revert {
@@ -748,9 +824,9 @@ fn check_undo(row: &Row, dir: &Path, options: &UndoOptions, running: bool) -> Re
             return Err(Refusal::Pushed(detail));
         }
     }
-    // With commits of the person's on the branch the folder legitimately differs from what the
-    // runs left; the revert merges only this run's changes and the safety snapshot keeps the rest.
-    let unsaved = foreign.is_empty() && !matching(dir, row)?;
+    // With other commits on the branch the folder legitimately differs from what the runs left;
+    // the revert merges only this run's changes and the safety snapshot keeps the rest.
+    let unsaved = !three_way && !matching(dir, row)?;
     if unsaved && !options.snapshot_unsaved {
         return Err(Refusal::Unsaved);
     }
@@ -798,9 +874,10 @@ pub fn undo(db: &Mutex<Db>, task_id: &str, dir: &Path, options: UndoOptions, run
     undone.sort_unstable();
     // The files first, then the history (a revert keeps it). Whatever fails puts the files back.
     let foreign_revert = options.revert && match run.start.head.as_deref() {
-        Some(start) => !foreign_commits(dir, &row, start)?.is_empty(),
+        Some(start) => history_since(dir, &row, start)? != History::Same,
         None => false,
     };
+    let head_before = head_of(dir);
     let mut new_own: Vec<String> = Vec::new();
     let applied: Result<bool, String> = (|| {
         if foreign_revert {
@@ -845,7 +922,15 @@ pub fn undo(db: &Mutex<Db>, task_id: &str, dir: &Path, options: UndoOptions, run
     let reverted_by_commit = match applied {
         Ok(reverted) => reverted,
         Err(error) => {
-            let _ = restore_tree(dir, &run.start.tree, &safety.point.tree);
+            // Put back whatever the attempt reached: the files as they are now, then the branch.
+            let current = working_tree(dir).map_or_else(|_| run.start.tree.clone(), |t| t.0);
+            let _ = restore_tree(dir, &current, &safety.point.tree);
+            if let (Some(before), Some(now)) = (&head_before, head_of(dir)) {
+                if *before != now {
+                    let _ = git(dir, &["update-ref", "-m", "neko: undo rolled back", "HEAD", before, &now]);
+                }
+            }
+            let _ = reset_index(dir, head_before.as_deref());
             delete_refs(dir, &[ref_for(task_id, &safety.id)]);
             return Err(Refusal::Failed(error));
         }
@@ -892,8 +977,7 @@ pub fn redo(db: &Mutex<Db>, task_id: &str, dir: &Path, running: bool) -> Result<
                 if commits.first().is_some_and(|oldest| on_a_remote(dir, oldest)) {
                     return Err(Refusal::Pushed("A commit made since the undo was already pushed.".into()));
                 }
-                let foreign = foreign_commits(dir, &row, target)?;
-                if !foreign.is_empty() {
+                if let History::Foreign(foreign) = history_since(dir, &row, target)? {
                     return Err(Refusal::Foreign(foreign));
                 }
             }
@@ -985,13 +1069,12 @@ pub fn expire(db: &Mutex<Db>, now_ms: i64) -> usize {
         let old = |at: i64| at > 0 && now_ms - at > KEEP_MS;
         let mut doomed = Vec::new();
         let keep = row.redo.as_ref().map(|r| r.extra_id.clone());
-        row.runs.retain(|run| {
-            let expired = old(if run.ended_ms > 0 { run.ended_ms } else { run.started_ms });
-            if expired {
-                doomed.extend(collect(&task_id, run));
-            }
-            !expired
-        });
+        let (gone, kept): (Vec<Run>, Vec<Run>) = std::mem::take(&mut row.runs).into_iter().partition(|run| old(if run.ended_ms > 0 { run.ended_ms } else { run.started_ms }));
+        for run in &gone {
+            doomed.extend(collect(&task_id, run));
+            remember_span(&dir, &mut row.own_commits, run);
+        }
+        row.runs = kept;
         row.extras.retain(|extra| {
             let expired = old(extra.at_ms) && Some(&extra.id) != keep.as_ref();
             if expired {
