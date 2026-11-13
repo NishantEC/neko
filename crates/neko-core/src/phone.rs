@@ -255,8 +255,10 @@ pub fn decide(settings: &PhoneSettings, state: &mut State, new: Vec<Candidate>, 
         return Vec::new();
     }
     if env.idle_secs.is_some_and(|idle| idle < AT_MAC_SECS) {
-        // The macOS notification reached them.
-        state.held.clear();
+        // The macOS notification reached them; what waits for quiet hours
+        // (non-urgent items during them) was not seen and stays held.
+        let quiet = quiet_at(settings, env.local_hour);
+        state.held.retain(|c| quiet && !c.urgent);
         return Vec::new();
     }
     let quiet = quiet_at(settings, env.local_hour);
@@ -303,7 +305,7 @@ pub fn reminder_for(push: &Push) -> ReminderNew {
     if push.seq != 0 {
         notes.push_str(&format!("\n\n{}", marker(push.seq)));
     }
-    ReminderNew { seq: push.seq, title: clip(&push.title, MAX_TITLE), notes, url: push.link.clone() }
+    ReminderNew { seq: push.seq, title: clip(&push.title, MAX_TITLE), notes, url: push.link.clone(), key: crate::workbench::new_id() }
 }
 
 /// The JSON a publish to the ntfy server carries. With `titles_only` the
@@ -358,6 +360,9 @@ pub fn absorb_sync(state: &mut State, access: RemindersAccess, present: &[String
 /// deleted; pending reminders are created while access is granted.
 pub fn plan(settings: &PhoneSettings, state: &mut State, open: &HashSet<u64>, completed: &[String], now_ms: i64) -> ReminderPlan {
     state.pending.retain(|p| now_ms - p.queued_ms < PENDING_MAX_MS);
+    if !settings.reminders {
+        state.pending.clear();
+    }
     if state.access != RemindersAccess::Granted {
         return ReminderPlan { enabled: settings.reminders, ..Default::default() };
     }
@@ -375,10 +380,11 @@ pub fn plan(settings: &PhoneSettings, state: &mut State, open: &HashSet<u64>, co
 /// The app did what the plan said.
 pub fn absorb_done(state: &mut State, created: &[neko_protocol::phone::ReminderCreated], deleted: &[String], now_ms: i64) {
     for c in created {
+        // A failed save reports an empty id: dropped, not retried every cycle.
+        state.pending.retain(|p| p.reminder.key != c.key);
         if c.id.is_empty() {
             continue;
         }
-        state.pending.retain(|p| p.reminder.seq != c.seq || c.seq == 0);
         state.mapped.retain(|m| m.id != c.id);
         state.mapped.push(Mapped { seq: c.seq, id: c.id.clone(), created_ms: now_ms });
     }
@@ -601,7 +607,7 @@ mod tests {
     fn created_reminders_become_mappings_and_a_failure_is_noted_once() {
         let mut state = State::default();
         state.pending.push(Pending { reminder: ReminderNew { seq: 5, ..Default::default() }, queued_ms: 0 });
-        absorb_done(&mut state, &[neko_protocol::phone::ReminderCreated { seq: 5, id: "x".into() }], &[], 7);
+        absorb_done(&mut state, &[neko_protocol::phone::ReminderCreated { seq: 5, id: "x".into(), key: String::new() }], &[], 7);
         assert!(state.pending.is_empty());
         assert_eq!(state.mapped, vec![Mapped { seq: 5, id: "x".into(), created_ms: 7 }]);
         let err: Result<(), String> = Err("down".into());
@@ -610,6 +616,38 @@ mod tests {
         assert!(!note_outcome(&mut state, "ntfy", &Ok(()), 3));
         assert_eq!(state.last_error, None);
         assert_eq!(state.last_push_ms, Some(3));
+    }
+
+    #[test]
+    fn a_summary_is_created_once_and_a_failed_save_is_not_retried() {
+        let mut state = State { access: RemindersAccess::Granted, ..Default::default() };
+        let summary = Push { title: "3 more things need you".into(), ..Default::default() };
+        let (a, b) = (reminder_for(&summary), reminder_for(&summary));
+        assert_ne!(a.key, b.key);
+        state.pending.push(Pending { reminder: a.clone(), queued_ms: 0 });
+        state.pending.push(Pending { reminder: b.clone(), queued_ms: 0 });
+        let created = [neko_protocol::phone::ReminderCreated { seq: 0, id: "s1".into(), key: a.key.clone() }, neko_protocol::phone::ReminderCreated { seq: 0, id: String::new(), key: b.key.clone() }];
+        absorb_done(&mut state, &created, &[], 5);
+        assert!(state.pending.is_empty(), "both leave the queue, the failed one too");
+        assert_eq!(state.mapped.len(), 1);
+        assert!(plan(&on(), &mut state, &open(&[]), &[], 6).create.is_empty());
+    }
+
+    #[test]
+    fn turning_reminders_off_forgets_what_was_waiting() {
+        let mut state = State { access: RemindersAccess::Granted, ..Default::default() };
+        state.pending.push(Pending { reminder: ReminderNew::default(), queued_ms: 0 });
+        plan(&PhoneSettings::default(), &mut state, &open(&[]), &[], 1);
+        assert!(state.pending.is_empty());
+    }
+
+    #[test]
+    fn touching_the_mac_keeps_what_waits_for_quiet_hours_to_end() {
+        let mut state = State::default();
+        decide(&on(), &mut state, vec![cand(1, false, 0)], &open(&[1]), &away(10, 2));
+        let at_mac = Env { now_ms: 20, idle_secs: Some(5), local_hour: 2 };
+        assert!(decide(&on(), &mut state, vec![], &open(&[1]), &at_mac).is_empty());
+        assert_eq!(state.held.len(), 1);
     }
 
     #[test]

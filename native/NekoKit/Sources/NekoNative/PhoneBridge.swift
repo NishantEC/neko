@@ -49,7 +49,21 @@ import NekoKit
 
     private func access() -> String { PhonePayload.access(EKEventStore.authorizationStatus(for: .reminder)) }
 
+    private var cycling = false
+    private var again = false
+
+    /// One cycle at a time: a change that arrives meanwhile runs one more.
     private func cycle() async {
+        if cycling { again = true; return }
+        cycling = true
+        repeat {
+            again = false
+            await runCycle()
+        } while again
+        cycling = false
+    }
+
+    private func runCycle() async {
         var access = access()
         // Access granted later in System Settings: the store must re-read.
         if access == "Granted", let last = lastAccess, last != "Granted" { store.reset() }
@@ -96,16 +110,16 @@ import NekoKit
     }
 
     /// Carries out the plan and returns what was created.
-    private func apply(_ plan: PhonePayload.Plan) async -> [(seq: Int, id: String)] {
+    private func apply(_ plan: PhonePayload.Plan) async -> [(seq: Int, id: String, key: String)] {
         for id in plan.delete {
             if let reminder = store.calendarItem(withIdentifier: id) as? EKReminder { try? store.remove(reminder, commit: false) }
         }
-        var created: [(seq: Int, id: String)] = []
+        var created: [(seq: Int, id: String, key: String)] = []
         if !plan.create.isEmpty, let list = neko() ?? makeList() {
             // A reminder made before an earlier report was lost is reused.
             let known = await knownMarkers(in: list)
             for item in plan.create {
-                if item.seq != 0, let id = known[item.seq] { created.append((item.seq, id)); continue }
+                if item.seq != 0, let id = known[item.seq] { created.append((item.seq, id, item.key)); continue }
                 let reminder = EKReminder(eventStore: store)
                 reminder.calendar = list
                 reminder.title = item.title
@@ -116,8 +130,8 @@ import NekoKit
                 reminder.addAlarm(EKAlarm(absoluteDate: due))
                 do {
                     try store.save(reminder, commit: false)
-                    created.append((item.seq, reminder.calendarItemIdentifier))
-                } catch { continue }
+                    created.append((item.seq, reminder.calendarItemIdentifier, item.key))
+                } catch { created.append((item.seq, "", item.key)) }
             }
         }
         try? store.commit()
@@ -162,6 +176,7 @@ enum PhonePayload {
         var title: String
         var notes: String
         var url: String?
+        var key = ""
     }
 
     struct Plan: Equatable {
@@ -220,9 +235,9 @@ enum PhonePayload {
         ])
     }
 
-    static func doneRequest(created: [(seq: Int, id: String)], deleted: [String]) -> JSONValue {
+    static func doneRequest(created: [(seq: Int, id: String, key: String)], deleted: [String]) -> JSONValue {
         .command("PhoneRemindersDone", [
-            "created": .array(created.map { .object(["seq": .number(Double($0.seq)), "id": .string($0.id)]) }),
+            "created": .array(created.map { .object(["seq": .number(Double($0.seq)), "id": .string($0.id), "key": .string($0.key)]) }),
             "deleted": .array(deleted.map { .string($0) }),
         ])
     }
@@ -236,7 +251,8 @@ enum PhonePayload {
                 seq: item["seq"].int,
                 title: item["title"].string,
                 notes: item["notes"].string,
-                url: item["url"].string.isEmpty ? nil : item["url"].string)
+                url: item["url"].string.isEmpty ? nil : item["url"].string,
+                key: item["key"].string)
         }
         return Plan(enabled: body["enabled"].bool, create: create, delete: body["delete"].array.map(\.string))
     }

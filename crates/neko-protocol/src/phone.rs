@@ -72,6 +72,9 @@ pub struct ReminderNew {
     pub title: String,
     pub notes: String,
     pub url: Option<String>,
+    /// Unique per queued reminder; echoed back so a summary (seq 0) is not
+    /// created again on the next cycle.
+    pub key: String,
 }
 
 /// What the app should do next. `enabled` false with an empty `delete` means
@@ -90,4 +93,5 @@ pub struct ReminderPlan {
 pub struct ReminderCreated {
     pub seq: u64,
     pub id: String,
+    pub key: String,
 }

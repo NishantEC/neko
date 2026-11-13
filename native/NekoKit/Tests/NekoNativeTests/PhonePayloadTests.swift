@@ -48,10 +48,11 @@ final class PhonePayloadTests: XCTestCase {
     }
 
     func testDoneRequestNamesWhatWasCreatedAndDeleted() {
-        let request = PhonePayload.doneRequest(created: [(5, "x")], deleted: ["y"])
+        let request = PhonePayload.doneRequest(created: [(5, "x", "k1")], deleted: ["y"])
         let body = request["PhoneRemindersDone"]
         XCTAssertEqual(body["created"].array.first?["seq"].int, 5)
         XCTAssertEqual(body["created"].array.first?["id"].string, "x")
+        XCTAssertEqual(body["created"].array.first?["key"].string, "k1")
         XCTAssertEqual(body["deleted"].array.map(\.string), ["y"])
     }
 

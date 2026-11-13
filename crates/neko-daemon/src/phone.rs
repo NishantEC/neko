@@ -334,7 +334,8 @@ mod tests {
         assert_eq!(p.create.len(), 1);
         assert!(p.create[0].notes.ends_with(&core::marker(seq)));
         let mut phone = core::load_state(&db);
-        core::absorb_done(&mut phone, &[neko_protocol::phone::ReminderCreated { seq, id: "rem1".into() }], &[], 23);
+        let key = phone.pending[0].reminder.key.clone();
+        core::absorb_done(&mut phone, &[neko_protocol::phone::ReminderCreated { seq, id: "rem1".into(), key }], &[], 23);
         core::save_state(&db, &phone).unwrap();
         assert!(sync(&db, 24, RemindersAccess::Granted, &["rem1".into()], &[]).unwrap().create.is_empty());
         // Completed on the phone: the item closes with its reason, the reminder is removed.
@@ -353,7 +354,8 @@ mod tests {
         plan(&db, 20, &away, 12).unwrap();
         sync(&db, 21, RemindersAccess::Granted, &[], &[]).unwrap();
         let mut phone = core::load_state(&db);
-        core::absorb_done(&mut phone, &[neko_protocol::phone::ReminderCreated { seq, id: "rem1".into() }], &[], 22);
+        let key = phone.pending[0].reminder.key.clone();
+        core::absorb_done(&mut phone, &[neko_protocol::phone::ReminderCreated { seq, id: "rem1".into(), key }], &[], 22);
         core::save_state(&db, &phone).unwrap();
         routines::close_seqs(&db, &[seq], neko_core::inbox::BY_YOU).unwrap();
         let p = sync(&db, 30, RemindersAccess::Granted, &["rem1".into()], &[]).unwrap();

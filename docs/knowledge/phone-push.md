@@ -40,6 +40,7 @@ channel off, deletes the reminder; deleting the reminder yourself leaves the
 item open. A reminder the app has not made within an hour is dropped.
 Limit: the mapping uses `calendarItemIdentifier`; if EventKit ever changes
 one after a sync, that item just stops closing from the phone.
+Each queued reminder carries a unique `key` that the app echoes back (summaries have no marker); a failed save is reported with an empty id and dropped. If the app ever lists nothing while reminders exist, their mappings are dropped (not fixed).
 `NSRemindersFullAccessUsageDescription` and the older key are in
 `scripts/Neko-Info.plist`. Denied or restricted shows one line in Settings.
 
