@@ -334,3 +334,95 @@ fn a_ticket_keeps_at_most_fifty_checkpoints() {
     assert_eq!(r.runs.last().unwrap().n, 30);
     assert_eq!(ref_count(&r), refs.len());
 }
+
+fn persons_commit(d: &Path, file: &str, body: &str) {
+    fs::write(d.join(file), body).unwrap();
+    g(d, &["add", file]);
+    g(d, &["commit", "-qm", &format!("person edits {file}")]);
+}
+
+#[test]
+fn undo_refuses_when_commits_were_made_outside_any_run_and_names_them() {
+    let f = fixture();
+    let n = run(&f, commit_in_run);
+    persons_commit(&f.wt, "mine.txt", "mine\n");
+    let head = g(&f.wt, &["rev-parse", "HEAD"]);
+    let refusal = undo(&f.db, "t", &f.wt, undo_opts(n), false, 3_000).unwrap_err();
+    assert_eq!(refusal.code(), "foreign_commits", "{refusal}");
+    assert!(refusal.message().contains("person edits mine.txt"), "{refusal}");
+    assert_eq!(g(&f.wt, &["rev-parse", "HEAD"]), head, "nothing was rewound");
+    assert_eq!(fs::read_to_string(f.wt.join("mine.txt")).unwrap(), "mine\n");
+    // "Undo back to here" refuses the same way.
+    run(&f, |d| fs::write(d.join("later.txt"), "x\n").unwrap());
+    let back = undo(&f.db, "t", &f.wt, UndoOptions { run: n, through_later: true, ..Default::default() }, false, 4_000).unwrap_err();
+    assert_eq!(back.code(), "foreign_commits");
+}
+
+#[test]
+fn a_revert_after_foreign_commits_undoes_only_the_runs_own_changes() {
+    let f = fixture();
+    let n = run(&f, commit_in_run);
+    persons_commit(&f.wt, "mine.txt", "mine\n");
+    let done = undo(&f.db, "t", &f.wt, UndoOptions { run: n, revert: true, ..Default::default() }, false, 3_000).unwrap();
+    assert!(done.reverted_by_commit);
+    assert_eq!(fs::read_to_string(f.wt.join("a.txt")).unwrap(), "one\n", "the run's change is gone");
+    assert_eq!(fs::read_to_string(f.wt.join("mine.txt")).unwrap(), "mine\n", "the person's commit stays");
+    assert!(g(&f.wt, &["log", "--format=%s"]).contains("person edits mine.txt"));
+    assert!(g(&f.wt, &["log", "-1", "--format=%s"]).contains("Revert run 1"));
+    assert!(g(&f.wt, &["status", "--porcelain"]).is_empty());
+}
+
+#[test]
+fn a_revert_that_conflicts_with_a_foreign_commit_refuses_and_changes_nothing() {
+    let f = fixture();
+    let n = run(&f, commit_in_run);
+    persons_commit(&f.wt, "a.txt", "person rewrote it\n");
+    let head = g(&f.wt, &["rev-parse", "HEAD"]);
+    let refusal = undo(&f.db, "t", &f.wt, UndoOptions { run: n, revert: true, ..Default::default() }, false, 3_000).unwrap_err();
+    assert_eq!(refusal.code(), "failed", "{refusal}");
+    assert!(refusal.message().contains("person edits a.txt"), "{refusal}");
+    assert_eq!(g(&f.wt, &["rev-parse", "HEAD"]), head);
+    assert_eq!(fs::read_to_string(f.wt.join("a.txt")).unwrap(), "person rewrote it\n");
+}
+
+#[test]
+fn commits_made_by_runs_are_not_foreign() {
+    let f = fixture();
+    let first = run(&f, commit_in_run);
+    run(&f, |d| {
+        fs::write(d.join("b.txt"), "b\n").unwrap();
+        g(d, &["add", "b.txt"]);
+        g(d, &["commit", "-qm", "second agent commit"]);
+    });
+    assert!(undo(&f.db, "t", &f.wt, UndoOptions { run: first, through_later: true, ..Default::default() }, false, 3_000).is_ok());
+}
+
+#[test]
+fn redo_checks_pushed_history_like_undo_does() {
+    let f = fixture();
+    let _bare = with_remote(&f);
+    let n = run(&f, commit_in_run);
+    g(&f.wt, &["push", "-q", "origin", "codex/neko-t"]);
+    undo(&f.db, "t", &f.wt, UndoOptions { run: n, revert: true, ..Default::default() }, false, 3_000).unwrap();
+    // Neko's own revert commit is now pushed: redo would move the branch back over it.
+    g(&f.wt, &["push", "-q", "origin", "codex/neko-t"]);
+    let refusal = redo(&f.db, "t", &f.wt, false).unwrap_err();
+    assert_eq!(refusal.code(), "pushed", "{refusal}");
+
+    // Unpushed, Neko's own revert commit may be dropped by a redo.
+    let f = fixture();
+    let _bare = with_remote(&f);
+    let n = run(&f, commit_in_run);
+    g(&f.wt, &["push", "-q", "origin", "codex/neko-t"]);
+    undo(&f.db, "t", &f.wt, UndoOptions { run: n, revert: true, ..Default::default() }, false, 3_000).unwrap();
+    assert!(redo(&f.db, "t", &f.wt, false).is_ok());
+
+    // A commit of the person's made after the undo is never dropped.
+    let f = fixture();
+    let n = run(&f, commit_in_run);
+    undo(&f.db, "t", &f.wt, undo_opts(n), false, 3_000).unwrap();
+    persons_commit(&f.wt, "mine.txt", "m\n");
+    let refusal = redo(&f.db, "t", &f.wt, false).unwrap_err();
+    assert!(["failed", "unsaved_changes", "foreign_commits"].contains(&refusal.code()), "{refusal}");
+    assert_eq!(fs::read_to_string(f.wt.join("mine.txt")).unwrap(), "m\n");
+}

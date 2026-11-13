@@ -46,6 +46,7 @@ Redo | SnapshotUnsaved)`. All refusals are decided before anything changes
 | `later_runs` | later runs exist that are not undone | "Undo back to here" (`through_later`) |
 | `unsaved_changes` | the folder's tree is not the one the last run, undo or redo left (edits no checkpoint holds) | "Snapshot them first, then undo" (`snapshot_unsaved`) |
 | `pushed` | a commit made since the run started is on a remote-tracking branch, or the ticket has an open pull request and commits were made | "Add a revert commit instead" (`revert`: files restored, history kept, one new commit) |
+| `foreign_commits` | commits on the branch after the run's start that no Neko run made (not between a recorded run's start and end HEAD, not a revert commit Neko added: `Row::own_commits`), the person's own for instance | no rewind. Only "Add a revert commit instead": a three-way merge-tree reverses just this run's changes (end checkpoint as base) as a new commit, and refuses if it conflicts. The refusal names the commits |
 | `busy` | a worker holds the ticket, or the run has no end yet | stop it first |
 
 The ticket's folder must be one of Neko's task worktrees and exist (a parked
@@ -54,7 +55,7 @@ any restore a `safeN` snapshot is taken; `restore_tree` deletes files only the
 current state has, writes files the target differs on, and leaves ignored files and
 oversize files alone; the person's index is reset to the run's start HEAD (a plain
 undo also moves the branch back when the run committed, so the branch ref is the
-one thing an undo rewrites, and only for commits not pushed). **Redo** restores the
+one thing an undo rewrites, and only for commits not pushed). **Redo** refuses to move the branch back over a commit that is on a remote (`pushed`) or that no run made (`foreign_commits`); Neko's own unpushed revert commit may be dropped. **Redo** restores the
 safety snapshot (and moves the branch forward again); one redo is kept, a new run
 ends it. The undo is a `checkpoint:` event on the ticket, and the next agent turn
 gets a sentence saying which runs were undone and not to assume the old files
@@ -97,7 +98,6 @@ local bare remote).
 
 ### Not done
 
-- Redo has no pushed-history check; commits made outside any run since the run's start are rewound or reverted with it.
 - The native (Swift) app does not show runs or undo.
 - A goal's journal does not get the undo as its own entry; the ticket's events do.
 - No run starts directly in a person's own checkout yet, so that path is covered by

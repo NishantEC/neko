@@ -122,6 +122,8 @@ pub struct Row {
     pub redo: Option<Redo>,
     /// Told to the next agent turn (once): what was undone.
     pub notice: String,
+    /// Commits Neko itself made outside a run's start-to-end span (revert commits).
+    pub own_commits: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -559,6 +561,9 @@ pub enum Refusal {
     Unsaved,
     /// A commit of the run was pushed or is in an open pull request.
     Pushed(String),
+    /// Commits made outside any Neko run (the person's own, or another tool's) sit
+    /// on the branch after the run started: `<short id> <subject>` lines.
+    Foreign(Vec<String>),
     /// A run is working in the folder.
     Busy,
     /// No such checkpoint, already undone, or nothing to redo.
@@ -572,6 +577,7 @@ impl Refusal {
             Self::LaterRuns(_) => "later_runs",
             Self::Unsaved => "unsaved_changes",
             Self::Pushed(_) => "pushed",
+            Self::Foreign(_) => "foreign_commits",
             Self::Busy => "busy",
             Self::Nothing(_) => "nothing",
             Self::Failed(_) => "failed",
@@ -585,6 +591,10 @@ impl Refusal {
             ),
             Self::Unsaved => "The folder has changes made after the last run that are in no checkpoint. Snapshot them first so this undo can be undone, then try again.".into(),
             Self::Pushed(detail) => format!("{detail} Rewinding would leave the pushed history behind, so nothing was changed. A revert commit undoes the run without rewriting history."),
+            Self::Foreign(commits) => format!(
+                "Commits made outside any Neko run sit on this branch after the run started, so rewinding would take them away: {}. Nothing was changed. A revert commit can undo only this run's own changes, if they apply cleanly on top.",
+                commits.join("; ")
+            ),
             Self::Busy => "A run is working in this folder right now. Stop it first.".into(),
             Self::Nothing(text) | Self::Failed(text) => text.clone(),
         }
@@ -661,6 +671,41 @@ fn pushed_reason(dir: &Path, start_head: &Option<String>, pull_request_open: boo
     Ok(None)
 }
 
+/// Commits on HEAD after `since` that no Neko run made: not between a recorded run's
+/// start and end HEAD, and not a revert commit Neko added. Oldest first, as
+/// `<short id> <subject>`. Empty when HEAD is `since` or not a descendant of it.
+fn foreign_commits(dir: &Path, row: &Row, since: &str) -> Result<Vec<String>, String> {
+    let Some(now) = head_of(dir) else { return Ok(Vec::new()) };
+    if now == since || !is_ancestor(dir, since, &now) {
+        return Ok(Vec::new());
+    }
+    let mut owned: std::collections::HashSet<String> = row.own_commits.iter().cloned().collect();
+    for run in &row.runs {
+        if let (Some(start), Some(end)) = (run.start.head.as_deref(), run.end.as_ref().and_then(|e| e.head.as_deref())) {
+            if start != end && is_ancestor(dir, start, end) {
+                owned.extend(git(dir, &["rev-list", &format!("{start}..{end}")])?.lines().map(str::to_owned));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for commit in commits_since(dir, since)? {
+        if !owned.contains(&commit) {
+            let subject = git(dir, &["log", "-1", "--format=%h %s", &commit])?;
+            out.push(subject.chars().take(100).collect());
+        }
+    }
+    Ok(out)
+}
+
+/// A three-way revert of one run's own changes on top of `ours` (a commit): the
+/// tree that results, or the conflict. Read-only apart from writing objects.
+fn reverse_run_on(dir: &Path, ours: &str, run: &Run) -> Result<String, String> {
+    let end = run.end.as_ref().ok_or("The run has not ended.")?;
+    let mut command = git_command(dir);
+    command.args(["merge-tree", "--write-tree", &format!("--merge-base={}", end.commit), ours, &run.start.commit]);
+    run_command(command, None, &[]).map(|b| text(&b).lines().next().unwrap_or_default().to_owned()).map_err(|e| format!("The run's own changes do not revert cleanly on top of the later commits ({e}). Nothing was changed."))
+}
+
 fn push_extra(row: &mut Row, task_id: &str, dir: &Path, kind: ExtraKind, note: &str, now_ms: i64) -> Result<Extra, String> {
     row.next_extra += 1;
     let id = format!("{}{}", if kind == ExtraKind::Safety { "safe" } else { "manual" }, row.next_extra);
@@ -684,12 +729,28 @@ fn check_undo(row: &Row, dir: &Path, options: &UndoOptions, running: bool) -> Re
     if !later.is_empty() && !options.through_later {
         return Err(Refusal::LaterRuns(later));
     }
-    if !options.revert {
+    let foreign = match run.start.head.as_deref() {
+        Some(start) => foreign_commits(dir, row, start)?,
+        None => Vec::new(),
+    };
+    if !foreign.is_empty() {
+        if !options.revert {
+            return Err(Refusal::Foreign(foreign));
+        }
+        // The only thing offered: reverse this run's own changes as a new commit; it must apply cleanly.
+        if let Some(head) = head_of(dir) {
+            if let Err(error) = reverse_run_on(dir, &head, &run) {
+                return Err(Refusal::Failed(format!("{error} Commits made outside Neko: {}.", foreign.join("; "))));
+            }
+        }
+    } else if !options.revert {
         if let Some(detail) = pushed_reason(dir, &run.start.head, options.pull_request_open)? {
             return Err(Refusal::Pushed(detail));
         }
     }
-    let unsaved = !matching(dir, row)?;
+    // With commits of the person's on the branch the folder legitimately differs from what the
+    // runs left; the revert merges only this run's changes and the safety snapshot keeps the rest.
+    let unsaved = foreign.is_empty() && !matching(dir, row)?;
     if unsaved && !options.snapshot_unsaved {
         return Err(Refusal::Unsaved);
     }
@@ -736,7 +797,28 @@ pub fn undo(db: &Mutex<Db>, task_id: &str, dir: &Path, options: UndoOptions, run
     let mut undone: Vec<u32> = row.runs.iter().filter(|r| r.n >= run.n && !r.undone).map(|r| r.n).collect();
     undone.sort_unstable();
     // The files first, then the history (a revert keeps it). Whatever fails puts the files back.
+    let foreign_revert = options.revert && match run.start.head.as_deref() {
+        Some(start) => !foreign_commits(dir, &row, start)?.is_empty(),
+        None => false,
+    };
+    let mut new_own: Vec<String> = Vec::new();
     let applied: Result<bool, String> = (|| {
+        if foreign_revert {
+            // Later commits are not ours: reverse only this run's changes, in the files and in one new commit.
+            let working = reverse_run_on(dir, &safety.point.commit, &run)?;
+            restore_tree(dir, &safety.point.tree, &working)?;
+            let head = head_of(dir).ok_or("The repository has no commits.")?;
+            let committed = reverse_run_on(dir, &head, &run)?;
+            let mut made = false;
+            if git(dir, &["rev-parse", "HEAD^{tree}"])? != committed {
+                let commit = text(&git_files(dir, None, &["-c", "commit.gpgsign=false", "commit-tree", &committed, "-p", &head, "-m", &format!("Revert run {} (Neko)", run.n)], &[])?);
+                git(dir, &["update-ref", "-m", &format!("neko: revert run {}", run.n), "HEAD", &commit, &head])?;
+                new_own.push(commit);
+                made = true;
+            }
+            reset_index(dir, head_of(dir).as_deref())?;
+            return Ok(made);
+        }
         restore_tree(dir, &safety.point.tree, &run.start.tree)?;
         // A revert keeps the history: one new commit whose tree is the committed state the run
         // started from (the run's uncommitted work was only ever in the files).
@@ -747,6 +829,7 @@ pub fn undo(db: &Mutex<Db>, task_id: &str, dir: &Path, options: UndoOptions, run
                 if git(dir, &["rev-parse", "HEAD^{tree}"])? != target {
                     let commit = text(&git_files(dir, None, &["-c", "commit.gpgsign=false", "commit-tree", &target, "-p", &head, "-m", &format!("Revert run {} (Neko)", run.n)], &[])?);
                     git(dir, &["update-ref", "-m", &format!("neko: revert run {}", run.n), "HEAD", &commit, &head])?;
+                    new_own.push(commit.clone());
                     reset_index(dir, Some(&commit))?;
                     reverted_by_commit = true;
                 }
@@ -772,7 +855,8 @@ pub fn undo(db: &Mutex<Db>, task_id: &str, dir: &Path, options: UndoOptions, run
             r.undone = true;
         }
     }
-    row.expected_tree = run.start.tree.clone();
+    row.own_commits.extend(new_own);
+    row.expected_tree = if foreign_revert { working_tree(dir)?.0 } else { run.start.tree.clone() };
     row.redo = Some(Redo { extra_id: safety.id, undone_runs: undone.clone(), label: format!("undo of run {}", run.n) });
     let which = undone.iter().map(|n| format!("run {n}")).collect::<Vec<_>>().join(", ");
     row.notice = format!(
@@ -801,6 +885,17 @@ pub fn redo(db: &Mutex<Db>, task_id: &str, dir: &Path, running: bool) -> Result<
         (Some(target), Some(now)) if *target != now => {
             if !is_ancestor(dir, &now, target) && !is_ancestor(dir, target, &now) {
                 return Err(Refusal::Failed("The branch moved to different history since the undo, so the redo cannot move it back.".into()));
+            }
+            if !is_ancestor(dir, &now, target) {
+                // Moving the branch back: whatever sits after the target is dropped from it.
+                let commits = commits_since(dir, target)?;
+                if commits.first().is_some_and(|oldest| on_a_remote(dir, oldest)) {
+                    return Err(Refusal::Pushed("A commit made since the undo was already pushed.".into()));
+                }
+                let foreign = foreign_commits(dir, &row, target)?;
+                if !foreign.is_empty() {
+                    return Err(Refusal::Foreign(foreign));
+                }
             }
             Some(target.clone())
         }

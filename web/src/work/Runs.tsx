@@ -201,7 +201,7 @@ export function Runs({ taskId, active, revision }: { taskId: string; active: boo
           <div className="mt-2 flex flex-wrap gap-2">
             {refusal.code === "later_runs" ? <Button size="xs" variant="outline" onClick={() => undo({ ...refusal.options, through_later: true })}>Undo back to here</Button> : null}
             {refusal.code === "unsaved_changes" ? <Button size="xs" variant="outline" onClick={() => undo({ ...refusal.options, snapshot_unsaved: true })}>Snapshot them first, then undo</Button> : null}
-            {refusal.code === "pushed" ? <Button size="xs" variant="outline" onClick={() => undo({ ...refusal.options, revert: true })}>Add a revert commit instead</Button> : null}
+            {refusal.code === "pushed" || refusal.code === "foreign_commits" ? <Button size="xs" variant="outline" onClick={() => undo({ ...refusal.options, revert: true })}>Add a revert commit instead</Button> : null}
             <Button size="xs" variant="ghost" onClick={() => setRefusal(null)}>Dismiss</Button>
           </div>
         </div>
