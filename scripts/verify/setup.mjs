@@ -146,8 +146,10 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   await page.reload();
   await page.waitForSelector("[data-slot='workspace']", { timeout: 15000 });
   await sleep(600);
-  const closed = await page.locator("[data-slot='workspace']").evaluateAll((els) => els.map((e) => [e.getAttribute("data-workspace"), !!e.querySelector("[data-slot='workspace-body']"), Math.round(e.getBoundingClientRect().height), e.querySelector("[data-slot='workspace-toggle']")?.getAttribute("aria-expanded")]));
-  check(closed.every(([, body, h, expanded]) => !body && h <= 48 && expanded === "false"), `every workspace starts as one line (${closed.map(([n, , h]) => `${n} ${h}px`).join(", ")})`);
+  const closed = await page.locator("[data-slot='workspace']").evaluateAll((els) => els.map((e) => [e.getAttribute("data-workspace"), !!e.querySelector("[data-slot='workspace-body']"), Math.round(e.getBoundingClientRect().height), e.querySelector("[data-slot='workspace-toggle']")?.getAttribute("aria-expanded"), !!e.querySelector("[data-slot='workspace-needs-you']")]));
+  // A workspace with something waiting on the owner (the harness seeds goal Inbox items on one) starts open on purpose.
+  const quiet = closed.filter(([, , , , waiting]) => !waiting);
+  check(quiet.length >= 2 && quiet.every(([, body, h, expanded]) => !body && h <= 48 && expanded === "false") && closed.filter(([, , , , waiting]) => waiting).every(([, , , expanded]) => expanded === "true"), `every workspace with nothing waiting starts as one line, one that needs you starts open (${closed.map(([n, , h, , w]) => `${n} ${h}px${w ? " needs you" : ""}`).join(", ")})`);
   check(!/Nothing yet|No MCP servers|None yet/.test(await page.locator("[data-slot='workspace-list']").innerText()), "no “nothing yet” rows while closed");
   const apiLine = (await apiPanel.locator("[data-slot='workspace-head']").innerText()).replace(/\s+/g, " ");
   check(/orders-api/.test(apiLine) && /orders-api|\//.test(await apiPanel.locator("[data-slot='workspace-folder']").innerText()), `orders-api's one line names it and its folder (“${apiLine}”)`);

@@ -637,7 +637,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   await page.locator("[data-slot='change-error']").waitFor({ timeout: 4000 });
   const buildBody = mock.captured.at(-1)?.Workbench?.SendMessage;
   check(buildBody?.text.startsWith("Open a task that changes Neko the way I describe.") && buildBody.text.includes(`${pluginsDir}/<name>/`) && !buildBody.text.includes("{{") && Buffer.byteLength(buildBody.text) < 4096, "Ask Neko sends one well-formed chat message (SendMessage) that opens a task, under the daemon's 4096-byte limit");
-  check(buildBody.text.includes(path.join(DATA, "custom.css")) && /web-live\.prev/.test(buildBody.text) && /host\.storage/.test(buildBody.text) && /Customised/.test(buildBody.text) && /neko checkout/.test(buildBody.text), "the message explains both routes: a page of yours (and styles), or the app's own source with the previous UI kept");
+  check(buildBody.text.includes(path.join(DATA, "custom.css")) && /web-live\.prev/.test(buildBody.text) && /host\.storage/.test(buildBody.text) && /Customised/.test(buildBody.text) && /development checkout/.test(buildBody.text), "the message explains both routes: a page of yours (and styles), or the app's own source with the previous UI kept");
   const longest = Buffer.byteLength(buildBody.text);
   console.log(`     change prompt: ${longest} of 4096 bytes`);
   check(/verify: SendMessage was intercepted/.test(await page.locator("[data-slot='change-error']").innerText()), "a failure is shown in the dialog, word for word, and the dialog stays open");
