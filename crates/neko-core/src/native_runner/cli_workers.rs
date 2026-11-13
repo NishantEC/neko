@@ -196,6 +196,9 @@ pub(crate) struct Parser {
     agent: Agent,
     extraction: bool,
     commands: std::collections::HashMap<String, Option<String>>,
+    /// Tool uses seen and not yet answered: only these were counted as in flight,
+    /// so a result whose start line was skipped (too large) never un-counts another tool.
+    open: std::collections::HashSet<String>,
     pub answer: Option<String>,
     pub failure: Option<String>,
     pub completed: bool,
@@ -208,7 +211,7 @@ pub(crate) struct Parser {
 
 impl Parser {
     pub(crate) fn new(agent: Agent, extraction: bool) -> Self {
-        Self { agent, extraction, commands: Default::default(), answer: None, failure: None, completed: false, last_text: None, stall: std::rc::Rc::new(super::StallGuard::new()), stream_text: false, claude: Default::default() }
+        Self { agent, extraction, commands: Default::default(), open: Default::default(), answer: None, failure: None, completed: false, last_text: None, stall: std::rc::Rc::new(super::StallGuard::new()), stream_text: false, claude: Default::default() }
     }
 
     /// The run's quiet-stall guard, shared with the process loop.
@@ -263,7 +266,9 @@ impl Parser {
                             let name = block["name"].as_str().unwrap_or("");
                             // A tool in flight is not silence: a long build or a
                             // subagent may say nothing until it ends.
-                            self.stall.command_started();
+                            if self.open.insert(block["id"].as_str().unwrap_or("").to_owned()) {
+                                self.stall.command_started();
+                            }
                             if name == "Bash" {
                                 let command = block["input"]["command"].as_str().map(str::to_owned);
                                 self.commands.insert(block["id"].as_str().unwrap_or("").to_owned(), command);
@@ -296,8 +301,11 @@ impl Parser {
                         let bash = text.as_deref().filter(|_| is_bash).map(|t| { let (code, body) = claude_exit(t, block["is_error"].as_bool() == Some(true)); (code, body.to_owned()) });
                         self.claude.tool_result(block, bash, on_event);
                     }
+                    let was_open = self.open.remove(id);
                     let Some(command) = self.commands.remove(id) else {
-                        self.stall.tool_finished();
+                        if was_open {
+                            self.stall.tool_finished();
+                        }
                         continue;
                     };
                     let output = match &block["content"] {
@@ -310,7 +318,7 @@ impl Parser {
                         let (code, body) = claude_exit(output, is_error);
                         (Some(code), Some(body))
                     }).unwrap_or((is_error.then_some(1), None));
-                    self.receipt(command.as_deref(), exit_code, body, true, on_event)?;
+                    self.receipt(command.as_deref(), exit_code, body, was_open, on_event)?;
                 }
             }
             Some("stream_event") if self.stream_text && value["parent_tool_use_id"].is_null() => {
@@ -729,6 +737,11 @@ mod tests {
         assert!(guard.quiet_allowed(), "the subagent still runs");
         line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"ok"}]}}"#);
         assert!(!guard.quiet_allowed());
+        // A tool whose start line was too large to read is not counted, so its
+        // result must not un-count the subagent that is still running.
+        line(r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"agent","name":"Task","input":{}}]}}"#);
+        line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"skipped-start","content":"ok"}]}}"#);
+        assert!(guard.quiet_allowed(), "the subagent is still in flight");
     }
 
     #[test]

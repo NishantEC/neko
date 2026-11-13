@@ -140,6 +140,8 @@ impl Controller {
                 && !active.contains(&t.id)
                 && !in_use(&t.id)
                 && !in_split(&snapshot, &t.id)
+                // A goal runs its check in this folder; it stays while the goal is unfinished.
+                && !snapshot.goals.iter().any(|g| g.ticket_id.as_deref() == Some(t.id.as_str()) && !g.status.is_finished())
                 && t.worktree.as_deref().is_some_and(|w| {
                     let path = std::path::Path::new(w);
                     path.is_dir() && root.as_ref().is_some_and(|r| path.canonicalize().is_ok_and(|p| p.starts_with(r)))

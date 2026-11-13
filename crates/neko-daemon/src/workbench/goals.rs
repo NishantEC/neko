@@ -17,9 +17,11 @@ use neko_protocol::goals::*;
 const TICK: Duration = Duration::from_secs(3);
 /// A check that runs longer than this is ended and recorded as failed.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(10 * 60);
-/// The most one tick counts toward a goal's running time, so a sleeping Mac
-/// or a stopped daemon does not spend its wall-clock budget.
-const MAX_CLOCK_STEP_MS: i64 = 15_000;
+/// A running goal's clock is moved this often (its own deferred row, never
+/// the goal's), and never by more than `MAX_CLOCK_STEP_MS` at once, so a
+/// sleeping Mac or a stopped daemon does not spend the wall-clock budget.
+const CLOCK_EVERY_MS: i64 = 15_000;
+const MAX_CLOCK_STEP_MS: i64 = 60_000;
 /// What a ticket's failure says when the evidence gate gave up.
 pub(super) const BLOCKED_PREFIX: &str = "Blocked:";
 
@@ -37,9 +39,32 @@ pub(super) trait Env: Sync {
     /// `OPEN`, `MERGED` or `CLOSED`.
     fn pr_state(&self, pr: &str) -> Option<String>;
     fn pid_alive(&self, pid: u32) -> bool;
-    fn exists(&self, directory: &std::path::Path, relative: &str) -> bool {
-        directory.join(relative).exists()
+    /// Whether a piece of evidence is real. A path must be inside the folder
+    /// and created or changed since the goal began (a file that was already
+    /// there proves nothing); a pull request must exist; a link must answer.
+    fn verify(&self, directory: &std::path::Path, since_ms: i64, evidence: &core::Evidence) -> bool {
+        match evidence {
+            core::Evidence::Path(relative) => artifact_since(directory, relative, since_ms),
+            core::Evidence::PullRequest(pr) => self.pr_state(pr).is_some(),
+            core::Evidence::Url(url) => self.url_ok(url),
+        }
     }
+    /// A link that answers (a pull request URL is checked as the pull request).
+    fn url_ok(&self, url: &str) -> bool;
+}
+
+/// `relative` names something inside `directory` that was modified at or after `since_ms`.
+pub(super) fn artifact_since(directory: &std::path::Path, relative: &str, since_ms: i64) -> bool {
+    let (Ok(root), Ok(path)) = (directory.canonicalize(), directory.join(relative).canonicalize()) else { return false };
+    if path == root || !path.starts_with(&root) {
+        return false;
+    }
+    let modified = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64);
+    if path.is_dir() {
+        // A folder counts when something in it is new.
+        return std::fs::read_dir(&path).is_ok_and(|entries| entries.flatten().any(|e| modified(&e.path()) >= since_ms));
+    }
+    modified(&path) >= since_ms
 }
 
 pub(super) struct Real {
@@ -105,6 +130,20 @@ impl Env for Real {
         last.retain(|(key, _, _)| key != pr);
         last.push((pr.to_owned(), now, state.clone()));
         state
+    }
+
+    fn url_ok(&self, url: &str) -> bool {
+        // A GitHub pull request link is the pull request.
+        let parts: Vec<&str> = url.trim_start_matches("https://").trim_start_matches("http://").split('/').collect();
+        if let ["github.com", owner, repo, "pull", number, ..] = parts.as_slice() {
+            return self.pr_state(&format!("{owner}/{repo}#{number}")).is_some();
+        }
+        std::process::Command::new("/usr/bin/curl")
+            .args(["-sIL", "--max-time", "10", "-o", "/dev/null", "-w", "%{http_code}", url])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .is_some_and(|code| code.trim().starts_with('2'))
     }
 
     fn pid_alive(&self, pid: u32) -> bool {
@@ -188,7 +227,13 @@ pub(super) fn run_shell(directory: &std::path::Path, command: &str, limit: Durat
     };
     // A background process that kept the pipe open must not hold the check.
     unsafe { libc::kill(-pid, libc::SIGKILL) };
-    let _ = reader.join();
+    // A process that left its group and kept the pipe open must not hold the
+    // check: give the reader a moment, then go on with what it has (it ends
+    // on its own when the pipe closes).
+    let waited = std::time::Instant::now();
+    while !reader.is_finished() && waited.elapsed() < Duration::from_secs(2) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
     let text = String::from_utf8_lossy(&buffer.lock().unwrap_or_else(std::sync::PoisonError::into_inner)).into_owned();
     result.exit_code = if timed_out { None } else { status.and_then(|s| s.code()).map(i64::from) };
     result.tail = core::tail(&text, core::TAIL_BYTES);
@@ -211,66 +256,84 @@ pub(crate) struct Spec<'a> {
     pub max_turns: Option<u32>,
     pub ticket_id: Option<&'a str>,
     pub conversation_id: Option<&'a str>,
+    /// The person set it (`/goal`, the app): its check may run and it asks for
+    /// local work. False for a goal a model proposed in a reply: it is stored
+    /// paused, with its check unrun, until the person resumes it.
+    pub by_person: bool,
 }
 
 /// Stores a goal and makes sure a ticket works it: the one named, or a new
-/// one in the workspace. The ticket is the person's own request for local
-/// work (nothing is published); it starts at once.
+/// one in the workspace. A goal the person set is their own request for local
+/// work (nothing is published); it starts at once. It never widens a ticket:
+/// the ticket keeps its assessment and its scope, and a read-only ticket
+/// cannot carry a goal.
 pub(crate) fn create(db: &Db, spec: &Spec) -> Result<Goal, String> {
     let now = store::now_ms();
     let mut goal = core::new_goal(spec.workspace_id, spec.objective, spec.done_check, spec.constraints, spec.max_turns, now)?;
     goal.conversation_id = spec.conversation_id.map(str::to_owned);
-    (|| -> Result<(), String> {
-        let snapshot = store::load(db)?;
-        if !snapshot.workspaces.iter().any(|w| w.id == spec.workspace_id) {
-            return Err("That workspace no longer exists".into());
-        }
-        match spec.ticket_id {
-            Some(id) => {
-                let task = snapshot.tasks.iter().find(|t| t.id == id).ok_or("That ticket no longer exists")?;
-                if task.workspace_id != spec.workspace_id {
-                    return Err("That ticket is in another workspace".into());
-                }
-                if task.status == TaskStatus::Cancelled {
-                    return Err("That ticket was cancelled".into());
-                }
-                goal.ticket_id = Some(id.to_owned());
-                // Attaching a goal to a ticket that has not started is the
-                // person asking for it to be worked.
-                if task.status == TaskStatus::Queued {
-                    let mut after = snapshot.clone();
-                    after.start_when_planned.insert(id.to_owned());
-                    store::save(db, &after)?;
-                }
-                if task.status == TaskStatus::AwaitingApproval {
-                    goal.status = GoalStatus::Waiting;
-                    goal.wait = Some(Wait { reason: "The ticket is waiting for your approval of its plan.".into(), ticket: true, ..Wait::default() });
-                }
+    let snapshot = store::load(db)?;
+    if !snapshot.workspaces.iter().any(|w| w.id == spec.workspace_id) {
+        return Err("That workspace no longer exists".into());
+    }
+    let mut start_directly = None;
+    match spec.ticket_id {
+        Some(id) => {
+            let task = snapshot.tasks.iter().find(|t| t.id == id).ok_or("That ticket no longer exists")?;
+            if task.workspace_id != spec.workspace_id {
+                return Err("That ticket is in another workspace".into());
             }
-            None => {
-                let title = core::head(spec.objective.lines().next().unwrap_or(spec.objective), 80);
-                let mut text = spec.objective.trim().to_owned();
-                if !goal.done_check.is_empty() {
-                    text.push_str(&format!("\n\nDone when this passes in the ticket's folder: {}", goal.done_check));
-                }
-                if !goal.constraints.is_empty() {
-                    text.push_str(&format!("\n\nConstraints: {}", goal.constraints));
-                }
-                let mut after = store::apply(db, Command::CreateTask { workspace_id: spec.workspace_id.to_owned(), title, goal: text })?;
-                let task = after.tasks.last_mut().ok_or("The ticket was not created")?;
-                task.request = neko_chat::ticket_request(spec.objective);
-                goal.ticket_id = Some(task.id.clone());
-                // The goal is the request for local work; it starts directly.
-                after.start_when_planned.insert(task.id.clone());
-                store::save(db, &after)?;
+            if task.status == TaskStatus::Cancelled {
+                return Err("That ticket was cancelled".into());
+            }
+            if snapshot.task_read_only.contains(id) {
+                return Err("That ticket is read-only, so it cannot carry a goal".into());
+            }
+            goal.ticket_id = Some(id.to_owned());
+            // Attaching a goal the person set to a ticket that has not started
+            // is them asking for it to be worked.
+            if task.status == TaskStatus::Queued && spec.by_person {
+                start_directly = Some(id.to_owned());
+            }
+            if task.status == TaskStatus::AwaitingApproval {
+                goal.status = GoalStatus::Waiting;
+                goal.wait = Some(Wait { reason: "The ticket is waiting for your approval of its plan.".into(), ticket: true, ..Wait::default() });
             }
         }
-        goal.turns = 1;
-        goal.in_turn = true;
-        core::create(db, goal.clone())?;
-        core::push_journal(db, &goal.subject(), JournalEntry { at_ms: now, turn: 1, note: "Goal set".into(), plan: core::head(spec.objective, 200), ..Default::default() })?;
-        Ok(())
-    })()?;
+        None => {
+            let title = core::head(spec.objective.lines().next().unwrap_or(spec.objective), 80);
+            let mut text = spec.objective.trim().to_owned();
+            if !goal.done_check.is_empty() {
+                text.push_str(&format!("\n\nDone when this passes in the ticket's folder: {}", goal.done_check));
+            }
+            if !goal.constraints.is_empty() {
+                text.push_str(&format!("\n\nConstraints: {}", goal.constraints));
+            }
+            let mut after = store::apply(db, Command::CreateTask { workspace_id: spec.workspace_id.to_owned(), title, goal: text })?;
+            let task = after.tasks.last_mut().ok_or("The ticket was not created")?;
+            task.request = neko_chat::ticket_request(spec.objective);
+            goal.ticket_id = Some(task.id.clone());
+            if spec.by_person {
+                start_directly = Some(task.id.clone());
+            }
+            store::save(db, &after)?;
+        }
+    }
+    if !spec.by_person {
+        goal.status = GoalStatus::Paused;
+        goal.paused_reason = "Neko suggested this goal and its check. Read the check, then Resume to start it.".into();
+    }
+    goal.turns = 1;
+    goal.in_turn = true;
+    // The goal row first: a ticket that already has a goal is refused before
+    // anything about the ticket changes.
+    core::create(db, goal.clone())?;
+    let note = if spec.by_person { "Goal set" } else { "Goal suggested by Neko; waiting for you" };
+    core::push_journal(db, &goal.subject(), JournalEntry { at_ms: now, turn: 1, note: note.into(), plan: core::head(spec.objective, 200), ..Default::default() })?;
+    if let Some(id) = start_directly {
+        let mut after = store::load(db)?;
+        after.start_when_planned.insert(id);
+        store::save(db, &after)?;
+    }
     Ok(goal)
 }
 
@@ -331,7 +394,7 @@ pub(crate) fn slash_reply(db: &Db, command: Slash, workspace_id: Option<&str>) -
             let Some(workspace) = workspace else { return ("Choose a workspace for this goal first, then send it again.".into(), vec![]) };
             let profile = snapshot.agent_profiles.for_scope(Some(&workspace)).to_owned();
             let conversation = neko_core::runtime_selection::home_id(&profile, workspace_id);
-            match create(db, &Spec { workspace_id: &workspace, objective: &objective, done_check: &done_check, constraints: "", max_turns, ticket_id: None, conversation_id: Some(&conversation) }) {
+            match create(db, &Spec { workspace_id: &workspace, objective: &objective, done_check: &done_check, constraints: "", max_turns, ticket_id: None, conversation_id: Some(&conversation), by_person: true }) {
                 Ok(goal) => (
                     format!("Goal set: {}. I will keep working turn after turn, up to {} turns, and it is done only when {}.", core::head(&goal.objective, 160), goal.budget.max_turns, if goal.done_check.is_empty() { "a file or link proves it".to_owned() } else { format!("`{}` passes", core::head(&goal.done_check, 120)) }),
                     goal.ticket_id.into_iter().collect(),
@@ -363,7 +426,8 @@ fn commit(db: &Arc<Mutex<Db>>, id: &str, still: impl Fn(&Goal) -> bool, change: 
     Ok(true)
 }
 
-/// One pass over every active goal.
+/// One pass over every active goal, one after another (tests, and the
+/// reference for what a pass does).
 pub(super) fn tick(db: &Arc<Mutex<Db>>, env: &dyn Env) -> Result<(), String> {
     let goals = core::load_all(&*db.lock().map_err(|_| "Goal storage unavailable")?)?;
     for goal in goals.into_iter().filter(|g| g.status.is_active()) {
@@ -375,14 +439,54 @@ pub(super) fn tick(db: &Arc<Mutex<Db>>, env: &dyn Env) -> Result<(), String> {
     Ok(())
 }
 
+/// Goals whose step is running on a thread now.
+static IN_FLIGHT: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// The daemon's pass: every active goal steps on its own thread, so a slow
+/// check or a slow judge holds that goal only, never the others, and a goal
+/// is never stepped twice at once.
+fn tick_concurrently(db: &Arc<Mutex<Db>>, env: &Arc<Real>) -> Result<(), String> {
+    let goals = core::load_all(&*db.lock().map_err(|_| "Goal storage unavailable")?)?;
+    for goal in goals.into_iter().filter(|g| g.status.is_active()) {
+        {
+            let mut busy = IN_FLIGHT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if busy.contains(&goal.id) {
+                continue;
+            }
+            busy.push(goal.id.clone());
+        }
+        let (db, env, id) = (db.clone(), env.clone(), goal.id.clone());
+        let spawned = std::thread::Builder::new().name(format!("neko-goal-{id}")).spawn({
+            let id = id.clone();
+            move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| step(&db, &*env, goal)));
+                match result {
+                    Ok(Err(error)) => eprintln!("neko goals: {id}: {error}"),
+                    Err(_) => eprintln!("neko goals: {id}: step panicked; continuing"),
+                    Ok(Ok(())) => {}
+                }
+                IN_FLIGHT.lock().unwrap_or_else(std::sync::PoisonError::into_inner).retain(|g| *g != id);
+            }
+        });
+        if spawned.is_err() {
+            IN_FLIGHT.lock().unwrap_or_else(std::sync::PoisonError::into_inner).retain(|g| *g != id);
+        }
+    }
+    Ok(())
+}
+
 fn step(db: &Arc<Mutex<Db>>, env: &dyn Env, mut goal: Goal) -> Result<(), String> {
     let now = env.now_ms();
-    // Only running time counts; the clock row is deferred, never the goal's row.
-    if goal.status == GoalStatus::Running && goal.last_tick_ms > 0 {
-        goal.wall_ms += (now - goal.last_tick_ms).clamp(0, MAX_CLOCK_STEP_MS);
+    // Only running time counts, and only a running goal writes its clock.
+    if goal.status == GoalStatus::Running {
+        if goal.last_tick_ms <= 0 {
+            goal.last_tick_ms = now;
+        } else if now - goal.last_tick_ms >= CLOCK_EVERY_MS {
+            goal.wall_ms += (now - goal.last_tick_ms).clamp(0, MAX_CLOCK_STEP_MS);
+            goal.last_tick_ms = now;
+            core::save_clock_only(&*db.lock().map_err(|_| "Goal storage unavailable")?, &goal)?;
+        }
     }
-    goal.last_tick_ms = now;
-    core::save_clock_only(&*db.lock().map_err(|_| "Goal storage unavailable")?, &goal)?;
     match goal.status {
         GoalStatus::Running => running(db, env, goal),
         GoalStatus::Waiting => waiting(db, env, goal),
@@ -423,6 +527,15 @@ fn running(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: Goal) -> Result<(), String>
     let (turn, id) = (goal.turns, goal.id.clone());
     let same_turn = move |g: &Goal| g.status == GoalStatus::Running && g.turns == turn && g.in_turn;
     if !goal.in_turn {
+        // The person already sent the ticket on (a reply of their own): that run is the turn.
+        if matches!(task.status, TaskStatus::Queued | TaskStatus::Planning | TaskStatus::Building | TaskStatus::Reviewing) {
+            let turn = goal.turns;
+            commit(db, &id, move |g| g.status == GoalStatus::Running && g.turns == turn && !g.in_turn, |_, g| {
+                g.in_turn = true;
+                Ok(())
+            })?;
+            return Ok(());
+        }
         // A wait ended, an answer came, or the person resumed: the next turn is due.
         if env.machine_held() {
             return Ok(());
@@ -474,6 +587,7 @@ fn issue_turn(db: &Db, goal: &mut Goal, text: &str, count: bool) -> Result<(), S
     store::goal_turn(db, &ticket, &format!("Goal turn {} of {}.\n{}", goal.turns, goal.budget.max_turns, text))?;
     goal.in_turn = true;
     goal.status = GoalStatus::Running;
+    goal.last_tick_ms = store::now_ms();
     Ok(())
 }
 
@@ -545,8 +659,15 @@ fn evaluate(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: &Goal, snapshot: &Snapshot
     if env.machine_held() {
         return Ok(());
     }
+    // A parked folder comes back (at the same path) before its check runs there.
+    if task.parked.is_some() {
+        let _ = super::parking::ensure_restored(db, &task.id, &AtomicBool::new(false));
+    }
     let directory = task_directory(snapshot, task);
+    let started = std::time::Instant::now();
     let check = (!goal.done_check.trim().is_empty()).then(|| env.run_check(&directory, goal.done_check.trim()));
+    // Time spent checking counts against the wall-clock budget.
+    let spent_ms = started.elapsed().as_millis() as i64;
     let mut answer = task.result.clone();
     if let Some(error) = &error {
         answer.push_str(&format!("\n\nThe turn stopped with: {error}"));
@@ -555,7 +676,7 @@ fn evaluate(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: &Goal, snapshot: &Snapshot
     let now = env.now_ms();
     let judged = env.judge(&prompt).and_then(|text| core::parse_ruling(&text, now));
     let (ruling, judge_failed) = match judged {
-        Ok(ruling) => (core::enforce(goal, check.as_ref(), ruling, &|relative| env.exists(&directory, relative)), false),
+        Ok(ruling) => (core::enforce(goal, check.as_ref(), ruling, &|evidence| env.verify(&directory, goal.created_ms, evidence)), false),
         // Fail open: a judge that cannot answer never ends the goal, and the
         // turn cap still bounds it.
         Err(failure) => (
@@ -569,6 +690,7 @@ fn evaluate(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: &Goal, snapshot: &Snapshot
     let same_turn = move |g: &Goal| g.status == GoalStatus::Running && g.turns == turn && g.in_turn;
     let stalled = error.as_deref().is_some_and(core::is_stall);
     commit(db, &id, same_turn, |db, g| {
+        g.wall_ms += spent_ms;
         if let Some(check) = &check {
             core::push_ledger(db, &g.subject(), check.clone())?;
             g.last_check = Some(check.clone());
@@ -635,6 +757,7 @@ fn waiting(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: Goal) -> Result<(), String>
         commit(db, &goal.id, |g| g.status == GoalStatus::Waiting && g.wait.as_ref() == Some(&wait), |db, g| {
             g.status = GoalStatus::Running;
             g.wait = None;
+            g.last_tick_ms = now;
             if !wait.ticket {
                 g.reason = format!("The wait is over ({}). Carry on.", core::head(&wait.reason, 200));
                 core::push_journal(db, &g.subject(), JournalEntry { at_ms: now, turn: g.turns, note: "Wait over".into(), ..Default::default() })?;
@@ -691,6 +814,11 @@ pub(super) fn resume_sweep(db: &Arc<Mutex<Db>>, now: i64) -> Result<usize, Strin
     Ok(resumed)
 }
 
+/// Whether an unfinished goal works this ticket.
+pub(super) fn has_open_goal(db: &Db, task_id: &str) -> bool {
+    core::load_all(db).is_ok_and(|goals| goals.iter().any(|g| g.ticket_id.as_deref() == Some(task_id) && !g.status.is_finished()))
+}
+
 /// What a ticket's agent is told when its ticket works a goal: the goal, the
 /// journal and the ledger. Empty for any other ticket.
 pub(super) fn prompt_context(db: &Db, task_id: &str) -> String {
@@ -716,13 +844,18 @@ pub(super) enum GateOutcome {
 
 /// A ticket that changed code cannot reach ReadyForReview without a passing
 /// check in its ledger. The ledger gets this run's command receipts (the
-/// agent's check-like commands and the independent review's proven checks);
+/// agent's real checks and the independent review's);
 /// at most `GATE_EXTRA_TURNS` extra "run the checks and fix" turns, then
 /// blocked. Edits that only touch prose skip it.
-pub(super) fn evidence_gate(db: &Db, task_id: &str, changed: &[String], builder_receipts: &[String], review_receipts: &[String], extra_turns: u32, now: i64) -> Result<GateOutcome, String> {
-    let mut entries = core::entries_from_receipts(builder_receipts, "agent", false, now);
-    entries.extend(core::entries_from_receipts(review_receipts, "review", true, now));
-    let subject = core::load_all(db)?.into_iter().find(|g| g.ticket_id.as_deref() == Some(task_id) && !g.status.is_finished()).map(|g| g.subject()).unwrap_or_else(|| task_id.to_owned());
+pub(super) fn evidence_gate(db: &Db, task_id: &str, changed: &[String], builder_receipts: &[String], review_receipts: &[String], approved: &[String], extra_turns: u32, now: i64) -> Result<GateOutcome, String> {
+    // Only real checks count (`core::real_check`): the ticket's approved checks, the
+    // goal's own check and recognised test, type-check and lint runners, not reads.
+    let goal = core::load_all(db)?.into_iter().find(|g| g.ticket_id.as_deref() == Some(task_id) && !g.status.is_finished());
+    let mut accepted = approved.to_vec();
+    accepted.extend(goal.iter().map(|g| g.done_check.clone()).filter(|c| !c.trim().is_empty()));
+    let mut entries = core::entries_from_receipts(builder_receipts, "agent", &accepted, now);
+    entries.extend(core::entries_from_receipts(review_receipts, "review", &accepted, now));
+    let subject = goal.map(|g| g.subject()).unwrap_or_else(|| task_id.to_owned());
     for entry in &entries {
         core::push_ledger(db, &subject, entry.clone())?;
     }
@@ -745,7 +878,7 @@ impl Controller {
         let find = |id: &str| core::load(&db, id)?.ok_or_else(|| "That goal no longer exists".to_owned());
         match command {
             GoalCommand::Create { workspace_id, objective, done_check, constraints, max_turns, ticket_id, conversation_id } => {
-                create(&db, &Spec { workspace_id: &workspace_id, objective: &objective, done_check: &done_check, constraints: &constraints, max_turns, ticket_id: ticket_id.as_deref(), conversation_id: conversation_id.as_deref() })?;
+                create(&db, &Spec { workspace_id: &workspace_id, objective: &objective, done_check: &done_check, constraints: &constraints, max_turns, ticket_id: ticket_id.as_deref(), conversation_id: conversation_id.as_deref(), by_person: true })?;
             }
             GoalCommand::Pause { id } => {
                 let mut goal = find(&id)?;
@@ -764,7 +897,7 @@ impl Controller {
                 if goal.turns >= goal.budget.max_turns && !goal.in_turn {
                     return Err("It used its turns. Extend it to keep going.".into());
                 }
-                goal.status = GoalStatus::Running;
+                goal.status = restored_status(&goal);
                 goal.paused_reason.clear();
                 goal.last_tick_ms = now;
                 core::save(&db, &goal)?;
@@ -784,7 +917,7 @@ impl Controller {
                     *cap += (*cap / 2).max(100);
                 }
                 if matches!(goal.status, GoalStatus::Paused) {
-                    goal.status = GoalStatus::Running;
+                    goal.status = restored_status(&goal);
                     goal.paused_reason.clear();
                     goal.last_tick_ms = now;
                 }
@@ -819,6 +952,7 @@ impl Controller {
                 let answer = if text.trim().is_empty() { blocked.default_answer.clone() } else { core::head(&text, 1000) };
                 goal.status = GoalStatus::Running;
                 goal.in_turn = false;
+                goal.last_tick_ms = now;
                 goal.reason = format!("You answered \"{}\" to: {}", answer, core::head(&blocked.question, 300));
                 if let Some(seq) = blocked.inbox_seq {
                     let _ = crate::routines::close_goal_item(&db, seq);
@@ -837,12 +971,12 @@ impl Controller {
             Ok(n) => eprintln!("neko goals: resumed {n} from their journals"),
             Err(error) => eprintln!("neko goals: cannot resume: {error}"),
         }
-        let env = Real { db: self.db.clone() };
+        let env = Arc::new(Real { db: self.db.clone() });
         let db = self.db.clone();
         std::thread::Builder::new()
             .name("neko-goals".into())
             .spawn(move || loop {
-                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tick(&db, &env))) {
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tick_concurrently(&db, &env))) {
                     Ok(Err(error)) => eprintln!("neko goals: {error}"),
                     Err(_) => eprintln!("neko goals: tick panicked; continuing"),
                     Ok(Ok(())) => {}
@@ -851,6 +985,20 @@ impl Controller {
             })
             .map(|_| ())
             .unwrap_or_else(|error| eprintln!("neko goals: cannot start: {error}"));
+    }
+}
+
+/// What a paused goal goes back to: the question it was blocked on, the wait or
+/// the usage-limit hold it was in (not a fresh one), else running.
+fn restored_status(goal: &Goal) -> GoalStatus {
+    if goal.blocked.is_some() {
+        GoalStatus::Blocked
+    } else if goal.wait.is_some() {
+        GoalStatus::Waiting
+    } else if goal.hold_until_ms.is_some() {
+        GoalStatus::Held
+    } else {
+        GoalStatus::Running
     }
 }
 
@@ -868,3 +1016,7 @@ mod tests;
 #[cfg(test)]
 #[path = "goals_chat_tests.rs"]
 mod chat_tests;
+
+#[cfg(test)]
+#[path = "goals_more_tests.rs"]
+mod more_tests;

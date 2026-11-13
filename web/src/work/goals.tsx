@@ -116,7 +116,7 @@ function Ledger({ goal, now }: { goal: Goal; now: number }) {
             {[...ledger].reverse().map((entry, i) => (
               <li key={i} className="min-w-0">
                 <span className="flex min-w-0 items-baseline gap-2">
-                  <span aria-label={entry.exit_code === 0 ? "passed" : "failed"} className={cn("shrink-0 tabular-nums", entry.exit_code === 0 ? "text-foreground" : "text-warning-foreground")}>{entry.exit_code == null ? "no exit" : `exit ${entry.exit_code}`}</span>
+                  <span className={cn("shrink-0 tabular-nums", entry.exit_code === 0 ? "text-foreground" : "text-warning-foreground")}><span className="sr-only">{entry.exit_code === 0 ? "Passed: " : "Failed: "}</span>{entry.exit_code == null ? "no exit" : `exit ${entry.exit_code}`}</span>
                   <code className="min-w-0 truncate font-mono text-[12px]" title={entry.command}>{entry.command}</code>
                   <span className="ms-auto shrink-0 tabular-nums text-muted-foreground/70">{entry.source} · {relativeTime(entry.at_ms, now)}</span>
                 </span>
@@ -159,7 +159,7 @@ export function GoalAnswer({ goal, showQuestion = true }: { goal: Goal; showQues
     <div data-slot="goal-answer" className="ms-8 mt-1 flex min-w-0 flex-col gap-2 pb-2 text-[12.5px]">
       {showQuestion ? <p className="text-foreground">{blocked.question}</p> : null}
       <div className="flex min-w-0 items-center gap-2">
-        <Input value={text} onChange={(e) => setText(e.target.value)} placeholder={blocked.default_answer} aria-label="Your answer" className="h-8 min-w-0 flex-1 text-[13px]" />
+        <Input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && text.trim()) { void send("Sent.", { Answer: { id, text } }); setText(""); } }} placeholder={blocked.default_answer} aria-label="Your answer" className="h-8 min-w-0 flex-1 text-[13px]" />
         <Button size="xs" variant="outline" onClick={() => { void send("Sent.", { Answer: { id, text } }); setText(""); }} disabled={!text.trim()}>Answer</Button>
         <Button size="xs" onClick={() => void send("Using the default.", { Answer: { id, text: "" } })}>Use the default</Button>
       </div>

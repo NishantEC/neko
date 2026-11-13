@@ -53,9 +53,12 @@ The goal tick (3 s, its own thread) watches the ticket. When a turn ends
    DONE / CONTINUE / BLOCKED / WAIT, a reason, and `done` / `next` / `plan` lines;
 3. `core::enforce` applies the rule the judge cannot override: **DONE needs
    evidence**. With a check, only a passing one (a judge DONE over a failing check
-   becomes CONTINUE with "still fails"). With no check, `evidence` must be a URL,
-   a `owner/repo#12` reference or a path that exists in the folder (no `..`, not
-   absolute). BLOCKED without a question and WAIT with nothing to wait for become
+   becomes CONTINUE with "still fails"). With no check, `evidence` must be
+   **verified** (`Env::verify`): a path inside the task's folder (no `..`, not
+   absolute, not a link out, not `.`) that was created or changed since the goal
+   began (a file that was already there proves nothing), a `owner/repo#12`
+   reference that `gh pr view` finds, or a link that answers (a GitHub pull URL is
+   checked as the pull request). BLOCKED without a question and WAIT with nothing to wait for become
    CONTINUE;
 4. apply it:
    - **CONTINUE**: if a cap is reached, pause (below); otherwise
@@ -78,8 +81,12 @@ message as a read-only question. A goal turn grants nothing the goal did not.
 
 In `execute_with_worktree`, after the independent review passes and before
 ReadyForReview, `goals::evidence_gate` files this run's receipts in the ledger
-(the builder's check-like commands, `core::check_like`, and the review's proven
-checks) and calls `core::gate`: a ticket whose changed files include code
+and calls `core::gate`. Only **real checks** are recorded (`core::real_check`: the
+goal's own check, the ticket's approved checks, or a recognised test, type-check
+or lint runner; never a read such as `cat src/test/x.rs`, a listing, a plain
+build, or anything piped or chained). Only the **latest** result of each command
+counts, and once the independent review ran only its results do (it ran after
+the last edit, so a builder pass from before a later edit proves nothing). A ticket whose changed files include code
 (`core::needs_check`; markdown, text, images, lockfiles and licences are prose)
 needs a passing ledger entry. Missing: up to `GATE_EXTRA_TURNS` = 2 extra "run the
 checks and fix" builder turns (`gate_instruction`, sent as part of the next
@@ -121,6 +128,24 @@ parent integrates verified work).
   shared `machine-ok` WAIT) postpones checks, judging and new turns; the
   ticket's own admission holds its run.
 
+### What a goal may and may not do
+
+- Only the person sets a goal that runs a check: `/goal`, the app, or Neko's own
+  `--request`. A `neko-goal` block in a reply is only honoured in full-power chat
+  (the read-only prompt does not offer it) and the goal it makes is **paused**
+  ("Neko suggested this goal and its check. Read the check, then Resume"): its
+  shell check is never run, and it asks for no plan skip, until the person resumes.
+- A goal never widens a ticket. `store::goal_turn` keeps the ticket's assessment
+  (so the scope check still applies), its read-only state and approval state;
+  a read-only ticket cannot carry a goal or take a goal turn.
+- A ticket's dependency folders are not pruned, and its folder is not parked,
+  while an unfinished goal works it (the check runs there; a parked folder is
+  restored first).
+- `create` refuses a second goal on a ticket before it changes anything.
+- Snapshot readers get no clocks (`wall_ms` / `last_tick_ms` are zero there):
+  running time moves on a timer, in its own deferred row, written only by running
+  goals every 15 s.
+
 ### Inbox
 
 Inbox items belong to routines. A goal's items live on a hidden, never-running
@@ -141,6 +166,8 @@ against the harness's three seeded goals.
 
 ### Not done
 
+- Split parents skip the evidence gate (their children are gated and integrated);
+  a ticket that ends "nothing to change" has no changed code to check.
 - A goal with no workspace Git repository cannot make a ticket; there is no
   ticketless goal that runs on its own.
 - The judge is asked once per ended turn; there is no per-turn plan file the agent

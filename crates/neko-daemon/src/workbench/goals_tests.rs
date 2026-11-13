@@ -57,7 +57,14 @@ impl Env for Stub {
     fn pid_alive(&self, _: u32) -> bool {
         self.pid_alive.load(Ordering::SeqCst)
     }
-    fn exists(&self, _: &std::path::Path, _: &str) -> bool {
+    fn verify(&self, _: &std::path::Path, _: i64, evidence: &core::Evidence) -> bool {
+        match evidence {
+            core::Evidence::Path(_) => self.artifact.load(Ordering::SeqCst),
+            core::Evidence::PullRequest(pr) => self.pr_state(pr).is_some(),
+            core::Evidence::Url(_) => self.url_ok(""),
+        }
+    }
+    fn url_ok(&self, _: &str) -> bool {
         self.artifact.load(Ordering::SeqCst)
     }
 }
@@ -439,16 +446,23 @@ fn running_time_counts_only_while_running_and_the_clock_has_its_own_row() {
     let env = Stub::new();
     env.advance(2_000);
     tick(&db, &env).unwrap();
+    assert_eq!(goal(&db, &id).wall_ms, 0, "a short gap is not written yet");
     env.advance(60_000_000);
     tick(&db, &env).unwrap();
     let g = goal(&db, &id);
-    assert!(g.wall_ms <= 2_000 + MAX_CLOCK_STEP_MS + 15_000, "a gap is not spent: {}", g.wall_ms);
+    assert_eq!(g.wall_ms, MAX_CLOCK_STEP_MS, "a long gap (a sleeping Mac) is not spent: {}", g.wall_ms);
     let row = db.lock().unwrap().get_setting(&format!("neko_goal_v1:{id}")).unwrap().unwrap();
     assert!(row.contains("\"wall_ms\":0"), "the clock is not in the goal's row: {row}");
     let writes = db.lock().unwrap().setting_writes();
     tick(&db, &env).unwrap();
     tick(&db, &env).unwrap();
-    assert_eq!(db.lock().unwrap().setting_writes(), writes, "a tick writes the deferred clock row, never the goal's");
+    assert_eq!(db.lock().unwrap().setting_writes(), writes, "a tick between clock steps writes nothing");
+    // A parked goal does not move its clock at all.
+    controller.goal_command(GoalCommand::Pause { id: id.clone() }).unwrap();
+    let before = goal(&db, &id).wall_ms;
+    env.advance(120_000);
+    tick(&db, &env).unwrap();
+    assert_eq!(goal(&db, &id).wall_ms, before);
 }
 
 #[test]
@@ -459,20 +473,28 @@ fn the_evidence_gate_sends_code_back_twice_then_blocks_and_skips_prose() {
     let ok = format!("VERIFICATION_COMMAND {}", serde_json::json!({"command": "cargo test", "exit_code": 0, "output": "ok"}));
     let bad = format!("VERIFICATION_COMMAND {}", serde_json::json!({"command": "cargo test", "exit_code": 101, "output": "1 failed"}));
     let now = 1_000;
-    assert!(matches!(evidence_gate(&db, "t", &["README.md".into()], &[], &[], 0, now).unwrap(), GateOutcome::Pass), "prose skips the gate");
-    assert!(matches!(evidence_gate(&db, "t", &code, &[ok.clone()], &[], 0, now).unwrap(), GateOutcome::Pass));
-    match evidence_gate(&db, "t", &code, &[bad.clone()], &[], 0, now).unwrap() {
+    assert!(matches!(evidence_gate(&db, "t", &["README.md".into()], &[], &[], &[], 0, now).unwrap(), GateOutcome::Pass), "prose skips the gate");
+    assert!(matches!(evidence_gate(&db, "t", &code, &[ok.clone()], &[], &[], 0, now).unwrap(), GateOutcome::Pass));
+    match evidence_gate(&db, "t", &code, &[bad.clone()], &[], &[], 0, now).unwrap() {
         GateOutcome::Retry(text) => assert!(text.contains("1 failed") && text.contains("Run the repository's checks")),
         _ => panic!("first extra turn"),
     }
-    assert!(matches!(evidence_gate(&db, "t", &code, &[], &[], 1, now).unwrap(), GateOutcome::Retry(_)));
-    match evidence_gate(&db, "t", &code, &[bad], &[], 2, now).unwrap() {
+    assert!(matches!(evidence_gate(&db, "t", &code, &[], &[], &[], 1, now).unwrap(), GateOutcome::Retry(_)));
+    match evidence_gate(&db, "t", &code, &[bad], &[], &[], 2, now).unwrap() {
         GateOutcome::Blocked(message) => assert!(message.starts_with(BLOCKED_PREFIX) && message.contains("1 failed")),
         _ => panic!("blocked after two extra turns"),
     }
     // The independent review's proven checks count, and everything lands in the ledger.
-    assert!(matches!(evidence_gate(&db, "t", &code, &[], &[ok], 2, now).unwrap(), GateOutcome::Pass));
+    assert!(matches!(evidence_gate(&db, "t", &code, &[], &[ok.clone()], &[], 2, now).unwrap(), GateOutcome::Pass));
     assert!(core::log(&db, "t").unwrap().ledger.iter().any(|e| e.source == "review" && e.passed()));
+    // Reads and plain builds are not evidence, however they exit.
+    let receipt = |command: &str, code: i64| format!("VERIFICATION_COMMAND {}", serde_json::json!({"command": command, "exit_code": code, "output": "fine"}));
+    let reads = [receipt("cat src/test/a.rs", 0), receipt("grep -rn check .", 0), receipt("cargo build", 0), receipt("ls -la", 0)];
+    assert!(matches!(evidence_gate(&db, "t", &code, &[], &reads, &[], 0, now).unwrap(), GateOutcome::Retry(_)), "a passing read is not a check");
+    // A pass the builder saw before editing again does not outlive the review's failure.
+    assert!(matches!(evidence_gate(&db, "t", &code, &[ok.clone()], &[receipt("cargo test", 101)], &[], 0, now).unwrap(), GateOutcome::Retry(_)));
+    // A check the ticket approved counts whatever it is called; a goal's own check does too.
+    assert!(matches!(evidence_gate(&db, "t", &code, &[], &[receipt("./scripts/ci-gate --all", 0)], &["./scripts/ci-gate --all".to_owned()], 0, now).unwrap(), GateOutcome::Pass));
 }
 
 #[test]

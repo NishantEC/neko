@@ -1424,7 +1424,7 @@ impl Controller {
                 if split.is_none() {
                     let outcome = goals::evidence_gate(
                         &*self.db.lock().map_err(|_| "Task storage unavailable")?,
-                        &task.id, &changed, &builder_receipts.borrow(), &receipts, gate_extra_turns, store::now_ms(),
+                        &task.id, &changed, &builder_receipts.borrow(), &receipts, &required_checks, gate_extra_turns, store::now_ms(),
                     )?;
                     match outcome {
                         goals::GateOutcome::Pass => {}
@@ -1441,7 +1441,11 @@ impl Controller {
                 // Nothing runs in the folder while it waits for review: drop
                 // its ignored dependency folders (often gigabytes). Publishing
                 // only needs Git; a reply re-seeds them before work resumes.
-                native_runner::prune_dependency_folders(&directory, cancel);
+                // A goal's check runs in this folder next (`pnpm test`, `pytest`), so its
+                // dependencies stay while the goal is unfinished.
+                if !goals::has_open_goal(&*self.db.lock().map_err(|_| "Task storage unavailable")?, &task.id) {
+                    native_runner::prune_dependency_folders(&directory, cancel);
+                }
                 self.commit_phase_authorized(authority, Some(&snapshot), |state| {
                     let t = state.tasks.iter_mut().find(|t| t.id == task.id).ok_or("Task no longer exists")?;
                     t.status = TaskStatus::ReadyForReview;
@@ -2095,20 +2099,22 @@ fn complete_chat_reply(
     // A goal the reply set: it rides the ticket this reply opened (or the one
     // it names), else gets a ticket of its own. A person's own request.
     let mut goal_note = String::new();
-    if let Some(proposed) = reply.goals.first() {
+    // Only full-power chat may propose one, and what it proposes waits paused
+    // for the person (its check is a shell command): `by_person: false`.
+    if let Some(proposed) = reply.goals.first().filter(|_| neko_chat::super_agent(&db)) {
         let workspace = neko_chat::ticket_workspace(&snapshot, chosen, proposed.workspace_id.as_deref(), message);
         match workspace {
             Some(workspace) => {
                 let named = proposed.task_id.as_deref().filter(|id| snapshot.tasks.iter().any(|t| t.id == *id && t.workspace_id == workspace.id)).map(str::to_owned);
                 let ticket = named.or_else(|| opened.first().cloned());
                 let conversation = neko_core::runtime_selection::home_id(&turn.agent_profile_id, chosen);
-                let spec = goals::Spec { workspace_id: &workspace.id, objective: &proposed.objective, done_check: &proposed.done_check, constraints: &proposed.constraints, max_turns: proposed.max_turns, ticket_id: ticket.as_deref(), conversation_id: Some(&conversation) };
+                let spec = goals::Spec { workspace_id: &workspace.id, objective: &proposed.objective, done_check: &proposed.done_check, constraints: &proposed.constraints, max_turns: proposed.max_turns, ticket_id: ticket.as_deref(), conversation_id: Some(&conversation), by_person: false };
                 match goals::create(&db, &spec) {
                     Ok(goal) => {
                         if ticket.is_none() {
                             opened.extend(goal.ticket_id.clone());
                         }
-                        goal_note = format!("\n\nGoal set: {}. Turn 1 of {}{}.", neko_core::goals::head(&goal.objective, 120), goal.budget.max_turns, if goal.done_check.is_empty() { ", done when a file or link proves it".to_owned() } else { format!(", done when `{}` passes", neko_core::goals::head(&goal.done_check, 80)) });
+                        goal_note = format!("\n\nGoal proposed: {}. It is paused until you resume it, up to {} turns, {}. Neko runs that check on your machine only once you do.", neko_core::goals::head(&goal.objective, 120), goal.budget.max_turns, if goal.done_check.is_empty() { "done when a file or link proves it".to_owned() } else { format!("done when `{}` passes", neko_core::goals::head(&goal.done_check, 80)) });
                     }
                     Err(error) => {
                         goal_note = format!("\n\nI could not set the goal: {error}");

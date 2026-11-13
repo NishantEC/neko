@@ -365,7 +365,13 @@ fn load_stored(db: &Db) -> Result<Snapshot, String> {
     snapshot.memory_options = crate::neko_memory::options(db)?;
     snapshot.memory_proposals = crate::memory_learning::proposals(db, &snapshot)?;
     snapshot.skills = crate::skills::load(db)?;
+    // Readers get no clocks: running time moves on a timer and would change the
+    // snapshot (and re-send it to every page) every few seconds.
     snapshot.goals = crate::goals::load_all(db)?;
+    for goal in &mut snapshot.goals {
+        goal.wall_ms = 0;
+        goal.last_tick_ms = 0;
+    }
     snapshot.import_preview = crate::setup_import::load_preview(db)?;
     crate::decision_context::attach(db, &mut snapshot)?;
     Ok(snapshot)
@@ -410,7 +416,11 @@ fn persist(db: &Db, snapshot: &Snapshot, deferred: bool) -> Result<(), String> {
         let order: Vec<&str> = compacted.tasks.iter().map(|t| t.id.as_str()).collect();
         if !deferred {
             for (id, _) in db.task_rows().map_err(|e| e.to_string())? {
-                if !order.contains(&id.as_str()) { db.delete_task_rows(&id).map_err(|e| e.to_string())?; }
+                if !order.contains(&id.as_str()) {
+                    db.delete_task_rows(&id).map_err(|e| e.to_string())?;
+                    // Its evidence ledger and journal go with it.
+                    crate::goals::forget_subject(db, &id)?;
+                }
             }
         }
         for task in &compacted.tasks {
@@ -1491,23 +1501,25 @@ pub fn recover_interrupted(db: &Db) -> Result<Snapshot, String> {
 }
 
 /// A goal's next turn for its ticket: the ticket queues again with `text` as
-/// a note the agent reads, in the same session. The goal is the person's own
-/// request for local work on this ticket, so it needs no reply interpreter
-/// (a model call that could read a machine-written message as a question);
-/// nothing is published and no new authority is granted.
+/// a note the agent reads, in the same session. It is not `ReplyToTask`: a
+/// reply goes through `supervision::reply_intent`, a model call that could
+/// read a machine-written message as a read-only question. It grants nothing:
+/// the ticket keeps its assessment (the scope check still applies), its
+/// read-only and approval state, and nothing is sent anywhere. A read-only
+/// ticket cannot take a goal turn.
 pub fn goal_turn(db: &Db, task_id: &str, text: &str) -> Result<Snapshot, String> {
     let mut snapshot = load(db)?;
+    if snapshot.task_read_only.contains(task_id) {
+        return Err("The ticket is read-only, so a goal cannot work it".into());
+    }
     let task = snapshot.tasks.iter_mut().find(|t| t.id == task_id).ok_or("Task no longer exists")?;
     if matches!(task.status, TaskStatus::Queued | TaskStatus::Planning | TaskStatus::Building | TaskStatus::Reviewing) {
         return Err("The ticket is still working".into());
     }
     append_event(task, NOTE_ROLE, text.trim());
     task.status = TaskStatus::Queued;
-    task.supervision = None;
     task.updated_at_ms = now_ms();
     append_event(task, "system", "Goal: the next turn is queued; the agent keeps its session.");
-    snapshot.start_when_planned.insert(task_id.to_owned());
-    snapshot.task_read_only.remove(task_id);
     save(db, &snapshot)?;
     Ok(snapshot)
 }

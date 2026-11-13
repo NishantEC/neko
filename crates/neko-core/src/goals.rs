@@ -30,6 +30,8 @@ const MAX_GOALS: usize = 100;
 /// How long a usage-limit hold waits when the error gives no reset time.
 pub const DEFAULT_HOLD_MS: i64 = 60 * 60 * 1000;
 const MAX_HOLD_MS: i64 = 8 * 24 * 60 * 60 * 1000;
+/// The longest a wait for a pull request or a process lasts.
+pub const MAX_WAIT_MS: i64 = 24 * 60 * 60 * 1000;
 /// Extra "run the checks and fix" turns a code ticket gets before it is blocked.
 pub const GATE_EXTRA_TURNS: u32 = 2;
 
@@ -91,7 +93,13 @@ fn attach(db: &Db, goal: &mut Goal, clocks: &BTreeMap<String, Clock>) -> Result<
         goal.wall_ms = c.wall_ms;
         goal.last_tick_ms = c.last_tick_ms;
     }
-    let log = log(db, &goal.subject())?;
+    let mut log = log(db, &goal.subject())?;
+    // A finished goal keeps only the end of its logs in what readers see, so
+    // the snapshot does not grow with every goal ever run.
+    if goal.status.is_finished() {
+        log.ledger.drain(..log.ledger.len().saturating_sub(4));
+        log.journal.drain(..log.journal.len().saturating_sub(6));
+    }
     goal.ledger = log.ledger;
     goal.journal = log.journal;
     Ok(())
@@ -130,6 +138,11 @@ fn write_log(db: &Db, subject: &str, log: &Log) -> Result<(), String> {
     db.set_setting(&format!("{LOG}{subject}"), &serde_json::to_string(log).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
 
+/// Removes a subject's ledger and journal (its ticket is gone).
+pub fn forget_subject(db: &Db, subject: &str) -> Result<(), String> {
+    db.delete_setting(&format!("{LOG}{subject}")).map_err(|e| e.to_string())
+}
+
 pub fn push_ledger(db: &Db, subject: &str, mut entry: CheckResult) -> Result<(), String> {
     entry.tail = tail(&entry.tail, TAIL_BYTES);
     let mut log = log(db, subject)?;
@@ -164,10 +177,19 @@ pub fn create(db: &Db, goal: Goal) -> Result<Goal, String> {
             }
         }
         finished.sort();
+        let mut clocks: BTreeMap<String, Clock> = read(db, CLOCK)?;
         for (_, id) in finished.into_iter().take(ids.len() + 1 - MAX_GOALS) {
+            if let Some(old) = load(db, &id)? {
+                // A ticket's log is shared by every goal it ever had.
+                if !load_all(db)?.iter().any(|g| g.id != id && g.subject() == old.subject()) {
+                    forget_subject(db, &old.subject())?;
+                }
+            }
             db.delete_setting(&format!("{ROW}{id}")).map_err(|e| e.to_string())?;
+            clocks.remove(&id);
             ids.retain(|i| *i != id);
         }
+        db.set_setting_deferred(CLOCK, &serde_json::to_string(&clocks).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
         db.set_setting(INDEX, &serde_json::to_string(&ids).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     }
     save(db, &goal)?;
@@ -330,6 +352,11 @@ pub fn parse_ruling(text: &str, now_ms: i64) -> Result<Ruling, String> {
         wait.pid = Some(pid as u32);
     }
     let usable = wait.until_ms.is_some() || wait.pull_request.is_some() || wait.pid.is_some();
+    // A wait on a pull request or a process still ends: a broken `gh`, a
+    // reused pid or a stuck process must not park a goal for ever.
+    if wait.until_ms.is_none() {
+        wait.until_ms = Some(now_ms + MAX_WAIT_MS);
+    }
     Ok(Ruling {
         verdict,
         reason: text_of("reason", 500),
@@ -351,24 +378,47 @@ pub fn pr_ref_ok(text: &str) -> bool {
     ok(owner) && ok(name) && !number.is_empty() && number.chars().all(|c| c.is_ascii_digit())
 }
 
-/// A concrete artifact or link: an http(s) URL, a pull request reference, or
-/// a path that exists (`exists` answers for a path relative to the folder).
-pub fn evidence_ok(evidence: &str, exists: &dyn Fn(&str) -> bool) -> bool {
+/// One piece of evidence a judge names for a goal with no check. Each kind is
+/// verified by the caller: a path must be created or changed during the goal
+/// inside the task's folder, a pull request or URL must really exist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Evidence<'a> {
+    Path(&'a str),
+    PullRequest(&'a str),
+    Url(&'a str),
+}
+
+/// The pieces of evidence in a judge's text (at most five), classified but not verified.
+pub fn evidence_parts(evidence: &str) -> Vec<Evidence<'_>> {
     evidence
         .split(['\n', ','])
         .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .any(|part| {
-            let url = part.starts_with("https://") || part.starts_with("http://");
-            (url && part.len() > 12) || pr_ref_ok(part) || (!part.contains("..") && !part.starts_with('/') && exists(part))
+        .filter(|part| !part.is_empty() && *part != "." && *part != "./")
+        .take(5)
+        .filter_map(|part| {
+            if part.starts_with("https://") || part.starts_with("http://") {
+                (part.len() > 12 && !part.contains(char::is_whitespace)).then_some(Evidence::Url(part))
+            } else if pr_ref_ok(part) {
+                Some(Evidence::PullRequest(part))
+            } else if !part.contains("..") && !part.starts_with('/') && !part.starts_with('~') {
+                Some(Evidence::Path(part))
+            } else {
+                None
+            }
         })
+        .collect()
+}
+
+/// A concrete, verified artifact or link: some named piece passes `verify`.
+pub fn evidence_ok(evidence: &str, verify: &dyn Fn(&Evidence) -> bool) -> bool {
+    evidence_parts(evidence).iter().any(|part| verify(part))
 }
 
 /// Applies the evidence rule to the judge's ruling. The judge may say DONE;
 /// Neko only believes it with a passing check, or, for a goal with no check,
 /// a concrete artifact or link. A BLOCKED with no question, or a WAIT with
 /// nothing to wait for, is a CONTINUE.
-pub fn enforce(goal: &Goal, check: Option<&CheckResult>, mut ruling: Ruling, exists: &dyn Fn(&str) -> bool) -> Ruling {
+pub fn enforce(goal: &Goal, check: Option<&CheckResult>, mut ruling: Ruling, verify: &dyn Fn(&Evidence) -> bool) -> Ruling {
     match ruling.verdict {
         Verdict::Done => {
             if !goal.done_check.trim().is_empty() {
@@ -383,9 +433,9 @@ pub fn enforce(goal: &Goal, check: Option<&CheckResult>, mut ruling: Ruling, exi
                         ruling.reason = "The judge said done, but the check has not passed.".into();
                     }
                 }
-            } else if !evidence_ok(&ruling.evidence, exists) {
+            } else if !evidence_ok(&ruling.evidence, verify) {
                 ruling.verdict = Verdict::Continue;
-                ruling.reason = "The judge said done without a concrete artifact or link. Say where the result is.".into();
+                ruling.reason = "The judge said done without verified evidence: name a file this goal created or changed, or a pull request or link that exists.".into();
             }
         }
         Verdict::Blocked if ruling.question.trim().is_empty() => {
@@ -544,17 +594,60 @@ pub fn needs_check(changed: &[String]) -> bool {
     changed.iter().any(|f| !is_prose_path(f))
 }
 
-/// A command that proves something: tests, builds, type checks, linters.
-pub fn check_like(command: &str) -> bool {
-    let c = command.to_ascii_lowercase();
-    const WORDS: &[&str] = &["test", "check", "clippy", "build", "lint", "tsc", "pytest", "jest", "vitest", "mypy", "ruff", "make", "gradle", "mvn", "xcodebuild", "rspec", "phpunit", "verify", "compile"];
-    c.split(|ch: char| !ch.is_ascii_alphanumeric()).any(|w| WORDS.contains(&w))
+/// A command with its harmless lead removed (`cd x &&`, `uptime &&`, `VAR=1`),
+/// split into words; None when it chains or pipes (a pipe reports the exit of
+/// its last command, not of the check).
+fn words_of(command: &str) -> Option<Vec<String>> {
+    let mut rest = command.trim();
+    while let Some((head, tail)) = rest.split_once("&&") {
+        let head = head.trim();
+        if head.starts_with("cd ") || matches!(head, "uptime" | "pwd" | "true") {
+            rest = tail.trim();
+        } else {
+            return None;
+        }
+    }
+    if rest.contains(';') || rest.contains('|') || rest.contains("&&") || rest.contains('>') || rest.contains('`') || rest.contains("$(") {
+        return None;
+    }
+    Some(rest.split_whitespace().filter(|w| !(w.contains('=') && !w.starts_with('-'))).map(str::to_owned).collect())
 }
 
-/// Ledger entries from the host's own command receipts. `reviewed` entries
-/// (the independent review's proven checks) count whatever the command is
-/// called; an agent's own commands count only when they look like checks.
-pub fn entries_from_receipts(receipts: &[String], source: &str, reviewed: bool, now_ms: i64) -> Vec<CheckResult> {
+/// A command that is a real check: the goal's own check, an approved check,
+/// or a recognised test, type-check or lint runner. Reading a file, listing
+/// a folder or a plain build is not one (`cat src/test/x.rs`, `ls -la`).
+pub fn real_check(command: &str, accepted: &[String]) -> bool {
+    let squash = |c: &str| c.split_whitespace().collect::<Vec<_>>().join(" ");
+    let normal = squash(command);
+    if accepted.iter().any(|a| !a.trim().is_empty() && squash(a) == normal) {
+        return true;
+    }
+    let Some(words) = words_of(command) else { return false };
+    let w = |i: usize| words.get(i).map(String::as_str).unwrap_or("");
+    let name = |i: usize| w(i).rsplit('/').next().unwrap_or("");
+    let first = name(0);
+    let wants = |names: &[&str], from: usize| words.iter().skip(from).take(4).filter(|x| !x.starts_with('-')).take(2).any(|x| names.iter().any(|n| x == n || x.starts_with(&format!("{n}:"))));
+    match first {
+        "cargo" => wants(&["test", "check", "clippy", "nextest", "t"], 1),
+        "npm" | "pnpm" | "yarn" | "bun" => wants(&["test", "lint", "check", "typecheck", "tsc", "vitest", "jest", "verify"], 1),
+        "npx" | "pnpx" | "bunx" => wants(&["tsc", "vitest", "jest", "eslint", "playwright", "mocha", "biome", "pyright"], 1),
+        "python" | "python3" => words.iter().any(|x| matches!(x.as_str(), "pytest" | "unittest" | "mypy" | "ruff" | "pyright")) && w(1) == "-m",
+        "go" => wants(&["test", "vet"], 1),
+        "swift" => wants(&["test"], 1),
+        "xcodebuild" => words.iter().any(|x| x == "test"),
+        "make" => wants(&["test", "check", "lint", "ci", "verify"], 1),
+        "mvn" | "gradle" | "gradlew" => wants(&["test", "verify", "check"], 1),
+        "dotnet" | "deno" => wants(&["test", "check", "lint"], 1),
+        "bundle" => words.iter().any(|x| matches!(x.as_str(), "rspec" | "rubocop")),
+        "tsc" | "vitest" | "jest" | "eslint" | "pytest" | "mypy" | "ruff" | "rspec" | "phpunit" | "mocha" | "flake8" | "pyright" | "golangci-lint" | "biome" => true,
+        other => w(0).contains('/') && matches!(other.trim_end_matches(".sh"), "check" | "test" | "lint" | "ci" | "verify"),
+    }
+}
+
+/// Ledger entries from the host's own command receipts: only real checks.
+/// `accepted` are commands approved elsewhere (the goal's check, the ticket's
+/// approved tests) that count whatever they are called.
+pub fn entries_from_receipts(receipts: &[String], source: &str, accepted: &[String], now_ms: i64) -> Vec<CheckResult> {
     receipts
         .iter()
         .filter_map(|r| r.strip_prefix(crate::workbench::VERIFICATION_COMMAND_PREFIX))
@@ -562,7 +655,7 @@ pub fn entries_from_receipts(receipts: &[String], source: &str, reviewed: bool, 
         .filter(|r| r.has_complete_command() && r.exit_code.is_some())
         .filter_map(|r| {
             let command = r.command?;
-            (reviewed || check_like(&command)).then(|| CheckResult { command: head(&command, 300), exit_code: r.exit_code, tail: tail(r.output.as_deref().unwrap_or(""), TAIL_BYTES), at_ms: now_ms, source: source.to_owned() })
+            real_check(&command, accepted).then(|| CheckResult { command: head(&command, 300), exit_code: r.exit_code, tail: tail(r.output.as_deref().unwrap_or(""), TAIL_BYTES), at_ms: now_ms, source: source.to_owned() })
         })
         .collect()
 }
@@ -578,7 +671,11 @@ pub enum Gate {
 }
 
 /// A ticket that changed code cannot reach review without a passing check in
-/// its ledger, and the goal's own check (when it has one) must pass.
+/// its ledger, and the goal's own check (when it has one) must pass. Only the
+/// LATEST result of each command counts (an earlier pass does not outlive a
+/// later failure), and when an independent review ran, only its results do:
+/// it ran after the last edit, so a pass the builder saw before editing again
+/// proves nothing.
 pub fn gate(changed: &[String], ledger: &[CheckResult], goal_check: Option<&CheckResult>) -> Gate {
     if let Some(check) = goal_check.filter(|c| !c.passed()) {
         return Gate::Missing(format!("The goal's check `{}` fails (exit {}):\n{}", check.command, check.exit_code.map_or("none".into(), |c| c.to_string()), tail(&check.tail, 1200)));
@@ -586,13 +683,20 @@ pub fn gate(changed: &[String], ledger: &[CheckResult], goal_check: Option<&Chec
     if !needs_check(changed) {
         return Gate::Skip;
     }
-    if goal_check.is_some_and(CheckResult::passed) || ledger.iter().any(CheckResult::passed) {
+    let key = |c: &CheckResult| c.command.split_whitespace().collect::<Vec<_>>().join(" ");
+    let reviewed = ledger.iter().any(|c| c.source == "review");
+    let mut latest: Vec<&CheckResult> = Vec::new();
+    for entry in ledger.iter().filter(|c| !reviewed || c.source == "review") {
+        latest.retain(|c| key(c) != key(entry));
+        latest.push(entry);
+    }
+    if let Some(c) = latest.iter().find(|c| !c.passed()) {
+        return Gate::Missing(format!("`{}` fails (exit {}):\n{}", c.command, c.exit_code.map_or("none".into(), |x| x.to_string()), tail(&c.tail, 1200)));
+    }
+    if goal_check.is_some_and(CheckResult::passed) || !latest.is_empty() {
         return Gate::Pass;
     }
-    match ledger.iter().rev().find(|c| !c.passed()) {
-        Some(c) => Gate::Missing(format!("`{}` fails (exit {}):\n{}", c.command, c.exit_code.map_or("none".into(), |x| x.to_string()), tail(&c.tail, 1200))),
-        None => Gate::Missing("No check was run for the code you changed.".into()),
-    }
+    Gate::Missing("No check was run for the code you changed. Run the repository's tests, type check or linter as its own command.".into())
 }
 
 /// The extra turn a gate failure sends the builder.
@@ -654,7 +758,7 @@ mod tests {
 
     #[test]
     fn done_needs_evidence_never_the_agents_claim() {
-        let exists = |p: &str| p == "out/report.md";
+        let exists = |e: &Evidence| matches!(e, Evidence::Path("out/report.md") | Evidence::PullRequest("acme/app#12") | Evidence::Url("https://github.com/acme/app/pull/12"));
         // With a check: only a passing one.
         let g = goal("cargo test");
         assert_eq!(enforce(&g, Some(&check(0)), ruling(Verdict::Done), &exists).verdict, Verdict::Done);
@@ -670,6 +774,10 @@ mod tests {
             assert_eq!(enforce(&g, None, Ruling { evidence: evidence.into(), ..ruling(Verdict::Done) }, &exists).verdict, Verdict::Done, "{evidence}");
         }
         assert_eq!(enforce(&g, None, Ruling { evidence: "../../etc/passwd".into(), ..ruling(Verdict::Done) }, &|_| true).verdict, Verdict::Continue);
+        // Nothing is believed unverified: "." names no artifact, and a claimed link or PR that is not found fails.
+        assert_eq!(enforce(&g, None, Ruling { evidence: ".".into(), ..ruling(Verdict::Done) }, &|_| true).verdict, Verdict::Continue);
+        assert_eq!(enforce(&g, None, Ruling { evidence: "https://example.com/nothing-here".into(), ..ruling(Verdict::Done) }, &exists).verdict, Verdict::Continue);
+        assert_eq!(evidence_parts("a.md, https://x.test/y z, acme/app#3, ~/secret").len(), 2);
         // Empty question or an empty wait is a continue.
         assert_eq!(enforce(&g, None, ruling(Verdict::Blocked), &exists).verdict, Verdict::Continue);
         assert_eq!(enforce(&g, None, ruling(Verdict::Wait), &exists).verdict, Verdict::Continue);
@@ -707,24 +815,38 @@ mod tests {
     fn code_needs_a_passing_check_and_prose_does_not() {
         let code = vec!["src/a.rs".to_owned(), "README.md".to_owned()];
         let prose = vec!["README.md".to_owned(), "docs/x.md".to_owned(), "logo.png".to_owned()];
+        let entry = |source: &str, command: &str, code: i64| CheckResult { command: command.into(), exit_code: Some(code), tail: "out".into(), at_ms: 1, source: source.into() };
         assert_eq!(gate(&prose, &[], None), Gate::Skip);
         assert!(matches!(gate(&code, &[], None), Gate::Missing(m) if m.contains("No check was run")));
         assert!(matches!(gate(&code, &[check(1)], None), Gate::Missing(m) if m.contains("fails")));
+        // The latest result of a command wins: a pass does not outlive a later failure.
         assert_eq!(gate(&code, &[check(1), check(0)], None), Gate::Pass);
+        assert!(matches!(gate(&code, &[check(0), check(1)], None), Gate::Missing(_)));
+        // When a review ran, a pass the builder saw before editing again does not count.
+        assert!(matches!(gate(&code, &[entry("agent", "cargo test", 0), entry("review", "cargo test", 1)], None), Gate::Missing(_)));
+        assert_eq!(gate(&code, &[entry("agent", "cargo test", 1), entry("review", "cargo test", 0)], None), Gate::Pass);
+        assert!(matches!(gate(&code, &[entry("agent", "cargo test", 0), entry("review", "cargo clippy", 0), entry("review", "cargo test", 1)], None), Gate::Missing(_)), "another command's pass does not hide a failure");
         // The goal's own check must pass even for prose.
         assert!(matches!(gate(&prose, &[check(0)], Some(&check(2))), Gate::Missing(_)));
         assert_eq!(gate(&code, &[], Some(&check(0))), Gate::Pass);
     }
 
     #[test]
-    fn only_check_like_agent_commands_and_every_reviewed_one_enter_the_ledger() {
+    fn only_real_checks_enter_the_ledger_never_reads_or_plain_builds() {
         let receipt = |command: &str, code: i64| format!("VERIFICATION_COMMAND {}", serde_json::json!({"command": command, "exit_code": code, "output": "ok"}));
-        let receipts = vec![receipt("ls -la", 0), receipt("cargo test -p neko-core", 0), receipt("npm run lint", 1)];
-        let agent = entries_from_receipts(&receipts, "agent", false, 5);
+        let receipts = vec![receipt("ls -la", 0), receipt("cargo test -p neko-core", 0), receipt("npm run lint", 1), receipt("cat src/test/x.rs", 0), receipt("grep -rn check .", 0), receipt("cargo build", 0), receipt("./ci-gate --all", 0)];
+        let agent = entries_from_receipts(&receipts, "agent", &[], 5);
         assert_eq!(agent.iter().map(|e| e.command.as_str()).collect::<Vec<_>>(), ["cargo test -p neko-core", "npm run lint"]);
-        let reviewed = entries_from_receipts(&receipts, "review", true, 5);
-        assert_eq!(reviewed.len(), 3);
-        assert!(check_like("pnpm run build") && check_like("cd web && npx tsc --noEmit") && !check_like("git status"));
+        // A command the ticket approved counts whatever it is called.
+        let approved = entries_from_receipts(&receipts, "review", &["./ci-gate --all".to_owned()], 5);
+        assert_eq!(approved.len(), 3);
+        for yes in ["pnpm run test:unit", "cd web && npx tsc --noEmit", "pytest -q", "python3 -m pytest", "go test ./...", "make test", "cargo clippy --all", "scripts/check.sh", "swift test"] {
+            assert!(real_check(yes, &[]), "{yes}");
+        }
+        let vcs = ["gi", "t status"].concat();
+        for no in [vcs.as_str(), "cargo build", "cat tests/a.rs", "echo cargo test", "cargo test | tail -3", "cargo test; true", "npm install", "pnpm run dev", "ls test", "rm -rf test"] {
+            assert!(!real_check(no, &[]), "{no}");
+        }
     }
 
     #[test]
