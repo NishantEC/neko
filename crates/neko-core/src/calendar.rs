@@ -115,18 +115,43 @@ pub fn store(db: &Db, events: Vec<CalendarEvent>, source: &str, access: Calendar
     };
     LAST_SYNC.fetch_max(now_ms, Ordering::AcqRel);
     let stored: CalendarStatus = read_json(db, STATUS)?;
-    let mut status = CalendarStatus { access, source, last_sync_ms: Some(now_ms), events: events.len(), truncated };
+    let mut status = CalendarStatus { access, source, last_sync_ms: Some(now_ms), events: events.len(), truncated, enabled: false };
     let same = CalendarStatus { last_sync_ms: stored.last_sync_ms, ..status.clone() } == stored;
     if !same || stored.last_sync_ms.is_none_or(|at| now_ms - at >= SYNC_STALE_MS) {
         db.set_setting_quiet(STATUS, &serde_json::to_string(&status).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     }
     status.last_sync_ms = Some(now_ms);
+    status.enabled = enabled(db);
     Ok(status)
+}
+
+const ENABLED: &str = "calendar_enabled_v1";
+
+/// Whether the app may ask for, and read, the person's calendars. A choice is
+/// kept; with none, a Mac whose calendar was already shared (an earlier build
+/// asked at launch) stays on, and a fresh data folder stays off until the
+/// first-run setup or Settings turns it on.
+pub fn enabled(db: &Db) -> bool {
+    match db.get_setting(ENABLED).ok().flatten().as_deref() {
+        Some("on") => true,
+        Some("off") => false,
+        _ => read_json::<CalendarStatus>(db, STATUS).is_ok_and(|s| s.access == CalendarAccess::Granted),
+    }
+}
+
+pub fn set_enabled(db: &Db, on: bool) -> Result<CalendarStatus, String> {
+    db.set_setting(ENABLED, if on { "on" } else { "off" }).map_err(|e| e.to_string())?;
+    if !on {
+        // Switched off: what was copied stops being kept.
+        db.set_setting_quiet(EVENTS, "[]").map_err(|e| e.to_string())?;
+    }
+    status(db)
 }
 
 /// What is stored, with the newest sync time this daemon has seen.
 pub fn status(db: &Db) -> Result<CalendarStatus, String> {
     let mut status: CalendarStatus = read_json(db, STATUS)?;
+    status.enabled = enabled(db);
     let recent = LAST_SYNC.load(Ordering::Acquire);
     if recent > 0 && status.last_sync_ms.is_none_or(|at| at < recent) {
         status.last_sync_ms = Some(recent);

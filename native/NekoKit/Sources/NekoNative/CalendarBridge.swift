@@ -13,6 +13,9 @@ import NekoKit
     static let shared = CalendarBridge()
     private static let interval: Duration = .seconds(300)
     private static let settle: Duration = .seconds(2)
+    /// How often to look for the switch while Calendar is off.
+    private static let idle: Duration = .seconds(20)
+    private var enabled = false
     private let store = EKEventStore()
     private var task: Task<Void, Never>?
     private var pending: Task<Void, Never>?
@@ -30,10 +33,16 @@ import NekoKit
             MainActor.assumeIsolated { self?.changed() }
         }
         task = Task { [weak self] in
-            await self?.askOnce()
             while !Task.isCancelled {
-                await self?.sync()
-                do { try await Task.sleep(for: Self.interval) } catch { return }
+                // Calendar is a choice (first-run setup or Settings): macOS is
+                // asked, and events are read, only while it is switched on.
+                if await self?.refreshEnabled() == true {
+                    await self?.askOnce()
+                    await self?.sync()
+                    do { try await Task.sleep(for: Self.interval) } catch { return }
+                } else {
+                    do { try await Task.sleep(for: Self.idle) } catch { return }
+                }
             }
         }
     }
@@ -48,6 +57,13 @@ import NekoKit
         }
     }
 
+    /// Asks the daemon whether the person switched Calendar on.
+    private func refreshEnabled() async -> Bool {
+        let reply = try? await client.request(.string("CalendarStatus"))
+        enabled = CalendarPayload.isEnabled(reply)
+        return enabled
+    }
+
     /// EventKit shows its prompt only while access was never decided.
     private func askOnce() async {
         guard EKEventStore.authorizationStatus(for: .event) == .notDetermined else { return }
@@ -58,6 +74,7 @@ import NekoKit
     }
 
     private func sync() async {
+        guard enabled else { return }
         let access = CalendarPayload.access(EKEventStore.authorizationStatus(for: .event))
         // Access granted later in System Settings: the store must re-read.
         if access == "Granted", lastAccess != nil, lastAccess != "Granted" { store.reset() }
@@ -90,6 +107,11 @@ enum CalendarPayload {
         var allDay: Bool
         var location: String?
         var url: String?
+    }
+
+    /// The daemon's answer to `CalendarStatus`: is Calendar switched on?
+    static func isEnabled(_ reply: JSONValue?) -> Bool {
+        reply?["CalendarStatus"]["enabled"].bool ?? false
     }
 
     static func access(_ status: EKAuthorizationStatus) -> String {

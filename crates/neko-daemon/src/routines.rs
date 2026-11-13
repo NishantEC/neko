@@ -187,6 +187,11 @@ fn scopes(state: &AppState, create: bool) -> Result<Vec<ScopeProposal>, String> 
 /// so a scope folder added later is picked up too.
 fn ensure_seeded(state: &AppState) -> Result<(), String> {
     let _seeding = SEEDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    // Routines are off until the person turns them on: no workspace or routine
+    // is made for what happens to be on disk.
+    if !routines_on(state)? {
+        return Ok(());
+    }
     let scopes = scopes(state, true)?;
     let db = db(state);
     let mut store = core::load(&db)?;
@@ -244,6 +249,12 @@ fn ensure_seeded(state: &AppState) -> Result<(), String> {
     store.seeded_workspaces.extend(fresh.into_iter().filter_map(|s| s.workspace_id));
     store.seeded = true;
     core::save_definitions(&db, &store)
+}
+
+/// The master switch (`core::master_on`).
+fn routines_on(state: &AppState) -> Result<bool, String> {
+    let db = db(state);
+    Ok(core::master_on(&db, &core::load(&db)?))
 }
 
 /// At start no run is in flight, whatever the rows say.
@@ -347,6 +358,9 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
         return Ok(());
     }
     if neko_core::machine::latest().is_some_and(|health| health.holding.is_some()) {
+        return Ok(());
+    }
+    if !routines_on(state)? {
         return Ok(());
     }
     ensure_seeded(state)?;
@@ -1072,7 +1086,8 @@ fn views(state: &AppState) -> Result<Response, String> {
             orders.entry(id.clone()).or_insert_with(|| store.orders_for(id).to_string());
         }
     }
-    Ok(Response::Routines { routines, standing_orders: orders, scopes, owner_name: core::owner_name(), age_out_days: store.age_out_days() })
+    let routines_on = core::master_on(&db, &store);
+    Ok(Response::Routines { routines, standing_orders: orders, scopes, owner_name: core::owner_name(), age_out_days: store.age_out_days(), routines_on })
 }
 
 fn notifications(state: &AppState, after: u64) -> Result<Response, String> {
@@ -1141,6 +1156,7 @@ fn edit(state: &AppState, request: Request) -> Result<(), String> {
             routine.enabled = enabled;
             core::save_definitions(&db, &store)
         }
+        Request::SetRoutinesOn { enabled } => core::set_master(&db, enabled),
         Request::SetStandingOrders { workspace_id, text } => {
             if text.len() > core::MAX_ORDERS {
                 return Err(format!("Keep standing orders under {} KB", core::MAX_ORDERS / 1024));

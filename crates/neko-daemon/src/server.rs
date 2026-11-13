@@ -893,6 +893,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         | Request::SaveRoutine { .. }
         | Request::RunRoutineNow { .. }
         | Request::SetRoutineEnabled { .. }
+        | Request::SetRoutinesOn { .. }
         | Request::ClearNeedsYou { .. }
         | Request::ReopenNeedsYou { .. }
         | Request::SetInboxAgeOutDays { .. }
@@ -914,6 +915,10 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         Request::CalendarStatus => {
             let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             neko_core::calendar::status(&db).map_or_else(|message| Response::Error { message }, Response::CalendarStatus)
+        }
+        Request::SetCalendarEnabled { enabled } => {
+            let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            neko_core::calendar::set_enabled(&db, enabled).map_or_else(|message| Response::Error { message }, Response::CalendarStatus)
         }
         Request::UnseenTasks => {
             let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

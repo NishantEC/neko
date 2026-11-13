@@ -606,6 +606,11 @@ pub enum Request {
     SaveRoutine {
         routine: routines::Routine,
     },
+    /// The master switch for routines: off on a fresh data folder until the
+    /// person turns it on (first-run setup or Settings). Answered with `Routines`.
+    SetRoutinesOn {
+        enabled: bool,
+    },
     /// Makes the routine due now; the runner starts it within 30 seconds.
     RunRoutineNow {
         id: String,
@@ -658,6 +663,11 @@ pub enum Request {
         to_ms: i64,
     },
     CalendarStatus,
+    /// Switches Calendar on or off (off on a fresh data folder). The app asks
+    /// macOS for access only once it is on. Answered with `CalendarStatus`.
+    SetCalendarEnabled {
+        enabled: bool,
+    },
     /// The phone channels' settings and status. Answered with `Phone`.
     PhoneSettings,
     /// Saves the settings (an empty ntfy topic is generated). Answered with `Phone`.
@@ -1115,6 +1125,9 @@ pub enum Response {
         /// `SetInboxAgeOutDays`, 7 unless changed.
         #[serde(default)]
         age_out_days: u32,
+        /// The master switch (`SetRoutinesOn`); old daemons never sent it.
+        #[serde(default = "routines_on_default")]
+        routines_on: bool,
     },
     RoutineNotifications {
         items: Vec<routines::RoutineNotice>,
@@ -1507,4 +1520,8 @@ mod tests {
     fn default_summon_combo_displays_as_option_space() {
         assert_eq!(HotkeyCombo::default_summon().display(), "⌥Space");
     }
+}
+
+fn routines_on_default() -> bool {
+    true
 }

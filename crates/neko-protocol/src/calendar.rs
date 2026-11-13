@@ -54,6 +54,9 @@ pub struct CalendarStatus {
     pub events: usize,
     /// More events were sent than are kept (2000 or 1 MB).
     pub truncated: bool,
+    /// Whether the person has Calendar switched on (`SetCalendarEnabled`).
+    /// The app asks macOS for access only while this is true.
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

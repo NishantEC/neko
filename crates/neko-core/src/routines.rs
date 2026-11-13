@@ -87,6 +87,24 @@ pub fn save_definitions(db: &crate::Db, store: &Store) -> Result<(), String> {
     write(db, DEFINITIONS, store)
 }
 
+const MASTER: &str = "routines_master_v1";
+
+/// Whether routines may run at all. A person who chose answers for good; a
+/// Mac whose routines were already seeded by an earlier build keeps running
+/// them; a fresh data folder has them off until the first-run setup (or
+/// Settings) turns them on, so nothing acts on someone's accounts unasked.
+pub fn master_on(db: &crate::Db, store: &Store) -> bool {
+    match db.get_setting(MASTER).ok().flatten().as_deref() {
+        Some("on") => true,
+        Some("off") => false,
+        _ => store.seeded,
+    }
+}
+
+pub fn set_master(db: &crate::Db, on: bool) -> Result<(), String> {
+    db.set_setting(MASTER, if on { "on" } else { "off" }).map_err(|e| e.to_string())
+}
+
 pub fn load_state(db: &crate::Db, id: &str) -> Result<RoutineState, String> {
     read(db, &state_key(id))
 }

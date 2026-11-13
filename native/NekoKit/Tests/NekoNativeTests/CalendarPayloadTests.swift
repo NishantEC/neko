@@ -56,4 +56,11 @@ final class CalendarPayloadTests: XCTestCase {
         XCTAssertEqual(event["url"].string, "https://meet.google.com/x")
         XCTAssertNil(event.object["location"], "absent fields are left out, not sent empty")
     }
+
+    func testCalendarIsOffUnlessTheDaemonSaysItIsOn() {
+        XCTAssertFalse(CalendarPayload.isEnabled(nil))
+        XCTAssertFalse(CalendarPayload.isEnabled(.object(["CalendarStatus": .object(["access": .string("NotAsked")])])))
+        XCTAssertFalse(CalendarPayload.isEnabled(.object(["CalendarStatus": .object(["enabled": .bool(false)])])))
+        XCTAssertTrue(CalendarPayload.isEnabled(.object(["CalendarStatus": .object(["enabled": .bool(true)])])))
+    }
 }
