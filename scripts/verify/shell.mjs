@@ -678,96 +678,10 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   await a11y("missing page");
 
   // ===========================================================================================
-  // First run
+  // First run lives in scripts/verify/firstrun.mjs (the setup's six steps).
+  // Here only the wiring the shell owns: /setup and the palette open it again.
   // ===========================================================================================
-  mock.models = true;
-  await page.evaluate(() => fetch("/api/request", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ SetOnboardingComplete: { completed: false } }) }));
-  await page.goto(`${base}/#/`);
-  await page.reload();
   const onboarding = page.locator("[data-slot='onboarding']");
-  await onboarding.waitFor({ timeout: 10000 });
-  check(/A little more\s+off your mind/.test(await onboarding.innerText()), "when first run is not finished, the welcome step opens by itself");
-  check((await onboarding.getByRole("button", { name: "Skip setup" }).count()) === 0, "there is nothing to skip on the welcome screen");
-  for (const theme of themes) {
-    await setTheme(theme);
-    await shot(`onboarding-welcome-${theme}`);
-    await a11y(`onboarding welcome (${theme})`);
-  }
-  await setTheme("dark");
-  await onboarding.getByRole("button", { name: /Get started/ }).click();
-  await onboarding.getByText("Full Disk Access").first().waitFor();
-  const perms = await onboarding.innerText();
-  check(/Privacy & Security → Full Disk Access/.test(perms) && /Accessibility/.test(perms) && /Clipboard history/.test(perms), "permissions are explained, with Full Disk Access guidance");
-  check((await onboarding.locator("a[href^='x-apple.systempreferences:']").count()) === 2, "each permission links to its System Settings pane");
-  const clip = onboarding.getByRole("switch", { name: "Clipboard history" });
-  await page.waitForFunction(() => { const el = document.querySelector("[role='switch'][aria-label='Clipboard history']"); return el && el.getAttribute("aria-disabled") !== "true" && !el.hasAttribute("data-disabled"); }, null, { timeout: 5000 });
-  const wasOn = (await clip.getAttribute("aria-checked")) === "true";
-  await clip.click();
-  await page.waitForFunction((was) => (document.querySelector("[role='switch'][aria-label='Clipboard history']")?.getAttribute("aria-checked") === "true") !== was, wasOn, { timeout: 5000 });
-  check(true, "the clipboard switch really changes the daemon's setting");
-  await clip.click();
-  for (const theme of themes) {
-    await setTheme(theme);
-    await shot(`onboarding-permissions-${theme}`);
-    await a11y(`onboarding permissions (${theme})`);
-  }
-  await setTheme("dark");
-  await page.keyboard.press("Escape");
-  check(/A little more\s+off your mind/.test(await onboarding.innerText()), "Esc steps back");
-  await onboarding.getByRole("button", { name: /Get started/ }).click();
-  await onboarding.getByRole("button", { name: /Continue/ }).click();
-  await onboarding.getByText("Where do").waitFor();
-  await onboarding.getByLabel("Folder path").fill("not a path");
-  await onboarding.getByRole("button", { name: "Add workspace" }).click();
-  await onboarding.locator("[data-slot='onboarding-error']").waitFor();
-  check(/starting with \//.test(await onboarding.locator("[data-slot='onboarding-error']").innerText()), "a folder path that is not a path is explained");
-  await onboarding.getByLabel("Folder path").fill(DATA);
-  await onboarding.getByLabel("Name (optional)").fill("Test workspace");
-  await onboarding.getByRole("button", { name: "Add workspace" }).click();
-  await onboarding.locator("[data-slot='workspace-list']").getByText("Test workspace").waitFor({ timeout: 6000 });
-  check(true, "a workspace folder can be connected from the tour (SaveWorkspaceWithFolders)");
-  for (const theme of themes) {
-    await setTheme(theme);
-    await shot(`onboarding-workspace-${theme}`);
-  }
-  await setTheme("dark");
-  await onboarding.getByRole("button", { name: /Continue/ }).click();
-  await onboarding.locator("[data-slot='runtime-choices']").getByText("GPT-6 Astra").waitFor({ timeout: 6000 });
-  check(/Neko decides/.test(await onboarding.innerText()) && /Sign in with `claude login`/.test(await onboarding.innerText()), "the runtime step lists what is ready and why the rest is not");
-  await onboarding.getByRole("radio", { name: /GPT-6 Astra/ }).click();
-  for (const theme of themes) {
-    await setTheme(theme);
-    await shot(`onboarding-runtime-${theme}`);
-    await a11y(`onboarding runtime (${theme})`);
-  }
-  await setTheme("dark");
-  await onboarding.getByRole("button", { name: /Continue/ }).click();
-  await onboarding.getByText("existing setup").first().waitFor();
-  await onboarding.getByRole("button", { name: "Look", exact: true }).click();
-  await onboarding.locator("[data-slot='import-sources']").waitFor({ timeout: 6000 });
-  check(true, "the optional import step looks for setups (SetupImport ListSources)");
-  await shot("onboarding-import-dark");
-  await page.keyboard.press("Enter"); // Enter continues (focus is not on a control)
-  await sleep(300);
-  if (!/Neko is\s+ready/.test(await onboarding.innerText())) await onboarding.getByRole("button", { name: /Continue/ }).click();
-  await onboarding.getByText("ready.").waitFor();
-  check(/GPT-6 Astra|gpt-6-astra/.test(await onboarding.innerText()), "the last step summarises what was chosen");
-  await shot("onboarding-finish-dark");
-  await onboarding.getByRole("button", { name: "Open Neko" }).click();
-  await onboarding.waitFor({ state: "detached", timeout: 6000 });
-  const state = await page.evaluate(() => fetch("/api/request", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify("GetOnboardingState") }).then((r) => r.json()));
-  check(state.OnboardingState.completed === true, "finishing marks first run complete in the daemon");
-  const runtime = await page.evaluate(() => fetch("/api/request", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ Workbench: "Snapshot" }) }).then((r) => r.json()));
-  check(runtime.Workbench.agent_runtime.model === "gpt-6-astra", "the runtime picked in the tour was saved (SetAgentRuntime)");
-  // Skip from the middle.
-  await page.evaluate(() => fetch("/api/request", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ SetOnboardingComplete: { completed: false } }) }));
-  await page.reload();
-  await onboarding.waitFor({ timeout: 10000 });
-  await onboarding.getByRole("button", { name: /Get started/ }).click();
-  await onboarding.getByRole("button", { name: "Skip setup" }).click();
-  await onboarding.waitFor({ state: "detached", timeout: 6000 });
-  check((await page.evaluate(() => fetch("/api/request", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify("GetOnboardingState") }).then((r) => r.json()))).OnboardingState.completed === true, "Skip setup finishes first run");
-  // /setup shows it again; Esc on the first step closes a re-opened tour.
   await page.goto(`${base}/#/`);
   await page.waitForSelector("[data-slot='composer'] textarea");
   await page.locator("[data-slot='composer'] textarea").fill("/setup");
@@ -775,13 +689,13 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   await onboarding.waitFor({ timeout: 4000 });
   await page.keyboard.press("Escape");
   await onboarding.waitFor({ state: "detached", timeout: 4000 });
-  check(true, "/setup shows the tour again, and Esc closes it");
+  check(true, "/setup shows the first-run setup again, and Esc closes it");
   await page.locator("[data-slot='composer'] textarea").fill("/permissions");
   await page.keyboard.press("Enter");
-  await onboarding.getByText("Full Disk Access").first().waitFor({ timeout: 4000 });
-  check(true, "/permissions opens the tour at the permissions step");
+  await onboarding.getByText("Accessibility").first().waitFor({ timeout: 4000 });
+  check(true, "/permissions opens the setup at the This Mac step");
   await page.keyboard.press("Escape");
-  await page.keyboard.press("Escape");
+  for (let i = 0; i < 6 && (await onboarding.count()); i++) await page.keyboard.press("Escape");
   await onboarding.waitFor({ state: "detached", timeout: 4000 });
 
   await page.unroute("**/api/request");

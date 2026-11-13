@@ -24,7 +24,7 @@ const POLL_MS = 10_000;
 /** Lists show this many before "Show more", so a scope fits on a screen. */
 const SHORT = 5;
 
-type Data = { routines: Json[]; standing_orders: Record<string, string>; scopes: Json[]; owner_name?: string };
+type Data = { routines: Json[]; standing_orders: Record<string, string>; scopes: Json[]; owner_name?: string; routines_on?: boolean };
 type Send = (body: Json, done?: string) => Promise<boolean>;
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -408,6 +408,12 @@ function InboxBody() {
   return (
     <>
       {error ? <ErrorNote error={`${error} The list below may be out of date.`} title="Can’t reach the Neko daemon" onDismiss={clear} /> : null}
+      {data.routines_on === false ? (
+        <p data-slot="routines-off" className="flex items-center gap-2 text-[13px] text-muted-foreground">
+          <span><span className="text-foreground">Routines are off.</span> Neko will not check messages, PRs or your day until you turn them on.</span>
+          <Button size="sm" variant="outline" onClick={() => void send({ SetRoutinesOn: { enabled: true } }, "Routines are on")}>Turn on</Button>
+        </p>
+      ) : null}
       <Section title="Needs you" count={open.length || undefined}>
         <span role="status" aria-live="polite" className="sr-only">{open.length ? `${open.length} thing${open.length === 1 ? "" : "s"} only you can do.` : "Nothing needs you."}</span>
         {open.length === 0 ? (

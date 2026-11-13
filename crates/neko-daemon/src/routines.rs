@@ -161,6 +161,17 @@ fn scopes(state: &AppState, create: bool) -> Result<Vec<ScopeProposal>, String> 
             Err(error) => give_up(&home_path, &error, false),
         }
     }
+    // Not made yet (routines are off): still offered, so the first-run setup can
+    // say what the personal scope would have (the global MCP servers).
+    if !create && !home_covered {
+        let servers = claude_json(&home())
+            .and_then(|value| value["mcpServers"].as_object().map(|s| s.keys().cloned().collect::<Vec<_>>()))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|name| neko_protocol::routines::ScopeServer { name, origin: "~/.claude.json".into(), level: "scope".into(), repo: None })
+            .collect();
+        proposals.push(ScopeProposal { name: "Personal".into(), folders: vec![home_path.clone()], servers, problems: Vec::new(), workspace_id: None, discovered: false, instructions: String::new() });
+    }
     for proposal in &mut proposals {
         if let Some(workspace) = workspaces.iter().find(|w| proposal.workspace_id.as_deref() == Some(w.id.as_str())) {
             proposal.instructions = workspace.instructions.clone();

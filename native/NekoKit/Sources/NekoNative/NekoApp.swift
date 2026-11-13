@@ -85,7 +85,17 @@ struct WorkspaceView: View {
                     Text("Connecting to Neko…").font(NekoFont.meta).foregroundStyle(N.text3)
                     if model.error != nil { Button("Retry connection") { Task { await model.start() } } }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if model.onboarding { OnboardingView(model: model) }
+            } else if model.onboarding {
+                // First run is the web app's setup (one tour for the browser and this
+                // window); this window follows the daemon until it is finished.
+                WebHomeView()
+                    .task {
+                        while model.onboarding, !Task.isCancelled {
+                            try? await Task.sleep(for: .seconds(2))
+                            await model.loadSetup()
+                        }
+                    }
+            }
             else {
                 NavigationSplitView(columnVisibility: $columns) {
                     NativeSidebar(model: model, page: $page, addingWorkspace: $addingWorkspace)

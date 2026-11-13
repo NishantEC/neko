@@ -118,6 +118,8 @@ private struct WebHomeRepresentable: NSViewRepresentable {
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
             guard let target = action.request.url else { return .cancel }
             if target.host == "127.0.0.1" { return .allow }
+            // The setup tour links to the System Settings panes it explains.
+            if target.scheme == "x-apple.systempreferences" { NSWorkspace.shared.open(target) }
             if target.scheme == "http" || target.scheme == "https" { NSWorkspace.shared.open(target) }
             return .cancel
         }

@@ -1939,6 +1939,16 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_fresh_data_folder_makes_no_workspace_and_no_routine_until_asked() {
+        let state = test_state(Db::open_in_memory().unwrap(), Vec::new());
+        let Response::Routines { routines, routines_on, .. } = handle_request_for_test(&state, Request::Routines) else { panic!("not Routines") };
+        assert!(!routines_on, "routines start off");
+        assert!(routines.is_empty(), "no routine is seeded for whatever is on disk");
+        let snapshot = neko_core::workbench::load(&state.db.lock().unwrap()).unwrap();
+        assert!(snapshot.workspaces.is_empty(), "no workspace is made either");
+    }
+
+    #[test]
     fn unseen_tasks_round_trip_and_stay_out_of_the_snapshot() {
         use neko_protocol::workbench::TaskStatus;
         let state = test_state(Db::open_in_memory().unwrap(), Vec::new());

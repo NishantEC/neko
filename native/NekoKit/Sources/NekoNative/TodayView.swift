@@ -482,7 +482,7 @@ struct TodayView: View {
         case .memory: open(.memory)
         case .tickets: open(.tickets)
         case .models, .permissions: open(.settings)
-        case .setup: model.onboarding = true
+        case .setup: if !OpenNeko.inBrowser(route: "setup") { model.error = "Neko’s web address isn’t published yet. Try again in a moment." }
         case .help: draft = "/"
         case .remember, .forget, .recall: break
         }

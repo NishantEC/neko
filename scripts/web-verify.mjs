@@ -27,10 +27,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const require = createRequire(import.meta.url);
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// playwright-core is a devDependency of web/ (pnpm --dir web install); only
+// its client is used, never a browser it would download.
+const require = createRequire(path.join(repo, "web/package.json"));
 const { chromium } = require(process.env.PLAYWRIGHT_CORE ?? "playwright-core");
 
-const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.NEKO_WEB_PORT ?? 4748);
 const DATA = process.env.NEKO_WEB_VERIFY_DATA ?? "/tmp/neko-web-data";
 const OUT = process.env.NEKO_WEB_SHOTS ?? "/tmp/neko-web";
@@ -45,8 +47,13 @@ if (!process.env.NEKO_WEB_SEED) {
 const TARGET = process.env.CARGO_TARGET_DIR ?? path.join(repo, "target");
 const HARNESS = process.env.NEKO_WEB_HARNESS ?? path.join(TARGET, "debug/web_harness");
 const LEASE = process.env.NEKO_WEB_LEASE ?? "neko-web-foundation";
-const CHROME = "http://127.0.0.1:9333";
+// A Chrome with remote debugging on, shared by every run: this Mac's
+// `~/.agents/bin/shared-chrome` when it has one (it starts and leases it),
+// otherwise any Chrome you started with --remote-debugging-port=9333
+// (NEKO_WEB_CHROME names another address).
+const CHROME = process.env.NEKO_WEB_CHROME ?? "http://127.0.0.1:9333";
 const sharedChrome = path.join(os.homedir(), ".agents/bin/shared-chrome");
+const haveSharedChrome = existsSync(sharedChrome);
 
 const failures = [];
 const check = (ok, label) => {
@@ -163,9 +170,15 @@ try {
   check((await raw({ host, authorization: `Bearer ${token}` })) === 200, "the right token is accepted (200)");
 
   // --- browser ---------------------------------------------------------------
-  execFileSync(sharedChrome, ["acquire", LEASE], { stdio: "inherit" });
-  leased = true;
-  browser = await chromium.connectOverCDP(CHROME);
+  if (haveSharedChrome) {
+    execFileSync(sharedChrome, ["acquire", LEASE], { stdio: "inherit" });
+    leased = true;
+  }
+  try {
+    browser = await chromium.connectOverCDP(CHROME);
+  } catch (error) {
+    throw new Error(`No Chrome to drive at ${CHROME}. Start one with: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --remote-debugging-port=9333 (${error.message})`);
+  }
   context = await browser.newContext({ viewport: { width: Number(process.env.NEKO_WEB_WIDTH ?? 1440), height: 900 }, deviceScaleFactor: 1, colorScheme: "dark" });
   const page = await context.newPage();
   const problems = [];
@@ -176,7 +189,7 @@ try {
   const unexpected = (text) => !expected.some((marker) => text.includes(marker));
   page.on("console", (m) => { if (m.type() === "error" && unexpected(m.text())) problems.push(`console: ${JSON.stringify(m.text())} @${m.location().url}`); });
   page.on("pageerror", (e) => { if (unexpected(String(e.message))) problems.push(`pageerror: ${e.message}`); });
-  page.on("requestfailed", (r) => { if (!r.url().includes("/api/events") && !r.url().includes("/api/request")) problems.push(`request failed: ${r.url()} (${r.failure()?.errorText ?? "?"})`); });
+  page.on("requestfailed", (r) => { if (!r.url().includes("/api/events") && !r.url().includes("/api/request") && r.failure()?.errorText !== "net::ERR_ABORTED") problems.push(`request failed: ${r.url()} (${r.failure()?.errorText ?? "?"})`); });
   page.on("response", (r) => { if (r.status() >= 400) problems.push(`HTTP ${r.status()}: ${r.url()}`); });
 
   const shot = (name, options = {}) => page.screenshot({ path: path.join(OUT, `${name}.png`), ...options });

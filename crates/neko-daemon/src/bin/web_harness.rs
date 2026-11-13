@@ -133,6 +133,9 @@ fn main() {
 fn seed_inbox(state: &server::AppState) -> Result<(), String> {
     use neko_core::inbox;
     use neko_protocol::routines::{NeedsYou, RoutineRun};
+    // Routines are off on a fresh data folder; the Inbox pages need them on.
+    // (scripts/verify/firstrun.mjs switches them off again to start fresh.)
+    neko_core::routines::set_master(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), true)?;
     // Asking for the routines creates the home scope's.
     routines::handle(state, neko_protocol::Request::Routines);
     let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

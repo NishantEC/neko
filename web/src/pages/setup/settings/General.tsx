@@ -1,4 +1,7 @@
+import { useEffect, useState } from "react";
 import { request } from "@/api";
+import { Button } from "@/ui/button";
+import { openOnboarding } from "@/onboarding/open";
 import { Skeleton } from "@/ui/skeleton";
 import { Kbd } from "@/ui/kbd";
 import { Panel } from "@/setup/kit";
@@ -6,6 +9,47 @@ import { ErrorNote, Section, SettingRow, Toggle } from "@/setup/kit";
 import { activate, providerRows, rec, str, useLoad, useRun } from "@/setup/lib";
 
 const MODIFIERS: Record<string, string> = { Cmd: "⌘", Alt: "⌥", Ctrl: "⌃", Shift: "⇧" };
+
+/** Routines and Calendar are off until switched on; the first-run setup offers both, and so does this. */
+function SetupSection() {
+  const [routines, setRoutines] = useState<boolean | null>(null);
+  const [calendar, setCalendar] = useState<boolean | null>(null);
+  const { run, busy, error, clear } = useRun();
+  useEffect(() => {
+    request("Routines").then((r) => setRoutines(r?.Routines?.routines_on !== false), () => setRoutines(null));
+    request("CalendarStatus").then((r) => setCalendar(!!r?.CalendarStatus?.enabled), () => setCalendar(null));
+  }, []);
+  return (
+    <Section title="Setup">
+      <Panel>
+        <div className="flex flex-col">
+          <SettingRow id="routines-on" title="Routines" description="Background checks of messages, pull requests and your day. Off until you turn them on.">
+            {routines === null ? <Skeleton className="h-5 w-9" /> : (
+              <Toggle checked={routines} label="Routines" disabled={busy} onChange={(value) => void run(async () => {
+                const reply = await request({ SetRoutinesOn: { enabled: value } });
+                setRoutines(reply?.Routines?.routines_on !== false);
+                return null;
+              })} />
+            )}
+          </SettingRow>
+          <SettingRow id="calendar-on" title="Calendar" description="Show your macOS Calendar beside Neko’s work. macOS asks once.">
+            {calendar === null ? <Skeleton className="h-5 w-9" /> : (
+              <Toggle checked={calendar} label="Calendar" disabled={busy} onChange={(value) => void run(async () => {
+                const reply = await request({ SetCalendarEnabled: { enabled: value } });
+                setCalendar(!!reply?.CalendarStatus?.enabled);
+                return null;
+              })} />
+            )}
+          </SettingRow>
+          <SettingRow id="first-run-setup" title="First-run setup" description="Agents, workspaces, routines and phone reminders, one calm pass.">
+            <Button variant="outline" size="sm" onClick={() => openOnboarding("welcome")}>Show again</Button>
+          </SettingRow>
+        </div>
+        {error ? <div className="px-3 py-2"><ErrorNote error={error} onDismiss={clear} /></div> : null}
+      </Panel>
+    </Section>
+  );
+}
 
 export function GeneralSection() {
   const preferences = useLoad((signal) => providerRows("preference", signal));
@@ -20,6 +64,7 @@ export function GeneralSection() {
 
   return (
     <div className="flex flex-col gap-8">
+      <SetupSection />
       <Section title="Summon & startup">
         <Panel>
           <div className="flex flex-col">

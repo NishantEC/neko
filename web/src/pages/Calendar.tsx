@@ -62,6 +62,8 @@ interface Status {
   last_sync_ms: number | null;
   events: number;
   truncated: boolean;
+  /** Switched on by the person (first-run setup or here); the app asks macOS only then. */
+  enabled?: boolean;
 }
 
 interface Data { events: CalendarEvent[]; neko: NekoItem[]; status: Status }
@@ -553,7 +555,27 @@ function MonthGrid({ days, anchor, data, now, onPickDay }: { days: Date[]; ancho
 
 /** What to do when Calendar is not connected, in the person's words. */
 function AccessNote({ status }: { status: Status | undefined }) {
+  const [busy, setBusy] = useState(false);
   if (!status) return null;
+  if (status.enabled === false) {
+    return (
+      <p data-slot="calendar-off" className="flex items-center gap-2 text-[13px] text-muted-foreground">
+        <CalendarIcon aria-hidden size={14} className="shrink-0" />
+        <span><span className="text-foreground">Calendar is off.</span> Turn it on to see your meetings beside Neko’s work.</span>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            void request({ SetCalendarEnabled: { enabled: true } }).finally(() => setBusy(false));
+          }}
+        >
+          Turn on
+        </Button>
+      </p>
+    );
+  }
   if (status.access === "Denied") {
     return (
       <Alert className="border-0 bg-foreground/[0.03]">

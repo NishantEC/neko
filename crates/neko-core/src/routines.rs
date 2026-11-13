@@ -521,6 +521,18 @@ mod tests {
     use super::*;
     use chrono::FixedOffset;
 
+    #[test]
+    fn routines_are_off_on_a_fresh_folder_and_on_where_they_already_ran() {
+        let db = crate::Db::open_in_memory().unwrap();
+        let fresh = Store::default();
+        assert!(!master_on(&db, &fresh), "a fresh data folder acts on nothing until asked");
+        assert!(master_on(&db, &Store { seeded: true, ..Default::default() }), "an install that already ran routines keeps them");
+        set_master(&db, false).unwrap();
+        assert!(!master_on(&db, &Store { seeded: true, ..Default::default() }), "a choice wins over history");
+        set_master(&db, true).unwrap();
+        assert!(master_on(&db, &fresh));
+    }
+
     fn ist() -> FixedOffset {
         FixedOffset::east_opt(5 * 3600 + 1800).unwrap()
     }

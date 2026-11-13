@@ -210,7 +210,7 @@ export function NekoComposer({
         case "memory": open("memory"); break;
         case "tickets": open("tasks"); break;
         case "models": setModelsOpen((n) => n + 1); break;
-        case "permissions": openOnboarding("permissions"); break;
+        case "permissions": openOnboarding("mac"); break;
         case "setup": openOnboarding("welcome"); break;
         case "help": setDraftText(scope, "/"); area.current?.focus(); break;
         case "plan": setDraftMode(scope, "plan"); break;

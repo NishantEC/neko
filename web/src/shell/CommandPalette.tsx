@@ -87,7 +87,7 @@ export function CommandPalette() {
       { id: "shell.new-tab", title: "New tab", keywords: ["open", "launcher", "pages"], icon: Plus, shortcut: "⌘T", run: newTab },
       { id: "shell.close-tab", title: "Close this tab", keywords: ["tab", "close"], icon: X, shortcut: "⌘W", run: closeActiveTab },
       { id: "shell.shortcuts", title: "Keyboard shortcuts", keywords: ["keys", "help", "hotkeys"], icon: Keyboard, shortcut: "?", run: openShortcuts },
-      { id: "shell.setup", title: "Show the first-run tour", keywords: ["onboarding", "welcome", "setup", "permissions"], icon: Rocket, run: () => openOnboarding("welcome") },
+      { id: "shell.setup", title: "Show the first-run setup", keywords: ["onboarding", "welcome", "setup", "permissions"], icon: Rocket, run: () => openOnboarding("welcome") },
     ],
     [status.approvals],
   );

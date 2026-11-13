@@ -1,29 +1,32 @@
-// First run, at parity with OnboardingView.swift. Shown when the daemon says
-// onboarding is not complete (GetOnboardingState) and when something asks for
-// the tour again ("/setup", "/permissions", ⌘K "Show the first-run tour").
+// First run. Shown when the daemon says setup is not complete
+// (GetOnboardingState: an empty data folder) and when something asks for it
+// again ("/setup", ⌘K, Settings → General, the native app's #/setup link).
 //
-//   welcome -> permissions -> workspace -> runtime -> import (optional) -> done
+//   welcome -> agents -> workspaces -> routines -> mac -> done
 //
-// Skippable from every step after the first ("Skip setup" marks it complete,
-// exactly like the native app's). ↵ continues, ⎋ goes back, Tab stays inside.
+// Every step can be skipped ("Skip setup" marks it complete); finishing never
+// shows it again. Choices are saved by the switches themselves, so leaving
+// halfway keeps what was chosen. ↵ continues, ⎋ goes back, Tab stays inside.
+// docs/knowledge/first-run.md.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { accept, command, request } from "@/api";
+import { request } from "@/api";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/ui/dialog";
 import { Button } from "@/ui/button";
 import { ArrowLeft, ArrowRight, CircleNotch } from "@/ui/icons";
 import { toast } from "@/ui/sonner";
 import { cn } from "@/ui/lib/utils";
-import { onOpenOnboarding, type OnboardingStep } from "@/onboarding/open";
-import { Finish, ImportStep, Permissions, Runtime, STEPS, Welcome, Workspace, type RuntimeChoice } from "@/onboarding/steps";
+import { onOpenOnboarding, openOnboarding, type OnboardingStep } from "@/onboarding/open";
+import { Agents, Finish, Mac, Routines, STEPS, Welcome, Workspaces, useRoutinesData } from "@/onboarding/steps";
 
 export function OnboardingHost() {
   const [open, setOpen] = useState(false);
   const [manual, setManual] = useState(false);
   const [step, setStep] = useState(0);
-  const [choice, setChoice] = useState<RuntimeChoice | null>(null);
+  const [agentsReady, setAgentsReady] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const heading = useRef<HTMLDivElement>(null);
+  const routines = useRoutinesData();
 
   // First run: ask the daemon once.
   useEffect(() => {
@@ -38,7 +41,7 @@ export function OnboardingHost() {
     };
   }, []);
 
-  // "/setup", "/permissions", the palette.
+  // "/setup", "/permissions", the palette, Settings.
   useEffect(
     () =>
       onOpenOnboarding((at?: OnboardingStep) => {
@@ -47,9 +50,24 @@ export function OnboardingHost() {
         setManual(true);
         setError(null);
         setOpen(true);
+        void routines.reload();
       }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
+
+  // The native app links to `#/setup`.
+  useEffect(() => {
+    const look = () => {
+      if (/^#\/setup\/?$/.test(window.location.hash)) {
+        history.replaceState(null, "", "#/");
+        openOnboarding("welcome");
+      }
+    };
+    look();
+    window.addEventListener("hashchange", look);
+    return () => window.removeEventListener("hashchange", look);
+  }, []);
 
   // Each step starts at its heading, so a screen reader reads it and Tab goes on from there.
   useEffect(() => {
@@ -60,7 +78,6 @@ export function OnboardingHost() {
     setOpen(false);
     setManual(false);
     setStep(0);
-    setChoice(null);
     setError(null);
   }, []);
 
@@ -79,35 +96,24 @@ export function OnboardingHost() {
 
   const last = step === STEPS.length - 1;
   const next = useCallback(async () => {
-    if (STEPS[step].id === "runtime" && choice) {
-      setBusy(true);
-      setError(null);
-      try {
-        accept(await command("SetAgentRuntime", { runtime: { provider: choice.provider, model: choice.model, reasoning_effort: null, service_tier: null } }));
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-        setBusy(false);
-        return;
-      }
-      setBusy(false);
-    }
     if (last) {
       await complete();
       toast("Neko is ready.");
     } else setStep((s) => s + 1);
-  }, [step, choice, last, complete]);
+  }, [last, complete]);
 
   const back = useCallback(() => {
     setError(null);
     setStep((s) => Math.max(0, s - 1));
   }, []);
 
+  const id = STEPS[step].id;
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
         if (next) return;
-        // Esc: a step back; from the first step, only a re-opened tour closes (the first run is left with Skip setup).
+        // Esc: a step back; from the first step, only a re-opened setup closes (the first run is left with Skip setup).
         if (step > 0) back();
         else if (manual) close();
       }}
@@ -128,17 +134,17 @@ export function OnboardingHost() {
         className="h-[min(680px,92vh)] max-w-[calc(100%-2rem)] grid-rows-[1fr_auto] gap-0 overflow-hidden p-0 sm:max-w-[760px]"
       >
         <DialogTitle className="sr-only">Set up Neko — step {step + 1} of {STEPS.length}: {STEPS[step].label}</DialogTitle>
-        <DialogDescription className="sr-only">A short tour: permissions, a workspace, the agent runtime and an optional import. You can skip it.</DialogDescription>
-        <div className="min-h-0 overflow-y-auto px-10 pt-9 pb-6" data-step={STEPS[step].id}>
-          {STEPS[step].id === "welcome" && <Welcome headingRef={heading} onNext={() => void next()} />}
-          {STEPS[step].id === "permissions" && <Permissions headingRef={heading} />}
-          {STEPS[step].id === "workspace" && <Workspace headingRef={heading} />}
-          {STEPS[step].id === "runtime" && <Runtime headingRef={heading} choice={choice} onChoice={setChoice} />}
-          {STEPS[step].id === "import" && <ImportStep headingRef={heading} />}
-          {STEPS[step].id === "finish" && <Finish headingRef={heading} runtime={choice} />}
+        <DialogDescription className="sr-only">A short setup: your agents, workspaces, routines, and Calendar and phone reminders. Every step is optional and you can skip it.</DialogDescription>
+        <div className="min-h-0 overflow-y-auto px-10 pt-9 pb-6" data-step={id}>
+          {id === "welcome" && <Welcome headingRef={heading} owner={routines.data?.owner_name} onNext={() => void next()} onSkip={() => void complete()} />}
+          {id === "agents" && <Agents headingRef={heading} onReady={setAgentsReady} />}
+          {id === "workspaces" && <Workspaces headingRef={heading} routines={routines} />}
+          {id === "routines" && <Routines headingRef={heading} routines={routines} agentsReady={agentsReady} />}
+          {id === "mac" && <Mac headingRef={heading} />}
+          {id === "finish" && <Finish headingRef={heading} agentsReady={agentsReady} routines={routines} />}
           {error ? <p role="alert" data-slot="onboarding-error" className="mt-4 select-text text-[13px] text-destructive">{error}</p> : null}
         </div>
-        <footer className="flex items-center gap-3 border-t border-border/70 bg-foreground/[0.02] px-6 py-3.5">
+        <footer className="flex items-center gap-3 px-6 py-3.5">
           <Button type="button" variant="ghost" onClick={back} disabled={step === 0 || busy} className={cn(step === 0 && "invisible")} aria-hidden={step === 0}>
             <ArrowLeft /> Back
           </Button>

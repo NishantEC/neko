@@ -336,6 +336,16 @@ pub fn neko_items_local(sources: &NekoSources, from_ms: i64, to_ms: i64, now_ms:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn calendar_is_off_on_a_fresh_folder_and_on_where_it_was_already_shared() {
+        let db = Db::open_in_memory().unwrap();
+        assert!(!enabled(&db));
+        store(&db, vec![], "macOS Calendar", CalendarAccess::Granted, 1).unwrap();
+        assert!(enabled(&db), "an earlier build asked at launch and was allowed");
+        assert!(!set_enabled(&db, false).unwrap().enabled, "a choice wins over history");
+        assert!(set_enabled(&db, true).unwrap().enabled);
+    }
     use neko_protocol::routines::RoutineKind;
 
     fn event(id: &str, start: i64, end: i64) -> CalendarEvent {
