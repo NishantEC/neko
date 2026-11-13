@@ -493,7 +493,7 @@ fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) ->
         if core::failure_alerts(&routine.cadence, routine_state.failures) && !alert_open(&db, routine).unwrap_or(false) {
             if let Ok(seq) = core::reserve_seq(&db, 1) {
                 let alert = NeedsYou { seq, title: failure_title(routine), detail: format!("Neko could not save this run: {error}"), link: None, done: false };
-                let run = RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: now, finished_ms: Some(now), ok: false, quiet: false, did: Vec::new(), needs_you: vec![alert], error: Some(error.clone()), text: String::new() };
+                let run = RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: now, finished_ms: Some(now), ok: false, quiet: false, did: Vec::new(), needs_you: vec![alert], error: Some(error.clone()), text: String::new(), ..Default::default() };
                 let _ = core::push_run(&db, &routine.id, run);
             }
         }
@@ -510,6 +510,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
         let db = db(state);
         (core::load(&db)?.orders_for(&routine.workspace_id).to_string(), core::load_state(&db, &routine.id)?.memory, open_items(&db, &routine.workspace_id)?)
     };
+    let mut meta = AgentMeta::default();
     let outcome: Result<core::Parsed, (String, String)> = match scope.as_ref().and_then(|s| s.folders.first().map(|f| (s, f))) {
         None => Err(("This routine's workspace no longer exists".into(), String::new())),
         Some((scope, folder)) => {
@@ -541,7 +542,9 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
                         config = neko_core::scopes::with_computer_use(config, &peekaboo);
                     }
                 }
-                match neko_core::native_runner::run_claude_scoped(&spec, &config, routine.browser, &cancel, |_| {}) {
+                let ran = run_agent(state, routine, &spec, &config, &cancel);
+                meta = ran.meta;
+                match ran.result {
                     Ok(text) => core::parse_reply(&text).map_err(|error| (error, text)),
                     Err(error) => Err((error, String::new())),
                 }
@@ -564,6 +567,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
             // Another routine in this scope may already have raised it.
             let open = open_titles(&db, &routine.workspace_id)?;
             needs_you.retain(|item| !open.contains(&title_key(&item.title)));
+            add_outage_notice(&db, routine, &meta, &mut needs_you)?;
             if !needs_you.is_empty() {
                 let first = core::reserve_seq(&db, needs_you.len() as u64)?;
                 for (offset, item) in needs_you.iter_mut().enumerate() {
@@ -580,7 +584,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
             } else {
                 routine_state.note = Some(format!("The run asked to remember more than {} KB; its previous memory was kept.", core::MAX_MEMORY / 1024));
             }
-            RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: true, quiet: parsed.quiet, did: parsed.did, needs_you, error: None, text: String::new() }
+            RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: true, quiet: parsed.quiet, did: parsed.did, needs_you, error: None, text: String::new(), runtime: meta.runtime.clone(), note: meta.note.clone() }
         }
         Err((error, text)) => {
             let mut end = text.len().min(KEEP_TEXT);
@@ -589,6 +593,10 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
             }
             routine_state.failures = routine_state.failures.saturating_add(1);
             let mut needs_you = Vec::new();
+            add_outage_notice(&db, routine, &meta, &mut needs_you)?;
+            if !needs_you.is_empty() {
+                needs_you[0].seq = core::reserve_seq(&db, 1)?;
+            }
             if core::failure_alerts(&current.cadence, routine_state.failures) && !alert_open(&db, &current)? {
                 needs_you.push(NeedsYou {
                     seq: core::reserve_seq(&db, 1)?,
@@ -599,7 +607,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
                 });
             }
             next_due = Some(retry_or_next(&current.cadence, &routine_state, finished));
-            RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: false, quiet: false, did: Vec::new(), needs_you, error: Some(error), text: text[..end].to_string() }
+            RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: false, quiet: false, did: Vec::new(), needs_you, error: Some(error), text: text[..end].to_string(), runtime: meta.runtime.clone(), note: meta.note.clone() }
         }
     };
     let ok = run.ok;
@@ -621,6 +629,121 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
         }
     }
     Ok(())
+}
+
+/// Raised once per outage, resolved when Claude Code works again.
+const SIGNED_OUT_TITLE: &str = "Claude Code is signed out or its account changed";
+
+/// What the agent call tells the run's record.
+#[derive(Default)]
+struct AgentMeta {
+    /// "claude" or "codex"; empty when no agent ran.
+    runtime: String,
+    note: String,
+    /// This run found Claude Code's login bad for the first time in an outage.
+    new_outage: bool,
+    /// Another runtime is installed to take over.
+    fallback: bool,
+}
+
+struct AgentRun {
+    result: Result<String, String>,
+    meta: AgentMeta,
+}
+
+const PROBE_LIMIT: Duration = Duration::from_secs(30);
+
+/// Runs the routine's agent. Claude Code first; when its login or account is
+/// bad (`runtime_health::is_auth_failure`) the same prompt runs once on Codex
+/// with the same scope servers, and Claude Code is skipped until a probe says
+/// it works again (at most every 30 minutes). Without another runtime the
+/// behaviour is the old one, plus the once-per-outage notice.
+fn run_agent(state: &AppState, routine: &Routine, spec: &neko_core::native_runner::RunSpec, config: &serde_json::Value, cancel: &AtomicBool) -> AgentRun {
+    use neko_core::native_runner as runner;
+    use neko_core::runtime_health as health;
+    let fallback = runner::codex_installed();
+    let mut meta = AgentMeta { runtime: "claude".into(), fallback, ..Default::default() };
+    let now = neko_core::workbench::now_ms();
+    let before = health::load(&db(state));
+    let mut bad = before.is_bad();
+    if bad && fallback && before.probe_due(now) {
+        let _ = health::note_try(&db(state), now);
+        if runner::probe_claude(PROBE_LIMIT).is_ok() {
+            claude_works(state);
+            bad = false;
+        }
+    }
+    let on_codex = |meta: &mut AgentMeta| {
+        meta.runtime = "codex".into();
+        let codex_spec = runner::RunSpec {
+            directory: spec.directory.clone(),
+            prompt: spec.prompt.clone(),
+            writable: spec.writable,
+            timeout: spec.timeout,
+            runtime: AgentRuntime { provider: "codex".into(), ..Default::default() },
+        };
+        runner::run_codex_scoped(&codex_spec, config, cancel, |_| {}).map(|(text, skipped)| {
+            let mut note = String::from("Claude Code is signed out, so this run used Codex.");
+            if !skipped.is_empty() {
+                note.push_str(&format!(" Not available there: {}.", skipped.join(", ")));
+            }
+            if routine.browser {
+                note.push_str(" Chrome control is Claude Code only.");
+            }
+            meta.note = note;
+            text
+        })
+    };
+    if bad && fallback {
+        // The login may have gone bad in a chat, which raises no notice.
+        meta.new_outage = before.notice.is_none();
+        let result = on_codex(&mut meta);
+        return AgentRun { result, meta };
+    }
+    match runner::run_claude_scoped(spec, config, routine.browser, cancel, |_| {}) {
+        Ok(text) => {
+            if bad {
+                claude_works(state);
+            }
+            AgentRun { result: Ok(text), meta }
+        }
+        Err(error) if health::is_auth_failure(&error) => {
+            let db = db(state);
+            let _ = health::mark_bad(&db, &error, neko_core::workbench::now_ms());
+            meta.new_outage = health::load(&db).notice.is_none();
+            drop(db);
+            if !fallback {
+                return AgentRun { result: Err(error), meta };
+            }
+            let result = on_codex(&mut meta).map_err(|codex| format!("{error} The Codex fallback also failed: {codex}"));
+            AgentRun { result, meta }
+        }
+        Err(error) => AgentRun { result: Err(error), meta },
+    }
+}
+
+/// Claude Code answers again: forget the outage and close its Inbox item.
+fn claude_works(state: &AppState) {
+    let db = db(state);
+    if let Ok(Some(before)) = neko_core::runtime_health::mark_good(&db) {
+        if let Some((workspace, title)) = before.notice {
+            let _ = resolve_items(&db, &workspace, &[title]);
+        }
+    }
+}
+
+/// The one Inbox item of an outage, put on the run that found it.
+fn add_outage_notice(db: &neko_core::Db, routine: &Routine, meta: &AgentMeta, needs_you: &mut Vec<NeedsYou>) -> Result<(), String> {
+    if !meta.new_outage {
+        return Ok(());
+    }
+    let detail = if meta.fallback {
+        "Routines are running on Codex until it is back. To fix it, run `claude /login` in a terminal; this clears itself when Claude Code works again."
+    } else {
+        "No other agent is installed, so routines will keep failing until you run `claude /login` in a terminal. This clears itself when Claude Code works again."
+    };
+    needs_you.push(NeedsYou { seq: 0, title: SIGNED_OUT_TITLE.into(), detail: detail.into(), link: None, done: false });
+    neko_core::runtime_health::set_notice(db, &routine.workspace_id, SIGNED_OUT_TITLE)
 }
 
 /// The id of an active schedule called `name` in `paseo schedule ls --json`.
@@ -825,7 +948,7 @@ mod tests {
         let store = Store { routines: vec![routine("a", true), routine("b", true), Routine { workspace_id: "other".into(), ..routine("c", true) }], ..Default::default() };
         core::save_definitions(&db, &store).unwrap();
         let item = |title: &str, done: bool| neko_protocol::routines::NeedsYou { seq: 1, title: title.into(), detail: String::new(), link: None, done };
-        let run = |rid: &str, items| RoutineRun { id: "x".into(), routine_id: rid.into(), started_ms: 0, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: items, error: None, text: String::new() };
+        let run = |rid: &str, items| RoutineRun { id: "x".into(), routine_id: rid.into(), started_ms: 0, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: items, error: None, text: String::new(), ..Default::default() };
         core::push_run(&db, "a", run("a", vec![item("Gmail not signed in", false), item("Old", true)])).unwrap();
         core::push_run(&db, "c", run("c", vec![item("Elsewhere", false)])).unwrap();
         let titles = open_titles(&db, "w").unwrap();
@@ -840,7 +963,7 @@ mod tests {
         let store = Store { routines: vec![routine("a", true), routine("b", true)], ..Default::default() };
         core::save_definitions(&db, &store).unwrap();
         let item = |seq, title: &str| neko_protocol::routines::NeedsYou { seq, title: title.into(), detail: String::new(), link: None, done: false };
-        let run = |rid: &str, items| RoutineRun { id: rid.into(), routine_id: rid.into(), started_ms: 0, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: items, error: None, text: String::new() };
+        let run = |rid: &str, items| RoutineRun { id: rid.into(), routine_id: rid.into(), started_ms: 0, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: items, error: None, text: String::new(), ..Default::default() };
         core::push_run(&db, "a", run("a", vec![item(2, "Gmail API not enabled"), item(3, "Sam")])).unwrap();
         core::push_run(&db, "b", run("b", vec![item(1, "gmail api NOT enabled")])).unwrap();
         assert_eq!(open_items(&db, "w").unwrap(), vec!["gmail api NOT enabled", "Sam"]);
@@ -855,7 +978,7 @@ mod tests {
         core::save_definitions(&db, &Store { routines: vec![sweep.clone()], ..Default::default() }).unwrap();
         assert!(!alert_open(&db, &sweep).unwrap());
         let alert = neko_protocol::routines::NeedsYou { seq: 1, title: failure_title(&sweep), detail: String::new(), link: None, done: false };
-        let run = RoutineRun { id: "x".into(), routine_id: "a".into(), started_ms: 0, finished_ms: None, ok: false, quiet: false, did: vec![], needs_you: vec![alert], error: None, text: String::new() };
+        let run = RoutineRun { id: "x".into(), routine_id: "a".into(), started_ms: 0, finished_ms: None, ok: false, quiet: false, did: vec![], needs_you: vec![alert], error: None, text: String::new(), ..Default::default() };
         core::push_run(&db, "a", run).unwrap();
         assert!(alert_open(&db, &sweep).unwrap());
         resolve_items(&db, "w", &[failure_title(&sweep)]).unwrap();
@@ -915,7 +1038,7 @@ mod tests {
         let run = |id: usize, open: bool| RoutineRun {
             id: id.to_string(), routine_id: "r".into(), started_ms: 0, finished_ms: None, ok: true, quiet: false, did: vec![],
             needs_you: if open { vec![neko_protocol::routines::NeedsYou { seq: id as u64, title: "t".into(), detail: String::new(), link: None, done: false }] } else { vec![] },
-            error: None, text: String::new(),
+            error: None, text: String::new(), ..Default::default()
         };
         let runs: Vec<_> = (0..30).map(|i| run(i, i == 25)).collect();
         let shown = runs_for_view(runs);
@@ -930,6 +1053,28 @@ mod tests {
         assert_eq!(active_schedule_id(listing, "weekly-pr-sweep"), None);
         assert_eq!(active_schedule_id(listing, "message-watch-adaptive"), None);
         assert_eq!(active_schedule_id("not json", "daily-work-digest"), None);
+    }
+
+    #[test]
+    fn the_signed_out_notice_is_raised_once_and_closes_when_claude_works() {
+        let db = neko_core::Db::open_in_memory().unwrap();
+        let r = routine("a", true);
+        core::save_definitions(&db, &Store { routines: vec![r.clone()], ..Default::default() }).unwrap();
+        let mut items = Vec::new();
+        add_outage_notice(&db, &r, &AgentMeta { fallback: true, ..Default::default() }, &mut items).unwrap();
+        assert!(items.is_empty(), "no outage found by this run, no notice");
+        neko_core::runtime_health::mark_bad(&db, "OAuth session expired", 5).unwrap();
+        add_outage_notice(&db, &r, &AgentMeta { new_outage: true, fallback: true, ..Default::default() }, &mut items).unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(items[0].detail.contains("claude /login") && items[0].detail.contains("Codex"));
+        let health = neko_core::runtime_health::load(&db);
+        assert_eq!(health.notice, Some(("w".into(), SIGNED_OUT_TITLE.into())));
+        // The run that raised it is saved, then Claude works again.
+        let run = RoutineRun { id: "x".into(), routine_id: "a".into(), ok: true, needs_you: items, ..Default::default() };
+        core::push_run(&db, "a", run).unwrap();
+        let (workspace, title) = health.notice.unwrap();
+        resolve_items(&db, &workspace, &[title]).unwrap();
+        assert!(core::load_runs(&db, "a").unwrap()[0].needs_you[0].done);
     }
 
     #[test]

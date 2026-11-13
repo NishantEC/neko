@@ -1733,7 +1733,7 @@ fn converse(
             }
         }
     };
-    let result = (|| {
+    let mut run_with = |spec: &native_runner::RunSpec| -> Result<String, String> {
         if cancel.load(Ordering::Acquire) {
             return Err("Cancelled".into());
         }
@@ -1767,11 +1767,44 @@ fn converse(
                 sources_through_bridge: false,
             };
             // Lease drop also cancels any approval waiter and in-flight call.
-            native_runner::run_with_bridge_streaming(&spec, &bridge, cancel, &mut progress)
+            native_runner::run_with_bridge_streaming(spec, &bridge, cancel, &mut progress)
         } else {
-            native_runner::run_streaming(&spec, cancel, &mut progress)
+            native_runner::run_streaming(spec, cancel, &mut progress)
         }
-    })();
+    };
+    // Claude Code's login can go bad under Neko (another tool switches the
+    // account): a Claude chat then answers on Codex, and the same health row
+    // routines use remembers it. See docs/knowledge/neko-runs-the-day.md.
+    let result = {
+        use neko_core::runtime_health as health;
+        let codex_spec = || native_runner::RunSpec {
+            directory: spec.directory.clone(),
+            prompt: spec.prompt.clone(),
+            writable: spec.writable,
+            timeout: spec.timeout,
+            runtime: neko_protocol::workbench::AgentRuntime { provider: "codex".into(), ..Default::default() },
+        };
+        let lock = || db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let on_claude = spec.runtime.provider == "claude" && native_runner::codex_installed();
+        let now = neko_core::workbench::now_ms();
+        let known_bad = on_claude && { let h = health::load(&lock()); h.is_bad() && !h.probe_due(now) };
+        if known_bad {
+            run_with(&codex_spec())
+        } else {
+            let first = run_with(&spec);
+            match &first {
+                Ok(_) if spec.runtime.provider == "claude" => {
+                    let _ = health::mark_good(&lock());
+                    first
+                }
+                Err(error) if on_claude && health::is_auth_failure(error) && !cancel.load(Ordering::Acquire) => {
+                    let _ = health::mark_bad(&lock(), error, now);
+                    run_with(&codex_spec())
+                }
+                _ => first,
+            }
+        }
+    };
     if let Some(dir) = &scratch {
         let _ = std::fs::remove_dir_all(dir);
     }

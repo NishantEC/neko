@@ -56,6 +56,7 @@ pub mod runtime_selection;
 pub mod schedule_import;
 pub mod schedule_time;
 pub mod routines;
+pub mod runtime_health;
 pub mod scheduled_plans;
 pub mod scopes;
 pub mod task_seen;

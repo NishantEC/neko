@@ -135,6 +135,7 @@ pub fn push_run(db: &crate::Db, id: &str, run: RoutineRun) -> Result<(), String>
                 needs_you: vec![NeedsYou { seq: oldest, title: format!("{count} older items were not handled"), detail: "They were too old to keep. Check this routine's sources if any still matter.".into(), link: None, done: false }],
                 error: None,
                 text: count.to_string(),
+                ..Default::default()
             });
         }
     }
@@ -561,7 +562,7 @@ mod tests {
     fn open_items_survive_trimming() {
         let db = crate::Db::open_in_memory().unwrap();
         let item = NeedsYou { seq: 1, title: "t".into(), detail: String::new(), link: None, done: false };
-        let run = |i: i64, open: bool| RoutineRun { id: i.to_string(), routine_id: "r".into(), started_ms: i, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: if open { vec![item.clone()] } else { vec![] }, error: None, text: String::new() };
+        let run = |i: i64, open: bool| RoutineRun { id: i.to_string(), routine_id: "r".into(), started_ms: i, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: if open { vec![item.clone()] } else { vec![] }, error: None, text: String::new(), ..Default::default() };
         push_run(&db, "r", run(0, true)).unwrap();
         for i in 1..80 {
             push_run(&db, "r", run(i, false)).unwrap();
@@ -585,7 +586,7 @@ mod tests {
     fn corrupt_runs_row_starts_over() {
         let db = crate::Db::open_in_memory().unwrap();
         db.set_setting(&runs_key("r"), "{not json").unwrap();
-        let run = RoutineRun { id: "1".into(), routine_id: "r".into(), started_ms: 0, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: vec![], error: None, text: String::new() };
+        let run = RoutineRun { id: "1".into(), routine_id: "r".into(), started_ms: 0, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: vec![], error: None, text: String::new(), ..Default::default() };
         push_run(&db, "r", run).unwrap();
         assert_eq!(load_runs(&db, "r").unwrap().len(), 1);
     }
@@ -610,7 +611,7 @@ mod tests {
     fn runs_keep_fifty() {
         let db = crate::Db::open_in_memory().unwrap();
         for i in 0..55 {
-            let run = RoutineRun { id: i.to_string(), routine_id: "r".into(), started_ms: i, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: vec![], error: None, text: String::new() };
+            let run = RoutineRun { id: i.to_string(), routine_id: "r".into(), started_ms: i, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: vec![], error: None, text: String::new(), ..Default::default() };
             push_run(&db, "r", run).unwrap();
         }
         let runs = load_runs(&db, "r").unwrap();

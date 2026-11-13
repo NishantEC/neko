@@ -275,6 +275,11 @@ function RoutineRow({ view, now, send, onEdit }: { view: Json; now: number; send
           ) : null}
         </div>
       ) : null}
+      {last && (last.note || (last.runtime && last.runtime !== "claude")) ? (
+        <p className="truncate text-[12.5px] text-muted-foreground" title={last.note || undefined}>
+          {last.note || `Last run used ${last.runtime === "codex" ? "Codex" : last.runtime}.`}
+        </p>
+      ) : null}
       {state.note ? <p className="truncate text-[12.5px] text-muted-foreground" title={state.note}>{state.note}</p> : null}
     </div>
   );

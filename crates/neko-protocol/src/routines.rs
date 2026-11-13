@@ -90,7 +90,7 @@ pub struct NeedsYou {
     pub done: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RoutineRun {
     pub id: String,
     pub routine_id: String,
@@ -104,6 +104,14 @@ pub struct RoutineRun {
     /// The agent's reply, kept for a failed run (bounded).
     #[serde(default)]
     pub text: String,
+    /// Which agent did the run ("claude", "codex"); empty on old runs, which
+    /// were all Claude Code.
+    #[serde(default)]
+    pub runtime: String,
+    /// Said quietly in the run's detail, e.g. a fallback that ran without
+    /// some of the scope's servers.
+    #[serde(default)]
+    pub note: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -182,6 +190,7 @@ mod tests {
             needs_you: vec![NeedsYou { seq: 3, title: "Sign in".into(), detail: "Jira".into(), link: None, done: false }],
             error: None,
             text: String::new(),
+            ..Default::default()
         };
         let json = serde_json::to_string(&run).unwrap();
         assert_eq!(serde_json::from_str::<RoutineRun>(&json).unwrap(), run);

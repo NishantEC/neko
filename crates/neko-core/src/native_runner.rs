@@ -321,9 +321,163 @@ fn run_configured_streaming(
     bridge: Option<&BridgeConfig>,
     session: &Session,
     cancel: &AtomicBool,
+    on_event: impl FnMut(String),
+    extraction: bool,
+    stream_text: bool,
+) -> Result<String, String> {
+    run_configured_scoped(executable, spec, bridge, session, cancel, on_event, extraction, stream_text, None)
+}
+
+/// What a Codex run needs to carry a scope's MCP servers: `-c` overrides, and
+/// environment values (passed by name, so secrets never appear in argv).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct CodexScope {
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+    /// Servers Codex could not be given, with why (for the run's note).
+    pub skipped: Vec<String>,
+}
+
+/// Translates a Claude-style `{"mcpServers": …}` config into Codex
+/// `mcp_servers.<name>` overrides, and turns off every other MCP server in
+/// the user's own Codex config (`user_servers`), so a run sees only its scope.
+/// Stdio servers and header-less streamable-HTTP servers carry over; the rest
+/// are skipped and named.
+pub fn codex_scope(config: &serde_json::Value, user_servers: &[String]) -> CodexScope {
+    let mut scope = CodexScope::default();
+    let mut used: Vec<String> = Vec::new();
+    if let Some(servers) = config["mcpServers"].as_object() {
+        'server: for (name, server) in servers {
+            let key = toml_key(name);
+            let json = |v: &serde_json::Value| serde_json::to_string(v).unwrap_or_default();
+            let kind = server["type"].as_str().unwrap_or(if server["url"].is_string() { "http" } else { "stdio" });
+            let mut parts: Vec<String> = Vec::new();
+            match kind {
+                "stdio" => {
+                    let Some(command) = server["command"].as_str() else { scope.skipped.push(format!("{name} (no command)")); continue };
+                    parts.push(format!("command={}", json(&serde_json::json!(command))));
+                    let args: Vec<&str> = server["args"].as_array().map(|a| a.iter().filter_map(|v| v.as_str()).collect()).unwrap_or_default();
+                    parts.push(format!("args={}", json(&serde_json::json!(args))));
+                    let mut names = Vec::new();
+                    let mut pending = Vec::new();
+                    for (var, value) in server["env"].as_object().into_iter().flatten() {
+                        let Some(value) = value.as_str() else { continue };
+                        let valid = !var.is_empty() && var.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                        // One process environment serves every server, so a
+                        // name with two different values cannot be shared.
+                        let clash = scope.env.iter().any(|(k, v)| k == var && v != value);
+                        if !valid || clash {
+                            scope.skipped.push(format!("{name} (environment {var} unavailable)"));
+                            continue 'server;
+                        }
+                        names.push(var.clone());
+                        pending.push((var.clone(), value.to_string()));
+                    }
+                    if !names.is_empty() {
+                        parts.push(format!("env_vars={}", json(&serde_json::json!(names))));
+                    }
+                    for pair in pending {
+                        if !scope.env.contains(&pair) {
+                            scope.env.push(pair);
+                        }
+                    }
+                }
+                "http" => {
+                    let Some(url) = server["url"].as_str() else { scope.skipped.push(format!("{name} (no url)")); continue };
+                    if server["headers"].as_object().is_some_and(|h| !h.is_empty()) {
+                        scope.skipped.push(format!("{name} (needs request headers)"));
+                        continue;
+                    }
+                    parts.push(format!("url={}", json(&serde_json::json!(url))));
+                }
+                other => {
+                    scope.skipped.push(format!("{name} ({other} transport)"));
+                    continue;
+                }
+            }
+            parts.push("required=false".into());
+            scope.args.push("-c".into());
+            scope.args.push(format!("mcp_servers.{key}={{{}}}", parts.join(",")));
+            used.push(name.clone());
+        }
+    }
+    for name in user_servers {
+        if !used.contains(name) {
+            scope.args.push("-c".into());
+            scope.args.push(format!("mcp_servers.{}.enabled=false", toml_key(name)));
+        }
+    }
+    scope
+}
+
+/// Like `run`, but Codex carries the servers of `config` (see `codex_scope`),
+/// reads and writes in `spec.directory`, and nothing else from the user's own
+/// Codex MCP setup. Returns the reply and the servers it could not carry.
+pub fn run_codex_scoped(
+    spec: &RunSpec,
+    config: &serde_json::Value,
+    cancel: &AtomicBool,
+    on_event: impl FnMut(String),
+) -> Result<(String, Vec<String>), String> {
+    let scope = codex_scope(config, &user_codex_mcp_servers());
+    let skipped = scope.skipped.clone();
+    run_configured_scoped(&resolve_codex()?, spec, None, &Session::Ephemeral, cancel, on_event, false, false, Some(&scope)).map(|text| (text, skipped))
+}
+
+/// True when a Codex CLI is installed (it need not be signed in).
+pub fn codex_installed() -> bool {
+    resolve_codex().is_ok()
+}
+
+/// Claude Code answers a trivial prompt: the login and account work. The
+/// error is Claude's own words, so it can be classified.
+pub fn probe_claude(limit: Duration) -> Result<(), String> {
+    let executable = cli_workers::resolve(cli_workers::Agent::Claude)?;
+    let mut command = Command::new(&executable);
+    command.args(["-p", "Reply with the single word ok.", "--output-format", "text", "--max-turns", "1"]);
+    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    for name in ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"] {
+        command.env_remove(name);
+    }
+    if let Ok(path) = std::env::join_paths(cli_workers::agent_directories()) {
+        command.env("PATH", path);
+    }
+    if let Some(dir) = std::env::temp_dir().canonicalize().ok() {
+        command.current_dir(dir);
+    }
+    let mut child = command.spawn().map_err(|e| e.to_string())?;
+    let deadline = std::time::Instant::now() + limit;
+    loop {
+        match child.try_wait().map_err(|e| e.to_string())? {
+            Some(_) => break,
+            None if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("Claude Code did not answer within {}s", limit.as_secs()));
+            }
+            None => std::thread::sleep(Duration::from_millis(100)),
+        }
+    }
+    let output = child.wait_with_output().map_err(|e| e.to_string())?;
+    let text = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    if output.status.success() && !crate::runtime_health::is_auth_failure(&text) {
+        Ok(())
+    } else {
+        Err(text.trim().chars().take(400).collect())
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_configured_scoped(
+    executable: &Path,
+    spec: &RunSpec,
+    bridge: Option<&BridgeConfig>,
+    session: &Session,
+    cancel: &AtomicBool,
     mut on_event: impl FnMut(String),
     extraction: bool,
     stream_text: bool,
+    scope: Option<&CodexScope>,
 ) -> Result<String, String> {
     // Extraction never streams: it has no reader for a partial answer.
     let stream_text = stream_text && !extraction;
@@ -405,7 +559,13 @@ fn run_configured_streaming(
     if let Some(bridge) = bridge {
         configure_bridge(&mut command, bridge)?;
     }
-    let disabled = if extraction { AMBIENT_DISABLED_FEATURES } else { UNATTENDED_DISABLED_FEATURES };
+    if let Some(scope) = scope {
+        command.args(&scope.args);
+        for (name, value) in &scope.env {
+            command.env(name, value);
+        }
+    }
+    let disabled =if extraction { AMBIENT_DISABLED_FEATURES } else { UNATTENDED_DISABLED_FEATURES };
     for feature in disabled {
         command.args(["-c", &format!("features.{feature}=false")]);
     }
@@ -1317,6 +1477,7 @@ pub(crate) fn executable_directories() -> Vec<PathBuf> {
             "/usr/bin",
             "/bin",
             "/Applications/Codex.app/Contents/Resources",
+            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin",
         ]
         .into_iter()
         .map(PathBuf::from),
@@ -3608,5 +3769,25 @@ printf '%s' '{"type":"turn.completed"}'
         let (_temp, exe, spec) = fixture("awk 'BEGIN{s=sprintf(\"%200000s\",\"\"); gsub(/ /,\"x\",s); for(i=0;i<345;i++) print \"{\\\"type\\\":\\\"unknown\\\",\\\"pad\\\":\\\"\" s \"\\\"}\"}'");
         let err = run_with_executable(&exe, &spec, &AtomicBool::new(false), |_| {}).unwrap_err();
         assert!(err.contains("limit"), "{err}");
+    }
+
+    #[test]
+    fn scope_servers_carry_over_and_the_users_others_are_off() {
+        let config = serde_json::json!({"mcpServers": {
+            "mail": {"type": "stdio", "command": "/bin/mail-mcp", "args": ["--tools", "gmail"], "env": {"MAIL_TOKEN": "s3cret"}},
+            "docs": {"type": "http", "url": "https://example.com/mcp"},
+            "authed": {"type": "http", "url": "https://example.com/x", "headers": {"Authorization": "Bearer x"}},
+            "live": {"type": "sse", "url": "https://example.com/sse"},
+            "zclash": {"command": "x", "env": {"MAIL_TOKEN": "other"}}
+        }});
+        let scope = codex_scope(&config, &["mail".into(), "personal-extra".into()]);
+        let joined = scope.args.join(" ");
+        assert!(joined.contains("mcp_servers.mail={command=\"/bin/mail-mcp\",args=[\"--tools\",\"gmail\"],env_vars=[\"MAIL_TOKEN\"],required=false}"), "{joined}");
+        assert!(joined.contains("mcp_servers.docs={url=\"https://example.com/mcp\",required=false}"));
+        assert!(joined.contains("mcp_servers.personal-extra.enabled=false"));
+        assert!(!joined.contains("mcp_servers.mail.enabled=false"));
+        assert!(!joined.contains("s3cret"), "secrets never go in argv");
+        assert_eq!(scope.env, vec![("MAIL_TOKEN".to_string(), "s3cret".to_string())]);
+        assert_eq!(scope.skipped.len(), 3, "{:?}", scope.skipped);
     }
 }

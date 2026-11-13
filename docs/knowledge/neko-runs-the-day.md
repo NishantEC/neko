@@ -51,6 +51,34 @@ and "there is no restriction. It can do whatever it wants". Design:
   is not kept, and instructions (16 KB) and standing orders (8 KB) are
   bounded, so the prompt cannot outgrow `MAX_PROMPT`. Runs with open items
   are kept past the 50-run trim.
+- **A bad Claude login no longer kills routines** (2026-11-13). Between
+  11-08 and 11-13, 22 runs failed, 15 "organization has disabled Claude
+  subscription" and 7 "OAuth session expired": another tool swaps the logged-in
+  Claude Code account. `runtime_health::is_auth_failure` classifies a failed
+  run's error (expired/missing sign-in, disabled subscription, 401, credit or
+  usage limit; tested on the exact strings). On one, `routines::run_agent`
+  retries the same prompt once on Codex (`native_runner::run_codex_scoped`)
+  and the reply parses as before. The scope's MCP servers go along:
+  `codex_scope` turns the Claude-style config into `-c mcp_servers.<n>={…}`
+  (stdio, and header-less HTTP), env values travel by name in the process
+  environment (`env_vars`, never argv), and the user's own Codex servers are
+  switched off so a run sees only its scope. Servers it cannot carry (SSE,
+  request headers, clashing env) and Chrome control are named in
+  `RoutineRun::note`; `RoutineRun::runtime` says which agent ran (both
+  `serde(default)`, shown quietly under the routine in Inbox). The outage is
+  one small row, `runtime_health_v1:claude` (not the snapshot): while it is
+  bad runs go straight to Codex and a 30 s `claude -p` probe
+  (`probe_claude`) tries Claude again at most every 30 min. One Inbox item
+  per outage ("Claude Code is signed out or its account changed", fix:
+  `claude /login`), put on the run that found it and closed when Claude
+  answers again; a rescued run is `ok`, so no failure alert. With no other
+  runtime installed the old behaviour stays (runs fail, the notice says so).
+  The Codex CLI also ships inside `ChatGPT.app` (`…/Resources/codex-cli/bin`),
+  now on the search path. Overrides verified against codex 0.163: unknown
+  server names in `mcp_servers.<n>.enabled=false` are a config error, so only
+  names read from the user's own config are disabled. The home chat
+  (`workbench.rs`, a Claude runtime) shares the same row: auth failure retries
+  that turn on Codex, and a known-bad login skips Claude.
 - **Polling is cheap:** scopes read only workspaces and folders
   (`workbench::load_workspaces`), and discovery is cached on the mtimes of
   `~/.claude.json` and `~/Documents` (10 min at most). A half-written
