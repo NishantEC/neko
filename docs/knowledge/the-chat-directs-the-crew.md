@@ -11,7 +11,7 @@ next phase.
 ### The tools (MCP, over the existing `--mcp-bridge`)
 
 No new server: the stdio bridge every run with a lease already gets
-(`neko_core::mcp_host::bridge`) lists nine more tools and sends them to the
+(`neko_core::mcp_host::bridge`) lists eleven more tools and sends them to the
 daemon as `BridgeAction::Crew{tool, arguments_json}`. The daemon
 (`workbench/crew.rs`, `Controller::crew_call`, dispatched from `server.rs`)
 looks up the lease's **crew role** (`neko_protocol::crew::CrewRole`, a field of
@@ -27,6 +27,10 @@ the daemon, not that list, is the authority), OpenCode through its config.
 | `create_task` (title, request in the person's words, workspace, folder, optional goal) | yes | no | sub-tasks of its own ticket only, same workspace; never from planning, a read-only ticket, a watch's ticket or a ticket that is itself a delegated sub-task (no chains) |
 | `steer_task`, `cancel_task`, `schedule` | yes | no | no |
 | `save_artifact`, `show_artifact` | yes | no | no |
+| `checkpoint_diff` (a task's runs and one run's or the whole diff) | yes | no | its own ticket only |
+| `undo_run` (checks, returns the `neko-action` block the person confirms; never changes files) | yes | no | no |
+
+Both are described in `checkpoints-and-undo.md`.
 
 Leases: the chat gets its role in `run_with` (`Full` when full power is on, else
 `ReadOnly`), a chat with several workspaces and none chosen gets a crew-only lease

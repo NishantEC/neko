@@ -206,7 +206,7 @@ export function TaskBuilder({
                   </StageView>
                 ) : value === "changes" ? (
                   <StageView>
-                    {task.worktree || task.parked ? <Changes taskId={task.id} active /> : (
+                    {task.worktree || task.parked ? <Changes taskId={task.id} active revision={`${task.status}:${task.updated_at_ms}`} /> : (
                       <p data-slot="changes-empty" className="mt-10 text-center text-[13px] text-muted-foreground">This task has no working copy yet, so nothing has changed.</p>
                     )}
                   </StageView>

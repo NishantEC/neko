@@ -98,6 +98,10 @@ fn main() {
     }
     // No app scan: the web UI does not search apps, and the scan is slow.
     let state = Arc::new(server::AppState::new(db, Vec::new()));
+    if let Err(e) = seed_checkpoints(&state.db) {
+        eprintln!("web-harness: cannot seed checkpoints: {e}");
+        std::process::exit(1);
+    }
     if self_update {
         self_update::spawn(state.clone());
     }
@@ -127,6 +131,53 @@ fn main() {
         let state = state.clone();
         std::thread::spawn(move || server::handle_connection(state, stream));
     }
+}
+
+/// A real temporary repository for one seeded ticket, with three checkpointed
+/// runs (the second one commits and pushes to a local bare remote), so the
+/// task view's run lines, per-run diffs and undo have something to act on.
+fn seed_checkpoints(db: &std::sync::Mutex<Db>) -> Result<(), String> {
+    use std::process::Command as Git;
+    let mut snapshot = {
+        let guard = db.lock().map_err(|_| "db")?;
+        neko_core::workbench::load(&guard)?
+    };
+    let Some(task) = snapshot.tasks.iter_mut().find(|t| t.title == "Stop the nightly export running twice") else { return Ok(()) };
+    let data = neko_protocol::support_dir();
+    let repo = data.join("seed-repo");
+    let worktree = data.join("task-worktrees").join(&task.id);
+    let git = |dir: &Path, args: &[&str]| -> Result<(), String> {
+        let out = Git::new("git").current_dir(dir).args(["-c", "user.name=Seed", "-c", "user.email=seed@example.com", "-c", "commit.gpgsign=false"]).args(args).output().map_err(|e| e.to_string())?;
+        if out.status.success() { Ok(()) } else { Err(format!("git {args:?}: {}", String::from_utf8_lossy(&out.stderr))) }
+    };
+    std::fs::create_dir_all(&repo).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(worktree.parent().unwrap_or(&data)).map_err(|e| e.to_string())?;
+    let bare = data.join("seed-origin.git");
+    std::fs::create_dir_all(&bare).map_err(|e| e.to_string())?;
+    git(&bare, &["init", "-q", "--bare", "-b", "main"])?;
+    git(&repo, &["init", "-q", "-b", "main"])?;
+    std::fs::write(repo.join("export.sh"), "#!/bin/sh\nrun_export\n").map_err(|e| e.to_string())?;
+    git(&repo, &["add", "."])?;
+    git(&repo, &["commit", "-qm", "export script"])?;
+    git(&repo, &["remote", "add", "origin", bare.to_str().unwrap_or_default()])?;
+    git(&repo, &["worktree", "add", "-q", "-b", "codex/neko-seed", worktree.to_str().unwrap_or_default()])?;
+    let run = |work: &dyn Fn() -> Result<(), String>| -> Result<(), String> {
+        let n = neko_core::checkpoints::begin_run(db, &task.id, &worktree, neko_core::workbench::now_ms())?;
+        work()?;
+        neko_core::checkpoints::end_run(db, &task.id, n, &worktree, neko_core::checkpoints::Outcome::Done, neko_core::workbench::now_ms())?;
+        Ok(())
+    };
+    let write = |name: &str, text: &str| std::fs::write(worktree.join(name), text).map_err(|e| e.to_string());
+    run(&|| write("export.sh", "#!/bin/sh\nlock_file=/tmp/export.lock\nrun_export\n"))?;
+    run(&|| {
+        write("export.sh", "#!/bin/sh\nlock_file=/tmp/export.lock\ntest -e $lock_file && exit 0\nrun_export\n")?;
+        git(&worktree, &["commit", "-qam", "skip when the lock exists"])?;
+        git(&worktree, &["push", "-q", "origin", "codex/neko-seed"])
+    })?;
+    run(&|| write("NOTES.md", "The export now takes a lock.\n"))?;
+    task.worktree = Some(worktree.to_string_lossy().into_owned());
+    let guard = db.lock().map_err(|_| "db")?;
+    neko_core::workbench::save(&guard, &snapshot)
 }
 
 /// Made-up Inbox items on the home scope's first routine: three open, and

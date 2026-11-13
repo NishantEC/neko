@@ -224,6 +224,7 @@ finished.
 
 ## Knowledge index
 
+- [Checkpoints and undo (2026-11-14)](docs/knowledge/checkpoints-and-undo.md) — Hidden-ref snapshots at each ticket run's start and end, per-run diffs, undo/redo with refusals, `checkpoint_diff`/`undo_run` crew tools.
 - [Current standalone workspace (2026-09-24)](docs/knowledge/current-standalone-workspace.md) — The native workspace now follows system appearance, with Light / Dark…
 - [Neko is the chief of staff (2026-10-17)](docs/knowledge/neko-is-the-chief-of-staff.md) — Every task goes through Neko.
 - [Pull requests after they open (2026-10-21)](docs/knowledge/pull-requests-after-they-open.md) — Learned from a Paseo agent that walked Neko's PRs to merge by…

@@ -11,6 +11,7 @@ import { cn } from "@/ui/lib/utils";
 import { MonoLabel } from "@/editorial";
 import { Block } from "@/work/Thread";
 import { parseDiff, type DiffFile } from "@/work/model";
+import { Runs } from "@/work/Runs";
 
 interface Changes { files: string[]; patch: string; truncated: boolean }
 
@@ -51,7 +52,7 @@ const DiffBody = memo(function DiffBody({ file }: { file: DiffFile }) {
   );
 });
 
-function FileRow({ file, defaultOpen }: { file: DiffFile; defaultOpen: boolean }) {
+export function FileRow({ file, defaultOpen }: { file: DiffFile; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div data-slot="changed-file" className="border-b border-border/70 last:border-b-0">
@@ -72,7 +73,7 @@ function FileRow({ file, defaultOpen }: { file: DiffFile; defaultOpen: boolean }
   );
 }
 
-export function Changes({ taskId, active }: { taskId: string; active: boolean }) {
+export function Changes({ taskId, active, revision = "" }: { taskId: string; active: boolean; revision?: string }) {
   const [changes, setChanges] = useState<Changes | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -101,6 +102,8 @@ export function Changes({ taskId, active }: { taskId: string; active: boolean })
   const total = Math.max(files.length, changes?.files.length ?? 0);
 
   return (
+    <>
+    <Runs taskId={taskId} active={active} revision={revision} />
     <section data-slot="changes" aria-label="Files changed" className="mt-6">
       <div className="mb-2 flex items-center gap-2">
         <MonoLabel className="text-[10.5px]">Files changed</MonoLabel>
@@ -139,5 +142,6 @@ export function Changes({ taskId, active }: { taskId: string; active: boolean })
         </>
       )}
     </section>
+    </>
   );
 }

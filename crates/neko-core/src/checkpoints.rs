@@ -407,7 +407,11 @@ pub fn row(db: &Mutex<Db>, task_id: &str) -> Result<Row, String> {
     read_key(&lock(db), &format!("{ROW}{task_id}"))
 }
 
+/// Rows and the index are read and written whole; one writer at a time keeps the index whole.
+static ROWS: Mutex<()> = Mutex::new(());
+
 fn save_row(db: &Mutex<Db>, task_id: &str, row: &Row) -> Result<(), String> {
+    let _one = ROWS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let db = lock(db);
     let key = format!("{ROW}{task_id}");
     let mut index: Vec<String> = read_key(&db, INDEX)?;
@@ -713,14 +717,24 @@ pub fn undo(db: &Mutex<Db>, task_id: &str, dir: &Path, options: UndoOptions, run
     undone.sort_unstable();
     // The files first; the history only when asked (a revert keeps it).
     restore_tree(dir, &safety.point.tree, &run.start.tree)?;
-    let reverted_by_commit = options.revert && head_of(dir).is_some();
-    if reverted_by_commit {
-        let head = head_of(dir).unwrap_or_default();
-        let commit = text(&git_files(dir, None, &["-c", "commit.gpgsign=false", "commit-tree", &run.start.tree, "-p", &head, "-m", &format!("Revert run {} (Neko)", run.n)], &[])?);
-        git(dir, &["update-ref", "-m", &format!("neko: revert run {}", run.n), "HEAD", &commit, &head])?;
-        reset_index(dir, Some(&commit))?;
-    } else {
+    // A revert keeps the history: one new commit whose tree is the committed state the run
+    // started from (the run's uncommitted work was only ever in the files).
+    let mut reverted_by_commit = false;
+    if options.revert {
+        if let (Some(head), Some(start)) = (head_of(dir), run.start.head.as_deref()) {
+            let target = git(dir, &["rev-parse", &format!("{start}^{{tree}}")])?;
+            if git(dir, &["rev-parse", "HEAD^{tree}"])? != target {
+                let commit = text(&git_files(dir, None, &["-c", "commit.gpgsign=false", "commit-tree", &target, "-p", &head, "-m", &format!("Revert run {} (Neko)", run.n)], &[])?);
+                git(dir, &["update-ref", "-m", &format!("neko: revert run {}", run.n), "HEAD", &commit, &head])?;
+                reset_index(dir, Some(&commit))?;
+                reverted_by_commit = true;
+            }
+        }
+    }
+    if !reverted_by_commit && !options.revert {
         reset_index(dir, run.start.head.as_deref())?;
+    } else if !reverted_by_commit {
+        reset_index(dir, head_of(dir).as_deref())?;
     }
     for r in &mut row.runs {
         if undone.contains(&r.n) {

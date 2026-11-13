@@ -77,7 +77,7 @@ export function TaskSheetBody({ task, snapshot, ui, tab, onTab, onOpenTask, swap
         </TabsPanel>
         <TabsPanel value="changes" className="min-h-0 overflow-y-auto">
           <div key={task.id} className={cn("px-6 pb-6", swapFade)}>
-            {task.worktree || task.parked ? <Changes taskId={task.id} active={tab === "changes"} /> : (
+            {task.worktree || task.parked ? <Changes taskId={task.id} active={tab === "changes"} revision={`${task.status}:${task.updated_at_ms}`} /> : (
               <p data-slot="changes-empty" className="py-6 text-sm text-muted-foreground">This task has no working copy yet, so nothing has changed.</p>
             )}
           </div>

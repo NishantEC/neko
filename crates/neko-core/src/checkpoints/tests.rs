@@ -234,6 +234,17 @@ fn undo_refuses_when_the_runs_commit_was_pushed_and_offers_a_revert_commit() {
 }
 
 #[test]
+fn a_revert_of_a_run_that_committed_nothing_adds_no_commit() {
+    let f = fixture();
+    let head = g(&f.wt, &["rev-parse", "HEAD"]);
+    let n = run(&f, |d| fs::write(d.join("a.txt"), "loose\n").unwrap());
+    let done = undo(&f.db, "t", &f.wt, UndoOptions { run: n, revert: true, ..Default::default() }, false, 3_000).unwrap();
+    assert!(!done.reverted_by_commit);
+    assert_eq!(g(&f.wt, &["rev-parse", "HEAD"]), head);
+    assert_eq!(fs::read_to_string(f.wt.join("a.txt")).unwrap(), "one\n");
+}
+
+#[test]
 fn a_commit_in_an_open_pull_request_also_refuses() {
     let f = fixture();
     let n = run(&f, commit_in_run);
