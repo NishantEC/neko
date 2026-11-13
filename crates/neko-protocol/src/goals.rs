@@ -69,6 +69,9 @@ pub struct Wait {
     pub pr_state: Option<String>,
     /// A process id that must exit.
     pub pid: Option<u32>,
+    /// Waiting on the ticket itself (its plan needs the person's approval);
+    /// the turn in flight carries on when the ticket moves.
+    pub ticket: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

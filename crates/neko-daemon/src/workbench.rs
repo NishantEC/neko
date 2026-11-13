@@ -36,6 +36,8 @@ mod parking;
 mod triage;
 #[path = "workbench/pull_requests.rs"]
 mod pull_requests;
+#[path = "workbench/goals.rs"]
+pub(crate) mod goals;
 
 struct TaskClaim {
     task: Task,
@@ -103,6 +105,7 @@ impl Controller {
                 },
             ),
             Command::Schedules(command) => self.schedule_command(command),
+            Command::Goals(command) => self.goal_command(command),
             Command::SetupImport(command) => self.import_command(command),
             Command::Skills(command) => {
                 use neko_protocol::skills::SkillCommand;
@@ -614,6 +617,8 @@ impl Controller {
         self.start_triage();
         // Pull requests Neko opened are followed until they merge or close.
         self.start_pull_requests();
+        // Goals keep working: resumed from their journals, then ticked.
+        self.start_goals();
         // Reads the Mac every 15 s; admission and the app use the reading.
         let db = self.db.clone();
         std::thread::Builder::new().name("neko-machine".into()).spawn(move || {
@@ -1029,6 +1034,9 @@ impl Controller {
             &skill_workspaces,
             Some(&workspace.id),
         )?);
+        // A ticket that works a goal tells its agent the goal, the journal and
+        // the evidence so far, so a fresh or resumed session starts informed.
+        memory.push_str(&goals::prompt_context(&*self.db.lock().map_err(|_| "Goal storage unavailable")?, &task.id));
         let base = native_runner::head(&directory, cancel)?;
         let split = snapshot.splits.iter().find(|s| s.parent_id == task.id);
         let inherited = if !planning && split.is_none() {
@@ -1045,6 +1053,11 @@ impl Controller {
         // A repair is part of this worker, never a newly authorized scheduler claim.
         let mut attempt_task = task.clone();
         let mut repairs = review_repair::RepairBudget::default();
+        // The evidence gate: the builder's own command receipts (its check-like
+        // commands count), the extra turns spent, and the note for the next one.
+        let builder_receipts: std::cell::RefCell<Vec<String>> = Default::default();
+        let mut gate_extra_turns = 0_u32;
+        let mut gate_note = String::new();
         loop {
             let task = &attempt_task;
             let result = if !planning && split.is_some_and(|s| s.approved && !s.integrated) {
@@ -1079,7 +1092,7 @@ impl Controller {
                         },
                         &memory,
                         &rules,
-                    ), repairs.instruction()),
+                    ), format!("{}{gate_note}", repairs.instruction())),
                     writable: !planning,
                     timeout: Duration::from_secs(if planning { 600 } else { 1800 }),
                     runtime: snapshot.agent_runtime.clone(),
@@ -1111,6 +1124,7 @@ impl Controller {
                         return;
                     }
                     let usage = event.starts_with("USAGE ");
+                    if event.starts_with("VERIFICATION_COMMAND ") && !planning { builder_receipts.borrow_mut().push(event.clone()); }
                     let _ = self.record_progress_event(&task.id, authority, role, &event);
                     if usage { self.stop_if_over_budget(&task.id, cancel); }
                 };
@@ -1397,6 +1411,26 @@ impl Controller {
                     // Keep the complete verdict in the bounded repair prompt.
                     attempt_task = evidence;
                     continue;
+                }
+                // Evidence gate: code that changed needs a passing check in the
+                // ledger before it reaches review. Two extra "run the checks and
+                // fix" turns at most, then the ticket is blocked with the output.
+                if split.is_none() {
+                    let outcome = goals::evidence_gate(
+                        &*self.db.lock().map_err(|_| "Task storage unavailable")?,
+                        &task.id, &changed, &builder_receipts.borrow(), &receipts, gate_extra_turns, store::now_ms(),
+                    )?;
+                    match outcome {
+                        goals::GateOutcome::Pass => {}
+                        goals::GateOutcome::Retry(instruction) => {
+                            gate_extra_turns += 1;
+                            self.update_task_authorized(&task.id, authority, |t| store::append_event(t, "supervisor", &format!("Evidence gate: no passing check yet for the code changed. Sending it back to run the checks and fix ({gate_extra_turns} of {} extra turns).", neko_core::goals::GATE_EXTRA_TURNS)))?;
+                            gate_note = format!("\n{instruction}");
+                            attempt_task = review_repair::feedback(task, &instruction);
+                            continue;
+                        }
+                        goals::GateOutcome::Blocked(message) => return Err(message),
+                    }
                 }
                 // Nothing runs in the folder while it waits for review: drop
                 // its ignored dependency folders (often gigabytes). Publishing

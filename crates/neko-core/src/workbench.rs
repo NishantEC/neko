@@ -1490,6 +1490,28 @@ pub fn recover_interrupted(db: &Db) -> Result<Snapshot, String> {
     Ok(snapshot)
 }
 
+/// A goal's next turn for its ticket: the ticket queues again with `text` as
+/// a note the agent reads, in the same session. The goal is the person's own
+/// request for local work on this ticket, so it needs no reply interpreter
+/// (a model call that could read a machine-written message as a question);
+/// nothing is published and no new authority is granted.
+pub fn goal_turn(db: &Db, task_id: &str, text: &str) -> Result<Snapshot, String> {
+    let mut snapshot = load(db)?;
+    let task = snapshot.tasks.iter_mut().find(|t| t.id == task_id).ok_or("Task no longer exists")?;
+    if matches!(task.status, TaskStatus::Queued | TaskStatus::Planning | TaskStatus::Building | TaskStatus::Reviewing) {
+        return Err("The ticket is still working".into());
+    }
+    append_event(task, NOTE_ROLE, text.trim());
+    task.status = TaskStatus::Queued;
+    task.supervision = None;
+    task.updated_at_ms = now_ms();
+    append_event(task, "system", "Goal: the next turn is queued; the agent keeps its session.");
+    snapshot.start_when_planned.insert(task_id.to_owned());
+    snapshot.task_read_only.remove(task_id);
+    save(db, &snapshot)?;
+    Ok(snapshot)
+}
+
 /// Agent cost a ticket has reported so far, from its USAGE events.
 pub fn task_cost_usd(task: &neko_protocol::workbench::Task) -> f64 {
     task.events

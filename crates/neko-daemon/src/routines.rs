@@ -477,6 +477,38 @@ pub(crate) fn all_items(db: &neko_core::Db) -> Result<Vec<NeedsYou>, String> {
     Ok(items)
 }
 
+/// The routine that holds a scope's goal items. It never runs (disabled, no
+/// schedule the owner sees); it only gives goal questions a place in the
+/// Inbox, where the phone channels already read them.
+pub(crate) const GOALS_ROUTINE_PREFIX: &str = "goals:";
+
+/// Raises one needs-you item for a goal ("Extend by 20 turns?", or a blocked
+/// goal's question) and returns its `seq`. `link` is `goal:<id>`.
+pub(crate) fn raise_goal_item(db: &neko_core::Db, workspace_id: &str, title: &str, detail: &str, link: &str) -> Result<u64, String> {
+    let id = format!("{GOALS_ROUTINE_PREFIX}{workspace_id}");
+    let mut store = core::load(db)?;
+    if !store.routines.iter().any(|r| r.id == id) {
+        store.routines.push(Routine {
+            id: id.clone(), workspace_id: workspace_id.to_owned(), kind: neko_protocol::routines::RoutineKind::Custom,
+            name: "Goals".into(), instruction: "Goals that keep working report here.".into(),
+            cadence: Cadence::Daily { hour: 0, minute: 0 }, enabled: false, model: String::new(), paseo_schedule: None,
+            browser: false, computer: false, customized: true,
+        });
+        core::save_definitions(db, &store)?;
+    }
+    let now = neko_core::workbench::now_ms();
+    let seq = core::reserve_seq(db, 1)?;
+    let item = NeedsYou { seq, title: title.into(), detail: detail.into(), link: Some(link.into()), created_ms: now, touched_ms: now, ..Default::default() };
+    let run = RoutineRun { id: neko_core::workbench::new_id(), routine_id: id.clone(), started_ms: now, finished_ms: Some(now), ok: true, quiet: false, did: Vec::new(), needs_you: vec![item], error: None, text: String::new(), ..Default::default() };
+    core::push_run(db, &id, run)?;
+    Ok(seq)
+}
+
+/// Closes a goal's item once the person answered it another way.
+pub(crate) fn close_goal_item(db: &neko_core::Db, seq: u64) -> Result<(), String> {
+    close_seqs(db, &[seq], inbox::BY_YOU)
+}
+
 /// Closes the open items with these seqs (the owner completed their
 /// reminders on the phone).
 pub(crate) fn close_seqs(db: &neko_core::Db, seqs: &[u64], reason: &str) -> Result<(), String> {
