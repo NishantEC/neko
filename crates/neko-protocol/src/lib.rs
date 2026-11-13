@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod agent_profiles;
 pub mod calendar;
+pub mod checkpoints;
 pub mod crew;
 pub mod phone;
 pub mod agent_models;
@@ -479,6 +480,16 @@ pub enum Request {
     /// Read-only: the files and patch a ticket's worktree changed.
     TaskChanges {
         task_id: String,
+    },
+    /// Read-only: a ticket's per-run checkpoints (one line per run).
+    TaskCheckpoints {
+        task_id: String,
+    },
+    /// Read-only: one run's diff (start to end), or the whole task's when `run` is `None`. Answers `TaskChanges`.
+    CheckpointDiff {
+        task_id: String,
+        #[serde(default)]
+        run: Option<u32>,
     },
     /// `provider`, when set, scopes this search to exactly one provider's
     /// own `search()` — no cross-provider `allocate()`, no section
@@ -1064,6 +1075,7 @@ pub enum Response {
         patch: String,
         truncated: bool,
     },
+    TaskCheckpoints(checkpoints::CheckpointList),
     /// One search reply. **A single `Request::Search` can be answered by
     /// more than one of these** — see [`Response::ends_request`] and
     /// `AGENTS.md`'s "Two-phase search" section.

@@ -143,6 +143,8 @@ impl Controller {
             "steer_task" => self.crew_steer(&scope, &role, &args, &key),
             "cancel_task" => self.crew_cancel(&scope, &role, &args),
             "schedule" => self.crew_schedule(&scope, &args),
+            "checkpoint_diff" => self.crew_checkpoint_diff(&scope, &role, &args),
+            "undo_run" => self.crew_undo_run(&scope, &role, &args),
             "save_artifact" | "show_artifact" => artifacts(tool, args.clone()),
             _ => Err(format!("Unknown tool {tool}")),
         };
@@ -245,6 +247,61 @@ impl Controller {
         let snapshot = store::load(&db)?;
         let task = self.crew_task(&snapshot, scope, role, &id)?;
         Ok(Self::status_json(&snapshot, &queue::of_task(&db, &id)?, task).to_string())
+    }
+
+    /// A run's checkpoints, and one run's diff (or the whole task's). A builder reads only its own ticket.
+    fn crew_checkpoint_diff(&self, scope: &neko_core::mcp_host::capability::Scope, role: &CrewRole, args: &Value) -> Result<String, String> {
+        const AGENT_DIFF_BYTES: usize = 48 * 1024;
+        let id = match (string_arg(args, "task_id"), role) {
+            (Some(id), CrewRole::Task { ticket_id, .. }) if &id != ticket_id => return Err("A builder may read the checkpoints of its own task only".into()),
+            (Some(id), _) => id,
+            (None, CrewRole::Task { ticket_id, .. }) => ticket_id.clone(),
+            (None, _) => return Err("task_id is required".into()),
+        };
+        {
+            let snapshot = store::load(&*self.db.lock().map_err(|_| "Task storage unavailable")?)?;
+            self.crew_task(&snapshot, scope, role, &id)?;
+        }
+        let list = self.checkpoint_list(&id)?;
+        let runs: Vec<Value> = list.runs.iter().map(|r| json!({"run": r.n, "outcome": r.outcome, "files": r.files, "added": r.added, "removed": r.removed, "undone": r.undone, "skipped_large_files": r.skipped_count})).collect();
+        let wanted = if args.get("whole").and_then(Value::as_bool).unwrap_or(false) { Some(None) } else { args.get("run").and_then(Value::as_u64).map(|n| Some(n as u32)) };
+        let mut out = json!({"task_id": id, "runs": runs, "redo_available": list.redo, "unsaved_changes": list.unsaved});
+        if let Some(run) = wanted {
+            let (files, patch, truncated) = self.checkpoint_diff(&id, run)?;
+            let cut = patch.len() > AGENT_DIFF_BYTES;
+            let patch: String = if cut { patch.chars().take(AGENT_DIFF_BYTES).collect() } else { patch };
+            out["diff"] = json!({"run": run, "files": files, "patch": patch, "truncated": truncated || cut});
+        } else {
+            out["note"] = json!("Pass run (a number) for that run's diff, or whole: true for the whole task's.");
+        }
+        Ok(out.to_string())
+    }
+
+    /// Checks an undo and returns the block that asks the person; it never changes files.
+    fn crew_undo_run(&self, scope: &neko_core::mcp_host::capability::Scope, role: &CrewRole, args: &Value) -> Result<String, String> {
+        let id = required(args, "task_id")?;
+        let run = args.get("run").and_then(Value::as_u64).ok_or("run is required (a run number)")? as u32;
+        let flag = |key: &str| args.get(key).and_then(Value::as_bool).unwrap_or(false);
+        let (back, snapshot_first, revert) = (flag("back_to_here"), flag("snapshot_first"), flag("revert"));
+        let task = {
+            let snapshot = store::load(&*self.db.lock().map_err(|_| "Task storage unavailable")?)?;
+            self.crew_task(&snapshot, scope, role, &id)?.clone()
+        };
+        let dir = run_checkpoints::folder_of(&task)?;
+        let options = neko_core::checkpoints::UndoOptions { run, through_later: back, snapshot_unsaved: snapshot_first, revert, pull_request_open: task.pull_request.as_ref().is_some_and(|p| p.is_open()) };
+        let running = self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().any(|a| a.task_id == id);
+        match neko_core::checkpoints::preview_undo(&self.db, &id, &dir, options, running) {
+            Err(refusal) => Ok(json!({"can_undo": false, "reason": refusal.code(), "message": refusal.message(), "note": "Nothing was changed. Tell the person why, and offer the option the message names; call undo_run again with it."}).to_string()),
+            Ok(runs) => {
+                let text = [if back { "back" } else { "" }, if snapshot_first { "snapshot" } else { "" }, if revert { "revert" } else { "" }].iter().filter(|w| !w.is_empty()).fold(run.to_string(), |acc, w| format!("{acc} {w}"));
+                Ok(json!({
+                    "can_undo": true,
+                    "would_undo_runs": runs,
+                    "confirm_with": {"task_id": id, "kind": "undo_run", "text": text},
+                    "note": "Nothing was changed. Put this as a neko-action block after your reply (kind undo_run, text as given): the person confirms with one click. A safety checkpoint is taken first, so the undo can itself be redone. Do not say it was undone until the task's events show it."
+                }).to_string())
+            }
+        }
     }
 
     fn crew_wait(&self, scope: &neko_core::mcp_host::capability::Scope, role: &CrewRole, args: &Value) -> Result<String, String> {

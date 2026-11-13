@@ -69,6 +69,10 @@ pub struct Run {
     pub started_ms: i64,
     pub ended_ms: i64,
     pub outcome: Outcome,
+    /// Files changed and lines added and removed, start to end.
+    pub files: usize,
+    pub added: usize,
+    pub removed: usize,
     /// Restored away by an undo (until a redo brings it back).
     pub undone: bool,
 }
@@ -256,6 +260,20 @@ pub struct Diff {
     pub removed: usize,
     pub patch: String,
     pub truncated: bool,
+}
+
+/// Files changed and lines added and removed between two commits.
+pub fn stat(dir: &Path, from: &str, to: &str) -> Result<(usize, usize, usize), String> {
+    let numstat = git_files(dir, None, &["diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", from, to], &[])?;
+    let (mut files, mut added, mut removed) = (0, 0, 0);
+    for record in numstat.split(|b| *b == 0).filter(|r| !r.is_empty()) {
+        let record = String::from_utf8_lossy(record);
+        let mut parts = record.splitn(3, '\t');
+        added += parts.next().and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
+        removed += parts.next().and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
+        files += 1;
+    }
+    Ok((files, added, removed))
 }
 
 /// What changed between two snapshots (or any two commits).
@@ -448,9 +466,17 @@ pub fn begin_run(db: &Mutex<Db>, task_id: &str, dir: &Path, now_ms: i64) -> Resu
     if row.repo.is_empty() {
         row.repo = crate::native_runner::publish::source_checkout(dir, &AtomicBool::new(false)).map_or_else(|_| dir.to_string_lossy().into_owned(), |p| p.to_string_lossy().into_owned());
     }
+    // A run that never ended (the daemon stopped mid-run) ends where this one starts.
+    for stale in row.runs.iter_mut().filter(|r| r.end.is_none()) {
+        stale.end = Some(start.clone());
+        stale.ended_ms = now_ms;
+        stale.outcome = Outcome::Cancelled;
+        let (files, added, removed) = stat(dir, &stale.start.commit, &start.commit).unwrap_or_default();
+        (stale.files, stale.added, stale.removed) = (files, added, removed);
+    }
     row.next_run = n;
     row.expected_tree = start.tree.clone();
-    row.runs.push(Run { n, start, end: None, started_ms: now_ms, ended_ms: 0, outcome: Outcome::Running, undone: false });
+    row.runs.push(Run { n, start, end: None, started_ms: now_ms, ended_ms: 0, outcome: Outcome::Running, ..Default::default() });
     if let Some(redo) = row.redo.take() {
         row.extras.retain(|e| e.id != redo.extra_id);
         delete_refs(dir, &[ref_for(task_id, &redo.extra_id)]);
@@ -465,6 +491,7 @@ pub fn end_run(db: &Mutex<Db>, task_id: &str, n: u32, dir: &Path, outcome: Outco
     let end = capture(dir, &ref_for(task_id, &format!("{n}-end")), &format!("Neko checkpoint: end of run {n}"))?;
     let mut row = row(db, task_id)?;
     let run = row.runs.iter_mut().find(|r| r.n == n).ok_or("That run's checkpoint is gone")?;
+    (run.files, run.added, run.removed) = stat(dir, &run.start.commit, &end.commit).unwrap_or_default();
     run.end = Some(end.clone());
     run.ended_ms = now_ms;
     run.outcome = outcome;
@@ -571,6 +598,11 @@ pub struct Done {
     pub reverted_by_commit: bool,
 }
 
+/// Whether the folder has changes that are in no checkpoint (it is not as the last run, undo or redo left it).
+pub fn unsaved(dir: &Path, row: &Row) -> Result<bool, String> {
+    matching(dir, row).map(|same| !same)
+}
+
 fn matching(dir: &Path, row: &Row) -> Result<bool, String> {
     if row.expected_tree.is_empty() {
         return Ok(true);
@@ -612,14 +644,12 @@ fn push_extra(row: &mut Row, task_id: &str, dir: &Path, kind: ExtraKind, note: &
     Ok(extra)
 }
 
-/// Restores the folder to the start of run `options.run`. `running` says a run is
-/// working in the folder now. Nothing is changed unless every check passes; a
-/// safety checkpoint is taken first so the undo can be redone.
-pub fn undo(db: &Mutex<Db>, task_id: &str, dir: &Path, options: UndoOptions, running: bool, now_ms: i64) -> Result<Done, Refusal> {
+/// Every refusal an undo can have, decided without changing anything. Returns the run
+/// to restore and whether edits no checkpoint holds must be snapshotted first.
+fn check_undo(row: &Row, dir: &Path, options: &UndoOptions, running: bool) -> Result<(Run, bool), Refusal> {
     if running {
         return Err(Refusal::Busy);
     }
-    let mut row = row(db, task_id)?;
     let run = row.runs.iter().find(|r| r.n == options.run).cloned().ok_or_else(|| Refusal::Nothing(format!("Run {} has no checkpoint (it is older than the ones kept, or never started).", options.run)))?;
     if run.undone {
         return Err(Refusal::Nothing(format!("Run {} is already undone.", run.n)));
@@ -636,10 +666,44 @@ pub fn undo(db: &Mutex<Db>, task_id: &str, dir: &Path, options: UndoOptions, run
             return Err(Refusal::Pushed(detail));
         }
     }
-    if !matching(dir, &row)? {
-        if !options.snapshot_unsaved {
-            return Err(Refusal::Unsaved);
+    let unsaved = !matching(dir, row)?;
+    if unsaved && !options.snapshot_unsaved {
+        return Err(Refusal::Unsaved);
+    }
+    Ok((run, unsaved))
+}
+
+/// The text of a chat `undo_run` action: the run number, then any of `back`
+/// (also undo the later runs), `snapshot` (keep unsaved edits first), `revert`.
+pub fn parse_action_text(text: &str) -> Option<UndoOptions> {
+    let mut words = text.split_whitespace();
+    let run = words.next()?.parse().ok()?;
+    let mut options = UndoOptions { run, ..Default::default() };
+    for word in words {
+        match word {
+            "back" => options.through_later = true,
+            "snapshot" => options.snapshot_unsaved = true,
+            "revert" => options.revert = true,
+            _ => return None,
         }
+    }
+    Some(options)
+}
+
+/// Whether an undo would go ahead, and which runs it would restore away; nothing is changed.
+pub fn preview_undo(db: &Mutex<Db>, task_id: &str, dir: &Path, options: UndoOptions, running: bool) -> Result<Vec<u32>, Refusal> {
+    let row = row(db, task_id)?;
+    let (run, _) = check_undo(&row, dir, &options, running)?;
+    Ok(row.runs.iter().filter(|r| r.n >= run.n && !r.undone).map(|r| r.n).collect())
+}
+
+/// Restores the folder to the start of run `options.run`. `running` says a run is
+/// working in the folder now. Nothing is changed unless every check passes; a
+/// safety checkpoint is taken first so the undo can be redone.
+pub fn undo(db: &Mutex<Db>, task_id: &str, dir: &Path, options: UndoOptions, running: bool, now_ms: i64) -> Result<Done, Refusal> {
+    let mut row = row(db, task_id)?;
+    let (run, unsaved) = check_undo(&row, dir, &options, running)?;
+    if unsaved {
         let extra = push_extra(&mut row, task_id, dir, ExtraKind::Manual, "changes made outside any run", now_ms)?;
         row.expected_tree = extra.point.tree;
     }

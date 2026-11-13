@@ -854,9 +854,11 @@ pub enum ChatActionStatus {
 /// a task with an open pull request, merge it (`merge_pr`, once CI passes) or
 /// close it (`close_pr`, `text` is the comment saying why), and `apply_update`
 /// to apply a Neko self-update that waits for the owner (its `task_id` is the
-/// task whose landed commit brought it).
+/// task whose landed commit brought it), and `undo_run` to restore a ticket's
+/// folder to how it was before a run (`text`: the run number, then optionally
+/// `back`, `snapshot`, `revert`).
 pub fn chat_action_kinds() -> &'static [&'static str] {
-    &["message", "start", "stop", "close", "merge", "run_next", "approve", "accept", "retry", "rename", "merge_pr", "close_pr", "apply_update"]
+    &["message", "start", "stop", "close", "merge", "run_next", "approve", "accept", "retry", "rename", "merge_pr", "close_pr", "apply_update", "undo_run"]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -889,6 +891,7 @@ pub enum Command {
     Schedules(crate::scheduled_plans::ScheduleCommand),
     Goals(crate::goals::GoalCommand),
     Crew(crate::crew::CrewCommand),
+    Checkpoints(crate::checkpoints::CheckpointCommand),
     SetupImport(crate::setup_import::ImportCommand),
     /// Read-only proposal; approval remains a separate explicit command.
     ProposeSplit {

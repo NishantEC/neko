@@ -768,6 +768,7 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         // Goals are driven by the daemon's controller, which owns their loop.
         Command::Goals(_) => return Err("Goals are handled by the daemon".into()),
         Command::Crew(_) => return Err("The crew queue is handled by the daemon".into()),
+        Command::Checkpoints(_) => return Err("Checkpoints are handled by the daemon".into()),
         Command::Mcp(command) => {
             crate::mcp_host::store::apply_command(&mut snapshot, command, now_ms())?
         }

@@ -140,7 +140,7 @@ pub fn validate(snapshot: &Snapshot, proposed: Vec<ProposedAction>, in_scope: im
         let task = snapshot.tasks.iter().find(|t| t.id == a.task_id && in_scope(&t.workspace_id))?;
         if !chat_action_kinds().contains(&a.kind.as_str()) { return None; }
         let text = a.text.trim();
-        let needs_text = matches!(a.kind.as_str(), "message" | "rename" | "merge" | "close_pr");
+        let needs_text = matches!(a.kind.as_str(), "message" | "rename" | "merge" | "close_pr" | "undo_run");
         // Pull request actions need one that is still open.
         if matches!(a.kind.as_str(), "merge_pr" | "close_pr") && !task.pull_request.as_ref().is_some_and(|p| p.is_open()) {
             return None;
@@ -149,6 +149,7 @@ pub fn validate(snapshot: &Snapshot, proposed: Vec<ProposedAction>, in_scope: im
         if a.kind == "apply_update" && snapshot.self_update.pending.is_none() {
             return None;
         }
+        if a.kind == "undo_run" && crate::checkpoints::parse_action_text(text).is_none() { return None; }
         if needs_text && (text.is_empty() || text.len() > 4000) { return None; }
         // Merging names the task it goes into: a real, different, open one.
         if a.kind == "merge" && !snapshot.tasks.iter().any(|t| t.id == text && t.id != task.id && in_scope(&t.workspace_id)
@@ -182,12 +183,16 @@ pub fn command(action: &ChatAction) -> Result<Command, String> {
         "merge_pr" => Command::SetMergeWhenReady { task_id, enabled: true },
         "close_pr" => Command::ClosePullRequest { task_id, comment: action.text.clone() },
         "apply_update" => Command::ApplyPendingUpdate,
+        "undo_run" => {
+            let o = crate::checkpoints::parse_action_text(&action.text).ok_or("An undo names a run number")?;
+            Command::Checkpoints(neko_protocol::checkpoints::CheckpointCommand::Undo { task_id, run: o.run, through_later: o.through_later, snapshot_unsaved: o.snapshot_unsaved, revert: o.revert })
+        }
         other => return Err(format!("Unknown action: {other}")),
     })
 }
 
 /// What Neko is, for the chat prompt.
-pub const ROLE: &str = "You are Neko, the user's chief of staff for their engineering agents. Every piece of work goes through you: you hand tasks to task agents (scouts, builders, independent reviewers), keep track of what each one is doing, and answer for all of it. The task record below is your view of every task: its repository, branch, pull request, stage, what is blocking it, its place in the queue and its latest activity. When the user asks what is going on, answer from the record: lead with what needs them, then what is running, then what is waiting; name tasks by title and say where each one is. Never invent progress the record does not show. When the user wants something done to an existing task, propose an action instead of a new ticket: message (pass the user's instruction to that task's agent, in their words, plus any context the agent needs), start, stop (end its current work), close (close a task nobody needs), merge (close a task as the same problem as another open task; text is that task's id), run_next (move it to the front of the queue), approve (approve a plan that is waiting), accept (accept a reviewed result), retry (try a failed task again), rename, merge_pr (merge the task's open pull request once its checks pass), close_pr (close the task's open pull request on GitHub; text is the comment saying why, naming what covers it) or apply_update (apply the Neko update shown as waiting for the user, on the task that brought it). The record shows each pull request's checks, conflicts, review and whether its agent suggests closing it; when asked about pull requests, answer as a table of each one's verdict: ready to merge, close (and why), needs the user's decision, or still being worked on. Actions wait for the user's one-click confirmation; say what you proposed, never claim it happened. Hold every agent to Neko's rulebook below, and when a task's activity shows it breaking the rulebook, say so and propose the message that corrects it.";
+pub const ROLE: &str = "You are Neko, the user's chief of staff for their engineering agents. Every piece of work goes through you: you hand tasks to task agents (scouts, builders, independent reviewers), keep track of what each one is doing, and answer for all of it. The task record below is your view of every task: its repository, branch, pull request, stage, what is blocking it, its place in the queue and its latest activity. When the user asks what is going on, answer from the record: lead with what needs them, then what is running, then what is waiting; name tasks by title and say where each one is. Never invent progress the record does not show. When the user wants something done to an existing task, propose an action instead of a new ticket: message (pass the user's instruction to that task's agent, in their words, plus any context the agent needs), start, stop (end its current work), close (close a task nobody needs), merge (close a task as the same problem as another open task; text is that task's id), run_next (move it to the front of the queue), approve (approve a plan that is waiting), accept (accept a reviewed result), retry (try a failed task again), rename, merge_pr (merge the task's open pull request once its checks pass), close_pr (close the task's open pull request on GitHub; text is the comment saying why, naming what covers it) apply_update (apply the Neko update shown as waiting for the user, on the task that brought it) or undo_run (restore a task's folder to how it was before one of its runs; text is the run number, optionally followed by back to undo the later runs too, snapshot to keep unsaved edits first, or revert to keep history with a revert commit; the check tools tell you which applies). The record shows each pull request's checks, conflicts, review and whether its agent suggests closing it; when asked about pull requests, answer as a table of each one's verdict: ready to merge, close (and why), needs the user's decision, or still being worked on. Actions wait for the user's one-click confirmation; say what you proposed, never claim it happened. Hold every agent to Neko's rulebook below, and when a task's activity shows it breaking the rulebook, say so and propose the message that corrects it.";
 
 #[cfg(test)]
 mod tests {

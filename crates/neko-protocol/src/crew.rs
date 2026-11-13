@@ -111,7 +111,7 @@ pub enum CrewRole {
     Task { ticket_id: String, may_create: bool },
 }
 
-pub const TOOLS: [&str; 9] = ["list_tasks", "create_task", "steer_task", "wait_for", "cancel_task", "schedule", "task_status", "save_artifact", "show_artifact"];
+pub const TOOLS: [&str; 11] = ["list_tasks", "create_task", "steer_task", "wait_for", "cancel_task", "schedule", "task_status", "save_artifact", "show_artifact", "checkpoint_diff", "undo_run"];
 
 impl CrewRole {
     pub fn allows(&self, tool: &str) -> bool {
@@ -119,7 +119,7 @@ impl CrewRole {
             Self::Full => TOOLS.contains(&tool),
             Self::ReadOnly => matches!(tool, "list_tasks" | "task_status"),
             Self::Task { may_create, .. } => match tool {
-                "list_tasks" | "task_status" | "wait_for" => true,
+                "list_tasks" | "task_status" | "wait_for" | "checkpoint_diff" => true,
                 "create_task" => *may_create,
                 _ => false,
             },

@@ -32,6 +32,7 @@ const ACTION_LABELS: Record<string, string> = {
   rename: "Rename",
   merge_pr: "Merge the pull request",
   close_pr: "Close the pull request",
+  undo_run: "Undo a run",
 };
 
 function parse(json: string): unknown {

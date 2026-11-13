@@ -975,6 +975,14 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             Ok((files, patch, truncated)) => Response::TaskChanges { files, patch, truncated },
             Err(message) => Response::Error { message },
         },
+        Request::TaskCheckpoints { task_id } => match state.workbench.checkpoint_list(&task_id) {
+            Ok(list) => Response::TaskCheckpoints(list),
+            Err(message) => Response::Error { message },
+        },
+        Request::CheckpointDiff { task_id, run } => match state.workbench.checkpoint_diff(&task_id, run) {
+            Ok((files, patch, truncated)) => Response::TaskChanges { files, patch, truncated },
+            Err(message) => Response::Error { message },
+        },
         Request::CheckAgentModel { runtime, save } => {
             let check = neko_core::agent_catalog::check(&runtime);
             if check.ok && save {

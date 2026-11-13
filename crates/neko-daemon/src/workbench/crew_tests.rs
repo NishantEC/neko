@@ -86,7 +86,7 @@ fn a_lease_carries_only_what_its_role_allows() {
     };
     assert_eq!(listed(&full).len(), TOOLS.len());
     assert_eq!(listed(&read_only), ["list_tasks", "task_status"]);
-    assert_eq!(listed(&own), ["list_tasks", "create_task", "wait_for", "task_status"]);
+    assert_eq!(listed(&own), ["list_tasks", "create_task", "wait_for", "task_status", "checkpoint_diff"]);
 
     // Read-only chat looks, and cannot do anything else.
     assert_eq!(call(&c, &read_only, "list_tasks", json!({})).unwrap()["tasks"].as_array().unwrap().len(), 1);

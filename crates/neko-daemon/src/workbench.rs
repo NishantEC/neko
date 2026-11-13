@@ -40,6 +40,8 @@ mod pull_requests;
 pub(crate) mod goals;
 #[path = "workbench/crew.rs"]
 mod crew;
+#[path = "workbench/run_checkpoints.rs"]
+mod run_checkpoints;
 
 struct TaskClaim {
     task: Task,
@@ -109,6 +111,7 @@ impl Controller {
             Command::Schedules(command) => self.schedule_command(command),
             Command::Goals(command) => self.goal_command(command),
             Command::Crew(command) => self.crew_command(command),
+            Command::Checkpoints(command) => self.checkpoint_command(command),
             Command::SetupImport(command) => self.import_command(command),
             Command::Skills(command) => {
                 use neko_protocol::skills::SkillCommand;
@@ -900,6 +903,24 @@ impl Controller {
             &AtomicBool,
         ) -> Result<std::path::PathBuf, String>,
     ) -> Result<(), String> {
+        // A writable run is checkpointed at its start and, however it ends, its end.
+        let run = run_checkpoints::RunSlot::default();
+        let result = self.execute_with_worktree_in(claim, cancel, create_worktree, &run);
+        run.end(&self.db, result.is_ok(), cancel);
+        result
+    }
+
+    fn execute_with_worktree_in(
+        &self,
+        claim: &TaskClaim,
+        cancel: &AtomicBool,
+        create_worktree: impl FnOnce(
+            &std::path::Path,
+            &str,
+            &AtomicBool,
+        ) -> Result<std::path::PathBuf, String>,
+        run: &run_checkpoints::RunSlot,
+    ) -> Result<(), String> {
         let task = &claim.task;
         let authority = &claim.authority;
         let mut snapshot = store::load(
@@ -1038,6 +1059,9 @@ impl Controller {
             };
             store::append_event(t, role, "Agent started in an isolated task worktree");
         })?;
+        if !planning {
+            run.begin(&self.db, &task.id, &directory);
+        }
         let rules = neko_core::rulebook::text(&snapshot);
         let mut memory = neko_core::agent_profiles::context_about(&snapshot, Some(&workspace.id), Some(&format!("{} {}", task.title, task.goal)));
         memory.push_str(&decision_context::context_about(&snapshot, &workspace.id, Some(&task.id), &format!("{} {}", task.title, task.goal)));
@@ -1081,6 +1105,11 @@ impl Controller {
                 } else if claim.read_only_reply {
                     "The user's latest request is read-only. Answer their question or give the requested plan. No local changes are authorized by this message."
                 } else { "" };
+                // What the person undid or redid since the last turn, told once.
+                let direction = match neko_core::checkpoints::take_notice(&self.db, &task.id) {
+                    Some(notice) => format!("{direction}\n{notice}"),
+                    None => direction.to_owned(),
+                };
                 let direction = match &prior_work {
                     Some(context) => format!("{direction}\n{context}"),
                     None => direction.to_owned(),

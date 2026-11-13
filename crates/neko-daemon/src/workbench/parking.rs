@@ -122,6 +122,7 @@ impl Controller {
 
     /// Parks up to `PER_PASS` idle tickets. Returns how many were parked.
     pub(super) fn parking_tick(&self) -> Result<usize, String> {
+        self.checkpoint_housekeeping();
         self.parking_pass(&neko_protocol::support_dir().join("task-worktrees"))
     }
 
@@ -168,6 +169,12 @@ impl Controller {
                         wip: saved.wip,
                     }), &message)?;
                     parked += 1;
+                    // A finished ticket's checkpoints go with its folder.
+                    if task.status == TaskStatus::Completed {
+                        if let Err(error) = neko_core::checkpoints::delete_task(&self.db, &task.id, Some(&source)) {
+                            eprintln!("neko checkpoints {}: {error}", task.id);
+                        }
+                    }
                 }
                 Err(error) => eprintln!("neko parking {}: {error}", task.id),
             }
