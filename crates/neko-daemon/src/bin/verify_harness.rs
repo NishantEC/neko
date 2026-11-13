@@ -24,8 +24,12 @@
 #[allow(dead_code)]
 #[path = "../codex.rs"]
 mod codex;
+#[path = "../inbox_reply.rs"]
+mod inbox_reply;
 #[path = "../mcp_host.rs"]
 mod mcp_host;
+#[path = "../morning_digest.rs"]
+mod morning_digest;
 #[allow(dead_code)]
 #[path = "../phone.rs"]
 mod phone;

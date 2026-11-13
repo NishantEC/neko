@@ -107,7 +107,8 @@ pub(crate) fn spend_held(db: &neko_core::Db, now_ms: i64) -> bool {
             "Today's reported spend is ${:.2} of the ${ceiling:.2} daily ceiling. New goal turns and routine runs are paused; work already running finishes. Raise the ceiling in Settings, AI and agents, Budget, or leave it: it resets at midnight.",
             today.total_usd()
         );
-        let seq = snapshot.workspaces.first().and_then(|w| crate::routines::raise_goal_item(db, &w.id, "Daily spend ceiling reached", &detail, "").ok());
+        let raise = f64::from(neko_core::spend::raise_to_cents(today.ceiling_cents.unwrap_or(0))) / 100.0;
+        let seq = snapshot.workspaces.first().and_then(|w| crate::routines::raise_goal_item(db, &w.id, &format!("Raise today's ceiling to ${raise:.0}?"), &detail, "", &format!("Raise today's ceiling to ${raise:.0}")).ok());
         let _ = neko_core::spend::save_notice(db, &neko_core::spend::Notice { day_ms: today.since_ms, seq });
     }
     true
@@ -200,12 +201,12 @@ mod tests {
         assert!(spend_held(&db, now), "ceiling reached: goal turns and routine runs wait");
         assert!(spend_held(&db, now + 1000));
         let items = crate::routines::all_items(&db).unwrap();
-        assert_eq!(items.iter().filter(|i| i.title == "Daily spend ceiling reached" && !i.done).count(), 1, "one Inbox item, however often it is asked");
+        assert_eq!(items.iter().filter(|i| i.title.starts_with("Raise today's ceiling to") && !i.done).count(), 1, "one Inbox item, however often it is asked");
         // Raising the ceiling releases it and closes the item.
         neko_core::workbench::apply(&db, neko_protocol::workbench::Command::SetDailyBudget { cents: Some(500) }).unwrap();
         assert!(!spend_held(&db, now));
         let items = crate::routines::all_items(&db).unwrap();
-        assert_eq!(items.iter().filter(|i| i.title == "Daily spend ceiling reached" && !i.done).count(), 0);
+        assert_eq!(items.iter().filter(|i| i.title.starts_with("Raise today's ceiling to") && !i.done).count(), 0);
         // Yesterday's spend does not count.
         neko_core::workbench::apply(&db, neko_protocol::workbench::Command::SetDailyBudget { cents: Some(100) }).unwrap();
         assert!(!spend_held(&db, now + 3 * 86_400_000), "a new day starts at zero");

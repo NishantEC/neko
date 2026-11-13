@@ -503,6 +503,31 @@ pub(crate) fn all_items(db: &neko_core::Db) -> Result<Vec<NeedsYou>, String> {
     Ok(items)
 }
 
+/// The memory the prompt shows: what the routine asked to keep, plus what the owner answered to
+/// its items lately (`owner_replies`, never saved back into the routine's own memory).
+pub(crate) fn with_owner_replies(mut memory: serde_json::Value, replies: &[crate::inbox_reply::Reply]) -> serde_json::Value {
+    if replies.is_empty() {
+        return memory;
+    }
+    if !memory.is_object() {
+        memory = serde_json::json!({});
+    }
+    memory["owner_replies"] = replies.iter().map(|r| serde_json::json!({"title": r.title, "answer": r.answer})).collect();
+    memory
+}
+
+/// Like `all_items`, with the routine each item belongs to.
+pub(crate) fn all_items_with_routine(db: &neko_core::Db) -> Result<Vec<(String, NeedsYou)>, String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut items = Vec::new();
+    for routine in core::load(db)?.routines {
+        for run in core::load_runs(db, &routine.id).unwrap_or_default() {
+            items.extend(run.needs_you.into_iter().filter(|i| i.seq == 0 || seen.insert(i.seq)).map(|i| (routine.id.clone(), i)));
+        }
+    }
+    Ok(items)
+}
+
 /// The routine that holds a scope's goal items. It never runs (disabled, no
 /// schedule the owner sees); it only gives goal questions a place in the
 /// Inbox, where the phone channels already read them.
@@ -510,7 +535,7 @@ pub(crate) const GOALS_ROUTINE_PREFIX: &str = "goals:";
 
 /// Raises one needs-you item for a goal ("Extend by 20 turns?", or a blocked
 /// goal's question) and returns its `seq`. `link` is `goal:<id>`.
-pub(crate) fn raise_goal_item(db: &neko_core::Db, workspace_id: &str, title: &str, detail: &str, link: &str) -> Result<u64, String> {
+pub(crate) fn raise_goal_item(db: &neko_core::Db, workspace_id: &str, title: &str, detail: &str, link: &str, default: &str) -> Result<u64, String> {
     let id = format!("{GOALS_ROUTINE_PREFIX}{workspace_id}");
     let mut store = core::load(db)?;
     if !store.routines.iter().any(|r| r.id == id) {
@@ -524,7 +549,7 @@ pub(crate) fn raise_goal_item(db: &neko_core::Db, workspace_id: &str, title: &st
     }
     let now = neko_core::workbench::now_ms();
     let seq = core::reserve_seq(db, 1)?;
-    let item = NeedsYou { seq, title: title.into(), detail: detail.into(), link: (!link.is_empty()).then(|| link.into()), created_ms: now, touched_ms: now, ..Default::default() };
+    let item = NeedsYou { seq, title: inbox::one_question(title), detail: detail.into(), link: (!link.is_empty()).then(|| link.into()), created_ms: now, touched_ms: now, default: inbox::clean_default(default), ..Default::default() };
     let run = RoutineRun { id: neko_core::workbench::new_id(), routine_id: id.clone(), started_ms: now, finished_ms: Some(now), ok: true, quiet: false, did: Vec::new(), needs_you: vec![item], error: None, text: String::new(), ..Default::default() };
     core::push_run(db, &id, run)?;
     Ok(seq)
@@ -834,7 +859,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
     let started = neko_core::workbench::now_ms();
     let (orders, memory, open, age_out_days) = {
         let db = db(state);
-        (core::load(&db)?.orders_for(&routine.workspace_id).to_string(), core::load_state(&db, &routine.id)?.memory, open_items(&db, &routine.workspace_id, neko_core::workbench::now_ms())?, core::load(&db)?.age_out_days())
+        (core::load(&db)?.orders_for(&routine.workspace_id).to_string(), with_owner_replies(core::load_state(&db, &routine.id)?.memory, &crate::inbox_reply::replies(&db, &routine.id, neko_core::workbench::now_ms())), open_items(&db, &routine.workspace_id, neko_core::workbench::now_ms())?, core::load(&db)?.age_out_days())
     };
     let mut meta = AgentMeta::default();
     let outcome: Result<core::Parsed, (String, String)> = match scope.as_ref().and_then(|s| s.folders.first().map(|f| (s, f))) {

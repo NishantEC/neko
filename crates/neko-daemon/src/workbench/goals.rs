@@ -605,7 +605,7 @@ fn pause(db: &Db, goal: &mut Goal, why: &str, now: i64) -> Result<(), String> {
     if goal.extend_seq.is_none() {
         let more = extend_by(goal);
         let detail = format!("{} {}\nGoal: {}\nTurn {} of {}. Choose Extend on the goal to keep going, or leave it paused.", "Paused:", why, core::head(&goal.objective, 300), goal.turns, goal.budget.max_turns);
-        goal.extend_seq = Some(crate::routines::raise_goal_item(db, &goal.workspace_id, &format!("Extend by {more} turns?"), &detail, &format!("goal:{}", goal.id))?);
+        goal.extend_seq = Some(crate::routines::raise_goal_item(db, &goal.workspace_id, &format!("Extend by {more} turns?"), &detail, &format!("goal:{}", goal.id), &format!("Extend by {more} turns"))?);
     }
     core::push_journal(db, &goal.subject(), JournalEntry { at_ms: now, turn: goal.turns, note: goal.paused_reason.clone(), ..Default::default() })
 }
@@ -650,12 +650,20 @@ fn failed_turn(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: &Goal, snapshot: &Snaps
 
 /// Raises one question with a default answer, then waits for the person.
 fn block(db: &Db, goal: &mut Goal, question: &str, default_answer: &str, now: i64) -> Result<(), String> {
+    // One question, always with a default: a second question is dropped and a missing default is filled.
+    let question = &neko_core::inbox::one_question(question);
+    let default_answer = if neko_core::inbox::clean_default(default_answer).is_some() { default_answer } else { "Use your best judgement and keep going." };
     goal.status = GoalStatus::Blocked;
     goal.in_turn = false;
     let detail = format!("{question}\nIf you do not answer, Neko will go with: {default_answer}\nGoal: {}", core::head(&goal.objective, 300));
-    let seq = crate::routines::raise_goal_item(db, &goal.workspace_id, &core::head(question, 120), &detail, &format!("goal:{}", goal.id))?;
+    let seq = crate::routines::raise_goal_item(db, &goal.workspace_id, &core::head(question, 120), &detail, &format!("goal:{}", goal.id), default_answer)?;
     goal.blocked = Some(Blocked { question: question.to_owned(), default_answer: default_answer.to_owned(), inbox_seq: Some(seq) });
     core::push_journal(db, &goal.subject(), JournalEntry { at_ms: now, turn: goal.turns, note: format!("Blocked: {}", core::head(question, 160)), ..Default::default() })
+}
+
+#[cfg(test)]
+pub(crate) fn block_for_test(db: &Db, goal: &mut Goal, question: &str, default_answer: &str, now: i64) -> Result<(), String> {
+    block(db, goal, question, default_answer, now)
 }
 
 /// A turn ended: check, judge, rule.

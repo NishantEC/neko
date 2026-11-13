@@ -21,6 +21,9 @@ pub const AGED_OUT: &str = "Aged out";
 pub const BY_ROUTINE: &str = "Resolved by routine";
 pub const BY_YOU: &str = "Done by you";
 pub const ON_PHONE: &str = "Done on your phone";
+/// Closed because the owner answered it (typed on the phone or tapped the default).
+pub const ANSWERED_ON_PHONE: &str = "Answered on your phone";
+pub const ANSWERED: &str = "Answered by you";
 
 /// One open item as the prompt lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,12 +183,64 @@ pub fn refresh(old: &mut NeedsYou, new: &NeedsYou, now: i64) {
     if new.link.is_some() {
         old.link = new.link.clone();
     }
+    if new.default.is_some() {
+        old.default = new.default.clone();
+    }
     if new.expires_ms.is_some() {
         old.expires_ms = new.expires_ms;
         // A new time is a new deadline, even on an item the owner reopened.
         old.kept = false;
     }
     old.touched_ms = now;
+}
+
+/// The most an answer, a question or a default may say.
+pub const MAX_ANSWER: usize = 1000;
+
+/// An escalation is one question: everything after its first question mark
+/// is dropped (a title with no question mark is left as it is). A second
+/// question belongs in a second item, or nowhere.
+pub fn one_question(title: &str) -> String {
+    let title = title.trim();
+    match title.find('?') {
+        Some(at) => title[..=at].trim().to_owned(),
+        None => title.to_owned(),
+    }
+}
+
+/// A default the owner can accept: one line of plain words, bounded.
+pub fn clean_default(text: &str) -> Option<String> {
+    let line: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let line: String = line.chars().filter(|c| !c.is_control()).take(300).collect();
+    line.chars().any(char::is_alphanumeric).then_some(line)
+}
+
+/// What the owner wrote on lines that start with `>` in a reminder's notes
+/// (the lines are joined with a space), or `None` when there is none.
+pub fn reply_in_notes(notes: &str) -> Option<String> {
+    let lines: Vec<&str> = notes.lines().filter_map(|l| l.trim_start().strip_prefix('>')).map(str::trim).filter(|l| !l.is_empty()).collect();
+    (!lines.is_empty()).then(|| lines.join(" "))
+}
+
+/// Neutralises a `>` at the start of a line in text Neko writes into a
+/// reminder, so only the owner's own lines count as replies.
+pub fn without_reply_marks(text: &str) -> String {
+    text.lines().map(|l| if l.trim_start().starts_with('>') { l.replacen('>', "\u{203a}", 1) } else { l.to_owned() }).collect::<Vec<_>>().join("\n")
+}
+
+/// Whether `text` is an answer to `item` and what it is, cleaned. Not an
+/// answer: nothing to read in it, or only the item's own words quoted back.
+/// The result only ever goes where a typed answer would go; it is never run.
+pub fn answer_text(text: &str, item: &NeedsYou) -> Option<String> {
+    let cleaned: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
+    let cleaned: String = cleaned.chars().take(MAX_ANSWER).collect();
+    if !cleaned.chars().any(char::is_alphanumeric) {
+        return None;
+    }
+    let key = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+    let mine = key(&cleaned);
+    let quoted = std::iter::once(item.title.as_str()).chain(item.detail.lines()).any(|l| !l.trim().is_empty() && key(l) == mine);
+    (!quoted).then_some(cleaned)
 }
 
 /// Why an open item should close now for time alone: its `expires` passed
@@ -320,5 +375,47 @@ mod tests {
         assert!(recently_closed(&old, 600 + DAY_MS) && !recently_closed(&old, 600 + 4 * DAY_MS));
         reopen(&mut old, 700);
         assert!(!old.done && old.kept && old.closed_ms.is_none() && old.touched_ms == 700);
+    }
+
+    #[test]
+    fn an_escalation_is_one_question_with_a_default() {
+        assert_eq!(one_question("Which database? And which region?"), "Which database?");
+        assert_eq!(one_question("  Sign in to the tracker  "), "Sign in to the tracker");
+        assert_eq!(clean_default("  Use the\n primary  "), Some("Use the primary".to_owned()));
+        assert_eq!(clean_default("  ...  "), None, "nothing to read is no default");
+        assert_eq!(clean_default(""), None);
+    }
+
+    #[test]
+    fn only_lines_that_start_with_greater_than_are_a_reply() {
+        assert_eq!(reply_in_notes("why\n\n> use staging\n>and retry\nneko:4"), Some("use staging and retry".to_owned()));
+        assert_eq!(reply_in_notes("  >  indented works too"), Some("indented works too".to_owned()));
+        assert_eq!(reply_in_notes("a > b is not a reply\nneko:4"), None);
+        assert_eq!(reply_in_notes(">\n> \n"), None);
+        // What Neko writes into a reminder never starts a reply line.
+        assert_eq!(reply_in_notes(&without_reply_marks("> quoted by an agent\nplain\n   > indented quote")), None);
+    }
+
+    #[test]
+    fn what_is_not_an_answer_is_dropped_and_answers_are_cleaned() {
+        let item = NeedsYou { title: "Reply to Sam?".into(), detail: "Sam asked about Friday\nSecond line".into(), ..Default::default() };
+        assert_eq!(answer_text("  Friday\nworks\u{7} ", &item), Some("Friday works".to_owned()));
+        assert_eq!(answer_text("...", &item), None);
+        assert_eq!(answer_text("", &item), None);
+        assert_eq!(answer_text("reply to sam?", &item), None, "the question quoted back");
+        assert_eq!(answer_text("Sam asked about  Friday", &item), None, "a line of the detail quoted back");
+        assert_eq!(answer_text(&"x".repeat(5000), &item).map(|a| a.len()), Some(MAX_ANSWER));
+    }
+
+    #[test]
+    fn refresh_keeps_the_default_the_item_had() {
+        let mut old = item("t", "d", None);
+        old.default = Some("Say yes".into());
+        refresh(&mut old, &item("t", "newer", None), 5);
+        assert_eq!(old.default.as_deref(), Some("Say yes"));
+        let mut newer = item("t", "newer", None);
+        newer.default = Some("Say no".into());
+        refresh(&mut old, &newer, 6);
+        assert_eq!(old.default.as_deref(), Some("Say no"));
     }
 }

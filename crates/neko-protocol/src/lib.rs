@@ -15,6 +15,7 @@ pub mod calendar;
 pub mod checkpoints;
 pub mod crew;
 pub mod phone;
+pub mod digest;
 pub mod agent_models;
 pub mod decision_context;
 pub mod goals;
@@ -696,6 +697,9 @@ pub enum Request {
         present: Vec<String>,
         #[serde(default)]
         completed: Vec<String>,
+        /// Notes of reminders that carry a reply line (starts with `>`).
+        #[serde(default)]
+        notes: Vec<phone::ReminderNote>,
     },
     /// What the app did with the last plan. Answered with `Phone`.
     PhoneRemindersDone {
@@ -703,7 +707,23 @@ pub enum Request {
         created: Vec<phone::ReminderCreated>,
         #[serde(default)]
         deleted: Vec<String>,
+        /// Reminders whose echo was written and that were completed.
+        #[serde(default)]
+        finished: Vec<String>,
     },
+    /// Answers one needs-you item the way a typed answer would: `text` is
+    /// the answer, no text takes the item's default (the same path the phone
+    /// uses). Answered with `NeedsYouAnswered`.
+    AnswerNeedsYou {
+        seq: u64,
+        #[serde(default)]
+        text: Option<String>,
+    },
+    /// The morning digest as last composed, if there is one to show.
+    /// Answered with `Digest`.
+    MorningDigest,
+    /// Marks the digest read (hides it from Home). Answered with `Digest`.
+    MarkDigestRead,
     /// Sends a test push on every channel that is on, ignoring quiet hours
     /// and whether the person is at the Mac. Answered with `PhoneTest`.
     PhoneTest,
@@ -1161,6 +1181,9 @@ pub enum Response {
         status: phone::PhoneStatus,
     },
     PhonePlan(phone::ReminderPlan),
+    /// What `AnswerNeedsYou` did, in a line.
+    NeedsYouAnswered { summary: String },
+    Digest { digest: Option<digest::Digest> },
     /// One line per channel that was tried.
     PhoneTest {
         lines: Vec<String>,

@@ -157,6 +157,11 @@ pub struct NeedsYou {
     /// the phone even during quiet hours.
     #[serde(default)]
     pub urgent: bool,
+    /// What Neko will do if the owner does nothing more than accept: every
+    /// escalation is one question with a default. `None` shows "No default"
+    /// and completing its reminder only marks it seen.
+    #[serde(default)]
+    pub default: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

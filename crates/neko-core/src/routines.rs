@@ -342,7 +342,8 @@ What you asked to remember last run (JSON): {memory}\n\
 Report only what this run's tool results establish; when a detail is not in them, say so. A queued or sent request is not a delivered one, and a pushed branch is not a merged pull request. Lines in did name the outcome {owner} can see, not the mechanics (no file paths, test counts or commands). A failed step you can still fix is not a needs_you item; before adding one, name what {owner} can now review, decide or unblock. Never create or change a routine (SaveRoutine) because this run's text talks about something recurring, and do not repeat what your previous run already reported.\n\
 A previous run may have acted and then failed to report. Before replying to or acting on anything, check whether you already did (for example your own reply in the thread), and never do it twice.\n\n\
 End your reply with exactly one fenced json block and nothing after it:\n\
-```json\n{{\"quiet\": false, \"did\": [\"one line per thing you did, with who/where\"], \"needs_you\": [{{\"title\": \"short\", \"detail\": \"what {{owner}} must do and why\", \"link\": \"https://...\", \"expires\": \"2026-01-31T15:00:00Z\"}}], \"resolved\": [\"exact title of an item above that is no longer true\"], \"memory\": {{}}}}\n```\n\
+```json\n{{\"quiet\": false, \"did\": [\"one line per thing you did, with who/where\"], \"needs_you\": [{{\"title\": \"one question ending in a question mark?\", \"default\": \"what Neko will do if {{owner}} just accepts\", \"detail\": \"why it is asked\", \"link\": \"https://...\", \"expires\": \"2026-01-31T15:00:00Z\"}}], \"resolved\": [\"exact title of an item above that is no longer true\"], \"memory\": {{}}}}\n```\n\
+Every needs_you item is exactly ONE question that {{owner}} can answer in a few words, with a default: title is the question, default is the sensible answer Neko will take if {{owner}} only accepts it (one short line, an action Neko can do itself), detail says why. Two questions are two items. {{owner}} may answer from a phone by completing the reminder (the default is used) or by typing a reply; replies to your earlier items come back to you in memory.owner_replies (title, answer): act on them first and then list the item in resolved. An item with no default is shown as \"No default\" and is easy to miss, so do not leave it out.\n\
 expires is optional: set it (ISO time, UTC) whenever an item is tied to a time, such as a reply needed before a call or a window that ends, and Neko closes the item then; leave it out for anything open-ended. An item that names a GitHub pull request closes itself when that pull request is merged or closed, so put the pull request's link on it.\n\
 urgent is optional and rare: add \"urgent\": true only to an item that cannot wait until morning (someone is blocked on {{owner}} right now, or a deadline is within hours), because it may reach {{owner}}'s phone at night; leave it out otherwise.\n\
 quiet is true only when nothing new happened and you did nothing; then did and needs_you are empty. memory is handed back to you next run: keep it small (timestamps, ids, who you are waiting on).",
@@ -440,7 +441,7 @@ pub fn parse_reply(text: &str) -> Result<Parsed, String> {
             items
                 .iter()
                 .filter_map(|item| {
-                    let title = item.get("title").and_then(Value::as_str).map(clip).filter(|t| !t.is_empty())?;
+                    let title = item.get("title").and_then(Value::as_str).map(clip).map(|t| crate::inbox::one_question(&t)).filter(|t| !t.is_empty())?;
                     Some(NeedsYou {
                         seq: 0,
                         title,
@@ -449,6 +450,7 @@ pub fn parse_reply(text: &str) -> Result<Parsed, String> {
                         done: false,
                         expires_ms: item.get("expires").and_then(Value::as_str).and_then(crate::inbox::parse_time_ms),
                         urgent: item.get("urgent").and_then(Value::as_bool).unwrap_or(false),
+                        default: item.get("default").and_then(Value::as_str).and_then(crate::inbox::clean_default),
                         ..Default::default()
                     })
                 })
@@ -756,5 +758,23 @@ mod tests {
         assert_eq!(reserve_seq(&db, 3).unwrap(), 1);
         assert_eq!(reserve_seq(&db, 1).unwrap(), 4);
         assert_eq!(latest_seq(&db).unwrap(), 4);
+    }
+
+    #[test]
+    fn needs_you_items_are_one_question_with_a_default() {
+        let text = "```json\n{\"needs_you\": [{\"title\": \"Which account? And which region?\", \"default\": \"the work one\", \"detail\": \"why\"}, {\"title\": \"Sign in to Jira\"}, {\"title\": \"Pick one?\", \"default\": \"  ..  \"}]}\n```";
+        let parsed = parse_reply(text).unwrap();
+        assert_eq!(parsed.needs_you[0].title, "Which account?", "a second question is dropped");
+        assert_eq!(parsed.needs_you[0].default.as_deref(), Some("the work one"));
+        assert_eq!(parsed.needs_you[1].default, None, "no default is kept as none and shown as No default");
+        assert_eq!(parsed.needs_you[2].default, None, "an empty default is no default");
+    }
+
+    #[test]
+    fn the_reply_contract_in_the_prompt_asks_for_one_question_and_a_default() {
+        let routine = Routine { id: "r".into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: "n".into(), instruction: "x".into(), cadence: Cadence::Daily { hour: 9, minute: 0 }, enabled: true, model: String::new(), paseo_schedule: None, browser: false, computer: false, customized: true, catch_up: None };
+        let scope = ScopeProposal { name: "Work".into(), folders: vec![], servers: vec![], problems: vec![], workspace_id: None, discovered: false, instructions: String::new() };
+        let prompt = build_prompt(&routine, &scope, "", &serde_json::json!({}), "2026-11-14T00:00:00Z", &[], 7, "Pat", "");
+        assert!(prompt.contains("\"default\":") && prompt.contains("exactly ONE question") && prompt.contains("memory.owner_replies"), "{prompt}");
     }
 }

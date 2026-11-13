@@ -29,6 +29,7 @@ pub mod command_queue;
 pub mod conversation;
 pub mod crew;
 pub mod db;
+pub mod digest;
 pub mod duplicates;
 pub mod goals;
 pub mod inbox;

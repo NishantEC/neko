@@ -68,6 +68,20 @@ impl Today {
     }
 }
 
+/// The ceiling "Raise to" offers: half again, in whole dollars, at least a dollar more.
+pub fn raise_to_cents(cents: u32) -> u32 {
+    let half_again = (f64::from(cents) * 1.5 / 100.0).ceil() as u32 * 100;
+    half_again.max(cents.saturating_add(100)).min(1_000_000)
+}
+
+/// What yesterday (the local day before today) reported across tasks and routines.
+pub fn yesterday_usd(db: &crate::Db, snapshot: &Snapshot, now_ms: i64) -> f64 {
+    let today = day_start_local(now_ms);
+    let yesterday = day_start_local(today - 3_600_000);
+    let since = |from: i64| tasks_usd_since(snapshot, from) + routines_usd_since(db, from);
+    (since(yesterday) - since(today)).max(0.0)
+}
+
 pub fn today(db: &crate::Db, snapshot: &Snapshot, now_ms: i64) -> Today {
     let since_ms = day_start_local(now_ms);
     Today { since_ms, tasks_usd: tasks_usd_since(snapshot, since_ms), routines_usd: routines_usd_since(db, since_ms), ceiling_cents: snapshot.daily_budget_cents }

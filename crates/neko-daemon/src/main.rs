@@ -1,4 +1,6 @@
 mod codex;
+mod inbox_reply;
+mod morning_digest;
 mod mcp_host;
 mod phone;
 mod routine_care;

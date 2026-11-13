@@ -23,8 +23,12 @@
 
 #[path = "../codex.rs"]
 mod codex;
+#[path = "../inbox_reply.rs"]
+mod inbox_reply;
 #[path = "../mcp_host.rs"]
 mod mcp_host;
+#[path = "../morning_digest.rs"]
+mod morning_digest;
 #[allow(dead_code)]
 #[path = "../phone.rs"]
 mod phone;
@@ -284,7 +288,7 @@ fn seed_from(db: &Db, path: &Path) -> Result<(), String> {
         // Only for a run that checks the goals (`NEKO_WEB_ONLY=goals`): the Inbox area counts its items.
         let item = item.filter(|_| std::env::var_os("NEKO_WEB_GOAL_ITEMS").is_some());
         if let Some((title, detail)) = item {
-            let seq = routines::raise_goal_item(db, &goal.workspace_id, &title, &detail, &format!("goal:{}", goal.id))?;
+            let seq = routines::raise_goal_item(db, &goal.workspace_id, &title, &detail, &format!("goal:{}", goal.id), &match &goal.blocked { Some(b) => b.default_answer.clone(), None => "Extend by 10 turns".to_owned() })?;
             match goal.status {
                 neko_protocol::goals::GoalStatus::Blocked => if let Some(b) = goal.blocked.as_mut() { b.inbox_seq = Some(seq); },
                 _ => goal.extend_seq = Some(seq),

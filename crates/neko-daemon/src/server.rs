@@ -927,6 +927,8 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         | Request::SetInboxAgeOutDays { .. }
         | Request::SetStandingOrders { .. }
         | Request::RoutineNotifications { .. }) => crate::routines::handle(state, request),
+        Request::AnswerNeedsYou { seq, text } => crate::inbox_reply::handle(state, seq, text),
+        request @ (Request::MorningDigest | Request::MarkDigestRead) => crate::morning_digest::handle(state, request),
         request @ (Request::PhoneSettings
         | Request::SetPhoneSettings { .. }
         | Request::PhoneRemindersSync { .. }

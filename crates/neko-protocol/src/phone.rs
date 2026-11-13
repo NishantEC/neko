@@ -20,6 +20,12 @@ pub struct PhoneSettings {
     pub quiet_enabled: bool,
     pub quiet_from_hour: u32,
     pub quiet_to_hour: u32,
+    /// The morning digest (docs/knowledge/morning-digest.md): one calm block
+    /// at the top of Home, and one push when a channel is on.
+    pub digest: bool,
+    /// Local time the digest is composed.
+    pub digest_hour: u32,
+    pub digest_minute: u32,
 }
 
 pub const DEFAULT_NTFY_SERVER: &str = "https://ntfy.sh";
@@ -35,6 +41,9 @@ impl Default for PhoneSettings {
             quiet_enabled: true,
             quiet_from_hour: 23,
             quiet_to_hour: 8,
+            digest: true,
+            digest_hour: 8,
+            digest_minute: 30,
         }
     }
 }
@@ -86,6 +95,26 @@ pub struct ReminderPlan {
     pub create: Vec<ReminderNew>,
     /// `calendarItemIdentifier`s of reminders to remove.
     pub delete: Vec<String>,
+    /// Reminders the person answered in words: the app sets these notes (the
+    /// "Got it: ..." echo) and completes the reminder, and keeps it.
+    pub finish: Vec<ReminderFinish>,
+}
+
+/// A reminder to complete with these notes.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReminderFinish {
+    pub id: String,
+    pub notes: String,
+}
+
+/// The notes of one reminder that has a line starting with `>` (the
+/// person's reply), as the app read them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReminderNote {
+    pub id: String,
+    pub notes: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

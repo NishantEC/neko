@@ -8,7 +8,7 @@
 //! person chose) and `phone_state_v1` (quiet writes: cursor, held items,
 //! reminders in flight, the send log).
 use crate::Db;
-use neko_protocol::phone::{PhoneSettings, PhoneStatus, ReminderNew, ReminderPlan, RemindersAccess, DEFAULT_NTFY_SERVER};
+use neko_protocol::phone::{PhoneSettings, PhoneStatus, ReminderFinish, ReminderNew, ReminderPlan, RemindersAccess, DEFAULT_NTFY_SERVER};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -28,6 +28,12 @@ const HELD_MAX_MS: i64 = 24 * HOUR_MS;
 /// buzz is worse than none), and so is the summary reminder after 6 hours.
 const PENDING_MAX_MS: i64 = HOUR_MS;
 const SUMMARY_REMINDER_MS: i64 = 6 * HOUR_MS;
+/// An answered reminder stays (completed, with its "Got it" echo) this long.
+const ANSWERED_KEEP_MS: i64 = 24 * HOUR_MS;
+/// The morning digest's reminder stands in for the digest this long.
+const DIGEST_REMINDER_MS: i64 = 24 * HOUR_MS;
+/// The `seq` the digest's reminder is mapped under (no item has one this big).
+pub const DIGEST_SEQ: u64 = 4_000_000_000_000;
 const MAX_TITLE: usize = 120;
 const MAX_DETAIL: usize = 300;
 const MAX_LOG: usize = 64;
@@ -43,6 +49,9 @@ pub struct Candidate {
     pub link: Option<String>,
     pub urgent: bool,
     pub since_ms: i64,
+    /// What completing the reminder does ("extend NK-14 by 10 turns"); empty
+    /// when the item has no default.
+    pub action: String,
 }
 
 /// A reminder waiting for the app to create it.
@@ -60,6 +69,12 @@ pub struct Mapped {
     pub seq: u64,
     pub id: String,
     pub created_ms: i64,
+    /// The person answered in words and the app was told to echo and complete
+    /// it; the reminder is kept (completed) until `ANSWERED_KEEP_MS` passes.
+    pub answered_ms: i64,
+    /// A hash of the last reply text looked at (used or rejected), so the
+    /// same text is never judged twice.
+    pub text_hash: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +86,8 @@ pub struct State {
     pub held: Vec<Candidate>,
     pub pending: Vec<Pending>,
     pub mapped: Vec<Mapped>,
+    /// Echoes the app has not yet written and completed.
+    pub finish: Vec<ReminderFinish>,
     /// When each push of the last hour went out.
     pub sent_ms: Vec<i64>,
     pub summary_ms: i64,
@@ -88,11 +105,16 @@ pub struct Push {
     pub detail: String,
     pub link: Option<String>,
     pub urgent: bool,
+    /// What completing the reminder does; empty for a question with no
+    /// default, a summary, a digest and a test.
+    pub action: String,
+    /// An escalation that has no default ("No default" is said in its notes).
+    pub no_default: bool,
 }
 
 impl From<&Candidate> for Push {
     fn from(c: &Candidate) -> Self {
-        Push { seq: c.seq, title: c.title.clone(), detail: c.detail.clone(), link: c.link.clone(), urgent: c.urgent }
+        Push { seq: c.seq, title: c.title.clone(), detail: c.detail.clone(), link: c.link.clone(), urgent: c.urgent, action: c.action.clone(), no_default: c.seq != 0 && c.action.is_empty() }
     }
 }
 
@@ -276,7 +298,7 @@ pub fn decide(settings: &PhoneSettings, state: &mut State, new: Vec<Candidate>, 
     if !excess.is_empty() && (state.summary_ms == 0 || env.now_ms - state.summary_ms >= HOUR_MS) {
         state.summary_ms = env.now_ms;
         let n = excess.len();
-        pushes.push(Push { seq: 0, title: format!("{n} more thing{} need{} you", if n == 1 { "" } else { "s" }, if n == 1 { "s" } else { "" }), detail: "Open Neko's Inbox.".into(), link: None, urgent: false });
+        pushes.push(Push { seq: 0, title: format!("{n} more thing{} need{} you", if n == 1 { "" } else { "s" }, if n == 1 { "s" } else { "" }), detail: "Open Neko's Inbox.".into(), link: None, urgent: false, action: String::new(), no_default: false });
     }
     // Excess beyond the summary stays in the Inbox; nothing is retried.
     state.sent_ms.extend(pushes.iter().map(|_| env.now_ms));
@@ -294,18 +316,49 @@ pub fn marker(seq: u64) -> String {
     format!("neko:{seq}")
 }
 
+/// A line that says what the two ways to answer do. Lines of the item's own
+/// text never start with `>` (see `without_reply_marks`), so every `>` line
+/// found later is the person's.
+fn how_to_answer(push: &Push) -> Option<String> {
+    if push.seq == 0 || push.seq == DIGEST_SEQ {
+        return None;
+    }
+    Some(if push.action.is_empty() {
+        "No default. Completing this only marks it seen. To answer, add a line that starts with > and your answer.".to_owned()
+    } else {
+        format!("Completing this = {}. To answer in words instead, add a line that starts with > and your answer.", push.action)
+    })
+}
+
 pub fn reminder_for(push: &Push) -> ReminderNew {
-    let mut notes = clip(&push.detail, 600);
+    let mut notes = crate::inbox::without_reply_marks(&clip(&push.detail, 600));
     if let Some(link) = &push.link {
         if !notes.is_empty() {
             notes.push_str("\n\n");
         }
         notes.push_str(link);
     }
+    if let Some(how) = how_to_answer(push) {
+        if !notes.is_empty() {
+            notes.push_str("\n\n");
+        }
+        notes.push_str(&how);
+    }
     if push.seq != 0 {
         notes.push_str(&format!("\n\n{}", marker(push.seq)));
     }
-    ReminderNew { seq: push.seq, title: clip(&push.title, MAX_TITLE), notes, url: push.link.clone(), key: crate::workbench::new_id() }
+    let title = if push.action.is_empty() { clip(&push.title, MAX_TITLE) } else { clip(&format!("{} ✓ = {}", push.title, push.action), MAX_TITLE) };
+    // A link that is not on the web (a goal's `goal:<id>`, a task's) is not a reminder URL.
+    let url = push.link.clone().filter(|l| l.starts_with("http"));
+    ReminderNew { seq: push.seq, title, notes, url, key: crate::workbench::new_id() }
+}
+
+/// A stable hash of reply text.
+pub fn hash_text(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish().max(1)
 }
 
 /// The JSON a publish to the ntfy server carries. With `titles_only` the
@@ -343,7 +396,7 @@ pub fn absorb_sync(state: &mut State, access: RemindersAccess, present: &[String
     let mut closed = Vec::new();
     state.mapped.retain(|m| {
         if done.contains(&m.id) {
-            if m.seq != 0 {
+            if m.seq != 0 && m.answered_ms == 0 {
                 closed.push(m.seq);
             }
             // Kept one more round so `plan` deletes the finished reminder.
@@ -370,15 +423,29 @@ pub fn plan(settings: &PhoneSettings, state: &mut State, open: &HashSet<u64>, co
     let delete = state
         .mapped
         .iter()
-        .filter(|m| !settings.reminders || done.contains(&m.id) || (m.seq != 0 && !open.contains(&m.seq)) || (m.seq == 0 && now_ms - m.created_ms > SUMMARY_REMINDER_MS))
+        .filter(|m| {
+            if !settings.reminders {
+                return true;
+            }
+            // An answered reminder stays, completed, so the echo can be read.
+            if m.answered_ms != 0 {
+                return now_ms - m.answered_ms > ANSWERED_KEEP_MS;
+            }
+            done.contains(&m.id)
+                || (m.seq == DIGEST_SEQ && now_ms - m.created_ms > DIGEST_REMINDER_MS)
+                || (m.seq != 0 && m.seq != DIGEST_SEQ && !open.contains(&m.seq))
+                || (m.seq == 0 && now_ms - m.created_ms > SUMMARY_REMINDER_MS)
+        })
         .map(|m| m.id.clone())
         .collect();
     let create = if settings.reminders { state.pending.iter().map(|p| p.reminder.clone()).collect() } else { Vec::new() };
-    ReminderPlan { enabled: settings.reminders, create, delete }
+    let finish = if settings.reminders { state.finish.clone() } else { Vec::new() };
+    ReminderPlan { enabled: settings.reminders, create, delete, finish }
 }
 
 /// The app did what the plan said.
-pub fn absorb_done(state: &mut State, created: &[neko_protocol::phone::ReminderCreated], deleted: &[String], now_ms: i64) {
+pub fn absorb_done(state: &mut State, created: &[neko_protocol::phone::ReminderCreated], deleted: &[String], finished: &[String], now_ms: i64) {
+    state.finish.retain(|f| !finished.contains(&f.id));
     for c in created {
         // A failed save reports an empty id: dropped, not retried every cycle.
         state.pending.retain(|p| p.reminder.key != c.key);
@@ -386,7 +453,7 @@ pub fn absorb_done(state: &mut State, created: &[neko_protocol::phone::ReminderC
             continue;
         }
         state.mapped.retain(|m| m.id != c.id);
-        state.mapped.push(Mapped { seq: c.seq, id: c.id.clone(), created_ms: now_ms });
+        state.mapped.push(Mapped { seq: c.seq, id: c.id.clone(), created_ms: now_ms, ..Default::default() });
     }
     let gone: HashSet<&String> = deleted.iter().collect();
     state.mapped.retain(|m| !gone.contains(&m.id));
@@ -422,7 +489,7 @@ mod tests {
     use super::*;
 
     fn cand(seq: u64, urgent: bool, since: i64) -> Candidate {
-        Candidate { seq, title: format!("Item {seq}"), detail: "private detail".into(), link: Some("https://example.com/x".into()), urgent, since_ms: since }
+        Candidate { seq, title: format!("Item {seq}"), detail: "private detail".into(), link: Some("https://example.com/x".into()), urgent, since_ms: since, action: String::new() }
     }
     fn on() -> PhoneSettings {
         PhoneSettings { reminders: true, ..Default::default() }
@@ -507,7 +574,7 @@ mod tests {
 
     #[test]
     fn ntfy_titles_only_never_carries_the_detail() {
-        let push = Push { seq: 1, title: "Reply to Sam".into(), detail: "secret plan".into(), link: Some("https://example.com/x".into()), urgent: false };
+        let push = Push { seq: 1, title: "Reply to Sam".into(), detail: "secret plan".into(), link: Some("https://example.com/x".into()), urgent: false, action: String::new(), no_default: true };
         let mut s = PhoneSettings { ntfy_topic: "neko-abcdefghijklmnopqrstuvwx".into(), ..Default::default() };
         let body = ntfy_body(&s, &push);
         assert_eq!(body["title"], "Reply to Sam");
@@ -548,14 +615,19 @@ mod tests {
 
     #[test]
     fn reminders_carry_notes_link_and_a_marker() {
-        let r = reminder_for(&Push { seq: 7, title: "T".into(), detail: "why".into(), link: Some("https://example.com/p".into()), urgent: false });
-        assert_eq!(r.notes, "why\n\nhttps://example.com/p\n\nneko:7");
+        let r = reminder_for(&Push { seq: 7, title: "T".into(), detail: "why".into(), link: Some("https://example.com/p".into()), urgent: false, action: String::new(), no_default: true });
+        assert!(r.notes.starts_with("why\n\nhttps://example.com/p\n\nNo default."), "{}", r.notes);
+        assert!(r.notes.ends_with("\n\nneko:7"));
+        let with = reminder_for(&Push { seq: 7, title: "Extend by 10 turns?".into(), detail: "> quoted by the agent".into(), action: "extend NK-14 by 10 turns".into(), ..Default::default() });
+        assert_eq!(with.title, "Extend by 10 turns? ✓ = extend NK-14 by 10 turns");
+        assert!(with.notes.contains("Completing this = extend NK-14 by 10 turns."));
+        assert!(crate::inbox::reply_in_notes(&with.notes).is_none(), "nothing Neko wrote counts as a reply: {}", with.notes);
         assert_eq!(r.url.as_deref(), Some("https://example.com/p"));
         assert!(!reminder_for(&Push { title: "N more".into(), ..Default::default() }).notes.contains("neko:"));
     }
 
     fn mapped(state: &mut State, seq: u64, id: &str) {
-        state.mapped.push(Mapped { seq, id: id.into(), created_ms: 0 });
+        state.mapped.push(Mapped { seq, id: id.into(), ..Default::default() });
     }
 
     #[test]
@@ -567,7 +639,7 @@ mod tests {
         assert_eq!(closed, vec![1]);
         let p = plan(&on(), &mut state, &open(&[2]), &["r1".into()], 10);
         assert_eq!(p.delete, vec!["r1".to_string()]);
-        absorb_done(&mut state, &[], &p.delete, 10);
+        absorb_done(&mut state, &[], &p.delete, &[], 10);
         assert_eq!(state.mapped.iter().map(|m| m.seq).collect::<Vec<_>>(), vec![2]);
     }
 
@@ -607,9 +679,9 @@ mod tests {
     fn created_reminders_become_mappings_and_a_failure_is_noted_once() {
         let mut state = State::default();
         state.pending.push(Pending { reminder: ReminderNew { seq: 5, ..Default::default() }, queued_ms: 0 });
-        absorb_done(&mut state, &[neko_protocol::phone::ReminderCreated { seq: 5, id: "x".into(), key: String::new() }], &[], 7);
+        absorb_done(&mut state, &[neko_protocol::phone::ReminderCreated { seq: 5, id: "x".into(), key: String::new() }], &[], &[], 7);
         assert!(state.pending.is_empty());
-        assert_eq!(state.mapped, vec![Mapped { seq: 5, id: "x".into(), created_ms: 7 }]);
+        assert_eq!(state.mapped, vec![Mapped { seq: 5, id: "x".into(), created_ms: 7, ..Default::default() }]);
         let err: Result<(), String> = Err("down".into());
         assert!(note_outcome(&mut state, "ntfy", &err, 1), "first failure is news");
         assert!(!note_outcome(&mut state, "ntfy", &err, 2), "the same failure is not");
@@ -627,7 +699,7 @@ mod tests {
         state.pending.push(Pending { reminder: a.clone(), queued_ms: 0 });
         state.pending.push(Pending { reminder: b.clone(), queued_ms: 0 });
         let created = [neko_protocol::phone::ReminderCreated { seq: 0, id: "s1".into(), key: a.key.clone() }, neko_protocol::phone::ReminderCreated { seq: 0, id: String::new(), key: b.key.clone() }];
-        absorb_done(&mut state, &created, &[], 5);
+        absorb_done(&mut state, &created, &[], &[], 5);
         assert!(state.pending.is_empty(), "both leave the queue, the failed one too");
         assert_eq!(state.mapped.len(), 1);
         assert!(plan(&on(), &mut state, &open(&[]), &[], 6).create.is_empty());
