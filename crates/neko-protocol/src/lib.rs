@@ -1142,6 +1142,9 @@ pub enum Response {
         /// The master switch (`SetRoutinesOn`); old daemons never sent it.
         #[serde(default = "routines_on_default")]
         routines_on: bool,
+        /// Today's reported spend (tickets and routine runs) against the daily ceiling.
+        #[serde(default)]
+        spend_today: routines::SpendToday,
     },
     RoutineNotifications {
         items: Vec<routines::RoutineNotice>,

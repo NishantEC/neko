@@ -1209,7 +1209,8 @@ fn views(state: &AppState) -> Result<Response, String> {
         }
     }
     let routines_on = core::master_on(&db, &store);
-    Ok(Response::Routines { routines, standing_orders: orders, scopes, owner_name: core::owner_name(), age_out_days: store.age_out_days(), routines_on })
+    let spend_today = neko_core::workbench::load(&db).map(|snapshot| neko_core::spend::today(&db, &snapshot, neko_core::workbench::now_ms())).map(|t| neko_protocol::routines::SpendToday { tasks_usd: t.tasks_usd, routines_usd: t.routines_usd, ceiling_cents: t.ceiling_cents, held: t.reached() }).unwrap_or_default();
+    Ok(Response::Routines { routines, standing_orders: orders, scopes, owner_name: core::owner_name(), age_out_days: store.age_out_days(), routines_on, spend_today })
 }
 
 fn notifications(state: &AppState, after: u64) -> Result<Response, String> {

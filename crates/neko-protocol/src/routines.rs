@@ -97,6 +97,16 @@ pub struct RoutineState {
     pub missed: Option<Missed>,
 }
 
+/// What today's model use cost as agents reported it, and the ceiling (`Snapshot::daily_budget_cents`).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]
+pub struct SpendToday {
+    pub tasks_usd: f64,
+    pub routines_usd: f64,
+    pub ceiling_cents: Option<u32>,
+    /// The ceiling is reached: new goal turns and routine runs wait.
+    pub held: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Hold {
     pub until_ms: i64,

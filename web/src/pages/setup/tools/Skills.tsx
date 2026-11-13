@@ -11,7 +11,14 @@ import { EmptyBlock, ErrorNote, FormField, PanelFooter, Row } from "@/setup/kit"
 import { Panel } from "@/setup/kit";
 import { arr, skillsCmd, str, useRun } from "@/setup/lib";
 
-function SkillRow({ skill, workspace, enabled, run, busy }: { skill: Json; workspace: string; enabled: Json[]; run: (s: () => Promise<Json>) => Promise<boolean>; busy: boolean }) {
+const CURATOR_WORDS: Record<string, string> = {
+  neko: "Neko wrote this skill. Its daily curator tidies accumulated lessons by itself and keeps what it removes in an Archive section.",
+  locked: "Locked: the curator only proposes changes to this skill, and you accept them.",
+  edited: "You edited this by hand, so it is locked: the curator only proposes changes, and you accept them.",
+  other: "Not written by Neko: the curator only proposes changes, and you accept them.",
+};
+
+function SkillRow({ skill, workspace, enabled, run, busy, curated }: { skill: Json; workspace: string; enabled: Json[]; run: (s: () => Promise<Json>) => Promise<boolean>; busy: boolean; curated?: Json }) {
   const [open, setOpen] = useState(false);
   const record = enabled.find((e) => e.workspace_id === workspace && e.path === skill.path);
   const changed = !!record && record.content_hash !== skill.content_hash;
@@ -43,6 +50,14 @@ function SkillRow({ skill, workspace, enabled, run, busy }: { skill: Json; works
               </Button>
             ) : null}
           </div>
+          {curated ? (
+            <div data-slot="skill-curator-state" data-state={str(curated.state)} className="flex flex-wrap items-center gap-3">
+              <p className="min-w-0 flex-1 text-xs text-muted-foreground">{CURATOR_WORDS[str(curated.state)] ?? CURATOR_WORDS.other}</p>
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => void run(() => skillsCmd("SetLocked", { path: skill.path, locked: str(curated.state) === "neko" || str(curated.state) === "other" }))}>
+                {str(curated.state) === "locked" || str(curated.state) === "edited" ? "Unlock for the curator" : "Lock against the curator"}
+              </Button>
+            </div>
+          ) : null}
           <p className="text-xs text-muted-foreground">Open the file in your editor to read it before enabling: this page cannot open local files.</p>
         </div>
       </CollapsibleContent>
@@ -109,6 +124,9 @@ export function SkillsTab({ snapshot, workspace }: { snapshot: Json; workspace: 
   );
   const unavailable = enabled.filter((r) => r.workspace_id === workspace && !available.some((a) => a.path === r.path && (!str(a.workspace_id) || a.workspace_id === workspace)));
   const proposals = arr(snapshot.skills?.proposals).filter((p) => p.workspace_id === workspace);
+  const curator = (snapshot.skills?.curator ?? {}) as Json;
+  const curated = arr(curator.skills);
+  const recent = arr(curator.recent);
 
   return (
     <div className="flex flex-col gap-6">
@@ -130,7 +148,7 @@ export function SkillsTab({ snapshot, workspace }: { snapshot: Json; workspace: 
       ))}
       {visible.length > 0 ? (
         <Panel>
-          {visible.map((s) => <SkillRow key={str(s.path)} skill={s} workspace={workspace} enabled={enabled} run={run} busy={busy} />)}
+          {visible.map((s) => <SkillRow key={str(s.path)} skill={s} workspace={workspace} enabled={enabled} run={run} busy={busy} curated={curated.find((c) => c.path === s.path)} />)}
         </Panel>
       ) : (
         <EmptyBlock icon={Books} title={search ? `No skills match “${search}”` : "No local skills available yet"} description={search ? undefined : "Refresh local skills, or fetch an instruction file below."} />
@@ -152,6 +170,25 @@ export function SkillsTab({ snapshot, workspace }: { snapshot: Json; workspace: 
             </PanelFooter>
           </CollapsibleContent>
         </Collapsible>
+      </Panel>
+      <Panel data-slot="skill-curator">
+        <Row title="Skill curator" description="Once a day, when the Mac is idle, tidies the lessons a skill has gathered: merges duplicates and drops what a newer lesson contradicts. Changes show as a diff. It applies by itself only to skills Neko wrote and you have not edited; everything else is a proposal. Nothing is deleted: removed text moves to an Archive section.">
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void run(() => skillsCmd("SetCurator", { on: !curator.on }))}>{curator.on === false ? "Turn the curator on" : "Turn the curator off"}</Button>
+            <span className="text-xs text-muted-foreground">{curator.on === false ? "Off." : curator.last_run_ms ? `Last pass ${new Date(Number(curator.last_run_ms)).toLocaleString()}.` : "Has not run yet."}</span>
+          </div>
+        </Row>
+        {recent.slice(0, 3).map((r) => (
+          <Collapsible key={`${str(r.path)}:${r.at_ms}`} data-slot="skill-curator-applied">
+            <CollapsibleTrigger render={<button type="button" className="flex min-h-10 w-full items-center gap-3 rounded-[10px] px-3 text-start text-[13px] outline-none transition-colors hover:bg-foreground/[0.03] focus-visible:ring-2 focus-visible:ring-ring" />}>
+              <span className="min-w-0 flex-1 truncate">Tidied {str(r.name)}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">{new Date(Number(r.at_ms)).toLocaleDateString()}</span>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <pre className="mx-3 mb-3 max-h-60 overflow-auto whitespace-pre-wrap rounded-[10px] bg-foreground/[0.03] p-3 font-mono text-xs" aria-label="Applied changes">{str(r.diff)}</pre>
+            </CollapsibleContent>
+          </Collapsible>
+        ))}
       </Panel>
       {proposals.length > 0 ? (
         <Panel>

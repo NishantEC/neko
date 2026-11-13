@@ -279,6 +279,13 @@ function BudgetPanel({ snapshot }: { snapshot: Json }) {
   const [text, setText] = useState(savedText);
   useEffect(() => setText(savedText), [savedText]);
   const { run, busy, error, clear } = useRun();
+  const dailyCents = snapshot.daily_budget_cents;
+  const dailySaved = dailyCents == null ? "" : (num(dailyCents) / 100).toFixed(2);
+  const [dailyText, setDailyText] = useState(dailySaved);
+  useEffect(() => setDailyText(dailySaved), [dailySaved]);
+  const dailyClean = dailyText.trim().replace(/^\$/, "");
+  const dailyDollars = dailyClean === "" ? null : Number(dailyClean);
+  const dailyInvalid = dailyDollars !== null && !(Number.isFinite(dailyDollars) && dailyDollars >= 0.01 && dailyDollars <= 10000);
   const clean = text.trim().replace(/^\$/, "");
   const dollars = clean === "" ? null : Number(clean);
   const invalid = dollars !== null && !(Number.isFinite(dollars) && dollars >= 0.01 && dollars <= 1000);
@@ -298,6 +305,14 @@ function BudgetPanel({ snapshot }: { snapshot: Json }) {
           </form>
         </SettingRow>
         {invalid ? <p className="px-3 py-3 text-[13px] text-warning-foreground">Enter an amount between 0.01 and 1000, or leave it empty.</p> : null}
+        <SettingRow id="daily-ceiling" title="Pause new work for the day at" description="When today’s reported cost (tickets and routine runs, local day) reaches this, new goal turns and routine runs wait until tomorrow and one Inbox item asks whether to raise it. Work already running finishes. Off when empty.">
+          <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (!dailyInvalid) void run(() => command("SetDailyBudget", { cents: dailyDollars === null ? null : Math.round(dailyDollars * 100) })); }}>
+            <span className="font-mono text-[13px] text-muted-foreground">US$</span>
+            <Input aria-label="Daily ceiling in US dollars" inputMode="decimal" value={dailyText} onChange={(e) => setDailyText(e.target.value)} placeholder="Off" aria-invalid={dailyInvalid} className="h-8 w-28 font-mono" />
+            <Button type="submit" size="sm" variant="outline" disabled={busy || dailyInvalid || dailyClean === (dailySaved === "" ? "" : dailySaved)}>Save ceiling</Button>
+          </form>
+        </SettingRow>
+        {dailyInvalid ? <p className="px-3 py-3 text-[13px] text-warning-foreground">Enter an amount between 0.01 and 10000, or leave it empty.</p> : null}
         <SettingRow id="tickets-at-once" title="Tasks at once" description="Other tasks wait their turn and start as running ones finish. Work already running is not stopped.">
           <Pick label="Tasks at once" value={String(snapshot.max_running_tickets ?? 0)} onChange={(v) => void limit("SetMaxRunningTickets", v)} options={options([1, 2, 3, 5], snapshot.max_running_tickets, "No limit")} disabled={busy} />
         </SettingRow>

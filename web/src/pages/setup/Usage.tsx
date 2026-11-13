@@ -177,8 +177,24 @@ function spendOf(tasks: Json[], now: number): Spend {
 const usd = (n: number) => `$${n >= 100 ? n.toFixed(0) : n.toFixed(2)}`;
 const compact = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
 
+/** Today's reported spend (tickets and routine runs) against the daily ceiling, from the daemon. */
+function useSpendToday(): Json | null {
+  const [today, setToday] = useState<Json | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const read = () => request("Routines").then((reply) => { if (alive && reply?.Routines?.spend_today) setToday(reply.Routines.spend_today as Json); }, () => {});
+    void read();
+    const timer = window.setInterval(read, 60_000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, []);
+  return today;
+}
+
 function SpendSection({ snapshot, now }: { snapshot: Json; now: number }) {
   const spend = useMemo(() => spendOf(arr(snapshot.tasks), now), [snapshot.tasks, now]);
+  const today = useSpendToday();
+  const todayTotal = today ? num(today.tasks_usd) + num(today.routines_usd) : 0;
+  const ceiling = today?.ceiling_cents == null ? null : num(today.ceiling_cents) / 100;
   const budgetCents = snapshot.task_budget_cents as number | null | undefined;
   const budget = budgetCents == null ? null : budgetCents / 100;
   const top = spend.tasks[0];
@@ -188,6 +204,14 @@ function SpendSection({ snapshot, now }: { snapshot: Json; now: number }) {
     <Section title={<span title="Read from the cost each Claude Code and OpenCode run reports. Codex subscriptions don’t report a price, so their runs aren’t counted here.">Spend</span>}>
       <Panel data-slot="spend-figures">
         {/* With nothing priced yet, zeros say nothing (DESIGN.md §8 rule 11): only the budget, and one line under it. */}
+ {today && (todayTotal > 0 || ceiling != null) ? (
+          <Figure
+            label="Today"
+            value={usd(todayTotal)}
+            tone={today.held ? "error" : ceiling != null && todayTotal >= ceiling * 0.8 ? "warning" : "neutral"}
+            detail={`${ceiling == null ? "No daily ceiling. Set one in Settings → AI & agents." : today.held ? `Ceiling of ${usd(ceiling)} reached: new goal turns and routine runs wait until tomorrow.` : `of a ${usd(ceiling)} daily ceiling`}${num(today.routines_usd) > 0 ? ` · ${usd(num(today.routines_usd))} from routines` : ""}`}
+          />
+        ) : null}
         {hasData ? <Figure label="Recorded spend" value={usd(spend.total)} detail={`${spend.runs} priced ${spend.runs === 1 ? "run" : "runs"} · ${compact(spend.tokensIn)} in · ${compact(spend.tokensOut)} out`} /> : null}
         {hasData ? <Figure label="Last 7 days" value={usd(spend.week)} detail={spend.week > 0 ? "Across every task" : "Nothing priced this week"} /> : null}
         <Figure

@@ -13,6 +13,12 @@ export function routineStatus(view: Json): [StatusKind, string] {
   if (state?.running) return ["inProgress", "Running"];
   if (state?.run_requested) return ["todo", "Queued"];
   if (!routine?.enabled) return ["backlog", "Paused"];
+  // Parked by a usage limit: not a failure, said quietly with when it resumes.
+  if (state?.hold?.until_ms > Date.now()) {
+    const at = new Date(state.hold.until_ms);
+    const sameDay = at.toDateString() === new Date().toDateString();
+    return ["backlog", `Held until ${at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}${sameDay ? "" : ` ${at.toLocaleDateString([], { weekday: "short" })}`} (${state.hold.reason || "usage limit"})`];
+  }
   if (!last) return ["backlog", "Not run yet"];
   if (!last.ok) return ["failed", "Failed"];
   return ["done", last.quiet ? "Quiet" : "Acted"];
