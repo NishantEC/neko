@@ -310,6 +310,49 @@ function BudgetPanel({ snapshot }: { snapshot: Json }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Inbox clean-up: how long a needs-you item may sit untouched
+// ---------------------------------------------------------------------------
+
+const AGE_OUT_CHOICES = [3, 7, 14, 30];
+
+function InboxPanel() {
+  const [days, setDays] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const take = (reply: Json) => { if (reply?.Routines) setDays(num(reply.Routines.age_out_days)); };
+  useEffect(() => {
+    let alive = true;
+    request("Routines").then((reply) => { if (alive) take(reply); }, (e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); });
+    return () => { alive = false; };
+  }, []);
+  const choose = async (value: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      take(await request({ SetInboxAgeOutDays: { days: Number(value) } }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const options: Option[] = [
+    { value: "0", label: "Never" },
+    ...Array.from(new Set([...AGE_OUT_CHOICES, ...(days ? [days] : [])])).sort((a, b) => a - b).map((n) => ({ value: String(n), label: `${n} days` })),
+  ];
+  return (
+    <Panel data-slot="inbox-clean-up">
+      <div className="flex flex-col">
+        <SettingRow id="inbox-age-out" title="Inbox items age out after" description="An item in your Inbox that nothing has touched for this long closes itself and moves to Closed recently, where you can reopen it. A routine that still needs you can report it again. Items also close when their pull request is merged or closed, or when the time they were tied to has passed.">
+          <Pick label="Inbox items age out after" value={String(days ?? 7)} onChange={(v) => void choose(v)} options={options} disabled={busy || days === null} />
+        </SettingRow>
+      </div>
+      {error ? <div className="px-3 py-2"><ErrorNote error={error} title="Couldn’t save" onDismiss={() => setError(null)} /></div> : null}
+    </Panel>
+  );
+}
+
 function WorkStylePanel({ snapshot }: { snapshot: Json }) {
   const { run, busy, error, clear } = useRun();
   const [confirm, setConfirm] = useState(false);
@@ -382,6 +425,9 @@ export function AiSection() {
       </Section>
       <Section title="Budget & limits">
         <BudgetPanel snapshot={snapshot} />
+      </Section>
+      <Section title="Inbox clean-up">
+        <InboxPanel />
       </Section>
       <Section title="How work starts">
         <WorkStylePanel snapshot={snapshot} />

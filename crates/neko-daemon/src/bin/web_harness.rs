@@ -98,6 +98,12 @@ fn main() {
     if self_update {
         self_update::spawn(state.clone());
     }
+    // The routines get their runs here, not from an agent: open items and
+    // items closed for each reason, so the Inbox's "Closed recently" shows.
+    if let Err(e) = seed_inbox(&state) {
+        eprintln!("web-harness: cannot seed the inbox: {e}");
+        std::process::exit(1);
+    }
     // A reply is "in progress" for the whole run, so a message sent from the
     // web composer queues behind it and no model, `gh` or agent ever starts.
     // `NEKO_WEB_SCRIPTED=1` instead answers every message with a scripted
@@ -118,6 +124,40 @@ fn main() {
         let state = state.clone();
         std::thread::spawn(move || server::handle_connection(state, stream));
     }
+}
+
+/// Made-up Inbox items on the home scope's first routine: three open, and
+/// closed ones with each reason (plus one closed long ago, which stays hidden).
+fn seed_inbox(state: &server::AppState) -> Result<(), String> {
+    use neko_core::inbox;
+    use neko_protocol::routines::{NeedsYou, RoutineRun};
+    // Asking for the routines creates the home scope's.
+    routines::handle(state, neko_protocol::Request::Routines);
+    let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let store = neko_core::routines::load(&db)?;
+    let routine = store.routines.first().ok_or("no routine was seeded")?;
+    let now = neko_core::workbench::now_ms();
+    let item = |seq: u64, title: &str, detail: &str, link: Option<&str>, reason: Option<(&str, i64)>, expires: Option<i64>| {
+        let mut item = NeedsYou { seq, title: title.into(), detail: detail.into(), link: link.map(Into::into), created_ms: now - 2 * inbox::DAY_MS, touched_ms: now - 2 * inbox::DAY_MS, expires_ms: expires, ..Default::default() };
+        if let Some((why, ago)) = reason {
+            inbox::close(&mut item, why, now - ago);
+        }
+        item
+    };
+    let hour = 3_600_000;
+    let items = vec![
+        item(1, "Review the retry change", "Reviewer asked for a second look. Pull request: acme/widgets#42.", Some("https://example.com/acme/widgets/pull/42"), None, None),
+        item(2, "Reply before the 3pm call", "Sam is waiting on the budget numbers.", None, None, Some(now + 4 * hour)),
+        item(3, "Enable the calendar API", "The calendar server needs the API enabled for its project.", None, None, None),
+        item(4, "Review the schema change", "acme/widgets#40 was waiting on you.", None, Some((inbox::PR_MERGED, 2 * hour)), None),
+        item(5, "Reply before standup", "Quick question about the rollout.", None, Some((inbox::EXPIRED, 5 * hour)), None),
+        item(6, "Ask about the old launch plan", "Nobody has touched this for a week.", None, Some((inbox::AGED_OUT, 26 * hour)), None),
+        item(7, "Sign in to the issue tracker", "The token expired.", None, Some((inbox::BY_ROUTINE, 30 * hour)), None),
+        item(8, "Check the staging deploy", "You handled it.", None, Some((inbox::BY_YOU, 50 * hour)), None),
+        item(9, "Closed long ago", "Past the window.", None, Some((inbox::BY_YOU, 10 * inbox::DAY_MS)), None),
+    ];
+    let run = RoutineRun { id: "seed-run".into(), routine_id: routine.id.clone(), started_ms: now - hour, finished_ms: Some(now - hour), ok: true, needs_you: items, ..Default::default() };
+    neko_core::routines::push_run(&db, &routine.id, run)
 }
 
 /// Sample self-update state: an applied update, a rollback, and an update

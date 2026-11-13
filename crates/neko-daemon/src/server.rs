@@ -894,6 +894,8 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         | Request::RunRoutineNow { .. }
         | Request::SetRoutineEnabled { .. }
         | Request::ClearNeedsYou { .. }
+        | Request::ReopenNeedsYou { .. }
+        | Request::SetInboxAgeOutDays { .. }
         | Request::SetStandingOrders { .. }
         | Request::RoutineNotifications { .. }) => crate::routines::handle(state, request),
         Request::SetCalendarEvents { events, source, access } => {

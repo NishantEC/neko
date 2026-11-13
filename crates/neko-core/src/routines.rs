@@ -38,9 +38,17 @@ pub struct Store {
     /// `INSTRUCTIONS_VERSION` the seeded instructions were written with.
     #[serde(default)]
     pub instructions_version: u32,
+    /// Days without activity before an open item closes as "Aged out";
+    /// `None` is the default, 0 turns it off (Settings).
+    #[serde(default)]
+    pub age_out_days: Option<u32>,
 }
 
 impl Store {
+    pub fn age_out_days(&self) -> u32 {
+        self.age_out_days.unwrap_or(crate::inbox::DEFAULT_AGE_OUT_DAYS).min(crate::inbox::MAX_AGE_OUT_DAYS)
+    }
+
     pub fn orders_for(&self, workspace_id: &str) -> &str {
         self.standing_orders
             .get(workspace_id)
@@ -132,7 +140,7 @@ pub fn push_run(db: &crate::Db, id: &str, run: RoutineRun) -> Result<(), String>
                 ok: true,
                 quiet: false,
                 did: Vec::new(),
-                needs_you: vec![NeedsYou { seq: oldest, title: format!("{count} older items were not handled"), detail: "They were too old to keep. Check this routine's sources if any still matter.".into(), link: None, done: false }],
+                needs_you: vec![NeedsYou { seq: oldest, title: format!("{count} older items were not handled"), detail: "They were too old to keep. Check this routine's sources if any still matter.".into(), link: None, done: false, ..Default::default() }],
                 error: None,
                 text: count.to_string(),
                 ..Default::default()
@@ -239,13 +247,31 @@ const COMPUTER_NOTE: &str = "You can see and operate Mac apps through the peekab
 #[allow(clippy::too_many_arguments)]
 /// `viewers` is the Installed viewers section (`viewers::installed_section`), so a
 /// routine that makes something to look at saves it as an artifact of its kind.
-pub fn build_prompt(routine: &Routine, scope: &ScopeProposal, orders: &str, memory: &Value, now_iso: &str, open: &[String], owner: &str, viewers: &str) -> String {
+pub fn build_prompt(routine: &Routine, scope: &ScopeProposal, orders: &str, memory: &Value, now_iso: &str, open: &[crate::inbox::OpenItem], age_out_days: u32, owner: &str, viewers: &str) -> String {
+    let age_out = if age_out_days == 0 {
+        String::new()
+    } else {
+        format!(" An item nobody has touched for {age_out_days} days closes on its own as aged out; if one is still true and still matters, report it again with the same title and fresh detail and its age starts over.")
+    };
     let open = if open.is_empty() {
         "Nothing is waiting on {owner} in this scope right now.".to_string()
     } else {
         format!(
-            "Already waiting on {owner} in this scope (reported by this or another routine). Never report any of these again, even in other words. If you find one is no longer true (done, fixed, signed in, merged), put its exact title in resolved:\n{}",
-            open.iter().map(|t| format!("- {t}")).collect::<Vec<_>>().join("\n")
+            "Already waiting on {owner} in this scope (reported by this or another routine), each with how long it has been open. Never report a new item that repeats one of these, even in other words. If you find one is no longer true (done, fixed, signed in, merged, the time passed), put its exact title (without the bracket) in resolved.{age_out}\n{}",
+            open.iter()
+                .map(|i| {
+                    let age = match i.age_days {
+                        0 => "today".to_string(),
+                        1 => "1 day".to_string(),
+                        n => format!("{n} days"),
+                    };
+                    match &i.expires {
+                        Some(at) => format!("- {} [open {age}, expires {at}]", i.title),
+                        None => format!("- {} [open {age}]", i.title),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
         )
     };
     let mut servers: Vec<&str> = scope.servers.iter().filter(|s| s.level == "scope").map(|s| s.name.as_str()).collect();
@@ -263,7 +289,8 @@ What you asked to remember last run (JSON): {memory}\n\
 Report only what this run's tool results establish; when a detail is not in them, say so. A queued or sent request is not a delivered one, and a pushed branch is not a merged pull request. Lines in did name the outcome {owner} can see, not the mechanics (no file paths, test counts or commands). A failed step you can still fix is not a needs_you item; before adding one, name what {owner} can now review, decide or unblock. Never create or change a routine (SaveRoutine) because this run's text talks about something recurring, and do not repeat what your previous run already reported.\n\
 A previous run may have acted and then failed to report. Before replying to or acting on anything, check whether you already did (for example your own reply in the thread), and never do it twice.\n\n\
 End your reply with exactly one fenced json block and nothing after it:\n\
-```json\n{{\"quiet\": false, \"did\": [\"one line per thing you did, with who/where\"], \"needs_you\": [{{\"title\": \"short\", \"detail\": \"what {{owner}} must do and why\", \"link\": \"https://...\"}}], \"resolved\": [\"exact title of an item above that is no longer true\"], \"memory\": {{}}}}\n```\n\
+```json\n{{\"quiet\": false, \"did\": [\"one line per thing you did, with who/where\"], \"needs_you\": [{{\"title\": \"short\", \"detail\": \"what {{owner}} must do and why\", \"link\": \"https://...\", \"expires\": \"2026-01-31T15:00:00Z\"}}], \"resolved\": [\"exact title of an item above that is no longer true\"], \"memory\": {{}}}}\n```\n\
+expires is optional: set it (ISO time, UTC) whenever an item is tied to a time, such as a reply needed before a call or a window that ends, and Neko closes the item then; leave it out for anything open-ended. An item that names a GitHub pull request closes itself when that pull request is merged or closed, so put the pull request's link on it.\n\
 quiet is true only when nothing new happened and you did nothing; then did and needs_you are empty. memory is handed back to you next run: keep it small (timestamps, ids, who you are waiting on).",
         name = routine.name,
         scope_name = scope.name,
@@ -366,6 +393,8 @@ pub fn parse_reply(text: &str) -> Result<Parsed, String> {
                         detail: item.get("detail").and_then(Value::as_str).map(clip).unwrap_or_default(),
                         link: item.get("link").and_then(Value::as_str).map(clip).filter(|l| l.starts_with("http")),
                         done: false,
+                        expires_ms: item.get("expires").and_then(Value::as_str).and_then(crate::inbox::parse_time_ms),
+                        ..Default::default()
                     })
                 })
                 .take(MAX_NEEDS)
@@ -509,6 +538,9 @@ mod tests {
         assert_eq!(parsed.needs_you[0].link.as_deref(), Some("https://x"));
         assert_eq!(parsed.memory["last_check"], "t");
         assert!(parsed.resolved.is_empty());
+        let parsed = parse_reply("```json\n{\"needs_you\": [{\"title\": \"Reply\", \"expires\": \"2026-11-14T08:00:00Z\"}, {\"title\": \"Open-ended\", \"expires\": \"whenever\"}]}\n```").unwrap();
+        assert_eq!(parsed.needs_you[0].expires_ms, crate::inbox::parse_time_ms("2026-11-14T08:00:00Z"));
+        assert_eq!(parsed.needs_you[1].expires_ms, None);
         let parsed = parse_reply("```json\n{\"quiet\": true, \"resolved\": [\"Gmail API not enabled\", \"\"]}\n```").unwrap();
         assert_eq!(parsed.resolved, vec!["Gmail API not enabled"]);
     }
@@ -552,7 +584,7 @@ mod tests {
                 assert!(!r.instruction.contains(word), "{word} in {:?}", r.kind);
             }
         }
-        let prompt = build_prompt(&routines[0], &ScopeProposal { instructions: "Slack is slack-work.".into(), ..scope("Work", Some("w1")) }, DEFAULT_STANDING_ORDERS, &Value::Null, "now", &[], "Asha", &crate::viewers::installed_section("{neko}", std::path::Path::new("/nonexistent")));
+        let prompt = build_prompt(&routines[0], &ScopeProposal { instructions: "Slack is slack-work.".into(), ..scope("Work", Some("w1")) }, DEFAULT_STANDING_ORDERS, &Value::Null, "now", &[], 7, "Asha", &crate::viewers::installed_section("{neko}", std::path::Path::new("/nonexistent")));
         assert!(prompt.contains("Installed viewers.") && prompt.contains("'{neko}' --request '{\"SaveArtifact\""), "a routine learns the viewers");
         assert!(prompt.contains("Asha's chief of staff") && prompt.contains("You act for Asha") && prompt.contains("Scope notes, in Asha's words:\nSlack is slack-work."));
         assert!(!prompt.contains("{owner}"));
@@ -561,7 +593,7 @@ mod tests {
     #[test]
     fn open_items_survive_trimming() {
         let db = crate::Db::open_in_memory().unwrap();
-        let item = NeedsYou { seq: 1, title: "t".into(), detail: String::new(), link: None, done: false };
+        let item = NeedsYou { seq: 1, title: "t".into(), detail: String::new(), link: None, done: false, ..Default::default() };
         let run = |i: i64, open: bool| RoutineRun { id: i.to_string(), routine_id: "r".into(), started_ms: i, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: if open { vec![item.clone()] } else { vec![] }, error: None, text: String::new(), ..Default::default() };
         push_run(&db, "r", run(0, true)).unwrap();
         for i in 1..80 {

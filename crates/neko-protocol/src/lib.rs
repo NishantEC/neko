@@ -619,6 +619,18 @@ pub enum Request {
         run_id: String,
         seq: u64,
     },
+    /// Brings a closed needs-you item back (it stays open until you close
+    /// it, or until it ages out).
+    ReopenNeedsYou {
+        routine_id: String,
+        run_id: String,
+        seq: u64,
+    },
+    /// Days without activity before an open needs-you item closes itself as
+    /// "Aged out"; 0 keeps items until they are handled.
+    SetInboxAgeOutDays {
+        days: u32,
+    },
     /// Plain-language rules every routine in this workspace follows.
     SetStandingOrders {
         workspace_id: String,
@@ -1073,6 +1085,9 @@ pub enum Response {
         /// so a page can show them as the agent reads them.
         #[serde(default)]
         owner_name: String,
+        /// `SetInboxAgeOutDays`, 7 unless changed.
+        #[serde(default)]
+        age_out_days: u32,
     },
     RoutineNotifications {
         items: Vec<routines::RoutineNotice>,

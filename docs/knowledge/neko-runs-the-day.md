@@ -79,6 +79,48 @@ and "there is no restriction. It can do whatever it wants". Design:
   names read from the user's own config are disabled. The home chat
   (`workbench.rs`, a Claude runtime) shares the same row: auth failure retries
   that turn on Codex, and a known-bad login skips Claude.
+- **The Inbox cleans itself** (2026-11-13). 41 items were open when the owner
+  tidied by hand; 24 could go (merged or closed PRs, passed times, week-old
+  chat asks, repeats of one setup failure). Routines almost never used
+  `resolved`, so Neko now closes items itself (`neko_core::inbox` holds the
+  rules, daemon `routines.rs` applies them). `NeedsYou` gained serde-default
+  fields: `created_ms`, `touched_ms`, `expires_ms`, `closed_ms`, `reason`
+  (why it closed) and `kept` (the owner reopened it). Items stay inside the
+  run rows, not the snapshot. Closing sets `done` and a reason: "PR merged",
+  "PR closed", "Expired", "Aged out", "Resolved by routine", "Done by you".
+  - **Linked work.** An item whose link or detail names a pull request
+    (`github.com/o/r/pull/n` or `o/r#n`, at most 3) closes once all of them
+    are merged or closed. `sweep_prs` runs on its own thread every 15 min,
+    makes at most 6 `gh pr view --json state` calls per sweep (never in
+    tests, never while the steward holds) and caches the answers in one small
+    row, `inbox_pr_state_v1` (merged/closed kept, open re-read after 15 min).
+    The existing `workbench_pull_request_status_v1` row only covers tasks'
+    own PRs, so it could not be reused.
+  - **Time.** The reply contract's optional `expires` (ISO, UTC; also a bare
+    date or an offset-less time) becomes `expires_ms`; the prompt tells
+    routines to set it for anything tied to a time. Past it, the item closes
+    as Expired (unless reopened). `sweep_time` runs every 5 min and reads rows
+    only.
+  - **Age-out.** No activity (`touched_ms`, else `created_ms`, else the run's
+    start for old items) for N days closes it as Aged out. N defaults to 7,
+    `Store::age_out_days` in the `routines_v1` row, changed by
+    `SetInboxAgeOutDays` (Settings → AI & agents → Inbox clean-up; 0 =
+    never, max 90). The prompt lists each open item with its age (and
+    expiry) and says a routine can report an item again with the same title
+    to restart its age.
+  - **No repeats.** A reply's items that match an open one are not added:
+    the open item is refreshed (newer detail, link, `touched_ms`; the `seq`
+    stays, so no second notification). Match = `duplicates::normalized_title`
+    within a scope, or the same `setup_key` in any scope (a title with a
+    marker word such as enable / auth / token / expired, minus filler, names
+    the connection: "Enable Google Calendar API" = "Google Calendar needs
+    re-auth"). Two copies inside one reply collapse too.
+  - **See and undo.** Inbox has a collapsed "Closed recently" group (3 days;
+    `runs_for_view` keeps runs with recently closed items) with the reason
+    and a Reopen row action and menu item (`ReopenNeedsYou`). Reopened items
+    are `kept`: a merged PR or passed time will not close them again, age-out
+    still will.
+  - Harness: `seed_inbox` in `web_harness.rs`, area `scripts/verify/inbox.mjs`.
 - **Polling is cheap:** scopes read only workspaces and folders
   (`workbench::load_workspaces`), and discovery is cached on the mtimes of
   `~/.claude.json` and `~/Documents` (10 min at most). A half-written

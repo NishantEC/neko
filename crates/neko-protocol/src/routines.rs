@@ -78,7 +78,7 @@ pub struct RoutineState {
     pub failures: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NeedsYou {
     /// Global and increasing, so a client can ask for what is new.
     pub seq: u64,
@@ -88,6 +88,28 @@ pub struct NeedsYou {
     pub link: Option<String>,
     #[serde(default)]
     pub done: bool,
+    /// When the item was raised. 0 on items from before these fields: the
+    /// run's start stands in.
+    #[serde(default)]
+    pub created_ms: i64,
+    /// The last time a run reported it again or the owner reopened it. Age
+    /// is counted from here.
+    #[serde(default)]
+    pub touched_ms: i64,
+    /// A time after which the item no longer matters (the routine's
+    /// `expires`); it closes as "Expired".
+    #[serde(default)]
+    pub expires_ms: Option<i64>,
+    /// When it closed, and why ("PR merged", "Expired", "Aged out",
+    /// "Resolved by routine", "Done by you"). Set together with `done`.
+    #[serde(default)]
+    pub closed_ms: Option<i64>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// Reopened by the owner: a merged PR or a passed time no longer closes
+    /// it again (only age-out and the owner do).
+    #[serde(default)]
+    pub kept: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -187,7 +209,7 @@ mod tests {
             ok: true,
             quiet: false,
             did: vec!["Replied to Asha".into()],
-            needs_you: vec![NeedsYou { seq: 3, title: "Sign in".into(), detail: "Jira".into(), link: None, done: false }],
+            needs_you: vec![NeedsYou { seq: 3, title: "Sign in".into(), detail: "Jira".into(), link: None, done: false, ..Default::default() }],
             error: None,
             text: String::new(),
             ..Default::default()

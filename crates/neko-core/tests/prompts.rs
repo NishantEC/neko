@@ -150,9 +150,9 @@ fn every_seeded_routine() {
     let seeded = routines::seeds(std::slice::from_ref(&scope), home);
     assert_eq!(seeded.len(), 5, "messages, brief, PR sweep, reflect, Mac care");
     let memory = serde_json::json!({"last_check": "2026-11-08T08:30:00Z"});
-    let open = vec!["Sign in to the issue tracker".to_owned()];
+    let open = vec![neko_core::inbox::OpenItem { title: "Sign in to the issue tracker".to_owned(), age_days: 2, expires: None }];
     for routine in &seeded {
-        let text = routines::build_prompt(routine, &scope, routines::DEFAULT_STANDING_ORDERS, &memory, NOW, &open, OWNER, &viewers());
+        let text = routines::build_prompt(routine, &scope, routines::DEFAULT_STANDING_ORDERS, &memory, NOW, &open, 7, OWNER, &viewers());
         check(&format!("routine-{}", format!("{:?}", routine.kind).to_lowercase()), &text);
     }
 }

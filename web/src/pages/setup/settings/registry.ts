@@ -36,6 +36,7 @@ export const SETTINGS: SettingDef[] = [
   { id: "budget", section: "ai", title: "Task budget", keywords: ["cost", "money", "limit", "spend", "dollars", "price"] },
   { id: "tickets-at-once", section: "ai", title: "Tasks at once", keywords: ["concurrency", "parallel", "one at a time", "queue", "limit", "workers"] },
   { id: "writable-per-repo", section: "ai", title: "Writing per repository", keywords: ["worktrees", "limit", "repository", "concurrency"] },
+  { id: "inbox-age-out", section: "ai", title: "Inbox items age out after", keywords: ["inbox", "routines", "needs you", "stale", "expire", "days", "clean up"] },
   { id: "plan-first", section: "ai", title: "Plan before working", keywords: ["approval", "read-only", "plan"] },
   { id: "start-over", section: "ai", title: "Start over", keywords: ["reset", "clear", "delete tasks", "delete tickets", "fresh", "wipe"] },
   { id: "rulebook", section: "rulebook", title: "Rulebook text", keywords: ["rules", "standards", "default", "reset"] },

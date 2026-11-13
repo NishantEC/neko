@@ -5,12 +5,13 @@
 //! servers and sign-ins. It acts, then its reply's json block becomes a
 //! `RoutineRun`. See docs/knowledge/neko-runs-the-day.md.
 use crate::server::AppState;
+use neko_core::inbox;
 use neko_core::routines::{self as core, Store};
 use neko_protocol::routines::{Cadence, NeedsYou, Routine, RoutineNotice, RoutineRun, RoutineState, RoutineView, ScopeProposal};
 use neko_protocol::workbench::{AgentRuntime, Command, Workspace};
 use neko_protocol::{Request, Response};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, MutexGuard};
 use std::time::Duration;
 
@@ -319,11 +320,12 @@ impl Drop for BusyGuard {
     }
 }
 
-/// The newest runs, plus any older run that still has an item open, so an
-/// unhandled item never drops off the page.
-pub(crate) fn runs_for_view(mut runs: Vec<RoutineRun>) -> Vec<RoutineRun> {
+/// The newest runs, plus any older run that still has an item open (or one
+/// closed in the last few days, for "Closed recently"), so an unhandled item
+/// never drops off the page.
+pub(crate) fn runs_for_view(mut runs: Vec<RoutineRun>, now: i64) -> Vec<RoutineRun> {
     let older = runs.split_off(runs.len().min(VIEW_RUNS));
-    runs.extend(older.into_iter().filter(|run| run.needs_you.iter().any(|item| !item.done)));
+    runs.extend(older.into_iter().filter(|run| run.needs_you.iter().any(|item| !item.done || inbox::recently_closed(item, now))));
     runs
 }
 
@@ -340,6 +342,7 @@ pub fn spawn(state: Arc<AppState>) {
 }
 
 fn tick(state: &Arc<AppState>) -> Result<(), String> {
+    sweep_inbox(state);
     if BUSY.load(Ordering::SeqCst) {
         return Ok(());
     }
@@ -397,37 +400,218 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
     Ok(())
 }
 
-/// Open item titles in this workspace, oldest first, without repeats.
-fn open_items(db: &neko_core::Db, workspace_id: &str) -> Result<Vec<String>, String> {
-    let mut items: Vec<(u64, String)> = Vec::new();
+/// Open items in this workspace, oldest first, without repeats, with how
+/// long each has been open.
+fn open_items(db: &neko_core::Db, workspace_id: &str, now: i64) -> Result<Vec<inbox::OpenItem>, String> {
+    let mut items: Vec<(u64, inbox::OpenItem)> = Vec::new();
     for routine in core::load(db)?.routines.iter().filter(|r| r.workspace_id == workspace_id) {
         for run in core::load_runs(db, &routine.id).unwrap_or_default() {
-            items.extend(run.needs_you.into_iter().filter(|i| !i.done).map(|i| (i.seq, i.title)));
+            let started = run.started_ms;
+            items.extend(run.needs_you.into_iter().filter(|i| !i.done).map(|i| {
+                let open = inbox::OpenItem { age_days: inbox::age_days(&i, started, now), expires: i.expires_ms.map(inbox::iso_from_ms), title: i.title };
+                (i.seq, open)
+            }));
         }
     }
-    items.sort();
+    items.sort_by_key(|(seq, _)| *seq);
     let mut seen = std::collections::HashSet::new();
-    Ok(items.into_iter().filter(|(_, t)| seen.insert(title_key(t))).map(|(_, t)| t).take(MAX_OPEN_IN_PROMPT).collect())
+    Ok(items.into_iter().filter(|(_, i)| seen.insert(title_key(&i.title))).map(|(_, i)| i).take(MAX_OPEN_IN_PROMPT).collect())
 }
 
-/// Marks done every open item in the workspace whose title a run resolved.
-fn resolve_items(db: &neko_core::Db, workspace_id: &str, titles: &[String]) -> Result<(), String> {
-    if titles.is_empty() {
-        return Ok(());
-    }
-    let keys: std::collections::HashSet<String> = titles.iter().map(|t| title_key(t)).collect();
-    for routine in core::load(db)?.routines.iter().filter(|r| r.workspace_id == workspace_id) {
+/// Applies `f` to every item of the routines in `workspace` (every scope
+/// when `None`) and saves the rows it changed. `f` gets the routine, the
+/// start of the run holding the item, and the item; it says whether it
+/// changed it.
+fn each_item(db: &neko_core::Db, workspace: Option<&str>, f: &mut dyn FnMut(&Routine, i64, &mut NeedsYou) -> bool) -> Result<(), String> {
+    for routine in core::load(db)?.routines.iter().filter(|r| workspace.map_or(true, |w| r.workspace_id == w)) {
         let mut runs = core::load_runs(db, &routine.id).unwrap_or_default();
         let mut changed = false;
-        for item in runs.iter_mut().flat_map(|r| r.needs_you.iter_mut()).filter(|i| !i.done && keys.contains(&title_key(&i.title))) {
-            item.done = true;
-            changed = true;
+        for run in runs.iter_mut() {
+            let started = run.started_ms;
+            for item in run.needs_you.iter_mut() {
+                changed |= f(routine, started, item);
+            }
         }
         if changed {
             core::save_runs(db, &routine.id, &runs)?;
         }
     }
     Ok(())
+}
+
+/// Closes every open item in the workspace whose title is in `titles`.
+fn close_titles(db: &neko_core::Db, workspace_id: &str, titles: &[String], reason: &str) -> Result<(), String> {
+    if titles.is_empty() {
+        return Ok(());
+    }
+    let keys: std::collections::HashSet<String> = titles.iter().map(|t| title_key(t)).collect();
+    let now = neko_core::workbench::now_ms();
+    each_item(db, Some(workspace_id), &mut |_, _, item| {
+        if item.done || !keys.contains(&title_key(&item.title)) {
+            return false;
+        }
+        inbox::close(item, reason, now);
+        true
+    })
+}
+
+/// Marks done every open item in the workspace whose title a run resolved.
+fn resolve_items(db: &neko_core::Db, workspace_id: &str, titles: &[String]) -> Result<(), String> {
+    close_titles(db, workspace_id, titles, inbox::BY_ROUTINE)
+}
+
+/// A reply's items that repeat an open one refresh it (newer detail, age
+/// starts over) instead of being added again; a setup failure naming the
+/// same connection counts as the same item in any scope. What is left is new
+/// and gets its times.
+fn absorb_repeats(db: &neko_core::Db, workspace_id: &str, items: &mut Vec<NeedsYou>, now: i64) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
+    items.retain(|i| seen.insert(title_key(&i.title)));
+    let mut absorbed = vec![false; items.len()];
+    if !items.is_empty() {
+        each_item(db, None, &mut |routine, _, old| {
+            if old.done {
+                return false;
+            }
+            let same_scope = routine.workspace_id == workspace_id;
+            for (n, new) in items.iter().enumerate() {
+                if !absorbed[n] && inbox::same_item(&new.title, &old.title, same_scope) {
+                    inbox::refresh(old, new, now);
+                    absorbed[n] = true;
+                    return true;
+                }
+            }
+            false
+        })?;
+    }
+    let mut keep = absorbed.into_iter().map(|a| !a);
+    items.retain(|_| keep.next().unwrap_or(true));
+    for item in items.iter_mut() {
+        item.created_ms = now;
+        item.touched_ms = now;
+    }
+    Ok(())
+}
+
+static LAST_SWEEP_MS: AtomicI64 = AtomicI64::new(0);
+static LAST_PR_SWEEP_MS: AtomicI64 = AtomicI64::new(0);
+static PR_SWEEPING: AtomicBool = AtomicBool::new(false);
+const SWEEP_EVERY_MS: i64 = 5 * 60 * 1000;
+const PR_SWEEP_EVERY_MS: i64 = 15 * 60 * 1000;
+/// `gh` calls per sweep: the rest wait for the next one.
+const MAX_PR_CALLS: usize = 6;
+const PR_STATE: &str = "inbox_pr_state_v1";
+
+/// Closes items whose time passed or that nobody touched for the age-out
+/// period (every 5 minutes, rows only), and, on its own thread every 15
+/// minutes, items whose pull request is merged or closed.
+fn sweep_inbox(state: &Arc<AppState>) {
+    let now = neko_core::workbench::now_ms();
+    if now - LAST_SWEEP_MS.load(Ordering::SeqCst) < SWEEP_EVERY_MS {
+        return;
+    }
+    LAST_SWEEP_MS.store(now, Ordering::SeqCst);
+    if let Err(error) = sweep_time(&db(state), now) {
+        eprintln!("inbox sweep: {error}");
+    }
+    let holding = neko_core::machine::latest().is_some_and(|health| health.holding.is_some());
+    if cfg!(test) || holding || now - LAST_PR_SWEEP_MS.load(Ordering::SeqCst) < PR_SWEEP_EVERY_MS || PR_SWEEPING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    LAST_PR_SWEEP_MS.store(now, Ordering::SeqCst);
+    let database = state.db.clone();
+    std::thread::spawn(move || {
+        if let Ok(gh) = neko_core::native_runner::publish::resolve_gh() {
+            if let Err(error) = sweep_prs(&database, neko_core::workbench::now_ms(), &|r| gh_pr_state(&gh, r)) {
+                eprintln!("inbox pull request sweep: {error}");
+            }
+        }
+        PR_SWEEPING.store(false, Ordering::SeqCst);
+    });
+}
+
+fn sweep_time(db: &neko_core::Db, now: i64) -> Result<usize, String> {
+    let days = core::load(db)?.age_out_days();
+    let mut closed = 0;
+    each_item(db, None, &mut |_, started, item| match inbox::time_reason(item, started, now, days) {
+        Some(reason) => {
+            inbox::close(item, reason, now);
+            closed += 1;
+            true
+        }
+        None => false,
+    })?;
+    Ok(closed)
+}
+
+/// Pull request state per `owner/repo#n`, with when it was read. Merged and
+/// closed are kept (a pull request rarely comes back); open is read again
+/// after 15 minutes. Its own small row, never the workbench snapshot.
+type PrCache = std::collections::BTreeMap<String, (String, i64)>;
+
+fn gh_pr_state(gh: &Path, pr: &inbox::PrRef) -> Option<String> {
+    let mut command = std::process::Command::new(gh);
+    command
+        .env("GH_PROMPT_DISABLED", "1")
+        .env("GH_NO_UPDATE_NOTIFIER", "1")
+        .env("NO_COLOR", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .args(["pr", "view", &pr.number.to_string(), "--repo", &format!("{}/{}", pr.owner, pr.repo), "--json", "state", "--jq", ".state"]);
+    let output = output_within(command, Duration::from_secs(15)).ok()?;
+    let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (output.status.success() && matches!(state.as_str(), "OPEN" | "MERGED" | "CLOSED")).then_some(state)
+}
+
+/// Reads the state of the pull requests open items name (at most
+/// `MAX_PR_CALLS` fresh lookups) and closes the items whose pull requests are
+/// all merged or closed. `fetch` is `gh pr view` in production.
+fn sweep_prs(db: &std::sync::Mutex<neko_core::Db>, now: i64, fetch: &dyn Fn(&inbox::PrRef) -> Option<String>) -> Result<usize, String> {
+    let lock = || db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut wanted = std::collections::BTreeSet::new();
+    let mut cache: PrCache = {
+        let db = lock();
+        each_item(&db, None, &mut |_, _, item| {
+            if !item.done && !item.kept {
+                wanted.extend(inbox::pr_refs(item));
+            }
+            false
+        })?;
+        db.get_setting(PR_STATE).map_err(|e| e.to_string())?.and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
+    };
+    if wanted.is_empty() {
+        if !cache.is_empty() {
+            lock().set_setting_quiet(PR_STATE, "{}").map_err(|e| e.to_string())?;
+        }
+        return Ok(0);
+    }
+    let mut stale: Vec<&inbox::PrRef> = wanted
+        .iter()
+        .filter(|r| cache.get(&r.key()).map_or(true, |(state, at)| state == "OPEN" && now - at >= PR_SWEEP_EVERY_MS))
+        .collect();
+    stale.sort_by_key(|r| cache.get(&r.key()).map_or(0, |(_, at)| *at));
+    for pr in stale.into_iter().take(MAX_PR_CALLS) {
+        if let Some(state) = fetch(pr) {
+            cache.insert(pr.key(), (state, now));
+        }
+    }
+    cache.retain(|key, _| wanted.iter().any(|r| &r.key() == key));
+    let db = lock();
+    db.set_setting_quiet(PR_STATE, &serde_json::to_string(&cache).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let mut closed = 0;
+    each_item(&db, None, &mut |_, _, item| {
+        if item.done || item.kept {
+            return false;
+        }
+        match inbox::pr_reason(&inbox::pr_refs(item), &|r| cache.get(&r.key()).map(|(state, _)| state.clone())) {
+            Some(reason) => {
+                inbox::close(item, reason, now);
+                closed += 1;
+                true
+            }
+            None => false,
+        }
+    })?;
+    Ok(closed)
 }
 
 fn failure_title(routine: &Routine) -> String {
@@ -440,7 +624,7 @@ fn alert_open(db: &neko_core::Db, routine: &Routine) -> Result<bool, String> {
 }
 
 fn title_key(title: &str) -> String {
-    title.trim().to_lowercase()
+    inbox::title_key(title)
 }
 
 /// Titles of items still open anywhere in this workspace's routines.
@@ -492,7 +676,7 @@ fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) ->
         routine_state.note = Some(format!("Last run could not be saved: {error}"));
         if core::failure_alerts(&routine.cadence, routine_state.failures) && !alert_open(&db, routine).unwrap_or(false) {
             if let Ok(seq) = core::reserve_seq(&db, 1) {
-                let alert = NeedsYou { seq, title: failure_title(routine), detail: format!("Neko could not save this run: {error}"), link: None, done: false };
+                let alert = NeedsYou { seq, title: failure_title(routine), detail: format!("Neko could not save this run: {error}"), created_ms: now, touched_ms: now, ..Default::default() };
                 let run = RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: now, finished_ms: Some(now), ok: false, quiet: false, did: Vec::new(), needs_you: vec![alert], error: Some(error.clone()), text: String::new(), ..Default::default() };
                 let _ = core::push_run(&db, &routine.id, run);
             }
@@ -506,9 +690,9 @@ fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) ->
 /// save, so a failed save can be retried by `run_one` as it was meant.
 fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, pushed: &mut Option<RoutineState>) -> Result<(), String> {
     let started = neko_core::workbench::now_ms();
-    let (orders, memory, open) = {
+    let (orders, memory, open, age_out_days) = {
         let db = db(state);
-        (core::load(&db)?.orders_for(&routine.workspace_id).to_string(), core::load_state(&db, &routine.id)?.memory, open_items(&db, &routine.workspace_id)?)
+        (core::load(&db)?.orders_for(&routine.workspace_id).to_string(), core::load_state(&db, &routine.id)?.memory, open_items(&db, &routine.workspace_id, neko_core::workbench::now_ms())?, core::load(&db)?.age_out_days())
     };
     let mut meta = AgentMeta::default();
     let outcome: Result<core::Parsed, (String, String)> = match scope.as_ref().and_then(|s| s.folders.first().map(|f| (s, f))) {
@@ -520,7 +704,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
             } else {
                 let spec = neko_core::native_runner::RunSpec {
                     directory: folder,
-                    prompt: core::build_prompt(routine, scope, &orders, &memory, &core::now_iso(), &open, &core::owner_name(), &neko_core::viewers::installed_section("{neko}", &neko_core::viewers::plugins_dir()))
+                    prompt: core::build_prompt(routine, scope, &orders, &memory, &core::now_iso(), &open, age_out_days, &core::owner_name(), &neko_core::viewers::installed_section("{neko}", &neko_core::viewers::plugins_dir()))
                         .replace("{neko}", &std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "neko-daemon".into()))
                         .replace("{mac_care}", &core::install_mac_care().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "mac-care".into())),
                     writable: true,
@@ -564,9 +748,9 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
             resolved.push(failure_title(&current));
             resolve_items(&db, &routine.workspace_id, &resolved)?;
             let mut needs_you = parsed.needs_you;
-            // Another routine in this scope may already have raised it.
-            let open = open_titles(&db, &routine.workspace_id)?;
-            needs_you.retain(|item| !open.contains(&title_key(&item.title)));
+            // Another routine (or run) may already have raised it: refresh
+            // that item rather than adding another.
+            absorb_repeats(&db, &routine.workspace_id, &mut needs_you, finished)?;
             add_outage_notice(&db, routine, &meta, &mut needs_you)?;
             if !needs_you.is_empty() {
                 let first = core::reserve_seq(&db, needs_you.len() as u64)?;
@@ -596,6 +780,8 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
             add_outage_notice(&db, routine, &meta, &mut needs_you)?;
             if !needs_you.is_empty() {
                 needs_you[0].seq = core::reserve_seq(&db, 1)?;
+                needs_you[0].created_ms = finished;
+                needs_you[0].touched_ms = finished;
             }
             if core::failure_alerts(&current.cadence, routine_state.failures) && !alert_open(&db, &current)? {
                 needs_you.push(NeedsYou {
@@ -604,6 +790,9 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
                     detail: format!("{error} Neko will try again{}.", if matches!(current.cadence, Cadence::Daily { .. }) { " in 30 minutes" } else { " on schedule" }),
                     link: None,
                     done: false,
+                    created_ms: finished,
+                    touched_ms: finished,
+                    ..Default::default()
                 });
             }
             next_due = Some(retry_or_next(&current.cadence, &routine_state, finished));
@@ -743,7 +932,7 @@ fn run_agent(state: &AppState, routine: &Routine, spec: &neko_core::native_runne
 pub(crate) fn claude_works(db: &neko_core::Db) {
     if let Ok(Some(before)) = neko_core::runtime_health::mark_good(db) {
         if let Some((workspace, title)) = before.notice {
-            let _ = resolve_items(db, &workspace, &[title]);
+            let _ = close_titles(db, &workspace, &[title], "Claude Code works again");
         }
     }
 }
@@ -767,7 +956,8 @@ fn add_outage_notice(db: &neko_core::Db, routine: &Routine, meta: &AgentMeta, ne
             return neko_core::runtime_health::set_notice(db, &routine.workspace_id, existing);
         }
     }
-    needs_you.push(NeedsYou { seq: 0, title: title.into(), detail: detail.into(), link: None, done: false });
+    let now = neko_core::workbench::now_ms();
+    needs_you.push(NeedsYou { seq: 0, title: title.into(), detail: detail.into(), created_ms: now, touched_ms: now, ..Default::default() });
     neko_core::runtime_health::set_notice(db, &routine.workspace_id, title)
 }
 
@@ -814,7 +1004,7 @@ fn views(state: &AppState) -> Result<Response, String> {
     let store = core::load(&db)?;
     let mut routines = Vec::new();
     for routine in &store.routines {
-        let runs = runs_for_view(core::load_runs(&db, &routine.id)?);
+        let runs = runs_for_view(core::load_runs(&db, &routine.id)?, neko_core::workbench::now_ms());
         routines.push(RoutineView { routine: routine.clone(), state: core::load_state(&db, &routine.id)?, runs });
     }
     let mut orders = store.standing_orders.clone();
@@ -823,7 +1013,7 @@ fn views(state: &AppState) -> Result<Response, String> {
             orders.entry(id.clone()).or_insert_with(|| store.orders_for(id).to_string());
         }
     }
-    Ok(Response::Routines { routines, standing_orders: orders, scopes, owner_name: core::owner_name() })
+    Ok(Response::Routines { routines, standing_orders: orders, scopes, owner_name: core::owner_name(), age_out_days: store.age_out_days() })
 }
 
 fn notifications(state: &AppState, after: u64) -> Result<Response, String> {
@@ -906,8 +1096,25 @@ fn edit(state: &AppState, request: Request) -> Result<(), String> {
                 .find(|r| r.id == run_id)
                 .and_then(|r| r.needs_you.iter_mut().find(|i| i.seq == seq))
                 .ok_or("That item is gone")?;
-            item.done = true;
+            inbox::close(item, inbox::BY_YOU, neko_core::workbench::now_ms());
             core::save_runs(&db, &routine_id, &runs)
+        }
+        Request::ReopenNeedsYou { routine_id, run_id, seq } => {
+            let mut runs = core::load_runs(&db, &routine_id)?;
+            let item = runs
+                .iter_mut()
+                .find(|r| r.id == run_id)
+                .and_then(|r| r.needs_you.iter_mut().find(|i| i.seq == seq))
+                .ok_or("That item is gone")?;
+            inbox::reopen(item, neko_core::workbench::now_ms());
+            core::save_runs(&db, &routine_id, &runs)
+        }
+        Request::SetInboxAgeOutDays { days } => {
+            if days > inbox::MAX_AGE_OUT_DAYS {
+                return Err(format!("Choose {} days or fewer, or 0 to keep items until you close them", inbox::MAX_AGE_OUT_DAYS));
+            }
+            store.age_out_days = Some(days);
+            core::save_definitions(&db, &store)
         }
         _ => Err("Not a routine request".into()),
     }
@@ -972,7 +1179,7 @@ mod tests {
         let db = neko_core::Db::open_in_memory().unwrap();
         let store = Store { routines: vec![routine("a", true), routine("b", true), Routine { workspace_id: "other".into(), ..routine("c", true) }], ..Default::default() };
         core::save_definitions(&db, &store).unwrap();
-        let item = |title: &str, done: bool| neko_protocol::routines::NeedsYou { seq: 1, title: title.into(), detail: String::new(), link: None, done };
+        let item = |title: &str, done: bool| neko_protocol::routines::NeedsYou { seq: 1, title: title.into(), detail: String::new(), link: None, done, ..Default::default() };
         let run = |rid: &str, items| RoutineRun { id: "x".into(), routine_id: rid.into(), started_ms: 0, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: items, error: None, text: String::new(), ..Default::default() };
         core::push_run(&db, "a", run("a", vec![item("Gmail not signed in", false), item("Old", true)])).unwrap();
         core::push_run(&db, "c", run("c", vec![item("Elsewhere", false)])).unwrap();
@@ -987,13 +1194,134 @@ mod tests {
         let db = neko_core::Db::open_in_memory().unwrap();
         let store = Store { routines: vec![routine("a", true), routine("b", true)], ..Default::default() };
         core::save_definitions(&db, &store).unwrap();
-        let item = |seq, title: &str| neko_protocol::routines::NeedsYou { seq, title: title.into(), detail: String::new(), link: None, done: false };
+        let item = |seq, title: &str| neko_protocol::routines::NeedsYou { seq, title: title.into(), detail: String::new(), link: None, done: false, ..Default::default() };
         let run = |rid: &str, items| RoutineRun { id: rid.into(), routine_id: rid.into(), started_ms: 0, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: items, error: None, text: String::new(), ..Default::default() };
         core::push_run(&db, "a", run("a", vec![item(2, "Gmail API not enabled"), item(3, "Sam")])).unwrap();
         core::push_run(&db, "b", run("b", vec![item(1, "gmail api NOT enabled")])).unwrap();
-        assert_eq!(open_items(&db, "w").unwrap(), vec!["gmail api NOT enabled", "Sam"]);
+        let titles = |db: &neko_core::Db| open_items(db, "w", 0).unwrap().into_iter().map(|i| i.title).collect::<Vec<_>>();
+        assert_eq!(titles(&db), vec!["gmail api NOT enabled", "Sam"]);
         resolve_items(&db, "w", &["Gmail API not enabled".into()]).unwrap();
-        assert_eq!(open_items(&db, "w").unwrap(), vec!["Sam"]);
+        assert_eq!(titles(&db), vec!["Sam"]);
+        let closed = &core::load_runs(&db, "a").unwrap()[0].needs_you[0];
+        assert!(closed.done && closed.reason.as_deref() == Some("Resolved by routine") && closed.closed_ms.is_some());
+    }
+
+    fn inbox_item(seq: u64, title: &str, detail: &str, link: Option<&str>) -> NeedsYou {
+        NeedsYou { seq, title: title.into(), detail: detail.into(), link: link.map(Into::into), created_ms: 1_000, touched_ms: 1_000, ..Default::default() }
+    }
+
+    fn inbox_fixture(items: Vec<NeedsYou>) -> neko_core::Db {
+        let db = neko_core::Db::open_in_memory().unwrap();
+        core::save_definitions(&db, &Store { routines: vec![routine("a", true), Routine { workspace_id: "other".into(), ..routine("c", true) }], ..Default::default() }).unwrap();
+        let run = RoutineRun { id: "r1".into(), routine_id: "a".into(), started_ms: 1_000, ok: true, needs_you: items, ..Default::default() };
+        core::push_run(&db, "a", run).unwrap();
+        db
+    }
+
+    fn items_of(db: &neko_core::Db, routine: &str) -> Vec<NeedsYou> {
+        core::load_runs(db, routine).unwrap().into_iter().flat_map(|r| r.needs_you).collect()
+    }
+
+    #[test]
+    fn a_repeat_refreshes_the_open_item_instead_of_adding_one() {
+        let db = inbox_fixture(vec![inbox_item(1, "Reply to Sam", "old", None), inbox_item(2, "Enable Google Calendar API", "project one", None)]);
+        let other = RoutineRun { id: "r2".into(), routine_id: "c".into(), started_ms: 1_000, ok: true, needs_you: vec![inbox_item(3, "Sign in", "x", None)], ..Default::default() };
+        core::push_run(&db, "c", other).unwrap();
+        let mut reply = vec![
+            inbox_item(0, "reply to sam!", "newer detail", None),
+            inbox_item(0, "Reply to Sam", "same again", None),
+            inbox_item(0, "Google Calendar needs re-auth", "other scope", None),
+            inbox_item(0, "Something new", "", None),
+        ];
+        // Run in the other scope: the setup failure matches across scopes, the plain title does not.
+        absorb_repeats(&db, "other", &mut reply, 9_000).unwrap();
+        assert_eq!(reply.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(), vec!["reply to sam!", "Something new"]);
+        assert!(reply.iter().all(|i| i.created_ms == 9_000 && i.touched_ms == 9_000));
+        let first = items_of(&db, "a");
+        assert_eq!((first[1].detail.as_str(), first[1].touched_ms), ("other scope", 9_000), "setup failure refreshed across scopes");
+        assert_eq!(first[0].touched_ms, 1_000, "a plain title is only matched within its scope");
+        let mut same_scope = vec![inbox_item(0, "Reply to Sam", "newer detail", None)];
+        absorb_repeats(&db, "w", &mut same_scope, 9_500).unwrap();
+        assert!(same_scope.is_empty());
+        let first = items_of(&db, "a");
+        assert_eq!((first[0].detail.as_str(), first[0].touched_ms), ("newer detail", 9_500));
+        assert_eq!(first.len(), 2, "nothing was added");
+    }
+
+    #[test]
+    fn time_closes_expired_and_aged_items_with_a_reason() {
+        let day = inbox::DAY_MS;
+        let mut expiring = inbox_item(2, "Reply before the call", "", None);
+        expiring.expires_ms = Some(50 * day);
+        let mut fresh = inbox_item(3, "Fresh", "", None);
+        fresh.touched_ms = 59 * day;
+        let db = inbox_fixture(vec![inbox_item(1, "Stale", "", None), expiring, fresh]);
+        assert_eq!(sweep_time(&db, 60 * day).unwrap(), 2);
+        let items = items_of(&db, "a");
+        assert_eq!(items.iter().map(|i| i.reason.as_deref()).collect::<Vec<_>>(), vec![Some("Aged out"), Some("Expired"), None]);
+        // The setting changes the period; 0 turns it off.
+        let mut store = core::load(&db).unwrap();
+        store.age_out_days = Some(0);
+        core::save_definitions(&db, &store).unwrap();
+        let more = RoutineRun { id: "r3".into(), routine_id: "a".into(), started_ms: 1_000, ok: true, needs_you: vec![inbox_item(9, "Ancient", "", None)], ..Default::default() };
+        core::push_run(&db, "a", more).unwrap();
+        assert_eq!(sweep_time(&db, 400 * day).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_merged_or_closed_pull_request_closes_its_item() {
+        let db = std::sync::Mutex::new(inbox_fixture(vec![
+            inbox_item(1, "Review the change", "", Some("https://github.com/acme/widgets/pull/5")),
+            inbox_item(2, "CI is red", "on acme/widgets#6", None),
+            inbox_item(3, "Still going", "acme/widgets#7", None),
+            inbox_item(4, "No pull request", "", None),
+            NeedsYou { kept: true, ..inbox_item(5, "Reopened", "acme/widgets#5", None) },
+        ]));
+        let calls = std::cell::Cell::new(0);
+        let fetch = |r: &inbox::PrRef| {
+            calls.set(calls.get() + 1);
+            Some(match r.number { 5 => "MERGED", 6 => "CLOSED", _ => "OPEN" }.to_string())
+        };
+        assert_eq!(sweep_prs(&db, 5_000, &fetch).unwrap(), 2);
+        let items = items_of(&db.lock().unwrap(), "a");
+        assert_eq!(items.iter().map(|i| i.reason.as_deref()).collect::<Vec<_>>(), vec![Some("PR merged"), Some("PR closed"), None, None, None]);
+        assert_eq!(calls.get(), 3);
+        // Terminal states are remembered; an open one is read again only after 15 minutes.
+        assert_eq!(sweep_prs(&db, 6_000, &fetch).unwrap(), 0);
+        assert_eq!(calls.get(), 3, "nothing was asked again within 15 minutes");
+        sweep_prs(&db, 5_000 + PR_SWEEP_EVERY_MS, &fetch).unwrap();
+        assert_eq!(calls.get(), 4);
+    }
+
+    #[test]
+    fn at_most_a_few_lookups_per_sweep() {
+        let items: Vec<NeedsYou> = (1..=10).map(|n| inbox_item(n, &format!("Item {n}"), &format!("acme/widgets#{}", 100 + n), None)).collect();
+        let db = std::sync::Mutex::new(inbox_fixture(items));
+        let calls = std::cell::Cell::new(0);
+        let fetch = |_: &inbox::PrRef| {
+            calls.set(calls.get() + 1);
+            Some("OPEN".to_string())
+        };
+        sweep_prs(&db, 5_000, &fetch).unwrap();
+        assert_eq!(calls.get(), MAX_PR_CALLS);
+        sweep_prs(&db, 6_000, &fetch).unwrap();
+        assert_eq!(calls.get(), 10, "the rest were read on the next sweep");
+    }
+
+    #[test]
+    fn closed_items_reopen_and_stay_in_the_view_for_a_few_days() {
+        let db = inbox_fixture(vec![inbox_item(1, "Merged thing", "", None)]);
+        let mut runs = core::load_runs(&db, "a").unwrap();
+        inbox::close(&mut runs[0].needs_you[0], inbox::PR_MERGED, 10 * inbox::DAY_MS);
+        let mut old = runs[0].clone();
+        old.id = "old".into();
+        let mut filler: Vec<RoutineRun> = (0..VIEW_RUNS).map(|n| RoutineRun { id: format!("f{n}"), routine_id: "a".into(), started_ms: 5_000 + n as i64, ..Default::default() }).collect();
+        filler.push(old);
+        assert_eq!(runs_for_view(filler.clone(), 11 * inbox::DAY_MS).len(), VIEW_RUNS + 1, "closed yesterday: still listed");
+        assert_eq!(runs_for_view(filler, 20 * inbox::DAY_MS).len(), VIEW_RUNS, "closed long ago: gone");
+        inbox::reopen(&mut runs[0].needs_you[0], 12 * inbox::DAY_MS);
+        let item = &runs[0].needs_you[0];
+        assert!(!item.done && item.kept && item.reason.is_none());
     }
 
     #[test]
@@ -1002,7 +1330,7 @@ mod tests {
         let sweep = Routine { name: "PR sweep".into(), ..routine("a", true) };
         core::save_definitions(&db, &Store { routines: vec![sweep.clone()], ..Default::default() }).unwrap();
         assert!(!alert_open(&db, &sweep).unwrap());
-        let alert = neko_protocol::routines::NeedsYou { seq: 1, title: failure_title(&sweep), detail: String::new(), link: None, done: false };
+        let alert = neko_protocol::routines::NeedsYou { seq: 1, title: failure_title(&sweep), detail: String::new(), link: None, done: false, ..Default::default() };
         let run = RoutineRun { id: "x".into(), routine_id: "a".into(), started_ms: 0, finished_ms: None, ok: false, quiet: false, did: vec![], needs_you: vec![alert], error: None, text: String::new(), ..Default::default() };
         core::push_run(&db, "a", run).unwrap();
         assert!(alert_open(&db, &sweep).unwrap());
@@ -1062,11 +1390,11 @@ mod tests {
     fn view_keeps_old_runs_with_open_items() {
         let run = |id: usize, open: bool| RoutineRun {
             id: id.to_string(), routine_id: "r".into(), started_ms: 0, finished_ms: None, ok: true, quiet: false, did: vec![],
-            needs_you: if open { vec![neko_protocol::routines::NeedsYou { seq: id as u64, title: "t".into(), detail: String::new(), link: None, done: false }] } else { vec![] },
+            needs_you: if open { vec![neko_protocol::routines::NeedsYou { seq: id as u64, title: "t".into(), detail: String::new(), link: None, done: false, ..Default::default() }] } else { vec![] },
             error: None, text: String::new(), ..Default::default()
         };
         let runs: Vec<_> = (0..30).map(|i| run(i, i == 25)).collect();
-        let shown = runs_for_view(runs);
+        let shown = runs_for_view(runs, 0);
         assert_eq!(shown.len(), VIEW_RUNS + 1);
         assert_eq!(shown.last().unwrap().id, "25");
     }

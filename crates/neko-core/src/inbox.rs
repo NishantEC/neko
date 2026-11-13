@@ -1,0 +1,298 @@
+//! The Inbox's "needs you" items stay few without the owner cleaning them:
+//! each one closes itself when its pull request is merged or closed, when
+//! the time it was tied to has passed, or when nothing has touched it for a
+//! while, and a repeat of an open item refreshes it instead of adding
+//! another. Pure rules live here; the daemon's `routines` module applies
+//! them to the stored runs. A closed item keeps its reason.
+//! See docs/knowledge/neko-runs-the-day.md.
+use neko_protocol::routines::NeedsYou;
+
+pub const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+/// Days without activity before an item closes ("Aged out"). 0 turns it off.
+pub const DEFAULT_AGE_OUT_DAYS: u32 = 7;
+pub const MAX_AGE_OUT_DAYS: u32 = 90;
+/// How long a closed item stays listed under "Closed recently".
+pub const RECENT_CLOSED_DAYS: i64 = 3;
+
+pub const PR_MERGED: &str = "PR merged";
+pub const PR_CLOSED: &str = "PR closed";
+pub const EXPIRED: &str = "Expired";
+pub const AGED_OUT: &str = "Aged out";
+pub const BY_ROUTINE: &str = "Resolved by routine";
+pub const BY_YOU: &str = "Done by you";
+
+/// One open item as the prompt lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenItem {
+    pub title: String,
+    pub age_days: i64,
+    /// ISO time, when the item has one.
+    pub expires: Option<String>,
+}
+
+/// A time as a routine writes it: RFC 3339, the same without an offset
+/// (UTC), a date and time without seconds, or a bare date (its last second).
+pub fn parse_time_ms(text: &str) -> Option<i64> {
+    use chrono::{NaiveDate, NaiveDateTime, TimeZone, Utc};
+    let text = text.trim();
+    if let Ok(t) = chrono::DateTime::parse_from_rfc3339(text) {
+        return Some(t.timestamp_millis());
+    }
+    for format in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"] {
+        if let Ok(t) = NaiveDateTime::parse_from_str(text, format) {
+            return Some(Utc.from_utc_datetime(&t).timestamp_millis());
+        }
+    }
+    let day = NaiveDate::parse_from_str(text, "%Y-%m-%d").ok()?;
+    Some(Utc.from_utc_datetime(&day.and_hms_opt(23, 59, 59)?).timestamp_millis())
+}
+
+pub fn iso_from_ms(ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms).map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)).unwrap_or_default()
+}
+
+/// A pull request an item names.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PrRef {
+    pub owner: String,
+    pub repo: String,
+    pub number: u64,
+}
+
+impl PrRef {
+    pub fn key(&self) -> String {
+        format!("{}/{}#{}", self.owner, self.repo, self.number)
+    }
+}
+
+fn name_ok(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 100 && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// The pull requests an item's link or detail names, as a pull URL or
+/// `owner/repo#12`; at most three, in order of appearance.
+pub fn pr_refs(item: &NeedsYou) -> Vec<PrRef> {
+    let mut found: Vec<PrRef> = Vec::new();
+    let mut add = |r: PrRef| {
+        if found.len() < 3 && !found.contains(&r) {
+            found.push(r);
+        }
+    };
+    let text = format!("{} {}", item.link.as_deref().unwrap_or_default(), item.detail);
+    for token in text.split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '<' | '>' | ',' | ';' | '"' | '\'' | '`')) {
+        let token = token.trim_end_matches(['.', ':', '!', '?']);
+        if let Some(rest) = token.split("github.com/").nth(1) {
+            let mut parts = rest.split('/');
+            if let (Some(owner), Some(repo), Some("pull"), Some(n)) = (parts.next(), parts.next(), parts.next(), parts.next()) {
+                let digits: String = n.chars().take_while(char::is_ascii_digit).collect();
+                if let (true, true, Ok(number)) = (name_ok(owner), name_ok(repo), digits.parse::<u64>()) {
+                    add(PrRef { owner: owner.into(), repo: repo.into(), number });
+                }
+            }
+        } else if let Some((left, right)) = token.split_once('#') {
+            if let Some((owner, repo)) = left.split_once('/') {
+                if let (true, true, Ok(number)) = (name_ok(owner), name_ok(repo), right.parse::<u64>()) {
+                    add(PrRef { owner: owner.into(), repo: repo.into(), number });
+                }
+            }
+        }
+    }
+    found
+}
+
+/// What two titles must share to be the same item: the normalised title
+/// (`duplicates::normalized_title`), or the lower-cased text when nothing
+/// letter-like is left.
+pub fn title_key(title: &str) -> String {
+    let key = crate::duplicates::normalized_title(title);
+    if key.is_empty() { title.trim().to_lowercase() } else { key }
+}
+
+/// Words that say "this is a setup failure" and the filler around them. What
+/// is left of the title names the connection, so "Enable Google Calendar API"
+/// and "Google Calendar needs re-auth" count as one.
+const SETUP_MARKERS: &[&str] = &["enable", "enabled", "enabling", "reauth", "auth", "authenticate", "authentication", "reauthenticate", "authorize", "authorise", "authorization", "login", "credentials", "token", "tokens", "expired", "reconnect", "sign"];
+const SETUP_FILLER: &[&str] = &["re", "in", "out", "signed", "log", "needs", "need", "required", "missing", "api", "access", "grant", "connect", "renew", "fix", "to", "the", "for", "on", "your", "a", "an", "is", "are", "again", "not", "failed", "failing", "error", "account", "of", "and", "with", "setup", "set", "up", "expire", "expires", "has", "have", "been", "please", "mcp", "server", "connection"];
+
+/// The connection a setup-failure title names, or `None` for any other item.
+pub fn setup_key(title: &str) -> Option<String> {
+    let normalized = crate::duplicates::normalized_title(title);
+    let words: Vec<&str> = normalized.split_whitespace().collect();
+    if words.is_empty() || words.len() > 8 || !words.iter().any(|w| SETUP_MARKERS.contains(w)) {
+        return None;
+    }
+    let mut rest: Vec<&str> = words.into_iter().filter(|w| !SETUP_MARKERS.contains(w) && !SETUP_FILLER.contains(w)).collect();
+    if rest.is_empty() {
+        return None;
+    }
+    rest.sort_unstable();
+    rest.dedup();
+    Some(rest.join(" "))
+}
+
+/// Whether `new` repeats `old`. Titles match within a scope; a setup failure
+/// naming the same connection matches across scopes too.
+pub fn same_item(new_title: &str, old_title: &str, same_scope: bool) -> bool {
+    if same_scope && title_key(new_title) == title_key(old_title) {
+        return true;
+    }
+    matches!((setup_key(new_title), setup_key(old_title)), (Some(a), Some(b)) if a == b)
+}
+
+/// The last moment something happened to the item; `run_started_ms` stands
+/// in for items stored before these fields existed.
+pub fn last_activity_ms(item: &NeedsYou, run_started_ms: i64) -> i64 {
+    [item.touched_ms, item.created_ms].into_iter().max().filter(|t| *t > 0).unwrap_or(run_started_ms)
+}
+
+pub fn age_days(item: &NeedsYou, run_started_ms: i64, now: i64) -> i64 {
+    ((now - last_activity_ms(item, run_started_ms)) / DAY_MS).max(0)
+}
+
+pub fn close(item: &mut NeedsYou, reason: &str, now: i64) {
+    item.done = true;
+    item.closed_ms = Some(now);
+    item.reason = Some(reason.to_string());
+}
+
+pub fn reopen(item: &mut NeedsYou, now: i64) {
+    item.done = false;
+    item.closed_ms = None;
+    item.reason = None;
+    item.touched_ms = now;
+    item.kept = true;
+}
+
+/// A routine reported an open item again: newer words replace the old, and
+/// its age starts over.
+pub fn refresh(old: &mut NeedsYou, new: &NeedsYou, now: i64) {
+    if !new.detail.trim().is_empty() {
+        old.detail = new.detail.clone();
+    }
+    if new.link.is_some() {
+        old.link = new.link.clone();
+    }
+    old.expires_ms = new.expires_ms.or(old.expires_ms);
+    old.touched_ms = now;
+}
+
+/// Why an open item should close now for time alone: its `expires` passed
+/// (unless the owner reopened it) or `age_out_days` went by without activity.
+pub fn time_reason(item: &NeedsYou, run_started_ms: i64, now: i64, age_out_days: u32) -> Option<&'static str> {
+    if item.done {
+        return None;
+    }
+    if !item.kept && item.expires_ms.is_some_and(|t| t <= now) {
+        return Some(EXPIRED);
+    }
+    if age_out_days > 0 && now - last_activity_ms(item, run_started_ms) >= i64::from(age_out_days) * DAY_MS {
+        return Some(AGED_OUT);
+    }
+    None
+}
+
+/// Whether a closed item still shows under "Closed recently".
+pub fn recently_closed(item: &NeedsYou, now: i64) -> bool {
+    item.done && item.closed_ms.is_some_and(|t| now - t <= RECENT_CLOSED_DAYS * DAY_MS)
+}
+
+/// What a pull request's state closes an item as, once every pull request it
+/// names is merged or closed. `state` answers for one reference.
+pub fn pr_reason(refs: &[PrRef], state: &dyn Fn(&PrRef) -> Option<String>) -> Option<&'static str> {
+    if refs.is_empty() {
+        return None;
+    }
+    let mut all_merged = true;
+    for r in refs {
+        match state(r)?.as_str() {
+            "MERGED" => {}
+            "CLOSED" => all_merged = false,
+            _ => return None,
+        }
+    }
+    Some(if all_merged { PR_MERGED } else { PR_CLOSED })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(title: &str, detail: &str, link: Option<&str>) -> NeedsYou {
+        NeedsYou { seq: 1, title: title.into(), detail: detail.into(), link: link.map(Into::into), ..Default::default() }
+    }
+
+    #[test]
+    fn times_parse_in_the_forms_a_routine_writes() {
+        let t = parse_time_ms("2026-11-14T08:00:00Z").unwrap();
+        assert_eq!(parse_time_ms("2026-11-14T08:00:00+00:00"), Some(t));
+        assert_eq!(parse_time_ms("2026-11-14T08:00:00"), Some(t));
+        assert_eq!(parse_time_ms("2026-11-14 08:00"), Some(t));
+        assert_eq!(parse_time_ms("2026-11-14T10:00:00+02:00"), Some(t));
+        assert_eq!(parse_time_ms("2026-11-14"), parse_time_ms("2026-11-14T23:59:59Z"));
+        assert_eq!(parse_time_ms("tomorrow"), None);
+    }
+
+    #[test]
+    fn pull_requests_are_found_in_links_and_details() {
+        let by_link = item("Review", "", Some("https://github.com/acme/widgets/pull/12/files"));
+        assert_eq!(pr_refs(&by_link), vec![PrRef { owner: "acme".into(), repo: "widgets".into(), number: 12 }]);
+        let by_text = item("Fix", "CI fails on acme/widgets#7, see (https://github.com/acme/api/pull/9).", None);
+        let keys: Vec<String> = pr_refs(&by_text).iter().map(PrRef::key).collect();
+        assert_eq!(keys, vec!["acme/widgets#7", "acme/api#9"]);
+        assert!(pr_refs(&item("Issue", "see acme/widgets/issues/3 and #4", Some("https://github.com/acme/widgets/issues/3"))).is_empty());
+    }
+
+    #[test]
+    fn setup_failures_naming_one_connection_are_one_item() {
+        assert!(same_item("Enable Google Calendar API", "Enable Google Calendar API", false));
+        assert!(same_item("Re-auth Slack", "Slack token expired", false));
+        assert!(same_item("Enable the Google Calendar API", "Google Calendar needs re-auth", false));
+        assert!(!same_item("Enable Google Calendar API", "Enable Gmail API", false));
+        assert!(!same_item("Reply to Sam", "Reply to Sam", false), "plain titles match within a scope only");
+        assert!(same_item("Reply to Sam", "reply to sam!", true));
+        assert_eq!(setup_key("Reply to Sam about the launch"), None);
+    }
+
+    #[test]
+    fn time_closes_expired_and_stale_items() {
+        let now = 100 * DAY_MS;
+        let mut a = item("a", "", None);
+        a.created_ms = now - 8 * DAY_MS;
+        a.touched_ms = a.created_ms;
+        assert_eq!(time_reason(&a, 0, now, 7), Some(AGED_OUT));
+        assert_eq!(time_reason(&a, 0, now, 0), None, "0 days turns age-out off");
+        a.touched_ms = now - DAY_MS;
+        assert_eq!(time_reason(&a, 0, now, 7), None);
+        a.expires_ms = Some(now - 1);
+        assert_eq!(time_reason(&a, 0, now, 7), Some(EXPIRED));
+        a.kept = true;
+        assert_eq!(time_reason(&a, 0, now, 7), None, "a reopened item is not expired again");
+        // Items from before the fields existed are aged from their run.
+        assert_eq!(time_reason(&item("old", "", None), now - 9 * DAY_MS, now, 7), Some(AGED_OUT));
+    }
+
+    #[test]
+    fn pull_request_state_closes_only_when_all_are_done() {
+        let r = |n| PrRef { owner: "o".into(), repo: "r".into(), number: n };
+        let states = |n: &PrRef| Some(match n.number { 1 => "MERGED", 2 => "CLOSED", _ => "OPEN" }.to_string());
+        assert_eq!(pr_reason(&[r(1)], &states), Some(PR_MERGED));
+        assert_eq!(pr_reason(&[r(1), r(2)], &states), Some(PR_CLOSED));
+        assert_eq!(pr_reason(&[r(1), r(3)], &states), None);
+        assert_eq!(pr_reason(&[r(1), r(4)], &|n: &PrRef| (n.number == 1).then(|| "MERGED".to_string())), None, "unknown stays open");
+        assert_eq!(pr_reason(&[], &states), None);
+    }
+
+    #[test]
+    fn refresh_and_reopen_restart_age() {
+        let mut old = item("t", "old words", Some("https://a"));
+        old.created_ms = 1;
+        old.touched_ms = 1;
+        refresh(&mut old, &item("t", "newer words", None), 500);
+        assert_eq!((old.detail.as_str(), old.link.as_deref(), old.touched_ms), ("newer words", Some("https://a"), 500));
+        close(&mut old, BY_YOU, 600);
+        assert!(old.done && old.reason.as_deref() == Some(BY_YOU));
+        assert!(recently_closed(&old, 600 + DAY_MS) && !recently_closed(&old, 600 + 4 * DAY_MS));
+        reopen(&mut old, 700);
+        assert!(!old.done && old.kept && old.closed_ms.is_none() && old.touched_ms == 700);
+    }
+}

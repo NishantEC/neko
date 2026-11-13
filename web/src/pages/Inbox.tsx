@@ -12,7 +12,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/ui/collap
 import { SegmentedControl, SegmentedControlItem } from "@/ui/segmented-control";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
 import { toast } from "@/ui/sonner";
-import { ArrowSquareOut, CaretDown, Check, Copy, Link as LinkIcon, Pause, PencilSimple, Play, Tray } from "@/ui/icons";
+import { ArrowCounterClockwise, ArrowSquareOut, CaretDown, Check, Copy, Link as LinkIcon, Pause, PencilSimple, Play, Tray } from "@/ui/icons";
 import { GlyphButton, ProgressRing, StatusGlyph } from "@/ui/status-glyph";
 import { itemProgress, routineStatus } from "@/setup/routine-status";
 import { copyText, useContextMenu } from "@/shell/context-menu";
@@ -332,6 +332,34 @@ function NeedsYouItem({ item, where, when, onDone }: { item: Json; where: string
   );
 }
 
+/** How long a closed item stays under "Closed recently" (the daemon keeps the same window). */
+const CLOSED_DAYS = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A closed item on one quiet line: its title, why it closed and when. Reopen
+ * is a row action and in the right-click menu.
+ */
+function ClosedItem({ item, where, now, onReopen }: { item: Json; where: string; now: number; onReopen: () => void }) {
+  const link = safeLink(item.link);
+  const menu = useContextMenu(() => [
+    { label: "Reopen", icon: ArrowCounterClockwise, run: onReopen },
+    link ? { label: "Open link", icon: ArrowSquareOut, run: () => void window.open(link, "_blank", "noreferrer") } : null,
+    "separator",
+    { label: "Copy", icon: Copy, run: () => void copyText([item.title, item.detail].filter(Boolean).join("\n\n")) },
+  ]);
+  return (
+    <div data-slot="closed-item" {...menu} className="group/row flex min-h-8 items-center gap-3 rounded-[10px] px-3 py-1.5 transition-colors hover:bg-foreground/[0.03]">
+      <span className="min-w-0 flex-1 truncate text-[13.5px] text-muted-foreground" title={item.detail || item.title}>{item.title}</span>
+      <span className="shrink-0 truncate text-[12.5px] text-muted-foreground/70">{where}</span>
+      <span className="shrink-0 text-[12.5px] tabular-nums text-muted-foreground/70">{item.reason || "Closed"} · {relativeTime(item.closed_ms, now)}</span>
+      <RowActions className="hidden group-hover/row:flex group-focus-within/row:flex [@media(hover:none)]:flex">
+        <RowAction label={`Reopen “${item.title}”`} icon={ArrowCounterClockwise} onClick={onReopen} />
+      </RowActions>
+    </div>
+  );
+}
+
 function SetupNotes({ problems }: { problems: string[] }) {
   return (
     <ul aria-label="Setup notes" className="flex flex-col gap-1 px-3 py-1.5 text-[12.5px] text-warning-foreground">
@@ -357,6 +385,15 @@ function InboxBody() {
     return items.sort((a, b) => b.item.seq - a.item.seq);
   }, [data]);
 
+  // Closed in the last few days, newest first, with the reason each closed.
+  const closed = useMemo(() => {
+    const items: { item: Json; run: Json; routine: Json }[] = [];
+    for (const view of data?.routines ?? []) for (const run of view.runs ?? []) for (const item of run.needs_you ?? []) {
+      if (item.done && item.closed_ms && now - item.closed_ms <= CLOSED_DAYS * DAY_MS) items.push({ item, run, routine: view.routine });
+    }
+    return items.sort((a, b) => b.item.closed_ms - a.item.closed_ms);
+  }, [data, now]);
+
   const errorNote = <ErrorNote error={error} title="Can’t reach the Neko daemon" onDismiss={clear} />;
   if (!data) return error ? errorNote : <LoadingRows rows={4} />;
 
@@ -364,6 +401,8 @@ function InboxBody() {
     const left = open.length - 1;
     await send({ ClearNeedsYou: { routine_id: routineId, run_id: runId, seq } }, left > 0 ? `Done. ${left} left.` : "All clear.");
   };
+
+  const reopen = (routineId: string, runId: string, seq: number) => void send({ ReopenNeedsYou: { routine_id: routineId, run_id: runId, seq } }, "Reopened");
 
   const scopes = data.scopes.filter((s) => s.workspace_id && (data.routines.some((v) => v.routine.workspace_id === s.workspace_id) || s.problems?.length));
   return (
@@ -391,6 +430,19 @@ function InboxBody() {
           </Panel>
         )}
       </Section>
+      {closed.length ? (
+        <Section title="Closed recently" count={closed.length} collapsible defaultOpen={false}>
+          <Panel>
+            <ShortList
+              items={closed}
+              noun="closed items"
+              render={({ item, run, routine }) => (
+                <ClosedItem key={item.seq} item={item} where={scopeName[routine.workspace_id] ?? "Scope"} now={now} onReopen={() => reopen(routine.id, run.id, item.seq)} />
+              )}
+            />
+          </Panel>
+        </Section>
+      ) : null}
       {scopes.map((scope) => {
         const views = data.routines.filter((v) => v.routine.workspace_id === scope.workspace_id);
         const did = views
