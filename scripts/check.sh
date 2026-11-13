@@ -58,6 +58,11 @@ else
   step rust-test cargo test --workspace --quiet
   step swift-test swift test --package-path native/NekoKit --quiet
 fi
+# The optional GPUI client is its own workspace and needs the patched fork;
+# it is checked only on a Mac that has run scripts/setup-gpui-patch.sh.
+if [[ -d "$repo_root/.gpui-fork-patched" ]]; then
+  step gpui-client cargo check --manifest-path crates/neko/Cargo.toml --target-dir target --quiet
+fi
 
 if (( ${#failed[@]} )); then
   printf 'Failed: %s\n' "${failed[*]}"

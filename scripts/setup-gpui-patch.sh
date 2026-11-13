@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Populates the local, patched copy of the `wingleeio/zed` gpui fork that
-# this repo's root `Cargo.toml` `[patch."https://github.com/wingleeio/zed"]`
+# `crates/neko/Cargo.toml`'s `[patch."https://github.com/wingleeio/zed"]`
+# (the optional GPUI client only; the daemon and the app never need this)
 # section points `gpui`/`gpui_platform` at. Run this once before the first
 # `cargo build`/`cargo test`/`cargo clippy` in a fresh checkout, and again
 # any time the pinned rev in `crates/neko/Cargo.toml` changes or

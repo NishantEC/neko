@@ -23,7 +23,8 @@ client_binary="$bundle_macos/neko"
 daemon_binary="$bundle_macos/neko-daemon"
 
 cd "$repo_root"
-cargo build -p neko -p neko-daemon
+cargo build -p neko-daemon
+cargo build --manifest-path crates/neko/Cargo.toml --target-dir target
 mkdir -p "$bundle_macos"
 cp "$repo_root/scripts/Neko-Info.plist" "$bundle_contents/Info.plist"
 cp "$build_directory/neko" "$client_binary"

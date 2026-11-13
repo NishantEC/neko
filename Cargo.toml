@@ -5,14 +5,12 @@ members = [
     "crates/neko-core",
     "crates/neko-daemon",
     "crates/neko-client",
-    "crates/neko",
 ]
-# **The patched fork checkout is not part of this workspace.** It lives inside
-# the repo so `[patch]` below can name it relatively, and without this Cargo
-# absorbs it — the fork's own crates use `workspace = true` dependencies that
-# then resolve against *our* workspace root instead of theirs, and the build
-# fails with a missing workspace dependency.
-exclude = [".gpui-fork-patched"]
+# The optional GPUI client (`crates/neko`) is its own workspace, so a fresh
+# clone builds the daemon and the app without fetching the GPUI fork.
+# Build it with `scripts/setup-gpui-patch.sh` then
+# `cargo build --manifest-path crates/neko/Cargo.toml --target-dir target`.
+exclude = ["crates/neko", ".gpui-fork-patched"]
 
 [workspace.package]
 version = "0.1.0"
@@ -29,22 +27,3 @@ serde_json = "1"
 opt-level = 0
 debug = "line-tables-only"
 incremental = false
-
-# Fixes a real ~30ms warm-summon regression in the pinned gpui fork rev (see
-# `AGENTS.md`'s "Summon latency" section and `patches/gpui-0001-*.patch`) —
-# an inactive-window frame throttle with no exemption for a pending
-# `on_next_frame` callback, not present in any published gpui release.
-# `gpui`/`gpui_platform` are redirected to a local checkout of the exact
-# pinned rev with that one small patch applied on top. Run
-# `scripts/setup-gpui-patch.sh` once (or again after the pinned rev
-# changes) to populate it — `cargo build` fails with a missing-path error
-# until that has been run at least once.
-#
-# **Relative, because Cargo expands neither `~` nor environment variables
-# here.** An absolute path is one machine's path, and this section held one
-# for a long time — which meant a fresh clone could not build on anybody
-# else's computer. `.gpui-fork-patched/` sits beside this file and is
-# gitignored.
-[patch."https://github.com/wingleeio/zed"]
-gpui = { path = ".gpui-fork-patched/crates/gpui" }
-gpui_platform = { path = ".gpui-fork-patched/crates/gpui_platform" }

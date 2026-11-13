@@ -43,7 +43,8 @@ trap cleanup EXIT
 
 cd "$repo_root"
 ./scripts/setup-gpui-patch.sh
-cargo build --release -p neko -p neko-daemon
+cargo build --release -p neko-daemon
+cargo build --release --manifest-path crates/neko/Cargo.toml --target-dir target
 
 mkdir -p "$bundle_macos"
 cp "$repo_root/scripts/Neko-Info.plist" "$bundle_contents/Info.plist"

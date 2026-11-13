@@ -1,7 +1,20 @@
+# Its own workspace root: the GPUI fork (and the local patch on it) is needed
+# only here. The installed app is the SwiftUI client and never links this.
+[workspace]
+
+# Fixes a real ~30ms warm-summon regression in the pinned gpui fork rev (see
+# `patches/gpui-0001-*.patch`): an inactive-window frame throttle with no
+# exemption for a pending `on_next_frame` callback, not present in any
+# published gpui release. Run `scripts/setup-gpui-patch.sh` once to populate
+# `.gpui-fork-patched/` (gitignored, beside the repository's root Cargo.toml).
+[patch."https://github.com/wingleeio/zed"]
+gpui = { path = "../../.gpui-fork-patched/crates/gpui" }
+gpui_platform = { path = "../../.gpui-fork-patched/crates/gpui_platform" }
+
 [package]
 name = "neko"
-version.workspace = true
-edition.workspace = true
+version = "0.1.0"
+edition = "2024"
 
 [[bin]]
 name = "neko"
@@ -9,9 +22,9 @@ path = "src/main.rs"
 
 [dependencies]
 libc = "0.2"
-neko-protocol.workspace = true
-neko-client.workspace = true
-serde_json.workspace = true
+neko-protocol = { path = "../neko-protocol" }
+neko-client = { path = "../neko-client" }
+serde_json = "1"
 # `wingleeio/zed` fork, pinned by rev (never a branch — see `AGENTS.md`, "The
 # GPUI dependency decision" for the full record of this reversal and its
 # licence consequence). Rev matches exactly what comet pins
@@ -120,3 +133,8 @@ raw-window-handle = "0.6"
 gpui = { git = "https://github.com/wingleeio/zed", rev = "e2ddcc6805f8c5088e62a60dfe517abcccd61a9a", features = [
     "test-support",
 ] }
+
+[profile.dev]
+opt-level = 0
+debug = "line-tables-only"
+incremental = false
