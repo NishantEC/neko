@@ -1,7 +1,10 @@
 //! Delivering a reviewed ticket. Neko does this on its own as soon as an
 //! independent review passes, and again when asked. Repositories listed in
-//! `Snapshot::land_on_main` fast-forward local `main` (nothing pushed);
-//! every other repository gets a pull request, which Neko never merges.
+//! `Snapshot::land_on_main` fast-forward local `main` (nothing pushed); the
+//! development checkout (`SelfUpdate::dev_checkout`) also fast-forwards `main`
+//! and then pushes it to its `origin`, so the change reaches the installed app
+//! through the updater, which only ever reads the published repository; every
+//! other repository gets a pull request, which Neko never merges.
 //!
 //! Network work runs outside the storage lock. A ticket that is no longer
 //! ready for review when the push is about to happen is left alone.
@@ -47,10 +50,15 @@ pub(super) fn publish_task(db: &Arc<Mutex<Db>>, task_id: &str, cancel: &AtomicBo
     let message = match &outcome {
         Ok(Some(Delivered::PullRequest(published))) if published.created => format!("Opened a pull request: {}", published.url),
         Ok(Some(Delivered::PullRequest(published))) => format!("Pushed the reviewed changes to the open pull request: {}", published.url),
-        Ok(Some(Delivered::Landed(landed))) => format!(
-            "Landed on {main} as {}{}. Nothing was pushed.",
+        Ok(Some(Delivered::Landed(landed, push))) => format!(
+            "Landed on {main} as {}{}. {}",
             &landed.commit[..landed.commit.len().min(10)],
-            if landed.rebased { ", rebased onto newer work first (the review covered the change before the rebase)" } else { "" }
+            if landed.rebased { ", rebased onto newer work first (the review covered the change before the rebase)" } else { "" },
+            match push {
+                Push::NotAsked => "Nothing was pushed.".to_owned(),
+                Push::Pushed => format!("Pushed to the published {main}; the installed app picks it up on its next update check (within about 10 minutes)."),
+                Push::Stayed(why) => format!("Not pushed ({why}). It stays on this checkout's {main} only, so the installed app is unaffected."),
+            }
         ),
         Ok(None) => "Nothing new to deliver since the last time.".into(),
         Err(Failure { landing: true, error }) => format!("Couldn't land on {main}: {error}. The reviewed result stays in its worktree."),
@@ -71,7 +79,7 @@ pub(super) fn publish_task(db: &Arc<Mutex<Db>>, task_id: &str, cancel: &AtomicBo
                 slot => *slot = Some(PullRequest { url: published.url.clone(), branch: published.branch.clone(), ..Default::default() }),
             }
         }
-        Ok(Some(Delivered::Landed(landed))) => {
+        Ok(Some(Delivered::Landed(landed, _))) => {
             task.landed_commit = Some(landed.commit.clone());
             // Keep Changes meaningful after a rebase onto newer work.
             task.base_commit = Some(landed.onto.clone());
@@ -85,7 +93,23 @@ pub(super) fn publish_task(db: &Arc<Mutex<Db>>, task_id: &str, cancel: &AtomicBo
 
 enum Delivered {
     PullRequest(native_runner::publish::Published),
-    Landed(native_runner::publish::Landed),
+    Landed(native_runner::publish::Landed, Push),
+}
+
+/// What happened to a landed commit of the development checkout.
+enum Push {
+    /// Not the development checkout: landing is local by design.
+    NotAsked,
+    Pushed,
+    /// Why it stayed local.
+    Stayed(String),
+}
+
+fn push_to_published(source: &std::path::Path, update_source: &str, cancel: &AtomicBool) -> Push {
+    match native_runner::publish::push_to_update_source(source, update_source, cancel) {
+        Ok(()) => Push::Pushed,
+        Err(why) => Push::Stayed(why),
+    }
 }
 
 struct Failure {
@@ -130,9 +154,13 @@ fn publish_unlocked(db: &Arc<Mutex<Db>>, task_id: &str, cancel: &AtomicBool) -> 
         .filter(|u| !u.is_empty());
     let describe = || describe(task, issue_url.as_deref(), &directory, &base, &snapshot.agent_runtime, cancel);
     let source = native_runner::publish::source_checkout(&directory, cancel)?;
-    if snapshot.land_on_main.contains(&*source.to_string_lossy()) {
+    let is_dev = snapshot.self_update.dev_checkout.as_deref() == Some(&*source.to_string_lossy());
+    if is_dev || snapshot.land_on_main.contains(&*source.to_string_lossy()) {
         return native_runner::publish::land(&directory, &base, &describe, &still_reviewed, cancel)
-            .map(|landed| landed.map(Delivered::Landed))
+            .map(|landed| landed.map(|landed| {
+                let push = if is_dev { push_to_published(&source, &snapshot.self_update.source, cancel) } else { Push::NotAsked };
+                Delivered::Landed(landed, push)
+            }))
             .map_err(|error| Failure { landing: true, error });
     }
     Ok(native_runner::publish::publish(&directory, &base, &describe, &still_reviewed, cancel)?.map(Delivered::PullRequest))

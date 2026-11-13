@@ -479,16 +479,17 @@ pub struct Snapshot {
     /// Contextual guidance only. Keeping one never starts work or grants tools.
     #[serde(default)]
     pub working_preferences: Vec<crate::decision_context::WorkingPreference>,
-    /// Neko updating itself from its own checkout when a Neko task lands
-    /// there (`neko_core::self_update`).
+    /// The installed app keeping itself current from the published
+    /// repository (`neko_core::self_update`).
     #[serde(default)]
     pub self_update: SelfUpdate,
 }
 
 fn yes() -> bool { true }
 
-/// Neko writing itself over: what is live, what is waiting and why, and
-/// whether it may update on its own. See AGENTS.md, "Neko updates itself".
+/// The use copy keeping itself current: what is live, what is waiting and
+/// why, and whether it may update on its own. See
+/// `docs/knowledge/neko-updates-itself.md`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SelfUpdate {
     /// Rebuild and swap in the web UI on its own after a landed change.
@@ -498,9 +499,24 @@ pub struct SelfUpdate {
     /// idle and the Mac says it is fine to build.
     #[serde(default = "yes")]
     pub auto_native: bool,
-    /// The neko checkout updates are built from (found from `land_on_main`).
+    /// The clone the updater owns (`<data dir>/source`) and builds from. It is
+    /// never the development checkout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkout: Option<String>,
+    /// Where updates come from, as `owner/name` (the app's "Updates come
+    /// from" setting, synced by the app); empty means the project's public
+    /// repository.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source: String,
+    /// The folder where Neko's own tasks change Neko (a development
+    /// checkout). Empty by default. The updater never writes to it; a task
+    /// that lands there is pushed to the published `main`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dev_checkout: Option<String>,
+    /// The last look at the published repository. Changes on a timer, so it
+    /// is stored in a row of its own, not in the snapshot row.
+    #[serde(default)]
+    pub check: UpdateCheck,
     /// The last `main` commit whose changes were applied (or deliberately
     /// taken as the starting point).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -521,7 +537,7 @@ pub struct SelfUpdate {
     /// A reinstall the detached installer is doing right now.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub installing: Option<UpdatePlan>,
-    /// The owner asked for "Update Neko now".
+    /// The owner asked for "Update now" (check the repository at once).
     #[serde(default)]
     pub requested: bool,
     /// The owner asked to go back to the previous web UI (`web-live.prev`).
@@ -541,14 +557,29 @@ pub struct SelfUpdate {
 impl Default for SelfUpdate {
     fn default() -> Self {
         Self {
-            auto_ui: true, auto_native: true, checkout: None, applied_through: None, web_commit: None,
+            auto_ui: true, auto_native: true, checkout: None, source: String::new(), dev_checkout: None,
+            check: UpdateCheck::default(), applied_through: None, web_commit: None,
             native_commit: None, queued: None, pending: None, installing: None, requested: false, roll_back_web: false,
             status: String::new(), last_update: None, last_failure: None, last_rollback: None,
         }
     }
 }
 
-/// One update: the commits `from..to` of the neko checkout's `main`.
+/// What the updater saw the last time it looked at the published repository.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UpdateCheck {
+    /// When it last looked (0: never).
+    #[serde(default)]
+    pub at_ms: i64,
+    /// What `main` pointed at then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_head: Option<String>,
+    /// Why the last look failed; empty when it worked.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub error: String,
+}
+
+/// One update: the commits `from..to` of the published `main`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UpdatePlan {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1064,8 +1095,8 @@ pub enum Command {
     },
     /// Check every open pull request on GitHub now instead of on the timer.
     CheckPullRequests,
-    /// Build and apply everything new on the neko checkout's `main` now,
-    /// safety-critical changes included (this click is the approval).
+    /// Look at the published repository now and apply everything new on its
+    /// `main` (this click is the approval for a switched-off part).
     UpdateNekoNow,
     /// Apply the update that waits for the owner's click.
     ApplyPendingUpdate,
@@ -1076,6 +1107,17 @@ pub enum Command {
     SetSelfUpdate {
         auto_ui: bool,
         auto_native: bool,
+    },
+    /// Where updates come from: `owner/name` or a GitHub URL; empty means the
+    /// project's public repository. The app sends its "Updates come from"
+    /// setting here.
+    SetUpdateSource {
+        repository: String,
+    },
+    /// The development checkout where Neko's own tasks change Neko; empty
+    /// clears it.
+    SetDevCheckout {
+        path: String,
     },
 }
 

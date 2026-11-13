@@ -1,24 +1,29 @@
-//! Neko updating itself from its own checkout. One thread, woken by the
-//! update commands and otherwise every few seconds:
+//! The installed app keeping itself current from the published repository.
+//! One thread, woken by the update commands and otherwise every few seconds:
 //!
 //! 1. reads what the detached installer reported (`result.json`);
-//! 2. notices a Neko task's landed commit on the checkout's `main` (or the
-//!    owner's "Update Neko now") and decides it (`neko_core::self_update::
-//!    decide`): nothing, queue, or wait for a click;
-//! 3. web part: builds `web/` into `<data>/web-live.next`, smoke checks it and
-//!    swaps it in atomically; open pages are told (`Event::WebUpdated`);
+//! 2. looks at the published repository at most every 10 minutes (a cheap
+//!    `ls-remote` first), moves its own clean clone (`<data>/source`) to
+//!    `origin/main`, and decides the commits since what is applied
+//!    (`neko_core::self_update::decide`): nothing (docs only), queue, or wait
+//!    for a click when auto-update is off;
+//! 3. web part: builds `web/` of the clone into `<data>/web-live.next`, smoke
+//!    checks it and swaps it in atomically; open pages are told
+//!    (`Event::WebUpdated`);
 //! 4. native part: once nothing is running or publishing and `machine-ok`
-//!    says go, hands the reinstall to `scripts/self-update.sh`, started in its
-//!    own process group so it outlives this daemon (which the install stops).
-//!    The script installs, relaunches, health-checks, restores the newest
-//!    backup on failure, and writes `result.json` for the next daemon.
+//!    says go, hands the reinstall to `scripts/self-update.sh` of the clone,
+//!    started in its own process group so it outlives this daemon (which the
+//!    install stops). The script installs, relaunches, health-checks, restores
+//!    the newest backup on failure, and writes `result.json` for the next
+//!    daemon.
 //!
-//! Decisions are pure and tested in `neko_core::self_update`; this file is the
-//! I/O around them. See AGENTS.md, "Neko updates itself".
+//! The development checkout is never touched here. Decisions are pure and
+//! tested in `neko_core::self_update`; this file is the I/O around them. See
+//! `docs/knowledge/neko-updates-itself.md`.
 
-use neko_core::self_update::{self as core, Decision, IdleInputs};
+use neko_core::self_update::{self as core, Decision, IdleInputs, Source};
 use neko_core::workbench as store;
-use neko_protocol::workbench::{ChatAction, ChatActionStatus, Snapshot, UpdatePlan, UpdateRecord};
+use neko_protocol::workbench::{ChatAction, ChatActionStatus, Snapshot, UpdateCheck, UpdatePlan, UpdateRecord};
 use neko_protocol::Event;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
@@ -75,8 +80,8 @@ fn with_snapshot<T>(state: &AppState, f: impl FnOnce(&mut Snapshot) -> T) -> Res
     Ok(out)
 }
 
-/// Says something on the task that brought the update (when there is one)
-/// and in the chat; `apply` adds the one-click "Apply update" action.
+/// Says something in the chat (and on a task, when one is named); `apply`
+/// adds the one-click "Apply update" action on that task.
 fn tell(state: &AppState, task_id: Option<&str>, text: &str, apply: bool) {
     let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut ticket_ids = Vec::new();
@@ -106,19 +111,42 @@ fn record(commit: &str, summary: &str) -> UpdateRecord {
     UpdateRecord { commit: commit.to_owned(), at_ms: store::now_ms(), summary: summary.to_owned() }
 }
 
+/// What touches the outside world, so the whole loop can be driven in a test
+/// against a local bare repository without building anything or asking the
+/// Mac how busy it is.
+struct Hooks {
+    /// Builds the clone's `web/` into `<data>/web-live.next`.
+    build_web: fn(&Path, &Path, bool) -> Result<(), String>,
+    /// Starts the detached installer of the clone for a plan.
+    launch: fn(&Path, &Path, &UpdatePlan) -> Result<(), String>,
+    /// `machine-ok`'s WAIT reason, if it says wait.
+    machine_wait: fn() -> Option<String>,
+}
+
+impl Hooks {
+    fn real() -> Hooks {
+        Hooks { build_web: core::build_web, launch: spawn_installer, machine_wait: core::machine_wait }
+    }
+}
+
 fn tick(state: &Arc<AppState>, data: &Path) -> Result<(), String> {
-    tick_with(state, data, core::bundle_commit())
+    let source = {
+        let snapshot = store::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
+        Source::configured(data, &snapshot.self_update.source)
+    };
+    tick_with(state, data, core::bundle_commit(), &source, &Hooks::real())
 }
 
 /// One pass. `bundle` is the running app's commit (`None` outside an
-/// installed app, where there is nothing to reinstall).
-fn tick_with(state: &Arc<AppState>, data: &Path, bundle: Option<String>) -> Result<(), String> {
+/// installed app, where there is nothing to reinstall); `source` is where the
+/// published repository is cloned from and to.
+fn tick_with(state: &Arc<AppState>, data: &Path, bundle: Option<String>, source: &Source, hooks: &Hooks) -> Result<(), String> {
     consume_install_report(state, data)?;
     let snapshot = store::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
     let su = snapshot.self_update.clone();
 
     if su.roll_back_web {
-        // Needs no checkout: it only moves the `web-live` link back.
+        // Needs no clone: it only moves the `web-live` link back.
         let outcome = core::roll_back_web(data);
         let summary = match &outcome {
             Ok(()) => "Rolled the web UI back to the previous version.".to_owned(),
@@ -154,40 +182,47 @@ fn tick_with(state: &Arc<AppState>, data: &Path, bundle: Option<String>) -> Resu
         return Ok(());
     }
 
-    let candidates: Vec<String> = su.checkout.iter().cloned()
-        .chain(snapshot.land_on_main.iter().cloned())
-        .collect();
-    let Some(checkout) = core::find_checkout(candidates.iter()) else {
-        if su.requested || su.queued.is_some() {
-            with_snapshot(state, |s| {
-                s.self_update.requested = false;
-                s.self_update.status = "Neko's own checkout was not found. Turn on “Land on main” for the neko repository.".into();
-            })?;
-        }
+    refresh(state, source, hooks)?;
+    let snapshot = store::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
+    let su = snapshot.self_update.clone();
+    if !source.dir.join(".git").exists() {
         return Ok(());
-    };
-    let head = core::main_head(&checkout)?;
-    let checkout_text = checkout.to_string_lossy().into_owned();
+    }
+    let clone = source.dir.as_path();
+    let head = core::head(clone)?;
+    let clone_text = clone.to_string_lossy().into_owned();
 
-    // The first time: start from what is running, so history is not replayed.
-    let applied = match &su.applied_through {
-        Some(applied) if core::is_ancestor(&checkout, applied, &head) => applied.clone(),
-        _ => bundle.clone().filter(|b| core::is_ancestor(&checkout, b, &head)).unwrap_or_else(|| head.clone()),
-    };
+    // Where this app starts: what was applied, else what is running, else
+    // (the app's commit is not in the published history) the published tip
+    // when the app's tree matches it, else the tip applied once. History is
+    // never replayed.
+    let mut applied = core::starting_point(clone, &head, su.applied_through.as_deref(), bundle.as_deref(), None);
+    if applied.is_none() && bundle.is_some() {
+        let tree = bundle.as_deref().and_then(|commit| {
+            std::iter::once(clone.to_path_buf())
+                .chain(su.dev_checkout.iter().map(PathBuf::from))
+                .chain(core::bundle_source_path())
+                .find_map(|repository| core::tree_of(&repository, commit))
+        });
+        applied = core::starting_point(clone, &head, None, bundle.as_deref(), tree.as_deref());
+    } else if applied.is_none() {
+        applied = Some(head.clone());
+    }
+
     // A build swapped in outside this thread (`scripts/ship-web.sh`, or its
     // `--rollback`) is adopted: its folder is labelled with its commit.
     let mut web_commit = su.web_commit.clone();
     let live_label = core::live_web_label(data);
     let adopted = match &live_label {
         Some(label) if web_commit.as_deref().map(core::short) != Some(label.as_str()) => {
-            core::resolve_commit(&checkout, label).inspect(|commit| web_commit = Some(commit.clone()))
+            core::resolve_commit(clone, label).inspect(|commit| web_commit = Some(commit.clone()))
         }
         None if web_commit.is_some() => { web_commit = None; None }
         _ => None,
     };
     // A newer app (installed by hand) outranks an older live web UI.
     let stale_web = match (&web_commit, &bundle) {
-        (Some(web), Some(bundle)) => web == bundle || !core::is_ancestor(&checkout, bundle, web),
+        (Some(web), Some(bundle)) => web == bundle || !core::is_ancestor(clone, bundle, web),
         _ => false,
     };
     if stale_web {
@@ -195,8 +230,13 @@ fn tick_with(state: &Arc<AppState>, data: &Path, bundle: Option<String>) -> Resu
     }
     with_snapshot(state, |s| {
         let u = &mut s.self_update;
-        u.checkout = Some(checkout_text.clone());
-        u.applied_through = Some(applied.clone());
+        // Before 2026-11-13 the updater built from the development checkout
+        // and recorded it here. It is now only a development checkout.
+        if let Some(old) = u.checkout.as_deref().filter(|old| Path::new(old) != clone && Path::new(old).join(".git").exists()) {
+            if u.dev_checkout.is_none() { u.dev_checkout = Some(old.to_owned()); }
+        }
+        u.checkout = Some(clone_text.clone());
+        if applied.is_some() { u.applied_through = applied.clone(); }
         if bundle.is_some() { u.native_commit = bundle.clone(); }
         u.web_commit = if stale_web { None } else { web_commit.clone() };
         if let Some(commit) = adopted.as_ref().filter(|_| !stale_web) {
@@ -212,43 +252,81 @@ fn tick_with(state: &Arc<AppState>, data: &Path, bundle: Option<String>) -> Resu
         crate::server::broadcast_event(state, &Event::WebUpdated { commit });
     }
 
-    plan(state, &checkout, &head, &applied, bundle.as_deref())?;
-    apply(state, &checkout, data, bundle.as_deref())
+    plan(state, clone, &head, applied.as_deref(), bundle.as_deref())?;
+    apply(state, clone, data, bundle.as_deref(), hooks)
 }
 
-/// Turns new commits on `main` into a queued or pending update.
-fn plan(state: &Arc<AppState>, checkout: &Path, head: &str, applied: &str, bundle: Option<&str>) -> Result<(), String> {
+/// Looks at the published repository when it is time (every 10 minutes, at
+/// once for "Update now" or a missing clone): one `ls-remote`, and only when
+/// `main` moved a fetch, `reset --hard` and `clean`. Does nothing while the
+/// Mac says WAIT, unless the owner asked. Failures are recorded as the last
+/// check's error; going offline is normal and never a failed update.
+fn refresh(state: &Arc<AppState>, source: &Source, hooks: &Hooks) -> Result<(), String> {
+    let snapshot = store::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
+    let su = &snapshot.self_update;
+    let now = store::now_ms();
+    let have_clone = source.dir.join(".git").exists();
+    let due = su.requested || !have_clone || su.check.at_ms == 0 || su.check.at_ms > now || now - su.check.at_ms >= core::CHECK_EVERY_MS;
+    if !due {
+        return Ok(());
+    }
+    if !su.requested {
+        if let Some(wait) = (hooks.machine_wait)().or_else(|| neko_core::machine::latest().and_then(|h| h.holding)) {
+            eprintln!("neko self-update: not checking for updates while the Mac says wait ({wait})");
+            return Ok(());
+        }
+    }
+    let outcome = core::remote_head(source).and_then(|remote| {
+        let local = if have_clone { core::head(&source.dir).ok() } else { None };
+        if local.as_deref() != Some(remote.as_str()) {
+            core::sync_clone(source)?;
+        }
+        Ok(remote)
+    });
+    let requested = su.requested;
+    let previous = su.check.remote_head.clone();
+    with_snapshot(state, |s| {
+        let check = &mut s.self_update.check;
+        *check = match &outcome {
+            Ok(remote) => UpdateCheck { at_ms: now, remote_head: Some(remote.clone()), error: String::new() },
+            Err(error) => UpdateCheck { at_ms: now, remote_head: previous.clone(), error: error.clone() },
+        };
+        if let (Err(error), true) = (&outcome, requested) {
+            s.self_update.requested = false;
+            s.self_update.status = format!("Couldn't reach the update source: {error}");
+        }
+    })?;
+    Ok(())
+}
+
+/// Turns new published commits into a queued or pending update.
+fn plan(state: &Arc<AppState>, clone: &Path, head: &str, applied: Option<&str>, bundle: Option<&str>) -> Result<(), String> {
     let snapshot = store::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
     let su = &snapshot.self_update;
     if su.queued.is_some() {
         return Ok(());
     }
     let requested = su.requested;
-    // The task whose landed commit is new since the last applied one.
-    let landed = snapshot.tasks.iter()
-        .filter_map(|t| t.landed_commit.as_deref().map(|c| (t, c)))
-        .filter(|(_, c)| *c != applied && core::is_ancestor(checkout, c, head) && !core::is_ancestor(checkout, c, applied))
-        .max_by_key(|(t, _)| t.updated_at_ms)
-        .map(|(t, _)| t.id.clone());
-    let already_pending = su.pending.as_ref().is_some_and(|p| p.to == head);
-    if !requested && (landed.is_none() || already_pending) {
+    if !requested && applied == Some(head) {
+        return Ok(());
+    }
+    if !requested && su.pending.as_ref().is_some_and(|p| p.to == head) {
         return Ok(());
     }
     // "Update now" also reinstalls an app that is behind, even when the web
     // part was already applied.
     let from = match bundle {
-        Some(b) if requested && b != head && core::is_ancestor(checkout, b, head) => b.to_owned(),
-        _ => applied.to_owned(),
+        Some(b) if requested && b != head && core::is_ancestor(clone, b, head) => Some(b.to_owned()),
+        _ => applied.map(str::to_owned),
     };
-    if from == head {
+    if from.as_deref() == Some(head) {
         if requested {
             with_snapshot(state, |s| { s.self_update.requested = false; s.self_update.status = "Neko is up to date.".into(); })?;
         }
         return Ok(());
     }
-    let paths = core::changed_paths(checkout, &from, head)?;
-    let task_id = landed.or_else(|| su.pending.as_ref().and_then(|p| p.task_id.clone()));
-    let decision = core::decide(Some(&from), head, &paths, task_id, requested, su, store::now_ms());
+    let paths = core::paths_between(clone, from.as_deref(), head)?;
+    let decision = core::decide(from.as_deref(), head, &paths, None, requested, su, store::now_ms());
     match decision {
         Decision::Nothing => {
             with_snapshot(state, |s| {
@@ -265,41 +343,53 @@ fn plan(state: &Arc<AppState>, checkout: &Path, head: &str, applied: &str, bundl
             })?;
         }
         Decision::Pending(plan) => {
-            let text = format!("Neko has an update waiting for you ({}): {} Apply it from Settings → System, or here.", core::short(&plan.to), plan.reason);
-            let task_id = plan.task_id.clone();
+            let text = format!("Neko has an update waiting for you ({}): {} Apply it from Settings → Neko updates.", core::short(&plan.to), plan.reason);
             with_snapshot(state, |s| {
                 s.self_update.requested = false;
                 s.self_update.status.clear();
                 s.self_update.pending = Some(plan);
             })?;
-            tell(state, task_id.as_deref(), &text, true);
+            tell(state, None, &text, false);
         }
     }
     Ok(())
 }
 
 /// Carries out the queued update: the web part now, the native part when idle.
-fn apply(state: &Arc<AppState>, checkout: &Path, data: &Path, bundle: Option<&str>) -> Result<(), String> {
+fn apply(state: &Arc<AppState>, clone: &Path, data: &Path, bundle: Option<&str>, hooks: &Hooks) -> Result<(), String> {
     let snapshot = store::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
     let Some(mut queued) = snapshot.self_update.queued.clone() else { return Ok(()) };
     let set_status = |text: String| with_snapshot(state, |s| s.self_update.status = text);
 
+    // The clone moves to `origin/main` whenever it is checked; an update that
+    // waited (the Mac was busy, a task was running) is retargeted to the
+    // newest published commit instead of waiting for a commit that is gone.
+    let mut head = core::head(clone)?;
+    if core::dirty(clone, None) {
+        // Nobody else writes in the clone, so this is leftover build output.
+        head = core::reset_clone(clone)?;
+    }
+    if head != queued.to {
+        let from = queued.from.clone().filter(|f| core::resolve_commit(clone, f).is_some());
+        let paths = core::paths_between(clone, from.as_deref(), &head)?;
+        let class = core::classify(&paths);
+        queued.to = head.clone();
+        queued.from = from;
+        queued.web = class.web;
+        queued.native = class.native;
+        queued.sensitive = class.sensitive;
+        with_snapshot(state, |s| s.self_update.queued = Some(queued.clone()))?;
+    }
+
     if queued.web {
-        if let Some(wait) = core::machine_wait() {
+        if let Some(wait) = (hooks.machine_wait)() {
             return set_status(format!("Waiting for the Mac to settle before building the web UI ({wait})."));
         }
-        let head = core::head(checkout)?;
-        if head != queued.to && !core::is_ancestor(checkout, &queued.to, &head) {
-            return set_status("Waiting: the neko checkout is not on main.".into());
-        }
-        if core::dirty(checkout, Some("web")) {
-            return set_status("Waiting: web/ in the neko checkout has uncommitted changes.".into());
-        }
         set_status(format!("Building the web UI at {}…", core::short(&head)))?;
-        let lockfile = core::changed_paths(checkout, queued.from.as_deref().unwrap_or(&head), &head)
+        let lockfile = core::paths_between(clone, queued.from.as_deref(), &head)
             .map(|p| p.iter().any(|p| p == "web/pnpm-lock.yaml" || p == "web/package.json"))
             .unwrap_or(true);
-        let outcome = core::build_web(checkout, data, lockfile).and_then(|()| core::swap_in(data, core::short(&head)));
+        let outcome = (hooks.build_web)(clone, data, lockfile).and_then(|()| core::swap_in(data, core::short(&head)));
         let task_id = queued.task_id.clone();
         match outcome {
             Ok(()) => {
@@ -329,18 +419,17 @@ fn apply(state: &Arc<AppState>, checkout: &Path, data: &Path, bundle: Option<&st
             Some(b) if b == queued.to => queued.native = false,
             Some(_) => {
                 let (workers, publishing, chat_running) = state.workbench.busy();
-                let head = core::head(checkout).unwrap_or_default();
                 let inputs = IdleInputs {
                     workers, publishing, chat_running,
-                    machine_wait: core::machine_wait()
+                    machine_wait: (hooks.machine_wait)()
                         .or_else(|| neko_core::machine::latest().and_then(|h| h.holding)),
-                    checkout_at_target: head == queued.to,
-                    checkout_dirty: core::dirty(checkout, None),
+                    checkout_at_target: core::head(clone).is_ok_and(|h| h == queued.to),
+                    checkout_dirty: core::dirty(clone, None),
                 };
                 if let Err(reason) = core::idle_gate(&inputs) {
                     return set_status(reason);
                 }
-                start_installer(state, checkout, data, &queued)?;
+                start_installer(state, clone, data, &queued, hooks)?;
                 queued.native = false;
             }
         }
@@ -355,34 +444,43 @@ fn apply(state: &Arc<AppState>, checkout: &Path, data: &Path, bundle: Option<&st
 }
 
 /// Hands the reinstall to `scripts/self-update.sh`, in its own process group
-/// so it survives this daemon being stopped by the install it runs.
-fn start_installer(state: &Arc<AppState>, checkout: &Path, data: &Path, plan: &UpdatePlan) -> Result<(), String> {
-    use std::os::unix::process::CommandExt;
-    let script = checkout.join("scripts/self-update.sh");
-    if !script.is_file() {
-        return Err("scripts/self-update.sh is missing from the checkout".into());
-    }
-    let folder = data.join("self-update");
-    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_file(core::result_path(data));
-    let log = std::fs::File::create(folder.join("install.log")).map_err(|e| e.to_string())?;
-    let port = crate::web::configured_port().unwrap_or(0).to_string();
-    let mut command = std::process::Command::new("/bin/bash");
-    command.arg(&script)
-        .args(["--checkout", &checkout.to_string_lossy(), "--data-dir", &data.to_string_lossy(), "--commit", &plan.to, "--web-port", &port])
-        .current_dir(checkout)
-        .env("CARGO_BUILD_JOBS", "2")
-        .stdin(std::process::Stdio::null())
-        .stdout(log.try_clone().map_err(|e| e.to_string())?)
-        .stderr(log)
-        .process_group(0);
-    command.spawn().map_err(|e| format!("cannot start the installer: {e}"))?;
+/// so it survives this daemon being stopped by the install it runs. Cargo's
+/// output goes to the user's cache folder, not into the data folder.
+fn start_installer(state: &Arc<AppState>, checkout: &Path, data: &Path, plan: &UpdatePlan, hooks: &Hooks) -> Result<(), String> {
+    (hooks.launch)(checkout, data, plan)?;
     let text = format!("Reinstalling Neko at {} now that it is idle. It restarts on its own and rolls back if the new version is unhealthy.", core::short(&plan.to));
     with_snapshot(state, |s| {
         s.self_update.installing = Some(UpdatePlan { at_ms: store::now_ms(), ..plan.clone() });
         s.self_update.status = format!("Reinstalling Neko at {}…", core::short(&plan.to));
     })?;
     tell(state, plan.task_id.as_deref(), &text, false);
+    Ok(())
+}
+
+fn spawn_installer(checkout: &Path, data: &Path, plan: &UpdatePlan) -> Result<(), String> {
+    use std::os::unix::process::CommandExt;
+    let script = checkout.join("scripts/self-update.sh");
+    if !script.is_file() {
+        return Err("scripts/self-update.sh is missing from the update source".into());
+    }
+    let folder = data.join("self-update");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(core::result_path(data));
+    let log = std::fs::File::create(folder.join("install.log")).map_err(|e| e.to_string())?;
+    let port = crate::web::configured_port().unwrap_or(0).to_string();
+    let target = core::build_cache_dir();
+    std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+    let mut command = std::process::Command::new("/bin/bash");
+    command.arg(&script)
+        .args(["--checkout", &checkout.to_string_lossy(), "--data-dir", &data.to_string_lossy(), "--commit", &plan.to, "--web-port", &port])
+        .current_dir(checkout)
+        .env("CARGO_BUILD_JOBS", "2")
+        .env("CARGO_TARGET_DIR", &target)
+        .stdin(std::process::Stdio::null())
+        .stdout(log.try_clone().map_err(|e| e.to_string())?)
+        .stderr(log)
+        .process_group(0);
+    command.spawn().map_err(|e| format!("cannot start the installer: {e}"))?;
     Ok(())
 }
 
@@ -418,7 +516,7 @@ fn consume_install_report(state: &Arc<AppState>, data: &Path) -> Result<(), Stri
 mod tests {
     use super::*;
     use neko_core::Db;
-    use neko_protocol::workbench::{Command, Task, TaskStatus, Workspace};
+    use neko_protocol::workbench::Command;
     use std::process::Command as Process;
 
     fn run(dir: &Path, args: &[&str]) -> String {
@@ -429,193 +527,355 @@ mod tests {
         String::from_utf8(out.stdout).unwrap().trim().to_owned()
     }
 
-    fn commit(dir: &Path, file: &str, text: &str) -> String {
+    fn write(dir: &Path, file: &str, text: &str) {
         let path = dir.join(file);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, text).unwrap();
-        run(dir, &["add", "-A"]);
-        run(dir, &["commit", "-q", "-m", file]);
-        run(dir, &["rev-parse", "HEAD"])
     }
 
-    fn task(id: &str) -> Task {
-        Task {
-            id: id.into(), workspace_id: "w".into(), issue_id: None, title: format!("Task {id}"), goal: "g".into(),
-            status: TaskStatus::Completed, plan: String::new(), result: String::new(), worktree: None, events: vec![],
-            created_at_ms: 0, updated_at_ms: 0, source_revision: None, base_commit: None, pull_request: None,
-            landed_commit: None, supervision: None, display_title: None, parked: None, request: None,
+    fn stub_build(_clone: &Path, data: &Path, _lockfile: bool) -> Result<(), String> {
+        let next = core::web_paths(data).next;
+        let _ = std::fs::remove_dir_all(&next);
+        write(&next, "index.html", r#"<script type="module" src="/assets/a.js"></script>"#);
+        write(&next, "assets/a.js", "1");
+        let log = data.join("web-builds-run");
+        let before = std::fs::read_to_string(&log).unwrap_or_default();
+        std::fs::write(&log, format!("{before}x")).map_err(|e| e.to_string())
+    }
+
+    fn stub_launch(_clone: &Path, data: &Path, plan: &UpdatePlan) -> Result<(), String> {
+        let log = data.join("installer-ran");
+        let before = std::fs::read_to_string(&log).unwrap_or_default();
+        std::fs::write(&log, format!("{before}{} sensitive={}\n", plan.to, plan.sensitive.len())).map_err(|e| e.to_string())
+    }
+
+    fn calm() -> Option<String> { None }
+
+    /// `machine-ok` saying WAIT while a test holds the flag.
+    static WAIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    fn sometimes_busy() -> Option<String> {
+        WAIT.load(std::sync::atomic::Ordering::SeqCst).then(|| "load 18".to_owned())
+    }
+
+    const HOOKS: Hooks = Hooks { build_web: stub_build, launch: stub_launch, machine_wait: calm };
+
+    /// A local bare "public" repository, a working copy that publishes to it,
+    /// a development checkout cloned from it, and a data folder.
+    struct Rig {
+        _keep: tempfile::TempDir,
+        root: PathBuf,
+        publisher: PathBuf,
+        dev: PathBuf,
+        data: PathBuf,
+        source: Source,
+        state: Arc<AppState>,
+    }
+
+    impl Rig {
+        fn new() -> Rig {
+            let keep = tempfile::tempdir().unwrap();
+            let root = keep.path().canonicalize().unwrap();
+            let bare = root.join("public.git");
+            let publisher = root.join("publisher");
+            let dev = root.join("dev");
+            let data = root.join("data");
+            std::fs::create_dir_all(&data).unwrap();
+            run(&root, &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()]);
+            run(&root, &["init", "-q", "-b", "main", publisher.to_str().unwrap()]);
+            run(&publisher, &["remote", "add", "origin", bare.to_str().unwrap()]);
+            write(&publisher, "crates/neko-daemon/Cargo.toml", "[package]");
+            write(&publisher, "web/package.json", "{}");
+            write(&publisher, "README.md", "first");
+            run(&publisher, &["add", "-A"]);
+            run(&publisher, &["commit", "-q", "-m", "base"]);
+            run(&publisher, &["push", "-q", "origin", "main"]);
+            // The development checkout: its own clone, with work nobody may touch.
+            run(&root, &["clone", "-q", bare.to_str().unwrap(), dev.to_str().unwrap()]);
+            write(&dev, "unpushed.txt", "local commit");
+            run(&dev, &["add", "-A"]);
+            run(&dev, &["commit", "-q", "-m", "local only"]);
+            write(&dev, "README.md", "uncommitted edit");
+            write(&dev, "scratch/untracked.txt", "scratch");
+            let state = Arc::new(AppState::with_test_providers(
+                Db::open_in_memory().unwrap(), vec![], Some(neko_core::files::FileProvider::empty()),
+                neko_core::settings::SettingsProvider::with_panes(Vec::new()),
+                neko_core::permissions::PermissionsProvider::disabled(),
+            ));
+            let source = Source { remote: bare.to_string_lossy().into_owned(), dir: data.join("source") };
+            Rig { _keep: keep, root, publisher, dev, data, source, state }
+        }
+
+        /// A commit published to the "public" repository.
+        fn publish(&self, file: &str, text: &str) -> String {
+            write(&self.publisher, file, text);
+            run(&self.publisher, &["add", "-A"]);
+            run(&self.publisher, &["commit", "-q", "-m", file]);
+            run(&self.publisher, &["push", "-q", "origin", "main"]);
+            run(&self.publisher, &["rev-parse", "HEAD"])
+        }
+
+        fn tick(&self, bundle: Option<&str>) {
+            tick_with(&self.state, &self.data, bundle.map(str::to_owned), &self.source, &HOOKS).unwrap();
+        }
+
+        fn snapshot(&self) -> Snapshot {
+            store::load(&self.state.db.lock().unwrap()).unwrap()
+        }
+
+        fn command(&self, command: Command) {
+            store::apply(&self.state.db.lock().unwrap(), command).unwrap();
+        }
+
+        /// Pretends the last look was long ago, so the next tick looks again.
+        fn age_check(&self) {
+            with_snapshot(&self.state, |s| s.self_update.check.at_ms -= 11 * 60 * 1000).unwrap();
+        }
+
+        fn builds(&self) -> usize {
+            std::fs::read_to_string(self.data.join("web-builds-run")).unwrap_or_default().len()
+        }
+
+        fn installs(&self) -> Vec<String> {
+            std::fs::read_to_string(self.data.join("installer-ran")).unwrap_or_default().lines().map(str::to_owned).collect()
+        }
+
+        fn dev_state(&self) -> (String, String, String) {
+            (run(&self.dev, &["rev-parse", "HEAD"]), run(&self.dev, &["status", "--porcelain", "--ignored"]), run(&self.dev, &["log", "--format=%H"]))
         }
     }
 
-    fn snapshot(state: &AppState) -> Snapshot {
-        store::load(&state.db.lock().unwrap()).unwrap()
-    }
-
-    fn land(state: &AppState, id: &str, commit: &str) {
-        with_snapshot(state, |s| {
-            let mut t = task(id);
-            t.landed_commit = Some(commit.to_owned());
-            t.updated_at_ms = store::now_ms();
-            s.tasks.push(t);
-        }).unwrap();
-    }
-
     #[test]
-    fn landed_changes_are_applied_held_for_a_click_and_reported() {
-        let repo = tempfile::tempdir().unwrap();
-        let data = tempfile::tempdir().unwrap();
-        let dir = repo.path().canonicalize().unwrap();
-        run(&dir, &["init", "-q", "-b", "main"]);
-        commit(&dir, "crates/neko-daemon/Cargo.toml", "[package]");
-        let base = commit(&dir, "web/package.json", "{}");
-        let state = Arc::new(AppState::with_test_providers(
-            Db::open_in_memory().unwrap(), vec![], Some(neko_core::files::FileProvider::empty()),
-            neko_core::settings::SettingsProvider::with_panes(Vec::new()),
-            neko_core::permissions::PermissionsProvider::disabled(),
-        ));
-        with_snapshot(&state, |s| {
-            s.workspaces.push(Workspace { id: "w".into(), name: "neko".into(), repository: dir.to_string_lossy().into(), instructions: String::new(), away_enabled: false });
-            s.land_on_main.insert(dir.to_string_lossy().into());
-        }).unwrap();
+    fn the_use_copy_follows_the_published_repository_and_never_touches_the_dev_checkout() {
+        let rig = Rig::new();
+        let base = run(&rig.publisher, &["rev-parse", "HEAD"]);
+        let dev_before = rig.dev_state();
 
-        // First pass: what is there now is the starting point, not an update.
-        tick_with(&state, data.path(), None).unwrap();
-        let su = snapshot(&state).self_update;
+        // First run: the clone is made, the running app (at the published tip)
+        // is adopted, nothing is built or reinstalled.
+        rig.tick(Some(&base));
+        assert!(rig.source.dir.join(".git").exists(), "the updater owns a clone at <data>/source");
+        let su = rig.snapshot().self_update;
+        assert_eq!(su.checkout.as_deref(), Some(&*rig.source.dir.to_string_lossy()));
         assert_eq!(su.applied_through.as_deref(), Some(base.as_str()));
-        assert_eq!(su.checkout.as_deref(), Some(&*dir.to_string_lossy()));
+        assert_eq!(su.check.remote_head.as_deref(), Some(base.as_str()));
+        assert!(su.check.at_ms > 0 && su.check.error.is_empty());
+        assert_eq!((rig.builds(), rig.installs().len()), (0, 0));
 
-        // An ordinary native change from a landed task is applied (there is no
-        // installed app in a test, so nothing is reinstalled).
-        let ordinary = commit(&dir, "crates/neko-core/src/triage.rs", "// x");
-        land(&state, "a", &ordinary);
-        tick_with(&state, data.path(), None).unwrap();
-        let su = snapshot(&state).self_update;
-        assert_eq!(su.applied_through.as_deref(), Some(ordinary.as_str()));
+        // A new published commit is not seen before the next check is due
+        // (at most one look every 10 minutes)…
+        let web = rig.publish("web/src/a.css", "a{}");
+        rig.tick(Some(&base));
+        assert_eq!(rig.snapshot().self_update.applied_through.as_deref(), Some(base.as_str()));
+        // …and a web-only range is built and swapped in, with no reinstall.
+        rig.age_check();
+        rig.tick(Some(&base));
+        let su = rig.snapshot().self_update;
+        assert_eq!(su.applied_through.as_deref(), Some(web.as_str()));
+        assert_eq!(su.web_commit.as_deref(), Some(web.as_str()));
+        assert_eq!((rig.builds(), rig.installs().len()), (1, 0));
+        assert!(core::live_web_root(&rig.data).is_some());
+        assert!(su.last_update.unwrap().summary.contains("UI live"));
+
+        // A docs-only range does nothing.
+        let docs = rig.publish("docs/notes.md", "words");
+        rig.age_check();
+        rig.tick(Some(&base));
+        let su = rig.snapshot().self_update;
+        assert_eq!(su.applied_through.as_deref(), Some(docs.as_str()), "taken as applied");
+        assert_eq!((rig.builds(), rig.installs().len()), (1, 0));
         assert!(su.queued.is_none() && su.pending.is_none());
 
-        // A commit nobody landed through a task is not applied on its own.
-        let by_hand = commit(&dir, "crates/neko-core/src/apps.rs", "// y");
-        tick_with(&state, data.path(), None).unwrap();
-        assert_eq!(snapshot(&state).self_update.applied_through.as_deref(), Some(ordinary.as_str()));
+        // A native range makes the install call (stubbed) and records it.
+        let native = rig.publish("crates/neko-core/src/triage.rs", "// x");
+        rig.age_check();
+        rig.tick(Some(&base));
+        assert_eq!(rig.installs(), vec![format!("{native} sensitive=0")]);
+        let su = rig.snapshot().self_update;
+        assert_eq!(su.installing.as_ref().map(|p| p.to.as_str()), Some(native.as_str()));
+        assert_eq!(su.applied_through.as_deref(), Some(native.as_str()));
+        // While it installs, nothing else happens.
+        rig.tick(Some(&base));
+        assert_eq!(rig.installs().len(), 1);
+        // The installer's report is recorded once.
+        std::fs::create_dir_all(rig.data.join("self-update")).unwrap();
+        std::fs::write(core::result_path(&rig.data), format!(r#"{{"commit":"{native}","status":"updated","reason":""}}"#)).unwrap();
+        rig.tick(Some(&native));
+        let su = rig.snapshot().self_update;
+        assert!(su.installing.is_none());
+        assert_eq!(su.native_commit.as_deref(), Some(native.as_str()));
 
-        // A safety-critical change waits for the owner, says so on the task and
-        // in chat, and offers the one-click action there.
-        let critical = commit(&dir, "crates/neko-daemon/src/web.rs", "// z");
-        land(&state, "b", &critical);
-        tick_with(&state, data.path(), None).unwrap();
-        let s = snapshot(&state);
-        let pending = s.self_update.pending.clone().expect("waits for a click");
-        assert_eq!((pending.to.as_str(), pending.task_id.as_deref()), (critical.as_str(), Some("b")));
-        assert_eq!(pending.sensitive, vec!["crates/neko-daemon/src/web.rs".to_owned()]);
-        assert_eq!(s.self_update.applied_through.as_deref(), Some(ordinary.as_str()), "nothing applied");
-        assert!(s.tasks.iter().find(|t| t.id == "b").unwrap().events.iter().any(|e| e.message.contains("waiting for you")));
-        let notice = s.conversation.last().unwrap();
-        assert!(notice.text().contains("safety-critical") && notice.actions[0].kind == "apply_update");
-        // Ticking again neither re-plans nor repeats the notice.
-        tick_with(&state, data.path(), None).unwrap();
-        assert_eq!(snapshot(&state).conversation.len(), s.conversation.len());
-        let _ = by_hand;
+        // Safety-critical paths apply on their own too, and the plan names them.
+        let critical = rig.publish("crates/neko-daemon/src/web.rs", "// z");
+        rig.age_check();
+        rig.tick(Some(&native));
+        assert_eq!(rig.installs().last().unwrap(), &format!("{critical} sensitive=1"));
+        std::fs::write(core::result_path(&rig.data), format!(r#"{{"commit":"{critical}","status":"updated","reason":""}}"#)).unwrap();
+        rig.tick(Some(&critical));
 
-        // The chat action applies it, through the same command as the button.
-        let action = neko_core::chief_of_staff::command(&notice.actions[0]).unwrap();
-        assert!(matches!(action, Command::ApplyPendingUpdate));
-        store::apply(&state.db.lock().unwrap(), action).unwrap();
-        tick_with(&state, data.path(), None).unwrap();
-        let su = snapshot(&state).self_update;
-        assert_eq!(su.applied_through.as_deref(), Some(critical.as_str()));
-        assert!(su.pending.is_none() && su.queued.is_none());
+        // Switching auto-update off makes it wait for a click; the click applies it.
+        rig.command(Command::SetSelfUpdate { auto_ui: true, auto_native: false });
+        let later = rig.publish("crates/neko-core/src/apps.rs", "// y");
+        rig.age_check();
+        rig.tick(Some(&critical));
+        let su = rig.snapshot().self_update;
+        let pending = su.pending.expect("auto-update off means it waits");
+        assert!(pending.reason.contains("Auto-update is off for the app"));
+        assert_eq!(rig.installs().len(), 2);
+        rig.command(Command::ApplyPendingUpdate);
+        rig.tick(Some(&critical));
+        assert_eq!(rig.installs().last().unwrap(), &format!("{later} sensitive=0"));
 
-        // The installer's report is recorded once, on the task and in chat.
-        with_snapshot(&state, |s| s.self_update.installing = Some(UpdatePlan { to: critical.clone(), task_id: Some("b".into()), at_ms: store::now_ms(), ..UpdatePlan::default() })).unwrap();
-        std::fs::create_dir_all(data.path().join("self-update")).unwrap();
-        std::fs::write(core::result_path(data.path()), format!(r#"{{"commit":"{critical}","status":"rolled_back","reason":"the new version did not become healthy"}}"#)).unwrap();
-        tick_with(&state, data.path(), None).unwrap();
-        let s = snapshot(&state);
-        assert!(s.self_update.installing.is_none());
-        assert!(s.self_update.last_rollback.as_ref().unwrap().summary.contains("did not become healthy"));
-        assert!(s.conversation.last().unwrap().text().starts_with("Rolled back"));
-        assert!(!core::result_path(data.path()).exists());
+        // The clone is exactly the published tip, with no commits of its own.
+        assert_eq!(run(&rig.source.dir, &["rev-parse", "HEAD"]), later);
+        assert_eq!(run(&rig.source.dir, &["status", "--porcelain"]), "");
+        assert_eq!(run(&rig.source.dir, &["rev-list", "--count", "HEAD"]), run(&rig.publisher, &["rev-list", "--count", "HEAD"]));
+        // The development checkout is exactly as it was.
+        assert_eq!(rig.dev_state(), dev_before);
     }
 
     #[test]
-    fn update_now_and_the_auto_switches() {
-        let repo = tempfile::tempdir().unwrap();
-        let data = tempfile::tempdir().unwrap();
-        let dir = repo.path().canonicalize().unwrap();
-        run(&dir, &["init", "-q", "-b", "main"]);
-        commit(&dir, "crates/neko-daemon/Cargo.toml", "[package]");
-        commit(&dir, "web/package.json", "{}");
-        let state = Arc::new(AppState::with_test_providers(
-            Db::open_in_memory().unwrap(), vec![], Some(neko_core::files::FileProvider::empty()),
-            neko_core::settings::SettingsProvider::with_panes(Vec::new()),
-            neko_core::permissions::PermissionsProvider::disabled(),
-        ));
-        with_snapshot(&state, |s| {
-            s.workspaces.push(Workspace { id: "w".into(), name: "neko".into(), repository: dir.to_string_lossy().into(), instructions: String::new(), away_enabled: false });
-            s.land_on_main.insert(dir.to_string_lossy().into());
-        }).unwrap();
-        tick_with(&state, data.path(), None).unwrap();
-        // Auto-update off for the app: a landed native change waits.
-        store::apply(&state.db.lock().unwrap(), Command::SetSelfUpdate { auto_ui: true, auto_native: false }).unwrap();
-        let change = commit(&dir, "crates/neko-core/src/triage.rs", "// x");
-        land(&state, "a", &change);
-        tick_with(&state, data.path(), None).unwrap();
-        let pending = snapshot(&state).self_update.pending.expect("off means it waits");
-        assert!(pending.reason.contains("Auto-update is off for the app"));
-        // Switching it back on releases it.
-        store::apply(&state.db.lock().unwrap(), Command::SetSelfUpdate { auto_ui: true, auto_native: true }).unwrap();
-        tick_with(&state, data.path(), None).unwrap();
-        assert_eq!(snapshot(&state).self_update.applied_through.as_deref(), Some(change.as_str()));
-        // Update now, with nothing new, says so.
-        store::apply(&state.db.lock().unwrap(), Command::UpdateNekoNow).unwrap();
-        tick_with(&state, data.path(), None).unwrap();
-        let su = snapshot(&state).self_update;
-        assert!(!su.requested);
-        assert_eq!(su.status, "Neko is up to date.");
-        // Update now applies a commit made by hand (docs only: nothing to do).
-        let doc = commit(&dir, "AGENTS.md", "notes");
-        store::apply(&state.db.lock().unwrap(), Command::UpdateNekoNow).unwrap();
-        tick_with(&state, data.path(), None).unwrap();
-        assert_eq!(snapshot(&state).self_update.applied_through.as_deref(), Some(doc.as_str()));
-        assert!(store::apply(&state.db.lock().unwrap(), Command::ApplyPendingUpdate).is_err(), "nothing waiting");
+    fn a_dirty_clone_is_reset_and_a_waiting_update_follows_the_newest_commit() {
+        let rig = Rig::new();
+        let base = run(&rig.publisher, &["rev-parse", "HEAD"]);
+        rig.tick(Some(&base));
+        let first = rig.publish("crates/neko-core/src/a.rs", "// a");
+        rig.age_check();
+        let busy = Hooks { machine_wait: sometimes_busy, ..HOOKS };
+        let wait = |on: bool| WAIT.store(on, std::sync::atomic::Ordering::SeqCst);
+        // The Mac says wait: nothing is even checked.
+        wait(true);
+        tick_with(&rig.state, &rig.data, Some(base.clone()), &rig.source, &busy).unwrap();
+        assert_eq!(rig.snapshot().self_update.applied_through.as_deref(), Some(base.as_str()));
+        assert_eq!(rig.snapshot().self_update.check.remote_head.as_deref(), Some(base.as_str()));
+        // The owner asked, so it is checked and queued, then waits for the Mac.
+        rig.command(Command::UpdateNekoNow);
+        tick_with(&rig.state, &rig.data, Some(base.clone()), &rig.source, &busy).unwrap();
+        let su = rig.snapshot().self_update;
+        assert_eq!(su.queued.as_ref().map(|p| p.to.as_str()), Some(first.as_str()));
+        assert!(su.status.contains("load 18"));
+        // Another commit is published and build output litters the clone meanwhile.
+        write(&rig.source.dir, "crates/neko-daemon/Cargo.toml", "[package] # edited");
+        write(&rig.source.dir, "stray/output.bin", "junk");
+        let second = rig.publish("crates/neko-core/src/b.rs", "// b");
+        rig.command(Command::UpdateNekoNow);
+        tick_with(&rig.state, &rig.data, Some(base.clone()), &rig.source, &busy).unwrap();
+        assert_eq!(rig.snapshot().self_update.queued.as_ref().map(|p| p.to.as_str()), Some(second.as_str()), "retargeted to the newest");
+        // When the Mac settles it is installed once, at the newest commit.
+        wait(false);
+        tick_with(&rig.state, &rig.data, Some(base.clone()), &rig.source, &busy).unwrap();
+        assert_eq!(rig.installs(), vec![format!("{second} sensitive=0")]);
+        assert!(!rig.source.dir.join("stray").exists());
+        assert_eq!(run(&rig.source.dir, &["status", "--porcelain"]), "");
+    }
+
+    #[test]
+    fn an_app_built_from_unpublished_history_is_adopted_when_its_files_match() {
+        let rig = Rig::new();
+        // A commit with the published tip's exact files but another history,
+        // living only in the development checkout.
+        let tree = run(&rig.publisher, &["rev-parse", "HEAD^{tree}"]);
+        let rewritten = run(&rig.dev, &["commit-tree", &tree, "-m", "same files, rewritten history"]);
+        with_snapshot(&rig.state, |s| s.self_update.dev_checkout = Some(rig.dev.to_string_lossy().into_owned())).unwrap();
+        rig.tick(Some(&rewritten));
+        let published = run(&rig.publisher, &["rev-parse", "HEAD"]);
+        let su = rig.snapshot().self_update;
+        assert_eq!(su.applied_through.as_deref(), Some(published.as_str()), "adopted as applied");
+        assert_eq!((rig.builds(), rig.installs().len()), (0, 0), "no needless reinstall");
+        assert!(su.queued.is_none() && su.pending.is_none());
+    }
+
+    #[test]
+    fn an_app_that_does_not_match_the_published_history_is_applied_once() {
+        let rig = Rig::new();
+        let published = run(&rig.publisher, &["rev-parse", "HEAD"]);
+        write(&rig.dev, "different.txt", "an app built from something else");
+        run(&rig.dev, &["add", "-A"]);
+        run(&rig.dev, &["commit", "-q", "-m", "different"]);
+        let foreign = run(&rig.dev, &["rev-parse", "HEAD"]);
+        with_snapshot(&rig.state, |s| s.self_update.dev_checkout = Some(rig.dev.to_string_lossy().into_owned())).unwrap();
+        rig.tick(Some(&foreign));
+        // The whole tree is classified: the web UI is built and the app reinstalled, once.
+        assert_eq!(rig.builds(), 1);
+        assert_eq!(rig.installs(), vec![format!("{published} sensitive=0")]);
+        // Not again on the next look.
+        std::fs::remove_file(core::result_path(&rig.data)).ok();
+        with_snapshot(&rig.state, |s| s.self_update.installing = None).unwrap();
+        rig.age_check();
+        rig.tick(Some(&foreign));
+        assert_eq!((rig.builds(), rig.installs().len()), (1, 1));
+    }
+
+    #[test]
+    fn the_old_checkout_becomes_the_development_checkout_once() {
+        let rig = Rig::new();
+        let base = run(&rig.publisher, &["rev-parse", "HEAD"]);
+        // What the previous version recorded: the updater's checkout was the dev one.
+        with_snapshot(&rig.state, |s| s.self_update.checkout = Some(rig.dev.to_string_lossy().into_owned())).unwrap();
+        rig.tick(Some(&base));
+        let su = rig.snapshot().self_update;
+        assert_eq!(su.dev_checkout.as_deref(), Some(&*rig.dev.to_string_lossy()));
+        assert_eq!(su.checkout.as_deref(), Some(&*rig.source.dir.to_string_lossy()));
+        // Cleared by the owner, it stays cleared.
+        rig.command(Command::SetDevCheckout { path: String::new() });
+        rig.tick(Some(&base));
+        assert_eq!(rig.snapshot().self_update.dev_checkout, None);
+        let _ = &rig.root;
+    }
+
+    #[test]
+    fn an_unreachable_source_is_recorded_as_the_last_checks_error_not_a_failed_update() {
+        let rig = Rig::new();
+        let missing = Source { remote: rig.root.join("nowhere.git").to_string_lossy().into_owned(), dir: rig.data.join("source") };
+        tick_with(&rig.state, &rig.data, None, &missing, &HOOKS).unwrap();
+        let su = rig.snapshot().self_update;
+        assert!(!su.check.error.is_empty() && su.check.at_ms > 0);
+        assert!(su.last_failure.is_none() && su.queued.is_none());
+        assert!(!rig.data.join("source").exists());
+    }
+
+    #[test]
+    fn the_source_and_the_development_checkout_are_settings() {
+        let rig = Rig::new();
+        rig.command(Command::SetUpdateSource { repository: "https://github.com/acme/neko-fork.git".into() });
+        assert_eq!(rig.snapshot().self_update.source, "acme/neko-fork");
+        let configured = Source::configured(&rig.data, &rig.snapshot().self_update.source);
+        assert_eq!(configured.remote, "https://github.com/acme/neko-fork.git");
+        assert_eq!(configured.dir, rig.data.join("source"));
+        assert!(store::apply(&rig.state.db.lock().unwrap(), Command::SetUpdateSource { repository: "not a repo".into() }).is_err());
+        rig.command(Command::SetUpdateSource { repository: String::new() });
+        assert_eq!(Source::configured(&rig.data, "").remote, format!("https://github.com/{}.git", core::DEFAULT_REPOSITORY));
+        rig.command(Command::SetDevCheckout { path: rig.dev.to_string_lossy().into_owned() });
+        assert_eq!(rig.snapshot().self_update.dev_checkout.as_deref(), Some(&*rig.dev.to_string_lossy()));
+        assert!(store::apply(&rig.state.db.lock().unwrap(), Command::SetDevCheckout { path: rig.data.to_string_lossy().into_owned() }).is_err(), "not a repository");
     }
 
     #[test]
     fn a_web_build_shipped_by_hand_is_adopted_and_outranked_by_a_newer_app() {
-        let repo = tempfile::tempdir().unwrap();
-        let data = tempfile::tempdir().unwrap();
-        let dir = repo.path().canonicalize().unwrap();
-        run(&dir, &["init", "-q", "-b", "main"]);
-        commit(&dir, "crates/neko-daemon/Cargo.toml", "[package]");
-        let app = commit(&dir, "web/package.json", "{}");
-        let shipped = commit(&dir, "web/src/a.css", "a{}");
-        let state = Arc::new(AppState::with_test_providers(
-            Db::open_in_memory().unwrap(), vec![], Some(neko_core::files::FileProvider::empty()),
-            neko_core::settings::SettingsProvider::with_panes(Vec::new()),
-            neko_core::permissions::PermissionsProvider::disabled(),
-        ));
-        with_snapshot(&state, |s| { s.land_on_main.insert(dir.to_string_lossy().into()); }).unwrap();
+        let rig = Rig::new();
+        let app = run(&rig.publisher, &["rev-parse", "HEAD"]);
+        let shipped = rig.publish("web/src/a.css", "a{}");
         // What `scripts/ship-web.sh` leaves: a build labelled with its commit.
-        let build = data.path().join("web-builds").join(core::short(&shipped));
+        let build = rig.data.join("web-builds").join(core::short(&shipped));
         std::fs::create_dir_all(&build).unwrap();
         std::fs::write(build.join("index.html"), "x").unwrap();
-        std::os::unix::fs::symlink(Path::new("web-builds").join(core::short(&shipped)), data.path().join("web-live")).unwrap();
+        std::os::unix::fs::symlink(Path::new("web-builds").join(core::short(&shipped)), rig.data.join("web-live")).unwrap();
+        // Applied already, so the thread itself builds nothing.
+        with_snapshot(&rig.state, |s| s.self_update.applied_through = Some(shipped.clone())).unwrap();
 
-        tick_with(&state, data.path(), Some(app.clone())).unwrap();
-        let su = snapshot(&state).self_update;
+        rig.tick(Some(&app));
+        let su = rig.snapshot().self_update;
         assert_eq!(su.web_commit.as_deref(), Some(shipped.as_str()));
         assert!(su.last_update.unwrap().summary.contains("shipped by hand"));
-        assert!(core::live_web_root(data.path()).is_some(), "the older app does not outrank it");
-        assert!(su.queued.is_none() && su.pending.is_none(), "a hand commit is not applied by the thread");
+        assert!(core::live_web_root(&rig.data).is_some(), "the older app does not outrank it");
 
         // The app is then installed at the shipped commit: its own UI is served again.
-        tick_with(&state, data.path(), Some(shipped.clone())).unwrap();
-        assert_eq!(snapshot(&state).self_update.web_commit, None);
-        assert!(core::live_web_root(data.path()).is_none());
+        rig.tick(Some(&shipped));
+        assert_eq!(rig.snapshot().self_update.web_commit, None);
+        assert!(core::live_web_root(&rig.data).is_none());
     }
 
     #[test]
-    fn rolling_back_the_web_ui_needs_no_checkout_and_is_recorded() {
+    fn rolling_back_the_web_ui_needs_no_clone_and_is_recorded() {
         let data = tempfile::tempdir().unwrap();
         let state = Arc::new(AppState::with_test_providers(
             Db::open_in_memory().unwrap(), vec![], Some(neko_core::files::FileProvider::empty()),
@@ -632,9 +892,9 @@ mod tests {
         std::os::unix::fs::symlink("web-builds/one", data.path().join("web-live.prev")).unwrap();
         with_snapshot(&state, |s| s.self_update.web_commit = Some("abc123".into())).unwrap();
         store::apply(&state.db.lock().unwrap(), Command::RollBackWebUi).unwrap();
-        assert!(snapshot(&state).self_update.roll_back_web);
-        tick_with(&state, data.path(), None).unwrap();
-        let su = snapshot(&state).self_update;
+        let nowhere = Source { remote: data.path().join("none.git").to_string_lossy().into_owned(), dir: data.path().join("source") };
+        tick_with(&state, data.path(), None, &nowhere, &HOOKS).unwrap();
+        let su = store::load(&state.db.lock().unwrap()).unwrap().self_update;
         assert!(!su.roll_back_web && su.status.is_empty());
         assert_eq!(su.web_commit, None);
         let record = su.last_rollback.expect("recorded");

@@ -1,11 +1,13 @@
-//! Neko writing itself over: deciding what a landed change to Neko's own
-//! checkout needs (a new web UI, a reinstalled app, or the owner's click),
-//! building and swapping the web UI, and reading what the detached installer
-//! reported. The daemon's `self_update` thread drives this; everything here is
-//! either pure or works on paths it is given, so it is tested on temp dirs.
+//! The installed app keeping itself current from the published repository:
+//! deciding what a range of published commits needs (a new web UI, a
+//! reinstalled app, or nothing), managing the updater's own clone, building
+//! and swapping the web UI, and reading what the detached installer reported.
+//! The daemon's `self_update` thread drives this; everything here is either
+//! pure or works on paths it is given, so it is tested on temp dirs and local
+//! bare repositories (never GitHub).
 //!
-//! See AGENTS.md, "Neko updates itself", for the design and why the daemon
-//! hands its own replacement to a detached script.
+//! See `docs/knowledge/neko-updates-itself.md` for the design and why the
+//! daemon hands its own replacement to a detached script.
 
 use neko_protocol::workbench::{SelfUpdate, UpdatePlan};
 use std::fs;
@@ -14,9 +16,11 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
-/// Safety-critical paths: a change touching any of these is never applied on
-/// its own; it waits for the owner's click (Settings → System, or the chat
-/// action `apply_update`). A trailing `/` means the whole folder.
+/// Safety-critical paths. Since 2026-11-13 the use copy follows the published
+/// `main`, so a range touching these applies like any other (switch auto-update
+/// off in Settings → Neko updates to make everything wait for a click); the
+/// list is what the plan and the notice name so the owner can see it. A
+/// trailing `/` means the whole folder.
 ///
 /// Keep this the one list. It covers the rulebook's defaults, the code that
 /// decides authority, approval, review and publishing, the web bridge's access
@@ -111,7 +115,8 @@ pub enum Decision {
 }
 
 /// Decides one update. `approved` is the owner's click (Apply or Update now):
-/// it lets safety-critical changes and switched-off parts through.
+/// it lets switched-off parts through. Safety-critical paths are named in the
+/// plan but do not hold it back: the source is the published `main`.
 pub fn decide(from: Option<&str>, to: &str, paths: &[String], task_id: Option<String>, approved: bool, settings: &SelfUpdate, now_ms: i64) -> Decision {
     let class = classify(paths);
     if !class.web && !class.native {
@@ -124,10 +129,6 @@ pub fn decide(from: Option<&str>, to: &str, paths: &[String], task_id: Option<St
     if approved {
         return Decision::Queue(plan);
     }
-    if !plan.sensitive.is_empty() {
-        plan.reason = format!("It changes safety-critical code ({}), so it waits for your click.", short_list(&plan.sensitive));
-        return Decision::Pending(plan);
-    }
     let blocked: Vec<&str> = [(plan.web && !settings.auto_ui, "the web UI"), (plan.native && !settings.auto_native, "the app")]
         .into_iter().filter(|(off, _)| *off).map(|(_, what)| what).collect();
     if !blocked.is_empty() {
@@ -138,12 +139,13 @@ pub fn decide(from: Option<&str>, to: &str, paths: &[String], task_id: Option<St
 }
 
 /// A pending update that waited only because auto-update was off may go once
-/// it is switched back on. Safety-critical ones never do.
+/// it is switched back on.
 pub fn releasable(plan: &UpdatePlan, settings: &SelfUpdate) -> bool {
-    plan.sensitive.is_empty() && (!plan.web || settings.auto_ui) && (!plan.native || settings.auto_native)
+    (!plan.web || settings.auto_ui) && (!plan.native || settings.auto_native)
 }
 
-fn short_list(paths: &[String]) -> String {
+/// A short list of paths for a sentence: the first three, then an ellipsis.
+pub fn short_list(paths: &[String]) -> String {
     let mut shown: Vec<&str> = paths.iter().take(3).map(String::as_str).collect();
     if paths.len() > 3 { shown.push("…"); }
     shown.join(", ")
@@ -162,9 +164,9 @@ pub struct IdleInputs {
     pub chat_running: bool,
     /// `~/.agents/bin/machine-ok`'s WAIT reason (or the steward's hold).
     pub machine_wait: Option<String>,
-    /// The checkout's `HEAD` is the commit being installed.
+    /// The clone's `HEAD` is the commit being installed.
     pub checkout_at_target: bool,
-    /// Tracked files in the checkout have uncommitted changes.
+    /// Tracked files in the clone have uncommitted changes.
     pub checkout_dirty: bool,
 }
 
@@ -182,10 +184,10 @@ pub fn idle_gate(inputs: &IdleInputs) -> Result<(), String> {
         return Err(format!("Waiting for the Mac to settle before building ({reason})."));
     }
     if !inputs.checkout_at_target {
-        return Err("Waiting: the neko checkout is not on the commit to install.".into());
+        return Err("Waiting: the update source is not on the commit to install.".into());
     }
     if inputs.checkout_dirty {
-        return Err("Waiting: the neko checkout has uncommitted changes.".into());
+        return Err("Waiting: the update source has uncommitted changes.".into());
     }
     Ok(())
 }
@@ -205,28 +207,122 @@ pub fn machine_wait() -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
-// The checkout
+// The use copy: a clean clone the updater owns
 // ---------------------------------------------------------------------------
 
-/// Neko's own checkout: a `land_on_main` repository that holds the daemon and
-/// the web app. `NEKO_SELF_CHECKOUT` overrides (tests and development).
-pub fn find_checkout<'a>(candidates: impl IntoIterator<Item = &'a String>) -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("NEKO_SELF_CHECKOUT").map(PathBuf::from) {
-        return looks_like_neko(&dir).then_some(dir);
+/// The project's public repository, used when the app has not told the daemon
+/// another one (Settings → About, "Updates come from"). Same value as
+/// `Updates.defaultRepository` in the native app.
+pub const DEFAULT_REPOSITORY: &str = "NishantEC/neko"; // privacy-ok: the project's own public repository
+
+/// A look at the published repository at most this often (milliseconds).
+pub const CHECK_EVERY_MS: i64 = 10 * 60 * 1000;
+const LS_REMOTE_TIMEOUT: Duration = Duration::from_secs(30);
+const FETCH_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const CLONE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+/// `owner/name` from `owner/name`, a github.com URL (with or without `.git`)
+/// or an ssh remote; `None` for anything else. Mirrors
+/// `Updates.normalizedRepository` in the native app.
+pub fn normalize_repository(text: &str) -> Option<String> {
+    let mut value = text.trim();
+    for prefix in ["https://github.com/", "http://github.com/", "git@github.com:", "github.com/"] {
+        if let Some(rest) = value.strip_prefix(prefix) { value = rest; break; }
     }
-    candidates.into_iter().map(PathBuf::from).find(|dir| looks_like_neko(dir))
+    let value = value.trim_end_matches('/');
+    let value = value.strip_suffix(".git").unwrap_or(value);
+    let parts: Vec<&str> = value.split('/').collect();
+    let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.');
+    (parts.len() == 2 && parts.iter().all(|p| !p.is_empty() && p.chars().all(allowed))).then(|| value.to_owned())
 }
 
-pub fn looks_like_neko(dir: &Path) -> bool {
-    dir.join("crates/neko-daemon/Cargo.toml").is_file() && dir.join("web/package.json").is_file() && dir.join(".git").exists()
+/// Where the use copy is cloned from, and where it lives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Source {
+    /// An https URL without credentials (tests and development may name a
+    /// local bare repository).
+    pub remote: String,
+    /// `<data dir>/source`: a clean clone nobody else writes to.
+    pub dir: PathBuf,
+}
+
+impl Source {
+    /// The configured source: the app's setting (or the public repository),
+    /// over https and with no credentials. `NEKO_UPDATE_REMOTE` and
+    /// `NEKO_UPDATE_SOURCE_DIR` override the remote and the clone path (tests
+    /// and development; never set in a normal install).
+    pub fn configured(data_dir: &Path, repository: &str) -> Source {
+        let repository = normalize_repository(repository).unwrap_or_else(|| DEFAULT_REPOSITORY.to_owned());
+        Source {
+            remote: std::env::var("NEKO_UPDATE_REMOTE").ok().filter(|r| !r.is_empty())
+                .unwrap_or_else(|| format!("https://github.com/{repository}.git")),
+            dir: std::env::var_os("NEKO_UPDATE_SOURCE_DIR").map(PathBuf::from).filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or_else(|| data_dir.join("source")),
+        }
+    }
+}
+
+/// Cargo's build output for updates: the user's cache folder, not the data
+/// folder (it is several GB and can be rebuilt). `NEKO_UPDATE_TARGET_DIR`
+/// overrides.
+pub fn build_cache_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("NEKO_UPDATE_TARGET_DIR").filter(|d| !d.is_empty()) {
+        return PathBuf::from(dir);
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    home.join("Library/Caches/neko/target")
+}
+
+fn no_cancel() -> AtomicBool {
+    AtomicBool::new(false)
 }
 
 fn git(checkout: &Path, args: &[&str]) -> Result<String, String> {
-    crate::native_runner::git_output(checkout, args, &AtomicBool::new(false)).map(|s| s.trim().to_owned())
+    crate::native_runner::git_output(checkout, args, &no_cancel()).map(|s| s.trim().to_owned())
 }
 
-pub fn main_head(checkout: &Path) -> Result<String, String> {
-    git(checkout, &["rev-parse", "--verify", "refs/heads/main^{commit}"])
+fn git_net(directory: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
+    crate::native_runner::publish::git_limited(directory, args, &no_cancel(), timeout).map(|s| s.trim().to_owned())
+}
+
+/// What `main` points at on the remote: one `ls-remote`, 30 seconds at most.
+pub fn remote_head(source: &Source) -> Result<String, String> {
+    let from = source.dir.parent().filter(|p| p.is_dir()).map(Path::to_path_buf).unwrap_or_else(std::env::temp_dir);
+    let out = git_net(&from, &["ls-remote", &source.remote, "refs/heads/main"], LS_REMOTE_TIMEOUT)?;
+    out.split_whitespace().next().filter(|h| h.len() >= 40 && h.bytes().all(|b| b.is_ascii_hexdigit())).map(str::to_owned)
+        .ok_or_else(|| "the repository has no main branch".to_owned())
+}
+
+/// Brings the clone to the remote's `main`, creating it when it is missing:
+/// clone (single branch, no tags) or fetch, then `reset --hard` and
+/// `clean -fdx` keeping only `node_modules` and the Swift `.build` cache
+/// (nobody else writes in the clone, so nothing else is worth keeping).
+/// Never commits and never pushes. Returns the commit it is at.
+pub fn sync_clone(source: &Source) -> Result<String, String> {
+    let dir = &source.dir;
+    if !dir.join(".git").exists() {
+        if dir.exists() && fs::read_dir(dir).map(|mut d| d.next().is_some()).unwrap_or(true) {
+            return Err(format!("{} exists and is not a clone; move it away", dir.display()));
+        }
+        let parent = dir.parent().ok_or("the update source has no parent folder")?;
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        git_net(parent, &["clone", "--quiet", "--single-branch", "--branch", "main", "--no-tags", &source.remote, &dir.to_string_lossy()], CLONE_TIMEOUT)?;
+    } else {
+        if git(dir, &["remote", "get-url", "origin"]).ok().as_deref() != Some(source.remote.as_str()) {
+            // The person pointed Neko at another repository.
+            git(dir, &["remote", "set-url", "origin", &source.remote])?;
+        }
+        git_net(dir, &["fetch", "--quiet", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"], FETCH_TIMEOUT)?;
+    }
+    reset_clone(dir)
+}
+
+/// Makes the clone's tree exactly `origin/main` again, without the network.
+pub fn reset_clone(dir: &Path) -> Result<String, String> {
+    git(dir, &["checkout", "--quiet", "--force", "-B", "main", "refs/remotes/origin/main"])?;
+    git(dir, &["reset", "--quiet", "--hard", "refs/remotes/origin/main"])?;
+    git(dir, &["clean", "--quiet", "-fdx", "-e", "node_modules", "-e", ".build"])?;
+    head(dir)
 }
 
 pub fn head(checkout: &Path) -> Result<String, String> {
@@ -236,6 +332,43 @@ pub fn head(checkout: &Path) -> Result<String, String> {
 pub fn changed_paths(checkout: &Path, from: &str, to: &str) -> Result<Vec<String>, String> {
     Ok(git(checkout, &["diff", "--name-only", "--no-renames", from, to])?
         .lines().map(str::to_owned).filter(|l| !l.is_empty()).collect())
+}
+
+/// Every path of the tree at `commit`: what "apply it once" classifies when
+/// there is no starting commit to compare with.
+pub fn all_paths(checkout: &Path, commit: &str) -> Result<Vec<String>, String> {
+    Ok(git(checkout, &["ls-tree", "-r", "--name-only", commit])?.lines().map(str::to_owned).filter(|l| !l.is_empty()).collect())
+}
+
+/// The paths a plan from `from` (or from nothing) to `to` changes.
+pub fn paths_between(checkout: &Path, from: Option<&str>, to: &str) -> Result<Vec<String>, String> {
+    match from {
+        Some(from) => changed_paths(checkout, from, to),
+        None => all_paths(checkout, to),
+    }
+}
+
+/// The tree object of `commit` in `repository`, if that repository has it.
+pub fn tree_of(repository: &Path, commit: &str) -> Option<String> {
+    git(repository, &["rev-parse", "--verify", "--quiet", &format!("{commit}^{{tree}}")]).ok().filter(|t| !t.is_empty())
+}
+
+/// Where a running app starts from. Pure over what the clone knows:
+/// - the recorded `applied` commit, if it is in the published history;
+/// - else the app's own commit, if it is in the published history;
+/// - else (the app was built from commits that are not public, such as a
+///   rewritten history) `head` when the app's tree equals `head`'s: it is
+///   the same files, so it is adopted as already applied;
+/// - else `None`: nothing to compare with, apply `head` once.
+pub fn starting_point(clone: &Path, head: &str, applied: Option<&str>, bundle: Option<&str>, bundle_tree: Option<&str>) -> Option<String> {
+    if let Some(applied) = applied.filter(|a| is_ancestor(clone, a, head)) {
+        return Some(applied.to_owned());
+    }
+    let bundle = bundle?;
+    if is_ancestor(clone, bundle, head) {
+        return Some(bundle.to_owned());
+    }
+    (bundle_tree.is_some() && bundle_tree == tree_of(clone, head).as_deref()).then(|| head.to_owned())
 }
 
 /// The full commit a build label (a short hex commit) names, if the checkout
@@ -501,6 +634,18 @@ pub fn plist_commit(plist: &Path) -> Option<String> {
     (commit.len() >= 7 && commit.bytes().all(|b| b.is_ascii_hexdigit())).then(|| commit.to_owned())
 }
 
+/// The folder the running app was built in (`NekoSourcePath`). Read only:
+/// when the app's commit is not in the published history, its tree is looked
+/// up there to see whether the app matches the published `main`.
+pub fn bundle_source_path() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let text = fs::read_to_string(exe.parent()?.parent()?.join("Info.plist")).ok()?;
+    let rest = &text[text.find("<key>NekoSourcePath</key>")?..];
+    let start = rest.find("<string>")? + "<string>".len();
+    let end = rest[start..].find("</string>")?;
+    Some(PathBuf::from(rest[start..start + end].trim())).filter(|p| p.join(".git").exists())
+}
+
 /// What `scripts/self-update.sh` writes to `<data>/self-update/result.json`
 /// when it is done (successfully or not).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -580,11 +725,14 @@ mod tests {
         let web = paths(&["web/src/App.tsx"]);
         assert!(matches!(decide(None, "abc", &web, None, false, &on, 1), Decision::Queue(p) if p.web && !p.native));
         assert_eq!(decide(None, "abc", &paths(&["README.md"]), None, false, &on, 1), Decision::Nothing);
+        // Safety-critical paths are named in the plan but no longer hold it back.
         let critical = paths(&["crates/neko-daemon/src/web.rs"]);
-        let Decision::Pending(plan) = decide(Some("a"), "b", &critical, Some("t".into()), false, &on, 1) else { panic!("must wait") };
-        assert!(plan.reason.contains("safety-critical") && plan.native && plan.task_id.as_deref() == Some("t"));
-        assert!(!releasable(&plan, &on), "a click is the only way through");
+        let Decision::Queue(plan) = decide(Some("a"), "b", &critical, None, false, &on, 1) else { panic!("applies on its own") };
+        assert!(plan.native && plan.sensitive == critical && !plan.approved);
         assert!(matches!(decide(Some("a"), "b", &critical, None, true, &on, 1), Decision::Queue(p) if p.approved));
+        let off = SelfUpdate { auto_native: false, ..SelfUpdate::default() };
+        let Decision::Pending(plan) = decide(Some("a"), "b", &critical, None, false, &off, 1) else { panic!("auto-update off waits") };
+        assert!(releasable(&plan, &on) && !releasable(&plan, &off));
         let off = SelfUpdate { auto_native: false, ..SelfUpdate::default() };
         let Decision::Pending(plan) = decide(None, "b", &paths(&["crates/neko-core/src/triage.rs"]), None, false, &off, 1) else { panic!() };
         assert!(plan.reason.contains("the app"));
@@ -669,5 +817,105 @@ mod tests {
         let result = take_result(dir.path()).unwrap();
         assert_eq!((result.status.as_str(), result.reason.as_str()), ("rolled_back", "health check failed"));
         assert_eq!(take_result(dir.path()), None, "read once");
+    }
+
+    fn run(dir: &Path, args: &[&str]) -> String {
+        let out = Command::new("git").current_dir(dir).args(args)
+            .env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t")
+            .output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap().trim().to_owned()
+    }
+
+    #[test]
+    fn repositories_are_normalized_like_the_native_apps_setting() {
+        for (input, want) in [
+            ("acme/neko", Some("acme/neko")),
+            ("https://github.com/acme/neko.git", Some("acme/neko")),
+            ("git@github.com:acme/neko.git", Some("acme/neko")),
+            ("github.com/acme/neko/", Some("acme/neko")),
+            ("acme", None), ("a/b/c", None), ("https://evil.example/acme/neko", None), ("", None), ("acme/ne ko", None),
+        ] {
+            assert_eq!(normalize_repository(input).as_deref(), want, "{input}");
+        }
+    }
+
+    #[test]
+    fn the_source_is_https_with_no_credentials_and_the_clone_lives_in_the_data_folder() {
+        let data = Path::new("/tmp/neko-data");
+        let source = Source::configured(data, "");
+        if std::env::var_os("NEKO_UPDATE_REMOTE").is_none() {
+            assert_eq!(source.remote, format!("https://github.com/{DEFAULT_REPOSITORY}.git"));
+            assert!(!source.remote.contains('@'));
+        }
+        if std::env::var_os("NEKO_UPDATE_SOURCE_DIR").is_none() {
+            assert_eq!(source.dir, data.join("source"));
+        }
+        // The build output is never inside the data folder.
+        assert!(!build_cache_dir().starts_with(data));
+    }
+
+    #[test]
+    fn the_clone_is_made_moved_to_origin_main_and_cleaned_but_keeps_its_dependencies() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let bare = root.join("public.git");
+        let work = root.join("work");
+        run(&root, &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()]);
+        run(&root, &["init", "-q", "-b", "main", work.to_str().unwrap()]);
+        run(&work, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        fs::write(work.join("a.txt"), "one").unwrap();
+        run(&work, &["add", "-A"]);
+        run(&work, &["commit", "-q", "-m", "one"]);
+        run(&work, &["push", "-q", "origin", "main"]);
+        let source = Source { remote: bare.to_string_lossy().into_owned(), dir: root.join("data/source") };
+        let one = run(&work, &["rev-parse", "HEAD"]);
+        assert_eq!(remote_head(&source).unwrap(), one);
+        assert_eq!(sync_clone(&source).unwrap(), one);
+        // Litter, local edits and a stray commit are all undone; dependencies stay.
+        fs::create_dir_all(source.dir.join("web/node_modules")).unwrap();
+        fs::write(source.dir.join("web/node_modules/dep.js"), "x").unwrap();
+        fs::write(source.dir.join("stray.txt"), "x").unwrap();
+        fs::write(source.dir.join("a.txt"), "edited").unwrap();
+        run(&source.dir, &["commit", "-q", "-am", "a commit nobody should make"]);
+        fs::write(work.join("a.txt"), "two").unwrap();
+        run(&work, &["commit", "-q", "-am", "two"]);
+        run(&work, &["push", "-q", "origin", "main"]);
+        let two = run(&work, &["rev-parse", "HEAD"]);
+        assert_eq!(sync_clone(&source).unwrap(), two);
+        assert_eq!(fs::read_to_string(source.dir.join("a.txt")).unwrap(), "two");
+        assert!(!source.dir.join("stray.txt").exists());
+        assert!(source.dir.join("web/node_modules/dep.js").is_file());
+        assert!(!dirty(&source.dir, None));
+        assert!(remote_head(&Source { remote: root.join("none.git").to_string_lossy().into_owned(), dir: source.dir.clone() }).is_err());
+        // A folder in the way that is not a clone is never overwritten.
+        let blocked = Source { dir: root.join("blocked"), ..source.clone() };
+        fs::create_dir_all(&blocked.dir).unwrap();
+        fs::write(blocked.dir.join("mine.txt"), "x").unwrap();
+        assert!(sync_clone(&blocked).unwrap_err().contains("not a clone"));
+        assert!(blocked.dir.join("mine.txt").exists());
+    }
+
+    #[test]
+    fn a_running_app_starts_from_what_is_applied_what_is_running_or_a_matching_tree() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().canonicalize().unwrap();
+        run(&dir, &["init", "-q", "-b", "main"]);
+        fs::write(dir.join("a.txt"), "1").unwrap();
+        run(&dir, &["add", "-A"]);
+        run(&dir, &["commit", "-q", "-m", "1"]);
+        let one = run(&dir, &["rev-parse", "HEAD"]);
+        fs::write(dir.join("a.txt"), "2").unwrap();
+        run(&dir, &["commit", "-q", "-am", "2"]);
+        let two = run(&dir, &["rev-parse", "HEAD"]);
+        let unknown = "f".repeat(40);
+        assert_eq!(starting_point(&dir, &two, Some(&one), Some(&two), None).as_deref(), Some(one.as_str()), "applied wins");
+        assert_eq!(starting_point(&dir, &two, None, Some(&one), None).as_deref(), Some(one.as_str()), "then the app's commit");
+        assert_eq!(starting_point(&dir, &two, Some(&unknown), Some(&one), None).as_deref(), Some(one.as_str()));
+        let tree = tree_of(&dir, &two).unwrap();
+        assert_eq!(starting_point(&dir, &two, None, Some(&unknown), Some(&tree)).as_deref(), Some(two.as_str()), "same files: adopted");
+        assert_eq!(starting_point(&dir, &two, None, Some(&unknown), Some("0".repeat(40).as_str())), None, "different files: apply once");
+        assert_eq!(starting_point(&dir, &two, None, None, None), None);
+        assert_eq!(paths_between(&dir, None, &two).unwrap(), vec!["a.txt".to_owned()]);
     }
 }

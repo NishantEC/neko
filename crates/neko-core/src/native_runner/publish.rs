@@ -199,6 +199,47 @@ pub fn land(
     Ok(Some(Landed { commit, rebased, onto }))
 }
 
+/// Runs the version-control tool in `directory` with a time limit, no
+/// prompts and no credential helper (a clone of a public repository needs
+/// none), and returns stdout. The updater's network steps use it: they must
+/// never hang or ask.
+pub fn git_limited(directory: &Path, args: &[&str], cancel: &AtomicBool, timeout: Duration) -> Result<String, String> {
+    let mut command = git_command(directory);
+    command.args(["-c", "credential.helper="]).args(args)
+        .env("GIT_ASKPASS", "/usr/bin/true")
+        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=15");
+    capture(&format!("git {}", args.first().unwrap_or(&"")), command, b"", cancel, timeout)
+}
+
+/// Pushes `main` of the development checkout `source` to its `origin` as a
+/// plain fast-forward (never forced). When it fails the landed commit simply
+/// stays local; the caller says so.
+pub fn push_main(source: &Path, cancel: &AtomicBool) -> Result<(), String> {
+    let mut command = git_command(source);
+    command.args(["push", "--porcelain", "origin", &format!("refs/heads/{LANDING_BRANCH}:refs/heads/{LANDING_BRANCH}")])
+        .env("GIT_ASKPASS", "/usr/bin/true")
+        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=15");
+    run("git push", command, b"", cancel, PUSH_TIMEOUT)
+}
+
+/// Pushes the development checkout's `main` to the published repository, or
+/// says why not. Only when `origin` is the repository the app updates from
+/// (`update_source`, empty for the project's own), so a change never goes
+/// somewhere the updater would not read it back from.
+pub fn push_to_update_source(source: &Path, update_source: &str, cancel: &AtomicBool) -> Result<(), String> {
+    let origin = match git_output(source, &["config", "--get", "remote.origin.url"], cancel) {
+        Ok(url) if !url.trim().is_empty() => url,
+        _ => return Err("this checkout has no origin remote".into()),
+    };
+    let wanted = crate::self_update::normalize_repository(update_source).unwrap_or_else(|| crate::self_update::DEFAULT_REPOSITORY.to_owned());
+    match crate::self_update::normalize_repository(origin.trim()) {
+        Some(found) if found.eq_ignore_ascii_case(&wanted) => {}
+        Some(found) => return Err(format!("origin is {found}, not the update source {wanted}")),
+        None => return Err("origin is not a GitHub repository".into()),
+    }
+    push_main(source, cancel).map_err(|error| error.trim_end_matches(['.', ' ']).to_owned())
+}
+
 fn publish_with(
     gh: &Path,
     directory: &Path,

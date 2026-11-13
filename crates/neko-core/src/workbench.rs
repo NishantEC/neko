@@ -46,6 +46,10 @@ const PR_STATUS: &str = "workbench_pull_request_status_v1";
 /// Written immediately, not deferred: due times are durable claims that keep
 /// a watch from running twice after a restart.
 const WATCH_SCHEDULE: &str = "workbench_watch_schedule_v1";
+/// When the updater last looked at the published repository and what `main`
+/// was then: a timer value (every 10 minutes), so it has a row of its own.
+/// Deferred: a crash only makes the next look come sooner.
+const UPDATE_CHECK: &str = "workbench_self_update_check_v1";
 
 /// The parts of a watch that change on every run.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -329,6 +333,9 @@ fn load_stored(db: &Db) -> Result<Snapshot, String> {
             }
         }
     }
+    if let Some(json) = db.get_setting(UPDATE_CHECK).map_err(|e| e.to_string())? {
+        snapshot.self_update.check = serde_json::from_str(&json).map_err(|e| format!("Cannot read the update check: {e}"))?;
+    }
     if let Some(json) = db.get_setting(PR_STATUS).map_err(|e| e.to_string())? {
         let mut statuses: std::collections::HashMap<String, neko_protocol::workbench::PrStatus> =
             serde_json::from_str(&json).map_err(|e| format!("Cannot read pull request status: {e}"))?;
@@ -394,6 +401,8 @@ fn persist(db: &Db, snapshot: &Snapshot, deferred: bool) -> Result<(), String> {
     // Receipts and pull request statuses are always deferred; queued before
     // the transaction opens, since a write inside one goes straight to disk.
     save_receipts(db, snapshot)?;
+    db.set_setting_deferred(UPDATE_CHECK, &serde_json::to_string(&snapshot.self_update.check).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
     let run = || -> Result<(), String> {
         keep_legacy_row_once(db)?;
         save_watch_schedules(db, snapshot, deferred)?;
@@ -540,6 +549,8 @@ fn encode(snapshot: &Snapshot) -> Result<Snapshot, String> {
     compacted.skills = Default::default();
     compacted.import_preview = Default::default();
     compacted.mcp.receipts.clear();
+    // The last look at the published repository changes on a timer.
+    compacted.self_update.check = Default::default();
     for watch in &mut compacted.mcp.responsibilities {
         watch.next_due_ms = 0;
         watch.last_attempt_ms = None;
@@ -1354,6 +1365,26 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         Command::SetSelfUpdate { auto_ui, auto_native } => {
             snapshot.self_update.auto_ui = auto_ui;
             snapshot.self_update.auto_native = auto_native;
+        }
+        Command::SetUpdateSource { repository } => {
+            let text = repository.trim();
+            snapshot.self_update.source = if text.is_empty() {
+                String::new()
+            } else {
+                crate::self_update::normalize_repository(text).ok_or("Use owner/name or a github.com URL")?
+            };
+        }
+        Command::SetDevCheckout { path } => {
+            let text = path.trim();
+            snapshot.self_update.dev_checkout = if text.is_empty() {
+                None
+            } else {
+                let dir = std::path::Path::new(text).canonicalize().map_err(|_| "That folder does not exist")?;
+                if !dir.join(".git").exists() {
+                    return Err("Choose the repository's own checkout folder".into());
+                }
+                Some(dir.to_string_lossy().into_owned())
+            };
         }
     }
     save(db, &snapshot)?;
