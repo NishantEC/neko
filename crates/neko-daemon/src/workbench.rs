@@ -337,6 +337,12 @@ impl Controller {
             if !state.workspaces.iter().any(|w| &w.id == id) { return Err("Selected workspace no longer exists".into()); }
         }
         let id = neko_chat::begin_scoped_turn_with_id(&db, &text, workspace_id.as_deref(), active.is_some(), message_id)?;
+        // `/goal <text>` sets a goal without a model turn.
+        if active.is_none() && let Some(command) = goals::slash(&text) {
+            let (reply, tickets) = goals::slash_reply(&db, command, workspace_id.as_deref());
+            neko_chat::finish_turn(&db, &id, &reply, tickets, false)?;
+            return Ok((store::load(&db)?, None));
+        }
         let mut launch = None;
         let mut started = None;
         if interrupt {
@@ -2086,6 +2092,33 @@ fn complete_chat_reply(
             }
         }
     }
+    // A goal the reply set: it rides the ticket this reply opened (or the one
+    // it names), else gets a ticket of its own. A person's own request.
+    let mut goal_note = String::new();
+    if let Some(proposed) = reply.goals.first() {
+        let workspace = neko_chat::ticket_workspace(&snapshot, chosen, proposed.workspace_id.as_deref(), message);
+        match workspace {
+            Some(workspace) => {
+                let named = proposed.task_id.as_deref().filter(|id| snapshot.tasks.iter().any(|t| t.id == *id && t.workspace_id == workspace.id)).map(str::to_owned);
+                let ticket = named.or_else(|| opened.first().cloned());
+                let conversation = neko_core::runtime_selection::home_id(&turn.agent_profile_id, chosen);
+                let spec = goals::Spec { workspace_id: &workspace.id, objective: &proposed.objective, done_check: &proposed.done_check, constraints: &proposed.constraints, max_turns: proposed.max_turns, ticket_id: ticket.as_deref(), conversation_id: Some(&conversation) };
+                match goals::create(&db, &spec) {
+                    Ok(goal) => {
+                        if ticket.is_none() {
+                            opened.extend(goal.ticket_id.clone());
+                        }
+                        goal_note = format!("\n\nGoal set: {}. Turn 1 of {}{}.", neko_core::goals::head(&goal.objective, 120), goal.budget.max_turns, if goal.done_check.is_empty() { ", done when a file or link proves it".to_owned() } else { format!(", done when `{}` passes", neko_core::goals::head(&goal.done_check, 80)) });
+                    }
+                    Err(error) => {
+                        goal_note = format!("\n\nI could not set the goal: {error}");
+                        eprintln!("neko chat: could not set a goal: {error}");
+                    }
+                }
+            }
+            None => goal_note = "\n\nI could not set the goal: choose a workspace for it first.".into(),
+        }
+    }
     // Memories: only what the user said, scoped like tickets. A workspace fact
     // lands in the chosen workspace or one the user named; otherwise it is
     // kept as a fact about the user.
@@ -2135,6 +2168,7 @@ fn complete_chat_reply(
         save_suggested_responsibilities(&db, &snapshot, chosen, reply.responsibilities);
     let text = if reply.text.is_empty() { "Done.".to_owned() } else { reply.text };
     let mut notes = String::new();
+    notes.push_str(&goal_note);
     if skipped {
         notes.push_str(if opened.is_empty() {
             "\n\nNo ticket was created. Choose a Git folder for this workspace, or name its repository path and ask me to create the ticket."
@@ -2788,7 +2822,7 @@ mod tests {
     }
 
     fn reply_with_ticket_and_memory() -> neko_chat::Reply {
-        neko_chat::Reply { used_memory: vec![], actions: vec![],
+        neko_chat::Reply { used_memory: vec![], actions: vec![], goals: vec![],
             text: "Opened a ticket and remembered your preference.".into(),
             tickets: vec![neko_chat::ProposedTicket {
                 title: "New ticket".into(),
@@ -2843,7 +2877,7 @@ mod tests {
         let turn = neko_chat::begin_turn(&db.lock().unwrap(), "Plan my next step").unwrap();
         complete_chat_reply(&db, &AtomicBool::new(false), &turn,
             "Plan my next step", None,
-            neko_chat::Reply { used_memory: vec![], actions: vec![], text: format!("The active repo is `{}`.", repo.display()),
+            neko_chat::Reply { used_memory: vec![], actions: vec![], goals: vec![], text: format!("The active repo is `{}`.", repo.display()),
                 tickets: vec![neko_chat::ProposedTicket { title: "Repair repo".into(),
                     goal: "Make branch reproducible".into(), workspace_id: Some(workspace.clone()),
                     folder: None }], memories: vec![], responsibilities: vec![] }).unwrap();
@@ -2867,7 +2901,7 @@ mod tests {
                 folders: vec![repo.path().to_string_lossy().into()],
             }).unwrap().workspaces[0].id.clone()
         };
-        let ticket = |title: &str| neko_chat::Reply { used_memory: vec![], actions: vec![], text: "Opened.".into(),
+        let ticket = |title: &str| neko_chat::Reply { used_memory: vec![], actions: vec![], goals: vec![], text: "Opened.".into(),
             tickets: vec![neko_chat::ProposedTicket { title: title.into(), goal: "Fix it".into(), workspace_id: Some(workspace.clone()), folder: None }],
             memories: vec![], responsibilities: vec![] };
         for (message, title) in [("first", "ENG-3006: Reviewers see only the shared reports"), ("again", "Reviewers see only the shared reports")] {
@@ -2917,7 +2951,7 @@ mod tests {
             &turn,
             "What could you watch?",
             None,
-            neko_chat::Reply { used_memory: vec![], actions: vec![],
+            neko_chat::Reply { used_memory: vec![], actions: vec![], goals: vec![],
                 text: "Here are two ideas, paused until you turn them on.".into(),
                 tickets: vec![],
                 memories: vec![],

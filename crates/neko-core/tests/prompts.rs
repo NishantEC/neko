@@ -181,3 +181,34 @@ fn ticket_lesson() {
     let text = skills::lesson_prompt(&catalog, "(no agent context)", "Fix the flaky login test", "1. Reproduce\n2. Fix the wait", "Passed review: the wait is now on the response.");
     check("ticket-lesson", &text);
 }
+
+fn golden_goal() -> neko_protocol::goals::Goal {
+    use neko_protocol::goals::{CheckResult, JournalEntry};
+    let mut goal = neko_core::goals::new_goal("w1", "Make the invoice export handle empty rows", "cargo test -p acme-export", "Do not change the CSV header", Some(12), 1_000).unwrap();
+    goal.turns = 3;
+    goal.journal.push(JournalEntry { at_ms: 1, turn: 2, done: "Handled the empty row in the writer".into(), next: "Fix the header test".into(), note: "CONTINUE".into(), ..Default::default() });
+    goal.ledger.push(CheckResult { command: "cargo test -p acme-export".into(), exit_code: Some(101), tail: "test header_is_stable ... FAILED".into(), at_ms: 2, source: "neko".into() });
+    goal
+}
+
+#[test]
+fn goal_judge() {
+    let goal = golden_goal();
+    let failing = goal.ledger[0].clone();
+    check("goal-judge", &neko_core::goals::judge_prompt(&goal, Some(&failing), "I handled empty rows. All tests pass now.", "/Users/example/task-worktrees/abc"));
+    let mut no_check = goal.clone();
+    no_check.done_check.clear();
+    check("goal-judge-no-check", &neko_core::goals::judge_prompt(&no_check, None, "Wrote the guide to docs/export.md", "/Users/example/task-worktrees/abc"));
+}
+
+#[test]
+fn goal_turns() {
+    let goal = golden_goal();
+    let failing = goal.ledger[0].clone();
+    let mut text = neko_core::goals::continue_prompt(&goal, Some(&failing), "The header test still fails.", None);
+    text.push_str("\n---\n");
+    text.push_str(&neko_core::goals::context(&goal));
+    text.push_str("\n---\n");
+    text.push_str(&neko_core::goals::gate_instruction("No check was run for the code you changed."));
+    check("goal-turns", &text);
+}

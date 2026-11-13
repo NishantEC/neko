@@ -235,6 +235,13 @@ pub(crate) fn create(db: &Db, spec: &Spec) -> Result<Goal, String> {
                     return Err("That ticket was cancelled".into());
                 }
                 goal.ticket_id = Some(id.to_owned());
+                // Attaching a goal to a ticket that has not started is the
+                // person asking for it to be worked.
+                if task.status == TaskStatus::Queued {
+                    let mut after = snapshot.clone();
+                    after.start_when_planned.insert(id.to_owned());
+                    store::save(db, &after)?;
+                }
                 if task.status == TaskStatus::AwaitingApproval {
                     goal.status = GoalStatus::Waiting;
                     goal.wait = Some(Wait { reason: "The ticket is waiting for your approval of its plan.".into(), ticket: true, ..Wait::default() });
@@ -265,6 +272,74 @@ pub(crate) fn create(db: &Db, spec: &Spec) -> Result<Goal, String> {
         Ok(())
     })()?;
     Ok(goal)
+}
+
+// ---------------------------------------------------------------------------
+// `/goal` in the chat
+// ---------------------------------------------------------------------------
+
+/// What a `/goal` message asks for.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Slash {
+    /// `/goal` alone: where the goals stand.
+    List,
+    /// `/goal <objective> [--check <command>] [--turns <n>]`.
+    Set { objective: String, done_check: String, max_turns: Option<u32> },
+}
+
+/// Reads a chat message that is a `/goal` command; None for anything else.
+pub(crate) fn slash(text: &str) -> Option<Slash> {
+    let rest = text.trim().strip_prefix("/goal")?;
+    if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let mut rest = rest.trim().to_owned();
+    if rest.is_empty() {
+        return Some(Slash::List);
+    }
+    let mut max_turns = None;
+    if let Some((before, after)) = rest.rsplit_once(" --turns ") {
+        if let Ok(n) = after.trim().parse::<u32>() {
+            max_turns = Some(n);
+            rest = before.trim().to_owned();
+        }
+    }
+    let (objective, done_check) = match rest.split_once(" --check ") {
+        Some((objective, check)) => (objective.trim().to_owned(), check.trim().to_owned()),
+        None => (rest, String::new()),
+    };
+    Some(Slash::Set { objective, done_check, max_turns })
+}
+
+/// The chat's answer to a `/goal` message, and the tickets it opened.
+pub(crate) fn slash_reply(db: &Db, command: Slash, workspace_id: Option<&str>) -> (String, Vec<String>) {
+    let snapshot = match store::load(db) {
+        Ok(snapshot) => snapshot,
+        Err(error) => return (format!("I could not read the goals: {error}"), vec![]),
+    };
+    match command {
+        Slash::List => {
+            let active: Vec<&Goal> = snapshot.goals.iter().filter(|g| !g.status.is_finished()).collect();
+            let mut text = String::from("`/goal <what you want finished>` keeps Neko working until it is proven done. Add `--check <command>` for a command that passes only when it is done, and `--turns <n>` for a turn budget (20 by default).");
+            for goal in active.iter().take(5) {
+                text.push_str(&format!("\n- {:?}: {} (turn {}/{})", goal.status, core::head(&goal.objective, 100), goal.turns, goal.budget.max_turns));
+            }
+            (text, vec![])
+        }
+        Slash::Set { objective, done_check, max_turns } => {
+            let workspace = workspace_id.map(str::to_owned).or_else(|| (snapshot.workspaces.len() == 1).then(|| snapshot.workspaces[0].id.clone()));
+            let Some(workspace) = workspace else { return ("Choose a workspace for this goal first, then send it again.".into(), vec![]) };
+            let profile = snapshot.agent_profiles.for_scope(Some(&workspace)).to_owned();
+            let conversation = neko_core::runtime_selection::home_id(&profile, workspace_id);
+            match create(db, &Spec { workspace_id: &workspace, objective: &objective, done_check: &done_check, constraints: "", max_turns, ticket_id: None, conversation_id: Some(&conversation) }) {
+                Ok(goal) => (
+                    format!("Goal set: {}. I will keep working turn after turn, up to {} turns, and it is done only when {}.", core::head(&goal.objective, 160), goal.budget.max_turns, if goal.done_check.is_empty() { "a file or link proves it".to_owned() } else { format!("`{}` passes", core::head(&goal.done_check, 120)) }),
+                    goal.ticket_id.into_iter().collect(),
+                ),
+                Err(error) => (format!("I could not set the goal: {error}"), vec![]),
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -789,3 +864,7 @@ fn close_items(db: &Db, goal: &mut Goal) {
 #[cfg(test)]
 #[path = "goals_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "goals_chat_tests.rs"]
+mod chat_tests;

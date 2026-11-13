@@ -35,7 +35,7 @@ pub const PERSIST_EVERY: Duration = Duration::from_secs(2);
 /// `data-neko-*` kinds drawn in the reply.
 pub const DISPLAY_KINDS: [&str; 6] = ["chart", "choices", "form", "plan", "files", "sources"];
 /// Blocks that carry what the reply proposes; consumed, never drawn.
-pub const PROPOSAL_KINDS: [&str; 5] = ["ticket", "remember", "watch", "action", "used-memory"];
+pub const PROPOSAL_KINDS: [&str; 6] = ["ticket", "remember", "watch", "action", "used-memory", "goal"];
 
 fn bound(text: &str, limit: usize) -> String {
     if text.chars().count() <= limit { return text.to_owned(); }
