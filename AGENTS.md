@@ -301,4 +301,5 @@ finished.
 - [Codex quick attention loop](docs/knowledge/codex-quick-attention-loop.md) — neko-core::codex is the current Codex integration seam, and it is…
 - [Seams for follow-up work](docs/knowledge/seams-for-follow-up-work.md) — the daemon; see "Clipboard history" above.
 - [Chat tool authority](docs/knowledge/chat-tool-authority.md) — Chat MCP tools use the selected workspace's lease and current connection catalog;
+- [Keeping Neko public (2026-11-13)](docs/knowledge/keeping-neko-public.md) — Nothing personal or work-related enters the repo; placeholders to use; `scripts/privacy-check.sh` (pre-commit).
 - [Maintaining this file](docs/knowledge/maintaining-this-file.md) — Keep this file for knowledge useful to almost every future agent session in this project.

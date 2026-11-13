@@ -3,6 +3,8 @@
 # Rust or Swift. Installed by `git config core.hooksPath .githooks`.
 # Bypass once with `git commit --no-verify` (Neko's own publisher does).
 set -euo pipefail
+# Nothing personal or work-related may enter the repo (fast: staged lines only).
+"$(git rev-parse --show-toplevel)/scripts/privacy-check.sh" --staged
 if git diff --cached --name-only --diff-filter=ACMR | grep -qE '\.(rs|swift)$|(^|/)Cargo\.(toml|lock)$|Package\.swift$'; then
   exec "$(git rev-parse --show-toplevel)/scripts/check.sh" --quick
 fi
