@@ -146,6 +146,7 @@ struct PreferencesView: View {
     @State private var checkingUpdates = false
     @State private var updateStatus: Updates.Status?
     @State private var updateNote: String?
+    @AppStorage(Updates.repositoryKey) private var updateRepository = ""
     private func checkUpdates() {
         checkingUpdates = true
         Task { updateStatus = await Updates.check(); checkingUpdates = false }
@@ -397,6 +398,8 @@ struct PreferencesView: View {
                         Button(checkingUpdates ? "Checking…" : "Check for updates") { checkUpdates() }.disabled(checkingUpdates)
                         if case .behind = updateStatus { Button("Update now") { runUpdate() }.nekoButton(.primary) }
                     }.padding(.top, 8).settingsTarget(.updates)
+                    LabeledContent("Updates come from") { TextField(Updates.defaultRepository, text: $updateRepository).labelsHidden().textFieldStyle(.roundedBorder).frame(width: 220).onSubmit { updateStatus = nil } }
+                        .help("A GitHub repository as owner/name. Leave empty for the project’s own.")
                     if let updateStatus { Text(updateStatus.message).font(NekoFont.body).foregroundStyle(.secondary).multilineTextAlignment(.center) }
                     if let updateNote { Text(updateNote).font(NekoFont.meta).foregroundStyle(.secondary).multilineTextAlignment(.center).textSelection(.enabled) }
                 }.frame(maxWidth: .infinity).padding(.top, 28)

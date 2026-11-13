@@ -166,3 +166,15 @@ final class MachineStatusTests: XCTestCase {
         XCTAssertEqual(held.title, "New work is on hold")
     }
 }
+
+final class UpdateRepositoryTests: XCTestCase {
+    func testTheUpdateSourceAcceptsOwnerNameAndUrlsAndRejectsTheRest() {
+        XCTAssertEqual(Updates.normalizedRepository("acme/neko"), "acme/neko")
+        XCTAssertEqual(Updates.normalizedRepository(" https://github.com/acme/neko.git/ "), "acme/neko")
+        XCTAssertEqual(Updates.normalizedRepository("github.com/acme/neko"), "acme/neko")
+        XCTAssertNil(Updates.normalizedRepository(""))
+        XCTAssertNil(Updates.normalizedRepository("acme"))
+        XCTAssertNil(Updates.normalizedRepository("acme/neko/extra"))
+        XCTAssertNil(Updates.normalizedRepository("acme/ne ko?x=1"))
+    }
+}

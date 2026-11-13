@@ -8,7 +8,26 @@ import NekoKit
 /// touch uncommitted work.
 enum Updates {
     struct UpdateError: Error, Equatable { let message: String }
-    static let repository = "NishantEC/neko" // privacy-ok: the project's own public repository
+    /// Where "newer commits" are looked for: the project's public repository
+    /// unless the person points Neko at their own fork (Settings, About).
+    static let defaultRepository = "NishantEC/neko" // privacy-ok: the project's own public repository
+    static let repositoryKey = "neko.updates.repository"
+    static var repository: String {
+        normalizedRepository(UserDefaults.standard.string(forKey: repositoryKey) ?? "") ?? defaultRepository
+    }
+    /// `owner/name` from `owner/name`, a github.com URL (with or without
+    /// `.git`) or an ssh remote; nil for anything else, so a typo falls back to
+    /// the default rather than querying a strange URL.
+    static func normalizedRepository(_ text: String) -> String? {
+        var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        for prefix in ["https://github.com/", "http://github.com/", "git@github.com:", "github.com/"] where value.hasPrefix(prefix) { value = String(value.dropFirst(prefix.count)) }
+        while value.hasSuffix("/") { value = String(value.dropLast()) }
+        if value.hasSuffix(".git") { value = String(value.dropLast(4)) }
+        let parts = value.split(separator: "/", omittingEmptySubsequences: false)
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
+        guard parts.count == 2, parts.allSatisfy({ !$0.isEmpty && $0.unicodeScalars.allSatisfy(allowed.contains) }) else { return nil }
+        return value
+    }
     static let lastCheckKey = "neko.updates.lastCheck"
 
     struct Build: Equatable {
