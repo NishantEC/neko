@@ -29,9 +29,16 @@ if [[ -f web/package.json ]]; then
   rm -rf "$bundle/Contents/Resources/web"
   cp -R web/dist "$bundle/Contents/Resources/web"
 fi
-shader_work="$(mktemp -d)"
-xcrun -sdk macosx metal -c native/Shaders/Gem.metal -o "$shader_work/Gem.air"
-xcrun -sdk macosx metallib "$shader_work/Gem.air" -o "$bundle/Contents/Resources/Neko.metallib"
+# The Metal shader only decorates the Design lab; the app runs without it
+# (GemShaders.library is nil). Command Line Tools alone have no Metal compiler,
+# so a Mac without full Xcode builds without it rather than failing.
+if xcrun -sdk macosx --find metal >/dev/null 2>&1; then
+  shader_work="$(mktemp -d)"
+  xcrun -sdk macosx metal -c native/Shaders/Gem.metal -o "$shader_work/Gem.air"
+  xcrun -sdk macosx metallib "$shader_work/Gem.air" -o "$bundle/Contents/Resources/Neko.metallib"
+else
+  printf 'No Metal compiler (it ships with Xcode, not the Command Line Tools); building without the optional shader.\n' >&2
+fi
 /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string neko.icns' "$bundle/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 14.0' "$bundle/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_id" "$bundle/Contents/Info.plist"
@@ -47,7 +54,7 @@ identity="${NEKO_CODESIGN_IDENTITY:-}"
 if [[ -z "$identity" ]]; then
   identities="$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/^ *[0-9]*) \([0-9A-F]\{40\}\) "\(Apple Development:.*\)"$/\1 \2/p')"
   # Prefer whichever certificate signed the installed app, so its permissions carry over.
-  installed="$(codesign -dvv /Applications/Neko.app 2>&1 | sed -n 's/^Authority=\(Apple Development:.*\)$/\1/p' | head -1)"
+  installed="$(codesign -dvv /Applications/Neko.app 2>&1 | sed -n 's/^Authority=\(Apple Development:.*\)$/\1/p' | head -1 || true)"
   if [[ -n "$installed" ]]; then identity="$(printf '%s\n' "$identities" | awk -v name="$installed" 'substr($0, 42) == name { print $1; exit }')"; fi
   if [[ -z "$identity" ]]; then identity="$(printf '%s\n' "$identities" | head -1 | cut -d' ' -f1)"; fi
   if [[ -z "$identity" ]]; then
