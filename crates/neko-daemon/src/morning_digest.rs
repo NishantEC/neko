@@ -72,6 +72,18 @@ pub fn clock() -> (String, u32, u32) {
     (now.format("%Y-%m-%d").to_string(), now.hour() * 60 + now.minute(), now.hour())
 }
 
+/// Composes today's digest when it is due and was not handled yet; returns the stored row. Both
+/// the tick and a Home page that opens after the time ask, so the first of them does it once.
+pub(crate) fn compose_if_due(db: &Db, now: i64, day: &str, minutes: u32) -> Result<State, String> {
+    let settings = core::load_settings(db);
+    let mut stored = digest::load(db);
+    if digest::due(settings.digest, &stored, day, minutes, settings.digest_hour, settings.digest_minute) {
+        stored = State { day: day.to_owned(), composed_ms: now, digest: gather(db, now, stored.composed_ms, day), pushed: false };
+        digest::save(db, &stored)?;
+    }
+    Ok(stored)
+}
+
 pub fn tick(state: &AppState, send: &dyn Fn(&str, &Value) -> Result<(), String>) -> Result<(), String> {
     let (day, minutes, hour) = clock();
     step(state, neko_core::workbench::now_ms(), &day, minutes, hour, send)
@@ -91,9 +103,7 @@ pub(crate) fn step(state: &AppState, now: i64, day: &str, minutes: u32, hour: u3
         return Ok(());
     }
     if is_due {
-        let db = lock(state);
-        stored = State { day: day.to_owned(), composed_ms: now, digest: gather(&db, now, stored.composed_ms, day), pushed: false };
-        digest::save(&db, &stored)?;
+        stored = compose_if_due(&lock(state), now, day, minutes)?;
     }
     let Some(d) = stored.digest.clone().filter(|d| !d.read && !stored.pushed) else { return Ok(()) };
     if !core::any_channel(&settings) || core::quiet_at(&settings, hour) {
@@ -124,7 +134,10 @@ pub fn handle(state: &AppState, request: Request) -> Response {
     let db = lock(state);
     match request {
         Request::MarkDigestRead => mark_read(&db),
-        _ => {}
+        _ => {
+            let (day, minutes, _) = clock();
+            let _ = compose_if_due(&db, neko_core::workbench::now_ms(), &day, minutes);
+        }
     }
     let digest = digest::load(&db).digest.filter(|d| !d.read);
     Response::Digest { digest }

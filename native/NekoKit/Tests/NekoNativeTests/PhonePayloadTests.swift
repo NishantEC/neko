@@ -71,4 +71,38 @@ final class PhonePayloadTests: XCTestCase {
         XCTAssertEqual(plan.delete, ["old"])
         XCTAssertEqual(PhonePayload.plan(from: .object(["Error": .object(["message": .string("x")])])), PhonePayload.Plan(), "an error means do nothing")
     }
+
+    func testOnlyALineStartingWithGreaterThanIsAReply() {
+        XCTAssertTrue(PhonePayload.hasReply("why\n\n> use staging\n\nneko:4"))
+        XCTAssertTrue(PhonePayload.hasReply("  >indented and tight"))
+        XCTAssertFalse(PhonePayload.hasReply("a > b is arithmetic\nneko:4"), "a > in the middle of a line is not a reply")
+        XCTAssertFalse(PhonePayload.hasReply(">\n>   \n"), "an empty reply line is nothing")
+        XCTAssertFalse(PhonePayload.hasReply(""))
+    }
+
+    func testSyncRequestSendsNotesOnlyForRemindersThatCarryAReply() {
+        let request = PhonePayload.syncRequest(access: "Granted", reminders: [
+            .init(id: "a", completed: false, notes: "private words\nneko:1"),
+            .init(id: "b", completed: false, notes: "why\n> yes, do it\nneko:2"),
+            .init(id: "c", completed: true, notes: "> done and answered\nneko:3"),
+        ])
+        let notes = request["PhoneRemindersSync"]["notes"].array
+        XCTAssertEqual(notes.map { $0["id"].string }, ["b", "c"], "a reminder with no reply keeps its text on the phone")
+        XCTAssertEqual(notes.first?["notes"].string, "why\n> yes, do it\nneko:2")
+    }
+
+    func testTheMarkerIsFoundAfterTheEchoToo() {
+        XCTAssertEqual(PhonePayload.seq(fromNotes: "why\nneko:9\n\nGot it: yes (recorded)"), 9)
+    }
+
+    func testDoneRequestNamesWhatWasFinishedAndThePlanCarriesTheEcho() {
+        let body = PhonePayload.doneRequest(created: [], deleted: [], finished: ["r1"])["PhoneRemindersDone"]
+        XCTAssertEqual(body["finished"].array.map(\.string), ["r1"])
+        let reply: JSONValue = .object(["PhonePlan": .object([
+            "enabled": .bool(true),
+            "finish": .array([.object(["id": .string("r1"), "notes": .string("> yes\n\nGot it: yes")]), .object(["id": .string(""), "notes": .string("x")])]),
+        ])])
+        let plan = PhonePayload.plan(from: reply)
+        XCTAssertEqual(plan.finish, [PhonePayload.Finish(id: "r1", notes: "> yes\n\nGot it: yes")], "an entry with no id is dropped")
+    }
 }

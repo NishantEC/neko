@@ -19,6 +19,10 @@ interface Settings {
   quiet_enabled: boolean;
   quiet_from_hour: number;
   quiet_to_hour: number;
+  open_url: string;
+  digest: boolean;
+  digest_hour: number;
+  digest_minute: number;
 }
 interface Status {
   reminders_access: "NotAsked" | "Granted" | "Denied";
@@ -60,6 +64,8 @@ export function PhoneSection() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [server, setServer] = useState("");
+  const [openUrl, setOpenUrl] = useState("");
+  const [digestTime, setDigestTime] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [test, setTest] = useState<string[] | null>(null);
@@ -69,6 +75,8 @@ export function PhoneSection() {
     setSettings(reply.Phone.settings);
     setStatus(reply.Phone.status);
     setServer((current) => current || reply.Phone.settings.ntfy_server);
+    setOpenUrl((current) => current || reply.Phone.settings.open_url || "");
+    setDigestTime((current) => current || `${String(reply.Phone.settings.digest_hour).padStart(2, "0")}:${String(reply.Phone.settings.digest_minute).padStart(2, "0")}`);
   }, []);
 
   useEffect(() => {
@@ -88,6 +96,7 @@ export function PhoneSection() {
       const reply = await request({ SetPhoneSettings: { settings: next } });
       take(reply);
       if ("ntfy_server" in change) setServer(reply.Phone.settings.ntfy_server);
+      if ("open_url" in change) setOpenUrl(reply.Phone.settings.open_url);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -127,6 +136,9 @@ export function PhoneSection() {
             </SettingRow>
           </div>
         </Panel>
+        <p data-slot="phone-replies" className="px-3 pt-2 text-[12.5px] text-muted-foreground">
+          Replies need Apple Reminders: complete a reminder to take its default, or add a line that starts with &gt; to answer in words. ntfy only notifies, because answering through it would mean opening your Mac to the internet.
+        </p>
       </Section>
       {settings.ntfy ? (
         <Section title="ntfy">
@@ -155,10 +167,44 @@ export function PhoneSection() {
               <SettingRow id="phone-ntfy-titles" title="Send titles only">
                 <Toggle checked={settings.titles_only} label="Send titles only" disabled={busy} onChange={(v) => void save({ titles_only: v })} />
               </SettingRow>
+              <SettingRow id="phone-ntfy-open" title="Open in Neko address">
+                <Input
+                  aria-label="Open in Neko address"
+                  className="w-64"
+                  placeholder="Empty: no button"
+                  value={openUrl}
+                  disabled={busy}
+                  onChange={(e) => setOpenUrl(e.target.value)}
+                  onBlur={() => { if (openUrl.trim() !== settings.open_url) void save({ open_url: openUrl }); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                />
+              </SettingRow>
+
             </div>
           </Panel>
         </Section>
       ) : null}
+      <Section title="Morning digest">
+        <Panel>
+          <div className="flex flex-col" data-slot="phone-digest">
+            <SettingRow id="phone-digest" title="Morning digest">
+              <Toggle checked={settings.digest} label="Morning digest" disabled={busy} onChange={(v) => void save({ digest: v })} />
+              <Input
+                aria-label="Digest time"
+                type="time"
+                className="w-28"
+                value={digestTime}
+                disabled={busy || !settings.digest}
+                onChange={(e) => setDigestTime(e.target.value)}
+                onBlur={() => {
+                  const [hour, minute] = digestTime.split(":").map((n) => Number(n));
+                  if (Number.isFinite(hour) && Number.isFinite(minute) && (hour !== settings.digest_hour || minute !== settings.digest_minute)) void save({ digest_hour: hour, digest_minute: minute });
+                }}
+              />
+            </SettingRow>
+          </div>
+        </Panel>
+      </Section>
       <Section title="When">
         <Panel>
           <div className="flex flex-col">

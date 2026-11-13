@@ -80,9 +80,10 @@ import NekoKit
             lastAccess = access
             plan = await sync(access: access)
         }
-        guard access == "Granted", !plan.delete.isEmpty || !plan.create.isEmpty else { return }
+        guard access == "Granted", !plan.delete.isEmpty || !plan.create.isEmpty || !plan.finish.isEmpty else { return }
         let created = await apply(plan)
-        _ = try? await client.request(PhonePayload.doneRequest(created: created, deleted: plan.delete))
+        let finished = finish(plan.finish)
+        _ = try? await client.request(PhonePayload.doneRequest(created: created, deleted: plan.delete, finished: finished))
     }
 
     private func sync(access: String) async -> PhonePayload.Plan {
@@ -107,6 +108,24 @@ import NekoKit
         list.source = source
         do { try store.saveCalendar(list, commit: true) } catch { return nil }
         return list
+    }
+
+    /// Writes the daemon's echo into each answered reminder's notes and
+    /// completes it (it stays in the list, completed, so the echo can be read).
+    /// Returns the ids that were saved.
+    private func finish(_ items: [PhonePayload.Finish]) -> [String] {
+        var done: [String] = []
+        for item in items {
+            guard let reminder = store.calendarItem(withIdentifier: item.id) as? EKReminder else { continue }
+            reminder.notes = item.notes
+            reminder.isCompleted = true
+            do {
+                try store.save(reminder, commit: false)
+                done.append(item.id)
+            } catch { continue }
+        }
+        try? store.commit()
+        return done
     }
 
     /// Carries out the plan and returns what was created.
@@ -179,10 +198,18 @@ enum PhonePayload {
         var key = ""
     }
 
+    /// A reminder the person answered in words: set these notes (the "Got it"
+    /// echo) and complete it.
+    struct Finish: Equatable {
+        var id: String
+        var notes: String
+    }
+
     struct Plan: Equatable {
         var enabled = false
         var create: [NewReminder] = []
         var delete: [String] = []
+        var finish: [Finish] = []
     }
 
     enum SourceKind: Equatable { case iCloud, otherAccount, local, other }
@@ -221,10 +248,21 @@ enum PhonePayload {
     }
 
     /// The item number in a reminder's notes, if it has the marker line.
+    /// The marker is the last line that has the prefix: after an echo the
+    /// notes end with "Got it: ...", not with the marker.
     static func seq(fromNotes notes: String) -> Int? {
-        guard let last = notes.split(whereSeparator: \.isNewline).last?.trimmingCharacters(in: .whitespaces),
-              last.hasPrefix(markerPrefix) else { return nil }
+        let lines = notes.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let last = lines.last(where: { $0.hasPrefix(markerPrefix) }) else { return nil }
         return Int(last.dropFirst(markerPrefix.count))
+    }
+
+    /// Whether the person wrote a reply: a line whose first character (after
+    /// spaces) is `>`. Nothing Neko writes into a reminder starts that way.
+    static func hasReply(_ notes: String) -> Bool {
+        notes.split(whereSeparator: \.isNewline).contains { line in
+            let trimmed = line.drop(while: { $0 == " " || $0 == "\t" })
+            return trimmed.hasPrefix(">") && !trimmed.dropFirst().allSatisfy { $0 == " " || $0 == "\t" }
+        }
     }
 
     static func syncRequest(access: String, reminders: [ReminderInfo]) -> JSONValue {
@@ -232,13 +270,17 @@ enum PhonePayload {
             "access": .string(access),
             "present": .array(reminders.map { .string($0.id) }),
             "completed": .array(reminders.filter(\.completed).map { .string($0.id) }),
+            // Only reminders that carry a reply line send their notes: the
+            // daemon never sees the rest of anyone's Reminders text.
+            "notes": .array(reminders.filter { hasReply($0.notes) }.map { .object(["id": .string($0.id), "notes": .string($0.notes)]) }),
         ])
     }
 
-    static func doneRequest(created: [(seq: Int, id: String, key: String)], deleted: [String]) -> JSONValue {
+    static func doneRequest(created: [(seq: Int, id: String, key: String)], deleted: [String], finished: [String] = []) -> JSONValue {
         .command("PhoneRemindersDone", [
             "created": .array(created.map { .object(["seq": .number(Double($0.seq)), "id": .string($0.id), "key": .string($0.key)]) }),
             "deleted": .array(deleted.map { .string($0) }),
+            "finished": .array(finished.map { .string($0) }),
         ])
     }
 
@@ -254,6 +296,7 @@ enum PhonePayload {
                 url: item["url"].string.isEmpty ? nil : item["url"].string,
                 key: item["key"].string)
         }
-        return Plan(enabled: body["enabled"].bool, create: create, delete: body["delete"].array.map(\.string))
+        let finish = body["finish"].array.map { Finish(id: $0["id"].string, notes: $0["notes"].string) }.filter { !$0.id.isEmpty }
+        return Plan(enabled: body["enabled"].bool, create: create, delete: body["delete"].array.map(\.string), finish: finish)
     }
 }

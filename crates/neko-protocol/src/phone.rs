@@ -17,6 +17,10 @@ pub struct PhoneSettings {
     pub ntfy_topic: String,
     /// Send only the title to the ntfy server (it sees the text).
     pub titles_only: bool,
+    /// Where Neko's web UI can be reached from the phone (the person's own
+    /// address, for example a private network name). Empty: no "Open in Neko"
+    /// button, because Neko never makes the Mac reachable by itself.
+    pub open_url: String,
     pub quiet_enabled: bool,
     pub quiet_from_hour: u32,
     pub quiet_to_hour: u32,
@@ -38,6 +42,7 @@ impl Default for PhoneSettings {
             ntfy_server: DEFAULT_NTFY_SERVER.into(),
             ntfy_topic: String::new(),
             titles_only: true,
+            open_url: String::new(),
             quiet_enabled: true,
             quiet_from_hour: 23,
             quiet_to_hour: 8,

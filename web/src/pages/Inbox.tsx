@@ -301,13 +301,16 @@ function RoutineRow({ view, now, send, onEdit }: { view: Json; now: number; send
  * under it, in full when the row is opened. Open and Done also sit at the
  * right on hover and in the right-click menu.
  */
-function NeedsYouItem({ item, where, when, onDone }: { item: Json; where: string; when: string; onDone: () => void }) {
+function NeedsYouItem({ item, where, when, onDone, onAnswer }: { item: Json; where: string; when: string; onDone: () => void; onAnswer: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const link = safeLink(item.link);
   // An item a goal raised ("Extend by 10 turns?", or its one question) carries `goal:<id>`.
   const goalId = typeof item.link === "string" && item.link.startsWith("goal:") ? item.link.slice(5) : null;
   const text = [item.title, item.detail].filter(Boolean).join("\n\n");
+  // Every escalation is one question with a default. A goal's own buttons answer its items.
+  const fallback: string | null = !goalId && typeof item.default === "string" && item.default.trim() ? item.default : null;
   const menu = useContextMenu(() => [
+    fallback ? { label: "Use the default", icon: Play, run: onAnswer } : null,
     { label: "Mark done", icon: Check, run: onDone },
     link ? { label: "Open link", icon: ArrowSquareOut, run: () => void window.open(link, "_blank", "noreferrer") } : null,
     "separator",
@@ -333,11 +336,15 @@ function NeedsYouItem({ item, where, when, onDone }: { item: Json; where: string
         {item.detail ? (
           <span className={cn("max-w-[72ch] text-[12.5px] text-muted-foreground", expanded ? "whitespace-pre-wrap" : "truncate")}>{item.detail}</span>
         ) : null}
+        {goalId ? null : (
+          <span data-slot="item-default" className="max-w-[72ch] truncate text-[12.5px] text-muted-foreground/80">{fallback ? `Default: ${fallback}` : "No default"}</span>
+        )}
       </button>
       <span className="flex h-5 shrink-0 items-center gap-3">
         <span className="text-[12.5px] tabular-nums text-muted-foreground/70">{when}</span>
         <RowActions className="hidden group-hover/row:flex group-focus-within/row:flex [@media(hover:none)]:flex">
           {link ? <RowAction label={`Open ${item.title}`} icon={ArrowSquareOut} href={link} /> : null}
+          {fallback ? <RowAction label={`Use the default for “${item.title}”: ${fallback}`} icon={Play} onClick={onAnswer} /> : null}
           <RowAction label={`Mark “${item.title}” done`} icon={Check} onClick={onDone} />
         </RowActions>
       </span>
@@ -417,6 +424,17 @@ function InboxBody() {
     await send({ ClearNeedsYou: { routine_id: routineId, run_id: runId, seq } }, left > 0 ? `Done. ${left} left.` : "All clear.");
   };
 
+  // The same daemon path the phone uses: no words takes the item's default.
+  const answer = async (seq: number) => {
+    try {
+      const reply = await request({ AnswerNeedsYou: { seq } });
+      toast.success(`Done: ${reply?.NeedsYouAnswered?.summary ?? "answered"}`);
+      await send("Routines");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const reopen = (routineId: string, runId: string, seq: number) => void send({ ReopenNeedsYou: { routine_id: routineId, run_id: runId, seq } }, "Reopened");
 
   const scopes = data.scopes.filter((s) => s.workspace_id && (data.routines.some((v) => v.routine.workspace_id === s.workspace_id) || s.problems?.length));
@@ -445,6 +463,7 @@ function InboxBody() {
                   where={`${scopeName[routine.workspace_id] ?? "Scope"} · ${routine.name}`}
                   when={relativeTime(run.finished_ms ?? run.started_ms, now)}
                   onDone={() => void done(routine.id, run.id, item.seq)}
+                  onAnswer={() => void answer(item.seq)}
                 />
               )}
             />

@@ -154,6 +154,21 @@ pub fn clean_server(server: &str) -> Result<String, String> {
     Ok(server.to_string())
 }
 
+/// The address the "Open in Neko" button opens: `http(s)://...` or empty. Never
+/// guessed: without one the button is not offered.
+pub fn clean_open_url(url: &str) -> Result<String, String> {
+    let url = url.trim().trim_end_matches('/');
+    if url.is_empty() {
+        return Ok(String::new());
+    }
+    let lower = url.to_ascii_lowercase();
+    let rest = lower.strip_prefix("https://").or_else(|| lower.strip_prefix("http://")).ok_or("The address must start with https:// or http://")?;
+    if rest.is_empty() || url.contains(char::is_whitespace) || url.len() > 200 {
+        return Err("That is not an address".into());
+    }
+    Ok(url.to_string())
+}
+
 /// 29 characters, `neko-` and 24 random lowercase letters and digits.
 pub fn new_topic() -> String {
     let mut bytes = [0u8; 24];
@@ -180,11 +195,15 @@ fn valid_topic(topic: &str) -> bool {
 pub fn clean_settings(mut settings: PhoneSettings) -> Result<PhoneSettings, String> {
     settings.ntfy_server = clean_server(&settings.ntfy_server)?;
     settings.ntfy_topic = settings.ntfy_topic.trim().to_string();
+    settings.open_url = clean_open_url(&settings.open_url)?;
     if !valid_topic(&settings.ntfy_topic) {
         settings.ntfy_topic = new_topic();
     }
     if settings.quiet_from_hour > 23 || settings.quiet_to_hour > 23 {
         return Err("Hours are 0 to 23".into());
+    }
+    if settings.digest_hour > 23 || settings.digest_minute > 59 {
+        return Err("The digest time is 00:00 to 23:59".into());
     }
     Ok(settings)
 }
@@ -366,13 +385,21 @@ pub fn hash_text(text: &str) -> u64 {
 pub fn ntfy_body(settings: &PhoneSettings, push: &Push) -> Value {
     let message = if settings.titles_only || push.detail.trim().is_empty() { "Open Neko on your Mac.".to_string() } else { clip(&push.detail, MAX_DETAIL) };
     // No click URL: tapping opens the ntfy app, not a private page.
-    json!({
+    let mut body = json!({
         "topic": settings.ntfy_topic,
         "title": clip(&push.title, MAX_TITLE),
         "message": message,
         "priority": if push.urgent { 4 } else { 3 },
         "tags": ["cat"],
-    })
+    });
+    // The one button that works without exposing the Mac: open the address the
+    // person gave. Accept and decline are not offered: they would need an
+    // endpoint the phone can reach, and Neko does not open one. Replies go
+    // through Reminders.
+    if !settings.open_url.is_empty() {
+        body["actions"] = json!([{ "action": "view", "label": "Open in Neko", "url": format!("{}/#/inbox", settings.open_url), "clear": true }]);
+    }
+    body
 }
 
 /// Sends one publish; a plain failure message, no retry here.
@@ -758,5 +785,24 @@ mod tests {
         let seen = server.join().unwrap();
         assert!(seen[0].starts_with("POST / ") && seen[0].contains("\"title\":\"Hello\""));
         assert!(send_ntfy("http://127.0.0.1:1", &json!({})).is_err());
+    }
+
+    #[test]
+    fn ntfy_offers_only_an_open_button_and_only_for_an_address_the_person_gave() {
+        let push = Push { seq: 1, title: "Reply to Sam?".into(), detail: "d".into(), ..Default::default() };
+        let mut s = PhoneSettings { ntfy_topic: "neko-abcdefghijklmnopqrstuvwx".into(), ..Default::default() };
+        assert!(ntfy_body(&s, &push).get("actions").is_none(), "no address, no button");
+        s.open_url = "https://neko.example.net".into();
+        let body = ntfy_body(&s, &push);
+        let actions = body["actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 1, "never an accept or decline button");
+        assert_eq!((actions[0]["action"].as_str(), actions[0]["label"].as_str(), actions[0]["url"].as_str()), (Some("view"), Some("Open in Neko"), Some("https://neko.example.net/#/inbox")));
+        assert_eq!(clean_open_url(" https://a.example/ ").unwrap(), "https://a.example");
+        assert_eq!(clean_open_url("").unwrap(), "");
+        assert!(clean_open_url("ftp://x").is_err() && clean_open_url("http://").is_err() && clean_open_url("https://a b").is_err());
+        assert!(clean_settings(PhoneSettings { open_url: "javascript:alert(1)".into(), ..Default::default() }).is_err());
+        assert!(clean_settings(PhoneSettings { digest_hour: 24, ..Default::default() }).is_err() && clean_settings(PhoneSettings { digest_minute: 60, ..Default::default() }).is_err());
+        let ok = clean_settings(PhoneSettings::default()).unwrap();
+        assert_eq!((ok.digest, ok.digest_hour, ok.digest_minute), (true, 8, 30), "08:30 by default");
     }
 }

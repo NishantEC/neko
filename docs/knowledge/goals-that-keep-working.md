@@ -64,7 +64,7 @@ The goal tick (3 s, its own thread) watches the ticket. When a turn ends
    - **CONTINUE**: if a cap is reached, pause (below); otherwise
      `store::goal_turn` queues the ticket again with a note carrying the failing
      output and the judge's reason (`continue_prompt`), same session;
-   - **BLOCKED**: one Inbox item with one question and a default answer; the goal
+   - **BLOCKED** (since 2026-11-14 exactly one question, a second is dropped, and a default that is never empty; answerable from the phone, see phone-push.md): one Inbox item with one question and a default answer; the goal
      waits, ticks cost nothing. Answer from the goal line or the Inbox
      (`GoalCommand::Answer`; empty text takes the default);
    - **WAIT**: parked until a time, a PR state (`gh pr view`, polled at most once a

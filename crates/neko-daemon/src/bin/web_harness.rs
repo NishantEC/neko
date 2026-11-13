@@ -219,6 +219,9 @@ fn seed_inbox(state: &server::AppState) -> Result<(), String> {
         item(8, "Check the staging deploy", "You handled it.", None, Some((inbox::BY_YOU, 50 * hour)), None),
         item(9, "Closed long ago", "Past the window.", None, Some((inbox::BY_YOU, 10 * inbox::DAY_MS)), None),
     ];
+    // One open item carries a default (every escalation is one question with a default); the others show "No default".
+    let mut items = items;
+    items[0].default = Some("Approve it with a comment".into());
     let run = RoutineRun { id: "seed-run".into(), routine_id: routine.id.clone(), started_ms: now - hour, finished_ms: Some(now - hour), ok: true, needs_you: items, ..Default::default() };
     neko_core::routines::push_run(&db, &routine.id, run)
 }
