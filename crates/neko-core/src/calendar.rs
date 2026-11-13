@@ -435,7 +435,7 @@ mod tests {
     }
 
     fn routine(id: &str, cadence: Cadence) -> Routine {
-        Routine { id: id.into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: format!("Routine {id}"), instruction: "x".into(), cadence, enabled: true, model: String::new(), paseo_schedule: None, browser: true, computer: true, customized: false }
+        Routine { id: id.into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: format!("Routine {id}"), instruction: "x".into(), cadence, enabled: true, model: String::new(), paseo_schedule: None, browser: true, computer: true, customized: false, catch_up: None }
     }
 
     #[test]

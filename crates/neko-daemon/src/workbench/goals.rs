@@ -154,7 +154,7 @@ impl Env for Real {
 
 /// The cheapest models that can judge: Claude Code's Haiku, then the
 /// smallest Codex model the catalog lists (a "mini"), else Codex's default.
-fn judge_runtimes(claude_ok: bool) -> Vec<AgentRuntime> {
+pub(super) fn judge_runtimes(claude_ok: bool) -> Vec<AgentRuntime> {
     let mut runtimes = Vec::new();
     if claude_ok {
         runtimes.push(AgentRuntime { provider: "claude".into(), model: "haiku".into(), ..Default::default() });
@@ -236,7 +236,8 @@ pub(super) fn run_shell(directory: &std::path::Path, command: &str, limit: Durat
     }
     let text = String::from_utf8_lossy(&buffer.lock().unwrap_or_else(std::sync::PoisonError::into_inner)).into_owned();
     result.exit_code = if timed_out { None } else { status.and_then(|s| s.code()).map(i64::from) };
-    result.tail = core::tail(&text, core::TAIL_BYTES);
+    // A long output goes to a file under the data dir; the prompt gets its head, tail and path.
+    result.tail = if text.len() > neko_core::spill::LIMIT { neko_core::spill::bounded("check", &text) } else { core::tail(&text, core::TAIL_BYTES) };
     if timed_out {
         result.tail = format!("Ended after {} minutes.\n{}", limit.as_secs() / 60, result.tail);
     }
@@ -538,6 +539,10 @@ fn running(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: Goal) -> Result<(), String>
         }
         // A wait ended, an answer came, or the person resumed: the next turn is due.
         if env.machine_held() {
+            return Ok(());
+        }
+        // The daily spend ceiling: no new turn today (one Inbox item asks to raise it).
+        if crate::routine_care::spend_held(&*db.lock().map_err(|_| "Goal storage unavailable")?, env.now_ms()) {
             return Ok(());
         }
         let (still, now) = (move |g: &Goal| g.status == GoalStatus::Running && g.turns == turn && !g.in_turn, env.now_ms());

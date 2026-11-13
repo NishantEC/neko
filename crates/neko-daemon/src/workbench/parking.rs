@@ -123,6 +123,8 @@ impl Controller {
     /// Parks up to `PER_PASS` idle tickets. Returns how many were parked.
     pub(super) fn parking_tick(&self) -> Result<usize, String> {
         self.checkpoint_housekeeping();
+        // Spilled tool output older than a week (`neko_core::spill`).
+        neko_core::spill::cleanup(&neko_core::spill::dir(), std::time::SystemTime::now(), neko_core::spill::KEEP);
         self.parking_pass(&neko_protocol::support_dir().join("task-worktrees"))
     }
 

@@ -249,6 +249,36 @@ pub fn next_due<Tz: TimeZone>(cadence: &Cadence, quiet_streak: u32, now_ms: i64,
     }
 }
 
+/// The due times from `due_ms` on, at the routine's cadence, that fell inside
+/// the window Neko was not running (`down_since_ms` to `down_until_ms`): how many,
+/// and the first. `None` when none did (a routine merely late behind another run
+/// has missed nothing). The due time itself is the first candidate.
+pub fn missed_in<Tz: TimeZone>(cadence: &Cadence, due_ms: i64, down_since_ms: i64, down_until_ms: i64, tz: &Tz) -> Option<neko_protocol::routines::Missed> {
+    let (mut at, mut count, mut first) = (due_ms, 0_u32, None);
+    for _ in 0..2000 {
+        if at > down_until_ms {
+            break;
+        }
+        if at > down_since_ms {
+            count += 1;
+            first.get_or_insert(at);
+        }
+        let next = next_due(cadence, 0, at, tz);
+        if next <= at {
+            break;
+        }
+        at = next;
+    }
+    first.map(|since_ms| neko_protocol::routines::Missed { count, since_ms })
+}
+
+/// "missed ×3 since 09:20" for a run's note, in the Mac's time zone.
+pub fn missed_note(missed: &neko_protocol::routines::Missed) -> String {
+    use chrono::TimeZone;
+    let when = chrono::Local.timestamp_millis_opt(missed.since_ms).single().map_or_else(String::new, |t| t.format("%a %H:%M").to_string());
+    format!("Missed ×{} since {when}; ran once to catch up.", missed.count)
+}
+
 /// `next_due` in the Mac's own time zone.
 pub fn next_due_local(cadence: &Cadence, quiet_streak: u32, now_ms: i64) -> i64 {
     next_due(cadence, quiet_streak, now_ms, &chrono::Local)
@@ -295,6 +325,8 @@ pub fn build_prompt(routine: &Routine, scope: &ScopeProposal, orders: &str, memo
                 .join("\n")
         )
     };
+    // A very long list goes to a file; the prompt keeps its head, tail and the path.
+    let open = crate::spill::bounded("open-items", &open);
     let mut servers: Vec<&str> = scope.servers.iter().filter(|s| s.level == "scope").map(|s| s.name.as_str()).collect();
     servers.dedup();
     let servers = if servers.is_empty() { "the MCP servers and connectors your setup loads here".to_string() } else { servers.join(", ") };
@@ -510,6 +542,7 @@ pub fn seeds(scopes: &[ScopeProposal], home: &str) -> Vec<Routine> {
                 browser: !matches!(kind, RoutineKind::Reflect | RoutineKind::MacCare),
                 computer: !matches!(kind, RoutineKind::Reflect | RoutineKind::MacCare),
                 customized: false,
+                catch_up: None,
             });
         }
     }
@@ -520,6 +553,42 @@ pub fn seeds(scopes: &[ScopeProposal], home: &str) -> Vec<Routine> {
 mod tests {
     use super::*;
     use chrono::FixedOffset;
+
+    #[test]
+    fn missed_due_times_are_counted_inside_the_downtime_only() {
+        let utc = FixedOffset::east_opt(0).unwrap();
+        let every_20 = Cadence::Every { minutes: 20, from_hour: 0, to_hour: 0 };
+        let min = 60_000;
+        // Due at 0:20; down from 0:10 to 1:05: due times 0:20, 0:40, 1:00 fell inside it.
+        let missed = missed_in(&every_20, 20 * min, 10 * min, 65 * min, &utc).unwrap();
+        assert_eq!((missed.count, missed.since_ms), (3, 20 * min));
+        // Late behind another run, not down: nothing was missed.
+        assert!(missed_in(&every_20, 20 * min, 0, 10 * min, &utc).is_none());
+        // A daily routine that was off across two days.
+        let daily = Cadence::Daily { hour: 9, minute: 0 };
+        let day = 24 * 60 * min;
+        let missed = missed_in(&daily, 9 * 60 * min, 8 * 60 * min, 2 * day + 12 * 60 * min, &utc).unwrap();
+        assert_eq!(missed.count, 3);
+        assert!(missed_note(&missed).starts_with("Missed ×3 since"));
+    }
+
+    #[test]
+    fn catch_up_defaults_on_for_messages_and_digest_only() {
+        let mut routine = seeds(&[], "/tmp").into_iter().next().unwrap_or_else(|| Routine {
+            id: "r".into(), workspace_id: "w".into(), kind: RoutineKind::Messages, name: "m".into(), instruction: "x".into(),
+            cadence: Cadence::Daily { hour: 9, minute: 0 }, enabled: true, model: String::new(), paseo_schedule: None, browser: false, computer: false, customized: false, catch_up: None,
+        });
+        for (kind, expect) in [(RoutineKind::Messages, true), (RoutineKind::Digest, true), (RoutineKind::PrSweep, false), (RoutineKind::Reflect, false), (RoutineKind::MacCare, false), (RoutineKind::Custom, false)] {
+            routine.kind = kind;
+            routine.catch_up = None;
+            assert_eq!(routine.catches_up(), expect, "{kind:?}");
+            routine.catch_up = Some(!expect);
+            assert_eq!(routine.catches_up(), !expect, "an explicit switch wins");
+        }
+        // Old stored routines have no flag.
+        let old: Routine = serde_json::from_str(&serde_json::to_string(&routine).unwrap().replace(",\"catch_up\":false", "").replace(",\"catch_up\":true", "")).unwrap();
+        assert_eq!(old.catch_up, None);
+    }
 
     #[test]
     fn routines_are_off_on_a_fresh_folder_and_on_where_they_already_ran() {

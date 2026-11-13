@@ -12,6 +12,8 @@ mod import;
 mod memory_learning;
 #[path = "workbench/checkpoints.rs"]
 mod checkpoints;
+#[path = "workbench/skill_curator.rs"]
+mod skill_curator;
 #[path = "workbench/responsibilities.rs"]
 mod responsibilities;
 #[path = "workbench/scheduled_plans.rs"]
@@ -136,6 +138,12 @@ impl Controller {
                     SkillCommand::DecideProposal { id, content_hash, accept } => {
                         neko_core::skills::decide(&db, &neko_protocol::support_dir(), &id, &content_hash, accept)?;
                         neko_core::skills::refresh(&db, &snapshot.workspaces)?;
+                    }
+                    SkillCommand::SetLocked { path, locked } => {
+                        neko_core::skills::curator::set_locked(&db, &path, locked)?;
+                    }
+                    SkillCommand::SetCurator { on } => {
+                        neko_core::skills::curator::set_on(&db, on)?;
                     }
                     SkillCommand::ConfirmAuditReview { id, content_hash, audit_url } => {
                         neko_core::skills::confirm_audit_review(&db, &id, &content_hash, &audit_url)?;
@@ -631,6 +639,8 @@ impl Controller {
         self.start_pull_requests();
         // Goals keep working: resumed from their journals, then ticked.
         self.start_goals();
+        // Once a day, when the Mac is idle: tidy the lessons skills have gathered.
+        self.start_skill_curator();
         // Reads the Mac every 15 s; admission and the app use the reading.
         let db = self.db.clone();
         std::thread::Builder::new().name("neko-machine".into()).spawn(move || {

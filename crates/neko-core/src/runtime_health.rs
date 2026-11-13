@@ -57,6 +57,95 @@ pub fn is_usage_limit(error: &str) -> bool {
         .any(|m| text.contains(m))
 }
 
+/// Codex's wording for the same thing: a spent usage limit, not a sign-in problem.
+pub fn is_codex_usage_limit(error: &str) -> bool {
+    let text = error.to_lowercase();
+    ["usage_limit_reached", "hit your usage limit", "usage limit has been reached", "reached your usage limit", "insufficient_quota"]
+        .iter()
+        .any(|m| text.contains(m))
+}
+
+/// Either runtime says its usage limit is spent.
+pub fn is_any_usage_limit(error: &str) -> bool {
+    is_usage_limit(error) || is_codex_usage_limit(error)
+}
+
+/// Longest a hold parks work: a weekly limit may reset days away, never further.
+const MAX_HOLD_MS: i64 = 7 * 24 * 3_600_000;
+const DEFAULT_HOLD_MS: i64 = 3_600_000;
+
+/// A clock time like `3pm`, `2:30 PM` or `14:00`, as (hour, minute).
+fn clock(text: &str) -> Option<(u32, u32)> {
+    let text = text.trim_start();
+    let digits: String = text.chars().take_while(char::is_ascii_digit).collect();
+    let mut hour: u32 = digits.parse().ok()?;
+    let mut rest = &text[digits.len()..];
+    let mut minute = 0;
+    let mut has_minutes = false;
+    if let Some(after) = rest.strip_prefix(':') {
+        let minutes: String = after.chars().take_while(char::is_ascii_digit).collect();
+        minute = minutes.parse().ok()?;
+        has_minutes = true;
+        rest = &after[minutes.len()..];
+    }
+    let rest = rest.trim_start();
+    let pm = rest.starts_with("pm") || rest.starts_with("p.m");
+    let am = rest.starts_with("am") || rest.starts_with("a.m");
+    if !pm && !am && !has_minutes {
+        return None;
+    }
+    if minute > 59 || ((pm || am) && !(1..=12).contains(&hour)) || hour > 23 {
+        return None;
+    }
+    if pm && hour < 12 {
+        hour += 12;
+    }
+    if am && hour == 12 {
+        hour = 0;
+    }
+    Some((hour, minute))
+}
+
+/// When the limit in `error` resets, if it says: Claude's `...limit reached|<epoch seconds>`,
+/// Codex's `resets_in_seconds`, or a clock time after "resets" / "try again at" (read in `tz`,
+/// the next time that clock shows).
+pub fn limit_reset_ms<Tz: chrono::TimeZone>(error: &str, now_ms: i64, tz: &Tz) -> Option<i64> {
+    use chrono::Duration;
+    if let Some((_, tail)) = error.split_once('|') {
+        let digits: String = tail.trim_start().chars().take_while(char::is_ascii_digit).collect();
+        if digits.len() >= 9 {
+            if let Ok(number) = digits.parse::<i64>() {
+                let at = if digits.len() >= 13 { number } else { number * 1000 };
+                if at > now_ms {
+                    return Some(at);
+                }
+            }
+        }
+    }
+    if let Some((_, tail)) = error.split_once("resets_in_seconds") {
+        let digits: String = tail.chars().skip_while(|c| !c.is_ascii_digit()).take_while(char::is_ascii_digit).collect();
+        if let Ok(seconds) = digits.parse::<i64>() {
+            return Some(now_ms + seconds.min(MAX_HOLD_MS / 1000) * 1000);
+        }
+    }
+    let lower = error.to_lowercase();
+    let after = ["resets at ", "resets ", "try again at ", "available again at "].iter().find_map(|m| lower.find(m).map(|i| &lower[i + m.len()..]))?;
+    let token: String = after.chars().take(12).collect();
+    let (hour, minute) = clock(&token)?;
+    let now = tz.timestamp_millis_opt(now_ms).single()?;
+    let today = now.date_naive();
+    let at = |day: chrono::NaiveDate| tz.from_local_datetime(&day.and_hms_opt(hour, minute, 0)?).earliest().map(|t| t.timestamp_millis());
+    let first = at(today)?;
+    if first > now_ms { Some(first) } else { at(today + Duration::days(1)) }
+}
+
+/// Where a routine parked by a usage limit resumes: the earliest reset any of the
+/// runtimes' errors names, else an hour from now; never in the past, never past a week.
+pub fn hold_until<Tz: chrono::TimeZone>(errors: &[&str], now_ms: i64, tz: &Tz) -> i64 {
+    let earliest = errors.iter().filter_map(|e| limit_reset_ms(e, now_ms, tz)).min();
+    earliest.unwrap_or(now_ms + DEFAULT_HOLD_MS).clamp(now_ms + 60_000, now_ms + MAX_HOLD_MS)
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Health {
     /// When the login was first seen bad in this outage; None when fine.
@@ -174,6 +263,26 @@ mod tests {
         ] {
             assert!(!is_auth_failure(error), "{error}");
         }
+    }
+
+    #[test]
+    fn a_usage_limit_names_its_reset_or_waits_an_hour() {
+        use chrono::TimeZone;
+        let tz = chrono::FixedOffset::east_opt(0).unwrap();
+        let now = tz.with_ymd_and_hms(2026, 11, 14, 10, 0, 0).unwrap().timestamp_millis();
+        let at = |h, m| tz.with_ymd_and_hms(2026, 11, 14, h, m, 0).unwrap().timestamp_millis();
+        let epoch = now / 1000 + 5_000;
+        assert_eq!(limit_reset_ms(&format!("Claude AI usage limit reached|{epoch}"), now, &tz), Some(epoch * 1000));
+        assert_eq!(limit_reset_ms("You've hit your limit · resets 3pm", now, &tz), Some(at(15, 0)));
+        assert_eq!(limit_reset_ms("limit. try again at 2:30 PM.", now, &tz), Some(at(14, 30)));
+        assert_eq!(limit_reset_ms("hit your limit, resets 9am", now, &tz), Some(at(9, 0) + 86_400_000), "the next 9am");
+        assert_eq!(limit_reset_ms("{\"type\":\"usage_limit_reached\",\"resets_in_seconds\":600}", now, &tz), Some(now + 600_000));
+        assert_eq!(limit_reset_ms("credit balance is too low", now, &tz), None);
+        assert_eq!(limit_reset_ms("hit your limit, resets soon", now, &tz), None);
+        assert!(is_codex_usage_limit("usage_limit_reached") && !is_codex_usage_limit("timed out"));
+        assert_eq!(hold_until(&["credit balance is too low"], now, &tz), now + 3_600_000);
+        // Every runtime out: the earliest reset wins.
+        assert_eq!(hold_until(&["hit your limit, resets 5pm", "usage_limit_reached resets_in_seconds 1200"], now, &tz), now + 1_200_000);
     }
 
     #[test]

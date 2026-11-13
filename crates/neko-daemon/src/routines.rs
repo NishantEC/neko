@@ -6,6 +6,7 @@
 //! `RoutineRun`. See docs/knowledge/neko-runs-the-day.md.
 use crate::server::AppState;
 use neko_core::inbox;
+use crate::routine_care;
 use neko_core::routines::{self as core, Store};
 use neko_protocol::routines::{Cadence, NeedsYou, Routine, RoutineNotice, RoutineRun, RoutineState, RoutineView, ScopeProposal};
 use neko_protocol::workbench::{AgentRuntime, Command, Workspace};
@@ -364,6 +365,8 @@ pub fn spawn(state: Arc<AppState>) {
 }
 
 fn tick(state: &Arc<AppState>) -> Result<(), String> {
+    let tick_ms = neko_core::workbench::now_ms();
+    let down = routine_care::note_tick(&db(state), tick_ms);
     sweep_inbox(state);
     if BUSY.load(Ordering::SeqCst) {
         return Ok(());
@@ -376,6 +379,7 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
     }
     ensure_seeded(state)?;
     let now = neko_core::workbench::now_ms();
+    let mut routine_missed = None;
     let (routine, scope) = {
         let store = core::load(&db(state))?;
         let states = store
@@ -404,6 +408,23 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
             .collect::<Result<Vec<_>, String>>()?;
         let Some(id) = pick_due(&store, &states, now, &|cadence| core::in_window_local(cadence, now)) else { return Ok(()) };
         let routine = store.routines.iter().find(|r| r.id == id).cloned().ok_or("Routine vanished")?;
+        let picked = states.iter().find(|(i, _)| *i == id).map(|(_, s)| s.clone()).unwrap_or_default();
+        // The daily spend ceiling pauses new routine runs (a "Run now" from the person still goes).
+        if !picked.run_requested && routine_care::spend_held(&db(state), now) {
+            return Ok(());
+        }
+        // Down across due times: one catch-up run with a note, or skip them when catch-up is off.
+        match routine_care::plan(&routine, &picked, now, down, &chrono::Local) {
+            routine_care::Plan::Skip(missed) => {
+                let db = db(state);
+                let mut skipped = core::load_state(&db, &routine.id)?;
+                skipped.next_due_ms = Some(core::next_due_local(&routine.cadence, skipped.quiet_streak, now));
+                skipped.note = Some(format!("Skipped {} missed run{} since {}: catch-up is off for this routine.", missed.count, if missed.count == 1 { "" } else { "s" }, local_time(missed.since_ms)));
+                core::save_state(&db, &routine.id, &skipped)?;
+                return Ok(());
+            }
+            routine_care::Plan::Run(missed) => routine_missed = missed,
+        }
         let scope = scopes(state, false)?.into_iter().find(|s| s.workspace_id.as_deref() == Some(routine.workspace_id.as_str()));
         (routine, scope)
     };
@@ -412,6 +433,7 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
         let mut routine_state = core::load_state(&db, &routine.id)?;
         routine_state.running = true;
         routine_state.run_requested = false;
+        routine_state.missed = routine_missed;
         core::save_state(&db, &routine.id, &routine_state)?;
     }
     BUSY.store(true, Ordering::SeqCst);
@@ -492,13 +514,13 @@ pub(crate) fn raise_goal_item(db: &neko_core::Db, workspace_id: &str, title: &st
             id: id.clone(), workspace_id: workspace_id.to_owned(), kind: neko_protocol::routines::RoutineKind::Custom,
             name: "Goals".into(), instruction: "Goals that keep working report here.".into(),
             cadence: Cadence::Daily { hour: 0, minute: 0 }, enabled: false, model: String::new(), paseo_schedule: None,
-            browser: false, computer: false, customized: true,
+            browser: false, computer: false, customized: true, catch_up: None,
         });
         core::save_definitions(db, &store)?;
     }
     let now = neko_core::workbench::now_ms();
     let seq = core::reserve_seq(db, 1)?;
-    let item = NeedsYou { seq, title: title.into(), detail: detail.into(), link: Some(link.into()), created_ms: now, touched_ms: now, ..Default::default() };
+    let item = NeedsYou { seq, title: title.into(), detail: detail.into(), link: (!link.is_empty()).then(|| link.into()), created_ms: now, touched_ms: now, ..Default::default() };
     let run = RoutineRun { id: neko_core::workbench::new_id(), routine_id: id.clone(), started_ms: now, finished_ms: Some(now), ok: true, quiet: false, did: Vec::new(), needs_you: vec![item], error: None, text: String::new(), ..Default::default() };
     core::push_run(db, &id, run)?;
     Ok(seq)
@@ -856,6 +878,22 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
     // The definition as it is now: an edit made during the run applies.
     let current = core::load(&db)?.routines.into_iter().find(|r| r.id == routine.id).unwrap_or_else(|| routine.clone());
     let mut routine_state = core::load_state(&db, &routine.id)?;
+    // Every runtime is out of usage: park the routine until the reset. Not a failure, no
+    // alert, no run in its history; the row says so quietly.
+    if let (Err(_), Some(until)) = (&outcome, meta.hold_until) {
+        park_for_limit(&mut routine_state, until);
+        *pushed = Some(routine_state.clone());
+        core::save_state(&db, &routine.id, &routine_state)?;
+        return Ok(());
+    }
+    routine_state.hold = None;
+    // Due times that passed while Neko was down were caught up by this one run.
+    let missed_note = routine_state.missed.take().map(|m| core::missed_note(&m));
+    let note = match (&missed_note, meta.note.is_empty()) {
+        (Some(missed), true) => missed.clone(),
+        (Some(missed), false) => format!("{missed} {}", meta.note),
+        (None, _) => meta.note.clone(),
+    };
     let mut next_due = None;
     let run = match outcome {
         Ok(parsed) => {
@@ -884,7 +922,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
             } else {
                 routine_state.note = Some(format!("The run asked to remember more than {} KB; its previous memory was kept.", core::MAX_MEMORY / 1024));
             }
-            RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: true, quiet: parsed.quiet, did: parsed.did, needs_you, error: None, text: String::new(), runtime: meta.runtime.clone(), note: meta.note.clone() }
+            RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: true, quiet: parsed.quiet, did: parsed.did, needs_you, error: None, text: String::new(), runtime: meta.runtime.clone(), note: note.clone(), cost_micro_usd: meta.cost_micro }
         }
         Err((error, text)) => {
             let mut end = text.len().min(KEEP_TEXT);
@@ -912,7 +950,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
                 });
             }
             next_due = Some(retry_or_next(&current.cadence, &routine_state, finished));
-            RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: false, quiet: false, did: Vec::new(), needs_you, error: Some(error), text: text[..end].to_string(), runtime: meta.runtime.clone(), note: meta.note.clone() }
+            RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: false, quiet: false, did: Vec::new(), needs_you, error: Some(error), text: text[..end].to_string(), runtime: meta.runtime.clone(), note, cost_micro_usd: meta.cost_micro }
         }
     };
     let ok = run.ok;
@@ -961,6 +999,29 @@ struct AgentMeta {
     new_outage: bool,
     /// Another runtime is installed to take over.
     fallback: bool,
+    /// Every runtime that could run this reports a spent usage limit: park the routine
+    /// until then (the earliest reset the errors name, else an hour on).
+    hold_until: Option<i64>,
+    /// What the run cost, in millionths of a dollar, when the agent reported a price.
+    cost_micro: u64,
+}
+
+/// A time of day as the owner reads it ("Tue 14:00").
+fn local_time(ms: i64) -> String {
+    use chrono::TimeZone;
+    chrono::Local.timestamp_millis_opt(ms).single().map_or_else(String::new, |t| t.format("%a %H:%M").to_string())
+}
+
+/// Parks a routine until the usage limit resets: due then, not failed, shown quietly.
+fn park_for_limit(state: &mut RoutineState, until_ms: i64) {
+    state.running = false;
+    state.hold = Some(neko_protocol::routines::Hold { until_ms, reason: "usage limit".into() });
+    state.next_due_ms = Some(until_ms);
+}
+
+/// The hold a failed run earns: every runtime tried (and any that is installed) is out of usage.
+fn usage_hold(errors: &[&str], now_ms: i64) -> Option<i64> {
+    (!errors.is_empty() && errors.iter().all(|e| neko_core::runtime_health::is_any_usage_limit(e))).then(|| neko_core::runtime_health::hold_until(errors, now_ms, &chrono::Local))
 }
 
 struct AgentRun {
@@ -1020,9 +1081,19 @@ fn run_agent(state: &AppState, routine: &Routine, spec: &neko_core::native_runne
         // The login may have gone bad in a chat, which raises no notice.
         meta.new_outage = before.notice.is_none();
         let result = on_codex(&mut meta);
+        if let Err(codex) = &result {
+            meta.hold_until = usage_hold(&[before.reason.as_str(), codex.as_str()], neko_core::workbench::now_ms());
+        }
         return AgentRun { result, meta };
     }
-    match runner::run_claude_scoped(spec, config, routine.browser, cancel, |_| {}) {
+    let mut cost_usd = 0.0;
+    let claude = runner::run_claude_scoped(spec, config, routine.browser, cancel, |event| {
+        if let Some(cost) = neko_core::spend::event_cost_usd(&event) {
+            cost_usd += cost;
+        }
+    });
+    meta.cost_micro = neko_core::spend::micro_usd(cost_usd);
+    match claude {
         Ok(text) => {
             // Always: a chat may have marked the login bad during this run.
             claude_works(&db(state));
@@ -1034,9 +1105,17 @@ fn run_agent(state: &AppState, routine: &Routine, spec: &neko_core::native_runne
             meta.new_outage = health::load(&db).notice.is_none();
             drop(db);
             if !fallback {
+                meta.hold_until = usage_hold(&[error.as_str()], neko_core::workbench::now_ms());
                 return AgentRun { result: Err(error), meta };
             }
-            let result = on_codex(&mut meta).map_err(|codex| format!("{error} The Codex fallback also failed: {codex}"));
+            let mut codex_error = String::new();
+            let result = on_codex(&mut meta).map_err(|codex| {
+                codex_error = codex.clone();
+                format!("{error} The Codex fallback also failed: {codex}")
+            });
+            if result.is_err() {
+                meta.hold_until = usage_hold(&[error.as_str(), codex_error.as_str()], neko_core::workbench::now_ms());
+            }
             AgentRun { result, meta }
         }
         Err(error) => AgentRun { result: Err(error), meta },
@@ -1253,11 +1332,37 @@ mod tests {
     use neko_protocol::routines::{Cadence, RoutineKind};
 
     fn routine(id: &str, enabled: bool) -> Routine {
-        Routine { id: id.into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: id.into(), instruction: "x".into(), cadence: Cadence::Daily { hour: 9, minute: 0 }, enabled, model: String::new(), paseo_schedule: None, browser: true, computer: true, customized: false }
+        Routine { id: id.into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: id.into(), instruction: "x".into(), cadence: Cadence::Daily { hour: 9, minute: 0 }, enabled, model: String::new(), paseo_schedule: None, browser: true, computer: true, customized: false, catch_up: None }
     }
 
     fn due(ms: Option<i64>, running: bool) -> RoutineState {
         RoutineState { next_due_ms: ms, running, ..Default::default() }
+    }
+
+    #[test]
+    fn a_routine_out_of_usage_everywhere_waits_for_the_reset_without_failing() {
+        let now = neko_core::workbench::now_ms();
+        let epoch = now / 1000 + 7200;
+        let claude = format!("Claude AI usage limit reached|{epoch}");
+        // Claude alone, no other runtime installed: the reset it names.
+        assert_eq!(usage_hold(&[claude.as_str()], now), Some(epoch * 1000));
+        // Claude and Codex both out: the earlier reset.
+        let codex = "{\"type\":\"usage_limit_reached\",\"resets_in_seconds\":900}";
+        assert_eq!(usage_hold(&[claude.as_str(), codex], now), Some(now + 900_000));
+        // No reset in the error: an hour.
+        assert_eq!(usage_hold(&["Credit balance is too low"], now), Some(now + 3_600_000));
+        // One runtime still works or failed for another reason: no hold.
+        assert_eq!(usage_hold(&[claude.as_str(), "timed out after 900s"], now), None);
+        assert_eq!(usage_hold(&[], now), None);
+        // The routine is parked at the reset, not counted as failed.
+        let mut state = RoutineState { running: true, failures: 0, ..Default::default() };
+        park_for_limit(&mut state, epoch * 1000);
+        assert_eq!((state.running, state.failures, state.next_due_ms), (false, 0, Some(epoch * 1000)));
+        assert_eq!(state.hold.as_ref().map(|h| h.reason.as_str()), Some("usage limit"));
+        // Not picked before the reset, picked right after it.
+        let store = Store { routines: vec![routine("a", true)], ..Default::default() };
+        assert_eq!(pick_due(&store, &[("a".into(), state.clone())], epoch * 1000 - 1, &|_| true), None);
+        assert_eq!(pick_due(&store, &[("a".into(), state)], epoch * 1000, &|_| true), Some("a".into()));
     }
 
     #[test]

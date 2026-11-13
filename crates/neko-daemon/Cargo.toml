@@ -18,6 +18,7 @@ test = false
 
 [dependencies]
 libc = "0.2"
+chrono = "0.4"
 neko-protocol.workspace = true
 neko-core.workspace = true
 serde.workspace = true

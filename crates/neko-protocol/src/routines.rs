@@ -50,6 +50,18 @@ pub struct Routine {
     /// newer seeded one.
     #[serde(default)]
     pub customized: bool,
+    /// After the daemon or the Mac was down across due times, run once to
+    /// catch up (with a "missed xN since" note) instead of skipping them.
+    /// `None` is the default for the kind: on for Messages and Digest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catch_up: Option<bool>,
+}
+
+impl Routine {
+    /// Whether a missed due time is caught up with one run.
+    pub fn catches_up(&self) -> bool {
+        self.catch_up.unwrap_or(matches!(self.kind, RoutineKind::Messages | RoutineKind::Digest))
+    }
 }
 
 fn yes() -> bool {
@@ -76,6 +88,27 @@ pub struct RoutineState {
     /// Failed runs in a row; reset by a good one.
     #[serde(default)]
     pub failures: u32,
+    /// Parked by a usage limit until `until_ms`: not a failure, shown quietly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold: Option<Hold>,
+    /// Due times that passed while Neko was down, found when this run was
+    /// picked; the run records it and clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub missed: Option<Missed>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Hold {
+    pub until_ms: i64,
+    /// Why, in a word: "usage limit".
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Missed {
+    pub count: u32,
+    /// The first due time that was missed.
+    pub since_ms: i64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -138,6 +171,13 @@ pub struct RoutineRun {
     /// some of the scope's servers.
     #[serde(default)]
     pub note: String,
+    /// What the run cost in millionths of a US dollar, when the agent reported a price.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub cost_micro_usd: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -202,6 +242,7 @@ mod tests {
             browser: true,
             computer: true,
             customized: false,
+            catch_up: None,
         };
         let json = serde_json::to_string(&routine).unwrap();
         assert_eq!(serde_json::from_str::<Routine>(&json).unwrap(), routine);

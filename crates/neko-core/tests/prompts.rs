@@ -182,6 +182,12 @@ fn ticket_lesson() {
     check("ticket-lesson", &text);
 }
 
+#[test]
+fn skill_curator() {
+    let body = "---\nname: rust-tests\ndescription: Run and fix Rust tests in a workspace\n---\n# Steps\n- Run `cargo test` first.\n\n## Lessons\n- Cap test workers at 2.\n- Cap workers at 2 when testing.\n";
+    check("skill-curator", &skills::curator::prompt("rust-tests", body));
+}
+
 fn golden_goal() -> neko_protocol::goals::Goal {
     use neko_protocol::goals::{CheckResult, JournalEntry};
     let mut goal = neko_core::goals::new_goal("w1", "Make the invoice export handle empty rows", "cargo test -p acme-export", "Do not change the CSV header", Some(12), 1_000).unwrap();

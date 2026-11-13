@@ -246,7 +246,7 @@ impl Controller {
         let db = self.db.lock().map_err(|_| "Task storage unavailable")?;
         let snapshot = store::load(&db)?;
         let task = self.crew_task(&snapshot, scope, role, &id)?;
-        Ok(Self::status_json(&snapshot, &queue::of_task(&db, &id)?, task).to_string())
+        Ok(neko_core::spill::bounded("task-status", &Self::status_json(&snapshot, &queue::of_task(&db, &id)?, task).to_string()))
     }
 
     /// A run's checkpoints, and one run's diff (or the whole task's). A builder reads only its own ticket.

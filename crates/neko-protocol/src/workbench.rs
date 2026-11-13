@@ -363,6 +363,10 @@ pub struct Snapshot {
     /// Only runtimes that report a price (Claude Code, OpenCode) count.
     #[serde(default)]
     pub task_budget_cents: Option<u32>,
+    /// Pause new goal turns and routine runs once the day's reported spend reaches
+    /// this many cents (local day). `None` is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daily_budget_cents: Option<u32>,
     /// At most this many tickets have a worker at once; new ones wait their
     /// turn. `None` is no limit beyond the machine-load pacing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1044,6 +1048,10 @@ pub enum Command {
         options: MemoryOptions,
     },
     SetTaskBudget {
+        cents: Option<u32>,
+    },
+    /// A daily spend ceiling; `None` is off.
+    SetDailyBudget {
         cents: Option<u32>,
     },
     SetMaxRunningTickets {

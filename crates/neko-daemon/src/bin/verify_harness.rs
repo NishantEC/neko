@@ -29,6 +29,8 @@ mod mcp_host;
 #[allow(dead_code)]
 #[path = "../phone.rs"]
 mod phone;
+#[path = "../routine_care.rs"]
+mod routine_care;
 #[path = "../routines.rs"]
 mod routines;
 #[path = "../self_update.rs"]

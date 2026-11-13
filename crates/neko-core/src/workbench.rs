@@ -1289,6 +1289,12 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             }
             snapshot.task_budget_cents = cents;
         }
+        Command::SetDailyBudget { cents } => {
+            if cents.is_some_and(|c| c == 0 || c > 1_000_000) {
+                return Err("Choose a daily ceiling between $0.01 and $10,000, or none".into());
+            }
+            snapshot.daily_budget_cents = cents;
+        }
         Command::SetMaxRunningTickets { limit } => {
             if limit.is_some_and(|n| n == 0 || n > 50) {
                 return Err("Choose between 1 and 50 tickets at once, or no limit".into());

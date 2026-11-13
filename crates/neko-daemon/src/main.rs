@@ -1,6 +1,7 @@
 mod codex;
 mod mcp_host;
 mod phone;
+mod routine_care;
 mod routines;
 mod self_update;
 mod server;

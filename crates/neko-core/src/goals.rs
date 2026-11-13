@@ -239,6 +239,11 @@ pub fn tail(text: &str, max: usize) -> String {
     format!("...{}", &text[start..])
 }
 
+/// A check's output as a prompt carries it: the end, or, when Neko spilled a long one to a file (`spill`), its head, tail and path.
+fn shown(text: &str) -> String {
+    tail(text, crate::spill::HEAD + crate::spill::TAIL + 400)
+}
+
 /// The first part of `text`, bounded, on a character boundary.
 pub fn head(text: &str, max: usize) -> String {
     let text = text.trim();
@@ -308,7 +313,7 @@ pub fn judge_prompt(goal: &Goal, check: Option<&CheckResult>, answer: &str, fold
         (command, Some(result)) => out.push_str(&format!(
             "\nThe check `{command}` was run by Neko just now. Exit code: {}.\nOutput (end):\n{}\n",
             result.exit_code.map_or("none (it did not finish)".to_owned(), |c| c.to_string()),
-            tail(&result.tail, 1200),
+            shown(&result.tail),
         )),
         (command, None) => out.push_str(&format!("\nThe check `{command}` has not been run yet, so the goal cannot be DONE.\n")),
     }
@@ -461,7 +466,7 @@ pub fn continue_prompt(goal: &Goal, check: Option<&CheckResult>, ruling_reason: 
         out.push_str(&format!("Constraints: {}\n", head(&goal.constraints, 1000)));
     }
     if let (false, Some(c)) = (goal.done_check.trim().is_empty(), check) {
-        out.push_str(&format!("\nNeko ran the check `{}`: exit {}.\n{}\n", goal.done_check.trim(), c.exit_code.map_or("none".into(), |x| x.to_string()), tail(&c.tail, 1200)));
+        out.push_str(&format!("\nNeko ran the check `{}`: exit {}.\n{}\n", goal.done_check.trim(), c.exit_code.map_or("none".into(), |x| x.to_string()), shown(&c.tail)));
     }
     if let Some(error) = error.filter(|e| !e.trim().is_empty()) {
         out.push_str(&format!("\nThe last turn stopped with: {}\n", head(error, 600)));
@@ -678,7 +683,7 @@ pub enum Gate {
 /// proves nothing.
 pub fn gate(changed: &[String], ledger: &[CheckResult], goal_check: Option<&CheckResult>) -> Gate {
     if let Some(check) = goal_check.filter(|c| !c.passed()) {
-        return Gate::Missing(format!("The goal's check `{}` fails (exit {}):\n{}", check.command, check.exit_code.map_or("none".into(), |c| c.to_string()), tail(&check.tail, 1200)));
+        return Gate::Missing(format!("The goal's check `{}` fails (exit {}):\n{}", check.command, check.exit_code.map_or("none".into(), |c| c.to_string()), shown(&check.tail)));
     }
     if !needs_check(changed) {
         return Gate::Skip;
@@ -691,7 +696,7 @@ pub fn gate(changed: &[String], ledger: &[CheckResult], goal_check: Option<&Chec
         latest.push(entry);
     }
     if let Some(c) = latest.iter().find(|c| !c.passed()) {
-        return Gate::Missing(format!("`{}` fails (exit {}):\n{}", c.command, c.exit_code.map_or("none".into(), |x| x.to_string()), tail(&c.tail, 1200)));
+        return Gate::Missing(format!("`{}` fails (exit {}):\n{}", c.command, c.exit_code.map_or("none".into(), |x| x.to_string()), shown(&c.tail)));
     }
     if goal_check.is_some_and(CheckResult::passed) || !latest.is_empty() {
         return Gate::Pass;
@@ -714,6 +719,20 @@ mod tests {
     fn check(code: i64) -> CheckResult {
         CheckResult { command: "cargo test".into(), exit_code: Some(code), tail: "out".into(), at_ms: 1, source: "neko".into() }
     }
+    #[test]
+    fn a_long_check_output_reaches_the_next_turn_as_head_tail_and_a_file_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = format!("{}{}{}", "START".repeat(500), "x".repeat(30_000), "FINISH".repeat(500));
+        let mut spilled = check(101);
+        spilled.tail = crate::spill::bounded_in(dir.path(), "check", &output);
+        let next = continue_prompt(&goal("cargo test"), Some(&spilled), "", None);
+        assert!(next.contains("STARTSTART") && next.contains("FINISHFINISH"), "head and tail");
+        let path = std::fs::read_dir(dir.path()).unwrap().next().unwrap().unwrap().path();
+        assert!(next.contains(path.to_str().unwrap()), "the path of the full output");
+        assert!(next.len() < 6_000, "{}", next.len());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), output);
+    }
+
     fn ruling(verdict: Verdict) -> Ruling {
         Ruling { verdict, reason: "r".into(), evidence: String::new(), question: String::new(), default_answer: String::new(), wait: None, plan: String::new(), done: String::new(), next: String::new() }
     }

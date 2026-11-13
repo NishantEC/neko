@@ -226,6 +226,7 @@ mod tests {
             browser: false,
             computer: false,
             customized: false,
+            catch_up: None,
         };
         rcore::save_definitions(&db, &rcore::Store { routines: vec![routine], ..Default::default() }).unwrap();
         db

@@ -12,6 +12,8 @@ use std::{
 
 #[path = "skills/lessons.rs"]
 mod lessons;
+#[path = "skills/curator.rs"]
+pub mod curator;
 pub use lessons::{catalog_section, learning_catalog, lesson_prompt, propose_lesson, read_lesson, unified_diff, TicketLesson};
 
 const SETTING: &str = "neko_skills_v1";
@@ -102,7 +104,8 @@ pub fn current_roots(workspaces: &[neko_protocol::workbench::Workspace]) -> Vec<
 }
 
 pub fn save(db: &Db, state: &SkillState) -> Result<(), String> {
-    let json = serde_json::to_string(state).map_err(|e| e.to_string())?;
+    // The curator's view is attached when read and has its own rows.
+    let json = if state.curator == Default::default() { serde_json::to_string(state) } else { serde_json::to_string(&SkillState { curator: Default::default(), ..state.clone() }) }.map_err(|e| e.to_string())?;
     if json.len() > 4 * 1024 * 1024 {
         return Err("Skill storage is full; review pending proposals first".into());
     }
@@ -247,6 +250,7 @@ fn decide_with_hook(
     if proposal.content_hash != expected_hash || hash(&proposal.body) != expected_hash {
         return Err("Proposal changed; review it again before deciding".into());
     }
+    let (decided_source, decided_patch, installed_body) = (proposal.source.clone(), proposal.patch.clone(), proposal.body.clone());
     if accept {
         if proposal.audit_url.is_some()
             && proposal.audit_reviewed_hash.as_deref() != Some(expected_hash)
@@ -264,7 +268,15 @@ fn decide_with_hook(
     }
     state.proposals.retain(|p| p.id != id);
     hook(InstallStep::Save)?;
-    save(db, &state)
+    save(db, &state)?;
+    if accept {
+        // The curator's record of what Neko wrote and what it left alone; best effort.
+        let _ = match &decided_patch {
+            Some(patch) => curator::note_patch(db, &patch.path, &patch.base_hash, &patch.revised, &decided_source),
+            None => curator::note_installed(db, &data.join("skills").join(format!("reviewed-{id}")).join("SKILL.md"), &installed_body, &decided_source),
+        };
+    }
+    Ok(())
 }
 
 pub fn confirm_audit_review(
@@ -479,12 +491,15 @@ fn discover_bounded(roots: &[Root], remaining: &mut usize) -> Vec<Skill> {
 }
 
 pub fn load(db: &Db) -> Result<SkillState, String> {
-    db.get_setting(SETTING)
+    let mut state: SkillState = db
+        .get_setting(SETTING)
         .map_err(|e| e.to_string())?
         .map(|json| {
             serde_json::from_str(&json).map_err(|e| format!("Cannot read enabled skills: {e}"))
         })
-        .unwrap_or_else(|| Ok(SkillState::default()))
+        .unwrap_or_else(|| Ok(SkillState::default()))?;
+    curator::attach(db, &mut state);
+    Ok(state)
 }
 
 pub fn set_enabled(

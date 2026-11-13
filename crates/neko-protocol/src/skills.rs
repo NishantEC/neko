@@ -27,6 +27,39 @@ pub struct SkillState {
     pub available: Vec<Skill>,
     #[serde(default)]
     pub proposals: Vec<SkillProposal>,
+    /// What the curator knows about skills, attached when read; never stored here.
+    #[serde(default)]
+    pub curator: Curation,
+}
+
+/// The skill curator as the app shows it (`neko_core::skills::curator`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Curation {
+    /// The once-a-day pass is on (it is, unless the person switched it off).
+    pub on: bool,
+    pub last_run_ms: i64,
+    /// Skills the curator tracks: Neko-written ones, and any a lesson improved.
+    pub skills: Vec<CuratedSkill>,
+    /// Newest first, at most 10: consolidations applied by themselves to skills Neko wrote.
+    pub recent: Vec<CuratorApplied>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CuratedSkill {
+    pub path: String,
+    /// "neko" (Neko wrote it, unchanged since: consolidations apply by themselves),
+    /// "locked" (the person locked it), "edited" (the person changed it by hand: locked)
+    /// or "other" (not Neko's: proposals only).
+    pub state: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CuratorApplied {
+    pub path: String,
+    pub name: String,
+    pub at_ms: i64,
+    /// The diff that was applied.
+    pub diff: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -80,6 +113,15 @@ pub enum SkillCommand {
         id: String,
         content_hash: String,
         accept: bool,
+    },
+    /// Lock a skill so the curator only ever proposes changes to it, or unlock it.
+    SetLocked {
+        path: String,
+        locked: bool,
+    },
+    /// Switch the once-a-day curator pass on or off.
+    SetCurator {
+        on: bool,
     },
     ConfirmAuditReview {
         id: String,
