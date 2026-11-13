@@ -1368,11 +1368,16 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         }
         Command::SetUpdateSource { repository } => {
             let text = repository.trim();
-            snapshot.self_update.source = if text.is_empty() {
+            let source = if text.is_empty() {
                 String::new()
             } else {
                 crate::self_update::normalize_repository(text).ok_or("Use owner/name or a github.com URL")?
             };
+            if source != snapshot.self_update.source {
+                // A new source is looked at right away, not after the old one's interval.
+                snapshot.self_update.check = Default::default();
+            }
+            snapshot.self_update.source = source;
         }
         Command::SetDevCheckout { path } => {
             let text = path.trim();
@@ -1380,6 +1385,9 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
                 None
             } else {
                 let dir = std::path::Path::new(text).canonicalize().map_err(|_| "That folder does not exist")?;
+                if dir == neko_protocol::support_dir().join("source").canonicalize().unwrap_or_default() {
+                    return Err("That is the folder the app updates itself in; choose your own checkout".into());
+                }
                 if !dir.join(".git").exists() {
                     return Err("Choose the repository's own checkout folder".into());
                 }

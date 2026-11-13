@@ -33,7 +33,7 @@ use crate::server::AppState;
 
 const TICK: Duration = Duration::from_secs(10);
 /// A reinstall that has not reported after this long is recorded as failed.
-const INSTALL_DEADLINE_MS: i64 = 60 * 60 * 1000;
+const INSTALL_DEADLINE_MS: i64 = 3 * 60 * 60 * 1000;
 
 static WAKE: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
 
@@ -182,6 +182,11 @@ fn tick_with(state: &Arc<AppState>, data: &Path, bundle: Option<String>, source:
         return Ok(());
     }
 
+    // The updater resets its folder: it must never be a checkout somebody works in.
+    let is_dev = su.dev_checkout.as_deref().is_some_and(|dev| Path::new(dev).canonicalize().ok() == source.dir.canonicalize().ok());
+    if is_dev || source.dir.join(".git").is_file() {
+        return with_snapshot(state, |s| s.self_update.check.error = "the update source folder is a checkout in use; choose another folder".into());
+    }
     refresh(state, source, hooks)?;
     let snapshot = store::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
     let su = snapshot.self_update.clone();
@@ -205,6 +210,17 @@ fn tick_with(state: &Arc<AppState>, data: &Path, bundle: Option<String>, source:
                 .find_map(|repository| core::tree_of(&repository, commit))
         });
         applied = core::starting_point(clone, &head, None, bundle.as_deref(), tree.as_deref());
+        // An app built from commits ahead of the published tip (not pushed yet)
+        // is newer, not older: never install the published tip over it.
+        if applied.is_none() {
+            let ahead = bundle.as_deref().is_some_and(|commit| {
+                std::iter::once(clone.to_path_buf())
+                    .chain(su.dev_checkout.iter().map(PathBuf::from))
+                    .chain(core::bundle_source_path())
+                    .any(|repository| core::is_ancestor(&repository, &head, commit))
+            });
+            if ahead { applied = Some(head.clone()); }
+        }
     } else if applied.is_none() {
         applied = Some(head.clone());
     }
@@ -221,8 +237,9 @@ fn tick_with(state: &Arc<AppState>, data: &Path, bundle: Option<String>, source:
         _ => None,
     };
     // A newer app (installed by hand) outranks an older live web UI.
+    // (An app whose commit the clone does not know is not compared by ancestry.)
     let stale_web = match (&web_commit, &bundle) {
-        (Some(web), Some(bundle)) => web == bundle || !core::is_ancestor(clone, bundle, web),
+        (Some(web), Some(bundle)) => web == bundle || (core::resolve_commit(clone, bundle).is_some() && !core::is_ancestor(clone, bundle, web)),
         _ => false,
     };
     if stale_web {
@@ -275,7 +292,9 @@ fn refresh(state: &Arc<AppState>, source: &Source, hooks: &Hooks) -> Result<(), 
     let su = &snapshot.self_update;
     let now = store::now_ms();
     let have_clone = source.dir.join(".git").exists();
-    let due = su.requested || !have_clone || su.check.at_ms == 0 || su.check.at_ms > now || now - su.check.at_ms >= core::CHECK_EVERY_MS;
+    // No clone yet: try again after a minute, not on every tick.
+    let every = if have_clone { core::CHECK_EVERY_MS } else { 60_000 };
+    let due = su.requested || su.check.at_ms == 0 || su.check.at_ms > now || now - su.check.at_ms >= every;
     if !due {
         return Ok(());
     }
@@ -313,9 +332,15 @@ fn plan(state: &Arc<AppState>, clone: &Path, head: &str, applied: Option<&str>, 
     let snapshot = store::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
     let su = &snapshot.self_update;
     if su.queued.is_some() {
+        // The owner's click has been answered (the look happened); do not keep looking every tick.
+        if su.requested { with_snapshot(state, |s| s.self_update.requested = false)?; }
         return Ok(());
     }
     let requested = su.requested;
+    // A commit that failed to apply is not retried until `main` moves or the owner asks.
+    if !requested && [&su.last_failure, &su.last_rollback].iter().any(|r| r.as_ref().is_some_and(|r| r.commit == head)) {
+        return Ok(());
+    }
     if !requested && applied == Some(head) {
         return Ok(());
     }
@@ -324,8 +349,10 @@ fn plan(state: &Arc<AppState>, clone: &Path, head: &str, applied: Option<&str>, 
     }
     // "Update now" also reinstalls an app that is behind, even when the web
     // part was already applied.
+    // The app is behind what was applied when an install failed or rolled back.
+    let app_behind = applied.is_some_and(|a| [&su.last_failure, &su.last_rollback].iter().any(|r| r.as_ref().is_some_and(|r| r.commit == a)));
     let from = match bundle {
-        Some(b) if requested && b != head && core::is_ancestor(clone, b, head) => Some(b.to_owned()),
+        Some(b) if (requested || app_behind) && b != head && core::is_ancestor(clone, b, head) => Some(b.to_owned()),
         _ => applied.map(str::to_owned),
     };
     if from.as_deref() == Some(head) {
@@ -412,8 +439,16 @@ fn apply(state: &Arc<AppState>, clone: &Path, data: &Path, bundle: Option<&str>,
             }
             Err(error) => {
                 let summary = format!("Couldn't update the web UI to {}: {}. The current UI stays.", core::short(&head), error.trim_end_matches(['.', ' ']));
-                with_snapshot(state, |s| s.self_update.last_failure = Some(record(&head, &summary)))?;
+                // Not applied: nothing more of this plan runs, and `applied_through`
+                // stays, but the failed commit is not retried until `main` moves
+                // or the owner clicks Update now.
+                with_snapshot(state, |s| {
+                    s.self_update.last_failure = Some(record(&head, &summary));
+                    s.self_update.queued = None;
+                    s.self_update.status.clear();
+                })?;
                 tell(state, task_id.as_deref(), &summary, false);
+                return Ok(());
             }
         }
         queued.web = false;
@@ -797,10 +832,8 @@ mod tests {
     fn an_app_that_does_not_match_the_published_history_is_applied_once() {
         let rig = Rig::new();
         let published = run(&rig.publisher, &["rev-parse", "HEAD"]);
-        write(&rig.dev, "different.txt", "an app built from something else");
-        run(&rig.dev, &["add", "-A"]);
-        run(&rig.dev, &["commit", "-q", "-m", "different"]);
-        let foreign = run(&rig.dev, &["rev-parse", "HEAD"]);
+        // A root commit with an empty tree: shares no history and no files with the published tip.
+        let foreign = run(&rig.dev, &["commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "an app built from something else"]);
         with_snapshot(&rig.state, |s| s.self_update.dev_checkout = Some(rig.dev.to_string_lossy().into_owned())).unwrap();
         rig.tick(Some(&foreign));
         // The whole tree is classified: the web UI is built and the app reinstalled, once.
@@ -911,5 +944,73 @@ mod tests {
         assert!(record.summary.contains("previous version"));
         assert_eq!(std::fs::read_link(data.path().join("web-live")).unwrap().to_string_lossy(), "web-builds/one");
         assert!(!data.path().join("web-live.prev").exists(), "nothing left to roll back to");
+    }
+
+    static WAIT_TOO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    fn busy_too() -> Option<String> {
+        WAIT_TOO.load(std::sync::atomic::Ordering::SeqCst).then(|| "load 18".to_owned())
+    }
+
+    fn failing_build(_clone: &Path, _data: &Path, _lockfile: bool) -> Result<(), String> {
+        Err("pnpm run failed: boom".into())
+    }
+
+    #[test]
+    fn a_missing_clone_is_retried_after_a_minute_not_every_tick_and_a_click_is_answered_once() {
+        let rig = Rig::new();
+        let missing = Source { remote: rig.root.join("nowhere.git").to_string_lossy().into_owned(), dir: rig.data.join("source") };
+        tick_with(&rig.state, &rig.data, None, &missing, &HOOKS).unwrap();
+        let first = rig.snapshot().self_update.check.at_ms;
+        assert!(first > 0);
+        tick_with(&rig.state, &rig.data, None, &missing, &HOOKS).unwrap();
+        assert_eq!(rig.snapshot().self_update.check.at_ms, first, "no second look within the minute");
+        // A queued update answers the click: `requested` does not stay on.
+        let base = run(&rig.publisher, &["rev-parse", "HEAD"]);
+        rig.tick(Some(&base));
+        rig.publish("crates/neko-core/src/a.rs", "// a");
+        rig.command(Command::UpdateNekoNow);
+        let busy = Hooks { machine_wait: busy_too, ..HOOKS };
+        WAIT_TOO.store(true, std::sync::atomic::Ordering::SeqCst);
+        tick_with(&rig.state, &rig.data, Some(base.clone()), &rig.source, &busy).unwrap();
+        tick_with(&rig.state, &rig.data, Some(base.clone()), &rig.source, &busy).unwrap();
+        WAIT_TOO.store(false, std::sync::atomic::Ordering::SeqCst);
+        let su = rig.snapshot().self_update;
+        assert!(su.queued.is_some() && !su.requested);
+    }
+
+    #[test]
+    fn a_failed_web_build_is_recorded_and_not_retried_until_main_moves() {
+        let rig = Rig::new();
+        let base = run(&rig.publisher, &["rev-parse", "HEAD"]);
+        rig.tick(Some(&base));
+        let bad = rig.publish("web/src/a.css", "a{}");
+        rig.age_check();
+        let failing = Hooks { build_web: failing_build, ..HOOKS };
+        tick_with(&rig.state, &rig.data, Some(base.clone()), &rig.source, &failing).unwrap();
+        let su = rig.snapshot().self_update;
+        assert_eq!(su.last_failure.as_ref().map(|f| f.commit.as_str()), Some(bad.as_str()));
+        assert_eq!(su.applied_through.as_deref(), Some(base.as_str()));
+        assert!(su.queued.is_none());
+        // Ticking again neither rebuilds nor repeats the notice.
+        let notices = rig.snapshot().conversation.len();
+        tick_with(&rig.state, &rig.data, Some(base.clone()), &rig.source, &failing).unwrap();
+        assert_eq!(rig.builds(), 0);
+        assert_eq!(rig.snapshot().conversation.len(), notices);
+        // The owner's click tries again.
+        rig.command(Command::UpdateNekoNow);
+        rig.tick(Some(&base));
+        assert_eq!(rig.snapshot().self_update.web_commit.as_deref(), Some(bad.as_str()));
+    }
+
+    #[test]
+    fn the_clone_is_never_a_checkout_in_use() {
+        let rig = Rig::new();
+        let base = run(&rig.publisher, &["rev-parse", "HEAD"]);
+        with_snapshot(&rig.state, |s| s.self_update.dev_checkout = Some(rig.dev.to_string_lossy().into_owned())).unwrap();
+        let on_dev = Source { dir: rig.dev.clone(), ..rig.source.clone() };
+        let before = rig.dev_state();
+        tick_with(&rig.state, &rig.data, Some(base), &on_dev, &HOOKS).unwrap();
+        assert!(rig.snapshot().self_update.check.error.contains("checkout in use"));
+        assert_eq!(rig.dev_state(), before);
     }
 }

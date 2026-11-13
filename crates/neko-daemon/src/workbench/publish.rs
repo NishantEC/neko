@@ -105,8 +105,8 @@ enum Push {
     Stayed(String),
 }
 
-fn push_to_published(source: &std::path::Path, update_source: &str, cancel: &AtomicBool) -> Push {
-    match native_runner::publish::push_to_update_source(source, update_source, cancel) {
+fn push_to_published(source: &std::path::Path, update_source: &str, onto: &str, cancel: &AtomicBool) -> Push {
+    match native_runner::publish::push_to_update_source(source, update_source, onto, cancel) {
         Ok(()) => Push::Pushed,
         Err(why) => Push::Stayed(why),
     }
@@ -158,7 +158,7 @@ fn publish_unlocked(db: &Arc<Mutex<Db>>, task_id: &str, cancel: &AtomicBool) -> 
     if is_dev || snapshot.land_on_main.contains(&*source.to_string_lossy()) {
         return native_runner::publish::land(&directory, &base, &describe, &still_reviewed, cancel)
             .map(|landed| landed.map(|landed| {
-                let push = if is_dev { push_to_published(&source, &snapshot.self_update.source, cancel) } else { Push::NotAsked };
+                let push = if is_dev { push_to_published(&source, &snapshot.self_update.source, &landed.onto, cancel) } else { Push::NotAsked };
                 Delivered::Landed(landed, push)
             }))
             .map_err(|error| Failure { landing: true, error });

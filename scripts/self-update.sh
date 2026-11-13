@@ -50,8 +50,11 @@ report() {
   log "result: $1 $2"
 }
 
+# A lock left by a killed run (no live pid in it) is stale and removed.
+if [[ -d "$lock" ]] && ! kill -0 "$(cat "$lock/pid" 2>/dev/null)" 2>/dev/null; then rm -rf "$lock"; fi
 mkdir "$lock" 2>/dev/null || { log 'another self-update is running'; exit 1; }
-trap 'rmdir "$lock" 2>/dev/null' EXIT
+echo $$ > "$lock/pid"
+trap 'rm -rf "$lock" 2>/dev/null' EXIT
 
 is_installed_executable() {
   case "$1" in

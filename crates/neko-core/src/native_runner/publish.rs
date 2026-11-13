@@ -207,6 +207,10 @@ pub fn git_limited(directory: &Path, args: &[&str], cancel: &AtomicBool, timeout
     let mut command = git_command(directory);
     command.args(["-c", "credential.helper="]).args(args)
         .env("GIT_ASKPASS", "/usr/bin/true")
+        // Nothing from the person's own Git configuration (URL rewrites to ssh,
+        // credential helpers): a public https clone needs none of it.
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=15");
     capture(&format!("git {}", args.first().unwrap_or(&"")), command, b"", cancel, timeout)
 }
@@ -226,7 +230,7 @@ pub fn push_main(source: &Path, cancel: &AtomicBool) -> Result<(), String> {
 /// says why not. Only when `origin` is the repository the app updates from
 /// (`update_source`, empty for the project's own), so a change never goes
 /// somewhere the updater would not read it back from.
-pub fn push_to_update_source(source: &Path, update_source: &str, cancel: &AtomicBool) -> Result<(), String> {
+pub fn push_to_update_source(source: &Path, update_source: &str, onto: &str, cancel: &AtomicBool) -> Result<(), String> {
     let origin = match git_output(source, &["config", "--get", "remote.origin.url"], cancel) {
         Ok(url) if !url.trim().is_empty() => url,
         _ => return Err("this checkout has no origin remote".into()),
@@ -236,6 +240,13 @@ pub fn push_to_update_source(source: &Path, update_source: &str, cancel: &Atomic
         Some(found) if found.eq_ignore_ascii_case(&wanted) => {}
         Some(found) => return Err(format!("origin is {found}, not the update source {wanted}")),
         None => return Err("origin is not a GitHub repository".into()),
+    }
+    // Only what was reviewed goes public: local `main` must have held nothing
+    // unpublished before this landing.
+    git_limited(source, &["fetch", "--quiet", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"], cancel, GH_TIMEOUT)
+        .map_err(|e| format!("could not look at the published main first ({e})"))?;
+    if git_command(source).args(["merge-base", "--is-ancestor", onto, "refs/remotes/origin/main"]).status().map_or(true, |s| !s.success()) {
+        return Err("this checkout's main had commits that are not published yet; push them yourself first".into());
     }
     push_main(source, cancel).map_err(|error| error.trim_end_matches(['.', ' ']).to_owned())
 }

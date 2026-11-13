@@ -43,12 +43,17 @@ and otherwise every 10 s. State is `Snapshot::self_update`.
    which a shallow history may not hold, and the repository is ~50 MB. **No work
    while the Mac says WAIT** (`machine-ok`, or the steward's hold) unless the
    owner clicked Update now. An unreachable source is the last check's `error`
-   (offline is normal), never a failed update.
+   (offline is normal), never a failed update; with no clone yet it retries after
+   a minute, not every tick. The network git calls ignore the person's own Git
+   configuration (`GIT_CONFIG_GLOBAL=/dev/null`: no ssh URL rewrites, no
+   credential helpers) and never prompt. The clone folder is refused when it is
+   the development checkout or a real worktree.
 2. **Starting point** (`starting_point`): the recorded `applied_through` if it is
    in the published history; else the running app's `NekoGitCommit`; else, when
    the app's commit is not public (rewritten history), the published tip **if the
    app's tree equals the tip's tree** (adopted, no reinstall); else the tip is
-   applied once. No installed app (a development run): the tip is the start.
+   applied once. An app built from commits *ahead* of the published tip (found in
+   the development checkout) is newer, not older, and is left alone. No installed app (a development run): the tip is the start.
 3. **Decide** (`decide`): docs-only (`.md`) ranges do nothing; web-only ranges
    rebuild the UI; anything under `crates/ native/ scripts/ patches/` or the
    Cargo files reinstalls. **Updates apply automatically by default, `SENSITIVE`
@@ -80,9 +85,10 @@ and otherwise every 10 s. State is `Snapshot::self_update`.
      failure, keeps one backup on success, and writes
      `<data>/self-update/result.json`, which whichever daemon runs reads once
      (`take_result`): "updated", "rolled back", or "failed". No report within an
-     hour is a failure. A failed or rolled-back commit is not retried until
-     `main` moves or the owner clicks Update now (`applied_through` advances when
-     the installer starts).
+     hour is a failure. A failed web build, a failed install or a rollback is
+     recorded and that commit is not retried until `main` moves or the owner
+     clicks Update now; after a native failure the next range is computed from
+     the running app, so the UI never outruns the daemon.
 5. **Where things live.** Clone: `<data dir>/source`. Cargo's output
    (`NEKO_UPDATE_TARGET_DIR` overrides): `~/Library/Caches/neko/target`, which
    `build-native.sh` and `install-native.sh` honour through `CARGO_TARGET_DIR`
@@ -102,6 +108,11 @@ and otherwise every 10 s. State is `Snapshot::self_update`.
    clone path for tests and development; `NEKO_SELF_UPDATE=0` switches the
    thread off.
 
+Not a security boundary: `SetUpdateSource` is an ordinary daemon command like
+the rest, so a full-access agent or page that can reach the daemon could point
+the app at another repository (the app puts its own setting back on its next
+launch). The old click on safety-critical paths had the same limit.
+
 ### Neko tasks that change Neko
 
 They work in the **development checkout** (Settings → Neko updates →
@@ -110,7 +121,8 @@ default, so a friend's install has none). A task whose repository is that
 checkout lands on its local `main` after review (as `land_on_main` always did)
 and then `native_runner::publish::push_to_update_source` pushes `main` to
 `origin` as a plain fast-forward, only when `origin` is the repository the app
-updates from. The ticket says which happened: pushed ("the installed app picks
+updates from and the checkout's `main` held nothing unpublished before the
+landing (it fetches first; otherwise it says to push those commits yourself). The ticket says which happened: pushed ("the installed app picks
 it up within about 10 minutes") or not pushed with the reason (no `origin`, a
 different origin, no credentials, a non-fast-forward), in which case the change
 stays local and the use copy is unaffected. The change returns to the use copy

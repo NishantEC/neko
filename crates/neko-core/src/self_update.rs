@@ -308,7 +308,7 @@ pub fn sync_clone(source: &Source) -> Result<String, String> {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         git_net(parent, &["clone", "--quiet", "--single-branch", "--branch", "main", "--no-tags", &source.remote, &dir.to_string_lossy()], CLONE_TIMEOUT)?;
     } else {
-        if git(dir, &["remote", "get-url", "origin"]).ok().as_deref() != Some(source.remote.as_str()) {
+        if git(dir, &["config", "--get", "remote.origin.url"]).ok().as_deref() != Some(source.remote.as_str()) {
             // The person pointed Neko at another repository.
             git(dir, &["remote", "set-url", "origin", &source.remote])?;
         }
