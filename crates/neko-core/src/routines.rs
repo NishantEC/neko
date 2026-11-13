@@ -115,7 +115,10 @@ pub fn push_run(db: &crate::Db, id: &str, run: RoutineRun) -> Result<(), String>
     };
     runs.insert(0, run);
     let older = runs.split_off(runs.len().min(KEEP_RUNS));
-    runs.extend(older.into_iter().filter(|run| run.needs_you.iter().any(|item| !item.done)));
+    // Items closed in the last few days stay too: "Closed recently" lists
+    // them and Reopen needs the run.
+    let now = crate::workbench::now_ms();
+    runs.extend(older.into_iter().filter(|run| run.needs_you.iter().any(|item| !item.done || crate::inbox::recently_closed(item, now))));
     if runs.len() > MAX_RUNS {
         // Never drop open items silently: one item says how many went.
         let dropped = runs.split_off(MAX_RUNS - 1);
@@ -140,7 +143,7 @@ pub fn push_run(db: &crate::Db, id: &str, run: RoutineRun) -> Result<(), String>
                 ok: true,
                 quiet: false,
                 did: Vec::new(),
-                needs_you: vec![NeedsYou { seq: oldest, title: format!("{count} older items were not handled"), detail: "They were too old to keep. Check this routine's sources if any still matter.".into(), link: None, done: false, ..Default::default() }],
+                needs_you: vec![NeedsYou { seq: oldest, title: format!("{count} older items were not handled"), detail: "They were too old to keep. Check this routine's sources if any still matter.".into(), link: None, done: false, created_ms: now, touched_ms: now, ..Default::default() }],
                 error: None,
                 text: count.to_string(),
                 ..Default::default()
@@ -251,13 +254,13 @@ pub fn build_prompt(routine: &Routine, scope: &ScopeProposal, orders: &str, memo
     let age_out = if age_out_days == 0 {
         String::new()
     } else {
-        format!(" An item nobody has touched for {age_out_days} days closes on its own as aged out; if one is still true and still matters, report it again with the same title and fresh detail and its age starts over.")
+        format!(" An item nobody has touched for {age_out_days} days closes on its own as aged out; to keep one that is still true and still matters, list it in needs_you again with exactly its title and fresh detail: Neko refreshes that item instead of adding another, and its age starts over.")
     };
     let open = if open.is_empty() {
         "Nothing is waiting on {owner} in this scope right now.".to_string()
     } else {
         format!(
-            "Already waiting on {owner} in this scope (reported by this or another routine), each with how long it has been open. Never report a new item that repeats one of these, even in other words. If you find one is no longer true (done, fixed, signed in, merged, the time passed), put its exact title (without the bracket) in resolved.{age_out}\n{}",
+            "Already waiting on {owner} in this scope (reported by this or another routine), each with how long it has been open. Never add a second item for any of these, even in other words. If you find one is no longer true (done, fixed, signed in, merged, the time passed), put its exact title (without the bracket) in resolved.{age_out}\n{}",
             open.iter()
                 .map(|i| {
                     let age = match i.age_days {

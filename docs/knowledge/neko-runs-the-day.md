@@ -93,7 +93,11 @@ and "there is no restriction. It can do whatever it wants". Design:
     are merged or closed. `sweep_prs` runs on its own thread every 15 min,
     makes at most 6 `gh pr view --json state` calls per sweep (never in
     tests, never while the steward holds) and caches the answers in one small
-    row, `inbox_pr_state_v1` (merged/closed kept, open re-read after 15 min).
+    row, `inbox_pr_state_v1` (merged/closed kept with `closedAt`, open re-read after 15 min, a reference
+    `gh` cannot read cached as UNKNOWN for 6 h so a few bad ones never starve
+    the rest). A pull request that ended before the item was raised
+    (`created_ms`, else the run's start) only counts as a mention and does not
+    close it.
     The existing `workbench_pull_request_status_v1` row only covers tasks'
     own PRs, so it could not be reused.
   - **Time.** The reply contract's optional `expires` (ISO, UTC; also a bare
@@ -111,10 +115,15 @@ and "there is no restriction. It can do whatever it wants". Design:
   - **No repeats.** A reply's items that match an open one are not added:
     the open item is refreshed (newer detail, link, `touched_ms`; the `seq`
     stays, so no second notification). Match = `duplicates::normalized_title`
-    within a scope, or the same `setup_key` in any scope (a title with a
+    behind the leading issue key (two tickets with one wording stay two
+    items) within a scope, or the same `setup_key` in any scope (a title with a
     marker word such as enable / auth / token / expired, minus filler, names
     the connection: "Enable Google Calendar API" = "Google Calendar needs
-    re-auth"). Two copies inside one reply collapse too.
+    re-auth"). Two copies inside one reply collapse too. A routine that
+    resolves a setup failure closes it in every scope; the outage notices are
+    never aged (they close when Claude answers).
+  - **Run trim.** `push_run` keeps runs past the newest 50 while an item in
+    them is open or closed within 3 days, or Reopen would find nothing.
   - **See and undo.** Inbox has a collapsed "Closed recently" group (3 days;
     `runs_for_view` keeps runs with recently closed items) with the reason
     and a Reopen row action and menu item (`ReopenNeedsYou`). Reopened items

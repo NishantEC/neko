@@ -101,11 +101,18 @@ pub fn pr_refs(item: &NeedsYou) -> Vec<PrRef> {
 }
 
 /// What two titles must share to be the same item: the normalised title
-/// (`duplicates::normalized_title`), or the lower-cased text when nothing
+/// (`duplicates::normalized_title`) behind its leading issue key, so two
+/// tickets with one wording stay two items; the lower-cased text when nothing
 /// letter-like is left.
 pub fn title_key(title: &str) -> String {
     let key = crate::duplicates::normalized_title(title);
-    if key.is_empty() { title.trim().to_lowercase() } else { key }
+    if key.is_empty() {
+        return title.trim().to_lowercase();
+    }
+    match crate::duplicates::leading_key(title) {
+        Some(lead) => format!("{} {key}", lead.to_lowercase()),
+        None => key,
+    }
 }
 
 /// Words that say "this is a setup failure" and the filler around them. What
@@ -172,7 +179,11 @@ pub fn refresh(old: &mut NeedsYou, new: &NeedsYou, now: i64) {
     if new.link.is_some() {
         old.link = new.link.clone();
     }
-    old.expires_ms = new.expires_ms.or(old.expires_ms);
+    if new.expires_ms.is_some() {
+        old.expires_ms = new.expires_ms;
+        // A new time is a new deadline, even on an item the owner reopened.
+        old.kept = false;
+    }
     old.touched_ms = now;
 }
 
@@ -197,14 +208,21 @@ pub fn recently_closed(item: &NeedsYou, now: i64) -> bool {
 }
 
 /// What a pull request's state closes an item as, once every pull request it
-/// names is merged or closed. `state` answers for one reference.
-pub fn pr_reason(refs: &[PrRef], state: &dyn Fn(&PrRef) -> Option<String>) -> Option<&'static str> {
+/// names is merged or closed. `state` answers for one reference with its
+/// state and when it ended. A pull request that ended before `since_ms` (the
+/// item's start) does not count: the item only mentions it, so it stays for
+/// age-out to handle.
+pub fn pr_reason(refs: &[PrRef], since_ms: i64, state: &dyn Fn(&PrRef) -> Option<(String, i64)>) -> Option<&'static str> {
     if refs.is_empty() {
         return None;
     }
     let mut all_merged = true;
     for r in refs {
-        match state(r)?.as_str() {
+        let (state, ended_ms) = state(r)?;
+        if ended_ms < since_ms - PR_SLACK_MS {
+            return None;
+        }
+        match state.as_str() {
             "MERGED" => {}
             "CLOSED" => all_merged = false,
             _ => return None,
@@ -212,6 +230,9 @@ pub fn pr_reason(refs: &[PrRef], state: &dyn Fn(&PrRef) -> Option<String>) -> Op
     }
     Some(if all_merged { PR_MERGED } else { PR_CLOSED })
 }
+
+/// Clock differences between GitHub and this Mac.
+const PR_SLACK_MS: i64 = 5 * 60 * 1000;
 
 #[cfg(test)]
 mod tests {
@@ -251,6 +272,8 @@ mod tests {
         assert!(!same_item("Reply to Sam", "Reply to Sam", false), "plain titles match within a scope only");
         assert!(same_item("Reply to Sam", "reply to sam!", true));
         assert_eq!(setup_key("Reply to Sam about the launch"), None);
+        assert_ne!(title_key("ABC-1: Review the fix"), title_key("ABC-2: Review the fix"), "two tickets, one wording");
+        assert_eq!(title_key("ABC-1: Review the fix"), title_key("ABC-1 - review the fix!"));
     }
 
     #[test]
@@ -274,12 +297,14 @@ mod tests {
     #[test]
     fn pull_request_state_closes_only_when_all_are_done() {
         let r = |n| PrRef { owner: "o".into(), repo: "r".into(), number: n };
-        let states = |n: &PrRef| Some(match n.number { 1 => "MERGED", 2 => "CLOSED", _ => "OPEN" }.to_string());
-        assert_eq!(pr_reason(&[r(1)], &states), Some(PR_MERGED));
-        assert_eq!(pr_reason(&[r(1), r(2)], &states), Some(PR_CLOSED));
-        assert_eq!(pr_reason(&[r(1), r(3)], &states), None);
-        assert_eq!(pr_reason(&[r(1), r(4)], &|n: &PrRef| (n.number == 1).then(|| "MERGED".to_string())), None, "unknown stays open");
-        assert_eq!(pr_reason(&[], &states), None);
+        let states = |n: &PrRef| Some((match n.number { 1 => "MERGED", 2 => "CLOSED", _ => "OPEN" }.to_string(), 1_000_000));
+        assert_eq!(pr_reason(&[r(1)], 0, &states), Some(PR_MERGED));
+        assert_eq!(pr_reason(&[r(1), r(2)], 0, &states), Some(PR_CLOSED));
+        assert_eq!(pr_reason(&[r(1), r(3)], 0, &states), None);
+        assert_eq!(pr_reason(&[r(1), r(4)], 0, &|n: &PrRef| (n.number == 1).then(|| ("MERGED".to_string(), 1_000_000))), None, "unknown stays open");
+        assert_eq!(pr_reason(&[], 0, &states), None);
+        assert_eq!(pr_reason(&[r(1)], 2_000_000, &states), None, "a pull request that ended before the item was raised is only mentioned");
+        assert_eq!(pr_reason(&[r(1)], 1_000_000 + 60_000, &states), Some(PR_MERGED), "clock slack");
     }
 
     #[test]

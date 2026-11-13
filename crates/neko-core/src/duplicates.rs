@@ -37,7 +37,7 @@ pub fn issue_keys(text: &str) -> Vec<String> {
 }
 
 /// The key a title starts with (`ENG-3006: Fix …`, `[ENG-3006] Fix …`).
-fn leading_key(title: &str) -> Option<String> {
+pub fn leading_key(title: &str) -> Option<String> {
     let head = title.trim_start().trim_start_matches('[');
     let end = head.find(|c: char| !(c.is_ascii_alphanumeric() || c == '-')).unwrap_or(head.len());
     issue_keys(&head[..end]).into_iter().next()

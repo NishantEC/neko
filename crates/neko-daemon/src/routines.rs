@@ -445,9 +445,12 @@ fn close_titles(db: &neko_core::Db, workspace_id: &str, titles: &[String], reaso
         return Ok(());
     }
     let keys: std::collections::HashSet<String> = titles.iter().map(|t| title_key(t)).collect();
+    // A setup failure that is fixed is fixed for every scope that raised it.
+    let setups: std::collections::HashSet<String> = titles.iter().filter_map(|t| inbox::setup_key(t)).collect();
     let now = neko_core::workbench::now_ms();
-    each_item(db, Some(workspace_id), &mut |_, _, item| {
-        if item.done || !keys.contains(&title_key(&item.title)) {
+    each_item(db, None, &mut |routine, _, item| {
+        let here = routine.workspace_id == workspace_id && keys.contains(&title_key(&item.title));
+        if item.done || !(here || inbox::setup_key(&item.title).is_some_and(|k| setups.contains(&k))) {
             return false;
         }
         inbox::close(item, reason, now);
@@ -521,19 +524,31 @@ fn sweep_inbox(state: &Arc<AppState>) {
     LAST_PR_SWEEP_MS.store(now, Ordering::SeqCst);
     let database = state.db.clone();
     std::thread::spawn(move || {
+        let _clear = PrSweepGuard;
         if let Ok(gh) = neko_core::native_runner::publish::resolve_gh() {
             if let Err(error) = sweep_prs(&database, neko_core::workbench::now_ms(), &|r| gh_pr_state(&gh, r)) {
                 eprintln!("inbox pull request sweep: {error}");
             }
         }
-        PR_SWEEPING.store(false, Ordering::SeqCst);
     });
+}
+
+/// Clears `PR_SWEEPING` however the sweep ends, a panic included.
+struct PrSweepGuard;
+
+impl Drop for PrSweepGuard {
+    fn drop(&mut self) {
+        PR_SWEEPING.store(false, Ordering::SeqCst);
+    }
 }
 
 fn sweep_time(db: &neko_core::Db, now: i64) -> Result<usize, String> {
     let days = core::load(db)?.age_out_days();
+    // An outage's notice closes when Claude answers again; it is not aged out
+    // (the health row would still say it was raised, so it would never return).
+    let outage = [title_key(SIGNED_OUT_TITLE), title_key(LIMIT_TITLE)];
     let mut closed = 0;
-    each_item(db, None, &mut |_, started, item| match inbox::time_reason(item, started, now, days) {
+    each_item(db, None, &mut |_, started, item| match inbox::time_reason(item, started, now, days).filter(|_| !outage.contains(&title_key(&item.title))) {
         Some(reason) => {
             inbox::close(item, reason, now);
             closed += 1;
@@ -544,28 +559,39 @@ fn sweep_time(db: &neko_core::Db, now: i64) -> Result<usize, String> {
     Ok(closed)
 }
 
-/// Pull request state per `owner/repo#n`, with when it was read. Merged and
-/// closed are kept (a pull request rarely comes back); open is read again
-/// after 15 minutes. Its own small row, never the workbench snapshot.
-type PrCache = std::collections::BTreeMap<String, (String, i64)>;
+/// Pull request state per `owner/repo#n`: the state, when it ended and when it
+/// was read. Merged and closed are kept (a pull request rarely comes back);
+/// open is read again after 15 minutes; a reference `gh` could not read
+/// ("UNKNOWN": private, not a pull request) is retried after 6 hours, so a
+/// few bad references never use up every sweep. Its own small row, never the
+/// workbench snapshot.
+type PrCache = std::collections::BTreeMap<String, (String, i64, i64)>;
+const UNKNOWN_RETRY_MS: i64 = 6 * 60 * 60 * 1000;
 
-fn gh_pr_state(gh: &Path, pr: &inbox::PrRef) -> Option<String> {
+/// The state and end time (ms) of a pull request; merged and closed ones end
+/// at GitHub's `closedAt`.
+fn gh_pr_state(gh: &Path, pr: &inbox::PrRef) -> Option<(String, i64)> {
     let mut command = std::process::Command::new(gh);
     command
         .env("GH_PROMPT_DISABLED", "1")
         .env("GH_NO_UPDATE_NOTIFIER", "1")
         .env("NO_COLOR", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
-        .args(["pr", "view", &pr.number.to_string(), "--repo", &format!("{}/{}", pr.owner, pr.repo), "--json", "state", "--jq", ".state"]);
+        .args(["pr", "view", &pr.number.to_string(), "--repo", &format!("{}/{}", pr.owner, pr.repo), "--json", "state,closedAt"]);
     let output = output_within(command, Duration::from_secs(15)).ok()?;
-    let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (output.status.success() && matches!(state.as_str(), "OPEN" | "MERGED" | "CLOSED")).then_some(state)
+    if !output.status.success() {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let state = value["state"].as_str().filter(|s| matches!(*s, "OPEN" | "MERGED" | "CLOSED"))?.to_string();
+    let ended = value["closedAt"].as_str().and_then(inbox::parse_time_ms).unwrap_or(0);
+    Some((state, ended))
 }
 
 /// Reads the state of the pull requests open items name (at most
 /// `MAX_PR_CALLS` fresh lookups) and closes the items whose pull requests are
 /// all merged or closed. `fetch` is `gh pr view` in production.
-fn sweep_prs(db: &std::sync::Mutex<neko_core::Db>, now: i64, fetch: &dyn Fn(&inbox::PrRef) -> Option<String>) -> Result<usize, String> {
+fn sweep_prs(db: &std::sync::Mutex<neko_core::Db>, now: i64, fetch: &dyn Fn(&inbox::PrRef) -> Option<(String, i64)>) -> Result<usize, String> {
     let lock = || db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut wanted = std::collections::BTreeSet::new();
     let mut cache: PrCache = {
@@ -586,23 +612,30 @@ fn sweep_prs(db: &std::sync::Mutex<neko_core::Db>, now: i64, fetch: &dyn Fn(&inb
     }
     let mut stale: Vec<&inbox::PrRef> = wanted
         .iter()
-        .filter(|r| cache.get(&r.key()).map_or(true, |(state, at)| state == "OPEN" && now - at >= PR_SWEEP_EVERY_MS))
+        .filter(|r| match cache.get(&r.key()) {
+            None => true,
+            Some((state, _, at)) => match state.as_str() {
+                "OPEN" => now - at >= PR_SWEEP_EVERY_MS,
+                "UNKNOWN" => now - at >= UNKNOWN_RETRY_MS,
+                _ => false,
+            },
+        })
         .collect();
-    stale.sort_by_key(|r| cache.get(&r.key()).map_or(0, |(_, at)| *at));
+    stale.sort_by_key(|r| cache.get(&r.key()).map_or(0, |(_, _, at)| *at));
     for pr in stale.into_iter().take(MAX_PR_CALLS) {
-        if let Some(state) = fetch(pr) {
-            cache.insert(pr.key(), (state, now));
-        }
+        let (state, ended) = fetch(pr).unwrap_or_else(|| ("UNKNOWN".into(), 0));
+        cache.insert(pr.key(), (state, ended, now));
     }
     cache.retain(|key, _| wanted.iter().any(|r| &r.key() == key));
     let db = lock();
     db.set_setting_quiet(PR_STATE, &serde_json::to_string(&cache).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let mut closed = 0;
-    each_item(&db, None, &mut |_, _, item| {
+    each_item(&db, None, &mut |_, started, item| {
         if item.done || item.kept {
             return false;
         }
-        match inbox::pr_reason(&inbox::pr_refs(item), &|r| cache.get(&r.key()).map(|(state, _)| state.clone())) {
+        let since = if item.created_ms > 0 { item.created_ms } else { started };
+        match inbox::pr_reason(&inbox::pr_refs(item), since, &|r| cache.get(&r.key()).map(|(state, ended, _)| (state.clone(), *ended))) {
             Some(reason) => {
                 inbox::close(item, reason, now);
                 closed += 1;
@@ -1280,7 +1313,7 @@ mod tests {
         let calls = std::cell::Cell::new(0);
         let fetch = |r: &inbox::PrRef| {
             calls.set(calls.get() + 1);
-            Some(match r.number { 5 => "MERGED", 6 => "CLOSED", _ => "OPEN" }.to_string())
+            Some((match r.number { 5 => "MERGED", 6 => "CLOSED", _ => "OPEN" }.to_string(), 5_000))
         };
         assert_eq!(sweep_prs(&db, 5_000, &fetch).unwrap(), 2);
         let items = items_of(&db.lock().unwrap(), "a");
@@ -1300,12 +1333,62 @@ mod tests {
         let calls = std::cell::Cell::new(0);
         let fetch = |_: &inbox::PrRef| {
             calls.set(calls.get() + 1);
-            Some("OPEN".to_string())
+            Some(("OPEN".to_string(), 0))
         };
         sweep_prs(&db, 5_000, &fetch).unwrap();
         assert_eq!(calls.get(), MAX_PR_CALLS);
         sweep_prs(&db, 6_000, &fetch).unwrap();
         assert_eq!(calls.get(), 10, "the rest were read on the next sweep");
+    }
+
+    #[test]
+    fn unreadable_references_do_not_starve_the_real_ones() {
+        let mut items: Vec<NeedsYou> = (1..=7).map(|n| inbox_item(n, &format!("Bad {n}"), &format!("acme/private#{n}"), None)).collect();
+        items.push(inbox_item(8, "Real", "", Some("https://github.com/acme/widgets/pull/99")));
+        let db = std::sync::Mutex::new(inbox_fixture(items));
+        let fetch = |r: &inbox::PrRef| (r.number == 99).then(|| ("MERGED".to_string(), 5_000));
+        sweep_prs(&db, 5_000, &fetch).unwrap();
+        sweep_prs(&db, 6_000, &fetch).unwrap();
+        let items = items_of(&db.lock().unwrap(), "a");
+        assert_eq!(items[7].reason.as_deref(), Some("PR merged"), "failures are remembered, so the real pull request is reached");
+    }
+
+    #[test]
+    fn a_pull_request_that_ended_before_the_item_was_raised_is_only_a_mention() {
+        let db = std::sync::Mutex::new(inbox_fixture(vec![inbox_item(1, "Deploy after the fix lands", "waiting on acme/widgets#3", None)]));
+        let old = |_: &inbox::PrRef| Some(("MERGED".to_string(), 1));
+        let mut tight = items_of(&db.lock().unwrap(), "a");
+        tight[0].created_ms = 10 * 60 * 1000;
+        let run = RoutineRun { id: "r1".into(), routine_id: "a".into(), started_ms: 1_000, ok: true, needs_you: tight, ..Default::default() };
+        core::save_runs(&db.lock().unwrap(), "a", &[run]).unwrap();
+        assert_eq!(sweep_prs(&db, 20 * 60 * 1000, &old).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_fixed_setup_failure_closes_in_every_scope_and_an_outage_is_never_aged() {
+        let db = inbox_fixture(vec![inbox_item(1, "Slack token expired", "", None), inbox_item(2, SIGNED_OUT_TITLE, "", None)]);
+        let other = RoutineRun { id: "r2".into(), routine_id: "c".into(), started_ms: 1_000, ok: true, needs_you: vec![inbox_item(3, "Re-auth Slack", "", None)], ..Default::default() };
+        core::push_run(&db, "c", other).unwrap();
+        assert_eq!(sweep_time(&db, 100 * inbox::DAY_MS).unwrap(), 2, "the two Slack items age; the outage notice waits for Claude");
+        assert!(!items_of(&db, "a")[1].done);
+        let db = inbox_fixture(vec![inbox_item(1, "Slack token expired", "", None)]);
+        let other = RoutineRun { id: "r2".into(), routine_id: "c".into(), started_ms: 1_000, ok: true, needs_you: vec![inbox_item(3, "Re-auth Slack", "", None)], ..Default::default() };
+        core::push_run(&db, "c", other).unwrap();
+        resolve_items(&db, "w", &["Slack token expired".into()]).unwrap();
+        assert!(items_of(&db, "a")[0].done && items_of(&db, "c")[0].done);
+    }
+
+    #[test]
+    fn a_closed_item_survives_the_run_trim_so_it_can_be_reopened() {
+        let db = inbox_fixture(vec![inbox_item(1, "Old", "", None)]);
+        let now = neko_core::workbench::now_ms();
+        let mut runs = core::load_runs(&db, "a").unwrap();
+        inbox::close(&mut runs[0].needs_you[0], inbox::AGED_OUT, now);
+        core::save_runs(&db, "a", &runs).unwrap();
+        for n in 0..55 {
+            core::push_run(&db, "a", RoutineRun { id: format!("n{n}"), routine_id: "a".into(), started_ms: 2_000 + n, ok: true, ..Default::default() }).unwrap();
+        }
+        assert!(core::load_runs(&db, "a").unwrap().iter().any(|r| r.id == "r1"), "the run with a recently closed item is kept");
     }
 
     #[test]
