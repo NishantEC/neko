@@ -218,14 +218,21 @@ pub fn clean_default(text: &str) -> Option<String> {
 /// What the owner wrote on lines that start with `>` in a reminder's notes
 /// (the lines are joined with a space), or `None` when there is none.
 pub fn reply_in_notes(notes: &str) -> Option<String> {
+    let notes = unify_breaks(notes);
     let lines: Vec<&str> = notes.lines().filter_map(|l| l.trim_start().strip_prefix('>')).map(str::trim).filter(|l| !l.is_empty()).collect();
     (!lines.is_empty()).then(|| lines.join(" "))
+}
+
+/// Every kind of line break the Reminders text can carry (Swift's `isNewline`) as `\n`, so a
+/// `>` after a carriage return or a Unicode separator is a line start here too.
+fn unify_breaks(text: &str) -> String {
+    text.replace("\r\n", "\n").replace(['\r', '\u{b}', '\u{c}', '\u{85}', '\u{2028}', '\u{2029}'], "\n")
 }
 
 /// Neutralises a `>` at the start of a line in text Neko writes into a
 /// reminder, so only the owner's own lines count as replies.
 pub fn without_reply_marks(text: &str) -> String {
-    text.lines().map(|l| if l.trim_start().starts_with('>') { l.replacen('>', "\u{203a}", 1) } else { l.to_owned() }).collect::<Vec<_>>().join("\n")
+    unify_breaks(text).lines().map(|l| if l.trim_start().starts_with('>') { l.replacen('>', "\u{203a}", 1) } else { l.to_owned() }).collect::<Vec<_>>().join("\n")
 }
 
 /// Whether `text` is an answer to `item` and what it is, cleaned. Not an

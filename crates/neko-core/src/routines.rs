@@ -446,7 +446,7 @@ pub fn parse_reply(text: &str) -> Result<Parsed, String> {
                         seq: 0,
                         title,
                         detail: item.get("detail").and_then(Value::as_str).map(clip).unwrap_or_default(),
-                        link: item.get("link").and_then(Value::as_str).map(clip).filter(|l| l.starts_with("http")),
+                        link: item.get("link").and_then(Value::as_str).map(clip).filter(|l| l.starts_with("http") && !l.chars().any(|c| c.is_whitespace() || c.is_control())),
                         done: false,
                         expires_ms: item.get("expires").and_then(Value::as_str).and_then(crate::inbox::parse_time_ms),
                         urgent: item.get("urgent").and_then(Value::as_bool).unwrap_or(false),

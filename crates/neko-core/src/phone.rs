@@ -34,6 +34,17 @@ const ANSWERED_KEEP_MS: i64 = 24 * HOUR_MS;
 const DIGEST_REMINDER_MS: i64 = 24 * HOUR_MS;
 /// The `seq` the digest's reminder is mapped under (no item has one this big).
 pub const DIGEST_SEQ: u64 = 4_000_000_000_000;
+
+/// The `seq` of one day's digest reminder (`YYYY-MM-DD`), so an older digest's reminder
+/// can never be taken for today's. Always at least `DIGEST_SEQ`.
+pub fn digest_seq(day: &str) -> u64 {
+    let digits: String = day.chars().filter(char::is_ascii_digit).collect();
+    DIGEST_SEQ + digits.parse::<u64>().unwrap_or(0)
+}
+
+pub fn is_digest(seq: u64) -> bool {
+    seq >= DIGEST_SEQ
+}
 const MAX_TITLE: usize = 120;
 const MAX_DETAIL: usize = 300;
 const MAX_LOG: usize = 64;
@@ -60,6 +71,8 @@ pub struct Candidate {
 pub struct Pending {
     pub reminder: ReminderNew,
     pub queued_ms: i64,
+    /// What completing it does, as the title promised (kept on the mapping).
+    pub action: String,
 }
 
 /// An item and the reminder that stands for it (`seq` 0: a summary).
@@ -72,6 +85,10 @@ pub struct Mapped {
     /// The person answered in words and the app was told to echo and complete
     /// it; the reminder is kept (completed) until `ANSWERED_KEEP_MS` passes.
     pub answered_ms: i64,
+    /// What completing the reminder was promised to do ("extend NK-14 by 10
+    /// turns"); empty when it had no default. Completing applies the default
+    /// only while the item still offers exactly this.
+    pub action: String,
     /// A hash of the last reply text looked at (used or rejected), so the
     /// same text is never judged twice.
     pub text_hash: u64,
@@ -339,7 +356,7 @@ pub fn marker(seq: u64) -> String {
 /// text never start with `>` (see `without_reply_marks`), so every `>` line
 /// found later is the person's.
 fn how_to_answer(push: &Push) -> Option<String> {
-    if push.seq == 0 || push.seq == DIGEST_SEQ {
+    if push.seq == 0 || is_digest(push.seq) {
         return None;
     }
     Some(if push.action.is_empty() {
@@ -350,7 +367,7 @@ fn how_to_answer(push: &Push) -> Option<String> {
 }
 
 pub fn reminder_for(push: &Push) -> ReminderNew {
-    let mut notes = crate::inbox::without_reply_marks(&clip(&push.detail, 600));
+    let mut notes = clip(&push.detail, 600);
     if let Some(link) = &push.link {
         if !notes.is_empty() {
             notes.push_str("\n\n");
@@ -369,6 +386,9 @@ pub fn reminder_for(push: &Push) -> ReminderNew {
     let title = if push.action.is_empty() { clip(&push.title, MAX_TITLE) } else { clip(&format!("{} ✓ = {}", push.title, push.action), MAX_TITLE) };
     // A link that is not on the web (a goal's `goal:<id>`, a task's) is not a reminder URL.
     let url = push.link.clone().filter(|l| l.starts_with("http"));
+    // Everything Neko wrote (detail, link, the how-to line) is neutralised in one pass at the end,
+    // whoever wrote it: only the person's own `>` lines may count as replies.
+    let notes = crate::inbox::without_reply_marks(&notes);
     ReminderNew { seq: push.seq, title, notes, url, key: crate::workbench::new_id() }
 }
 
@@ -459,13 +479,16 @@ pub fn plan(settings: &PhoneSettings, state: &mut State, open: &HashSet<u64>, co
                 return now_ms - m.answered_ms > ANSWERED_KEEP_MS;
             }
             done.contains(&m.id)
-                || (m.seq == DIGEST_SEQ && now_ms - m.created_ms > DIGEST_REMINDER_MS)
-                || (m.seq != 0 && m.seq != DIGEST_SEQ && !open.contains(&m.seq))
+                || (is_digest(m.seq) && now_ms - m.created_ms > DIGEST_REMINDER_MS)
+                || (m.seq != 0 && !open.contains(&m.seq))
                 || (m.seq == 0 && now_ms - m.created_ms > SUMMARY_REMINDER_MS)
         })
         .map(|m| m.id.clone())
         .collect();
     let create = if settings.reminders { state.pending.iter().map(|p| p.reminder.clone()).collect() } else { Vec::new() };
+    // An echo for a reminder that is gone is not asked for again.
+    let known: HashSet<String> = state.mapped.iter().map(|m| m.id.clone()).collect();
+    state.finish.retain(|f| known.contains(&f.id));
     let finish = if settings.reminders { state.finish.clone() } else { Vec::new() };
     ReminderPlan { enabled: settings.reminders, create, delete, finish }
 }
@@ -475,12 +498,13 @@ pub fn absorb_done(state: &mut State, created: &[neko_protocol::phone::ReminderC
     state.finish.retain(|f| !finished.contains(&f.id));
     for c in created {
         // A failed save reports an empty id: dropped, not retried every cycle.
+        let action = state.pending.iter().find(|p| p.reminder.key == c.key).map(|p| p.action.clone()).unwrap_or_default();
         state.pending.retain(|p| p.reminder.key != c.key);
         if c.id.is_empty() {
             continue;
         }
         state.mapped.retain(|m| m.id != c.id);
-        state.mapped.push(Mapped { seq: c.seq, id: c.id.clone(), created_ms: now_ms, ..Default::default() });
+        state.mapped.push(Mapped { seq: c.seq, id: c.id.clone(), created_ms: now_ms, action, ..Default::default() });
     }
     let gone: HashSet<&String> = deleted.iter().collect();
     state.mapped.retain(|m| !gone.contains(&m.id));
@@ -693,7 +717,7 @@ mod tests {
     #[test]
     fn nothing_is_planned_without_access_and_stale_reminders_expire() {
         let mut state = State::default();
-        state.pending.push(Pending { reminder: ReminderNew { seq: 1, ..Default::default() }, queued_ms: 0 });
+        state.pending.push(Pending { reminder: ReminderNew { seq: 1, ..Default::default() }, queued_ms: 0, ..Default::default() });
         mapped(&mut state, 3, "r3");
         let p = plan(&on(), &mut state, &open(&[]), &[], 10);
         assert!(p.create.is_empty() && p.delete.is_empty() && p.enabled);
@@ -705,7 +729,7 @@ mod tests {
     #[test]
     fn created_reminders_become_mappings_and_a_failure_is_noted_once() {
         let mut state = State::default();
-        state.pending.push(Pending { reminder: ReminderNew { seq: 5, ..Default::default() }, queued_ms: 0 });
+        state.pending.push(Pending { reminder: ReminderNew { seq: 5, ..Default::default() }, queued_ms: 0, ..Default::default() });
         absorb_done(&mut state, &[neko_protocol::phone::ReminderCreated { seq: 5, id: "x".into(), key: String::new() }], &[], &[], 7);
         assert!(state.pending.is_empty());
         assert_eq!(state.mapped, vec![Mapped { seq: 5, id: "x".into(), created_ms: 7, ..Default::default() }]);
@@ -723,8 +747,8 @@ mod tests {
         let summary = Push { title: "3 more things need you".into(), ..Default::default() };
         let (a, b) = (reminder_for(&summary), reminder_for(&summary));
         assert_ne!(a.key, b.key);
-        state.pending.push(Pending { reminder: a.clone(), queued_ms: 0 });
-        state.pending.push(Pending { reminder: b.clone(), queued_ms: 0 });
+        state.pending.push(Pending { reminder: a.clone(), queued_ms: 0, ..Default::default() });
+        state.pending.push(Pending { reminder: b.clone(), queued_ms: 0, ..Default::default() });
         let created = [neko_protocol::phone::ReminderCreated { seq: 0, id: "s1".into(), key: a.key.clone() }, neko_protocol::phone::ReminderCreated { seq: 0, id: String::new(), key: b.key.clone() }];
         absorb_done(&mut state, &created, &[], &[], 5);
         assert!(state.pending.is_empty(), "both leave the queue, the failed one too");
@@ -735,7 +759,7 @@ mod tests {
     #[test]
     fn turning_reminders_off_forgets_what_was_waiting() {
         let mut state = State { access: RemindersAccess::Granted, ..Default::default() };
-        state.pending.push(Pending { reminder: ReminderNew::default(), queued_ms: 0 });
+        state.pending.push(Pending { reminder: ReminderNew::default(), queued_ms: 0, ..Default::default() });
         plan(&PhoneSettings::default(), &mut state, &open(&[]), &[], 1);
         assert!(state.pending.is_empty());
     }

@@ -53,9 +53,15 @@ daemon path the Inbox's "Use the default" button takes (`AnswerNeedsYou`):
 | --- | --- | --- |
 | Goal BLOCKED (`goal:<id>`, `blocked.inbox_seq`) | `GoalCommand::Answer` with the goal's default answer | the same command, the words as the answer |
 | "Extend by N turns?" (`goal.extend_seq`) | `GoalCommand::Extend` by half the cap again | a number of turns, 1 to 100 (anything else is refused) |
-| "Raise today's ceiling to $X?" (the spend notice's seq) | `SetDailyBudget` to $X (half again, whole dollars) | an amount like `$20` |
+| "Raise the daily ceiling to $X?" (the spend notice's seq) | `SetDailyBudget` to $X (half again, whole dollars; the ceiling is the lasting daily cap, so it stays raised) | an amount like `$20` |
 | Item with `task:<id>` as its link | the item's default, queued for that task | the words, queued for that task |
 | Any other routine item | the item's `default`, kept as the routine's `owner_replies` | the words, kept the same way |
+
+Completing applies the default **the reminder promised**: the action text in
+the title is kept on the mapping (`Mapped.action`), and if the item offers
+something else when it is completed (an agent refreshed its default, the
+ceiling moved) it is only marked seen. The web and the phone answer one item
+at a time (`APPLY` guard, the item is looked up again inside it).
 
 A task message goes through the durable command queue (`CrewCommand::Enqueue`,
 `after_turn`, kind `answer`); a routine reply goes to a small row
@@ -76,7 +82,10 @@ The daemon (`phone::jobs_for`) accepts a reply only when:
 - the reminder is one Neko made (it is in `mapped`) and its item is still open;
 - the `>` line is the person's: every `>` at the start of a line in text Neko
   writes into a reminder is turned into `›` (`inbox::without_reply_marks`),
-  so an agent's own quote can never count, and the how-to line has none;
+  so an agent's own quote can never count. The whole notes text (detail,
+  link, how-to line, defaults) is neutralised in one pass at the end of
+  `reminder_for`, every line break Swift knows (`\r`, U+2028 and so on) counts
+  as one, and a link with whitespace is refused at the reply contract;
 - it is an answer (`inbox::answer_text`): something to read in it (not only
   punctuation), not the item's own title or a line of its detail quoted back;
   control characters are dropped, 1000 characters at most;
@@ -88,8 +97,12 @@ Then the answer goes only where a typed one would go (table above). It is
 never run or interpreted as a command. The daemon puts `Got it: <words>
 (<what happened>)` under the person's notes (`ReminderPlan.finish`), the app
 writes those notes and completes the reminder, and reports
-`PhoneRemindersDone.finished`. An answered reminder is kept (completed) for
-24 h so the echo can be read, then deleted. Only reminders Neko made and
+`PhoneRemindersDone.finished`. An answer that cannot be used (words on an
+Extend offer that are not a number, a goal that was answered meanwhile) gets
+`Not applied: <why>` in the notes and the reminder stays open
+(`ReminderFinish.keep_open`); the same text is not judged again. An answered
+reminder is kept (completed) for 24 h so the echo can be read, then deleted,
+and an echo for a reminder that is gone is dropped. Only reminders Neko made and
 only text added after it was created count. Words on the digest's reminder
 are not an answer to anything; completing it marks the digest read.
 

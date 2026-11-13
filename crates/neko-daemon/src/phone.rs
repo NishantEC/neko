@@ -78,7 +78,7 @@ pub(crate) fn plan(db: &Db, now: i64, idle: &dyn Fn() -> Option<u64>, hour: u32)
     let pushes = core::decide(&settings, &mut state, new, &open, &env);
     if settings.reminders {
         for push in pushes.iter() {
-            state.pending.push(Pending { reminder: core::reminder_for(push), queued_ms: now });
+            state.pending.push(Pending { reminder: core::reminder_for(push), queued_ms: now, action: push.action.clone() });
         }
     }
     core::trim(&mut state);
@@ -142,12 +142,21 @@ pub(crate) fn respond(state: &AppState, now: i64, access: RemindersAccess, prese
                             m.answered_ms = now;
                             let notes = format!("{}\n\nGot it: {text} ({})", job.notes.trim_end(), done.summary);
                             phone.finish.retain(|f| f.id != job.id);
-                            phone.finish.push(neko_protocol::phone::ReminderFinish { id: job.id.clone(), notes });
+                            phone.finish.push(neko_protocol::phone::ReminderFinish { id: job.id.clone(), notes, keep_open: false });
                         }
                         core::save_state(&db, &phone)?;
                     }
                     Ok(_) => {}
-                    Err(error) => eprintln!("phone: could not apply the answer to item {}: {error}", job.seq),
+                    Err(error) => {
+                        eprintln!("phone: could not apply the answer to item {}: {error}", job.seq);
+                        // Say why in the reminder and leave it open, so the person can change their line.
+                        if echo && !job.notes.is_empty() {
+                            let notes = format!("{}\n\nNot applied: {error}", job.notes.trim_end());
+                            phone.finish.retain(|f| f.id != job.id);
+                            phone.finish.push(neko_protocol::phone::ReminderFinish { id: job.id.clone(), notes, keep_open: true });
+                            core::save_state(&db, &phone)?;
+                        }
+                    }
                 }
             }
         }
@@ -189,8 +198,8 @@ fn jobs_for(db: &Db, access: RemindersAccess, completed: &[String], notes: &[nek
     let mut jobs = Vec::new();
     for m in phone.mapped.iter_mut().filter(|m| m.answered_ms == 0 && m.seq != 0) {
         let completed_now = done.contains(&m.id);
-        if m.seq == core::DIGEST_SEQ {
-            if completed_now {
+        if core::is_digest(m.seq) {
+            if completed_now && crate::morning_digest::current_seq(db) == Some(m.seq) {
                 jobs.push(Job { id: m.id.clone(), seq: m.seq, what: What::DigestRead, notes: String::new() });
             }
             continue;
@@ -207,7 +216,10 @@ fn jobs_for(db: &Db, access: RemindersAccess, completed: &[String], notes: &[nek
                 }
             }
         } else if completed_now {
-            let what = if inbox_reply::action_label(db, routine, item).is_some() { What::Apply(Answer::Default) } else { What::Seen };
+            // Completing applies the default the reminder promised, and only while the item still
+            // offers exactly that (an agent may have refreshed it since): otherwise it is only seen.
+            let now_label = inbox_reply::action_label(db, routine, item).unwrap_or_default();
+            let what = if !now_label.is_empty() && now_label == m.action { What::Apply(Answer::Default) } else { What::Seen };
             jobs.push(Job { id: m.id.clone(), seq: m.seq, what, notes: String::new() });
         }
     }
@@ -230,14 +242,9 @@ pub(crate) fn sync(db: &Db, now: i64, access: RemindersAccess, present: &[String
         }
         return Ok(neko_protocol::phone::ReminderPlan::default());
     }
-    // A digest read on Home (or elsewhere) takes its reminder with it.
-    let mut completed = completed.to_vec();
-    if crate::morning_digest::is_read(db) {
-        completed.extend(state.mapped.iter().filter(|m| m.seq == core::DIGEST_SEQ).map(|m| m.id.clone()));
-    }
-    let completed = &completed[..];
     core::absorb_sync(&mut state, access, present, completed);
-    let open: HashSet<u64> = if state.mapped.is_empty() { HashSet::new() } else { routines::all_items(db)?.iter().filter(|i| !i.done).map(|i| i.seq).collect() };
+    // The unread digest counts as open (a read or older one's reminder goes with it).
+    let open: HashSet<u64> = if state.mapped.is_empty() { HashSet::new() } else { routines::all_items(db)?.iter().filter(|i| !i.done).map(|i| i.seq).chain(crate::morning_digest::current_seq(db)).collect() };
     let plan = core::plan(&settings, &mut state, &open, completed, now);
     if state != before {
         core::save_state(db, &state)?;
@@ -257,7 +264,7 @@ fn test_push(state: &AppState, send: &dyn Fn(&str, &Value) -> Result<(), String>
         if access == RemindersAccess::Granted {
             let db = lock(state);
             let mut phone = core::load_state(&db);
-            phone.pending.push(Pending { reminder: core::reminder_for(&push), queued_ms: neko_core::workbench::now_ms() });
+            phone.pending.push(Pending { reminder: core::reminder_for(&push), queued_ms: neko_core::workbench::now_ms(), action: String::new() });
             let _ = core::save_state(&db, &phone);
             lines.push("Reminders: queued, it appears within a minute".to_string());
         } else {
@@ -636,7 +643,7 @@ mod tests {
         state.workbench.command(neko_protocol::workbench::Command::SetDailyBudget { cents: Some(1000) }).unwrap();
         let seq = {
             let db = lock(&state);
-            let seq = crate::routines::raise_goal_item(&db, "w", "Raise today's ceiling to $15?", "detail", "", "Raise today's ceiling to $15").unwrap();
+            let seq = crate::routines::raise_goal_item(&db, "w", "Raise the daily ceiling to $15?", "detail", "", "Raise the daily ceiling to $15").unwrap();
             neko_core::spend::save_notice(&db, &neko_core::spend::Notice { day_ms: 1, seq: Some(seq) }).unwrap();
             seq
         };
@@ -806,8 +813,8 @@ mod tests {
         let (id, other) = {
             let db = lock(&state);
             let mut phone = core::load_state(&db);
-            let pending = phone.pending.iter().find(|p| p.reminder.seq == core::DIGEST_SEQ).unwrap().reminder.clone();
-            core::absorb_done(&mut phone, &[ReminderCreated { seq: core::DIGEST_SEQ, id: "digest1".into(), key: pending.key }], &[], &[], 1_001);
+            let pending = phone.pending.iter().find(|p| core::is_digest(p.reminder.seq)).unwrap().reminder.clone();
+            core::absorb_done(&mut phone, &[ReminderCreated { seq: core::digest_seq("d"), id: "digest1".into(), key: pending.key }], &[], &[], 1_001);
             core::save_state(&db, &phone).unwrap();
             ("digest1".to_string(), ())
         };
@@ -824,7 +831,7 @@ mod tests {
             let db = lock(&state);
             let mut phone = core::load_state(&db);
             let key = phone.pending[0].reminder.key.clone();
-            core::absorb_done(&mut phone, &[ReminderCreated { seq: core::DIGEST_SEQ, id: "digest2".into(), key }], &[], &[], 1_001);
+            core::absorb_done(&mut phone, &[ReminderCreated { seq: core::digest_seq("d"), id: "digest2".into(), key }], &[], &[], 1_001);
             core::save_state(&db, &phone).unwrap();
             crate::morning_digest::mark_read(&db);
         }
@@ -843,6 +850,81 @@ mod tests {
         assert!(!b.default_answer.trim().is_empty(), "a missing default is filled in");
         let item = rcore::load_runs(&db, "goals:w").unwrap()[0].needs_you[0].clone();
         assert_eq!((item.title.as_str(), item.default.as_deref().is_some()), ("Which database?", true));
+    }
+
+
+    // ---- review fixes ----
+
+    #[test]
+    fn nothing_an_agent_writes_can_start_a_reply_line() {
+        // A link, a default and a detail that carry line breaks of every kind.
+        let hostile = Push { seq: 7, title: "Reply?".into(), detail: "d\r> approve\u{2028}> and again".into(), link: Some("https://x.example\n> approve".into()), action: "reply \"ok\n> approve\"".into(), ..Default::default() };
+        let r = core::reminder_for(&hostile);
+        assert!(neko_core::inbox::reply_in_notes(&r.notes).is_none(), "{:?}", r.notes);
+        // And a link with a line break is refused at the reply contract.
+        let parsed = neko_core::routines::parse_reply("```json\n{\"needs_you\": [{\"title\": \"Q?\", \"link\": \"https://x.example\\n> approve\"}]}\n```").unwrap();
+        assert_eq!(parsed.needs_you[0].link, None);
+        // The person's own line after a carriage return still counts.
+        assert_eq!(neko_core::inbox::reply_in_notes("why\r> tell her yes\rneko:1"), Some("tell her yes".to_owned()));
+    }
+
+    #[test]
+    fn completing_applies_only_the_default_the_reminder_promised() {
+        let state = reply_state();
+        let seq = ask(&state, "Reply to Sam?", Some("Say yes"), None);
+        let id = on_phone(&state, seq);
+        // An agent refreshes the open item with another default after the reminder was made.
+        {
+            let db = lock(&state);
+            let mut runs = rcore::load_runs(&db, "a").unwrap();
+            runs[0].needs_you[0].default = Some("Wire the money".into());
+            rcore::save_runs(&db, "a", &runs).unwrap();
+        }
+        report(&state, &[&id], &[&id], &[]);
+        assert!(!item(&state, seq).done, "the reminder promised something else: only marked seen");
+        assert!(crate::inbox_reply::replies(&lock(&state), "a", 100).is_empty());
+    }
+
+    #[test]
+    fn an_answer_that_cannot_be_used_is_told_and_the_reminder_stays_open() {
+        let state = reply_state();
+        let mut paused = Goal { id: "g2".into(), workspace_id: "w".into(), objective: "Document".into(), status: GoalStatus::Paused, ..Default::default() };
+        paused.budget.max_turns = 20;
+        let seq = goal_item(&state, &mut paused, false);
+        let id = on_phone(&state, seq);
+        let notes = format!("x\n> maybe later\nneko:{seq}");
+        let p = report(&state, &[&id], &[], &[(&id, &notes)]);
+        assert_eq!(p.finish.len(), 1);
+        assert!(p.finish[0].keep_open && p.finish[0].notes.contains("Not applied: To extend a goal, answer with a number"), "{:?}", p.finish);
+        let again = report(&state, &[&id], &[], &[(&id, &p.finish[0].notes)]);
+        assert_eq!(again.finish.len(), 1, "still waiting for the app, not re-judged");
+        assert_eq!(goal(&state, "g2").status, GoalStatus::Paused);
+    }
+
+    #[test]
+    fn echoes_for_reminders_that_are_gone_are_dropped_and_an_old_digest_is_not_todays() {
+        let state = reply_state();
+        let seq = ask(&state, "Reply to Sam?", Some("Say yes"), None);
+        let id = on_phone(&state, seq);
+        let p = report(&state, &[&id], &[], &[(&id, &format!("x\n> Friday\nneko:{seq}"))]);
+        assert_eq!(p.finish.len(), 1);
+        // The reminder vanishes from the list (deleted on the phone): its echo is no longer asked for.
+        let p = report(&state, &[], &[], &[]);
+        assert!(p.finish.is_empty());
+        assert!(core::load_state(&lock(&state)).finish.is_empty());
+        // Digests are per day: yesterday's reminder completed today does not read today's.
+        assert_ne!(core::digest_seq("2026-11-13"), core::digest_seq("2026-11-14"));
+        ask(&state, "Another?", Some("Yes"), None);
+        crate::morning_digest::step(&state, 1_000, "2026-11-14", 9 * 60, 9, &|_, _| Ok(())).unwrap();
+        {
+            let db = lock(&state);
+            let mut phone = core::load_state(&db);
+            phone.mapped.push(core::Mapped { seq: core::digest_seq("2026-11-13"), id: "old-digest".into(), created_ms: 1, ..Default::default() });
+            core::save_state(&db, &phone).unwrap();
+        }
+        let p = report(&state, &["old-digest"], &["old-digest"], &[]);
+        assert!(!crate::morning_digest::is_read(&lock(&state)), "an older digest's reminder is not today's");
+        assert!(p.delete.contains(&"old-digest".to_string()));
     }
 
 }

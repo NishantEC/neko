@@ -77,7 +77,7 @@ reports (`RoutineRun::cost_micro_usd`), the `Routines` reply carries `spend_toda
 page shows "Today", and `Snapshot::daily_budget_cents` (`SetDailyBudget`, Settings, AI, off by
 default) is a ceiling over the local day's tickets and routine runs together. At the ceiling a
 running goal does not issue its next turn and no routine is picked (a "Run now" still goes),
-and one Inbox item "Raise today's ceiling to $X?" (default: raise it, half again in whole dollars; the phone can accept it, see phone-push.md) is raised (its own row `neko_spend_notice_v1`,
+and one Inbox item "Raise the daily ceiling to $X?" (default: raise it, half again in whole dollars; the phone can accept it, see phone-push.md) is raised (its own row `neko_spend_notice_v1`,
 once a day); raising the ceiling or midnight releases both and closes the item. Codex runs report
 no price, so they are not counted.
 

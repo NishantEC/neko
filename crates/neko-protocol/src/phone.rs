@@ -111,6 +111,9 @@ pub struct ReminderPlan {
 pub struct ReminderFinish {
     pub id: String,
     pub notes: String,
+    /// Write the notes but leave the reminder open (an answer that could not be
+    /// used: the person sees why and can change their line).
+    pub keep_open: bool,
 }
 
 /// The notes of one reminder that has a line starting with `>` (the

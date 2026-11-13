@@ -652,7 +652,7 @@ fn failed_turn(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: &Goal, snapshot: &Snaps
 fn block(db: &Db, goal: &mut Goal, question: &str, default_answer: &str, now: i64) -> Result<(), String> {
     // One question, always with a default: a second question is dropped and a missing default is filled.
     let question = &neko_core::inbox::one_question(question);
-    let default_answer = if neko_core::inbox::clean_default(default_answer).is_some() { default_answer } else { "Use your best judgement and keep going." };
+    let default_answer = &neko_core::inbox::clean_default(default_answer).unwrap_or_else(|| "Use your best judgement and keep going.".to_owned());
     goal.status = GoalStatus::Blocked;
     goal.in_turn = false;
     let detail = format!("{question}\nIf you do not answer, Neko will go with: {default_answer}\nGoal: {}", core::head(&goal.objective, 300));

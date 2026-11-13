@@ -104,5 +104,7 @@ final class PhonePayloadTests: XCTestCase {
         ])])
         let plan = PhonePayload.plan(from: reply)
         XCTAssertEqual(plan.finish, [PhonePayload.Finish(id: "r1", notes: "> yes\n\nGot it: yes")], "an entry with no id is dropped")
+        let refused: JSONValue = .object(["PhonePlan": .object(["finish": .array([.object(["id": .string("r2"), "notes": .string("n"), "keep_open": .bool(true)])])])])
+        XCTAssertEqual(PhonePayload.plan(from: refused).finish.first?.keepOpen, true, "a refused answer is written but not completed")
     }
 }

@@ -33,8 +33,9 @@ pushed): about one small write a day, nothing timer-driven in the snapshot.
 
 **Push.** Once per digest, when Reminders or ntfy is on, outside quiet hours
 (it waits for them to end, and is dropped 12 h after composing): one reminder
-whose notes hold the whole digest (marker `neko:4000000000000`,
-`phone::DIGEST_SEQ`) and one ntfy message (title only while "Send titles
+whose notes hold the whole digest (marker `neko:<seq>` with `seq` =
+`phone::digest_seq(day)`, 4 trillion plus the date, so yesterday's reminder is never
+today's) and one ntfy message (title only while "Send titles
 only" is on). **Completing the reminder marks the digest read**, which hides
 the Home block; marking it read on Home deletes the reminder. Typing under it
 answers nothing.

@@ -118,7 +118,8 @@ import NekoKit
         for item in items {
             guard let reminder = store.calendarItem(withIdentifier: item.id) as? EKReminder else { continue }
             reminder.notes = item.notes
-            reminder.isCompleted = true
+            // An answer that could not be used keeps its reminder open, with the reason in the notes.
+            if !item.keepOpen { reminder.isCompleted = true }
             do {
                 try store.save(reminder, commit: false)
                 done.append(item.id)
@@ -203,6 +204,7 @@ enum PhonePayload {
     struct Finish: Equatable {
         var id: String
         var notes: String
+        var keepOpen = false
     }
 
     struct Plan: Equatable {
@@ -296,7 +298,7 @@ enum PhonePayload {
                 url: item["url"].string.isEmpty ? nil : item["url"].string,
                 key: item["key"].string)
         }
-        let finish = body["finish"].array.map { Finish(id: $0["id"].string, notes: $0["notes"].string) }.filter { !$0.id.isEmpty }
+        let finish = body["finish"].array.map { Finish(id: $0["id"].string, notes: $0["notes"].string, keepOpen: $0["keep_open"].bool) }.filter { !$0.id.isEmpty }
         return Plan(enabled: body["enabled"].bool, create: create, delete: body["delete"].array.map(\.string), finish: finish)
     }
 }

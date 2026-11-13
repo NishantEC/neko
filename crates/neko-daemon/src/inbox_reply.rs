@@ -102,7 +102,7 @@ pub fn target_of(db: &neko_core::Db, routine_id: &str, item: &NeedsYou) -> Targe
 }
 
 fn goal_name(goal: &Goal) -> String {
-    goal.ticket_id.clone().map_or_else(|| neko_core::goals::head(&goal.objective, 40), |t| t.chars().take(24).collect())
+    goal.ticket_id.clone().map_or_else(|| neko_core::goals::head(&goal.objective, 40), |t| t.chars().take(24).collect()).split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn spend_raise(db: &neko_core::Db, seq: u64) -> Option<u32> {
@@ -117,18 +117,24 @@ fn spend_raise(db: &neko_core::Db, seq: u64) -> Option<u32> {
 /// by 10 turns"), or `None` when the item has no default.
 pub fn action_label(db: &neko_core::Db, routine_id: &str, item: &NeedsYou) -> Option<String> {
     let default = item.default.as_deref().map(str::trim).filter(|d| !d.is_empty());
+    // One line of plain words, whoever wrote it (a default can come from a model).
+    let line = |text: &str| neko_core::goals::head(&text.split_whitespace().collect::<Vec<_>>().join(" "), 60);
     match target_of(db, routine_id, item) {
-        Target::GoalBlocked { default, .. } => Some(format!("answer \"{}\"", neko_core::goals::head(&default, 60))),
+        Target::GoalBlocked { default, .. } => Some(format!("answer \"{}\"", line(&default))),
         Target::GoalExtend { turns, subject, .. } => Some(format!("extend {subject} by {turns} turns")),
-        Target::Spend { to_cents } => Some(format!("raise today's ceiling to ${}", to_cents / 100)),
-        Target::Task { .. } => default.map(|d| format!("tell the task \"{}\"", neko_core::goals::head(d, 60))),
-        Target::Plain { .. } => default.map(|d| format!("reply \"{}\"", neko_core::goals::head(d, 60))),
+        Target::Spend { to_cents } => Some(format!("raise the daily ceiling to ${}", to_cents / 100)),
+        Target::Task { .. } => default.map(|d| format!("tell the task \"{}\"", line(d))),
+        Target::Plain { .. } => default.map(|d| format!("reply \"{}\"", line(d))),
     }
 }
 
 /// Applies an answer to the open item `seq`, closing it as answered. `phone`
 /// says where it came from (the reason shown in Closed recently).
 pub fn apply(state: &AppState, seq: u64, answer: Answer, phone: bool) -> Result<Done, String> {
+    // One answer at a time: the web and the phone may answer the same item together, and the
+    // item is looked up again under this guard so only the first one applies.
+    static APPLY: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one_at_a_time = APPLY.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (routine_id, item, target) = {
         let db = lock(state);
         let (routine_id, item) = find_open(&db, seq)?;
@@ -153,10 +159,10 @@ pub fn apply(state: &AppState, seq: u64, answer: Answer, phone: bool) -> Result<
             state.workbench.command(Command::Goals(GoalCommand::Extend { id: goal_id.clone(), turns }))?;
             format!("extended by {turns} turns")
         }
-        (Target::Spend { to_cents }, Answer::Default) => raise_ceiling(state, seq, *to_cents)?,
+        (Target::Spend { to_cents }, Answer::Default) => raise_ceiling(state, seq, *to_cents, reason)?,
         (Target::Spend { .. }, Answer::Text(text)) => {
             let cents = dollars_in(text).filter(|c| (1..=1_000_000).contains(c)).ok_or("To raise the ceiling, answer with an amount like $20")?;
-            raise_ceiling(state, seq, cents)?
+            raise_ceiling(state, seq, cents, reason)?
         }
         (Target::Task { task_id }, _) => {
             let text = match &answer {
@@ -194,11 +200,11 @@ fn close(state: &AppState, seq: u64, reason: &str, _now: i64) -> Result<(), Stri
     crate::routines::close_seqs(&lock(state), &[seq], reason)
 }
 
-fn raise_ceiling(state: &AppState, seq: u64, cents: u32) -> Result<String, String> {
+fn raise_ceiling(state: &AppState, seq: u64, cents: u32, reason: &str) -> Result<String, String> {
     state.workbench.command(Command::SetDailyBudget { cents: Some(cents) })?;
     // The held state clears on the next gate look; close the item now.
-    close(state, seq, inbox::ANSWERED, 0)?;
-    Ok(format!("raised today's ceiling to ${}", cents / 100))
+    close(state, seq, reason, 0)?;
+    Ok(format!("raised the daily ceiling to ${}", cents / 100))
 }
 
 /// The first whole number in the words ("20", "add 20 turns").

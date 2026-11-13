@@ -19,6 +19,11 @@ fn lock(state: &AppState) -> std::sync::MutexGuard<'_, Db> {
     state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// The reminder `seq` of the unread digest, if there is one.
+pub fn current_seq(db: &Db) -> Option<u64> {
+    digest::load(db).digest.filter(|d| !d.read).map(|d| core::digest_seq(&d.day))
+}
+
 /// Whether the stored digest has been read (so its reminder can go).
 pub fn is_read(db: &Db) -> bool {
     digest::load(db).digest.is_some_and(|d| d.read)
@@ -114,14 +119,15 @@ pub(crate) fn step(state: &AppState, now: i64, day: &str, minutes: u32, hour: u3
         return digest::save(&lock(state), &stored);
     }
     let text = digest::to_text(&d);
-    let push = core::Push { seq: core::DIGEST_SEQ, title: digest::title(&d), detail: text.clone(), ..Default::default() };
+    let seq = core::digest_seq(&d.day);
+    let push = core::Push { seq, title: digest::title(&d), detail: text.clone(), ..Default::default() };
     if settings.reminders {
         let db = lock(state);
         let mut phone = core::load_state(&db);
         let mut reminder = core::reminder_for(&push);
         // The whole digest is in the notes (the generic clip is for items).
-        reminder.notes = format!("{}\n\n{}", neko_core::inbox::without_reply_marks(&text.chars().take(1800).collect::<String>()), core::marker(core::DIGEST_SEQ));
-        phone.pending.push(core::Pending { reminder, queued_ms: now });
+        reminder.notes = format!("{}\n\n{}", neko_core::inbox::without_reply_marks(&text.chars().take(1800).collect::<String>()), core::marker(seq));
+        phone.pending.push(core::Pending { reminder, queued_ms: now, action: String::new() });
         core::save_state(&db, &phone)?;
     }
     let results = crate::phone::deliver(&settings, std::slice::from_ref(&push), send);
@@ -188,7 +194,7 @@ mod tests {
         assert_eq!(sent.borrow().len(), 1, "one ntfy message");
         let phone = core::load_state(&lock(&state));
         assert_eq!(phone.pending.len(), 1, "one reminder");
-        assert!(phone.pending[0].reminder.notes.contains("Reply to Sam? (default: Say yes)") && phone.pending[0].reminder.notes.ends_with(&core::marker(core::DIGEST_SEQ)));
+        assert!(phone.pending[0].reminder.notes.contains("Reply to Sam? (default: Say yes)") && phone.pending[0].reminder.notes.ends_with(&core::marker(core::digest_seq("2026-11-14"))));
         // Later ticks the same day do nothing more.
         step(&state, now + 60_000, "2026-11-14", 9 * 60, 9, &send).unwrap();
         assert_eq!((sent.borrow().len(), core::load_state(&lock(&state)).pending.len()), (1, 1));
