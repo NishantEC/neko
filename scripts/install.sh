@@ -58,7 +58,9 @@ else need "macOS 14 or newer (this is $(sw_vers -productVersion))" "Update in Sy
 
 # --- Xcode Command Line Tools / Swift ---------------------------------------
 if xcode-select -p >/dev/null 2>&1 && command -v swift >/dev/null 2>&1 && xcrun --find clang >/dev/null 2>&1; then
-  ok "Swift $(swift --version 2>&1 | sed -n 's/.*Swift version \([0-9.]*\).*/\1/p' | head -1) (Xcode or its Command Line Tools)"
+  swift_version="$(swift --version 2>&1 | sed -n 's/.*Swift version \([0-9][0-9.]*\).*/\1/p' | head -1)"
+  if [[ "${swift_version%%.*}" =~ ^[0-9]+$ ]] && (( ${swift_version%%.*} >= 6 )); then ok "Swift $swift_version (Xcode or its Command Line Tools)"
+  else need "Swift 6 or newer (this is ${swift_version:-unknown})" "Update the Command Line Tools in System Settings > General > Software Update," "or install Xcode 16 or newer from the App Store."; fi
 else
   need "Xcode Command Line Tools (the Swift compiler)" "Run:  xcode-select --install" "then wait for the installer to finish and run this again."
 fi

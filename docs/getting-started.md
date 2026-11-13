@@ -9,9 +9,9 @@ and what to do when it does not go to plan.
 | Need | Check | If missing |
 | --- | --- | --- |
 | macOS 14 or newer | `sw_vers -productVersion` | Software Update |
-| Swift (Xcode or its Command Line Tools) | `swift --version` | `xcode-select --install` |
+| Swift 6 or newer (Xcode 16+ or its Command Line Tools) | `swift --version` | `xcode-select --install`, or update in Software Update |
 | Rust 1.88 or newer | `rustc --version` | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh`, then a new Terminal window |
-| Node 20 or newer, and pnpm | `node --version`, `pnpm --version` | `brew install node && corepack enable pnpm` |
+| Node 20 or newer, and pnpm | `node --version`, `pnpm --version` | `brew install node && corepack enable pnpm` ([Homebrew](https://brew.sh)), or Node from nodejs.org and `npm install -g pnpm` |
 | One agent CLI, signed in | the first-run setup shows them | see below |
 | `gh` (optional) | `gh auth status` | `brew install gh && gh auth login`; only for pull requests |
 

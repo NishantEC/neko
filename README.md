@@ -6,13 +6,15 @@ press ⌥Space for quick search, clipboard history, and task attention.
 
 ## Install on your Mac
 
-Neko is built from source on your own Mac (macOS 14 or newer). About 20 minutes
-the first time, most of it compiling.
+Neko is built from source on your own Mac (macOS 14 or newer). The first time
+takes 10 to 20 minutes, 5 to 15 of them compiling.
 
 1. **Install the tools once.** Xcode Command Line Tools (`xcode-select --install`),
    Rust (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`), and Node
-   with pnpm (`brew install node && corepack enable pnpm`). The next step checks
-   all of them and prints the exact command for anything missing.
+   with pnpm (`brew install node && corepack enable pnpm`; Homebrew is at
+   [brew.sh](https://brew.sh), or take Node from [nodejs.org](https://nodejs.org)
+   and run `npm install -g pnpm`). The next step checks all of them and prints
+   the exact command for anything missing.
 2. **Clone it.** `git clone https://github.com/NishantEC/neko.git && cd neko` <!-- privacy-ok: the project's own public repository -->
 3. **Install it.** `bash scripts/install.sh` builds Neko, puts it in
    `/Applications` and opens it.
