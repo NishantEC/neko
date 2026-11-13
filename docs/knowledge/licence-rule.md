@@ -1,5 +1,9 @@
 ## Licence rule
 
+**Neko's own source has no licence file since 2026-11-13** (owner's call); the
+rules below are about third-party code, whose notices (`NOTICE`,
+`THIRD_PARTY_LICENSES/`) must stay because those licences require them.
+
 **Every line in this repo is written fresh**, with one documented exception:
 see "Third-party UI code" above (`gpui-component`'s `blink_cursor.rs`,
 Apache-2.0, attributed). **Vendored *assets* are a separate, audited

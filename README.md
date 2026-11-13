@@ -305,9 +305,9 @@ The smoke test uses isolated local data and a deterministic child fixture. It
 does not prove a live model, an authenticated MCP account, or production
 monitoring.
 
-## Licence
+## Third-party code
 
-Neko's own source is MIT-licensed; see `LICENSE`. Vendored dependencies have
+Neko itself carries no licence file. Vendored dependencies keep
 their own notices in `NOTICE`. Binary obligations depend on the target being
 built: the native installer does not link the optional GPUI client, whose
 dependency chain includes GPL-3.0-or-later code. Review the dependencies and
