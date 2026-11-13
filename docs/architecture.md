@@ -957,6 +957,11 @@ launch rather than assuming.
 `crates/neko` depends on the `wingleeio/zed` fork of gpui, pinned by rev, with
 one local patch applied on top by `scripts/setup-gpui-patch.sh`.
 
+`crates/neko` is its own Cargo workspace (its own lock and `[patch]`), so the
+daemon, the web app and the native installer build on a fresh clone without
+the fork: `scripts/setup-gpui-patch.sh`, then
+`cargo build --manifest-path crates/neko/Cargo.toml --target-dir target`.
+
 - **Why the fork.** It has `paint_backdrop_blur`, `EdgeFade`, a real mac
   implementation of `start_window_move()`, and a fix for a
   `windowDidBecomeKey:` self-deadlock that reliably hung the published crate

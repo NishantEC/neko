@@ -16,3 +16,8 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
 Several people can run this at once: give each run its own
 `NEKO_WEB_PORT`, `NEKO_WEB_VERIFY_DATA`, `NEKO_WEB_SHOTS` and `NEKO_WEB_LEASE`, and
 `NEKO_WEB_ONLY=tasks` to run just your area.
+
+The browser is the shared Chrome on this Mac (`~/.agents/bin/shared-chrome`) when
+it exists, otherwise any Chrome you started with `--remote-debugging-port=9333`
+(`NEKO_WEB_CHROME` names another address). `playwright-core` comes from `web/`
+(`pnpm --dir web install`). `firstrun.mjs` walks the first-run setup.

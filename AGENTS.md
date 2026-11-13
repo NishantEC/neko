@@ -226,6 +226,7 @@ finished.
 - [Neko reaches your phone (2026-11-13)](docs/knowledge/phone-push.md) — Needs-you items pushed to Apple Reminders (EventKit in the app) and optional ntfy when away; idle, quiet hours, 6/hour cap, two-way done.
 - [The Calendar (2026-11-06)](docs/knowledge/calendar.md) — macOS Calendar via EventKit in the app, one quiet daemon row, Neko's dated work on the all-day row.
 - [One window of tabs (2026-11-06)](docs/knowledge/one-window-of-tabs.md) — Tab strip over the hash router, detail tabs, Neko's right-click menu, one status glyph set, crew lines in chat.
+- [A friend can install it: one command, one calm first run (2026-11-13)](docs/knowledge/first-run.md) — `scripts/install.sh`, the GPUI client as its own workspace, routines and Calendar off until switched on, the web first-run setup, the update source setting.
 - [Neko updates itself (2026-10-22)](docs/knowledge/neko-updates-itself.md) — Owner: Neko "should be able to write itself over".
 - [Tickets keep your words, lessons improve skills, long chats keep a checkpoint (2026-11-08)](docs/knowledge/tickets-learning-and-checkpoints.md) — `Task::request` and its authority line, `PATCH <n>` skill lessons shown as diffs, `chat_checkpoint`, prompt golden files.
 - [The canvas beside the chat (2026-11-06)](docs/knowledge/the-canvas-beside-the-chat.md) — Artifacts (`SaveArtifact`), `/artifact/<id>/<n>` under its own sandboxed CSP, comment mode, an artifact tab (no gallery page).

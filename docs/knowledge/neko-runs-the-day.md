@@ -231,3 +231,13 @@ and "there is no restriction. It can do whatever it wants". Design:
   notifies.
 - Not built yet: learning rules from approvals, moving MCP config between
   folders (it is only reported), phone delivery.
+
+### Routines are off until the person says so (2026-11-13)
+
+A fresh data folder used to make a workspace for every scope found on disk and
+run seeded routines within minutes. `routines_master_v1` (`core::master_on`)
+now gates seeding (`ensure_seeded`) and running (`tick`): absent means "on only
+if routines were already seeded", so existing installs are unchanged.
+`SetRoutinesOn { enabled }` (first-run setup, Settings → General, the Inbox's
+"Routines are off" line) answers with `Routines { routines_on }`. See
+`docs/knowledge/first-run.md`.

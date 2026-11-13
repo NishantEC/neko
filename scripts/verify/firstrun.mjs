@@ -177,6 +177,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
 
   await page.unroute("**/api/request");
   // Leave the harness the way the other areas expect it.
+  await call({ SetPhoneSettings: { settings: { ...phone, reminders: false, ntfy: false } } });
   await call({ SetRoutinesOn: { enabled: true } });
   await call({ SetOnboardingComplete: { completed: true } });
 }

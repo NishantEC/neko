@@ -90,3 +90,12 @@ Neko items; the daemon test round-trips the JSON the app sends; Swift tests
 cover the payload, links, colours and the window. The page was looked at in
 the shared Chrome against `web_harness` with fixture events (week, day,
 month, popover, chip navigation, not-asked and denied, dark and light).
+
+**Switched on by the person (2026-11-13).** The app no longer asks macOS for
+Calendar at launch: `CalendarBridge` asks and reads only while the daemon's
+`calendar_enabled_v1` is on (`SetCalendarEnabled`, `CalendarStatus.enabled`;
+absent means on when an earlier build was already granted). While off it checks
+the switch every 20 s and sends nothing; switching off empties the stored
+events. The first-run setup and Settings → General hold the switch; the
+Calendar page says "Calendar is off" with a Turn on button. See
+`docs/knowledge/first-run.md`.

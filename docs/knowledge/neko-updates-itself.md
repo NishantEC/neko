@@ -94,3 +94,13 @@ reload. Adoption is what keeps the "newer app outranks the live UI" rule
 working for hand-shipped builds. Nothing here touches `SENSITIVE` paths: the
 script ships only `web/`, which has none, and changes to the daemon still
 need an install (or the owner's "Apply update").
+
+### The update source is a setting (2026-11-13)
+
+Settings → About → "Updates come from" (UserDefaults `neko.updates.repository`)
+names the GitHub repository the native "Check for updates" compares against. It
+defaults to the project's public repository (`Updates.defaultRepository`); a
+friend running their own fork sets `owner/name` (or pastes the URL). A value that
+is not `owner/name` falls back to the default. The daemon's self-update (landed
+commits on Neko's own checkout) has no remote and is dormant without that
+checkout. See `docs/knowledge/first-run.md`.

@@ -4,6 +4,27 @@ A native personal-agent workspace and quick command center for macOS. Neko's
 SwiftUI/AppKit app runs on a local Rust daemon. Open the app for your workspace;
 press ⌥Space for quick search, clipboard history, and task attention.
 
+## Install on your Mac
+
+Neko is built from source on your own Mac (macOS 14 or newer). About 20 minutes
+the first time, most of it compiling.
+
+1. **Install the tools once.** Xcode Command Line Tools (`xcode-select --install`),
+   Rust (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`), and Node
+   with pnpm (`brew install node && corepack enable pnpm`). The next step checks
+   all of them and prints the exact command for anything missing.
+2. **Clone it.** `git clone https://github.com/NishantEC/neko.git && cd neko` <!-- privacy-ok: the project's own public repository -->
+3. **Install it.** `bash scripts/install.sh` builds Neko, puts it in
+   `/Applications` and opens it.
+4. **Follow the setup** that opens on first launch (about two minutes, every step
+   skippable): your agents, workspaces, routines, Calendar and phone reminders.
+5. **Use it.** Press ⌥Space for the quick panel. Update later with
+   `git pull && bash scripts/install.sh`.
+
+Neko runs the agent CLIs you already use (Claude Code, Codex or OpenCode) with
+your own sign-in; install at least one. `gh` is optional and only needed for
+pull requests. Details and troubleshooting: [docs/getting-started.md](docs/getting-started.md).
+
 ## Neko-owned work
 
 Create a named workspace with one or more existing folders using the native multi-folder picker, then browse hosted servers in the app, link an MCP definition already
@@ -242,8 +263,9 @@ arrow through them.
 
 ## Build and run
 
-The native SwiftUI/AppKit client requires macOS 14+, Xcode's Swift toolchain,
-and Rust 1.97.1 for the daemon. Build a signed, self-contained bundle without
+The native SwiftUI/AppKit client requires macOS 14+, a Swift toolchain (Xcode
+or the Command Line Tools), Node with pnpm, and Rust 1.88 or newer for the
+daemon (`bash scripts/install.sh --check` verifies all of it). Build a signed, self-contained bundle without
 changing the installed app:
 
 ```sh
@@ -267,8 +289,9 @@ prints recovery paths and does not launch the replacement automatically.
 Preview builds (`NEKO_NATIVE_PREVIEW=1`) use a separate bundle identity and
 are not accepted by this installer. No installation is performed by a dry run.
 
-On first launch, choose a workspace folder and any Mac permissions you want to
-grant. The main window works without the global shortcut; no tool connection or
+On first launch the setup (agents, workspaces, routines, Calendar, phone
+reminders) opens; every step is optional and routines stay off until you turn them
+on. The main window works without the global shortcut; no tool connection or
 background watch is activated just by opening the app. If you decline
 Accessibility, use the Dock or menu bar to reopen Neko.
 
@@ -298,7 +321,10 @@ node scripts/smoke-workbench.mjs
 
 Enable the hook once per clone with `git config core.hooksPath .githooks`.
 `scripts/install-native.sh` runs `scripts/check.sh` before it builds and
-installs nothing if a check fails. The native client's design rules are in
+installs nothing if a check fails (`scripts/install.sh`, the friend's command,
+skips the checks). The optional GPUI client (`crates/neko`) is its own
+Cargo workspace: `scripts/setup-gpui-patch.sh`, then
+`cargo build --manifest-path crates/neko/Cargo.toml --target-dir target`. The native client's design rules are in
 [docs/design/principles.md](docs/design/principles.md).
 
 The smoke test uses isolated local data and a deterministic child fixture. It

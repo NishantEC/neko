@@ -67,8 +67,8 @@ fi
 if command -v cargo >/dev/null 2>&1 && command -v rustc >/dev/null 2>&1; then
   rust_version="$(rustc --version | sed -n 's/^rustc \([0-9]*\.[0-9]*\).*/\1/p')"
   rust_minor="${rust_version#*.}"
-  if [[ "${rust_version%%.*}" -gt 1 ]] || (( rust_minor >= 85 )); then ok "Rust $rust_version"
-  else need "Rust 1.85 or newer (this is $rust_version)" "Run:  rustup update stable"; fi
+  if [[ "${rust_version%%.*}" -gt 1 ]] || (( rust_minor >= 88 )); then ok "Rust $rust_version"
+  else need "Rust 1.88 or newer (this is $rust_version)" "Run:  rustup update stable"; fi
 else
   need "Rust" "Run:  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh" "then open a new Terminal window (or run:  . \"\$HOME/.cargo/env\") and run this again."
 fi
