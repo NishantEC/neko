@@ -452,6 +452,10 @@ pub struct Snapshot {
     pub splits: Vec<TaskSplit>,
     #[serde(default)]
     pub skills: crate::skills::SkillState,
+    /// Goals that keep working. Attached for readers from their own rows;
+    /// never part of the stored snapshot (see `neko_core::goals`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub goals: Vec<crate::goals::Goal>,
     #[serde(default = "crate::mcp_host::legacy_state")]
     pub mcp: crate::mcp_host::McpState,
     pub workspaces: Vec<Workspace>,
@@ -879,6 +883,7 @@ pub enum Command {
     SetConversationRuntime { conversation_id: String, preferences: RuntimePreferences },
     AgentProfiles(crate::agent_profiles::ProfileCommand),
     Schedules(crate::scheduled_plans::ScheduleCommand),
+    Goals(crate::goals::GoalCommand),
     SetupImport(crate::setup_import::ImportCommand),
     /// Read-only proposal; approval remains a separate explicit command.
     ProposeSplit {

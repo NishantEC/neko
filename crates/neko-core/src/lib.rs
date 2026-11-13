@@ -28,6 +28,7 @@ pub mod commands;
 pub mod conversation;
 pub mod db;
 pub mod duplicates;
+pub mod goals;
 pub mod inbox;
 pub mod decision_context;
 pub mod decomposition;

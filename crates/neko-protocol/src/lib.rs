@@ -15,6 +15,7 @@ pub mod calendar;
 pub mod phone;
 pub mod agent_models;
 pub mod decision_context;
+pub mod goals;
 pub mod mcp_host;
 pub mod routines;
 pub mod scheduled_plans;

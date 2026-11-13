@@ -365,6 +365,7 @@ fn load_stored(db: &Db) -> Result<Snapshot, String> {
     snapshot.memory_options = crate::neko_memory::options(db)?;
     snapshot.memory_proposals = crate::memory_learning::proposals(db, &snapshot)?;
     snapshot.skills = crate::skills::load(db)?;
+    snapshot.goals = crate::goals::load_all(db)?;
     snapshot.import_preview = crate::setup_import::load_preview(db)?;
     crate::decision_context::attach(db, &mut snapshot)?;
     Ok(snapshot)
@@ -547,6 +548,7 @@ fn encode(snapshot: &Snapshot) -> Result<Snapshot, String> {
     compacted.decision_records.clear();
     compacted.working_preferences.clear();
     compacted.skills = Default::default();
+    compacted.goals.clear();
     compacted.import_preview = Default::default();
     compacted.mcp.receipts.clear();
     // The last look at the published repository changes on a timer.
@@ -748,6 +750,8 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             return Ok(snapshot);
         }
         Command::Schedules(command) => crate::scheduled_plans::apply(&mut snapshot, command)?,
+        // Goals are driven by the daemon's controller, which owns their loop.
+        Command::Goals(_) => return Err("Goals are handled by the daemon".into()),
         Command::Mcp(command) => {
             crate::mcp_host::store::apply_command(&mut snapshot, command, now_ms())?
         }
