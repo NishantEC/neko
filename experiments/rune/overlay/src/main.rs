@@ -8,6 +8,7 @@
 
 mod bench;
 mod capsule;
+mod diag;
 mod launcher;
 mod pointer;
 mod stdin;

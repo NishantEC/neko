@@ -2634,6 +2634,9 @@ source = "git+https://github.com/anomalyco/rune?rev=4ddf696b0f13ec618fdeb80b4c9e
 name = "rune-overlay"
 version = "0.0.1"
 dependencies = [
+ "objc2 0.5.3",
+ "objc2-app-kit 0.2.2",
+ "objc2-foundation 0.2.2",
  "rune",
 ]
 

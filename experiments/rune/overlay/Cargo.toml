@@ -12,6 +12,10 @@ publish = false
 [dependencies]
 rune = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1", features = ["keys-overlay"] }
 
+objc2 = "0.5.2"
+objc2-foundation = { version = "0.2.2", features = ["NSArray", "NSString", "NSThread", "NSGeometry"] }
+objc2-app-kit = { version = "0.2.2", features = ["NSApplication", "NSWindow", "NSPanel", "NSResponder", "NSRunningApplication"] }
+
 # Cargo does not inherit a dependency's patch table; these mirror Rune's root Cargo.toml at the pinned rev.
 [patch.crates-io]
 winit = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }

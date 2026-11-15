@@ -50,6 +50,10 @@ pub fn spawn(h: Arc<Handles>, app: rune::AppHandle<launcher::Launcher>) {
                     let kind = if words.next() == Some("overlay") { "overlay" } else { "panel" };
                     bench::run(&h, n, kind);
                 }
+                "diag" => {
+                    h.panel.update(|_, _| crate::diag::dump());
+                    std::thread::sleep(Duration::from_millis(200));
+                }
                 "status" => {
                     println!(
                         "status panel_visible={} pointer_window={:?} capsule_window={:?} pointer_availability={:?} capsule_availability={:?} pointer_capture={:?}",
