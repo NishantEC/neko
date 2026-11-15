@@ -23,8 +23,8 @@ rune-kit = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618
 procwatch = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
 raw-window-handle = "0.6"
 objc2 = "0.5.2"
-objc2-foundation = { version = "0.2.2", features = ["NSString", "NSURL", "NSGeometry", "NSObject", "NSThread", "NSArray", "NSDictionary"] }
-objc2-app-kit = { version = "0.2.2", features = ["NSApplication", "NSView", "NSWindow", "NSResponder", "NSPanel", "NSColor", "NSScreen", "NSEvent"] }
+objc2-foundation = { version = "0.2.2", features = ["NSString", "NSURL", "NSGeometry", "NSObject", "NSThread", "NSArray", "NSDictionary", "NSRange"] }
+objc2-app-kit = { version = "0.2.2", features = ["NSApplication", "NSView", "NSWindow", "NSResponder", "NSPanel", "NSColor", "NSScreen", "NSEvent", "NSGraphics", "NSText"] }
 objc2-web-kit = { version = "0.2.2", features = ["WKWebView", "WKWebViewConfiguration", "WKNavigation", "WKNavigationDelegate", "WKFoundation", "WKUIDelegate", "objc2-app-kit"] }
 
 [profile.release]
