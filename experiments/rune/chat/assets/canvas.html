@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; height: 100%; background: #101826; color: #dfe8f5; font: 13px -apple-system, sans-serif; }
+  canvas { display: block; width: 100%; height: 70%; }
+  #bar { padding: 6px 8px; }
+  input { width: 60%; font-size: 14px; }
+</style>
+<canvas id="c"></canvas>
+<div id="bar"><input id="in" placeholder="web input (keyboard and IME land here)"> <span id="n">0</span></div>
+<script>
+  const c = document.getElementById('c'), g = c.getContext('2d');
+  let clicks = 0, frames = 0, last = performance.now(), fps = 0;
+  const log = [];
+  function status() {
+    document.title = JSON.stringify({ clicks, value: document.getElementById('in').value, log: log.slice(-6), fps: Math.round(fps) });
+  }
+  function draw(t) {
+    const dpr = devicePixelRatio, w = c.clientWidth * dpr, h = c.clientHeight * dpr;
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    g.fillStyle = '#101826'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 40; i++) {
+      const a = t / 700 + i * 0.4;
+      g.fillStyle = `hsl(${(i * 9 + t / 20) % 360} 80% 60%)`;
+      g.beginPath();
+      g.arc(w / 2 + Math.cos(a) * w * 0.35 * (0.3 + i / 60), h / 2 + Math.sin(a * 1.3) * h * 0.35, 8 * dpr, 0, 7);
+      g.fill();
+    }
+    g.fillStyle = '#fff'; g.font = `${14 * dpr}px sans-serif`;
+    g.fillText('WKWebView canvas  clicks=' + clicks + ' fps=' + Math.round(fps), 12 * dpr, 22 * dpr);
+    frames++;
+    if (t - last > 500) { fps = frames * 1000 / (t - last); frames = 0; last = t; status(); }
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+  c.addEventListener('mousedown', () => { clicks++; status(); });
+  const inp = document.getElementById('in');
+  for (const ev of ['compositionstart', 'compositionupdate', 'compositionend', 'input'])
+    inp.addEventListener(ev, e => { log.push(ev + ':' + (e.data ?? inp.value)); status(); });
+  inp.addEventListener('focus', () => { log.push('focus'); status(); });
+  status();
+</script>
