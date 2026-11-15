@@ -1,0 +1,48 @@
+# Spike: Neko's chat-scale UI on Rune. Its own workspace, not part of Neko's root workspace.
+[workspace]
+resolver = "2"
+
+[package]
+name = "neko-rune-chat"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "chat"
+path = "src/main.rs"
+
+[[bin]]
+name = "webview"
+path = "src/bin/webview.rs"
+
+[dependencies]
+rune = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
+rune-kit = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1", features = ["markdown"] }
+procwatch = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
+raw-window-handle = "0.6"
+objc2 = "0.5.2"
+objc2-foundation = { version = "0.2.2", features = ["NSString", "NSURL", "NSGeometry", "NSObject", "NSThread", "NSArray", "NSDictionary"] }
+objc2-app-kit = { version = "0.2.2", features = ["NSApplication", "NSView", "NSWindow", "NSResponder", "NSPanel", "NSColor", "NSScreen", "NSEvent"] }
+objc2-web-kit = { version = "0.2.2", features = ["WKWebView", "WKWebViewConfiguration", "WKNavigation", "WKNavigationDelegate", "WKFoundation", "WKUIDelegate", "objc2-app-kit"] }
+
+[profile.release]
+codegen-units = 16
+incremental = true
+
+[profile.perf]
+inherits = "release"
+opt-level = 3
+codegen-units = 16
+lto = false
+debug = false
+incremental = false
+
+# Cargo doesn't inherit patches from a dependency: the table Rune's README requires, at the same rev.
+[patch.crates-io]
+winit = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
+parley_engine = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
