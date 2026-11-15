@@ -6,3 +6,5 @@ license.workspace = true
 
 [dependencies]
 rune.workspace = true
+# MIT OR Apache-2.0, pure Rust, no binary to ship.
+hayro = "0.9"

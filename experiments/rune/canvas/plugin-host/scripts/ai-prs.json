@@ -1,0 +1,7 @@
+{"events": [
+  {"t": 0.5, "type": "tap", "key": "refresh"},
+  {"t": 20.0, "type": "tap", "key": "pr-2"},
+  {"t": 20.5, "type": "tap", "key": "input-filter"},
+  {"t": 20.7, "type": "type", "text": "re"},
+  {"t": 24.0, "type": "mark", "name": "end"}
+]}
