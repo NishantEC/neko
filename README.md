@@ -1,8 +1,12 @@
 # neko
 
-A native personal-agent workspace and quick command center for macOS. Neko's
-SwiftUI/AppKit app runs on a local Rust daemon. Open the app for your workspace;
-press ⌥Space for quick search, clipboard history, and task attention.
+A personal-agent workspace for macOS. A local Rust daemon does the work, the
+React web UI in `web/` is the only interface, and a thin Swift shell gives it a
+window, a menu bar item, the global shortcut, Calendar and Reminders, and
+notifications. Press ⌥Space for quick search, clipboard history, and task
+attention while the shell still carries the quick panel (see
+[ADR 0001](docs/decisions/0001-one-interface.md) for what is staying and what
+the owner is still deciding).
 
 ## Install on your Mac
 
@@ -299,9 +303,13 @@ Accessibility, use the Dock or menu bar to reopen Neko.
 
 ## How it is put together
 
-The SwiftUI/AppKit app in `native/NekoKit` talks to a resident Rust daemon over
-the typed `neko-protocol` wire format. The daemon owns SQLite, search indexes,
-MCP connections, scheduling, and task supervision. See
+One shape ([ADR 0001](docs/decisions/0001-one-interface.md), 2026-11-16): the
+resident Rust daemon is the brain and owns SQLite, search indexes, MCP
+connections, scheduling and task supervision; the React web UI in `web/` is the
+only interface; the Swift app in `native/NekoKit` is a thin shell for what
+needs macOS. A new screen goes in `web/`, Swift is only for OS duties, no GPUI.
+The shell and the GPUI client still contain screens the web duplicates; their
+retirement waits on the owner's choices. See
 [docs/architecture.md](docs/architecture.md) for the boundaries.
 
 | Document | What it covers |
@@ -324,10 +332,9 @@ node scripts/smoke-workbench.mjs
 Enable the hook once per clone with `git config core.hooksPath .githooks`.
 `scripts/install-native.sh` runs `scripts/check.sh` before it builds and
 installs nothing if a check fails (`scripts/install.sh`, the friend's command,
-skips the checks). The optional GPUI client (`crates/neko`) is its own
-Cargo workspace: `scripts/setup-gpui-patch.sh`, then
-`cargo build --manifest-path crates/neko/Cargo.toml --target-dir target`. The native client's design rules are in
-[docs/design/principles.md](docs/design/principles.md).
+skips the checks). The GPUI client (`crates/neko`, its own Cargo workspace)
+is retired by ADR 0001 and no longer a place for new work; it is deleted once
+the owner confirms. The web rules are in [DESIGN.md](DESIGN.md).
 
 The smoke test uses isolated local data and a deterministic child fixture. It
 does not prove a live model, an authenticated MCP account, or production
@@ -337,6 +344,6 @@ monitoring.
 
 Neko's own source is MIT-licensed; see `LICENSE`. Vendored dependencies have
 their own notices in `NOTICE`. Binary obligations depend on the target being
-built: the native installer does not link the optional GPUI client, whose
-dependency chain includes GPL-3.0-or-later code. Review the dependencies and
+built: the native installer does not link the GPUI client (being retired, ADR
+0001), whose dependency chain includes GPL-3.0-or-later code. Review the dependencies and
 `NOTICE` for any binary you plan to distribute. This is not legal advice.

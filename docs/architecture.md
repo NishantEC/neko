@@ -4,11 +4,28 @@ The map, not the territory. Every section points at the code that owns the
 detail. `AGENTS.md` has the full decision record for anything below that looks
 arbitrary; several of these decisions cost days to learn.
 
+## Shape (ADR 0001, 2026-11-16)
+
+One interface. The **Rust daemon is the brain**; **the React web UI (`web/`)
+is the only interface**; a **thin Swift shell** (`native/NekoKit`) does only
+what needs macOS: the window hosting the web UI (WKWebView), the menu bar item,
+the global hotkey, launch at login, EventKit (Calendar and Reminders),
+notifications, permissions and the update check. The GPUI client
+(`crates/neko`) and the SwiftUI screens that duplicate the web are retired by
+that decision; the inventory, evidence for each Swift/GPUI-only feature and
+the port costs are in
+[docs/decisions/0001-one-interface.md](decisions/0001-one-interface.md). Their
+removal is pending the owner's choices, so the sections below that describe
+the GPUI client (crate table, two resident processes, why the hotkey is
+registered in the client, the gpui dependency, window, motion, themes, icons)
+are **historical** and still describe code in the tree. Rule: a new screen goes
+in `web/`; Swift only for OS duties; no GPUI.
+
 ## Current default: standalone Neko work
 
 `neko-protocol::workbench` supplies typed commands and snapshots. The installed
-client is `native/NekoKit` (SwiftUI/AppKit); the earlier GPUI `workspace.rs`
-window remains a separate legacy client. Both are clients of the same daemon.
+shell is `native/NekoKit` (SwiftUI/AppKit hosting the web UI); the earlier
+GPUI `workspace.rs` window is a retired legacy client. All are clients of the same daemon.
 The native bundle prohibits multiple macOS app instances. Its installer stops
 the installed client/daemon and any copies running from installer backups,
 unregisters the build output and recovery bundles from Launch Services, and registers

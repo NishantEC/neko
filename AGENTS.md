@@ -224,6 +224,7 @@ finished.
 
 ## Knowledge index
 
+- **[ADR 0001: one interface (2026-11-16)](docs/decisions/0001-one-interface.md)** — The web UI is the only interface, the Rust daemon is the brain, Swift is a thin OS shell, no GPUI; new screens go in `web/`. Retirement is pending the owner's choices, so the GPUI client and duplicate Swift screens still exist until then.
 - [Checkpoints and undo (2026-11-14)](docs/knowledge/checkpoints-and-undo.md) — Hidden-ref snapshots at each ticket run's start and end, per-run diffs, undo/redo with refusals, `checkpoint_diff`/`undo_run` crew tools.
 - [Current standalone workspace (2026-09-24)](docs/knowledge/current-standalone-workspace.md) — The native workspace now follows system appearance, with Light / Dark…
 - [Neko is the chief of staff (2026-10-17)](docs/knowledge/neko-is-the-chief-of-staff.md) — Every task goes through Neko.
