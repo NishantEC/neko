@@ -49,6 +49,7 @@ const INKS: [Color; 4] = [
 ];
 const SELECT: Color = Color { r: 0.38, g: 0.30, b: 0.95, a: 1.0 };
 const TEXT_SIZE: f32 = 18.0;
+const TEXT_STYLE: tok::TextStyle = tok::TextStyle::new(TEXT_SIZE, 400.0);
 
 #[derive(Clone, Copy)]
 enum Grab {
@@ -330,10 +331,10 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
         .child(canvas(drawing(s)).key("surface").w_full().h_full().absolute(0.0, 0.0)
             .on_drag(|s: &mut State, d, _| pointer(s, d)));
     for e in s.elems.iter().filter(|e| e.kind == Kind::Text && Some(e.id) != s.editing) {
-        paper = paper.child(text(e.text.clone()).font(type_::BODY.size_to(TEXT_SIZE)).color(INKS[e.ink % INKS.len()]).absolute(e.x, e.y));
+        paper = paper.child(text(e.text.clone()).font(TEXT_STYLE).color(INKS[e.ink % INKS.len()]).absolute(e.x, e.y));
     }
     if let Some(e) = s.editing.and_then(|id| s.elems.iter().find(|e| e.id == id)) {
-        paper = paper.child(text_input(&s.edit, type_::BODY.size_to(TEXT_SIZE)).key("text-edit").single_line().min_w(160.0).absolute(e.x, e.y)
+        paper = paper.child(text_input(&s.edit, TEXT_STYLE).key("text-edit").single_line().min_w(160.0).absolute(e.x, e.y)
             .on_edit(|s: &mut State| &mut s.edit)
             .on_submit(|s: &mut State, tx| {
                 commit_text(s);
