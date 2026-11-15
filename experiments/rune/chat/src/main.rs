@@ -14,7 +14,7 @@ use std::time::Duration;
 use fake::{GROUPS, Status, Task};
 use rune::{AppSpec, Chrome, ClipboardContent, Cx, El, GrowthSpec, PointerPress, ScrollSpec, Spring, TextEdit, Tx, col, el, memo, row, text};
 use rune_kit::shell::{PaneMotion, PaneState, Sidebar, SidebarHeader, SidebarRow, SplitView, Toolbar};
-use rune_kit::{Button, ButtonVariant, ControlSize, Kit, Markdown, MenuItem, TextArea, context_menu, root};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit, Markdown, MenuItem, context_menu, root};
 
 thread_local! {
     static KIT: Kit = Kit::neutral(true);
@@ -293,19 +293,32 @@ fn view_with(s: &App, cx: &mut Cx<App>, k: &Kit) -> El {
                 .child(Button::new("×").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |s: &mut App| s.attachments.retain(|x| x.id != id)).build(k).key(format!("chip-x{id}"))),
         );
     }
-    let composer = TextArea::new(&s.composer)
-        .placeholder("Message Neko — ⌘↩ to send, paste an image")
-        .auto_grow(2, 8)
+    // The kit's `TextArea` has no `on_input_paste`, so an image paste never reaches the app from
+    // it: the composer is the core `text_input` with the kit's colours instead.
+    let style = rune::TextStyle { line_height: (13.0f32 * 1.35 * 2.0).round() / 2.0, ..k.ty.ui };
+    let field = rune::text_input(&s.composer, style)
+        .key("input")
+        .w_full()
+        .color(c.text_base)
+        .placeholder("Message Neko — ⇧↩ for a new line, paste an image", c.text_faint)
+        .caret(c.text_base, k.selection())
         .on_edit(|s: &mut App| &mut s.composer)
         .on_submit(send)
-        .build(k)
-        .key("composer")
         .on_input_paste(|s: &mut App, content: &ClipboardContent, _| {
             let Some(image) = content.image() else { return false };
             s.pasted += 1;
             s.attachments.push(Attachment { id: s.pasted, size: image.size(), kb: image.png().len() / 1024 });
             true
         });
+    let composer = col()
+        .key("composer")
+        .role("textbox")
+        .w_full()
+        .padding(8.0)
+        .radius(k.radius.md)
+        .fill(c.layer_01)
+        .border(1.0, c.border_weak)
+        .child(rune::auto_grow(field, 2, 8));
     let bottom = col().w_full().px(0.0).py(12.0).gap(8.0).child(chips).child(row().px(24.0).gap(8.0).items_end().child(col().grow(1.0).w_full().child(composer)).child(
         Button::new("Send").variant(ButtonVariant::Contrast).on_press_tx(send).build(k).key("send"),
     ));

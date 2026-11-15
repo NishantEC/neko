@@ -1,0 +1,14 @@
+[
+  {"t": 0.2, "type": "tap", "key": "composer"},
+  {"t": 0.4, "type": "ime", "preedit": "にほんご", "cursor": [12, 12]},
+  {"t": 0.6, "type": "ime", "commit": "日本語"},
+  {"t": 0.8, "type": "type", "text": " and "},
+  {"t": 1.2, "type": "ime", "preedit": "zhong wen", "cursor": [9, 9]},
+  {"t": 1.4, "type": "ime", "commit": "中文"},
+  {"t": 1.6, "type": "key", "name": "Enter", "shift": true},
+  {"t": 1.8, "type": "type", "text": "second line"},
+  {"t": 3.0, "type": "ime", "preedit": "かんじ", "cursor": [9, 9], "clauses": [[0, 9, true]]},
+  {"t": 3.1, "type": "ime", "commit": "漢字"},
+  {"t": 3.2, "type": "paste", "png": "shots/q1-child-composited.png"},
+  {"t": 4.0, "type": "mark", "name": "end"}
+]
