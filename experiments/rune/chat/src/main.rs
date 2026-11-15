@@ -5,6 +5,7 @@
 //! `leak` (10 stream cycles, memory after each; `fast=N` multiplies the token rate, `keep` keeps
 //! the history), `rate=N` (tokens per second, default 60), `stream` (start one stream at once).
 
+mod daemon;
 mod fake;
 mod stats;
 
@@ -107,7 +108,20 @@ fn initial_messages() -> (Vec<Msg>, u64) {
 }
 
 fn init() -> App {
-    let tasks = fake::tasks(500);
+    // `daemon=PORT`: the task list comes from a Neko daemon (question 3), else 500 made-up tasks.
+    let tasks = match arg("daemon").and_then(|p| p.parse::<u16>().ok()) {
+        Some(port) => match daemon::fetch_tasks(port) {
+            Ok((tasks, took, n)) => {
+                println!("daemon: {n} tasks in {took:?} (request, decode, map)");
+                tasks
+            }
+            Err(e) => {
+                eprintln!("daemon: {e}");
+                fake::tasks(500)
+            }
+        },
+        None => fake::tasks(500),
+    };
     let collapsed = [false; 5];
     let lines = lines_for(&tasks, &collapsed);
     let (messages, next_id) = initial_messages();
@@ -342,16 +356,13 @@ fn view_with(s: &App, cx: &mut Cx<App>, k: &Kit) -> El {
 // poll: the token stream and the bench driver
 // ---------------------------------------------------------------------------------------------
 
+/// Scroll the task list at a steady ~3,000 points a second, back and forth, one step per frame.
 fn sweep(s: &mut App, tx: &mut Tx, t: f64) {
-    if t - s.bench.last_scroll < 0.05 {
-        return;
-    }
-    s.bench.last_scroll = t;
-    let n = s.lines.len().max(2) as f64;
-    let pos = (t * 60.0) % (2.0 * n);
-    let idx = if pos < n { pos } else { 2.0 * n - pos } as usize;
-    let key = line_key(s, idx.min(s.lines.len() - 1)).into_owned();
-    tx.scroll_into_view_in("sidebar-list", key);
+    let total = (s.lines.len() as f64 * 45.0 - 600.0).max(100.0);
+    let pos = (t * 3000.0) % (2.0 * total);
+    let y = if pos < total { pos } else { 2.0 * total - pos };
+    let _ = s.bench.last_scroll;
+    tx.scroll_to_y("sidebar-scroll", y as f32);
 }
 
 fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
@@ -420,7 +431,7 @@ fn bench_run(s: &mut App, t: f64, tx: &mut Tx, stream_finished: bool) -> bool {
         1 if t - s.bench.t_mark > 4.0 => {
             stats::memory("idle");
             start_stream(s, t);
-            stats::set_phase("stream");
+            stats::set_phase("stream-q1");
             s.bench.step = 2;
             s.bench.t_mark = t;
             return true;
@@ -436,7 +447,13 @@ fn bench_run(s: &mut App, t: f64, tx: &mut Tx, stream_finished: bool) -> bool {
                 stats::set_phase("stream+scroll");
                 sweep(s, tx, t);
             } else {
-                stats::set_phase("stream");
+                let frac = s.stream.as_ref().map_or(0.0, |st| st.pos as f64 / st.ends.len() as f64);
+                stats::set_phase(match frac {
+                    f if f < 0.25 => "stream-q1",
+                    f if f < 0.5 => "stream-q2",
+                    f if f < 0.75 => "stream-q3",
+                    _ => "stream-q4",
+                });
             }
         }
         3 if t - s.bench.t_mark > 3.0 => {
@@ -484,7 +501,7 @@ fn leak_run(s: &mut App, t: f64, tx: &mut Tx, stream_finished: bool) -> bool {
         }
         2 if t - s.bench.t_mark > 1.5 => {
             stats::memory(&format!("cycle-{}", s.bench.cycles));
-            if s.bench.cycles >= 10 {
+            if s.bench.cycles >= arg("cycles").and_then(|v| v.parse().ok()).unwrap_or(10) {
                 write_results(&arg("name").unwrap_or_else(|| "leak".into()));
                 tx.quit();
                 s.bench.step = 9;

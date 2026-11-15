@@ -30,6 +30,9 @@ thread_local! {
 pub fn set_phase(name: &'static str) {
     STATS.with(|s| {
         let mut s = s.borrow_mut();
+        if s.phase == name {
+            return;
+        }
         s.phase = name;
         // A gap between phases is not a frame interval.
         if let Some(p) = s.phases.get_mut(name) {
@@ -55,12 +58,12 @@ pub fn frame(f: &rune::FrameEncoded) {
                 if let Some(e) = f.encode_ms() {
                     p.encode_ms.push(e);
                 }
-                if let Some(st) = f.started() {
-                    if let Some(prev) = p.last_started {
-                        p.intervals_ms.push(st.duration_since(prev).as_secs_f64() * 1000.0);
-                    }
-                    p.last_started = Some(st);
+                // `at()`: when encoding finished. `started()` is only set for display-paced frames.
+                let st = f.at();
+                if let Some(prev) = p.last_started {
+                    p.intervals_ms.push(st.duration_since(prev).as_secs_f64() * 1000.0);
                 }
+                p.last_started = Some(st);
             }
             rune::FrameOutcome::Unchanged => p.unchanged += 1,
             _ => p.skipped += 1,
