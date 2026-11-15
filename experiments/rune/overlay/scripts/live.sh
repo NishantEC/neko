@@ -12,7 +12,8 @@ MAX=$1; OUT=$2; shift 2
 FIFO=$(mktemp -u "${TMPDIR:-/tmp}/rune-overlay-fifo.XXXXXX"); mkfifo "$FIFO"
 sleep "$MAX" > "$FIFO" &       # keeps the write end open; also the hard time limit
 HOLD=$!
-"$BIN" < "$FIFO" > "$OUT" 2>&1 &
+: > "$OUT"
+"$BIN" < "$FIFO" >> "$OUT" 2>&1 &   # append mode, so the script's own notes below are not overwritten
 APP=$!
 ( sleep "$MAX"; kill "$APP" 2>/dev/null ) &
 exec 3> "$FIFO"
