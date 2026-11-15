@@ -23,6 +23,7 @@ for c in "$@"; do
     sleep:*) sleep "${c#sleep:}" ;;
     winlist) { echo "--- winlist $(date +%T)"; "$WINLIST" rune-overlay; } >> "$OUT" ;;
     footprint) { echo "--- footprint"; footprint -p "$APP" 2>&1 | head -12; ps -o rss=,vsz= -p "$APP"; } >> "$OUT" ;;
+    postkey) /tmp/postkey >> "$OUT" 2>&1 ;;   # scripts/postkey.swift, compiled to /tmp/postkey
     shot:*)  # shot:<png>:<pointer|capsule> captures that one window only (never the whole screen)
       IFS=: read -r _ png which <<< "$c"
       id=$(grep -o "${which}_window=Some([0-9]*)" "$OUT" | tail -1 | grep -o '[0-9]*')
