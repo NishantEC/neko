@@ -1,0 +1,57 @@
+# Neko's native UI on Rune (docs/decisions/0002-rune-for-everything.md). Its own Cargo workspace:
+# Rune needs the `[patch.crates-io]` table below, which must not reach the daemon's workspace
+# (the root `Cargo.toml` never lists this folder, and the installer never builds it).
+#
+# Rune is pinned by git rev. The rev is written on every `rev =` line below and in `RUNE_REV`;
+# change it only through `scripts/bump-rune.sh`, which also checks that the patch table still
+# matches the one in Rune's own root `Cargo.toml`.
+[workspace]
+resolver = "2"
+members = ["."]
+
+[package]
+name = "neko-rune"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Neko's native client on the Rune UI framework (beside the web UI until each screen reaches parity)."
+
+[lib]
+name = "neko_rune"
+path = "src/lib.rs"
+
+[[bin]]
+name = "neko-rune"
+path = "src/main.rs"
+
+[dependencies]
+rune = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1", features = ["tooling"] }
+rune-kit = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1", features = ["markdown"] }
+# The wire types and framing, shared with the daemon: the only thing this client knows of it.
+neko-protocol = { path = "../../crates/neko-protocol" }
+serde_json = "1"
+
+[dev-dependencies]
+png = "0.17"
+
+[profile.release]
+codegen-units = 16
+incremental = true
+
+[profile.perf]
+inherits = "release"
+opt-level = 3
+codegen-units = 16
+lto = false
+debug = false
+incremental = false
+
+# Cargo does not inherit a dependency's patches. This is the table Rune's README requires, at the
+# same rev as the dependencies above.
+[patch.crates-io]
+winit = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
+parley_engine = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
