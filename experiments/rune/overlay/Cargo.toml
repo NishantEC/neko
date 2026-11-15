@@ -1,0 +1,25 @@
+# Spike: Rune system overlays on macOS. Its own workspace: not a member of the repo root workspace.
+[workspace]
+resolver = "3"
+members = ["."]
+
+[package]
+name = "rune-overlay"
+version = "0.0.1"
+edition = "2024"
+publish = false
+
+[dependencies]
+rune = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1", features = ["keys-overlay"] }
+
+# Cargo does not inherit a dependency's patch table; these mirror Rune's root Cargo.toml at the pinned rev.
+[patch.crates-io]
+winit = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
+parley_engine = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1" }
+
+[profile.release]
+codegen-units = 16
+incremental = true
