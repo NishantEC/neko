@@ -109,8 +109,8 @@ fn initial_messages() -> (Vec<Msg>, u64) {
 
 fn init() -> App {
     // `daemon=PORT`: the task list comes from a Neko daemon (question 3), else 500 made-up tasks.
-    let tasks = match arg("daemon").and_then(|p| p.parse::<u16>().ok()) {
-        Some(port) => match daemon::fetch_tasks(port) {
+    let tasks = match arg("daemon").filter(|p| !p.is_empty()) {
+        Some(socket) => match daemon::fetch_tasks(&socket) {
             Ok((tasks, took, n)) => {
                 println!("daemon: {n} tasks in {took:?} (request, decode, map)");
                 tasks
