@@ -1,0 +1,12 @@
+[package]
+name = "viewer3d"
+version = "0.0.1"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rune.workspace = true
+wgpu.workspace = true
+bytemuck.workspace = true
+# MIT OR Apache-2.0
+gltf = { version = "1", default-features = false, features = ["utils", "import"] }

@@ -1,0 +1,9 @@
+{"events": [
+  {"t": 0.10, "type": "drag", "key": "viewport", "dx": 420, "dy": 60, "dur": 1.2},
+  {"t": 1.50, "type": "wheel", "key": "viewport", "dx": 0, "dy": -60},
+  {"t": 1.60, "type": "wheel", "key": "viewport", "dx": 0, "dy": -60},
+  {"t": 1.70, "type": "wheel", "key": "viewport", "dx": 0, "dy": -60},
+  {"t": 2.00, "type": "tap", "key": "wire"},
+  {"t": 2.40, "type": "drag", "key": "viewport", "dx": -300, "dy": -40, "dur": 1.0},
+  {"t": 3.60, "type": "tap", "key": "fit"}
+]}

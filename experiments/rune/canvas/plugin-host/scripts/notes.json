@@ -1,0 +1,5 @@
+{"events": [
+  {"t": 0.2, "type": "tap", "x": 400, "y": 68},
+  {"t": 0.4, "type": "type", "text": "hello from Luau"},
+  {"t": 3.0, "type": "mark", "name": "end"}
+]}
