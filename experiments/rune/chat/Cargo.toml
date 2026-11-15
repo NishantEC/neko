@@ -27,6 +27,10 @@ objc2-foundation = { version = "0.2.2", features = ["NSString", "NSURL", "NSGeom
 objc2-app-kit = { version = "0.2.2", features = ["NSApplication", "NSView", "NSWindow", "NSResponder", "NSPanel", "NSColor", "NSScreen", "NSEvent", "NSGraphics", "NSText"] }
 objc2-web-kit = { version = "0.2.2", features = ["WKWebView", "WKWebViewConfiguration", "WKNavigation", "WKNavigationDelegate", "WKFoundation", "WKUIDelegate", "objc2-app-kit"] }
 
+[features]
+# Headless `--snap`, `--tree`, `--script` in release builds (about 3.4 MB of binary).
+tooling = ["rune/tooling"]
+
 [profile.release]
 codegen-units = 16
 incremental = true
