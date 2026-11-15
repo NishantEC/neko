@@ -1,0 +1,7 @@
+[
+  {"t": 0.2, "type": "type", "text": "rev"},
+  {"t": 0.6, "type": "key", "name": "Down"},
+  {"t": 0.7, "type": "key", "name": "Down"},
+  {"t": 0.8, "type": "key", "name": "Down"},
+  {"t": 1.4, "type": "mark", "name": "end"}
+]
