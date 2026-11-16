@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rune::TextEdit;
 
-use crate::groups::{Group, first_session, grouped};
+use crate::groups::{Group, first_session};
 use crate::layout::Layout;
 use crate::link::{LinkError, LinkEvent, Summary, TaskRow, calm};
 use crate::views::FullView;
@@ -186,7 +186,15 @@ impl App {
                 self.summary = Some(summary);
                 changed
             }
-            LinkEvent::Quiet => false,
+            LinkEvent::Quiet => {
+                // Nothing changed, but ages ("5m") and the day's edge move: redraw once a minute.
+                let now = (self.clock)();
+                let stale = now - self.now_ms >= 60_000;
+                if stale {
+                    self.now_ms = now;
+                }
+                stale
+            }
             LinkEvent::Down { error, retry_in, .. } => {
                 let state = LinkState::Down { message: calm(&error, retry_in) };
                 let changed = self.link != state;
@@ -244,7 +252,7 @@ impl App {
 
     /// How many sessions wait on the person, for the Neko column and its collapsed icon.
     pub fn waiting(&self) -> usize {
-        self.summary.as_ref().map_or(0, |s| grouped(s, self.now_ms).first().map_or(0, |(_, rows)| rows.len()))
+        self.summary.as_ref().map_or(0, Summary::needs_you)
     }
 }
 

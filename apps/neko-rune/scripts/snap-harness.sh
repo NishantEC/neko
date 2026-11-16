@@ -26,7 +26,7 @@ harness="$repo/target/debug/web_harness"
 bin="$CARGO_TARGET_DIR/debug/neko-rune"
 
 data="/tmp/neko-rune-harness-data-$$"
-port=$((4700 + $$ % 200))
+port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
 seed="$data-seed.json"
 web="$data-web"
 rm -rf "$data" "$web"; mkdir -p "$data" "$web" "$out"
@@ -38,7 +38,7 @@ pid=$!
 cleanup() {
   # By pid, and only after confirming it is the harness this script started.
   if ps -p "$pid" -o command= 2>/dev/null | grep -q web_harness; then kill -TERM "$pid" 2>/dev/null || true; fi
-  rm -rf "$data" "$web" "$seed" "$data.log"
+  rm -rf "$data" "$web" "$seed" "$data.log" "$data-summary.json"
 }
 trap cleanup EXIT
 
@@ -52,4 +52,3 @@ for theme in light dark; do
   NEKO_RUNE_SUMMARY="$summary" "$bin" --snap "$out/shell-$theme.png" --scene harness --theme "$theme" --size 1280x800 --scale 2 >/dev/null 2>&1
   echo "wrote $out/shell-$theme.png"
 done
-rm -f "$summary"

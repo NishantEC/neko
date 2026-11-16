@@ -29,17 +29,23 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let t = theme(cx.system_dark());
     let mut layer = Vec::new();
     let layout = &s.layout;
+    // What fits: the session keeps its minimum, so a small window narrows or hides the others.
+    // Before the first layout there is no width to read, and the state's own widths stand.
+    let fit = match cx.layout_size("window") {
+        Some([w, _]) => layout.fit(w),
+        None => crate::layout::Fit { context: layout.context.shown_width(), neko_open: layout.neko.is_open() },
+    };
 
     let mut window = row().key("window").w_full().h_full().fill(t.surface.sidebar);
     window = window.child(sessions::column(s, &t, &mut layer).w(layout.sessions.width()).key("sessions"));
     window = window.child(grip(Region::Sessions, &t));
     // The session and the context panel are two cards in the window, inset from its edges.
     window = window.child(session::region(s, &t, &mut layer));
-    if layout.context.is_open() {
+    if fit.context > 0.0 {
         window = window.child(grip(Region::Context, &t));
-        window = window.child(context::panel(s, &t).w(layout.context.width()));
+        window = window.child(context::panel(s, &t).w(fit.context));
     }
-    if layout.neko.is_open() {
+    if fit.neko_open {
         window = window.child(grip(Region::Neko, &t));
         window = window.child(neko::column(s, &t).w(layout.neko.width()).key("neko"));
     } else {

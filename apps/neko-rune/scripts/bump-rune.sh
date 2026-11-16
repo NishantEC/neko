@@ -16,7 +16,7 @@
 #   4. builds, then runs scripts/check.sh's tests;
 #   5. green: keeps the pin and notes the date in RUNE_REV. Red: puts the old pin back, prints
 #      the first errors and the commits in between, and exits 1 (`--keep` skips the restore).
-# Needs network (raw.githubusercontent.com and `git ls-remote`), and never runs two builds at once.
+# Needs network (raw.githubusercontent.com and `git ls-remote`). Run one at a time: it builds.
 set -uo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$here"
@@ -59,6 +59,9 @@ restore() {
   cp "$work/Cargo.toml" Cargo.toml; cp "$work/RUNE_REV" RUNE_REV
   [[ -f "$work/Cargo.lock" ]] && cp "$work/Cargo.lock" Cargo.lock
 }
+finished=0
+# Interrupted before the end (Ctrl-C, a kill): put the old pin back, as a failed run does.
+trap 'if (( ! finished )) && (( ! keep )); then restore; echo "Interrupted; restored $old." >&2; fi' INT TERM
 fail() {
   echo; echo "BUMP FAILED at step: $1"
   if (( keep )); then echo "(--keep: the new pin stays; the old one is $old)"; else restore; echo "Restored $old."; fi
@@ -103,11 +106,11 @@ for pair in "crates/rune:tooling" "crates/rune-kit:markdown"; do
 done
 
 # 4. Build, then the tests (unit, shell, read-only, headless snapshots).
-rm -f Cargo.lock.new
 cargo update -p rune -p rune-kit --quiet 2>"$work/update.log" || { cat "$work/update.log" | tail -20; fail "cargo update"; }
 cargo build --all-targets --quiet 2>"$work/build.log" || { grep -E "^(error|warning: unused)" -A6 "$work/build.log" | head -40; fail "build"; }
 cargo test --quiet 2>"$work/test.log" >"$work/test.out" || { tail -30 "$work/test.out"; grep -E "^error" -A6 "$work/test.log" | head -20; fail "tests"; }
 
+finished=1
 rm -rf "$work"
 echo
 echo "BUMP OK: Rune is now ${new:0:12}. Commit apps/neko-rune/{Cargo.toml,Cargo.lock,RUNE_REV}."

@@ -151,9 +151,10 @@ impl Summary {
         self.tasks.iter().filter(|t| f(t.status)).count()
     }
 
-    /// Waiting on the person: a plan or a step needs approval.
+    /// Waiting on the person: a plan or step needs approval, a result needs review, or it failed.
+    /// The sessions column's "Needs you" group and the Neko column count the same.
     pub fn needs_you(&self) -> usize {
-        self.count(|s| s == TaskStatus::AwaitingApproval)
+        self.count(|s| matches!(s, TaskStatus::AwaitingApproval | TaskStatus::ReadyForReview | TaskStatus::Failed))
     }
 
     pub fn in_review(&self) -> usize {
@@ -423,6 +424,6 @@ mod tests {
                 task("e", TaskStatus::Completed),
             ],
         };
-        assert_eq!((s.needs_you(), s.working(), s.in_review()), (1, 2, 1));
+        assert_eq!((s.needs_you(), s.working(), s.in_review()), (2, 2, 1));
     }
 }

@@ -23,6 +23,14 @@ pub enum Region {
     Neko,
 }
 
+/// What [`Layout::fit`] decides shows in a given window.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fit {
+    /// The context panel's width, 0 when it is hidden or closed.
+    pub context: f32,
+    pub neko_open: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Layout {
     pub sessions: PaneState,
@@ -66,6 +74,24 @@ impl Layout {
             Region::Context | Region::Neko => start - travel,
         };
         self.pane_mut(region).drag_to(width);
+    }
+
+    /// What shows in a window `window` wide so the session keeps [`MIDDLE_MIN`]: the context panel
+    /// narrows toward its minimum first, then the Neko column collapses to its icon, then the
+    /// context panel hides. Nothing is changed in the state: widening the window brings it all back.
+    pub fn fit(&self, window: f32) -> Fit {
+        let mut fit = Fit { context: self.context.shown_width(), neko_open: self.neko.is_open() };
+        let middle = |f: &Fit| window - self.sessions.width() - f.context - if f.neko_open { self.neko.width() } else { NEKO_STRIP } - 3.0 * GRIP;
+        if middle(&fit) < MIDDLE_MIN && fit.context > 0.0 {
+            fit.context = (fit.context - (MIDDLE_MIN - middle(&fit))).max(self.context.min_width());
+        }
+        if middle(&fit) < MIDDLE_MIN && fit.neko_open {
+            fit.neko_open = false;
+        }
+        if middle(&fit) < MIDDLE_MIN {
+            fit.context = 0.0;
+        }
+        fit
     }
 
     /// Points the three regions take of a window `window` wide, and what is left for the session.
@@ -114,6 +140,32 @@ mod tests {
         l.drag(Region::Neko, 300.0, -40.0);
         assert!(l.neko.is_open());
         assert_eq!(l.neko.width(), 340.0);
+    }
+
+    #[test]
+    fn a_small_window_gives_way_in_order_and_the_session_keeps_its_minimum() {
+        let mut l = Layout::default();
+        l.context.set_open(true);
+        // Roomy: nothing changes.
+        assert_eq!(l.fit(1600.0), Fit { context: 360.0, neko_open: true });
+        // At the default 1280 the session still has its minimum, so nothing gives way.
+        assert_eq!(l.fit(1280.0), Fit { context: 360.0, neko_open: true });
+        // Tighter: the context panel narrows first, down to its minimum.
+        let narrower = l.fit(1200.0);
+        assert!(narrower.context < 360.0 && narrower.context >= 280.0 && narrower.neko_open, "{narrower:?}");
+        // Tighter still: Neko collapses to its icon, then the context panel hides.
+        assert!(!l.fit(1060.0).neko_open);
+        // At the smallest window the app allows (960) the context panel is at its minimum beside
+        // Neko's icon; in a window smaller than that it hides.
+        assert_eq!(l.fit(960.0), Fit { context: 280.0, neko_open: false });
+        assert_eq!(l.fit(840.0), Fit { context: 0.0, neko_open: false });
+        for w in [840.0, 960.0, 1000.0, 1060.0, 1180.0, 1280.0, 1600.0] {
+            let f = l.fit(w);
+            let middle = w - l.sessions.width() - f.context - if f.neko_open { l.neko.width() } else { NEKO_STRIP } - 3.0 * GRIP;
+            assert!(middle >= MIDDLE_MIN, "{w}: {middle}");
+        }
+        // The state is untouched.
+        assert!(l.neko.is_open() && l.context.is_open());
     }
 
     #[test]

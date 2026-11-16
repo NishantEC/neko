@@ -57,8 +57,10 @@ Left to right in one window:
 4. **Neko column**, always there, collapsible to an icon. The super agent: a one-line crew status
    ("3 agents working · 1 needs you"), the Inbox, the digest and an ask box.
 
-The edges between regions drag to resize, each within a range, and dragging a region narrower than
-half its minimum collapses it. **DESIGN.md §1, "One window, opened as tabs", is superseded for the
+The edges between regions drag to resize, each within a range; dragging the context panel or the
+Neko column narrower than half its minimum collapses it. The session keeps at least 320 points: in a
+small window the context panel narrows first, then Neko collapses to its icon, then the context
+panel hides (widening the window brings them back). **DESIGN.md §1, "One window, opened as tabs", is superseded for the
 Rune app**: tabs came from the 2026-11-05 study of a tabbed app, and the owner has decided against
 them. They stay true of the web UI while it exists. DESIGN.md is rewritten for the Rune app in P1;
 until then its colour, type, status-glyph and calm-page rules (§2, §3, §6, §7, §8 rules 1 to 4 and

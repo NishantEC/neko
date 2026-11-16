@@ -11,7 +11,7 @@ use crate::app::{App, crew_line, status_line};
 use crate::groups::{Group, grouped};
 use crate::icons;
 use crate::link::TaskRow;
-use crate::status::{status_glyph, status_of};
+use crate::status::{status_glyph, status_label, status_of};
 use crate::theme::Neko;
 
 /// How many Inbox items the column lists before saying how many more.
@@ -46,7 +46,7 @@ fn body(s: &App, t: &Neko) -> El {
             row()
                 .key(format!("inbox-{}", task.id))
                 .role("button")
-                .label(task.title.clone())
+                .label(format!("{}, {}", task.title, status_label(task.status)))
                 .focusable(true)
                 .w_full()
                 .h(30.0)

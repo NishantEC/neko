@@ -12,7 +12,7 @@ use crate::app::{App, status_line};
 use crate::groups::{age, grouped};
 use crate::icons;
 use crate::link::TaskRow;
-use crate::status::{status_glyph, status_of};
+use crate::status::{status_glyph, status_label, status_of};
 use crate::theme::Neko;
 use crate::views::FullView;
 
@@ -57,7 +57,7 @@ fn session_row(task: &TaskRow, selected: bool, now_ms: i64, t: &Neko) -> El {
     let mut r = row()
         .key(format!("session-{}", task.id))
         .role("button")
-        .label(task.title.clone())
+        .label(format!("{}, {}", task.title, status_label(task.status)))
         .checked(selected)
         .focusable(true)
         .w_full()

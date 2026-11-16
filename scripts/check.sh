@@ -8,7 +8,8 @@
 #
 # The Rune client is its own Cargo workspace (apps/neko-rune, docs/decisions/0002). Its check is
 # about 25 s with a warm cache and about 3 minutes cold (Rune and wgpu compile once), so a full
-# check runs it only when the cache from an earlier build exists, or with --rune.
+# check runs it, as advice that never blocks, only when the cache from an earlier build exists;
+# with --rune it runs always and blocks.
 #
 # Prints one line per step and exits non-zero if any step failed. Output of a
 # failed step is kept in $TMPDIR/neko-check/<step>.log.
@@ -25,7 +26,7 @@ for option in "$@"; do
     --quick) mode=quick ;;
     --rune) rune=yes ;;
     --no-rune) rune=no ;;
-    --help) sed -n '2,16p' "$0"; exit 0 ;;
+    --help) sed -n '2,12p' "$0"; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$option" >&2; exit 2 ;;
   esac
 done
@@ -79,6 +80,13 @@ if [[ "$mode" == full && "$rune" != no && -d "$repo_root/apps/neko-rune" ]]; the
   if [[ "$rune" == yes || -d "$rune_cache/debug/deps" ]]; then
     # Always its own cache, whatever target dir the daemon's steps were given.
     step rune-client env CARGO_TARGET_DIR="$rune_cache" "$repo_root/apps/neko-rune/scripts/check.sh"
+    # Without --rune it is advisory: a Rune problem is shown but never blocks the daemon's gate
+    # (the installer runs this gate too).
+    if [[ "$rune" != yes && "${failed[*]:-}" == *rune-client* ]]; then
+      kept=(); for f in ${failed[@]+"${failed[@]}"}; do [[ "$f" == rune-client ]] || kept+=("$f"); done
+      failed=(${kept[@]+"${kept[@]}"})
+      printf '        (advisory: pass --rune to make the Rune client block)\n'
+    fi
   fi
 fi
 
