@@ -232,8 +232,7 @@ mod tests {
 
     #[test]
     fn layout_pressure_collapses_neko_and_gives_it_back_when_the_pressure_ends() {
-        let mut l = Layout::default();
-        l.neko_auto = false;
+        let mut l = Layout { neko_auto: false, ..Layout::default() };
         // 1360 wide, panel closed: 1360 - 300 - 340 - 21 = 699 for the session, no pressure.
         assert!(!l.pressed(1360.0) && l.fit(1360.0).neko_open);
         // The panel opens: 279 left, under 480, so Neko is its 44 point strip.
@@ -251,8 +250,7 @@ mod tests {
 
     #[test]
     fn layout_pressure_edge_is_exactly_480_for_the_session() {
-        let mut l = Layout::default();
-        l.neko_auto = false;
+        let mut l = Layout { neko_auto: false, ..Layout::default() };
         l.context.set_open(true);
         let edge = l.sessions.width() + l.context.width() + l.neko.width() + 3.0 * GRIP + SESSION_COMFORT;
         assert!(l.pressed(edge - 1.0) && !l.pressed(edge));

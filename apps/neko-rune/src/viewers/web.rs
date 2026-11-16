@@ -31,13 +31,18 @@ pub fn is_web(viewer_id: &str) -> bool {
 /// The registry's `build` for every web viewer. The panel never calls it (it draws [`slot`] itself, which
 /// knows whether the view is up); it is what a caller that only has the registry gets: the bare slot.
 pub fn build(input: &ViewerInput, _state: &mut ViewerState) -> El {
-    slot(&crate::theme::theme(input.theme_dark), false)
+    slot(&crate::theme::theme(input.theme_dark), "")
+}
+
+/// What the slot says: nothing once the view is up, why when it could not start, else that it is on its way.
+pub fn line(s: &App) -> String {
+    if s.web_view.exists() { String::new() } else { s.web_view.error().unwrap_or_else(|| "Opening…".to_owned()) }
 }
 
 /// The place the web view sits over: the panel's own surface colour (what shows when the view is hidden
 /// under a menu), and a quiet line while the view is still on its way. The slot reports its rect every
 /// layout pass and the view follows it.
-pub fn slot(t: &Neko, opening: bool) -> El {
+pub fn slot(t: &Neko, line: &str) -> El {
     // The line is always there, and empty once the view is up: the same tree every build.
     el().key("viewer-web")
         .w_full()
@@ -49,7 +54,7 @@ pub fn slot(t: &Neko, opening: bool) -> El {
             s.web_view.set_slot(r);
             tx.live_only();
         })
-        .child(text(if opening { "Opening…" } else { "" }.to_owned()).key("web-opening").font(t.ty.meta).color(t.text.faint).a11y_hidden())
+        .child(text(line.to_owned()).key("web-opening").font(t.ty.meta).color(t.text.faint).a11y_hidden())
 }
 
 /// Marks the region the web view is cut to (the panel's body, or a plugin page's whole region).

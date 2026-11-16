@@ -199,7 +199,10 @@ impl Factory for WryFactory {
                 }
                 wry::NewWindowResponse::Deny
             });
-        let view = window.with_raw_handle(|handle| builder.build_as_child(&handle)).map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+        // A web view that cannot start (AppKit wants the main thread, the handle is not an AppKit view) is a
+        // line in the panel, not a crash of the app: wry panics on an invalid handle.
+        let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| window.with_raw_handle(|handle| builder.build_as_child(&handle))));
+        let view = built.map_err(|_| "The web view could not start in this window.".to_owned())?.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
         Ok(Box::new(WryNative(view)))
     }
 }

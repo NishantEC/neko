@@ -102,6 +102,10 @@ Pin an exact version, keep the library's licence file next to it
 Web Workers loaded from the plugin folder and WebAssembly all work. Network
 calls go through `host.request`, not `fetch` to other sites.
 
+> The Rune client (`apps/neko-rune`) draws a plugin's viewers and pages by loading Neko's own web UI in a web view with
+> `?embed=1` (only the routed content, a transparent page, the host's theme in the address): nothing to do differently.
+> A page appears in its More menu once a Neko web window has loaded the plugin.
+
 ## 4. Viewers and reply fences
 
 An artifact's **kind** is its file extension (`stl`, `glb`, `csv`…). The canvas

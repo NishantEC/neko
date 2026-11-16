@@ -34,6 +34,9 @@ authority for what is in and out of v1).
   `DISPLAY_KINDS` block: a model cannot write one by itself. Then
   `Event::ArtifactsChanged { id, version, message_id }` goes to every client
   (the GPUI client ignores it; Swift ignores all events).
+- **Since 2026-11-16 an artifact a ticket's run saves (the bridge call's lease names the ticket) records `task_id`** and
+  is not linked to a Home reply that happens to be running; `ArtifactsForTask { task_id }` lists them
+  (`rune-p3b-the-web-panel.md`).
 - **Rendering is isolated.** `GET /artifact/<id>/<n>` (`latest` for the
   newest; same Host/Origin/Sec-Fetch-Site/token gates as every route; never
   asks the daemon, it reads the store like `/plugins/`) replies with

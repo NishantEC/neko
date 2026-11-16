@@ -302,7 +302,7 @@ fn layout_pressure_collapses_neko_and_icon_tabs_never_truncate() {
     frames(&mut rt, 60);
     assert!((rect(&rt, "neko")[2] - 340.0).abs() < 1.0, "the person's expand wins over the pressure: {:?}", rect(&rt, "neko"));
     let ctx = rect(&rt, "context")[2];
-    assert!(ctx < 420.0 && ctx >= 320.0, "the panel narrowed to leave the session its minimum: {ctx}");
+    assert!((320.0..420.0).contains(&ctx), "the panel narrowed to leave the session its minimum: {ctx}");
 }
 
 #[test]

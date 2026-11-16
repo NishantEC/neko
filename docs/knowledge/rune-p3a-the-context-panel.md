@@ -152,7 +152,7 @@ symlink and `..` refused), unit tests in each viewer. Snapshots: `apps/neko-rune
 `svg`, `markdown`, `code`, `table` (100,000 rows, scrolled to the middle), `pdf` (16 pages, on page 9), `model3d` (wireframe on),
 `model3d-solid`, `web`, `fallback`, `too-large`) and `expanded`.
 
-### Not done in P3a
+### Not done in P3a (the web view and the durable link were done in [P3b](rune-p3b-the-web-panel.md))
 
 HTML and Excalidraw viewers (the placeholder is P3b's to replace), the live Browser and Screen tabs, Luau viewers, a PDF's text
 selection and search, SVG text, a durable session-to-artifact link (see the finding above), a measurement in a real window, and

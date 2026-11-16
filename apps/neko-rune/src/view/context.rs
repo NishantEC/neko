@@ -192,7 +192,7 @@ pub fn viewer(s: &App, t: &Neko, target: &Target) -> El {
             Some(spec) if viewers::web::is_web(spec.id) && target.web_route().is_some() => {
                 let Some(route) = target.web_route() else { return placeholder(&["Nothing to show yet."], t) };
                 s.web_view.set_want(Some(Want { route, dark: t.dark }));
-                viewers::web::slot(t, !s.web_view.exists())
+                viewers::web::slot(t, &viewers::web::line(s))
             }
             // A file of the working folder is not an artifact the web UI can show: its text, as code.
             Some(spec) if viewers::web::is_web(spec.id) => match viewers::resolve("txt") {

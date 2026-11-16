@@ -203,7 +203,7 @@ fn plugin_page(s: &App, page: &neko_protocol::PluginPage, t: &Neko) -> El {
     // The page's route as the web app spells it: the plugin's own id for the page (`my-plugin:board`).
     s.web_view.set_want(Some(crate::web_panel::Want { route: format!("{}?embed=1", page.id), dark: t.dark }));
     let head = band(t).px(20.0).child(text(page.title.clone()).key("plugin-page-title").font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(t.text.base).truncate().a11y_hidden().role("heading")).child(text(format!("Plugin: {}", page.plugin)).font(t.ty.meta).color(t.text.faint).truncate().min_w(0.0));
-    let body = crate::viewers::web::region(col().key("plugin-page-body").w_full().grow(1.0).min_h(0.0).child(crate::viewers::web::slot(t, !s.web_view.exists())));
+    let body = crate::viewers::web::region(col().key("plugin-page-body").w_full().grow(1.0).min_h(0.0).child(crate::viewers::web::slot(t, &crate::viewers::web::line(s))));
     col().key("plugin-page").w_full().h_full().child(head).child(body)
 }
 
