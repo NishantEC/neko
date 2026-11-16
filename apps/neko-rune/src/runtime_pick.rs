@@ -11,6 +11,9 @@ use rune::TextEdit;
 /// What the popover keeps between frames.
 pub struct RuntimeUi {
     pub open: bool,
+    /// The conversation being edited (`task:<id>`, `home:<profile>:<workspace>`) and the chip the popover hangs from.
+    pub conversation: String,
+    pub anchor: &'static str,
     /// The pins being edited (a copy of what the conversation has until the person changes something).
     pub draft: RuntimePreferences,
     /// What the conversation had when the popover was opened, and its revision.
@@ -32,6 +35,8 @@ impl Default for RuntimeUi {
     fn default() -> Self {
         RuntimeUi {
             open: false,
+            conversation: String::new(),
+            anchor: "runtime-chip",
             draft: RuntimePreferences::default(),
             saved: RuntimePreferences::default(),
             revision: 0,

@@ -129,8 +129,11 @@ impl App {
         if workspaces == 0 {
             return Some("Add a workspace in the web UI first.");
         }
-        if self.new_request.text.trim().is_empty() {
+        if !self.has_payload(crate::compose::Dest::New) {
             return Some("Say what you want done.");
+        }
+        if self.uploading(crate::compose::Dest::New) {
+            return Some("Wait for the files to finish uploading.");
         }
         if self.new_request.text.len() > MAX_REQUEST {
             return Some("That is too long for one request.");
@@ -144,7 +147,7 @@ impl App {
         }
         let Some(summary) = self.summary.as_ref() else { return };
         let known: HashSet<String> = summary.tasks.iter().map(|t| t.id.clone()).collect();
-        let request = self.new_request.text.trim().to_owned();
+        let request = self.composed(crate::compose::Dest::New, self.new_request.text.trim());
         let Some(form) = self.new_form.as_mut() else { return };
         let Some(workspace) = summary.workspaces.get(form.workspace) else { return };
         form.busy = true;
@@ -182,6 +185,7 @@ impl App {
             self.call(Call::Start { task_id: id.to_owned() });
         }
         self.new_request = TextEdit::new("");
+        self.clear_chips(crate::compose::Dest::New);
     }
 
     /// An image chosen with the composer's "+": its Markdown reference joins the request, as a pasted one does.

@@ -11,6 +11,7 @@ pub mod art;
 pub mod art_gpu;
 pub mod attachments;
 pub mod clock;
+pub mod compose;
 pub mod connection;
 pub mod groups;
 pub mod icons;
@@ -187,6 +188,7 @@ pub fn run() {
             s.tick_layout(t, tx);
             let panel = s.panel_tick(t, tx);
             let toast = s.tick_toast(t, tx);
+            s.tick_compose(t, tx);
             moved || panel || toast
         }),
         ..rune::AppSpec::new("Neko (Rune)", (1360.0, 840.0), init, view::view)

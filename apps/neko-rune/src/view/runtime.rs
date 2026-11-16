@@ -25,6 +25,40 @@ pub fn chip_words(s: &App) -> String {
     compact_label(&pins, &s.runtime.catalog.clone().unwrap_or_default())
 }
 
+/// What the ask box's chip says: the pins of Neko's own conversation, or the runtime it last ran on.
+pub fn ask_chip_words(s: &App) -> String {
+    let Some(m) = s.summary.as_ref() else { return String::new() };
+    let conversation = m.home_conversation(s.workspace_scope.as_deref());
+    match m.pins.get(&conversation).map(|(p, _)| clean(p)).filter(|p| *p != Default::default()) {
+        Some(pins) => compact_label(&pins, &s.runtime.catalog.clone().unwrap_or_default()),
+        None => m.home_runtime.clone(),
+    }
+}
+
+/// The chip in the ask box's bar: the same popover, on Neko's own conversation.
+pub fn ask_chip(s: &App, t: &Neko) -> El {
+    let open = s.runtime.open && s.runtime.anchor == "ask-model";
+    row()
+        .key("ask-model")
+        .role("button")
+        .label(format!("Conversation settings: {}", ask_chip_words(s)))
+        .help("Model, effort and speed for this conversation. Changes apply to the next turn or worker.")
+        .expanded(open)
+        .focusable(true)
+        .h(28.0)
+        .px(10.0)
+        .gap(6.0)
+        .center_y()
+        .radius(14.0)
+        .fill(if open { t.surface.active } else { Color::TRANSPARENT })
+        .border(1.0, t.surface.field_border)
+        .hover(t.surface.hover)
+        .focus_ring(2.0, 2.0, t.surface.ring)
+        .on_press(|s: &mut App| s.runtime_toggle_home())
+        .child(text(ask_chip_words(s)).font(t.ty.meta).color(t.text.muted).truncate().max_w(180.0).min_w(0.0).a11y_hidden())
+        .child(icon(&icons::CHEVRON_DOWN, 14.0).color(t.text.muted).a11y_hidden())
+}
+
 /// The chip in the composer's bar: the words, a chevron, a 1 px border; pressing it opens the popover.
 pub fn chip(s: &App, t: &Neko) -> El {
     row()
@@ -32,14 +66,14 @@ pub fn chip(s: &App, t: &Neko) -> El {
         .role("button")
         .label(format!("Conversation settings: {}", chip_words(s)))
         .help("Model, effort and speed for this conversation. Changes apply to the next turn or worker.")
-        .expanded(s.runtime.open)
+        .expanded(s.runtime.open && s.runtime.anchor == "runtime-chip")
         .focusable(true)
         .h(28.0)
         .px(10.0)
         .gap(6.0)
         .center_y()
         .radius(14.0)
-        .fill(if s.runtime.open { t.surface.active } else { Color::TRANSPARENT })
+        .fill(if s.runtime.open && s.runtime.anchor == "runtime-chip" { t.surface.active } else { Color::TRANSPARENT })
         .border(1.0, t.surface.field_border)
         .hover(t.surface.hover)
         .focus_ring(2.0, 2.0, t.surface.ring)
@@ -282,24 +316,37 @@ fn panel(s: &App, t: &Neko) -> El {
 
 /// The popover, above the chip.
 pub fn mount(s: &App, t: &Neko, layer: &mut Vec<El>) {
-    if !s.runtime.open || s.selected.is_none() {
+    if !s.runtime.open {
         return;
     }
     layer.push(scrim("runtime-scrim", |s: &mut App| s.runtime.open = false));
     let surface = popover::raised(&t.kit, col().key("runtime-popover").role("dialog").label("Model and effort").w(WIDTH).max_w(WIDTH).padding(16.0).min_h(0.0).child(panel(s, t)), t.kit.radius.md);
-    layer.push(popover::anchored(&t.kit, surface, "runtime-chip", Placement::TopStart, 10.0));
+    layer.push(popover::anchored(&t.kit, surface, s.runtime.anchor, Placement::TopStart, 10.0));
 }
 
 impl App {
-    /// The chip was pressed: opens the popover on what the session has pinned, and reads the catalog once.
+    /// The session's chip was pressed: opens the popover on what the session has pinned, and reads the catalog once.
     pub fn runtime_toggle(&mut self) {
-        if self.runtime.open {
+        let Some(detail) = self.detail() else { return };
+        let (conversation, saved, revision) = (format!("task:{}", detail.task.id), clean(&detail.prefs), detail.prefs_revision);
+        self.runtime_open(conversation, "runtime-chip", saved, revision);
+    }
+
+    /// The ask box's chip: the same popover on Neko's own conversation (what `/models` opens in the web).
+    pub fn runtime_toggle_home(&mut self) {
+        let Some(m) = self.summary.as_ref() else { return };
+        let conversation = m.home_conversation(self.workspace_scope.as_deref());
+        let (saved, revision) = m.pins.get(&conversation).map(|(p, r)| (clean(p), *r)).unwrap_or_default();
+        self.runtime_open(conversation, "ask-model", saved, revision);
+    }
+
+    fn runtime_open(&mut self, conversation: String, anchor: &'static str, saved: neko_protocol::workbench::RuntimePreferences, revision: u64) {
+        if self.runtime.open && self.runtime.conversation == conversation {
             self.runtime.open = false;
             return;
         }
-        let Some(detail) = self.detail() else { return };
-        let saved = clean(&detail.prefs);
-        let revision = detail.prefs_revision;
+        self.runtime.conversation = conversation;
+        self.runtime.anchor = anchor;
         self.runtime.saved = saved.clone();
         self.runtime.draft = saved;
         self.runtime.revision = revision;
@@ -327,10 +374,9 @@ impl App {
         if !self.runtime.can_apply() {
             return;
         }
-        let Some(id) = self.selected.clone() else { return };
         self.runtime.saving = true;
         self.runtime.apply_error = None;
         let prefs = clean(&self.runtime.draft);
-        self.call(crate::link::Call::SetRuntimePrefs { task_id: id, prefs });
+        self.call(crate::link::Call::SetRuntimePrefs { conversation_id: self.runtime.conversation.clone(), prefs });
     }
 }

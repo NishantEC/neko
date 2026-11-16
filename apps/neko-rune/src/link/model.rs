@@ -248,6 +248,17 @@ pub struct Summary {
     /// The repositories whose reviewed tasks land on local main instead of opening a pull request.
     #[serde(default)]
     pub land_on_main: Vec<String>,
+    /// The tool connections an `@` mention can name: (id, label, how many tools). Only enabled ones.
+    #[serde(default)]
+    pub connections: Vec<(String, String, usize)>,
+    /// The profile Neko speaks to for the whole workbench, and the one each workspace is assigned (`profileFor`).
+    #[serde(default)]
+    pub active_profile: String,
+    #[serde(default)]
+    pub profile_of: std::collections::BTreeMap<String, String>,
+    /// What each conversation has pinned (model, effort, speed) and the revision of that pin.
+    #[serde(default)]
+    pub pins: std::collections::BTreeMap<String, (RuntimePreferences, u64)>,
 }
 
 /// How many of Neko's messages the client keeps (a long reply is ~8 MB of layout; DESIGN: bounded). The column
@@ -311,6 +322,10 @@ impl Summary {
                 })
                 .collect(),
             land_on_main: snapshot.land_on_main.iter().cloned().collect(),
+            connections: snapshot.mcp.connections.iter().filter(|c| c.enabled).map(|c| (c.id.clone(), c.label.clone(), c.tools.len())).collect(),
+            active_profile: snapshot.agent_profiles.active_profile_id.clone(),
+            profile_of: snapshot.agent_profiles.assignments.iter().map(|a| (a.workspace_id.clone(), a.profile_id.clone())).collect(),
+            pins: snapshot.conversation_runtime.iter().map(|(k, v)| (k.clone(), (v.clone(), snapshot.conversation_runtime_revisions.get(k).copied().unwrap_or(0)))).collect(),
             home_runtime: runtime_for(snapshot, "home:"),
             runtime: format!(
                 "{} · {}",
@@ -370,6 +385,20 @@ impl Summary {
     /// An agent is working on it.
     pub fn working(&self) -> usize {
         self.count(|s| matches!(s, TaskStatus::Planning | TaskStatus::Building | TaskStatus::Reviewing))
+    }
+
+    /// The profile Home speaks to for a workspace (the web's `profileFor`).
+    pub fn profile_for(&self, workspace: Option<&str>) -> String {
+        match workspace {
+            Some(w) => self.profile_of.get(w).cloned().unwrap_or_else(|| "default".to_owned()),
+            None if self.active_profile.is_empty() => "default".to_owned(),
+            None => self.active_profile.clone(),
+        }
+    }
+
+    /// The conversation Neko's own chat is in for a workspace scope: `home:<profile>:<workspace or *>`.
+    pub fn home_conversation(&self, workspace: Option<&str>) -> String {
+        format!("home:{}:{}", self.profile_for(workspace), workspace.unwrap_or("*"))
     }
 
     /// A task's workspace, repository, open pull request and given name.

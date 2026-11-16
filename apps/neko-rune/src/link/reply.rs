@@ -140,10 +140,17 @@ pub fn inbox_items(routines: &[neko_protocol::routines::RoutineView]) -> Vec<Inb
 
 /// Makes one call and reads the answer. `open` is the task whose detail a snapshot answer carries.
 pub fn make(socket: &Path, call: &Call, open: Option<&str>) -> Reply {
-    let response = match ask(socket, call.wire()) {
+    let mut response = match ask(socket, call.wire()) {
         Ok(response) => response,
         Err(error) => return Reply::Failed(error),
     };
+    // A call of two steps (the old message leaves the queue, then the new words go): the second answer is the one that counts.
+    if let (Some(next), Response::Workbench(_)) = (call.then(), &response) {
+        response = match ask(socket, next) {
+            Ok(response) => response,
+            Err(error) => return Reply::Failed(error),
+        };
+    }
     match response {
         Response::Workbench(snapshot) => Reply::Snapshot(Summary::from_snapshot_for(&snapshot, open)),
         Response::TaskCheckpoints(list) => match call {

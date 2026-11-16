@@ -87,8 +87,8 @@ pub enum Call {
     // A new session.
     CreateTask { workspace_id: String, title: String, goal: String },
     SetRuntime { task_id: String, provider: String, model: String },
-    /// The model chip's "Check & apply": every pin of the conversation `task:<id>`, as the web sends them.
-    SetRuntimePrefs { task_id: String, prefs: RuntimePreferences },
+    /// The model chip's "Check & apply": every pin of one conversation (`task:<id>`, `home:<profile>:<workspace>`), as the web sends them.
+    SetRuntimePrefs { conversation_id: String, prefs: RuntimePreferences },
     // What the web's task menu does (`work/taskActions.ts`).
     /// A name the person gives it; empty lets Neko name it again.
     Rename { task_id: String, title: String },
@@ -108,6 +108,14 @@ pub enum Call {
     ClearFinished { workspace_id: Option<String> },
     // Neko's own conversation.
     Ask { text: String },
+    /// Stops the reply and sends this first (`InterruptAndSendMessage`, the web's ⌘↵).
+    AskNow { text: String },
+    /// Takes back a message that waits behind a reply.
+    DiscardQueued { message_id: String },
+    /// "Send now" on a queued message: it leaves the queue, then the reply stops and it goes first.
+    SteerQueued { message_id: String, text: String },
+    /// An edited queued message: the old one leaves the queue and the new words queue behind the reply.
+    EditQueued { message_id: String, text: String },
     StopAsking { turn_id: String },
     DecideChatTool { turn_id: String, call_id: String, approve: bool },
     DecideChatAction { message_id: String, action_id: String, accept: bool },
@@ -148,6 +156,15 @@ pub enum Call {
 }
 
 impl Call {
+    /// The request that follows `wire()` when a call is two steps (the old message leaves the queue, then the new one goes).
+    pub fn then(&self) -> Option<Request> {
+        match self {
+            Call::SteerQueued { text, .. } => Some(Request::Workbench(Command::InterruptAndSendMessage { text: text.clone(), workspace_id: None })),
+            Call::EditQueued { text, .. } => Some(Request::Workbench(Command::SendMessage { text: text.clone(), workspace_id: None })),
+            _ => None,
+        }
+    }
+
     /// Whether this only fetches.
     pub fn reads(&self) -> bool {
         matches!(self, Call::Refresh | Call::Checkpoints { .. } | Call::CheckpointDiff { .. } | Call::TaskFolder { .. } | Call::ArtifactFile { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } | Call::SignedWebUrl { .. } | Call::PluginViewers | Call::PluginPages | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::ModelsRefresh | Call::RoutinesFull | Call::CalendarEvents { .. } | Call::PhoneSettings | Call::Appearance | Call::Quota | Call::Plugins)
@@ -214,7 +231,7 @@ impl Call {
                 conversation_id: format!("task:{task_id}"),
                 preferences: RuntimePreferences { provider: Some(provider).filter(|p| !p.is_empty()), model: Some(model).filter(|m| !m.is_empty()), ..RuntimePreferences::default() },
             }),
-            Call::SetRuntimePrefs { task_id, prefs } => Request::Workbench(Command::SetConversationRuntime { conversation_id: format!("task:{task_id}"), preferences: prefs }),
+            Call::SetRuntimePrefs { conversation_id, prefs } => Request::Workbench(Command::SetConversationRuntime { conversation_id, preferences: prefs }),
             Call::Rename { task_id, title } => Request::Workbench(Command::RenameTask { task_id, title }),
             Call::Publish { task_id } => Request::Workbench(Command::PublishTask { task_id }),
             Call::RunNext { task_id } => Request::Workbench(Command::PrioritizeTask { task_id }),
@@ -224,6 +241,8 @@ impl Call {
             Call::StopAll => Request::Workbench(Command::CancelAllWork),
             Call::ClearFinished { workspace_id } => Request::Workbench(Command::ClearFinishedTasks { workspace_id }),
             Call::Ask { text } => Request::Workbench(Command::SendMessage { text, workspace_id: None }),
+            Call::AskNow { text } => Request::Workbench(Command::InterruptAndSendMessage { text, workspace_id: None }),
+            Call::DiscardQueued { message_id } | Call::SteerQueued { message_id, .. } | Call::EditQueued { message_id, .. } => Request::Workbench(Command::DiscardQueuedMessage { message_id }),
             Call::StopAsking { turn_id } => Request::Workbench(Command::CancelChat { turn_id }),
             Call::DecideChatTool { turn_id, call_id, approve } => Request::Workbench(Command::DecideChatTool { turn_id, call_id, approve }),
             Call::DecideChatAction { message_id, action_id, accept } => Request::Workbench(Command::DecideChatAction { message_id, action_id, accept }),

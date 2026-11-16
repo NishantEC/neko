@@ -54,7 +54,22 @@ pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
         }
     };
     // One calm line when a button could not do its job (opening the web UI while Neko is not running).
-    let mut region = col().key("session-region").grow(1.0).min_w(0.0).h_full().my(8.0).mx(2.0).radius(t.radius.window).fill(t.surface.window).child(col().w_full().grow(1.0).min_h(0.0).child(inner));
+    let mut region = col()
+        .key("session-region")
+        .grow(1.0)
+        .min_w(0.0)
+        .h_full()
+        .my(8.0)
+        .mx(2.0)
+        .radius(t.radius.window)
+        .fill(t.surface.window)
+        // Files dropped anywhere on the region are attached to the open session's reply box (or Home's new-session box).
+        .on_drop_files(|s: &mut App, files: &[std::path::PathBuf], _| s.drop_files(files))
+        .on_drop_hover(|s: &mut App, over: bool, _| s.compose.drop_over = over)
+        .child(col().w_full().grow(1.0).min_h(0.0).child(inner));
+    if let Some(overlay) = super::compose::drop_overlay(s, t) {
+        region = region.child(overlay);
+    }
     if let Some(notice) = &s.notice {
         region = region.child(text(notice.clone()).key("notice").font(t.ty.meta).color(t.text.muted).px(20.0).py(6.0).live_region(rune::LiveRegion::Polite));
     }
@@ -348,8 +363,8 @@ fn composer(s: &App, t: &Neko, layer: &mut Vec<El>, ready: bool) -> El {
     let can_send = ready && !s.composer.text.trim().is_empty();
     let send = super::composer::send(t, "send", &format!("Send, {}", mode_label(s)), &format!("Send, {}", mode_label(s)), can_send, false, |s: &mut App| s.send_composer(None));
     let model = super::runtime::chip(s, t);
-    let attach = super::composer::attach(t, "composer-attach", App::attach_to_reply);
-    text_column(super::composer::card(t, "composer-card", field, vec![attach], vec![steer, model], send).mb(16.0)).key("composer")
+    let attach = super::composer::attach(t, "composer-attach", crate::compose::Dest::Reply);
+    text_column(super::composer::card(t, "composer-card", super::composer::with_chips(s, t, crate::compose::Dest::Reply, field), vec![attach], vec![steer, model], send).mb(16.0)).key("composer")
 }
 
 /// What Send does right now, in words (for its tooltip and name).

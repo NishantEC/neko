@@ -490,10 +490,14 @@ impl App {
     /// Sends the composer's text: queued with its mode while the task is in a turn, else as a
     /// reply. The text stays until the daemon takes it (`TaskComposer`).
     pub fn send_composer(&mut self, as_mode: Option<DeliveryMode>) {
-        let text = self.composer.text.trim().to_owned();
-        if text.is_empty() {
+        if !self.has_payload(crate::compose::Dest::Reply) {
             return;
         }
+        if self.uploading(crate::compose::Dest::Reply) {
+            self.work.notice = Some("Wait for the files to finish uploading, then send.".to_owned());
+            return;
+        }
+        let text = self.composed(crate::compose::Dest::Reply, self.composer.text.trim());
         let Some(task) = self.detail().map(|d| d.task.clone()) else { return };
         self.work.notice = None;
         if in_turn(task.status) {
@@ -677,19 +681,6 @@ impl App {
         self.call(Call::Inbox);
     }
 
-    /// Sends the ask box's text to Neko.
-    pub fn ask_neko(&mut self) {
-        let text = self.ask.text.trim().to_owned();
-        if text.is_empty() {
-            return;
-        }
-        // Plan: the web's `homeText`, the plan-only instruction before the words (never before a slash command).
-        let text = if self.ask_plan && !text.starts_with('/') { format!("{PLAN_PREFIX}{text}") } else { text };
-        if self.work.busy.insert("ask".to_owned()) {
-            self.call(Call::Ask { text });
-        }
-    }
-
     /// Opens a task by id from a link in Neko's column (a handoff line).
     pub fn open_linked(&mut self, id: &str) {
         if self.summary.as_ref().is_some_and(|s| s.task(id).is_some()) {
@@ -704,7 +695,7 @@ impl App {
         // Whatever the answer, the write is no longer in flight.
         match call {
             Call::Reply { task_id, .. } => self.work.busy.remove(&format!("reply:{task_id}")),
-            Call::Ask { .. } => self.work.busy.remove("ask"),
+            Call::Ask { .. } | Call::AskNow { .. } => self.work.busy.remove("ask"),
             Call::CreateTask { .. } => self.work.busy.remove("new"),
             _ => false,
         };
@@ -726,13 +717,14 @@ impl App {
                 // The answer to a write is the new workbench; a text the daemon took leaves the box.
                 match call {
                     Call::Enqueue { task_id, text, .. } | Call::Reply { task_id, text } => {
-                        if self.selected.as_deref() == Some(task_id) && self.composer.text.trim() == text {
+                        if self.selected.as_deref() == Some(task_id) && self.composed(crate::compose::Dest::Reply, self.composer.text.trim()) == *text {
                             self.composer.clear();
+                            self.clear_chips(crate::compose::Dest::Reply);
                         }
                         self.work.drafts.remove(task_id);
                         self.work.attempt = None;
                     }
-                    Call::Ask { text } if self.ask.text.trim() == text => self.ask.clear(),
+                    Call::Ask { text } | Call::AskNow { text } => self.ask_taken(text),
                     Call::Undo { .. } | Call::Redo { .. } => {
                         self.work.undoing = false;
                         self.work.open_run = None;
@@ -741,9 +733,9 @@ impl App {
                         self.work.diff_load.clear();
                     }
                     Call::CreateTask { .. } => created = self.created_task(&summary),
-                    Call::SetRuntimePrefs { task_id, prefs } => {
+                    Call::SetRuntimePrefs { conversation_id, prefs } => {
                         // The web checks the daemon confirmed exactly what was sent before it says so.
-                        let confirmed = summary.detail.as_ref().filter(|d| &d.task.id == task_id).map(|d| crate::runtime_pick::clean(&d.prefs));
+                        let confirmed = summary.pins.get(conversation_id).map(|(p, _)| crate::runtime_pick::clean(p)).or_else(|| Some(Default::default()));
                         self.runtime.saving = false;
                         if confirmed.as_ref().is_none_or(|c| c == prefs) {
                             self.runtime.saved = prefs.clone();
@@ -796,7 +788,8 @@ impl App {
             Reply::SignedUrl { route, url } => {
                 if route == crate::link::http::ROUTE {
                     self.http = crate::link::http::Http::from_signed_url(&url);
-                    return false;
+                    self.flush_http();
+                    return true;
                 }
                 self.web_view.signed(&route, url);
                 true

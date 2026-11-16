@@ -54,6 +54,24 @@ pub fn save_png_in(dir: &Path, bytes: &[u8]) -> std::io::Result<PathBuf> {
     Ok(path)
 }
 
+/// How big a file is, when it is a file we may read.
+pub fn size_of(path: &Path) -> Option<u64> {
+    std::fs::metadata(path).ok().filter(|m| m.is_file()).map(|m| m.len())
+}
+
+/// A file's bytes for the daemon's `/api/attachments` (at most 32 MB, never empty).
+pub fn read_for_upload(path: &Path) -> Result<Vec<u8>, String> {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "That file".to_owned());
+    let size = size_of(path).ok_or_else(|| format!("Couldn’t read {name}."))?;
+    if size == 0 {
+        return Err(format!("{name} is empty."));
+    }
+    if size as usize > crate::link::http::MAX_ATTACHMENT_BYTES {
+        return Err("Choose a file under 32 MB.".to_owned());
+    }
+    std::fs::read(path).map_err(|_| format!("Couldn’t read {name}."))
+}
+
 /// The Markdown the message carries for a kept image.
 pub fn reference(path: &Path) -> String {
     // A space or a bracket in the folder's name would end the Markdown link early.

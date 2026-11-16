@@ -200,6 +200,10 @@ pub struct App {
     pub pages: Pages,
     /// The context panel: its tabs, the loaded file or artifact, the viewers' state.
     pub panel: crate::panel::Panel,
+    /// The right-click menu on a message: which, and where.
+    pub msg_menu: Option<crate::view::MsgMenu>,
+    /// What the composers keep: the `/` and `@` popover, files attached, the queue tray's edit (`compose.rs`).
+    pub compose: crate::compose::ComposeUi,
     /// "All sessions": its search, cursor and filters (`all_sessions.rs`).
     pub all: crate::all_sessions::AllState,
     /// The model chip's popover (`runtime_pick.rs`, `view/runtime.rs`).
@@ -294,6 +298,8 @@ impl Default for App {
             inbox_menu: None,
             pages: Pages::default(),
             panel: crate::panel::Panel::standard(),
+            msg_menu: None,
+            compose: crate::compose::ComposeUi::default(),
             all: crate::all_sessions::AllState::default(),
             runtime: crate::runtime_pick::RuntimeUi::default(),
             http: None,

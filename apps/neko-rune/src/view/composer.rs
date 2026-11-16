@@ -7,6 +7,7 @@
 use rune::{Color, El, Icon, KeyEvent, TextEdit, TextStyle, col, el, icon, row, text};
 
 use crate::app::App;
+use crate::compose::{ChipState, Dest, size_words};
 use crate::icons;
 use crate::theme::Neko;
 
@@ -33,20 +34,74 @@ pub fn square(t: &Neko, glyph: &'static Icon, label: &str, key: &str) -> El {
     row().key(key.to_owned()).role("button").label(label).help(label).focusable(true).size(32.0, 32.0).center().radius(t.radius.control).hover(t.surface.hover).focus_ring(2.0, 2.0, t.surface.ring).child(icon(glyph, 16.0).color(t.text.muted).a11y_hidden())
 }
 
-/// The "+" that opens a file dialog for an image and hands the path to `attach`.
-pub fn attach(t: &Neko, key: &str, attach: fn(&mut App, &std::path::Path)) -> El {
-    square(t, &icons::PLUS, "Attach an image", key).on_press_tx(move |_: &mut App, tx: &mut rune::Tx| {
-        tx.open_file(rune::FileDialogOptions { title: "Attach an image".into(), ..Default::default() }.filter("Images", &["png", "jpg", "jpeg", "gif", "webp"]), move |s: &mut App, answer, _| {
+/// The "+" that opens a file dialog for any file: each file chosen becomes a chip above the text and is uploaded.
+pub fn attach(t: &Neko, key: &str, dest: Dest) -> El {
+    square(t, &icons::PLUS, "Attach a file", key).on_press_tx(move |_: &mut App, tx: &mut rune::Tx| {
+        tx.open_file(rune::FileDialogOptions { title: "Attach a file".into(), ..Default::default() }, move |s: &mut App, answer, _| {
             if let Ok(Some(path)) = answer {
-                attach(s, &path);
+                s.attach_files(dest, &[path]);
             }
         });
     })
 }
 
-/// What the composer's agent runs on, as a quiet chip: 12.5 muted.
-pub fn chip(t: &Neko, key: &str, words: &str) -> El {
-    row().key(key.to_owned()).h(32.0).px(8.0).center_y().child(text(words.to_owned()).font(t.ty.meta).color(t.text.muted).truncate().min_w(0.0).a11y_hidden())
+/// The files attached to a draft, as chips above its text: an icon, the name, the size and a x. A file still on its way says
+/// so; one the daemon refused says why, in coral, and can be taken away.
+pub fn chips(s: &App, t: &Neko, dest: Dest) -> Option<El> {
+    let list = s.chips(dest);
+    if list.is_empty() {
+        return None;
+    }
+    let mut r = row().key(format!("chips-{dest:?}").to_lowercase()).w_full().gap(6.0).wrap().px(2.0).pb(4.0);
+    for chip in list {
+        let id = chip.id;
+        let failed = matches!(chip.state, ChipState::Failed(_));
+        let words = match &chip.state {
+            ChipState::Uploading => "Uploading…".to_owned(),
+            ChipState::Ready { .. } => size_words(chip.size),
+            ChipState::Failed(why) => why.clone(),
+        };
+        r = r.child(
+            row()
+                .key(format!("chip-{id}"))
+                .role("group")
+                .label(format!("{}, {words}", chip.name))
+                .h(28.0)
+                .pl(8.0)
+                .pr(2.0)
+                .gap(6.0)
+                .center_y()
+                .radius(8.0)
+                .fill(t.text.base.alpha(0.04))
+                .border(1.0, if failed { t.meaning.coral.alpha(0.5) } else { t.surface.field_border })
+                .child(icon(&icons::FILE, 14.0).color(if failed { t.meaning.coral } else { t.text.muted }).a11y_hidden())
+                .child(text(chip.name.clone()).key(format!("chip-name-{id}")).font(t.ty.meta).color(t.text.base).truncate().max_w(180.0).min_w(0.0).a11y_hidden())
+                .child(text(words).key(format!("chip-size-{id}")).font(t.ty.id).color(if failed { t.meaning.coral } else { t.text.faint }).truncate().max_w(220.0).a11y_hidden())
+                .child(
+                    row()
+                        .key(format!("chip-x-{id}"))
+                        .role("button")
+                        .label(format!("Remove {}", chip.name))
+                        .focusable(true)
+                        .size(24.0, 24.0)
+                        .center()
+                        .radius(6.0)
+                        .hover(t.surface.hover)
+                        .focus_ring(2.0, 2.0, t.surface.ring)
+                        .on_press(move |s: &mut App| s.remove_chip(dest, id))
+                        .child(icon(&icons::CLOSE_SMALL, 14.0).color(t.text.muted).a11y_hidden()),
+                ),
+        );
+    }
+    Some(r)
+}
+
+/// The text area with the files above it.
+pub fn with_chips(s: &App, t: &Neko, dest: Dest, field: El) -> El {
+    match chips(s, t, dest) {
+        Some(c) => col().w_full().child(c).child(field),
+        None => field,
+    }
 }
 
 /// One half of a two-way control (Ask/Plan, Plan/Build).

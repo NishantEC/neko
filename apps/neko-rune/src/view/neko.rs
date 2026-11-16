@@ -5,7 +5,7 @@
 //! column's first group; this column does not repeat them (docs/decisions/0002).
 
 use neko_protocol::workbench::TaskStatus;
-use rune::{El, Key, KeyEvent, ScrollSpec, col, el, icon, row, text};
+use rune::{El, KeyEvent, ScrollSpec, col, el, icon, row, text};
 
 use super::turn::{self, Where};
 use super::{flat_band, icon_button, quiet_button};
@@ -367,13 +367,7 @@ fn el_grow() -> El {
 /// above while it is written, with a Stop.
 fn foot(s: &App, t: &Neko, win_h: f32) -> El {
     let replying = s.summary.as_ref().is_some_and(|m| m.replying());
-    let ask = super::composer::field(t, &s.ask, "ask-box", "ask", "Ask Neko", "Ask Neko…", if win_h <= SHORT_WINDOW { 4 } else { 6 }, |s: &mut App| &mut s.ask, |s: &mut App, ev: &KeyEvent| {
-        if ev.key != Key::Enter || ev.mods.shift || ev.mods.alt || s.ask.is_composing() {
-            return false;
-        }
-        s.ask_neko();
-        true
-    });
+    let ask = super::composer::field(t, &s.ask, "ask-box", "ask", "Ask Neko", "Ask Neko…", if win_h <= SHORT_WINDOW { 4 } else { 6 }, |s: &mut App| &mut s.ask, |s: &mut App, ev: &KeyEvent| s.ask_key(ev));
     let plan = s.ask_plan;
     let mode = super::composer::segmented(
         t,
@@ -382,11 +376,19 @@ fn foot(s: &App, t: &Neko, win_h: f32) -> El {
         super::composer::seg(t, "ask-mode-ask", "Ask", "Ask: Neko answers now", "Ask: Neko answers now", !plan, |s: &mut App| s.ask_plan = false),
         super::composer::seg(t, "ask-mode-plan", "Plan", "Plan: Neko proposes a task with a plan for your approval, without changing anything", "Plan: Neko proposes a task with a plan for your approval, without changing anything", plan, |s: &mut App| s.ask_plan = true),
     );
-    let model = super::composer::chip(t, "ask-model", &s.summary.as_ref().map(|m| m.home_runtime.clone()).unwrap_or_default());
-    let can = !s.ask.text.trim().is_empty() && !s.work.busy.contains("ask");
+    let model = super::runtime::ask_chip(s, t);
+    let can = s.has_payload(crate::compose::Dest::Ask) && !s.work.busy.contains("ask");
     let send = super::composer::send(t, "ask-send", "Ask Neko", "Ask Neko (Enter)", can, false, |s: &mut App| s.ask_neko());
-    let card = super::composer::card(t, "ask-card", ask, vec![super::composer::attach(t, "ask-attach", App::attach_to_ask)], vec![mode, model], send);
-    let mut c = col().key("neko-foot").w_full().px(12.0).pb(12.0).gap(8.0).child(card);
+    let ask = super::composer::with_chips(s, t, crate::compose::Dest::Ask, ask);
+    let card = super::composer::card(t, "ask-card", ask, vec![super::composer::attach(t, "ask-attach", crate::compose::Dest::Ask)], vec![mode, model], send);
+    let mut c = col().key("neko-foot").w_full().px(12.0).pb(12.0).gap(8.0);
+    if let Some(tray) = super::compose::tray(s, t) {
+        c = c.child(tray);
+    }
+    c = c.child(card);
+    if let Some(error) = s.compose.error.as_ref() {
+        c = c.child(text(error.clone()).key("ask-error").font(t.ty.meta).color(t.meaning.amber).wrap().live_region(rune::LiveRegion::Polite));
+    }
     if replying {
         let turn = s.summary.as_ref().and_then(|m| m.conversation.last()).map(|m| m.id.clone()).unwrap_or_default();
         c = c.child(row().gap(8.0).center_y().child(text("Neko is replying…").font(t.ty.meta).color(t.text.muted).grow(1.0)).child(quiet_button("Stop", "ask-stop", t, move |s: &mut App| s.call(Call::StopAsking { turn_id: turn.clone() }))));

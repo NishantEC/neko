@@ -163,11 +163,11 @@ fn the_model_chip_opens_a_popover_and_apply_sends_every_pin_the_web_sends() {
     click(&mut rt, "runtime-effort-high");
     rt.state.outbox.clear();
     click(&mut rt, "runtime-apply");
-    let Some(Call::SetRuntimePrefs { task_id, prefs }) = rt.state.outbox.last().cloned() else { panic!("{:?}", rt.state.outbox) };
-    assert_eq!(task_id, "t6");
+    let Some(Call::SetRuntimePrefs { conversation_id, prefs }) = rt.state.outbox.last().cloned() else { panic!("{:?}", rt.state.outbox) };
+    assert_eq!(conversation_id, "task:t6");
     assert_eq!((prefs.provider.as_deref(), prefs.model.as_deref(), prefs.reasoning_effort.as_deref(), prefs.service_tier.clone(), prefs.allow_paid_speed), (Some("claude"), Some("opus"), Some("high"), None, false));
     // On the wire it is the web's request: SetConversationRuntime on `task:<id>`.
-    let wire = serde_json::to_value(Call::SetRuntimePrefs { task_id: "t6".into(), prefs }.wire()).unwrap();
+    let wire = serde_json::to_value(Call::SetRuntimePrefs { conversation_id: "task:t6".into(), prefs }.wire()).unwrap();
     assert_eq!(wire["Workbench"]["SetConversationRuntime"]["conversation_id"], "task:t6");
     assert_eq!(wire["Workbench"]["SetConversationRuntime"]["preferences"]["reasoning_effort"], "high");
     // The daemon refuses: its words are shown verbatim and the popover stays.
@@ -319,4 +319,231 @@ fn all_sessions_groups_by_stage_hides_failed_and_cancelled_until_asked_and_clear
     click_text(&mut rt, "Clear finished");
     assert!(rt.state.outbox.is_empty(), "Clear finished asks first");
     assert!(has_key(&rt, "ask-yes") || has_text(&rt, "Nothing finished to clear."), "a dialog (or the calm line when there is nothing to clear)");
+}
+
+// ------------------------------------------------------------------------------------------------ 3. composer
+
+fn type_ask(rt: &mut Runtime<App>, words: &str) {
+    click(rt, "ask");
+    rt.update(|s, _| s.ask.replace_text(words));
+    settle(rt);
+}
+
+#[test]
+fn a_slash_opens_the_popover_with_the_webs_commands_32_point_rows_and_at_most_eight_visible() {
+    let mut rt = runtime(scene("live"));
+    type_ask(&mut rt, "/");
+    assert!(has_key(&rt, "ask-popover"), "the popover opens above the ask box");
+    let rows = rt.state.ask_rows();
+    assert_eq!(rows.len(), 12, "/plan and the web's eleven commands");
+    assert_eq!(rows[0].title, "/plan");
+    let first = rect(&rt, "ask-pop-0");
+    assert_eq!(first[3], 32.0, "32 point rows");
+    let list = rect(&rt, "ask-popover-scroll");
+    assert!(list[3] <= 8.0 * 32.0 + 0.5, "at most 8 rows show: {list:?}");
+    let card = rect(&rt, "ask-card");
+    assert!(list[1] + list[3] <= card[1] + 1.0, "it sits above the composer: {list:?} {card:?}");
+    // Typing narrows.
+    rt.update(|s, _| s.ask.replace_text("/re"));
+    settle(&mut rt);
+    assert_eq!(rt.state.ask_rows().iter().map(|r| r.title.as_str()).collect::<Vec<_>>(), ["/remember", "/recall"]);
+}
+
+#[test]
+fn arrows_choose_enter_accepts_and_escape_closes_and_a_command_that_takes_an_argument_only_fills_it_in() {
+    let mut rt = runtime(scene("live"));
+    type_ask(&mut rt, "/re");
+    press(&mut rt, Key::Down, Mods::default());
+    assert_eq!(rt.state.compose.index, 1);
+    press(&mut rt, Key::Up, Mods::default());
+    press(&mut rt, Key::Enter, Mods::default());
+    assert_eq!(rt.state.ask.text, "/remember ", "it takes an argument: it fills the box and waits");
+    assert!(rt.state.outbox.is_empty());
+    // /plan switches Plan on and empties the box.
+    type_ask(&mut rt, "/pl");
+    press(&mut rt, Key::Tab, Mods::default());
+    assert!(rt.state.ask_plan && rt.state.ask.text.is_empty());
+    // Esc closes the popover until the draft changes.
+    type_ask(&mut rt, "/");
+    press(&mut rt, Key::Escape, Mods::default());
+    assert!(!has_key(&rt, "ask-popover"));
+    // A command that runs: /tickets opens All sessions.
+    type_ask(&mut rt, "/tickets");
+    press(&mut rt, Key::Enter, Mods::default());
+    assert!(rt.state.ask.text.is_empty());
+    assert_eq!(rt.state.view, Some(neko_rune::views::FullView::AllSessions));
+}
+
+#[test]
+fn slash_stop_asks_before_it_stops() {
+    let mut rt = runtime(scene("live"));
+    type_ask(&mut rt, "/stop");
+    press(&mut rt, Key::Enter, Mods::default());
+    press(&mut rt, Key::Enter, Mods::default());
+    assert!(rt.state.dialog.is_some() || has_text(&rt, "Nothing is running."), "a dialog, or the calm line");
+    assert!(!rt.state.outbox.contains(&Call::StopAll), "nothing was stopped without a yes");
+}
+
+#[test]
+fn a_mention_lists_workspaces_tools_and_files_and_replaces_the_word() {
+    let mut rt = runtime(scene("live"));
+    rt.update(|s, _| {
+        let m = s.summary.as_mut().unwrap();
+        m.connections = vec![("c1".into(), "Linear".into(), 12)];
+        s.compose.files = vec![neko_rune::link::http::MentionFile { path: "/p/readme.md".into(), name: "readme.md".into(), location: "~/p".into() }];
+    });
+    type_ask(&mut rt, "look at @");
+    let titles: Vec<String> = rt.state.ask_rows().into_iter().map(|r| format!("{}|{}", r.title, r.detail)).collect();
+    assert!(titles.iter().any(|t| t.ends_with("|Workspace")), "{titles:?}");
+    assert!(titles.contains(&"Linear|12 tools".to_owned()), "{titles:?}");
+    assert!(titles.contains(&"readme.md|~/p".to_owned()), "{titles:?}");
+    let at = rt.state.ask_rows().iter().position(|r| r.title == "Linear").unwrap();
+    click(&mut rt, &format!("ask-pop-{at}"));
+    assert_eq!(rt.state.ask.text, "look at @Linear ");
+}
+
+#[test]
+fn files_are_attached_as_chips_uploaded_over_http_and_referenced_when_sent() {
+    let dir = std::env::temp_dir().join(format!("neko-rune-batch-a-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("notes.txt");
+    std::fs::write(&file, b"hello").unwrap();
+    let mut rt = runtime(scene("running"));
+    rt.update(|s, _| s.http = Some(neko_rune::link::http::Http::new(1, &"0".repeat(64))));
+    // Dropping a file anywhere on the session region shows the overlay, then attaches.
+    rt.drag_files(vec![file.clone()], Some((600.0, 300.0)));
+    rt.frame(1.0 / 60.0);
+    rt.frame(1.0 / 60.0);
+    assert!(has_key(&rt, "drop-overlay"), "the overlay shows while files are dragged over");
+    let frame = rect(&rt, "drop-frame");
+    let region = rect(&rt, "session-region");
+    assert!((frame[0] - region[0] - 12.0).abs() < 1.0 && (frame[1] - region[1] - 12.0).abs() < 1.0, "inset 12: {frame:?} {region:?}");
+    assert!(has_text(&rt, "Drop to attach"));
+    rt.drop_files(vec![file.clone()], Some((600.0, 300.0)));
+    settle(&mut rt);
+    assert!(!has_key(&rt, "drop-overlay"));
+    let chips = rt.state.chips(neko_rune::compose::Dest::Reply).to_vec();
+    assert_eq!(chips.len(), 1);
+    assert_eq!((chips[0].name.as_str(), chips[0].size), ("notes.txt", 5));
+    assert!(has_text(&rt, "notes.txt") && has_text(&rt, "Uploading…"));
+    assert!(matches!(rt.state.compose.asked.first(), Some(neko_rune::compose::HttpWork::Upload { name, .. }) if name == "notes.txt"), "{:?}", rt.state.compose.asked);
+    // Sending waits for the upload.
+    rt.update(|s, _| s.composer.replace_text("see the notes"));
+    rt.state.outbox.clear();
+    rt.update(|s, _| s.send_composer(None));
+    assert!(rt.state.outbox.is_empty(), "not while a file is on its way");
+    // The daemon keeps it: the chip is ready, and the reference joins the message.
+    let id = chips[0].id;
+    rt.update(|s, _| {
+        s.http_done(neko_rune::compose::HttpDone::Uploaded { dest: neko_rune::compose::Dest::Reply, id, result: Ok(neko_rune::link::http::Kept { name: "notes.txt".into(), reference: "[notes.txt](file:///a/notes.txt)".into(), is_image: false }) });
+    });
+    settle(&mut rt);
+    assert!(has_text(&rt, "5 B"));
+    rt.update(|s, _| s.send_composer(None));
+    let Some(Call::Enqueue { text, .. }) = rt.state.outbox.last().cloned() else { panic!("{:?}", rt.state.outbox) };
+    assert_eq!(text, "see the notes\n[notes.txt](file:///a/notes.txt)");
+    // The x takes a chip away.
+    rt.update(|s, _| s.attach_files(neko_rune::compose::Dest::Reply, std::slice::from_ref(&file)));
+    settle(&mut rt);
+    let second = rt.state.chips(neko_rune::compose::Dest::Reply).iter().map(|c| c.id).max().unwrap();
+    click(&mut rt, &format!("chip-x-{second}"));
+    assert!(rt.state.chips(neko_rune::compose::Dest::Reply).iter().all(|c| c.id != second));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+fn with_queued(app: &mut App) {
+    scene("live")(app);
+    let m = app.summary.as_mut().unwrap();
+    for (id, text) in [("q1", "first thing"), ("q2", "second thing")] {
+        let message: neko_protocol::workbench::ChatMessage = serde_json::from_value(serde_json::json!({
+            "id": id, "at_ms": 1, "role": "user", "parts": [{"type": "text", "text": text}], "queued": true,
+        }))
+        .unwrap();
+        m.conversation.push(message);
+    }
+}
+
+#[test]
+fn queued_messages_show_hover_actions_edit_in_place_send_now_and_cancel() {
+    let mut rt = runtime(with_queued);
+    assert!(has_key(&rt, "queue-tray") && has_text(&rt, "first thing") && has_text(&rt, "second thing"));
+    click(&mut rt, "queue-cancel-q1");
+    assert_eq!(rt.state.outbox.last(), Some(&Call::DiscardQueued { message_id: "q1".into() }));
+    click(&mut rt, "queue-send-q2");
+    assert_eq!(rt.state.outbox.last(), Some(&Call::SteerQueued { message_id: "q2".into(), text: "second thing".into() }));
+    // Edit turns the row into a field; Enter queues the new words, Esc keeps the old ones.
+    click(&mut rt, "queue-edit-q1");
+    assert!(has_key(&rt, "queue-edit"));
+    rt.update(|s, _| s.compose.editing.as_mut().unwrap().1.replace_text("first thing, edited"));
+    settle(&mut rt);
+    press(&mut rt, Key::Enter, Mods::default());
+    assert_eq!(rt.state.outbox.last(), Some(&Call::EditQueued { message_id: "q1".into(), text: "first thing, edited".into() }));
+    click(&mut rt, "queue-edit-q1");
+    press(&mut rt, Key::Escape, Mods::default());
+    assert!(!has_key(&rt, "queue-edit") && rt.state.compose.editing.is_none());
+    // On the wire: Discard first, then the second request.
+    let wire = serde_json::to_value(Call::SteerQueued { message_id: "q2".into(), text: "t".into() }.then().unwrap()).unwrap();
+    assert_eq!(wire["Workbench"]["InterruptAndSendMessage"]["text"], "t");
+}
+
+#[test]
+fn alt_up_edits_the_last_queued_message_and_command_return_stops_the_reply_and_sends() {
+    let mut rt = runtime(with_queued);
+    click(&mut rt, "ask");
+    let ev = KeyEvent { key: Key::Up, mods: Mods { alt: true, ..Mods::default() } };
+    rt.update(|s, _| assert!(s.ask_key(&ev)));
+    assert_eq!(rt.state.compose.editing.as_ref().map(|(id, e)| (id.as_str(), e.text.as_str())), Some(("q2", "second thing")), "the last one");
+    rt.update(|s, _| s.cancel_edit_queued());
+    rt.update(|s, _| s.ask.replace_text("do this first"));
+    let ev = KeyEvent { key: Key::Enter, mods: Mods { cmd: true, ..Mods::default() } };
+    rt.state.outbox.clear();
+    rt.update(|s, _| assert!(s.ask_key(&ev)));
+    assert_eq!(rt.state.outbox, vec![Call::AskNow { text: "do this first".into() }]);
+    let wire = serde_json::to_value(Call::AskNow { text: "x".into() }.wire()).unwrap();
+    assert!(wire["Workbench"]["InterruptAndSendMessage"].is_object());
+    // Plain Return queues (the daemon holds it behind the reply).
+    rt.update(|s, _| s.work.busy.clear());
+    rt.update(|s, _| s.ask.replace_text("and then this"));
+    rt.state.outbox.clear();
+    let ev = KeyEvent { key: Key::Enter, mods: Mods::default() };
+    rt.update(|s, _| assert!(s.ask_key(&ev)));
+    assert_eq!(rt.state.outbox, vec![Call::Ask { text: "and then this".into() }]);
+}
+
+#[test]
+fn the_right_click_menu_of_a_message_copies_quotes_edits_and_opens_the_task() {
+    let mut rt = runtime(scene("live"));
+    let user_key = rt.elements().into_iter().filter_map(|e| e.key).find(|k| k.starts_with("neko-user-")).expect("a message of yours in Neko's chat");
+    right_click(&mut rt, &user_key);
+    assert!(has_text(&rt, "Copy message") && has_text(&rt, "Quote in reply") && has_text(&rt, "Edit and send again"), "{:?}", texts(&rt));
+    click_text(&mut rt, "Quote in reply");
+    assert!(rt.state.ask.text.starts_with("> "), "the quote goes into the composer: {:?}", rt.state.ask.text);
+    right_click(&mut rt, &user_key);
+    let words = rt.state.msg_menu.as_ref().unwrap().text.clone();
+    click_text(&mut rt, "Edit and send again");
+    assert_eq!(rt.state.ask.text, words);
+    // A crew line: Open the task.
+    let handoff = rt.elements().into_iter().filter_map(|e| e.key).find(|k| k.starts_with("handoff-")).expect("a crew line");
+    right_click(&mut rt, &handoff);
+    assert!(texts(&rt).iter().any(|t| t.starts_with("Open NEK-")), "{:?}", texts(&rt));
+    assert!(!has_text(&rt, "Edit and send again"), "not on a crew line");
+}
+
+#[test]
+fn a_finished_replys_csv_fence_is_a_table_and_a_3d_fence_names_the_artifact() {
+    let mut rt = runtime_sized(scene("live"), (1360.0, 1800.0));
+    rt.update(|s, _| {
+        let m = s.summary.as_mut().unwrap();
+        let message: neko_protocol::workbench::ChatMessage = serde_json::from_value(serde_json::json!({
+            "id": "fence", "at_ms": 9, "started_ms": 5, "role": "neko",
+            "parts": [{"type": "text", "text": "Numbers:\n\n```csv\nname,age\nada,36\ngrace,45\n```\n\nThe model:\n\n```3d\na1b2c3d4e5f6\n```\n\n```rust\nlet x = 1;\n```\n"}],
+        }))
+        .unwrap();
+        m.conversation.push(message);
+    });
+    settle(&mut rt);
+    assert!(has_key(&rt, "fence-table"), "csv is drawn through the table viewer");
+    assert!(has_text(&rt, "ada") && has_text(&rt, "grace") && has_text(&rt, "name"));
+    assert!(has_key(&rt, "fence-3d-a1b2c3d4e5f6"), "the 3d fence opens the artifact in the panel: {:?}", rt.elements().iter().filter_map(|e| e.key.clone()).filter(|k| k.contains("fence") || k.contains("code")).collect::<Vec<_>>());
+    assert!(has_text(&rt, "let x = 1;"), "an ordinary fence stays code");
 }

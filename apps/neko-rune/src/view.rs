@@ -10,6 +10,7 @@
 
 mod all;
 mod calendar;
+mod compose;
 mod composer;
 mod context;
 mod context_diff;
@@ -17,6 +18,7 @@ mod context_files;
 mod context_info;
 mod context_terminal;
 mod dialogs;
+mod fences;
 mod home;
 mod more;
 mod neko;
@@ -30,6 +32,7 @@ mod turn;
 mod ui;
 mod work;
 
+pub use compose::MsgMenu;
 pub use session::goal_body_cap;
 
 use rune::{Cursor, Cx, Drag, El, Phase, col, el, icon, row, text};
@@ -107,6 +110,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         window = window.child(neko::strip(s, &t).w(NEKO_STRIP).key("neko"));
     }
     palette::mount(s, &t, &mut layer);
+    compose::mount_popover(s, &t, &mut layer);
+    compose::mount_message_menu(s, &t, &mut layer);
     runtime::mount(s, &t, &mut layer);
     dialogs::mount(s, &t, &mut layer);
     crate::toasts::mount(s, &t, &mut layer);

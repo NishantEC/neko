@@ -197,6 +197,8 @@ fn composer(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         false
     });
 
+    let request = super::composer::with_chips(s, t, crate::compose::Dest::New, request);
+
     // Plan / Build.
     let seg = |label: &'static str, key: &'static str, mode: Mode| {
         super::composer::seg(t, key, label, &format!("{label}: {}", if mode == Mode::Plan { "plan first" } else { "start building" }), if mode == Mode::Plan { "Plan first, then wait for approval" } else { "Start building right away" }, f.mode == mode, move |s: &mut App| {
@@ -210,7 +212,7 @@ fn composer(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     let blocker = s.new_blocker();
     let can_send = blocker.is_none() && !f.busy;
     let send = super::composer::send(t, "new-start", "Send", "Send (⌘↩)", can_send, true, |s: &mut App| s.submit_new());
-    let attach = super::composer::attach(t, "new-attach", App::attach_to_new);
+    let attach = super::composer::attach(t, "new-attach", crate::compose::Dest::New);
 
     let mut card = super::composer::card(t, "home-composer", request, vec![attach, ws_menu.build(k, layer), rt_menu.build(k, layer)], vec![segmented, model_menu.build(k, layer)], send);
     let used = s.new_request.text.len();

@@ -117,7 +117,9 @@ pub fn tool_card(s: &App, t: &Neko, w: Where, tool: &Tool, turn_id: &str) -> El 
 }
 
 fn markdown(t: &Neko, source: &str, streaming: bool) -> El {
-    Markdown::new(source).streaming(streaming).selectable(true).build(&t.kit)
+    // A finished reply's csv, tsv and 3d fences are drawn as the web draws them (`fences.rs`).
+    let dark = t.dark;
+    Markdown::new(source).streaming(streaming).selectable(true).code_frame(move |card, frame| super::fences::frame(dark, card, frame)).build(&t.kit)
 }
 
 /// The task a conversation belongs to, for the hand-off lines between its agents.
@@ -145,6 +147,10 @@ pub fn handoff_row(t: &Neko, key: &str, from: &str, to: &str, task: &HandoffTask
         .hover(t.surface.hover)
         .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(move |s: &mut App| s.open_linked(&id))
+        .on_secondary_press({
+            let menu = (task.id.clone(), format!("{short}: {}", task.title));
+            move |s: &mut App, at, _| s.msg_menu = Some(super::MsgMenu { key: String::new(), text: String::new(), own: false, tasks: vec![menu.clone()], in_neko: true, at })
+        })
         .child(status_glyph(status_of(task.status), t, 12.0, Some("")))
         .child(text(short).font(rune::TextStyle { weight: 500.0, ..t.ty.meta }).color(t.meaning.iris).a11y_hidden());
     row()
@@ -183,7 +189,7 @@ pub fn turns_for(s: &App, t: &Neko, w: Where, list: &[Turn], task: Option<&Hando
         let gap_before = if w.compact { 10.0 } else if shows_speaker { 22.0 } else { 8.0 };
         let last = index + 1 == list.len();
         match turn.role {
-            Role::User => out.push(user_turn(t, w, turn).mt(gap_before)),
+            Role::User => out.push(user_turn(t, w, turn).mt(gap_before).on_secondary_press(menu_press(s, w, turn, true))),
             Role::System => {
                 for b in &turn.blocks {
                     if let Block::Status(line) = b {
@@ -214,11 +220,23 @@ pub fn turns_for(s: &App, t: &Neko, w: Where, list: &[Turn], task: Option<&Hando
                 } else if turn.pending && turn.blocks.is_empty() {
                     c = c.child(text("Thinking…").font(t.ty.meta).color(t.text.faint).px(4.0).live_region(rune::LiveRegion::Polite));
                 }
-                out.push(c);
+                out.push(c.on_secondary_press(menu_press(s, w, turn, false)));
             }
         }
     }
     out
+}
+
+/// The right-click on a message: Copy, Quote, Edit and send again (yours), and Open for the tasks it names.
+fn menu_press(s: &App, w: Where, turn: &Turn, own: bool) -> impl Fn(&mut App, rune::PointerPress, &mut rune::Tx) + 'static {
+    let tasks: Vec<(String, String)> = turn
+        .tickets
+        .iter()
+        .filter_map(|id| s.summary.as_ref().and_then(|m| m.task(id)))
+        .map(|t| (t.id.clone(), format!("{}: {}", short_id(&t.id), t.title)))
+        .collect();
+    let (key, text, in_neko) = (turn.id.clone(), turn.text(), w.compact);
+    move |s: &mut App, at, _| s.msg_menu = Some(super::MsgMenu { key: key.clone(), text: text.clone(), own, tasks: tasks.clone(), in_neko, at })
 }
 
 fn user_turn(t: &Neko, w: Where, turn: &Turn) -> El {
