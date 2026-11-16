@@ -102,7 +102,7 @@ pub fn entries(s: &App, id: &str) -> Vec<Entry> {
     if is_running(status) {
         items.push(entry(Act::Stop, "Stop"));
     } else if matches!(status, TaskStatus::AwaitingApproval | TaskStatus::ReadyForReview) {
-        items.push(entry(Act::Cancel, "Cancel task"));
+        items.push(Entry { danger: true, ..entry(Act::Cancel, "Cancel task") });
     }
     if is_finished(status) {
         items.push(Entry { danger: true, ..entry(Act::Delete, "Delete…") });
@@ -322,7 +322,7 @@ impl App {
             cancel: "Keep them".into(),
             destructive: true,
             call: Call::ClearFinished { workspace_id: workspace },
-            done: format!("Cleared {count} finished {}.", if count == 1 { "task" } else { "tasks" }),
+            done: "Cleared finished tasks.".to_owned(),
         });
     }
 }

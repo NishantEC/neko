@@ -111,15 +111,15 @@ pub enum Call {
     /// Remove every completed or cancelled task, in one workspace or all. Only built inside a confirm dialog.
     ClearFinished { workspace_id: Option<String> },
     // Neko's own conversation.
-    Ask { text: String },
+    Ask { text: String, workspace_id: Option<String> },
     /// Stops the reply and sends this first (`InterruptAndSendMessage`, the web's ⌘↵).
-    AskNow { text: String },
+    AskNow { text: String, workspace_id: Option<String> },
     /// Takes back a message that waits behind a reply.
     DiscardQueued { message_id: String },
     /// "Send now" on a queued message: it leaves the queue, then the reply stops and it goes first.
-    SteerQueued { message_id: String, text: String },
+    SteerQueued { message_id: String, text: String, workspace_id: Option<String> },
     /// An edited queued message: the old one leaves the queue and the new words queue behind the reply.
-    EditQueued { message_id: String, text: String },
+    EditQueued { message_id: String, text: String, workspace_id: Option<String> },
     StopAsking { turn_id: String },
     DecideChatTool { turn_id: String, call_id: String, approve: bool },
     DecideChatAction { message_id: String, action_id: String, accept: bool },
@@ -163,8 +163,9 @@ impl Call {
     /// The request that follows `wire()` when a call is two steps (the old message leaves the queue, then the new one goes).
     pub fn then(&self) -> Option<Request> {
         match self {
-            Call::SteerQueued { text, .. } => Some(Request::Workbench(Command::InterruptAndSendMessage { text: text.clone(), workspace_id: None })),
-            Call::EditQueued { text, .. } => Some(Request::Workbench(Command::SendMessage { text: text.clone(), workspace_id: None })),
+            Call::SteerQueued { text, workspace_id, .. } => Some(Request::Workbench(Command::InterruptAndSendMessage { text: text.clone(), workspace_id: workspace_id.clone() })),
+            // An edited message goes first and the old one is taken back second: if the second step fails the person has the words twice, never none.
+            Call::EditQueued { message_id, .. } => Some(Request::Workbench(Command::DiscardQueuedMessage { message_id: message_id.clone() })),
             _ => None,
         }
     }
@@ -246,9 +247,10 @@ impl Call {
             Call::Delete { task_id } => Request::Workbench(Command::DeleteTask { task_id }),
             Call::StopAll => Request::Workbench(Command::CancelAllWork),
             Call::ClearFinished { workspace_id } => Request::Workbench(Command::ClearFinishedTasks { workspace_id }),
-            Call::Ask { text } => Request::Workbench(Command::SendMessage { text, workspace_id: None }),
-            Call::AskNow { text } => Request::Workbench(Command::InterruptAndSendMessage { text, workspace_id: None }),
-            Call::DiscardQueued { message_id } | Call::SteerQueued { message_id, .. } | Call::EditQueued { message_id, .. } => Request::Workbench(Command::DiscardQueuedMessage { message_id }),
+            Call::Ask { text, workspace_id } => Request::Workbench(Command::SendMessage { text, workspace_id }),
+            Call::AskNow { text, workspace_id } => Request::Workbench(Command::InterruptAndSendMessage { text, workspace_id }),
+            Call::EditQueued { text, workspace_id, .. } => Request::Workbench(Command::SendMessage { text, workspace_id }),
+            Call::DiscardQueued { message_id } | Call::SteerQueued { message_id, .. } => Request::Workbench(Command::DiscardQueuedMessage { message_id }),
             Call::StopAsking { turn_id } => Request::Workbench(Command::CancelChat { turn_id }),
             Call::DecideChatTool { turn_id, call_id, approve } => Request::Workbench(Command::DecideChatTool { turn_id, call_id, approve }),
             Call::DecideChatAction { message_id, action_id, accept } => Request::Workbench(Command::DecideChatAction { message_id, action_id, accept }),
@@ -308,7 +310,7 @@ mod tests {
         assert!(Call::Checkpoints { task_id: "t".into() }.reads());
         assert!(!Call::Redo { task_id: "t".into() }.reads());
         assert!(!Call::MarkDigestRead.reads());
-        assert!(!Call::Ask { text: "x".into() }.reads());
+        assert!(!Call::Ask { text: "x".into(), workspace_id: None }.reads());
     }
 
     #[test]

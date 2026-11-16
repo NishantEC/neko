@@ -608,7 +608,8 @@ impl App {
         if text.is_empty() {
             self.call(Call::DiscardQueued { message_id: id });
         } else {
-            self.call(Call::EditQueued { message_id: id, text });
+            let workspace_id = self.scope().map(str::to_owned);
+            self.call(Call::EditQueued { message_id: id, text, workspace_id });
         }
     }
 
@@ -622,7 +623,8 @@ impl App {
 
     /// "Send now": the message leaves the queue and goes first, stopping the reply.
     pub fn steer_queued(&mut self, id: &str, text: &str) {
-        self.call(Call::SteerQueued { message_id: id.to_owned(), text: text.to_owned() });
+        let workspace_id = self.scope().map(str::to_owned);
+        self.call(Call::SteerQueued { message_id: id.to_owned(), text: text.to_owned(), workspace_id });
     }
 
     /// What the ask box sends: the words and their files, behind the Plan prefix when Plan is on (the web's `homeText`).
@@ -683,7 +685,8 @@ impl App {
         }
         self.compose.error = None;
         if self.work.busy.insert("ask".to_owned()) {
-            self.call(if interrupt { Call::AskNow { text: payload } } else { Call::Ask { text: payload } });
+            let workspace_id = self.scope().map(str::to_owned);
+            self.call(if interrupt { Call::AskNow { text: payload, workspace_id } } else { Call::Ask { text: payload, workspace_id } });
         }
     }
 

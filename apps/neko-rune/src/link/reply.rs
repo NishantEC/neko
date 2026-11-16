@@ -29,6 +29,26 @@ impl Wanted {
     }
 }
 
+/// A string that is never printed: the signed web address carries the token, so a `{:?}` of a reply cannot leak it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn new(text: String) -> Secret {
+        Secret(text)
+    }
+
+    pub fn reveal(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<hidden>")
+    }
+}
+
 /// An open Inbox item: what a routine or a goal needs from the person, with its default.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InboxItem {
@@ -79,7 +99,7 @@ pub enum Reply {
     /// An artifact's record.
     ArtifactInfo(neko_protocol::Artifact),
     /// The web UI's address at a route, signed in. The token is in it: never printed.
-    SignedUrl { route: String, url: String },
+    SignedUrl { route: String, url: Secret },
     PluginViewers(Vec<neko_protocol::PluginViewer>),
     PluginPages(Vec<neko_protocol::PluginPage>),
     /// What a session's own runs saved.
@@ -197,7 +217,7 @@ pub fn make(socket: &Path, call: &Call, open: Option<&str>) -> Reply {
         },
         Response::Artifact { artifact, .. } => Reply::ArtifactInfo(artifact),
         Response::SignedWebUrl { url } => match call {
-            Call::SignedWebUrl { route } => Reply::SignedUrl { route: route.clone(), url },
+            Call::SignedWebUrl { route } => Reply::SignedUrl { route: route.clone(), url: Secret(url) },
             _ => Reply::Done,
         },
         Response::PluginViewers { viewers } => Reply::PluginViewers(viewers),

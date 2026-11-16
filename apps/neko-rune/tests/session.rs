@@ -230,7 +230,8 @@ fn plan_approval_completion_and_stop_are_the_webs_actions() {
     let mut rt = runtime(scene("running"));
     click(&mut rt, "stop");
     assert!(has_text(&rt, "Stop “Fix the empty state on the board”?") && rt.state.outbox.is_empty(), "Stop asks first");
-    click(&mut rt, "confirm-yes");
+    // The one dialog every destructive press goes through (`task_actions.rs`).
+    click(&mut rt, "ask-yes");
     assert_eq!(rt.state.outbox, vec![Call::Stop { task_id: "t6".into() }]);
 }
 

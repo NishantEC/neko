@@ -745,7 +745,7 @@ fn sign_asked(rt: &mut Runtime<App>) {
     let asked: Vec<String> = rt.state.outbox.iter().filter_map(|c| if let Call::SignedWebUrl { route } = c { Some(route.clone()) } else { None }).collect();
     assert_eq!(asked.len(), 1, "the daemon is asked once: {:?}", rt.state.outbox);
     let call = Call::SignedWebUrl { route: asked[0].clone() };
-    let reply = neko_rune::link::Reply::SignedUrl { route: asked[0].clone(), url: format!("http://127.0.0.1:4747/?token={}#/{}", "ab".repeat(32), asked[0]) };
+    let reply = neko_rune::link::Reply::SignedUrl { route: asked[0].clone(), url: neko_rune::link::Secret::new(format!("http://127.0.0.1:4747/?token={}#/{}", "ab".repeat(32), asked[0])) };
     rt.update(|s, _| {
         s.apply_reply(&call, reply);
     });

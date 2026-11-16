@@ -470,19 +470,19 @@ fn queued_messages_show_hover_actions_edit_in_place_send_now_and_cancel() {
     click(&mut rt, "queue-cancel-q1");
     assert_eq!(rt.state.outbox.last(), Some(&Call::DiscardQueued { message_id: "q1".into() }));
     click(&mut rt, "queue-send-q2");
-    assert_eq!(rt.state.outbox.last(), Some(&Call::SteerQueued { message_id: "q2".into(), text: "second thing".into() }));
+    assert_eq!(rt.state.outbox.last(), Some(&Call::SteerQueued { message_id: "q2".into(), text: "second thing".into(), workspace_id: None }));
     // Edit turns the row into a field; Enter queues the new words, Esc keeps the old ones.
     click(&mut rt, "queue-edit-q1");
     assert!(has_key(&rt, "queue-edit"));
     rt.update(|s, _| s.compose.editing.as_mut().unwrap().1.replace_text("first thing, edited"));
     settle(&mut rt);
     press(&mut rt, Key::Enter, Mods::default());
-    assert_eq!(rt.state.outbox.last(), Some(&Call::EditQueued { message_id: "q1".into(), text: "first thing, edited".into() }));
+    assert_eq!(rt.state.outbox.last(), Some(&Call::EditQueued { message_id: "q1".into(), text: "first thing, edited".into(), workspace_id: None }));
     click(&mut rt, "queue-edit-q1");
     press(&mut rt, Key::Escape, Mods::default());
     assert!(!has_key(&rt, "queue-edit") && rt.state.compose.editing.is_none());
     // On the wire: Discard first, then the second request.
-    let wire = serde_json::to_value(Call::SteerQueued { message_id: "q2".into(), text: "t".into() }.then().unwrap()).unwrap();
+    let wire = serde_json::to_value(Call::SteerQueued { message_id: "q2".into(), text: "t".into(), workspace_id: None }.then().unwrap()).unwrap();
     assert_eq!(wire["Workbench"]["InterruptAndSendMessage"]["text"], "t");
 }
 
@@ -498,8 +498,8 @@ fn alt_up_edits_the_last_queued_message_and_command_return_stops_the_reply_and_s
     let ev = KeyEvent { key: Key::Enter, mods: Mods { cmd: true, ..Mods::default() } };
     rt.state.outbox.clear();
     rt.update(|s, _| assert!(s.ask_key(&ev)));
-    assert_eq!(rt.state.outbox, vec![Call::AskNow { text: "do this first".into() }]);
-    let wire = serde_json::to_value(Call::AskNow { text: "x".into() }.wire()).unwrap();
+    assert_eq!(rt.state.outbox, vec![Call::AskNow { text: "do this first".into(), workspace_id: None }]);
+    let wire = serde_json::to_value(Call::AskNow { text: "x".into(), workspace_id: None }.wire()).unwrap();
     assert!(wire["Workbench"]["InterruptAndSendMessage"].is_object());
     // Plain Return queues (the daemon holds it behind the reply).
     rt.update(|s, _| s.work.busy.clear());
@@ -507,7 +507,7 @@ fn alt_up_edits_the_last_queued_message_and_command_return_stops_the_reply_and_s
     rt.state.outbox.clear();
     let ev = KeyEvent { key: Key::Enter, mods: Mods::default() };
     rt.update(|s, _| assert!(s.ask_key(&ev)));
-    assert_eq!(rt.state.outbox, vec![Call::Ask { text: "and then this".into() }]);
+    assert_eq!(rt.state.outbox, vec![Call::Ask { text: "and then this".into(), workspace_id: None }]);
 }
 
 #[test]

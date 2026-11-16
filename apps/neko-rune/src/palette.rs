@@ -118,13 +118,9 @@ impl App {
             for e in crate::task_actions::entries(self, &id) {
                 let title = match e.act {
                     Act::Rename => "Rename selected session".to_owned(),
-                    Act::Retry => "Retry selected session from the start".to_owned(),
-                    Act::Publish => "Publish selected session’s pull request".to_owned(),
+                    // The web's palette offers only these (the ones `taskActions` gives a palette sentence).
+                    Act::Retry | Act::Publish | Act::LandOnMain | Act::MarkUnread | Act::CopyLink | Act::OpenWeb => continue,
                     Act::RunNext => "Run selected session next".to_owned(),
-                    Act::LandOnMain => e.label.clone(),
-                    Act::MarkUnread => "Mark selected session as unread".to_owned(),
-                    Act::CopyLink => continue,
-                    Act::OpenWeb => "Open selected session in the web UI".to_owned(),
                     Act::Stop => "Stop selected session".to_owned(),
                     Act::Cancel => "Cancel selected session".to_owned(),
                     Act::Delete => "Delete selected session".to_owned(),

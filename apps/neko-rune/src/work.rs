@@ -552,15 +552,9 @@ impl App {
         self.work.confirm = None;
     }
 
-    /// Stop the task: asks first (the web's "Stop it?").
-    pub fn ask_stop(&mut self, id: &str, title: &str) {
-        self.ask_confirm(Confirm {
-            title: format!("Stop “{title}”?"),
-            detail: "The agent stops where it is. Its files and worktree stay on disk, and you can start it again.".into(),
-            ok: "Stop it".into(),
-            cancel: "Keep working".into(),
-            call: Call::Stop { task_id: id.to_owned() },
-        });
+    /// Stop the task: asks first (the web's "Stop it?"), through the one dialog every destructive press uses.
+    pub fn ask_stop(&mut self, id: &str, _title: &str) {
+        self.do_action(id, crate::task_actions::Act::Stop);
     }
 
     /// "Undo this run": asks first, with what the undo will do.
@@ -745,7 +739,7 @@ impl App {
                         self.work.drafts.remove(task_id);
                         self.work.attempt = None;
                     }
-                    Call::Ask { text } | Call::AskNow { text } => self.ask_taken(text),
+                    Call::Ask { text, .. } | Call::AskNow { text, .. } => self.ask_taken(text),
                     Call::Undo { .. } | Call::Redo { .. } => {
                         self.work.undoing = false;
                         self.work.open_run = None;
@@ -807,6 +801,7 @@ impl App {
             Reply::ArtifactInfo(artifact) => self.artifact_info(artifact),
             Reply::TaskArtifacts { task_id, artifacts } => self.task_artifacts(&task_id, artifacts),
             Reply::SignedUrl { route, url } => {
+                let url = url.reveal().to_owned();
                 if route == crate::link::http::ROUTE {
                     self.http = crate::link::http::Http::from_signed_url(&url);
                     self.flush_http();
@@ -895,6 +890,11 @@ impl App {
                     Call::Models | Call::ModelsRefresh => {
                         self.runtime.loading = false;
                         self.runtime.catalog_error = Some(message);
+                    }
+                    Call::EditQueued { text, .. } => {
+                        // Never lose the words: they go back into the box with the daemon's reason.
+                        self.ask.replace_text(text.clone());
+                        self.compose.error = Some(format!("{message} Your text is back in the box."));
                     }
                     Call::Enqueue { .. } | Call::Reply { .. } => self.work.notice = Some(format!("{message} Your text is still here.")),
                     Call::CheckpointDiff { task_id, run } => {

@@ -123,7 +123,7 @@ fn plan_prefixes_neko_s_words_with_the_web_s_instruction_and_ask_does_not() {
     settle(&mut rt);
     click(&mut rt, "ask-mode-plan");
     click(&mut rt, "ask-send");
-    let sent = rt.state.outbox.iter().find_map(|c| if let neko_rune::link::Call::Ask { text } = c { Some(text.clone()) } else { None }).expect("asked");
+    let sent = rt.state.outbox.iter().find_map(|c| if let neko_rune::link::Call::Ask { text, .. } = c { Some(text.clone()) } else { None }).expect("asked");
     assert_eq!(sent, format!("{}tidy the board", neko_rune::work::PLAN_PREFIX));
 }
 

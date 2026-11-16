@@ -84,7 +84,7 @@ fn only_the_link_module_names_daemon_requests() {
 fn the_scan_cannot_be_sidestepped_by_renaming_or_by_an_early_test_module() {
     for (path, text) in crate_sources() {
         // A renamed or glob-imported request type would hide its uses from the scan.
-        for sneaky in ["Request as", "Command as", "Request::*", "Command::*", "CrewCommand as", "GoalCommand as", "CheckpointCommand as", "use neko_protocol::*"] {
+        for sneaky in ["Request as", "Command as", "Request::*", "Command::*", "CrewCommand as", "GoalCommand as", "CheckpointCommand as", "use neko_protocol::*", "Call as", "Call::*", "link::*"] {
             assert!(!production(&text).contains(sneaky), "{} uses `{sneaky}`, which hides requests from the allow-list scan", path.display());
         }
         // Everything after the first `#[cfg(test)]` is unscanned, so it must be the one test module.
@@ -103,6 +103,8 @@ const RUNE_EXTRAS: &[&str] = &[
     // A new session: the web starts work from Neko's chat (`create_task`), Rune has a form (Home, "+ New").
     "CreateTask",
     "StartTask",
+    // The goal on a new session made from the form (`GoalCommand::Create`; the web makes goals through `/goal` in chat).
+    "Create",
     // Rune's own panel: the signed address for the web panel and the API's token, the viewers and pages plugins
     // declare, a session's folder and what its runs saved.
     "SignedWebUrl",
@@ -145,6 +147,7 @@ const SUBCOMMAND_PREFIXES: [&str; 3] = ["CrewCommand", "GoalCommand", "Checkpoin
 /// inside a `confirm(` (see `destructive_requests_are_only_sent_from_a_confirm_dialog`).
 const DESTRUCTIVE: &[(&str, &str)] = &[
     ("DeleteTask", "Call::Delete"),
+    ("CancelTask", "Call::Stop"),
     ("StartOver", "Call::StartOver"),
     ("ClosePullRequest", "Call::ClosePullRequest"),
     ("RemoveTheme", "Call::RemoveTheme"),
@@ -226,13 +229,17 @@ fn web_sends() -> BTreeSet<String> {
     found
 }
 
-/// Whether the web's sources mention `name` as a whole word (a sub-command carried inside `Crew`, `Goals`, ...).
+/// Whether the web's sources use `name` as a request key or a quoted name (`{ Enqueue: {` or `"Enqueue"`), not just as a word in a
+/// comment (a sub-command carried inside `Crew`, `Goals`, ...).
 fn web_mentions(name: &str) -> bool {
     web_sources().iter().any(|(_, text)| {
         text.match_indices(name).any(|(at, _)| {
             let before = text[..at].chars().next_back();
-            let after = text[at + name.len()..].chars().next();
-            !before.is_some_and(|c| c.is_alphanumeric() || c == '_') && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
+            let rest = &text[at + name.len()..];
+            let after = rest.chars().next();
+            let boundary = !before.is_some_and(|c| c.is_alphanumeric() || c == '_') && !after.is_some_and(|c| c.is_alphanumeric() || c == '_');
+            let as_key = rest.trim_start().starts_with(':') || (before == Some('"') && after == Some('"')) || (before == Some('\'') && after == Some('\''));
+            boundary && as_key
         })
     })
 }
@@ -305,7 +312,7 @@ fn destructive_requests_are_only_sent_from_a_confirm_dialog() {
                 }
                 built += 1;
                 let before = &code[at.saturating_sub(900)..at];
-                assert!(before.contains("confirm("), "{}: `{call}` is built outside a confirm dialog", path.display());
+                assert!(before.contains("self.confirm(Ask {") || before.contains("confirm(Ask {"), "{}: `{call}` is built outside a confirm dialog", path.display());
                 assert!(confirm_only.iter().any(|f| path.ends_with(f)), "{}: `{call}` belongs in task_actions.rs (the one place that confirms)", path.display());
             }
         }

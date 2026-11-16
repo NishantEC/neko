@@ -199,7 +199,7 @@ pub fn on_key(s: &mut App, ev: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
         return true;
     }
     // ⌘↵ with no field holding the keyboard approves what waits for a yes; Esc with the ask box empty declines it.
-    if ev.mods.cmd && !ev.mods.shift && ev.key == rune::Key::Enter && s.palette.is_none() && s.dialog.is_none() {
+    if ev.mods.cmd && !ev.mods.shift && ev.key == rune::Key::Enter && s.palette.is_none() && s.dialog.is_none() && s.work.confirm.is_none() {
         s.approve_first_decision();
         return true;
     }
@@ -208,7 +208,7 @@ pub fn on_key(s: &mut App, ev: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
             s.shortcuts_open = false;
             return true;
         }
-        if s.palette.is_none() && s.dialog.is_none() && s.ask.text.trim().is_empty() && s.decline_first_decision() {
+        if s.palette.is_none() && s.dialog.is_none() && s.work.confirm.is_none() && !s.composer.focused && !s.ask.focused && s.ask.text.trim().is_empty() && s.decline_first_decision() {
             return true;
         }
     }

@@ -59,7 +59,7 @@ pub fn run(name: &str, s: &mut App) {
     }
 }
 
-const BATCH_A: &[(&str, fn(&mut App))] = &[
+const BATCH_A: &[crate::scenes::Scene] = &[
     // 1. the header: opaque with a fade, the sky badge, and the model chip's popover.
     ("ba-review", |s| {
         live(s);
@@ -92,15 +92,11 @@ const BATCH_A: &[(&str, fn(&mut App))] = &[
     }),
     ("ba-delete", |s| {
         live(s);
-        s.dialog = Some(crate::task_actions::Ask {
-            title: "Delete this task?".into(),
-            detail: "Removes the task, its subtasks and their history from Neko. Your files and the task’s worktree on disk stay as they are.".into(),
-            ok: "Delete task".into(),
-            cancel: "Keep it".into(),
-            destructive: true,
-            call: crate::link::Call::Delete { task_id: "t0".into() },
-            done: String::new(),
-        });
+        // The dialog the menu's Delete opens (the session is made finished so the item exists).
+        if let Some(t) = s.summary.as_mut().and_then(|m| m.tasks.iter_mut().find(|t| t.id == "t0")) {
+            t.status = TaskStatus::Failed;
+        }
+        s.do_action("t0", crate::task_actions::Act::Delete);
     }),
     ("ba-stop-all", |s| {
         live(s);
@@ -120,7 +116,9 @@ const BATCH_A: &[(&str, fn(&mut App))] = &[
     }),
     ("ba-mention", |s| {
         live(s);
-        s.summary.as_mut().map(|m| m.connections = vec![("c1".into(), "Linear".into(), 12), ("c2".into(), "Calendar".into(), 7)]);
+        if let Some(m) = s.summary.as_mut() {
+            m.connections = vec![("c1".into(), "Linear".into(), 12), ("c2".into(), "Calendar".into(), 7)];
+        }
         s.compose.files = vec![crate::link::http::MentionFile { path: "/Users/me/neko/README.md".into(), name: "README.md".into(), location: "~/neko".into() }];
         s.ask.replace_text("look at @");
         s.ask.focused = true;
