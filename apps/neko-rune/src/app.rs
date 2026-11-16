@@ -599,13 +599,15 @@ impl App {
 }
 
 /// The Neko column's one-line crew status: who is working, then what needs the person.
-pub fn crew_line(working: usize, waiting: usize) -> String {
+pub fn crew_line(working: usize, waiting: usize, inbox: usize) -> String {
     let work = match working {
         0 => "No agents working".to_owned(),
         1 => "1 agent working".to_owned(),
         n => format!("{n} agents working"),
     };
     let wait = match waiting {
+        // No session needs you, but the Inbox may still hold items: say so rather than "nothing needs you".
+        0 if inbox > 0 => format!("{inbox} in Inbox"),
         0 => "nothing needs you".to_owned(),
         1 => "1 needs you".to_owned(),
         n => format!("{n} need you"),
@@ -724,9 +726,10 @@ mod tests {
 
     #[test]
     fn the_crew_line_says_who_works_and_what_needs_you() {
-        assert_eq!(crew_line(3, 1), "3 agents working · 1 needs you");
-        assert_eq!(crew_line(1, 2), "1 agent working · 2 need you");
-        assert_eq!(crew_line(0, 0), "No agents working · nothing needs you");
+        assert_eq!(crew_line(3, 1, 0), "3 agents working · 1 needs you");
+        assert_eq!(crew_line(1, 2, 27), "1 agent working · 2 need you");
+        assert_eq!(crew_line(0, 0, 0), "No agents working · nothing needs you");
+        assert_eq!(crew_line(0, 0, 27), "No agents working · 27 in Inbox", "the Inbox counts when no session needs you");
     }
 
     #[test]

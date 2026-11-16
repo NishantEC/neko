@@ -342,7 +342,7 @@ fn body(s: &App, t: &Neko, win_h: f32, layer: &mut Vec<El>) -> El {
     let foot = FOOT_MIN;
     let cap = (win_h * 0.5).min(win_h - super::BAND - foot - CHAT_MIN).clamp(100.0, 440.0);
     let mut top = col().key("neko-top").w_full().px(12.0).pb(8.0).gap(8.0);
-    top = top.child(row().key("crew-row").w_full().h(32.0).px(8.0).center_y().child(text(crew_line(working, waiting)).key("crew").font(t.ty.row).color(t.text.base).truncate()));
+    top = top.child(row().key("crew-row").w_full().h(32.0).px(8.0).center_y().child(text(crew_line(working, waiting, s.neko.inbox.len())).key("crew").font(t.ty.row).color(t.text.base).truncate()));
     top = top.child(inbox(s, t, layer, win_h));
     top = top.child(digest(s, t));
     let mut c = col().key("neko-body").w_full().grow(1.0).min_h(0.0).child(col().key("neko-scroll").w_full().max_h(cap).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(top));
