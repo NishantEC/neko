@@ -1,4 +1,6 @@
 import { AppShell } from "@/shell/AppShell";
+import { EmbedShell } from "@/shell/EmbedShell";
+import { embedded } from "@/shell/embed";
 import { useWorkbench } from "@/useStore";
 
 export function App() {
@@ -15,5 +17,6 @@ export function App() {
       </div>
     );
   }
-  return <AppShell />;
+  // `?embed=1`: the Rune client's web view shows only the routed content (shell/embed.ts).
+  return embedded ? <EmbedShell /> : <AppShell />;
 }

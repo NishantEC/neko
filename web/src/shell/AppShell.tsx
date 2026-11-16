@@ -36,6 +36,7 @@ import { useAttention } from "@/shell/attention";
 import { AppSidebar, MobileTopBar } from "@/shell/AppSidebar";
 import { PageContainer } from "@/shell/PageContainer";
 import { OnboardingHost } from "@/onboarding/Onboarding";
+import { useReportPluginPages } from "@/shell/pluginPages";
 
 function PageFallback() {
   return (
@@ -83,7 +84,7 @@ function CustomisedStrip({ id, title, plugin }: { id: string; title: string; plu
   );
 }
 
-function Outlet({ route }: { route: string }) {
+export function Outlet({ route }: { route: string }) {
   const { problems } = usePlugins();
   const page = usePages().find((p) => p.id === route);
   // The shell's own places: not pages, so they are not in the sidebar or ⌘K's "Go to".
@@ -169,6 +170,7 @@ export function AppShell() {
   const { active } = useTabs();
   const [sidebarOpen, setSidebarOpen] = useSidebarOpen();
   useAttention();
+  useReportPluginPages();
   useGlobalShortcuts();
   // An agent's ShowArtifact / OpenTab: every open page opens the canvas or the tab.
   useEffect(obeyAgentRequests, []);

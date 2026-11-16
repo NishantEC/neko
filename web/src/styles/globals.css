@@ -299,3 +299,12 @@ html[data-shell="native"] [data-slot="sidebar-inner"] {
     }
   }
 }
+
+/* Embed mode (`?embed=1`, shell/embed.ts): the page is a piece of the Rune client's panel, which paints
+ * the background; the page draws only its content over it. The theme still sets text and surfaces. */
+html[data-embed],
+html[data-embed] body,
+html[data-embed] #root,
+html[data-embed] body[class] {
+  background: transparent !important;
+}

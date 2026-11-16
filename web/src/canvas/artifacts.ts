@@ -17,6 +17,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { onEvent, request, type Json } from "@/api";
 import { HOME } from "@/router";
+import { embedded } from "@/shell/embed";
 import { toast } from "@/ui/sonner";
 
 export interface ArtifactVersion {
@@ -35,6 +36,8 @@ export interface Artifact {
   workspace_id?: string | null;
   /** The Home reply that made it. */
   message_id?: string | null;
+  /** The ticket whose run saved it. */
+  task_id?: string | null;
   versions: ArtifactVersion[];
 }
 
@@ -381,7 +384,7 @@ export function offerFromArtifact(artifact: Artifact, n: number, text: string): 
   }
   if (offers.length >= 5) return false;
   offers.push({ text: said, name: `From “${artifact.title}”`, reference: fromArtifactLine(artifact.id, n, artifact.title) });
-  if (currentRoute() !== HOME) location.hash = "/";
+  if (!embedded && currentRoute() !== HOME) location.hash = "/";
   dispatchEvent(new CustomEvent(OFFER_EVENT));
   return true;
 }

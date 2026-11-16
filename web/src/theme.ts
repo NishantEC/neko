@@ -23,6 +23,7 @@
 // instead, which is what the app follows.
 import { useSyncExternalStore } from "react";
 import { onEvent, request } from "./api";
+import { embedTheme, embedded } from "./shell/embed";
 import { contrastFailures, resolveColors, themesCss, validateTheme, type Appearance, type ThemeData } from "./themes/derive";
 
 export type Mode = "system" | "light" | "dark";
@@ -105,10 +106,24 @@ function readChoice(): Choice {
 
 /** `?theme=` on the load: light or dark forces the mode, glass (the old name) forces that dark theme, any other id forces that theme. */
 function forcedFromQuery(): string | null {
+  // Embed mode (the Rune client's web view): the host window's appearance is in the address, and follows it.
+  if (embedded) {
+    const host = embedTheme();
+    if (host) return host;
+  }
   const value = new URLSearchParams(location.search).get("theme");
   return value && isId(value) ? value : null;
 }
-const forced = forcedFromQuery();
+let forced = forcedFromQuery();
+if (embedded) {
+  // The host changes the address's theme (it never reloads the page): the page follows, unsaved.
+  addEventListener("hashchange", () => {
+    const next = forcedFromQuery();
+    if (next === forced) return;
+    forced = next;
+    apply();
+  });
+}
 
 let choice: Choice = readChoice();
 let userThemes: ThemeInfo[] = [];

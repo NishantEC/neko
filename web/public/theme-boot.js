@@ -21,6 +21,9 @@
       }
     }
     var forced = new URLSearchParams(location.search).get("theme");
+    // Embed mode (the Rune client's web view) carries the host window's appearance in the hash query.
+    var hashQuery = new URLSearchParams(location.hash.split("?")[1] || "");
+    if (hashQuery.get("embed") === "1" && (hashQuery.get("theme") === "light" || hashQuery.get("theme") === "dark")) forced = hashQuery.get("theme");
     if (forced === "light" || forced === "dark") choice.mode = forced;
     else if (forced === "glass") { choice.mode = "dark"; choice.dark = "glass"; }
     var dark = choice.mode === "dark" || (choice.mode !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
