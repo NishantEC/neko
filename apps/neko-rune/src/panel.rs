@@ -13,7 +13,7 @@
 //! decoded from it, are dropped as soon as it is not on screen ([`App::panel_settle`]).
 
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -197,6 +197,8 @@ pub enum TermRow {
     Line(usize, usize),
     /// "…N lines hidden" inside entry `.0`.
     Gap(usize),
+    /// "Show all N lines" (or "Show fewer") under entry `.0`.
+    More(usize),
 }
 
 /// The Terminal tab's entries and rows, shared with the rows' builders, and how many older commands were left out.
@@ -205,7 +207,7 @@ pub type TermRows = (Rc<Vec<Entry>>, Rc<Vec<TermRow>>, usize);
 pub struct TermCache {
     pub task_id: String,
     /// What the events were when this was made: how many, and the last one's time.
-    pub stamp: (usize, i64),
+    pub stamp: (usize, i64, u32),
     pub entries: Rc<Vec<Entry>>,
     pub dropped: usize,
     pub rows: Rc<Vec<TermRow>>,
@@ -225,6 +227,9 @@ pub struct Panel {
     pub files_tree: TreeModel<FileNode<bool>>,
     pub files_meta: Option<FilesMeta>,
     pub terminal: std::cell::RefCell<Option<TermCache>>,
+    /// The commands whose whole output is shown (by entry id), and a counter that changes whenever that set does.
+    pub term_open: HashSet<String>,
+    pub term_rev: u32,
     /// The panel fills the session and panel regions.
     pub expanded: bool,
     /// An element key to scroll into view at the next frame (a page, a file's diff).
@@ -818,10 +823,18 @@ impl App {
         }
     }
 
+    /// "Show all N lines" under a command, or "Show fewer" once opened.
+    pub fn toggle_term(&mut self, id: &str) {
+        if !self.panel.term_open.remove(id) {
+            self.panel.term_open.insert(id.to_owned());
+        }
+        self.panel.term_rev = self.panel.term_rev.wrapping_add(1);
+    }
+
     /// The Terminal tab's rows for the open task, made when its events changed.
     pub fn terminal_rows(&self) -> Option<TermRows> {
         let detail = self.detail()?;
-        let stamp = (detail.task.events.len(), detail.task.events.last().map_or(0, |e| e.at_ms));
+        let stamp = (detail.task.events.len(), detail.task.events.last().map_or(0, |e| e.at_ms), self.panel.term_rev);
         let mut cache = self.panel.terminal.borrow_mut();
         if cache.as_ref().is_none_or(|c| c.task_id != detail.task.id || c.stamp != stamp) {
             let (entries, dropped) = terminal::entries(&detail.task);
@@ -831,11 +844,17 @@ impl App {
             }
             for (i, e) in entries.iter().enumerate() {
                 rows.push(TermRow::Header(i));
-                for l in 0..e.lines.len() {
-                    if e.hidden > 0 && l == e.at {
+                // Collapsed to 12 lines, "Show all N lines" under them; opened, everything kept (with its gap).
+                let open = self.panel.term_open.contains(&e.id);
+                let shown = if open { e.lines.len() } else { e.lines.len().min(terminal::COLLAPSED_LINES) };
+                for l in 0..shown {
+                    if open && e.hidden > 0 && l == e.at {
                         rows.push(TermRow::Gap(i));
                     }
                     rows.push(TermRow::Line(i, l));
+                }
+                if e.total() > terminal::COLLAPSED_LINES {
+                    rows.push(TermRow::More(i));
                 }
             }
             *cache = Some(TermCache { task_id: detail.task.id.clone(), stamp, entries: Rc::new(entries), dropped, rows: Rc::new(rows) });

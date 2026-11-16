@@ -18,6 +18,8 @@ use crate::turns::command_receipt;
 pub const MAX_COMMANDS: usize = 200;
 /// Lines of output kept per command.
 pub const MAX_LINES: usize = 2000;
+/// Lines of one command's output shown before "Show all N lines".
+pub const COLLAPSED_LINES: usize = 12;
 /// The terminal's width in columns; longer lines wrap as a terminal wraps them.
 pub const COLS: u16 = 120;
 /// Rows of the live screen; lines that scroll off it are read from the scrollback.
@@ -80,6 +82,48 @@ pub struct Entry {
     pub hidden: usize,
     /// Where the "…N lines hidden" row sits in `lines`.
     pub at: usize,
+}
+
+impl Entry {
+    /// Every line the command printed, as the "Show all N lines" link counts them.
+    pub fn total(&self) -> usize {
+        self.lines.len() + self.hidden
+    }
+}
+
+/// `text` with the person's home folder written `~`: `/Users/me/code/x` is `~/code/x`. Only a whole folder name
+/// matches (`/Users/me2` is not under `/Users/me`).
+pub fn tilde(text: &str, home: &str) -> String {
+    let home = home.trim_end_matches('/');
+    if home.is_empty() || home == "/" || !text.contains(home) {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(home) {
+        let after = &rest[at + home.len()..];
+        let whole = after.chars().next().is_none_or(|c| !(c.is_alphanumeric() || matches!(c, '_' | '-' | '.')));
+        let boundary = rest[..at].chars().next_back().is_none_or(|c| !(c.is_alphanumeric() || matches!(c, '_' | '-' | '.')));
+        out.push_str(&rest[..at]);
+        out.push_str(if whole && boundary { "~" } else { home });
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `text` cut to at most `max` characters by taking out the middle, keeping the start and the end: `cargo test -p b…ail.rs`.
+/// Whitespace runs (a command's new lines) become single spaces first.
+pub fn middle(text: &str, max: usize) -> String {
+    let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let chars: Vec<char> = flat.chars().collect();
+    if chars.len() <= max || max < 3 {
+        return flat;
+    }
+    let keep = max - 1;
+    let tail = keep / 2;
+    let head = keep - tail;
+    format!("{}…{}", chars[..head].iter().collect::<String>(), chars[chars.len() - tail..].iter().collect::<String>())
 }
 
 /// What the output of a command looks like once a terminal has drawn it.
@@ -161,14 +205,26 @@ pub fn render(output: &str) -> Rendered {
 /// The task's commands, oldest first, at most [`MAX_COMMANDS`] (the newest), and how many older ones
 /// were left out.
 pub fn entries(task: &Task) -> (Vec<Entry>, usize) {
+    entries_at(task, &std::env::var("HOME").unwrap_or_default())
+}
+
+/// [`entries`] with `home` written `~` in the commands and their output.
+pub fn entries_at(task: &Task, home: &str) -> (Vec<Entry>, usize) {
     let receipts: Vec<(usize, _)> = task.events.iter().enumerate().filter_map(|(i, e)| command_receipt(e).map(|r| (i, r))).collect();
     let dropped = receipts.len().saturating_sub(MAX_COMMANDS);
     let entries = receipts
         .into_iter()
         .skip(dropped)
         .map(|(i, r)| {
-            let out = render(&r.output);
-            Entry { id: format!("receipt-{i}"), command: r.command, exit: r.exit, lines: out.lines, hidden: out.hidden, at: out.at }
+            let mut out = render(&r.output);
+            for line in &mut out.lines {
+                for run in line.iter_mut() {
+                    if run.text.contains(home) && !home.is_empty() {
+                        run.text = tilde(&run.text, home);
+                    }
+                }
+            }
+            Entry { id: format!("receipt-{i}"), command: tilde(&r.command, home), exit: r.exit, lines: out.lines, hidden: out.hidden, at: out.at }
         })
         .collect();
     (entries, dropped)
@@ -312,6 +368,18 @@ mod tests {
         assert_eq!((list.len(), dropped), (200, 50));
         assert_eq!(list[0].command, "cmd 50");
         assert_eq!(list[199].command, "cmd 249");
+    }
+
+    #[test]
+    fn a_home_folder_is_a_tilde_and_a_long_command_loses_its_middle() {
+        assert_eq!(tilde("cd /Users/me/code && ls /Users/me", "/Users/me"), "cd ~/code && ls ~");
+        assert_eq!(tilde("/Users/me2/x and /Users/mex", "/Users/me"), "/Users/me2/x and /Users/mex", "only the whole folder");
+        assert_eq!(tilde("/tmp/x", ""), "/tmp/x");
+        assert_eq!(middle("cargo test", 20), "cargo test");
+        let cut = middle("cargo test -p neko-rune --test parity -- the_composer_is_one_card", 21);
+        assert_eq!(cut.chars().count(), 21);
+        assert!(cut.starts_with("cargo test ") && cut.ends_with("one_card") && cut.contains('…'), "{cut}");
+        assert_eq!(middle("a\n  b", 10), "a b", "new lines are spaces");
     }
 
     #[test]

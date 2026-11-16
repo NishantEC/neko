@@ -90,7 +90,7 @@ fn top_line(s: &App, task: &TaskRow, t: &Neko, layer: &mut Vec<El>) -> El {
     line = line.child(el().grow(1.0).min_w(0.0));
     let runtime = detail.map(|d| d.runtime.clone()).filter(|r| !r.is_empty()).or_else(|| s.summary.as_ref().map(|m| m.runtime.clone()));
     if let Some(r) = runtime {
-        line = line.child(text(r).key("top-runtime").font(t.ty.meta).color(t.text.muted).truncate().min_w(0.0));
+        line = line.child(text(r).key("top-runtime").font(t.ty.meta).color(t.text.muted));
     }
     line.child(overflow_menu(s, task, detail.map(|d| d.can_split).unwrap_or(false), t, layer))
         .child(icon_button(&icons::PANEL_RIGHT, if s.layout.context.is_open() { "Hide context" } else { "Show context" }, "context-toggle", t, |s: &mut App| s.panel_toggle()))

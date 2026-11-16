@@ -182,3 +182,43 @@ fn plan_is_the_checklist_with_done_and_active_steps() {
     assert_eq!(label(&rt, 1), "Add the empty state, in progress", "the first open step is active while it builds");
     assert_eq!(label(&rt, 2), "Test it");
 }
+
+#[test]
+fn the_terminal_tab_has_a_32_point_header_per_command_and_collapses_long_output() {
+    use neko_protocol::workbench::TaskEvent;
+    use neko_rune::panel::Tab;
+    let mut rt = runtime_sized(scene("running"), (1800.0, 900.0));
+    let home = std::env::var("HOME").unwrap_or_default();
+    rt.update(move |s, _| {
+        let output: String = (0..30).map(|i| format!("line {i} in {home}/code/x\n")).collect();
+        let long = format!("cargo test -p neko-rune --test parity -- the_terminal_tab_has_a_header_per_command --nocapture {home}/code/some/very/long/path/that/goes/on/and/on");
+        let receipt = |command: &str, out: &str, code: i64| format!("VERIFICATION_COMMAND {}", serde_json::json!({"command": command, "output": out, "exit_code": code}));
+        let d = s.summary.as_mut().and_then(|m| m.detail.as_mut()).expect("detail");
+        let at = d.task.events.last().map_or(0, |e| e.at_ms) + 1;
+        d.task.events.push(TaskEvent { at_ms: at, role: "builder".into(), message: receipt(&long, &output, 101) });
+        d.task.events.push(TaskEvent { at_ms: at + 1, role: "builder".into(), message: receipt("ls", "a\n", 0) });
+        s.panel_choose_tab(Tab::Terminal);
+        s.panel_set_open(true);
+    });
+    settle(&mut rt);
+    // The list's rows are keyed `t<i>` (a virtual list's own keys): the header rows are the 32 point ones, one per command.
+    let tall: Vec<f32> = rt.elements().into_iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with('t') && k[1..].chars().all(|c| c.is_ascii_digit()) && k.len() > 1)).map(|e| e.rect[3]).filter(|h| *h > 24.0).collect();
+    assert!(tall.len() >= 2 && tall.iter().all(|h| (h - 32.0).abs() < 0.5), "one 32 point header row per command: {tall:?}");
+    let words = texts(&rt);
+    let long = words.iter().find(|t| t.starts_with("cargo test -p neko-run")).unwrap_or_else(|| panic!("the long command: {words:?}"));
+    assert!(long.contains('…') && long.ends_with("on/and/on"), "cut in the middle, the end kept: {long}");
+    assert!(!words.iter().any(|t| t.contains(&std::env::var("HOME").unwrap_or_else(|_| "/nonexistent".into())) && t.contains("code/x")), "the home folder reads ~");
+    assert!(words.iter().any(|t| t.starts_with("line 0 in ~/code/x")), "{words:?}");
+    assert!(words.iter().any(|t| t == "101") && words.iter().any(|t| t == "0"), "the exit chips");
+    // 12 lines, then "Show all 30 lines"; one press shows them all.
+    assert!(words.iter().any(|t| t == "line 11 in ~/code/x") || words.iter().any(|t| t.starts_with("line 11 ")), "{words:?}");
+    assert!(!words.iter().any(|t| t.starts_with("line 12 ")), "collapsed to 12 lines");
+    assert!(words.iter().any(|t| t == "Show all 30 lines"));
+    let more = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Show all 30 lines")).expect("the link").rect;
+    let (x, y) = (more[0] + more[2] / 2.0, more[1] + more[3] / 2.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert!(has_text(&rt, "line 29 in ~/code/x") || has_text(&rt, "line 29 "), "{:?}", texts(&rt));
+    assert!(has_text(&rt, "Show fewer"));
+}
