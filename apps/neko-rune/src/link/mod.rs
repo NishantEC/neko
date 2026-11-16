@@ -111,12 +111,16 @@ pub enum LinkEvent {
     Live(Summary),
     /// The daemon is there and nothing changed (a held poll ran out): the link is fine.
     Quiet,
+    /// The daemon pushed `ShowArtifact`: an agent asked every window to show this artifact now.
+    ShowArtifact { id: String, version: Option<u32> },
     Down { error: LinkError, attempt: u32, retry_in: Duration },
 }
 
 /// A connection that can ask the daemon one read request at a time.
 pub trait Transport {
-    fn ask(&mut self, request: &ReadRequest) -> Result<Response, LinkError>;
+    /// Asks one read request. The daemon also pushes events to every connection, even while a
+    /// held request waits: each one is handed to `on_event` as it arrives, not after the answer.
+    fn ask(&mut self, request: &ReadRequest, on_event: &mut dyn FnMut(neko_protocol::Event)) -> Result<Response, LinkError>;
 }
 
 pub trait Connector {
@@ -159,7 +163,12 @@ fn hold<T: Transport>(conn: &mut T, stop: &AtomicBool, wanted: &Wanted, emit: &m
     while !stop.load(Ordering::Relaxed) {
         let request = if digest.is_empty() { ReadRequest::Snapshot } else { ReadRequest::IfChanged { digest: digest.clone(), wait_ms: HOLD_MS } };
         let asked = Instant::now();
-        match conn.ask(&request) {
+        let mut on_event = |event: neko_protocol::Event| {
+            if let neko_protocol::Event::ShowArtifact { id, version } = event {
+                emit(LinkEvent::ShowArtifact { id, version });
+            }
+        };
+        match conn.ask(&request, &mut on_event) {
             Ok(Response::Workbench(snapshot)) => {
                 *attempt = 0;
                 digest = snapshot.digest.clone();
@@ -244,7 +253,7 @@ mod tests {
     struct Conn<'a>(&'a Fake);
 
     impl Transport for Conn<'_> {
-        fn ask(&mut self, request: &ReadRequest) -> Result<Response, LinkError> {
+        fn ask(&mut self, request: &ReadRequest, _on_event: &mut dyn FnMut(neko_protocol::Event)) -> Result<Response, LinkError> {
             self.0.asked.borrow_mut().push(request.clone());
             self.0.script.borrow_mut().pop_front().unwrap_or(Err(LinkError::Dropped))
         }

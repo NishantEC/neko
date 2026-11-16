@@ -46,14 +46,16 @@ impl Connector for UnixConnector {
 }
 
 impl Transport for UnixConn {
-    fn ask(&mut self, request: &ReadRequest) -> Result<Response, LinkError> {
+    fn ask(&mut self, request: &ReadRequest, on_event: &mut dyn FnMut(neko_protocol::Event)) -> Result<Response, LinkError> {
         let id = self.next_id;
         self.next_id += 1;
         write_frame(&mut self.stream, &Frame::Request { id, request: request.wire() }).map_err(|e| LinkError::from_io(&e))?;
         loop {
             match read_frame(&mut self.stream) {
                 Ok(Some(Frame::Response { id: answered, response })) if answered == id => return Ok(response),
-                // Events the daemon pushes to every connection, and answers to nothing we asked.
+                // Events the daemon pushes to every connection are handed on at once.
+                Ok(Some(Frame::Event(event))) => on_event(event),
+                // Answers to nothing we asked.
                 Ok(Some(_)) => continue,
                 Ok(None) => return Err(LinkError::Dropped),
                 Err(e) => return Err(LinkError::from_io(&e)),

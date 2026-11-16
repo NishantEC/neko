@@ -67,6 +67,11 @@ pub fn open_url(url: &str) -> io::Result<()> {
     std::process::Command::new("/usr/bin/open").arg(url).spawn().map(|_| ())
 }
 
+/// Shows a file in Finder: macOS's `open -R`, with the path as its one argument after the flag.
+pub fn reveal_in_finder(path: &str) -> io::Result<()> {
+    std::process::Command::new("/usr/bin/open").arg("-R").arg(path).spawn().map(|_| ())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

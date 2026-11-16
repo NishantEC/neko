@@ -1,7 +1,7 @@
 //! The four-region shell driven through Rune's headless `Runtime`: real layout, real hit-testing,
 //! no window. Clicks and drags go where a person's would, so this checks the app as used.
 
-use neko_rune::app::{App, ContextKind, Steer, down};
+use neko_rune::app::{App, Steer, down};
 use neko_rune::layout::{MIDDLE_MIN, Region};
 use neko_rune::link::{LinkError, LinkEvent};
 use neko_rune::scenes;
@@ -160,21 +160,16 @@ fn more_lists_the_other_views_and_opens_one() {
 }
 
 #[test]
-fn the_context_panel_toggles_from_the_top_line_and_picks_a_kind() {
+fn the_context_panel_toggles_from_the_top_line_and_says_when_there_is_nothing() {
     let mut rt = runtime(true, live);
     click(&mut rt, "context-toggle");
     assert!(rt.state.layout.context.is_open());
-    assert!(rt.find("context").is_some() && rt.find("context-picker").is_some());
+    assert!(rt.find("context").is_some() && rt.find("context-expand").is_some() && rt.find("context-close").is_some());
     // In a 1280 window the session keeps its minimum: the panel narrows to its own minimum and Neko folds to its icon.
     assert_eq!(rect(&rt, "context")[2], 320.0);
-    let t = texts(&rt);
-    for kind in ContextKind::ALL {
-        assert!(t.contains(&kind.title().to_owned()), "{}", kind.title());
-    }
-    assert!(t.contains(&"Diff appears here when the session produces one.".to_owned()), "{t:?}");
-    rt.update(|s, _| s.context = ContextKind::Browser);
-    settle(&mut rt);
-    assert!(texts(&rt).contains(&"Live views arrive in P3.".to_owned()));
+    // The session has produced nothing: no tabs, and one calm line.
+    assert!(rt.find("context-picker").is_none(), "only tabs that have content show");
+    assert!(texts(&rt).contains(&"Nothing to show yet.".to_owned()), "{:?}", texts(&rt));
     click(&mut rt, "context-close");
     assert!(!rt.state.layout.context.is_open());
     assert!(rt.find("context").is_none());

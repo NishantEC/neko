@@ -127,6 +127,8 @@ pub struct NekoType {
     pub id: TextStyle,
     /// Commands, output and ids of files: the mono face at the id size.
     pub mono: TextStyle,
+    /// The mono face at the meta size: a command's header line, a file path in a list.
+    pub mono_meta: TextStyle,
 }
 
 impl NekoType {
@@ -140,6 +142,7 @@ impl NekoType {
             meta: TextStyle::new(12.5, 400.0).lh(18.0),
             id: TextStyle { features: "'tnum' 1", ..TextStyle::new(12.0, 400.0).lh(16.0) },
             mono: TextStyle { family: rune::Family::Mono, ..TextStyle::new(12.0, 400.0).lh(17.0) },
+            mono_meta: TextStyle { family: rune::Family::Mono, ..TextStyle::new(12.5, 400.0).lh(18.0) },
         }
     }
 }
@@ -227,6 +230,61 @@ impl Neko {
     }
 }
 
+/// An sRGB colour from its 8-bit parts.
+fn rgb8(r: u8, g: u8, b: u8) -> Color {
+    use rune::color::srgb_decode;
+    Color { r: srgb_decode(f32::from(r) / 255.0), g: srgb_decode(f32::from(g) / 255.0), b: srgb_decode(f32::from(b) / 255.0), a: 1.0 }
+}
+
+impl Neko {
+    /// The terminal's colours as the theme's: 0-7 and 8-15 are the meanings (red is Coral, green
+    /// Mint, yellow Amber, blue Iris, cyan Sky) and the greys, the bright ones lifted toward the
+    /// text; 16-231 and 232-255 are xterm's own cube and ramp, which a theme cannot improve on.
+    pub fn ansi(&self, index: u8) -> Color {
+        let m = &self.meaning;
+        let base = |i: u8| match i {
+            0 => self.text.faint,
+            1 => m.coral,
+            2 => m.mint,
+            3 => m.amber,
+            4 => m.iris,
+            5 => m.iris.mix(m.coral, 0.5),
+            6 => m.sky,
+            _ => self.text.muted,
+        };
+        match index {
+            0..=7 => base(index),
+            8 => self.text.muted,
+            15 => self.text.base,
+            9..=14 => base(index - 8).mix(self.text.base, 0.25),
+            16..=231 => {
+                let n = index - 16;
+                let level = |v: u8| if v == 0 { 0 } else { 55 + 40 * v };
+                rgb8(level(n / 36), level(n / 6 % 6), level(n % 6))
+            }
+            232..=255 => {
+                let v = 8 + 10 * (index - 232);
+                rgb8(v, v, v)
+            }
+        }
+    }
+
+    /// What a terminal draws on: the card, so a command's output sits on the panel's own surface.
+    pub fn terminal_bg(&self) -> Color {
+        self.surface.card
+    }
+
+    /// A terminal's ink where the output names no colour.
+    pub fn terminal_fg(&self) -> Color {
+        self.text.base
+    }
+
+    /// A true-colour terminal colour.
+    pub fn rgb(&self, r: u8, g: u8, b: u8) -> Color {
+        rgb8(r, g, b)
+    }
+}
+
 thread_local! {
     static THEMES: [Rc<Neko>; 2] = [Rc::new(Neko::build(false)), Rc::new(Neko::build(true))];
 }
@@ -309,6 +367,24 @@ mod tests {
         assert_eq!(t.title.weight, 600.0, "bold is for the page title only");
         assert!(t.row.weight < 500.0 && t.meta.weight < 500.0 && t.id.weight < 500.0);
         assert!(t.id.features.contains("tnum"), "ids are tabular");
+    }
+
+    #[test]
+    fn the_terminal_palette_is_the_themes_meanings_and_xterms_cube() {
+        for dark in [true, false] {
+            let t = theme(dark);
+            assert_eq!(t.ansi(1).hex(), t.meaning.coral.hex());
+            assert_eq!(t.ansi(2).hex(), t.meaning.mint.hex());
+            assert_eq!(t.ansi(3).hex(), t.meaning.amber.hex());
+            assert_eq!(t.ansi(15).hex(), t.text.base.hex());
+            assert_ne!(t.ansi(9).hex(), t.ansi(1).hex(), "bright is lifted");
+            assert_eq!(t.ansi(16).hex(), "#000000ff");
+            assert_eq!(t.ansi(231).hex(), "#ffffffff");
+            assert_eq!(t.ansi(232).hex(), "#080808ff");
+            assert_eq!(t.ansi(196).hex(), "#ff0000ff", "xterm 196 is pure red");
+            assert_eq!(t.ty.mono_meta.size, 12.5);
+            assert_eq!(t.ty.mono.size, 12.0);
+        }
     }
 
     #[test]

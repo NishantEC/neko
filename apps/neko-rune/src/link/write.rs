@@ -5,7 +5,8 @@
 //! may build and fails when one is added without a review.
 //!
 //! * **Reads** (`Call::reads`): the open task's checkpoints and one run's diff, the unseen
-//!   marks, the Inbox's items and the morning digest. Fetching changes nothing.
+//!   marks, the Inbox's items and the morning digest. Fetching changes nothing. P3a adds the
+//!   context panel's three: a task's folder, an artifact's stored file and an artifact's record.
 //! * **Pages (P2)**: reads for the routines, the calendar, the phone settings, the quota meters and
 //!   the plugin status; writes that are controls on the web's Inbox, Settings and Calendar pages
 //!   (a routine's switch, Run now and editor, standing orders, the Inbox clean-up, the budgets, the
@@ -31,6 +32,12 @@ pub enum Call {
     Refresh,
     Checkpoints { task_id: String },
     CheckpointDiff { task_id: String, run: Option<u32> },
+    /// The folder a session works in, for the context panel's Files tab (P3a).
+    TaskFolder { task_id: String },
+    /// Where one version of an artifact is stored (the newest for `None`), for the Canvas tab.
+    ArtifactFile { id: String, version: Option<u32> },
+    /// One artifact's record: its title, kind and versions.
+    ArtifactInfo { id: String },
     Unseen,
     Digest,
     Inbox,
@@ -109,7 +116,7 @@ pub enum Call {
 impl Call {
     /// Whether this only fetches.
     pub fn reads(&self) -> bool {
-        matches!(self, Call::Refresh | Call::Checkpoints { .. } | Call::CheckpointDiff { .. } | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::RoutinesFull | Call::CalendarEvents { .. } | Call::PhoneSettings | Call::Quota | Call::Plugins)
+        matches!(self, Call::Refresh | Call::Checkpoints { .. } | Call::CheckpointDiff { .. } | Call::TaskFolder { .. } | Call::ArtifactFile { .. } | Call::ArtifactInfo { .. } | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::RoutinesFull | Call::CalendarEvents { .. } | Call::PhoneSettings | Call::Quota | Call::Plugins)
     }
 
     /// The request the daemon receives: the same JSON the web UI posts.
@@ -118,6 +125,9 @@ impl Call {
             Call::Refresh => Request::Workbench(Command::Snapshot),
             Call::Checkpoints { task_id } => Request::TaskCheckpoints { task_id },
             Call::CheckpointDiff { task_id, run } => Request::CheckpointDiff { task_id, run },
+            Call::TaskFolder { task_id } => Request::TaskFolder { task_id },
+            Call::ArtifactFile { id, version } => Request::ArtifactFile { id, version },
+            Call::ArtifactInfo { id } => Request::Artifact { id },
             Call::Unseen => Request::UnseenTasks,
             Call::Digest => Request::MorningDigest,
             Call::Inbox => Request::Routines,

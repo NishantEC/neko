@@ -22,6 +22,10 @@ use std::path::{Path, PathBuf};
 const READS: &[&str] = &[
     "Command::Snapshot",
     "Request::AgentModels",
+    // The context panel (P3a): an artifact's record, where its file is stored, and a session's folder.
+    "Request::Artifact",
+    "Request::ArtifactFile",
+    "Request::TaskFolder",
     "Request::CalendarEvents",
     "Request::CheckpointDiff",
     "Request::MorningDigest",
@@ -283,4 +287,25 @@ fn only_the_app_state_touches_rune_prefs_and_only_to_keep_the_layout() {
     let code = production(&app);
     assert!(code.contains("PREFS_ID") && !code.contains("support_dir") && !code.contains("neko_protocol::socket_path"), "the layout goes to Rune's store, not the daemon's folder");
     assert_eq!(code.matches("prefs::Prefs::open").count(), 2, "one read at startup, one write on a thread");
+}
+
+#[test]
+fn the_panel_reads_files_only_through_the_confined_readers() {
+    // The Files tab and the Canvas show what the daemon names (a folder, a stored artifact), and the
+    // daemon's word is data, not permission: every such read goes through `readers.rs`, which refuses
+    // `..`, paths outside the root and links that leave it. The token (`web_link.rs`) and a pasted image
+    // (`attachments.rs`) are the only other files this client opens.
+    for (path, text) in crate_sources() {
+        let code = production(&text);
+        // `scenes.rs` reads one JSON summary a headless snapshot run is pointed at (`NEKO_RUNE_SUMMARY`).
+        let allowed = path.ends_with("readers.rs") || path.ends_with("web_link.rs") || path.ends_with("attachments.rs") || path.ends_with("scenes.rs");
+        for opener in ["File::open", "fs::read(", "fs::read_to_string", "read_dir", "fs::metadata", "canonicalize", "File::create"] {
+            assert!(allowed || !code.contains(opener), "{} opens files with `{opener}` outside the confined readers", path.display());
+        }
+    }
+    let readers = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/readers.rs")).unwrap();
+    let code = production(&readers);
+    for writer in ["fs::write", "File::create", "OpenOptions", "fs::remove", "fs::rename", "fs::copy", "File::options", "create_dir", "set_permissions", "symlink("] {
+        assert!(!code.contains(writer), "the readers never write: `{writer}`");
+    }
 }

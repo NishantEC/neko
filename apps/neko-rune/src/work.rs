@@ -409,6 +409,7 @@ impl App {
         self.work.detail_asked = Some(id.to_owned());
         self.call(Call::Refresh);
         self.mark_opened(id);
+        self.panel_on_select();
     }
 
     /// Opening a task marks it seen, unless the person marked it unread and has not left it.
@@ -479,6 +480,7 @@ impl App {
         }
         // A finished task the person is looking at is seen (unless they marked it unread).
         self.mark_visible_seen();
+        self.panel_sync();
     }
 
     /// Sends the composer's text: queued with its mode while the task is in a turn, else as a
@@ -759,8 +761,15 @@ impl App {
                 let key = diff_key(&task_id, run);
                 self.work.diffs.insert(key.clone(), DiffState::new(rune_kit::diff::parse(&patch)));
                 self.work.diff_load.insert(key, DiffLoad::Ready { truncated });
+                self.mark_changed_files();
                 true
             }
+            Reply::Folder { task_id, path } => self.folder_arrived(&task_id, path),
+            Reply::ArtifactFile { id, version, path, kind, .. } => {
+                self.artifact_file(&id, version, &path, &kind);
+                true
+            }
+            Reply::ArtifactInfo(artifact) => self.artifact_info(artifact),
             Reply::Unseen(ids) => {
                 let mut next: HashSet<String> = ids.into_iter().collect();
                 // A task marked unread here stays unread until it is opened again.
@@ -827,7 +836,8 @@ impl App {
                     Call::CheckpointDiff { task_id, run } => {
                         self.work.diff_load.insert(diff_key(task_id, *run), DiffLoad::Failed(message));
                     }
-                    Call::Checkpoints { .. } | Call::Unseen | Call::Digest | Call::Inbox | Call::Refresh | Call::Models => {}
+                    Call::Checkpoints { .. } | Call::Unseen | Call::Digest | Call::Inbox | Call::Refresh | Call::Models | Call::TaskFolder { .. } | Call::ArtifactInfo { .. } => {}
+                    Call::ArtifactFile { id, version } => self.artifact_unreadable(id, *version, message),
                     Call::CreateTask { .. } => self.new_error(message),
                     _ => self.work.notice = Some(message),
                 }
@@ -850,7 +860,8 @@ impl App {
                     Call::CheckpointDiff { task_id, run } => {
                         self.work.diff_load.insert(diff_key(task_id, *run), DiffLoad::Failed(line));
                     }
-                    Call::Refresh | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::Checkpoints { .. } => return false,
+                    Call::Refresh | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::Checkpoints { .. } | Call::TaskFolder { .. } | Call::ArtifactInfo { .. } => return false,
+                    Call::ArtifactFile { id, version } => self.artifact_unreadable(id, *version, line),
                     Call::CreateTask { .. } => self.new_error(line),
                     _ => self.work.notice = Some(line),
                 }

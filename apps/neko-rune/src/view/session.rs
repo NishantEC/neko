@@ -71,7 +71,7 @@ fn top_line(s: &App, task: &TaskRow, t: &Neko) -> El {
     line
         .child(text(task.title.clone()).key("top-title").font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(t.text.base).truncate().a11y_hidden().role("heading"))
         .child(text(meta.join(" · ")).key("top-meta").font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0))
-        .child(icon_button(&icons::PANEL_RIGHT, if s.layout.context.is_open() { "Hide context" } else { "Show context" }, "context-toggle", t, |s: &mut App| s.layout.context.toggle()))
+        .child(icon_button(&icons::PANEL_RIGHT, if s.layout.context.is_open() { "Hide context" } else { "Show context" }, "context-toggle", t, |s: &mut App| s.panel_toggle()))
 }
 
 fn session(s: &App, row_task: &TaskRow, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {

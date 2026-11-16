@@ -30,3 +30,5 @@ icon_body!(CHEVRON_LEFT, "chevron-left", r#"<path d="M10 3.5L5.5 8L10 12.5" fill
 icon_body!(CHEVRON_RIGHT, "chevron-right", r#"<path d="M6 3.5L10.5 8L6 12.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>"#);
 icon_body!(PLAY, "play", r#"<path d="M5 3.5L12 8L5 12.5Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>"#);
 icon_body!(EXTERNAL, "external", r#"<path d="M9 3H13V7M13 3L7.5 8.5M11 9.5V12.5H3.5V5H6.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(EXPAND, "expand", r#"<path d="M9.5 2.5H13.5V6.5M6.5 13.5H2.5V9.5M13.5 2.5L9 7M2.5 13.5L7 9" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(COLLAPSE, "collapse", r#"<path d="M13 6H9V2M3 10H7V14M9 6L13.5 1.5M7 10L2.5 14.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>"#);

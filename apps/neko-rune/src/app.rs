@@ -21,7 +21,7 @@ use crate::new_session::NewForm;
 use crate::pages::Pages;
 use crate::work::{NekoCol, Work};
 use crate::views::FullView;
-use crate::web_link::{WebTarget, open_url};
+use crate::web_link::{WebTarget, open_url, reveal_in_finder};
 
 /// Where the connection to the daemon stands.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,41 +30,6 @@ pub enum LinkState {
     Live,
     /// Down, with the calm sentence to show. The last workbench stays in [`App::summary`].
     Down { message: String },
-}
-
-/// What a session produces, shown in the context panel (plugin slot (a): viewers by kind).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ContextKind {
-    Diff,
-    Files,
-    Terminal,
-    Browser,
-    Screen,
-    Canvas,
-}
-
-impl ContextKind {
-    pub const ALL: [ContextKind; 6] = [ContextKind::Diff, ContextKind::Files, ContextKind::Terminal, ContextKind::Browser, ContextKind::Screen, ContextKind::Canvas];
-
-    pub fn title(self) -> &'static str {
-        match self {
-            ContextKind::Diff => "Diff",
-            ContextKind::Files => "Files",
-            ContextKind::Terminal => "Terminal",
-            ContextKind::Browser => "Browser",
-            ContextKind::Screen => "Screen",
-            ContextKind::Canvas => "Canvas",
-        }
-    }
-
-    /// Browser and Screen are live views of what the agent is doing right now.
-    pub fn live(self) -> bool {
-        matches!(self, ContextKind::Browser | ContextKind::Screen)
-    }
-
-    pub fn index(self) -> usize {
-        Self::ALL.iter().position(|k| *k == self).unwrap_or(0)
-    }
 }
 
 /// How a message to a running agent lands (`docs/knowledge/the-chat-directs-the-crew.md`).
@@ -131,6 +96,8 @@ pub struct App {
     pub notice: Option<String>,
     /// How a URL is opened. The browser by default; a no-op in headless scenes and tests.
     pub opener: fn(&str) -> io::Result<()>,
+    /// How a file is shown in Finder (`open -R`); a no-op in headless scenes and tests.
+    pub revealer: fn(&str) -> io::Result<()>,
     /// The time, in epoch milliseconds: the system's, or a fixed one in headless scenes.
     pub clock: fn() -> i64,
     /// When the last snapshot arrived, by `clock`: what "5m ago" counts from.
@@ -147,7 +114,6 @@ pub struct App {
     pub view: Option<FullView>,
     /// Which of the three groups are collapsed, in `Group::ALL` order.
     pub collapsed: [bool; 3],
-    pub context: ContextKind,
     pub steer: Steer,
     pub steer_open: bool,
     pub more_open: bool,
@@ -191,6 +157,8 @@ pub struct App {
     pub inbox_menu: Option<(u64, PointerPress)>,
     /// What the full views keep (Routines, Calendar, Settings, Usage, Workspaces, Plugins).
     pub pages: Pages,
+    /// The context panel: its tabs, the loaded file or artifact, the viewers' state.
+    pub panel: crate::panel::Panel,
 }
 
 /// Where the window's own settings are kept (Rune's `prefs` store).
@@ -221,6 +189,7 @@ impl Default for App {
             web: None,
             notice: None,
             opener: open_url,
+            revealer: reveal_in_finder,
             clock: system_ms,
             now_ms: system_ms(),
             linked: true,
@@ -229,7 +198,6 @@ impl Default for App {
             selected: None,
             view: None,
             collapsed: [false; 3],
-            context: ContextKind::Diff,
             steer: Steer::AfterTurn,
             steer_open: false,
             more_open: false,
@@ -258,6 +226,7 @@ impl Default for App {
             focused: true,
             inbox_menu: None,
             pages: Pages::default(),
+            panel: crate::panel::Panel::standard(),
         }
     }
 }
@@ -269,7 +238,7 @@ impl App {
     /// The state a headless run starts from: it never opens anything outside itself and its clock
     /// stands still.
     pub fn headless() -> App {
-        App { opener: |_| Ok(()), clock: || DEMO_NOW, now_ms: DEMO_NOW, linked: false, ..App::default() }
+        App { opener: |_| Ok(()), revealer: |_| Ok(()), clock: || DEMO_NOW, now_ms: DEMO_NOW, linked: false, ..App::default() }
     }
 
     pub fn apply_link(&mut self, event: LinkEvent) -> bool {
@@ -300,6 +269,10 @@ impl App {
                     self.refresh_page(view);
                 }
                 stale
+            }
+            LinkEvent::ShowArtifact { id, version } => {
+                self.show_artifact(&id, version);
+                true
             }
             LinkEvent::Down { error, retry_in, .. } => {
                 let state = LinkState::Down { message: calm(&error, retry_in) };
@@ -413,6 +386,13 @@ impl App {
     pub fn open_path(&mut self, path: &str) {
         if !path.starts_with('/') || (self.opener)(path).is_err() {
             self.notice = Some("Couldn’t open that folder.".to_owned());
+        }
+    }
+
+    /// Shows a file in Finder. Only absolute paths; says why in one calm line when it cannot.
+    pub fn reveal(&mut self, path: &str) {
+        if !path.starts_with('/') || (self.revealer)(path).is_err() {
+            self.notice = Some("Couldn’t show that file in Finder.".to_owned());
         }
     }
 
@@ -657,9 +637,7 @@ mod tests {
     }
 
     #[test]
-    fn the_context_kinds_and_steer_modes_are_named() {
-        assert_eq!(ContextKind::ALL.map(ContextKind::title), ["Diff", "Files", "Terminal", "Browser", "Screen", "Canvas"]);
-        assert_eq!(ContextKind::ALL.iter().filter(|k| k.live()).count(), 2);
+    fn the_steer_modes_are_named() {
         assert_eq!(Steer::ALL.map(Steer::label), ["Steer now", "After this turn", "Interrupt and restart"]);
     }
 }

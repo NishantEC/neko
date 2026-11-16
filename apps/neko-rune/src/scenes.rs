@@ -351,7 +351,6 @@ pub const SCENES: &[Scene] = &[
     ("context", |s| {
         live(s);
         s.layout.context.set_open(true);
-        s.context = crate::app::ContextKind::Browser;
     }),
     ("collapsed", |s| {
         live(s);

@@ -168,6 +168,27 @@ pub fn short_command(command: &str) -> String {
     text.lines().next().unwrap_or("").chars().take(140).collect()
 }
 
+/// What a command event's saved receipt says, for the context panel's Terminal tab (the same events
+/// [`task_turns`] shows as tool cards).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommandReceipt {
+    pub command: String,
+    pub output: String,
+    pub exit: Option<i64>,
+}
+
+/// The command, output and exit code of a receipt event; None for any other event, and for a receipt
+/// with no command (it names nothing to run).
+pub fn command_receipt(event: &TaskEvent) -> Option<CommandReceipt> {
+    if !RECEIPT_ROLES.contains(&event.role.as_str()) {
+        return None;
+    }
+    let raw = event.message.strip_prefix(RECEIPT_PREFIX)?;
+    let value = serde_json::from_str::<Value>(raw).ok().filter(Value::is_object)?;
+    let command = value["command"].as_str().filter(|c| !c.trim().is_empty())?;
+    Some(CommandReceipt { command: command.to_owned(), output: value["output"].as_str().unwrap_or("").to_owned(), exit: value["exit_code"].as_i64() })
+}
+
 /// The saved receipt of a command event, as a finished tool card.
 fn receipt(event: &TaskEvent, index: usize) -> Option<Tool> {
     if !RECEIPT_ROLES.contains(&event.role.as_str()) {

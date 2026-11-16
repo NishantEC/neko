@@ -1,48 +1,180 @@
-//! The context panel: what the session produces, one viewer at a time (plugin slot (a), viewers
-//! by kind). The header is a segmented control over Diff, Files, Terminal, Browser (live), Screen
-//! (live) and Canvas. In P0 each is a placeholder; the panel is closed until a session has
-//! something to show, and the toggle in the session's top line opens it.
+//! The context panel (docs/decisions/0002, plugin slot (a)): what the selected session produces, one
+//! tab at a time. The header is 36 points: a segmented control over only the tabs that have content
+//! (Canvas, Diff, Files, Terminal, in that order), then Expand and Close. The panel opens by the rules
+//! in `panel.rs`; this file draws it. The tabs' bodies are in `context_diff.rs`, `context_files.rs`,
+//! `context_terminal.rs` and, for the Canvas and every viewer, here.
 
-use rune::{El, col, row, text};
+use rune::{El, col, el, row, text};
+use rune_kit::SegmentedControl;
+use rune_kit::glyphs::{FILE, FILE_CODE, FILE_IMAGE, FILE_TEXT};
 
-use super::{band, icon_button, placeholder};
-use crate::app::{App, ContextKind};
+use super::{context_diff, context_files, context_terminal, icon_button, placeholder, quiet_button, ui};
+use crate::app::App;
+use crate::groups::age;
 use crate::icons;
+use crate::panel::{Content, Loaded, Tab, Target};
+use crate::readers::size_words;
 use crate::theme::Neko;
+use crate::viewers::{self, ViewerInput, family};
 
-pub fn panel(s: &App, t: &Neko) -> El {
-    // The kinds as small text buttons (the kit's segmented control is too wide for a 360-point
-    // panel); the open one has the soft fill.
-    let mut picker = row().key("context-picker").role("tablist").label("Context").gap(2.0).center_y().min_w(0.0);
-    for kind in ContextKind::ALL {
-        let active = s.context == kind;
-        picker = picker.child(
-            row()
-                .key(format!("context-{}", kind.title().to_lowercase()))
-                .role("tab")
-                .label(kind.title())
-                .checked(active)
-                .focusable(true)
-                .h(26.0)
-                .px(6.0)
-                .center()
-                .radius(t.radius.control)
-                .fill(if active { t.surface.active } else { rune::Color::TRANSPARENT })
-                .hover(t.surface.hover)
-                .focus_ring(2.0, 0.0, t.kit.c.border_focus)
-                .on_press(move |s: &mut App| s.context = kind)
-                .child(text(kind.title()).font(if active { rune::TextStyle { weight: 500.0, ..t.ty.meta } } else { t.ty.meta }).color(if active { t.text.base } else { t.text.muted }).a11y_hidden()),
-        );
+/// The header's height.
+pub const HEAD: f32 = 36.0;
+
+pub fn panel(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
+    let tabs = s.panel_tabs();
+    let tab = s.panel_tab();
+    let expanded = s.panel.expanded;
+    let mut head = row().key("context-head").w_full().h(HEAD).px(8.0).gap(8.0).center_y();
+    if tabs.is_empty() {
+        head = head.child(el().grow(1.0));
+    } else {
+        let labels: Vec<&str> = tabs.iter().map(|t| t.title()).collect();
+        let selected = tab.and_then(|t| tabs.iter().position(|x| *x == t));
+        let picks = tabs.clone();
+        let control = SegmentedControl::new(&labels, selected).label("Context").width(None).on_pick(move |s: &mut App, i: usize, _| s.panel_choose_tab(picks[i])).build(&t.kit);
+        head = head.child(row().key("context-picker").grow(1.0).min_w(0.0).child(control));
     }
-    let lines: Vec<String> = match s.context {
-        ContextKind::Browser => vec!["The agent's browser shows here, live.".to_owned(), "Live views arrive in P3.".to_owned()],
-        ContextKind::Screen => vec!["The agent's screen shows here, live.".to_owned(), "Live views arrive in P3.".to_owned()],
-        kind => vec![format!("{} appears here when the session produces one.", kind.title())],
+    head = head
+        .child(icon_button(if expanded { &icons::COLLAPSE } else { &icons::EXPAND }, if expanded { "Restore the panel" } else { "Expand the panel" }, "context-expand", t, move |s: &mut App| s.panel_expand(!expanded)))
+        .child(icon_button(&icons::CLOSE_SMALL, "Close the panel", "context-close", t, |s: &mut App| s.panel_set_open(false)));
+    let body = match tab {
+        Some(Tab::Canvas) => canvas(s, t, layer),
+        Some(Tab::Diff) => context_diff::tab(s, t, layer),
+        Some(Tab::Files) => context_files::tab(s, t),
+        Some(Tab::Terminal) => context_terminal::tab(s, t),
+        None => placeholder(&["Nothing to show yet."], t),
     };
-    let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
-    col().key("context").h_full().min_w(0.0).my(8.0).mx(2.0).radius(t.radius.window).fill(t.surface.card).child(
-        col().w_full().h_full().child(
-            band(t).px(8.0).gap(4.0).child(row().grow(1.0).min_w(0.0).child(picker)).child(icon_button(&icons::CLOSE_SMALL, "Hide context", "context-close", t, |s: &mut App| s.layout.context.set_open(false))),
-        ).child(placeholder(&refs, t)),
-    )
+    col().key("context").h_full().min_w(0.0).my(8.0).mx(2.0).radius(t.radius.window).clip_rounded(t.radius.window).fill(t.surface.card).child(head).child(col().key("context-body").w_full().grow(1.0).min_h(0.0).child(body))
+}
+
+/// The icon of a kind: the kit's file glyphs by family.
+pub fn kind_icon(kind: &str) -> &'static rune::Icon {
+    match family(kind) {
+        "image" | "model" => &FILE_IMAGE,
+        "text" | "table" | "document" => &FILE_TEXT,
+        "page" => &FILE_CODE,
+        _ => &FILE,
+    }
+}
+
+/// The Canvas: the session's artifacts as rows, the chosen one's version select, and its viewer.
+fn canvas(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
+    let Some(id) = s.selected.clone() else { return placeholder(&["Nothing to show yet."], t) };
+    let Some(sp) = s.panel.session(&id) else { return placeholder(&["Nothing to show yet."], t) };
+    let target = s.panel_target();
+    let current = target.as_ref().and_then(|t| match t {
+        Target::Artifact { id, .. } => Some(id.clone()),
+        Target::File { .. } => None,
+    });
+    let mut list = col().key("canvas-list").w_full().px(8.0).pb(4.0);
+    for shown in &sp.shown {
+        let record = s.panel.artifacts.get(&shown.id);
+        let selected = current.as_deref() == Some(shown.id.as_str());
+        let version = sp.versions.get(&shown.id).copied().or_else(|| record.and_then(|a| a.versions.iter().map(|v| v.n).max()));
+        let when = record.and_then(|a| a.versions.iter().map(|v| v.at_ms).max()).unwrap_or(shown.at_ms);
+        let title = record.map_or_else(|| shown.id.clone(), |a| a.title.clone());
+        let kind = record.map(|a| a.kind.clone()).unwrap_or_default();
+        let pick = shown.id.clone();
+        let mut line = row()
+            .key(format!("artifact-{}", shown.id))
+            .role("button")
+            .label(format!("{title}, {}", version.map_or("loading".to_owned(), |v| format!("version {v}"))))
+            .focusable(true)
+            .w_full()
+            .h(32.0)
+            .px(8.0)
+            .gap(8.0)
+            .center_y()
+            .radius(t.radius.row)
+            .fill(if selected { t.surface.selected } else { rune::Color::TRANSPARENT })
+            .hover(t.surface.hover)
+            .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+            .on_press(move |s: &mut App| s.panel_pick_artifact(&pick))
+            .child(rune::icon(kind_icon(&kind), 16.0).color(t.text.muted).a11y_hidden())
+            .child(text(title).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0).a11y_hidden());
+        if let Some(v) = version {
+            line = line.child(text(format!("v{v}")).font(t.ty.id).color(t.text.faint).a11y_hidden());
+        }
+        list = list.child(line.child(text(age(s.now_ms, when)).font(t.ty.meta).color(t.text.muted).a11y_hidden()));
+    }
+    let mut c = col().w_full().grow(1.0).min_h(0.0).child(col().key("canvas-scroll").w_full().max_h(4.0 * 32.0 + 8.0).min_h(0.0).clip_rounded(0.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(list));
+    if let Some(Target::Artifact { id, version }) = &target {
+        // The chosen artifact's own line: a version select at the right when it has more than one.
+        let versions: Vec<u32> = s.panel.artifacts.get(id).map(|a| { let mut v: Vec<u32> = a.versions.iter().map(|v| v.n).collect(); v.sort_unstable_by(|a, b| b.cmp(a)); v }).unwrap_or_default();
+        let mut line = row().key("canvas-head").w_full().h(32.0).px(12.0).gap(8.0).center_y().child(el().grow(1.0));
+        if !versions.is_empty() {
+            let options: Vec<String> = versions.iter().map(|v| format!("v{v}")).collect();
+            let owner = id.clone();
+            line = line.child(ui::pick(s, t, layer, "context-version", "Version", &options, &format!("v{version}"), 80.0, move |s: &mut App, chosen: &str| {
+                if let Ok(n) = chosen.trim_start_matches('v').parse::<u32>() {
+                    s.panel_pick_version(&owner, n);
+                }
+            }));
+        }
+        c = c.child(line);
+    }
+    match target {
+        Some(target) => c.child(viewer(s, t, &target)),
+        None => c.child(placeholder(&["Nothing to show yet."], t)),
+    }
+}
+
+/// What the open target shows: its viewer, the fallback, or why there is nothing.
+pub fn viewer(s: &App, t: &Neko, target: &Target) -> El {
+    let content = s.panel.open.as_ref().filter(|o| &o.target == target).map(|o| &o.content);
+    match content {
+        None | Some(Content::Loading) => placeholder(&["Opening…"], t),
+        Some(Content::Failed(message)) => placeholder(&[message.as_str()], t),
+        Some(Content::TooLarge { size, path }) => too_large(t, *size, path),
+        Some(Content::Ready(loaded)) => match viewers::resolve_for(&loaded.kind, Some(loaded.bytes())) {
+            Some(spec) => {
+                let input = ViewerInput { kind: &loaded.kind, bytes: Some(loaded.bytes()), path: Some(&loaded.path), text: loaded.text(), theme_dark: t.dark, title: &loaded.title };
+                let key = target.key();
+                let route = target.route();
+                s.panel.states.with(&key, |st| {
+                    st.route = route;
+                    (spec.build)(&input, st)
+                })
+            }
+            None => fallback(s, t, loaded, target),
+        },
+    }
+}
+
+/// An unknown kind: its name, its size, and ways out (the web UI has viewers this window lacks).
+fn fallback(_s: &App, t: &Neko, loaded: &Loaded, target: &Target) -> El {
+    let path = loaded.path.to_string_lossy().into_owned();
+    let route = target.route();
+    col()
+        .key("viewer-fallback")
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .center()
+        .gap(6.0)
+        .px(24.0)
+        .child(text(loaded.title.clone()).font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(t.text.base).truncate())
+        .child(text(size_words(loaded.size)).font(t.ty.meta).color(t.text.muted))
+        .child(
+            row()
+                .gap(8.0)
+                .pt(8.0)
+                .child(quiet_button("Reveal in Finder", "fallback-reveal", t, move |s: &mut App| s.reveal(&path)))
+                .child(quiet_button("Open in web UI", "fallback-web", t, move |s: &mut App| s.open_in_web(route.as_deref()))),
+        )
+}
+
+fn too_large(t: &Neko, size: u64, path: &std::path::Path) -> El {
+    let path = path.to_string_lossy().into_owned();
+    col()
+        .key("viewer-too-large")
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .center()
+        .gap(6.0)
+        .px(24.0)
+        .child(text("Too large to preview").font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(t.text.base))
+        .child(text(size_words(size)).font(t.ty.meta).color(t.text.muted))
+        .child(row().pt(8.0).child(quiet_button("Reveal in Finder", "too-large-reveal", t, move |s: &mut App| s.reveal(&path))))
 }

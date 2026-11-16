@@ -62,6 +62,12 @@ pub enum Reply {
     Snapshot(Summary),
     Checkpoints { task_id: String, list: CheckpointList },
     Diff { task_id: String, run: Option<u32>, patch: String, truncated: bool },
+    /// The folder a session works in, when it has one that exists now.
+    Folder { task_id: String, path: Option<String> },
+    /// Where one version of an artifact is stored.
+    ArtifactFile { id: String, version: Option<u32>, path: String, kind: String, size: u64 },
+    /// An artifact's record.
+    ArtifactInfo(neko_protocol::Artifact),
     Unseen(Vec<String>),
     Digest(Option<Digest>),
     Inbox(Vec<InboxItem>),
@@ -140,6 +146,15 @@ pub fn make(socket: &Path, call: &Call, open: Option<&str>) -> Reply {
             Call::CheckpointDiff { task_id, run } => Reply::Diff { task_id: task_id.clone(), run: *run, patch, truncated },
             _ => Reply::Done,
         },
+        Response::TaskFolder { path } => match call {
+            Call::TaskFolder { task_id } => Reply::Folder { task_id: task_id.clone(), path },
+            _ => Reply::Done,
+        },
+        Response::ArtifactFile { path, kind, size } => match call {
+            Call::ArtifactFile { id, version } => Reply::ArtifactFile { id: id.clone(), version: *version, path, kind, size },
+            _ => Reply::Done,
+        },
+        Response::Artifact { artifact, .. } => Reply::ArtifactInfo(artifact),
         Response::UnseenTasks { ids } => Reply::Unseen(ids),
         Response::Digest { digest } => Reply::Digest(digest),
         Response::Routines { routines, standing_orders, scopes, owner_name, age_out_days, routines_on, spend_today } => match call {

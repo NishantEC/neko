@@ -18,6 +18,7 @@ pub fn describe(event: &LinkEvent) -> String {
         LinkEvent::Connecting => "connecting".to_owned(),
         LinkEvent::Live(s) => format!("live: {} tasks, {} need you, {} in review, {} working", s.tasks.len(), s.needs_you(), s.in_review(), s.working()),
         LinkEvent::Quiet => "quiet: nothing changed".to_owned(),
+        LinkEvent::ShowArtifact { id, version } => format!("show artifact {id} v{}", version.map_or("latest".to_owned(), |v| v.to_string())),
         LinkEvent::Down { error, attempt, retry_in } => format!("down (attempt {attempt}, retry in {retry_in:?}): {}", crate::link::calm(error, *retry_in)),
     }
 }

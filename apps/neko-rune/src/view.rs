@@ -10,6 +10,9 @@
 
 mod calendar;
 mod context;
+mod context_diff;
+mod context_files;
+mod context_terminal;
 mod more;
 mod neko;
 mod new;
@@ -46,6 +49,7 @@ pub struct Frame {
 
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let t = theme(cx.system_dark());
+    s.panel.dark.set(t.dark);
     let mut layer = Vec::new();
     let layout = &s.layout;
     // What fits: the session keeps its minimum, so a small window narrows or hides the others.
@@ -57,14 +61,21 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let neko_w = if fit.neko_open { layout.neko.width() } else { NEKO_STRIP };
     let frame = Frame { win_h, region_w: (win_w - layout.sessions.width() - fit.context - neko_w - 3.0 * GRIP - 4.0).max(0.0) };
 
+    s.panel.shown.set(fit.context > 0.0);
+    // Expanded, the panel takes the session's region and its own; the sessions and Neko columns stay.
+    let expanded = s.panel.expanded && fit.context > 0.0;
     let mut window = row().key("window").w_full().h_full().fill(t.surface.sidebar);
     window = window.child(sessions::column(s, &t, &mut layer).w(layout.sessions.width()).key("sessions"));
     window = window.child(grip(Region::Sessions, &t));
     // The session and the context panel are two cards in the window, inset from its edges.
-    window = window.child(session::region(s, &t, &mut layer, frame));
-    if fit.context > 0.0 {
-        window = window.child(grip(Region::Context, &t));
-        window = window.child(context::panel(s, &t).w(fit.context));
+    if expanded {
+        window = window.child(context::panel(s, &t, &mut layer).grow(1.0));
+    } else {
+        window = window.child(session::region(s, &t, &mut layer, frame));
+        if fit.context > 0.0 {
+            window = window.child(grip(Region::Context, &t));
+            window = window.child(context::panel(s, &t, &mut layer).w(fit.context));
+        }
     }
     if fit.neko_open {
         window = window.child(grip(Region::Neko, &t));

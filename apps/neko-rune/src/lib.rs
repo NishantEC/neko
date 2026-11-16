@@ -14,12 +14,17 @@ pub mod layout;
 pub mod link;
 pub mod new_session;
 pub mod pages;
+pub mod panel;
+pub mod samples;
 pub mod scenes;
+pub mod readers;
 pub mod scenes_pages;
 pub mod status;
+pub mod terminal;
 pub mod theme;
 pub mod turns;
 pub mod view;
+pub mod viewers;
 pub mod views;
 pub mod web_link;
 pub mod work;
@@ -82,6 +87,10 @@ fn socket_path() -> PathBuf {
 
 /// Keys the window handles before any field: ⌘K opens the palette; ⌘N starts a session.
 fn on_key(s: &mut App, ev: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
+    // The context panel's keys: Esc restores an expanded panel; ⌘+, ⌘−, ⌘0 zoom a PDF; W turns a model's wireframe on.
+    if s.panel_on_key(ev) {
+        return true;
+    }
     // ⌘F in Settings goes to its search field, which filters the rows of every section.
     if ev.is_command('f') && !ev.mods.shift && s.view == Some(views::FullView::Settings) {
         tx.focus("settings-search", true);
@@ -106,7 +115,8 @@ pub fn run() {
         let socket = std::env::args().find_map(|a| a.strip_prefix("socket=").map(PathBuf::from)).unwrap_or_else(|| std::env::var("NEKO_SOCKET").map(PathBuf::from).unwrap_or_else(|_| neko_protocol::socket_path()));
         std::process::exit(connection::probe(socket, neko_protocol::support_dir(), std::time::Duration::from_secs(15), std::env::args().any(|a| a == "json")));
     }
-    rune::prewarm_gpu();
+    // The wgpu backend: the 3D viewer draws with depth, which Rune's own Metal backend cannot (docs/knowledge/rune-p3a-the-context-panel.md).
+    rune::prewarm_gpu_on(rune::GpuBackend::Wgpu);
     let spec = rune::AppSpec {
         scenes: scenes::SCENES,
         min_size: Some((960.0, 560.0)),
@@ -114,11 +124,16 @@ pub fn run() {
         poll: Some(|s: &mut App, t: f64, tx: &mut rune::Tx| {
             let moved = s.tick_stream(t);
             s.tick_layout(t, tx);
-            moved
+            let panel = s.panel_tick(t, tx);
+            moved || panel
         }),
         ..rune::AppSpec::new("Neko (Rune)", (1360.0, 840.0), init, view::view)
     };
-    let app = rune::App::new(spec).titlebar(rune::Titlebar::new(44.0)).on_focus(|s: &mut App, focused: bool, _| s.set_focused(focused));
+    let app = rune::App::new(spec)
+        .gpu_backend(rune::GpuBackend::Wgpu)
+        .compositor(viewers::model3d_gpu::Viewer3d::default())
+        .titlebar(rune::Titlebar::new(44.0))
+        .on_focus(|s: &mut App, focused: bool, _| s.set_focused(focused));
     let handle = app.handle();
     let mut started = false;
     app.on_ready(move |_| {
