@@ -61,6 +61,8 @@ const WRITES: &[&str] = &[
     "Command::CompleteTask",
     "Command::CancelTask",
     "Command::StartTask",
+    // The session header's "Propose parallel work" (a read-only proposal; the web's own button).
+    "Command::ProposeSplit",
     // A goal.
     "GoalCommand::Pause",
     "GoalCommand::Resume",

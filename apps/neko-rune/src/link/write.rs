@@ -62,6 +62,8 @@ pub enum Call {
     Complete { task_id: String },
     Stop { task_id: String },
     Start { task_id: String },
+    /// "Propose parallel work" (the web's `ProposeSplit`: a read-only proposal, approval is separate).
+    ProposeSplit { task_id: String },
     // A goal.
     GoalPause { id: String },
     GoalResume { id: String },
@@ -158,6 +160,7 @@ impl Call {
             Call::Complete { task_id } => Request::Workbench(Command::CompleteTask { task_id }),
             Call::Stop { task_id } => Request::Workbench(Command::CancelTask { task_id }),
             Call::Start { task_id } => Request::Workbench(Command::StartTask { task_id }),
+            Call::ProposeSplit { task_id } => Request::Workbench(Command::ProposeSplit { task_id }),
             Call::GoalPause { id } => Request::Workbench(Command::Goals(GoalCommand::Pause { id })),
             Call::GoalResume { id } => Request::Workbench(Command::Goals(GoalCommand::Resume { id })),
             Call::GoalExtend { id, turns } => Request::Workbench(Command::Goals(GoalCommand::Extend { id, turns })),

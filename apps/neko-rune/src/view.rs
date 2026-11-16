@@ -42,6 +42,10 @@ pub fn home_scrim() -> (f32, f32) {
 
 /// One column for full views and the lab (DESIGN.md §8 rule 8).
 pub const COLUMN: f32 = 880.0;
+/// The session's text column (turns, cards, composer): at most this wide, with `TEXT_PAD` of air at each side.
+/// The sticky header and the region's background stay full width.
+pub const TEXT_COLUMN: f32 = 760.0;
+pub const TEXT_PAD: f32 = 32.0;
 /// The window's titlebar height: the traffic lights sit in it, and every region's header row is centred in it (polish spec §0).
 pub const BAND: f32 = 44.0;
 /// Every region's header row (sidebar, session, Neko): 32 high, its centre 28 from the window's top.

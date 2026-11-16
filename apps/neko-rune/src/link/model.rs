@@ -155,6 +155,40 @@ pub struct Detail {
     /// The task has a folder its checkpoints live in (a working copy, or parked work).
     pub has_folder: bool,
     pub workspace: String,
+    /// The runtime that last ran it, as the header says it: "Claude · default".
+    #[serde(default)]
+    pub runtime: String,
+    /// "Propose parallel work" is offered (the web's `canProposeSplit`: awaiting approval, no split yet).
+    #[serde(default)]
+    pub can_split: bool,
+    /// The ticket's source, when a watch filed it: its identifier and its address.
+    #[serde(default)]
+    pub source: Option<(String, String)>,
+}
+
+/// A runtime in words, as the web's header chip says it (`modelLabel` with a default): "Claude · default".
+pub fn runtime_words(provider: &str, model: &str) -> String {
+    let name = match provider {
+        "" | "codex" => "Codex".to_owned(),
+        "claude" => "Claude".to_owned(),
+        "opencode" => "OpenCode".to_owned(),
+        other => { let mut c = other.chars(); c.next().map_or_else(String::new, |f| f.to_uppercase().collect::<String>() + c.as_str()) }
+    };
+    format!("{name} · {}", if model.is_empty() { "default" } else { model })
+}
+
+/// The newest runtime chosen for a conversation (`task:<id>`, `home:…`), else the workbench's own.
+fn runtime_for(snapshot: &Snapshot, prefix: &str) -> String {
+    let own = snapshot.runtime_selections.iter().filter(|s| s.conversation_id.starts_with(prefix)).max_by_key(|s| s.selected_at_ms);
+    match own {
+        Some(s) if !s.runtime.provider.is_empty() || !s.runtime.model.is_empty() => runtime_words(&s.runtime.provider, &s.runtime.model),
+        _ => runtime_words(&snapshot.agent_runtime.provider, ""),
+    }
+}
+
+/// The web's `shortId`: `NEK-` and the first four characters of the id, upper-cased.
+pub fn short_id(id: &str) -> String {
+    format!("NEK-{}", id.chars().take(4).collect::<String>().to_uppercase())
 }
 
 /// What the app keeps of a workbench snapshot.
@@ -164,6 +198,9 @@ pub struct Summary {
     /// The runtime new work uses, as words ("Codex · default model").
     #[serde(default)]
     pub runtime: String,
+    /// The runtime Neko's own chat last ran on ("Claude · default").
+    #[serde(default)]
+    pub home_runtime: String,
     pub tasks: Vec<TaskRow>,
     #[serde(default)]
     pub workspaces: Vec<WorkspaceRow>,
@@ -236,6 +273,7 @@ impl Summary {
                 usage: usage_points(snapshot, now),
             },
             digest: snapshot.digest.clone(),
+            home_runtime: runtime_for(snapshot, "home:"),
             runtime: format!(
                 "{} · {}",
                 if snapshot.agent_runtime.provider.is_empty() { "Codex" } else { snapshot.agent_runtime.provider.as_str() },
@@ -267,7 +305,9 @@ impl Summary {
                     event.message = clip_bytes(&event.message, EVENT_BYTES);
                 }
                 let workspace = snapshot.workspaces.iter().find(|w| w.id == t.workspace_id).map(|w| w.name.clone()).unwrap_or_default();
-                Detail { has_folder: t.worktree.is_some() || t.parked.is_some(), workspace, task }
+                let can_split = t.status == TaskStatus::AwaitingApproval && !snapshot.splits.iter().any(|s| s.parent_id == t.id || s.subtasks.iter().any(|sub| sub.task_id.as_deref() == Some(t.id.as_str())));
+                let source = t.issue_id.as_ref().and_then(|id| snapshot.issues.iter().find(|i| &i.id == id)).filter(|i| !i.url.is_empty()).map(|i| (if i.identifier.is_empty() { i.external_id.clone() } else { i.identifier.clone() }, i.url.clone()));
+                Detail { has_folder: t.worktree.is_some() || t.parked.is_some(), workspace, runtime: runtime_for(snapshot, &format!("task:{}", t.id)), can_split, source, task }
             }),
         }
     }

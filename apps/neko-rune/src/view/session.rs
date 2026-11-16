@@ -9,7 +9,7 @@ use rune::{Color, El, Key, KeyEvent, ScrollSpec, col, el, icon, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant, Menu, MenuItem, Placement};
 
 use super::turn::{self, Where};
-use super::{COLUMN, Frame, band, icon_button, placeholder, primary_button, work};
+use super::{Frame, TEXT_COLUMN, TEXT_PAD, band, icon_button, placeholder, primary_button, work};
 use crate::app::{App, Steer};
 use crate::icons;
 use crate::lab::lab;
@@ -26,6 +26,11 @@ const LIST: Where = Where { ns: "", compact: false };
 /// conversation and the composer under it are never covered.
 pub fn goal_body_cap(win_h: f32) -> f32 {
     380.0f32.min(win_h * 0.35)
+}
+
+/// One centred text column: at most 760 wide with 32 at each side, however wide the region is.
+fn text_column(inner: El) -> El {
+    row().w_full().justify_center().child(col().w_full().max_w(TEXT_COLUMN).px(TEXT_PAD).child(inner))
 }
 
 /// The card in the middle: inset from the window's edges with the window's radius.
@@ -90,7 +95,7 @@ fn session(s: &App, row_task: &TaskRow, t: &Neko, layer: &mut Vec<El>, frame: Fr
     // scroll area is inset by its height plus 8, so its first line is never under it.
     // The lines' own padding (4 above, 4 below) and 8 of air.
     let inset = if goals.is_empty() { 0.0 } else { goals.len() as f32 * work::GOAL_LINE_H + 16.0 };
-    let content = col().w_full().max_w(COLUMN - 120.0).px(24.0).pb(20.0).pt(inset).child(conversation(s, t, task, detail.has_folder, layer));
+    let content = col().w_full().max_w(TEXT_COLUMN).px(TEXT_PAD).pb(20.0).pt(inset).child(conversation(s, t, task, detail.has_folder, layer));
     let mut region = col().key("turns-region").w_full().grow(1.0).min_h(0.0).clip_rounded(0.0).child(
         col()
             .key("turns")
@@ -116,7 +121,7 @@ fn session(s: &App, row_task: &TaskRow, t: &Neko, layer: &mut Vec<El>, frame: Fr
     }
     c = c.child(region);
     if let Some(tray) = work::tray(s, t, task) {
-        c = c.child(row().w_full().justify_center().px(20.0).pb(8.0).child(tray.w_full().max_w(COLUMN - 120.0)));
+        c = c.child(text_column(tray.w_full().pb(8.0)));
     }
     c.child(composer(s, t, layer, true))
 }
@@ -297,10 +302,13 @@ fn composer(s: &App, t: &Neko, layer: &mut Vec<El>, ready: bool) -> El {
         .build(k)
         .key("send");
 
-    row().key("composer").w_full().justify_center().px(20.0).pb(16.0).child(
+    row().key("composer").w_full().justify_center().pb(16.0).child(
         col()
             .w_full()
-            .max_w(COLUMN - 120.0)
+            .max_w(TEXT_COLUMN)
+            .px(TEXT_PAD)
+            .child(col()
+            .w_full()
             .px(14.0)
             .pt(10.0)
             .pb(6.0)
@@ -308,7 +316,7 @@ fn composer(s: &App, t: &Neko, layer: &mut Vec<El>, ready: bool) -> El {
             .radius(t.radius.row + 4.0)
             .fill(t.surface.card)
             .child(field)
-            .child(row().w_full().center_y().child(steer).child(el().grow(1.0)).child(send)),
+            .child(row().w_full().center_y().child(steer).child(el().grow(1.0)).child(send))),
     )
 }
 
