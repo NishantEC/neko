@@ -363,7 +363,7 @@ mod tests {
 
     #[test]
     fn summaries_count_what_needs_the_person() {
-        let task = |id: &str, status| TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: 0, goal: String::new() };
+        let task = |id: &str, status| TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: 0, goal: String::new(), wait: Wait::None, progress: None };
         let s = Summary {
             tasks: vec![
                 task("a", TaskStatus::AwaitingApproval),

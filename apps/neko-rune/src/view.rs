@@ -8,14 +8,15 @@
 //! The edges between regions drag to resize (`layout.rs` holds the widths and ranges). Colours,
 //! sizes and fonts come from `theme.rs`; the regions name none.
 
+mod all;
 mod calendar;
 mod context;
 mod context_diff;
 mod context_files;
 mod context_terminal;
+mod home;
 mod more;
 mod neko;
-mod new;
 mod palette;
 mod routines;
 mod session;
@@ -36,8 +37,12 @@ use crate::theme::{Neko, theme};
 
 /// One column for full views and the lab (DESIGN.md §8 rule 8).
 pub const COLUMN: f32 = 880.0;
-/// The height of the band across the top of each region (the window's titlebar height).
+/// The window's titlebar height: the traffic lights sit in it, and every region's header row is centred in it (polish spec §0).
 pub const BAND: f32 = 44.0;
+/// Every region's header row (sidebar, session, Neko): 32 high, its centre 28 from the window's top.
+pub const HEADER_H: f32 = 32.0;
+/// Where the traffic lights sit: their left edge 12 from the window's edge, centred on the header row (14 point buttons).
+pub const TRAFFIC_LIGHTS: (f32, f32) = (12.0, 28.0 - 7.0);
 
 /// What the window gives the middle region: its height and its own width, for the parts that must
 /// fit them (an open goal, Settings' rail).
@@ -59,7 +64,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         None => (crate::layout::Fit { context: layout.context.shown_width(), neko_open: layout.neko.is_open() }, 840.0, 1360.0),
     };
     let neko_w = if fit.neko_open { layout.neko.width() } else { NEKO_STRIP };
-    let frame = Frame { win_h, region_w: (win_w - layout.sessions.width() - fit.context - neko_w - 3.0 * GRIP - 4.0).max(0.0) };
+    let frame = Frame { win_h, region_w: (win_w - layout.sessions.shown_width() - fit.context - neko_w - 3.0 * GRIP - 4.0).max(0.0) };
 
     s.panel.hidden.set(layout.context.is_open() && fit.context <= 0.0);
     // The web view is wanted by whatever shows it below, in this very build (`viewers::web`, `context.rs`, `session.rs`).
@@ -67,8 +72,10 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     // Expanded, the panel takes the session's region and its own; the sessions and Neko columns stay.
     let expanded = s.panel.expanded && fit.context > 0.0;
     let mut window = row().key("window").w_full().h_full().fill(t.surface.sidebar);
-    window = window.child(sessions::column(s, &t, &mut layer).w(layout.sessions.width()).key("sessions"));
-    window = window.child(grip(Region::Sessions, &t));
+    if layout.sessions.is_open() {
+        window = window.child(sessions::column(s, &t, &mut layer).w(layout.sessions.width()).key("sessions"));
+        window = window.child(grip(Region::Sessions, &t));
+    }
     // The session and the context panel are two cards in the window, inset from its edges.
     if expanded {
         window = window.child(context::panel(s, &t, &mut layer, win_w).grow(1.0));
@@ -90,7 +97,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     // one, a native web view (always above Rune's surface) is hidden.
     s.web_view.overlays.set(layer.len());
     s.web_view.sync();
-    root(window, layer)
+    // Hover fills arrive and leave in 120 ms, ease-out, everywhere in the window (polish spec §4).
+    root(window, layer).hover_motion_within(crate::motion::hover(), crate::motion::hover())
 }
 
 /// The draggable edge between two regions: a transparent strip that resizes the region beside it
@@ -113,10 +121,24 @@ fn grip(region: Region, t: &Neko) -> El {
         .on_double_press(move |s: &mut App| s.layout.pane_mut(region).reset_width())
 }
 
-/// The band across the top of a region: the window can be dragged by it.
+/// The row across the top of a card region (the session, the context panel): 32 high, 4 below the card's top edge
+/// (which is 8 below the window's), so its centre is the sidebar header's. The window can be dragged by it.
 fn band(t: &Neko) -> El {
     let _ = t;
-    row().h(BAND).w_full().px(14.0).gap(10.0).center_y().window_drag()
+    row().h(HEADER_H + 4.0).pt(4.0).w_full().px(12.0).gap(8.0).center_y().window_drag()
+}
+
+/// The row across the top of the Neko column, which is not a card: 32 high at 12 from the window's top (the sidebar
+/// header's place), the window can be dragged by it.
+fn flat_band(t: &Neko) -> El {
+    let _ = t;
+    row().h(BAND).pt(12.0).w_full().px(12.0).gap(8.0).center_y().window_drag()
+}
+
+/// The same row for Home and the session, which also carries the button that brings the sessions column back
+/// when it is folded, after the traffic lights (their 80 point inset, as in the sidebar's header).
+fn card_band(t: &Neko) -> El {
+    band(t)
 }
 
 /// A small icon button: 28 points, the ink muted, a soft fill under the pointer.
@@ -134,26 +156,6 @@ fn icon_button(glyph: &'static rune::Icon, label: &str, key: &str, t: &Neko, on_
         .focus_ring(2.0, 0.0, t.kit.c.border_focus)
         .on_press(on_press)
         .child(icon(glyph, 16.0).color(t.text.muted).a11y_hidden())
-}
-
-/// A row in a column: an icon, a title, the soft fill when it is the open one.
-fn nav_row(glyph: &'static rune::Icon, label: &str, key: &str, active: bool, t: &Neko) -> El {
-    row()
-        .key(key.to_owned())
-        .role("button")
-        .label(label)
-        .focusable(true)
-        .w_full()
-        .h(32.0)
-        .px(10.0)
-        .gap(10.0)
-        .center_y()
-        .radius(t.radius.row)
-        .fill(if active { t.surface.active } else { rune::Color::TRANSPARENT })
-        .hover(t.surface.hover)
-        .focus_ring(2.0, 0.0, t.kit.c.border_focus)
-        .child(icon(glyph, 16.0).color(if active { t.text.base } else { t.text.muted }).a11y_hidden())
-        .child(text(label.to_owned()).font(t.ty.row).color(if active { t.text.base } else { t.text.muted }).truncate().a11y_hidden())
 }
 
 /// A row in a list of sections: just its words, the soft fill when it is the open one.

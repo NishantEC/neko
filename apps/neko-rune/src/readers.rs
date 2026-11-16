@@ -198,6 +198,26 @@ pub fn size_words(bytes: u64) -> String {
     }
 }
 
+/// The branch a folder's repository is on (`ref: refs/heads/main` in `.git/HEAD`), or a short commit
+/// when it is detached. A linked worktree's `.git` is a file that names the folder holding its HEAD.
+pub fn branch_of(folder: &Path) -> Option<String> {
+    let git = folder.join(".git");
+    let dir = if git.is_file() {
+        let text = std::fs::read_to_string(&git).ok()?;
+        let target = text.trim().strip_prefix("gitdir:")?.trim().to_owned();
+        let path = Path::new(&target);
+        if path.is_absolute() { path.to_path_buf() } else { folder.join(path) }
+    } else {
+        git
+    };
+    let head = std::fs::read_to_string(dir.join("HEAD")).ok()?;
+    let head = head.trim();
+    match head.strip_prefix("ref: refs/heads/") {
+        Some(branch) => Some(branch.to_owned()),
+        None => (head.len() >= 7).then(|| head.chars().take(7).collect()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

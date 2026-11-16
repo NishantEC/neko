@@ -123,6 +123,8 @@ pub struct Surfaces {
 /// Text in three greys (DESIGN.md §2).
 #[derive(Clone, Copy, Debug)]
 pub struct Greys {
+    /// `--strong`: the strongest text (headings, the greeting).
+    pub strong: Color,
     pub base: Color,
     pub muted: Color,
     pub faint: Color,
@@ -264,7 +266,7 @@ impl Neko {
         // The faint grey is the muted grey thinned toward the window, an opaque colour so it
         // never changes with what is under it. Blended in sRGB, as the web's `/70` is.
         let faint = mix_srgb(window, muted, FAINT_SHARE);
-        let text = Greys { base: fg, muted, faint };
+        let text = Greys { strong: c(hex.strong), base: fg, muted, faint };
         let meaning = Meaning { iris: c(hex.iris), amber: c(hex.amber), sky: c(hex.sky), mint: c(hex.mint), coral: c(hex.coral) };
         let radius = Radii { window: 20.0, row: 8.0, control: 8.0 };
         let ty = NekoType::new();

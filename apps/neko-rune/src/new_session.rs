@@ -8,32 +8,62 @@
 //! ticket's conversation (what the composer's runtime picker does).
 
 use std::collections::HashSet;
+use std::path::Path;
 
 use rune::TextEdit;
 
 use crate::app::App;
 use crate::link::{Call, RuntimeChoice, Summary};
 
+/// Which of the composer's selects is open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NewMenu {
     Workspace,
     Runtime,
+    Model,
 }
 
+/// Plan: the session plans first and waits for approval. Build: it starts building as soon as it is made.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Mode {
+    #[default]
+    Plan,
+    Build,
+}
+
+/// The runtimes the composer offers, as the daemon names them: (provider id, the name on the select).
+pub const RUNTIMES: [(&str, &str); 3] = [("claude", "Claude"), ("codex", "Codex"), ("opencode", "OpenCode")];
+
+/// What Home's composer holds besides its text: where, with which runtime and model, plan or build.
 pub struct NewForm {
     /// Index into the summary's workspaces.
     pub workspace: usize,
-    pub goal: bool,
+    pub mode: Mode,
     pub choices: Vec<RuntimeChoice>,
-    /// `None` is the default runtime.
-    pub runtime: Option<usize>,
+    /// The runtime's provider id; `None` is the one Neko uses by default.
+    pub runtime: Option<String>,
+    /// The model's id; `None` is Auto (the runtime's own choice).
+    pub model: Option<String>,
     pub menu: Option<NewMenu>,
     pub busy: bool,
     pub error: Option<String>,
-    /// The tasks there were when "Start" was pressed, to find the one it made.
+    /// The workspaces' branches, read from their folders when Home opens: (workspace id, branch).
+    pub branches: Vec<(String, String)>,
+    /// The tasks there were when "Send" was pressed, to find the one it made.
     known: HashSet<String>,
     /// The title the ticket was asked for with, to tell it from one another window made meanwhile.
     expect: String,
+}
+
+impl NewForm {
+    pub fn fresh() -> NewForm {
+        NewForm { workspace: 0, mode: Mode::Plan, choices: Vec::new(), runtime: None, model: None, menu: None, busy: false, error: None, branches: Vec::new(), known: HashSet::new(), expect: String::new() }
+    }
+
+    /// The models the chosen runtime offers (the daemon's own list), for the model select.
+    pub fn models_for(&self, provider: &str) -> Vec<&RuntimeChoice> {
+        self.choices.iter().filter(|c| c.provider == provider).collect()
+    }
 }
 
 /// The longest request the daemon keeps (`MAX_TASK_REQUEST`).
@@ -47,21 +77,52 @@ pub fn title_of(request: &str) -> String {
 }
 
 impl App {
+    /// Home with a clean composer: "New session" and a fresh window both land here.
     pub fn open_new(&mut self) {
         self.new_request = TextEdit::new("");
         self.new_request.focused = true;
-        self.new_check = TextEdit::new("");
-        self.new_form = Some(NewForm { workspace: 0, goal: false, choices: Vec::new(), runtime: None, menu: None, busy: false, error: None, known: HashSet::new(), expect: String::new() });
+        let keep = self.new_form.take().map(|f| (f.workspace, f.mode, f.choices, f.runtime, f.model, f.branches));
+        let mut form = NewForm::fresh();
+        if let Some((workspace, mode, choices, runtime, model, branches)) = keep {
+            (form.workspace, form.mode, form.choices, form.runtime, form.model, form.branches) = (workspace, mode, choices, runtime, model, branches);
+        }
+        self.new_form = Some(form);
+        self.selected = None;
+        self.wanted.set(None);
         self.view = None;
         self.plugin_view = None;
         self.call(Call::Models);
+        self.read_branches();
+    }
+
+    /// The composer's state for a window that starts on Home (nothing selected).
+    pub fn ensure_home(&mut self) {
+        if self.new_form.is_none() {
+            self.new_form = Some(NewForm::fresh());
+            self.call(Call::Models);
+            self.read_branches();
+        }
+    }
+
+    /// Reads each workspace's branch from its first folder (one small file each).
+    pub fn read_branches(&mut self) {
+        let Some(summary) = self.summary.as_ref() else { return };
+        let branches: Vec<(String, String)> = summary
+            .settings
+            .workspaces
+            .iter()
+            .filter_map(|w| w.folders.iter().find_map(|f| crate::readers::branch_of(Path::new(f))).map(|b| (w.id.clone(), b)))
+            .collect();
+        if let Some(form) = self.new_form.as_mut() {
+            form.branches = branches;
+        }
     }
 
     pub fn close_new(&mut self) {
         self.new_form = None;
     }
 
-    /// Why Start is off, in one calm line, or None when it can go.
+    /// Why Send is off, in one calm line, or None when it can go.
     pub fn new_blocker(&self) -> Option<&'static str> {
         let _form = self.new_form.as_ref()?;
         let workspaces = self.summary.as_ref().map_or(0, |s| s.workspaces.len());
@@ -109,19 +170,30 @@ impl App {
         }
     }
 
-    /// The ticket exists: open it, then pin its runtime and attach its goal when asked.
+    /// The ticket exists: open it, pin its runtime and model when asked, and start it when the mode is Build.
     pub(crate) fn after_created(&mut self, id: &str) {
         let Some(form) = self.new_form.take() else { return };
-        let workspace_id = self.summary.as_ref().and_then(|s| s.workspaces.get(form.workspace)).map(|w| w.id.clone()).unwrap_or_default();
         self.open_task(id);
-        if let Some(choice) = form.runtime.and_then(|i| form.choices.get(i)) {
-            self.call(Call::SetRuntime { task_id: id.to_owned(), provider: choice.provider.clone(), model: choice.model.clone() });
+        if form.runtime.is_some() || form.model.is_some() {
+            let provider = form.runtime.clone().unwrap_or_else(|| self.default_provider());
+            self.call(Call::SetRuntime { task_id: id.to_owned(), provider, model: form.model.clone().unwrap_or_default() });
         }
-        if form.goal {
-            let objective = self.new_request.text.trim().to_owned();
-            let check = self.new_check.text.trim().to_owned();
-            self.call(Call::GoalCreate { workspace_id, objective, done_check: check, ticket_id: id.to_owned() });
+        if form.mode == Mode::Build {
+            self.call(Call::Start { task_id: id.to_owned() });
         }
+        self.new_request = TextEdit::new("");
+    }
+
+    /// An image chosen with the composer's "+": its Markdown reference joins the request, as a pasted one does.
+    pub fn attach_to_new(&mut self, path: &Path) {
+        let sep = if self.new_request.text.is_empty() || self.new_request.text.ends_with('\n') { "" } else { "\n" };
+        let text = format!("{}{sep}{}\n", self.new_request.text, crate::attachments::reference(path));
+        self.new_request.replace_text(text);
+    }
+
+    /// The provider id Neko uses when a session names none.
+    pub fn default_provider(&self) -> String {
+        self.summary.as_ref().map(|m| m.settings.runtime.provider.clone()).filter(|p| !p.is_empty()).unwrap_or_else(|| "codex".to_owned())
     }
 
     pub(crate) fn new_error(&mut self, message: String) {

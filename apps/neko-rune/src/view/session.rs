@@ -32,8 +32,8 @@ pub fn goal_body_cap(win_h: f32) -> f32 {
 pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     let inner = if s.lab {
         col().w_full().grow(1.0).min_h(0.0).child(band(t)).child(row().w_full().grow(1.0).min_h(0.0).justify_center().child(lab(t)))
-    } else if s.new_form.is_some() {
-        super::new::form(s, t, layer)
+    } else if s.home_shown() {
+        super::home::home(s, t, layer)
     } else if let Some(page) = s.plugin_view.as_ref() {
         plugin_page(s, page, t)
     } else if let Some(view) = s.view {
@@ -216,6 +216,7 @@ fn full_view(s: &App, view: FullView, t: &Neko, layer: &mut Vec<El>, frame: Fram
         FullView::Usage => super::more::usage(s, t),
         FullView::Workspaces => super::more::workspaces(s, t, layer),
         FullView::Plugins => super::more::plugins(s, t, layer),
+        FullView::AllSessions => super::all::page(s, t, layer),
     }
 }
 

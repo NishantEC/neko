@@ -60,8 +60,8 @@ fn the_four_regions_stand_left_to_right_and_there_are_no_tabs() {
         let key = e.key.as_deref().unwrap_or("");
         assert!(!key.starts_with("rail") && key != "tabs" && key != "new-tab" && !key.starts_with("t-"), "no tabs, no rail: {key}");
     }
-    // The decided defaults: 300 for sessions (titles show about thirty letters), 340 for Neko, the rest for the session.
-    assert_eq!(sessions[2], 300.0);
+    // The decided defaults: 248 for sessions (polish spec §1), 340 for Neko, the rest for the session.
+    assert_eq!(sessions[2], 248.0);
     assert_eq!(neko[2], 340.0);
     assert!(session[2] > 600.0, "{}", session[2]);
     assert!(session[2] > MIDDLE_MIN);
@@ -71,26 +71,29 @@ fn the_four_regions_stand_left_to_right_and_there_are_no_tabs() {
 fn sessions_are_grouped_by_state_with_counts_and_the_first_one_that_needs_you_is_open() {
     let rt = runtime(true, live);
     let t = texts(&rt);
-    for title in ["Needs you", "Running", "Done today"] {
+    for title in ["Needs you", "Running", "Recent"] {
         assert!(t.contains(&title.to_owned()), "{title}: {t:?}");
     }
-    // 2 awaiting approval + 3 ready for review + 1 failed; 3 + 1 + 1 + 4 queued; 6 done + 1 cancelled.
-    assert_eq!(keyed(&rt, "session-t"), 22, "every task has a row");
-    assert_eq!(keyed(&rt, "group-"), 3);
+    // 2 awaiting approval + 3 ready for review + 1 failed = 6 need you (at most 8); 3 + 1 + 1 + 4 queued = 9 run (all);
+    // 6 done + 1 cancelled = 7 are recent but only 5 show.
+    assert_eq!(keyed(&rt, "session-t"), 6 + 9 + 5, "needs you, running, and Recent's five");
+    assert_eq!(keyed(&rt, "section-"), 3);
+    assert!(rt.find("view-all").is_some(), "Recent has its View all link");
     assert!(rt.state.selected.is_some());
     assert_eq!(rt.state.session().map(|t| t.status), Some(neko_protocol::workbench::TaskStatus::AwaitingApproval));
 }
 
 #[test]
-fn a_row_is_one_line_with_a_glyph_a_faint_id_a_title_and_quiet_meta() {
+fn a_row_is_one_line_with_an_icon_a_title_and_quiet_meta() {
     let rt = runtime(true, live);
     let t = texts(&rt);
-    assert!(t.iter().any(|x| x.starts_with("NK-1")), "ids: {t:?}");
     assert!(t.iter().any(|x| x == "Add a retry to the sync job"));
-    assert!(t.iter().any(|x| x.ends_with('m')), "quiet meta in minutes");
-    assert!(keyed(&rt, "status-") >= 20, "a glyph on every row");
-    let row = rect(&rt, "session-t0");
-    assert_eq!(row[3], 32.0, "one line");
+    assert!(t.iter().any(|x| x.ends_with('m')), "a needs-you row's meta is its age, in minutes");
+    assert!(t.iter().any(|x| x == "2/7") && t.iter().any(|x| x == "3/7"), "a running row with a fraction says n/m: {t:?}");
+    for key in ["session-t0", "session-t6", "group-0", "group-1", "group-2", "new-session", "view-inbox", "sessions-search"] {
+        assert_eq!(rect(&rt, key)[3], 32.0, "{key} is one 32 point row");
+    }
+    assert_eq!(rect(&rt, "sessions-footer")[3], 40.0, "the footer is 40");
 }
 
 #[test]
@@ -129,10 +132,16 @@ fn groups_collapse_and_expand_with_their_count_kept() {
 #[test]
 fn the_foot_opens_full_views_in_the_sessions_place_and_a_session_brings_it_back() {
     let mut rt = runtime(true, live);
-    for key in ["view-calendar", "view-inbox", "view-settings", "more", "new-session"] {
-        assert!(rt.find(key).is_some(), "{key} is at the foot of the sessions column");
+    for key in ["view-calendar", "view-inbox", "view-workspaces", "account", "new-session"] {
+        assert!(rt.find(key).is_some(), "{key} is in the sessions column");
     }
-    click(&mut rt, "view-settings");
+    // Settings is in the account footer's menu.
+    click(&mut rt, "account");
+    let e = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Settings")).expect("Settings in the account menu");
+    let (x, y) = (e.rect[0] + e.rect[2] / 2.0, e.rect[1] + e.rect[3] / 2.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
     assert_eq!(rt.state.view, Some(FullView::Settings));
     assert!(rt.find("full-settings").is_some() && rt.find("composer").is_none(), "the view replaces the session and its composer");
     assert!(rt.find("settings-search").is_some() && texts(&rt).contains(&"AI and agents".to_owned()), "Settings is its own page now");
@@ -142,12 +151,12 @@ fn the_foot_opens_full_views_in_the_sessions_place_and_a_session_brings_it_back(
 }
 
 #[test]
-fn more_lists_the_other_views_and_opens_one() {
+fn the_account_menu_lists_the_other_views_and_opens_one() {
     let mut rt = runtime(true, live);
-    click(&mut rt, "more");
+    click(&mut rt, "account");
     assert!(rt.state.more_open);
     let t = texts(&rt);
-    for title in ["Usage", "Workspaces", "Plugins", "Open the web UI"] {
+    for title in ["Settings", "Usage", "Plugins", "Open the web UI", "Quit"] {
         assert!(t.contains(&title.to_owned()), "{title} in More: {t:?}");
     }
     let e = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Usage")).unwrap();
@@ -238,8 +247,8 @@ fn dragging_an_edge_resizes_its_region_within_the_range() {
     rt.pointer_move(x + 60.0, y);
     rt.pointer_up(x + 60.0, y);
     settle(&mut rt);
-    assert_eq!(rt.state.layout.sessions.width(), 360.0);
-    assert_eq!(rect(&rt, "sessions")[2], 360.0);
+    assert_eq!(rt.state.layout.sessions.width(), 308.0);
+    assert_eq!(rect(&rt, "sessions")[2], 308.0);
 
     let (x, y) = rt.find("grip-neko").unwrap();
     rt.pointer_down(x, y);
@@ -248,9 +257,9 @@ fn dragging_an_edge_resizes_its_region_within_the_range() {
     settle(&mut rt);
     assert_eq!(rt.state.layout.neko.width(), 420.0, "dragging a right-hand edge left widens it");
     assert!(rt.state.layout.middle(WINDOW.0) >= MIDDLE_MIN);
-    rt.update(|s, _| s.layout.drag(Region::Sessions, 360.0, 900.0));
+    rt.update(|s, _| s.layout.drag(Region::Sessions, 308.0, 900.0));
     settle(&mut rt);
-    assert_eq!(rt.state.layout.sessions.width(), 420.0);
+    assert_eq!(rt.state.layout.sessions.width(), 360.0, "the sessions column is 232 to 360");
 }
 
 #[test]
@@ -272,13 +281,14 @@ fn before_and_without_a_daemon_it_says_so_calmly_in_the_column() {
 fn an_empty_workbench_says_no_sessions_once() {
     let (_, scene) = scenes::SCENES.iter().find(|(n, _)| *n == "empty").unwrap();
     let rt = runtime(false, scene);
-    assert_eq!(texts(&rt).iter().filter(|t| *t == "No sessions").count(), 1);
+    assert_eq!(texts(&rt).iter().filter(|t| *t == "No sessions yet").count(), 1);
     assert!(texts(&rt).contains(&"Nothing needs you right now".to_owned()));
     assert!(texts(&rt).contains(&"Nothing needs you".to_owned()), "the empty digest says so");
-    assert!(rt.find("empty-new").is_some(), "the empty view offers the one thing to do");
-    let empty = rect(&rt, "empty");
-    let button = rect(&rt, "empty-new");
-    assert!(((button[0] + button[2] / 2.0) - (empty[0] + empty[2] / 2.0)).abs() < 1.0, "centred, not off to one side");
+    // With nothing chosen the window is on Home, which is where a first session starts.
+    assert!(rt.find("home-composer").is_some() && rt.find("home-title").is_some(), "Home offers the one thing to do");
+    let (home, composer) = (rect(&rt, "home"), rect(&rt, "home-composer"));
+    assert!(((composer[0] + composer[2] / 2.0) - (home[0] + home[2] / 2.0)).abs() < 1.0, "centred, not off to one side");
+    assert!(composer[2] <= 680.0 + 0.5, "at most 680 wide: {}", composer[2]);
 }
 
 #[test]
@@ -325,8 +335,9 @@ fn every_scene_lays_out_in_both_appearances() {
 fn light_and_dark_follow_the_system() {
     let fill = |rt: &Runtime<App>, key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).map(|e| e.fill.hex()).unwrap();
     let (dark, light) = (runtime(true, |_| {}), runtime(false, |_| {}));
-    assert_eq!(fill(&dark, "window"), "#121212ff");
-    assert_eq!(fill(&light, "window"), "#f3f3f3ff");
+    // The window is the sidebar: the background plus 2% lightness (polish spec §4).
+    assert_eq!(fill(&dark, "window"), "#141414ff");
+    assert_eq!(fill(&light, "window"), "#ffffffff");
     assert_eq!(fill(&dark, "session-region"), "#0f0f0fff");
     assert_eq!(fill(&light, "session-region"), "#fafafaff");
 }

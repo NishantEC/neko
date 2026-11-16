@@ -1536,6 +1536,21 @@ mod tests {
         assert!(text.ends_with("how to verify it."));
     }
 
+    /// The native client (`apps/neko-rune/src/activity.rs`) folds a notice into its Activity line by this
+    /// shape: Neko's role, never a turn (no start time, not pending or failed), text parts only, no tool
+    /// calls. If a notice ever stops looking like this, that client would show it as a chat message.
+    #[test]
+    fn a_notice_has_the_shape_the_native_client_folds_out_of_the_chat() {
+        let db = Db::open_in_memory().unwrap();
+        post_notice(&db, "Neko updated itself to abc123 (UI live).", vec![], vec![]).unwrap();
+        let notice = load(&db).unwrap().pop().unwrap();
+        assert_eq!(notice.role, ChatRole::Neko);
+        assert_eq!(notice.started_ms, 0, "a turn records when it started; a notice is not one");
+        assert!(!notice.pending && !notice.failed && !notice.queued);
+        assert!(notice.tool_calls.is_empty() && notice.actions.is_empty());
+        assert!(!notice.parts.is_empty() && notice.parts.iter().all(|p| p["type"] == "text"));
+    }
+
     #[test]
     fn a_checkpoint_stands_where_the_dropped_history_was() {
         use crate::chat_checkpoint::Checkpoint;

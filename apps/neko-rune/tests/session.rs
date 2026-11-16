@@ -238,8 +238,8 @@ fn plan_approval_completion_and_stop_are_the_webs_actions() {
 fn a_new_session_asks_for_words_then_makes_the_ticket_the_chat_makes() {
     let mut rt = runtime(scene("live"));
     click(&mut rt, "new-session");
-    assert!(rt.state.outbox.contains(&Call::Models), "the runtimes are read when the form opens");
-    assert!(rt.find("new-form").is_some() && rt.find("composer").is_none(), "the form takes the session's place");
+    assert!(rt.state.outbox.contains(&Call::Models), "the runtimes are read when Home opens");
+    assert!(rt.find("home-composer").is_some() && rt.find("composer").is_none(), "Home takes the session's place");
     click(&mut rt, "new-start");
     assert!(!rt.state.outbox.iter().any(|c| matches!(c, Call::CreateTask { .. })), "nothing is made without words");
     type_into(&mut rt, "new-request", "Make the sync job retry when a request fails.\nThree tries.");
@@ -248,10 +248,11 @@ fn a_new_session_asks_for_words_then_makes_the_ticket_the_chat_makes() {
     assert_eq!(made.0, "w1");
     assert_eq!(made.1, "Make the sync job retry when a request fails");
     assert_eq!(made.2, "Make the sync job retry when a request fails.\nThree tries.", "the request is kept in the person's words");
-    // The answer opens the new ticket, pins the runtime and attaches the goal.
+    // The answer opens the new ticket, pins the runtime and model and, in Build, starts it.
     rt.update(|s, _| {
-        s.new_form.as_mut().unwrap().goal = true;
-        s.new_check.replace_text("cargo test");
+        let form = s.new_form.as_mut().unwrap();
+        form.mode = neko_rune::new_session::Mode::Build;
+        form.runtime = Some("claude".into());
         let mut m = scenes::demo_full("t0");
         let mut row = m.tasks[0].clone();
         row.id = "t99".into();
@@ -264,7 +265,8 @@ fn a_new_session_asks_for_words_then_makes_the_ticket_the_chat_makes() {
     settle(&mut rt);
     assert!(rt.state.new_form.is_none());
     assert_eq!(rt.state.selected.as_deref(), Some("t99"));
-    assert!(rt.state.outbox.iter().any(|c| matches!(c, Call::GoalCreate { ticket_id, done_check, .. } if ticket_id == "t99" && done_check == "cargo test")), "{:?}", rt.state.outbox);
+    assert!(rt.state.outbox.iter().any(|c| matches!(c, Call::SetRuntime { task_id, provider, model } if task_id == "t99" && provider == "claude" && model.is_empty())), "{:?}", rt.state.outbox);
+    assert!(rt.state.outbox.iter().any(|c| matches!(c, Call::Start { task_id } if task_id == "t99")), "Build starts the ticket: {:?}", rt.state.outbox);
 }
 
 #[test]
@@ -333,12 +335,16 @@ fn two_states_with_the_same_glyph_are_told_apart_in_words() {
     // As in the web UI, "needs you" and "working" are both the amber half circle (DESIGN.md §3);
     // the row says which in words, and a row's name for assistive technology does too.
     let rt = runtime(scene("live"));
+    // The column's rows show an icon and an age or a fraction now; the words live in the row's name for assistive
+    // technology and its tooltip, and the icons differ (a list, a ring).
+    let name = |id: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("session-{id}"))).and_then(|e| e.label).unwrap_or_default();
+    assert!(name("t0").contains("Needs you"), "{}", name("t0"));
+    assert!(name("t6").contains("Building"), "{}", name("t6"));
+    assert!(name("t9").contains("Planning"), "planning is an agent at work too: {}", name("t9"));
+    assert!(name("t10").contains("Reviewing"), "{}", name("t10"));
     let meta = |id: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("meta-{id}"))).and_then(|e| e.text);
-    assert_eq!(meta("t0").as_deref(), Some("Needs you"));
-    assert_eq!(meta("t6").as_deref(), Some("Building"));
-    assert_eq!(meta("t9").as_deref(), Some("Building"), "planning is an agent at work too");
-    assert_eq!(meta("t10").as_deref(), Some("Building"));
-    assert_eq!(meta("t3").as_deref(), Some("23m"), "a sky row says its age, not a word");
+    assert_eq!(meta("t3").as_deref(), Some("23m"), "a needs-you row says its age");
+    assert_eq!(meta("t6").as_deref(), Some("2/7"), "a running row says its fraction");
     let label = |id: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("session-{id}"))).and_then(|e| e.label).unwrap();
     assert!(label("t0").contains("Needs you") && label("t6").contains("Building"), "{} / {}", label("t0"), label("t6"));
 }

@@ -18,6 +18,98 @@ pub struct TaskRow {
     /// The first line of the task's goal, cut short.
     #[serde(default)]
     pub goal: String,
+    /// What the person is being waited on for (the reason icon in the sessions column).
+    #[serde(default)]
+    pub wait: Wait,
+    /// How far along it is, as (done, of): a goal's turns used of its cap, else the plan's ticked steps of its steps.
+    #[serde(default)]
+    pub progress: Option<(u32, u32)>,
+}
+
+/// Why a task is waiting on the person, as the sessions column's reason icon says (polish spec §1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Wait {
+    /// Not waiting on the person.
+    #[default]
+    None,
+    /// A plan to approve.
+    Plan,
+    /// A question or an answer the agent needs.
+    Question,
+    /// A result to review, or a merge to decide.
+    Review,
+    /// It failed.
+    Failed,
+    /// A goal reached its turn or budget cap.
+    Cap,
+    /// Waiting, for something that is none of the above.
+    Other,
+}
+
+impl Wait {
+    /// Waiting on the person for a decision (a failure is a separate kind of attention).
+    pub fn waits(self) -> bool {
+        !matches!(self, Wait::None | Wait::Failed)
+    }
+}
+
+/// The agent's own words that mean "I need an answer before I build".
+const ASKED: &str = "Needs your input before building:";
+
+/// Events that say nothing about what the task waits for.
+fn is_noise(message: &str) -> bool {
+    message.starts_with("USAGE ") || message.starts_with("Command ") || message.starts_with("Advisory:") || message.starts_with('{')
+}
+
+/// What `task` waits on the person for, given the goals that run on it.
+pub fn wait_of(task: &Task, goals: &[Goal]) -> Wait {
+    use neko_protocol::goals::GoalStatus;
+    match task.status {
+        TaskStatus::Failed => Wait::Failed,
+        TaskStatus::Completed | TaskStatus::Cancelled => Wait::None,
+        TaskStatus::ReadyForReview => Wait::Review,
+        TaskStatus::AwaitingApproval => {
+            let last = task.events.iter().rev().map(|e| e.message.as_str()).find(|m| !is_noise(m));
+            if last.is_some_and(|m| m.starts_with(ASKED)) {
+                Wait::Question
+            } else if task.plan.trim().is_empty() {
+                Wait::Other
+            } else {
+                Wait::Plan
+            }
+        }
+        TaskStatus::Queued | TaskStatus::Planning | TaskStatus::Building | TaskStatus::Reviewing => {
+            let goal = goals.iter().filter(|g| g.ticket_id.as_deref() == Some(task.id.as_str()) && !g.status.is_finished()).last();
+            match goal.map(|g| g.status) {
+                Some(GoalStatus::Blocked) => Wait::Question,
+                Some(GoalStatus::Paused) => {
+                    let why = goal.map_or(String::new(), |g| g.paused_reason.to_lowercase());
+                    if why.contains("cap") || why.contains("budget") || why.contains("turn") || why.contains("limit") { Wait::Cap } else { Wait::None }
+                }
+                _ => Wait::None,
+            }
+        }
+    }
+}
+
+/// `(done, of)`: a live goal's turns used of its cap; else the ticked `- [x]` steps of the plan's
+/// `- [ ]`/`- [x]` steps; else nothing (the ring turns instead).
+pub fn progress_of(task: &Task, goals: &[Goal]) -> Option<(u32, u32)> {
+    let goal = goals.iter().filter(|g| g.ticket_id.as_deref() == Some(task.id.as_str()) && !g.status.is_finished()).last();
+    if let Some(g) = goal.filter(|g| g.budget.max_turns > 0) {
+        return Some((g.turns.min(g.budget.max_turns), g.budget.max_turns));
+    }
+    let (mut done, mut total) = (0u32, 0u32);
+    for line in task.plan.lines() {
+        let line = line.trim_start().trim_start_matches(['-', '*', '+']).trim_start();
+        if line.starts_with("[x]") || line.starts_with("[X]") {
+            done += 1;
+            total += 1;
+        } else if line.starts_with("[ ]") {
+            total += 1;
+        }
+    }
+    (total > 0).then_some((done, total))
 }
 
 /// A place work can start: the workspaces "+ New" offers.
@@ -92,8 +184,9 @@ pub struct Summary {
     pub settings: SettingsView,
 }
 
-/// How many of Neko's turns the client keeps (a long reply is ~8 MB of layout; DESIGN: bounded).
-pub const CHAT_KEPT: usize = 24;
+/// How many of Neko's messages the client keeps (a long reply is ~8 MB of layout; DESIGN: bounded). The column
+/// draws the last 30 of the conversation, and "Earlier messages" reveals more of these.
+pub const CHAT_KEPT: usize = 120;
 /// How many of the open task's newest events the client keeps.
 pub const EVENTS_KEPT: usize = 600;
 /// The most a kept event message holds, so one huge command output cannot be the app's memory.
@@ -158,6 +251,8 @@ impl Summary {
                     status: t.status,
                     updated_at_ms: t.updated_at_ms,
                     goal: first_line(&t.goal),
+                    wait: wait_of(t, &snapshot.goals),
+                    progress: progress_of(t, &snapshot.goals),
                 })
                 .collect(),
             workspaces: snapshot.workspaces.iter().map(|w| WorkspaceRow { id: w.id.clone(), name: w.name.clone() }).collect(),
@@ -241,4 +336,52 @@ pub fn usage_points(snapshot: &Snapshot, now_ms: i64) -> Vec<(i64, u64)> {
     }
     points.sort_unstable();
     points
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use neko_protocol::goals::{Budget, GoalStatus};
+
+    fn task(status: &str, plan: &str, events: &[&str]) -> Task {
+        serde_json::from_value(serde_json::json!({
+            "id": "t1", "workspace_id": "w", "issue_id": null, "title": "T", "goal": "G", "status": status, "plan": plan, "result": "",
+            "worktree": null, "created_at_ms": 0, "updated_at_ms": 0,
+            "events": events.iter().map(|m| serde_json::json!({"at_ms": 1, "role": "scout", "message": m})).collect::<Vec<_>>(),
+        }))
+        .expect("a task")
+    }
+
+    fn goal(status: GoalStatus, turns: u32, max: u32, paused: &str) -> Goal {
+        Goal { ticket_id: Some("t1".into()), status, turns, budget: Budget { max_turns: max, ..Budget::default() }, paused_reason: paused.into(), ..Goal::default() }
+    }
+
+    #[test]
+    fn what_a_task_waits_on_the_person_for_picks_its_reason_icon() {
+        assert_eq!(wait_of(&task("AwaitingApproval", "1. do it", &[]), &[]), Wait::Plan);
+        assert_eq!(wait_of(&task("AwaitingApproval", "1. do it", &["Needs your input before building: which file?"]), &[]), Wait::Question);
+        // Noise after the question (a usage line) does not hide it.
+        assert_eq!(wait_of(&task("AwaitingApproval", "", &["Needs your input before building: which file?", "USAGE {}"]), &[]), Wait::Question);
+        assert_eq!(wait_of(&task("AwaitingApproval", "", &["Plan ready."]), &[]), Wait::Other, "no plan and no question: something else");
+        assert_eq!(wait_of(&task("ReadyForReview", "", &[]), &[]), Wait::Review);
+        assert_eq!(wait_of(&task("Failed", "", &[]), &[]), Wait::Failed);
+        assert_eq!(wait_of(&task("Completed", "", &[]), &[]), Wait::None);
+        assert_eq!(wait_of(&task("Building", "", &[]), &[]), Wait::None);
+        // A running ticket whose goal is blocked on a question or stopped at its cap waits on the person.
+        assert_eq!(wait_of(&task("Building", "", &[]), &[goal(GoalStatus::Blocked, 2, 10, "")]), Wait::Question);
+        assert_eq!(wait_of(&task("Building", "", &[]), &[goal(GoalStatus::Paused, 10, 10, "Turn cap reached")]), Wait::Cap);
+        assert_eq!(wait_of(&task("Building", "", &[]), &[goal(GoalStatus::Paused, 3, 10, "Paused by you")]), Wait::None, "the person's own pause is not a wait on them");
+        assert_eq!(wait_of(&task("Building", "", &[]), &[goal(GoalStatus::Done, 3, 10, "")]), Wait::None);
+    }
+
+    #[test]
+    fn progress_is_the_goals_turns_else_the_plans_ticked_steps_else_nothing() {
+        assert_eq!(progress_of(&task("Building", "", &[]), &[goal(GoalStatus::Running, 4, 10, "")]), Some((4, 10)));
+        assert_eq!(progress_of(&task("Building", "", &[]), &[goal(GoalStatus::Running, 40, 10, "")]), Some((10, 10)), "never past its cap");
+        let plan = "- [x] read\n- [x] write\n* [ ] test\n- [ ] ship\nnot a step";
+        assert_eq!(progress_of(&task("Building", plan, &[]), &[]), Some((2, 4)));
+        assert_eq!(progress_of(&task("Building", "1. read\n2. write", &[]), &[]), None, "no ticks: the ring turns");
+        // A finished goal's turns are history.
+        assert_eq!(progress_of(&task("Building", plan, &[]), &[goal(GoalStatus::Done, 9, 10, "")]), Some((2, 4)));
+    }
 }

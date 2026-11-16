@@ -14,7 +14,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rune::{AppHandle, PointerPress, TextEdit};
 
-use crate::groups::{Group, first_session};
+use crate::account::Account;
+use crate::groups::Group;
 use crate::layout::{Layout, Saved};
 use crate::link::{Call, LinkError, LinkEvent, Summary, TaskRow, Wanted, calm, make};
 use crate::new_session::NewForm;
@@ -112,10 +113,24 @@ pub struct App {
     pub selected: Option<String>,
     /// A full view in the session's place, or the session.
     pub view: Option<FullView>,
-    /// Which of the three groups are collapsed, in `Group::ALL` order.
-    pub collapsed: [bool; 3],
+    /// Which of the groups are collapsed, in `Group::ALL` order ("Waiting a while" starts folded).
+    pub collapsed: [bool; 4],
+    /// "Show N more" in Needs you was pressed.
+    pub needs_expanded: bool,
+    /// The sessions column shows one group only (Home's "3 running" and "3 need you" set it).
+    pub filter: Option<Group>,
+    /// The account's name and picture (the footer, the greeting).
+    pub account: Account,
+    /// How many pages of 30 chat messages Neko's column shows ("Earlier messages" adds one).
+    pub chat_pages: usize,
+    /// The Activity line in Neko's column is open.
+    pub activity_open: bool,
+    /// When the sidebar's counts (routines, today's events) were last asked for.
+    pub side_asked_ms: i64,
+
     pub steer: Steer,
     pub steer_open: bool,
+    /// The account footer\'s menu is open.
     pub more_open: bool,
     /// The web view of the context panel and of a plugin's page (P3b).
     pub web_view: crate::web_panel::WebHost,
@@ -141,7 +156,6 @@ pub struct App {
     pub neko: NekoCol,
     pub new_form: Option<NewForm>,
     pub new_request: TextEdit,
-    pub new_check: TextEdit,
     /// The right-click menu on a session row: which row, and where.
     pub row_menu: Option<(String, PointerPress)>,
     pub palette: Option<PaletteState>,
@@ -205,7 +219,13 @@ impl Default for App {
             layout: Layout::default(),
             selected: None,
             view: None,
-            collapsed: [false; 3],
+            collapsed: [false, false, false, true],
+            needs_expanded: false,
+            filter: None,
+            account: Account::default(),
+            chat_pages: 1,
+            activity_open: false,
+            side_asked_ms: i64::MIN / 2,
             steer: Steer::AfterTurn,
             steer_open: false,
             more_open: false,
@@ -222,9 +242,8 @@ impl Default for App {
             keep_unread: HashSet::new(),
             work: Work::default(),
             neko: NekoCol::default(),
-            new_form: None,
+            new_form: Some(NewForm::fresh()),
             new_request: TextEdit::new(""),
-            new_check: TextEdit::new(""),
             row_menu: None,
             palette: None,
             palette_query: TextEdit::new(""),
@@ -298,14 +317,17 @@ impl App {
     /// A workbench arrived (from the link, or as the answer to a write).
     pub fn apply_summary(&mut self, summary: Summary) {
         self.now_ms = (self.clock)();
-        // A window opens on what needs you; a selection that has gone is replaced.
-        let gone = self.selected.as_ref().is_none_or(|id| !summary.tasks.iter().any(|t| &t.id == id));
-        let first = if gone { first_session(&summary, self.now_ms) } else { None };
+        // A window opens on Home; a selection that has gone puts it back there.
+        let gone = self.selected.as_ref().is_some_and(|id| !summary.tasks.iter().any(|t| &t.id == id));
         self.summary = Some(summary);
         self.seed_settings();
         if gone {
-            self.selected = first;
-            self.wanted.set(self.selected.as_deref());
+            self.selected = None;
+            self.wanted.set(None);
+            self.ensure_home();
+        }
+        if self.new_form.as_ref().is_some_and(|f| f.branches.is_empty()) {
+            self.read_branches();
         }
         // The open task's detail rides on the snapshot the link makes once it knows which task is
         // open; a task chosen by the window itself is asked for once.
@@ -477,6 +499,37 @@ impl App {
         self.collapsed[i] = !self.collapsed[i];
     }
 
+    /// Opens the first session of the first group that has one (what the scenes and tests that want a session open ask for;
+    /// a real window opens on Home).
+    pub fn open_first_session(&mut self) {
+        if let Some(id) = self.summary.as_ref().and_then(|m| crate::groups::first_session(m, self.now_ms)) {
+            self.open_task(&id);
+        }
+    }
+
+    /// "View all" in the sessions column: every session, newest first, in the middle region.
+    pub fn open_all_sessions(&mut self) {
+        self.open_view(FullView::AllSessions);
+    }
+
+    /// How many of the calendar's events start today (local time; an all-day event counts).
+    pub fn events_today(&self, data: &crate::link::CalendarData) -> usize {
+        let start = crate::clock::day_start(self.now_ms);
+        let end = crate::clock::add_days(start, 1);
+        data.events.iter().filter(|e| e.start_ms < end && e.end_ms.max(e.start_ms + 1) > start).count()
+    }
+
+    /// Whether Home is what the middle region shows: no session chosen and no full view or plugin page.
+    pub fn home_shown(&self) -> bool {
+        self.selected.is_none() && self.view.is_none() && self.plugin_view.is_none() && !self.lab
+    }
+
+    /// Home's "3 running" and "3 need you" filter the sessions column to that group; pressing it again clears it.
+    pub fn set_filter(&mut self, group: Group) {
+        self.filter = if self.filter == Some(group) { None } else { Some(group) };
+        self.collapsed[group.index()] = false;
+    }
+
     /// Opens the web UI at `page` (its hash route id), home when none. Says why in one calm line
     /// when it cannot.
     pub fn open_in_web(&mut self, page: Option<&str>) {
@@ -495,7 +548,12 @@ impl App {
 
     /// How many sessions wait on the person, for the Neko column and its collapsed icon.
     pub fn waiting(&self) -> usize {
-        self.summary.as_ref().map_or(0, Summary::needs_you)
+        self.group_count(Group::NeedsYou)
+    }
+
+    /// How many sessions are in `group` right now (all of them, before the column's caps).
+    pub fn group_count(&self, group: Group) -> usize {
+        self.summary.as_ref().map_or(0, |m| m.tasks.iter().filter(|t| crate::groups::group_of(t, self.now_ms) == Some(group)).count())
     }
 }
 
@@ -537,10 +595,11 @@ pub fn down(error: LinkError, secs: u64) -> LinkEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::link::Wait;
     use neko_protocol::workbench::TaskStatus;
 
     fn row(id: &str, status: TaskStatus, ago_ms: i64) -> TaskRow {
-        TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: DEMO_NOW - ago_ms, goal: String::new() }
+        TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: DEMO_NOW - ago_ms, goal: String::new(), wait: Wait::None, progress: None }
     }
 
     fn summary(rows: Vec<TaskRow>) -> Summary {
@@ -581,16 +640,22 @@ mod tests {
     }
 
     #[test]
-    fn a_window_opens_on_what_needs_you_and_keeps_your_choice() {
+    fn a_window_opens_on_home_and_keeps_your_choice() {
         let mut app = App::headless();
         app.apply_link(LinkEvent::Live(summary(vec![row("work", TaskStatus::Building, 1000), row("ask", TaskStatus::AwaitingApproval, 9000)])));
-        assert_eq!(app.selected.as_deref(), Some("ask"));
+        assert_eq!(app.selected, None, "a window opens on Home, not on a session");
+        assert!(app.home_shown() && app.new_form.is_some());
         app.select("work");
+        assert!(!app.home_shown());
         app.apply_link(LinkEvent::Live(summary(vec![row("work", TaskStatus::Building, 500), row("ask", TaskStatus::AwaitingApproval, 9000)])));
         assert_eq!(app.selected.as_deref(), Some("work"), "a new snapshot does not move the selection");
         app.apply_link(LinkEvent::Live(summary(vec![row("ask", TaskStatus::AwaitingApproval, 9000)])));
-        assert_eq!(app.selected.as_deref(), Some("ask"), "a session that is gone is replaced");
-        assert_eq!(app.session().map(|t| t.id.as_str()), Some("ask"));
+        assert_eq!(app.selected, None, "a session that is gone puts Home back");
+        assert!(app.home_shown() && app.new_form.is_some());
+        app.open_new();
+        app.select("ask");
+        app.open_new();
+        assert!(app.home_shown(), "New session lands on Home from a session");
     }
 
     #[test]
@@ -609,9 +674,11 @@ mod tests {
     fn groups_collapse_one_at_a_time() {
         let mut app = App::headless();
         app.toggle_group(Group::Running);
-        assert_eq!(app.collapsed, [false, true, false]);
+        assert_eq!(app.collapsed, [false, true, false, true], "Waiting a while starts folded");
         app.toggle_group(Group::Running);
-        assert_eq!(app.collapsed, [false; 3]);
+        assert_eq!(app.collapsed, [false, false, false, true]);
+        app.toggle_group(Group::WaitingAWhile);
+        assert_eq!(app.collapsed, [false; 4]);
     }
 
     #[test]

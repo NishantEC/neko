@@ -382,6 +382,7 @@ impl App {
                 self.call(Call::Quota);
             }
             FullView::Plugins => self.call(Call::Plugins),
+            FullView::AllSessions => {}
             FullView::Settings => {
                 self.call(Call::RoutinesFull);
                 self.call(Call::PhoneSettings);

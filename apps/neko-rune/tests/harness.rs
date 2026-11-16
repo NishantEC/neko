@@ -111,6 +111,9 @@ fn socket(h: &Harness) -> PathBuf {
 /// An app that talks to the harness on the calling thread, and the first things a window reads.
 fn app(h: &Harness) -> App {
     let mut app = App::headless();
+    // The daemon's rows are as old as the seed run made them: read them against the real clock, as the window does.
+    app.clock = neko_rune::app::system_ms;
+    app.now_ms = neko_rune::app::system_ms();
     app.dispatch = Dispatch::Blocking { socket: socket(h) };
     for call in [Call::Refresh, Call::Unseen, Call::Inbox, Call::Digest] {
         app.call(call);
@@ -128,6 +131,18 @@ fn runtime(app: App) -> Runtime<App> {
 fn settle(rt: &mut Runtime<App>) {
     for _ in 0..30 {
         rt.frame(1.0 / 60.0);
+    }
+}
+
+/// Opens a session: pressed in the column when its row is there; the column shows at most 8 of what needs you and
+/// 5 of what is recent, so a row may be behind "Show more" (the open session is what these tests are about).
+fn pick(rt: &mut Runtime<App>, id: &str) {
+    if rt.find(&format!("session-{id}")).is_some() {
+        click(rt, &format!("session-{id}"));
+    } else {
+        let id = id.to_owned();
+        rt.update(move |s, _| s.select(&id));
+        settle(rt);
     }
 }
 
@@ -175,7 +190,7 @@ fn selecting_a_session_reads_its_turns_from_the_daemon() {
     let Some(h) = start(&[]) else { return };
     let mut rt = runtime(app(&h));
     let id = id_of(&rt, "Rework the export batching");
-    click(&mut rt, &format!("session-{id}"));
+    pick(&mut rt, &id);
     assert_eq!(rt.state.selected.as_deref(), Some(id.as_str()));
     let detail = rt.state.detail().expect("the daemon sent the open session in full");
     assert_eq!(detail.task.id, id);
@@ -228,7 +243,7 @@ fn a_runs_diff_opens_and_undo_asks_first_and_then_takes_the_run_back() {
     let Some(h) = start(&[]) else { return };
     let mut rt = runtime(app(&h));
     let id = id_of(&rt, "Stop the nightly export running twice");
-    click(&mut rt, &format!("session-{id}"));
+    pick(&mut rt, &id);
     assert!(rt.state.work.checkpoints.get(&id).is_some_and(|l| l.runs.len() == 3 && l.restorable), "{:?}", rt.state.work.checkpoints.get(&id));
     for n in 1..=3 {
         assert!(rt.find(&format!("run-{n}")).is_some(), "run {n} has its line");
@@ -271,7 +286,7 @@ fn a_message_queues_in_each_steer_mode_and_can_be_taken_back() {
     let Some(h) = start(&[]) else { return };
     let mut rt = runtime(app(&h));
     let id = id_of(&rt, "Rework the export batching");
-    click(&mut rt, &format!("session-{id}"));
+    pick(&mut rt, &id);
     assert_eq!(rt.state.detail().map(|d| d.task.status), Some(neko_protocol::workbench::TaskStatus::Building));
     let say = |rt: &mut Runtime<App>, text: &str| {
         click(rt, "composer-input");
@@ -323,7 +338,7 @@ fn a_message_queues_in_each_steer_mode_and_can_be_taken_back() {
 }
 
 #[test]
-fn a_session_is_made_from_the_new_form_with_a_goal_and_opens() {
+fn a_session_is_made_from_home_and_opens() {
     let Some(h) = start(&[]) else { return };
     // Arrange the world: a workspace whose folder is a real Git repository (the harness seeds one).
     let repo = h.data.join("seed-repo");
@@ -334,7 +349,7 @@ fn a_session_is_made_from_the_new_form_with_a_goal_and_opens() {
     assert!(matches!(reply, Ok(Response::Workbench(_))), "{reply:?}");
     let mut rt = runtime(app(&h));
     click(&mut rt, "new-session");
-    assert!(rt.find("new-form").is_some() && rt.find("new-request").is_some());
+    assert!(rt.find("home-composer").is_some() && rt.find("new-request").is_some());
     assert!(rt.find("new-start").is_some() && rt.state.new_blocker() == Some("Say what you want done."), "Start waits for words");
     click(&mut rt, "new-request");
     rt.paste("Make the sync job retry when a request fails.\nThree tries, waiting longer each time.");
@@ -347,13 +362,7 @@ fn a_session_is_made_from_the_new_form_with_a_goal_and_opens() {
     rt.pointer_up(e.rect[0] + 5.0, e.rect[1] + e.rect[3] / 2.0);
     settle(&mut rt);
     assert_eq!(rt.state.summary.as_ref().unwrap().workspaces[rt.state.new_form.as_ref().unwrap().workspace].name, "Sandbox");
-    // A goal with a check, as `/goal` makes one.
     let tasks_before = rt.state.summary.as_ref().unwrap().tasks.len();
-    rt.update(|s, _| s.new_form.as_mut().unwrap().goal = true);
-    settle(&mut rt);
-    click(&mut rt, "new-check");
-    rt.paste("cargo test");
-    settle(&mut rt);
     click(&mut rt, "new-start");
     assert!(rt.state.new_form.is_none(), "the form closed: {:?}", rt.state.new_form.as_ref().and_then(|f| f.error.clone()));
     let summary = rt.state.summary.as_ref().unwrap();
@@ -361,7 +370,6 @@ fn a_session_is_made_from_the_new_form_with_a_goal_and_opens() {
     let new = rt.state.selected.clone().unwrap();
     let task = summary.task(&new).unwrap();
     assert_eq!(task.title, "Make the sync job retry when a request fails", "the title is the first line");
-    assert!(summary.goals.iter().any(|g| g.ticket_id.as_deref() == Some(new.as_str()) && g.done_check == "cargo test"), "the goal is on the new ticket");
     assert!(has_text(&rt, "Make the sync job retry when a request fails"), "the new session is open");
 }
 
@@ -421,18 +429,19 @@ fn marking_unread_and_opening_move_the_dot_through_the_daemon() {
     let Some(h) = start(&[]) else { return };
     let mut rt = runtime(app(&h));
     let id = id_of(&rt, "Add a retry to the webhook sender");
-    click(&mut rt, &format!("session-{id}"));
+    pick(&mut rt, &id);
     assert!(!rt.state.unseen.contains(&id));
     rt.update(|s, _| s.mark_unread(&id.clone()));
     settle(&mut rt);
-    assert!(rt.find(&format!("unseen-{id}")).is_some(), "the dot is back");
+    // The row may be behind "View all" (Recent shows five), so the dot is asserted where it lives: in the unseen set.
+    assert!(rt.state.unseen.contains(&id) || rt.find(&format!("unseen-{id}")).is_some(), "the dot is back");
     rt.update(|s, _| s.call(Call::Unseen));
     settle(&mut rt);
     assert!(rt.state.unseen.contains(&id), "the daemon keeps it");
     // Opening another and coming back marks it seen.
     let other = id_of(&rt, "Rework the export batching");
-    click(&mut rt, &format!("session-{other}"));
-    click(&mut rt, &format!("session-{id}"));
+    pick(&mut rt, &other);
+    pick(&mut rt, &id);
     rt.update(|s, _| s.call(Call::Unseen));
     settle(&mut rt);
     assert!(!rt.state.unseen.contains(&id) && rt.find(&format!("unseen-{id}")).is_none());
@@ -488,7 +497,8 @@ fn the_routines_page_lists_the_daemons_routines_and_its_controls_ask_it() {
 fn settings_change_the_daemons_budgets_and_switches_and_search_finds_rows() {
     let Some(h) = start(&[]) else { return };
     let mut rt = runtime(app(&h));
-    click(&mut rt, "view-settings");
+    rt.update(|s, _| s.open_view(neko_rune::views::FullView::Settings));
+    settle(&mut rt);
     // Budget: the daily ceiling is a field with Save; empty takes the ceiling off.
     click(&mut rt, "settings-section-budget");
     rt.update(|s, _| s.pages.set_field("daily-budget", "7.50"));
@@ -599,7 +609,7 @@ fn artifacts_of_every_built_in_kind_open_in_the_canvas_from_the_daemons_store() 
     let mut rt = runtime(app);
     // An artifact is shown for the session that is open.
     let session = id_of(&rt, "Rework the export batching");
-    click(&mut rt, &format!("session-{session}"));
+    pick(&mut rt, &session);
     for (id, title, kind, key) in &saved {
         // The daemon shows it (an agent's `ShowArtifact`): the panel opens on the Canvas and reads it.
         rt.update(|s, _| {
@@ -649,7 +659,7 @@ fn the_files_tab_reads_the_sessions_folder_through_the_daemon_and_cannot_leave_i
     let mut rt = runtime(app(&h));
     rt.state.panel.data_dir = h.data.clone();
     let id = id_of(&rt, "Stop the nightly export running twice");
-    click(&mut rt, &format!("session-{id}"));
+    pick(&mut rt, &id);
     // The daemon names the folder; the client lists it and marks what the whole task changed.
     let folder = rt.state.panel.session(&id).and_then(|p| p.folder.clone()).flatten().expect("the daemon named the task's folder");
     assert_eq!(Path::new(&folder), h.data.join("task-worktrees").join(&id).canonicalize().unwrap());

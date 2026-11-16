@@ -5,11 +5,12 @@
 //! column's first group; this column does not repeat them (docs/decisions/0002).
 
 use neko_protocol::workbench::TaskStatus;
-use rune::{El, Key, KeyEvent, ScrollSpec, col, icon, row, text};
+use rune::{El, Key, KeyEvent, ScrollSpec, col, el, icon, row, text};
 use rune_kit::TextArea;
 
 use super::turn::{self, Where};
-use super::{band, icon_button, quiet_button};
+use super::{flat_band, icon_button, quiet_button};
+use crate::activity;
 use crate::app::{App, crew_line, status_line};
 use crate::icons;
 use crate::link::{Call, InboxItem};
@@ -35,8 +36,6 @@ fn inbox_limit(win_h: f32) -> usize {
 fn ask_max(win_h: f32) -> f32 {
     if win_h <= SHORT_WINDOW { 80.0 } else { 120.0 }
 }
-/// How many of Neko's turns are drawn in the column.
-const TURNS_SHOWN: usize = 8;
 
 pub fn column(s: &App, t: &Neko, win_h: f32, layer: &mut Vec<El>) -> El {
     col().h_full().min_w(0.0).child(header(t)).child(body(s, t, win_h, layer)).child(foot(s, t, win_h))
@@ -44,10 +43,9 @@ pub fn column(s: &App, t: &Neko, win_h: f32, layer: &mut Vec<El>) -> El {
 
 /// "Neko" and the toggle that folds the column to its icon: 36 points.
 fn header(t: &Neko) -> El {
-    band(t)
-        .h(36.0)
+    flat_band(t)
         .child(icon(&icons::SPARK, 16.0).color(t.text.base).a11y_hidden())
-        .child(text("Neko").key("neko-title").font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(t.text.base).role("heading").grow(1.0))
+        .child(text("Neko").key("neko-title").font(t.ty.brand).color(t.text.base).role("heading").grow(1.0))
         .child(icon_button(&icons::PANEL_RIGHT, "Collapse Neko", "neko-collapse", t, |s: &mut App| s.layout.set_neko_open(false)))
 }
 
@@ -60,18 +58,18 @@ fn section_head(t: &Neko, key: &str, label: &str, count: Option<usize>, open: bo
         .expanded(open)
         .focusable(true)
         .w_full()
-        .h(24.0)
-        .px(6.0)
-        .gap(6.0)
+        .h(32.0)
+        .px(8.0)
+        .gap(8.0)
         .center_y()
         .radius(t.radius.row)
         .hover(t.surface.hover)
-        .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+        .focus_ring(2.0, 2.0, t.surface.ring)
         .on_press(move |s: &mut App| s.toggle(toggle))
-        .child(text(if open { "▾" } else { "▸" }).font(t.ty.meta).color(t.text.faint).a11y_hidden())
-        .child(text(label.to_owned()).font(t.ty.group).color(t.text.muted).a11y_hidden());
+        .child(icon(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 16.0).color(t.text.muted).a11y_hidden())
+        .child(text(label.to_owned()).font(t.ty.group).color(t.text.muted).grow(1.0).a11y_hidden());
     if let Some(n) = count {
-        h = h.child(text(n.to_string()).font(t.ty.id).color(t.text.faint).a11y_hidden());
+        h = h.child(text(n.to_string()).font(t.ty.meta).color(t.text.muted).a11y_hidden());
     }
     h
 }
@@ -84,29 +82,29 @@ fn inbox_item(s: &App, t: &Neko, item: &InboxItem, layer: &mut Vec<El>) -> El {
     let detail = item.detail.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").to_owned();
     let open = s.open(&format!("inbox:{seq}"));
     let actions = s.item_actions(item);
-    let mut text_col = col().grow(1.0).min_w(0.0).gap(1.0).child(text(item.title.clone()).font(t.ty.row).color(t.text.base).truncate().a11y_hidden());
-    if !detail.is_empty() {
-        let full = if open { item.detail.trim().to_owned() } else { detail.clone() };
-        let line = text(full).key(format!("inbox-detail-{seq}")).font(t.ty.meta).color(t.text.muted).a11y_hidden();
-        text_col = text_col.child(if open { line.wrap() } else { line.truncate() });
+    let title = text(item.title.clone()).font(t.ty.row).color(t.text.base).a11y_hidden();
+    let mut text_col = col().grow(1.0).min_w(0.0).gap(2.0).child(if open { title.wrap() } else { title.truncate() });
+    // One 32 point line: the detail is for the open row (and the tooltip), not a second line of every row.
+    if !detail.is_empty() && open {
+        text_col = text_col.child(text(item.detail.trim().to_owned()).key(format!("inbox-detail-{seq}")).font(t.ty.meta).color(t.text.muted).wrap().a11y_hidden());
     }
     let mut line = row()
         .key(format!("inbox-{seq}"))
         .role("button")
         .label(format!("{}{}", item.title, item.default.as_ref().map_or(String::new(), |d| format!(", default: {d}"))))
-        .help(item.default.as_ref().map_or_else(|| item.title.clone(), |d| format!("Default: {d}")))
+        .help(if detail.is_empty() { item.title.clone() } else { format!("{detail}{}", item.default.as_ref().map_or(String::new(), |d| format!(" · Default: {d}"))) })
         .expanded(open)
         .focusable(true)
         .hover_group()
         .w_full()
-        .min_h(40.0)
-        .px(6.0)
-        .py(5.0)
+        .min_h(32.0)
+        .px(8.0)
+        .py(if open { 6.0 } else { 0.0 })
         .gap(8.0)
         .center_y()
         .radius(t.radius.row)
         .hover(t.surface.hover)
-        .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+        .focus_ring(2.0, 2.0, t.surface.ring)
         .on_press(move |s: &mut App| s.toggle(&format!("inbox:{seq}")))
         .on_secondary_press(move |s: &mut App, p, _| s.inbox_menu = Some((seq, p)))
         .child(text_col);
@@ -124,7 +122,7 @@ fn inbox_item(s: &App, t: &Neko, item: &InboxItem, layer: &mut Vec<El>) -> El {
                 .center()
                 .radius(t.radius.control)
                 .hover(t.surface.active)
-                .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+                .focus_ring(2.0, 2.0, t.surface.ring)
                 .group_opacity(0.0, 1.0)
                 .on_press(move |s: &mut App| s.answer_default(seq))
                 .child(icon(&icons::CHECK_LINE, 14.0).color(t.text.muted).a11y_hidden()),
@@ -188,13 +186,15 @@ fn inbox(s: &App, t: &Neko, layer: &mut Vec<El>, win_h: f32) -> El {
                 .role("button")
                 .label(label.clone())
                 .focusable(true)
-                .h(24.0)
-                .px(6.0)
+                .h(32.0)
+                .px(8.0)
+                .gap(8.0)
                 .center_y()
                 .radius(t.radius.row)
                 .hover(t.surface.hover)
-                .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+                .focus_ring(2.0, 2.0, t.surface.ring)
                 .on_press(|s: &mut App| s.toggle("inbox:all"))
+                .child(el().size(16.0, 16.0).a11y_hidden())
                 .child(text(label).font(t.ty.meta).color(t.text.muted).a11y_hidden()),
         );
     }
@@ -279,17 +279,63 @@ fn handoffs(s: &App, t: &Neko, ids: &[String]) -> Vec<El> {
         .collect()
 }
 
-/// Neko's own conversation: the last few turns, the reply in flight streaming.
+/// The Activity line (polish spec §0): what Neko posted on its own (it updated itself, reinstalled, rolled
+/// back, an outage) folded into one quiet row at the top of the chat: an icon, the latest notice in 12.5
+/// muted, and "+N" faint for the others. Pressing it opens the list in place; it is closed by default.
+fn activity_line(s: &App, t: &Neko) -> Option<El> {
+    let summary = s.summary.as_ref()?;
+    let split = activity::split(&summary.conversation);
+    let (latest, more) = activity::summary(&split.notices)?;
+    let open = s.activity_open;
+    let mut line = row()
+        .key("activity")
+        .role("button")
+        .label(format!("Activity: {}{}", latest.text, if more > 0 { format!(", and {more} more") } else { String::new() }))
+        .expanded(open)
+        .focusable(true)
+        .w_full()
+        .h(32.0)
+        .px(8.0)
+        .gap(8.0)
+        .center_y()
+        .radius(t.radius.row)
+        .hover(t.surface.hover)
+        .focus_ring(2.0, 2.0, t.surface.ring)
+        .on_press(|s: &mut App| s.activity_open = !s.activity_open)
+        .child(icon(&icons::CLOCK, 16.0).color(t.text.muted).a11y_hidden())
+        .child(text(latest.text.clone()).key("activity-latest").font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden());
+    if more > 0 {
+        line = line.child(text(format!("+{more}")).key("activity-more").font(t.ty.meta).color(t.text.faint).a11y_hidden());
+    }
+    let mut c = col().key("activity-block").w_full().px(12.0).pt(8.0).child(line);
+    if open {
+        let mut list = col().key("activity-list").w_full().px(8.0).pb(4.0).gap(4.0);
+        for notice in split.notices.iter().rev() {
+            list = list.child(text(notice.text.clone()).font(t.ty.meta).color(t.text.muted).wrap().py(2.0));
+        }
+        c = c.child(col().key("activity-scroll").w_full().max_h(180.0).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(list));
+    }
+    Some(c)
+}
+
+/// Neko's own conversation: the last 30 messages, the reply in flight streaming.
 fn conversation(s: &App, t: &Neko) -> Option<El> {
     let summary = s.summary.as_ref()?;
     if summary.conversation.is_empty() {
         return None;
     }
-    let all = chat_turns(&summary.conversation);
-    let skip = all.len().saturating_sub(TURNS_SHOWN);
+    // Conversation only: what the daemon posted on its own is the Activity line, never a message.
+    let split = activity::split(&summary.conversation);
+    let (messages, held_back) = activity::visible(&summary.conversation, &split, s.chat_pages);
+    let all = chat_turns(&messages);
     let mut c = col().key("neko-chat").w_full().gap(0.0);
+    if held_back > 0 {
+        c = c.child(
+            row().key("earlier-row").w_full().h(32.0).justify_center().child(quiet_button(&format!("Earlier messages ({held_back})"), "earlier", t, |s: &mut App| s.chat_pages += 1)),
+        );
+    }
     // The turns and their handoff lines, in order: a handoff follows the turn that opened it.
-    let shown = &all[skip..];
+    let shown = &all[..];
     let mut start = 0;
     for (i, turn) in shown.iter().enumerate() {
         let followed = turn.role == Role::Agent && !turn.tickets.is_empty();
@@ -316,15 +362,19 @@ fn body(s: &App, t: &Neko, win_h: f32, layer: &mut Vec<El>) -> El {
     // The top block takes what it needs up to a share of the window, but never so much that the chat
     // (header 36, the ask box and status below it) is left under CHAT_MIN.
     let foot = ask_max(win_h) + 70.0;
-    let cap = (win_h * 0.46).min(win_h - 36.0 - foot - CHAT_MIN).clamp(100.0, 440.0);
-    let mut top = col().key("neko-top").w_full().px(8.0).pb(8.0).gap(8.0);
-    top = top.child(row().key("crew-row").w_full().h(24.0).px(6.0).center_y().child(text(crew_line(working, waiting)).key("crew").font(t.ty.row).color(t.text.base).truncate()));
+    let cap = (win_h * 0.5).min(win_h - super::BAND - foot - CHAT_MIN).clamp(100.0, 440.0);
+    let mut top = col().key("neko-top").w_full().px(12.0).pb(8.0).gap(8.0);
+    top = top.child(row().key("crew-row").w_full().h(32.0).px(8.0).center_y().child(text(crew_line(working, waiting)).key("crew").font(t.ty.row).color(t.text.base).truncate()));
     top = top.child(inbox(s, t, layer, win_h));
     top = top.child(digest(s, t));
     let mut c = col().key("neko-body").w_full().grow(1.0).min_h(0.0).child(col().key("neko-scroll").w_full().max_h(cap).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(top));
+    let activity = activity_line(s, t);
     if let Some(conv) = conversation(s, t) {
         c = c.child(row().key("neko-divider").w_full().h(1.0).fill(t.surface.border));
-        c = c.child(col().key("neko-chat-scroll").w_full().grow(1.0).min_h(0.0).px(14.0).pb(8.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: true }).scroll_edge_fade(16.0).child(conv));
+        if let Some(a) = activity {
+            c = c.child(a);
+        }
+        c = c.child(col().key("neko-chat-scroll").w_full().grow(1.0).min_h(0.0).px(12.0).pb(8.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: true }).scroll_edge_fade(16.0).child(conv));
     } else {
         c = c.child(el_grow());
     }
@@ -357,7 +407,7 @@ fn foot(s: &App, t: &Neko, win_h: f32) -> El {
         .min_w(0.0)
         .min_h(40.0)
         .max_h(ask_max(win_h));
-    let mut c = col().key("neko-foot").w_full().px(14.0).pb(8.0).gap(6.0).child(ask);
+    let mut c = col().key("neko-foot").w_full().px(12.0).pb(12.0).gap(8.0).child(ask);
     if replying {
         let turn = s.summary.as_ref().and_then(|m| m.conversation.last()).map(|m| m.id.clone()).unwrap_or_default();
         c = c.child(row().gap(8.0).center_y().child(text("Neko is replying…").font(t.ty.meta).color(t.text.muted).grow(1.0)).child(quiet_button("Stop", "ask-stop", t, move |s: &mut App| s.call(Call::StopAsking { turn_id: turn.clone() }))));
@@ -388,5 +438,5 @@ pub fn strip(s: &App, t: &Neko) -> El {
             ),
         );
     }
-    col().h_full().items_center().child(band(t).px(0.0).justify_center()).child(button)
+    col().h_full().items_center().child(flat_band(t).px(0.0).justify_center()).child(button)
 }

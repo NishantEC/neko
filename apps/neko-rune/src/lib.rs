@@ -3,13 +3,17 @@
 //! glyphs, and the four-region shell (sessions, the session, a context panel, Neko), with the
 //! sessions and counts live from the daemon and the rest placeholders. No tabs.
 
+pub mod account;
+pub mod activity;
 pub mod app;
+pub mod art;
 pub mod attachments;
 pub mod clock;
 pub mod connection;
 pub mod groups;
 pub mod icons;
 pub mod lab;
+pub mod motion;
 pub mod layout;
 pub mod link;
 pub mod new_session;
@@ -64,12 +68,15 @@ fn init() -> App {
             app.call(link::Call::Unseen);
             app.call(link::Call::Inbox);
             app.call(link::Call::Digest);
-            // The daemon's own times, so "5m" counts from the newest change in it.
-            if let Some(newest) = app.summary.as_ref().and_then(|m| m.tasks.iter().map(|t| t.updated_at_ms).max()) {
-                app.now_ms = newest + 60_000;
-                app.selected = app.summary.as_ref().and_then(|m| groups::first_session(m, app.now_ms));
-                app.wanted.set(app.selected.as_deref());
+            // Real time, so a task's age and the groups' 48 hour and 7 day edges are read as the person reads them.
+            if app.summary.is_some() {
+                app.clock = app::system_ms;
+                app.now_ms = app::system_ms();
+                // A window opens on Home: a session is chosen only when the snapshot asks (`NEKO_RUNE_OPEN_TASK`).
                 app.call(link::Call::Refresh);
+                app.call(link::Call::RoutinesFull);
+                app.call(link::Call::Models);
+                app.ask_calendar();
             }
             // For the panel's snapshots against a test daemon: open the task with this title, and show
             // this artifact as the daemon's `ShowArtifact` would (`scripts/snap-harness.sh`).
@@ -147,7 +154,7 @@ pub fn run() {
     let app = rune::App::new(spec)
         .gpu_backend(rune::GpuBackend::Wgpu)
         .compositor(viewers::model3d_gpu::Viewer3d::default())
-        .titlebar(rune::Titlebar::new(44.0))
+        .titlebar(rune::Titlebar::new(view::BAND).traffic_lights(view::TRAFFIC_LIGHTS.0, view::TRAFFIC_LIGHTS.1))
         .on_focus(|s: &mut App, focused: bool, _| s.set_focused(focused))
         // The web view (P3b) is built on the window's own handle, when first needed.
         .on_window(web_panel::remember_window);

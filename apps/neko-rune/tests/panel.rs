@@ -279,8 +279,8 @@ fn expand_fills_the_session_and_panel_regions_and_escape_restores_it() {
 
 #[test]
 fn layout_pressure_collapses_neko_and_icon_tabs_never_truncate() {
-    let mut rt = runtime_at((1360.0, 840.0), scenes_panel::auto_canvas);
-    // The panel is open at its 420 default: the session would have 279, so Neko is its strip.
+    let mut rt = runtime_at((1320.0, 840.0), scenes_panel::auto_canvas);
+    // The panel is open at its 420 default: the session would have 291, so Neko is its strip.
     assert!(rt.state.layout.context.is_open() && rt.state.layout.neko.is_open(), "the state is untouched");
     assert!((rect(&rt, "neko")[2] - 44.0).abs() < 1.0, "Neko collapsed itself: {:?}", rect(&rt, "neko"));
     assert!(rect(&rt, "session-region")[2] >= 480.0, "the session keeps 480: {:?}", rect(&rt, "session-region"));
@@ -775,11 +775,11 @@ fn a_menu_open_hides_the_view_the_moment_it_appears_and_closing_it_shows_it_agai
     assert!(rt.state.web_view.shown());
     assert_eq!(rt.state.web_view.overlays.open(), 0);
     // The More menu is a Rune menu: its elements are in the window's overlay layer.
-    click(&mut rt, "more");
+    click(&mut rt, "account");
     assert!(rt.state.web_view.overlays.open() > 0, "an open menu is counted");
     assert!(!rt.state.web_view.shown(), "so the native view is hidden: {:?}", log.borrow());
     assert!(rt.find("viewer-web").is_some(), "its backing surface stays, in the theme's colour");
-    click(&mut rt, "more");
+    click(&mut rt, "account");
     assert_eq!(rt.state.web_view.overlays.open(), 0);
     assert!(rt.state.web_view.shown(), "closed again: the view is back");
     // The palette is an overlay too.
@@ -829,7 +829,7 @@ fn a_plugins_page_is_in_more_under_its_own_heading_and_opens_as_the_web_view() {
     rt.update(|s, _| {
         s.plugin_pages = Some(vec![PluginPage { plugin: "pr-board".into(), id: "pr-board:board".into(), title: "PR board".into() }]);
     });
-    click(&mut rt, "more");
+    click(&mut rt, "account");
     let words = texts(&rt);
     assert!(words.iter().any(|t| t == "Plugins") && words.iter().any(|t| t == "PR board"), "{words:?}");
     let (x, y) = {

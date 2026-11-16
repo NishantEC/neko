@@ -58,7 +58,7 @@ fn session_rows_have_no_id_and_their_titles_get_the_room() {
     assert_eq!(texts(&rt).iter().filter(|t| t.as_str() == "NK-101").count(), 0, "no id on a row");
     assert!(rt.find("top-id").is_some());
     let title = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Fix the empty state on the board")).expect("a row title");
-    assert!(title.rect[2] >= 190.0, "about thirty letters fit: {}", title.rect[2]);
+    assert!(title.rect[2] >= 140.0, "twenty letters or more fit in the 248 point column: {}", title.rect[2]);
     // Only amber rows carry a word, the others their age.
     assert_eq!(rt.elements().into_iter().find(|e| e.key.as_deref() == Some("meta-t2")).and_then(|e| e.text).as_deref(), Some("16m"));
 }
@@ -73,11 +73,11 @@ fn the_neko_column_never_overlaps_at_560_700_840_or_1200_high() {
         assert!(bottom(foot) <= bottom(neko) + 0.5 && foot[1] >= neko[1], "{h}: the foot stays inside the column");
         assert!(chat[3] >= if h <= 600.0 { 160.0 } else { 120.0 }, "{h}: the chat keeps room to read: {}", chat[3]);
         // The sessions column: the list ends where the pinned foot begins, and the foot is on screen.
-        let (list, sfoot) = (rect(&rt, "sessions-scroll"), rect(&rt, "sessions-foot"));
+        let (list, sfoot) = (rect(&rt, "sessions-scroll"), rect(&rt, "sessions-footer"));
         assert!(bottom(list) <= sfoot[1] + 0.5, "{h}: the list scrolls inside its region");
-        assert!(bottom(sfoot) <= h + 0.5, "{h}: + New and the foot are pinned on screen");
+        assert!(bottom(sfoot) <= h + 0.5, "{h}: the account footer is pinned on screen");
         let new = rect(&rt, "new-session");
-        assert!(new[1] >= bottom(list) - 0.5, "{h}: + New is under the list, not over it");
+        assert!(bottom(new) <= list[1] + 0.5, "{h}: New session is pinned above the list, not inside it");
     }
 }
 

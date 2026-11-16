@@ -13,7 +13,7 @@ use neko_protocol::workbench::{ChatMessage, ChatRole, Task, TaskStatus};
 use rune_kit::diff::DiffState;
 
 use crate::app::{App, DEMO_NOW, down};
-use crate::link::{Detail, InboxItem, LinkError, LinkEvent, Summary, TaskRow, WorkspaceRow};
+use crate::link::{Detail, InboxItem, LinkError, LinkEvent, Summary, TaskRow, Wait, WorkspaceRow};
 use crate::views::FullView;
 use crate::web_link::WebTarget;
 use crate::work::{DiffLoad, RunKey, diff_key};
@@ -51,6 +51,15 @@ pub fn demo_summary() -> Summary {
                 status,
                 updated_at_ms: DEMO_NOW - ago_min * 60_000,
                 goal: goals[(at + i) % goals.len()].to_owned(),
+                wait: match status {
+                    AwaitingApproval if i % 2 == 0 => Wait::Plan,
+                    AwaitingApproval => Wait::Question,
+                    ReadyForReview => Wait::Review,
+                    Failed => Wait::Failed,
+                    _ => Wait::None,
+                },
+                // Two running rows have a fraction, the rest turn.
+                progress: matches!(status, Building).then_some((2 + i as u32, 7)).filter(|_| i < 2),
             });
         }
     }
@@ -243,6 +252,7 @@ fn panel_closed(s: &mut App) {
 
 fn live(s: &mut App) {
     s.apply_link(LinkEvent::Live(demo_full("t0")));
+    s.open_first_session();
     s.set_web(Some(WebTarget::new(4747, &"0".repeat(64))));
     s.neko.inbox = inbox();
     s.neko.loaded = true;
@@ -316,8 +326,8 @@ fn harness(s: &mut App) {
             let newest = summary.tasks.iter().map(|t| t.updated_at_ms).max().unwrap_or(DEMO_NOW);
             s.apply_link(LinkEvent::Live(summary));
             s.now_ms = newest + 60_000;
-            // Selection was chosen against the demo clock; choose again against this one.
-            s.selected = s.summary.as_ref().and_then(|m| crate::groups::first_session(m, s.now_ms));
+            // The first session, against this clock.
+            s.open_first_session();
         }
         None => live(s),
     }
@@ -391,7 +401,7 @@ pub const SCENES: &[Scene] = &[
     ("collapsed", |s| {
         live(s);
         s.layout.set_neko_open(false);
-        s.collapsed = [false, true, false];
+        s.collapsed = [false, true, false, true];
     }),
     ("steer", |s| {
         running(s);

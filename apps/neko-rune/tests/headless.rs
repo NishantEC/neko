@@ -112,7 +112,7 @@ fn the_tree_has_the_four_regions_and_no_layout_warnings() {
         let t = tree("live", theme);
         assert_eq!(t["title"], "Neko (Rune)");
         assert_eq!(t["warnings"].as_array().unwrap().len(), 0, "{theme}: {}", t["warnings"]);
-        for key in ["sessions", "session-region", "neko", "group-0", "group-1", "group-2", "session-t0", "composer-input", "steer-trigger", "crew", "inbox", "ask", "grip-sessions", "grip-neko", "view-calendar", "view-inbox", "view-settings", "more", "new-session"] {
+        for key in ["sessions", "session-region", "neko", "group-0", "group-1", "group-2", "session-t0", "composer-input", "steer-trigger", "crew", "inbox", "ask", "grip-sessions", "grip-neko", "view-calendar", "view-inbox", "view-workspaces", "account", "sessions-search", "new-session"] {
             assert!(element(&t, key).is_some(), "{theme}: {key}");
         }
         assert!(element(&t, "context").is_none(), "the context panel starts closed");
@@ -120,7 +120,7 @@ fn the_tree_has_the_four_regions_and_no_layout_warnings() {
         assert!(words.contains(&"5 agents working · 6 need you".to_owned()), "{words:?}");
         assert!(words.contains(&"Connected · 22 tasks".to_owned()), "{words:?}");
         // Everything that does something has a name for assistive technology.
-        for key in ["session-t0", "context-toggle", "neko-collapse", "view-settings", "more", "new-session", "steer-trigger", "grip-sessions"] {
+        for key in ["session-t0", "context-toggle", "neko-collapse", "view-inbox", "account", "sessions-search", "new-session", "steer-trigger", "grip-sessions"] {
             let label = element(&t, key).unwrap()["label"].as_str().unwrap_or("");
             assert!(!label.is_empty(), "{theme}: {key} has no label");
         }
@@ -157,9 +157,9 @@ fn offline_and_notice_scenes_say_what_they_should() {
     assert!(element(&tree("collapsed", "dark"), "neko-expand").is_some());
     assert!(texts(&tree("steer", "dark")).contains(&"Interrupt and restart".to_owned()));
     let more = texts(&tree("more", "dark"));
-    assert!(["Usage", "Workspaces", "Plugins", "Open the web UI"].iter().all(|w| more.contains(&(*w).to_owned())), "{more:?}");
+    assert!(["Settings", "Usage", "Plugins", "Open the web UI", "Quit"].iter().all(|w| more.contains(&(*w).to_owned())), "{more:?}");
     let settings = texts(&tree("full-view", "dark"));
-    assert!(settings.contains(&"Settings".to_owned()) && settings.contains(&"AI and agents".to_owned()), "a full view is its own page now, not a placeholder");
+    assert!(settings.contains(&"AI and agents".to_owned()), "a full view is its own page now, not a placeholder");
 }
 
 #[test]
