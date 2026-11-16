@@ -7,14 +7,18 @@
 //! the session view (or a full view in its place), the context panel and the Neko column. P0
 //! fills the sessions and the counts from the live snapshot; the rest are placeholders.
 
+use std::collections::HashSet;
 use std::io;
+use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rune::TextEdit;
+use rune::{AppHandle, PointerPress, TextEdit};
 
 use crate::groups::{Group, first_session};
 use crate::layout::Layout;
-use crate::link::{LinkError, LinkEvent, Summary, TaskRow, calm};
+use crate::link::{Call, LinkError, LinkEvent, Summary, TaskRow, Wanted, calm, make};
+use crate::new_session::NewForm;
+use crate::work::{NekoCol, Work};
 use crate::views::FullView;
 use crate::web_link::{WebTarget, open_url};
 
@@ -90,6 +94,23 @@ impl Steer {
     }
 }
 
+/// How a request reaches the daemon.
+#[derive(Clone)]
+pub enum Dispatch {
+    /// Nowhere: requests wait in [`App::outbox`] (unit tests, scenes).
+    None,
+    /// On a short-lived thread; the answer comes back through the window's handle.
+    Async { socket: PathBuf, handle: AppHandle<App> },
+    /// On the calling thread, answered before the call returns: headless runs against a test
+    /// daemon, where a scripted click must see its answer in the next frame.
+    Blocking { socket: PathBuf },
+}
+
+/// The ⌘K palette: the row the arrow keys are on (the query is [`App::palette_query`]).
+pub struct PaletteState {
+    pub index: usize,
+}
+
 pub struct App {
     pub link: LinkState,
     /// The last workbench the daemon sent; kept while the link is down.
@@ -122,6 +143,25 @@ pub struct App {
     pub more_open: bool,
     pub composer: TextEdit,
     pub ask: TextEdit,
+
+    pub dispatch: Dispatch,
+    /// Requests made while there is nowhere to send them (tests read this).
+    pub outbox: Vec<Call>,
+    /// The task open now, shared with the link thread so snapshots carry its detail.
+    pub wanted: Wanted,
+    /// Finished tasks not opened since they finished (the Iris dot).
+    pub unseen: HashSet<String>,
+    /// Tasks marked unread here: they stay unread until opened again.
+    pub keep_unread: HashSet<String>,
+    pub work: Work,
+    pub neko: NekoCol,
+    pub new_form: Option<NewForm>,
+    pub new_request: TextEdit,
+    pub new_check: TextEdit,
+    /// The right-click menu on a session row: which row, and where.
+    pub row_menu: Option<(String, PointerPress)>,
+    pub palette: Option<PaletteState>,
+    pub palette_query: TextEdit,
 }
 
 /// The system clock, in epoch milliseconds.
@@ -151,6 +191,19 @@ impl Default for App {
             more_open: false,
             composer: TextEdit::new(""),
             ask: TextEdit::new(""),
+            dispatch: Dispatch::None,
+            outbox: Vec::new(),
+            wanted: Wanted::default(),
+            unseen: HashSet::new(),
+            keep_unread: HashSet::new(),
+            work: Work::default(),
+            neko: NekoCol::default(),
+            new_form: None,
+            new_request: TextEdit::new(""),
+            new_check: TextEdit::new(""),
+            row_menu: None,
+            palette: None,
+            palette_query: TextEdit::new(""),
         }
     }
 }
@@ -177,13 +230,7 @@ impl App {
             LinkEvent::Live(summary) => {
                 let changed = self.link != LinkState::Live || self.summary.as_ref() != Some(&summary);
                 self.link = LinkState::Live;
-                self.now_ms = (self.clock)();
-                // A window opens on what needs you; a selection that has gone is replaced.
-                let gone = self.selected.as_ref().is_none_or(|id| !summary.tasks.iter().any(|t| &t.id == id));
-                if gone {
-                    self.selected = first_session(&summary, self.now_ms);
-                }
-                self.summary = Some(summary);
+                self.apply_summary(summary);
                 changed
             }
             LinkEvent::Quiet => {
@@ -193,6 +240,8 @@ impl App {
                 if stale {
                     self.now_ms = now;
                 }
+                // The Inbox and the digest are read again about once a minute.
+                self.after_live();
                 stale
             }
             LinkEvent::Down { error, retry_in, .. } => {
@@ -201,6 +250,61 @@ impl App {
                 self.link = state;
                 changed
             }
+        }
+    }
+
+    /// A workbench arrived (from the link, or as the answer to a write).
+    pub fn apply_summary(&mut self, summary: Summary) {
+        self.now_ms = (self.clock)();
+        // A window opens on what needs you; a selection that has gone is replaced.
+        let gone = self.selected.as_ref().is_none_or(|id| !summary.tasks.iter().any(|t| &t.id == id));
+        let first = if gone { first_session(&summary, self.now_ms) } else { None };
+        self.summary = Some(summary);
+        if gone {
+            self.selected = first;
+            self.wanted.set(self.selected.as_deref());
+        }
+        // The open task's detail rides on the snapshot the link makes once it knows which task is
+        // open; a task chosen by the window itself is asked for once.
+        if let Some(id) = self.selected.clone() {
+            let have = self.summary.as_ref().and_then(|s| s.detail.as_ref()).is_some_and(|d| d.task.id == id);
+            if !have && self.work.detail_asked.as_deref() != Some(id.as_str()) {
+                self.work.detail_asked = Some(id);
+                self.call(Call::Refresh);
+            }
+        }
+        self.after_live();
+    }
+
+    /// Sends one request to the daemon (see [`Dispatch`]).
+    pub fn call(&mut self, call: Call) {
+        match self.dispatch.clone() {
+            Dispatch::None => self.outbox.push(call),
+            Dispatch::Blocking { socket } => {
+                let reply = make(&socket, &call, self.selected.as_deref());
+                self.apply_reply(&call, reply);
+            }
+            Dispatch::Async { socket, handle } => {
+                let open = self.selected.clone();
+                let spawned = std::thread::Builder::new().name("neko-call".into()).spawn(move || {
+                    let reply = make(&socket, &call, open.as_deref());
+                    handle.update_if(move |s, tx| {
+                        tx.instant();
+                        s.apply_reply(&call, reply)
+                    });
+                });
+                if spawned.is_err() {
+                    self.work.notice = Some("Couldn’t reach Neko just now. Try again.".to_owned());
+                }
+            }
+        }
+    }
+
+    /// Opens a link (a pull request) in the browser; says why in one calm line when it cannot.
+    pub fn open_link(&mut self, url: &str) {
+        let web = url.starts_with("https://") || url.starts_with("http://");
+        if !web || (self.opener)(url).is_err() {
+            self.work.notice = Some("Couldn’t open that link.".to_owned());
         }
     }
 
@@ -218,9 +322,8 @@ impl App {
 
     /// Chooses a session: it shows in the middle, replacing any full view.
     pub fn select(&mut self, id: &str) {
-        self.selected = Some(id.to_owned());
-        self.view = None;
-        self.notice = None;
+        self.new_form = None;
+        self.open_task(id);
     }
 
     pub fn open_view(&mut self, view: FullView) {
@@ -301,7 +404,7 @@ mod tests {
     }
 
     fn summary(rows: Vec<TaskRow>) -> Summary {
-        Summary { digest: format!("d{}", rows.len()), runtime: String::new(), tasks: rows }
+        Summary { digest: format!("d{}", rows.len()), tasks: rows, ..Summary::default() }
     }
 
     thread_local! { static OPENED: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) }; }

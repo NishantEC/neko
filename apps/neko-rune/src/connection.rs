@@ -9,7 +9,7 @@ use std::time::Duration;
 use rune::AppHandle;
 
 use crate::app::App;
-use crate::link::{LinkEvent, UnixConnector, run};
+use crate::link::{LinkEvent, UnixConnector, Wanted, run, run_with};
 use crate::web_link::WebTarget;
 
 /// One line for a link event: what `NEKO_RUNE_LOG=1` and `probe` print.
@@ -58,15 +58,16 @@ pub fn probe(socket: PathBuf, data_dir: PathBuf, limit: Duration, json: bool) ->
 }
 
 /// Starts the worker. `socket` is the daemon's Unix socket, `data_dir` where it keeps `web-token`.
-pub fn spawn(handle: AppHandle<App>, socket: PathBuf, data_dir: PathBuf) {
+pub fn spawn(handle: AppHandle<App>, socket: PathBuf, data_dir: PathBuf, wanted: Wanted) {
     let spawned = std::thread::Builder::new().name("neko-link".into()).spawn(move || {
         let connector = UnixConnector::new(socket);
         let stop = AtomicBool::new(false);
         let port = std::env::var("NEKO_WEB_PORT").ok();
         let mut web: Option<WebTarget> = None;
-        run(
+        run_with(
             &connector,
             &stop,
+            &wanted,
             |event| {
                 if std::env::var_os("NEKO_RUNE_LOG").is_some() {
                     eprintln!("neko-rune link: {}", describe(&event));

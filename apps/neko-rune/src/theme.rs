@@ -123,6 +123,8 @@ pub struct NekoType {
     pub row: TextStyle,
     pub meta: TextStyle,
     pub id: TextStyle,
+    /// Commands, output and ids of files: the mono face at the id size.
+    pub mono: TextStyle,
 }
 
 impl NekoType {
@@ -135,6 +137,7 @@ impl NekoType {
             row: TextStyle::new(13.5, 400.0).lh(20.0),
             meta: TextStyle::new(12.5, 400.0).lh(18.0),
             id: TextStyle { features: "'tnum' 1", ..TextStyle::new(12.0, 400.0).lh(16.0) },
+            mono: TextStyle { family: rune::Family::Mono, ..TextStyle::new(12.0, 400.0).lh(17.0) },
         }
     }
 }

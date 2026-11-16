@@ -4,18 +4,22 @@
 //! sessions and counts live from the daemon and the rest placeholders. No tabs.
 
 pub mod app;
+pub mod attachments;
 pub mod connection;
 pub mod groups;
 pub mod icons;
 pub mod lab;
 pub mod layout;
 pub mod link;
+pub mod new_session;
 pub mod scenes;
 pub mod status;
 pub mod theme;
+pub mod turns;
 pub mod view;
 pub mod views;
 pub mod web_link;
+pub mod work;
 
 use std::path::PathBuf;
 
@@ -41,7 +45,17 @@ fn has(name: &str) -> bool {
 
 fn init() -> App {
     if headless_run() {
-        App::headless()
+        let mut app = App::headless();
+        // A headless run against a test daemon (`NEKO_RUNE_SOCKET`): requests are answered on the
+        // calling thread, so a scripted press sees its answer in the next frame.
+        if let Some(socket) = std::env::var_os("NEKO_RUNE_SOCKET").map(PathBuf::from) {
+            app.dispatch = app::Dispatch::Blocking { socket };
+            app.call(link::Call::Refresh);
+            app.call(link::Call::Unseen);
+            app.call(link::Call::Inbox);
+            app.call(link::Call::Digest);
+        }
+        app
     } else {
         App { linked: !has("nolink"), ..App::default() }
     }
@@ -51,6 +65,19 @@ fn init() -> App {
 /// (`$NEKO_DATA_DIR/neko.sock`, or the Application Support folder).
 fn socket_path() -> PathBuf {
     flag("socket").or_else(|| std::env::var("NEKO_SOCKET").ok()).map(PathBuf::from).unwrap_or_else(neko_protocol::socket_path)
+}
+
+/// Keys the window handles before any field: ⌘K opens the palette; ⌘N starts a session.
+fn on_key(s: &mut App, ev: &rune::KeyEvent, _: &mut rune::Tx) -> bool {
+    if ev.is_command('k') && !ev.mods.shift {
+        s.palette_toggle();
+        return true;
+    }
+    if ev.is_command('n') && !ev.mods.shift {
+        s.open_new();
+        return true;
+    }
+    false
 }
 
 /// Opens the window and, unless `nolink`, starts the read-only link to the running daemon.
@@ -65,6 +92,7 @@ pub fn run() {
     let spec = rune::AppSpec {
         scenes: scenes::SCENES,
         min_size: Some((960.0, 560.0)),
+        on_key: Some(on_key),
         ..rune::AppSpec::new("Neko (Rune)", (1360.0, 840.0), init, view::view)
     };
     let app = rune::App::new(spec).titlebar(rune::Titlebar::new(44.0));
@@ -74,7 +102,17 @@ pub fn run() {
         if std::mem::replace(&mut started, true) || has("nolink") {
             return;
         }
-        connection::spawn(handle.clone(), socket_path(), neko_protocol::support_dir());
+        // The window and the link thread share which task is open.
+        let wanted = link::Wanted::default();
+        let socket = socket_path();
+        let (for_app, thread_handle) = (wanted.clone(), handle.clone());
+        let dispatch = app::Dispatch::Async { socket: socket.clone(), handle: handle.clone() };
+        handle.update_if(move |s, _| {
+            s.wanted = for_app;
+            s.dispatch = dispatch;
+            false
+        });
+        connection::spawn(thread_handle, socket, neko_protocol::support_dir(), wanted);
     })
     .run();
 }

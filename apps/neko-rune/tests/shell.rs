@@ -21,7 +21,8 @@ fn runtime(dark: bool, setup: impl FnOnce(&mut App)) -> Runtime<App> {
 }
 
 fn live(app: &mut App) {
-    app.apply_link(LinkEvent::Live(scenes::demo_summary()));
+    let (_, scene) = scenes::SCENES.iter().find(|(n, _)| *n == "live").unwrap();
+    scene(app);
 }
 
 fn settle(rt: &mut Runtime<App>) {
@@ -97,11 +98,20 @@ fn clicking_a_session_selects_it_and_the_top_line_names_it() {
     let mut rt = runtime(true, live);
     click(&mut rt, "session-t6");
     assert_eq!(rt.state.selected.as_deref(), Some("t6"));
+    assert!(rt.state.outbox.contains(&neko_rune::link::Call::Refresh), "choosing a session asks the daemon for its events");
+    // The daemon's answer carries the open session in full.
+    rt.update(|s, _| {
+        s.apply_link(LinkEvent::Live(scenes::demo_full("t6")));
+    });
+    settle(&mut rt);
     let t = texts(&rt);
     let title = rt.state.session().unwrap().title.clone();
     assert!(t.contains(&title));
-    assert!(t.iter().any(|x| x.contains("Codex · default model · In progress")), "runtime and status in the top line: {t:?}");
-    assert!(t.iter().any(|x| x.contains("tests pass") || x.contains("shows a message") || x.contains("one section")), "the goal line: {t:?}");
+    let meta = rect(&rt, "top-meta");
+    assert!(meta[2] > 0.0);
+    let line = t.iter().find(|x| x.starts_with("Codex · default model")).unwrap_or_else(|| panic!("runtime and goal line in the top line: {t:?}"));
+    assert_eq!(line, "Codex · default model · the board shows a message when it is empty", "only runtime, model and goal line: no status, no repeated title");
+    assert!(!line.contains(&title) && !line.contains("Needs you") && !line.contains("In progress"));
 }
 
 #[test]
@@ -170,7 +180,7 @@ fn the_context_panel_toggles_from_the_top_line_and_picks_a_kind() {
 }
 
 #[test]
-fn the_composer_has_a_steer_menu_and_send_waits_for_p1() {
+fn the_composer_has_a_steer_menu_and_send_says_what_it_will_do() {
     let mut rt = runtime(true, live);
     assert!(rt.find("composer-input").is_some() && rt.find("steer-trigger").is_some());
     assert_eq!(rt.state.steer, Steer::AfterTurn);
@@ -187,7 +197,7 @@ fn the_composer_has_a_steer_menu_and_send_waits_for_p1() {
     settle(&mut rt);
     assert_eq!(rt.state.steer, Steer::Interrupt);
     let send = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("send")).unwrap();
-    assert_eq!(send.label.as_deref(), Some("Send"));
+    assert_eq!(send.label.as_deref(), Some("Send, as a reply"), "a task that is not in a turn takes a reply, whatever the mode");
 }
 
 #[test]
@@ -196,10 +206,19 @@ fn neko_shows_the_crew_the_inbox_and_collapses_to_an_icon_and_back() {
     let t = texts(&rt);
     assert!(t.contains(&"5 agents working · 6 need you".to_owned()), "5 working (3 building, 1 planning, 1 reviewing), 6 waiting: {t:?}");
     assert!(t.contains(&"Inbox".to_owned()) && t.contains(&"Digest".to_owned()));
-    assert!(rt.find("inbox-t0").is_some(), "what needs you is listed");
+    // The Neko column holds what the sessions column does not: routine and goal items with their
+    // defaults, never the tasks that need you (those are the sessions column's first group).
+    assert!(rt.find("inbox-3").is_some() && rt.find("inbox-use-3").is_some(), "an item with its default and a button");
+    assert!(rt.find("inbox-t0").is_none() && keyed(&rt, "inbox-t") == 0, "the Needs you tasks are not repeated here");
+    assert!(t.contains(&"default: Send the numbers from last week".to_owned()), "{t:?}");
+    assert!(rt.find("inbox-use-1").is_none() && t.contains(&"No default".to_owned()), "no default, no button");
     assert!(rt.find("ask").is_some());
-    click(&mut rt, "inbox-t1");
-    assert_eq!(rt.state.selected.as_deref(), Some("t1"), "an Inbox item opens its session");
+    click(&mut rt, "inbox-use-3");
+    assert_eq!(rt.state.outbox.last(), Some(&neko_rune::link::Call::AnswerNeedsYou { seq: 3 }), "Use the default asks the daemon the way the Inbox does");
+    rt.update(|s, _| s.neko.inbox.truncate(1));
+    settle(&mut rt);
+    click(&mut rt, "handoff-t6");
+    assert_eq!(rt.state.selected.as_deref(), Some("t6"), "a handoff line opens its session");
 
     click(&mut rt, "neko-collapse");
     assert!(!rt.state.layout.neko.is_open());
@@ -254,6 +273,11 @@ fn an_empty_workbench_says_no_sessions_once() {
     let rt = runtime(false, scene);
     assert_eq!(texts(&rt).iter().filter(|t| *t == "No sessions").count(), 1);
     assert!(texts(&rt).contains(&"Nothing needs you right now".to_owned()));
+    assert!(texts(&rt).contains(&"Nothing needs you".to_owned()), "the empty digest says so");
+    assert!(rt.find("empty-new").is_some(), "the empty view offers the one thing to do");
+    let empty = rect(&rt, "empty");
+    let button = rect(&rt, "empty-new");
+    assert!(((button[0] + button[2] / 2.0) - (empty[0] + empty[2] / 2.0)).abs() < 1.0, "centred, not off to one side");
 }
 
 #[test]
@@ -261,6 +285,7 @@ fn the_web_buttons_open_the_same_place_and_without_a_daemon_say_why() {
     thread_local! { static OPENED: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) }; }
     let mut rt = runtime(true, |a| {
         live(a);
+        a.set_web(None);
         a.opener = |url| {
             OPENED.with(|o| o.borrow_mut().push(url.to_owned()));
             Ok(())

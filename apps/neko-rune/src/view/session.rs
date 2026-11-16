@@ -1,23 +1,33 @@
-//! The session view: one line on top (title, runtime and goal), the agent's turns in the body (a
-//! placeholder in P0), the composer at the bottom with its steer-mode menu. A full view (Calendar,
-//! Settings, ...) takes this whole region when chosen.
+//! The session view: one line on top (title, then runtime and goal), the goal line, the agent's
+//! turns streaming below, the runs with their diffs and undo, and at the bottom the note or
+//! question for the person and the composer with its steer-mode menu. A full view (Calendar,
+//! Settings, ...) takes this whole region when chosen; "+ New" takes it while a session is made.
 
-use rune::{Color, El, ScrollSpec, col, el, icon, row, text};
-use rune_kit::{ControlSize, IconButton, IconButtonVariant, Menu, MenuItem, Placement, TextInput};
+use neko_protocol::crew::DeliveryMode;
+use neko_protocol::workbench::{Task, TaskStatus};
+use rune::{Color, El, Key, KeyEvent, ScrollSpec, col, el, icon, row, text};
+use rune_kit::{ControlSize, IconButton, IconButtonVariant, Menu, MenuItem, Placement, TextArea};
 
-use super::{COLUMN, band, icon_button, placeholder, primary_button};
+use super::turn::{self, Where};
+use super::{COLUMN, band, icon_button, placeholder, primary_button, work};
 use crate::app::{App, Steer};
 use crate::icons;
 use crate::lab::lab;
 use crate::link::TaskRow;
 use crate::status::{status_glyph, status_label, status_of};
 use crate::theme::Neko;
+use crate::turns::task_turns;
 use crate::views::FullView;
+use crate::work::{SHOWN_TURNS, working_line};
+
+const LIST: Where = Where { ns: "", compact: false };
 
 /// The card in the middle: inset from the window's edges with the window's radius.
 pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     let inner = if s.lab {
         col().w_full().grow(1.0).min_h(0.0).child(band(t)).child(row().w_full().grow(1.0).min_h(0.0).justify_center().child(lab(t)))
+    } else if s.new_form.is_some() {
+        super::new::form(s, t, layer)
     } else if let Some(view) = s.view {
         full_view(s, view, t)
     } else {
@@ -29,44 +39,132 @@ pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     col().key("session-region").grow(1.0).min_w(0.0).h_full().my(8.0).mx(2.0).radius(t.radius.window).fill(t.surface.window).child(inner)
 }
 
-/// The top line: status glyph, title, then the runtime and goal in quiet text, and the context
-/// panel's toggle at the right.
+/// The top line: status glyph, title, then the runtime and the goal's first line in quiet text,
+/// and the context panel's toggle at the right. The state's words live in the row of the column
+/// and under the title in the tray, never repeated here.
 fn top_line(s: &App, task: &TaskRow, t: &Neko) -> El {
     let mut meta: Vec<String> = Vec::new();
     if let Some(m) = s.summary.as_ref().filter(|m| !m.runtime.is_empty()) {
         meta.push(m.runtime.clone());
     }
-    meta.push(status_label(task.status).to_owned());
     if !task.goal.is_empty() {
         meta.push(task.goal.clone());
     }
     band(t)
         .px(20.0)
-        .child(status_glyph(status_of(task.status), t, 14.0, Some("")))
+        .child(status_glyph(status_of(task.status), t, 14.0, Some(status_label(task.status))))
         .child(text(task.title.clone()).key("top-title").font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(t.text.base).truncate().a11y_hidden().role("heading"))
         .child(text(meta.join(" · ")).key("top-meta").font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0))
         .child(icon_button(&icons::PANEL_RIGHT, if s.layout.context.is_open() { "Hide context" } else { "Show context" }, "context-toggle", t, |s: &mut App| s.layout.context.toggle()))
 }
 
-fn session(s: &App, task: &TaskRow, t: &Neko, layer: &mut Vec<El>) -> El {
-    col()
-        .w_full()
-        .h_full()
-        .min_w(0.0)
-        .child(top_line(s, task, t))
-        .child(
-            col().key("turns").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true }).child(placeholder(
-                &["The agent's turns appear here.", "The session view arrives in P1; the web UI shows them today."],
-                t,
-            )),
-        )
-        .child(composer(s, t, layer))
+fn session(s: &App, row_task: &TaskRow, t: &Neko, layer: &mut Vec<El>) -> El {
+    let mut c = col().w_full().h_full().min_w(0.0).child(top_line(s, row_task, t));
+    let Some(detail) = s.detail() else {
+        // The row is here and its events are on the way (one read after choosing it).
+        return c
+            .child(col().key("turns").w_full().grow(1.0).min_h(0.0).child(placeholder(&["Opening the session…"], t)))
+            .child(composer(s, t, layer, false));
+    };
+    let task = &detail.task;
+    let goals = s.summary.as_ref().map(|m| m.goals_of(&task.id)).unwrap_or_default();
+    if !goals.is_empty() {
+        let mut g = col().key("goals").w_full().px(8.0).pb(2.0);
+        for goal in goals {
+            g = g.child(work::goal_line(s, t, goal));
+        }
+        c = c.child(g);
+    }
+    c = c.child(
+        col()
+            .key("turns")
+            .w_full()
+            .grow(1.0)
+            .min_h(0.0)
+            .scroll(ScrollSpec { stick_bottom: true })
+            .child(row().w_full().justify_center().child(conversation(s, t, task, detail.has_folder).w_full().max_w(COLUMN - 120.0).px(24.0).pb(20.0))),
+    );
+    if let Some(tray) = work::tray(s, t, task) {
+        c = c.child(row().w_full().justify_center().px(20.0).pb(8.0).child(tray.w_full().max_w(COLUMN - 120.0)));
+    }
+    c.child(composer(s, t, layer, true))
 }
 
-/// Nothing selected: before the first snapshot, or a workbench with no tasks.
+/// The turns, then the plan and the result, the runs and the working line.
+fn conversation(s: &App, t: &Neko, task: &Task, has_folder: bool) -> El {
+    let all = task_turns(task);
+    let hidden = if s.work.all_turns { 0 } else { all.len().saturating_sub(SHOWN_TURNS) };
+    let mut c = col().key("conversation").w_full().pt(4.0);
+    if hidden > 0 {
+        c = c.child(super::quiet_button(&format!("Show {hidden} earlier"), "show-earlier", t, |s: &mut App| s.work.all_turns = true));
+    }
+    for el in turn::turns(s, t, LIST, &all[hidden..]) {
+        c = c.child(el);
+    }
+    let plan = task.plan.trim();
+    if !plan.is_empty() && matches!(task.status, TaskStatus::Planning | TaskStatus::AwaitingApproval) {
+        c = c.child(block(t, "plan", if task.status == TaskStatus::Planning { "Saved plan · being revised" } else { "Plan" }, plan));
+    }
+    let result = task.result.trim();
+    if !result.is_empty() {
+        let (body, review) = match result.split_once("\n\nIndependent review:\n") {
+            Some((body, review)) => (body, Some(review)),
+            None => (result, None),
+        };
+        let mut r = block(t, "result", &format!("Result · {}", status_label(task.status)), body);
+        if let Some(review) = review {
+            let open = s.open("review");
+            r = r.child(
+                super::quiet_button(if open { "Hide the independent review" } else { "Show the independent review" }, "review-toggle", t, |s: &mut App| s.toggle("review")),
+            );
+            if open {
+                r = r.child(text(review.chars().take(2000).collect::<String>()).font(t.ty.meta).color(t.text.muted).wrap().selectable(true).mt(4.0));
+            }
+        }
+        c = c.child(r);
+    }
+    if let Some(pr) = task.pull_request.as_ref().filter(|p| !p.url.is_empty()) {
+        let url = pr.url.clone();
+        let number = url.rsplit('/').next().unwrap_or("").to_owned();
+        c = c.child(
+            row().w_full().gap(10.0).center_y().mt(18.0).child(icon(&icons::PULL_REQUEST, 16.0).color(t.meaning.iris).a11y_hidden()).child(text(format!("Pull request #{number}")).font(t.ty.row).color(t.text.base)).child(el().grow(1.0)).child(super::quiet_button("Open on GitHub", "open-pr-link", t, move |s: &mut App| s.open_link(&url))),
+        );
+    }
+    if has_folder {
+        if let Some(list) = s.work.checkpoints.get(&task.id) {
+            if let Some(runs) = work::runs(s, t, &task.id, list) {
+                c = c.child(col().w_full().mt(22.0).child(runs));
+            }
+        }
+    }
+    if let Some(line) = working_line(task.status) {
+        c = c.child(text(line).key("working").font(t.ty.meta).color(t.text.faint).mt(18.0).live_region(rune::LiveRegion::Polite));
+    }
+    if all.is_empty() && plan.is_empty() && result.is_empty() {
+        c = c.child(text("Nothing has happened on this task yet.").font(t.ty.meta).color(t.text.muted).mt(40.0));
+    }
+    c
+}
+
+fn block(t: &Neko, key: &str, title: &str, body: &str) -> El {
+    col()
+        .key(format!("block-{key}"))
+        .w_full()
+        .gap(6.0)
+        .mt(24.0)
+        .child(text(title.to_owned()).font(t.ty.group).color(t.text.muted))
+        .child(rune_kit::Markdown::new(body.to_owned()).selectable(true).build(&t.kit))
+}
+
+/// Nothing selected: before the first snapshot, or a workbench with no tasks. The real view of
+/// an empty workbench says what to do first, in one line and one button.
 fn empty(s: &App, t: &Neko) -> El {
-    let line = if s.summary.is_some() { "No sessions yet. Start one with + New." } else { "Waiting for Neko." };
-    col().w_full().h_full().child(band(t)).child(placeholder(&[line], t))
+    let (line, button) = if s.summary.is_some() { ("No sessions yet.", true) } else { ("Waiting for Neko.", false) };
+    let mut c = col().key("empty").w_full().grow(1.0).min_h(0.0).items_center().justify_center().gap(12.0).child(text(line).font(t.ty.row).color(t.text.muted));
+    if button {
+        c = c.child(primary_button("New session", "empty-new", t, |s: &mut App| s.open_new()));
+    }
+    col().w_full().h_full().child(band(t)).child(c)
 }
 
 /// A full view's placeholder: what it is, when it comes, and the way to the web UI today.
@@ -88,17 +186,41 @@ fn full_view(s: &App, view: FullView, t: &Neko) -> El {
     col().w_full().h_full().child(band(t)).child(row().w_full().grow(1.0).min_h(0.0).justify_center().child(c))
 }
 
-/// The composer: a field, the steer-mode menu and Send. Sending arrives with the session view
-/// (P1), so P0's Send is off and says why; typing and choosing a mode work.
-fn composer(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
+fn mode_of(steer: Steer) -> DeliveryMode {
+    crate::work::delivery(steer)
+}
+
+/// The composer: a multi-line field (IME and image paste), the steer-mode menu and Send.
+fn composer(s: &App, t: &Neko, layer: &mut Vec<El>, ready: bool) -> El {
     let k = &t.kit;
-    let field = TextInput::new(&s.composer)
-        .placeholder("Message the agent…")
+    let field = TextArea::new(&s.composer)
+        .placeholder(placeholder_for(s))
         .label("Message the agent")
-        .plain()
+        .auto_grow(1, 8)
         .on_edit(|s: &mut App| &mut s.composer)
+        .on_key(|s: &mut App, ev: &KeyEvent, _| {
+            // Enter sends, Shift+Enter is a new line, ⌘↩ steers now; never while an input method
+            // is composing (the Enter that confirms a word is not a send).
+            if ev.key != Key::Enter || ev.mods.shift || ev.mods.alt || s.composer.is_composing() {
+                return false;
+            }
+            s.send_composer(ev.mods.cmd.then_some(DeliveryMode::SteerNow));
+            true
+        })
         .build(k)
-        .key("composer-input");
+        .key("composer-input")
+        .w_full()
+        .on_input_paste(|s: &mut App, content, _| {
+            let Some(image) = content.image() else { return false };
+            match crate::attachments::save_png(image.png()) {
+                Ok(path) => {
+                    let reference = crate::attachments::reference(&path);
+                    s.composer.insert(&reference);
+                }
+                Err(_) => s.work.notice = Some("Couldn’t keep that image. Your message is unchanged.".to_owned()),
+            }
+            true
+        });
 
     let trigger = row()
         .key("steer-trigger")
@@ -122,18 +244,21 @@ fn composer(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     }
     let steer = menu.build(k, layer);
 
+    let can_send = ready && !s.composer.text.trim().is_empty();
     let send = IconButton::new(&icons::SEND)
         .control_size(ControlSize::Large)
         .variant(IconButtonVariant::Ghost)
-        .label("Send")
-        .help("Sending arrives with the session view (P1)")
-        .disabled(true)
+        .label(format!("Send, {}", mode_label(s)))
+        .help(format!("Send, {}", mode_label(s)))
+        .disabled(!can_send)
+        .on_press(|s: &mut App| s.send_composer(None))
         .build(k)
         .key("send");
 
-    col().key("composer").w_full().px(20.0).pb(16.0).child(
+    row().key("composer").w_full().justify_center().px(20.0).pb(16.0).child(
         col()
             .w_full()
+            .max_w(COLUMN - 120.0)
             .px(14.0)
             .pt(10.0)
             .pb(6.0)
@@ -143,4 +268,22 @@ fn composer(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
             .child(field)
             .child(row().w_full().center_y().child(steer).child(el().grow(1.0)).child(send)),
     )
+}
+
+/// What Send does right now, in words (for its tooltip and name).
+fn mode_label(s: &App) -> String {
+    match s.detail().map(|d| d.task.status) {
+        Some(st) if crate::work::in_turn(st) => format!("{} while the agent works", mode_of(s.steer).word()),
+        _ => "as a reply".to_owned(),
+    }
+}
+
+fn placeholder_for(s: &App) -> &'static str {
+    match s.detail().map(|d| d.task.status) {
+        Some(TaskStatus::AwaitingApproval) => "Answer the agent, or tell it what to change…",
+        Some(TaskStatus::ReadyForReview) => "Ask a question or request changes…",
+        Some(TaskStatus::Failed | TaskStatus::Cancelled) => "Tell the agent how to try again…",
+        Some(TaskStatus::Completed) => "Reopen with a follow-up…",
+        _ => "Redirect the agent. It pauses and replans…",
+    }
 }

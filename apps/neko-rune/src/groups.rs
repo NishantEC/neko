@@ -63,6 +63,37 @@ pub fn first_session(summary: &Summary, now_ms: i64) -> Option<String> {
     grouped(summary, now_ms).into_iter().find_map(|(_, rows)| rows.first().map(|t| t.id.clone()))
 }
 
+/// Sessions whose title or key matches `query`, best first (`frizbee`: typo-tolerant, like fzf).
+/// An empty query lists the sessions in the column's order. At most `limit`.
+pub fn fuzzy_sessions<'a>(summary: &'a Summary, query: &str, now_ms: i64, limit: usize) -> Vec<&'a TaskRow> {
+    let query = query.trim();
+    if query.is_empty() {
+        return grouped(summary, now_ms).into_iter().flat_map(|(_, rows)| rows).take(limit).collect();
+    }
+    let hay: Vec<String> = summary.tasks.iter().map(|t| format!("{} {}", t.key.as_deref().unwrap_or(""), t.title)).collect();
+    let refs: Vec<&str> = hay.iter().map(String::as_str).collect();
+    let mut matcher = frizbee::Matcher::new(query, &frizbee::Config::default());
+    let mut found = matcher.match_list(&refs);
+    found.sort_by(|a, b| b.score.cmp(&a.score).then(summary.tasks[b.index as usize].updated_at_ms.cmp(&summary.tasks[a.index as usize].updated_at_ms)));
+    found.into_iter().take(limit).map(|m| &summary.tasks[m.index as usize]).collect()
+}
+
+/// The word beside a row's age: what the glyph alone cannot say, since a task that needs you and
+/// one an agent is working on share the amber half circle (as in the web UI).
+pub fn status_word(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Queued => "Queued",
+        TaskStatus::Planning => "Planning",
+        TaskStatus::AwaitingApproval => "Needs you",
+        TaskStatus::Building => "Building",
+        TaskStatus::Reviewing => "Reviewing",
+        TaskStatus::ReadyForReview => "Review",
+        TaskStatus::Completed => "Done",
+        TaskStatus::Failed => "Failed",
+        TaskStatus::Cancelled => "Cancelled",
+    }
+}
+
 /// Quiet meta for a row: how long ago it last changed ("now", "5m", "3h", "2d").
 pub fn age(now_ms: i64, then_ms: i64) -> String {
     let secs = ((now_ms - then_ms) / 1000).max(0);
@@ -112,17 +143,33 @@ mod tests {
 
     #[test]
     fn groups_are_always_three_and_newest_first() {
-        let s = Summary {
-            digest: String::new(),
-            runtime: String::new(),
-            tasks: vec![row("old", TaskStatus::Building, 5000), row("new", TaskStatus::Building, 1000), row("ask", TaskStatus::AwaitingApproval, 9000)],
-        };
+        let s = Summary { tasks: vec![row("old", TaskStatus::Building, 5000), row("new", TaskStatus::Building, 1000), row("ask", TaskStatus::AwaitingApproval, 9000)], ..Summary::default() };
         let g = grouped(&s, NOW);
         assert_eq!(g.iter().map(|(g, _)| *g).collect::<Vec<_>>(), Group::ALL);
         assert_eq!(g[0].1.len(), 1);
         assert_eq!(g[1].1.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["new", "old"]);
         assert!(g[2].1.is_empty());
         assert_eq!(first_session(&s, NOW).as_deref(), Some("ask"), "a window opens on what needs you");
+    }
+
+    #[test]
+    fn the_palette_finds_a_session_by_a_few_letters_of_its_title() {
+        let mut s = Summary { tasks: vec![row("a", TaskStatus::Building, 1000), row("b", TaskStatus::Building, 2000)], ..Summary::default() };
+        s.tasks[0].title = "Add dark mode to the settings page".into();
+        s.tasks[1].title = "Fix the retry in the sync job".into();
+        let hit = |q: &str| fuzzy_sessions(&s, q, NOW, 5).iter().map(|t| t.id.clone()).collect::<Vec<_>>();
+        assert_eq!(hit("dark"), ["a"]);
+        assert_eq!(hit("retry sync").first().map(String::as_str), Some("b"));
+        assert_eq!(hit("").len(), 2, "an empty query lists the sessions");
+        assert!(hit("zzzqq").is_empty());
+    }
+
+    #[test]
+    fn a_row_says_which_amber_it_is() {
+        assert_eq!((status_word(TaskStatus::AwaitingApproval), status_word(TaskStatus::Building)), ("Needs you", "Building"));
+        // Same glyph, so the words must differ (DESIGN.md section 3: the glyph is never the only cue).
+        let words: std::collections::HashSet<_> = [TaskStatus::AwaitingApproval, TaskStatus::Planning, TaskStatus::Building, TaskStatus::Reviewing].map(status_word).into_iter().collect();
+        assert_eq!(words.len(), 4);
     }
 
     #[test]

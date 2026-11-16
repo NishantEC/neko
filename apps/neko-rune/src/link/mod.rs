@@ -1,11 +1,13 @@
 //! The connection to the daemon: the daemon is the brain and the only writer, this client only
 //! listens (docs/decisions/0002-rune-for-everything.md, P0).
 //!
-//! * **Read-only by construction.** The only requests this module can send are the two in
-//!   [`ReadRequest`]: the whole workbench once, then `WorkbenchIfChanged` held up to 20 s, which
-//!   is how the web UI stays current (`web/src/api.ts`). No other `Request` or `Command` is named
-//!   anywhere in this crate outside `link/` (`tests/read_only.rs` checks that), and the client
-//!   never opens the database.
+//! * **Two kinds of traffic, both listed.** The held snapshot connection here sends only the two
+//!   reads in [`ReadRequest`]: the whole workbench once, then `WorkbenchIfChanged` held up to
+//!   20 s, which is how the web UI stays current (`web/src/api.ts`). Everything else the app asks
+//!   (the open task's runs, a message to an agent, a goal's actions, ...) is a [`Call`] in
+//!   `write.rs`, one request the web UI sends too. `tests/allow_list.rs` names exactly the
+//!   requests this crate may send, and no other `Request` or `Command` is named anywhere outside
+//!   `link/`. The client never opens the database.
 //! * **Reconnects with backoff** ([`backoff`]): 0.5 s, 1, 2, 4, 8, then every 10 s, reset by the
 //!   first answer. It never gives up, because the daemon may simply not be running yet.
 //! * **Calm errors** ([`calm`]): one sentence in the product's voice, never a raw OS message.
@@ -14,15 +16,21 @@
 //! tested with a fake transport and a recorded clock, and the real socket is tested against a
 //! fake server in `link/unix.rs`.
 
+mod model;
+mod reply;
 mod unix;
+pub mod write;
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use neko_protocol::workbench::{Command, Snapshot, TaskStatus};
+use neko_protocol::workbench::Command;
 use neko_protocol::{Request, Response};
 
+pub use model::*;
+pub use reply::*;
+pub use write::Call;
 pub use unix::UnixConnector;
 
 /// How long the daemon holds `WorkbenchIfChanged` while nothing changes (the web UI's value).
@@ -92,81 +100,6 @@ pub fn calm(error: &LinkError, retry_in: Duration) -> String {
     }
 }
 
-/// One task as a row: what lists and counts need, and nothing of its events or plan.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TaskRow {
-    pub id: String,
-    /// The source's short key (`ENG-12`), when the task has one.
-    pub key: Option<String>,
-    pub title: String,
-    pub status: TaskStatus,
-    pub updated_at_ms: i64,
-    /// The first line of the task's goal, cut short.
-    #[serde(default)]
-    pub goal: String,
-}
-
-/// What the app keeps of a workbench snapshot. The multi-megabyte snapshot itself is dropped
-/// as soon as it is summarised, so the client's memory does not grow with the daemon's history.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Summary {
-    pub digest: String,
-    /// The runtime new work uses, as words ("Codex · default model").
-    #[serde(default)]
-    pub runtime: String,
-    pub tasks: Vec<TaskRow>,
-}
-
-/// The first line of a goal, at most 140 characters.
-fn first_line(goal: &str) -> String {
-    let line = goal.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
-    if line.chars().count() > 140 { format!("{}…", line.chars().take(139).collect::<String>()) } else { line.to_owned() }
-}
-
-impl Summary {
-    pub fn from_snapshot(snapshot: &Snapshot) -> Summary {
-        Summary {
-            digest: snapshot.digest.clone(),
-            runtime: format!(
-                "{} · {}",
-                if snapshot.agent_runtime.provider.is_empty() { "Codex" } else { snapshot.agent_runtime.provider.as_str() },
-                if snapshot.agent_runtime.model.is_empty() { "default model" } else { snapshot.agent_runtime.model.as_str() }
-            ),
-            tasks: snapshot
-                .tasks
-                .iter()
-                .map(|t| TaskRow {
-                    id: t.id.clone(),
-                    key: t.issue_id.clone(),
-                    title: t.display_title.clone().unwrap_or_else(|| t.title.clone()),
-                    status: t.status,
-                    updated_at_ms: t.updated_at_ms,
-                    goal: first_line(&t.goal),
-                })
-                .collect(),
-        }
-    }
-
-    fn count(&self, f: impl Fn(TaskStatus) -> bool) -> usize {
-        self.tasks.iter().filter(|t| f(t.status)).count()
-    }
-
-    /// Waiting on the person: a plan or step needs approval, a result needs review, or it failed.
-    /// The sessions column's "Needs you" group and the Neko column count the same.
-    pub fn needs_you(&self) -> usize {
-        self.count(|s| matches!(s, TaskStatus::AwaitingApproval | TaskStatus::ReadyForReview | TaskStatus::Failed))
-    }
-
-    pub fn in_review(&self) -> usize {
-        self.count(|s| s == TaskStatus::ReadyForReview)
-    }
-
-    /// An agent is working on it.
-    pub fn working(&self) -> usize {
-        self.count(|s| matches!(s, TaskStatus::Planning | TaskStatus::Building | TaskStatus::Reviewing))
-    }
-}
-
 /// What the worker tells the app.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LinkEvent {
@@ -190,7 +123,12 @@ pub trait Connector {
 
 /// The worker loop. Returns only when `stop` is set. `emit` gets every event, `sleep` is how
 /// time passes (a recording fake in tests).
-pub fn run<C: Connector>(connector: &C, stop: &AtomicBool, mut emit: impl FnMut(LinkEvent), sleep: impl Fn(Duration)) {
+pub fn run<C: Connector>(connector: &C, stop: &AtomicBool, emit: impl FnMut(LinkEvent), sleep: impl Fn(Duration)) {
+    run_with(connector, stop, &Wanted::default(), emit, sleep)
+}
+
+/// [`run`], with each snapshot summarised for the task `wanted` names (the one open in the app).
+pub fn run_with<C: Connector>(connector: &C, stop: &AtomicBool, wanted: &Wanted, mut emit: impl FnMut(LinkEvent), sleep: impl Fn(Duration)) {
     let mut attempt: u32 = 0;
     let mut first = true;
     while !stop.load(Ordering::Relaxed) {
@@ -199,7 +137,7 @@ pub fn run<C: Connector>(connector: &C, stop: &AtomicBool, mut emit: impl FnMut(
             first = false;
         }
         let failure = match connector.connect() {
-            Ok(mut conn) => hold(&mut conn, stop, &mut emit, &sleep, &mut attempt),
+            Ok(mut conn) => hold(&mut conn, stop, wanted, &mut emit, &sleep, &mut attempt),
             Err(error) => error,
         };
         if stop.load(Ordering::Relaxed) {
@@ -213,7 +151,7 @@ pub fn run<C: Connector>(connector: &C, stop: &AtomicBool, mut emit: impl FnMut(
 }
 
 /// Keep one connection current until it fails; the error that ended it.
-fn hold<T: Transport>(conn: &mut T, stop: &AtomicBool, emit: &mut impl FnMut(LinkEvent), sleep: &impl Fn(Duration), attempt: &mut u32) -> LinkError {
+fn hold<T: Transport>(conn: &mut T, stop: &AtomicBool, wanted: &Wanted, emit: &mut impl FnMut(LinkEvent), sleep: &impl Fn(Duration), attempt: &mut u32) -> LinkError {
     let mut digest = String::new();
     while !stop.load(Ordering::Relaxed) {
         let request = if digest.is_empty() { ReadRequest::Snapshot } else { ReadRequest::IfChanged { digest: digest.clone(), wait_ms: HOLD_MS } };
@@ -222,7 +160,7 @@ fn hold<T: Transport>(conn: &mut T, stop: &AtomicBool, emit: &mut impl FnMut(Lin
             Ok(Response::Workbench(snapshot)) => {
                 *attempt = 0;
                 digest = snapshot.digest.clone();
-                emit(LinkEvent::Live(Summary::from_snapshot(&snapshot)));
+                emit(LinkEvent::Live(Summary::from_snapshot_for(&snapshot, wanted.get().as_deref())));
             }
             Ok(Response::WorkbenchUnchanged { .. }) => {
                 *attempt = 0;
@@ -244,6 +182,7 @@ fn hold<T: Transport>(conn: &mut T, stop: &AtomicBool, emit: &mut impl FnMut(Lin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neko_protocol::workbench::{Snapshot, TaskStatus};
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::sync::atomic::AtomicBool;
@@ -414,8 +353,6 @@ mod tests {
     fn summaries_count_what_needs_the_person() {
         let task = |id: &str, status| TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: 0, goal: String::new() };
         let s = Summary {
-            digest: String::new(),
-            runtime: String::new(),
             tasks: vec![
                 task("a", TaskStatus::AwaitingApproval),
                 task("b", TaskStatus::Building),
@@ -423,6 +360,7 @@ mod tests {
                 task("d", TaskStatus::ReadyForReview),
                 task("e", TaskStatus::Completed),
             ],
+            ..Summary::default()
         };
         assert_eq!((s.needs_you(), s.working(), s.in_review()), (2, 2, 1));
     }

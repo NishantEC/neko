@@ -10,8 +10,12 @@
 
 mod context;
 mod neko;
+mod new;
+mod palette;
 mod session;
 mod sessions;
+mod turn;
+mod work;
 
 use rune::{Cursor, Cx, Drag, El, Phase, col, el, icon, row, text};
 use rune_kit::root;
@@ -51,6 +55,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     } else {
         window = window.child(neko::strip(s, &t).w(NEKO_STRIP).key("neko"));
     }
+    palette::mount(s, &t, &mut layer);
     root(window, layer)
 }
 
@@ -115,6 +120,24 @@ fn nav_row(glyph: &'static rune::Icon, label: &str, key: &str, active: bool, t: 
         .focus_ring(2.0, 0.0, t.kit.c.border_focus)
         .child(icon(glyph, 16.0).color(if active { t.text.base } else { t.text.muted }).a11y_hidden())
         .child(text(label.to_owned()).font(t.ty.row).color(if active { t.text.base } else { t.text.muted }).truncate().a11y_hidden())
+}
+
+/// A secondary action: text on the soft fill under the pointer (the web's outline and ghost buttons).
+fn quiet_button(label: &str, key: &str, t: &Neko, on_press: impl Fn(&mut App) + 'static) -> El {
+    row()
+        .key(key.to_owned())
+        .role("button")
+        .label(label)
+        .focusable(true)
+        .h(26.0)
+        .px(10.0)
+        .radius(t.radius.control)
+        .center()
+        .fill(t.surface.hover)
+        .hover(t.surface.active)
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
+        .on_press(on_press)
+        .child(text(label.to_owned()).font(t.ty.meta).color(t.text.base).a11y_hidden())
 }
 
 /// The one primary action on a view: Iris, the colour of "do this".
