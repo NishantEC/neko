@@ -109,7 +109,7 @@ mod tests {
     }
 
     #[test]
-    fn talks_to_a_socket_skipping_pushed_events_and_reconnects_after_a_drop() {
+    fn talks_to_a_socket_handing_on_pushed_events_and_reconnects_after_a_drop() {
         let path = socket_path("talk");
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path).unwrap();
@@ -133,6 +133,9 @@ mod tests {
         );
         std::fs::remove_file(&path).ok();
 
+        // The daemon's pushed events are handed on as they arrive (the window acts on them); the rest of the story is the same.
+        assert!(events.contains(&LinkEvent::Pushed(crate::link::Pushed::Attention { count: 2 })), "an AttentionChanged is passed to the app");
+        let events: Vec<LinkEvent> = events.into_iter().filter(|e| !matches!(e, LinkEvent::Pushed(_))).collect();
         assert_eq!(events[0], LinkEvent::Connecting);
         assert!(matches!(&events[1], LinkEvent::Live(s) if s.digest == "one"));
         assert_eq!(events[2], LinkEvent::Quiet, "a held poll that runs out says the link is fine");

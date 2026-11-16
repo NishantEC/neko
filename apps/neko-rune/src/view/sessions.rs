@@ -13,7 +13,7 @@ use rune::{Color, El, LoopSpec, ScrollSpec, TextStyle, col, el, icon, row, text}
 use rune_kit::{Menu, MenuItem, Placement, context_menu};
 
 use crate::app::App;
-use crate::groups::{Group, age, grouped, shown, status_word};
+use crate::groups::{Group, age, grouped_in, shown, status_word};
 use crate::icons;
 use crate::link::{TaskRow, Wait};
 use crate::theme::Neko;
@@ -32,7 +32,8 @@ pub const HEADER_INSET: f32 = 80.0;
 pub fn column(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     let mut c = col().w_full().h_full().min_w(0.0).padding(PAD).gap(GAP);
     c = c.child(header(s, t));
-    c = c.child(search(t));
+    // The search field and, flush under it, the workspace switcher (a 32 point row): one block, then the 8 point gap.
+    c = c.child(col().key("sessions-find").w_full().child(search(t)).child(scope_row(s, t, layer)));
     // The fixed block: New session and the nav rows stay pinned above the scrolling list.
     let mut fixed = col().w_full().gap(0.0).child(new_row(s, t));
     for view in FullView::NAV {
@@ -87,6 +88,41 @@ fn search(t: &Neko) -> El {
         .child(text("⌘K").font(t.ty.hint).color(t.text.faint).a11y_hidden())
 }
 
+/// The workspace switcher: a 32 point row under the search field, a folder, "All workspaces" or one workspace's name, and a chevron.
+/// It scopes the list below, Routines, the Calendar's rows of Neko's work and Home's composer; the choice is kept.
+fn scope_row(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
+    let name = s.scope_name();
+    let trigger = row()
+        .key("scope")
+        .role("button")
+        .label(format!("Workspace: {name}"))
+        .help("Show one workspace or all of them")
+        .expanded(s.scope_open)
+        .focusable(true)
+        .w_full()
+        .h(ROW_H)
+        .px(8.0)
+        .gap(8.0)
+        .center_y()
+        .radius(t.radius.row)
+        .fill(if s.scope_open { t.surface.selected } else { Color::TRANSPARENT })
+        .hover(t.surface.hover)
+        .focus_ring(2.0, 2.0, t.surface.ring)
+        .on_press(|s: &mut App| s.scope_open = !s.scope_open)
+        .child(icon(&icons::FOLDER, 16.0).color(t.text.muted).a11y_hidden())
+        .child(text(name.clone()).key("scope-name").font(t.ty.row).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden())
+        .child(icon(&icons::CHEVRON_DOWN, 16.0).color(t.text.muted).a11y_hidden());
+    let mut menu = Menu::new("scope-menu").trigger(trigger).open(s.scope_open).placement(Placement::BottomStart).min_width(220.0).on_close(|s: &mut App| s.scope_open = false);
+    menu = menu.item(MenuItem::new("All workspaces").icon(&icons::FOLDER).checked(s.scope().is_none()).on_select(|s: &mut App| s.set_scope(None)));
+    if let Some(summary) = s.summary.as_ref() {
+        for w in &summary.workspaces {
+            let id = w.id.clone();
+            menu = menu.item(MenuItem::new(w.name.clone()).icon(&icons::FOLDER).checked(s.scope() == Some(w.id.as_str())).on_select(move |s: &mut App| s.set_scope(Some(id.clone()))));
+        }
+    }
+    col().key("scope-row").w_full().child(menu.build(&t.kit, layer))
+}
+
 /// The shape every row shares: 32 high, 8 of padding, radius 8, the hover and open fills.
 fn base_row(key: String, label: String, open: bool, t: &Neko) -> El {
     row()
@@ -131,7 +167,7 @@ fn new_row(s: &App, t: &Neko) -> El {
 /// The count a nav row shows at its right.
 fn nav_count(s: &App, view: FullView) -> Option<usize> {
     match view {
-        FullView::Routines => s.pages.routines.as_ref().map(|r| r.views.iter().filter(|v| v.routine.enabled).count()),
+        FullView::Routines => s.pages.routines.as_ref().map(|r| r.views.iter().filter(|v| v.routine.enabled && s.scope().is_none_or(|w| v.routine.workspace_id == w)).count()),
         FullView::Calendar => s.pages.calendar.as_ref().filter(|c| c.status.enabled).map(|c| s.events_today(c)),
         FullView::Workspaces => s.summary.as_ref().map(|m| m.workspaces.len()),
         _ => None,
@@ -209,7 +245,7 @@ fn list(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
             c = c.child(text(crate::app::status_line(&s.link, None)).key("sessions-status").font(t.ty.meta).color(t.text.muted).px(8.0).py(6.0).live_region(rune::LiveRegion::Polite));
         }
         Some(summary) => {
-            let groups = grouped(summary, s.now_ms);
+            let groups = grouped_in(summary, s.now_ms, s.scope());
             if groups.iter().all(|(_, rows)| rows.is_empty()) {
                 c = c.child(text("No sessions yet").key("sessions-empty").font(t.ty.meta).color(t.text.muted).px(8.0).py(6.0));
             }

@@ -25,6 +25,7 @@ mod neko;
 mod palette;
 mod routines;
 mod runtime;
+mod shortcuts;
 mod session;
 mod sessions;
 mod settings;
@@ -109,7 +110,9 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     } else {
         window = window.child(neko::strip(s, &t).w(NEKO_STRIP).key("neko"));
     }
-    palette::mount(s, &t, &mut layer);
+    palette::mount(s, &t, (win_w, win_h), &mut layer);
+    shortcuts::mount(s, &t, &mut layer);
+    mount_text_menu(s, &t, &mut layer);
     compose::mount_popover(s, &t, &mut layer);
     compose::mount_message_menu(s, &t, &mut layer);
     runtime::mount(s, &t, &mut layer);
@@ -120,7 +123,35 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     s.web_view.overlays.set(layer.len());
     s.web_view.sync();
     // Hover fills arrive and leave in 120 ms, ease-out, everywhere in the window (polish spec §4).
+    // A right-click on selected text anywhere that nothing else claims: Ask Neko about this, Search for ... (the web's global menu).
+    let window = window.on_secondary_press(|s: &mut App, at, tx: &mut rune::Tx| {
+        if let Some(sel) = tx.text_selection().map(|sel| sel.text().to_owned()).filter(|t| !t.trim().is_empty()) {
+            s.text_menu = Some((sel, at));
+        }
+    });
     root(window, layer).hover_motion_within(crate::motion::hover(), crate::motion::hover())
+}
+
+/// The menu on selected text: Copy, "Ask Neko about this" (the Neko composer, with the words quoted) and "Search for ...".
+fn mount_text_menu(s: &App, t: &Neko, layer: &mut Vec<El>) {
+    let Some((words, at)) = s.text_menu.as_ref() else { return };
+    let short: String = if words.chars().count() > 24 { format!("{}…", words.chars().take(24).collect::<String>()) } else { words.clone() };
+    let (copy, ask, find) = (words.clone(), words.clone(), words.clone());
+    rune_kit::context_menu("text-menu", el(), Some(*at))
+        .on_close(|s: &mut App| s.text_menu = None)
+        .item(rune_kit::MenuItem::new("Copy").icon(&crate::icons::COPY).shortcut("⌘C").on_select_tx(move |s: &mut App, tx: &mut rune::Tx| {
+            s.text_menu = None;
+            tx.copy(copy.clone());
+        }))
+        .item(rune_kit::MenuItem::new("Ask Neko about this").icon(&crate::icons::SPARK).on_select(move |s: &mut App| {
+            s.text_menu = None;
+            s.ask_neko_about(&ask);
+        }))
+        .item(rune_kit::MenuItem::new(format!("Search for “{short}”")).icon(&crate::icons::SEARCH).on_select(move |s: &mut App| {
+            s.text_menu = None;
+            s.palette_search(&find);
+        }))
+        .build(&t.kit, layer);
 }
 
 /// How the context panel comes and goes: it slides in from its edge and fades, on a 180 ms Snappy spring (polish spec §4).

@@ -695,6 +695,15 @@ impl App {
         }
     }
 
+    /// "Ask Neko about this" (the right-click menu on selected text): Neko's column opens with the words quoted in its composer
+    /// (the web's `askNeko`).
+    pub fn ask_neko_about(&mut self, words: &str) {
+        let quoted = format!("{}\n\n", words.trim().lines().map(|l| format!("> {l}")).collect::<Vec<_>>().join("\n"));
+        self.layout.set_neko_open(true);
+        self.ask.replace_text(quoted);
+        self.ask.focused = true;
+    }
+
     /// "Quote in reply": the text quoted into a composer, as the web's `quote`.
     pub fn quote_into_composer(&mut self, text: &str, in_neko: bool) {
         let quoted = format!("{}\n\n", text.trim().lines().map(|l| format!("> {l}")).collect::<Vec<_>>().join("\n"));

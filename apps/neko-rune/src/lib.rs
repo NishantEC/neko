@@ -4,6 +4,7 @@
 //! sessions and counts live from the daemon and the rest placeholders. No tabs.
 
 pub mod account;
+pub mod attention;
 pub mod all_sessions;
 pub mod activity;
 pub mod app;
@@ -13,6 +14,7 @@ pub mod attachments;
 pub mod clock;
 pub mod compose;
 pub mod connection;
+pub mod dock;
 pub mod groups;
 pub mod icons;
 pub mod lab;
@@ -21,10 +23,12 @@ pub mod layout;
 pub mod link;
 pub mod new_session;
 pub mod pages;
+pub mod palette;
 pub mod permissions;
 pub mod plan;
 pub mod panel;
 pub mod samples;
+pub mod scope;
 pub mod scenes;
 pub mod readers;
 pub mod runtime_pick;
@@ -32,6 +36,7 @@ pub mod scenes_pages;
 pub mod scenes_panel;
 pub mod status;
 pub mod task_actions;
+pub mod shortcuts;
 pub mod terminal;
 pub mod toasts;
 pub mod theme;
@@ -126,7 +131,7 @@ fn init() -> App {
         // The last run's widths (read once, before the first frame); the window then keeps them.
         let saved = app::load_layout();
         let layout = saved.map(layout::Layout::restored).unwrap_or_default();
-        App { linked: !has("nolink"), layout, layout_written: saved, layout_seen: saved, persist_layout: true, web_view: web_panel::WebHost::windowed(), ..App::default() }
+        App { linked: !has("nolink"), dock: dock::set_badge, workspace_scope: app::load_scope(), layout, layout_written: saved, layout_seen: saved, persist_layout: true, web_view: web_panel::WebHost::windowed(), ..App::default() }
     }
 }
 
@@ -160,6 +165,34 @@ pub fn on_key(s: &mut App, ev: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
         s.palette_toggle();
         return true;
     }
+    // ⌘B: the sessions column away and back.
+    if ev.is_command('b') && !ev.mods.shift {
+        s.toggle_sidebar();
+        return true;
+    }
+    // ⌘↵ with no field holding the keyboard approves what waits for a yes; Esc with the ask box empty declines it.
+    if ev.mods.cmd && !ev.mods.shift && ev.key == rune::Key::Enter && s.palette.is_none() && s.dialog.is_none() {
+        s.approve_first_decision();
+        return true;
+    }
+    if ev.key == rune::Key::Escape && !(ev.mods.cmd || ev.mods.alt || ev.mods.ctrl || ev.mods.shift) {
+        if s.shortcuts_open {
+            s.shortcuts_open = false;
+            return true;
+        }
+        if s.palette.is_none() && s.dialog.is_none() && s.ask.text.trim().is_empty() && s.decline_first_decision() {
+            return true;
+        }
+    }
+    // `?` shows the shortcuts (a `?` typed in a field is the field's, which sees the key first).
+    if matches!(&ev.key, rune::Key::Text(t) if t == "?") && !(ev.mods.cmd || ev.mods.ctrl || ev.mods.alt) {
+        s.shortcuts_open = !s.shortcuts_open;
+        return true;
+    }
+    if ev.is_command('/') && !ev.mods.shift {
+        s.shortcuts_open = !s.shortcuts_open;
+        return true;
+    }
     if ev.is_command('n') && !ev.mods.shift {
         s.open_new();
         return true;
@@ -189,6 +222,7 @@ pub fn run() {
             let panel = s.panel_tick(t, tx);
             let toast = s.tick_toast(t, tx);
             s.tick_compose(t, tx);
+            s.tick_dock();
             moved || panel || toast
         }),
         ..rune::AppSpec::new("Neko (Rune)", (1360.0, 840.0), init, view::view)

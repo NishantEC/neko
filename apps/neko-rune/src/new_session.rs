@@ -87,6 +87,7 @@ impl App {
             (form.workspace, form.mode, form.choices, form.runtime, form.model, form.branches) = (workspace, mode, choices, runtime, model, branches);
         }
         self.new_form = Some(form);
+        self.apply_scope_to_home();
         self.selected = None;
         self.wanted.set(None);
         self.view = None;

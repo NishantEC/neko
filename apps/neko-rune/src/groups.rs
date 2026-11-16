@@ -91,10 +91,15 @@ pub fn group_of(task: &TaskRow, now_ms: i64) -> Option<Group> {
 /// The four groups' tasks, each newest first (every task of the group, before any cap). Always four
 /// entries, in `Group::ALL` order.
 pub fn grouped(summary: &Summary, now_ms: i64) -> Vec<(Group, Vec<&TaskRow>)> {
+    grouped_in(summary, now_ms, None)
+}
+
+/// [`grouped`] for the tasks of one workspace (the switcher's scope), or all of them.
+pub fn grouped_in<'a>(summary: &'a Summary, now_ms: i64, scope: Option<&str>) -> Vec<(Group, Vec<&'a TaskRow>)> {
     Group::ALL
         .iter()
         .map(|g| {
-            let mut rows: Vec<&TaskRow> = summary.tasks.iter().filter(|t| group_of(t, now_ms) == Some(*g)).collect();
+            let mut rows: Vec<&TaskRow> = summary.tasks.iter().filter(|t| group_of(t, now_ms) == Some(*g) && scope.is_none_or(|w| summary.workspace_of(&t.id) == w)).collect();
             rows.sort_by_key(|t| std::cmp::Reverse(t.updated_at_ms));
             (*g, rows)
         })

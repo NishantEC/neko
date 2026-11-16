@@ -114,7 +114,36 @@ pub enum LinkEvent {
     Quiet,
     /// The daemon pushed `ShowArtifact`: an agent asked every window to show this artifact now.
     ShowArtifact { id: String, version: Option<u32> },
+    /// Another event the daemon pushes (`AttentionChanged`, `OpenTab`, `ThemeChanged`, `QuotaChanged`).
+    Pushed(Pushed),
     Down { error: LinkError, attempt: u32, retry_in: Duration },
+}
+
+/// What the daemon pushes to every connection that this client acts on. `WebUpdated` (the web UI rebuilt itself) and the
+/// others (`IconsUpdated`, `HotkeyChanged`, `ArtifactsChanged`, ...) are not in it: they are ignored.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Pushed {
+    /// How many agents are stopped waiting for a person.
+    Attention { count: usize },
+    /// Open this route (`tasks?task=<id>&view=full`, `artifact?id=<id>`, a plugin page's `<plugin>:<page>`, a page's id).
+    OpenTab { route: String },
+    /// A client committed a theme.
+    Theme { id: String },
+    /// A vendor's quota moved.
+    Quota,
+}
+
+/// The event as this client acts on it, or None for the ones it ignores.
+pub fn pushed(event: &neko_protocol::Event) -> Option<Pushed> {
+    use neko_protocol::Event;
+    match event {
+        Event::AttentionChanged { count } => Some(Pushed::Attention { count: *count }),
+        Event::OpenTab { route } => Some(Pushed::OpenTab { route: route.clone() }),
+        Event::ThemeChanged { id } => Some(Pushed::Theme { id: id.clone() }),
+        Event::AppearanceChanged { .. } => Some(Pushed::Theme { id: String::new() }),
+        Event::QuotaChanged { .. } => Some(Pushed::Quota),
+        _ => None,
+    }
 }
 
 /// A connection that can ask the daemon one read request at a time.
@@ -167,6 +196,8 @@ fn hold<T: Transport>(conn: &mut T, stop: &AtomicBool, wanted: &Wanted, emit: &m
         let mut on_event = |event: neko_protocol::Event| {
             if let neko_protocol::Event::ShowArtifact { id, version } = event {
                 emit(LinkEvent::ShowArtifact { id, version });
+            } else if let Some(pushed) = pushed(&event) {
+                emit(LinkEvent::Pushed(pushed));
             }
         };
         match conn.ask(&request, &mut on_event) {

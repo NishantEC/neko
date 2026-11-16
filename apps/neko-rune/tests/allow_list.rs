@@ -387,7 +387,7 @@ fn only_the_app_state_touches_rune_prefs_and_only_to_keep_the_layout() {
     let app = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs")).unwrap();
     let code = production(&app);
     assert!(code.contains("PREFS_ID") && !code.contains("support_dir") && !code.contains("neko_protocol::socket_path"), "the layout goes to Rune's store, not the daemon's folder");
-    assert_eq!(code.matches("prefs::Prefs::open").count(), 2, "one read at startup, one write on a thread");
+    assert_eq!(code.matches("prefs::Prefs::open").count(), 4, "at startup one read of the layout and one of the workspace scope, each written on a thread when it changes");
 }
 
 #[test]

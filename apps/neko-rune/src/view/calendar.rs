@@ -131,7 +131,7 @@ pub fn view(s: &App, t: &Neko) -> El {
     let days = days_shown(s);
     let data = s.pages.calendar.as_ref();
     let events: Vec<&CalendarEvent> = data.map(|d| d.events.iter().collect()).unwrap_or_default();
-    let neko: Vec<NekoCalendarItem> = data.map(|d| d.neko.clone()).unwrap_or_default();
+    let neko: Vec<NekoCalendarItem> = data.map(|d| s.scoped_neko_rows(d).into_iter().cloned().collect()).unwrap_or_default();
     let count = events.len() + neko.len();
     let mut body = col().w_full().gap(10.0);
     // Why there are no events, in one line, with the way to fix it.

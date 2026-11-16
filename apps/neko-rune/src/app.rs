@@ -206,6 +206,20 @@ pub struct App {
     pub compose: crate::compose::ComposeUi,
     /// "All sessions": its search, cursor and filters (`all_sessions.rs`).
     pub all: crate::all_sessions::AllState,
+    /// The workspace switcher's list is open.
+    pub scope_open: bool,
+    /// The scope changed and is to be written (the real window only).
+    pub scope_dirty: bool,
+    /// The shortcut overlay (`?`).
+    pub shortcuts_open: bool,
+    /// The right-click menu on selected text: the words, and where.
+    pub text_menu: Option<(String, PointerPress)>,
+    /// The Dock badge (`dock.rs`): the real window sets it; a headless run has none.
+    pub dock: fn(usize),
+    /// The count the Dock shows now.
+    pub dock_shown: Option<usize>,
+    /// How many agents the daemon says are stopped waiting for a person (`AttentionChanged`).
+    pub daemon_attention: Option<usize>,
     /// The model chip's popover (`runtime_pick.rs`, `view/runtime.rs`).
     pub runtime: crate::runtime_pick::RuntimeUi,
     /// The web server's port and token (from `SignedWebUrl`), for the three paths `link/http.rs` reaches.
@@ -220,6 +234,18 @@ pub const PREFS_ID: &str = "neko-rune";
 /// Reads the layout the last run left, if any. Called once at startup, before the first frame.
 pub fn load_layout() -> Option<Saved> {
     rune::prefs::Prefs::open(PREFS_ID).get::<Saved>("layout")
+}
+
+/// The workspace the window was scoped to the last run (None: all workspaces).
+pub fn load_scope() -> Option<String> {
+    rune::prefs::Prefs::open(PREFS_ID).get::<Option<String>>(crate::scope::KEY).flatten()
+}
+
+/// Writes the scope on its own thread.
+fn write_scope(id: Option<String>) {
+    let _ = std::thread::Builder::new().name("neko-scope".into()).spawn(move || {
+        let _ = rune::prefs::Prefs::open(PREFS_ID).set(crate::scope::KEY, &id);
+    });
 }
 
 /// Writes a layout on its own thread: nothing touches a file while input or frames run.
@@ -301,6 +327,13 @@ impl Default for App {
             msg_menu: None,
             compose: crate::compose::ComposeUi::default(),
             all: crate::all_sessions::AllState::default(),
+            scope_open: false,
+            scope_dirty: false,
+            shortcuts_open: false,
+            text_menu: None,
+            dock: crate::dock::none,
+            dock_shown: None,
+            daemon_attention: None,
             runtime: crate::runtime_pick::RuntimeUi::default(),
             http: None,
             http_asked: false,
@@ -367,6 +400,7 @@ impl App {
                 self.show_artifact(&id, version);
                 true
             }
+            LinkEvent::Pushed(pushed) => self.apply_pushed(pushed),
             LinkEvent::Down { error, retry_in, .. } => {
                 let state = LinkState::Down { message: calm(&error, retry_in) };
                 let changed = self.link != state;
@@ -437,6 +471,9 @@ impl App {
     pub fn tick_layout(&mut self, t: f64, tx: &mut rune::Tx) -> bool {
         if !self.persist_layout {
             return false;
+        }
+        if std::mem::take(&mut self.scope_dirty) {
+            write_scope(self.workspace_scope.clone());
         }
         let now = self.layout.saved();
         // The write waits until the layout has not changed for half a second: each change starts the wait again.
@@ -625,7 +662,7 @@ impl App {
 
     /// How many sessions are in `group` right now (all of them, before the column's caps).
     pub fn group_count(&self, group: Group) -> usize {
-        self.summary.as_ref().map_or(0, |m| m.tasks.iter().filter(|t| crate::groups::group_of(t, self.now_ms) == Some(group)).count())
+        self.summary.as_ref().map_or(0, |m| m.tasks.iter().filter(|t| crate::groups::group_of(t, self.now_ms) == Some(group) && self.scope().is_none_or(|w| m.workspace_of(&t.id) == w)).count())
     }
 }
 

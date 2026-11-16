@@ -22,7 +22,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         };
         return page(t, "routines", "Routines", None, Vec::new(), quiet_line(t, "routines-loading", &line));
     };
-    let views: Vec<&RoutineView> = data.views.iter().filter(|v| !is_goal_routine(v)).collect();
+    let views: Vec<&RoutineView> = data.views.iter().filter(|v| !is_goal_routine(v) && s.scope().is_none_or(|w| v.routine.workspace_id == w)).collect();
     let mut body = col().w_full().gap(2.0);
     if !data.routines_on {
         body = body.child(

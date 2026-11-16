@@ -61,6 +61,12 @@ wry = { version = "0.57", default-features = false, features = ["os-webview"] }
 # Addresses are parsed, never string-matched, by the web view's navigation lock (`src/web_panel.rs`).
 url = "2"
 
+# The Dock badge (`src/dock.rs`): NSApp.dockTile through objc2, the versions Rune already builds (no new crate in the tree).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSDockTile", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
+
 [dev-dependencies]
 png = "0.17"
 

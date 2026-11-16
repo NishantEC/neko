@@ -547,3 +547,153 @@ fn a_finished_replys_csv_fence_is_a_table_and_a_3d_fence_names_the_artifact() {
     assert!(has_key(&rt, "fence-3d-a1b2c3d4e5f6"), "the 3d fence opens the artifact in the panel: {:?}", rt.elements().iter().filter_map(|e| e.key.clone()).filter(|k| k.contains("fence") || k.contains("code")).collect::<Vec<_>>());
     assert!(has_text(&rt, "let x = 1;"), "an ordinary fence stays code");
 }
+
+// ------------------------------------------------------------------------------------------------ 4. palette, shortcuts, scope
+
+#[test]
+fn the_palette_is_640_wide_at_20_percent_with_a_44_field_and_36_rows_in_the_webs_order() {
+    let mut rt = runtime(scene("live"));
+    rt.update(|s, _| s.palette_toggle());
+    settle(&mut rt);
+    let palette = rect(&rt, "palette");
+    assert_eq!(palette[2], 640.0, "640 wide");
+    assert!((palette[1] - 900.0 * 0.20).abs() < 1.5, "its top edge is at 20% of the window: {palette:?}");
+    let anchor = rect(&rt, "palette-anchor");
+    assert!((anchor[0] + anchor[2] / 2.0 - 680.0).abs() < 2.0, "centred: {anchor:?}");
+    let field = rect(&rt, "palette-input");
+    assert!(field[3] >= 43.5 && field[3] <= 44.5, "the search field is 44 high: {field:?}");
+    assert_eq!(rect(&rt, "palette-row-0")[3], 36.0, "rows are 36");
+    // The section headings come in the web's order.
+    let headings: Vec<String> = rt.elements().into_iter().filter_map(|e| e.key).filter_map(|k| k.strip_prefix("palette-heading-").map(str::to_owned)).collect();
+    assert_eq!(headings, ["Sessions", "Go to", "Actions", "Appearance"], "Plugins appears when a plugin registered something");
+    // A row's shortcut is right-aligned (when the list shows it without scrolling).
+    let items = rt.state.palette_items();
+    assert!(items.iter().any(|i| i.right.as_deref() == Some("⌘⇧Esc")));
+}
+
+#[test]
+fn arrows_move_return_runs_and_escape_closes_the_palette() {
+    let mut rt = runtime(scene("live"));
+    rt.update(|s, _| s.palette_toggle());
+    settle(&mut rt);
+    rt.paste("calendr");
+    settle(&mut rt);
+    press(&mut rt, Key::Down, Mods::default());
+    press(&mut rt, Key::Up, Mods::default());
+    press(&mut rt, Key::Enter, Mods::default());
+    assert!(rt.state.palette.is_none());
+    assert_eq!(rt.state.view, Some(neko_rune::views::FullView::Calendar), "a typo still finds Go to Calendar");
+    rt.update(|s, _| s.palette_toggle());
+    settle(&mut rt);
+    press(&mut rt, Key::Escape, Mods::default());
+    assert!(rt.state.palette.is_none(), "Esc closes");
+}
+
+#[test]
+fn question_mark_opens_the_shortcut_overlay_in_two_columns_and_command_b_hides_the_sidebar() {
+    let mut rt = runtime(scene("live"));
+    let ev = KeyEvent { key: Key::Text("?".into()), mods: Mods::default() };
+    rt.update(|s, tx| assert!(neko_rune::on_key(s, &ev, tx)));
+    settle(&mut rt);
+    assert!(has_text(&rt, "Keyboard shortcuts") && has_text(&rt, "Anywhere") && has_text(&rt, "Composer") && has_text(&rt, "A decision waiting for you"));
+    let (left, right) = (rect(&rt, "shortcuts-left"), rect(&rt, "shortcuts-right"));
+    assert!(right[0] > left[0] + left[2] - 1.0 && (left[1] - right[1]).abs() < 1.0, "two columns side by side: {left:?} {right:?}");
+    assert!(has_text(&rt, "Stop all work") && has_text(&rt, "Show or hide the sidebar"));
+    press(&mut rt, Key::Escape, Mods::default());
+    assert!(!rt.state.shortcuts_open);
+    assert!(rt.state.layout.sessions.is_open());
+    let ev = KeyEvent { key: Key::Command('b'), mods: Mods { cmd: true, ..Mods::default() } };
+    rt.update(|s, tx| assert!(neko_rune::on_key(s, &ev, tx)));
+    assert!(!rt.state.layout.sessions.is_open(), "⌘B hides the sidebar");
+    rt.update(|s, tx| assert!(neko_rune::on_key(s, &ev, tx)));
+    assert!(rt.state.layout.sessions.is_open(), "and shows it again");
+}
+
+#[test]
+fn the_right_click_menu_on_selected_text_asks_neko_or_searches() {
+    let mut rt = runtime(scene("live"));
+    let at = rune::PointerPress { x: 400.0, y: 300.0 };
+    rt.update(|s, _| s.text_menu = Some(("the board draws nothing".to_owned(), at)));
+    settle(&mut rt);
+    assert!(has_text(&rt, "Ask Neko about this") && texts(&rt).iter().any(|t| t.starts_with("Search for “the board")), "{:?}", texts(&rt));
+    click_text(&mut rt, "Ask Neko about this");
+    assert_eq!(rt.state.ask.text, "> the board draws nothing\n\n", "Neko's composer has the quote");
+    assert!(rt.state.layout.neko.is_open());
+    rt.update(|s, _| s.text_menu = Some(("billing".to_owned(), at)));
+    settle(&mut rt);
+    let search = rt.elements().into_iter().find(|e| e.text.as_deref().is_some_and(|t| t.starts_with("Search for"))).unwrap().rect;
+    rt.pointer_down(search[0] + 4.0, search[1] + search[3] / 2.0);
+    rt.pointer_up(search[0] + 4.0, search[1] + search[3] / 2.0);
+    settle(&mut rt);
+    assert!(rt.state.palette.is_some());
+    assert_eq!(rt.state.palette_query.text, "billing");
+}
+
+#[test]
+fn the_workspace_switcher_is_a_32_point_row_under_the_search_that_scopes_the_list_and_home() {
+    let mut rt = runtime(scene("live"));
+    let (search, scope) = (rect(&rt, "sessions-search"), rect(&rt, "scope"));
+    assert_eq!(scope[3], 32.0);
+    assert!(scope[1] >= search[1] + search[3] - 0.5 && scope[1] - (search[1] + search[3]) <= 9.0, "right under the search field: {search:?} {scope:?}");
+    assert!(has_text(&rt, "All workspaces"));
+    let before = rt.state.group_count(neko_rune::groups::Group::NeedsYou);
+    let workspaces: Vec<(String, String)> = rt.state.summary.as_ref().unwrap().workspaces.iter().map(|w| (w.id.clone(), w.name.clone())).collect();
+    assert!(workspaces.len() >= 2, "the scene has workspaces: {workspaces:?}");
+    // Give the tasks alternating workspaces so the scope has something to cut.
+    rt.update(|s, _| {
+        let m = s.summary.as_mut().unwrap();
+        let ids: Vec<String> = m.tasks.iter().map(|t| t.id.clone()).collect();
+        for (i, id) in ids.iter().enumerate() {
+            m.meta.entry(id.clone()).or_default().workspace_id = workspaces[i % 2].0.clone();
+        }
+    });
+    click(&mut rt, "scope");
+    click_text(&mut rt, &workspaces[1].1);
+    assert_eq!(rt.state.scope(), Some(workspaces[1].0.as_str()));
+    assert!(has_text(&rt, &workspaces[1].1));
+    assert!(rt.state.group_count(neko_rune::groups::Group::NeedsYou) < before, "fewer sessions are in the list now");
+    assert!(rt.state.scope_dirty, "the choice is to be kept");
+    rt.update(|s, _| s.open_new());
+    settle(&mut rt);
+    assert_eq!(rt.state.new_form.as_ref().unwrap().workspace, 1, "Home's composer starts in the scoped workspace");
+}
+
+// ------------------------------------------------------------------------------------------------ 7. toasts and the Dock
+
+#[test]
+fn toasts_stack_three_at_the_bottom_centre_forty_high_with_radius_twelve_and_go_after_four_seconds() {
+    let mut rt = runtime(scene("live"));
+    rt.update(|s, _| {
+        for w in ["One.", "Two.", "Three.", "Four."] {
+            s.show_toast(w);
+        }
+    });
+    settle(&mut rt);
+    let region = rect(&rt, "toast-region");
+    let toasts: Vec<[f32; 4]> = rt.elements().into_iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("toast-") && !k.starts_with("toast-region") && !k.starts_with("toast-action"))).map(|e| e.rect).collect();
+    assert_eq!(toasts.len(), 3, "at most three");
+    assert!(toasts.iter().all(|r| (r[3] - 40.0).abs() < 0.5), "40 high: {toasts:?}");
+    assert!((region[0] + region[2] / 2.0 - 680.0).abs() < 2.0, "bottom centre of the window: {region:?}");
+    assert!(region[1] + region[3] > 800.0, "at the bottom: {region:?}");
+    assert!(!has_text(&rt, "One."), "the oldest made room");
+    rt.update(|s, tx| {
+        s.tick_toast(10.0, tx);
+    });
+    rt.update(|s, tx| {
+        assert!(!s.tick_toast(13.9, tx), "still up at 3.9 s");
+        assert!(s.tick_toast(14.1, tx), "gone after 4 s");
+    });
+    assert!(rt.state.toasts.is_empty());
+}
+
+#[test]
+fn a_toast_with_undo_sends_the_request_when_pressed() {
+    let mut rt = runtime(scene("live"));
+    rt.update(|s, _| s.toast_with("Moved to the front of the queue.", "Undo", Call::Unseen));
+    settle(&mut rt);
+    rt.state.outbox.clear();
+    let id = rt.state.toasts[0].id;
+    click(&mut rt, &format!("toast-action-{id}"));
+    assert_eq!(rt.state.outbox, vec![Call::Unseen]);
+    assert!(rt.state.toasts.is_empty());
+}
