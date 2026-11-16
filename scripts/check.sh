@@ -3,6 +3,12 @@
 #
 #   scripts/check.sh           everything: Rust lints and tests, Swift tests
 #   scripts/check.sh --quick   compile only (the pre-commit hook)
+#   scripts/check.sh --rune    also the Rune client (apps/neko-rune), even on a cold cache
+#   scripts/check.sh --no-rune never the Rune client
+#
+# The Rune client is its own Cargo workspace (apps/neko-rune, docs/decisions/0002). Its check is
+# about 25 s with a warm cache and about 3 minutes cold (Rune and wgpu compile once), so a full
+# check runs it only when the cache from an earlier build exists, or with --rune.
 #
 # Prints one line per step and exits non-zero if any step failed. Output of a
 # failed step is kept in $TMPDIR/neko-check/<step>.log.
@@ -13,10 +19,13 @@ set -uo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 mode=full
+rune=auto
 for option in "$@"; do
   case "$option" in
     --quick) mode=quick ;;
-    --help) sed -n '2,10p' "$0"; exit 0 ;;
+    --rune) rune=yes ;;
+    --no-rune) rune=no ;;
+    --help) sed -n '2,16p' "$0"; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$option" >&2; exit 2 ;;
   esac
 done
@@ -62,6 +71,15 @@ fi
 # it is checked only on a Mac that has run scripts/setup-gpui-patch.sh.
 if [[ -d "$repo_root/.gpui-fork-patched" ]]; then
   step gpui-client cargo check --manifest-path crates/neko/Cargo.toml --target-dir target --quiet
+fi
+
+# The Rune client: warm cache or asked for, never in the quick (pre-commit) pass.
+rune_cache="$HOME/Library/Caches/neko/rune-target"
+if [[ "$mode" == full && "$rune" != no && -d "$repo_root/apps/neko-rune" ]]; then
+  if [[ "$rune" == yes || -d "$rune_cache/debug/deps" ]]; then
+    # Always its own cache, whatever target dir the daemon's steps were given.
+    step rune-client env CARGO_TARGET_DIR="$rune_cache" "$repo_root/apps/neko-rune/scripts/check.sh"
+  fi
 fi
 
 if (( ${#failed[@]} )); then

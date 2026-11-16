@@ -37,7 +37,10 @@ fn live(s: &mut App) {
     s.set_web(Some(WebTarget::new(4747, &"0".repeat(64))));
 }
 
-pub const SCENES: &[(&str, fn(&mut App))] = &[
+/// A scene's name and what it does to the starting state.
+pub type Scene = (&'static str, fn(&mut App));
+
+pub const SCENES: &[Scene] = &[
     ("default", |_| {}),
     ("live", live),
     ("offline", |s| {

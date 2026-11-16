@@ -52,16 +52,22 @@ impl Entry {
     }
 }
 
-/// The palette's rows for a query: pages whose title contains it (any case), and, once there is
-/// a query, the same pages in the web UI. With no query, every page.
+/// The palette's rows for a query, best match first: pages fuzzy-matched on their title and id
+/// with `frizbee` (MIT; docs/research/reuse-for-rune-2026-11.md), then, once there is a query,
+/// the same pages in the web UI. With no query, every page in the rail's order.
 pub fn entries(query: &str) -> Vec<Entry> {
-    let needle = query.trim().to_lowercase();
-    let matches = |page: &Page| needle.is_empty() || page.title().to_lowercase().contains(&needle) || page.id().contains(&needle);
-    let mut rows: Vec<Entry> = Page::RAIL.iter().chain([&Page::FOOT]).chain(Page::MORE.iter()).filter(|p| matches(p)).map(|p| Entry::GoTo(*p)).collect();
-    if !needle.is_empty() {
-        rows.extend(Page::ALL.iter().filter(|p| matches(p)).map(|p| Entry::OpenInWeb(*p)));
+    let needle = query.trim();
+    let order: Vec<Page> = Page::RAIL.iter().chain([&Page::FOOT]).chain(Page::MORE.iter()).copied().collect();
+    if needle.is_empty() {
+        return order.into_iter().map(Entry::GoTo).collect();
     }
-    rows
+    let haystacks: Vec<String> = order.iter().map(|p| format!("{} {}", p.title(), p.id())).collect();
+    let refs: Vec<&str> = haystacks.iter().map(String::as_str).collect();
+    // `Config::default()` sorts by score and, with smart casing, ignores case for a lowercase
+    // needle.
+    let mut matcher = frizbee::Matcher::new(needle, &frizbee::Config::default());
+    let ranked: Vec<Page> = matcher.match_list(&refs).iter().map(|m| order[m.index as usize]).collect();
+    ranked.iter().copied().map(Entry::GoTo).chain(ranked.iter().copied().map(Entry::OpenInWeb)).collect()
 }
 
 pub struct App {
@@ -336,10 +342,13 @@ mod tests {
     fn the_palette_filters_pages_and_offers_the_web_ui() {
         assert_eq!(entries("").len(), Page::ALL.len());
         assert_eq!(entries("")[0], Entry::GoTo(Page::Home));
-        let inbox = entries("INB");
-        assert_eq!(inbox, vec![Entry::GoTo(Page::Inbox), Entry::OpenInWeb(Page::Inbox)]);
+        assert_eq!(entries("inb")[0], Entry::GoTo(Page::Inbox));
+        assert!(entries("inb").contains(&Entry::OpenInWeb(Page::Inbox)));
         assert!(entries("zzzz").is_empty());
         assert_eq!(entries("pull")[0], Entry::GoTo(Page::PullRequests));
+        // Fuzzy: letters in order, not a substring.
+        assert_eq!(entries("tsk")[0], Entry::GoTo(Page::Tasks));
+        assert_eq!(entries("prs")[0], Entry::GoTo(Page::PullRequests), "the web UI's id works too");
     }
 
     #[test]

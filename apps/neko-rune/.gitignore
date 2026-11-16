@@ -1,1 +1,3 @@
 /target
+# Written by scripts/patched-rune.sh only while patches/ holds patches.
+/.cargo
