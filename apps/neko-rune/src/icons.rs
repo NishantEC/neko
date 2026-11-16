@@ -52,6 +52,9 @@ icon_body!(FOLDER, "folder", r#"<path d="M2.5 4.5C2.5 3.7 3.2 3 4 3H6.4L8 4.8H12
 icon_body!(REASON_LIST, "reason-list", r#"<path d="M3 4.5H13M3 8H13M3 11.5H9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 icon_body!(REASON_QUESTION, "reason-question", r#"<path d="M5.8 6.2C5.8 5 6.8 4.2 8 4.2C9.2 4.2 10.2 5 10.2 6.1C10.2 7.6 8 7.6 8 9.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 11.7V11.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 icon_body!(REASON_BRANCH, "reason-branch", r#"<circle cx="4.5" cy="3.8" r="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="4.5" cy="12.2" r="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="11.5" cy="6.2" r="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4.5 5.3V10.7M11.5 7.7C11.5 9.6 9.5 9.4 7.6 9.6C5.9 9.8 4.5 10.2 4.5 10.7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+// The context panel's Plan tab (a checklist) and Info tab.
+icon_body!(CHECKLIST, "checklist", r#"<path d="M2.5 4L3.8 5.3L6 3M2.5 9L3.8 10.3L6 8M8.5 4.5H13.5M8.5 9.5H13.5M2.5 13.5H3.5M6 13.5H13.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(INFO, "info", r#"<circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 7.2V10.8M8 5.2V5.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 icon_body!(CROSS, "cross", r#"<path d="M4.5 4.5L11.5 11.5M11.5 4.5L4.5 11.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 // The "anything else" reason: a filled dot (the one filled glyph besides the mark).
 icon_body!(DOT, "dot", r#"<circle cx="8" cy="8" r="2" fill="currentColor"/>"#);
@@ -105,7 +108,7 @@ mod tests {
         let declared = src.lines().filter(|l| l.starts_with("icon_body!(")).count();
         let icons = vec![
             &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND,
-            &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP,
+            &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &CHECKLIST, &INFO,
         ];
         // The two filled ones (MORE's dots count as line icons here: they carry no stroke) are `icon_body!` lines too.
         assert_eq!(icons.len() + 1, declared, "a declared icon is missing from this list (the dot is the +1)");

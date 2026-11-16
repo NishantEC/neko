@@ -14,6 +14,7 @@ mod composer;
 mod context;
 mod context_diff;
 mod context_files;
+mod context_info;
 mod context_terminal;
 mod home;
 mod more;

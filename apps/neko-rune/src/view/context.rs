@@ -1,6 +1,6 @@
 //! The context panel (docs/decisions/0002, plugin slot (a)): what the selected session produces, one
 //! tab at a time. The header is 36 points: a segmented control over only the tabs that have content
-//! (Canvas, Diff, Files, Terminal, in that order), then Expand and Close. The panel opens by the rules
+//! (Canvas, Diff, Files, Terminal, Plan, Info, in that order), then Expand and Close. The panel opens by the rules
 //! in `panel.rs`; this file draws it. The tabs' bodies are in `context_diff.rs`, `context_files.rs`,
 //! `context_terminal.rs` and, for the Canvas and every viewer, here.
 
@@ -8,7 +8,7 @@ use rune::{El, col, el, row, text};
 use rune_kit::SegmentedControl;
 use rune_kit::glyphs::{FILE, FILE_CODE, FILE_IMAGE, FILE_TEXT};
 
-use super::{context_diff, context_files, context_terminal, icon_button, placeholder, quiet_button, ui};
+use super::{context_diff, context_files, context_info, context_terminal, icon_button, placeholder, quiet_button, ui};
 use crate::app::App;
 use crate::groups::age;
 use crate::icons;
@@ -52,6 +52,8 @@ pub fn panel(s: &App, t: &Neko, layer: &mut Vec<El>, width: f32) -> El {
         Some(Tab::Diff) => context_diff::tab(s, t, layer),
         Some(Tab::Files) => context_files::tab(s, t),
         Some(Tab::Terminal) => context_terminal::tab(s, t),
+        Some(Tab::Plan) => context_info::plan(s, t),
+        Some(Tab::Info) => context_info::info(s, t),
         None => placeholder(&["Nothing to show yet."], t),
     };
     col().key("context").h_full().min_w(0.0).my(8.0).mx(2.0).radius(t.radius.window).clip_rounded(t.radius.window).fill(t.surface.card).child(head).child(viewers::web::region(col().key("context-body").w_full().grow(1.0).min_h(0.0).child(body)))
@@ -64,6 +66,8 @@ pub fn tab_icon(tab: Tab) -> &'static rune::Icon {
         Tab::Diff => &icons::DIFF,
         Tab::Files => &icons::FILES,
         Tab::Terminal => &icons::TERMINAL,
+        Tab::Plan => &icons::CHECKLIST,
+        Tab::Info => &icons::INFO,
     }
 }
 

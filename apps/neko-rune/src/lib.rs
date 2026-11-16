@@ -19,6 +19,7 @@ pub mod layout;
 pub mod link;
 pub mod new_session;
 pub mod pages;
+pub mod plan;
 pub mod panel;
 pub mod samples;
 pub mod scenes;
@@ -86,6 +87,11 @@ fn init() -> App {
                 if let Some(id) = id {
                     app.select(&id);
                 }
+            }
+            // The panel's tab for the pictures (`NEKO_RUNE_TAB=plan|info|terminal|diff|files|canvas`): opens the panel on it.
+            if let Some(tab) = std::env::var("NEKO_RUNE_TAB").ok().and_then(|v| panel::Tab::ALL.into_iter().find(|t| t.title().eq_ignore_ascii_case(&v))) {
+                app.panel_choose_tab(tab);
+                app.panel_set_open(true);
             }
             // For the side-by-side pairs against the web UI (`/tmp/neko-polish`): the person's own name, and a full view.
             if std::env::var_os("NEKO_RUNE_ACCOUNT").is_some() {

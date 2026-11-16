@@ -669,7 +669,7 @@ fn the_files_tab_reads_the_sessions_folder_through_the_daemon_and_cannot_leave_i
     assert!(!rt.state.panel.files_tree.contains(".git"), "git's own files are not listed");
     assert_eq!(rt.state.panel.files_tree.get("export.sh").and_then(|n| n.data), Some(true), "a changed file");
     assert_eq!(rt.state.panel.files_tree.get("NOTES.md").and_then(|n| n.data), Some(true));
-    assert_eq!(rt.state.panel_tabs(), [Tab::Diff, Tab::Files, Tab::Terminal].into_iter().filter(|t| rt.state.panel_tabs().contains(t)).collect::<Vec<_>>());
+    assert_eq!(rt.state.panel_content_tabs(), [Tab::Diff, Tab::Files, Tab::Terminal].into_iter().filter(|t| rt.state.panel_content_tabs().contains(t)).collect::<Vec<_>>());
     // Open a file of the folder: the code viewer shows it.
     rt.update(|s, _| s.panel_choose_tab(Tab::Files));
     settle(&mut rt);

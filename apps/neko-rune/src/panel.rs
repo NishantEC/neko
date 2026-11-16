@@ -41,11 +41,20 @@ pub enum Tab {
     Diff,
     Files,
     Terminal,
+    /// The plan as a checklist.
+    Plan,
+    /// Where the session lives: workspace, branch, pull request, runtime, dates, the ticket.
+    Info,
 }
 
 impl Tab {
     /// In the order the segmented control shows them.
-    pub const ALL: [Tab; 4] = [Tab::Canvas, Tab::Diff, Tab::Files, Tab::Terminal];
+    pub const ALL: [Tab; 6] = [Tab::Canvas, Tab::Diff, Tab::Files, Tab::Terminal, Tab::Plan, Tab::Info];
+
+    /// A tab the person asks for: it never opens the panel by itself (Info always has something to say).
+    pub fn on_request(self) -> bool {
+        matches!(self, Tab::Plan | Tab::Info)
+    }
 
     pub fn title(self) -> &'static str {
         match self {
@@ -53,6 +62,8 @@ impl Tab {
             Tab::Diff => "Diff",
             Tab::Files => "Files",
             Tab::Terminal => "Terminal",
+            Tab::Plan => "Plan",
+            Tab::Info => "Info",
         }
     }
 }
@@ -307,7 +318,18 @@ impl App {
         if self.detail().is_some_and(|d| d.task.id == id && terminal::command_count(&d.task) > 0) {
             tabs.push(Tab::Terminal);
         }
+        if let Some(d) = self.detail().filter(|d| d.task.id == id) {
+            if !crate::plan::steps(&d.task.plan, d.task.status).is_empty() {
+                tabs.push(Tab::Plan);
+            }
+            tabs.push(Tab::Info);
+        }
         tabs
+    }
+
+    /// The tabs whose content opens the panel by itself: all but Plan and Info.
+    pub fn panel_content_tabs(&self) -> Vec<Tab> {
+        self.panel_tabs().into_iter().filter(|t| !t.on_request()).collect()
     }
 
     /// An artifact was shown in the last [`RECENT_MS`].
@@ -387,7 +409,7 @@ impl App {
         self.panel.open_select = None;
         let Some(id) = self.selected.clone() else { return };
         let closed = self.session_panel(&id).is_some_and(|p| p.person_closed);
-        let any = !self.panel_tabs().is_empty();
+        let any = !self.panel_content_tabs().is_empty();
         self.layout.context.set_open(any && !closed);
         self.panel_sync();
     }
@@ -419,7 +441,7 @@ impl App {
             self.call(Call::TaskArtifacts { task_id: id.clone() });
         }
         let closed = self.session_panel(&id).is_some_and(|p| p.person_closed);
-        if !closed && !self.layout.context.is_open() && !self.panel_tabs().is_empty() {
+        if !closed && !self.layout.context.is_open() && !self.panel_content_tabs().is_empty() {
             self.layout.context.set_open(true);
         }
         if !self.layout.context.is_open() {
@@ -431,7 +453,7 @@ impl App {
                 self.want_diff(&id, run);
                 // The Files tab marks changed files from the whole task's diff.
             }
-            Some(Tab::Canvas) | Some(Tab::Files) | Some(Tab::Terminal) | None => {}
+            Some(Tab::Canvas | Tab::Files | Tab::Terminal | Tab::Plan | Tab::Info) | None => {}
         }
         // The Files tab marks what changed from the whole task's diff.
         if self.panel_tab() == Some(Tab::Files) && self.session_panel(&id).is_some_and(|p| matches!(&p.folder, Some(Some(_)))) && self.work.checkpoints.get(&id).is_some_and(|l| l.runs.iter().any(|r| r.files > 0)) {
@@ -836,7 +858,8 @@ mod tests {
         assert_eq!(first_tab(&[Files], false), Some(Files));
         assert_eq!(first_tab(&[Canvas], false), Some(Canvas), "an old artifact alone is still what there is");
         assert_eq!(first_tab(&[], true), None);
-        assert_eq!(Tab::ALL.map(Tab::title), ["Canvas", "Diff", "Files", "Terminal"]);
+        assert_eq!(Tab::ALL.map(Tab::title), ["Canvas", "Diff", "Files", "Terminal", "Plan", "Info"]);
+        assert_eq!(first_tab(&[Plan, Info], false), Some(Plan), "only when the person asked for the panel");
     }
 
     #[test]
