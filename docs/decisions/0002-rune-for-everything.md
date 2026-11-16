@@ -122,8 +122,8 @@ registration. Slot (a) needs that registration added on Neko's side before plugi
   is hidden while a menu or overlay is open, as the spike showed works; the context panel's
   viewers that need a web view (P3) are built on that.
 - **Memory.** Idle is 50 to 110 MB; full-screen overlays cost 70 to 240 MB. The footprint is
-  watched (P0's window measured 51 MB idle at 0% CPU over 20 s, and 300 MB for the first seconds
-  while its drawables settle), a long chat message costs about 8 MB so the session view bounds
+  watched (P0's four-region window measured a 62 MB footprint and 0% CPU over 20 s idle, against a
+  test daemon; an earlier build showed about 300 MB in its first seconds while drawables settle), a long chat message costs about 8 MB so the session view bounds
   what it keeps, and overlays are made once and reused.
 - **The Rune check is slower than the daemon's.** About 25 s warm with the dependency cache, about
   3 minutes cold. `scripts/check.sh` runs it only when that cache exists, or with `--rune`.
