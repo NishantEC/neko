@@ -168,8 +168,9 @@ fn the_context_panel_toggles_from_the_top_line_and_says_when_there_is_nothing() 
     click(&mut rt, "context-toggle");
     assert!(rt.state.layout.context.is_open());
     assert!(rt.find("context").is_some() && rt.find("context-expand").is_some() && rt.find("context-close").is_some());
-    // In a 1280 window the session keeps its minimum: the panel narrows to its own minimum and Neko folds to its icon.
-    assert_eq!(rect(&rt, "context")[2], 320.0);
+    // In a 1280 window the session would have under 480: Neko folds to its icon and the panel keeps its width.
+    assert_eq!(rect(&rt, "context")[2], 420.0);
+    assert!((rect(&rt, "neko")[2] - 44.0).abs() < 1.0);
     // The session has produced nothing: no tabs, and one calm line.
     assert!(rt.find("context-picker").is_none(), "only tabs that have content show");
     assert!(texts(&rt).contains(&"Nothing to show yet.".to_owned()), "{:?}", texts(&rt));

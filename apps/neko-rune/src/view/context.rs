@@ -20,7 +20,12 @@ use crate::viewers::{self, ViewerInput, family};
 /// The header's height.
 pub const HEAD: f32 = 36.0;
 
-pub fn panel(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
+/// Below this panel width the tabs are icons only (Canvas, Diff, Files, Terminal) with a tooltip
+/// naming each: four labels in a 36 point header truncated ("Termi…") before this was a rule.
+pub const ICONS_BELOW: f32 = 440.0;
+
+/// `width` is the panel's own width (an expanded panel passes the window's).
+pub fn panel(s: &App, t: &Neko, layer: &mut Vec<El>, width: f32) -> El {
     let tabs = s.panel_tabs();
     let tab = s.panel_tab();
     let expanded = s.panel.expanded;
@@ -31,7 +36,11 @@ pub fn panel(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         let labels: Vec<&str> = tabs.iter().map(|t| t.title()).collect();
         let selected = tab.and_then(|t| tabs.iter().position(|x| *x == t));
         let picks = tabs.clone();
-        let control = SegmentedControl::new(&labels, selected).label("Context").width(None).on_pick(move |s: &mut App, i: usize, _| s.panel_choose_tab(picks[i])).build(&t.kit);
+        let control = if width < ICONS_BELOW {
+            icon_tabs(&tabs, selected, t)
+        } else {
+            SegmentedControl::new(&labels, selected).label("Context").width(None).on_pick(move |s: &mut App, i: usize, _| s.panel_choose_tab(picks[i])).build(&t.kit)
+        };
         head = head.child(row().key("context-picker").grow(1.0).min_w(0.0).child(control));
     }
     head = head
@@ -45,6 +54,50 @@ pub fn panel(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         None => placeholder(&["Nothing to show yet."], t),
     };
     col().key("context").h_full().min_w(0.0).my(8.0).mx(2.0).radius(t.radius.window).clip_rounded(t.radius.window).fill(t.surface.card).child(head).child(col().key("context-body").w_full().grow(1.0).min_h(0.0).child(body))
+}
+
+/// The icon of a tab.
+pub fn tab_icon(tab: Tab) -> &'static rune::Icon {
+    match tab {
+        Tab::Canvas => &icons::CANVAS,
+        Tab::Diff => &icons::DIFF,
+        Tab::Files => &icons::FILES,
+        Tab::Terminal => &icons::TERMINAL,
+    }
+}
+
+/// The tabs as icons in the kit's segmented look (raised selected segment on a quiet layer); same keys,
+/// roles and names as the labelled control so a script and a screen reader find the same things.
+fn icon_tabs(tabs: &[Tab], selected: Option<usize>, t: &Neko) -> El {
+    let c = &t.kit.c;
+    let n = tabs.len();
+    let mut control = row().key("context-icon-tabs").role("radiogroup").label("Context").focus_group().h(28.0).center_y().radius(6.0).fill(c.layer_01).box_shadow(rune::Shadow { spread: 0.5, color: c.border_base, ..Default::default() });
+    for (i, tab) in tabs.iter().enumerate() {
+        let on = selected == Some(i);
+        let pick = *tab;
+        let mut seg = row()
+            .key(format!("segment{i}"))
+            .role("radio")
+            .label(tab.title())
+            .help(tab.title())
+            .focusable(true)
+            .focus_selected(on)
+            .focus_ring(2.0, 1.0, c.border_focus)
+            .position_in_set(i + 1, n)
+            .w(34.0)
+            .h(28.0)
+            .center()
+            .radius(6.0)
+            .on_press(move |s: &mut App| s.panel_choose_tab(pick))
+            .child(rune::icon(tab_icon(*tab), 16.0).color(if on { c.text_base } else { c.text_muted }).a11y_hidden());
+        if on {
+            seg = seg.fill(c.bg_base).box_shadow(rune::Shadow { spread: 0.5, color: c.border_strong, ..Default::default() });
+        } else {
+            seg = seg.hover(t.surface.hover);
+        }
+        control = control.child(seg);
+    }
+    control
 }
 
 /// The version select's options, newest first: `v3`, `v2`, `v1`.

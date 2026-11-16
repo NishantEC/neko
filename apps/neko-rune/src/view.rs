@@ -69,12 +69,12 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     window = window.child(grip(Region::Sessions, &t));
     // The session and the context panel are two cards in the window, inset from its edges.
     if expanded {
-        window = window.child(context::panel(s, &t, &mut layer).grow(1.0));
+        window = window.child(context::panel(s, &t, &mut layer, win_w).grow(1.0));
     } else {
         window = window.child(session::region(s, &t, &mut layer, frame));
         if fit.context > 0.0 {
             window = window.child(grip(Region::Context, &t));
-            window = window.child(context::panel(s, &t, &mut layer).w(fit.context));
+            window = window.child(context::panel(s, &t, &mut layer, fit.context).w(fit.context));
         }
     }
     if fit.neko_open {

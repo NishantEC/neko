@@ -15,6 +15,9 @@ pub const NEKO_STRIP: f32 = 44.0;
 pub const NEKO_AUTO_WIDTH: f32 = 1100.0;
 /// The least the session view keeps; below this the window is too small for all the regions.
 pub const MIDDLE_MIN: f32 = 320.0;
+/// What the session view should keep before Neko gives way: below this (window − sessions −
+/// context panel − Neko) the Neko column collapses to its icon by itself (P3b).
+pub const SESSION_COMFORT: f32 = 480.0;
 /// How wide the draggable edge between two regions is.
 pub const GRIP: f32 = 7.0;
 
@@ -40,6 +43,9 @@ pub struct Layout {
     pub neko: PaneState,
     /// Nobody has opened or closed Neko yet: a window under [`NEKO_AUTO_WIDTH`] shows its icon.
     pub neko_auto: bool,
+    /// The person's own expand (`Some(true)`) or collapse (`Some(false)`) of Neko this run. It wins
+    /// over the layout-pressure rule until the next launch; never saved (`restored` starts at None).
+    pub neko_choice: Option<bool>,
 }
 
 /// What is kept between runs (Rune's `prefs` store): each region's width and whether it shows.
@@ -59,6 +65,7 @@ impl Default for Layout {
             context: PaneState::new(420.0).range(320.0, 640.0).collapsed(),
             neko: PaneState::new(340.0).range(280.0, 480.0),
             neko_auto: true,
+            neko_choice: None,
         }
     }
 }
@@ -78,6 +85,7 @@ impl Layout {
         l.context.set_open(saved.context_open);
         l.neko.set_open(saved.neko_open);
         l.neko_auto = false;
+        l.neko_choice = None;
         l
     }
 
@@ -85,6 +93,7 @@ impl Layout {
     pub fn set_neko_open(&mut self, open: bool) {
         self.neko.set_open(open);
         self.neko_auto = false;
+        self.neko_choice = Some(open);
     }
 
     pub fn pane(&self, region: Region) -> &PaneState {
@@ -114,14 +123,26 @@ impl Layout {
         self.pane_mut(region).drag_to(width);
         if region == Region::Neko {
             self.neko_auto = false;
+            self.neko_choice = Some(self.neko.is_open());
         }
     }
 
-    /// What shows in a window `window` wide so the session keeps [`MIDDLE_MIN`]: the context panel
-    /// narrows toward its minimum first, then the Neko column collapses to its icon, then the
-    /// context panel hides. Nothing is changed in the state: widening the window brings it all back.
+    /// Whether the session would have less than [`SESSION_COMFORT`] in a window `window` wide with
+    /// every region at the width the person gave it (Neko open, the panel as it is).
+    pub fn pressed(&self, window: f32) -> bool {
+        window - self.sessions.width() - self.context.shown_width() - self.neko.width() - 3.0 * GRIP < SESSION_COMFORT
+    }
+
+    /// What shows in a window `window` wide. Under pressure ([`Layout::pressed`]) the Neko column
+    /// collapses to its icon on its own, and comes back when the pressure ends, unless the person
+    /// expanded or collapsed it themselves this run (`neko_choice`: their word stands). Then the
+    /// session keeps [`MIDDLE_MIN`] at least: the context panel narrows toward its minimum, then
+    /// Neko collapses even if the person opened it, then the context panel hides. Nothing is changed
+    /// in the state: widening the window brings it all back.
     pub fn fit(&self, window: f32) -> Fit {
-        let mut fit = Fit { context: self.context.shown_width(), neko_open: self.neko.is_open() && !(self.neko_auto && window < NEKO_AUTO_WIDTH) };
+        let wanted = self.neko.is_open() && !(self.neko_auto && window < NEKO_AUTO_WIDTH);
+        let pressure_collapse = self.neko_choice.is_none() && self.pressed(window);
+        let mut fit = Fit { context: self.context.shown_width(), neko_open: wanted && !pressure_collapse };
         let middle = |f: &Fit| window - self.sessions.width() - f.context - if f.neko_open { self.neko.width() } else { NEKO_STRIP } - 3.0 * GRIP;
         if middle(&fit) < MIDDLE_MIN && fit.context > 0.0 {
             fit.context = (fit.context - (MIDDLE_MIN - middle(&fit))).max(self.context.min_width());
@@ -192,13 +213,13 @@ mod tests {
         l.context.set_open(true);
         l.neko_auto = false;
         assert_eq!(l.fit(1600.0), Fit { context: 420.0, neko_open: true });
-        assert_eq!(l.fit(1440.0), Fit { context: 420.0, neko_open: true }, "the session still has its minimum");
-        // Tighter: the context panel narrows first, down to its minimum.
-        let narrower = l.fit(1320.0);
-        assert!(narrower.context < 420.0 && narrower.context >= 320.0 && narrower.neko_open, "{narrower:?}");
-        // Tighter still: Neko collapses to its icon, then the context panel hides.
-        assert_eq!(l.fit(1100.0), Fit { context: 320.0, neko_open: false });
-        assert_eq!(l.fit(1010.0), Fit { context: 320.0, neko_open: false });
+        // Under 480 for the session, Neko is the first to give way (it was the panel before P3b).
+        assert_eq!(l.fit(1440.0), Fit { context: 420.0, neko_open: false });
+        assert_eq!(l.fit(1360.0), Fit { context: 420.0, neko_open: false });
+        // Tighter: the panel narrows toward its minimum, then hides.
+        let narrower = l.fit(1060.0);
+        assert!(narrower.context < 420.0 && narrower.context >= 320.0 && !narrower.neko_open, "{narrower:?}");
+        assert_eq!(l.fit(1005.0), Fit { context: 320.0, neko_open: false });
         assert_eq!(l.fit(960.0), Fit { context: 0.0, neko_open: false });
         for w in [840.0, 960.0, 1000.0, 1060.0, 1180.0, 1280.0, 1600.0] {
             let f = l.fit(w);
@@ -210,11 +231,68 @@ mod tests {
     }
 
     #[test]
-    fn neko_starts_as_its_icon_under_1100_until_the_person_opens_it() {
+    fn layout_pressure_collapses_neko_and_gives_it_back_when_the_pressure_ends() {
         let mut l = Layout::default();
-        assert!(!l.fit(1099.0).neko_open && l.fit(1100.0).neko_open);
+        l.neko_auto = false;
+        // 1360 wide, panel closed: 1360 - 300 - 340 - 21 = 699 for the session, no pressure.
+        assert!(!l.pressed(1360.0) && l.fit(1360.0).neko_open);
+        // The panel opens: 279 left, under 480, so Neko is its 44 point strip.
+        l.context.set_open(true);
+        assert!(l.pressed(1360.0));
+        assert_eq!(l.fit(1360.0), Fit { context: 420.0, neko_open: false });
+        assert!(l.neko.is_open(), "the state is not touched: it is a decision of the fit");
+        // The panel closes: Neko is back.
+        l.context.set_open(false);
+        assert!(l.fit(1360.0).neko_open);
+        // The window widens with the panel open: back when the session gets its 480 (the edge is exact).
+        l.context.set_open(true);
+        assert!(!l.fit(1560.0).neko_open && l.fit(1561.0).neko_open, "300 + 420 + 340 + 21 + 480 = 1561 is the edge");
+    }
+
+    #[test]
+    fn layout_pressure_edge_is_exactly_480_for_the_session() {
+        let mut l = Layout::default();
+        l.neko_auto = false;
+        l.context.set_open(true);
+        let edge = l.sessions.width() + l.context.width() + l.neko.width() + 3.0 * GRIP + SESSION_COMFORT;
+        assert!(l.pressed(edge - 1.0) && !l.pressed(edge));
+        assert!(l.fit(edge).neko_open && !l.fit(edge - 1.0).neko_open);
+    }
+
+    #[test]
+    fn a_manual_expand_or_collapse_wins_over_layout_pressure_until_the_next_launch() {
+        let mut l = Layout::default();
+        l.context.set_open(true);
+        // The person expands Neko under pressure: it stays, and the panel narrows to make room.
         l.set_neko_open(true);
-        assert!(l.fit(1099.0).neko_open || l.middle(1099.0) < MIDDLE_MIN, "an open Neko stays open while the session has room");
+        let f = l.fit(1360.0);
+        assert!(f.neko_open && f.context < 420.0 && f.context >= 320.0, "{f:?}");
+        // The person collapses it with room to spare: it stays collapsed after the pressure ends.
+        let mut l = Layout::default();
+        l.set_neko_open(false);
+        assert!(!l.fit(1600.0).neko_open);
+        l.context.set_open(true);
+        l.context.set_open(false);
+        assert!(!l.fit(1600.0).neko_open, "the person's collapse stands");
+        // A drag of Neko's edge is a choice too.
+        let mut l = Layout::default();
+        l.context.set_open(true);
+        l.drag(Region::Neko, 340.0, -20.0);
+        assert_eq!(l.neko_choice, Some(true));
+        // A new launch has no choice, even when the last run saved one.
+        let mut saved = Layout::default();
+        saved.set_neko_open(true);
+        assert_eq!(Layout::restored(saved.saved()).neko_choice, None);
+    }
+
+    #[test]
+    fn neko_starts_as_its_icon_in_a_narrow_window_until_the_person_opens_it() {
+        let mut l = Layout::default();
+        // 300 + 340 + 21 + 480 = 1141: below it the pressure rule collapses Neko (the old 1100 rule is inside it).
+        assert!(!l.fit(1140.0).neko_open && l.fit(1141.0).neko_open);
+        assert!(!l.fit(1099.0).neko_open);
+        l.set_neko_open(true);
+        assert!(l.fit(1099.0).neko_open, "an open Neko stays open while the session keeps its minimum");
         assert!(!l.neko_auto);
     }
 

@@ -19,9 +19,13 @@ const WINDOW: (f32, f32) = (1700.0, 900.0);
 const MIN: i64 = 60_000;
 
 fn runtime(setup: impl FnOnce(&mut App)) -> Runtime<App> {
+    runtime_at(WINDOW, setup)
+}
+
+fn runtime_at(size: (f32, f32), setup: impl FnOnce(&mut App)) -> Runtime<App> {
     let mut app = App::headless();
     setup(&mut app);
-    let mut rt = Runtime::new(app, view, WINDOW, Env { system_dark: true, scale: 2.0 });
+    let mut rt = Runtime::new(app, view, size, Env { system_dark: true, scale: 2.0 });
     rt.frame(0.0);
     frames(&mut rt, 20);
     rt
@@ -236,6 +240,46 @@ fn expand_fills_the_session_and_panel_regions_and_escape_restores_it() {
     click(&mut rt, "context-expand");
     click(&mut rt, "context-close");
     assert!(!rt.state.panel.expanded && !rt.state.layout.context.is_open());
+}
+
+#[test]
+fn layout_pressure_collapses_neko_and_icon_tabs_never_truncate() {
+    let mut rt = runtime_at((1360.0, 840.0), scenes_panel::auto_canvas);
+    // The panel is open at its 420 default: the session would have 279, so Neko is its strip.
+    assert!(rt.state.layout.context.is_open() && rt.state.layout.neko.is_open(), "the state is untouched");
+    assert!((rect(&rt, "neko")[2] - 44.0).abs() < 1.0, "Neko collapsed itself: {:?}", rect(&rt, "neko"));
+    assert!(rect(&rt, "session-region")[2] >= 480.0, "the session keeps 480: {:?}", rect(&rt, "session-region"));
+    // 420 is under 440: icons only, each named (tooltip and accessible name), never a cut label.
+    assert!(rt.find("context-icon-tabs").is_some());
+    assert_eq!(segments(&rt), ["Canvas", "Diff", "Files", "Terminal"]);
+    assert!(texts(&rt).iter().all(|t| !t.ends_with('…') || !["Canvas", "Diff", "Files", "Termi"].iter().any(|w| t.starts_with(w))), "{:?}", texts(&rt));
+    // Closing the panel ends the pressure: Neko is back at its width.
+    click(&mut rt, "context-close");
+    frames(&mut rt, 60);
+    assert!((rect(&rt, "neko")[2] - 340.0).abs() < 1.0, "{:?}", rect(&rt, "neko"));
+    // The person collapses it by hand, reopens the panel: it stays collapsed; expands it: it stays open.
+    click(&mut rt, "neko-collapse");
+    frames(&mut rt, 60);
+    rt.update(|s, _| s.panel_set_open(true));
+    frames(&mut rt, 60);
+    assert!((rect(&rt, "neko")[2] - 44.0).abs() < 1.0);
+    click(&mut rt, "neko-expand");
+    frames(&mut rt, 60);
+    assert!((rect(&rt, "neko")[2] - 340.0).abs() < 1.0, "the person's expand wins over the pressure: {:?}", rect(&rt, "neko"));
+    let ctx = rect(&rt, "context")[2];
+    assert!(ctx < 420.0 && ctx >= 320.0, "the panel narrowed to leave the session its minimum: {ctx}");
+}
+
+#[test]
+fn a_wide_panel_shows_the_words() {
+    let mut rt = runtime_at((1700.0, 900.0), scenes_panel::auto_canvas);
+    rt.update(|s, _| s.layout.drag(neko_rune::layout::Region::Context, 420.0, -100.0));
+    frames(&mut rt, 5);
+    assert!(rect(&rt, "context")[2] >= 440.0);
+    assert!(rt.find("context-icon-tabs").is_none() && rt.find("context-picker").is_some());
+    let mut names = segments(&rt);
+    names.dedup();
+    assert_eq!(names, ["Canvas", "Diff", "Files", "Terminal"]);
 }
 
 // ---------------------------------------------------------------- the tabs
