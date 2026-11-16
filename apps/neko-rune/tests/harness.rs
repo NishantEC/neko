@@ -250,7 +250,7 @@ fn a_runs_diff_opens_and_undo_asks_first_and_then_takes_the_run_back() {
     click(&mut rt, "undo-run-3");
     assert!(has_text(&rt, "Undo run 3?"), "{:?}", texts(&rt));
     click(&mut rt, "confirm-no");
-    assert!(rt.find("confirm").is_none() && rt.state.work.checkpoints[&id].runs[2].undone == false, "Keep it changes nothing");
+    assert!(rt.find("confirm").is_none() && !rt.state.work.checkpoints[&id].runs[2].undone, "Keep it changes nothing");
     click(&mut rt, "undo-run-3");
     click(&mut rt, "confirm-yes");
     wait_for("the undo to show", || {

@@ -93,6 +93,7 @@ pub fn run() {
         scenes: scenes::SCENES,
         min_size: Some((960.0, 560.0)),
         on_key: Some(on_key),
+        poll: Some(|s: &mut App, t: f64, _: &mut rune::Tx| s.tick_stream(t)),
         ..rune::AppSpec::new("Neko (Rune)", (1360.0, 840.0), init, view::view)
     };
     let app = rune::App::new(spec).titlebar(rune::Titlebar::new(44.0));

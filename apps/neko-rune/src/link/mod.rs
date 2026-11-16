@@ -100,8 +100,9 @@ pub fn calm(error: &LinkError, retry_in: Duration) -> String {
     }
 }
 
-/// What the worker tells the app.
+/// What the worker tells the app. (One per snapshot, moved once, so `Live` is not boxed.)
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub enum LinkEvent {
     Connecting,
     /// The workbench, new or changed.

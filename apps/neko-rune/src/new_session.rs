@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn a_title_is_the_first_line_cut_short_without_its_full_stop() {
         assert_eq!(title_of("\n  Fix the login button.\nIt does nothing."), "Fix the login button");
-        assert_eq!(title_of(&"word ".repeat(40)).chars().count() <= 80, true);
+        assert!(title_of(&"word ".repeat(40)).chars().count() <= 80);
         assert_eq!(title_of(""), "");
     }
 }

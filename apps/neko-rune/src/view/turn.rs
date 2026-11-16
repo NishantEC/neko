@@ -68,8 +68,10 @@ pub fn tool_card(s: &App, t: &Neko, w: Where, tool: &Tool, turn_id: &str) -> El 
         line = line.child(text(words).font(t.ty.id).color(if tool.state == ToolState::Failed { t.meaning.coral } else { t.text.faint }).a11y_hidden());
     }
     let mut c = col().key(format!("{}toolbox-{}", w.ns, tool.id)).w_full().gap(2.0).child(line);
-    if tool.state == ToolState::Waiting {
-        if let Some(approval) = tool.approval.clone() {
+    if tool.state == ToolState::Waiting
+        && let Some(approval) = tool.approval.clone()
+    {
+        {
             let (turn, call, call2, turn2) = (turn_id.to_owned(), approval.clone(), approval, turn_id.to_owned());
             c = c.child(
                 row()

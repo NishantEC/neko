@@ -529,11 +529,9 @@ impl App {
         let key = format!("tool:{}", tool.id);
         let opening = !self.open(&key);
         self.toggle(&key);
-        if opening {
-            if let Some(edit) = tool.edit.as_ref().filter(|_| !self.work.edit_diffs.contains_key(&tool.id)) {
-                let file = rune_kit::diff::FileDiff::from_texts(&edit.path, &edit.old, &edit.new);
-                self.work.edit_diffs.insert(tool.id.clone(), DiffState::new(vec![file]));
-            }
+        if opening && let Some(edit) = tool.edit.as_ref().filter(|_| !self.work.edit_diffs.contains_key(&tool.id)) {
+            let file = rune_kit::diff::FileDiff::from_texts(&edit.path, &edit.old, &edit.new);
+            self.work.edit_diffs.insert(tool.id.clone(), DiffState::new(vec![file]));
         }
     }
 

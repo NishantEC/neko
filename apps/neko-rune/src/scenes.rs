@@ -261,6 +261,41 @@ fn with_diff(s: &mut App, run: Option<u32>) {
     s.work.open_run = Some(run.map_or(RunKey::Whole, RunKey::Run));
 }
 
+/// A long markdown reply, `words` words: paragraphs, a list, a code block and a table, repeated.
+pub fn long_reply(words: usize) -> Vec<String> {
+    let block = "## Where things stand\n\nThe sync job **retries** a failed request up to three times, waiting a little longer each time, and then reports the failure. \n\n- the first retry waits `200 ms`\n- the second waits `800 ms`\n- a third failure is reported\n\n```rust\nfn backoff(n: u32) -> Duration { Duration::from_millis(200 * 4u64.pow(n)) }\n```\n\n| attempt | wait |\n|---|---|\n| 1 | 200 ms |\n| 2 | 800 ms |\n\n";
+    let mut out: Vec<String> = Vec::new();
+    while out.len() < words {
+        out.extend(block.split_inclusive(' ').map(str::to_owned));
+    }
+    out.truncate(words);
+    out
+}
+
+/// A reply of `words` words, streaming at 60 a second, in Neko's column.
+fn stream(s: &mut App) {
+    live(s);
+    if let Some(summary) = s.summary.as_mut() {
+        summary.conversation.truncate(3);
+        summary.conversation.push(ChatMessage { id: "m4".into(), at_ms: DEMO_NOW - 15_000, role: ChatRole::Neko, pending: true, parts: vec![], ..blank() });
+    }
+    s.stream = Some(crate::app::Stream { words: long_reply(4000), per_sec: 60.0, started: None, shown: 0 });
+}
+
+/// Ten finished replies of about 400 words each in Neko's column, and a long session: what a day
+/// of use leaves on screen.
+fn ten_turns(s: &mut App) {
+    live(s);
+    if let Some(summary) = s.summary.as_mut() {
+        summary.conversation.clear();
+        for i in 0..10 {
+            let body: String = long_reply(400).concat();
+            summary.conversation.push(ChatMessage { id: format!("u{i}"), at_ms: DEMO_NOW - 100_000 + i, role: ChatRole::User, parts: ChatMessage::text_parts(&format!("question number {i}")), ..blank() });
+            summary.conversation.push(ChatMessage { id: format!("a{i}"), at_ms: DEMO_NOW - 90_000 + i, role: ChatRole::Neko, parts: ChatMessage::text_parts(&body), ..blank() });
+        }
+    }
+}
+
 /// A summary printed by `neko-rune probe json`, from the file named by `NEKO_RUNE_SUMMARY`.
 fn harness(s: &mut App) {
     let loaded = std::env::var("NEKO_RUNE_SUMMARY").ok().and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice::<Summary>(&b).ok());
@@ -323,6 +358,8 @@ pub const SCENES: &[Scene] = &[
         s.lab = true;
     }),
     ("running", running),
+    ("stream", stream),
+    ("ten-turns", ten_turns),
     ("tool-open", |s| {
         running(s);
         let tool = s.detail().and_then(|d| crate::turns::task_turns(&d.task).iter().flat_map(|t| t.tools().cloned().collect::<Vec<_>>()).nth(1)).expect("a tool card");

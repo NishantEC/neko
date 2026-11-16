@@ -95,7 +95,7 @@ registration. Slot (a) needs that registration added on Neko's side before plugi
    and counts and placeholders elsewhere; headless snapshots in light and dark, including one with
    live rows from the test harness daemon (`docs/design/rune/`); `run.sh` to run it beside the
    installed app.
-1. **P1, the core.** The session view (turns, streaming chat, the composer sends, steer modes), the
+1. **P1, the core (built 2026-11-16, see [the knowledge note](../knowledge/rune-p1-the-core.md)).** The session view (turns, streaming chat, the composer sends, steer modes), the
    Neko column (Inbox, digest, ask), the sessions column's actions (new, approve, answer) and
    DESIGN.md for Rune. Parity with Home, Inbox, Tasks (list and board), task detail and chat.
 2. **P2, the rest of the pages.** Calendar, Routines, Settings and everything in "More".

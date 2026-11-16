@@ -130,12 +130,11 @@ fn conversation(s: &App, t: &Neko, task: &Task, has_folder: bool) -> El {
             row().w_full().gap(10.0).center_y().mt(18.0).child(icon(&icons::PULL_REQUEST, 16.0).color(t.meaning.iris).a11y_hidden()).child(text(format!("Pull request #{number}")).font(t.ty.row).color(t.text.base)).child(el().grow(1.0)).child(super::quiet_button("Open on GitHub", "open-pr-link", t, move |s: &mut App| s.open_link(&url))),
         );
     }
-    if has_folder {
-        if let Some(list) = s.work.checkpoints.get(&task.id) {
-            if let Some(runs) = work::runs(s, t, &task.id, list) {
-                c = c.child(col().w_full().mt(22.0).child(runs));
-            }
-        }
+    if has_folder
+        && let Some(list) = s.work.checkpoints.get(&task.id)
+        && let Some(runs) = work::runs(s, t, &task.id, list)
+    {
+        c = c.child(col().w_full().mt(22.0).child(runs));
     }
     if let Some(line) = working_line(task.status) {
         c = c.child(text(line).key("working").font(t.ty.meta).color(t.text.faint).mt(18.0).live_region(rune::LiveRegion::Polite));

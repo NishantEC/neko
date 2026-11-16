@@ -106,6 +106,15 @@ pub enum Dispatch {
     Blocking { socket: PathBuf },
 }
 
+/// A scripted stream for headless measurements: words arrive in the last pending reply at a rate,
+/// by the run's own clock, so a 60-tokens-a-second reply can be timed without a model.
+pub struct Stream {
+    pub words: Vec<String>,
+    pub per_sec: f64,
+    pub started: Option<f64>,
+    pub shown: usize,
+}
+
 /// The ⌘K palette: the row the arrow keys are on (the query is [`App::palette_query`]).
 pub struct PaletteState {
     pub index: usize,
@@ -162,6 +171,7 @@ pub struct App {
     pub row_menu: Option<(String, PointerPress)>,
     pub palette: Option<PaletteState>,
     pub palette_query: TextEdit,
+    pub stream: Option<Stream>,
 }
 
 /// The system clock, in epoch milliseconds.
@@ -204,6 +214,7 @@ impl Default for App {
             row_menu: None,
             palette: None,
             palette_query: TextEdit::new(""),
+            stream: None,
         }
     }
 }
@@ -298,6 +309,29 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Advances a scripted stream to time `t` (seconds on the run's clock). True when words arrived.
+    pub fn tick_stream(&mut self, t: f64) -> bool {
+        let Some(stream) = self.stream.as_mut() else { return false };
+        let start = *stream.started.get_or_insert(t);
+        let due = (((t - start) * stream.per_sec) as usize).min(stream.words.len());
+        if due <= stream.shown {
+            return false;
+        }
+        let add: String = stream.words[stream.shown..due].concat();
+        stream.shown = due;
+        let Some(summary) = self.summary.as_mut() else { return false };
+        let Some(last) = summary.conversation.last_mut() else { return false };
+        let at = last.parts.iter().rposition(|p| p["type"] == "text");
+        match at {
+            Some(i) => {
+                let text = format!("{}{add}", last.parts[i]["text"].as_str().unwrap_or(""));
+                last.parts[i]["text"] = serde_json::Value::String(text);
+            }
+            None => last.parts.push(serde_json::json!({"type": "text", "text": add, "state": "streaming"})),
+        }
+        true
     }
 
     /// Opens a link (a pull request) in the browser; says why in one calm line when it cannot.

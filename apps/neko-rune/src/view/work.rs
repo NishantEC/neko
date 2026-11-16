@@ -40,8 +40,10 @@ pub fn goal_line(s: &App, t: &Neko, goal: &Goal) -> El {
         .child(text(goal.objective.clone()).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0).a11y_hidden())
         .child(text(format!("{} · {}", turn_text(goal), goal_state(goal))).key(format!("goal-meta-{}", goal.id)).font(t.ty.meta).color(t.text.muted).truncate().a11y_hidden());
     let mut c = col().key(format!("goalbox-{}", goal.id)).w_full().child(header);
-    if goal.status == GoalStatus::Blocked {
-        if let Some(blocked) = &goal.blocked {
+    if goal.status == GoalStatus::Blocked
+        && let Some(blocked) = &goal.blocked
+    {
+        {
             let (id1, id2) = (goal.id.clone(), goal.id.clone());
             c = c.child(
                 col()

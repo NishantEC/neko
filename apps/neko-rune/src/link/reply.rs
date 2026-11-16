@@ -49,8 +49,10 @@ pub struct RuntimeChoice {
     pub label: String,
 }
 
-/// What came back, ready for the app.
+/// What came back, ready for the app. (One is made per call and moved once, so the big variant
+/// is not boxed.)
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub enum Reply {
     Snapshot(Summary),
     Checkpoints { task_id: String, list: CheckpointList },
