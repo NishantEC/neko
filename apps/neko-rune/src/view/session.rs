@@ -7,6 +7,7 @@ use neko_protocol::crew::DeliveryMode;
 use neko_protocol::workbench::{Task, TaskStatus};
 use rune::{Color, El, Key, KeyEvent, ScrollSpec, col, el, icon, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant, Menu, MenuItem, Placement};
+use crate::link::Call;
 
 use super::turn::{self, Where};
 use super::{Frame, TEXT_COLUMN, TEXT_PAD, band, icon_button, placeholder, primary_button, work};
@@ -57,32 +58,84 @@ pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     region
 }
 
-/// The top line: status glyph, title, then the runtime and the goal's first line in quiet text,
-/// and the context panel's toggle at the right. The state's words live in the row of the column
-/// and under the title in the tray, never repeated here.
-fn top_line(s: &App, task: &TaskRow, t: &Neko) -> El {
-    let mut meta: Vec<String> = Vec::new();
-    if let Some(m) = s.summary.as_ref().filter(|m| !m.runtime.is_empty()) {
-        meta.push(m.runtime.clone());
+/// The state badge the web shows beside the title, where it shows one: its words and its colour (amber for what is
+/// waiting on the person or being worked on, coral for a failure). Other states have none here.
+pub fn state_badge(task: &Task) -> Option<(&'static str, bool)> {
+    match task.status {
+        TaskStatus::AwaitingApproval if crate::work::waiting_reason(task).is_some() => Some(("Needs answer", false)),
+        TaskStatus::AwaitingApproval => Some(("Needs approval", false)),
+        TaskStatus::Planning => Some(("Planning", false)),
+        TaskStatus::Building => Some(("Building", false)),
+        TaskStatus::Reviewing => Some(("Reviewing", false)),
+        TaskStatus::Failed => Some(("Failed", true)),
+        _ => None,
     }
-    // The goal's first line, unless it only says the title again.
-    let plain = |s: &str| s.trim().trim_end_matches(['.', ':']).to_lowercase();
-    if !task.goal.is_empty() && plain(&task.goal) != plain(&task.title) {
-        meta.push(task.goal.clone());
-    }
+}
+
+/// 12.5 medium, amber or coral text on that colour at 12%, radius 6, padding 2 and 8.
+fn badge(t: &Neko, words: &str, failed: bool) -> El {
+    let ink = if failed { t.meaning.coral } else { t.meaning.amber };
+    row().key("state-badge").px(8.0).py(2.0).radius(6.0).fill(ink.alpha(0.12)).child(text(words.to_owned()).font(rune::TextStyle { weight: 500.0, ..t.ty.meta }).color(ink).a11y_hidden())
+}
+
+/// The top line, one 32 point row and nothing else: status glyph, title (14 semibold, ellipsis), the state badge where
+/// the web shows one, then at the right the runtime chip, the "..." menu and the context panel's toggle.
+fn top_line(s: &App, task: &TaskRow, t: &Neko, layer: &mut Vec<El>) -> El {
+    let detail = s.detail().filter(|d| d.task.id == task.id);
     let mut line = band(t).px(20.0).child(status_glyph(status_of(task.status), t, 14.0, Some(status_label(task.status))));
-    // The id lives here, not in the sessions column's rows: the title gets that room.
-    if let Some(id) = &task.key {
-        line = line.child(text(id.clone()).key("top-id").font(t.ty.id).color(t.text.faint).a11y_hidden());
+    line = line.child(text(task.title.clone()).key("top-title").font(t.ty.brand).color(t.text.base).truncate().min_w(0.0).a11y_hidden().role("heading"));
+    if let Some((words, failed)) = detail.and_then(|d| state_badge(&d.task)) {
+        line = line.child(badge(t, words, failed));
     }
-    line
-        .child(text(task.title.clone()).key("top-title").font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(t.text.base).truncate().a11y_hidden().role("heading"))
-        .child(text(meta.join(" · ")).key("top-meta").font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0))
+    line = line.child(el().grow(1.0).min_w(0.0));
+    let runtime = detail.map(|d| d.runtime.clone()).filter(|r| !r.is_empty()).or_else(|| s.summary.as_ref().map(|m| m.runtime.clone()));
+    if let Some(r) = runtime {
+        line = line.child(text(r).key("top-runtime").font(t.ty.meta).color(t.text.muted).truncate().min_w(0.0));
+    }
+    line.child(overflow_menu(s, task, detail.map(|d| d.can_split).unwrap_or(false), t, layer))
         .child(icon_button(&icons::PANEL_RIGHT, if s.layout.context.is_open() { "Hide context" } else { "Show context" }, "context-toggle", t, |s: &mut App| s.panel_toggle()))
 }
 
+/// The "..." menu: Propose parallel work, Copy link, Open in web UI, Stop, Mark as unread.
+fn overflow_menu(s: &App, task: &TaskRow, can_split: bool, t: &Neko, layer: &mut Vec<El>) -> El {
+    let trigger = icon_button(&icons::MORE, "More actions", "session-more", t, |s: &mut App| s.session_menu = !s.session_menu);
+    let (a, b, c, d) = (task.id.clone(), task.id.clone(), task.id.clone(), task.id.clone());
+    let title = task.title.clone();
+    let link = s.web.as_ref().map(|w| format!("{}/#/tasks?task={}&view=full", w.display(), task.id));
+    let running = crate::work::in_turn(task.status) || task.status == TaskStatus::Queued;
+    let menu = Menu::new("session-menu")
+        .trigger(trigger)
+        .open(s.session_menu)
+        .placement(Placement::BottomEnd)
+        .min_width(220.0)
+        .on_close(|s: &mut App| s.session_menu = false)
+        .item(MenuItem::new("Propose parallel work").disabled(!can_split).on_select(move |s: &mut App| {
+            s.session_menu = false;
+            s.call(Call::ProposeSplit { task_id: a.clone() });
+        }))
+        .item(MenuItem::new("Copy link").disabled(link.is_none()).on_select_tx(move |s: &mut App, tx: &mut rune::Tx| {
+            s.session_menu = false;
+            if let Some(link) = &link {
+                tx.copy(link.clone());
+            }
+        }))
+        .item(MenuItem::new("Open in web UI").on_select(move |s: &mut App| {
+            s.session_menu = false;
+            s.open_in_web(Some(&format!("tasks?task={b}&view=full")));
+        }))
+        .item(MenuItem::new("Stop").disabled(!running).on_select(move |s: &mut App| {
+            s.session_menu = false;
+            s.ask_stop(&c, &title);
+        }))
+        .item(MenuItem::new("Mark as unread").on_select(move |s: &mut App| {
+            s.session_menu = false;
+            s.mark_unread(&d);
+        }));
+    menu.build(&t.kit, layer)
+}
+
 fn session(s: &App, row_task: &TaskRow, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
-    let mut c = col().w_full().h_full().min_w(0.0).child(top_line(s, row_task, t));
+    let mut c = col().w_full().h_full().min_w(0.0).child(top_line(s, row_task, t, layer));
     let Some(detail) = s.detail() else {
         // The row is here and its events are on the way (one read after choosing it).
         return c

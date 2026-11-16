@@ -130,6 +130,8 @@ pub struct App {
 
     pub steer: Steer,
     pub steer_open: bool,
+    /// The session header's menu is open.
+    pub session_menu: bool,
     /// The account footer's menu is open.
     pub more_open: bool,
     /// One line the window says for a few seconds ("Saved to Downloads"): its words, and the time it goes
@@ -233,6 +235,7 @@ impl Default for App {
             side_asked_ms: i64::MIN / 2,
             steer: Steer::AfterTurn,
             steer_open: false,
+            session_menu: false,
             more_open: false,
             reduce_motion: std::cell::Cell::new(false),
             toast: None,
