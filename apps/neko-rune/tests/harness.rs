@@ -554,3 +554,131 @@ fn calendar_usage_workspaces_and_plugins_read_what_the_daemon_has() {
     open_page(&mut rt, FullView::Plugins);
     assert!(rt.find("full-plugins").is_some());
 }
+
+/// Saves a file as an artifact through the daemon, as an agent would; its id.
+fn save_artifact(h: &Harness, title: &str, file: &Path, artifact_id: Option<String>) -> String {
+    let request = Request::SaveArtifact { title: title.into(), file: file.to_string_lossy().into_owned(), workspace_id: None, artifact_id, note: String::new(), show: Some(false) };
+    match ask(&socket(h), request) {
+        Ok(Response::ArtifactSaved { artifact, .. }) => artifact.id,
+        other => panic!("the daemon did not keep {title}: {other:?}"),
+    }
+}
+
+#[test]
+fn artifacts_of_every_built_in_kind_open_in_the_canvas_from_the_daemons_store() {
+    use neko_rune::link::LinkEvent;
+    use neko_rune::panel::{Content, Tab};
+    use neko_rune::samples;
+    let Some(h) = start(&[]) else { return };
+    let dir = h.data.join("samples");
+    std::fs::create_dir_all(&dir).unwrap();
+    let files: Vec<(&str, &str, Vec<u8>, &str)> = vec![
+        ("Board mockup", "png", samples::png(640, 400), "viewer-image"),
+        ("Loading loop", "gif", samples::gif(6), "viewer-image"),
+        ("Logo", "svg", samples::svg(), "viewer-svg"),
+        ("Release notes", "md", samples::markdown().into_bytes(), "viewer-markdown"),
+        ("Word count", "rs", samples::code().into_bytes(), "viewer-code"),
+        ("Events", "csv", samples::csv(100_000).into_bytes(), "viewer-table"),
+        ("Quarterly report", "pdf", samples::pdf(16), "viewer-pdf"),
+        ("Torus knot", "glb", samples::glb(160, 24), "viewer-model3d"),
+        ("Landing page", "html", b"<html><body>hello</body></html>".to_vec(), "viewer-web-pending"),
+        ("Dump", "bin", vec![0, 159, 146, 150, 0, 1, 2, 3], "viewer-fallback"),
+    ];
+    let mut saved = Vec::new();
+    for (title, kind, bytes, key) in &files {
+        let file = dir.join(format!("{}.{kind}", title.replace(' ', "-")));
+        std::fs::write(&file, bytes).unwrap();
+        saved.push((save_artifact(&h, title, &file, None), *title, *kind, *key));
+    }
+    // The board mockup gets a second version.
+    std::fs::write(dir.join("Board-mockup-2.png"), samples::png(320, 200)).unwrap();
+    save_artifact(&h, "", &dir.join("Board-mockup-2.png"), Some(saved[0].0.clone()));
+
+    let mut app = app(&h);
+    app.panel.data_dir = h.data.clone();
+    let mut rt = runtime(app);
+    // An artifact is shown for the session that is open.
+    let session = id_of(&rt, "Rework the export batching");
+    click(&mut rt, &format!("session-{session}"));
+    for (id, title, kind, key) in &saved {
+        // The daemon shows it (an agent's `ShowArtifact`): the panel opens on the Canvas and reads it.
+        rt.update(|s, _| {
+            s.apply_link(LinkEvent::ShowArtifact { id: id.clone(), version: None });
+        });
+        settle(&mut rt);
+        assert_eq!(rt.state.panel_tab(), Some(Tab::Canvas), "{title}");
+        let state = rt.state.panel.open.as_ref().map(|o| match &o.content {
+            Content::Loading => "loading".to_owned(),
+            Content::Failed(m) => m.clone(),
+            Content::Ready(_) => "ready".to_owned(),
+            Content::TooLarge { .. } => "too large".to_owned(),
+        });
+        assert!(
+            rt.find(key).is_some(),
+            "{title} ({kind}) did not open in {key}: {:?} {state:?} {:?} selected={:?} shown={:?} open={} artifacts={:?} target={:?}",
+            keyed(&rt, "viewer"),
+            rt.state.outbox,
+            rt.state.selected,
+            rt.state.panel.session(&session).map(|p| (p.shown.len(), p.canvas.clone())),
+            rt.state.layout.context.is_open(),
+            rt.state.panel.artifacts.keys().collect::<Vec<_>>(),
+            rt.state.panel_target()
+        );
+        assert!(matches!(rt.state.panel.open.as_ref().map(|o| &o.content), Some(Content::Ready(_))), "{title}");
+    }
+    // Every artifact is a row; the one with two versions opens on its newest and offers both.
+    assert_eq!(keyed(&rt, "artifact-").len(), saved.len());
+    rt.update(|s, _| {
+        s.apply_link(LinkEvent::ShowArtifact { id: saved[0].0.clone(), version: None });
+    });
+    settle(&mut rt);
+    let open = rt.state.panel.open.as_ref().unwrap();
+    assert_eq!(open.target, neko_rune::panel::Target::Artifact { id: saved[0].0.clone(), version: 2 });
+    assert!(has_text(&rt, "v2"));
+    rt.update(|s, _| s.panel_pick_version(&saved[0].0, 1));
+    settle(&mut rt);
+    let open = rt.state.panel.open.as_ref().unwrap();
+    assert_eq!(open.target, neko_rune::panel::Target::Artifact { id: saved[0].0.clone(), version: 1 }, "version 1 was read from the store");
+    assert!(matches!(&open.content, Content::Ready(l) if l.size == samples::png(640, 400).len() as u64));
+}
+
+#[test]
+fn the_files_tab_reads_the_sessions_folder_through_the_daemon_and_cannot_leave_it() {
+    use neko_rune::panel::{Content, Tab, Target};
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    rt.state.panel.data_dir = h.data.clone();
+    let id = id_of(&rt, "Stop the nightly export running twice");
+    click(&mut rt, &format!("session-{id}"));
+    // The daemon names the folder; the client lists it and marks what the whole task changed.
+    let folder = rt.state.panel.session(&id).and_then(|p| p.folder.clone()).flatten().expect("the daemon named the task's folder");
+    assert_eq!(Path::new(&folder), h.data.join("task-worktrees").join(&id).canonicalize().unwrap());
+    let meta = rt.state.panel.files_meta.as_ref().expect("the folder was listed");
+    assert_eq!(meta.task_id, id);
+    assert!(rt.state.panel.files_tree.contains("export.sh") && rt.state.panel.files_tree.contains("NOTES.md"));
+    assert!(!rt.state.panel.files_tree.contains(".git"), "git's own files are not listed");
+    assert_eq!(rt.state.panel.files_tree.get("export.sh").and_then(|n| n.data), Some(true), "a changed file");
+    assert_eq!(rt.state.panel.files_tree.get("NOTES.md").and_then(|n| n.data), Some(true));
+    assert_eq!(rt.state.panel_tabs(), [Tab::Diff, Tab::Files, Tab::Terminal].into_iter().filter(|t| rt.state.panel_tabs().contains(t)).collect::<Vec<_>>());
+    // Open a file of the folder: the code viewer shows it.
+    rt.update(|s, _| s.panel_choose_tab(Tab::Files));
+    settle(&mut rt);
+    rt.update(|s, _| s.panel_open_file("export.sh"));
+    settle(&mut rt);
+    assert!(rt.find("viewer-code").is_some() && has_text(&rt, "run_export"), "{:?}", texts(&rt));
+    // The folder's own links and `..` lead nowhere outside it.
+    let worktree = Path::new(&folder);
+    std::os::unix::fs::symlink(h.data.join("seed-repo/export.sh"), worktree.join("leak.sh")).unwrap();
+    for refused in ["leak.sh", "../seed-repo/export.sh", ".git"] {
+        rt.update(|s, _| s.panel_open_file(refused));
+        settle(&mut rt);
+        let open = rt.state.panel.open.as_ref().expect("something is open");
+        assert_eq!(open.target, Target::File { task_id: id.clone(), path: refused.into() });
+        assert!(matches!(open.content, Content::Failed(_)), "{refused} was refused: {:?}", texts(&rt));
+        assert!(!has_text(&rt, "run_export"), "{refused} showed a file it should not");
+    }
+    // A task with no folder has none to read.
+    let other = id_of(&rt, "Rework the export batching");
+    assert!(matches!(ask(&socket(&h), Request::TaskFolder { task_id: other }), Ok(Response::TaskFolder { path: None })));
+    assert!(matches!(ask(&socket(&h), Request::TaskFolder { task_id: "no-such-task".into() }), Ok(Response::Error { .. })));
+}

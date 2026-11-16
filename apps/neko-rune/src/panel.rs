@@ -210,8 +210,9 @@ pub struct Panel {
     pub pending_scroll: Option<String>,
     /// Which select is open ("runs", "versions").
     pub open_select: Option<String>,
-    /// The panel is laid out (a narrow window hides it): set by the view, read by the compositor.
-    pub shown: Cell<bool>,
+    /// The panel is open but the window is too narrow to lay it out: set by the view, read by the loader,
+    /// the release and the compositor, so a hidden panel holds nothing.
+    pub hidden: Cell<bool>,
     pub dark: Cell<bool>,
     /// What each session's folder was when it was last asked for (its worktree and whether it is parked).
     pub folder_rev: HashMap<String, String>,
@@ -225,8 +226,7 @@ impl Panel {
 
     pub fn new(data_dir: PathBuf) -> Panel {
         viewers::ensure_builtins();
-        // Laid out until a view says it is not: before the first view nothing is known to be hidden.
-        Panel { data_dir, files_tree: FileTree::new().build(Vec::<(&str, bool)>::new()), shown: Cell::new(true), ..Panel::default() }
+        Panel { data_dir, files_tree: FileTree::new().build(Vec::<(&str, bool)>::new()), ..Panel::default() }
     }
 
     pub fn session(&self, id: &str) -> Option<&SessionPanel> {
@@ -308,12 +308,12 @@ impl App {
 
     /// Whether the panel is on screen for the selected session.
     pub fn panel_visible(&self) -> bool {
-        self.selected.is_some() && self.layout.context.is_open() && self.panel.shown.get()
+        self.selected.is_some() && self.layout.context.is_open() && !self.panel.hidden.get()
     }
 
     /// What the panel is showing as a viewer, if it is showing one.
     pub fn panel_target(&self) -> Option<Target> {
-        if !self.layout.context.is_open() || !self.panel.shown.get() {
+        if !self.layout.context.is_open() || self.panel.hidden.get() {
             return None;
         }
         let id = self.selected.as_deref()?;

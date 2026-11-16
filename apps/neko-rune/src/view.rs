@@ -61,7 +61,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let neko_w = if fit.neko_open { layout.neko.width() } else { NEKO_STRIP };
     let frame = Frame { win_h, region_w: (win_w - layout.sessions.width() - fit.context - neko_w - 3.0 * GRIP - 4.0).max(0.0) };
 
-    s.panel.shown.set(fit.context > 0.0);
+    s.panel.hidden.set(layout.context.is_open() && fit.context <= 0.0);
     // Expanded, the panel takes the session's region and its own; the sessions and Neko columns stay.
     let expanded = s.panel.expanded && fit.context > 0.0;
     let mut window = row().key("window").w_full().h_full().fill(t.surface.sidebar);
