@@ -74,11 +74,11 @@ fn the_neko_column_uses_the_sidebars_row_metrics() {
     // 12 of padding: the rows start 12 in from the column's left edge, and the ask box does too.
     let neko = rect("neko");
     assert_eq!(rect("inbox-toggle")[0], neko[0] + 12.0);
-    assert_eq!(rect("ask")[0], neko[0] + 12.0);
+    assert_eq!(rect("ask-card")[0], neko[0] + 12.0);
     // The Inbox's items are single 32 point lines unless opened.
     let first = rt.elements().into_iter().find(|e| e.key.as_deref().is_some_and(|k| k.starts_with("inbox-") && k[6..].chars().all(|c| c.is_ascii_digit()) && k.len() > 6)).expect("an inbox row");
     assert_eq!(first.rect[3], 32.0, "an Inbox item is one 32 point row");
     // The session view's header row is the sidebar header's: 32 high, centred on the same line.
-    let top = rect("top-meta");
+    let top = rect("top-title");
     assert!((top[1] + top[3] / 2.0 - 28.0).abs() <= 2.0, "the session header's centre is on the sidebar header's: {top:?}");
 }

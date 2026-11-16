@@ -5,8 +5,8 @@
 //! sessions column, and the composer card 24 below. Behind it, full bleed, the art (`crate::art`, a GPU
 //! shader drawn at an effect slot) and a radial scrim that keeps the words at AA contrast.
 
-use rune::{Color, El, Key, KeyEvent, TextStyle, col, el, icon, row, text};
-use rune_kit::{Menu, MenuItem, Placement, TextArea};
+use rune::{Color, El, Key, KeyEvent, col, el, icon, row, text};
+use rune_kit::{Menu, MenuItem, Placement};
 
 use super::card_band;
 use crate::account;
@@ -43,11 +43,6 @@ fn runtime_name(provider: &str) -> &'static str {
 /// What the model part of a choice's label reads ("Claude · Opus 4" is "Opus 4").
 fn model_name(label: &str) -> String {
     label.split_once(" · ").map_or(label, |(_, m)| m).to_owned()
-}
-
-/// A 32 point square button with an icon.
-fn square(glyph: &'static rune::Icon, label: &str, key: &str, t: &Neko, fill: Color, ink: Color) -> El {
-    row().key(key.to_owned()).role("button").label(label).help(label).focusable(true).size(32.0, 32.0).center().radius(t.radius.control).fill(fill).hover(t.surface.hover).focus_ring(2.0, 2.0, t.surface.ring).child(icon(glyph, 16.0).color(ink).a11y_hidden())
 }
 
 /// A select's closed face: an optional icon, its words, a muted detail, a chevron. 32 high.
@@ -194,77 +189,30 @@ fn composer(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         }));
     }
 
-    let request = TextArea::new(&s.new_request)
-        .placeholder(format!("Describe a task for {ws_name}"))
-        .label("Request")
-        .auto_grow(3, 12)
-        .on_edit(|s: &mut App| &mut s.new_request)
-        .on_key(|s: &mut App, ev: &KeyEvent, _| {
-            if ev.key == Key::Enter && ev.mods.cmd {
-                s.submit_new();
-                return true;
-            }
-            false
-        })
-        .build(k)
-        .key("new-request")
-        .fill(Color::TRANSPARENT)
-        .w_full();
+    let request = super::composer::field(t, &s.new_request, "new-request-box", "new-request", "Request", &format!("Describe a task for {ws_name}"), 12, |s: &mut App| &mut s.new_request, |s: &mut App, ev: &KeyEvent| {
+        if ev.key == Key::Enter && ev.mods.cmd {
+            s.submit_new();
+            return true;
+        }
+        false
+    });
 
     // Plan / Build.
     let seg = |label: &'static str, key: &'static str, mode: Mode| {
-        let on = f.mode == mode;
-        row()
-            .key(key)
-            .role("button")
-            .label(format!("{label}: {}", if mode == Mode::Plan { "plan first" } else { "start building" }))
-            .help(if mode == Mode::Plan { "Plan first, then wait for approval" } else { "Start building right away" })
-            .checked(on)
-            .focusable(true)
-            .h(26.0)
-            .px(10.0)
-            .center()
-            .radius(t.radius.control - 2.0)
-            .fill(if on { t.surface.active } else { Color::TRANSPARENT })
-            .hover(t.surface.hover)
-            .focus_ring(2.0, 2.0, t.surface.ring)
-            .on_press(move |s: &mut App| {
-                if let Some(f) = s.new_form.as_mut() {
-                    f.mode = mode;
-                }
-            })
-            .child(text(label).font(TextStyle { weight: if on { 500.0 } else { 400.0 }, ..t.ty.meta }).color(if on { t.text.base } else { t.text.muted }).a11y_hidden())
+        super::composer::seg(t, key, label, &format!("{label}: {}", if mode == Mode::Plan { "plan first" } else { "start building" }), if mode == Mode::Plan { "Plan first, then wait for approval" } else { "Start building right away" }, f.mode == mode, move |s: &mut App| {
+            if let Some(f) = s.new_form.as_mut() {
+                f.mode = mode;
+            }
+        })
     };
-    let segmented = row().key("new-mode").role("group").label("Plan or build").h(32.0).padding(3.0).gap(2.0).center_y().radius(t.radius.control + 2.0).border(1.0, t.surface.field_border).child(seg("Plan", "new-mode-plan", Mode::Plan)).child(seg("Build", "new-mode-build", Mode::Build));
+    let segmented = super::composer::segmented(t, "new-mode", "Plan or build", seg("Plan", "new-mode-plan", Mode::Plan), seg("Build", "new-mode-build", Mode::Build));
 
     let blocker = s.new_blocker();
     let can_send = blocker.is_none() && !f.busy;
-    let send = row()
-        .key("new-start")
-        .role("button")
-        .label("Send")
-        .help("Send (⌘↩)")
-        .focusable(true)
-        .size(32.0, 32.0)
-        .center()
-        .radius(10.0)
-        .fill(if can_send { t.meaning.iris } else { t.text.base.alpha(0.10) })
-        .hover(Color::WHITE.alpha(if can_send { 0.14 } else { 0.0 }))
-        .focus_ring(2.0, 2.0, t.surface.ring)
-        .on_press(|s: &mut App| s.submit_new())
-        .child(icon(&icons::ARROW_UP, 16.0).color(if can_send { Color::WHITE } else { t.text.muted }).a11y_hidden());
+    let send = super::composer::send(t, "new-start", "Send", "Send (⌘↩)", can_send, true, |s: &mut App| s.submit_new());
+    let attach = super::composer::attach(t, "new-attach", App::attach_to_new);
 
-    let attach = square(&icons::PLUS, "Attach an image", "new-attach", t, Color::TRANSPARENT, t.text.muted).on_press_tx(|s: &mut App, tx: &mut rune::Tx| {
-        tx.open_file(rune::FileDialogOptions { title: "Attach an image".into(), ..Default::default() }.filter("Images", &["png", "jpg", "jpeg", "gif", "webp"]), |s: &mut App, answer, _| {
-            if let Ok(Some(path)) = answer {
-                s.attach_to_new(&path);
-            }
-        });
-        let _ = s;
-    });
-
-    let bar = row().w_full().gap(4.0).center_y().child(attach).child(ws_menu.build(k, layer)).child(rt_menu.build(k, layer)).child(el().grow(1.0).min_w(0.0)).child(segmented).child(model_menu.build(k, layer)).child(send);
-    let mut card = col().key("home-composer").w_full().padding(16.0).gap(12.0).radius(16.0).fill(t.text.base.alpha(0.04)).border(1.0, t.surface.field_border).child(request).child(bar);
+    let mut card = super::composer::card(t, "home-composer", request, vec![attach, ws_menu.build(k, layer), rt_menu.build(k, layer)], vec![segmented, model_menu.build(k, layer)], send);
     let used = s.new_request.text.len();
     if let Some(e) = &f.error {
         card = card.child(text(e.clone()).key("new-error").font(t.ty.meta).color(t.meaning.amber).wrap().live_region(rune::LiveRegion::Polite));

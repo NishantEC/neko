@@ -80,3 +80,49 @@ fn a_hand_off_between_agents_is_a_crew_line_with_the_task_as_a_link() {
     assert!(has_key(&rt, &format!("handoff-{id}")), "the id is a link to the task");
     assert!(texts(&rt).iter().any(|t| t.starts_with("NEK-")), "{:?}", texts(&rt));
 }
+
+fn fill_of(rt: &Runtime<App>, key: &str) -> String {
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).map(|e| e.fill.hex()).unwrap_or_else(|| panic!("no element keyed {key}"))
+}
+
+#[test]
+fn the_composer_is_one_card_in_the_session_the_neko_column_and_home() {
+    let iris = neko_rune::theme::theme(true).meaning.iris.hex();
+    // The session: inside the 760 column, centred, three lines of text and a bar, a 32 point round Send.
+    let mut rt = runtime_sized(scene("live"), (1900.0, 900.0));
+    let (region, card) = (rect(&rt, "session-region"), rect(&rt, "composer-card"));
+    assert!(card[2] <= 760.0 - 64.0 + 0.5 && card[2] >= 690.0, "760 wide with 32 at each side: {card:?}");
+    assert!(((card[0] + card[2] / 2.0) - (region[0] + region[2] / 2.0)).abs() < 2.0, "centred: {card:?} {region:?}");
+    assert!(card[3] >= 3.0 * 17.0 + 32.0 + 32.0, "three lines and a bar: {card:?}");
+    for key in ["send", "ask-send"] {
+        let r = rect(&rt, key);
+        assert_eq!((r[2], r[3]), (32.0, 32.0), "{key}: {r:?}");
+    }
+    assert_ne!(fill_of(&rt, "send"), iris, "no text: the foreground at 10%");
+    rt.update(|s, _| s.composer.replace_text("use three tries"));
+    settle(&mut rt);
+    assert_eq!(fill_of(&rt, "send"), iris, "text: filled Iris");
+    // Neko's ask box: the same card, with Ask / Plan, a model chip and "+".
+    for key in ["ask-card", "ask-mode", "ask-model", "ask-attach"] {
+        assert!(has_key(&rt, key), "{key}");
+    }
+    assert_ne!(fill_of(&rt, "ask-send"), iris);
+    rt.update(|s, _| s.ask.replace_text("what needs me?"));
+    settle(&mut rt);
+    assert_eq!(fill_of(&rt, "ask-send"), iris);
+    // The session's bar has the steer mode, the model chip and "+".
+    for key in ["steer-trigger", "composer-model", "composer-attach"] {
+        assert!(has_key(&rt, key), "{key}");
+    }
+}
+
+#[test]
+fn plan_prefixes_neko_s_words_with_the_web_s_instruction_and_ask_does_not() {
+    let mut rt = runtime(scene("live"));
+    rt.update(|s, _| s.ask.replace_text("tidy the board"));
+    settle(&mut rt);
+    click(&mut rt, "ask-mode-plan");
+    click(&mut rt, "ask-send");
+    let sent = rt.state.outbox.iter().find_map(|c| if let neko_rune::link::Call::Ask { text } = c { Some(text.clone()) } else { None }).expect("asked");
+    assert_eq!(sent, format!("{}tidy the board", neko_rune::work::PLAN_PREFIX));
+}

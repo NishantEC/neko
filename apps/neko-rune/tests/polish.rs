@@ -197,7 +197,7 @@ fn home_is_a_680_column_with_the_greeting_a_status_line_and_the_composer() {
         let r = rect(&rt, key);
         assert_eq!((r[2], r[3]), (32.0, 32.0), "{key} is a 32 point square");
     }
-    assert!(rect(&rt, "new-request")[3] >= 3.0 * 18.0, "three lines at least");
+    assert!(rect(&rt, "new-request-box")[3] >= 3.0 * 17.0, "three lines at least");
     // "3 running" and "6 need you" filter the sessions column.
     assert!(texts(&rt).contains(&"9 running".to_owned()) && texts(&rt).contains(&"6 need you".to_owned()), "{:?}", texts(&rt));
     click(&mut rt, "home-running");

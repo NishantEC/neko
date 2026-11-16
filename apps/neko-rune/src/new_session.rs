@@ -191,6 +191,20 @@ impl App {
         self.new_request.replace_text(text);
     }
 
+    /// An image chosen with the session composer's "+": its reference goes into the message.
+    pub fn attach_to_reply(&mut self, path: &Path) {
+        let sep = if self.composer.text.is_empty() || self.composer.text.ends_with('\n') { "" } else { "\n" };
+        let text = format!("{}{sep}{}\n", self.composer.text, crate::attachments::reference(path));
+        self.composer.replace_text(text);
+    }
+
+    /// The same for Neko's ask box.
+    pub fn attach_to_ask(&mut self, path: &Path) {
+        let sep = if self.ask.text.is_empty() || self.ask.text.ends_with('\n') { "" } else { "\n" };
+        let text = format!("{}{sep}{}\n", self.ask.text, crate::attachments::reference(path));
+        self.ask.replace_text(text);
+    }
+
     /// The provider id Neko uses when a session names none.
     pub fn default_provider(&self) -> String {
         self.summary.as_ref().map(|m| m.settings.runtime.provider.clone()).filter(|p| !p.is_empty()).unwrap_or_else(|| "codex".to_owned())

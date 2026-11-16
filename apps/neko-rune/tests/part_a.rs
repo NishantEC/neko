@@ -54,9 +54,9 @@ fn click(rt: &mut Runtime<App>, key: &str) {
 #[test]
 fn session_rows_have_no_id_and_their_titles_get_the_room() {
     let rt = runtime_at((1360.0, 840.0), "live", |_| {});
-    // The id is in the session's own top line; the rows do not repeat it.
+    // The header is one row (glyph, title, badge, runtime, menu, toggle): no id there either.
     assert_eq!(texts(&rt).iter().filter(|t| t.as_str() == "NK-101").count(), 0, "no id on a row");
-    assert!(rt.find("top-id").is_some());
+    assert!(rt.find("top-id").is_none() && rt.find("top-title").is_some());
     let title = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Fix the empty state on the board")).expect("a row title");
     assert!(title.rect[2] >= 140.0, "twenty letters or more fit in the 248 point column: {}", title.rect[2]);
     // Only amber rows carry a word, the others their age.

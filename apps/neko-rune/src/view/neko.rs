@@ -6,7 +6,6 @@
 
 use neko_protocol::workbench::TaskStatus;
 use rune::{El, Key, KeyEvent, ScrollSpec, col, el, icon, row, text};
-use rune_kit::TextArea;
 
 use super::turn::{self, Where};
 use super::{flat_band, icon_button, quiet_button};
@@ -31,10 +30,8 @@ fn inbox_limit(win_h: f32) -> usize {
     if win_h <= SHORT_WINDOW { INBOX_ITEMS_SHORT } else { INBOX_ITEMS }
 }
 
-/// The tallest the ask box grows.
-fn ask_max(win_h: f32) -> f32 {
-    if win_h <= SHORT_WINDOW { 80.0 } else { 120.0 }
-}
+/// What the composer card, its status line and their padding take at least (three lines, a bar).
+const FOOT_MIN: f32 = 212.0;
 
 pub fn column(s: &App, t: &Neko, win_h: f32, layer: &mut Vec<El>) -> El {
     col().h_full().min_w(0.0).child(header(t)).child(body(s, t, win_h, layer)).child(foot(s, t, win_h))
@@ -342,7 +339,7 @@ fn body(s: &App, t: &Neko, win_h: f32, layer: &mut Vec<El>) -> El {
     let waiting = s.waiting();
     // The top block takes what it needs up to a share of the window, but never so much that the chat
     // (header 36, the ask box and status below it) is left under CHAT_MIN.
-    let foot = ask_max(win_h) + 70.0;
+    let foot = FOOT_MIN;
     let cap = (win_h * 0.5).min(win_h - super::BAND - foot - CHAT_MIN).clamp(100.0, 440.0);
     let mut top = col().key("neko-top").w_full().px(12.0).pb(8.0).gap(8.0);
     top = top.child(row().key("crew-row").w_full().h(32.0).px(8.0).center_y().child(text(crew_line(working, waiting)).key("crew").font(t.ty.row).color(t.text.base).truncate()));
@@ -370,25 +367,26 @@ fn el_grow() -> El {
 /// above while it is written, with a Stop.
 fn foot(s: &App, t: &Neko, win_h: f32) -> El {
     let replying = s.summary.as_ref().is_some_and(|m| m.replying());
-    let ask = TextArea::new(&s.ask)
-        .placeholder("Ask Neko…")
-        .label("Ask Neko")
-        .auto_grow(2, 6)
-        .on_edit(|s: &mut App| &mut s.ask)
-        .on_key(|s: &mut App, ev: &KeyEvent, _| {
-            if ev.key != Key::Enter || ev.mods.shift || ev.mods.alt || s.ask.is_composing() {
-                return false;
-            }
-            s.ask_neko();
-            true
-        })
-        .build(&t.kit)
-        .key("ask")
-        .w_full()
-        .min_w(0.0)
-        .min_h(40.0)
-        .max_h(ask_max(win_h));
-    let mut c = col().key("neko-foot").w_full().px(12.0).pb(12.0).gap(8.0).child(ask);
+    let ask = super::composer::field(t, &s.ask, "ask-box", "ask", "Ask Neko", "Ask Neko…", if win_h <= SHORT_WINDOW { 4 } else { 6 }, |s: &mut App| &mut s.ask, |s: &mut App, ev: &KeyEvent| {
+        if ev.key != Key::Enter || ev.mods.shift || ev.mods.alt || s.ask.is_composing() {
+            return false;
+        }
+        s.ask_neko();
+        true
+    });
+    let plan = s.ask_plan;
+    let mode = super::composer::segmented(
+        t,
+        "ask-mode",
+        "Ask or Plan",
+        super::composer::seg(t, "ask-mode-ask", "Ask", "Ask: Neko answers now", "Ask: Neko answers now", !plan, |s: &mut App| s.ask_plan = false),
+        super::composer::seg(t, "ask-mode-plan", "Plan", "Plan: Neko proposes a task with a plan for your approval, without changing anything", "Plan: Neko proposes a task with a plan for your approval, without changing anything", plan, |s: &mut App| s.ask_plan = true),
+    );
+    let model = super::composer::chip(t, "ask-model", &s.summary.as_ref().map(|m| m.home_runtime.clone()).unwrap_or_default());
+    let can = !s.ask.text.trim().is_empty() && !s.work.busy.contains("ask");
+    let send = super::composer::send(t, "ask-send", "Ask Neko", "Ask Neko (Enter)", can, false, |s: &mut App| s.ask_neko());
+    let card = super::composer::card(t, "ask-card", ask, vec![super::composer::attach(t, "ask-attach", App::attach_to_ask)], vec![mode, model], send);
+    let mut c = col().key("neko-foot").w_full().px(12.0).pb(12.0).gap(8.0).child(card);
     if replying {
         let turn = s.summary.as_ref().and_then(|m| m.conversation.last()).map(|m| m.id.clone()).unwrap_or_default();
         c = c.child(row().gap(8.0).center_y().child(text("Neko is replying…").font(t.ty.meta).color(t.text.muted).grow(1.0)).child(quiet_button("Stop", "ask-stop", t, move |s: &mut App| s.call(Call::StopAsking { turn_id: turn.clone() }))));

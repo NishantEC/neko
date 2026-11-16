@@ -10,6 +10,7 @@
 
 mod all;
 mod calendar;
+mod composer;
 mod context;
 mod context_diff;
 mod context_files;

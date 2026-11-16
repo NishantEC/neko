@@ -149,6 +149,8 @@ pub struct App {
     pub plugins_asked: bool,
     pub composer: TextEdit,
     pub ask: TextEdit,
+    /// Neko's ask box is on Plan (the web's Ask / Plan switch): the text goes with the plan-only instruction.
+    pub ask_plan: bool,
 
     pub dispatch: Dispatch,
     /// Requests made while there is nowhere to send them (tests read this).
@@ -245,6 +247,7 @@ impl Default for App {
             plugins_asked: false,
             composer: TextEdit::new(""),
             ask: TextEdit::new(""),
+            ask_plan: false,
             dispatch: Dispatch::None,
             outbox: Vec::new(),
             wanted: Wanted::default(),

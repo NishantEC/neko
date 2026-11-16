@@ -110,11 +110,11 @@ fn clicking_a_session_selects_it_and_the_top_line_names_it() {
     let t = texts(&rt);
     let title = rt.state.session().unwrap().title.clone();
     assert!(t.contains(&title));
-    let meta = rect(&rt, "top-meta");
-    assert!(meta[2] > 0.0);
-    let line = t.iter().find(|x| x.starts_with("Codex · default model")).unwrap_or_else(|| panic!("runtime and goal line in the top line: {t:?}"));
-    assert_eq!(line, "Codex · default model · the board shows a message when it is empty", "only runtime, model and goal line: no status, no repeated title");
-    assert!(!line.contains(&title) && !line.contains("Needs you") && !line.contains("In progress"));
+    // One 32 point row: the title, the runtime chip, nothing of the ticket's raw text.
+    assert!(rt.find("top-meta").is_none(), "no meta line in the header");
+    let chip = t.iter().find(|x| x.contains(" · ") && (x.starts_with("Codex") || x.starts_with("Claude"))).unwrap_or_else(|| panic!("the runtime chip: {t:?}"));
+    assert!(!chip.contains(&title) && !t.iter().any(|x| x.starts_with("Status:")), "{chip}");
+    assert!(rect(&rt, "top-runtime")[2] > 0.0);
 }
 
 #[test]

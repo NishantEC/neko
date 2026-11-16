@@ -6,7 +6,7 @@
 use neko_protocol::crew::DeliveryMode;
 use neko_protocol::workbench::{Task, TaskStatus};
 use rune::{Color, El, Key, KeyEvent, ScrollSpec, col, el, icon, row, text};
-use rune_kit::{ControlSize, IconButton, IconButtonVariant, Menu, MenuItem, Placement};
+use rune_kit::{Menu, MenuItem, Placement};
 use crate::link::Call;
 
 use super::turn::{self, Where};
@@ -286,42 +286,15 @@ fn mode_of(steer: Steer) -> DeliveryMode {
 /// The composer: a multi-line field (IME and image paste), the steer-mode menu and Send.
 fn composer(s: &App, t: &Neko, layer: &mut Vec<El>, ready: bool) -> El {
     let k = &t.kit;
-    // A multi-line field with the input method (composition shows in place) and image paste:
-    // the kit's TextArea has no paste hook, so it is built from Rune's text input directly.
-    let style = rune::TextStyle { line_height: (13.0f32 * 1.35 * 2.0).round() / 2.0, ..k.ty.ui };
-    let field = rune::auto_grow(
-        rune::text_input(&s.composer, style)
-            .key("input")
-            .w_full()
-            .color(t.text.base)
-            .placeholder(placeholder_for(s), t.text.faint)
-            .caret(t.text.base, k.selection())
-            .label("Message the agent")
-            .on_edit(|s: &mut App| &mut s.composer)
-            .on_input_key(|s: &mut App, ev: &KeyEvent, _| {
-                // Enter sends, Shift+Enter is a new line, ⌘↩ steers now; never while an input method
-                // is composing (the Enter that confirms a word is not a send).
-                if ev.key != Key::Enter || ev.mods.shift || ev.mods.alt || s.composer.is_composing() {
-                    return false;
-                }
-                s.send_composer(ev.mods.cmd.then_some(DeliveryMode::SteerNow));
-                true
-            })
-            .on_input_paste(|s: &mut App, content, _| {
-                let Some(image) = content.image() else { return false };
-                match crate::attachments::save_png(image.png()) {
-                    Ok(path) => {
-                        let reference = crate::attachments::reference(&path);
-                        s.composer.insert(&reference);
-                    }
-                    Err(_) => s.work.notice = Some("Couldn’t keep that image. Your message is unchanged.".to_owned()),
-                }
-                true
-            }),
-        1,
-        8,
-    );
-    let field = col().key("composer-input").role("textbox").w_full().px(2.0).py(4.0).child(field);
+    let field = super::composer::field(t, &s.composer, "composer-input", "input", "Message the agent", placeholder_for(s), 8, |s: &mut App| &mut s.composer, |s: &mut App, ev: &KeyEvent| {
+        // Enter sends, Shift+Enter is a new line, ⌘↩ steers now; never while an input method
+        // is composing (the Enter that confirms a word is not a send).
+        if ev.key != Key::Enter || ev.mods.shift || ev.mods.alt || s.composer.is_composing() {
+            return false;
+        }
+        s.send_composer(ev.mods.cmd.then_some(DeliveryMode::SteerNow));
+        true
+    });
 
     let trigger = row()
         .key("steer-trigger")
@@ -346,32 +319,11 @@ fn composer(s: &App, t: &Neko, layer: &mut Vec<El>, ready: bool) -> El {
     let steer = menu.build(k, layer);
 
     let can_send = ready && !s.composer.text.trim().is_empty();
-    let send = IconButton::new(&icons::SEND)
-        .control_size(ControlSize::Large)
-        .variant(IconButtonVariant::Ghost)
-        .label(format!("Send, {}", mode_label(s)))
-        .help(format!("Send, {}", mode_label(s)))
-        .disabled(!can_send)
-        .on_press(|s: &mut App| s.send_composer(None))
-        .build(k)
-        .key("send");
-
-    row().key("composer").w_full().justify_center().pb(16.0).child(
-        col()
-            .w_full()
-            .max_w(TEXT_COLUMN)
-            .px(TEXT_PAD)
-            .child(col()
-            .w_full()
-            .px(14.0)
-            .pt(10.0)
-            .pb(6.0)
-            .gap(4.0)
-            .radius(t.radius.row + 4.0)
-            .fill(t.surface.card)
-            .child(field)
-            .child(row().w_full().center_y().child(steer).child(el().grow(1.0)).child(send))),
-    )
+    let send = super::composer::send(t, "send", &format!("Send, {}", mode_label(s)), &format!("Send, {}", mode_label(s)), can_send, false, |s: &mut App| s.send_composer(None));
+    let runtime = s.detail().map(|d| d.runtime.clone()).filter(|r| !r.is_empty()).unwrap_or_default();
+    let model = super::composer::chip(t, "composer-model", &runtime);
+    let attach = super::composer::attach(t, "composer-attach", App::attach_to_reply);
+    text_column(super::composer::card(t, "composer-card", field, vec![attach], vec![steer, model], send).mb(16.0)).key("composer")
 }
 
 /// What Send does right now, in words (for its tooltip and name).

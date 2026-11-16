@@ -250,6 +250,9 @@ pub fn stop_reason(task: &Task) -> String {
     }
 }
 
+/// What the Plan switch puts before Neko's words (`PLAN_PREFIX` in the web's `ChatInputSlash.ts`).
+pub const PLAN_PREFIX: &str = "Plan only, and change nothing yet: propose a task with a short step-by-step plan for my approval.\n\n";
+
 /// The line under the conversation while an agent works (`workingLine`).
 pub fn working_line(status: TaskStatus) -> Option<&'static str> {
     match status {
@@ -680,6 +683,8 @@ impl App {
         if text.is_empty() {
             return;
         }
+        // Plan: the web's `homeText`, the plan-only instruction before the words (never before a slash command).
+        let text = if self.ask_plan && !text.starts_with('/') { format!("{PLAN_PREFIX}{text}") } else { text };
         if self.work.busy.insert("ask".to_owned()) {
             self.call(Call::Ask { text });
         }
