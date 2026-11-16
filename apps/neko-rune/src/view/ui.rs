@@ -3,7 +3,7 @@
 //! switches, selects and text fields. The pages compose these and draw no chrome of their own.
 
 use rune::{El, ScrollSpec, TextEdit, col, el, row, text};
-use rune_kit::{Select, Switch, TextArea, TextInput};
+use rune_kit::{Select, TextArea, TextInput};
 
 use super::{COLUMN, band};
 use crate::app::App;
@@ -62,14 +62,40 @@ pub fn note(s: &App, t: &Neko, key: &str) -> Option<El> {
     s.pages.notes.get(key).map(|n| text(n.clone()).key(format!("note-{key}")).font(t.ty.meta).color(t.meaning.amber).wrap().px(6.0).pb(4.0).live_region(rune::LiveRegion::Polite))
 }
 
+/// The web's switch (`ui/switch.tsx`): a 36 x 21 capsule, Iris when on, the foreground at 18% when off, and a 17 point
+/// thumb 2 points in. It says what it does to assistive technology and shows only its state.
+fn web_switch(t: &Neko, key: &str, label: &str, on: bool, enabled: bool, f: impl Fn(&mut App) + 'static) -> El {
+    let thumb = if on || !t.dark { rune::Color::WHITE } else { t.text.base };
+    let track = if on { t.meaning.iris } else { t.text.base.alpha(0.18) };
+    let mut r = row()
+        .key(key.to_owned())
+        .role("switch")
+        .label(label.to_owned())
+        .checked(on)
+        .disabled(!enabled)
+        .focusable(enabled)
+        .size(36.0, 21.0)
+        .px(2.0)
+        .center_y()
+        .radius(10.5)
+        .fill(if enabled { track } else { track.alpha(0.5) })
+        .focus_ring(2.0, 2.0, t.surface.ring)
+        .child(el().size(17.0, 17.0).radius(8.5).fill(thumb).a11y_hidden());
+    r = if on { r.justify_end() } else { r.justify_start() };
+    if enabled {
+        r = r.on_press(f);
+    }
+    r
+}
+
 /// A switch that says what it does to assistive technology and shows only its state.
 pub fn switch(t: &Neko, key: &str, label: &str, on: bool, f: impl Fn(&mut App) + 'static) -> El {
-    Switch::new(on).label(label).hide_label().on_toggle(f).build(&t.kit).key(key.to_owned())
+    web_switch(t, key, label, on, true, f)
 }
 
 /// A switch that cannot be pressed yet (what it changes has not loaded).
 pub fn switch_when(t: &Neko, key: &str, label: &str, on: bool, enabled: bool, f: impl Fn(&mut App) + 'static) -> El {
-    Switch::new(on).label(label).hide_label().disabled(!enabled).on_toggle(f).build(&t.kit).key(key.to_owned())
+    web_switch(t, key, label, on, enabled, f)
 }
 
 /// A choice from a short list: the current option shows, a list opens under it. Options are shown

@@ -55,7 +55,15 @@ fn rect(rt: &Runtime<App>, key: &str) -> [f32; 4] {
 fn a_routine_is_one_line_with_its_glyph_scope_cadence_and_next_due() {
     let rt = runtime("routines");
     assert!(texts(&rt).contains(&"Routines".to_owned()) && text_of(&rt, "page-count").as_deref() == Some("5"), "the title with its faint count");
-    assert_eq!(text_of(&rt, "routine-scope-r1").as_deref(), Some("Neko"));
+    // Under the workspace's heading, not a scope on every row; the cadence in one 180 point column; the web's 36 x 21 switch.
+    assert!(rt.find("routine-scope-r1").is_none() && texts(&rt).contains(&"Neko".to_owned()) && rt.find("routines-group-w1").is_some());
+    let columns: Vec<[f32; 4]> = ["r1", "r2", "r3"].iter().map(|id| rect(&rt, &format!("routine-cadence-{id}"))).collect();
+    assert!(columns.iter().all(|c| (c[0] - columns[0][0]).abs() < 0.5 && (c[2] - 180.0).abs() < 0.5), "one 180 point cadence column: {columns:?}");
+    let sw = rect(&rt, "routine-switch-r1");
+    assert_eq!((sw[2], sw[3]), (36.0, 21.0), "the web's switch");
+    let due = rect(&rt, "routine-due-r1");
+    let row = rect(&rt, "routine-r1");
+    assert!(due[0] + due[2] <= sw[0] && due[0] > columns[0][0] + 150.0 && row[0] + row[2] >= sw[0] + sw[2], "next due sits between the cadence and the switch: {due:?} {sw:?}");
     assert_eq!(text_of(&rt, "routine-cadence-r1").as_deref(), Some("Every 20 min, 08:00–23:00"));
     assert_eq!(text_of(&rt, "routine-due-r1").as_deref(), Some("next in 6m"));
     assert_eq!(text_of(&rt, "routine-due-r3").as_deref(), Some("running"));

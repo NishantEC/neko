@@ -23,7 +23,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         return page(t, "routines", "Routines", None, Vec::new(), quiet_line(t, "routines-loading", &line));
     };
     let views: Vec<&RoutineView> = data.views.iter().filter(|v| !is_goal_routine(v)).collect();
-    let mut body = col().w_full().gap(4.0);
+    let mut body = col().w_full().gap(2.0);
     if !data.routines_on {
         body = body.child(
             row()
@@ -40,10 +40,35 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     if views.is_empty() {
         body = body.child(quiet_line(t, "routines-empty", "No routines yet"));
     }
+    // Under their workspace's heading (12.5 medium muted, with the count), in the order the scopes come.
+    let mut groups: Vec<(String, String, Vec<&RoutineView>)> = Vec::new();
     for v in &views {
-        body = body.child(routine_row(s, t, layer, data, v));
-        if s.pages.open_routine.as_deref() == Some(v.routine.id.as_str()) {
-            body = body.child(details(s, t, layer, v));
+        let ws = v.routine.workspace_id.clone();
+        match groups.iter_mut().find(|(id, _, _)| *id == ws) {
+            Some((_, _, list)) => list.push(v),
+            None => {
+                let name = data.scopes.iter().find(|sc| sc.workspace_id.as_deref() == Some(ws.as_str())).map(|sc| sc.name.clone()).unwrap_or_else(|| "Other".to_owned());
+                groups.push((ws, name, vec![v]));
+            }
+        }
+    }
+    for (ws, name, list) in &groups {
+        body = body.child(
+            row()
+                .key(format!("routines-group-{ws}"))
+                .w_full()
+                .h(32.0)
+                .px(6.0)
+                .gap(8.0)
+                .center_y()
+                .child(text(name.clone()).font(t.ty.group).color(t.text.muted))
+                .child(text(list.len().to_string()).key(format!("routines-group-count-{ws}")).font(t.ty.meta).color(t.text.faint)),
+        );
+        for v in list {
+            body = body.child(routine_row(s, t, layer, v));
+            if s.pages.open_routine.as_deref() == Some(v.routine.id.as_str()) {
+                body = body.child(details(s, t, layer, v));
+            }
         }
     }
     let orders = standing_orders(s, t, data);
@@ -65,14 +90,41 @@ fn glyph_of(g: &RoutineGlyph) -> (StatusKind, &'static str) {
     }
 }
 
-fn routine_row(s: &App, t: &Neko, layer: &mut Vec<El>, data: &crate::link::RoutinesData, v: &RoutineView) -> El {
+/// What the last run did, as the chip after the name: Quiet (muted), Acted (mint at 12%), Failed (coral at 12%). None before a run.
+pub fn run_chip(v: &RoutineView) -> Option<(&'static str, RunTone)> {
+    let last = v.runs.first()?;
+    Some(if !last.ok {
+        ("Failed", RunTone::Failed)
+    } else if last.did.is_empty() {
+        ("Quiet", RunTone::Quiet)
+    } else {
+        ("Acted", RunTone::Acted)
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunTone {
+    Quiet,
+    Acted,
+    Failed,
+}
+
+fn chip(t: &Neko, key: String, words: &str, tone: RunTone) -> El {
+    let (ink, fill) = match tone {
+        RunTone::Quiet => (t.text.muted, t.text.base.alpha(0.08)),
+        RunTone::Acted => (t.meaning.mint, t.meaning.mint.alpha(0.12)),
+        RunTone::Failed => (t.meaning.coral, t.meaning.coral.alpha(0.12)),
+    };
+    row().key(key).px(8.0).py(2.0).radius(6.0).fill(fill).child(text(words.to_owned()).font(rune::TextStyle { weight: 500.0, ..t.ty.meta }).color(ink).a11y_hidden())
+}
+
+fn routine_row(s: &App, t: &Neko, layer: &mut Vec<El>, v: &RoutineView) -> El {
     let routine = &v.routine;
     let id = routine.id.clone();
     let toggle_id = id.clone();
     let open = s.pages.open_routine.as_deref() == Some(routine.id.as_str());
     let glyph = routine_glyph(v, s.now_ms);
     let (kind, word) = glyph_of(&glyph);
-    let scope = data.scopes.iter().find(|sc| sc.workspace_id.as_deref() == Some(routine.workspace_id.as_str())).map(|sc| sc.name.clone()).unwrap_or_default();
     // A held routine says until when in the place the next run would be.
     let due = match &glyph {
         RoutineGlyph::Held(words) => words.clone(),
@@ -99,10 +151,16 @@ fn routine_row(s: &App, t: &Neko, layer: &mut Vec<El>, data: &crate::link::Routi
             move |s: &mut App| s.open_routine(&id)
         })
         .child(status_glyph(kind, t, 14.0, Some(word)))
-        .child(text(routine.name.clone()).font(t.ty.row).color(t.text.base).truncate().min_w(0.0).max_w(150.0).grow(1.0).a11y_hidden())
-        .child(text(scope).key(format!("routine-scope-{id}")).font(t.ty.meta).color(t.text.muted).truncate().min_w(0.0).max_w(110.0).a11y_hidden())
-        .child(text(cadence_text(&routine.cadence)).key(format!("routine-cadence-{id}")).font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden())
-        .child(text(due).key(format!("routine-due-{id}")).font(t.ty.meta).color(due_color).truncate().max_w(170.0).a11y_hidden())
+        .child(text(routine.name.clone()).font(t.ty.row).color(t.text.base).truncate().min_w(0.0).max_w(240.0).a11y_hidden());
+    let line = match run_chip(v) {
+        Some((words, tone)) => line.child(chip(t, format!("routine-chip-{id}"), words, tone)),
+        None => line,
+    };
+    // The cadence sits in a fixed 180 point column, the next due is right-aligned, then the switch.
+    let line = line
+        .child(el().grow(1.0).min_w(0.0))
+        .child(text(cadence_text(&routine.cadence)).key(format!("routine-cadence-{id}")).font(t.ty.meta).color(t.text.muted).truncate().w(180.0).a11y_hidden())
+        .child(row().w(150.0).justify_end().child(text(due).key(format!("routine-due-{id}")).font(t.ty.meta).color(due_color).truncate().min_w(0.0).a11y_hidden()))
         .child(switch(t, &format!("routine-switch-{id}"), &format!("{} {}", if routine.enabled { "Pause" } else { "Resume" }, routine.name), routine.enabled, move |s: &mut App| {
             let on = s.pages.routine(&toggle_id).is_some_and(|v| v.routine.enabled);
             s.set_routine_enabled(&toggle_id, !on)
@@ -131,6 +189,17 @@ fn details(s: &App, t: &Neko, layer: &mut Vec<El>, v: &RoutineView) -> El {
     let Some(draft) = s.pages.draft.clone() else { return el() };
     let dirty = s.routine_dirty();
     let mut c = col().key(format!("routine-details-{id}")).w_full().pl(36.0).pr(6.0).pt(4.0).pb(14.0).gap(6.0);
+    // The last run and what was caught up after downtime live here, not on the row.
+    let mut said = Vec::new();
+    if let Some(ms) = v.state.last_run_ms {
+        said.push(format!("Last run {}", ago(s.now_ms, ms)));
+    }
+    if let Some(n) = v.state.note.as_ref().filter(|n| !n.is_empty()) {
+        said.push(n.clone());
+    }
+    if !said.is_empty() {
+        c = c.child(text(said.join(" · ")).key(format!("routine-last-{id}")).font(t.ty.meta).color(t.text.muted).wrap().px(6.0).pb(2.0));
+    }
     c = c.child(group(t, "Instruction")).child(area(s, t, "rt:instruction", "What this routine does each run", "", 6));
 
     let options = cadence_options(&draft.cadence);
@@ -217,9 +286,6 @@ fn details(s: &App, t: &Neko, layer: &mut Vec<El>, v: &RoutineView) -> El {
     c = c.child(actions);
     if let Some(n) = note(s, t, &format!("routine:{id}")) {
         c = c.child(n);
-    }
-    if let Some(n) = v.state.note.as_ref().filter(|n| !n.is_empty()) {
-        c = c.child(text(n.clone()).font(t.ty.meta).color(t.text.muted).wrap().px(6.0));
     }
 
     c = c.child(el().h(8.0)).child(group(t, "Recent runs"));
