@@ -198,14 +198,17 @@ fn conversation(s: &App, t: &Neko) -> Option<El> {
 fn body(s: &App, t: &Neko) -> El {
     let working = s.summary.as_ref().map_or(0, |m| m.working());
     let waiting = s.waiting();
-    let mut c = col().key("neko-body").w_full().px(14.0).pt(4.0).pb(10.0).gap(18.0);
-    c = c.child(text(crew_line(working, waiting)).key("crew").font(t.ty.row).color(t.text.base));
-    c = c.child(inbox(s, t));
-    c = c.child(digest(s, t));
+    // What needs you and the digest take at most a third of the column and scroll; the
+    // conversation fills the rest and sticks to its end as Neko writes.
+    let mut top = col().key("neko-top").w_full().px(14.0).pt(4.0).pb(10.0).gap(18.0);
+    top = top.child(text(crew_line(working, waiting)).key("crew").font(t.ty.row).color(t.text.base));
+    top = top.child(inbox(s, t));
+    top = top.child(digest(s, t));
+    let mut c = col().key("neko-body").w_full().grow(1.0).min_h(0.0).child(col().key("neko-scroll").w_full().max_h(360.0).scroll(ScrollSpec { stick_bottom: false }).child(top));
     if let Some(conv) = conversation(s, t) {
-        c = c.child(conv);
+        c = c.child(col().key("neko-chat-scroll").w_full().grow(1.0).min_h(0.0).px(14.0).pb(8.0).scroll(ScrollSpec { stick_bottom: true }).child(conv));
     }
-    col().key("neko-scroll").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(c)
+    c
 }
 
 /// The ask box and the link's state. Enter asks; Shift+Enter is a new line; the reply streams in
