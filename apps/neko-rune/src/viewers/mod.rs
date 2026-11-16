@@ -9,12 +9,18 @@
 //! cost (pixels, rendered PDF pages, a mesh); it is kept by `(artifact id, version)` and the
 //! decoded part is released as soon as the viewer is not on screen ([`ViewerStates::release_except`]),
 //! so a closed panel holds no pictures. The small things (camera, page, zoom) stay.
+//!
+//! **Heavy work runs off the UI thread** ([`ViewerState::load`], P3b): an image decode, a PDF's parse and
+//! page renders, a CSV's row index. The viewer shows a skeleton block until the result is in; results are
+//! kept in the state of the `(artifact id, version)` that asked, so a result for a version that has left the
+//! screen is dropped with that state. The bytes are one `Arc<[u8]>` shared with the panel's copy.
 
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Mutex, Once, OnceLock};
+use std::rc::Rc;
+use std::sync::{Arc, Mutex, Once, OnceLock};
 
 use rune::El;
 
@@ -31,14 +37,27 @@ pub mod web_pending;
 pub struct ViewerInput<'a> {
     /// The kind, lowercase, as the file's extension names it (`png`, `csv`, `glb`).
     pub kind: &'a str,
-    /// The file's bytes, when they were read (a file the preview may open: at most 5 MB).
-    pub bytes: Option<&'a [u8]>,
+    /// The file's bytes, when they were read (a file the preview may open: at most 5 MB). The same
+    /// allocation the panel holds: cloning it is a count, never a copy.
+    pub bytes: Option<Arc<[u8]>>,
     /// Where the file is, for a viewer that needs a path (a web view, later).
     pub path: Option<&'a Path>,
     /// The file as text, when it is UTF-8.
     pub text: Option<&'a str>,
     pub theme_dark: bool,
     pub title: &'a str,
+}
+
+impl ViewerInput<'_> {
+    /// The bytes as a slice (empty when none were read).
+    pub fn slice(&self) -> &[u8] {
+        self.bytes.as_deref().unwrap_or(&[])
+    }
+
+    /// The bytes for a job on another thread (a count, not a copy).
+    pub fn shared(&self) -> Arc<[u8]> {
+        self.bytes.clone().unwrap_or_else(|| Arc::from(Vec::new()))
+    }
 }
 
 /// A viewer for some kinds.
@@ -71,6 +90,59 @@ impl Default for Camera {
     }
 }
 
+/// How work given to [`ViewerState::spawn`] runs.
+enum Mode {
+    /// On the calling thread, at once (tests and headless runs: a scripted run sees the result).
+    Inline,
+    /// On a thread of its own; the waker has the window run its view when the result is in.
+    Threads(Arc<dyn Fn() + Send + Sync>),
+    /// Kept until [`ViewerStates::run_held`] (a test that wants to see the skeleton first).
+    Held,
+}
+
+/// Where viewers' jobs run: shared by every [`ViewerState`] of a window.
+pub struct Runner {
+    mode: RefCell<Mode>,
+    held: RefCell<Vec<Box<dyn FnOnce() + Send>>>,
+}
+
+impl Default for Runner {
+    fn default() -> Runner {
+        Runner { mode: RefCell::new(Mode::Inline), held: RefCell::new(Vec::new()) }
+    }
+}
+
+impl Runner {
+    fn run(&self, work: Box<dyn FnOnce() + Send>) {
+        let wake = match &*self.mode.borrow() {
+            Mode::Inline => None,
+            Mode::Held => {
+                self.held.borrow_mut().push(work);
+                return;
+            }
+            Mode::Threads(wake) => Some(wake.clone()),
+        };
+        let Some(wake) = wake else { return work() };
+        // A thread that cannot start leaves the work for the calling thread: slower, never lost.
+        let slot = Arc::new(Mutex::new(Some(work)));
+        let again = slot.clone();
+        let spawned = std::thread::Builder::new().name("neko-viewer".into()).spawn(move || {
+            if let Some(work) = slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
+                work();
+            }
+            wake();
+        });
+        if spawned.is_err()
+            && let Some(work) = again.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
+        {
+            work();
+        }
+    }
+}
+
+/// A job's answer, waiting for the viewer to pick it up. Dropped with the state that asked.
+type Slot = Arc<Mutex<Option<Box<dyn Any + Send>>>>;
+
 /// Everything a viewer remembers about one version.
 #[derive(Default)]
 pub struct ViewerState {
@@ -86,6 +158,9 @@ pub struct ViewerState {
     pub camera: Camera,
     /// What decoding it made, released when the viewer is off screen.
     data: Option<Box<dyn Any>>,
+    /// Jobs asked for by tag, and where their answers land. Released with `data`.
+    jobs: HashMap<String, Slot>,
+    runner: Option<Rc<Runner>>,
 }
 
 impl ViewerState {
@@ -106,13 +181,69 @@ impl ViewerState {
         self.data.as_mut().and_then(|d| d.downcast_mut::<T>())
     }
 
-    /// Lets go of what decoding made; the camera, page and zoom stay.
+    /// Puts `value` as the decoded content.
+    pub fn set_data<T: 'static>(&mut self, value: T) {
+        self.data = Some(Box::new(value));
+    }
+
+    /// Runs `job` off the UI thread under `tag` (once: asking again for a tag that is in flight or
+    /// done does nothing). Its answer is taken with [`ViewerState::ready`].
+    pub fn spawn<T: Send + 'static>(&mut self, tag: &str, job: impl FnOnce() -> T + Send + 'static) {
+        if self.jobs.contains_key(tag) {
+            return;
+        }
+        let slot: Slot = Arc::new(Mutex::new(None));
+        self.jobs.insert(tag.to_owned(), slot.clone());
+        let work: Box<dyn FnOnce() + Send> = Box::new(move || {
+            let answer = job();
+            *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Box::new(answer));
+        });
+        match &self.runner {
+            Some(runner) => runner.run(work),
+            None => work(),
+        }
+    }
+
+    /// Whether a job with this tag was asked for and its answer has not been taken.
+    pub fn asked(&self, tag: &str) -> bool {
+        self.jobs.contains_key(tag)
+    }
+
+    /// The answer of the job under `tag`, once it is in (taken: the tag may be asked again).
+    pub fn ready<T: Send + 'static>(&mut self, tag: &str) -> Option<T> {
+        let slot = self.jobs.get(tag)?;
+        let answer = slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()?;
+        self.jobs.remove(tag);
+        answer.downcast::<T>().ok().map(|b| *b)
+    }
+
+    /// The decoded content `D`, made from the answer of `job` (which runs off the UI thread, once).
+    /// `None` while the job is out: the viewer shows its skeleton and is built again when it lands.
+    pub fn load<J: Send + 'static, D: 'static>(&mut self, tag: &str, job: impl FnOnce() -> J + Send + 'static, make: impl FnOnce(J) -> D) -> Option<&mut D> {
+        if !self.data.as_ref().is_some_and(|d| d.is::<D>()) {
+            if !self.asked(tag) {
+                self.spawn(tag, job);
+            }
+            let made = make(self.ready::<J>(tag)?);
+            self.data = Some(Box::new(made));
+        }
+        self.data.as_mut().and_then(|d| d.downcast_mut::<D>())
+    }
+
+    /// Forgets the jobs whose tag starts with `prefix` (their answers are dropped when they land).
+    pub fn drop_jobs(&mut self, prefix: &str) {
+        self.jobs.retain(|tag, _| !tag.starts_with(prefix));
+    }
+
+    /// Lets go of what decoding made, and of jobs still out (their answers are dropped when they
+    /// land); the camera, page and zoom stay.
     pub fn release(&mut self) {
         self.data = None;
+        self.jobs.clear();
     }
 
     pub fn resident(&self) -> bool {
-        self.data.is_some()
+        self.data.is_some() || !self.jobs.is_empty()
     }
 
     pub fn zoom(&self) -> f32 {
@@ -123,20 +254,43 @@ impl ViewerState {
 /// The viewer states of this run, by key. Interior mutability, because a view is built from `&App`
 /// and a viewer decodes the first time it is drawn.
 #[derive(Default)]
-pub struct ViewerStates(RefCell<HashMap<ViewerKey, ViewerState>>);
+pub struct ViewerStates {
+    map: RefCell<HashMap<ViewerKey, ViewerState>>,
+    runner: Rc<Runner>,
+}
 
 impl ViewerStates {
     /// Runs `f` on the state for `key`, making it the first time. Do not call this from inside `f`.
     pub fn with<R>(&self, key: &ViewerKey, f: impl FnOnce(&mut ViewerState) -> R) -> R {
-        let mut map = self.0.borrow_mut();
-        f(map.entry(key.clone()).or_insert_with(|| ViewerState::new(key.clone())))
+        let mut map = self.map.borrow_mut();
+        f(map.entry(key.clone()).or_insert_with(|| ViewerState { runner: Some(self.runner.clone()), ..ViewerState::new(key.clone()) }))
+    }
+
+    /// Jobs run on threads of their own from now on; `wake` has the window build its view again.
+    pub fn use_threads(&self, wake: Arc<dyn Fn() + Send + Sync>) {
+        *self.runner.mode.borrow_mut() = Mode::Threads(wake);
+    }
+
+    /// Holds jobs (tests): they run at [`ViewerStates::run_held`].
+    pub fn hold(&self) {
+        *self.runner.mode.borrow_mut() = Mode::Held;
+    }
+
+    /// Runs the held jobs, and says how many there were.
+    pub fn run_held(&self) -> usize {
+        let held: Vec<_> = self.runner.held.borrow_mut().drain(..).collect();
+        let n = held.len();
+        for work in held {
+            work();
+        }
+        n
     }
 
     /// Releases what every viewer decoded except the one named (the one on screen), and returns how
     /// many held something.
     pub fn release_except(&self, keep: Option<&ViewerKey>) -> usize {
         let mut released = 0;
-        for (key, state) in self.0.borrow_mut().iter_mut() {
+        for (key, state) in self.map.borrow_mut().iter_mut() {
             if Some(key) != keep && state.resident() {
                 state.release();
                 released += 1;
@@ -147,16 +301,16 @@ impl ViewerStates {
 
     /// How many viewers hold decoded content (a test reads this).
     pub fn resident(&self) -> usize {
-        self.0.borrow().values().filter(|s| s.resident()).count()
+        self.map.borrow().values().filter(|s| s.resident()).count()
     }
 
     /// Forgets states that hold nothing worth keeping, so the map does not grow without end.
     pub fn len(&self) -> usize {
-        self.0.borrow().len()
+        self.map.borrow().len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.0.borrow().is_empty()
+        self.map.borrow().is_empty()
     }
 }
 
@@ -313,6 +467,40 @@ mod tests {
         assert_eq!(states.resident(), 0);
         // Asking for the data again decodes again.
         states.with(&a, |s| assert_eq!(s.data(|| vec![9u8; 2]).len(), 2));
+    }
+
+    #[test]
+    fn a_job_runs_off_the_call_and_its_answer_is_picked_up_once_and_keyed_to_its_version() {
+        let states = ViewerStates::default();
+        states.hold();
+        let (v1, v2): (ViewerKey, ViewerKey) = (("art".into(), 1), ("art".into(), 2));
+        // Nothing is made until the job has run: the viewer is told "not yet" (it draws a skeleton).
+        assert!(states.with(&v1, |s| s.load("decode", || 40 + 2, |n: i32| n.to_string()).is_none()));
+        assert!(states.with(&v1, |s| s.load("decode", || unreachable!("asked once"), |n: i32| n.to_string()).is_none()), "asking again while it is out does not start another");
+        assert_eq!(states.resident(), 1, "a job in flight counts as held, so leaving the screen releases it");
+        assert_eq!(states.run_held(), 1);
+        assert_eq!(states.with(&v1, |s| s.load("decode", || 0, |n: i32| n.to_string()).cloned()), Some("42".to_owned()));
+        // The decoded content stays; the job is not asked again.
+        assert_eq!(states.with(&v1, |s| s.load("decode", || unreachable!("done"), |n: i32| n.to_string()).cloned()), Some("42".to_owned()));
+        // A result that lands after the version left the screen is dropped with it.
+        assert!(states.with(&v2, |s| s.load("decode", || 7, |n: i32| n.to_string()).is_none()));
+        assert_eq!(states.release_except(Some(&v1)), 1, "version 2 left the screen with its job out");
+        assert_eq!(states.run_held(), 1, "the job still finishes");
+        assert!(states.with(&v2, |s| !s.resident() && s.ready::<i32>("decode").is_none()), "but nobody keeps what it made");
+        // Real threads: the waker is called once the answer is in.
+        let woken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let w = woken.clone();
+        let threaded = ViewerStates::default();
+        threaded.use_threads(Arc::new(move || {
+            w.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+        let key: ViewerKey = ("t".into(), 1);
+        threaded.with(&key, |s| s.spawn("x", || 5usize));
+        let started = std::time::Instant::now();
+        while woken.load(std::sync::atomic::Ordering::SeqCst) == 0 && started.elapsed().as_secs() < 5 {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(threaded.with(&key, |s| s.ready::<usize>("x")), Some(5));
     }
 
     #[test]

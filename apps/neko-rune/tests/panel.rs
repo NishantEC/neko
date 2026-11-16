@@ -501,6 +501,55 @@ fn the_canvas_lists_artifacts_with_a_kind_icon_title_version_and_time_and_picks_
 // ---------------------------------------------------------------- the viewers
 
 #[test]
+fn an_image_a_table_and_a_pdf_work_off_the_ui_thread_and_show_a_skeleton_until_it_lands() {
+    type Case = (&'static str, fn(&mut App), &'static str, &'static str);
+    let cases: [Case; 4] = [
+        ("png", scenes_panel::canvas_image, "viewer-image", "image-pixels"),
+        ("svg", scenes_panel::image_svg, "viewer-svg", "image-pixels"),
+        ("csv", scenes_panel::table, "viewer-table", "table-header"),
+        ("pdf", scenes_panel::pdf, "viewer-pdf", "pdf-pages"),
+    ];
+    for (kind, scene, viewer, drawn) in cases {
+        // The jobs are held: the viewer has been asked to open, and has nothing yet.
+        let mut rt = runtime(|s| {
+            s.panel.states.hold();
+            scene(s);
+        });
+        assert!(rt.find(viewer).is_some(), "{kind}: the viewer's own box is there");
+        assert!(rt.find("skeleton-block").is_some(), "{kind}: a skeleton block stands where it will be");
+        assert!(rt.find(drawn).is_none(), "{kind}: nothing is drawn before the job lands");
+        // The work finishes; the viewer picks it up the next time it is built.
+        let ran = rt.state.panel.states.run_held();
+        assert!(ran >= 1, "{kind}: a job was out");
+        rt.update(|_, _| ());
+        frames(&mut rt, 10);
+        assert!(rt.find(drawn).is_some(), "{kind}: drawn once the job landed");
+        assert!(rt.find("skeleton-block").is_none(), "{kind}: the skeleton is gone");
+    }
+}
+
+#[test]
+fn a_result_for_a_version_that_left_the_screen_is_dropped() {
+    let mut rt = runtime(|s| {
+        s.panel.states.hold();
+        scenes_panel::canvas_image(s);
+    });
+    assert!(rt.find("skeleton-block").is_some());
+    // The person picks another artifact before the decode finishes: the panel lets go of the version
+    // that left (and its job). Its answer, when it lands, is kept by nobody.
+    click(&mut rt, "artifact-a-budget");
+    rt.update(|s, tx| {
+        s.panel_tick(0.0, tx);
+    });
+    assert_eq!(rt.state.panel.states.resident(), 0, "nothing is held for the version that left");
+    rt.state.panel.states.run_held();
+    rt.update(|s, tx| {
+        s.panel_tick(0.0, tx);
+    });
+    assert_eq!(rt.state.panel.states.resident(), 0, "its late answer was dropped, not shown or kept: {}", rt.state.panel.states.resident());
+}
+
+#[test]
 fn every_built_in_viewer_draws_its_kind() {
     type Case = (&'static str, fn(&mut App), &'static str);
     let cases: [Case; 11] = [

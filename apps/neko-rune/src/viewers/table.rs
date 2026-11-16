@@ -9,6 +9,7 @@
 
 use std::borrow::Cow;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use rune::{El, GrowthSpec, ScrollSpec, col, el, row, text};
 use rune_kit::TableStyle;
@@ -25,7 +26,8 @@ const SAMPLE: usize = 200;
 
 /// A CSV file indexed: its bytes and where each record starts. Record 0 is the header.
 pub struct CsvData {
-    bytes: Vec<u8>,
+    /// The panel's own allocation, shared (the index is built over it; nothing is copied).
+    bytes: Arc<[u8]>,
     delimiter: u8,
     /// Where each record starts in `bytes`.
     offsets: Vec<u64>,
@@ -35,8 +37,8 @@ pub struct CsvData {
 }
 
 impl CsvData {
-    pub fn new(bytes: &[u8], delimiter: u8) -> CsvData {
-        let mut reader = csv::ReaderBuilder::new().has_headers(false).flexible(true).delimiter(delimiter).from_reader(bytes);
+    pub fn new(bytes: Arc<[u8]>, delimiter: u8) -> CsvData {
+        let mut reader = csv::ReaderBuilder::new().has_headers(false).flexible(true).delimiter(delimiter).from_reader(&bytes[..]);
         let mut offsets: Vec<u64> = Vec::new();
         let mut record = csv::ByteRecord::new();
         let mut header: Vec<String> = Vec::new();
@@ -65,7 +67,7 @@ impl CsvData {
             }
         }
         let widths = longest.iter().map(|n| ((*n as f32 + 3.0) * 7.2 + 24.0).clamp(COLUMN_MIN, COLUMN_MAX)).collect();
-        CsvData { bytes: bytes.to_vec(), delimiter, offsets, header, widths }
+        CsvData { bytes, delimiter, offsets, header, widths }
     }
 
     /// Rows under the header.
@@ -87,7 +89,8 @@ impl CsvData {
 
     /// How much memory this holds, for a measurement.
     pub fn held(&self) -> usize {
-        self.bytes.len() + self.offsets.len() * 8
+        // The bytes are the panel's own: only the index is this viewer's.
+        self.offsets.len() * 8
     }
 }
 
@@ -112,8 +115,10 @@ pub fn build(input: &ViewerInput, state: &mut ViewerState) -> El {
     let t = theme(input.theme_dark);
     let style = TableStyle::from_kit(&t.kit);
     let delimiter = if input.kind.eq_ignore_ascii_case("tsv") { b'\t' } else { b',' };
-    let bytes = input.bytes.unwrap_or(&[]);
-    let data: Rc<CsvData> = state.data(|| Rc::new(CsvData::new(bytes, delimiter))).clone();
+    let bytes = input.shared();
+    let Some(data) = state.load("index", move || CsvData::new(bytes, delimiter), Rc::new).cloned() else {
+        return super::image_view::skeleton(input, "viewer-table", None);
+    };
     if data.columns() == 0 {
         return col().key("viewer-table").w_full().grow(1.0).center().child(text("This file has no rows.").font(t.ty.meta).color(t.text.muted));
     }
@@ -174,7 +179,7 @@ mod tests {
 
     #[test]
     fn records_are_indexed_once_and_read_by_position() {
-        let data = CsvData::new(b"id,name\n1,Ada\n2,\"Grace, H\"\n3,\"multi\nline\"\n4,Linus", b',');
+        let data = CsvData::new(Arc::from(&b"id,name\n1,Ada\n2,\"Grace, H\"\n3,\"multi\nline\"\n4,Linus"[..]), b',');
         assert_eq!(data.header, ["id", "name"]);
         assert_eq!(data.rows(), 4);
         assert_eq!(data.row(0), ["1", "Ada"]);
@@ -182,8 +187,8 @@ mod tests {
         assert_eq!(data.row(2), ["3", "multi\nline"], "a quoted newline stays in its record");
         assert_eq!(data.row(3), ["4", "Linus"], "the last record needs no newline");
         assert!(data.row(4).is_empty());
-        assert_eq!(CsvData::new(b"a\tb\n1\t2\n", b'\t').row(0), ["1", "2"]);
-        assert_eq!(CsvData::new(b"", b',').columns(), 0);
+        assert_eq!(CsvData::new(Arc::from(&b"a\tb\n1\t2\n"[..]), b'\t').row(0), ["1", "2"]);
+        assert_eq!(CsvData::new(Arc::from(Vec::new()), b',').columns(), 0);
     }
 
     #[test]
@@ -193,7 +198,7 @@ mod tests {
             csv.push_str(&format!("{i},user-{i},{}.{:02},2026-11-16\n", i % 977, i % 100));
         }
         let started = std::time::Instant::now();
-        let data = CsvData::new(csv.as_bytes(), b',');
+        let data = CsvData::new(Arc::from(csv.as_bytes()), b',');
         let took = started.elapsed();
         assert_eq!((data.rows(), data.columns()), (100_000, 4));
         assert_eq!(data.row(50_000)[1], "user-50000");
@@ -206,7 +211,7 @@ mod tests {
 
     #[test]
     fn columns_are_sized_from_their_widest_early_value_within_bounds() {
-        let data = CsvData::new(b"a,a long header,c\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,2,3\n", b',');
+        let data = CsvData::new(Arc::from(&b"a,a long header,c\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,2,3\n"[..]), b',');
         assert_eq!(data.widths[0], COLUMN_MAX, "capped");
         assert_eq!(data.widths[2], COLUMN_MIN, "floored");
         assert!(data.widths[1] > COLUMN_MIN && data.widths[1] < COLUMN_MAX);

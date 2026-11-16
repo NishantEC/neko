@@ -259,7 +259,7 @@ pub fn fit(cam: &mut Camera) {
 
 pub fn build(input: &ViewerInput, state: &mut ViewerState) -> El {
     let t = theme(input.theme_dark);
-    let (kind, bytes) = (input.kind.to_owned(), input.bytes.unwrap_or(&[]));
+    let (kind, bytes) = (input.kind.to_owned(), input.slice());
     let loaded = state.data(|| match load(&kind, bytes) {
         Ok(mesh) => Loaded::Mesh(Rc::new(mesh)),
         Err(e) => Loaded::Failed(e),

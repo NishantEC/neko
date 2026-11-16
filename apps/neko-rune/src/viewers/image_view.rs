@@ -125,24 +125,68 @@ pub fn decode_gif(bytes: &[u8]) -> Result<(Vec<GifFrame>, (u32, u32)), String> {
     Ok((frames, (w, h)))
 }
 
-fn decode(kind: &str, bytes: &[u8]) -> ImageData {
-    if kind.eq_ignore_ascii_case("gif") {
-        match decode_gif(bytes) {
-            Ok((frames, size)) if frames.len() > 1 => {
+/// What decoding made, in plain buffers that can cross threads; [`Raw::into_data`] makes the pictures
+/// on the UI thread.
+pub enum Raw {
+    Still(Vec<u8>, (u32, u32)),
+    Animated(Vec<GifFrame>, (u32, u32)),
+    Failed(String),
+}
+
+impl Raw {
+    pub fn into_data(self) -> ImageData {
+        match self {
+            Raw::Still(rgba, size) => ImageData::still(rgba, size),
+            Raw::Failed(e) => ImageData::failed(e),
+            Raw::Animated(frames, size) => {
                 let px = Pixels::new();
                 px.set(size.0, size.1, frames[0].rgba.clone());
                 let total_ms = frames.iter().map(|f| f.ms).sum();
-                return ImageData { px, size, gif: Some(Gif { frames, total_ms, shown: 0, started: None }), error: None };
+                ImageData { px, size, gif: Some(Gif { frames, total_ms, shown: 0, started: None }), error: None }
             }
-            Ok((mut frames, size)) => return ImageData::still(frames.remove(0).rgba, size),
+        }
+    }
+}
+
+/// Decodes a picture (any of the kinds). Runs off the UI thread.
+pub fn decode(kind: &str, bytes: &[u8]) -> Raw {
+    if kind.eq_ignore_ascii_case("gif") {
+        match decode_gif(bytes) {
+            Ok((frames, size)) if frames.len() > 1 => return Raw::Animated(frames, size),
+            Ok((mut frames, size)) => return Raw::Still(frames.remove(0).rgba, size),
             // A GIF the animation decoder dislikes may still have a first frame the picture decoder reads.
             Err(_) => {}
         }
     }
     match decode_still(bytes) {
-        Ok((rgba, size)) => ImageData::still(rgba, size),
-        Err(e) => ImageData::failed(e),
+        Ok((rgba, size)) => Raw::Still(rgba, size),
+        Err(e) => Raw::Failed(e),
     }
+}
+
+/// An SVG drawn, as plain buffers. Runs off the UI thread.
+pub fn decode_svg(bytes: &[u8]) -> Raw {
+    match rasterize_svg(bytes) {
+        Ok((rgba, size)) => Raw::Still(rgba, size),
+        Err(e) => Raw::Failed(e),
+    }
+}
+
+/// The skeleton: a quiet block where the viewer's content will be, the picture's own shape when it is
+/// known (`size`, read from the header). The same block for every viewer that waits for a job.
+pub fn skeleton(input: &ViewerInput, key: &'static str, size: Option<(u32, u32)>) -> El {
+    let t = theme(input.theme_dark);
+    let block = el().key("skeleton-block").radius(t.radius.control).fill(t.surface.hover).role("progressbar").label("Opening".to_owned());
+    let block = match size.filter(|(w, h)| *w > 0 && *h > 0) {
+        Some((w, h)) => block.w_full().aspect_fit(w as f32 / h as f32),
+        None => block.w_full().grow(1.0).min_h(0.0),
+    };
+    col().key(key).w_full().grow(1.0).min_h(0.0).padding(12.0).child(block)
+}
+
+/// A picture's size from its header alone (no decode): the skeleton's shape.
+fn header_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?.into_dimensions().ok()
 }
 
 /// Rasterises an SVG with `resvg` at a size that is sharp in the panel (about 1,200 pixels wide).
@@ -177,7 +221,7 @@ fn show(input: &ViewerInput, key: &'static str, data: &ImageData) -> El {
     if let Some(error) = &data.error {
         return col().key(key).w_full().grow(1.0).min_h(0.0).center().px(24.0).child(text(error.clone()).font(t.ty.meta).color(t.text.muted).wrap());
     }
-    let caption = format!("{} × {}{}", data.size.0, data.size.1, input.bytes.map(|b| format!(" · {}", size_words(b.len() as u64))).unwrap_or_default());
+    let caption = format!("{} × {}{}", data.size.0, data.size.1, input.bytes.as_ref().map(|b| format!(" · {}", size_words(b.len() as u64))).unwrap_or_default());
     col()
         .key(key)
         .w_full()
@@ -190,18 +234,19 @@ fn show(input: &ViewerInput, key: &'static str, data: &ImageData) -> El {
 }
 
 pub fn build_image(input: &ViewerInput, state: &mut ViewerState) -> El {
-    let (kind, bytes) = (input.kind.to_owned(), input.bytes.unwrap_or(&[]));
-    let data = state.data(|| decode(&kind, bytes));
-    show(input, "viewer-image", data)
+    let (kind, bytes) = (input.kind.to_owned(), input.shared());
+    match state.load("decode", move || decode(&kind, &bytes), Raw::into_data) {
+        Some(data) => show(input, "viewer-image", data),
+        None => skeleton(input, "viewer-image", header_size(input.slice())),
+    }
 }
 
 pub fn build_svg(input: &ViewerInput, state: &mut ViewerState) -> El {
-    let bytes = input.bytes.unwrap_or(&[]);
-    let data = state.data(|| match rasterize_svg(bytes) {
-        Ok((rgba, size)) => ImageData::still(rgba, size),
-        Err(e) => ImageData::failed(e),
-    });
-    show(input, "viewer-svg", data)
+    let bytes = input.shared();
+    match state.load("decode", move || decode_svg(&bytes), Raw::into_data) {
+        Some(data) => show(input, "viewer-svg", data),
+        None => skeleton(input, "viewer-svg", None),
+    }
 }
 
 /// Advances an animated picture on the app's frame clock `t` (seconds): sets the picture's pixels
@@ -273,9 +318,9 @@ mod tests {
         assert_eq!((frames.len(), size), (4, (16, 16)));
         assert!(frames.iter().all(|f| f.ms == 100 && f.rgba.len() == 16 * 16 * 4));
         assert_ne!(frames[0].rgba[..3], frames[1].rgba[..3], "frames differ");
-        let one = decode("gif", &gif_bytes(1));
+        let one = decode("gif", &gif_bytes(1)).into_data();
         assert!(one.gif.is_none() && one.error.is_none(), "a single frame is a picture");
-        let many = decode("gif", &gif_bytes(3));
+        let many = decode("gif", &gif_bytes(3)).into_data();
         assert_eq!(many.gif.as_ref().map(|g| g.total_ms), Some(300));
     }
 

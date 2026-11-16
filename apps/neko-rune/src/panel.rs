@@ -16,6 +16,7 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use neko_protocol::Artifact;
 use rune::{Key, KeyEvent, Tx};
@@ -88,43 +89,37 @@ pub struct SessionPanel {
     pub artifacts_asked: Option<i64>,
 }
 
-/// What is loaded into a viewer.
+/// What is loaded into a viewer: the file's bytes, once. Viewers share this allocation (`shared`); a
+/// viewer that decodes on another thread takes a clone of the `Arc`, never a copy of the bytes.
 pub struct Loaded {
     pub path: PathBuf,
     pub kind: String,
     pub size: u64,
     pub title: String,
-    pub data: LoadedData,
-}
-
-pub enum LoadedData {
-    Text(String),
-    Bytes(Vec<u8>),
+    bytes: Arc<[u8]>,
+    /// The bytes are UTF-8 (checked once, when they were loaded).
+    utf8: bool,
 }
 
 impl Loaded {
     pub fn bytes(&self) -> &[u8] {
-        match &self.data {
-            LoadedData::Text(t) => t.as_bytes(),
-            LoadedData::Bytes(b) => b,
-        }
+        &self.bytes
     }
 
+    /// The bytes, shared: a count, not a copy.
+    pub fn shared(&self) -> Arc<[u8]> {
+        self.bytes.clone()
+    }
+
+    /// The bytes as text when they are UTF-8.
     pub fn text(&self) -> Option<&str> {
-        match &self.data {
-            LoadedData::Text(t) => Some(t),
-            LoadedData::Bytes(_) => None,
-        }
+        if self.utf8 { std::str::from_utf8(&self.bytes).ok() } else { None }
     }
 
-    /// The bytes as a string when they are one; the bytes themselves otherwise (no copy).
     pub fn from_bytes(path: PathBuf, kind: String, title: String, bytes: Vec<u8>) -> Loaded {
         let size = bytes.len() as u64;
-        let data = match String::from_utf8(bytes) {
-            Ok(text) => LoadedData::Text(text),
-            Err(e) => LoadedData::Bytes(e.into_bytes()),
-        };
-        Loaded { path, kind, size, title, data }
+        let utf8 = std::str::from_utf8(&bytes).is_ok();
+        Loaded { path, kind, size, title, bytes: Arc::from(bytes), utf8 }
     }
 }
 
@@ -810,6 +805,18 @@ mod tests {
         assert_eq!((a.key(), a.route().as_deref()), (("abc123".to_owned(), 3), Some("artifact?id=abc123&v=3")));
         let f = Target::File { task_id: "t1".into(), path: "src/a.rs".into() };
         assert_eq!(f.key(), ("file:t1:src/a.rs".to_owned(), 0));
+    }
+
+    #[test]
+    fn viewers_share_the_panels_bytes_and_never_copy_them() {
+        let l = Loaded::from_bytes("/x/a.csv".into(), "csv".into(), "a.csv".into(), b"id\n1\n".to_vec());
+        let (a, b) = (l.shared(), l.shared());
+        assert!(std::ptr::eq(a.as_ptr(), l.bytes().as_ptr()) && std::ptr::eq(b.as_ptr(), l.bytes().as_ptr()), "one allocation");
+        assert_eq!(Arc::strong_count(&a), 3, "the panel's copy and two borrowers: counts, not copies");
+        let table = crate::viewers::table::CsvData::new(l.shared(), b',');
+        assert_eq!(table.rows(), 1);
+        assert_eq!(Arc::strong_count(&a), 4, "the index is built over the same bytes");
+        assert_eq!(table.held(), 16, "so the viewer's own memory is the index alone (two records, eight bytes each)");
     }
 
     #[test]

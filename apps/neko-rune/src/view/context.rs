@@ -188,7 +188,7 @@ pub fn viewer(s: &App, t: &Neko, target: &Target) -> El {
         Some(Content::TooLarge { size, path }) => too_large(t, *size, path),
         Some(Content::Ready(loaded)) => match viewers::resolve_for(&loaded.kind, Some(loaded.bytes())) {
             Some(spec) => {
-                let input = ViewerInput { kind: &loaded.kind, bytes: Some(loaded.bytes()), path: Some(&loaded.path), text: loaded.text(), theme_dark: t.dark, title: &loaded.title };
+                let input = ViewerInput { kind: &loaded.kind, bytes: Some(loaded.shared()), path: Some(&loaded.path), text: loaded.text(), theme_dark: t.dark, title: &loaded.title };
                 let key = target.key();
                 let route = target.route();
                 s.panel.states.with(&key, |st| {

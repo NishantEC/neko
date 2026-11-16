@@ -159,9 +159,19 @@ pub fn run() {
         let socket = socket_path();
         let (for_app, thread_handle) = (wanted.clone(), handle.clone());
         let dispatch = app::Dispatch::Async { socket: socket.clone(), handle: handle.clone() };
+        // A viewer's heavy work (a decode, a PDF page, a CSV index) runs on a thread of its own; when it is
+        // done the window builds its view again and the viewer picks the answer up.
+        let waker = std::sync::Mutex::new(handle.clone());
+        let wake: std::sync::Arc<dyn Fn() + Send + Sync> = std::sync::Arc::new(move || {
+            waker.lock().unwrap_or_else(std::sync::PoisonError::into_inner).update_if(|_, tx| {
+                tx.instant();
+                true
+            });
+        });
         handle.update_if(move |s, _| {
             s.wanted = for_app;
             s.dispatch = dispatch;
+            s.panel.states.use_threads(wake);
             false
         });
         connection::spawn(thread_handle, socket, neko_protocol::support_dir(), wanted);
