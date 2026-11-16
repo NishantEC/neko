@@ -1,4 +1,5 @@
-4ddf696b0f13ec618fdeb80b4c9ea1a6246547f1
+bc05f817ed19488a10a6f1a928cc0521c1c70c75
 # The Rune revision (a `dev` commit) this client builds against. Line 1 is the pin; the rest is notes.
 # Change it only with scripts/bump-rune.sh, on a green run, at most about weekly.
-# 2026-11-16: the chat/overlay/canvas spikes' revision. Newer `dev` builds are tried with the script.
+# 2026-11-16: started at 4ddf696b0f13 (the chat/overlay/canvas spikes' revision), then bumped to the
+#   newest dev, bc05f817ed19, with scripts/bump-rune.sh: it built unchanged and every test passed.

@@ -93,12 +93,13 @@ print("patch table:", ", ".join(names))
 if added: print("  NEW in Rune's table:", ", ".join(added))
 if removed: print("  GONE from Rune's table:", ", ".join(removed))
 PY
-printf '%s\n# bumped %s from %s; see scripts/bump-rune.sh\n' "$new" "$(date +%Y-%m-%d)" "${old:0:12}" > RUNE_REV.new && mv RUNE_REV.new RUNE_REV
+{ echo "$new"; tail -n +2 RUNE_REV; echo "# $(date +%Y-%m-%d): bumped from ${old:0:12} by scripts/bump-rune.sh"; } > RUNE_REV.new && mv RUNE_REV.new RUNE_REV
 
 # 3. The features this app turns on.
 for pair in "crates/rune:tooling" "crates/rune-kit:markdown"; do
   crate="${pair%%:*}"; feat="${pair##*:}"
-  curl -fsSL "$raw/$new/$crate/Cargo.toml" | grep -Eq "^$feat\s*=" || { echo "feature '$feat' is gone from $crate"; fail "feature $feat"; }
+  curl -fsSL "$raw/$new/$crate/Cargo.toml" -o "$work/crate.toml" || fail "fetching $crate/Cargo.toml"
+  grep -Eq "^$feat[[:space:]]*=" "$work/crate.toml" || { echo "feature '$feat' is gone from $crate"; fail "feature $feat"; }
 done
 
 # 4. Build, then the tests (unit, shell, read-only, headless snapshots).
