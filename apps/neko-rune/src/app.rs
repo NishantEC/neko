@@ -304,6 +304,11 @@ impl App {
                 self.call(Call::Refresh);
             }
         }
+        // A session chosen for the person (the first, or the one that replaced a session that went) gets
+        // the panel the rules give it, as one the person chose does.
+        if gone {
+            self.panel_on_select();
+        }
         self.after_live();
     }
 
