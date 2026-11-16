@@ -32,6 +32,8 @@ pub struct NewForm {
     pub error: Option<String>,
     /// The tasks there were when "Start" was pressed, to find the one it made.
     known: HashSet<String>,
+    /// The title the ticket was asked for with, to tell it from one another window made meanwhile.
+    expect: String,
 }
 
 /// The longest request the daemon keeps (`MAX_TASK_REQUEST`).
@@ -41,7 +43,7 @@ pub const MAX_REQUEST: usize = neko_protocol::workbench::MAX_TASK_REQUEST;
 pub fn title_of(request: &str) -> String {
     let line = request.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
     let line: String = line.chars().take(80).collect();
-    line.trim_end_matches(|c: char| c == '.' || c == ':' || c.is_whitespace()).to_owned()
+    line.trim_end_matches(|c: char| matches!(c, '.' | ':') || c.is_whitespace()).to_owned()
 }
 
 impl App {
@@ -49,7 +51,7 @@ impl App {
         self.new_request = TextEdit::new("");
         self.new_request.focused = true;
         self.new_check = TextEdit::new("");
-        self.new_form = Some(NewForm { workspace: 0, goal: false, choices: Vec::new(), runtime: None, menu: None, busy: false, error: None, known: HashSet::new() });
+        self.new_form = Some(NewForm { workspace: 0, goal: false, choices: Vec::new(), runtime: None, menu: None, busy: false, error: None, known: HashSet::new(), expect: String::new() });
         self.view = None;
         self.call(Call::Models);
     }
@@ -75,7 +77,7 @@ impl App {
     }
 
     pub fn submit_new(&mut self) {
-        if self.new_blocker().is_some() {
+        if self.new_blocker().is_some() || self.new_form.as_ref().is_none_or(|f| f.busy) || !self.work.busy.insert("new".to_owned()) {
             return;
         }
         let Some(summary) = self.summary.as_ref() else { return };
@@ -86,6 +88,7 @@ impl App {
         form.busy = true;
         form.error = None;
         form.known = known;
+        form.expect = title_of(&request);
         let call = Call::CreateTask { workspace_id: workspace.id.clone(), title: title_of(&request), goal: request };
         self.call(call);
     }
@@ -94,8 +97,15 @@ impl App {
     pub(crate) fn created_task(&mut self, summary: &Summary) -> Option<String> {
         let form = self.new_form.as_ref()?;
         let new: Vec<&crate::link::TaskRow> = summary.tasks.iter().filter(|t| !form.known.contains(&t.id)).collect();
-        // More than one new row means another window made one too: the newest is ours.
-        new.iter().max_by_key(|t| t.updated_at_ms).map(|t| t.id.clone())
+        // A task filed by a watch or by chat in the same moment is not ours: ours has our title.
+        let ours = new.iter().filter(|t| t.title == form.expect).max_by_key(|t| t.updated_at_ms).or(if new.len() == 1 { new.first() } else { None });
+        match ours {
+            Some(t) => Some(t.id.clone()),
+            None => {
+                self.new_error("Neko made the session, but this app couldn’t tell which one it is. It is in the sessions list.".to_owned());
+                None
+            }
+        }
     }
 
     /// The ticket exists: open it, then pin its runtime and attach its goal when asked.

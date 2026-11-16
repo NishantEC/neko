@@ -8,6 +8,9 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
+/// The largest image kept (Rune hands over at most 32 MiB of PNG).
+pub const MAX_BYTES: usize = 32 * 1024 * 1024;
+
 /// The folder pasted images go to.
 pub fn dir() -> PathBuf {
     std::env::var_os("NEKO_RUNE_ATTACHMENTS").map(PathBuf::from).unwrap_or_else(|| {
@@ -33,16 +36,18 @@ pub fn save_png(bytes: &[u8]) -> std::io::Result<PathBuf> {
 }
 
 pub fn save_png_in(dir: &Path, bytes: &[u8]) -> std::io::Result<PathBuf> {
-    if !bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "not a PNG"));
+    if !bytes.starts_with(&[0x89, b'P', b'N', b'G']) || bytes.len() > MAX_BYTES {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "not a PNG, or too large"));
     }
     std::fs::create_dir_all(dir)?;
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
     let path = dir.join(name_of(bytes));
     if !path.exists() {
-        let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&path)?;
-        if let Err(e) = file.write_all(bytes) {
-            let _ = std::fs::remove_file(&path);
+        // Written beside it and renamed, so a crash never leaves a half-written image under its name.
+        let partial = dir.join(format!("{}.partial", name_of(bytes)));
+        let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&partial)?;
+        if let Err(e) = file.write_all(bytes).and_then(|()| file.sync_all()).and_then(|()| std::fs::rename(&partial, &path)) {
+            let _ = std::fs::remove_file(&partial);
             return Err(e);
         }
     }
@@ -51,7 +56,9 @@ pub fn save_png_in(dir: &Path, bytes: &[u8]) -> std::io::Result<PathBuf> {
 
 /// The Markdown the message carries for a kept image.
 pub fn reference(path: &Path) -> String {
-    format!("![Image](file://{})", path.to_string_lossy())
+    // A space or a bracket in the folder's name would end the Markdown link early.
+    let encoded: String = path.to_string_lossy().chars().map(|c| if matches!(c, ' ' | '(' | ')' | '[' | ']') { format!("%{:02X}", c as u32) } else { c.to_string() }).collect();
+    format!("![Image](file://{encoded})")
 }
 
 #[cfg(test)]
@@ -70,6 +77,7 @@ mod tests {
         assert_eq!(std::fs::metadata(&a).unwrap().permissions().mode() & 0o777, 0o600);
         assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
         assert_eq!(reference(&a), format!("![Image](file://{})", a.display()));
+        assert_eq!(reference(Path::new("/Users/a b/(x)/i.png")), "![Image](file:///Users/a%20b/%28x%29/i.png)");
         std::fs::remove_dir_all(&dir).ok();
     }
 

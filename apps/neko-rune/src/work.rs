@@ -115,6 +115,9 @@ pub struct Work {
     pub all_turns: bool,
     /// The task whose detail was last asked for by id.
     pub detail_asked: Option<String>,
+    /// Writes in flight that must not be sent twice (`new`, `reply:<task>`, `ask`): each is
+    /// released by the daemon's answer, as the web's `sending` is.
+    pub busy: HashSet<String>,
 }
 
 /// Turns drawn before "Show earlier": the session view bounds what it lays out.
@@ -141,6 +144,7 @@ impl Default for Work {
             counter: 0,
             all_turns: false,
             detail_asked: None,
+            busy: HashSet::new(),
         }
     }
 }
@@ -357,7 +361,8 @@ impl App {
 
     /// Opens a task: its detail and runs are read, a finished task is marked seen.
     pub fn open_task(&mut self, id: &str) {
-        if self.selected.as_deref() != Some(id) {
+        let same = self.selected.as_deref() == Some(id);
+        if !same {
             self.park_draft();
         }
         self.selected = Some(id.to_owned());
@@ -368,8 +373,11 @@ impl App {
         self.work.refusal = None;
         self.work.confirm = None;
         self.work.expanded.retain(|k| !k.starts_with("goal:"));
-        let draft = self.work.drafts.get(id).cloned().unwrap_or_default();
-        self.composer.replace_text(draft);
+        if !same {
+            let draft = self.work.drafts.get(id).cloned().unwrap_or_default();
+            self.composer.replace_text(draft);
+            self.work.goal_answer.clear();
+        }
         self.wanted.set(Some(id));
         self.work.detail_asked = Some(id.to_owned());
         self.call(Call::Refresh);
@@ -399,7 +407,18 @@ impl App {
             let id = detail.task.id.clone();
             let revision = format!("{:?}:{}:{}", detail.task.status, detail.task.updated_at_ms, detail.task.events.len());
             if detail.has_folder && self.work.requested.get(&id) != Some(&revision) {
-                self.work.requested.insert(id.clone(), revision);
+                let moved = self.work.requested.insert(id.clone(), revision).is_some();
+                // The task moved on: a diff held for it may be out of date (the whole-task diff and
+                // a running run's grow), so the open one is read again, as the web does on every open.
+                if moved {
+                    let prefix = format!("{id}|");
+                    self.work.diffs.retain(|k, _| !k.starts_with(&prefix));
+                    self.work.diff_load.retain(|k, _| !k.starts_with(&prefix));
+                    if let Some(key) = self.work.open_run {
+                        self.work.diff_load.insert(diff_key(&id, key.run()), DiffLoad::Loading);
+                        self.call(Call::CheckpointDiff { task_id: id.clone(), run: key.run() });
+                    }
+                }
                 self.call(Call::Checkpoints { task_id: id });
             }
         }
@@ -438,7 +457,7 @@ impl App {
                 }
             };
             self.call(Call::Enqueue { task_id: task.id, command_id: id, text, mode });
-        } else {
+        } else if self.work.busy.insert(format!("reply:{}", task.id)) {
             self.call(Call::Reply { task_id: task.id, text });
         }
     }
@@ -565,7 +584,9 @@ impl App {
         if text.is_empty() {
             return;
         }
-        self.call(Call::Ask { text });
+        if self.work.busy.insert("ask".to_owned()) {
+            self.call(Call::Ask { text });
+        }
     }
 
     /// Opens a task by id from a link in Neko's column (a handoff line).
@@ -577,6 +598,13 @@ impl App {
 
     /// What a daemon answer does to the state. True when something on screen changed.
     pub fn apply_reply(&mut self, call: &Call, reply: Reply) -> bool {
+        // Whatever the answer, the write is no longer in flight.
+        match call {
+            Call::Reply { task_id, .. } => self.work.busy.remove(&format!("reply:{task_id}")),
+            Call::Ask { .. } => self.work.busy.remove("ask"),
+            Call::CreateTask { .. } => self.work.busy.remove("new"),
+            _ => false,
+        };
         match reply {
             Reply::Snapshot(summary) => {
                 let mut created = None;

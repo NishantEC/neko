@@ -71,17 +71,29 @@ pub fn tool_card(s: &App, t: &Neko, w: Where, tool: &Tool, turn_id: &str) -> El 
     if tool.state == ToolState::Waiting
         && let Some(approval) = tool.approval.clone()
     {
-        {
-            let (turn, call, call2, turn2) = (turn_id.to_owned(), approval.clone(), approval, turn_id.to_owned());
-            c = c.child(
+        // A tool call is decided by the turn and the call; an action Neko proposes on a task by the
+        // message and the approval's own id (`chat/decisions.tsx`).
+        let (turn, tool_id, name) = (turn_id.to_owned(), tool.id.clone(), tool.name.clone());
+        let decide = move |approve: bool| {
+            if name == crate::turns::ACTION_TOOL {
+                crate::link::Call::DecideChatAction { message_id: turn.clone(), action_id: approval.clone(), accept: approve }
+            } else {
+                crate::link::Call::DecideChatTool { turn_id: turn.clone(), call_id: tool_id.clone(), approve }
+            }
+        };
+        let decline = decide.clone();
+        let mut box_ = col().gap(4.0).px(8.0).pb(4.0);
+        if let Some(note) = &tool.approval_note {
+            box_ = box_.child(text(note.clone()).font(t.ty.meta).color(t.text.muted).wrap());
+        }
+        c = c.child(
+            box_.child(
                 row()
                     .gap(8.0)
-                    .px(8.0)
-                    .pb(4.0)
-                    .child(super::primary_button("Approve", &format!("{}approve-{}", w.ns, tool.id), t, move |s: &mut App| s.call(crate::link::Call::DecideChatTool { turn_id: turn.clone(), call_id: call.clone(), approve: true })))
-                    .child(super::quiet_button("Decline", &format!("{}decline-{}", w.ns, tool.id), t, move |s: &mut App| s.call(crate::link::Call::DecideChatTool { turn_id: turn2.clone(), call_id: call2.clone(), approve: false }))),
-            );
-        }
+                    .child(super::primary_button("Approve", &format!("{}approve-{}", w.ns, tool.id), t, move |s: &mut App| s.call(decide(true))))
+                    .child(super::quiet_button("Decline", &format!("{}decline-{}", w.ns, tool.id), t, move |s: &mut App| s.call(decline(false)))),
+            ),
+        );
     }
     if open {
         let body = match (&tool.edit, s.work.edit_diffs.contains_key(&tool.id)) {

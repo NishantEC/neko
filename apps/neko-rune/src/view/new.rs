@@ -100,7 +100,8 @@ pub fn form(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
             false
         })
         .build(k)
-        .key("new-request");
+        .key("new-request")
+        .w_full();
 
     let goal = Switch::new(f.goal).label("Keep going until a check passes").on_toggle(|s: &mut App| {
         if let Some(f) = s.new_form.as_mut() {

@@ -129,6 +129,20 @@ fn only_the_link_module_names_daemon_requests() {
 }
 
 #[test]
+fn the_scan_cannot_be_sidestepped_by_renaming_or_by_an_early_test_module() {
+    for (path, text) in crate_sources() {
+        // A renamed or glob-imported request type would hide its uses from the scan.
+        for sneaky in ["Request as", "Command as", "Request::*", "Command::*", "CrewCommand as", "GoalCommand as", "CheckpointCommand as", "use neko_protocol::*"] {
+            assert!(!production(&text).contains(sneaky), "{} uses `{sneaky}`, which hides requests from the allow-list scan", path.display());
+        }
+        // Everything after the first `#[cfg(test)]` is unscanned, so it must be the one test module.
+        if let Some((_, rest)) = text.split_once("#[cfg(test)]") {
+            assert!(rest.trim_start().starts_with("mod tests") && !rest.contains("#[cfg(test)]"), "{}: `#[cfg(test)]` must only guard the closing `mod tests`", path.display());
+        }
+    }
+}
+
+#[test]
 fn the_link_sends_exactly_the_allow_listed_requests() {
     let mut used = BTreeSet::new();
     for (path, text) in crate_sources().into_iter().filter(|(p, _)| p.components().any(|c| c.as_os_str() == "link")) {
@@ -178,7 +192,7 @@ fn only_the_attachments_module_writes_files_and_only_in_its_own_cache() {
     for (path, text) in crate_sources() {
         let code = production(&text);
         let is_attachments = path.ends_with("attachments.rs");
-        for forbidden in ["fs::write", "File::create", "OpenOptions", "fs::remove", "fs::rename", "create_dir"] {
+        for forbidden in ["fs::write", "File::create", "OpenOptions", "fs::remove", "fs::rename", "fs::copy", "File::options", "create_dir"] {
             assert!(is_attachments || !code.contains(forbidden), "{} uses `{forbidden}`", path.display());
         }
     }

@@ -405,3 +405,70 @@ fn a_live_snapshot_with_a_finished_reply_stops_asking() {
     settle(&mut rt);
     assert!(!has_text(&rt, "Neko is replying…") && rt.find("ask-stop").is_none());
 }
+
+#[test]
+fn a_double_press_sends_a_write_once_until_the_daemon_answers() {
+    // Reply.
+    let mut rt = runtime(scene("live"));
+    type_into(&mut rt, "composer-input", "use three tries");
+    press(&mut rt, Key::Enter, Mods::default());
+    press(&mut rt, Key::Enter, Mods::default());
+    assert_eq!(rt.state.outbox.iter().filter(|c| matches!(c, Call::Reply { .. })).count(), 1, "{:?}", rt.state.outbox);
+    // Ask Neko.
+    type_into(&mut rt, "ask", "what needs me?");
+    press(&mut rt, Key::Enter, Mods::default());
+    press(&mut rt, Key::Enter, Mods::default());
+    assert_eq!(rt.state.outbox.iter().filter(|c| matches!(c, Call::Ask { .. })).count(), 1);
+    // A new session.
+    let mut rt = runtime(scene("live"));
+    click(&mut rt, "new-session");
+    type_into(&mut rt, "new-request", "Make the sync job retry");
+    click(&mut rt, "new-start");
+    click(&mut rt, "new-start");
+    assert_eq!(rt.state.outbox.iter().filter(|c| matches!(c, Call::CreateTask { .. })).count(), 1);
+}
+
+#[test]
+fn a_task_filed_in_the_same_moment_is_not_mistaken_for_the_new_session() {
+    let mut rt = runtime(scene("live"));
+    click(&mut rt, "new-session");
+    type_into(&mut rt, "new-request", "Make the sync job retry");
+    click(&mut rt, "new-start");
+    rt.update(|s, _| {
+        let mut m = scenes::demo_full("t0");
+        let mut other = m.tasks[0].clone();
+        other.id = "watch".into();
+        other.title = "Something a watch filed".into();
+        other.updated_at_ms += 10;
+        let mut ours = m.tasks[0].clone();
+        ours.id = "ours".into();
+        ours.title = "Make the sync job retry".into();
+        m.tasks.extend([ours, other]);
+        let call = Call::CreateTask { workspace_id: "w1".into(), title: "x".into(), goal: "y".into() };
+        s.apply_reply(&call, Reply::Snapshot(m));
+    });
+    assert_eq!(rt.state.selected.as_deref(), Some("ours"), "matched by its title, not by being the newest");
+}
+
+#[test]
+fn an_action_neko_proposes_is_decided_with_the_web_s_request() {
+    let mut rt = runtime(scene("live"));
+    rt.update(|s, _| {
+        let m = s.summary.as_mut().unwrap();
+        m.conversation.last_mut().unwrap().parts = vec![
+            serde_json::json!({"type": "dynamic-tool", "toolName": "neko_task_action", "toolCallId": "action:act-1", "state": "approval-requested", "input": {"taskId": "t6", "kind": "message", "text": "Rebase it"}, "approval": {"id": "act-1"}}),
+            serde_json::json!({"type": "dynamic-tool", "toolName": "save_issue", "toolCallId": "call-1", "state": "approval-requested", "input": {"title": "x"}, "approval": {"id": "call-1"}}),
+        ];
+    });
+    settle(&mut rt);
+    assert!(has_text(&rt, "message · Rebase it"), "what a click approves is shown");
+    click(&mut rt, "neko-approve-action:act-1");
+    click(&mut rt, "neko-decline-call-1");
+    assert_eq!(
+        rt.state.outbox,
+        vec![
+            Call::DecideChatAction { message_id: "m4".into(), action_id: "act-1".into(), accept: true },
+            Call::DecideChatTool { turn_id: "m4".into(), call_id: "call-1".into(), approve: false },
+        ]
+    );
+}

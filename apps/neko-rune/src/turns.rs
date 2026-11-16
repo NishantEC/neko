@@ -62,6 +62,10 @@ pub struct Tool {
     pub edit: Option<Edit>,
     /// Set on a Neko tool that needs approval: the id its decision carries.
     pub approval: Option<String>,
+    /// The tool's name (`neko_task_action` for an action Neko proposes on a task).
+    pub name: String,
+    /// What a click would approve, in a line: the proposed action's text, or the tool's arguments.
+    pub approval_note: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -175,16 +179,28 @@ fn receipt(event: &TaskEvent, index: usize) -> Option<Tool> {
     let output = value["output"].as_str();
     let exit = value["exit_code"].as_i64();
     let failed = exit.is_some_and(|c| c != 0);
+    let flag = |k: &str| value[k] == true;
+    // The daemon's own test of how far a saved receipt can be trusted (`task_chat::receipt`).
+    let odd_flag = ["command_truncated", "output_truncated", "receipt_incomplete", "receipt_malformed", "raw_truncated"].iter().any(|k| value.get(*k).is_some_and(|v| !v.is_boolean()));
+    let incomplete = flag("receipt_incomplete") || flag("receipt_malformed") || !value["raw"].is_null() || odd_flag || command.is_none() || output.is_none() || exit.is_none() || flag("command_truncated");
     let mut lines = Vec::new();
     if let Some(c) = command {
         lines.push(format!("$ {c}"));
     }
-    match output {
-        Some(o) => lines.push(if o.trim().is_empty() { "No output.".to_owned() } else { o.trim().to_owned() }),
-        None => lines.push("This saved record is incomplete. It does not provide full command evidence.".to_owned()),
+    if let Some(o) = output {
+        lines.push(if o.trim().is_empty() { "No output.".to_owned() } else { o.trim().to_owned() });
     }
     if let Some(code) = exit.filter(|c| *c != 0) {
         lines.push(format!("exit {code}"));
+    }
+    if incomplete {
+        lines.push("This saved record is incomplete. It does not provide full command evidence.".to_owned());
+    }
+    if flag("command_truncated") {
+        lines.push("The command was shortened before it was saved.".to_owned());
+    }
+    if flag("output_truncated") {
+        lines.push("Output was shortened before it was saved. Only the retained output is available here.".to_owned());
     }
     Some(Tool {
         id: format!("receipt-{index}"),
@@ -197,6 +213,8 @@ fn receipt(event: &TaskEvent, index: usize) -> Option<Tool> {
         detail: Some(lines.join("\n\n")),
         edit: None,
         approval: None,
+        name: "Bash".to_owned(),
+        approval_note: None,
     })
 }
 
@@ -343,7 +361,15 @@ fn tool_of(part: &Value) -> Tool {
         .flatten()
         .filter(|e| !e.path.is_empty() && e.old.len() + e.new.len() <= 64 * 1024);
     let approval = (state == ToolState::Waiting).then(|| part["approval"]["id"].as_str().map(str::to_owned).unwrap_or_else(|| str_of(part, "toolCallId").to_owned()));
-    Tool { id: str_of(part, "toolCallId").to_owned(), title, kind, state, detail, edit, approval }
+    let approval_note = (state == ToolState::Waiting).then(|| {
+        let note = if name == ACTION_TOOL {
+            format!("{} · {}", str_of(input, "kind"), str_of(input, "text"))
+        } else {
+            serde_json::to_string(input).unwrap_or_default()
+        };
+        note.chars().take(300).collect::<String>()
+    });
+    Tool { id: str_of(part, "toolCallId").to_owned(), title, kind, state, detail, edit, approval, name: name.to_owned(), approval_note }
 }
 
 /// The blocks of a chat reply's parts, in the order they happened.
@@ -495,6 +521,8 @@ mod tests {
         assert_eq!(tools[2].title, "Edited export.sh");
         assert_eq!(tools[2].edit.as_ref().map(|e| (e.old.as_str(), e.new.as_str())), Some(("a", "b")));
         assert_eq!(tools[3].approval.as_deref(), Some("call-1"));
+        assert_eq!(tools[3].name, "save_issue");
+        assert!(tools[3].approval_note.as_deref().unwrap().contains("title"), "what a click would approve is shown");
         assert!(tools[1].detail.as_deref().unwrap().ends_with("exit 128"));
     }
 }

@@ -337,7 +337,7 @@ pub fn tray(s: &App, t: &Neko, task: &Task) -> Option<El> {
         }
         TaskStatus::ReadyForReview => {
             has_action = true;
-            if let Some(url) = task.pull_request.as_ref().map(|p| p.url.clone()).filter(|u| !u.is_empty()) {
+            if let Some(url) = task.pull_request.as_ref().filter(|p| p.is_open()).map(|p| p.url.clone()).filter(|u| !u.is_empty()) {
                 actions = actions.child(primary_button("Open pull request", "open-pr", t, move |s: &mut App| s.open_link(&url)));
                 let id = id.clone();
                 actions = actions.child(quiet_button("Mark done", "complete", t, move |s: &mut App| s.call(Call::Complete { task_id: id.clone() })));
