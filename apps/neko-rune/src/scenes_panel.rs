@@ -175,6 +175,11 @@ pub fn model_solid(s: &mut App) {
     show(s, "a-knot", "Torus knot", "glb", 1, samples::glb(160, 24));
 }
 
+/// The spike's measuring model: 48,000 triangles, shaded.
+pub fn model_48k(s: &mut App) {
+    show(s, "a-knot", "Torus knot", "glb", 1, samples::glb(1000, 24));
+}
+
 pub fn web(s: &mut App) {
     show(s, "a-page", "Landing page", "html", 1, b"<html><body>hello</body></html>".to_vec());
 }

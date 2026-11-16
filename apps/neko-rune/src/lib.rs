@@ -70,6 +70,17 @@ fn init() -> App {
                 app.wanted.set(app.selected.as_deref());
                 app.call(link::Call::Refresh);
             }
+            // For the panel's snapshots against a test daemon: open the task with this title, and show
+            // this artifact as the daemon's `ShowArtifact` would (`scripts/snap-harness.sh`).
+            if let Some(title) = std::env::var("NEKO_RUNE_OPEN_TASK").ok().filter(|t| !t.is_empty()) {
+                let id = app.summary.as_ref().and_then(|m| m.tasks.iter().find(|t| t.title == title)).map(|t| t.id.clone());
+                if let Some(id) = id {
+                    app.select(&id);
+                }
+            }
+            if let Some(id) = std::env::var("NEKO_RUNE_SHOW").ok().filter(|t| !t.is_empty()) {
+                app.show_artifact(&id, None);
+            }
         }
         app
     } else {

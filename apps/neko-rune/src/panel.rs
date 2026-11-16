@@ -181,6 +181,9 @@ pub enum TermRow {
     Gap(usize),
 }
 
+/// The Terminal tab's entries and rows, shared with the rows' builders, and how many older commands were left out.
+pub type TermRows = (Rc<Vec<Entry>>, Rc<Vec<TermRow>>, usize);
+
 pub struct TermCache {
     pub task_id: String,
     /// What the events were when this was made: how many, and the last one's time.
@@ -442,7 +445,7 @@ impl App {
                 self.background(move || (root.read(Path::new(&path)), path, task_id), move |app, (read, path, _)| {
                     let kind = Path::new(&path).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
                     let title = Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(path.clone());
-                    app.finish_open(&target, read.map(|(p, b)| (p, b)), Some((kind, title)));
+                    app.finish_open(&target, read, Some((kind, title)));
                     true
                 });
             }
@@ -696,7 +699,7 @@ impl App {
     }
 
     /// The Terminal tab's rows for the open task, made when its events changed.
-    pub fn terminal_rows(&self) -> Option<(Rc<Vec<Entry>>, Rc<Vec<TermRow>>, usize)> {
+    pub fn terminal_rows(&self) -> Option<TermRows> {
         let detail = self.detail()?;
         let stamp = (detail.task.events.len(), detail.task.events.last().map_or(0, |e| e.at_ms));
         let mut cache = self.panel.terminal.borrow_mut();

@@ -403,7 +403,8 @@ fn the_canvas_lists_artifacts_with_a_kind_icon_title_version_and_time_and_picks_
 
 #[test]
 fn every_built_in_viewer_draws_its_kind() {
-    let cases: [(&str, fn(&mut App), &str); 11] = [
+    type Case = (&'static str, fn(&mut App), &'static str);
+    let cases: [Case; 11] = [
         ("png", scenes_panel::canvas_image, "viewer-image"),
         ("gif", scenes_panel::image_gif, "viewer-image"),
         ("svg", scenes_panel::image_svg, "viewer-svg"),

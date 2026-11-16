@@ -163,7 +163,7 @@ pub fn glb(rings: u32, segs: u32) -> Vec<u8> {
     }
     let idx_at = bin.len();
     bin.extend(idx.iter().flat_map(|i| i.to_le_bytes()));
-    while bin.len() % 4 != 0 {
+    while !bin.len().is_multiple_of(4) {
         bin.push(0);
     }
     let json = format!(
@@ -192,7 +192,7 @@ pub fn glb(rings: u32, segs: u32) -> Vec<u8> {
         hz = hi[2],
     );
     let mut json = json.into_bytes();
-    while json.len() % 4 != 0 {
+    while !json.len().is_multiple_of(4) {
         json.push(b' ');
     }
     let total = 12 + 8 + json.len() + 8 + bin.len();

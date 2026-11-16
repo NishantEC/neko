@@ -366,6 +366,7 @@ pub const SCENES: &[Scene] = &[
     ("p3a-pdf", crate::scenes_panel::pdf),
     ("p3a-model3d", crate::scenes_panel::model),
     ("p3a-model3d-solid", crate::scenes_panel::model_solid),
+    ("p3a-model3d-48k", crate::scenes_panel::model_48k),
     ("p3a-web", crate::scenes_panel::web),
     ("p3a-fallback", crate::scenes_panel::fallback),
     ("p3a-too-large", crate::scenes_panel::too_large),

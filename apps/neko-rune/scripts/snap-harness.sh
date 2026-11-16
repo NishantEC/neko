@@ -7,7 +7,9 @@
 # folder under /tmp, seeded with the made-up workbench of scripts/fixtures/web-seed.mjs, no agents,
 # no clipboard; never the person's own Neko), asks it for the workbench through the Rune client's
 # own link (`neko-rune probe json`, read-only), and renders the `harness` scene in light and dark
-# without opening a window. Then stops the harness it started, by its own pid.
+# without opening a window. Then seeds one artifact of each viewer kind through the daemon (as an agent's
+# SaveArtifact would) and renders the context panel's Files tab and Canvas from what the daemon says
+# (`p3a-harness-*`). Then stops the harness it started, by its own pid.
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 repo="$(cd "$here/../.." && pwd)"
@@ -55,4 +57,37 @@ for theme in light dark; do
   # on the calling thread (NEKO_RUNE_SOCKET), as the headless tests do.
   NEKO_RUNE_SOCKET="$data/neko.sock" "$bin" --snap "$out/harness-session-$theme.png" --scene default --theme "$theme" --size 1360x840 --scale 1 >/dev/null 2>&1
   echo "wrote $out/harness-session-$theme.png"
+done
+
+# Artifacts: a PNG, a CSV and a model, saved over the socket, then shown by the client the way an event shows them.
+samples="$data/samples"; mkdir -p "$samples"
+ids="$(python3 - "$data/neko.sock" "$samples" <<'PY'
+import json, socket, struct, sys, zlib
+sock_path, samples = sys.argv[1], sys.argv[2]
+def png(w, h):
+    raw = b"".join(b"\x00" + bytes(v for x in range(w) for v in (x * 255 // w, y * 255 // h, 150)) for y in range(h))
+    chunk = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+files = {"Board mockup": ("png", png(320, 200)), "Events": ("csv", ("id,name,amount\n" + "".join(f"{i},user-{i},{i % 977}.{i % 100:02}\n" for i in range(5000))).encode())}
+out = []
+for title, (kind, body) in files.items():
+    path = f"{samples}/{title.replace(' ', '-')}.{kind}"
+    open(path, "wb").write(body)
+    s = socket.socket(socket.AF_UNIX); s.connect(sock_path)
+    req = json.dumps({"Request": {"id": 1, "request": {"SaveArtifact": {"title": title, "file": path, "show": False}}}}).encode()
+    s.sendall(struct.pack("<I", len(req)) + req)
+    while True:
+        n = struct.unpack("<I", s.recv(4))[0]; buf = b""
+        while len(buf) < n: buf += s.recv(n - len(buf))
+        frame = json.loads(buf)
+        if "Response" in frame: out.append(frame["Response"]["response"]["ArtifactSaved"]["artifact"]["id"]); break
+print(" ".join(out))
+PY
+)"
+read -r png_id csv_id <<< "$ids"
+for theme in light dark; do
+  NEKO_DATA_DIR="$data" NEKO_RUNE_SOCKET="$data/neko.sock" NEKO_RUNE_OPEN_TASK="Stop the nightly export running twice" NEKO_RUNE_SHOW="$png_id" "$bin" --snap "$out/p3a-harness-canvas-$theme.png" --scene default --theme "$theme" --size 1360x840 --scale 1 --at 0.5 >/dev/null 2>&1
+  echo "wrote $out/p3a-harness-canvas-$theme.png"
+  NEKO_DATA_DIR="$data" NEKO_RUNE_SOCKET="$data/neko.sock" NEKO_RUNE_OPEN_TASK="Stop the nightly export running twice" NEKO_RUNE_SHOW="$csv_id" "$bin" --snap "$out/p3a-harness-table-$theme.png" --scene default --theme "$theme" --size 1360x840 --scale 1 --at 0.5 >/dev/null 2>&1
+  echo "wrote $out/p3a-harness-table-$theme.png"
 done
