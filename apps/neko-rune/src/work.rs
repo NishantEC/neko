@@ -158,16 +158,41 @@ pub struct NekoCol {
     pub loaded: bool,
     /// What the last Inbox answer did, in the daemon's words.
     pub note: Option<String>,
+    /// A refusal or failure shown next to what it belongs to: `inbox:<seq>` or `goal:<id>`.
+    pub notes: HashMap<String, String>,
 }
 
 impl Default for NekoCol {
     fn default() -> Self {
-        NekoCol { inbox: Vec::new(), digest: None, asked_ms: i64::MIN / 2, loaded: false, note: None }
+        NekoCol { inbox: Vec::new(), digest: None, asked_ms: i64::MIN / 2, loaded: false, note: None, notes: HashMap::new() }
     }
 }
 
 /// How often the Inbox and the digest are read again (the web polls every 60 s).
 pub const NEKO_POLL_MS: i64 = 60_000;
+
+/// Where a refusal of this call is shown: next to the Inbox item or goal it belongs to.
+pub fn note_key(call: &Call) -> Option<String> {
+    match call {
+        Call::AnswerNeedsYou { seq } => Some(format!("inbox:{seq}")),
+        Call::GoalPause { id } | Call::GoalResume { id } | Call::GoalExtend { id, .. } | Call::GoalDone { id } | Call::GoalStop { id } | Call::GoalAnswer { id, .. } => Some(format!("goal:{id}")),
+        _ => None,
+    }
+}
+
+/// What an Inbox item can be answered with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ItemAct {
+    Call(Call),
+    Link(String),
+}
+
+/// One entry of an Inbox item's right-click menu.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ItemAction {
+    pub label: String,
+    pub act: ItemAct,
+}
 
 pub fn delivery(steer: Steer) -> DeliveryMode {
     match steer {
@@ -387,8 +412,29 @@ impl App {
     /// Opening a task marks it seen, unless the person marked it unread and has not left it.
     fn mark_opened(&mut self, id: &str) {
         self.keep_unread.remove(id);
-        if self.unseen.remove(id) {
+        // Only while the window has the keyboard: a task opened behind another app is not looked at.
+        if self.focused && self.unseen.remove(id) {
             self.call(Call::MarkSeen { task_id: id.to_owned(), seen: true });
+        }
+    }
+
+    /// A session is seen when it is on screen (not under a full view or the new-session form) in
+    /// a window that has the keyboard, and not marked unread by the person.
+    pub fn session_in_view(&self) -> Option<&str> {
+        self.selected.as_deref().filter(|_| self.focused && self.view.is_none() && self.new_form.is_none() && !self.lab)
+    }
+
+    /// The window gained or lost the keyboard: a finished session that was waiting on screen is
+    /// seen the moment it comes back.
+    pub fn set_focused(&mut self, focused: bool) {
+        self.focused = focused;
+        self.mark_visible_seen();
+    }
+
+    fn mark_visible_seen(&mut self) {
+        if let Some(id) = self.session_in_view().map(str::to_owned).filter(|id| self.unseen.contains(id) && !self.keep_unread.contains(id)) {
+            self.unseen.remove(&id);
+            self.call(Call::MarkSeen { task_id: id, seen: true });
         }
     }
 
@@ -430,10 +476,7 @@ impl App {
             self.call(Call::Digest);
         }
         // A finished task the person is looking at is seen (unless they marked it unread).
-        if let Some(id) = self.selected.clone().filter(|id| self.unseen.contains(id) && !self.keep_unread.contains(id)) {
-            self.unseen.remove(&id);
-            self.call(Call::MarkSeen { task_id: id, seen: true });
-        }
+        self.mark_visible_seen();
     }
 
     /// Sends the composer's text: queued with its mode while the task is in a turn, else as a
@@ -568,6 +611,41 @@ impl App {
         self.call(Call::GoalAnswer { id: goal_id.to_owned(), text });
     }
 
+    /// What the right-click menu of an Inbox item offers. A routine's item: its default (the daemon's
+    /// path the phone uses) and its link. A goal's item: the goal's own actions (its answer, or
+    /// resume, extend and stop), never "Use the default" from the routines' path.
+    pub fn item_actions(&self, item: &InboxItem) -> Vec<ItemAction> {
+        let mut out = Vec::new();
+        if let Some(gid) = &item.goal {
+            if let Some(goal) = self.summary.as_ref().and_then(|m| m.goals.iter().find(|g| &g.id == gid)) {
+                if goal.status == GoalStatus::Blocked
+                    && let Some(b) = &goal.blocked
+                {
+                    out.push(ItemAction { label: format!("Answer with the default: {}", b.default_answer), act: ItemAct::Call(Call::GoalAnswer { id: gid.clone(), text: String::new() }) });
+                }
+                for act in goal_actions(goal) {
+                    if matches!(act, GoalAct::Resume | GoalAct::Extend | GoalAct::Stop) && (goal.status == GoalStatus::Paused || act == GoalAct::Stop) {
+                        out.push(ItemAction { label: act.label(goal), act: ItemAct::Call(act.call(goal)) });
+                    }
+                }
+            }
+        } else if let Some(d) = &item.default {
+            out.push(ItemAction { label: format!("Use the default: {d}"), act: ItemAct::Call(Call::AnswerNeedsYou { seq: item.seq }) });
+        }
+        if let Some(link) = &item.link {
+            out.push(ItemAction { label: "Open".to_owned(), act: ItemAct::Link(link.clone()) });
+        }
+        out
+    }
+
+    pub fn run_item_action(&mut self, act: ItemAct) {
+        self.neko.notes.clear();
+        match act {
+            ItemAct::Call(c) => self.call(c),
+            ItemAct::Link(url) => self.open_link(&url),
+        }
+    }
+
     /// "Use the default" on an Inbox item: the same daemon path the phone uses.
     pub fn answer_default(&mut self, seq: u64) {
         self.call(Call::AnswerNeedsYou { seq });
@@ -608,6 +686,9 @@ impl App {
         match reply {
             Reply::Snapshot(summary) => {
                 let mut created = None;
+                if let Some(key) = note_key(call) {
+                    self.neko.notes.remove(&key);
+                }
                 // The answer to a write is the new workbench; a text the daemon took leaves the box.
                 match call {
                     Call::Enqueue { task_id, text, .. } | Call::Reply { task_id, text } => {
@@ -675,12 +756,17 @@ impl App {
                 changed
             }
             Reply::Answered(summary) => {
+                self.neko.notes.clear();
                 self.neko.note = Some(format!("Done: {summary}"));
                 self.call(Call::Inbox);
                 true
             }
             Reply::Done => false,
             Reply::Refused(message) => {
+                if let Some(key) = note_key(call) {
+                    self.neko.notes.insert(key, message);
+                    return true;
+                }
                 match call {
                     Call::Undo { task_id: _, run, through_later, snapshot_unsaved, revert } => {
                         self.work.undoing = false;
@@ -706,6 +792,10 @@ impl App {
             }
             Reply::Failed(error) => {
                 let line = crate::link::calm(&error, std::time::Duration::from_secs(1));
+                if let Some(key) = note_key(call) {
+                    self.neko.notes.insert(key, line);
+                    return true;
+                }
                 match call {
                     Call::Undo { .. } | Call::Redo { .. } => self.work.undoing = false,
                     Call::CheckpointDiff { task_id, run } => {

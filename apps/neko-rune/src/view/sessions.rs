@@ -1,6 +1,6 @@
 //! The sessions column: every task across workspaces, grouped by state (Needs you, Running, Done
-//! today; each collapsible, with a count). A row is one line: status glyph, faint id, title,
-//! quiet meta at the right: the state in words, then its age (the amber half circle is both
+//! today; each collapsible, with a count). A row is one line: status glyph, title, quiet meta at
+//! the right (the id is in the session's own top line, so the title gets the room): the state in words, then its age (the amber half circle is both
 //! "working" and "needs you", as in the web UI, so the words say which; DESIGN.md §3). A dot
 //! marks work that finished since you last opened it. Up and Down move between rows, Return
 //! opens one, right-click offers Mark as unread, Stop and Open in web UI. "+ New" sits at the
@@ -53,7 +53,9 @@ fn list(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
             }
         }
     }
-    col().key("sessions-scroll").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(c)
+    // The list scrolls inside its own region: it ends where the foot begins, its last rows fade out
+    // under that edge instead of showing through, and "+ New" stays where it is.
+    col().key("sessions-scroll").w_full().grow(1.0).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).scroll_edge_fade(18.0).child(c.pb(14.0))
 }
 
 fn running(status: TaskStatus) -> bool {
@@ -79,15 +81,13 @@ fn session_row(s: &App, task: &TaskRow, t: &Neko, layer: &mut Vec<El>) -> El {
         .gap(8.0)
         .center_y()
         .radius(t.radius.row)
-        .fill(if selected { t.surface.active } else { rune::Color::TRANSPARENT })
+        .fill(if selected { t.surface.selected } else { rune::Color::TRANSPARENT })
         .hover(t.surface.hover)
         .focus_ring(2.0, 0.0, t.kit.c.border_focus)
         .on_press(move |s: &mut App| s.select(&press_id))
         .on_secondary_press(move |s: &mut App, p, _| s.row_menu = Some((id.clone(), p)))
         .child(status_glyph(status_of(task.status), t, 14.0, Some("")));
-    if let Some(key) = &task.key {
-        r = r.child(text(key.clone()).font(t.ty.id).color(t.text.faint).a11y_hidden());
-    }
+    // No id here: it is in the session's own top line, and the title gets the room.
     r = r.child(text(task.title.clone()).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0).a11y_hidden());
     if unseen {
         // Iris, 6 points: what changed since you looked (DESIGN.md §8 rule 13).
@@ -95,8 +95,8 @@ fn session_row(s: &App, task: &TaskRow, t: &Neko, layer: &mut Vec<El>) -> El {
     }
     // The amber half circle is both "working" and "needs you": those rows say which in words;
     // the others say how long ago (the words are in the row's name for assistive technology).
-    let meta = if status_of(task.status) == crate::status::StatusKind::InProgress { status_word(task.status).to_owned() } else { age(s.now_ms, task.updated_at_ms) };
-    r = r.child(text(meta).key(format!("meta-{}", task.id)).font(t.ty.id).color(t.text.faint).a11y_hidden());
+    let meta = crate::groups::amber_word(task.status).map_or_else(|| age(s.now_ms, task.updated_at_ms), str::to_owned);
+    r = r.child(text(meta).key(format!("meta-{}", task.id)).font(t.ty.meta).color(t.text.muted).ml(8.0).a11y_hidden());
 
     match s.row_menu.as_ref().filter(|(open, _)| *open == task.id) {
         Some((_, at)) => {
@@ -125,8 +125,9 @@ fn session_row(s: &App, task: &TaskRow, t: &Neko, layer: &mut Vec<El>) -> El {
 
 fn foot(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     let new = nav_row(&icons::PLUS, "New", "new-session", s.new_form.is_some(), t).help("Start a session").on_press(|s: &mut App| s.open_new());
-    let divider = row().key("foot-divider").w_full().h(1.0).fill(t.surface.border).mt(6.0).mb(6.0);
-    let mut c = col().key("sessions-foot").w_full().px(8.0).pb(10.0).child(new).child(divider);
+    // A hairline above "+ New", where the scrolling list meets the pinned foot.
+    let divider = row().key("foot-divider").w_full().h(1.0).fill(t.surface.border).mb(6.0);
+    let mut c = col().key("sessions-foot").w_full().px(8.0).pb(10.0).fill(t.surface.sidebar).child(divider).child(new);
     for view in FullView::FOOT {
         c = c.child(nav_row(view.icon(), view.title(), &format!("view-{}", view.web_id()), s.view == Some(view), t).on_press(move |s: &mut App| s.open_view(view)));
     }

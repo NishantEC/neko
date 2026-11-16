@@ -35,6 +35,9 @@ pub struct InboxItem {
     pub detail: String,
     pub default: Option<String>,
     pub link: Option<String>,
+    /// The goal that raised it (its link is `goal:<id>`): it is answered with the goal's own actions.
+    #[serde(default)]
+    pub goal: Option<String>,
     pub urgent: bool,
     /// The routine that raised it.
     pub from: String,
@@ -99,6 +102,7 @@ pub fn inbox_items(routines: &[neko_protocol::routines::RoutineView]) -> Vec<Inb
                     detail: item.detail.clone(),
                     default: item.default.clone().filter(|d| !d.trim().is_empty()),
                     link: item.link.clone().filter(|l| l.starts_with("http://") || l.starts_with("https://")),
+                    goal: item.link.as_deref().and_then(|l| l.strip_prefix("goal:")).filter(|g| !g.is_empty()).map(str::to_owned),
                     urgent: item.urgent,
                     from: view.routine.name.clone(),
                     at_ms: run.finished_ms.unwrap_or(run.started_ms),

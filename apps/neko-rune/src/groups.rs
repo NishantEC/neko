@@ -94,6 +94,16 @@ pub fn status_word(status: TaskStatus) -> &'static str {
     }
 }
 
+/// What an amber row says in the column instead of its age: "Needs you" or "Building" (a plan or
+/// step waits on the person, or an agent is at work). None for the glyphs that need no word.
+pub fn amber_word(status: TaskStatus) -> Option<&'static str> {
+    match status {
+        TaskStatus::AwaitingApproval => Some("Needs you"),
+        TaskStatus::Planning | TaskStatus::Building | TaskStatus::Reviewing => Some("Building"),
+        _ => None,
+    }
+}
+
 /// Quiet meta for a row: how long ago it last changed ("now", "5m", "3h", "2d").
 pub fn age(now_ms: i64, then_ms: i64) -> String {
     let secs = ((now_ms - then_ms) / 1000).max(0);
@@ -170,6 +180,15 @@ mod tests {
         // Same glyph, so the words must differ (DESIGN.md section 3: the glyph is never the only cue).
         let words: std::collections::HashSet<_> = [TaskStatus::AwaitingApproval, TaskStatus::Planning, TaskStatus::Building, TaskStatus::Reviewing].map(status_word).into_iter().collect();
         assert_eq!(words.len(), 4);
+    }
+
+    #[test]
+    fn only_amber_rows_say_a_word_in_the_column() {
+        use TaskStatus::*;
+        assert_eq!([AwaitingApproval, Planning, Building, Reviewing].map(amber_word), [Some("Needs you"), Some("Building"), Some("Building"), Some("Building")]);
+        for s in [Queued, ReadyForReview, Completed, Failed, Cancelled] {
+            assert_eq!(amber_word(s), None, "{s:?} shows its age");
+        }
     }
 
     #[test]

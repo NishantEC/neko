@@ -64,7 +64,10 @@ fn init() -> App {
         }
         app
     } else {
-        App { linked: !has("nolink"), ..App::default() }
+        // The last run's widths (read once, before the first frame); the window then keeps them.
+        let saved = app::load_layout();
+        let layout = saved.map(layout::Layout::restored).unwrap_or_default();
+        App { linked: !has("nolink"), layout, layout_written: saved, persist_layout: true, ..App::default() }
     }
 }
 
@@ -100,10 +103,14 @@ pub fn run() {
         scenes: scenes::SCENES,
         min_size: Some((960.0, 560.0)),
         on_key: Some(on_key),
-        poll: Some(|s: &mut App, t: f64, _: &mut rune::Tx| s.tick_stream(t)),
+        poll: Some(|s: &mut App, t: f64, tx: &mut rune::Tx| {
+            let moved = s.tick_stream(t);
+            s.tick_layout(t, tx);
+            moved
+        }),
         ..rune::AppSpec::new("Neko (Rune)", (1360.0, 840.0), init, view::view)
     };
-    let app = rune::App::new(spec).titlebar(rune::Titlebar::new(44.0));
+    let app = rune::App::new(spec).titlebar(rune::Titlebar::new(44.0)).on_focus(|s: &mut App, focused: bool, _| s.set_focused(focused));
     let handle = app.handle();
     let mut started = false;
     app.on_ready(move |_| {

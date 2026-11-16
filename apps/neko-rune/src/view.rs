@@ -35,9 +35,9 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let layout = &s.layout;
     // What fits: the session keeps its minimum, so a small window narrows or hides the others.
     // Before the first layout there is no width to read, and the state's own widths stand.
-    let fit = match cx.layout_size("window") {
-        Some([w, _]) => layout.fit(w),
-        None => crate::layout::Fit { context: layout.context.shown_width(), neko_open: layout.neko.is_open() },
+    let (fit, win_h) = match cx.layout_size("window") {
+        Some([w, h]) => (layout.fit(w), h),
+        None => (crate::layout::Fit { context: layout.context.shown_width(), neko_open: layout.neko.is_open() }, 840.0),
     };
 
     let mut window = row().key("window").w_full().h_full().fill(t.surface.sidebar);
@@ -51,7 +51,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     }
     if fit.neko_open {
         window = window.child(grip(Region::Neko, &t));
-        window = window.child(neko::column(s, &t).w(layout.neko.width()).key("neko"));
+        window = window.child(neko::column(s, &t, win_h, &mut layer).w(layout.neko.width()).key("neko"));
     } else {
         window = window.child(neko::strip(s, &t).w(NEKO_STRIP).key("neko"));
     }
@@ -138,6 +138,24 @@ fn quiet_button(label: &str, key: &str, t: &Neko, on_press: impl Fn(&mut App) + 
         .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(on_press)
         .child(text(label.to_owned()).font(t.ty.meta).color(t.text.base).a11y_hidden())
+}
+
+/// An affirmative action that is not the region's one primary button: Iris text, no fill, a soft
+/// fill under the pointer (Approve on a tool call, beside a primary elsewhere in the region).
+fn accent_button(label: &str, key: &str, t: &Neko, on_press: impl Fn(&mut App) + 'static) -> El {
+    row()
+        .key(key.to_owned())
+        .role("button")
+        .label(label)
+        .focusable(true)
+        .h(26.0)
+        .px(10.0)
+        .radius(t.radius.control)
+        .center()
+        .hover(t.surface.hover)
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
+        .on_press(on_press)
+        .child(text(label.to_owned()).font(rune::TextStyle { weight: 500.0, ..t.ty.meta }).color(t.meaning.iris).a11y_hidden())
 }
 
 /// The one primary action on a view: Iris, the colour of "do this".

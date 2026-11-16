@@ -60,10 +60,10 @@ fn the_four_regions_stand_left_to_right_and_there_are_no_tabs() {
         let key = e.key.as_deref().unwrap_or("");
         assert!(!key.starts_with("rail") && key != "tabs" && key != "new-tab" && !key.starts_with("t-"), "no tabs, no rail: {key}");
     }
-    // The defaults: 260 for sessions, 300 for Neko, the rest for the session.
-    assert_eq!(sessions[2], 260.0);
-    assert_eq!(neko[2], 300.0);
-    assert!(session[2] > 650.0, "{}", session[2]);
+    // The decided defaults: 300 for sessions (titles show about thirty letters), 340 for Neko, the rest for the session.
+    assert_eq!(sessions[2], 300.0);
+    assert_eq!(neko[2], 340.0);
+    assert!(session[2] > 600.0, "{}", session[2]);
     assert!(session[2] > MIDDLE_MIN);
 }
 
@@ -165,7 +165,8 @@ fn the_context_panel_toggles_from_the_top_line_and_picks_a_kind() {
     click(&mut rt, "context-toggle");
     assert!(rt.state.layout.context.is_open());
     assert!(rt.find("context").is_some() && rt.find("context-picker").is_some());
-    assert_eq!(rect(&rt, "context")[2], 360.0);
+    // In a 1280 window the session keeps its minimum: the panel narrows to its own minimum and Neko folds to its icon.
+    assert_eq!(rect(&rt, "context")[2], 320.0);
     let t = texts(&rt);
     for kind in ContextKind::ALL {
         assert!(t.contains(&kind.title().to_owned()), "{}", kind.title());
@@ -209,9 +210,10 @@ fn neko_shows_the_crew_the_inbox_and_collapses_to_an_icon_and_back() {
     // The Neko column holds what the sessions column does not: routine and goal items with their
     // defaults, never the tasks that need you (those are the sessions column's first group).
     assert!(rt.find("inbox-3").is_some() && rt.find("inbox-use-3").is_some(), "an item with its default and a button");
-    assert!(rt.find("inbox-t0").is_none() && keyed(&rt, "inbox-t") == 0, "the Needs you tasks are not repeated here");
-    assert!(t.contains(&"default: Send the numbers from last week".to_owned()), "{t:?}");
-    assert!(rt.find("inbox-use-1").is_none() && t.contains(&"No default".to_owned()), "no default, no button");
+    assert!(rt.find("inbox-t0").is_none() && rt.find("inbox-t1").is_none(), "the Needs you tasks are not repeated here");
+    assert!(rt.find("inbox-use-1").is_none(), "no default, no button");
+    assert!(rt.find("inbox-use-2").is_none(), "a goal's item has the goal's own actions in its menu, not the routines' default button");
+    assert!(!t.iter().any(|x| x.starts_with("default:")), "the default is on the button and in the menu, not a line of its own: {t:?}");
     assert!(rt.find("ask").is_some());
     click(&mut rt, "inbox-use-3");
     assert_eq!(rt.state.outbox.last(), Some(&neko_rune::link::Call::AnswerNeedsYou { seq: 3 }), "Use the default asks the daemon the way the Inbox does");
@@ -222,11 +224,11 @@ fn neko_shows_the_crew_the_inbox_and_collapses_to_an_icon_and_back() {
 
     click(&mut rt, "neko-collapse");
     assert!(!rt.state.layout.neko.is_open());
-    assert!((rect(&rt, "neko")[2] - 48.0).abs() < 1.0, "collapsed to an icon");
+    assert!((rect(&rt, "neko")[2] - 44.0).abs() < 1.0, "collapsed to an icon");
     assert!(rt.find("neko-title").is_none());
     assert!(rt.elements().iter().any(|e| e.label.as_deref() == Some("Neko, 6 need you")), "the icon carries the count");
     click(&mut rt, "neko-expand");
-    assert!((rect(&rt, "neko")[2] - 300.0).abs() < 1.0);
+    assert!((rect(&rt, "neko")[2] - 340.0).abs() < 1.0);
 }
 
 #[test]
@@ -237,17 +239,17 @@ fn dragging_an_edge_resizes_its_region_within_the_range() {
     rt.pointer_move(x + 60.0, y);
     rt.pointer_up(x + 60.0, y);
     settle(&mut rt);
-    assert_eq!(rt.state.layout.sessions.width(), 320.0);
-    assert_eq!(rect(&rt, "sessions")[2], 320.0);
+    assert_eq!(rt.state.layout.sessions.width(), 360.0);
+    assert_eq!(rect(&rt, "sessions")[2], 360.0);
 
     let (x, y) = rt.find("grip-neko").unwrap();
     rt.pointer_down(x, y);
     rt.pointer_move(x - 80.0, y);
     rt.pointer_up(x - 80.0, y);
     settle(&mut rt);
-    assert_eq!(rt.state.layout.neko.width(), 380.0, "dragging a right-hand edge left widens it");
+    assert_eq!(rt.state.layout.neko.width(), 420.0, "dragging a right-hand edge left widens it");
     assert!(rt.state.layout.middle(WINDOW.0) >= MIDDLE_MIN);
-    rt.update(|s, _| s.layout.drag(Region::Sessions, 320.0, 900.0));
+    rt.update(|s, _| s.layout.drag(Region::Sessions, 360.0, 900.0));
     settle(&mut rt);
     assert_eq!(rt.state.layout.sessions.width(), 420.0);
 }

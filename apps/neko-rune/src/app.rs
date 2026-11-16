@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rune::{AppHandle, PointerPress, TextEdit};
 
 use crate::groups::{Group, first_session};
-use crate::layout::Layout;
+use crate::layout::{Layout, Saved};
 use crate::link::{Call, LinkError, LinkEvent, Summary, TaskRow, Wanted, calm, make};
 use crate::new_session::NewForm;
 use crate::work::{NekoCol, Work};
@@ -172,6 +172,31 @@ pub struct App {
     pub palette: Option<PaletteState>,
     pub palette_query: TextEdit,
     pub stream: Option<Stream>,
+    /// Whether this window keeps its widths between runs (the real window only; a headless run or
+    /// a test never touches the preferences file).
+    pub persist_layout: bool,
+    /// What was last written, and when a newer layout was first seen (it is written once it stops moving).
+    pub layout_written: Option<Saved>,
+    pub layout_changed_at: Option<f64>,
+    /// The window has the keyboard. A finished session is only seen while it does.
+    pub focused: bool,
+    /// The right-click menu on an Inbox item: which, and where.
+    pub inbox_menu: Option<(u64, PointerPress)>,
+}
+
+/// Where the window's own settings are kept (Rune's `prefs` store).
+pub const PREFS_ID: &str = "neko-rune";
+
+/// Reads the layout the last run left, if any. Called once at startup, before the first frame.
+pub fn load_layout() -> Option<Saved> {
+    rune::prefs::Prefs::open(PREFS_ID).get::<Saved>("layout")
+}
+
+/// Writes a layout on its own thread: nothing touches a file while input or frames run.
+fn write_layout(saved: Saved) {
+    let _ = std::thread::Builder::new().name("neko-layout".into()).spawn(move || {
+        let _ = rune::prefs::Prefs::open(PREFS_ID).set("layout", &saved);
+    });
 }
 
 /// The system clock, in epoch milliseconds.
@@ -215,6 +240,11 @@ impl Default for App {
             palette: None,
             palette_query: TextEdit::new(""),
             stream: None,
+            persist_layout: false,
+            layout_written: None,
+            layout_changed_at: None,
+            focused: true,
+            inbox_menu: None,
         }
     }
 }
@@ -309,6 +339,30 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Keeps the layout: once it has stopped changing for half a second, it is written (off the UI
+    /// thread). True never: nothing on screen depends on it. Asks to be woken to write the last change.
+    pub fn tick_layout(&mut self, t: f64, tx: &mut rune::Tx) -> bool {
+        if !self.persist_layout {
+            return false;
+        }
+        let now = self.layout.saved();
+        match (self.layout_written, self.layout_changed_at) {
+            (Some(w), _) if w == now => self.layout_changed_at = None,
+            (None, None) if self.layout == Layout::default() => {}
+            (_, None) => {
+                self.layout_changed_at = Some(t);
+                tx.wake_at(t + 0.6);
+            }
+            (_, Some(at)) if t - at >= 0.5 => {
+                write_layout(now);
+                self.layout_written = Some(now);
+                self.layout_changed_at = None;
+            }
+            (_, Some(_)) => tx.wake_at(t + 0.6),
+        }
+        false
     }
 
     /// Advances a scripted stream to time `t` (seconds on the run's clock). True when words arrived.

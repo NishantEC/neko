@@ -85,6 +85,8 @@ pub struct Surfaces {
     pub hover: Color,
     /// The active tab and the open rail place: a soft fill, the foreground at 8%.
     pub active: Color,
+    /// The open row of a list: the foreground at 6%.
+    pub selected: Color,
 }
 
 /// Text in three greys (DESIGN.md §2).
@@ -181,6 +183,7 @@ impl Neko {
             border: ink(0.12),
             hover: ink(0.03),
             active: ink(0.08),
+            selected: ink(0.06),
         };
         // The faint grey is the muted grey thinned toward the window, an opaque colour so it
         // never changes with what is under it. Blended in sRGB, as the web's `/70` is.

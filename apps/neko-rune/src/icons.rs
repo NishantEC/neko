@@ -25,3 +25,8 @@ icon_body!(GAUGE, "gauge", r#"<path d="M2.5 11.5A5.5 5.5 0 1 1 13.5 11.5M8 9L10.
 icon_body!(PANEL_RIGHT, "panel-right", r#"<rect x="2.5" y="3" width="11" height="10" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M9.5 3V13" fill="none" stroke="currentColor" stroke-width="1.2"/>"#);
 icon_body!(SPARK, "spark", r#"<path d="M8 2.5L9.3 6.7L13.5 8L9.3 9.3L8 13.5L6.7 9.3L2.5 8L6.7 6.7Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>"#);
 icon_body!(SEND, "send", r#"<path d="M8 13V3.5M4 7.5L8 3.5L12 7.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(CHECK_LINE, "check-line", r#"<path d="M3.5 8.5L6.5 11.5L12.5 4.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(CHEVRON_LEFT, "chevron-left", r#"<path d="M10 3.5L5.5 8L10 12.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(CHEVRON_RIGHT, "chevron-right", r#"<path d="M6 3.5L10.5 8L6 12.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(PLAY, "play", r#"<path d="M5 3.5L12 8L5 12.5Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>"#);
+icon_body!(EXTERNAL, "external", r#"<path d="M9 3H13V7M13 3L7.5 8.5M11 9.5V12.5H3.5V5H6.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>"#);

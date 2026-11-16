@@ -34,7 +34,7 @@ pub fn demo_summary() -> Summary {
         (Cancelled, 1),
     ];
     let titles = ["Add a retry to the sync job", "Fix the empty state on the board", "Split the settings page", "Rename the export command", "Cache the repository list"];
-    let goals = ["tests pass · turn 4/20", "the board shows a message when it is empty", "one section per file, same tests", "old name still works for a release", "refresh at most once a minute"];
+    let goals = ["failed requests are retried before the run stops", "the board shows a message when it is empty", "one section per file, same tests", "old name still works for a release", "refresh at most once a minute"];
     let mut tasks = Vec::new();
     for (status, n) in shape {
         for i in 0..n {
@@ -71,7 +71,7 @@ fn task(row: &TaskRow, events: Vec<(&str, String)>, plan: &str, result: &str) ->
     }))
     .expect("a task");
     t.status = row.status;
-    t.goal = format!("{}.\n{}", row.title, row.goal);
+    t.goal = format!("{}.", row.title);
     t.events = events.into_iter().enumerate().map(|(i, (role, message))| neko_protocol::workbench::TaskEvent { at_ms: row.updated_at_ms - 3_000_000 + 60_000 * i as i64, role: role.into(), message }).collect();
     t
 }
@@ -189,9 +189,9 @@ fn blank() -> ChatMessage {
 
 fn inbox() -> Vec<InboxItem> {
     vec![
-        InboxItem { seq: 3, title: "Reply before the 3pm call".into(), detail: "Sam is waiting on the budget numbers.".into(), default: Some("Send the numbers from last week".into()), link: None, urgent: false, from: "Messages".into(), at_ms: DEMO_NOW - 600_000 },
-        InboxItem { seq: 2, title: "Extend by 10 turns?".into(), detail: "Paused: it used its 20 turns.".into(), default: Some("Extend by 10 turns".into()), link: None, urgent: false, from: "Goals".into(), at_ms: DEMO_NOW - 3_600_000 },
-        InboxItem { seq: 1, title: "Enable the calendar API".into(), detail: "The calendar server needs the API enabled for its project.".into(), default: None, link: Some("https://example.com/enable".into()), urgent: false, from: "Calendar".into(), at_ms: DEMO_NOW - 7_200_000 },
+        InboxItem { goal: None, seq: 3, title: "Reply before the 3pm call".into(), detail: "Sam is waiting on the budget numbers.".into(), default: Some("Send the numbers from last week".into()), link: None, urgent: false, from: "Messages".into(), at_ms: DEMO_NOW - 600_000 },
+        InboxItem { goal: Some("g1".into()), seq: 2, title: "Extend by 10 turns?".into(), detail: "Paused: it used its 20 turns.".into(), default: Some("Extend by 10 turns".into()), link: None, urgent: false, from: "Goals".into(), at_ms: DEMO_NOW - 3_600_000 },
+        InboxItem { goal: None, seq: 1, title: "Enable the calendar API".into(), detail: "The calendar server needs the API enabled for its project.".into(), default: None, link: Some("https://example.com/enable".into()), urgent: false, from: "Calendar".into(), at_ms: DEMO_NOW - 7_200_000 },
     ]
 }
 
@@ -334,7 +334,7 @@ pub const SCENES: &[Scene] = &[
     }),
     ("collapsed", |s| {
         live(s);
-        s.layout.neko.set_open(false);
+        s.layout.set_neko_open(false);
         s.collapsed = [false, true, false];
     }),
     ("steer", |s| {

@@ -52,9 +52,12 @@ fn top_line(s: &App, task: &TaskRow, t: &Neko) -> El {
     if !task.goal.is_empty() && plain(&task.goal) != plain(&task.title) {
         meta.push(task.goal.clone());
     }
-    band(t)
-        .px(20.0)
-        .child(status_glyph(status_of(task.status), t, 14.0, Some(status_label(task.status))))
+    let mut line = band(t).px(20.0).child(status_glyph(status_of(task.status), t, 14.0, Some(status_label(task.status))));
+    // The id lives here, not in the sessions column's rows: the title gets that room.
+    if let Some(id) = &task.key {
+        line = line.child(text(id.clone()).key("top-id").font(t.ty.id).color(t.text.faint).a11y_hidden());
+    }
+    line
         .child(text(task.title.clone()).key("top-title").font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(t.text.base).truncate().a11y_hidden().role("heading"))
         .child(text(meta.join(" · ")).key("top-meta").font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0))
         .child(icon_button(&icons::PANEL_RIGHT, if s.layout.context.is_open() { "Hide context" } else { "Show context" }, "context-toggle", t, |s: &mut App| s.layout.context.toggle()))
@@ -70,22 +73,35 @@ fn session(s: &App, row_task: &TaskRow, t: &Neko, layer: &mut Vec<El>) -> El {
     };
     let task = &detail.task;
     let goals = s.summary.as_ref().map(|m| m.goals_of(&task.id)).unwrap_or_default();
-    if !goals.is_empty() {
-        let mut g = col().key("goals").w_full().px(8.0).pb(2.0);
-        for goal in goals {
-            g = g.child(work::goal_line(s, t, goal));
-        }
-        c = c.child(g);
-    }
-    c = c.child(
+    // The goal line is sticky: it floats over the top of the conversation, and the conversation's
+    // scroll area is inset by its height plus 8, so its first line is never under it.
+    // The lines' own padding (4 above, 4 below) and 8 of air.
+    let inset = if goals.is_empty() { 0.0 } else { goals.len() as f32 * work::GOAL_LINE_H + 16.0 };
+    let content = col().w_full().max_w(COLUMN - 120.0).px(24.0).pb(20.0).pt(inset).child(conversation(s, t, task, detail.has_folder));
+    let mut region = col().key("turns-region").w_full().grow(1.0).min_h(0.0).child(
         col()
             .key("turns")
             .w_full()
-            .grow(1.0)
+            .h_full()
             .min_h(0.0)
+            .clip_rounded(0.0)
             .scroll(ScrollSpec { stick_bottom: true })
-            .child(row().w_full().justify_center().child(conversation(s, t, task, detail.has_folder).w_full().max_w(COLUMN - 120.0).px(24.0).pb(20.0))),
+            .scroll_margin(inset)
+            .child(row().w_full().justify_center().child(content)),
     );
+    if !goals.is_empty() {
+        let mut lines = col().key("goals").w_full().px(8.0).pt(4.0).pb(4.0).fill(t.surface.window);
+        for goal in &goals {
+            lines = lines.child(work::goal_line(s, t, goal));
+            // What a goal adds (its question, a refusal, its evidence when opened) hangs under its line
+            // and scrolls on its own, over the conversation, until it is closed.
+            if let Some(body) = work::goal_body(s, t, goal) {
+                lines = lines.child(col().key(format!("goal-body-{}", goal.id)).w_full().max_h(380.0).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body));
+            }
+        }
+        region = region.child(lines.absolute(0.0, 0.0));
+    }
+    c = c.child(region);
     if let Some(tray) = work::tray(s, t, task) {
         c = c.child(row().w_full().justify_center().px(20.0).pb(8.0).child(tray.w_full().max_w(COLUMN - 120.0)));
     }

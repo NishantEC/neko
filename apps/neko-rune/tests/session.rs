@@ -336,8 +336,9 @@ fn two_states_with_the_same_glyph_are_told_apart_in_words() {
     let meta = |id: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("meta-{id}"))).and_then(|e| e.text);
     assert_eq!(meta("t0").as_deref(), Some("Needs you"));
     assert_eq!(meta("t6").as_deref(), Some("Building"));
-    assert_eq!(meta("t9").as_deref(), Some("Planning"));
-    assert_eq!(meta("t10").as_deref(), Some("Reviewing"));
+    assert_eq!(meta("t9").as_deref(), Some("Building"), "planning is an agent at work too");
+    assert_eq!(meta("t10").as_deref(), Some("Building"));
+    assert_eq!(meta("t3").as_deref(), Some("23m"), "a sky row says its age, not a word");
     let label = |id: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("session-{id}"))).and_then(|e| e.label).unwrap();
     assert!(label("t0").contains("Needs you") && label("t6").contains("Building"), "{} / {}", label("t0"), label("t6"));
 }
@@ -381,11 +382,12 @@ fn the_digest_opens_to_its_lists_and_marks_read() {
     });
     assert!(has_text(&rt, "3 things finished, 1 thing is stuck"));
     assert!(!has_text(&rt, "Needs a decision"));
+    // Fold the Inbox so the opened digest has room (the top of the column scrolls at its cap).
+    click(&mut rt, "inbox-toggle");
     click(&mut rt, "digest-toggle");
     for word in ["Finished", "Stuck", "Needs a decision", "default: Send the numbers from last week", "3 events today"] {
         assert!(has_text(&rt, word), "{word}");
     }
-    click(&mut rt, "digest-toggle");
     click(&mut rt, "digest-read");
     assert_eq!(rt.state.outbox, vec![Call::MarkDigestRead]);
     assert!(has_text(&rt, "Nothing needs you"), "once read, the block says so");

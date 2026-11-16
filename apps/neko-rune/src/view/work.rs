@@ -8,15 +8,19 @@ use neko_protocol::workbench::{Task, TaskStatus};
 use rune::{El, ScrollSpec, col, row, text};
 use rune_kit::diff::DiffView;
 
-use super::{primary_button, quiet_button};
+use super::{accent_button, primary_button, quiet_button};
 use crate::app::App;
 use crate::link::Call;
 use crate::status::{StatusKind, status_glyph};
 use crate::theme::Neko;
 use crate::work::{DiffLoad, RunKey, UndoOptions, diff_key, goal_actions, goal_kind, goal_state, goal_word, stop_reason, turn_text, waiting_reason};
 
-/// One goal on one line: glyph, objective, "turn 4/20 · check failing", and a blocked goal's
-/// one question with its default. Open, its ledger, journal and actions.
+/// How tall a goal's sticky line is. The conversation under it is inset by this much per goal.
+pub const GOAL_LINE_H: f32 = 32.0;
+
+/// One goal on one line, the line that stays at the top of the session: glyph, objective and
+/// "turn 4/20 · check failing". Pressing it opens the goal's body (goal_body) at the top of the
+/// conversation.
 pub fn goal_line(s: &App, t: &Neko, goal: &Goal) -> El {
     let key = format!("goal:{}", goal.id);
     let open = s.open(&key);
@@ -28,7 +32,7 @@ pub fn goal_line(s: &App, t: &Neko, goal: &Goal) -> El {
         .expanded(open)
         .focusable(true)
         .w_full()
-        .min_h(32.0)
+        .h(GOAL_LINE_H)
         .px(12.0)
         .gap(10.0)
         .center_y()
@@ -39,44 +43,58 @@ pub fn goal_line(s: &App, t: &Neko, goal: &Goal) -> El {
         .child(status_glyph(goal_kind(goal.status), t, 14.0, Some("")))
         .child(text(goal.objective.clone()).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0).a11y_hidden())
         .child(text(format!("{} · {}", turn_text(goal), goal_state(goal))).key(format!("goal-meta-{}", goal.id)).font(t.ty.meta).color(t.text.muted).truncate().a11y_hidden());
-    let mut c = col().key(format!("goalbox-{}", goal.id)).w_full().child(header);
+    header
+}
+
+/// What a goal adds under its line when it has something to say: a blocked goal's one question
+/// with its default, a refusal from the daemon, and (open) its ledger, journal and actions. None
+/// when the line says it all.
+pub fn goal_body(s: &App, t: &Neko, goal: &Goal) -> Option<El> {
+    let open = s.open(&format!("goal:{}", goal.id));
+    let mut c = col().key(format!("goalbox-{}", goal.id)).w_full();
+    let mut any = false;
     if goal.status == GoalStatus::Blocked
         && let Some(blocked) = &goal.blocked
     {
-        {
-            let (id1, id2) = (goal.id.clone(), goal.id.clone());
-            c = c.child(
-                col()
-                    .w_full()
-                    .pl(36.0)
-                    .pr(12.0)
-                    .pb(6.0)
-                    .gap(6.0)
-                    .child(text(blocked.question.clone()).font(t.ty.meta).color(t.text.base).wrap())
-                    .child(
-                        row()
-                            .gap(8.0)
-                            .center_y()
-                            .child(
-                                rune_kit::TextInput::new(&s.work.goal_answer)
-                                    .placeholder(blocked.default_answer.clone())
-                                    .label("Your answer")
-                                    .on_edit(|s: &mut App| &mut s.work.goal_answer)
-                                    .on_submit(move |s: &mut App, _| s.goal_answer(&id1, false))
-                                    .build(&t.kit)
-                                    .key("goal-answer")
-                                    .grow(1.0)
-                                    .min_w(0.0),
-                            )
-                            .child(primary_button("Use the default", "goal-default", t, move |s: &mut App| s.goal_answer(&id2, true))),
-                    ),
-            );
-        }
+        any = true;
+        let (id1, id2) = (goal.id.clone(), goal.id.clone());
+        c = c.child(
+            col()
+                .w_full()
+                .pl(36.0)
+                .pr(12.0)
+                .pb(6.0)
+                .gap(6.0)
+                .child(text(blocked.question.clone()).font(t.ty.meta).color(t.text.base).wrap())
+                .child(
+                    row()
+                        .gap(8.0)
+                        .center_y()
+                        .child(
+                            rune_kit::TextInput::new(&s.work.goal_answer)
+                                .placeholder(blocked.default_answer.clone())
+                                .label("Your answer")
+                                .on_edit(|s: &mut App| &mut s.work.goal_answer)
+                                .on_submit(move |s: &mut App, _| s.goal_answer(&id1, false))
+                                .build(&t.kit)
+                                .key("goal-answer")
+                                .grow(1.0)
+                                .min_w(0.0),
+                        )
+                        // A quiet action: the one primary button of the session is its own (Approve plan).
+                        .child(quiet_button("Use the default", "goal-default", t, move |s: &mut App| s.goal_answer(&id2, true))),
+                ),
+        );
+    }
+    if let Some(note) = s.neko.notes.get(&format!("goal:{}", goal.id)) {
+        any = true;
+        c = c.child(text(note.clone()).key(format!("goal-note-{}", goal.id)).font(t.ty.meta).color(t.meaning.amber).wrap().pl(36.0).pr(12.0).pb(6.0).live_region(rune::LiveRegion::Polite));
     }
     if open {
+        any = true;
         c = c.child(goal_details(s, t, goal));
     }
-    c
+    any.then_some(c)
 }
 
 fn goal_details(_s: &App, t: &Neko, goal: &Goal) -> El {
@@ -325,7 +343,10 @@ pub fn tray(s: &App, t: &Neko, task: &Task) -> Option<El> {
         any = true;
         c = c.child(note(t, "Why it stopped", &stop_reason(task), true));
     }
-    // What the person can do about the task, as the web's action list decides.
+    // What the person can do about the task, as the web's action list decides. The region has one
+    // primary button: while a question is open (an undo to confirm), the lead action steps back.
+    let calm = s.work.confirm.is_some();
+    let lead = move |label: &str, key: &str, t: &Neko, f: Box<dyn Fn(&mut App)>| if calm { accent_button(label, key, t, f) } else { primary_button(label, key, t, f) };
     let mut actions = row().gap(8.0).center_y();
     let mut has_action = false;
     let id = task.id.clone();
@@ -333,16 +354,16 @@ pub fn tray(s: &App, t: &Neko, task: &Task) -> Option<El> {
     match task.status {
         TaskStatus::AwaitingApproval if question.is_none() => {
             has_action = true;
-            actions = actions.child(primary_button("Approve plan", "approve", t, move |s: &mut App| s.call(Call::Approve { task_id: id.clone() })));
+            actions = actions.child(lead("Approve plan", "approve", t, Box::new(move |s: &mut App| s.call(Call::Approve { task_id: id.clone() }))));
         }
         TaskStatus::ReadyForReview => {
             has_action = true;
             if let Some(url) = task.pull_request.as_ref().filter(|p| p.is_open()).map(|p| p.url.clone()).filter(|u| !u.is_empty()) {
-                actions = actions.child(primary_button("Open pull request", "open-pr", t, move |s: &mut App| s.open_link(&url)));
+                actions = actions.child(lead("Open pull request", "open-pr", t, Box::new(move |s: &mut App| s.open_link(&url))));
                 let id = id.clone();
                 actions = actions.child(quiet_button("Mark done", "complete", t, move |s: &mut App| s.call(Call::Complete { task_id: id.clone() })));
             } else {
-                actions = actions.child(primary_button("Mark done", "complete", t, move |s: &mut App| s.call(Call::Complete { task_id: id.clone() })));
+                actions = actions.child(lead("Mark done", "complete", t, Box::new(move |s: &mut App| s.call(Call::Complete { task_id: id.clone() }))));
             }
         }
         TaskStatus::Failed | TaskStatus::Cancelled => {

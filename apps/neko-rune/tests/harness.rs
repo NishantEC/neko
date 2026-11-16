@@ -373,7 +373,8 @@ fn an_inbox_default_is_answered_the_way_the_inbox_does() {
     let with_default: Vec<_> = rt.state.neko.inbox.iter().filter(|i| i.default.is_some()).map(|i| i.seq).collect();
     assert_eq!(with_default, vec![1], "one seeded item carries a default");
     assert!(rt.find("inbox-use-1").is_some() && rt.find("inbox-use-2").is_none(), "only an item with a default has the button");
-    assert!(has_text(&rt, "default: Approve it with a comment") && has_text(&rt, "No default"));
+    let label = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("inbox-use-1")).and_then(|e| e.label).unwrap_or_default();
+    assert_eq!(label, "Use the default: Approve it with a comment", "the quick action names what it will do");
     click(&mut rt, "inbox-use-1");
     // The daemon answered; the note says what it did, and the item is gone from the open list.
     assert!(rt.state.neko.note.as_deref().is_some_and(|n| n.starts_with("Done:")), "{:?}", rt.state.neko.note);

@@ -90,7 +90,7 @@ pub fn tool_card(s: &App, t: &Neko, w: Where, tool: &Tool, turn_id: &str) -> El 
             box_.child(
                 row()
                     .gap(8.0)
-                    .child(super::primary_button("Approve", &format!("{}approve-{}", w.ns, tool.id), t, move |s: &mut App| s.call(decide(true))))
+                    .child(super::accent_button("Approve", &format!("{}approve-{}", w.ns, tool.id), t, move |s: &mut App| s.call(decide(true))))
                     .child(super::quiet_button("Decline", &format!("{}decline-{}", w.ns, tool.id), t, move |s: &mut App| s.call(decline(false)))),
             ),
         );
@@ -171,7 +171,12 @@ pub fn turns(s: &App, t: &Neko, w: Where, list: &[Turn]) -> Vec<El> {
 
 fn user_turn(t: &Neko, w: Where, turn: &Turn) -> El {
     let brief = turn.kind == TurnKind::Brief;
-    let body = turn.text();
+    // A task a chat opened keeps the person's own words: the bubble shows only those, not the
+    // goal line the agent was given (which the session's top line and goal line already show).
+    let body = match (&turn.request, brief) {
+        (Some(words), true) => words.clone(),
+        _ => turn.text(),
+    };
     let mut bubble = col()
         .key(format!("{}user-{}", w.ns, turn.id))
         .max_w(if w.compact { 260.0 } else { 560.0 })
@@ -184,9 +189,5 @@ fn user_turn(t: &Neko, w: Where, turn: &Turn) -> El {
         bubble = bubble.child(text("Request").font(t.ty.id).color(t.text.faint));
     }
     bubble = bubble.child(text(body).font(t.ty.row).color(t.text.base).wrap().selectable(true));
-    let mut c = col().w_full().items_end().gap(4.0).child(bubble);
-    if let Some(words) = &turn.request {
-        c = c.child(text(format!("In your words: “{}”", words.chars().take(240).collect::<String>())).font(t.ty.id).color(t.text.faint).wrap().max_w(460.0));
-    }
-    c
+    col().w_full().items_end().gap(4.0).child(bubble)
 }
