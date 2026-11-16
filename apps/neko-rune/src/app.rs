@@ -99,6 +99,8 @@ pub struct App {
     pub opener: fn(&str) -> io::Result<()>,
     /// How a file is shown in Finder (`open -R`); a no-op in headless scenes and tests.
     pub revealer: fn(&str) -> io::Result<()>,
+    /// Asks macOS what this process may do (Settings, Permissions); a headless run asks nothing.
+    pub access_probe: fn() -> crate::permissions::Local,
     /// The time, in epoch milliseconds: the system's, or a fixed one in headless scenes.
     pub clock: fn() -> i64,
     /// When the last snapshot arrived, by `clock`: what "5m ago" counts from.
@@ -221,6 +223,7 @@ impl Default for App {
             notice: None,
             opener: open_url,
             revealer: reveal_in_finder,
+            access_probe: crate::permissions::check,
             clock: system_ms,
             now_ms: system_ms(),
             linked: true,
@@ -285,7 +288,22 @@ impl App {
     /// The state a headless run starts from: it never opens anything outside itself and its clock
     /// stands still.
     pub fn headless() -> App {
-        App { opener: |_| Ok(()), revealer: |_| Ok(()), clock: || DEMO_NOW, now_ms: DEMO_NOW, linked: false, ..App::default() }
+        App { opener: |_| Ok(()), revealer: |_| Ok(()), access_probe: crate::permissions::none, clock: || DEMO_NOW, now_ms: DEMO_NOW, linked: false, ..App::default() }
+    }
+
+    /// Whether the window is dark: the daemon's mode when it is Light or Dark (the web UI's own setting), else the system's.
+    pub fn appearance_dark(&self, system_dark: bool) -> bool {
+        match self.pages.appearance.as_deref() {
+            Some("light") => false,
+            Some("dark") => true,
+            _ => system_dark,
+        }
+    }
+
+    /// The person picks System, Light or Dark: the window follows at once, and the daemon keeps it for every client.
+    pub fn set_appearance(&mut self, mode: &str) {
+        self.pages.appearance = Some(mode.to_owned());
+        self.call(Call::SetAppearance { mode: mode.to_owned() });
     }
 
     pub fn apply_link(&mut self, event: LinkEvent) -> bool {

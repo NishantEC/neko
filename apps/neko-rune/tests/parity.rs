@@ -233,3 +233,70 @@ fn routines_have_status_chips_and_keep_the_last_run_for_the_details() {
     let open = runtime(scene("routines-open"));
     assert!(open.elements().iter().any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("routine-last-"))), "the last run is in the open details");
 }
+
+fn settings(section: &str) -> Runtime<App> {
+    let key = section.to_owned();
+    runtime(move |app| {
+        let (_, f) = scenes::SCENES.iter().find(|(n, _)| *n == "settings").expect("the settings scene");
+        f(app);
+        app.pages.section = neko_rune::pages::Section::ALL.into_iter().find(|s| s.key() == key).expect("a section");
+        app.outbox.clear();
+    })
+}
+
+#[test]
+fn settings_has_appearance_permissions_and_diagnostics_and_one_row_each_for_the_web_only_pages() {
+    use neko_rune::link::Call;
+    let mut rt = settings("appearance");
+    for key in ["settings-section-appearance", "settings-section-permissions", "settings-section-diagnostics", "settings-section-rulebook", "settings-section-quick-panel"] {
+        assert!(has_key(&rt, key), "{key}");
+    }
+    // Appearance writes the daemon's mode, the web's own request, and the window follows at once.
+    assert!(has_key(&rt, "set-appearance-pick"));
+    assert!(rt.state.appearance_dark(true) && !rt.state.appearance_dark(false), "follows the system until the daemon says");
+    rt.update(|s, _| s.set_appearance("light"));
+    assert_eq!(rt.state.outbox, vec![Call::SetAppearance { mode: "light".into() }]);
+    assert!(!rt.state.appearance_dark(true), "light means light, whatever the system says");
+    rt.update(|s, _| s.set_appearance("dark"));
+    assert!(rt.state.appearance_dark(false));
+
+    // Permissions: five rows, a status and an Open System Settings button each (the Mac's answers are injected).
+    let mut rt = runtime(|app| {
+        let (_, f) = scenes::SCENES.iter().find(|(n, _)| *n == "settings").expect("the settings scene");
+        f(app);
+        app.pages.section = neko_rune::pages::Section::Permissions;
+        app.access_probe = || neko_rune::permissions::Local { accessibility: neko_rune::permissions::Access::Granted, full_disk: neko_rune::permissions::Access::Denied, screen_recording: neko_rune::permissions::Access::Unknown };
+        app.pages.access = Some((app.access_probe)());
+    });
+    let opened = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let _ = &opened;
+    for id in ["accessibility", "full-disk", "calendar", "reminders", "screen-recording"] {
+        assert!(has_key(&rt, &format!("perm-{id}-state")) && has_key(&rt, &format!("perm-{id}-open")), "{id}");
+    }
+    assert!(has_text(&rt, "Allowed") && has_text(&rt, "Not allowed") && has_text(&rt, "Open System Settings"));
+    click(&mut rt, "perm-full-disk-open");
+    assert!(rt.state.notice.is_none(), "the headless opener takes the address");
+
+    // Diagnostics: versions, the data folder, the daemon, and a copy button.
+    let rt = settings("diagnostics");
+    for key in ["diag-app-value", "diag-neko-value", "diag-data-value", "diag-daemon-value", "diag-copy"] {
+        assert!(has_key(&rt, key), "{key}");
+    }
+    assert!(!has_text(&rt, &std::env::var("HOME").unwrap_or_else(|_| "/nonexistent".into())) || std::env::var("HOME").unwrap_or_default().is_empty(), "the home folder is written ~");
+
+    // Rulebook and Quick panel: one row each, "Open in web UI".
+    for (section, id) in [("rulebook", "rulebook"), ("quick-panel", "quick-panel")] {
+        let rt = settings(section);
+        assert!(has_key(&rt, &format!("{id}-open-web")) && has_text(&rt, "Open in web UI"), "{section}");
+        assert_eq!(rt.elements().iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("set-"))).count(), 1, "{section} is one row");
+    }
+}
+
+#[test]
+fn the_find_a_setting_hint_hides_while_the_field_has_text() {
+    let mut rt = settings("general");
+    assert!(has_key(&rt, "settings-search-hint"), "the hint shows while the field is empty");
+    rt.update(|s, _| s.pages.set_field("settings:search", "calendar"));
+    settle(&mut rt);
+    assert!(!has_key(&rt, "settings-search-hint"), "and goes when there is text, so the clear button never shares its corner");
+}

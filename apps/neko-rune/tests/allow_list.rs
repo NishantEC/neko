@@ -36,6 +36,8 @@ const READS: &[&str] = &[
     "Request::CheckpointDiff",
     "Request::MorningDigest",
     "Request::PhoneSettings",
+    // The web UI's appearance mode, so the window follows the same setting.
+    "Request::GetAppearance",
     "Request::PluginStatus",
     "Request::Routines",
     "Request::Search",
@@ -93,6 +95,8 @@ const WRITES: &[&str] = &[
     "Request::SetCalendarEnabled",
     "Request::SetPhoneSettings",
     "Request::PhoneTest",
+    // Settings, Appearance: System, Light or Dark (the web's own control).
+    "Request::SetAppearance",
     // Settings: the runtime, the budgets and limits, the plan switches, the updater's controls.
     "Command::SetAgentRuntime",
     "Command::SetTaskBudget",
@@ -214,6 +218,7 @@ const CONTROLS: &[&str] = &[
     "Request::SetInboxAgeOutDays",
     "Request::SetCalendarEnabled",
     "Request::SetPhoneSettings",
+    "Request::SetAppearance",
     "Command::SetAgentRuntime",
     "Command::SetTaskBudget",
     "Command::SetDailyBudget",
@@ -305,8 +310,9 @@ fn the_panel_reads_files_only_through_the_confined_readers() {
     // (`attachments.rs`) are the only other files this client opens.
     for (path, text) in crate_sources() {
         let code = production(&text);
+        // `permissions.rs` lists one folder macOS protects (Safari's) only to learn whether Full Disk Access is given; it reads no names.
         // `scenes.rs` reads one JSON summary a headless snapshot run is pointed at (`NEKO_RUNE_SUMMARY`).
-        let allowed = path.ends_with("readers.rs") || path.ends_with("web_link.rs") || path.ends_with("attachments.rs") || path.ends_with("scenes.rs");
+        let allowed = path.ends_with("readers.rs") || path.ends_with("web_link.rs") || path.ends_with("attachments.rs") || path.ends_with("scenes.rs") || path.ends_with("permissions.rs");
         for opener in ["File::open", "fs::read(", "fs::read_to_string", "read_dir", "fs::metadata", "canonicalize", "File::create"] {
             assert!(allowed || !code.contains(opener), "{} opens files with `{opener}` outside the confined readers", path.display());
         }

@@ -34,20 +34,30 @@ pub enum CalMode {
 pub enum Section {
     General,
     Ai,
+    Appearance,
+    Rulebook,
     Budget,
     Phone,
     Updates,
     Workspaces,
+    QuickPanel,
+    Permissions,
+    Diagnostics,
     About,
 }
 
 impl Section {
-    pub const ALL: [Section; 7] = [Section::General, Section::Ai, Section::Budget, Section::Phone, Section::Updates, Section::Workspaces, Section::About];
+    pub const ALL: [Section; 12] = [Section::General, Section::Ai, Section::Appearance, Section::Rulebook, Section::Budget, Section::Phone, Section::Updates, Section::Workspaces, Section::QuickPanel, Section::Permissions, Section::Diagnostics, Section::About];
 
     pub fn title(self) -> &'static str {
         match self {
             Section::General => "General",
             Section::Ai => "AI and agents",
+            Section::Appearance => "Appearance",
+            Section::Rulebook => "Rulebook",
+            Section::QuickPanel => "Quick panel",
+            Section::Permissions => "Permissions",
+            Section::Diagnostics => "Diagnostics",
             Section::Budget => "Budget",
             Section::Phone => "Phone",
             Section::Updates => "Neko updates",
@@ -60,6 +70,11 @@ impl Section {
         match self {
             Section::General => "general",
             Section::Ai => "ai",
+            Section::Appearance => "appearance",
+            Section::Rulebook => "rulebook",
+            Section::QuickPanel => "quick-panel",
+            Section::Permissions => "permissions",
+            Section::Diagnostics => "diagnostics",
             Section::Budget => "budget",
             Section::Phone => "phone",
             Section::Updates => "updates",
@@ -198,6 +213,10 @@ pub fn ago(now_ms: i64, at_ms: i64) -> String {
 
 /// One thing a page keeps.
 pub struct Pages {
+    /// The appearance mode the daemon keeps (`system`, `light`, `dark`); None until it answers.
+    pub appearance: Option<String>,
+    /// What this process may do on the Mac, as last probed (Settings, Permissions).
+    pub access: Option<crate::permissions::Local>,
     pub routines: Option<RoutinesData>,
     pub open_routine: Option<String>,
     pub draft: Option<RoutineDraft>,
@@ -236,6 +255,8 @@ pub struct Pages {
 impl Default for Pages {
     fn default() -> Self {
         Pages {
+            appearance: None,
+            access: None,
             routines: None,
             open_routine: None,
             draft: None,
@@ -329,6 +350,8 @@ pub fn control_key(call: &Call) -> Option<String> {
         Call::SetStartWithoutApproval { .. } => "setting:start-without-approval".to_owned(),
         Call::SetSelfUpdate { .. } | Call::UpdateNow | Call::ApplyUpdate => "setting:updates".to_owned(),
         Call::SetDevCheckout { .. } => "setting:dev-checkout".to_owned(),
+        Call::SetAppearance { .. } => "setting:appearance".to_owned(),
+        Call::Appearance => "page:appearance".to_owned(),
         Call::RoutinesFull => "page:routines".to_owned(),
         Call::CalendarEvents { .. } => "page:calendar".to_owned(),
         Call::PhoneSettings => "page:phone".to_owned(),
@@ -387,6 +410,8 @@ impl App {
                 self.call(Call::RoutinesFull);
                 self.call(Call::PhoneSettings);
                 self.call(Call::Models);
+                self.call(Call::Appearance);
+                self.pages.access = Some((self.access_probe)());
                 self.ask_calendar();
             }
         }
@@ -621,6 +646,12 @@ impl App {
                 self.seed_settings();
                 Some(changed)
             }
+            Reply::Appearance(mode) => {
+                let changed = self.pages.appearance.as_ref() != Some(mode);
+                self.pages.appearance = Some(mode.clone());
+                self.pages.notes.remove("setting:appearance");
+                Some(changed)
+            }
             Reply::PhoneTest(lines) => {
                 self.pages.phone_test = lines.clone();
                 Some(true)
@@ -667,6 +698,7 @@ impl App {
             Call::RoutinesFull => self.pages.routines.is_some(),
             Call::CalendarEvents { .. } => self.pages.calendar.is_some(),
             Call::PhoneSettings => self.pages.phone.is_some(),
+            Call::Appearance => self.pages.appearance.is_some(),
             Call::Quota => self.pages.quota.is_some(),
             Call::Plugins => self.pages.plugins.is_some(),
             _ => false,
@@ -722,10 +754,10 @@ mod tests {
 
     #[test]
     fn sections_have_keys_and_titles() {
-        assert_eq!(Section::ALL.map(Section::title), ["General", "AI and agents", "Budget", "Phone", "Neko updates", "Workspaces", "About"]);
+        assert_eq!(Section::ALL.map(Section::title), ["General", "AI and agents", "Appearance", "Rulebook", "Budget", "Phone", "Neko updates", "Workspaces", "Quick panel", "Permissions", "Diagnostics", "About"]);
         let mut keys: Vec<_> = Section::ALL.iter().map(|s| s.key()).collect();
         keys.sort();
         keys.dedup();
-        assert_eq!(keys.len(), 7);
+        assert_eq!(keys.len(), 12);
     }
 }

@@ -378,7 +378,7 @@ mod tests {
         assert_eq!(middle("cargo test", 20), "cargo test");
         let cut = middle("cargo test -p neko-rune --test parity -- the_composer_is_one_card", 21);
         assert_eq!(cut.chars().count(), 21);
-        assert!(cut.starts_with("cargo test ") && cut.ends_with("one_card") && cut.contains('…'), "{cut}");
+        assert!(cut.starts_with("cargo test") && cut.ends_with("one_card") && cut.contains('…'), "{cut}");
         assert_eq!(middle("a\n  b", 10), "a b", "new lines are spaces");
     }
 

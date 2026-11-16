@@ -9,13 +9,14 @@ use neko_protocol::agent_models::{CatalogModel, ModelAccess, SourceStatus};
 use neko_protocol::calendar::CalendarAccess;
 use neko_protocol::phone::RemindersAccess;
 use rune::{El, ScrollSpec, col, el, icon, row, text};
-use rune_kit::TextInput;
+use rune_kit::{SegmentedControl, TextInput};
 
 use super::ui::{edit_of, editing, note, pick, setting_row, switch, switch_when};
 use super::{Frame, band, nav_label_row, primary_button, quiet_button};
 use crate::app::App;
 use crate::icons;
 use crate::pages::{Section, ago};
+use crate::permissions::{Access, Pane};
 use crate::theme::Neko;
 
 /// One row of a section, with the words search matches against.
@@ -93,17 +94,11 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
 
 /// The section list, with the search field above it.
 fn rail(s: &App, t: &Neko, narrow: bool) -> El {
-    let search = TextInput::new(edit_of(s, "settings:search"))
-        .label("Find a setting")
-        .placeholder("Find a setting  ⌘F")
-        .width(None)
-        .leading_icon(&icons::SEARCH)
-        .clear_button()
-        .on_edit(editing("settings:search".to_owned()))
-        .build(&t.kit)
-        .key("settings-search")
-        .w_full();
     let searching = !s.pages.text("settings:search").trim().is_empty();
+    let mut field = TextInput::new(edit_of(s, "settings:search")).label("Find a setting").placeholder("Find a setting").width(None).leading_icon(&icons::SEARCH).on_edit(editing("settings:search".to_owned()));
+    // The ⌘F hint hides while the field has text (the clear button takes its place), so the two never share the corner.
+    field = if searching { field.clear_button() } else { field.trailing(text("⌘F").key("settings-search-hint").font(t.ty.hint).color(t.text.faint).a11y_hidden()) };
+    let search = field.build(&t.kit).key("settings-search").w_full();
     let mut c = col().key("settings-rail").w(if narrow { 150.0 } else { 200.0 }).h_full().px(if narrow { 8.0 } else { 12.0 }).pt(4.0).gap(0.0).child(search.h(32.0)).child(el().h(8.0));
     for section in Section::ALL {
         let active = !searching && s.pages.section == section;
@@ -120,10 +115,14 @@ fn items(s: &App, t: &Neko, layer: &mut Vec<El>) -> Vec<Item> {
     let mut out = Vec::new();
     general(s, t, &mut out);
     ai(s, t, layer, &mut out);
+    appearance(s, t, &mut out);
+    web_only(s, t, &mut out);
     budget(s, t, layer, &mut out);
     phone(s, t, layer, &mut out);
     updates(s, t, &mut out);
     workspaces(s, t, &mut out);
+    permissions(s, t, &mut out);
+    diagnostics(s, t, &mut out);
     about(s, t, &mut out);
     out
 }
@@ -586,4 +585,87 @@ fn about(s: &App, t: &Neko, out: &mut Vec<Item>) {
         "The web UI stays the default while this app reaches parity.",
         setting_row(t, "set-about-web", "The web UI", Some("The web UI stays the default while this app reaches parity."), row().gap(8.0).center_y().child(icon(&icons::EXTERNAL, 14.0).color(t.text.muted).a11y_hidden()).child(quiet_button("Open the web UI", "about-open-web", t, |s: &mut App| s.open_in_web(None)))),
     ));
+}
+
+/// Appearance: System, Light or Dark. It is the daemon's setting (the web UI's own), so the window and every browser agree.
+fn appearance(s: &App, t: &Neko, out: &mut Vec<Item>) {
+    const MODES: [&str; 3] = ["system", "light", "dark"];
+    let now = s.pages.appearance.as_deref().and_then(|m| MODES.iter().position(|x| *x == m)).unwrap_or(0);
+    let help = "System follows macOS. The choice is kept by Neko, so the web UI and this window agree.";
+    let control = SegmentedControl::new(&["System", "Light", "Dark"], Some(now)).label("Theme").width(None).on_pick(|s: &mut App, i: usize, _| s.set_appearance(MODES[i.min(2)])).build(&t.kit).key("set-appearance-pick");
+    out.push(item(Section::Appearance, "appearance-mode", "Theme", help, with_note(s, t, "setting:appearance", setting_row(t, "set-appearance", "Theme", Some(help), control))));
+}
+
+/// The Rulebook and the Quick panel's folders are edited in the web UI; each is one row that opens it there.
+fn web_only(s: &App, t: &Neko, out: &mut Vec<Item>) {
+    let _ = s;
+    for (section, id, label, help, route) in [
+        (Section::Rulebook, "rulebook", "Rulebook", "The rules Neko and every agent it hands work to follow.", "settings?section=rulebook"),
+        (Section::QuickPanel, "quick-panel", "Quick panel", "Choose which folders appear in the quick panel.", "settings?section=search"),
+    ] {
+        let button = row().gap(8.0).center_y().child(icon(&icons::EXTERNAL, 14.0).color(t.text.muted).a11y_hidden()).child(quiet_button("Open in web UI", &format!("{id}-open-web"), t, move |s: &mut App| s.open_in_web(Some(route))));
+        out.push(item(section, id, label, help, setting_row(t, &format!("set-{id}"), label, Some(help), button)));
+    }
+}
+
+/// Permissions: each kind of access with its status and a button that opens its pane of System Settings. Accessibility,
+/// Full Disk Access and Screen Recording are this process's own (asked of macOS, never prompting); Calendar and Reminders
+/// are what the daemon already reports.
+fn permissions(s: &App, t: &Neko, out: &mut Vec<Item>) {
+    let local = s.pages.access.unwrap_or_default();
+    let calendar = match s.pages.calendar.as_ref().map(|c| c.status.access) {
+        Some(CalendarAccess::Granted) => Access::Granted,
+        Some(CalendarAccess::Denied) => Access::Denied,
+        _ => Access::Unknown,
+    };
+    let reminders = match s.pages.phone.as_ref().map(|p| p.status.reminders_access) {
+        Some(RemindersAccess::Granted) => Access::Granted,
+        Some(RemindersAccess::Denied) => Access::Denied,
+        _ => Access::Unknown,
+    };
+    let rows: [(&str, &str, Access, Pane, &str); 5] = [
+        ("accessibility", "Accessibility", local.accessibility, Pane::Accessibility, "Lets Neko paste for you and read the text you have selected."),
+        ("full-disk", "Full Disk Access", local.full_disk, Pane::FullDisk, "Allows access to protected folders, including Documents, Desktop and iCloud Drive."),
+        ("calendar", "Calendar", calendar, Pane::Calendars, "Shows your meetings beside Neko’s dated work."),
+        ("reminders", "Reminders", reminders, Pane::Reminders, "A reminder in the Neko list for each thing that needs you."),
+        ("screen-recording", "Screen Recording", local.screen_recording, Pane::ScreenRecording, "Only for agents you let see the screen."),
+    ];
+    for (id, label, access, pane, help) in rows {
+        let ink = match access {
+            Access::Granted => t.meaning.mint,
+            Access::Denied => t.meaning.amber,
+            Access::Unknown => t.text.muted,
+        };
+        let control = row()
+            .gap(10.0)
+            .center_y()
+            .child(text(access.words()).key(format!("perm-{id}-state")).font(t.ty.meta).color(ink))
+            .child(quiet_button("Open System Settings", &format!("perm-{id}-open"), t, move |s: &mut App| {
+                if (s.opener)(pane.url()).is_err() {
+                    s.notice = Some("Couldn’t open System Settings.".to_owned());
+                }
+            }));
+        out.push(item(Section::Permissions, format!("perm-{id}"), label, help, setting_row(t, &format!("set-perm-{id}"), label, Some(help), control)));
+    }
+}
+
+/// Diagnostics: the versions in use, the data folder, whether the daemon answers, and one button that copies it all.
+fn diagnostics(s: &App, t: &Neko, out: &mut Vec<Item>) {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let data = crate::terminal::tilde(&neko_protocol::support_dir().to_string_lossy(), &home);
+    let pin = include_str!("../../RUNE_REV").lines().next().unwrap_or("").chars().take(9).collect::<String>();
+    let app = format!("Neko for Rune {} · Rune {pin}", env!("CARGO_PKG_VERSION"));
+    let u = s.summary.as_ref().and_then(|m| m.settings.self_update.clone());
+    let neko = u.as_ref().map_or("unknown".to_owned(), |u| format!("app {} · web {}", short(&u.native_commit), short(&u.web_commit)));
+    let daemon = crate::app::status_line(&s.link, s.summary.as_ref());
+    let rows = [("app", "This app", app), ("neko", "Neko", neko), ("data", "Data folder", data), ("daemon", "Daemon", daemon)];
+    for (id, label, words) in &rows {
+        out.push(item(Section::Diagnostics, format!("diag-{id}"), label, words, setting_row(t, &format!("set-diag-{id}"), label, None, value(t, &format!("diag-{id}-value"), words))));
+    }
+    let report: String = rows.iter().map(|(_, label, words)| format!("{label}: {words}")).collect::<Vec<_>>().join("\n");
+    let button = quiet_button("Copy diagnostics", "diag-copy", t, |_: &mut App| {}).on_press_tx(move |s: &mut App, tx: &mut rune::Tx| {
+        tx.copy(report.clone());
+        s.show_toast("Copied the diagnostics");
+    });
+    out.push(item(Section::Diagnostics, "diag-copy", "Copy diagnostics", "Versions, the data folder and the daemon's state, as text to paste into a report.", setting_row(t, "set-diag-copy", "Copy diagnostics", Some("Versions, the data folder and the daemon's state, as text to paste into a report."), button)));
 }

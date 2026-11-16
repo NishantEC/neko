@@ -757,7 +757,7 @@ impl App {
                 }
                 true
             }
-            Reply::Routines(_) | Reply::Calendar(_) | Reply::CalendarStatus(_) | Reply::Phone(_) | Reply::PhoneTest(_) | Reply::Quota(_) | Reply::Plugins(_) => page_changed.take().unwrap_or(false),
+            Reply::Routines(_) | Reply::Calendar(_) | Reply::CalendarStatus(_) | Reply::Phone(_) | Reply::Appearance(_) | Reply::PhoneTest(_) | Reply::Quota(_) | Reply::Plugins(_) => page_changed.take().unwrap_or(false),
             Reply::Checkpoints { task_id, list } => {
                 let changed = self.work.checkpoints.get(&task_id) != Some(&list);
                 self.work.checkpoints.insert(task_id, list);

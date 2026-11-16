@@ -83,6 +83,8 @@ pub enum Reply {
     Calendar(Box<CalendarData>),
     CalendarStatus(neko_protocol::calendar::CalendarStatus),
     Phone(Box<PhoneData>),
+    /// The appearance mode the daemon keeps: `system`, `light` or `dark`.
+    Appearance(String),
     PhoneTest(Vec<String>),
     Quota(Vec<QuotaRow>),
     Plugins(Vec<neko_protocol::PluginHealth>),
@@ -186,6 +188,7 @@ pub fn make(socket: &Path, call: &Call, open: Option<&str>) -> Reply {
         Response::CalendarStatus(status) => Reply::CalendarStatus(status),
         Response::Phone { settings, status } => Reply::Phone(Box::new(PhoneData { settings, status })),
         Response::PhoneTest { lines } => Reply::PhoneTest(lines),
+        Response::Appearance { mode, .. } => Reply::Appearance(mode),
         Response::PluginStatus { plugins } => Reply::Plugins(plugins),
         Response::SearchResults { items, .. } => Reply::Quota(quota_rows(&items)),
         Response::NeedsYouAnswered { summary } => Reply::Answered(summary),

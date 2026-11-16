@@ -64,7 +64,7 @@ pub struct Frame {
 }
 
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
-    let t = theme(cx.system_dark());
+    let t = theme(s.appearance_dark(cx.system_dark()));
     s.panel.dark.set(t.dark);
     s.reduce_motion.set(cx.system_reduced_motion());
     let mut layer = Vec::new();

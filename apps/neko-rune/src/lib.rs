@@ -19,6 +19,7 @@ pub mod layout;
 pub mod link;
 pub mod new_session;
 pub mod pages;
+pub mod permissions;
 pub mod plan;
 pub mod panel;
 pub mod samples;
@@ -78,6 +79,7 @@ fn init() -> App {
                 app.call(link::Call::Refresh);
                 app.call(link::Call::RoutinesFull);
                 app.call(link::Call::Models);
+                app.call(link::Call::Appearance);
                 app.ask_calendar();
             }
             // For the panel's snapshots against a test daemon: open the task with this title, and show
@@ -96,9 +98,15 @@ fn init() -> App {
             // For the side-by-side pairs against the web UI (`/tmp/neko-polish`): the person's own name, and a full view.
             if std::env::var_os("NEKO_RUNE_ACCOUNT").is_some() {
                 app.account = account::Account::load(|| {});
+                // The pictures of the person's own Mac report what this Mac says (Settings, Permissions).
+                app.access_probe = permissions::check;
             }
             if let Some(view) = std::env::var("NEKO_RUNE_VIEW").ok().and_then(|v| views::FullView::ALL.into_iter().find(|f| f.web_id() == v)) {
                 app.open_view(view);
+            }
+            // The Settings section for the pictures (`NEKO_RUNE_SECTION=permissions`).
+            if let Some(section) = std::env::var("NEKO_RUNE_SECTION").ok().and_then(|v| pages::Section::ALL.into_iter().find(|x| x.key() == v)) {
+                app.pages.section = section;
             }
             if let Some(id) = std::env::var("NEKO_RUNE_SHOW").ok().filter(|t| !t.is_empty()) {
                 app.show_artifact(&id, None);

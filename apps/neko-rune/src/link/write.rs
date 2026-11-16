@@ -95,6 +95,8 @@ pub enum Call {
     RoutinesFull,
     CalendarEvents { from_ms: i64, to_ms: i64 },
     PhoneSettings,
+    /// The web UI's appearance (System, Light or Dark), kept by the daemon so every client agrees.
+    Appearance,
     /// The vendors' quota meters (the web's Usage page asks the `usage` provider).
     Quota,
     Plugins,
@@ -120,12 +122,14 @@ pub enum Call {
     UpdateNow,
     ApplyUpdate,
     SetDevCheckout { path: String },
+    /// Saves the mode (`system`, `light`, `dark`): what the web's Appearance page sets.
+    SetAppearance { mode: String },
 }
 
 impl Call {
     /// Whether this only fetches.
     pub fn reads(&self) -> bool {
-        matches!(self, Call::Refresh | Call::Checkpoints { .. } | Call::CheckpointDiff { .. } | Call::TaskFolder { .. } | Call::ArtifactFile { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } | Call::SignedWebUrl { .. } | Call::PluginViewers | Call::PluginPages | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::RoutinesFull | Call::CalendarEvents { .. } | Call::PhoneSettings | Call::Quota | Call::Plugins)
+        matches!(self, Call::Refresh | Call::Checkpoints { .. } | Call::CheckpointDiff { .. } | Call::TaskFolder { .. } | Call::ArtifactFile { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } | Call::SignedWebUrl { .. } | Call::PluginViewers | Call::PluginPages | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::RoutinesFull | Call::CalendarEvents { .. } | Call::PhoneSettings | Call::Appearance | Call::Quota | Call::Plugins)
     }
 
     /// The request the daemon receives: the same JSON the web UI posts.
@@ -195,6 +199,8 @@ impl Call {
             Call::RoutinesFull => Request::Routines,
             Call::CalendarEvents { from_ms, to_ms } => Request::CalendarEvents { from_ms, to_ms },
             Call::PhoneSettings => Request::PhoneSettings,
+            Call::Appearance => Request::GetAppearance,
+            Call::SetAppearance { mode } => Request::SetAppearance { mode: Some(mode), light: None, dark: None },
             Call::Quota => Request::Search { query: String::new(), limit: 50, provider: Some("usage".to_owned()) },
             Call::Plugins => Request::PluginStatus { id: None },
             Call::SaveRoutine(routine) => Request::SaveRoutine { routine: *routine },

@@ -145,7 +145,7 @@ fn the_person_s_tab_choice_stands_while_it_has_content() {
     assert_eq!(rt.state.panel_tab(), Some(Tab::Diff));
     click(&mut rt, "segment2");
     assert_eq!(rt.state.panel_tab(), Some(Tab::Terminal), "the third of Diff, Files, Terminal");
-    assert!(texts(&rt).iter().any(|t| t.starts_with("$ cargo test")), "{:?}", texts(&rt));
+    assert!(texts(&rt).iter().any(|t| t.starts_with("cargo test")), "{:?}", texts(&rt));
 }
 
 #[test]
@@ -350,12 +350,12 @@ fn the_run_select_asks_for_that_runs_diff() {
 fn the_terminal_tab_draws_commands_and_output_through_a_terminal() {
     let rt = runtime(scenes_panel::terminal);
     let words = texts(&rt);
-    assert!(words.iter().any(|w| w == "$ cargo test -p board --color always"), "{words:?}");
+    assert!(words.iter().any(|w| w == "cargo test -p board --color always"), "{words:?}");
     assert!(words.iter().any(|w| w == "100%"), "a rewritten progress line is its last state: {words:?}");
     assert!(!words.iter().any(|w| w.contains('\u{1b}') || w.contains("10%")), "no escape codes reach the screen");
-    assert!(words.iter().any(|w| w == "exit 101"));
+    assert!(words.iter().any(|w| w == "101"), "the exit chip");
     // Commands in order, newest at the bottom.
-    let ys: Vec<f32> = ["$ rg -n EmptyBoard web/src", "$ cargo test -p board", "$ cargo test -p board --color always"].iter().map(|c| rt.elements().into_iter().find(|e| e.text.as_deref() == Some(*c)).unwrap_or_else(|| panic!("{c}")).rect[1]).collect();
+    let ys: Vec<f32> = ["rg -n EmptyBoard web/src", "cargo test -p board", "cargo test -p board --color always"].iter().map(|c| rt.elements().into_iter().find(|e| e.text.as_deref() == Some(*c)).unwrap_or_else(|| panic!("{c}")).rect[1]).collect();
     assert!(ys.windows(2).all(|w| w[0] < w[1]), "{ys:?}");
 }
 
