@@ -189,6 +189,8 @@ pub fn viewer(s: &App, t: &Neko, target: &Target) -> El {
         Some(Content::TooLarge { size, path }) => too_large(t, *size, path),
         Some(Content::Ready(loaded)) => match viewers::resolve_for(&loaded.kind, Some(loaded.bytes())) {
             // The web UI draws these (HTML, Excalidraw, a plugin's viewer): its embed page, in the web view.
+            // One web view serves the window: while a plugin's page has it, the panel's page waits.
+            Some(spec) if viewers::web::is_web(spec.id) && s.plugin_view.is_some() => placeholder(&["Shown when the plugin page is closed."], t),
             Some(spec) if viewers::web::is_web(spec.id) && target.web_route().is_some() => {
                 let Some(route) = target.web_route() else { return placeholder(&["Nothing to show yet."], t) };
                 s.web_view.set_want(Some(Want { route, dark: t.dark }));

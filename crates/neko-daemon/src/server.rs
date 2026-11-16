@@ -2125,6 +2125,14 @@ pub(crate) mod tests {
         assert!(mine.message_id.is_none(), "not linked to the chat reply that was running: {:?} / {turn}", mine.message_id);
         // Its next version stays the same ticket's.
         assert_eq!(saved(bridge(&run, args(Some(&mine.id)))).task_id.as_deref(), Some("t-board"));
+        // A ticket run cannot add a version to an artifact it did not make (another ticket's, the chat's, a hand's).
+        let chat_lease = state.workbench.mcp.crew_lease("chat:first", CrewRole::Full).unwrap();
+        let chats = saved(bridge(&chat_lease, args(None)));
+        let intruder = state.workbench.mcp.crew_lease("run-x", CrewRole::Task { ticket_id: "t-intruder".into(), may_create: false }).unwrap();
+        for id in [&mine.id, &chats.id] {
+            assert!(matches!(bridge(&intruder, args(Some(id))), Response::Error { .. }), "{id}");
+        }
+        assert_eq!(neko_core::artifacts::get(&state.artifacts, &chats.id).unwrap().versions.len(), 1, "untouched");
 
         // The chat (full power) and a hand's save (the socket) record none.
         let chat = state.workbench.mcp.crew_lease("chat:neko", CrewRole::Full).unwrap();

@@ -89,6 +89,18 @@ write-side field). Decision and phases: `docs/decisions/0002-rune-for-everything
 - **Plugin pages (slot b).** "More" has a **Plugins** heading with one entry per reported page (`App::plugin_pages`); choosing one
   opens `App::plugin_view`: the middle region is the page's whole content, `<page-route>?embed=1`. Choosing a session or a full view leaves it.
 
+### Review (one fresh reviewer) and what is left
+
+Fixed: a ticket run may add a version only to an artifact its own ticket made, and cannot name a workspace
+(`artifacts::keep_locked`, tested in the daemon); the context panel's web page waits while a plugin page owns the one view.
+**Open, not fixed (the feature freeze):** the navigation handler runs for every frame, so a page that sets `location` to another site
+opens the browser without a click (open it only from the new-window handler, debounced); the view follows the layout rect, not the
+drawn rect, during collapse animations (`on_drawn_layout_tx`); a view shown again can sit at its old rect for one frame; Download
+(`<a download>`) does nothing in the view; `ArtifactsForTask` rescans every `meta.json` per task update; one thread per viewer job
+(a pool would bound it); `Reply::SignedUrl` derives `Debug` with the token; `WebHost::close` is never called, so a rotated token
+needs a restart. Pre-existing and not from this work: `scripts/verify/tabs.mjs` "selected text offers Ask Neko about this" fails in
+the full `web-verify` run with or without `embed.mjs`.
+
 ### Licences
 
 New crates are MIT or Apache-2.0 (`wry` 0.57, `url`, `objc2-web-kit` also Zlib) with one exception: **`option-ext` 0.2.0 is MPL-2.0**,

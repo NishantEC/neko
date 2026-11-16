@@ -229,7 +229,9 @@ fn keep(root: &Path, save: Save, kind: &str, bytes: &[u8]) -> Result<(Artifact, 
 fn keep_locked(root: &Path, save: Save, kind: &str, bytes: &[u8]) -> Result<(Artifact, u32), String> {
     let title = shorten(&save.title, MAX_TITLE_CHARS);
     let note = shorten(&save.note, MAX_NOTE_CHARS);
-    let workspace_id = save.workspace_id.filter(|w| !w.is_empty());
+    let from_ticket = save.task_id.clone();
+    // A ticket's run cannot file an artifact under a workspace it names: the ticket is the link.
+    let workspace_id = save.workspace_id.filter(|w| !w.is_empty() && from_ticket.is_none());
     if workspace_id.as_deref().is_some_and(|w| !valid_id(w)) { return Err("The workspace id is not valid.".into()); }
     let message_id = save.message_id.filter(|m| valid_id(m));
     let task_id = save.task_id.filter(|t| valid_id(t));
@@ -238,6 +240,10 @@ fn keep_locked(root: &Path, save: Save, kind: &str, bytes: &[u8]) -> Result<(Art
         Some(id) => {
             let dir = folder(root, id).ok_or("The artifact id is not valid.")?;
             let artifact = read_meta(&dir).ok_or_else(|| format!("There is no artifact {id}."))?;
+            // A ticket's run (its lease names the ticket) may add versions only to artifacts its own ticket made.
+            if from_ticket.is_some() && artifact.task_id != from_ticket {
+                return Err(format!("Artifact {id} was not made by this ticket; save a new artifact instead."));
+            }
             (dir, artifact)
         }
         None => {
