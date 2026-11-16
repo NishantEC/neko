@@ -224,6 +224,7 @@ finished.
 
 ## Knowledge index
 
+- **[ADR 0002: Rune for everything (2026-11-16)](docs/decisions/0002-rune-for-everything.md)** — The whole UI moves to Rune (MIT, GPU-rendered Rust), built beside the web UI in `apps/neko-rune/` (its own Cargo workspace, Rune pinned by rev, `scripts/bump-rune.sh`); the web UI stays the default until each Rune screen reaches parity. Layout: sessions column, session view, context panel, Neko column, no tabs; four plugin slots; phases P1 to P5. Supersedes 0001 where they conflict. What to reuse: [docs/research/reuse-for-rune-2026-11.md](docs/research/reuse-for-rune-2026-11.md). `apps/**` is not built by the installer and never triggers a self-update reinstall.
 - **[ADR 0001: one interface (2026-11-16)](docs/decisions/0001-one-interface.md)** — The web UI is the only interface, the Rust daemon is the brain, Swift is a thin OS shell, no GPUI; new screens go in `web/`. Retirement is pending the owner's choices, so the GPUI client and duplicate Swift screens still exist until then.
 - [Checkpoints and undo (2026-11-14)](docs/knowledge/checkpoints-and-undo.md) — Hidden-ref snapshots at each ticket run's start and end, per-run diffs, undo/redo with refusals, `checkpoint_diff`/`undo_run` crew tools.
 - [Current standalone workspace (2026-09-24)](docs/knowledge/current-standalone-workspace.md) — The native workspace now follows system appearance, with Light / Dark…

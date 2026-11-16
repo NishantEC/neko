@@ -6,7 +6,9 @@ window, a menu bar item, the global shortcut, Calendar and Reminders, and
 notifications. Press ⌥Space for quick search, clipboard history, and task
 attention while the shell still carries the quick panel (see
 [ADR 0001](docs/decisions/0001-one-interface.md) for what is staying and what
-the owner is still deciding).
+the owner is still deciding). A native client on Rune is being built beside the web UI
+([ADR 0002](docs/decisions/0002-rune-for-everything.md), `apps/neko-rune/`); the web UI stays
+the default until it reaches parity.
 
 ## Install on your Mac
 
@@ -309,7 +311,10 @@ connections, scheduling and task supervision; the React web UI in `web/` is the
 only interface; the Swift app in `native/NekoKit` is a thin shell for what
 needs macOS. A new screen goes in `web/`, Swift is only for OS duties, no GPUI.
 The shell and the GPUI client still contain screens the web duplicates; their
-retirement waits on the owner's choices. See
+retirement waits on the owner's choices. Beside them, `apps/neko-rune/` is a native client on
+[Rune](https://github.com/anomalyco/rune) (MIT, GPU-rendered, Rust) that will replace the web
+UI screen by screen ([ADR 0002](docs/decisions/0002-rune-for-everything.md)); it is its own Cargo
+workspace, is not part of the installed app, and reads the daemon without ever writing to it. See
 [docs/architecture.md](docs/architecture.md) for the boundaries.
 
 | Document | What it covers |
@@ -317,6 +322,7 @@ retirement waits on the owner's choices. See
 | [docs/architecture.md](docs/architecture.md) | Native app, daemon/client split, wire protocol, workbench and MCP authority |
 | [docs/adding-a-provider.md](docs/adding-a-provider.md) | Adding a result type through the `Provider` seam |
 | [docs/design/principles.md](docs/design/principles.md) | Native design rules and the shell component catalogue |
+| [docs/decisions/0002-rune-for-everything.md](docs/decisions/0002-rune-for-everything.md) | The Rune client: layout, plugin slots, phases, risks |
 | `AGENTS.md` | Detailed engineering decisions and constraints |
 
 ## Development
@@ -324,6 +330,8 @@ retirement waits on the owner's choices. See
 ```sh
 scripts/check.sh                 # the gate: clippy's hard lints, all Rust and Swift tests (~70s)
 scripts/check.sh --quick         # compile only; the pre-commit hook runs this
+scripts/check.sh --rune          # also the Rune client (runs by itself when its build cache exists)
+apps/neko-rune/scripts/run.sh    # build and open "Neko (Rune)" against the running daemon, read-only
 scripts/render-previews.sh       # native shell components rendered offscreen, light and dark
 cargo build -p neko-daemon --bin neko-daemon
 node scripts/smoke-workbench.mjs

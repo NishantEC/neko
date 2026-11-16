@@ -9,6 +9,11 @@ agents and apps"): its principles, never its brand or assets.
 
 ## 1. One window, opened as tabs
 
+> **Superseded for the Rune app** ([ADR 0002](docs/decisions/0002-rune-for-everything.md), owner,
+> 2026-11-16): the Rune app has no tabs. Its window is four regions (sessions, the session, a
+> context panel, Neko). This section, and the rail of six places in §8 rule 5, stay true of the web
+> UI while it exists. DESIGN.md is rewritten for the Rune app in P1.
+
 Neko is one window. Every place opens as a **tab** in a tab strip at the top,
 with back and forward and `+`: a page (Inbox, Tasks, Calendar, Canvas), a
 workspace, a single task, an agent, an artifact. Opening something from a link

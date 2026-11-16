@@ -21,6 +21,29 @@ registered in the client, the gpui dependency, window, motion, themes, icons)
 are **historical** and still describe code in the tree. Rule: a new screen goes
 in `web/`; Swift only for OS duties; no GPUI.
 
+## The Rune client (ADR 0002, 2026-11-16)
+
+A second client is built beside the web UI: `apps/neko-rune/`, a native UI on Rune (MIT,
+GPU-rendered Rust) that replaces the web UI screen by screen and becomes the default only when
+every screen has reached parity (phase P5). It is **its own Cargo workspace** because Rune needs a
+`[patch.crates-io]` table that must not reach the daemon's; it depends on `neko-protocol` by path
+and nothing else of Neko's. Rune is pinned by git rev (`RUNE_REV`, moved only by
+`scripts/bump-rune.sh`), and local fixes to Rune are patches in `apps/neko-rune/patches/`.
+
+It reaches the daemon the way the Swift shell does, over the Unix socket with `neko_protocol::Frame`:
+one `Workbench(Snapshot)`, then `WorkbenchIfChanged` held up to 20 s (what the web UI's store does
+over HTTP), reconnecting with backoff and saying so calmly. **It never writes**: the only requests
+its link module can send are those two, its source names no other (`tests/read_only.rs` checks),
+and it never opens the database. The installer does not build `apps/`, and the self-updater
+classifies `apps/**` and `experiments/**` as needing neither a web rebuild nor a reinstall
+(`neko_core::self_update::classify`, tested).
+
+The window is four regions, no tabs: the sessions column, the session view (or a full view), a
+collapsible context panel and the Neko column; plugin slots and phases are in the ADR. Its colours,
+type scale and status glyphs are `src/theme.rs` and `src/status.rs`, the web UI's tokens (`DESIGN.md`)
+as one Rune theme. `apps/neko-rune/scripts/check.sh` is its gate (build, clippy, tests including
+headless snapshots in light and dark); `scripts/run.sh` runs it beside the installed app.
+
 ## Current default: standalone Neko work
 
 `neko-protocol::workbench` supplies typed commands and snapshots. The installed

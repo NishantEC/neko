@@ -1,6 +1,9 @@
 # 0001. One interface: the web UI, a thin Swift shell, the Rust daemon
 
-Status: **accepted 2026-11-16 (shape); execution pending the owner's choices.**
+Status: **accepted 2026-11-16 (shape); execution pending the owner's choices. Superseded in part by
+[0002](0002-rune-for-everything.md) the same day: the one interface becomes Rune, not the web UI
+(the web UI stays the default until each Rune screen reaches parity). The inventory, the retirement
+of GPUI and of the duplicate Swift screens, and the Swift shell's duty list still stand.**
 Phase 1 (this record and the inventory) is done. Phases 2 to 5 below are
 **pending the owner's choices**: nothing has been ported or deleted.
 
@@ -32,7 +35,9 @@ update source that the web owns.
   permissions (Accessibility, Full Disk Access) and the update check.
 - The GPUI client and the SwiftUI screens that duplicate the web are retired.
 
-**The rule: a new screen goes in `web/`. Swift only for OS duties. No GPUI.**
+**The rule: a new screen goes in `web/`. Swift only for OS duties. No GPUI.** (Per 0002 this holds until
+the Rune app reaches parity and becomes the default in its P5; the destination changes, the other two
+parts of the rule do not.)
 
 ## Consequences
 
