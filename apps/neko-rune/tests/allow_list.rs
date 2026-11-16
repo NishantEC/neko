@@ -1,120 +1,22 @@
-//! The daemon is the only writer. This client may ask it for the requests named here and for no
-//! other, and may not touch its database. The way it is kept that way is checked by reading the
-//! source, so a later screen cannot quietly add a write: adding a request means changing this
-//! list in the same commit, where a reviewer sees it.
+//! The daemon is the only writer. This client may ask it for what the web UI asks it, and for a short list of
+//! extras, and for nothing else; it may not touch its database. The way it is kept that way is checked by
+//! reading the source, so a later screen cannot quietly add a request.
 //!
-//! P2 adds the pages' reads (the routines whole, a week of the calendar, the phone settings, the
-//! quota meters, the plugin status) and the writes that are controls on the web UI's Inbox, Settings
-//! and Calendar pages: a routine's switch, Run now, editor and standing orders, the Inbox clean-up,
-//! Calendar on, the phone channels, the runtime, the budgets, the plan switches and the updater's
-//! switches and "Update now". Each is listed in `CONTROLS` below, the one place a name that starts
-//! like something destructive (`Set`, `Save`, `Update`) is allowed, because it is a web control.
+//! **The mirror rule (2026-11-16).** A test greps `web/src` for every daemon request the web UI sends (its
+//! `command(`, `run(`, `send(` and `request(` call sites) and builds `WEB_SENDS`. Rune may send exactly
+//! `WEB_SENDS` plus `RUNE_EXTRAS`: what Rune needs that the web reaches another way (a session form, the panel's
+//! signed address, the reads it already used). `NEVER` keeps only what no person-facing screen sends: the agents'
+//! `McpBridge` and the calls a run makes under its lease. A destructive request (delete, start over, retry,
+//! stop all, close a pull request, remove a theme, roll back the web UI) may only be built inside a `confirm(`
+//! dialog. The HTTP client (`src/link/http.rs`) reaches only the web's `/api/attachments`, `/api/files` and
+//! `/api/plugins/*`.
 //!
-//! P0 sent two reads. P1 adds the reads a session view needs (the open task's runs and one run's
-//! diff, the unseen marks, the Inbox, the digest, the model list) and the writes the web UI's own
-//! buttons make, with the same fields (docs/decisions/0002-rune-for-everything.md).
+//! A new request therefore needs no edit here when the web sends it too; one the web does not send goes into
+//! `RUNE_EXTRAS` with its reason, where a reviewer sees it.
 
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-/// Requests that only fetch.
-const READS: &[&str] = &[
-    "Command::Snapshot",
-    "Request::AgentModels",
-    // The context panel (P3a): an artifact's record, where its file is stored, and a session's folder.
-    "Request::Artifact",
-    "Request::ArtifactFile",
-    // P3b: what a session's own runs saved (the daemon links an artifact to its ticket).
-    "Request::ArtifactsForTask",
-    // P3b, the web panel: the web UI's signed address for a route, the viewers the plugins declare, the pages they registered.
-    "Request::SignedWebUrl",
-    "Request::PluginViewers",
-    "Request::PluginPages",
-    "Request::TaskFolder",
-    "Request::CalendarEvents",
-    "Request::CheckpointDiff",
-    "Request::MorningDigest",
-    "Request::PhoneSettings",
-    // The web UI's appearance mode, so the window follows the same setting.
-    "Request::GetAppearance",
-    "Request::PluginStatus",
-    "Request::Routines",
-    "Request::Search",
-    "Request::TaskCheckpoints",
-    "Request::UnseenTasks",
-    "Request::WorkbenchIfChanged",
-];
-
-/// Requests that change something, each one a button the web UI has. Wrappers (`Request::Workbench`
-/// carries a `Command`; `Command::Crew` carries a `CrewCommand`) are listed too.
-const WRITES: &[&str] = &[
-    // The envelopes.
-    "Request::Workbench",
-    "Command::Crew",
-    "Command::Checkpoints",
-    "Command::Goals",
-    // A message to a running agent, and taking it back.
-    "CrewCommand::Enqueue",
-    "CrewCommand::CancelQueued",
-    // A task between turns, and what the person decides about it.
-    "Command::ReplyToTask",
-    "Command::ApproveTask",
-    "Command::CompleteTask",
-    "Command::CancelTask",
-    "Command::StartTask",
-    // The session header's "Propose parallel work" (a read-only proposal; the web's own button).
-    "Command::ProposeSplit",
-    // A goal.
-    "GoalCommand::Pause",
-    "GoalCommand::Resume",
-    "GoalCommand::Extend",
-    "GoalCommand::MarkDone",
-    "GoalCommand::Stop",
-    "GoalCommand::Answer",
-    "GoalCommand::Create",
-    // Runs.
-    "CheckpointCommand::Undo",
-    "CheckpointCommand::Redo",
-    // The Inbox and the digest.
-    "Request::AnswerNeedsYou",
-    "Request::MarkDigestRead",
-    // Seen and unread.
-    "Request::MarkTaskSeen",
-    // A new session, and its runtime.
-    "Command::CreateTask",
-    "Command::SetConversationRuntime",
-    // Routines (the web's Inbox page): save the editor, Run now, the switch, the master switch, standing orders.
-    "Request::SaveRoutine",
-    "Request::RunRoutineNow",
-    "Request::SetRoutineEnabled",
-    "Request::SetRoutinesOn",
-    "Request::SetStandingOrders",
-    // Settings (the web's Settings page): Inbox clean-up, Calendar on, the phone channels and a test.
-    "Request::SetInboxAgeOutDays",
-    "Request::SetCalendarEnabled",
-    "Request::SetPhoneSettings",
-    "Request::PhoneTest",
-    // Settings, Appearance: System, Light or Dark (the web's own control).
-    "Request::SetAppearance",
-    // Settings: the runtime, the budgets and limits, the plan switches, the updater's controls.
-    "Command::SetAgentRuntime",
-    "Command::SetTaskBudget",
-    "Command::SetDailyBudget",
-    "Command::SetMaxRunningTickets",
-    "Command::SetMaxWritablePerRepository",
-    "Command::SetPlanFirst",
-    "Command::SetStartWithoutApproval",
-    "Command::SetSelfUpdate",
-    "Command::UpdateNekoNow",
-    "Command::ApplyPendingUpdate",
-    "Command::SetDevCheckout",
-    // Neko's own conversation.
-    "Command::SendMessage",
-    "Command::CancelChat",
-    "Command::DecideChatTool",
-    "Command::DecideChatAction",
-];
 
 fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).unwrap() {
@@ -192,68 +94,254 @@ fn the_scan_cannot_be_sidestepped_by_renaming_or_by_an_early_test_module() {
     }
 }
 
-#[test]
-fn the_link_sends_exactly_the_allow_listed_requests() {
-    let mut used = BTreeSet::new();
-    for (path, text) in crate_sources().into_iter().filter(|(p, _)| p.components().any(|c| c.as_os_str() == "link")) {
-        let _ = path;
-        used.extend(named(production(&text)));
-    }
-    let allowed: BTreeSet<String> = READS.iter().chain(WRITES).map(|s| (*s).to_owned()).collect();
-    let extra: Vec<_> = used.difference(&allowed).collect();
-    let missing: Vec<_> = allowed.difference(&used).collect();
-    assert!(extra.is_empty(), "requests the client sends that nobody reviewed (add them to this list on purpose): {extra:?}");
-    assert!(missing.is_empty(), "allow-listed requests the client no longer sends (remove them from this list): {missing:?}");
-}
+/// Requests no person-facing screen sends: the bridge an agent's run talks to (`McpBridge`) and the calls a run
+/// makes under its lease (`save_artifact`). They are for agents, so this client never sends them.
+const NEVER: &[&str] = &["McpBridge", "SaveArtifact"];
 
-/// Controls the web UI's own pages have, whose names start like something this client must not
-/// send. Each is one switch, field or button there; nothing here deletes, merges, publishes, clears
-/// or touches the tool connections, skills or the rulebook.
-const CONTROLS: &[&str] = &[
-    "Command::SetConversationRuntime",
-    "Request::SaveRoutine",
-    "Request::SetRoutineEnabled",
-    "Request::SetRoutinesOn",
-    "Request::SetStandingOrders",
-    "Request::SetInboxAgeOutDays",
-    "Request::SetCalendarEnabled",
-    "Request::SetPhoneSettings",
-    "Request::SetAppearance",
-    "Command::SetAgentRuntime",
-    "Command::SetTaskBudget",
-    "Command::SetDailyBudget",
-    "Command::SetMaxRunningTickets",
-    "Command::SetMaxWritablePerRepository",
-    "Command::SetPlanFirst",
-    "Command::SetStartWithoutApproval",
-    "Command::SetSelfUpdate",
-    "Command::UpdateNekoNow",
-    "Command::SetDevCheckout",
+/// Requests Rune sends that the scan of the web UI's call sites does not find, each for a reason the line says.
+const RUNE_EXTRAS: &[&str] = &[
+    // A new session: the web starts work from Neko's chat (`create_task`), Rune has a form (Home, "+ New").
+    "CreateTask",
+    "StartTask",
+    // Rune's own panel: the signed address for the web panel and the API's token, the viewers and pages plugins
+    // declare, a session's folder and what its runs saved.
+    "SignedWebUrl",
+    "TaskFolder",
+    "ArtifactFile",
+    "ArtifactsForTask",
+    "PluginViewers",
+    "PluginPages",
+    // A reply to a task between turns: the web sends it through its chat stream (`/api/chat/…`, which the daemon turns
+    // into `ReplyToTask`); Rune has no stream and sends the command itself.
+    "ReplyToTask",
+    // Settings' two limits, which the web sends through a `limit(name, value)` helper the scan does not follow.
+    "SetMaxRunningTickets",
+    "SetMaxWritablePerRepository",
+    // Reads Rune made before this rule that the web UI reaches through a store or helper the scan does not follow.
+    "Snapshot",
+    "WorkbenchIfChanged",
+    "Artifact",
+    "MorningDigest",
+    "PhoneSettings",
+    "GetAppearance",
+    "PluginStatus",
+    "Routines",
+    "UnseenTasks",
+    "TaskCheckpoints",
+    "CheckpointDiff",
+    "CalendarEvents",
+    "AgentModels",
+    "Search",
 ];
 
-/// Requests that must never be on the list, by name: a client of this kind can read and change what
-/// the web's pages let a person change, and nothing that destroys or publishes.
-const NEVER: &[&str] = &["StartOver", "RollBackWebUi", "SetRulebook", "SetUpdateSource", "SetMergeWhenReady", "SetMergeWithoutReview", "ClosePullRequest", "RemoveTheme", "ClearNeedsYou", "StartOver"];
+/// The envelopes: the web sends `Crew`, `Goals` and `Checkpoints` with the sub-command in the payload, and
+/// `Workbench` around every command.
+const ENVELOPES: &[&str] = &["Workbench", "Crew", "Goals", "Checkpoints"];
+
+/// The sub-commands carried inside an envelope: checked by their name appearing in the web's sources.
+const SUBCOMMAND_PREFIXES: [&str; 3] = ["CrewCommand", "GoalCommand", "CheckpointCommand"];
+
+/// Requests that destroy, publish or restart something, with the `Call` that carries each. A `Call` is only built
+/// inside a `confirm(` (see `destructive_requests_are_only_sent_from_a_confirm_dialog`).
+const DESTRUCTIVE: &[(&str, &str)] = &[
+    ("DeleteTask", "Call::Delete"),
+    ("StartOver", "Call::StartOver"),
+    ("ClosePullRequest", "Call::ClosePullRequest"),
+    ("RemoveTheme", "Call::RemoveTheme"),
+    ("CancelAllWork", "Call::StopAll"),
+    ("RetryTask", "Call::Retry"),
+    ("RollBackWebUi", "Call::RollBackWebUi"),
+    ("ClearFinishedTasks", "Call::ClearFinished"),
+];
+
+fn web_sources() -> Vec<(PathBuf, String)> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().is_some_and(|e| e == "ts" || e == "tsx") && !path.to_string_lossy().contains(".test.") {
+                out.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src"), &mut files);
+    files.into_iter().map(|p| (p.clone(), fs::read_to_string(p).unwrap_or_default())).collect()
+}
+
+/// A name read at byte `at` in `text`: an optional quote, then a capitalised identifier.
+fn name_at(text: &str, at: usize) -> Option<String> {
+    let rest = text[at..].trim_start().trim_start_matches(['"', '\'', '`']);
+    let name: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+    name.chars().next().filter(|c| c.is_uppercase()).map(|_| name)
+}
+
+/// The byte offset of the first thing after `at` that is not whitespace, `{` or a quote.
+fn skip_open(text: &str, mut at: usize) -> usize {
+    while let Some(c) = text[at..].chars().next() {
+        if c.is_whitespace() || c == '{' {
+            at += c.len_utf8();
+        } else {
+            break;
+        }
+    }
+    at
+}
+
+/// The daemon request names the web UI sends: the first argument of its `command(`, `run(`, `send(` and `request(`
+/// call sites (a quoted name, or the first key of an object), what `Workbench` wraps, and the board's move table.
+fn web_sends() -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    for (_, text) in web_sources() {
+        for call in ["command(", "run(", "send(", "request("] {
+            for (at, _) in text.match_indices(call) {
+                if text[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_') {
+                    continue;
+                }
+                let start = skip_open(&text, at + call.len());
+                let Some(name) = name_at(&text, start) else { continue };
+                found.insert(name.clone());
+                // `{ Workbench: { Name` and `{ Workbench: "Name"`.
+                if name == "Workbench" {
+                    let after = text[start..].find("Workbench").map(|i| start + i + "Workbench".len()).unwrap_or(start);
+                    let rest = text[after..].trim_start_matches(['"', '\'']).trim_start();
+                    if let Some(rest) = rest.strip_prefix(':') {
+                        let at = text.len() - rest.len();
+                        if let Some(inner) = name_at(&text, skip_open(&text, at)) {
+                            found.insert(inner);
+                        }
+                    }
+                }
+            }
+        }
+        // The board's move commands are named in one table (`moveCommand`).
+        for (at, _) in text.match_indices("command: \"") {
+            if let Some(name) = name_at(&text, at + "command: ".len()) {
+                found.insert(name);
+            }
+        }
+    }
+    found
+}
+
+/// Whether the web's sources mention `name` as a whole word (a sub-command carried inside `Crew`, `Goals`, ...).
+fn web_mentions(name: &str) -> bool {
+    web_sources().iter().any(|(_, text)| {
+        text.match_indices(name).any(|(at, _)| {
+            let before = text[..at].chars().next_back();
+            let after = text[at + name.len()..].chars().next();
+            !before.is_some_and(|c| c.is_alphanumeric() || c == '_') && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
+        })
+    })
+}
+
+/// Every request the client's link module names, as `Prefix::Name`.
+fn sent() -> BTreeSet<String> {
+    let mut used = BTreeSet::new();
+    for (_, text) in crate_sources().into_iter().filter(|(p, _)| p.components().any(|c| c.as_os_str() == "link")) {
+        used.extend(named(production(&text)));
+    }
+    used
+}
 
 #[test]
-fn the_reads_do_not_write_and_the_list_has_no_destructive_commands() {
-    for name in READS.iter().chain(WRITES) {
-        let tail = name.rsplit("::").next().unwrap_or(name);
-        assert!(!NEVER.contains(&tail), "{name} is on the never list");
-        if CONTROLS.contains(name) {
-            continue;
-        }
-        for forbidden in ["Delete", "ClearFinished", "CancelAll", "StartOver", "Save", "Set", "Update", "RollBack", "Merge", "Close", "Publish", "Skills", "Mcp", "Connect", "Clear"] {
-            assert!(!tail.starts_with(forbidden), "{name} looks like a request this client must not send (a web control belongs in CONTROLS)");
+fn the_scan_finds_the_web_uis_requests() {
+    let sends = web_sends();
+    for known in [
+        "SendMessage", "DiscardQueuedMessage", "InterruptAndSendMessage", "CancelAllWork", "ClearFinishedTasks", "ApproveTask", "DeleteTask", "RenameTask", "RetryTask",
+        "PublishTask", "PrioritizeTask", "SetLandOnMain", "CancelTask", "CompleteTask", "AnswerNeedsYou", "MarkTaskSeen", "SaveRoutine", "ClearNeedsYou", "ReopenNeedsYou", "ProposeSplit",
+    ] {
+        assert!(sends.contains(known), "the scan of web/src did not find `{known}`; found {sends:?}");
+    }
+}
+
+#[test]
+fn rune_sends_only_what_the_web_sends_and_its_extras() {
+    let web = web_sends();
+    let mut unreviewed = Vec::new();
+    for full in sent() {
+        let (prefix, tail) = full.split_once("::").unwrap();
+        assert!(!NEVER.contains(&tail), "{full} is for agents, never for this client");
+        let known = web.contains(tail) || RUNE_EXTRAS.contains(&tail) || ENVELOPES.contains(&tail) || (SUBCOMMAND_PREFIXES.contains(&prefix) && web_mentions(tail));
+        if !known {
+            unreviewed.push(full.clone());
         }
     }
-    // Every control is on the list, so the exception cannot hide a request nobody listed.
-    for name in CONTROLS {
-        assert!(WRITES.contains(name), "{name} is in CONTROLS but not in WRITES");
+    assert!(unreviewed.is_empty(), "requests Rune sends that the web UI does not (send what the web sends, or give the extra a reason in RUNE_EXTRAS): {unreviewed:?}");
+}
+
+#[test]
+fn every_extra_is_still_sent_and_none_is_a_web_send() {
+    let web = web_sends();
+    let used = sent();
+    let tails: BTreeSet<&str> = used.iter().filter_map(|s| s.split_once("::").map(|(_, t)| t)).collect();
+    for extra in RUNE_EXTRAS {
+        // The wire name of `Command::Snapshot` and the held read are named in `link/mod.rs` and `link/write.rs`.
+        assert!(tails.contains(extra), "{extra} is in RUNE_EXTRAS but Rune no longer sends it: remove it");
     }
-    // Reads never carry a control's name.
-    for name in READS {
-        assert!(!CONTROLS.contains(name), "{name} is a read");
+    let _ = web;
+}
+
+#[test]
+fn destructive_requests_are_only_sent_from_a_confirm_dialog() {
+    // Every `Call` that reaches a destructive request is built inside `confirm(`; no file outside `link/` names the wire request.
+    let confirm_only = ["task_actions.rs"];
+    let mut built = 0;
+    for (path, text) in crate_sources() {
+        let code = production(&text);
+        let in_link = path.components().any(|c| c.as_os_str() == "link");
+        for (wire, call) in DESTRUCTIVE {
+            if !in_link {
+                assert!(!bare_word(code, wire), "{} names the request `{wire}`: only link/ may", path.display());
+            }
+            if in_link {
+                continue;
+            }
+            for (at, _) in code.match_indices(call) {
+                if code[at + call.len()..].chars().next().is_some_and(|c| c.is_alphanumeric() || c == '_') {
+                    continue;
+                }
+                built += 1;
+                let before = &code[at.saturating_sub(900)..at];
+                assert!(before.contains("confirm("), "{}: `{call}` is built outside a confirm dialog", path.display());
+                assert!(confirm_only.iter().any(|f| path.ends_with(f)), "{}: `{call}` belongs in task_actions.rs (the one place that confirms)", path.display());
+            }
+        }
+    }
+    let _ = built;
+}
+
+/// `word` appears in `code` as a whole word.
+fn bare_word(code: &str, word: &str) -> bool {
+    code.match_indices(word).any(|(at, _)| {
+        !code[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_') && !code[at + word.len()..].chars().next().is_some_and(|c| c.is_alphanumeric() || c == '_')
+    })
+}
+
+#[test]
+fn http_goes_only_to_the_paths_the_web_uses() {
+    // `src/link/http.rs` is the one place the client speaks HTTP: `/api/attachments`, `/api/files` and `/api/plugins/*`,
+    // each a path the web's sources use.
+    let http = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/link/http.rs")).unwrap();
+    let code = production(&http);
+    let mut paths = BTreeSet::new();
+    for (at, _) in code.match_indices("\"/api/") {
+        let path: String = code[at + 1..].chars().take_while(|c| *c != '"' && *c != '?' && *c != '{').collect();
+        paths.insert(path);
+    }
+    let allowed: BTreeSet<String> = ["/api/attachments", "/api/files", "/api/plugins", "/api/plugins/"].map(str::to_owned).into();
+    assert!(paths.is_subset(&allowed), "http.rs reaches paths the web UI does not use: {paths:?}");
+    assert!(paths.contains("/api/attachments") && paths.contains("/api/files"));
+    for path in &paths {
+        assert!(web_sources().iter().any(|(_, t)| t.contains(path.trim_end_matches('/'))), "{path} is not a path the web UI uses");
+    }
+    // No other file opens a socket to the web port.
+    for (path, text) in crate_sources() {
+        if !path.ends_with("http.rs") {
+            assert!(!production(&text).contains("TcpStream"), "{} speaks TCP outside link/http.rs", path.display());
+        }
     }
 }
 

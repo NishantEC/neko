@@ -16,6 +16,7 @@
 //! tested with a fake transport and a recorded clock, and the real socket is tested against a
 //! fake server in `link/unix.rs`.
 
+pub mod http;
 mod model;
 mod pages;
 mod reply;

@@ -778,6 +778,10 @@ impl App {
             Reply::ArtifactInfo(artifact) => self.artifact_info(artifact),
             Reply::TaskArtifacts { task_id, artifacts } => self.task_artifacts(&task_id, artifacts),
             Reply::SignedUrl { route, url } => {
+                if route == crate::link::http::ROUTE {
+                    self.http = crate::link::http::Http::from_signed_url(&url);
+                    return false;
+                }
                 self.web_view.signed(&route, url);
                 true
             }
@@ -858,6 +862,7 @@ impl App {
                     }
                     Call::Checkpoints { .. } | Call::Unseen | Call::Digest | Call::Inbox | Call::Refresh | Call::Models | Call::TaskFolder { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } => {}
                     Call::ArtifactFile { id, version } => self.artifact_unreadable(id, *version, message),
+                    Call::SignedWebUrl { route } if route == crate::link::http::ROUTE => self.http_asked = false,
                     Call::SignedWebUrl { route } => self.web_view.signing_failed(route, message),
                     Call::PluginViewers | Call::PluginPages => {}
                     Call::CreateTask { .. } => self.new_error(message),
@@ -884,6 +889,7 @@ impl App {
                     }
                     Call::Refresh | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::Checkpoints { .. } | Call::TaskFolder { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } => return false,
                     Call::ArtifactFile { id, version } => self.artifact_unreadable(id, *version, line),
+                    Call::SignedWebUrl { route } if route == crate::link::http::ROUTE => self.http_asked = false,
                     Call::SignedWebUrl { route } => self.web_view.signing_failed(route, line),
                     Call::PluginViewers | Call::PluginPages => return false,
                     Call::CreateTask { .. } => self.new_error(line),

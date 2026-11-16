@@ -192,6 +192,10 @@ pub struct App {
     pub pages: Pages,
     /// The context panel: its tabs, the loaded file or artifact, the viewers' state.
     pub panel: crate::panel::Panel,
+    /// The web server's port and token (from `SignedWebUrl`), for the three paths `link/http.rs` reaches.
+    pub http: Option<crate::link::http::Http>,
+    /// The address was asked for (once; asked again when the answer failed).
+    pub http_asked: bool,
 }
 
 /// Where the window's own settings are kept (Rune's `prefs` store).
@@ -274,6 +278,8 @@ impl Default for App {
             inbox_menu: None,
             pages: Pages::default(),
             panel: crate::panel::Panel::standard(),
+            http: None,
+            http_asked: false,
         }
     }
 }
@@ -519,6 +525,15 @@ impl App {
             Some(id) if self.summary.as_ref().is_some_and(|m| m.task(id).is_some()) => self.select(id),
             _ => self.open_in_web(Some(route)),
         }
+    }
+
+    /// The HTTP client, when the daemon has signed its address; asks for it the first time it is wanted.
+    pub fn http(&mut self) -> Option<crate::link::http::Http> {
+        if self.http.is_none() && !self.http_asked {
+            self.http_asked = true;
+            self.call(Call::SignedWebUrl { route: crate::link::http::ROUTE.to_owned() });
+        }
+        self.http.clone()
     }
 
     /// Says `words` in a toast for [`TOAST_SECONDS`].
