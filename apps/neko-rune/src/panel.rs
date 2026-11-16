@@ -83,6 +83,9 @@ pub struct SessionPanel {
     pub file: Option<String>,
     /// The run whose diff the Diff tab shows; None is the whole task.
     pub run: Option<u32>,
+    /// The task's `updated_at_ms` when its saved artifacts were last asked for (`ArtifactsForTask`): a
+    /// change asks again, so what a run saves while the session is open shows up.
+    pub artifacts_asked: Option<i64>,
 }
 
 /// What is loaded into a viewer.
@@ -262,6 +265,11 @@ impl Panel {
     }
 }
 
+/// When an artifact last changed (its newest version), as the daemon's `artifacts::updated_ms` says it.
+fn updated_ms(artifact: &Artifact) -> i64 {
+    artifact.versions.iter().map(|v| v.at_ms).max().unwrap_or(0)
+}
+
 /// The tab rules, as a pure function of what the session has: the tab to open on among `available`.
 /// Canvas if an artifact was shown in the last ten minutes, else Diff, else Terminal, else Files;
 /// the first available one when none of those apply (an old artifact alone).
@@ -400,6 +408,12 @@ impl App {
         {
             self.folder_arrived(&id, Some(path));
         }
+        // What this session's own runs saved, kept by the daemon (asked once, and again when the task moved).
+        let updated = self.summary.as_ref().and_then(|m| m.tasks.iter().find(|t| t.id == id)).map_or(0, |t| t.updated_at_ms);
+        if self.session_panel(&id).and_then(|p| p.artifacts_asked) != Some(updated) {
+            self.panel.session_mut(&id).artifacts_asked = Some(updated);
+            self.call(Call::TaskArtifacts { task_id: id.clone() });
+        }
         let closed = self.session_panel(&id).is_some_and(|p| p.person_closed);
         if !closed && !self.layout.context.is_open() && !self.panel_tabs().is_empty() {
             self.layout.context.set_open(true);
@@ -537,6 +551,32 @@ impl App {
         // The record names its versions and title; the file is asked for once the version is known.
         self.call(Call::ArtifactInfo { id: id.to_owned() });
         self.panel_sync();
+    }
+
+    /// What the session's own runs saved arrived: their records join the Canvas's list beside what the
+    /// daemon showed while the session was open (an artifact is listed once, by its id).
+    pub fn task_artifacts(&mut self, task_id: &str, artifacts: Vec<Artifact>) -> bool {
+        let mut changed = false;
+        for artifact in artifacts {
+            let at_ms = updated_ms(&artifact);
+            let id = artifact.id.clone();
+            if self.panel.artifacts.get(&id) != Some(&artifact) {
+                self.panel.artifacts.insert(id.clone(), artifact);
+                changed = true;
+            }
+            let sp = self.panel.session_mut(task_id);
+            if !sp.shown.iter().any(|s| s.id == id) {
+                sp.shown.push(Shown { id, version: None, at_ms });
+                changed = true;
+            }
+        }
+        if changed {
+            let sp = self.panel.session_mut(task_id);
+            sp.shown.sort_by_key(|s| std::cmp::Reverse(s.at_ms));
+            sp.shown.truncate(SHOWN_KEPT);
+            self.panel_sync();
+        }
+        changed
     }
 
     /// The artifact's record arrived.

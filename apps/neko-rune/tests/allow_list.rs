@@ -25,6 +25,8 @@ const READS: &[&str] = &[
     // The context panel (P3a): an artifact's record, where its file is stored, and a session's folder.
     "Request::Artifact",
     "Request::ArtifactFile",
+    // P3b: what a session's own runs saved (the daemon links an artifact to its ticket).
+    "Request::ArtifactsForTask",
     "Request::TaskFolder",
     "Request::CalendarEvents",
     "Request::CheckpointDiff",

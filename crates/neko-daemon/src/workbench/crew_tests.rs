@@ -20,8 +20,8 @@ fn fixture() -> (Arc<Controller>, Arc<Mutex<Db>>, String, tempfile::TempDir) {
     (Arc::new(Controller::new(db.clone())), db, workspace, repo)
 }
 
-fn no_artifacts() -> impl Fn(&str, Value) -> Result<String, String> {
-    |_, _| Err("no artifacts in this test".into())
+fn no_artifacts() -> impl Fn(&str, Value, Option<&str>) -> Result<String, String> {
+    |_, _, _| Err("no artifacts in this test".into())
 }
 
 fn call(c: &Controller, lease: &crate::mcp_host::Lease, tool: &str, args: Value) -> Result<Value, String> {
@@ -86,7 +86,7 @@ fn a_lease_carries_only_what_its_role_allows() {
     };
     assert_eq!(listed(&full).len(), TOOLS.len());
     assert_eq!(listed(&read_only), ["list_tasks", "task_status"]);
-    assert_eq!(listed(&own), ["list_tasks", "create_task", "wait_for", "task_status", "checkpoint_diff"]);
+    assert_eq!(listed(&own), ["list_tasks", "create_task", "wait_for", "task_status", "save_artifact", "checkpoint_diff"]);
 
     // Read-only chat looks, and cannot do anything else.
     assert_eq!(call(&c, &read_only, "list_tasks", json!({})).unwrap()["tasks"].as_array().unwrap().len(), 1);

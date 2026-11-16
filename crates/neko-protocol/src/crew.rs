@@ -107,7 +107,7 @@ pub enum CrewRole {
     Full,
     /// Read-only chat: list and status.
     ReadOnly,
-    /// A ticket's own run: list, status, wait, and sub-tasks of its ticket.
+    /// A ticket's own run: list, status, wait, save an artifact, and sub-tasks of its ticket.
     Task { ticket_id: String, may_create: bool },
 }
 
@@ -119,7 +119,9 @@ impl CrewRole {
             Self::Full => TOOLS.contains(&tool),
             Self::ReadOnly => matches!(tool, "list_tasks" | "task_status"),
             Self::Task { may_create, .. } => match tool {
-                "list_tasks" | "task_status" | "wait_for" | "checkpoint_diff" => true,
+                // `save_artifact` records the ticket on the artifact (`Artifact::task_id`), so the
+                // Rune Canvas can list what a session made after a restart.
+                "list_tasks" | "task_status" | "wait_for" | "checkpoint_diff" | "save_artifact" => true,
                 "create_task" => *may_create,
                 _ => false,
             },

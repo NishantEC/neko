@@ -208,6 +208,18 @@ fn the_same_request_reaches_the_daemon_and_the_answer_comes_back() {
 }
 
 #[test]
+fn the_signed_address_is_not_given_to_a_page() {
+    let h = start();
+    let mut lines = good(h.port);
+    lines.push("Content-Type: application/json".into());
+    let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+    let answer = http(h.port, "POST", "/api/request", &refs, "{\"SignedWebUrl\":{\"route\":\"tasks\"}}");
+    assert!(answer.body.contains("Error") && answer.body.contains("socket"), "{}", answer.body);
+    assert!(!answer.body.contains("token="), "{}", answer.body);
+    assert!(h.backend.seen.lock().unwrap().is_empty(), "it never reached the daemon from the web");
+}
+
+#[test]
 fn bounds_request_size_and_refuses_chunked_bodies() {
     let h = start();
     let mut lines = good(h.port);

@@ -73,6 +73,7 @@ fn artifact(id: &str, kind: &str, versions: u32) -> Artifact {
         kind: kind.into(),
         workspace_id: None,
         message_id: None,
+        task_id: None,
         versions: (1..=versions).map(|n| ArtifactVersion { n, file: format!("v{n}.{kind}"), at_ms: DEMO_NOW - 2 * MIN, note: String::new(), message_id: None }).collect(),
     }
 }
@@ -162,6 +163,39 @@ fn a_session_with_nothing_to_show_has_no_panel_and_one_with_something_opens_it()
     frames(&mut rt, 10);
     assert!(rt.state.layout.context.is_open(), "t0 has a command in its events");
     assert_eq!(rt.state.panel_tab(), Some(Tab::Terminal));
+}
+
+#[test]
+fn what_a_sessions_own_runs_saved_joins_the_canvas_list_once_and_survives_a_restart() {
+    use neko_rune::link::Reply;
+    let mut rt = runtime(scenes_panel::auto_closed);
+    let session = rt.state.selected.clone().unwrap();
+    let asked = Call::TaskArtifacts { task_id: session.clone() };
+    assert!(rt.state.outbox.contains(&asked), "choosing a session asks the daemon what its runs saved: {:?}", rt.state.outbox);
+    assert_eq!(rt.state.panel_tabs(), Vec::<Tab>::new(), "nothing to show before the answer");
+    // The daemon's answer (a fresh run of the app: nothing was shown in this window yet).
+    let reply = Reply::TaskArtifacts { task_id: session.clone(), artifacts: vec![artifact("saved-a", "png", 2), artifact("saved-b", "md", 1)] };
+    rt.update(|s, _| {
+        s.apply_reply(&asked, reply);
+    });
+    frames(&mut rt, 5);
+    assert_eq!(tab_titles(&rt.state), ["Canvas"], "the Canvas has content without a ShowArtifact");
+    assert!(rt.state.layout.context.is_open(), "and the panel opens for it");
+    let ids = |app: &App| app.panel.session(&session).unwrap().shown.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&rt.state).len(), 2);
+    // An artifact the daemon showed while the session was open is the same row, not a second one.
+    rt.update(|s, _| {
+        s.apply_link(LinkEvent::ShowArtifact { id: "saved-a".into(), version: None });
+    });
+    frames(&mut rt, 5);
+    assert_eq!(ids(&rt.state), ["saved-a", "saved-b"], "merged by id, the one just shown first");
+    // Asking again with the same answer changes nothing; a new one is added.
+    let again = Reply::TaskArtifacts { task_id: session.clone(), artifacts: vec![artifact("saved-c", "csv", 1), artifact("saved-a", "png", 2), artifact("saved-b", "md", 1)] };
+    rt.update(|s, _| {
+        s.apply_reply(&asked, again);
+    });
+    assert_eq!(ids(&rt.state).len(), 3);
+    assert_eq!(ids(&rt.state).iter().filter(|i| i.as_str() == "saved-a").count(), 1);
 }
 
 #[test]

@@ -526,6 +526,8 @@ fn query_param<'a>(query: &'a str, name: &str) -> Option<&'a str> {
 
 fn api_request(req: &Req, backend: &dyn Backend) -> Reply {
     match serde_json::from_slice::<Request>(&req.body) {
+        // The signed address carries the web token: it is for the Unix socket, not for a page.
+        Ok(Request::SignedWebUrl { .. }) => Reply::json(&Response::Error { message: "That request is only answered on Neko's own socket.".into() }),
         Ok(request) => Reply::json(&backend.request(request)),
         Err(error) => Reply::json(&Response::Error { message: format!("Neko couldn’t read this request. ({error})") }),
     }

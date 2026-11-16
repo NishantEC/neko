@@ -807,6 +807,29 @@ pub enum Request {
         #[serde(default)]
         workspace_id: Option<String>,
     },
+    /// Read-only: the artifacts a ticket's own runs saved, newest first (`Artifact::task_id`).
+    /// Answers `Artifacts`.
+    ArtifactsForTask {
+        task_id: String,
+    },
+    /// Read-only: the address of Neko's web UI, signed in, at `route` (the hash route the web
+    /// app reads after `#/`, such as `artifact/<id>/<n>?embed=1` or `my-plugin:board?embed=1`).
+    /// The same address `neko-daemon --open-page` opens. Socket only: the web bridge refuses it.
+    /// Answers `SignedWebUrl`.
+    SignedWebUrl {
+        route: String,
+    },
+    /// Read-only: the viewers the enabled plugins' manifests declare (`viewers`), one entry
+    /// each. Answers `PluginViewers`.
+    PluginViewers,
+    /// A Neko web window tells the daemon which pages the plugins it loaded registered (the web app
+    /// sends it when they change); the daemon keeps them for `PluginPages`. Answers `Noted`.
+    ReportPluginPages {
+        pages: Vec<PluginPage>,
+    },
+    /// Read-only: the pages plugins registered, as the last Neko web window that loaded them
+    /// reported (kept across restarts). Answers `PluginPages`.
+    PluginPages,
     /// One artifact's record, and what open Neko pages saw when they drew its
     /// versions (`status`: when a page last showed each one, with which
     /// viewer, and the errors it reported). Read it after saving and showing:
@@ -874,7 +897,29 @@ pub struct Artifact {
     /// The Home reply that made it, when one was running.
     #[serde(default)]
     pub message_id: Option<String>,
+    /// The ticket whose run saved it (the lease of a run's `save_artifact` bridge call names its
+    /// ticket). None for a chat's or a hand's save. Set when the artifact is made, never changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
     pub versions: Vec<ArtifactVersion>,
+}
+
+/// One viewer a plugin's manifest declares (`PluginViewers`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginViewer {
+    pub plugin: String,
+    pub viewer_id: String,
+    pub kinds: Vec<String>,
+    pub title: String,
+}
+
+/// One page a plugin registered (`PluginPages`): `id` is the page's route as the web app spells
+/// it (`my-plugin:board`), `plugin` the plugin that registered it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginPage {
+    pub plugin: String,
+    pub id: String,
+    pub title: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1227,6 +1272,18 @@ pub enum Response {
     },
     Artifacts {
         artifacts: Vec<Artifact>,
+    },
+    /// `SignedWebUrl`.
+    SignedWebUrl {
+        url: String,
+    },
+    /// `PluginViewers`.
+    PluginViewers {
+        viewers: Vec<PluginViewer>,
+    },
+    /// `PluginPages`.
+    PluginPages {
+        pages: Vec<PluginPage>,
     },
     Artifact {
         artifact: Artifact,

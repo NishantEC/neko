@@ -101,7 +101,7 @@ fn visible(role: &CrewRole, scope_workspace: &str, own_workspace: Option<&str>, 
 impl Controller {
     /// One orchestration tool call. `artifacts` runs `save_artifact` /
     /// `show_artifact` (they live with the server's artifact store).
-    pub fn crew_call(&self, token: &str, tool: &str, arguments_json: &str, artifacts: &dyn Fn(&str, Value) -> Result<String, String>) -> Result<String, String> {
+    pub fn crew_call(&self, token: &str, tool: &str, arguments_json: &str, artifacts: &dyn Fn(&str, Value, Option<&str>) -> Result<String, String>) -> Result<String, String> {
         let scope = self.mcp.crew_scope(token)?;
         let role = scope.crew.clone().ok_or("This run has no crew tools")?;
         if tool == "tools" {
@@ -145,7 +145,10 @@ impl Controller {
             "schedule" => self.crew_schedule(&scope, &args),
             "checkpoint_diff" => self.crew_checkpoint_diff(&scope, &role, &args),
             "undo_run" => self.crew_undo_run(&scope, &role, &args),
-            "save_artifact" | "show_artifact" => artifacts(tool, args.clone()),
+            "save_artifact" | "show_artifact" => artifacts(tool, args.clone(), match &role {
+                CrewRole::Task { ticket_id, .. } => Some(ticket_id.as_str()),
+                _ => None,
+            }),
             _ => Err(format!("Unknown tool {tool}")),
         };
         if let (true, Ok(text)) = (mutating, &result) {

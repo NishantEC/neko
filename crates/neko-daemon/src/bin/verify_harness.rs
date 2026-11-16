@@ -45,6 +45,9 @@ mod server;
 #[allow(dead_code)]
 #[path = "../web.rs"]
 mod web;
+#[allow(dead_code)]
+#[path = "../web_embed.rs"]
+mod web_embed;
 #[path = "../workbench.rs"]
 mod workbench;
 

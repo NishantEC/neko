@@ -795,8 +795,13 @@ fn inspect_app() -> Response {
 /// `show` unset shows it when a Neko chat reply is running (the full-power
 /// chat is the only one that can save files, so that is where the person is
 /// watching); a routine or task run shows only when it asks to.
+///
+/// A ticket run's own save (its lease names the ticket: `save.task_id`) is the run's, not the
+/// chat's: it records the ticket and is never linked to a Home reply that happens to be running.
 fn save_artifact(state: &AppState, mut save: neko_core::artifacts::Save, show: Option<bool>) -> Response {
-    let pending = {
+    let pending = if save.task_id.is_some() {
+        None
+    } else {
         let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         neko_core::neko_chat::pending_turn(&db)
     };
@@ -835,21 +840,23 @@ fn crew_or_connection(state: &AppState, request: neko_protocol::mcp_host::Bridge
     let neko_protocol::mcp_host::BridgeAction::Crew { tool, arguments_json } = &request.action else {
         return state.workbench.mcp.bridge(request);
     };
-    let artifacts = |tool: &str, args: serde_json::Value| -> Result<String, String> {
+    // `task_id` is the ticket of a ticket run's lease (None for the chat's).
+    let artifacts = |tool: &str, args: serde_json::Value, task_id: Option<&str>| -> Result<String, String> {
         let text = |key: &str| args.get(key).and_then(|v| v.as_str()).map(str::to_owned);
-        let request = if tool == "save_artifact" {
-            Request::SaveArtifact {
+        let response = if tool == "save_artifact" {
+            save_artifact(state, neko_core::artifacts::Save {
                 title: text("title").ok_or("title is required")?,
-                file: text("file").ok_or("file is required (an absolute path)")?,
+                file: std::path::PathBuf::from(text("file").ok_or("file is required (an absolute path)")?),
                 workspace_id: text("workspace_id"),
                 artifact_id: text("artifact_id"),
                 note: text("note").unwrap_or_default(),
-                show: args.get("show").and_then(|v| v.as_bool()),
-            }
+                message_id: None,
+                task_id: task_id.map(str::to_owned),
+            }, args.get("show").and_then(|v| v.as_bool()))
         } else {
-            Request::ShowArtifact { id: text("id").ok_or("id is required")?, version: args.get("version").and_then(|v| v.as_u64()).map(|v| v as u32) }
+            handle_request(state, Request::ShowArtifact { id: text("id").ok_or("id is required")?, version: args.get("version").and_then(|v| v.as_u64()).map(|v| v as u32) }, ctx)
         };
-        match handle_request(state, request, ctx) {
+        match response {
             Response::Error { message } => Err(message),
             other => serde_json::to_string(&other).map_err(|e| e.to_string()),
         }
@@ -886,9 +893,27 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             artifact_id,
             note,
             message_id: None,
+            task_id: None,
         }, show),
         Request::EditArtifact { artifact_id, version, content, note } => edit_artifact(state, &artifact_id, version, &content, &note),
         Request::Artifacts { workspace_id } => Response::Artifacts { artifacts: neko_core::artifacts::list(&state.artifacts, workspace_id.as_deref()) },
+        Request::ArtifactsForTask { task_id } => Response::Artifacts { artifacts: neko_core::artifacts::list_for_task(&state.artifacts, &task_id) },
+        Request::SignedWebUrl { route } => match crate::web_embed::signed_url(&neko_protocol::support_dir(), std::env::var("NEKO_WEB_PORT").ok().as_deref(), &route) {
+            Ok(url) => Response::SignedWebUrl { url },
+            Err(message) => Response::Error { message },
+        },
+        Request::PluginViewers => Response::PluginViewers { viewers: crate::web_embed::plugin_viewers(&neko_core::viewers::plugins_dir()) },
+        Request::PluginPages => {
+            let dir = state.artifacts.parent().map(std::path::Path::to_path_buf).unwrap_or_else(neko_protocol::support_dir);
+            Response::PluginPages { pages: crate::web_embed::load_pages(&dir, &neko_core::viewers::plugins_dir()) }
+        }
+        Request::ReportPluginPages { pages } => {
+            let dir = state.artifacts.parent().map(std::path::Path::to_path_buf).unwrap_or_else(neko_protocol::support_dir);
+            match crate::web_embed::store_pages(&dir, pages) {
+                Ok(()) => Response::Noted,
+                Err(message) => Response::Error { message },
+            }
+        }
         Request::Artifact { id } => match neko_core::artifacts::get(&state.artifacts, &id) {
             Some(artifact) => Response::Artifact { status: artifact_reports().status(&artifact.id), artifact },
             None => Response::Error { message: format!("There is no artifact {id}.") },
@@ -2069,6 +2094,64 @@ pub(crate) mod tests {
         let denied = Request::SetCalendarEvents { events: vec![CalendarEvent { id: "e3".into(), ..Default::default() }], source: String::new(), access: CalendarAccess::Denied };
         let Response::CalendarStatus(status) = handle_request_for_test(&state, denied) else { panic!() };
         assert_eq!((status.access, status.events), (CalendarAccess::Denied, 0));
+    }
+
+    #[test]
+    fn a_ticket_runs_artifact_records_its_ticket_and_a_chat_or_manual_save_records_none() {
+        use neko_protocol::crew::CrewRole;
+        use neko_protocol::mcp_host::{BridgeAction, BridgeRequest};
+        let tmp = tempfile::tempdir().unwrap();
+        let mut state = test_state(Db::open_in_memory().unwrap(), Vec::new());
+        state.artifacts = tmp.path().join("artifacts");
+        let state = Arc::new(state);
+        let page = tmp.path().join("design.html");
+        std::fs::write(&page, "<html><body><h1>Hi</h1></body></html>").unwrap();
+        let args = |artifact_id: Option<&str>| serde_json::json!({"title": "Mockup", "file": page.to_string_lossy(), "artifact_id": artifact_id, "show": false}).to_string();
+        let bridge = |lease: &crate::mcp_host::Lease, arguments_json: String| handle_request_for_test(&state, Request::McpBridge(BridgeRequest {
+            token: neko_protocol::workbench::Secret(lease.token().to_owned()),
+            action: BridgeAction::Crew { tool: "save_artifact".into(), arguments_json },
+        }));
+        let saved = |response: Response| -> neko_protocol::Artifact {
+            let Response::McpBridge { json } = response else { panic!("not a bridge reply: {response:?}") };
+            let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+            serde_json::from_value(value["ArtifactSaved"]["artifact"].clone()).unwrap_or_else(|e| panic!("no artifact in {json}: {e}"))
+        };
+
+        // A ticket's run: the artifact names the ticket, even with a Home reply running (that reply is not its).
+        let turn = neko_core::neko_chat::begin_scoped_turn(&state.db.lock().unwrap(), "make it", Some("ws-1")).unwrap();
+        let run = state.workbench.mcp.crew_lease("run-1", CrewRole::Task { ticket_id: "t-board".into(), may_create: false }).unwrap();
+        let mine = saved(bridge(&run, args(None)));
+        assert_eq!(mine.task_id.as_deref(), Some("t-board"));
+        assert!(mine.message_id.is_none(), "not linked to the chat reply that was running: {:?} / {turn}", mine.message_id);
+        // Its next version stays the same ticket's.
+        assert_eq!(saved(bridge(&run, args(Some(&mine.id)))).task_id.as_deref(), Some("t-board"));
+
+        // The chat (full power) and a hand's save (the socket) record none.
+        let chat = state.workbench.mcp.crew_lease("chat:neko", CrewRole::Full).unwrap();
+        assert!(saved(bridge(&chat, args(None))).task_id.is_none());
+        let Response::ArtifactSaved { artifact: by_hand, .. } = handle_request_for_test(&state, Request::SaveArtifact { title: "Hand".into(), file: page.to_string_lossy().into(), workspace_id: None, artifact_id: None, note: String::new(), show: Some(false) }) else { panic!("not saved") };
+        assert!(by_hand.task_id.is_none());
+        // A read-only chat cannot save at all.
+        let read_only = state.workbench.mcp.crew_lease("chat:t2", CrewRole::ReadOnly).unwrap();
+        assert!(matches!(bridge(&read_only, args(None)), Response::Error { .. }));
+
+        // ArtifactsForTask lists what that ticket's runs made, newest first, and nothing for another ticket.
+        let another = state.workbench.mcp.crew_lease("run-2", CrewRole::Task { ticket_id: "t-other".into(), may_create: false }).unwrap();
+        let theirs = saved(bridge(&another, args(None)));
+        let ask = |id: &str| -> Vec<String> {
+            let Response::Artifacts { artifacts } = handle_request_for_test(&state, Request::ArtifactsForTask { task_id: id.into() }) else { panic!("not Artifacts") };
+            artifacts.into_iter().map(|a| a.id).collect()
+        };
+        assert_eq!(ask("t-board"), vec![mine.id.clone()]);
+        assert_eq!(ask("t-other"), vec![theirs.id.clone()]);
+        assert!(ask("t-none").is_empty() && ask("../x").is_empty() && ask("").is_empty());
+        // The record on disk keeps the link (an older record without it still reads).
+        let meta_path = state.artifacts.join(&mine.id).join("meta.json");
+        let meta = std::fs::read_to_string(&meta_path).unwrap();
+        assert!(meta.contains("\"task_id\": \"t-board\""), "{meta}");
+        let old = meta.replace("\"task_id\": \"t-board\",", "");
+        std::fs::write(&meta_path, old).unwrap();
+        assert!(neko_core::artifacts::get(&state.artifacts, &mine.id).unwrap().task_id.is_none());
     }
 
     #[test]

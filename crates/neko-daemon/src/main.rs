@@ -8,6 +8,7 @@ mod routines;
 mod self_update;
 mod server;
 mod web;
+mod web_embed;
 mod workbench;
 
 use std::sync::Arc;

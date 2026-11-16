@@ -57,6 +57,8 @@ pub struct Save {
     pub artifact_id: Option<String>,
     pub note: String,
     pub message_id: Option<String>,
+    /// The ticket whose run made the call (from its lease), for a new artifact.
+    pub task_id: Option<String>,
 }
 
 /// Saves run one at a time, so two versions of one artifact never get the
@@ -230,6 +232,7 @@ fn keep_locked(root: &Path, save: Save, kind: &str, bytes: &[u8]) -> Result<(Art
     let workspace_id = save.workspace_id.filter(|w| !w.is_empty());
     if workspace_id.as_deref().is_some_and(|w| !valid_id(w)) { return Err("The workspace id is not valid.".into()); }
     let message_id = save.message_id.filter(|m| valid_id(m));
+    let task_id = save.task_id.filter(|t| valid_id(t));
     fs::create_dir_all(root).map_err(|e| format!("Cannot create {}: {e}", root.display()))?;
     let (dir, mut artifact) = match save.artifact_id.as_deref().filter(|id| !id.is_empty()) {
         Some(id) => {
@@ -242,7 +245,7 @@ fn keep_locked(root: &Path, save: Save, kind: &str, bytes: &[u8]) -> Result<(Art
             let id = new_artifact_id(root);
             let dir = root.join(&id);
             fs::create_dir(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
-            (dir, Artifact { id, title: title.clone(), kind: kind.into(), workspace_id: workspace_id.clone(), message_id: message_id.clone(), versions: Vec::new() })
+            (dir, Artifact { id, title: title.clone(), kind: kind.into(), workspace_id: workspace_id.clone(), message_id: message_id.clone(), task_id: task_id.clone(), versions: Vec::new() })
         }
     };
     let n = artifact.versions.iter().map(|v| v.n).max().unwrap_or(0) + 1;
@@ -274,6 +277,12 @@ pub fn list(root: &Path, workspace_id: Option<&str>) -> Vec<Artifact> {
         .collect();
     out.sort_by(|a, b| updated_ms(b).cmp(&updated_ms(a)).then_with(|| a.id.cmp(&b.id)));
     out
+}
+
+/// The artifacts a ticket's own runs saved, newest first.
+pub fn list_for_task(root: &Path, task_id: &str) -> Vec<Artifact> {
+    if !valid_id(task_id) { return Vec::new(); }
+    list(root, None).into_iter().filter(|a| a.task_id.as_deref() == Some(task_id)).collect()
 }
 
 pub fn get(root: &Path, id: &str) -> Option<Artifact> {

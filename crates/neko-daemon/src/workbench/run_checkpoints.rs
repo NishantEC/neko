@@ -302,7 +302,7 @@ mod tests {
     }
 
     fn call(c: &Controller, lease: &crate::mcp_host::Lease, tool: &str, args: Value) -> Result<Value, String> {
-        c.crew_call(lease.token(), tool, &args.to_string(), &|_, _| Err("no artifacts".into())).map(|text| serde_json::from_str(&text).unwrap())
+        c.crew_call(lease.token(), tool, &args.to_string(), &|_, _, _| Err("no artifacts".into())).map(|text| serde_json::from_str(&text).unwrap())
     }
 
     #[test]

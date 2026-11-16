@@ -56,6 +56,7 @@ fn record(id: &str, title: &str, kind: &str, versions: u32, ago_min: i64) -> Art
         kind: kind.into(),
         workspace_id: Some("w1".into()),
         message_id: None,
+        task_id: None,
         versions: (1..=versions).map(|n| ArtifactVersion { n, file: format!("v{n}.{kind}"), at_ms: DEMO_NOW - ago_min * MIN - i64::from(versions - n) * 7 * MIN, note: String::new(), message_id: None }).collect(),
     }
 }

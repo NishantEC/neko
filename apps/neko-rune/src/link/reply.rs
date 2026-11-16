@@ -68,6 +68,8 @@ pub enum Reply {
     ArtifactFile { id: String, version: Option<u32>, path: String, kind: String, size: u64 },
     /// An artifact's record.
     ArtifactInfo(neko_protocol::Artifact),
+    /// What a session's own runs saved.
+    TaskArtifacts { task_id: String, artifacts: Vec<neko_protocol::Artifact> },
     Unseen(Vec<String>),
     Digest(Option<Digest>),
     Inbox(Vec<InboxItem>),
@@ -155,6 +157,10 @@ pub fn make(socket: &Path, call: &Call, open: Option<&str>) -> Reply {
             _ => Reply::Done,
         },
         Response::Artifact { artifact, .. } => Reply::ArtifactInfo(artifact),
+        Response::Artifacts { artifacts } => match call {
+            Call::TaskArtifacts { task_id } => Reply::TaskArtifacts { task_id: task_id.clone(), artifacts },
+            _ => Reply::Done,
+        },
         Response::UnseenTasks { ids } => Reply::Unseen(ids),
         Response::Digest { digest } => Reply::Digest(digest),
         Response::Routines { routines, standing_orders, scopes, owner_name, age_out_days, routines_on, spend_today } => match call {

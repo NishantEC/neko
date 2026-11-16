@@ -770,6 +770,7 @@ impl App {
                 true
             }
             Reply::ArtifactInfo(artifact) => self.artifact_info(artifact),
+            Reply::TaskArtifacts { task_id, artifacts } => self.task_artifacts(&task_id, artifacts),
             Reply::Unseen(ids) => {
                 let mut next: HashSet<String> = ids.into_iter().collect();
                 // A task marked unread here stays unread until it is opened again.
@@ -836,7 +837,7 @@ impl App {
                     Call::CheckpointDiff { task_id, run } => {
                         self.work.diff_load.insert(diff_key(task_id, *run), DiffLoad::Failed(message));
                     }
-                    Call::Checkpoints { .. } | Call::Unseen | Call::Digest | Call::Inbox | Call::Refresh | Call::Models | Call::TaskFolder { .. } | Call::ArtifactInfo { .. } => {}
+                    Call::Checkpoints { .. } | Call::Unseen | Call::Digest | Call::Inbox | Call::Refresh | Call::Models | Call::TaskFolder { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } => {}
                     Call::ArtifactFile { id, version } => self.artifact_unreadable(id, *version, message),
                     Call::CreateTask { .. } => self.new_error(message),
                     _ => self.work.notice = Some(message),
@@ -860,7 +861,7 @@ impl App {
                     Call::CheckpointDiff { task_id, run } => {
                         self.work.diff_load.insert(diff_key(task_id, *run), DiffLoad::Failed(line));
                     }
-                    Call::Refresh | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::Checkpoints { .. } | Call::TaskFolder { .. } | Call::ArtifactInfo { .. } => return false,
+                    Call::Refresh | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::Checkpoints { .. } | Call::TaskFolder { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } => return false,
                     Call::ArtifactFile { id, version } => self.artifact_unreadable(id, *version, line),
                     Call::CreateTask { .. } => self.new_error(line),
                     _ => self.work.notice = Some(line),

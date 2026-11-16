@@ -1193,7 +1193,7 @@ mod tests {
         assert!(pending_turn(&db).is_none(), "no reply running");
         let turn = begin_scoped_turn(&db, "design the onboarding screen", Some("ws")).unwrap();
         assert_eq!(pending_turn(&db), Some((turn.clone(), Some("ws".into()))));
-        let mut artifact = neko_protocol::Artifact { id: "abc".into(), title: "Onboarding".into(), kind: "html".into(), workspace_id: Some("ws".into()), message_id: Some(turn.clone()), versions: vec![] };
+        let mut artifact = neko_protocol::Artifact { id: "abc".into(), title: "Onboarding".into(), kind: "html".into(), workspace_id: Some("ws".into()), message_id: Some(turn.clone()), task_id: None, versions: vec![] };
         assert!(show_artifact(&turn, &artifact, 1));
         artifact.title = "Onboarding, bigger".into();
         assert!(show_artifact(&turn, &artifact, 2));

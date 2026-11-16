@@ -26,7 +26,8 @@ the daemon, not that list, is the authority), OpenCode through its config.
 | `wait_for` (task or goal, until a state or a timeout, max 30 min) | yes | no | yes |
 | `create_task` (title, request in the person's words, workspace, folder, optional goal) | yes | no | sub-tasks of its own ticket only, same workspace; never from planning, a read-only ticket, a watch's ticket or a ticket that is itself a delegated sub-task (no chains) |
 | `steer_task`, `cancel_task`, `schedule` | yes | no | no |
-| `save_artifact`, `show_artifact` | yes | no | no |
+| `save_artifact` | yes | no | yes (records its ticket on the artifact, `Artifact::task_id`; never linked to a Home reply) |
+| `show_artifact` | yes | no | no |
 | `checkpoint_diff` (a task's runs and one run's or the whole diff) | yes | no | its own ticket only |
 | `undo_run` (checks, returns the `neko-action` block the person confirms; never changes files) | yes | no | no |
 

@@ -164,6 +164,12 @@ fn installed(dir: &Path) -> Vec<Installed> {
     out
 }
 
+/// Every viewer the enabled plugins' manifests declare, with the plugin that declares it, by plugin
+/// folder name (`PluginViewers`).
+pub fn declared(plugins: &Path) -> Vec<(String, DeclaredViewer)> {
+    installed(plugins).into_iter().flat_map(|p| p.capabilities.viewers.into_iter().map(move |v| (p.id.clone(), v))).collect()
+}
+
 /// The **Installed viewers** section: how to save an artifact so it opens,
 /// each viewer with its kinds (built-ins, then plugins, labelled), the reply
 /// fences Neko draws, and each plugin's own prompt line. `neko` is the daemon
