@@ -219,6 +219,8 @@ pub struct Panel {
     pub dark: Cell<bool>,
     /// What each session's folder was when it was last asked for (its worktree and whether it is parked).
     pub folder_rev: HashMap<String, String>,
+    /// The session whose folder is being listed now (there is one tree, for the session on screen).
+    pub listing: Option<String>,
 }
 
 impl Panel {
@@ -390,6 +392,14 @@ impl App {
             self.panel.folder_rev.insert(id.clone(), rev);
             self.call(Call::TaskFolder { task_id: id.clone() });
         }
+        // One tree serves the session on screen: coming back to a session whose folder is known but whose
+        // tree was replaced lists it again.
+        if let Some(Some(path)) = self.session_panel(&id).map(|p| p.folder.clone()).and_then(|f| f)
+            && self.panel.files_meta.as_ref().is_none_or(|m| m.task_id != id)
+            && self.panel.listing.as_deref() != Some(id.as_str())
+        {
+            self.folder_arrived(&id, Some(path));
+        }
         let closed = self.session_panel(&id).is_some_and(|p| p.person_closed);
         if !closed && !self.layout.context.is_open() && !self.panel_tabs().is_empty() {
             self.layout.context.set_open(true);
@@ -406,7 +416,7 @@ impl App {
             Some(Tab::Canvas) | Some(Tab::Files) | Some(Tab::Terminal) | None => {}
         }
         // The Files tab marks what changed from the whole task's diff.
-        if self.session_panel(&id).is_some_and(|p| matches!(&p.folder, Some(Some(_)))) && self.work.checkpoints.get(&id).is_some_and(|l| l.runs.iter().any(|r| r.files > 0)) {
+        if self.panel_tab() == Some(Tab::Files) && self.session_panel(&id).is_some_and(|p| matches!(&p.folder, Some(Some(_)))) && self.work.checkpoints.get(&id).is_some_and(|l| l.runs.iter().any(|r| r.files > 0)) {
             self.want_diff(&id, None);
         }
         self.panel_want_target();
@@ -463,8 +473,9 @@ impl App {
                 Content::Ready(Rc::new(Loaded::from_bytes(path, kind, title, bytes)))
             }
             Err(Refused::TooLarge(size)) => {
+                // Where Finder is sent: the file's canonical path inside the folder it was read from.
                 let path = match target {
-                    Target::File { path, .. } => self.panel.files_meta.as_ref().map(|m| m.root.join(path)).unwrap_or_default(),
+                    Target::File { task_id, path } => self.panel.files_meta.as_ref().filter(|m| &m.task_id == task_id).and_then(|m| Confined::new(&m.root)?.resolve(Path::new(path)).ok()).unwrap_or_default(),
                     Target::Artifact { .. } => PathBuf::new(),
                 };
                 Content::TooLarge { size, path }
@@ -570,12 +581,20 @@ impl App {
     pub fn folder_arrived(&mut self, task_id: &str, path: Option<String>) -> bool {
         self.panel.session_mut(task_id).folder = Some(path.clone());
         let Some(root) = path.as_deref().and_then(|p| Confined::new(Path::new(p))) else {
+            // No folder, or one that is not there to read: the session has no Files tab.
+            self.panel.session_mut(task_id).folder = Some(None);
             self.panel_sync();
             return true;
         };
         let task_id = task_id.to_owned();
         let root_path = root.root().to_path_buf();
+        self.panel.listing = Some(task_id.clone());
         self.background(move || (root.list(), task_id), move |app, (listing, task_id): (Listing, String)| {
+            app.panel.listing = None;
+            // A listing that arrives after the person moved to another session is dropped: it is made again on return.
+            if app.selected.as_deref() != Some(task_id.as_str()) {
+                return false;
+            }
             app.panel.files_tree = FileTree::new().build(listing.files.iter().map(|f| (f.as_str(), false)));
             app.panel.files_meta = Some(FilesMeta { task_id, root: root_path, truncated: listing.truncated, count: listing.files.len() });
             app.mark_changed_files();

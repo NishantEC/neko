@@ -148,7 +148,11 @@ fn decode(kind: &str, bytes: &[u8]) -> ImageData {
 /// Rasterises an SVG with `resvg` at a size that is sharp in the panel (about 1,200 pixels wide).
 pub fn rasterize_svg(bytes: &[u8]) -> Result<(Vec<u8>, (u32, u32)), String> {
     use resvg::{tiny_skia, usvg};
-    let tree = usvg::Tree::from_data(bytes, &usvg::Options::default()).map_err(|e| format!("This SVG couldn’t be read ({e})."))?;
+    // An SVG is data from outside: it may name another file (`<image href="/path">`), and resvg would read it.
+    // Only pictures embedded in the SVG itself (`data:` links) are drawn.
+    let mut options = usvg::Options::default();
+    options.image_href_resolver.resolve_string = Box::new(|_, _| None);
+    let tree = usvg::Tree::from_data(bytes, &options).map_err(|e| format!("This SVG couldn’t be read ({e})."))?;
     let size = tree.size();
     let (w, h) = (size.width().max(1.0), size.height().max(1.0));
     let k = (1200.0 / w).clamp(0.05, 8.0);
@@ -273,6 +277,20 @@ mod tests {
         assert!(one.gif.is_none() && one.error.is_none(), "a single frame is a picture");
         let many = decode("gif", &gif_bytes(3));
         assert_eq!(many.gif.as_ref().map(|g| g.total_ms), Some(300));
+    }
+
+    #[test]
+    fn an_svg_never_reads_a_file_it_names() {
+        let dir = std::env::temp_dir().join(format!("nrs-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let red = dir.join("red.png");
+        let img = image::RgbaImage::from_pixel(8, 8, image::Rgba([255, 0, 0, 255]));
+        img.save(&red).unwrap();
+        let svg = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><image href="{}" width="100" height="100"/></svg>"#, red.display());
+        let (rgba, (w, h)) = rasterize_svg(svg.as_bytes()).unwrap();
+        let mid = (((h / 2) * w + w / 2) * 4) as usize;
+        assert_eq!(rgba[mid + 3], 0, "the picture at that path was not drawn: {:?}", &rgba[mid..mid + 4]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

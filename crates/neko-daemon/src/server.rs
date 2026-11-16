@@ -304,9 +304,6 @@ impl AppState {
     }
 }
 
-/// What a ticket's worktree changed since its checkout started, including
-/// commits and new files. Older tickets without a recorded start compare
-/// against their own HEAD. Only Neko's own task worktrees are read.
 /// `TaskFolder`: the folder a ticket works in, as a canonical absolute path, when it has one that
 /// exists. A parked ticket has had its folder removed and one that has not started has none: both
 /// are `None`, not an error. Read-only.
@@ -320,6 +317,9 @@ fn task_folder(state: &AppState, task_id: &str) -> Result<Option<String>, String
     Ok(std::path::Path::new(worktree).canonicalize().ok().filter(|d| d.is_dir()).map(|d| d.to_string_lossy().into_owned()))
 }
 
+/// What a ticket's worktree changed since its checkout started, including
+/// commits and new files. Older tickets without a recorded start compare
+/// against their own HEAD. Only Neko's own task worktrees are read.
 fn task_changes(state: &AppState, task_id: &str) -> Result<(Vec<String>, String, bool), String> {
     const LIMIT: usize = 512 * 1024;
     let snapshot = neko_core::workbench::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;

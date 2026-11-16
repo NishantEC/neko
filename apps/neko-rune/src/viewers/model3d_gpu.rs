@@ -463,7 +463,7 @@ impl Compositor<App> for Viewer3d {
             r.composite(device, queue, pass, site.format, srgb, site.instance.rect, site.size);
         });
         self.drew = true;
-        if self.cpu_ms.len() < 100_000 {
+        if self.cpu_ms.len() < 20_000 {
             self.cpu_ms.push(started.elapsed().as_secs_f64() * 1e3);
         }
     }

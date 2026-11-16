@@ -37,6 +37,8 @@ fn base(s: &mut App) {
     s.panel.data_dir = std::path::PathBuf::from("/data/neko");
     session(s).person_closed = false;
     session(s).folder = Some(Some("/work/board".to_owned()));
+    // Its tree is the demo folder's (the folder is made up, so the panel is never asked to list it).
+    tree(s);
     s.outbox.clear();
 }
 

@@ -309,6 +309,27 @@ fn the_files_tab_marks_changed_files_and_opens_one_in_a_viewer_with_a_back_arrow
 }
 
 #[test]
+fn coming_back_to_a_session_lists_its_folder_again_when_the_tree_was_another_sessions() {
+    let folder = Temp::new("relist");
+    std::fs::write(folder.0.join("a.txt"), "a").unwrap();
+    let path = folder.0.to_string_lossy().into_owned();
+    let mut app = App::headless();
+    scenes_panel::diff(&mut app);
+    app.folder_arrived("t6", Some(path));
+    assert!(app.panel.files_tree.contains("a.txt"));
+    // Another session's tree took the place (as choosing it would): this one is listed again on return.
+    app.panel.files_meta.as_mut().unwrap().task_id = "other".into();
+    app.panel.files_tree = rune_kit::FileTree::new().build(vec![("zzz.txt", false)]);
+    app.panel_sync();
+    assert_eq!(app.panel.files_meta.as_ref().map(|m| m.task_id.as_str()), Some("t6"));
+    assert!(app.panel.files_tree.contains("a.txt") && !app.panel.files_tree.contains("zzz.txt"));
+    // A folder that is not there is no Files tab, and nothing loops.
+    app.folder_arrived("t6", Some("/definitely/not/here".into()));
+    assert_eq!(app.panel.session("t6").unwrap().folder, Some(None));
+    assert!(!app.panel_tabs().contains(&Tab::Files));
+}
+
+#[test]
 fn the_files_tab_refuses_a_link_that_leaves_the_folder_and_a_file_over_five_megabytes() {
     let base = Temp::new("refuse");
     let folder = base.0.join("work");
