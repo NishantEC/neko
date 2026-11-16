@@ -133,8 +133,8 @@ pub fn run() {
     let spec = rune::AppSpec {
         scenes: scenes::SCENES,
         min_size: Some((960.0, 560.0)),
-        // Inter for text, the system's monospaced face for commands, paths and output (`ui-monospace`).
-        families: ("Inter", "ui-monospace"),
+        // The web UI's font stacks (`theme::FONT_SANS` starts with Inter, `FONT_MONO` with `ui-monospace`).
+        families: (theme::FONT_SANS, theme::FONT_MONO),
         on_key: Some(on_key),
         poll: Some(|s: &mut App, t: f64, tx: &mut rune::Tx| {
             let moved = s.tick_stream(t);

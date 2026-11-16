@@ -1,7 +1,8 @@
 //! The Neko theme in Rune: DESIGN.md's tokens as one module, light and dark.
 //!
-//! Values come from the web UI's default themes (`web/src/themes/builtin/neutral*.json`), so the
-//! two clients look alike while both exist. Nothing outside this module names a colour, a radius
+//! Values come from the web UI's default themes (`web/src/themes/builtin.generated.css`, built from
+//! `neutral*.json`), exactly, so the two clients look alike while both exist: the test at the foot of
+//! this file parses that CSS and compares every token (polish spec §0). Nothing outside this module names a colour, a radius
 //! or a font size (DESIGN.md §2, §7, §8 rule 7); screens read a [`Neko`].
 //!
 //! * Surfaces: window, card, sidebar, popover. One border tone, one large window radius.
@@ -18,14 +19,23 @@ use rune::{Color, TextStyle};
 use rune_kit::{Kit, PaletteSeed};
 
 /// The hex values of one appearance, as the web's theme data writes them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hex {
     pub background: &'static str,
     pub card: &'static str,
     pub popover: &'static str,
+    /// The web's own sidebar value. The window paints the sidebar at the background plus 2% lightness
+    /// (polish spec §4), see [`Surfaces::sidebar`]; this stays so the table matches the CSS.
     pub sidebar: &'static str,
     pub foreground: &'static str,
+    /// `--strong`: headings and the strongest text.
+    pub strong: &'static str,
     pub muted: &'static str,
+    /// `--border` is a colour at an alpha: this is its colour, [`Hex::border_alpha`] its opacity.
+    pub border: &'static str,
+    pub border_alpha: f32,
+    /// `--code`: the fill behind code.
+    pub code: &'static str,
     /// Iris: the primary action, focus, selection, now, references.
     pub iris: &'static str,
     /// Amber: needs you, in progress.
@@ -38,14 +48,18 @@ pub struct Hex {
     pub coral: &'static str,
 }
 
-/// `web/src/themes/builtin/neutral.json` ("Neko Dark").
+/// `html[data-neko-theme="neutral"]` in `web/src/themes/builtin.generated.css` ("Neko Dark").
 pub const DARK: Hex = Hex {
     background: "#0f0f0f",
     card: "#151515",
     popover: "#181818",
     sidebar: "#121212",
     foreground: "#d7d7d7",
+    strong: "#f7f7f7",
     muted: "#8f8f8f",
+    border: "#ffffff",
+    border_alpha: 0.07,
+    code: "#171717",
     iris: "#346bf1",
     amber: "#e0a042",
     sky: "#2393f1",
@@ -53,20 +67,33 @@ pub const DARK: Hex = Hex {
     coral: "#e5484d",
 };
 
-/// `web/src/themes/builtin/neutral-light.json` ("Neko Light").
+/// `html[data-neko-theme="neutral-light"]` ("Neko Light").
 pub const LIGHT: Hex = Hex {
     background: "#fafafa",
     card: "#ffffff",
     popover: "#ffffff",
     sidebar: "#f3f3f3",
     foreground: "#262626",
+    strong: "#0d0d0d",
     muted: "#636363",
+    border: "#000000",
+    border_alpha: 0.08,
+    code: "#f2f2f2",
     iris: "#346bf1",
     amber: "#e19b1b",
     sky: "#0083e0",
     mint: "#00af6f",
     coral: "#e6293f",
 };
+
+/// The web's `--font-sans` with its first face, `"Inter Variable"` (the web's bundled build), read as the
+/// `Inter` Rune embeds. The rest of the list is the web's, verbatim.
+pub const FONT_SANS: &str = "Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, \"SF Pro Text\", system-ui, sans-serif";
+/// The web's `--font-mono`, verbatim.
+pub const FONT_MONO: &str = "ui-monospace, \"SF Mono\", \"JetBrains Mono\", Menlo, monospace";
+
+/// How much lighter than the window the sidebar is painted (polish spec §4), in HSL lightness.
+const SIDEBAR_LIFT: f32 = 0.02;
 
 /// Share of the muted grey that is left in the faint grey (the web's `muted-foreground/70`).
 const FAINT_SHARE: f32 = 0.7;
@@ -79,14 +106,18 @@ pub struct Surfaces {
     pub card: Color,
     pub sidebar: Color,
     pub popover: Color,
-    /// The one border tone: the foreground at 12%.
+    /// The one border tone: the web's `--border` (white 7% in dark, black 8% in light).
     pub border: Color,
-    /// A row under the pointer: the foreground at 3%.
+    /// A row under the pointer: the foreground at 4% (polish spec §1).
     pub hover: Color,
-    /// The active tab and the open rail place: a soft fill, the foreground at 8%.
+    /// The active tab and the open rail place: a soft fill, the foreground at 7%.
     pub active: Color,
-    /// The open row of a list: the foreground at 6%.
+    /// The open row of a list: the foreground at 7%.
     pub selected: Color,
+    /// The sidebar's field: a 1 px border at the foreground's 10% (polish spec §1).
+    pub field_border: Color,
+    /// The focus ring: Iris at 60% (polish spec §4).
+    pub ring: Color,
 }
 
 /// Text in three greys (DESIGN.md §2).
@@ -108,7 +139,8 @@ pub struct Meaning {
     pub coral: Color,
 }
 
-/// Radii: one large window radius, rows and controls smaller (DESIGN.md §8 rule 2).
+/// Radii: one large window radius, rows and controls smaller (DESIGN.md §8 rule 2). The web's
+/// `--radius` is 1.25rem = 20; a row is 8 (polish spec §1).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Radii {
     pub window: f32,
@@ -125,6 +157,12 @@ pub struct NekoType {
     pub row: TextStyle,
     pub meta: TextStyle,
     pub id: TextStyle,
+    /// The sidebar's brand line: "Neko" 14 semibold.
+    pub brand: TextStyle,
+    /// Home's greeting: 34 semibold.
+    pub greeting: TextStyle,
+    /// A faint shortcut hint: 12 with tabular numbers.
+    pub hint: TextStyle,
     /// Commands, output and ids of files: the mono face at the id size.
     pub mono: TextStyle,
     /// The mono face at the meta size: a command's header line, a file path in a list.
@@ -141,6 +179,9 @@ impl NekoType {
             row: TextStyle::new(13.5, 400.0).lh(20.0),
             meta: TextStyle::new(12.5, 400.0).lh(18.0),
             id: TextStyle { features: "'tnum' 1", ..TextStyle::new(12.0, 400.0).lh(16.0) },
+            brand: TextStyle::new(14.0, 600.0).lh(20.0),
+            greeting: TextStyle::new(34.0, 600.0).lh(40.0),
+            hint: TextStyle { features: "'tnum' 1", ..TextStyle::new(12.0, 400.0).lh(16.0) },
             mono: TextStyle { family: rune::Family::Mono, ..TextStyle::new(12.0, 400.0).lh(17.0) },
             mono_meta: TextStyle { family: rune::Family::Mono, ..TextStyle::new(12.5, 400.0).lh(18.0) },
         }
@@ -171,6 +212,36 @@ fn mix_srgb(under: Color, over: Color, share: f32) -> Color {
     Color { r: m(under.r, over.r), g: m(under.g, over.g), b: m(under.b, over.b), a: 1.0 }
 }
 
+/// `colour` with its HSL lightness raised by `by` (0.02 = two points), saturation and hue kept. In
+/// gamma-encoded sRGB, as a designer's lightness is.
+fn lighten(colour: Color, by: f32) -> Color {
+    use rune::color::{srgb_decode, srgb_encode};
+    let (r, g, b) = (srgb_encode(colour.r), srgb_encode(colour.g), srgb_encode(colour.b));
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let l = (max + min) / 2.0;
+    let d = max - min;
+    let (h, sat) = if d < 1e-6 {
+        (0.0, 0.0)
+    } else {
+        let sat = d / (1.0 - (2.0 * l - 1.0).abs());
+        let h = if max == r { ((g - b) / d).rem_euclid(6.0) } else if max == g { (b - r) / d + 2.0 } else { (r - g) / d + 4.0 };
+        (h, sat)
+    };
+    let l2 = (l + by).clamp(0.0, 1.0);
+    let k = (1.0 - (2.0 * l2 - 1.0).abs()) * sat;
+    let x = k * (1.0 - ((h % 2.0) - 1.0).abs());
+    let (r1, g1, b1) = match h as u32 {
+        0 => (k, x, 0.0),
+        1 => (x, k, 0.0),
+        2 => (0.0, k, x),
+        3 => (0.0, x, k),
+        4 => (x, 0.0, k),
+        _ => (k, 0.0, x),
+    };
+    let m = l2 - k / 2.0;
+    Color { r: srgb_decode(r1 + m), g: srgb_decode(g1 + m), b: srgb_decode(b1 + m), a: colour.a }
+}
+
 impl Neko {
     pub fn build(dark: bool) -> Neko {
         let hex = if dark { DARK } else { LIGHT };
@@ -181,19 +252,21 @@ impl Neko {
         let surface = Surfaces {
             window,
             card: c(hex.card),
-            sidebar: c(hex.sidebar),
+            sidebar: lighten(window, SIDEBAR_LIFT),
             popover: c(hex.popover),
-            border: ink(0.12),
-            hover: ink(0.03),
-            active: ink(0.08),
-            selected: ink(0.06),
+            border: c(hex.border).alpha(hex.border_alpha),
+            hover: ink(0.04),
+            active: ink(0.07),
+            selected: ink(0.07),
+            field_border: ink(0.10),
+            ring: c(hex.iris).alpha(0.6),
         };
         // The faint grey is the muted grey thinned toward the window, an opaque colour so it
         // never changes with what is under it. Blended in sRGB, as the web's `/70` is.
         let faint = mix_srgb(window, muted, FAINT_SHARE);
         let text = Greys { base: fg, muted, faint };
         let meaning = Meaning { iris: c(hex.iris), amber: c(hex.amber), sky: c(hex.sky), mint: c(hex.mint), coral: c(hex.coral) };
-        let radius = Radii { window: 20.0, row: 10.0, control: 8.0 };
+        let radius = Radii { window: 20.0, row: 8.0, control: 8.0 };
         let ty = NekoType::new();
 
         let mut kit = Kit::from_palette(PaletteSeed { bg: window, fg, accent: meaning.iris });
@@ -202,6 +275,7 @@ impl Neko {
         kit.c.icon_muted = muted;
         kit.c.icon_faint = faint;
         kit.c.border_base = surface.border;
+        kit.c.border_focus = surface.ring;
         kit.c.hover = surface.hover;
         kit.c.bg_base = surface.card;
         kit.c.bg_deep = window;
@@ -305,8 +379,8 @@ pub fn contrast(a: Color, b: Color) -> f32 {
 mod tests {
     use super::*;
 
-    fn all_hex(h: &Hex) -> [&'static str; 11] {
-        [h.background, h.card, h.popover, h.sidebar, h.foreground, h.muted, h.iris, h.amber, h.sky, h.mint, h.coral]
+    fn all_hex(h: &Hex) -> [&'static str; 14] {
+        [h.background, h.card, h.popover, h.sidebar, h.foreground, h.strong, h.muted, h.border, h.code, h.iris, h.amber, h.sky, h.mint, h.coral]
     }
 
     #[test]
@@ -396,6 +470,127 @@ mod tests {
             assert_eq!(t.kit.c.danger.fg.hex(), t.meaning.coral.hex());
             assert_eq!(t.kit.radius.xl, t.radius.window);
             assert_eq!(t.kit.ty.ui.size, 13.5);
+        }
+    }
+
+    // ---- the web's CSS, parsed (polish spec §0) ----
+
+    const WEB_THEMES: &str = include_str!("../../../web/src/themes/builtin.generated.css");
+    const WEB_GLOBALS: &str = include_str!("../../../web/src/styles/globals.css");
+
+    /// The custom properties of one `html[data-neko-theme="id"] { ... }` block.
+    fn css_block(id: &str) -> std::collections::HashMap<String, String> {
+        let head = format!("html[data-neko-theme=\"{id}\"] {{");
+        let at = WEB_THEMES.find(&head).unwrap_or_else(|| panic!("no block for {id}"));
+        let body = &WEB_THEMES[at + head.len()..];
+        let body = &body[..body.find('}').expect("block ends")];
+        body.lines()
+            .filter_map(|l| {
+                let l = l.trim().strip_suffix(';')?;
+                let (name, value) = l.split_once(':')?;
+                Some((name.trim().trim_start_matches("--").to_owned(), value.trim().to_owned()))
+            })
+            .collect()
+    }
+
+    /// `rgba(255, 255, 255, 0.07)` as ("#ffffff", 0.07).
+    fn rgba(value: &str) -> (String, f32) {
+        let inner = value.strip_prefix("rgba(").and_then(|v| v.strip_suffix(')')).unwrap_or_else(|| panic!("not rgba: {value}"));
+        let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
+        let hex = format!("#{:02x}{:02x}{:02x}", parts[0].parse::<u8>().unwrap(), parts[1].parse::<u8>().unwrap(), parts[2].parse::<u8>().unwrap());
+        (hex, parts[3].parse().unwrap())
+    }
+
+    fn css_var(name: &str) -> String {
+        let at = WEB_GLOBALS.find(&format!("--{name}:")).unwrap_or_else(|| panic!("no --{name} in globals.css"));
+        let rest = &WEB_GLOBALS[at + name.len() + 3..];
+        rest[..rest.find(';').unwrap()].trim().to_owned()
+    }
+
+    #[test]
+    fn the_token_table_is_the_web_uis_css_exactly() {
+        for (id, h) in [("neutral", DARK), ("neutral-light", LIGHT)] {
+            let css = css_block(id);
+            let pairs = [
+                ("background", h.background),
+                ("card", h.card),
+                ("popover", h.popover),
+                ("sidebar", h.sidebar),
+                ("foreground", h.foreground),
+                ("strong", h.strong),
+                ("muted-foreground", h.muted),
+                ("code", h.code),
+                ("primary", h.iris),
+                ("warning", h.amber),
+                ("info", h.sky),
+                ("success", h.mint),
+                ("destructive", h.coral),
+            ];
+            for (name, ours) in pairs {
+                assert_eq!(css[name], ours, "{id}: --{name}");
+            }
+            let (border, alpha) = rgba(&css["border"]);
+            assert_eq!((border.as_str(), alpha), (h.border, h.border_alpha), "{id}: --border");
+        }
+    }
+
+    #[test]
+    fn the_built_theme_paints_those_tokens() {
+        for (dark, id) in [(true, "neutral"), (false, "neutral-light")] {
+            let (t, css) = (theme(dark), css_block(id));
+            let hex = |name: &str| c(&css[name]).hex();
+            assert_eq!(t.surface.window.hex(), hex("background"));
+            assert_eq!(t.surface.card.hex(), hex("card"));
+            assert_eq!(t.surface.popover.hex(), hex("popover"));
+            assert_eq!(t.text.base.hex(), hex("foreground"));
+            assert_eq!(t.text.muted.hex(), hex("muted-foreground"));
+            assert_eq!(t.meaning.iris.hex(), hex("primary"));
+            assert_eq!(t.meaning.coral.hex(), hex("destructive"));
+            // --border is a colour at an alpha, painted as that.
+            let (b, a) = rgba(&css["border"]);
+            assert_eq!(t.surface.border.hex(), c(&b).alpha(a).hex());
+            // The faint grey is `muted-foreground/70` laid on the background, as the web writes it.
+            assert_eq!(t.text.faint.hex(), mix_srgb(c(&css["background"]), c(&css["muted-foreground"]), 0.7).hex());
+        }
+    }
+
+    #[test]
+    fn faces_and_radius_are_the_webs() {
+        // `--font-sans` starts with "Inter Variable", the web's bundled build of the Inter Rune embeds.
+        assert_eq!(css_var("font-sans").replace("\"Inter Variable\"", "Inter"), FONT_SANS);
+        assert_eq!(css_var("font-mono"), FONT_MONO);
+        // `--radius: 1.25rem` at the web's 16 px root.
+        assert_eq!(css_var("radius"), "1.25rem");
+        assert_eq!(theme(true).radius.window, 1.25 * 16.0);
+    }
+
+    #[test]
+    fn the_polish_spec_fills_are_exact() {
+        for dark in [true, false] {
+            let t = theme(dark);
+            let fg = t.text.base;
+            assert_eq!(t.surface.hover.a, 0.04);
+            assert_eq!(t.surface.selected.a, 0.07);
+            assert_eq!(t.surface.field_border.a, 0.10);
+            assert_eq!(t.surface.hover.hex()[..7], fg.hex()[..7]);
+            assert_eq!(t.radius.row, 8.0);
+            assert_eq!(t.surface.ring.a, 0.6);
+            assert_eq!(t.surface.ring.hex()[..7], t.meaning.iris.hex()[..7]);
+        }
+    }
+
+    #[test]
+    fn the_sidebar_is_two_points_lighter_than_the_window() {
+        let lightness = |c: Color| {
+            use rune::color::srgb_encode;
+            let (r, g, b) = (srgb_encode(c.r), srgb_encode(c.g), srgb_encode(c.b));
+            (r.max(g).max(b) + r.min(g).min(b)) / 2.0
+        };
+        for dark in [true, false] {
+            let t = theme(dark);
+            let d = lightness(t.surface.sidebar) - lightness(t.surface.window);
+            let want = if dark { 0.02 } else { 0.02f32.min(1.0 - lightness(t.surface.window)) };
+            assert!((d - want).abs() < 0.004, "dark={dark}: {d}");
         }
     }
 }

@@ -83,10 +83,10 @@ fn texts(tree: &serde_json::Value) -> Vec<String> {
 
 #[test]
 fn the_shell_snaps_in_light_and_dark_with_the_neko_surfaces() {
-    // The sessions and Neko columns are the sidebar surface (#121212 dark, #f3f3f3 light); the
-    // session is the window surface (#0f0f0f, #fafafa); the context panel is the card surface
-    // (#151515, #ffffff).
-    let cases = [("dark", [0x12, 0x12, 0x12], [0x0f, 0x0f, 0x0f], [0x15, 0x15, 0x15]), ("light", [0xf3, 0xf3, 0xf3], [0xfa, 0xfa, 0xfa], [0xff, 0xff, 0xff])];
+    // The sessions and Neko columns are the sidebar surface, the window background plus 2% lightness
+    // (#141414 dark, #ffffff light: polish spec §4); the session is the window surface (#0f0f0f,
+    // #fafafa); the context panel is the card surface (#151515, #ffffff).
+    let cases = [("dark", [0x14, 0x14, 0x14], [0x0f, 0x0f, 0x0f], [0x15, 0x15, 0x15]), ("light", [0xff, 0xff, 0xff], [0xfa, 0xfa, 0xfa], [0xff, 0xff, 0xff])];
     for (theme, column, session, card) in cases {
         let image = Image::read(&snap("live", theme));
         assert_eq!((image.width, image.height), (SIZE.0 * SCALE, SIZE.1 * SCALE), "{theme}");
