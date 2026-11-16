@@ -35,6 +35,11 @@ use crate::app::App;
 use crate::layout::{GRIP, NEKO_STRIP, Region};
 use crate::theme::{Neko, theme};
 
+/// Home's scrim: the window's colour at this strength over this radius.
+pub fn home_scrim() -> (f32, f32) {
+    (home::SCRIM_ALPHA, home::SCRIM_RADIUS)
+}
+
 /// One column for full views and the lab (DESIGN.md §8 rule 8).
 pub const COLUMN: f32 = 880.0;
 /// The window's titlebar height: the traffic lights sit in it, and every region's header row is centred in it (polish spec §0).
@@ -55,6 +60,7 @@ pub struct Frame {
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let t = theme(cx.system_dark());
     s.panel.dark.set(t.dark);
+    s.reduce_motion.set(cx.system_reduced_motion());
     let mut layer = Vec::new();
     let layout = &s.layout;
     // What fits: the session keeps its minimum, so a small window narrows or hides the others.

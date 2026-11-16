@@ -7,6 +7,7 @@ pub mod account;
 pub mod activity;
 pub mod app;
 pub mod art;
+pub mod art_gpu;
 pub mod attachments;
 pub mod clock;
 pub mod connection;

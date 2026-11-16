@@ -279,7 +279,7 @@ pub fn home(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     let name = s.account.first_name().to_owned();
     let words = if name.is_empty() { account::greeting(hour).to_owned() } else { format!("{}, {name}", account::greeting(hour)) };
     let greeting = row().key("home-greeting").gap(12.0).center_y().child(icon(&icons::NEKO_MARK, 28.0).color(t.text.base).a11y_hidden()).child(text(words).key("home-title").font(t.ty.greeting).color(t.text.strong).role("heading"));
-    let content = col().w_full().max_w(COLUMN_MAX).px(24.0).items_start().gap(24.0).child(col().gap(10.0).child(greeting).child(status_line(s, t))).child(composer(s, t, layer));
+    let content = col().w_full().max_w(COLUMN_MAX).items_start().gap(24.0).child(col().gap(10.0).child(greeting).child(status_line(s, t))).child(composer(s, t, layer));
     // The art, then the scrim over it, then the column: painted in that order.
     let scrim = el().key("home-scrim").absolute(0.0, 0.0).w_full().h_full().radial_gradient([0.5, CENTRE], SCRIM_RADIUS, [(0.0, t.surface.window.alpha(SCRIM_ALPHA)), (1.0, t.surface.window.alpha(0.0))]).a11y_hidden();
     col()
@@ -287,8 +287,9 @@ pub fn home(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         .w_full()
         .grow(1.0)
         .min_h(0.0)
+        .clip_rounded(t.radius.window)
         .child(art::slot(s, t).absolute(0.0, 0.0).w_full().h_full().key("home-art").a11y_hidden())
         .child(scrim)
         .child(card_band(t))
-        .child(col().w_full().grow(1.0).min_h(0.0).items_center().child(el().grow(CENTRE * 10.0)).child(content).child(el().grow((1.0 - CENTRE) * 10.0)))
+        .child(col().w_full().grow(1.0).min_h(0.0).px(24.0).items_center().child(el().grow(CENTRE * 10.0)).child(content).child(el().grow((1.0 - CENTRE) * 10.0)))
 }

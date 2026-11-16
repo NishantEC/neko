@@ -130,8 +130,10 @@ pub struct App {
 
     pub steer: Steer,
     pub steer_open: bool,
-    /// The account footer\'s menu is open.
+    /// The account footer's menu is open.
     pub more_open: bool,
+    /// The system's Reduce Motion, as the last build saw it (Home's art stops under it).
+    pub reduce_motion: std::cell::Cell<bool>,
     /// The web view of the context panel and of a plugin's page (P3b).
     pub web_view: crate::web_panel::WebHost,
     /// What the plugins registered as pages (`PluginPages`), for "More"; None until asked.
@@ -229,6 +231,7 @@ impl Default for App {
             steer: Steer::AfterTurn,
             steer_open: false,
             more_open: false,
+            reduce_motion: std::cell::Cell::new(false),
             web_view: crate::web_panel::WebHost::default(),
             plugin_pages: None,
             plugin_view: None,

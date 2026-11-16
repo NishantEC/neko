@@ -21,6 +21,8 @@ use wgpu::util::DeviceExt;
 use super::Camera;
 use super::model3d::{Mesh, VIEW_KEY, Vertex, mvp};
 use crate::app::App;
+use crate::art;
+use crate::art_gpu::HomeArt;
 use crate::theme::theme;
 
 const SHADER: &str = r#"
@@ -404,12 +406,63 @@ pub struct Viewer3d {
     device_key: Option<DeviceKey>,
     drew: bool,
     cpu_ms: Vec<f64>,
+    /// Home's art (`art_gpu.rs`): its pipeline, made on first use.
+    art: Option<(HomeArt, DeviceKey)>,
+    /// The art's own clock, in seconds: it only runs while the art is on screen, the window is active and Reduce Motion is off.
+    art_clock: f64,
+    /// The art is moving now: the window keeps its display link running only while this is true.
+    art_moving: bool,
+    /// GPU milliseconds per frame of the art at 2560x1600 (`NEKO_RUNE_ART_BENCH=1`).
+    art_bench: Option<Vec<f64>>,
+    art_floor: Vec<f64>,
 }
 
 impl Viewer3d {
     fn release(&mut self) {
         self.renderer = None;
         self.mesh_id = 0;
+    }
+}
+
+impl Viewer3d {
+    /// Home's art: the window's frame with the shader drawn at the art's slot. Home and a model never share the screen.
+    fn render_art(&mut self, f: &mut Frame<'_, App>) {
+        self.release();
+        let dark = f.rt.state.panel.dark.get();
+        let moving = art::moving(f.rt.state.focused, f.rt.state.reduce_motion.get());
+        if moving {
+            // A long stall (a dragged window, a sleeping Mac) must not jump the stars.
+            self.art_clock += f.dt.min(0.1);
+        }
+        self.art_moving = moving;
+        let key = f.device_key();
+        if self.art.as_ref().is_none_or(|(_, k)| *k != key) {
+            self.art = Some((HomeArt::new(f.device), key));
+            self.art_bench = None;
+        }
+        let scale = f.rt.env.scale;
+        let look = art::look(dark, self.art_clock as f32, scale);
+        let (device, queue) = (f.device, f.queue);
+        let Some((gpu, _)) = self.art.as_mut() else { return };
+        if self.art_bench.is_none() && std::env::var_os("NEKO_RUNE_ART_BENCH").is_some() {
+            // Steady state: the first 120 of 480 frames are the GPU's clock coming up, and are dropped.
+            let steady = |mut v: Vec<f64>| v.split_off(v.len().min(120));
+            self.art_bench = Some(gpu.bench(device, queue, (2560, 1600), 480, &art::look(dark, 1.0, 2.0)).map(steady).unwrap_or_default());
+            // What an empty pass of the same size costs, to read the art's own share.
+            self.art_floor = gpu.bench(device, queue, (2560, 1600), 480, &crate::art_gpu::Look { floor: true, ..art::look(dark, 1.0, 2.0) }).map(steady).unwrap_or_default();
+        }
+        // The scene is drawn small, one texel per dither cell, before the window's pass; the pass expands it.
+        if let Some((rect, _)) = f.rt.presented(art::SLOT_KEY) {
+            gpu.prepare(device, queue, f.encoder, ((rect[2] * scale).round() as u32, (rect[3] * scale).round() as u32), &look);
+        }
+        f.ui.prepare(f.device, f.queue, &mut f.rt.text.atlas, &f.rt.instances, f.size);
+        let clear = f.rt.clear_color();
+        f.ui.draw_with(f.encoder, f.target, clear, &mut |pass, site| {
+            if site.mark == art::MARK {
+                gpu.draw(device, queue, pass, site, &look);
+            }
+        });
+        self.drew = true;
     }
 }
 
@@ -422,8 +475,17 @@ impl Compositor<App> for Viewer3d {
         self.drew
     }
 
+    fn animating(&self) -> bool {
+        self.art_moving
+    }
+
     fn render(&mut self, f: &mut Frame<'_, App>) {
         let started = Instant::now();
+        if f.rt.presented(art::SLOT_KEY).is_some_and(|(r, opacity)| r[2] > 8.0 && r[3] > 8.0 && opacity > 0.0) {
+            self.render_art(f);
+            return;
+        }
+        self.art_moving = false;
         let scene = f.rt.state.panel_scene();
         let rect = f.rt.presented(VIEW_KEY).map(|(r, _)| r);
         let (Some(scene), Some(rect)) = (scene, rect) else {
@@ -479,6 +541,11 @@ impl Compositor<App> for Viewer3d {
             format!("{name}: n={} mean {:.3} ms, p50 {:.3}, p95 {:.3}, max {:.3}", s.len(), mean, s[s.len() / 2], s[(s.len() * 95 / 100).min(s.len() - 1)], s[s.len() - 1])
         };
         let gpu = self.renderer.as_mut().map(|r| r.gpu_times(device)).unwrap_or_default();
-        Some([stat("model3d compositor CPU (encode, excl. Runtime::frame)", &self.cpu_ms), stat("model3d 3D pass GPU", &gpu)].join("\n"))
+        let mut lines = vec![stat("model3d compositor CPU (encode, excl. Runtime::frame)", &self.cpu_ms), stat("model3d 3D pass GPU", &gpu)];
+        if let Some(bench) = self.art_bench.as_ref() {
+            lines.push(stat("home art GPU at 2560x1600", bench));
+            lines.push(stat("empty pass GPU at 2560x1600", &self.art_floor));
+        }
+        Some(lines.join("\n"))
     }
 }
