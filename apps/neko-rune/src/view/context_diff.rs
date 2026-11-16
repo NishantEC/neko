@@ -14,6 +14,11 @@ use crate::work::{DiffLoad, diff_key};
 const LIST_ROWS: f32 = 5.0;
 const ROW_H: f32 = 26.0;
 
+/// The run select's options: the whole task, then each run.
+pub fn run_options(runs: &[u32]) -> Vec<String> {
+    std::iter::once("Whole task".to_owned()).chain(runs.iter().map(|n| format!("Run {n}"))).collect()
+}
+
 /// (added, removed) lines of each file of a diff.
 pub fn counts(file: &rune_kit::diff::FileDiff) -> (usize, usize) {
     let lines = file.hunks.iter().flat_map(|h| h.lines.iter());
@@ -30,8 +35,7 @@ pub fn tab(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     let key = diff_key(&id, run);
     // The select: the whole task, or one run.
     let runs: Vec<u32> = s.work.checkpoints.get(&id).map(|l| l.runs.iter().map(|r| r.n).collect()).unwrap_or_default();
-    let mut options = vec!["Whole task".to_owned()];
-    options.extend(runs.iter().map(|n| format!("Run {n}")));
+    let options = run_options(&runs);
     let current = run.map_or("Whole task".to_owned(), |n| format!("Run {n}"));
     let select = ui::pick(s, t, layer, "context-run", "Diff of", &options, &current, 140.0, |s: &mut App, chosen: &str| {
         s.panel_pick_run(chosen.strip_prefix("Run ").and_then(|n| n.parse().ok()));
@@ -88,4 +92,15 @@ pub fn tab(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         _ => placeholder(&["Loading the diff…"], t),
     };
     col().w_full().grow(1.0).min_h(0.0).child(head).child(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_run_select_offers_the_whole_task_then_each_run() {
+        assert_eq!(run_options(&[1, 2, 3]), ["Whole task", "Run 1", "Run 2", "Run 3"]);
+        assert_eq!(run_options(&[]), ["Whole task"]);
+    }
 }

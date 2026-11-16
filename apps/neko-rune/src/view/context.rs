@@ -47,6 +47,12 @@ pub fn panel(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     col().key("context").h_full().min_w(0.0).my(8.0).mx(2.0).radius(t.radius.window).clip_rounded(t.radius.window).fill(t.surface.card).child(head).child(col().key("context-body").w_full().grow(1.0).min_h(0.0).child(body))
 }
 
+/// The version select's options, newest first: `v3`, `v2`, `v1`.
+pub fn version_options(mut versions: Vec<u32>) -> Vec<String> {
+    versions.sort_unstable_by(|a, b| b.cmp(a));
+    versions.into_iter().map(|v| format!("v{v}")).collect()
+}
+
 /// The icon of a kind: the kit's file glyphs by family.
 pub fn kind_icon(kind: &str) -> &'static rune::Icon {
     match family(kind) {
@@ -100,11 +106,11 @@ fn canvas(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     let mut c = col().w_full().grow(1.0).min_h(0.0).child(col().key("canvas-scroll").w_full().max_h(4.0 * 32.0 + 8.0).min_h(0.0).clip_rounded(0.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(list));
     if let Some(Target::Artifact { id, version }) = &target {
         // The chosen artifact's own line: a version select at the right when it has more than one.
-        let versions: Vec<u32> = s.panel.artifacts.get(id).map(|a| { let mut v: Vec<u32> = a.versions.iter().map(|v| v.n).collect(); v.sort_unstable_by(|a, b| b.cmp(a)); v }).unwrap_or_default();
+        let versions: Vec<u32> = s.panel.artifacts.get(id).map(|a| a.versions.iter().map(|v| v.n).collect()).unwrap_or_default();
         let title = s.panel.artifacts.get(id).map_or_else(|| id.clone(), |a| a.title.clone());
         let mut line = row().key("canvas-head").w_full().h(32.0).px(12.0).gap(8.0).center_y().child(text(title).font(rune::TextStyle { weight: 500.0, ..t.ty.meta }).color(t.text.base).truncate().grow(1.0).min_w(0.0));
         if !versions.is_empty() {
-            let options: Vec<String> = versions.iter().map(|v| format!("v{v}")).collect();
+            let options = version_options(versions);
             let owner = id.clone();
             line = line.child(ui::pick(s, t, layer, "context-version", "Version", &options, &format!("v{version}"), 80.0, move |s: &mut App, chosen: &str| {
                 if let Ok(n) = chosen.trim_start_matches('v').parse::<u32>() {
@@ -178,4 +184,15 @@ fn too_large(t: &Neko, size: u64, path: &std::path::Path) -> El {
         .child(text("Too large to preview").font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(t.text.base))
         .child(text(size_words(size)).font(t.ty.meta).color(t.text.muted))
         .child(row().pt(8.0).child(quiet_button("Reveal in Finder", "too-large-reveal", t, move |s: &mut App| s.reveal(&path))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn versions_are_listed_newest_first() {
+        assert_eq!(version_options(vec![1, 3, 2]), ["v3", "v2", "v1"]);
+        assert!(version_options(vec![]).is_empty());
+    }
 }
