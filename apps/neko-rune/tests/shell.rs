@@ -62,7 +62,8 @@ fn the_four_regions_stand_left_to_right_and_there_are_no_tabs() {
     // The defaults: 260 for sessions, 300 for Neko, the rest for the session.
     assert_eq!(sessions[2], 260.0);
     assert_eq!(neko[2], 300.0);
-    assert!(session[2] >= MIDDLE_MIN && session[2] > 650.0, "{}", session[2]);
+    assert!(session[2] > 650.0, "{}", session[2]);
+    assert!(session[2] > MIDDLE_MIN);
 }
 
 #[test]
