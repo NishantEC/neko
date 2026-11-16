@@ -8,13 +8,18 @@
 //! The edges between regions drag to resize (`layout.rs` holds the widths and ranges). Colours,
 //! sizes and fonts come from `theme.rs`; the regions name none.
 
+mod calendar;
 mod context;
+mod more;
 mod neko;
 mod new;
 mod palette;
+mod routines;
 mod session;
 mod sessions;
+mod settings;
 mod turn;
+mod ui;
 mod work;
 
 use rune::{Cursor, Cx, Drag, El, Phase, col, el, icon, row, text};
@@ -122,6 +127,24 @@ fn nav_row(glyph: &'static rune::Icon, label: &str, key: &str, active: bool, t: 
         .child(text(label.to_owned()).font(t.ty.row).color(if active { t.text.base } else { t.text.muted }).truncate().a11y_hidden())
 }
 
+/// A row in a list of sections: just its words, the soft fill when it is the open one.
+fn nav_label_row(label: &str, key: &str, active: bool, t: &Neko) -> El {
+    row()
+        .key(key.to_owned())
+        .role("button")
+        .label(label)
+        .focusable(true)
+        .w_full()
+        .h(32.0)
+        .px(10.0)
+        .center_y()
+        .radius(t.radius.row)
+        .fill(if active { t.surface.selected } else { rune::Color::TRANSPARENT })
+        .hover(t.surface.hover)
+        .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+        .child(text(label.to_owned()).font(t.ty.row).color(if active { t.text.base } else { t.text.muted }).truncate().a11y_hidden())
+}
+
 /// A secondary action: text on the soft fill under the pointer (the web's outline and ghost buttons).
 fn quiet_button(label: &str, key: &str, t: &Neko, on_press: impl Fn(&mut App) + 'static) -> El {
     row()
@@ -174,15 +197,6 @@ fn primary_button(label: &str, key: &str, t: &Neko, on_press: impl Fn(&mut App) 
         .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(on_press)
         .child(text(label.to_owned()).font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(rune::Color::WHITE).a11y_hidden())
-}
-
-/// A group heading's look for the text sections of a column.
-fn heading(label: &str, count: Option<usize>, t: &Neko) -> El {
-    let mut h = row().gap(6.0).center_y().child(text(label.to_owned()).font(t.ty.group).color(t.text.muted));
-    if let Some(n) = count {
-        h = h.child(text(n.to_string()).font(t.ty.id).color(t.text.faint));
-    }
-    h
 }
 
 /// The centred, quiet line a region shows while it has nothing yet.

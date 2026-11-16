@@ -5,10 +5,12 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use neko_protocol::agent_models::ModelCatalog;
 use neko_protocol::checkpoints::CheckpointList;
 use neko_protocol::digest::Digest;
 use neko_protocol::{Frame, Request, Response, read_frame, write_frame};
 
+use super::pages::{CalendarData, PhoneData, QuotaRow, RoutinesData};
 use super::write::Call;
 use super::{LinkError, Summary};
 
@@ -54,7 +56,7 @@ pub struct RuntimeChoice {
 
 /// What came back, ready for the app. (One is made per call and moved once, so the big variant
 /// is not boxed.)
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 #[allow(clippy::large_enum_variant)]
 pub enum Reply {
     Snapshot(Summary),
@@ -63,7 +65,15 @@ pub enum Reply {
     Unseen(Vec<String>),
     Digest(Option<Digest>),
     Inbox(Vec<InboxItem>),
-    Models(Vec<RuntimeChoice>),
+    Models { choices: Vec<RuntimeChoice>, catalog: Box<ModelCatalog> },
+    /// The `Routines` answer, whole (the routines page, standing orders, Inbox settings).
+    Routines(Box<RoutinesData>),
+    Calendar(Box<CalendarData>),
+    CalendarStatus(neko_protocol::calendar::CalendarStatus),
+    Phone(Box<PhoneData>),
+    PhoneTest(Vec<String>),
+    Quota(Vec<QuotaRow>),
+    Plugins(Vec<neko_protocol::PluginHealth>),
     Answered(String),
     /// Done, and nothing to apply.
     Done,
@@ -132,8 +142,21 @@ pub fn make(socket: &Path, call: &Call, open: Option<&str>) -> Reply {
         },
         Response::UnseenTasks { ids } => Reply::Unseen(ids),
         Response::Digest { digest } => Reply::Digest(digest),
-        Response::Routines { routines, .. } => Reply::Inbox(inbox_items(&routines)),
-        Response::AgentModels(catalog) => Reply::Models(runtime_choices(&catalog)),
+        Response::Routines { routines, standing_orders, scopes, owner_name, age_out_days, routines_on, spend_today } => match call {
+            // The Inbox asks the same request and keeps only the open items.
+            Call::Inbox => Reply::Inbox(inbox_items(&routines)),
+            _ => Reply::Routines(Box::new(RoutinesData { views: routines, standing_orders, scopes, owner_name, age_out_days, routines_on, spend_today })),
+        },
+        Response::AgentModels(catalog) => Reply::Models { choices: runtime_choices(&catalog), catalog: Box::new(catalog) },
+        Response::CalendarEvents { events, neko, status } => match call {
+            Call::CalendarEvents { from_ms, to_ms } => Reply::Calendar(Box::new(CalendarData { events, neko, status, from_ms: *from_ms, to_ms: *to_ms })),
+            _ => Reply::Done,
+        },
+        Response::CalendarStatus(status) => Reply::CalendarStatus(status),
+        Response::Phone { settings, status } => Reply::Phone(Box::new(PhoneData { settings, status })),
+        Response::PhoneTest { lines } => Reply::PhoneTest(lines),
+        Response::PluginStatus { plugins } => Reply::Plugins(plugins),
+        Response::SearchResults { items, .. } => Reply::Quota(quota_rows(&items)),
         Response::NeedsYouAnswered { summary } => Reply::Answered(summary),
         Response::Error { message } => Reply::Refused(message),
         _ => Reply::Done,
@@ -149,5 +172,24 @@ pub fn runtime_choices(catalog: &neko_protocol::agent_models::ModelCatalog) -> V
         .filter(|s| s.status == SourceStatus::Ready)
         .flat_map(|s| s.models.iter().filter(|m| m.access != ModelAccess::Unavailable).map(|m| RuntimeChoice { provider: s.provider.clone(), model: m.id.clone(), label: format!("{} · {}", s.label, m.label) }))
         .take(40)
+        .collect()
+}
+
+/// The usage provider's meters as rows: a label, how much is used, and the meter's own words.
+pub fn quota_rows(items: &[neko_protocol::SearchItem]) -> Vec<QuotaRow> {
+    items
+        .iter()
+        .filter_map(|i| {
+            let meter = i.meter.as_ref()?;
+            let label = match &i.group_label {
+                Some(g) if !g.is_empty() => format!("{g} · {}", i.title),
+                _ => i.title.clone(),
+            };
+            let mut words: Vec<String> = meter.stats.iter().map(|s| format!("{} {}", s.value, s.label).trim().to_owned()).collect();
+            if let Some(sub) = i.subtitle.as_ref().filter(|s| !s.is_empty()) {
+                words.push(sub.clone());
+            }
+            Some(QuotaRow { label, used: meter.fraction.clamp(0.0, 1.0), words })
+        })
         .collect()
 }

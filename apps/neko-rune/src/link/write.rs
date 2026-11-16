@@ -6,6 +6,10 @@
 //!
 //! * **Reads** (`Call::reads`): the open task's checkpoints and one run's diff, the unseen
 //!   marks, the Inbox's items and the morning digest. Fetching changes nothing.
+//! * **Pages (P2)**: reads for the routines, the calendar, the phone settings, the quota meters and
+//!   the plugin status; writes that are controls on the web's Inbox, Settings and Calendar pages
+//!   (a routine's switch, Run now and editor, standing orders, the Inbox clean-up, the budgets, the
+//!   runtime, the phone channels, the updater's switches and Update now). Nothing destructive.
 //! * **Writes**: queue a message for a running agent and take it back, reply to a task, approve,
 //!   complete, stop or start a task, a goal's pause, resume, extend, mark done, stop and answer,
 //!   undo and redo a run, answer or clear an Inbox item, mark the digest read, mark a task seen
@@ -14,7 +18,9 @@
 use neko_protocol::checkpoints::CheckpointCommand;
 use neko_protocol::crew::{CrewCommand, DeliveryMode, QueueKind};
 use neko_protocol::goals::GoalCommand;
-use neko_protocol::workbench::{Command, RuntimePreferences};
+use neko_protocol::phone::PhoneSettings;
+use neko_protocol::routines::Routine;
+use neko_protocol::workbench::{AgentRuntime, Command, RuntimePreferences};
 use neko_protocol::Request;
 
 /// One request from the app to the daemon.
@@ -68,12 +74,42 @@ pub enum Call {
     StopAsking { turn_id: String },
     DecideChatTool { turn_id: String, call_id: String, approve: bool },
     DecideChatAction { message_id: String, action_id: String, accept: bool },
+    // The pages (P2). Reads first.
+    /// The routines whole, for the Routines page, standing orders and the Inbox settings.
+    RoutinesFull,
+    CalendarEvents { from_ms: i64, to_ms: i64 },
+    PhoneSettings,
+    /// The vendors' quota meters (the web's Usage page asks the `usage` provider).
+    Quota,
+    Plugins,
+    // Routines, each a control on the web's Inbox page.
+    SaveRoutine(Box<Routine>),
+    RunRoutine { id: String },
+    SetRoutineEnabled { id: String, enabled: bool },
+    SetRoutinesOn { enabled: bool },
+    SetStandingOrders { workspace_id: String, text: String },
+    // Settings, each a control the web's Settings page has.
+    SetInboxAgeOut { days: u32 },
+    SetCalendarOn { enabled: bool },
+    SavePhone(Box<PhoneSettings>),
+    PhoneTest,
+    SetAgentRuntime(AgentRuntime),
+    SetTaskBudget { cents: Option<u32> },
+    SetDailyBudget { cents: Option<u32> },
+    SetMaxRunning { limit: Option<u32> },
+    SetMaxWritable { limit: Option<u32> },
+    SetPlanFirst { enabled: bool },
+    SetStartWithoutApproval { enabled: bool },
+    SetSelfUpdate { auto_ui: bool, auto_native: bool },
+    UpdateNow,
+    ApplyUpdate,
+    SetDevCheckout { path: String },
 }
 
 impl Call {
     /// Whether this only fetches.
     pub fn reads(&self) -> bool {
-        matches!(self, Call::Refresh | Call::Checkpoints { .. } | Call::CheckpointDiff { .. } | Call::Unseen | Call::Digest | Call::Inbox | Call::Models)
+        matches!(self, Call::Refresh | Call::Checkpoints { .. } | Call::CheckpointDiff { .. } | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::RoutinesFull | Call::CalendarEvents { .. } | Call::PhoneSettings | Call::Quota | Call::Plugins)
     }
 
     /// The request the daemon receives: the same JSON the web UI posts.
@@ -132,6 +168,31 @@ impl Call {
             Call::StopAsking { turn_id } => Request::Workbench(Command::CancelChat { turn_id }),
             Call::DecideChatTool { turn_id, call_id, approve } => Request::Workbench(Command::DecideChatTool { turn_id, call_id, approve }),
             Call::DecideChatAction { message_id, action_id, accept } => Request::Workbench(Command::DecideChatAction { message_id, action_id, accept }),
+            Call::RoutinesFull => Request::Routines,
+            Call::CalendarEvents { from_ms, to_ms } => Request::CalendarEvents { from_ms, to_ms },
+            Call::PhoneSettings => Request::PhoneSettings,
+            Call::Quota => Request::Search { query: String::new(), limit: 50, provider: Some("usage".to_owned()) },
+            Call::Plugins => Request::PluginStatus { id: None },
+            Call::SaveRoutine(routine) => Request::SaveRoutine { routine: *routine },
+            Call::RunRoutine { id } => Request::RunRoutineNow { id },
+            Call::SetRoutineEnabled { id, enabled } => Request::SetRoutineEnabled { id, enabled },
+            Call::SetRoutinesOn { enabled } => Request::SetRoutinesOn { enabled },
+            Call::SetStandingOrders { workspace_id, text } => Request::SetStandingOrders { workspace_id, text },
+            Call::SetInboxAgeOut { days } => Request::SetInboxAgeOutDays { days },
+            Call::SetCalendarOn { enabled } => Request::SetCalendarEnabled { enabled },
+            Call::SavePhone(settings) => Request::SetPhoneSettings { settings: *settings },
+            Call::PhoneTest => Request::PhoneTest,
+            Call::SetAgentRuntime(runtime) => Request::Workbench(Command::SetAgentRuntime { runtime }),
+            Call::SetTaskBudget { cents } => Request::Workbench(Command::SetTaskBudget { cents }),
+            Call::SetDailyBudget { cents } => Request::Workbench(Command::SetDailyBudget { cents }),
+            Call::SetMaxRunning { limit } => Request::Workbench(Command::SetMaxRunningTickets { limit }),
+            Call::SetMaxWritable { limit } => Request::Workbench(Command::SetMaxWritablePerRepository { limit }),
+            Call::SetPlanFirst { enabled } => Request::Workbench(Command::SetPlanFirst { enabled }),
+            Call::SetStartWithoutApproval { enabled } => Request::Workbench(Command::SetStartWithoutApproval { enabled }),
+            Call::SetSelfUpdate { auto_ui, auto_native } => Request::Workbench(Command::SetSelfUpdate { auto_ui, auto_native }),
+            Call::UpdateNow => Request::Workbench(Command::UpdateNekoNow),
+            Call::ApplyUpdate => Request::Workbench(Command::ApplyPendingUpdate),
+            Call::SetDevCheckout { path } => Request::Workbench(Command::SetDevCheckout { path }),
         }
     }
 }

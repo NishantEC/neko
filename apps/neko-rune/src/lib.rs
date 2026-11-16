@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod attachments;
+pub mod clock;
 pub mod connection;
 pub mod groups;
 pub mod icons;
@@ -12,7 +13,9 @@ pub mod lab;
 pub mod layout;
 pub mod link;
 pub mod new_session;
+pub mod pages;
 pub mod scenes;
+pub mod scenes_pages;
 pub mod status;
 pub mod theme;
 pub mod turns;
@@ -78,7 +81,12 @@ fn socket_path() -> PathBuf {
 }
 
 /// Keys the window handles before any field: ⌘K opens the palette; ⌘N starts a session.
-fn on_key(s: &mut App, ev: &rune::KeyEvent, _: &mut rune::Tx) -> bool {
+fn on_key(s: &mut App, ev: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
+    // ⌘F in Settings goes to its search field, which filters the rows of every section.
+    if ev.is_command('f') && !ev.mods.shift && s.view == Some(views::FullView::Settings) {
+        tx.focus("settings-search", true);
+        return true;
+    }
     if ev.is_command('k') && !ev.mods.shift {
         s.palette_toggle();
         return true;

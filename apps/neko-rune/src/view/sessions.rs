@@ -137,5 +137,10 @@ fn foot(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     for view in FullView::MORE {
         menu = menu.item(MenuItem::new(view.title()).icon(view.icon()).checked(s.view == Some(view)).on_select(move |s: &mut App| s.open_view(view)));
     }
+    // The web UI stays one choice away, at the foot of the list.
+    menu = menu.item(MenuItem::new("Open the web UI").icon(&icons::EXTERNAL).on_select(|s: &mut App| {
+        s.more_open = false;
+        s.open_in_web(None);
+    }));
     c.child(menu.build(&t.kit, layer))
 }

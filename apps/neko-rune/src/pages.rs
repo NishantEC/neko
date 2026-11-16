@@ -1,0 +1,649 @@
+//! What the full views keep between frames and what pressing their controls does: the Routines
+//! page's open routine and editor, the Calendar's week, Settings' section and search, Usage, the
+//! workspaces' open state, the plugins. No drawing and no I/O here: every request goes out through
+//! [`App::call`], so each rule is tested by looking at what was asked of the daemon.
+//!
+//! The rules are the web UI's, ported: `pages/Inbox.tsx` (routines, their editor, standing orders),
+//! `pages/Calendar.tsx`, `pages/setup/Settings.tsx` and its sections, `pages/setup/Usage.tsx`,
+//! `pages/setup/Workspaces.tsx`.
+
+use std::collections::{HashMap, HashSet};
+
+use neko_protocol::agent_models::ModelCatalog;
+use neko_protocol::phone::PhoneSettings;
+use neko_protocol::routines::{Cadence, Routine, RoutineView};
+use neko_protocol::workbench::AgentRuntime;
+use neko_protocol::PluginHealth;
+use rune::TextEdit;
+
+use crate::app::App;
+use crate::clock;
+use crate::link::{CalendarData, Call, PhoneData, QuotaRow, Reply, RoutinesData};
+use crate::views::FullView;
+
+/// How long a page's data is trusted before it is asked for again while the page is open.
+pub const PAGE_POLL_MS: i64 = 30_000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CalMode {
+    Day,
+    Week,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Section {
+    General,
+    Ai,
+    Budget,
+    Phone,
+    Updates,
+    Workspaces,
+    About,
+}
+
+impl Section {
+    pub const ALL: [Section; 7] = [Section::General, Section::Ai, Section::Budget, Section::Phone, Section::Updates, Section::Workspaces, Section::About];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Section::General => "General",
+            Section::Ai => "AI and agents",
+            Section::Budget => "Budget",
+            Section::Phone => "Phone",
+            Section::Updates => "Neko updates",
+            Section::Workspaces => "Workspaces",
+            Section::About => "About",
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Section::General => "general",
+            Section::Ai => "ai",
+            Section::Budget => "budget",
+            Section::Phone => "phone",
+            Section::Updates => "updates",
+            Section::Workspaces => "workspaces",
+            Section::About => "about",
+        }
+    }
+}
+
+/// The routine editor's choices that are not text (the instruction and the model are fields).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoutineDraft {
+    pub id: String,
+    pub cadence: Cadence,
+    pub model: String,
+    pub browser: bool,
+    pub computer: bool,
+    pub catch_up: bool,
+}
+
+impl RoutineDraft {
+    pub fn of(routine: &Routine) -> RoutineDraft {
+        RoutineDraft { id: routine.id.clone(), cadence: routine.cadence.clone(), model: routine.model.clone(), browser: routine.browser, computer: routine.computer, catch_up: routine.catches_up() }
+    }
+}
+
+/// The runtime being chosen in Settings: the saved one until something is picked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeDraft(pub AgentRuntime);
+
+/// The words for a routine's cadence, as the web's Inbox page writes them.
+pub fn cadence_text(c: &Cadence) -> String {
+    match c {
+        Cadence::Every { minutes, from_hour, to_hour } if from_hour == to_hour => format!("Every {minutes} min"),
+        Cadence::Every { minutes, from_hour, to_hour } => format!("Every {minutes} min, {from_hour:02}:00–{to_hour:02}:00"),
+        Cadence::Daily { hour, minute } => format!("Daily at {hour:02}:{minute:02}"),
+    }
+}
+
+/// What the cadence select offers: the routine's own first, then the usual choices. A choice keeps
+/// the routine's hours window when it repeats through the day.
+pub fn cadence_options(current: &Cadence) -> Vec<(String, Cadence)> {
+    let (from, to) = match current {
+        Cadence::Every { from_hour, to_hour, .. } => (*from_hour, *to_hour),
+        Cadence::Daily { .. } => (8, 23),
+    };
+    let mut out: Vec<Cadence> = vec![current.clone()];
+    for minutes in [5, 10, 20, 30, 60, 120] {
+        out.push(Cadence::Every { minutes, from_hour: from, to_hour: to });
+    }
+    for hour in [6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 22] {
+        out.push(Cadence::Daily { hour, minute: 0 });
+    }
+    let mut seen = Vec::new();
+    out.into_iter()
+        .filter(|c| !seen.contains(c) && {
+            seen.push(c.clone());
+            true
+        })
+        .map(|c| (cadence_text(&c), c))
+        .collect()
+}
+
+/// Claude Code's model aliases a routine may use; empty means the first (the web's hint).
+pub fn model_options(current: &str) -> Vec<(String, String)> {
+    let mut out = vec![("sonnet (default)".to_owned(), String::new()), ("opus".to_owned(), "opus".to_owned()), ("haiku".to_owned(), "haiku".to_owned())];
+    if !current.is_empty() && !out.iter().any(|(_, v)| v == current) {
+        out.push((current.to_owned(), current.to_owned()));
+    }
+    out
+}
+
+/// The routine's state in the one status language: running, held, failed, paused, on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RoutineGlyph {
+    On,
+    Running,
+    Held(String),
+    Failed,
+    Paused,
+}
+
+pub fn routine_glyph(view: &RoutineView, now_ms: i64) -> RoutineGlyph {
+    let (routine, state) = (&view.routine, &view.state);
+    if state.running {
+        return RoutineGlyph::Running;
+    }
+    if !routine.enabled {
+        return RoutineGlyph::Paused;
+    }
+    if let Some(hold) = state.hold.as_ref().filter(|h| h.until_ms > now_ms) {
+        return RoutineGlyph::Held(format!("Held until {}", clock::hhmm(hold.until_ms)));
+    }
+    match view.runs.first() {
+        Some(last) if !last.ok => RoutineGlyph::Failed,
+        _ => RoutineGlyph::On,
+    }
+}
+
+/// When the next run is due, in a few words ("in 12m", "due now", "queued").
+pub fn next_due_text(view: &RoutineView, now_ms: i64) -> String {
+    let state = &view.state;
+    if state.running {
+        return "running".to_owned();
+    }
+    if state.run_requested {
+        return "queued".to_owned();
+    }
+    if !view.routine.enabled {
+        return String::new();
+    }
+    match state.next_due_ms {
+        Some(due) if due > now_ms => format!("next {}", short_in(due - now_ms)),
+        _ => "due now".to_owned(),
+    }
+}
+
+fn short_in(ms: i64) -> String {
+    match ms / 60_000 {
+        0 => "in under a minute".to_owned(),
+        m if m < 60 => format!("in {m}m"),
+        m if m < 24 * 60 => format!("in {}h", m / 60),
+        m => format!("in {}d", m / (24 * 60)),
+    }
+}
+
+/// How long ago, quietly ("3m ago").
+pub fn ago(now_ms: i64, at_ms: i64) -> String {
+    match (now_ms - at_ms).max(0) / 60_000 {
+        0 => "just now".to_owned(),
+        m if m < 60 => format!("{m}m ago"),
+        m if m < 24 * 60 => format!("{}h ago", m / 60),
+        m => format!("{}d ago", m / (24 * 60)),
+    }
+}
+
+/// One thing a page keeps.
+pub struct Pages {
+    pub routines: Option<RoutinesData>,
+    pub open_routine: Option<String>,
+    pub draft: Option<RoutineDraft>,
+    /// Standing orders as last saved, per workspace, to tell an edited box from an untouched one.
+    pub orders_saved: HashMap<String, String>,
+    pub fields: HashMap<String, TextEdit>,
+    pub calendar: Option<CalendarData>,
+    pub cal_mode: CalMode,
+    /// The local midnight of the day the calendar is on (the week that holds it in week view).
+    pub cal_day: i64,
+    /// The event whose "Open in Calendar" is showing.
+    pub cal_event: Option<String>,
+    pub phone: Option<PhoneData>,
+    pub phone_test: Vec<String>,
+    pub catalog: Option<ModelCatalog>,
+    pub runtime_draft: Option<RuntimeDraft>,
+    pub quota: Option<Vec<QuotaRow>>,
+    pub plugins: Option<Vec<PluginHealth>>,
+    pub section: Section,
+    /// The select whose list is open, by key.
+    pub open_select: Option<String>,
+    pub ws_open: HashSet<String>,
+    /// A refusal shown next to the control it belongs to, by control key.
+    pub notes: HashMap<String, String>,
+    /// When the open page last asked, by the app's clock.
+    pub asked_ms: i64,
+    pub routines_error: Option<String>,
+    /// What a text field shows before anything was typed in it.
+    pub blank: TextEdit,
+}
+
+impl Default for Pages {
+    fn default() -> Self {
+        Pages {
+            routines: None,
+            open_routine: None,
+            draft: None,
+            orders_saved: HashMap::new(),
+            fields: HashMap::new(),
+            calendar: None,
+            cal_mode: CalMode::Week,
+            cal_day: 0,
+            cal_event: None,
+            phone: None,
+            phone_test: Vec::new(),
+            catalog: None,
+            runtime_draft: None,
+            quota: None,
+            plugins: None,
+            section: Section::General,
+            open_select: None,
+            ws_open: HashSet::new(),
+            notes: HashMap::new(),
+            asked_ms: i64::MIN / 2,
+            routines_error: None,
+            blank: TextEdit::new(""),
+        }
+    }
+}
+
+impl Pages {
+    /// The text field with this key, made empty on first use.
+    pub fn field(&mut self, key: &str) -> &mut TextEdit {
+        self.fields.entry(key.to_owned()).or_insert_with(|| TextEdit::new(""))
+    }
+
+    /// The text field's contents ("" before it exists).
+    pub fn text(&self, key: &str) -> &str {
+        self.fields.get(key).map_or("", |f| f.text.as_str())
+    }
+
+    pub fn set_field(&mut self, key: &str, text: &str) {
+        self.field(key).replace_text(text);
+    }
+
+    pub fn routine(&self, id: &str) -> Option<&RoutineView> {
+        self.routines.as_ref()?.views.iter().find(|v| v.routine.id == id)
+    }
+}
+
+/// A control's key for a refusal: the routine, the setting, the page.
+pub fn control_key(call: &Call) -> Option<String> {
+    Some(match call {
+        Call::SaveRoutine(r) => format!("routine:{}", r.id),
+        Call::RunRoutine { id } | Call::SetRoutineEnabled { id, .. } => format!("routine:{id}"),
+        Call::SetRoutinesOn { .. } => "setting:routines-on".to_owned(),
+        Call::SetStandingOrders { workspace_id, .. } => format!("orders:{workspace_id}"),
+        Call::SetInboxAgeOut { .. } => "setting:age-out".to_owned(),
+        Call::SetCalendarOn { .. } => "setting:calendar-on".to_owned(),
+        Call::SavePhone(_) | Call::PhoneTest => "setting:phone".to_owned(),
+        Call::SetAgentRuntime(_) => "setting:runtime".to_owned(),
+        Call::SetTaskBudget { .. } => "setting:task-budget".to_owned(),
+        Call::SetDailyBudget { .. } => "setting:daily-budget".to_owned(),
+        Call::SetMaxRunning { .. } => "setting:max-running".to_owned(),
+        Call::SetMaxWritable { .. } => "setting:max-writable".to_owned(),
+        Call::SetPlanFirst { .. } => "setting:plan-first".to_owned(),
+        Call::SetStartWithoutApproval { .. } => "setting:start-without-approval".to_owned(),
+        Call::SetSelfUpdate { .. } | Call::UpdateNow | Call::ApplyUpdate => "setting:updates".to_owned(),
+        Call::SetDevCheckout { .. } => "setting:dev-checkout".to_owned(),
+        Call::RoutinesFull => "page:routines".to_owned(),
+        Call::CalendarEvents { .. } => "page:calendar".to_owned(),
+        Call::PhoneSettings => "page:phone".to_owned(),
+        Call::Quota => "page:quota".to_owned(),
+        Call::Plugins => "page:plugins".to_owned(),
+        _ => return None,
+    })
+}
+
+/// Cents from the text a money field holds ("12.50" or "$12.50"); None for empty (no limit).
+/// Err for something that is not an amount in range.
+pub fn parse_dollars(text: &str, max: f64) -> Result<Option<u32>, &'static str> {
+    let clean = text.trim().trim_start_matches('$').trim();
+    if clean.is_empty() {
+        return Ok(None);
+    }
+    match clean.parse::<f64>() {
+        Ok(v) if v.is_finite() && (0.01..=max).contains(&v) => Ok(Some((v * 100.0).round() as u32)),
+        _ => Err("Enter an amount, or leave it empty."),
+    }
+}
+
+impl App {
+    /// A full view opens: its data is asked for at once, then again while it stays open.
+    pub fn enter_view(&mut self, view: FullView) {
+        self.pages.open_select = None;
+        self.pages.notes.clear();
+        self.pages.asked_ms = i64::MIN / 2;
+        if view == FullView::Calendar && self.pages.cal_day == 0 {
+            self.pages.cal_day = clock::day_start(self.now_ms);
+        }
+        self.refresh_page(view);
+    }
+
+    /// Asks for what the open view shows (at most every [`PAGE_POLL_MS`] unless forced by `asked_ms`).
+    pub fn refresh_page(&mut self, view: FullView) {
+        if self.now_ms - self.pages.asked_ms < PAGE_POLL_MS {
+            return;
+        }
+        self.pages.asked_ms = self.now_ms;
+        match view {
+            FullView::Routines | FullView::Workspaces => self.call(Call::RoutinesFull),
+            FullView::Calendar => self.ask_calendar(),
+            FullView::Usage => {
+                self.call(Call::RoutinesFull);
+                self.call(Call::Quota);
+            }
+            FullView::Plugins => self.call(Call::Plugins),
+            FullView::Settings => {
+                self.call(Call::RoutinesFull);
+                self.call(Call::PhoneSettings);
+                self.call(Call::Models);
+                self.ask_calendar();
+            }
+        }
+    }
+
+    /// The days the calendar shows now, as [from, to) in local midnights.
+    pub fn calendar_range(&self) -> (i64, i64) {
+        let day = if self.pages.cal_day == 0 { clock::day_start(self.now_ms) } else { self.pages.cal_day };
+        match self.pages.cal_mode {
+            CalMode::Day => (day, clock::add_days(day, 1)),
+            CalMode::Week => {
+                let monday = clock::week_start(day + 12 * 3_600_000);
+                (monday, clock::add_days(monday, 7))
+            }
+        }
+    }
+
+    pub fn ask_calendar(&mut self) {
+        let (from_ms, to_ms) = self.calendar_range();
+        self.call(Call::CalendarEvents { from_ms, to_ms });
+    }
+
+    pub fn cal_mode(&mut self, mode: CalMode) {
+        self.pages.cal_mode = mode;
+        self.pages.cal_event = None;
+        self.ask_calendar();
+    }
+
+    /// Steps the calendar by a day or a week; `0` goes to today.
+    pub fn cal_step(&mut self, direction: i64) {
+        let today = clock::day_start(self.now_ms);
+        let step = if self.pages.cal_mode == CalMode::Week { 7 } else { 1 };
+        let day = if self.pages.cal_day == 0 { today } else { self.pages.cal_day };
+        self.pages.cal_day = if direction == 0 { today } else { clock::add_days(day, direction * step) };
+        self.pages.cal_event = None;
+        self.ask_calendar();
+    }
+
+    /// "Open in Calendar": macOS Calendar at the event's day (`calshow:`), not a web page.
+    pub fn open_in_calendar(&mut self, start_ms: i64) {
+        let url = format!("calshow:{}", clock::calshow_seconds(start_ms));
+        if (self.opener)(&url).is_err() {
+            self.pages.notes.insert("page:calendar".to_owned(), "Couldn’t open Calendar.".to_owned());
+        }
+    }
+
+    // ---- routines
+
+    /// Opens a routine's details under its row (accordion: one at a time), or closes it.
+    pub fn open_routine(&mut self, id: &str) {
+        if self.pages.open_routine.as_deref() == Some(id) {
+            self.pages.open_routine = None;
+            self.pages.draft = None;
+            return;
+        }
+        let Some(view) = self.pages.routine(id).cloned() else { return };
+        self.pages.open_routine = Some(id.to_owned());
+        self.pages.draft = Some(RoutineDraft::of(&view.routine));
+        self.pages.set_field("rt:instruction", &view.routine.instruction);
+        self.pages.open_select = None;
+        self.pages.notes.remove(&format!("routine:{id}"));
+    }
+
+    /// The editor differs from the saved routine.
+    pub fn routine_dirty(&self) -> bool {
+        let (Some(id), Some(draft)) = (self.pages.open_routine.as_deref(), self.pages.draft.as_ref()) else { return false };
+        let Some(view) = self.pages.routine(id) else { return false };
+        *draft != RoutineDraft::of(&view.routine) || self.pages.text("rt:instruction").trim() != view.routine.instruction.trim()
+    }
+
+    pub fn save_routine(&mut self) {
+        let (Some(id), Some(draft)) = (self.pages.open_routine.clone(), self.pages.draft.clone()) else { return };
+        let instruction = self.pages.text("rt:instruction").trim().to_owned();
+        if instruction.is_empty() {
+            self.pages.notes.insert(format!("routine:{id}"), "A routine needs an instruction.".to_owned());
+            return;
+        }
+        let Some(view) = self.pages.routine(&id) else { return };
+        // The web sends the whole routine with the edited fields replaced.
+        let routine = Routine { instruction, cadence: draft.cadence, model: draft.model.trim().to_owned(), browser: draft.browser, computer: draft.computer, catch_up: Some(draft.catch_up), ..view.routine.clone() };
+        self.pages.notes.remove(&format!("routine:{id}"));
+        self.call(Call::SaveRoutine(Box::new(routine)));
+    }
+
+    pub fn run_routine(&mut self, id: &str) {
+        self.call(Call::RunRoutine { id: id.to_owned() });
+    }
+
+    pub fn set_routine_enabled(&mut self, id: &str, enabled: bool) {
+        self.call(Call::SetRoutineEnabled { id: id.to_owned(), enabled });
+    }
+
+    pub fn save_orders(&mut self, workspace_id: &str) {
+        let text = self.pages.text(&format!("orders:{workspace_id}")).to_owned();
+        self.call(Call::SetStandingOrders { workspace_id: workspace_id.to_owned(), text });
+    }
+
+    /// Standing orders were edited here and not saved yet.
+    pub fn orders_dirty(&self, workspace_id: &str) -> bool {
+        self.pages.text(&format!("orders:{workspace_id}")) != self.pages.orders_saved.get(workspace_id).map_or("", String::as_str)
+    }
+
+    // ---- selects and settings
+
+    pub fn toggle_select(&mut self, key: &str) {
+        self.pages.open_select = if self.pages.open_select.as_deref() == Some(key) { None } else { Some(key.to_owned()) };
+    }
+
+    /// The runtime Settings shows: what is being picked, else what is saved.
+    pub fn runtime_shown(&self) -> AgentRuntime {
+        self.pages.runtime_draft.as_ref().map(|d| d.0.clone()).unwrap_or_else(|| self.summary.as_ref().map(|m| m.settings.runtime.clone()).unwrap_or_default())
+    }
+
+    pub fn runtime_dirty(&self) -> bool {
+        self.pages.runtime_draft.as_ref().is_some_and(|d| Some(&d.0) != self.summary.as_ref().map(|m| &m.settings.runtime))
+    }
+
+    pub fn pick_runtime(&mut self, change: impl FnOnce(&mut AgentRuntime)) {
+        let mut runtime = self.runtime_shown();
+        change(&mut runtime);
+        self.pages.runtime_draft = Some(RuntimeDraft(runtime));
+    }
+
+    pub fn use_runtime(&mut self) {
+        if let Some(d) = self.pages.runtime_draft.clone() {
+            self.call(Call::SetAgentRuntime(d.0));
+        }
+    }
+
+    /// A money setting saved from its field: refuses what is not an amount, says so next to it.
+    pub fn save_money(&mut self, field: &str, max: f64, make: impl FnOnce(Option<u32>) -> Call) {
+        match parse_dollars(self.pages.text(field), max) {
+            Ok(cents) => {
+                self.pages.notes.remove(&format!("setting:{field}"));
+                self.call(make(cents));
+            }
+            Err(why) => {
+                self.pages.notes.insert(format!("setting:{field}"), format!("{why} Between 0.01 and {max:.0}."));
+            }
+        }
+    }
+
+    /// Changes one phone setting and saves, as the web does on each change.
+    pub fn change_phone(&mut self, change: impl FnOnce(&mut PhoneSettings)) {
+        let Some(mut settings) = self.pages.phone.as_ref().map(|p| p.settings.clone()) else { return };
+        change(&mut settings);
+        self.call(Call::SavePhone(Box::new(settings)));
+    }
+
+    /// What a page-related answer does to the state. None when the reply is not one of theirs.
+    pub fn apply_page_reply(&mut self, call: &Call, reply: &Reply) -> Option<bool> {
+        match reply {
+            Reply::Routines(data) => {
+                // Standing orders show as saved until edited here.
+                for (workspace, text) in &data.standing_orders {
+                    let key = format!("orders:{workspace}");
+                    let edited = match (self.pages.fields.get(&key), self.pages.orders_saved.get(workspace)) {
+                        (Some(field), Some(saved)) => field.text != *saved,
+                        _ => false,
+                    };
+                    if !edited {
+                        self.pages.set_field(&key, text);
+                    }
+                    self.pages.orders_saved.insert(workspace.clone(), text.clone());
+                }
+                if let Some(key) = control_key(call) {
+                    self.pages.notes.remove(&key);
+                }
+                let changed = self.pages.routines.as_ref() != Some(&**data);
+                self.pages.routines = Some((**data).clone());
+                Some(changed)
+            }
+            Reply::Calendar(data) => {
+                let changed = self.pages.calendar.as_ref() != Some(&**data);
+                self.pages.calendar = Some((**data).clone());
+                self.pages.notes.remove("page:calendar");
+                Some(changed)
+            }
+            Reply::CalendarStatus(status) => {
+                if let Some(c) = self.pages.calendar.as_mut() {
+                    c.status = status.clone();
+                }
+                self.pages.asked_ms = i64::MIN / 2;
+                self.ask_calendar();
+                Some(true)
+            }
+            Reply::Phone(data) => {
+                let changed = self.pages.phone.as_ref() != Some(&**data);
+                self.pages.phone = Some((**data).clone());
+                self.pages.notes.remove("setting:phone");
+                Some(changed)
+            }
+            Reply::PhoneTest(lines) => {
+                self.pages.phone_test = lines.clone();
+                Some(true)
+            }
+            Reply::Quota(rows) => {
+                let changed = self.pages.quota.as_ref() != Some(rows);
+                self.pages.quota = Some(rows.clone());
+                Some(changed)
+            }
+            Reply::Plugins(list) => {
+                let changed = self.pages.plugins.as_ref() != Some(list);
+                self.pages.plugins = Some(list.clone());
+                Some(changed)
+            }
+            Reply::Models { catalog, .. } => {
+                let changed = self.pages.catalog.as_ref() != Some(&**catalog);
+                self.pages.catalog = Some((**catalog).clone());
+                // The new-session form takes its choices from the same answer.
+                Some(changed)
+            }
+            _ => None,
+        }
+    }
+
+    /// A refusal or failure of a page request: said next to the control it belongs to.
+    pub fn page_refused(&mut self, call: &Call, message: String) -> bool {
+        match control_key(call) {
+            Some(key) => {
+                // Reads that fail stay quiet while the page has older data.
+                if call.reads() && self.pages_have(call) {
+                    return false;
+                }
+                self.pages.notes.insert(key, message);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn pages_have(&self, call: &Call) -> bool {
+        match call {
+            Call::RoutinesFull => self.pages.routines.is_some(),
+            Call::CalendarEvents { .. } => self.pages.calendar.is_some(),
+            Call::PhoneSettings => self.pages.phone.is_some(),
+            Call::Quota => self.pages.quota.is_some(),
+            Call::Plugins => self.pages.plugins.is_some(),
+            _ => false,
+        }
+    }
+}
+
+/// Goals appear in the routines list as pseudo-routines the web's Inbox page leaves out.
+pub fn is_goal_routine(view: &RoutineView) -> bool {
+    view.routine.id.starts_with("goals:")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn money_fields_take_dollars_and_say_when_they_are_not() {
+        assert_eq!(parse_dollars("", 100.0), Ok(None));
+        assert_eq!(parse_dollars(" $12.5 ", 100.0), Ok(Some(1250)));
+        assert!(parse_dollars("0", 100.0).is_err() && parse_dollars("abc", 100.0).is_err() && parse_dollars("101", 100.0).is_err());
+    }
+
+    #[test]
+    fn the_cadence_select_leads_with_the_routines_own_and_keeps_its_hours() {
+        let own = Cadence::Every { minutes: 25, from_hour: 9, to_hour: 18 };
+        let options = cadence_options(&own);
+        assert_eq!(options[0].0, "Every 25 min, 09:00–18:00");
+        assert!(options.iter().any(|(l, c)| l == "Every 30 min, 09:00–18:00" && matches!(c, Cadence::Every { from_hour: 9, to_hour: 18, .. })));
+        assert!(options.iter().any(|(l, _)| l == "Daily at 08:00"));
+        let labels: Vec<_> = options.iter().map(|(l, _)| l.clone()).collect();
+        let mut unique = labels.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), labels.len(), "no two options read alike");
+        assert_eq!(cadence_text(&Cadence::Daily { hour: 9, minute: 5 }), "Daily at 09:05");
+        assert_eq!(cadence_text(&Cadence::Every { minutes: 20, from_hour: 0, to_hour: 0 }), "Every 20 min");
+    }
+
+    #[test]
+    fn the_model_select_keeps_an_alias_it_does_not_know() {
+        assert_eq!(model_options("")[0], ("sonnet (default)".to_owned(), String::new()));
+        assert_eq!(model_options("fable").last(), Some(&("fable".to_owned(), "fable".to_owned())));
+    }
+
+    #[test]
+    fn ages_and_dues_read_in_a_few_words() {
+        assert_eq!(ago(10 * 60_000, 7 * 60_000), "3m ago");
+        assert_eq!(ago(0, 5000), "just now");
+        assert_eq!(short_in(3 * 3_600_000), "in 3h");
+        assert_eq!(short_in(90_000), "in 1m");
+    }
+
+    #[test]
+    fn sections_have_keys_and_titles() {
+        assert_eq!(Section::ALL.map(Section::title), ["General", "AI and agents", "Budget", "Phone", "Neko updates", "Workspaces", "About"]);
+        let mut keys: Vec<_> = Section::ALL.iter().map(|s| s.key()).collect();
+        keys.sort();
+        keys.dedup();
+        assert_eq!(keys.len(), 7);
+    }
+}

@@ -29,7 +29,7 @@ pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     } else if s.new_form.is_some() {
         super::new::form(s, t, layer)
     } else if let Some(view) = s.view {
-        full_view(s, view, t)
+        full_view(s, view, t, layer)
     } else {
         match s.session() {
             Some(task) => session(s, task, t, layer),
@@ -184,23 +184,16 @@ fn empty(s: &App, t: &Neko) -> El {
     col().w_full().h_full().child(band(t)).child(c)
 }
 
-/// A full view's placeholder: what it is, when it comes, and the way to the web UI today.
-fn full_view(s: &App, view: FullView, t: &Neko) -> El {
-    let mut c = col()
-        .key(format!("full-{}", view.web_id()))
-        .w_full()
-        .max_w(COLUMN)
-        .px(32.0)
-        .pt(24.0)
-        .gap(14.0)
-        .items_start()
-        .child(text(view.title()).key("title").font(t.ty.title).color(t.text.base).role("heading"))
-        .child(text("Coming in P2. The web UI has it today.").key("coming").font(t.ty.row).color(t.text.muted))
-        .child(primary_button("Open in the web UI", "open-web", t, move |s: &mut App| s.open_in_web(Some(view.web_id()))));
-    if let Some(notice) = &s.notice {
-        c = c.child(text(notice.clone()).key("notice").font(t.ty.meta).color(t.text.muted).live_region(rune::LiveRegion::Polite));
+/// A full view: its own page (Calendar, Routines, Settings, Usage, Workspaces, Plugins).
+fn full_view(s: &App, view: FullView, t: &Neko, layer: &mut Vec<El>) -> El {
+    match view {
+        FullView::Calendar => super::calendar::view(s, t),
+        FullView::Routines => super::routines::view(s, t, layer),
+        FullView::Settings => super::settings::view(s, t, layer),
+        FullView::Usage => super::more::usage(s, t),
+        FullView::Workspaces => super::more::workspaces(s, t),
+        FullView::Plugins => super::more::plugins(s, t),
     }
-    col().w_full().h_full().child(band(t)).child(row().w_full().grow(1.0).min_h(0.0).justify_center().child(c))
 }
 
 fn mode_of(steer: Steer) -> DeliveryMode {

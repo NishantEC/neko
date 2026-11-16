@@ -1642,6 +1642,7 @@ name = "neko-rune"
 version = "0.0.0"
 dependencies = [
  "frizbee",
+ "libc",
  "neko-protocol",
  "png 0.17.16",
  "rune",

@@ -4,7 +4,7 @@
 
 use neko_protocol::crew::QueuedMessage;
 use neko_protocol::goals::Goal;
-use neko_protocol::workbench::{ChatMessage, ChatRole, Snapshot, Task, TaskStatus};
+use neko_protocol::workbench::{AgentRuntime, ChatMessage, ChatRole, SelfUpdate, Snapshot, Task, TaskStatus};
 
 /// One task as a row: what lists and counts need, and nothing of its events or plan.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -26,6 +26,35 @@ pub struct WorkspaceRow {
     pub id: String,
     pub name: String,
 }
+
+/// A workspace as Settings and the Workspaces page list it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WorkspaceInfo {
+    pub id: String,
+    pub name: String,
+    pub repository: String,
+    pub folders: Vec<String>,
+}
+
+/// What Settings and Usage read from the workbench, beyond the sessions.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SettingsView {
+    pub runtime: AgentRuntime,
+    pub task_budget_cents: Option<u32>,
+    pub daily_budget_cents: Option<u32>,
+    pub max_running: Option<u32>,
+    pub max_writable: Option<u32>,
+    pub plan_first: bool,
+    pub start_without_approval: bool,
+    pub self_update: Option<SelfUpdate>,
+    pub workspaces: Vec<WorkspaceInfo>,
+    /// Reported spend, newest 8 days: (when, millionths of a US dollar). Each priced agent run is one
+    /// `USAGE` event on its task (the web's Usage page reads the same events).
+    pub usage: Vec<(i64, u64)>,
+}
+
+/// How far back the client keeps priced runs (the Usage chart shows seven days).
+pub const USAGE_DAYS: i64 = 8;
 
 /// The open task in full: its events, plan and result, and what the daemon knows around it.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -58,6 +87,9 @@ pub struct Summary {
     /// The task the person has open, in full.
     #[serde(default)]
     pub detail: Option<Detail>,
+    /// Settings, budgets and spend.
+    #[serde(default)]
+    pub settings: SettingsView,
 }
 
 /// How many of Neko's turns the client keeps (a long reply is ~8 MB of layout; DESIGN: bounded).
@@ -92,7 +124,24 @@ impl Summary {
     /// The summary, with the full detail of `open` when it is a task the snapshot has.
     pub fn from_snapshot_for(snapshot: &Snapshot, open: Option<&str>) -> Summary {
         let skip = snapshot.conversation.len().saturating_sub(CHAT_KEPT);
+        let now = neko_protocol_now_ms();
         Summary {
+            settings: SettingsView {
+                runtime: snapshot.agent_runtime.clone(),
+                task_budget_cents: snapshot.task_budget_cents,
+                daily_budget_cents: snapshot.daily_budget_cents,
+                max_running: snapshot.max_running_tickets,
+                max_writable: snapshot.max_writable_per_repository,
+                plan_first: snapshot.plan_first,
+                start_without_approval: snapshot.start_without_approval,
+                self_update: Some(snapshot.self_update.clone()),
+                workspaces: snapshot
+                    .workspaces
+                    .iter()
+                    .map(|w| WorkspaceInfo { id: w.id.clone(), name: w.name.clone(), repository: w.repository.clone(), folders: snapshot.workspace_folders.get(&w.id).cloned().unwrap_or_default() })
+                    .collect(),
+                usage: usage_points(snapshot, now),
+            },
             digest: snapshot.digest.clone(),
             runtime: format!(
                 "{} · {}",
@@ -167,4 +216,29 @@ impl Summary {
     pub fn replying(&self) -> bool {
         self.conversation.last().is_some_and(|m| m.role == ChatRole::Neko && m.pending)
     }
+}
+
+/// The wall clock, for deciding which priced runs are recent. (Summaries are made on the link
+/// thread; a test that needs another time builds the numbers itself.)
+fn neko_protocol_now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+}
+
+/// Every priced run of the last [`USAGE_DAYS`] days as (time, micro-dollars), from the `USAGE`
+/// events agents leave on their tasks.
+pub fn usage_points(snapshot: &Snapshot, now_ms: i64) -> Vec<(i64, u64)> {
+    let since = now_ms - USAGE_DAYS * 86_400_000;
+    let mut points = Vec::new();
+    for task in &snapshot.tasks {
+        for event in task.events.iter().filter(|e| e.at_ms >= since) {
+            let Some(body) = event.message.strip_prefix("USAGE ") else { continue };
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else { continue };
+            let cost = value["cost_usd"].as_f64().unwrap_or(0.0);
+            if cost > 0.0 && cost.is_finite() {
+                points.push((event.at_ms, (cost * 1_000_000.0) as u64));
+            }
+        }
+    }
+    points.sort_unstable();
+    points
 }

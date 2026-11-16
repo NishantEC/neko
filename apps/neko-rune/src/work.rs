@@ -676,6 +676,8 @@ impl App {
 
     /// What a daemon answer does to the state. True when something on screen changed.
     pub fn apply_reply(&mut self, call: &Call, reply: Reply) -> bool {
+        // The pages' own answers (routines, calendar, phone, quota, plugins, the model catalog).
+        let mut page_changed = self.apply_page_reply(call, &reply);
         // Whatever the answer, the write is no longer in flight.
         match call {
             Call::Reply { task_id, .. } => self.work.busy.remove(&format!("reply:{task_id}")),
@@ -717,12 +719,13 @@ impl App {
                 }
                 true
             }
-            Reply::Models(choices) => {
+            Reply::Models { choices, .. } => {
                 if let Some(form) = self.new_form.as_mut() {
                     form.choices = choices;
                 }
                 true
             }
+            Reply::Routines(_) | Reply::Calendar(_) | Reply::CalendarStatus(_) | Reply::Phone(_) | Reply::PhoneTest(_) | Reply::Quota(_) | Reply::Plugins(_) => page_changed.take().unwrap_or(false),
             Reply::Checkpoints { task_id, list } => {
                 let changed = self.work.checkpoints.get(&task_id) != Some(&list);
                 self.work.checkpoints.insert(task_id, list);
@@ -763,6 +766,9 @@ impl App {
             }
             Reply::Done => false,
             Reply::Refused(message) => {
+                if self.page_refused(call, message.clone()) {
+                    return true;
+                }
                 if let Some(key) = note_key(call) {
                     self.neko.notes.insert(key, message);
                     return true;
@@ -792,6 +798,9 @@ impl App {
             }
             Reply::Failed(error) => {
                 let line = crate::link::calm(&error, std::time::Duration::from_secs(1));
+                if self.page_refused(call, line.clone()) {
+                    return true;
+                }
                 if let Some(key) = note_key(call) {
                     self.neko.notes.insert(key, line);
                     return true;

@@ -18,6 +18,7 @@ use crate::groups::{Group, first_session};
 use crate::layout::{Layout, Saved};
 use crate::link::{Call, LinkError, LinkEvent, Summary, TaskRow, Wanted, calm, make};
 use crate::new_session::NewForm;
+use crate::pages::Pages;
 use crate::work::{NekoCol, Work};
 use crate::views::FullView;
 use crate::web_link::{WebTarget, open_url};
@@ -182,6 +183,8 @@ pub struct App {
     pub focused: bool,
     /// The right-click menu on an Inbox item: which, and where.
     pub inbox_menu: Option<(u64, PointerPress)>,
+    /// What the full views keep (Routines, Calendar, Settings, Usage, Workspaces, Plugins).
+    pub pages: Pages,
 }
 
 /// Where the window's own settings are kept (Rune's `prefs` store).
@@ -245,6 +248,7 @@ impl Default for App {
             layout_changed_at: None,
             focused: true,
             inbox_menu: None,
+            pages: Pages::default(),
         }
     }
 }
@@ -283,6 +287,9 @@ impl App {
                 }
                 // The Inbox and the digest are read again about once a minute.
                 self.after_live();
+                if let Some(view) = self.view {
+                    self.refresh_page(view);
+                }
                 stale
             }
             LinkEvent::Down { error, retry_in, .. } => {
@@ -418,6 +425,23 @@ impl App {
         self.view = Some(view);
         self.more_open = false;
         self.notice = None;
+        self.new_form = None;
+        self.enter_view(view);
+    }
+
+    /// Opens one of Neko's dated things from the Calendar: a task opens as a session, the rest in the web UI.
+    pub fn open_neko_item(&mut self, route: &str) {
+        match route.strip_prefix("tasks?task=").map(|r| r.split('&').next().unwrap_or(r)) {
+            Some(id) if self.summary.as_ref().is_some_and(|m| m.task(id).is_some()) => self.select(id),
+            _ => self.open_in_web(Some(route)),
+        }
+    }
+
+    /// Opens or folds a workspace's details; what was open is remembered.
+    pub fn toggle_workspace(&mut self, id: &str) {
+        if !self.pages.ws_open.remove(id) {
+            self.pages.ws_open.insert(id.to_owned());
+        }
     }
 
     pub fn toggle_group(&mut self, group: Group) {

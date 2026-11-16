@@ -17,6 +17,7 @@
 //! fake server in `link/unix.rs`.
 
 mod model;
+mod pages;
 mod reply;
 mod unix;
 pub mod write;
@@ -29,6 +30,7 @@ use neko_protocol::workbench::Command;
 use neko_protocol::{Request, Response};
 
 pub use model::*;
+pub use pages::*;
 pub use reply::*;
 pub use write::Call;
 pub use unix::UnixConnector;

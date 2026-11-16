@@ -314,10 +314,30 @@ fn harness(s: &mut App) {
 }
 
 /// A scene's name and what it does to the starting state.
+/// The workbench the page scenes open over.
+pub fn live_for_pages(s: &mut App) {
+    live(s);
+}
+
 pub type Scene = (&'static str, fn(&mut App));
 
 pub const SCENES: &[Scene] = &[
     ("default", |_| {}),
+    ("routines", crate::scenes_pages::routines),
+    ("routines-open", crate::scenes_pages::routines_open),
+    ("calendar", crate::scenes_pages::calendar),
+    ("calendar-day", crate::scenes_pages::calendar_day),
+    ("calendar-event", crate::scenes_pages::calendar_event),
+    ("settings", crate::scenes_pages::settings),
+    ("settings-ai", crate::scenes_pages::settings_ai),
+    ("settings-budget", crate::scenes_pages::settings_budget),
+    ("settings-phone", crate::scenes_pages::settings_phone),
+    ("settings-updates", crate::scenes_pages::settings_updates),
+    ("settings-search", crate::scenes_pages::settings_search),
+    ("usage", crate::scenes_pages::usage),
+    ("workspaces", crate::scenes_pages::workspaces),
+    ("workspaces-open", crate::scenes_pages::workspaces_open),
+    ("plugins", crate::scenes_pages::plugins),
     ("live", live),
     ("harness", harness),
     ("offline", |s| {

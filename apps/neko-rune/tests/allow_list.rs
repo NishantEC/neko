@@ -3,6 +3,13 @@
 //! source, so a later screen cannot quietly add a write: adding a request means changing this
 //! list in the same commit, where a reviewer sees it.
 //!
+//! P2 adds the pages' reads (the routines whole, a week of the calendar, the phone settings, the
+//! quota meters, the plugin status) and the writes that are controls on the web UI's Inbox, Settings
+//! and Calendar pages: a routine's switch, Run now, editor and standing orders, the Inbox clean-up,
+//! Calendar on, the phone channels, the runtime, the budgets, the plan switches and the updater's
+//! switches and "Update now". Each is listed in `CONTROLS` below, the one place a name that starts
+//! like something destructive (`Set`, `Save`, `Update`) is allowed, because it is a web control.
+//!
 //! P0 sent two reads. P1 adds the reads a session view needs (the open task's runs and one run's
 //! diff, the unseen marks, the Inbox, the digest, the model list) and the writes the web UI's own
 //! buttons make, with the same fields (docs/decisions/0002-rune-for-everything.md).
@@ -15,9 +22,13 @@ use std::path::{Path, PathBuf};
 const READS: &[&str] = &[
     "Command::Snapshot",
     "Request::AgentModels",
+    "Request::CalendarEvents",
     "Request::CheckpointDiff",
     "Request::MorningDigest",
+    "Request::PhoneSettings",
+    "Request::PluginStatus",
     "Request::Routines",
+    "Request::Search",
     "Request::TaskCheckpoints",
     "Request::UnseenTasks",
     "Request::WorkbenchIfChanged",
@@ -59,6 +70,29 @@ const WRITES: &[&str] = &[
     // A new session, and its runtime.
     "Command::CreateTask",
     "Command::SetConversationRuntime",
+    // Routines (the web's Inbox page): save the editor, Run now, the switch, the master switch, standing orders.
+    "Request::SaveRoutine",
+    "Request::RunRoutineNow",
+    "Request::SetRoutineEnabled",
+    "Request::SetRoutinesOn",
+    "Request::SetStandingOrders",
+    // Settings (the web's Settings page): Inbox clean-up, Calendar on, the phone channels and a test.
+    "Request::SetInboxAgeOutDays",
+    "Request::SetCalendarEnabled",
+    "Request::SetPhoneSettings",
+    "Request::PhoneTest",
+    // Settings: the runtime, the budgets and limits, the plan switches, the updater's controls.
+    "Command::SetAgentRuntime",
+    "Command::SetTaskBudget",
+    "Command::SetDailyBudget",
+    "Command::SetMaxRunningTickets",
+    "Command::SetMaxWritablePerRepository",
+    "Command::SetPlanFirst",
+    "Command::SetStartWithoutApproval",
+    "Command::SetSelfUpdate",
+    "Command::UpdateNekoNow",
+    "Command::ApplyPendingUpdate",
+    "Command::SetDevCheckout",
     // Neko's own conversation.
     "Command::SendMessage",
     "Command::CancelChat",
@@ -156,18 +190,53 @@ fn the_link_sends_exactly_the_allow_listed_requests() {
     assert!(missing.is_empty(), "allow-listed requests the client no longer sends (remove them from this list): {missing:?}");
 }
 
+/// Controls the web UI's own pages have, whose names start like something this client must not
+/// send. Each is one switch, field or button there; nothing here deletes, merges, publishes, clears
+/// or touches the tool connections, skills or the rulebook.
+const CONTROLS: &[&str] = &[
+    "Command::SetConversationRuntime",
+    "Request::SaveRoutine",
+    "Request::SetRoutineEnabled",
+    "Request::SetRoutinesOn",
+    "Request::SetStandingOrders",
+    "Request::SetInboxAgeOutDays",
+    "Request::SetCalendarEnabled",
+    "Request::SetPhoneSettings",
+    "Command::SetAgentRuntime",
+    "Command::SetTaskBudget",
+    "Command::SetDailyBudget",
+    "Command::SetMaxRunningTickets",
+    "Command::SetMaxWritablePerRepository",
+    "Command::SetPlanFirst",
+    "Command::SetStartWithoutApproval",
+    "Command::SetSelfUpdate",
+    "Command::UpdateNekoNow",
+    "Command::SetDevCheckout",
+];
+
+/// Requests that must never be on the list, by name: a client of this kind can read and change what
+/// the web's pages let a person change, and nothing that destroys or publishes.
+const NEVER: &[&str] = &["StartOver", "RollBackWebUi", "SetRulebook", "SetUpdateSource", "SetMergeWhenReady", "SetMergeWithoutReview", "ClosePullRequest", "RemoveTheme", "ClearNeedsYou", "StartOver"];
+
 #[test]
 fn the_reads_do_not_write_and_the_list_has_no_destructive_commands() {
-    // Nothing that deletes or rewrites history, settings or other people's data is on the list.
     for name in READS.iter().chain(WRITES) {
-        for forbidden in ["Delete", "ClearFinished", "CancelAll", "StartOver", "Save", "Set", "Update", "RollBack", "Merge", "Close", "Publish", "Skills", "Mcp", "Connect", "Clear"] {
-            let tail = name.rsplit("::").next().unwrap_or(name);
-            // The one `Set` the web's composer also sends: pinning a runtime on a task's conversation.
-            if *name == "Command::SetConversationRuntime" {
-                continue;
-            }
-            assert!(!tail.starts_with(forbidden), "{name} looks like a request this client must not send");
+        let tail = name.rsplit("::").next().unwrap_or(name);
+        assert!(!NEVER.contains(&tail), "{name} is on the never list");
+        if CONTROLS.contains(name) {
+            continue;
         }
+        for forbidden in ["Delete", "ClearFinished", "CancelAll", "StartOver", "Save", "Set", "Update", "RollBack", "Merge", "Close", "Publish", "Skills", "Mcp", "Connect", "Clear"] {
+            assert!(!tail.starts_with(forbidden), "{name} looks like a request this client must not send (a web control belongs in CONTROLS)");
+        }
+    }
+    // Every control is on the list, so the exception cannot hide a request nobody listed.
+    for name in CONTROLS {
+        assert!(WRITES.contains(name), "{name} is in CONTROLS but not in WRITES");
+    }
+    // Reads never carry a control's name.
+    for name in READS {
+        assert!(!CONTROLS.contains(name), "{name} is a read");
     }
 }
 
