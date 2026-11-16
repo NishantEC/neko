@@ -88,8 +88,50 @@ Every `.focus_ring(` is 2 at offset 2; only the hover curve (120 ms ease-out, se
 spring (a slide-and-fade transition), the progress ring and the art animate, and a source scan names the files allowed to; the
 Neko column uses 32 point rows and 12 padding; the session header is centred on the sidebar header's line.
 
+### The session-view parity pass (2026-11-16, `tests/parity.rs`)
+
+Built against the same copied real data, from the owner's review of the pairs. What changed, where it lives and why:
+
+- **One text column** (`view.rs` `TEXT_COLUMN` 760, `TEXT_PAD` 32): turns, the question card and the composer sit in one centred column; the
+  header, the goal row and the region's fill stay full width. The card inside is 696 wide (760 less the two 32 sides).
+- **Header** (`view/session.rs`): one 32 row, glyph, title (`ty.brand`, 14 semibold, ellipsis), a state badge (`state_badge`: Needs approval,
+  Needs answer, Planning, Building, Reviewing in amber, Failed in coral; Queued, Ready to review, Completed and Cancelled have none here, the
+  brief names only amber and coral), the runtime chip ("Claude · default", `Detail::runtime` from the newest `runtime_selections` of `task:<id>`),
+  the "..." menu (Propose parallel work, Copy link, Open in web UI, Stop, Mark as unread) and the panel toggle. The raw ticket text is gone.
+  `Call::ProposeSplit` is the web's own button (`Command::ProposeSplit`, read-only proposal), enabled by `Detail::can_split` (the web's
+  `canProposeSplit`). Copy link puts the token-less `http://127.0.0.1:<port>/#/tasks?task=<id>&view=full` on the clipboard, never the signed one.
+- **Question and approval card** (`view/work.rs` `note`): amber 8% fill, 1 px amber border at 30%, radius 12, padding 12/16, the `?` icon at the
+  left, the first line clamped to two lines (`max_lines(2)`, the ellipsis ends the second) and "Full text" at the bottom right opens it in place.
+  The primary button is inside, bottom left: "Answer" (focuses the composer) for a question, "Approve plan" for a plan. A stop is the same card in coral.
+- **Crew hand-off lines** (`view/turn.rs` `handoff_row`, `turns_for`): `Builder -> Neko  (glyph) NEK-6F70 : title`, when one agent's turn follows
+  another's, as the web's `HandoffRow` does; Neko's column uses the same row and the web's `shortId` (`NEK-` and four characters), not the source key.
+- **One composer** (`view/composer.rs`): the session's reply box, Home's new-session box and Neko's ask box are one card (radius 16, 1 px border at
+  foreground 10%, padding 16, three lines minimum) with a bar of "+" attach, the mode control (steer mode / Ask-Plan / Plan-Build), a model chip and a
+  32 px round Send (Iris with text, foreground 10% without). The text area is Rune's `text_input` in all three (no kit field chrome inside the card).
+  Plan prefixes Neko's words with the web's `PLAN_PREFIX`. The model chip is a read-only label (the runtime the conversation last ran on):
+  the daemon changes a conversation's runtime only through `SetConversationRuntime`, which the sessions column does not offer a control for yet.
+- **Context panel tabs**: Plan (`plan.rs` `steps`: the `- [x]`/`- [ ]` lines, else numbered or bulleted ones; the first open step is active while the
+  task builds) and Info (workspace, branch, pull request, runtime, created, updated, the ticket's source link), after Terminal. They are
+  "tabs the person asks for" (`Tab::on_request`): they never open the panel by themselves (Info is always there), so auto-open reads
+  `panel_content_tabs`. The icon-only rule under 440 is unchanged; at 440 to ~520 the six labels are tight (see the INDEX).
+- **Terminal tab**: a 32 row per command (`$`, the command in 12.5 mono cut in the middle to the panel's width, an exit chip: muted "0", coral
+  otherwise), output in 12 mono collapsed to 12 lines with "Show all N lines" / "Show fewer", the home folder written `~` (`terminal::tilde`).
+- **Neko column**: the ask box is the shared composer; the crew line says "No agents working · 27 in Inbox" when nothing needs you but the Inbox has items.
+- **Routines**: grouped under workspace headers (12.5 medium muted, count), a status chip after the name from the last run (Quiet, Acted in mint 12%,
+  Failed in coral 12%), the cadence in a fixed 180 column, the next due right-aligned, the web's 36 x 21 switch (now every `ui::switch`).
+  The last run and the catch-up note are in the expanded details.
+- **Settings**: Appearance (System/Light/Dark through `GetAppearance`/`SetAppearance`, the daemon's own setting, which the window follows:
+  `App::appearance_dark`), Permissions (`permissions.rs`: Accessibility, Full Disk Access and Screen Recording asked of macOS without prompting,
+  Calendar and Reminders from what the daemon already reports; "Open System Settings" opens the pane), Diagnostics (versions, data folder, daemon,
+  "Copy diagnostics"), and one row each for Rulebook and Quick panel ("Open in web UI"). The ⌘F hint is a trailing hint that shows only while the
+  field is empty; the clear button only while it has text.
+- **Pictures**: `NEKO_RUNE_TAB=plan|info|terminal|...` and `NEKO_RUNE_SECTION=permissions` pick a panel tab and a Settings section for
+  `polish-pairs.sh`, which now also makes the "settings-permissions" pair and no longer needs the installed app's `web-live` folder.
+- **Allow list** (`tests/allow_list.rs`): new reads `GetAppearance`; new writes `ProposeSplit` and `SetAppearance`, both controls the web has.
+
 ### Known differences from the web UI that remain on purpose
 
-The web's icon rail and tab strip (Rune has the sessions column and no tabs), the web's reading column (centred, ~760) against
-Rune's session text starting at the region's left, the Neko column against the web's Home chat. See `/tmp/neko-polish/INDEX.md`
-of the run that produced the pictures for what was still different when it was written.
+The web's icon rail and tab strip (Rune has the sessions column and no tabs), the web's Chat/Result/Changes/Plan/Details tabs in the header
+(Rune's are the context panel's tabs), the Neko column against the web's Home chat, the read-only model chip, the Permissions section reading
+this app's own access where the web says "Managed in the native app". See `/tmp/neko-polish/INDEX.md` of the run that produced the pictures for
+what was still different when it was written.

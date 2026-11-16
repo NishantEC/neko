@@ -268,8 +268,6 @@ fn settings_has_appearance_permissions_and_diagnostics_and_one_row_each_for_the_
         app.access_probe = || neko_rune::permissions::Local { accessibility: neko_rune::permissions::Access::Granted, full_disk: neko_rune::permissions::Access::Denied, screen_recording: neko_rune::permissions::Access::Unknown };
         app.pages.access = Some((app.access_probe)());
     });
-    let opened = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
-    let _ = &opened;
     for id in ["accessibility", "full-disk", "calendar", "reminders", "screen-recording"] {
         assert!(has_key(&rt, &format!("perm-{id}-state")) && has_key(&rt, &format!("perm-{id}-open")), "{id}");
     }

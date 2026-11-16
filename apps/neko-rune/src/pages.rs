@@ -47,7 +47,7 @@ pub enum Section {
 }
 
 impl Section {
-    pub const ALL: [Section; 12] = [Section::General, Section::Ai, Section::Appearance, Section::Rulebook, Section::Budget, Section::Phone, Section::Updates, Section::Workspaces, Section::QuickPanel, Section::Permissions, Section::Diagnostics, Section::About];
+    pub const ALL: [Section; 12] = [Section::General, Section::Ai, Section::Appearance, Section::Rulebook, Section::Budget, Section::Phone, Section::QuickPanel, Section::Permissions, Section::Diagnostics, Section::Updates, Section::Workspaces, Section::About];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -63,6 +63,15 @@ impl Section {
             Section::Updates => "Neko updates",
             Section::Workspaces => "Workspaces",
             Section::About => "About",
+        }
+    }
+
+    /// The rail's heading above this section, where one starts a group: "Neko" and "This Mac", as the web's rail has them.
+    pub fn group(self) -> Option<&'static str> {
+        match self {
+            Section::General => Some("Neko"),
+            Section::QuickPanel => Some("This Mac"),
+            _ => None,
         }
     }
 
@@ -754,7 +763,7 @@ mod tests {
 
     #[test]
     fn sections_have_keys_and_titles() {
-        assert_eq!(Section::ALL.map(Section::title), ["General", "AI and agents", "Appearance", "Rulebook", "Budget", "Phone", "Neko updates", "Workspaces", "Quick panel", "Permissions", "Diagnostics", "About"]);
+        assert_eq!(Section::ALL.map(Section::title), ["General", "AI and agents", "Appearance", "Rulebook", "Budget", "Phone", "Quick panel", "Permissions", "Diagnostics", "Neko updates", "Workspaces", "About"]);
         let mut keys: Vec<_> = Section::ALL.iter().map(|s| s.key()).collect();
         keys.sort();
         keys.dedup();

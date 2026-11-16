@@ -30,9 +30,16 @@ fi
 mkdir -p "$data" "$out"
 rm -f "$data"/neko.db*
 sqlite3 -readonly "$live/neko.db" ".backup $data/neko.db"
-rm -rf "$web"; cp -RL "$live/web-live" "$web"
+# The web build the installed app serves: its swapped-in `web-live`, else the build of its own clone of the published
+# repository. A copy, so nothing of the live folder is ever written.
+rm -rf "$web"
+for candidate in "$live/web-live" "$live/source/web/dist"; do
+  if [[ -f "$candidate/index.html" ]]; then cp -RL "$candidate" "$web"; break; fi
+done
+[[ -f "$web/index.html" ]] || { echo "no web build found: the web half of the pairs needs one (web-live or source/web/dist)" >&2; exit 1; }
+web_env=(); [[ -d "$web" ]] && web_env=(NEKO_WEB_DIR="$web")
 
-( cd "$data" && exec env -i PATH="$PATH" HOME="$data" NEKO_DATA_DIR="$data" NEKO_WEB_PORT="$port" NEKO_WEB_DIR="$web" "$harness" >"$data.log" 2>&1 ) &
+( cd "$data" && exec env -i PATH="$PATH" HOME="$data" NEKO_DATA_DIR="$data" NEKO_WEB_PORT="$port" ${web_env[@]+"${web_env[@]}"} "$harness" >"$data.log" 2>&1 ) &
 pid=$!
 trap 'ps -p "$pid" -o command= 2>/dev/null | grep -q web_harness && kill -TERM "$pid" 2>/dev/null || true' EXIT
 for _ in $(seq 1 50); do [[ -S "$data/neko.sock" ]] && break; sleep 0.2; done
@@ -48,15 +55,18 @@ snap() { # name [ENV=value ...]
 }
 snap home
 snap session-plan NEKO_RUNE_OPEN_TASK="${PLAN_TITLE:-Optimize flow screens for mobile views}"
-snap session-panel NEKO_RUNE_OPEN_TASK="${PANEL_TITLE:-Send Ria's cards as images and read member files on WhatsApp}"
+panel_title="${PANEL_TITLE-}"
+[[ -n "$panel_title" ]] || panel_title="Send Ria's cards as images and read member files on WhatsApp"
+snap session-panel NEKO_RUNE_OPEN_TASK="$panel_title" NEKO_RUNE_TAB=terminal
 snap neko-column
 snap routines NEKO_RUNE_VIEW=inbox
 snap settings NEKO_RUNE_VIEW=settings
+snap settings-permissions NEKO_RUNE_VIEW=settings NEKO_RUNE_SECTION=permissions
 
 # The web half: the same screens at the same size and scale (routes need the task ids, in PLAN_ID and PANEL_ID).
 "$HOME/.agents/bin/shared-chrome" acquire neko-polish >/dev/null
 token="$(cat "$data/web-token")"
-SHOTS="[[\"home\",\"/\"],[\"session-plan\",\"/tasks?task=${PLAN_ID:-}&view=full\"],[\"session-panel\",\"/tasks?task=${PANEL_ID:-}&view=full\"],[\"neko-column\",\"/\"],[\"routines\",\"/inbox\"],[\"settings\",\"/settings\"]]" \
+SHOTS="[[\"home\",\"/\"],[\"session-plan\",\"/tasks?task=${PLAN_ID:-}&view=full\"],[\"session-panel\",\"/tasks?task=${PANEL_ID:-}&view=full\"],[\"neko-column\",\"/\"],[\"routines\",\"/inbox\"],[\"settings\",\"/settings\"],[\"settings-permissions\",\"/settings?section=permissions\"]]" \
   PORT="$port" TOKEN="$token" OUT="$out" THEME="$theme" PLAYWRIGHT_CORE="${PLAYWRIGHT_CORE:?set PLAYWRIGHT_CORE}" node "$here/scripts/polish-web.mjs"
 "$HOME/.agents/bin/shared-chrome" release neko-polish >/dev/null
 echo "pairs are in $out (not committed)"
