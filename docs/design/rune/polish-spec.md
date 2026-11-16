@@ -2,6 +2,47 @@
 
 These are the owner's decisions, so implement exactly. Measurements are in logical px, on one 4/8 px rhythm. They are taken from a reference sidebar the owner admired. We match its precision and structure, never its name, brand or artwork.
 
+## 0. Built against real data, matched to the web UI
+
+The first build looked right on test data and wrong on the owner's real data. These rules come first.
+
+**Real-shaped data, never committed.**
+- Copy the owner's daemon database to a temporary data dir: `cp "$HOME/Library/Application Support/neko/neko.db"*` into `/tmp/neko-polish-data/`.
+- Run the isolated `web_harness` daemon on that copy. Never point anything at the live data dir, and never send writes.
+- Screenshots of real data live only in `/tmp/neko-polish/`. They are **never committed**: the repo is public.
+- Committed snaps use the synthetic harness data, as before.
+
+**The web UI is the visual reference.**
+- Rune's theme takes the **exact** token values from the web UI's CSS variables in `web/src` (background, foreground, muted, faint, border, primary, card, radius), and its font sizes and weights. Inter is the font face, and code uses the web's mono stack.
+- Extract the values; do not approximate them. Write a test that compares Rune's token table with the parsed CSS values.
+- For every screen, capture the web UI and the Rune app on the same copied data at the same window size (1440×900, 2×) and save them as pairs in `/tmp/neko-polish/<screen>-{web,rune}.png`.
+  - Capture the web UI with the shared headless Chrome (`~/.agents/BROWSER.md`).
+  - Capture the Rune window with `screencapture -x -o -l <window id>`.
+- A screen is done when the owner's reviewer finds no difference in type, colour, spacing or hierarchy, other than the layout changes this spec asks for.
+
+**Grouping rules (sessions column).**
+
+| Group | What goes in it | Shown |
+|---|---|---|
+| **Needs you** | Tasks waiting on the person (plan approval, a question, a review or merge decision, a budget or turn cap) whose last activity is within 7 days, plus tasks that **failed within the last 48 hours** | At most 8 rows, then "Show N more" |
+| **Running** | Active states (planning, building, reviewing) | All |
+| **Recent** | Completed, failed or cancelled within the last 7 days, newest first | At most 5, plus "View all" |
+| **Waiting a while** | Tasks still waiting on the person with no activity for more than 7 days | After Recent, **collapsed by default**, with a count |
+
+- Failures older than 48 hours never appear in Needs you.
+- Anything older than 7 days that isn't waiting appears only under "View all".
+
+**Neko's chat holds conversation only.**
+- System notices (self-update, reinstall, outage, rollback, anything posted by `neko_chat::post_notice`) never render as chat messages.
+- They fold into one quiet **Activity** line at the top of the chat: an icon, the latest notice in 12.5 muted, and "+N" faint. Clicking it expands the list in place; it is collapsed by default.
+- The chat shows the last 30 messages, with "Earlier messages" at the top to load more.
+
+**Window chrome.**
+- Hide the title bar and run the content under it (full-size content view).
+- Place the traffic lights so their centres line up with the sidebar header row's centre, 12 px from the window's left edge.
+- The sidebar header's text starts after the traffic lights: an 80 px left inset on that row only.
+- Dragging the header rows of the sidebar, session view and Neko column moves the window.
+
 ## 1. Sessions column (sidebar)
 
 - **Width:** 248 by default, resizable 232–360. **Outer padding:** 12 on all sides.
