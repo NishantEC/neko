@@ -162,6 +162,9 @@ fn more_lists_the_other_views_and_opens_one() {
 #[test]
 fn the_context_panel_toggles_from_the_top_line_and_says_when_there_is_nothing() {
     let mut rt = runtime(true, live);
+    // A session that has produced nothing (the open one has a command, which is a tab of its own).
+    rt.update(|s, _| s.select("t10"));
+    settle(&mut rt);
     click(&mut rt, "context-toggle");
     assert!(rt.state.layout.context.is_open());
     assert!(rt.find("context").is_some() && rt.find("context-expand").is_some() && rt.find("context-close").is_some());
@@ -310,7 +313,9 @@ fn every_scene_lays_out_in_both_appearances() {
     for dark in [true, false] {
         for (name, scene) in scenes::SCENES {
             let rt = runtime(dark, scene);
-            assert!(rt.find("sessions").is_some() && rt.find("session-region").is_some() && rt.find("neko").is_some(), "{name} dark={dark}");
+            // An expanded panel stands where the session region was.
+            let middle = if *name == "p3a-expanded" { "context" } else { "session-region" };
+            assert!(rt.find("sessions").is_some() && rt.find(middle).is_some() && rt.find("neko").is_some(), "{name} dark={dark}");
         }
     }
 }
