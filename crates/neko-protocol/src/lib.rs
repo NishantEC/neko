@@ -482,6 +482,19 @@ pub enum Request {
     TaskChanges {
         task_id: String,
     },
+    /// Read-only: the folder a ticket works in (its worktree or checkout), when it has one that
+    /// exists now. A parked ticket, or one that has not started, has none. Answers `TaskFolder`.
+    TaskFolder {
+        task_id: String,
+    },
+    /// Read-only: where one version of an artifact is stored in the data folder (`version` unset:
+    /// the newest), its kind and its size in bytes. The path is proved to be a file inside the
+    /// artifact's own folder. Answers `ArtifactFile`.
+    ArtifactFile {
+        id: String,
+        #[serde(default)]
+        version: Option<u32>,
+    },
     /// Read-only: a ticket's per-run checkpoints (one line per run).
     TaskCheckpoints {
         task_id: String,
@@ -1096,6 +1109,16 @@ pub enum Response {
         truncated: bool,
     },
     TaskCheckpoints(checkpoints::CheckpointList),
+    /// `TaskFolder`: the ticket's folder, if it has one that exists.
+    TaskFolder {
+        path: Option<String>,
+    },
+    /// `ArtifactFile`: the stored file, its kind (the extension) and its size.
+    ArtifactFile {
+        path: String,
+        kind: String,
+        size: u64,
+    },
     /// One search reply. **A single `Request::Search` can be answered by
     /// more than one of these** — see [`Response::ends_request`] and
     /// `AGENTS.md`'s "Two-phase search" section.

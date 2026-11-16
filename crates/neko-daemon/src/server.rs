@@ -307,6 +307,19 @@ impl AppState {
 /// What a ticket's worktree changed since its checkout started, including
 /// commits and new files. Older tickets without a recorded start compare
 /// against their own HEAD. Only Neko's own task worktrees are read.
+/// `TaskFolder`: the folder a ticket works in, as a canonical absolute path, when it has one that
+/// exists. A parked ticket has had its folder removed and one that has not started has none: both
+/// are `None`, not an error. Read-only.
+fn task_folder(state: &AppState, task_id: &str) -> Result<Option<String>, String> {
+    let snapshot = neko_core::workbench::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
+    let task = snapshot.tasks.iter().find(|t| t.id == task_id).ok_or("That ticket no longer exists")?;
+    if task.parked.is_some() {
+        return Ok(None);
+    }
+    let Some(worktree) = task.worktree.as_deref() else { return Ok(None) };
+    Ok(std::path::Path::new(worktree).canonicalize().ok().filter(|d| d.is_dir()).map(|d| d.to_string_lossy().into_owned()))
+}
+
 fn task_changes(state: &AppState, task_id: &str) -> Result<(Vec<String>, String, bool), String> {
     const LIMIT: usize = 512 * 1024;
     let snapshot = neko_core::workbench::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
@@ -976,6 +989,17 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         Request::TaskChanges { task_id } => match task_changes(state, &task_id) {
             Ok((files, patch, truncated)) => Response::TaskChanges { files, patch, truncated },
             Err(message) => Response::Error { message },
+        },
+        Request::TaskFolder { task_id } => match task_folder(state, &task_id) {
+            Ok(path) => Response::TaskFolder { path },
+            Err(message) => Response::Error { message },
+        },
+        Request::ArtifactFile { id, version } => match neko_core::artifacts::version_file(&state.artifacts, &id, version.unwrap_or(0)) {
+            Some((file, kind)) => match std::fs::metadata(&file) {
+                Ok(meta) => Response::ArtifactFile { path: file.to_string_lossy().into_owned(), kind, size: meta.len() },
+                Err(_) => Response::Error { message: format!("Artifact {id} has no readable file.") },
+            },
+            None => Response::Error { message: match version { Some(n) if n > 0 => format!("There is no artifact {id} with a version {n}."), _ => format!("There is no artifact {id}.") } },
         },
         Request::TaskCheckpoints { task_id } => match state.workbench.checkpoint_list(&task_id, false) {
             Ok(list) => Response::TaskCheckpoints(list),
@@ -2120,6 +2144,75 @@ pub(crate) mod tests {
         assert!(matches!(handle_request_for_test(&state, refused), Response::Error { .. }));
         assert!(events.try_recv().is_err());
         neko_core::ui_message::finish(&turn, "done", 0);
+    }
+
+    #[test]
+    fn a_task_folder_is_the_folder_that_exists_and_nothing_for_a_parked_or_unstarted_ticket() {
+        use neko_protocol::workbench::{ParkedWork, Snapshot};
+        let tmp = tempfile::tempdir().unwrap();
+        let state = test_state(Db::open_in_memory().unwrap(), Vec::new());
+        let task = |id: &str, worktree: Option<String>, parked: bool| -> neko_protocol::workbench::Task {
+            let mut t: neko_protocol::workbench::Task = serde_json::from_value(serde_json::json!({
+                "id": id, "workspace_id": "w", "issue_id": null, "title": id, "goal": "Do the thing", "status": "Building", "plan": "",
+                "result": "", "worktree": null, "events": [], "created_at_ms": 1, "updated_at_ms": 1
+            })).unwrap();
+            t.worktree = worktree;
+            if parked { t.parked = Some(ParkedWork { branch: "b".into(), repository: "/r".into(), wip: false }); }
+            t
+        };
+        let folder = tmp.path().join("work");
+        std::fs::create_dir(&folder).unwrap();
+        let file = tmp.path().join("a-file");
+        std::fs::write(&file, "x").unwrap();
+        let snapshot = Snapshot {
+            workspaces: vec![neko_protocol::workbench::Workspace { id: "w".into(), name: "w".into(), repository: tmp.path().to_string_lossy().into_owned(), instructions: String::new(), away_enabled: false }],
+            tasks: vec![
+                task("here", Some(folder.to_string_lossy().into()), false),
+                task("parked", Some(folder.to_string_lossy().into()), true),
+                task("new", None, false),
+                task("gone", Some(tmp.path().join("missing").to_string_lossy().into()), false),
+                task("file", Some(file.to_string_lossy().into()), false),
+            ],
+            ..Snapshot::default()
+        };
+        neko_core::workbench::save(&state.db.lock().unwrap(), &snapshot).unwrap();
+        let ask = |id: &str| handle_request_for_test(&state, Request::TaskFolder { task_id: id.into() });
+        let Response::TaskFolder { path: Some(path) } = ask("here") else { panic!("no folder") };
+        assert_eq!(std::path::Path::new(&path), folder.canonicalize().unwrap(), "the canonical path");
+        for none in ["parked", "new", "gone", "file"] {
+            assert!(matches!(ask(none), Response::TaskFolder { path: None }), "{none} has no folder");
+        }
+        assert!(matches!(ask("nope"), Response::Error { .. }), "an unknown ticket is an error");
+    }
+
+    #[test]
+    fn an_artifact_file_is_the_stored_version_inside_the_artifacts_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut state = test_state(Db::open_in_memory().unwrap(), Vec::new());
+        state.artifacts = tmp.path().join("artifacts");
+        let sheet = tmp.path().join("sheet.csv");
+        std::fs::write(&sheet, "a,b\n1,2\n").unwrap();
+        let save = |artifact_id: Option<String>| Request::SaveArtifact { title: "Sheet".into(), file: sheet.to_string_lossy().into(), workspace_id: None, artifact_id, note: String::new(), show: Some(false) };
+        let Response::ArtifactSaved { artifact, .. } = handle_request_for_test(&state, save(None)) else { panic!("not saved") };
+        std::fs::write(&sheet, "a,b\n1,2\n3,4\n").unwrap();
+        handle_request_for_test(&state, save(Some(artifact.id.clone())));
+        let ask = |version: Option<u32>| handle_request_for_test(&state, Request::ArtifactFile { id: artifact.id.clone(), version });
+        let root = state.artifacts.canonicalize().unwrap();
+        let Response::ArtifactFile { path, kind, size } = ask(None) else { panic!("no file") };
+        assert_eq!((kind.as_str(), size), ("csv", 12), "the newest version, its kind and size");
+        assert!(std::path::Path::new(&path).starts_with(&root) && path.ends_with("v2.csv"), "{path}");
+        let Response::ArtifactFile { path, size, .. } = ask(Some(1)) else { panic!("no v1") };
+        assert!(path.ends_with("v1.csv") && size == 8, "{path} {size}");
+        for refused in [ask(Some(9)), handle_request_for_test(&state, Request::ArtifactFile { id: "nope".into(), version: None }), handle_request_for_test(&state, Request::ArtifactFile { id: "../etc".into(), version: None }), handle_request_for_test(&state, Request::ArtifactFile { id: String::new(), version: None })] {
+            assert!(matches!(refused, Response::Error { .. }), "{refused:?}");
+        }
+        // A planted symlink or an edited meta.json leads nowhere outside the artifact's folder.
+        let outside = tmp.path().join("secret.csv");
+        std::fs::write(&outside, "secret").unwrap();
+        let v2 = root.join(&artifact.id).join("v2.csv");
+        std::fs::remove_file(&v2).unwrap();
+        std::os::unix::fs::symlink(&outside, &v2).unwrap();
+        assert!(matches!(ask(None), Response::Error { .. }), "a link that leaves the folder is refused");
     }
 
     #[test]
