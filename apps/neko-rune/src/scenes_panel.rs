@@ -97,9 +97,11 @@ pub fn auto_diff(s: &mut App) {
     s.panel_on_select();
 }
 
+/// A session that has produced nothing: choosing it leaves no panel.
 pub fn auto_closed(s: &mut App) {
     super::scenes::live_for_pages(s);
-    s.panel_on_select();
+    s.layout.context.set_open(true);
+    s.select("t10");
 }
 
 pub fn diff(s: &mut App) {
