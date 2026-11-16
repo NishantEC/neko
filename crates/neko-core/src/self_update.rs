@@ -83,7 +83,10 @@ fn is_doc(path: &str) -> bool {
 }
 
 /// Sorts changed paths into web, native and safety-critical. Documentation
-/// changes nothing that runs.
+/// changes nothing that runs. So does anything outside the lists below: in
+/// particular `apps/` (the Rune client, `apps/neko-rune`, its own Cargo
+/// workspace that the installer does not build) and `experiments/` (spikes)
+/// never trigger a web rebuild or a reinstall. A test pins that.
 pub fn classify(paths: &[String]) -> Classification {
     let mut out = Classification::default();
     for path in paths {
@@ -690,6 +693,26 @@ mod tests {
         let c = classify(&paths(&["crates/neko-daemon/src/web.rs", "web/src/api.ts", "crates/neko-core/src/mcp_host/bridge.rs"]));
         assert!(c.web && c.native);
         assert_eq!(c.sensitive, paths(&["crates/neko-core/src/mcp_host/bridge.rs", "crates/neko-daemon/src/web.rs"]));
+    }
+
+    #[test]
+    fn the_rune_client_and_experiments_need_no_reinstall() {
+        // `apps/neko-rune` is its own Cargo workspace beside the daemon's; the installer never
+        // builds it, so a push that only touches it must not make the installed app reinstall.
+        let touched = paths(&[
+            "apps/neko-rune/src/view.rs",
+            "apps/neko-rune/Cargo.toml",
+            "apps/neko-rune/Cargo.lock",
+            "apps/neko-rune/RUNE_REV",
+            "apps/neko-rune/scripts/run.sh",
+            "experiments/rune/chat/src/main.rs",
+            "docs/design/rune/shell-dark.png",
+        ]);
+        assert_eq!(classify(&touched), Classification::default());
+        assert_eq!(decide(None, "abc", &touched, None, false, &SelfUpdate::default(), 0), Decision::Nothing);
+        // Its own lockfile is not the daemon's: only the root files count.
+        assert!(!classify(&paths(&["apps/neko-rune/Cargo.lock"])).native);
+        assert!(classify(&paths(&["Cargo.lock"])).native);
     }
 
     #[test]
