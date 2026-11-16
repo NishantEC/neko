@@ -14,7 +14,6 @@ use crate::activity;
 use crate::app::{App, crew_line, status_line};
 use crate::icons;
 use crate::link::{Call, InboxItem};
-use crate::status::{status_glyph, status_label, status_of};
 use crate::theme::Neko;
 use crate::turns::{Role, chat_turns};
 
@@ -250,31 +249,13 @@ fn handoffs(s: &App, t: &Neko, ids: &[String]) -> Vec<El> {
     ids.iter()
         .filter_map(|id| summary.task(id))
         .map(|task| {
-            let id = task.id.clone();
             let role = match task.status {
                 TaskStatus::Planning => "Scout",
                 TaskStatus::Reviewing | TaskStatus::ReadyForReview => "Reviewer",
                 _ => "Builder",
             };
-            let short = task.key.clone().unwrap_or_else(|| format!("NEK-{}", task.id.chars().take(4).collect::<String>().to_uppercase()));
-            row()
-                .key(format!("handoff-{}", task.id))
-                .role("button")
-                .label(format!("Neko hands off to {role}: {short}, {}, {}", task.title, status_label(task.status)))
-                .focusable(true)
-                .w_full()
-                .min_h(26.0)
-                .px(4.0)
-                .gap(6.0)
-                .center_y()
-                .radius(t.radius.row)
-                .hover(t.surface.hover)
-                .focus_ring(2.0, 2.0, t.kit.c.border_focus)
-                .on_press(move |s: &mut App| s.open_linked(&id))
-                .child(text(format!("Neko → {role}")).font(t.ty.id).color(t.text.muted).a11y_hidden())
-                .child(status_glyph(status_of(task.status), t, 12.0, Some("")))
-                .child(text(short).font(t.ty.id).color(t.meaning.iris).a11y_hidden())
-                .child(text(task.title.clone()).font(t.ty.meta).color(t.text.base).truncate().grow(1.0).min_w(0.0).a11y_hidden())
+            let shown = turn::HandoffTask { id: task.id.clone(), title: task.title.clone(), status: task.status };
+            turn::handoff_row(t, &format!("neko-hand-{}", task.id), "Neko", role, &shown)
         })
         .collect()
 }

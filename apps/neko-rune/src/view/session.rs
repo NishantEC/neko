@@ -187,7 +187,8 @@ fn conversation(s: &App, t: &Neko, task: &Task, has_folder: bool, layer: &mut Ve
     if hidden > 0 {
         c = c.child(super::quiet_button(&format!("Show {hidden} earlier"), "show-earlier", t, |s: &mut App| s.work.all_turns = true));
     }
-    for el in turn::turns(s, t, LIST, &all[hidden..]) {
+    let owner = turn::HandoffTask { id: task.id.clone(), title: task.display_title.clone().unwrap_or_else(|| task.title.clone()), status: task.status };
+    for el in turn::turns_for(s, t, LIST, &all[hidden..], Some(&owner)) {
         c = c.child(el);
     }
     let plan = task.plan.trim();

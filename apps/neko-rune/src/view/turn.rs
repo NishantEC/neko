@@ -3,12 +3,14 @@
 //! input and output (an edit opens to its diff). The same drawing serves both; `ns` keeps the
 //! keys of one list apart from the other's.
 
+use neko_protocol::workbench::TaskStatus;
 use rune::{El, col, row, text};
 use rune_kit::Markdown;
 use rune_kit::diff::DiffView;
 
 use crate::app::App;
-use crate::status::{StatusKind, status_glyph};
+use crate::link::short_id;
+use crate::status::{StatusKind, status_glyph, status_label, status_of};
 use crate::theme::Neko;
 use crate::turns::{Block, Role, Tool, ToolState, Turn, TurnKind};
 
@@ -118,11 +120,57 @@ fn markdown(t: &Neko, source: &str, streaming: bool) -> El {
     Markdown::new(source).streaming(streaming).selectable(true).build(&t.kit)
 }
 
+/// The task a conversation belongs to, for the hand-off lines between its agents.
+#[derive(Clone, Debug)]
+pub struct HandoffTask {
+    pub id: String,
+    pub title: String,
+    pub status: TaskStatus,
+}
+
+/// One crew line, as the web's `HandoffRow` draws it: `Builder → Neko  ◐ NEK-6F70 : the title`. 12.5 muted; the two names
+/// at 80% of the text colour; the glyph and the id are a link to the task, in Iris.
+pub fn handoff_row(t: &Neko, key: &str, from: &str, to: &str, task: &HandoffTask) -> El {
+    let id = task.id.clone();
+    let short = short_id(&task.id);
+    let names = text(format!("{from} → {to}")).font(t.ty.meta).color(t.text.muted).a11y_hidden();
+    let link = row()
+        .key(format!("handoff-{}", task.id))
+        .role("button")
+        .label(format!("{from} hands off to {to}: {short}, {}, {}", task.title, status_label(task.status)))
+        .focusable(true)
+        .gap(4.0)
+        .center_y()
+        .radius(t.radius.control)
+        .hover(t.surface.hover)
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
+        .on_press(move |s: &mut App| s.open_linked(&id))
+        .child(status_glyph(status_of(task.status), t, 12.0, Some("")))
+        .child(text(short).font(rune::TextStyle { weight: 500.0, ..t.ty.meta }).color(t.meaning.iris).a11y_hidden());
+    row()
+        .key(format!("{key}-line"))
+        .w_full()
+        .min_h(26.0)
+        .px(4.0)
+        .py(2.0)
+        .gap(8.0)
+        .center_y()
+        .child(names)
+        .child(row().gap(6.0).center_y().grow(1.0).min_w(0.0).child(link).child(text(format!(": {}", task.title)).font(t.ty.meta).color(t.text.muted).truncate().min_w(0.0).a11y_hidden()))
+}
+
 /// The turns, in order. `previous` is who spoke last before them (so a speaker's name shows only
 /// when the speaker changes); the last agent turn streams while it is `pending`.
 pub fn turns(s: &App, t: &Neko, w: Where, list: &[Turn]) -> Vec<El> {
+    turns_for(s, t, w, list, None)
+}
+
+/// [`turns`] for a task's own conversation: when one agent hands the task to the next (Planner → Builder, Builder → Neko)
+/// a crew line says so above the new speaker, as the web's does.
+pub fn turns_for(s: &App, t: &Neko, w: Where, list: &[Turn], task: Option<&HandoffTask>) -> Vec<El> {
     let mut out = Vec::new();
     let mut previous = String::new();
+    let mut previous_agent = String::new();
     for (index, turn) in list.iter().enumerate() {
         let speaker = match turn.role {
             Role::System => String::new(),
@@ -145,6 +193,10 @@ pub fn turns(s: &App, t: &Neko, w: Where, list: &[Turn]) -> Vec<El> {
             }
             Role::Agent => {
                 let mut c = col().key(format!("{}turn-{}", w.ns, turn.id)).w_full().gap(4.0).mt(gap_before);
+                if let Some(task) = task.filter(|_| !previous_agent.is_empty() && previous_agent != turn.author) {
+                    c = c.child(handoff_row(t, &format!("{}hand-{}", w.ns, turn.id), &previous_agent, &turn.author, task));
+                }
+                previous_agent = turn.author.clone();
                 if shows_speaker {
                     c = c.child(text(speaker).font(rune::TextStyle { weight: 500.0, ..t.ty.meta }).color(t.text.muted).px(4.0));
                 }

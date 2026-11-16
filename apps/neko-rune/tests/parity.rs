@@ -70,3 +70,13 @@ fn the_goal_line_is_a_full_width_row_under_the_header_and_the_column_is_at_most_
     assert!(goal[2] >= region[2] - 24.0, "the goal row spans the region: {goal:?} {region:?}");
     assert!((goal[3] - 32.0).abs() < 0.5, "32 high: {goal:?}");
 }
+
+#[test]
+fn a_hand_off_between_agents_is_a_crew_line_with_the_task_as_a_link() {
+    let rt = runtime(scene("running"));
+    let lines: Vec<String> = texts(&rt).into_iter().filter(|t| t.contains("Planner → Builder")).collect();
+    assert!(!lines.is_empty(), "the session has agents that hand over to each other: {:?}", texts(&rt));
+    let id = rt.state.selected.clone().expect("a session is open");
+    assert!(has_key(&rt, &format!("handoff-{id}")), "the id is a link to the task");
+    assert!(texts(&rt).iter().any(|t| t.starts_with("NEK-")), "{:?}", texts(&rt));
+}
