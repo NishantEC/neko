@@ -62,6 +62,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let frame = Frame { win_h, region_w: (win_w - layout.sessions.width() - fit.context - neko_w - 3.0 * GRIP - 4.0).max(0.0) };
 
     s.panel.hidden.set(layout.context.is_open() && fit.context <= 0.0);
+    // The web view is wanted by whatever shows it below, in this very build (`viewers::web`, `context.rs`, `session.rs`).
+    s.web_view.set_want(None);
     // Expanded, the panel takes the session's region and its own; the sessions and Neko columns stay.
     let expanded = s.panel.expanded && fit.context > 0.0;
     let mut window = row().key("window").w_full().h_full().fill(t.surface.sidebar);
@@ -84,6 +86,10 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         window = window.child(neko::strip(s, &t).w(NEKO_STRIP).key("neko"));
     }
     palette::mount(s, &t, &mut layer);
+    // Every popover, menu, select, dialog, the palette and toast is an element of this layer: while there is
+    // one, a native web view (always above Rune's surface) is hidden.
+    s.web_view.overlays.set(layer.len());
+    s.web_view.sync();
     root(window, layer)
 }
 

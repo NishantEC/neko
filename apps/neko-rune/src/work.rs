@@ -394,6 +394,7 @@ impl App {
         }
         self.selected = Some(id.to_owned());
         self.view = None;
+        self.plugin_view = None;
         self.notice = None;
         self.work.notice = None;
         self.work.open_run = None;
@@ -771,6 +772,19 @@ impl App {
             }
             Reply::ArtifactInfo(artifact) => self.artifact_info(artifact),
             Reply::TaskArtifacts { task_id, artifacts } => self.task_artifacts(&task_id, artifacts),
+            Reply::SignedUrl { route, url } => {
+                self.web_view.signed(&route, url);
+                true
+            }
+            Reply::PluginViewers(viewers) => {
+                crate::viewers::web::register_plugin_viewers(&viewers);
+                false
+            }
+            Reply::PluginPages(pages) => {
+                let changed = self.plugin_pages.as_ref() != Some(&pages);
+                self.plugin_pages = Some(pages);
+                changed
+            }
             Reply::Unseen(ids) => {
                 let mut next: HashSet<String> = ids.into_iter().collect();
                 // A task marked unread here stays unread until it is opened again.
@@ -839,6 +853,8 @@ impl App {
                     }
                     Call::Checkpoints { .. } | Call::Unseen | Call::Digest | Call::Inbox | Call::Refresh | Call::Models | Call::TaskFolder { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } => {}
                     Call::ArtifactFile { id, version } => self.artifact_unreadable(id, *version, message),
+                    Call::SignedWebUrl { route } => self.web_view.signing_failed(route, message),
+                    Call::PluginViewers | Call::PluginPages => {}
                     Call::CreateTask { .. } => self.new_error(message),
                     _ => self.work.notice = Some(message),
                 }
@@ -863,6 +879,8 @@ impl App {
                     }
                     Call::Refresh | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::Checkpoints { .. } | Call::TaskFolder { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } => return false,
                     Call::ArtifactFile { id, version } => self.artifact_unreadable(id, *version, line),
+                    Call::SignedWebUrl { route } => self.web_view.signing_failed(route, line),
+                    Call::PluginViewers | Call::PluginPages => return false,
                     Call::CreateTask { .. } => self.new_error(line),
                     _ => self.work.notice = Some(line),
                 }

@@ -53,6 +53,7 @@ impl App {
         self.new_check = TextEdit::new("");
         self.new_form = Some(NewForm { workspace: 0, goal: false, choices: Vec::new(), runtime: None, menu: None, busy: false, error: None, known: HashSet::new(), expect: String::new() });
         self.view = None;
+        self.plugin_view = None;
         self.call(Call::Models);
     }
 

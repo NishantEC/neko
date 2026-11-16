@@ -68,6 +68,10 @@ pub enum Reply {
     ArtifactFile { id: String, version: Option<u32>, path: String, kind: String, size: u64 },
     /// An artifact's record.
     ArtifactInfo(neko_protocol::Artifact),
+    /// The web UI's address at a route, signed in. The token is in it: never printed.
+    SignedUrl { route: String, url: String },
+    PluginViewers(Vec<neko_protocol::PluginViewer>),
+    PluginPages(Vec<neko_protocol::PluginPage>),
     /// What a session's own runs saved.
     TaskArtifacts { task_id: String, artifacts: Vec<neko_protocol::Artifact> },
     Unseen(Vec<String>),
@@ -157,6 +161,12 @@ pub fn make(socket: &Path, call: &Call, open: Option<&str>) -> Reply {
             _ => Reply::Done,
         },
         Response::Artifact { artifact, .. } => Reply::ArtifactInfo(artifact),
+        Response::SignedWebUrl { url } => match call {
+            Call::SignedWebUrl { route } => Reply::SignedUrl { route: route.clone(), url },
+            _ => Reply::Done,
+        },
+        Response::PluginViewers { viewers } => Reply::PluginViewers(viewers),
+        Response::PluginPages { pages } => Reply::PluginPages(pages),
         Response::Artifacts { artifacts } => match call {
             Call::TaskArtifacts { task_id } => Reply::TaskArtifacts { task_id: task_id.clone(), artifacts },
             _ => Reply::Done,

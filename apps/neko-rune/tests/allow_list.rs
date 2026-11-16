@@ -27,6 +27,10 @@ const READS: &[&str] = &[
     "Request::ArtifactFile",
     // P3b: what a session's own runs saved (the daemon links an artifact to its ticket).
     "Request::ArtifactsForTask",
+    // P3b, the web panel: the web UI's signed address for a route, the viewers the plugins declare, the pages they registered.
+    "Request::SignedWebUrl",
+    "Request::PluginViewers",
+    "Request::PluginPages",
     "Request::TaskFolder",
     "Request::CalendarEvents",
     "Request::CheckpointDiff",

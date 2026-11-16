@@ -55,6 +55,12 @@ glam = "0.29"
 wgpu = { version = "~30.0.1", default-features = false, features = ["std", "parking_lot", "metal", "wgsl"] }
 bytemuck = { version = "1.25", features = ["derive"] }
 
+# The web view for HTML artifacts, Excalidraw and plugins' pages (P3b, `src/web_panel.rs`): `wry` (Apache-2.0 or
+# MIT) builds a WKWebView as a child of the Rune window. Nothing else of Tauri comes with it.
+wry = { version = "0.57", default-features = false, features = ["os-webview"] }
+# Addresses are parsed, never string-matched, by the web view's navigation lock (`src/web_panel.rs`).
+url = "2"
+
 [dev-dependencies]
 png = "0.17"
 

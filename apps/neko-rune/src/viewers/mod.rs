@@ -31,7 +31,7 @@ pub mod model3d;
 pub mod model3d_gpu;
 pub mod pdf;
 pub mod table;
-pub mod web_pending;
+pub mod web;
 
 /// What a viewer is given: one version of one thing to show.
 pub struct ViewerInput<'a> {
@@ -314,22 +314,34 @@ impl ViewerStates {
     }
 }
 
-fn registry() -> &'static Mutex<Vec<&'static ViewerSpec>> {
-    static REGISTRY: OnceLock<Mutex<Vec<&'static ViewerSpec>>> = OnceLock::new();
+/// Each registered viewer, with the group it belongs to ("" for one registered for good).
+type Registered = (&'static str, &'static ViewerSpec);
+
+fn registry() -> &'static Mutex<Vec<Registered>> {
+    static REGISTRY: OnceLock<Mutex<Vec<Registered>>> = OnceLock::new();
     REGISTRY.get_or_init(|| Mutex::new(Vec::new()))
 }
 
 /// Adds a viewer. It lives as long as the process (a registry entry is never removed).
 pub fn register(spec: ViewerSpec) {
     let leaked: &'static ViewerSpec = Box::leak(Box::new(spec));
-    registry().lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(leaked);
+    registry().lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(("", leaked));
+}
+
+/// Replaces every viewer of `group` with `specs`: what the plugins declare changes while the app runs, and a
+/// plugin that went must stop claiming its kinds. (The specs themselves are leaked, as `register`'s are.)
+pub fn replace_group(group: &'static str, specs: Vec<ViewerSpec>) {
+    ensure_builtins();
+    let mut all = registry().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    all.retain(|(g, _)| *g != group);
+    all.extend(specs.into_iter().map(|s| (group, &*Box::leak(Box::new(s)))));
 }
 
 /// The built-in viewers, at priority 0 (once).
 pub fn ensure_builtins() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
-        for spec in builtins() {
+        for spec in builtins().into_iter().chain(web::builtins()) {
             register(spec);
         }
     });
@@ -349,7 +361,6 @@ fn builtins() -> Vec<ViewerSpec> {
         ViewerSpec { id: "table", title: "Table", kinds: &["csv", "tsv"], priority: 0, build: table::build },
         ViewerSpec { id: "pdf", title: "PDF", kinds: &["pdf"], priority: 0, build: pdf::build },
         ViewerSpec { id: "model3d", title: "3D model", kinds: &["glb", "gltf", "stl", "obj"], priority: 0, build: model3d::build },
-        ViewerSpec { id: "web-pending", title: "Page", kinds: &["html", "htm", "excalidraw"], priority: 0, build: web_pending::build },
     ]
 }
 
@@ -358,7 +369,7 @@ pub fn resolve(kind: &str) -> Option<&'static ViewerSpec> {
     ensure_builtins();
     let kind = kind.trim_start_matches('.').to_ascii_lowercase();
     let all = registry().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    all.iter().enumerate().filter(|(_, s)| s.kinds.contains(&kind.as_str())).max_by_key(|(i, s)| (s.priority, *i)).map(|(_, s)| *s)
+    all.iter().enumerate().filter(|(_, (_, s))| s.kinds.contains(&kind.as_str())).max_by_key(|(i, (_, s))| (s.priority, *i)).map(|(_, (_, s))| *s)
 }
 
 /// Whether bytes are text the code viewer may show for a kind nobody named: UTF-8, no NUL, at most
@@ -403,7 +414,7 @@ mod tests {
             ("yaml", "code"), ("yml", "code"), ("sh", "code"), ("txt", "code"), ("log", "code"), ("css", "code"), ("sql", "code"),
             ("csv", "table"), ("tsv", "table"), ("pdf", "pdf"),
             ("glb", "model3d"), ("gltf", "model3d"), ("stl", "model3d"), ("obj", "model3d"),
-            ("html", "web-pending"), ("htm", "web-pending"), ("excalidraw", "web-pending"),
+            ("html", "web-artifact"), ("htm", "web-artifact"), ("excalidraw", "web-excalidraw"),
         ];
         for (kind, id) in cases {
             assert_eq!(resolve(kind).map(|s| s.id), Some(id), "{kind}");
@@ -415,7 +426,7 @@ mod tests {
     }
 
     fn ensure_builtins_priority_is_zero() -> bool {
-        builtins().iter().all(|s| s.priority == 0)
+        builtins().iter().all(|s| s.priority == 0) && web::builtins().iter().all(|s| s.priority == 5)
     }
 
     #[test]

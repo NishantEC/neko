@@ -31,6 +31,7 @@ import { useViewerRegistry, viewerFor, ViewerReport, type ElementPick, type View
 import { artifactMenu } from "@/canvas/ArtifactCard";
 import { useContextMenu } from "@/shell/context-menu";
 import { PluginBoundary } from "@/plugins";
+import { embedded } from "@/shell/embed";
 import { getThemeState, useThemes } from "@/theme";
 
 export type { ElementPick };
@@ -202,9 +203,12 @@ export function ArtifactPanel({
         <Button variant="ghost" size="icon-sm" aria-label="Download" title="Download" render={<a href={downloadUrl(artifact.id, n)} download />}>
           <DownloadSimple />
         </Button>
-        <Button variant="ghost" size="icon-sm" aria-label="Open in browser" title="Open in browser" render={<a href={artifactUrl(artifact.id, n)} target="_blank" rel="noreferrer" />}>
-          <ArrowSquareOut />
-        </Button>
+        {/* Embedded in the Rune client, "Open in browser" would open the address without the sign-in that makes it load. */}
+        {embedded ? null : (
+          <Button variant="ghost" size="icon-sm" aria-label="Open in browser" title="Open in browser" render={<a href={artifactUrl(artifact.id, n)} target="_blank" rel="noreferrer" />}>
+            <ArrowSquareOut />
+          </Button>
+        )}
       </div>
       {commenting ? <p role="status" className="border-b border-border/70 bg-primary/8 px-3 py-1.5 text-xs text-foreground">Click an element in the design to comment on it. Esc stops.</p> : null}
       {version?.note ? <p className="border-b border-border/70 px-3 py-1.5 text-xs text-muted-foreground">{version.note}</p> : null}

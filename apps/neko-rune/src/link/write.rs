@@ -38,6 +38,11 @@ pub enum Call {
     ArtifactFile { id: String, version: Option<u32> },
     /// One artifact's record: its title, kind and versions.
     ArtifactInfo { id: String },
+    /// The web UI's address, signed in, at a route (for the web panel's view).
+    SignedWebUrl { route: String },
+    /// The viewers the plugins' manifests declare, and the pages the plugins registered.
+    PluginViewers,
+    PluginPages,
     /// The artifacts a session's own runs saved (the daemon links them to the ticket), newest first.
     TaskArtifacts { task_id: String },
     Unseen,
@@ -118,7 +123,7 @@ pub enum Call {
 impl Call {
     /// Whether this only fetches.
     pub fn reads(&self) -> bool {
-        matches!(self, Call::Refresh | Call::Checkpoints { .. } | Call::CheckpointDiff { .. } | Call::TaskFolder { .. } | Call::ArtifactFile { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::RoutinesFull | Call::CalendarEvents { .. } | Call::PhoneSettings | Call::Quota | Call::Plugins)
+        matches!(self, Call::Refresh | Call::Checkpoints { .. } | Call::CheckpointDiff { .. } | Call::TaskFolder { .. } | Call::ArtifactFile { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } | Call::SignedWebUrl { .. } | Call::PluginViewers | Call::PluginPages | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::RoutinesFull | Call::CalendarEvents { .. } | Call::PhoneSettings | Call::Quota | Call::Plugins)
     }
 
     /// The request the daemon receives: the same JSON the web UI posts.
@@ -131,6 +136,9 @@ impl Call {
             Call::ArtifactFile { id, version } => Request::ArtifactFile { id, version },
             Call::ArtifactInfo { id } => Request::Artifact { id },
             Call::TaskArtifacts { task_id } => Request::ArtifactsForTask { task_id },
+            Call::SignedWebUrl { route } => Request::SignedWebUrl { route },
+            Call::PluginViewers => Request::PluginViewers,
+            Call::PluginPages => Request::PluginPages,
             Call::Unseen => Request::UnseenTasks,
             Call::Digest => Request::MorningDigest,
             Call::Inbox => Request::Routines,

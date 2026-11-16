@@ -63,6 +63,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
     .then(() => check(true, "changing theme in the address changes the page's theme"), () => check(false, "changing theme in the address changes the page's theme"));
   await shot("embed-artifact-html-light");
   await a11y("embedded html artifact");
+  check((await page.getByRole("link", { name: "Open in browser" }).count()) === 0, "no \"Open in browser\" link (it would open without the sign-in)");
 
   // Comment mode and data-neko-send work: they dock a composer, and nothing is sent.
   const frame = page.frameLocator(`[data-slot='artifact-panel'][data-artifact='${html.id}'] iframe`);

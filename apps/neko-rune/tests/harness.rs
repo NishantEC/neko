@@ -581,7 +581,7 @@ fn artifacts_of_every_built_in_kind_open_in_the_canvas_from_the_daemons_store() 
         ("Events", "csv", samples::csv(100_000).into_bytes(), "viewer-table"),
         ("Quarterly report", "pdf", samples::pdf(16), "viewer-pdf"),
         ("Torus knot", "glb", samples::glb(160, 24), "viewer-model3d"),
-        ("Landing page", "html", b"<html><body>hello</body></html>".to_vec(), "viewer-web-pending"),
+        ("Landing page", "html", b"<html><body>hello</body></html>".to_vec(), "viewer-web"),
         ("Dump", "bin", vec![0, 159, 146, 150, 0, 1, 2, 3], "viewer-fallback"),
     ];
     let mut saved = Vec::new();

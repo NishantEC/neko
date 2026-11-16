@@ -28,6 +28,7 @@ pub mod view;
 pub mod viewers;
 pub mod views;
 pub mod web_link;
+pub mod web_panel;
 pub mod work;
 
 use std::path::PathBuf;
@@ -87,7 +88,7 @@ fn init() -> App {
         // The last run's widths (read once, before the first frame); the window then keeps them.
         let saved = app::load_layout();
         let layout = saved.map(layout::Layout::restored).unwrap_or_default();
-        App { linked: !has("nolink"), layout, layout_written: saved, layout_seen: saved, persist_layout: true, ..App::default() }
+        App { linked: !has("nolink"), layout, layout_written: saved, layout_seen: saved, persist_layout: true, web_view: web_panel::WebHost::windowed(), ..App::default() }
     }
 }
 
@@ -147,7 +148,9 @@ pub fn run() {
         .gpu_backend(rune::GpuBackend::Wgpu)
         .compositor(viewers::model3d_gpu::Viewer3d::default())
         .titlebar(rune::Titlebar::new(44.0))
-        .on_focus(|s: &mut App, focused: bool, _| s.set_focused(focused));
+        .on_focus(|s: &mut App, focused: bool, _| s.set_focused(focused))
+        // The web view (P3b) is built on the window's own handle, when first needed.
+        .on_window(web_panel::remember_window);
     let handle = app.handle();
     let mut started = false;
     app.on_ready(move |_| {

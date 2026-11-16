@@ -34,6 +34,8 @@ pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
         col().w_full().grow(1.0).min_h(0.0).child(band(t)).child(row().w_full().grow(1.0).min_h(0.0).justify_center().child(lab(t)))
     } else if s.new_form.is_some() {
         super::new::form(s, t, layer)
+    } else if let Some(page) = s.plugin_view.as_ref() {
+        plugin_page(s, page, t)
     } else if let Some(view) = s.view {
         full_view(s, view, t, layer, frame)
     } else {
@@ -193,6 +195,16 @@ fn empty(s: &App, t: &Neko) -> El {
         c = c.child(primary_button("New session", "empty-new", t, |s: &mut App| s.open_new()));
     }
     col().w_full().h_full().child(band(t)).child(c)
+}
+
+/// A plugin's page (slot b): its whole content is the web view, at `<route>?embed=1`. The band on top says
+/// whose page it is; the daemon signs the address like any other.
+fn plugin_page(s: &App, page: &neko_protocol::PluginPage, t: &Neko) -> El {
+    // The page's route as the web app spells it: the plugin's own id for the page (`my-plugin:board`).
+    s.web_view.set_want(Some(crate::web_panel::Want { route: format!("{}?embed=1", page.id), dark: t.dark }));
+    let head = band(t).px(20.0).child(text(page.title.clone()).key("plugin-page-title").font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(t.text.base).truncate().a11y_hidden().role("heading")).child(text(format!("Plugin: {}", page.plugin)).font(t.ty.meta).color(t.text.faint).truncate().min_w(0.0));
+    let body = crate::viewers::web::region(col().key("plugin-page-body").w_full().grow(1.0).min_h(0.0).child(crate::viewers::web::slot(t, !s.web_view.exists())));
+    col().key("plugin-page").w_full().h_full().child(head).child(body)
 }
 
 /// A full view: its own page (Calendar, Routines, Settings, Usage, Workspaces, Plugins).

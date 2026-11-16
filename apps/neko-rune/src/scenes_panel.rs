@@ -203,3 +203,42 @@ pub fn expanded(s: &mut App) {
     show(s, "a-report", "Quarterly report", "pdf", 1, samples::pdf(16));
     s.panel.expanded = true;
 }
+
+/// An HTML artifact: the web view's slot, with the More menu open over it. A native web view is hidden while
+/// a Rune menu is open, so what shows here is the slot's own surface in the theme's colour.
+pub fn web_menu_open(s: &mut App) {
+    web(s);
+    s.web_view.pretend_up();
+    s.more_open = true;
+}
+
+fn plugin_pages(s: &mut App) {
+    s.plugin_pages = Some(vec![
+        neko_protocol::PluginPage { plugin: "pr-board".into(), id: "pr-board:board".into(), title: "PR board".into() },
+        neko_protocol::PluginPage { plugin: "stl-tools".into(), id: "stl-tools:viewer".into(), title: "STL viewer".into() },
+    ]);
+}
+
+/// "More" with a Plugins heading and the pages the plugins registered.
+pub fn plugin_more(s: &mut App) {
+    super::scenes::live_for_pages(s);
+    plugin_pages(s);
+    s.more_open = true;
+}
+
+/// A plugin's page open in the middle region: its whole content is the web view's slot.
+pub fn plugin_page(s: &mut App) {
+    super::scenes::live_for_pages(s);
+    plugin_pages(s);
+    s.layout.context.set_open(false);
+    let page = s.plugin_pages.as_ref().and_then(|p| p.first().cloned());
+    if let Some(page) = page {
+        s.open_plugin_page(page);
+    }
+    s.web_view.pretend_up();
+}
+
+/// The Canvas with four tabs in a panel too narrow for their words: icons with tooltips.
+pub fn pressure_icons(s: &mut App) {
+    auto_canvas(s);
+}

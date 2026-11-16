@@ -139,6 +139,15 @@ impl Target {
         }
     }
 
+    /// The web app's embed route for this target, when it is an artifact (a file of a folder has none):
+    /// `artifact/<id>/<n>?embed=1`. The id is the daemon's (12 hex characters, validated again here).
+    pub fn web_route(&self) -> Option<String> {
+        match self {
+            Target::Artifact { id, version } if !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') => Some(format!("artifact/{id}/{version}?embed=1")),
+            _ => None,
+        }
+    }
+
     pub fn route(&self) -> Option<String> {
         match self {
             Target::Artifact { id, version } => Some(format!("artifact?id={id}&v={version}")),
@@ -711,13 +720,38 @@ impl App {
     pub fn panel_tick(&mut self, t: f64, tx: &mut Tx) -> bool {
         self.panel_settle();
         self.panel_want_target();
+        let web_changed = self.web_tick(t, tx);
         if let Some(key) = self.panel.pending_scroll.take() {
             tx.scroll_center(key);
         }
         if let Some(target) = self.panel_target() {
             self.panel.states.with(&target.key(), |st| viewers::image_view::tick(st, t, tx));
         }
-        false
+        web_changed
+    }
+
+    /// The web view (P3b), once a frame: asks the daemon to sign what the panel wants, makes the view when
+    /// its address is in, moves and follows it, and lets go of it when it is not needed. The plugins'
+    /// viewers and pages are asked for once the daemon is answering.
+    pub fn web_tick(&mut self, t: f64, tx: &mut Tx) -> bool {
+        if !self.plugins_asked && self.summary.is_some() {
+            self.plugins_asked = true;
+            self.call(Call::PluginViewers);
+            self.call(Call::PluginPages);
+        }
+        if let Some(route) = self.web_view.needs_signing() {
+            self.call(Call::SignedWebUrl { route });
+        }
+        // A plugin's page keeps the view as long as it is open, even with the context panel closed.
+        let panel_open = self.layout.context.is_open() || self.plugin_view.is_some();
+        let existed = self.web_view.exists();
+        self.web_view.tick(t, panel_open);
+        // A view that is not on screen is looked at again, so its five minutes are kept.
+        if self.web_view.exists() && !self.web_view.shown() {
+            tx.wake_after(std::time::Duration::from_secs(30));
+        }
+        // The slot says "Opening…" until the view exists, and not after: the view is built again when that changes.
+        existed != self.web_view.exists()
     }
 
     /// Keys the panel owns: ⌘+, ⌘−, ⌘0 zoom a PDF; W toggles a model's wireframe; Esc restores an

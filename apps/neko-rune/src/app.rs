@@ -117,6 +117,14 @@ pub struct App {
     pub steer: Steer,
     pub steer_open: bool,
     pub more_open: bool,
+    /// The web view of the context panel and of a plugin's page (P3b).
+    pub web_view: crate::web_panel::WebHost,
+    /// What the plugins registered as pages (`PluginPages`), for "More"; None until asked.
+    pub plugin_pages: Option<Vec<neko_protocol::PluginPage>>,
+    /// A plugin's page open in the middle region (a web view of its whole content).
+    pub plugin_view: Option<neko_protocol::PluginPage>,
+    /// The plugins' viewers and pages were asked for once this run.
+    pub plugins_asked: bool,
     pub composer: TextEdit,
     pub ask: TextEdit,
 
@@ -201,6 +209,10 @@ impl Default for App {
             steer: Steer::AfterTurn,
             steer_open: false,
             more_open: false,
+            web_view: crate::web_panel::WebHost::default(),
+            plugin_pages: None,
+            plugin_view: None,
+            plugins_asked: false,
             composer: TextEdit::new(""),
             ask: TextEdit::new(""),
             dispatch: Dispatch::None,
@@ -427,7 +439,17 @@ impl App {
         self.open_task(id);
     }
 
+    /// A plugin's page: the middle region shows its whole content, in the web view.
+    pub fn open_plugin_page(&mut self, page: neko_protocol::PluginPage) {
+        self.plugin_view = Some(page);
+        self.view = None;
+        self.more_open = false;
+        self.notice = None;
+        self.new_form = None;
+    }
+
     pub fn open_view(&mut self, view: FullView) {
+        self.plugin_view = None;
         self.view = Some(view);
         self.more_open = false;
         self.notice = None;

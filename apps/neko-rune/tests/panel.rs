@@ -12,6 +12,7 @@ use neko_rune::app::{App, DEMO_NOW};
 use neko_rune::link::{Call, LinkEvent};
 use neko_rune::panel::{Content, Loaded, Opened, Shown, Tab, Target};
 use neko_rune::view::view;
+use neko_rune::web_panel::{Factory, Native, Rect, WebHost, Want};
 use neko_rune::{samples, scenes, scenes_panel};
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
@@ -561,7 +562,7 @@ fn every_built_in_viewer_draws_its_kind() {
         ("csv", scenes_panel::table, "viewer-table"),
         ("pdf", scenes_panel::pdf, "viewer-pdf"),
         ("glb", scenes_panel::model, "viewer-model3d"),
-        ("html", scenes_panel::web, "viewer-web-pending"),
+        ("html", scenes_panel::web, "viewer-web"),
         ("bin", scenes_panel::fallback, "viewer-fallback"),
         ("big", scenes_panel::too_large, "viewer-too-large"),
     ];
@@ -575,15 +576,15 @@ fn every_built_in_viewer_draws_its_kind() {
 }
 
 #[test]
-fn an_unknown_kind_shows_its_name_size_and_two_ways_out_and_a_page_says_it_is_coming() {
+fn an_unknown_kind_shows_its_name_size_and_two_ways_out_and_a_page_is_the_web_views() {
     let rt = runtime(scenes_panel::fallback);
     let words = texts(&rt);
     for expect in ["dump.bin", "10 bytes", "Reveal in Finder", "Open in web UI"] {
         assert!(words.iter().any(|w| w == expect), "{expect} in {words:?}");
     }
     let rt = runtime(scenes_panel::web);
-    let words = texts(&rt);
-    assert!(words.iter().any(|w| w == "Opens here in the next update") && words.iter().any(|w| w == "Open in web UI"), "{words:?}");
+    assert!(rt.find("viewer-web").is_some() && rt.find("viewer-fallback").is_none(), "an html page is the web view's, not a placeholder");
+    assert!(texts(&rt).iter().any(|w| w == "Opening…"), "until the view is up");
 }
 
 #[test]
@@ -695,4 +696,157 @@ fn an_animated_gif_advances_on_the_frame_clock_and_stops_when_it_leaves() {
     rt.update(|s, _| s.panel_choose_tab(Tab::Diff));
     frames(&mut rt, 5);
     assert_eq!(rt.state.panel.states.resident(), 0);
+}
+
+// ---------------------------------------------------------------- the web panel
+
+/// A web view that only records what it is told.
+struct Fake(Rc<RefCell<Vec<String>>>);
+
+impl Native for Fake {
+    fn set_bounds(&mut self, r: Rect) {
+        self.0.borrow_mut().push(format!("bounds {:?}", r.map(|v| v.round())));
+    }
+
+    fn set_visible(&mut self, visible: bool) {
+        self.0.borrow_mut().push(format!("visible {visible}"));
+    }
+
+    fn load(&mut self, address: &str) {
+        self.0.borrow_mut().push(format!("load {}", address.split('#').nth(1).unwrap_or("")));
+    }
+
+    fn eval(&mut self, _: &str) {
+        self.0.borrow_mut().push("eval".into());
+    }
+}
+
+struct Recording(Rc<RefCell<Vec<String>>>);
+
+impl Factory for Recording {
+    fn create(&self, address: &str, port: u16, bounds: Rect, visible: bool) -> Result<Box<dyn Native>, String> {
+        self.0.borrow_mut().push(format!("create {} port {port} visible {visible} at {:?}", address.split('#').nth(1).unwrap_or(""), bounds.map(|v| v.round())));
+        Ok(Box::new(Fake(self.0.clone())))
+    }
+}
+
+fn with_web_view(setup: fn(&mut App)) -> (Runtime<App>, Rc<RefCell<Vec<String>>>) {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let sink = log.clone();
+    let rt = runtime(move |s| {
+        setup(s);
+        s.web_view = WebHost::new(Some(Rc::new(Recording(sink))));
+    });
+    (rt, log)
+}
+
+fn sign_asked(rt: &mut Runtime<App>) {
+    let asked: Vec<String> = rt.state.outbox.iter().filter_map(|c| if let Call::SignedWebUrl { route } = c { Some(route.clone()) } else { None }).collect();
+    assert_eq!(asked.len(), 1, "the daemon is asked once: {:?}", rt.state.outbox);
+    let call = Call::SignedWebUrl { route: asked[0].clone() };
+    let reply = neko_rune::link::Reply::SignedUrl { route: asked[0].clone(), url: format!("http://127.0.0.1:4747/?token={}#/{}", "ab".repeat(32), asked[0]) };
+    rt.update(|s, _| {
+        s.apply_reply(&call, reply);
+    });
+    frames(rt, 10);
+}
+
+#[test]
+fn an_html_artifact_is_the_web_views_page_and_the_daemon_is_asked_to_sign_its_embed_route() {
+    let (mut rt, log) = with_web_view(scenes_panel::web);
+    assert!(rt.find("viewer-web").is_some(), "the slot stands where the view will be");
+    assert_eq!(rt.state.web_view.want(), Some(Want { route: "artifact/a-page/1?embed=1".into(), dark: true }));
+    assert!(!rt.state.web_view.exists() && log.borrow().is_empty(), "no view before the address is in");
+    assert!(texts(&rt).iter().any(|t| t == "Opening…"));
+    sign_asked(&mut rt);
+    let slot = rect(&rt, "viewer-web");
+    assert_eq!(log.borrow()[0], format!("create /artifact/a-page/1?embed=1&theme=dark port 4747 visible false at {:?}", slot.map(|v| v.round())), "made hidden, at Rune's slot: {:?}", log.borrow());
+    assert!(rt.state.web_view.exists() && rt.state.web_view.made() == 1);
+    // And it shows (the slot's rect reached it, and nothing overlaps it).
+    assert!(rt.state.web_view.shown(), "{:?}", log.borrow());
+    // The page is the panel's content in the panel's own colour, with no word over it once the view is up.
+    assert!(!texts(&rt).iter().any(|t| t == "Opening…"));
+}
+
+#[test]
+fn a_menu_open_hides_the_view_the_moment_it_appears_and_closing_it_shows_it_again() {
+    let (mut rt, log) = with_web_view(scenes_panel::web);
+    sign_asked(&mut rt);
+    assert!(rt.state.web_view.shown());
+    assert_eq!(rt.state.web_view.overlays.open(), 0);
+    // The More menu is a Rune menu: its elements are in the window's overlay layer.
+    click(&mut rt, "more");
+    assert!(rt.state.web_view.overlays.open() > 0, "an open menu is counted");
+    assert!(!rt.state.web_view.shown(), "so the native view is hidden: {:?}", log.borrow());
+    assert!(rt.find("viewer-web").is_some(), "its backing surface stays, in the theme's colour");
+    click(&mut rt, "more");
+    assert_eq!(rt.state.web_view.overlays.open(), 0);
+    assert!(rt.state.web_view.shown(), "closed again: the view is back");
+    // The palette is an overlay too.
+    rt.update(|s, _| s.palette_toggle());
+    frames(&mut rt, 5);
+    assert!(!rt.state.web_view.shown(), "the ⌘K palette hides it");
+    rt.update(|s, _| s.palette_toggle());
+    frames(&mut rt, 5);
+    assert!(rt.state.web_view.shown());
+}
+
+#[test]
+fn another_tab_hides_the_view_and_closing_the_panel_destroys_it() {
+    let (mut rt, log) = with_web_view(scenes_panel::web);
+    sign_asked(&mut rt);
+    assert!(rt.state.web_view.shown());
+    // The Diff tab shows: nothing wants the view, so it is hidden and kept for a while.
+    rt.update(|s, _| s.panel_choose_tab(neko_rune::panel::Tab::Diff));
+    frames(&mut rt, 5);
+    assert!(rt.state.web_view.want().is_none() && rt.state.web_view.exists() && !rt.state.web_view.shown(), "{:?}", log.borrow());
+    // Back on the Canvas (the artifact is read again, as the daemon's answer would bring it): the same view, shown again.
+    rt.update(|s, _| {
+        s.panel_choose_tab(neko_rune::panel::Tab::Canvas);
+        s.panel.open = Some(Opened { target: Target::Artifact { id: "a-page".into(), version: 1 }, content: Content::Ready(Rc::new(Loaded::from_bytes("/data/neko/artifacts/a-page/v1.html".into(), "html".into(), "Landing page".into(), b"<html></html>".to_vec()))) });
+    });
+    frames(&mut rt, 5);
+    assert!(rt.state.web_view.shown() && rt.state.web_view.made() == 1);
+    // The person closes the panel: the view is gone.
+    click(&mut rt, "context-close");
+    frames(&mut rt, 5);
+    assert!(!rt.state.web_view.exists(), "{:?}", log.borrow());
+    assert!(rt.state.web_view.want().is_none());
+}
+
+#[test]
+fn a_file_of_the_folder_is_never_the_web_views_page() {
+    let (mut rt, _) = with_web_view(scenes_panel::file_open);
+    assert!(rt.state.web_view.want().is_none());
+    assert!(rt.state.outbox.iter().all(|c| !matches!(c, Call::SignedWebUrl { .. })));
+    let _ = &mut rt;
+}
+
+#[test]
+fn a_plugins_page_is_in_more_under_its_own_heading_and_opens_as_the_web_view() {
+    use neko_protocol::PluginPage;
+    let (mut rt, log) = with_web_view(scenes_panel::auto_closed);
+    rt.update(|s, _| {
+        s.plugin_pages = Some(vec![PluginPage { plugin: "pr-board".into(), id: "pr-board:board".into(), title: "PR board".into() }]);
+    });
+    click(&mut rt, "more");
+    let words = texts(&rt);
+    assert!(words.iter().any(|t| t == "Plugins") && words.iter().any(|t| t == "PR board"), "{words:?}");
+    let (x, y) = {
+        let e = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("PR board")).unwrap();
+        (e.rect[0] + e.rect[2] / 2.0, e.rect[1] + e.rect[3] / 2.0)
+    };
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    frames(&mut rt, 10);
+    assert_eq!(rt.state.plugin_view.as_ref().map(|p| p.id.as_str()), Some("pr-board:board"));
+    assert!(rt.find("plugin-page").is_some() && rt.find("viewer-web").is_some(), "its whole content is the web view's slot");
+    assert_eq!(rt.state.web_view.want(), Some(Want { route: "pr-board:board?embed=1".into(), dark: true }));
+    sign_asked(&mut rt);
+    assert!(log.borrow()[0].starts_with("create /pr-board:board?embed=1&theme=dark port 4747 visible false"), "{:?}", log.borrow());
+    assert!(rt.state.web_view.shown());
+    // Choosing a session leaves the page; the view goes with the panel only after it has been off screen a while.
+    rt.update(|s, _| s.select("t6"));
+    frames(&mut rt, 5);
+    assert!(rt.state.plugin_view.is_none());
 }

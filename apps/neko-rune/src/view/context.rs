@@ -16,6 +16,7 @@ use crate::panel::{Content, Loaded, Tab, Target};
 use crate::readers::size_words;
 use crate::theme::Neko;
 use crate::viewers::{self, ViewerInput, family};
+use crate::web_panel::Want;
 
 /// The header's height.
 pub const HEAD: f32 = 36.0;
@@ -53,7 +54,7 @@ pub fn panel(s: &App, t: &Neko, layer: &mut Vec<El>, width: f32) -> El {
         Some(Tab::Terminal) => context_terminal::tab(s, t),
         None => placeholder(&["Nothing to show yet."], t),
     };
-    col().key("context").h_full().min_w(0.0).my(8.0).mx(2.0).radius(t.radius.window).clip_rounded(t.radius.window).fill(t.surface.card).child(head).child(col().key("context-body").w_full().grow(1.0).min_h(0.0).child(body))
+    col().key("context").h_full().min_w(0.0).my(8.0).mx(2.0).radius(t.radius.window).clip_rounded(t.radius.window).fill(t.surface.card).child(head).child(viewers::web::region(col().key("context-body").w_full().grow(1.0).min_h(0.0).child(body)))
 }
 
 /// The icon of a tab.
@@ -187,6 +188,21 @@ pub fn viewer(s: &App, t: &Neko, target: &Target) -> El {
         Some(Content::Failed(message)) => placeholder(&[message.as_str()], t),
         Some(Content::TooLarge { size, path }) => too_large(t, *size, path),
         Some(Content::Ready(loaded)) => match viewers::resolve_for(&loaded.kind, Some(loaded.bytes())) {
+            // The web UI draws these (HTML, Excalidraw, a plugin's viewer): its embed page, in the web view.
+            Some(spec) if viewers::web::is_web(spec.id) && target.web_route().is_some() => {
+                let Some(route) = target.web_route() else { return placeholder(&["Nothing to show yet."], t) };
+                s.web_view.set_want(Some(Want { route, dark: t.dark }));
+                viewers::web::slot(t, !s.web_view.exists())
+            }
+            // A file of the working folder is not an artifact the web UI can show: its text, as code.
+            Some(spec) if viewers::web::is_web(spec.id) => match viewers::resolve("txt") {
+                Some(code) => {
+                    let input = ViewerInput { kind: &loaded.kind, bytes: Some(loaded.shared()), path: Some(&loaded.path), text: loaded.text(), theme_dark: t.dark, title: &loaded.title };
+                    let key = target.key();
+                    s.panel.states.with(&key, |st| (code.build)(&input, st))
+                }
+                None => fallback(s, t, loaded, target),
+            },
             Some(spec) => {
                 let input = ViewerInput { kind: &loaded.kind, bytes: Some(loaded.shared()), path: Some(&loaded.path), text: loaded.text(), theme_dark: t.dark, title: &loaded.title };
                 let key = target.key();

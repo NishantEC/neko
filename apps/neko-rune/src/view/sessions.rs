@@ -137,6 +137,15 @@ fn foot(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     for view in FullView::MORE {
         menu = menu.item(MenuItem::new(view.title()).icon(view.icon()).checked(s.view == Some(view)).on_select(move |s: &mut App| s.open_view(view)));
     }
+    // The pages plugins registered (plugin slot b), under their own heading.
+    if let Some(pages) = s.plugin_pages.as_ref().filter(|p| !p.is_empty()) {
+        menu = menu.separator().group_label("Plugins");
+        for page in pages {
+            let open = page.clone();
+            menu = menu.item(MenuItem::new(page.title.clone()).icon(&icons::WRENCH).checked(s.plugin_view.as_ref().is_some_and(|p| p.id == page.id)).on_select(move |s: &mut App| s.open_plugin_page(open.clone())));
+        }
+        menu = menu.separator();
+    }
     // The web UI stays one choice away, at the foot of the list.
     menu = menu.item(MenuItem::new("Open the web UI").icon(&icons::EXTERNAL).on_select(|s: &mut App| {
         s.more_open = false;
