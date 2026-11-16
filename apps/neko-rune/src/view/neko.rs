@@ -225,12 +225,12 @@ fn digest(s: &App, t: &Neko) -> El {
     let open = s.open("digest");
     let c = col().key("digest").w_full().gap(2.0).child(section_head(t, "digest-toggle", "Digest", None, open, "digest"));
     let Some(d) = &s.neko.digest else {
-        return c.child(text("Nothing needs you").key("digest-empty").font(t.ty.meta).color(t.text.muted).px(6.0).py(2.0));
+        return c.child(text("Nothing needs you").key("digest-empty").font(t.ty.meta).color(t.text.muted).px(8.0).py(2.0));
     };
     if !open {
-        return c.child(text(d.headline.clone()).key("digest-headline").font(t.ty.meta).color(t.text.muted).truncate().px(6.0).py(2.0));
+        return c.child(text(d.headline.clone()).key("digest-headline").font(t.ty.meta).color(t.text.muted).truncate().px(8.0).py(2.0));
     }
-    let mut details = col().key("digest-details").w_full().px(6.0).pt(2.0).gap(8.0);
+    let mut details = col().key("digest-details").w_full().px(8.0).pt(2.0).gap(8.0);
     details = details.child(text(d.headline.clone()).key("digest-headline").font(t.ty.meta).color(t.text.base).wrap());
     for l in [lines(t, "Finished", &d.finished, false), lines(t, "Stuck", &d.stuck, false), lines(t, "Needs a decision", &d.decisions, true)].into_iter().flatten() {
         details = details.child(l);
@@ -438,5 +438,5 @@ pub fn strip(s: &App, t: &Neko) -> El {
             ),
         );
     }
-    col().h_full().items_center().child(flat_band(t).px(0.0).justify_center()).child(button)
+    col().h_full().items_center().child(flat_band(t).px(0.0).justify_center().child(button))
 }

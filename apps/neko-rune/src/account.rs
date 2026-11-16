@@ -80,7 +80,7 @@ pub fn first_name(name: &str) -> &str {
 /// "Ada Lovelace" is "AL"; one word is its first letter; nothing is "N" (Neko).
 pub fn initials(name: &str) -> String {
     let mut words = name.split_whitespace().filter_map(|w| w.chars().next());
-    let (a, b) = (words.next(), words.last());
+    let (a, b) = (words.next(), words.next_back());
     match (a, b) {
         (Some(a), Some(b)) => format!("{}{}", a.to_uppercase(), b.to_uppercase()),
         (Some(a), None) => a.to_uppercase().to_string(),
@@ -92,7 +92,7 @@ pub fn initials(name: &str) -> String {
 /// bytes. The bytes, or None when the account has no picture.
 pub fn parse_dscl_photo(output: &str) -> Option<Vec<u8>> {
     let hex: String = output.strip_prefix("JPEGPhoto:")?.chars().filter(char::is_ascii_hexdigit).collect();
-    if hex.len() < 16 || hex.len() % 2 != 0 {
+    if hex.len() < 16 || !hex.len().is_multiple_of(2) {
         return None;
     }
     (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok()).collect()

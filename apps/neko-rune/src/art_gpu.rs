@@ -186,8 +186,8 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
     var col = mix(u.bg.rgb, u.ink.rgb, on * u.b.x);
 
     // the cat on its rock, on the horizon, facing the moon: a flat silhouette, edges one cell soft
-    let s = 0.115;
-    let q = vec2f(p.x - asp * 0.095, -(p.y - (hz - 0.004))) / s;
+    let s = 0.066;
+    let q = vec2f(p.x - asp * 0.14, -(p.y - (hz - 0.004))) / s;
     let dc = cat_sd(q) * s;
     let a = 1.0 - smoothstep(-px * 0.6, px * 0.6, dc);
     col = mix(col, u.cat.rgb, a);
@@ -201,7 +201,12 @@ fn fs_blit(@builtin(position) frag: vec4f) -> @location(0) vec4f {
     let dims = vec2i(textureDimensions(img));
     var col = textureLoad(img, clamp(g, vec2i(0), dims - vec2i(1)), 0).rgb;
     if (u.a.w > 0.5) { col = to_srgb(col); }
-    return vec4f(col, 1.0);
+    // The slot's corners are the card's: outside a rounded rectangle of radius b.w (device pixels) nothing is drawn.
+    let half = u.rect.zw * 0.5;
+    let q = abs(frag.xy - (u.rect.xy + half)) - (half - vec2f(u.b.w));
+    let d = length(max(q, vec2f(0.0))) + min(max(q.x, q.y), 0.0) - u.b.w;
+    let a = clamp(0.5 - d, 0.0, 1.0);
+    return vec4f(col * a, a);
 }
 "#;
 
@@ -244,10 +249,13 @@ impl Look {
             bg: [self.bg[0], self.bg[1], self.bg[2], 1.0],
             ink: [self.ink[0], self.ink[1], self.ink[2], 1.0],
             cat: [self.cat[0], self.cat[1], self.cat[2], 1.0],
-            b: [strength, density, if self.floor { 1.0 } else { 0.0 }, 0.0],
+            b: [strength, density, if self.floor { 1.0 } else { 0.0 }, CORNER_POINTS * self.scale],
         }
     }
 }
+
+/// The card's corner radius in points (the window radius): the art is clipped to it.
+pub const CORNER_POINTS: f32 = 20.0;
 
 /// The dot strength the shader uses over the window's colour, so the legibility test can name the worst case.
 pub fn dot_strength(dark: bool) -> f32 {
@@ -325,7 +333,7 @@ impl HomeArt {
                 primitive: Default::default(),
                 depth_stencil: None,
                 multisample: Default::default(),
-                fragment: Some(wgpu::FragmentState { module: &self.shader, entry_point: Some("fs_blit"), compilation_options: Default::default(), targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })] }),
+                fragment: Some(wgpu::FragmentState { module: &self.shader, entry_point: Some("fs_blit"), compilation_options: Default::default(), targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })] }),
                 multiview_mask: None,
                 cache: None,
             });

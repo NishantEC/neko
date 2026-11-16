@@ -25,6 +25,8 @@ pub const SCRIM_ALPHA: f32 = 0.70;
 pub const SCRIM_RADIUS: f32 = 520.0;
 /// Where the column's middle sits, as a share of the region's height from the top.
 pub const CENTRE: f32 = 0.40;
+/// The weight of the space above the column against the space below it, so the column's middle sits 40% down.
+const ABOVE: f32 = 3.2;
 
 fn glyph_for(provider: &str) -> &'static rune::Icon {
     match provider {
@@ -49,6 +51,7 @@ fn square(glyph: &'static rune::Icon, label: &str, key: &str, t: &Neko, fill: Co
 }
 
 /// A select's closed face: an optional icon, its words, a muted detail, a chevron. 32 high.
+#[allow(clippy::too_many_arguments)]
 fn face(t: &Neko, key: &str, label: &str, glyph: Option<&'static rune::Icon>, value: &str, detail: Option<&str>, open: bool, on_press: impl Fn(&mut App) + 'static) -> El {
     let mut r = row()
         .key(key.to_owned())
@@ -205,6 +208,7 @@ fn composer(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         })
         .build(k)
         .key("new-request")
+        .fill(Color::TRANSPARENT)
         .w_full();
 
     // Plan / Build.
@@ -291,5 +295,5 @@ pub fn home(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         .child(art::slot(s, t).absolute(0.0, 0.0).w_full().h_full().key("home-art").a11y_hidden())
         .child(scrim)
         .child(card_band(t))
-        .child(col().w_full().grow(1.0).min_h(0.0).px(24.0).items_center().child(el().grow(CENTRE * 10.0)).child(content).child(el().grow((1.0 - CENTRE) * 10.0)))
+        .child(col().w_full().grow(1.0).min_h(0.0).px(24.0).items_center().child(el().grow(ABOVE)).child(content).child(el().grow(10.0 - ABOVE)))
 }

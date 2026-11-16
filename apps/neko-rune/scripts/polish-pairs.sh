@@ -1,0 +1,62 @@
+#!/bin/bash
+# Side-by-side pairs of the web UI and the Rune app on a COPY of the owner's real data, for the polish pass
+# (docs/design/rune/polish-spec.md §0). Pictures land in /tmp/neko-polish and are NEVER committed: the repo is public.
+#
+#   apps/neko-rune/scripts/polish-pairs.sh
+#
+# 1. Copies the live database (read-only, `sqlite3 .backup`) to /tmp/neko-polish-data and the served web build to
+#    /tmp/neko-polish-data-web. The live data folder is never written to and nothing is ever sent to it.
+# 2. Runs the isolated `web_harness` daemon on the copy (it refuses any data folder outside /tmp), on port 4761.
+# 3. Takes the Rune half headless (`--snap`, 1440x900 at 2x, no window, no focus) against that daemon.
+# 4. Takes the web half with the shared headless Chrome (`~/.agents/bin/shared-chrome`, never a Chrome of its own).
+# 5. Stops the harness it started, by pid.
+#
+# Needs: sqlite3, node with `playwright-core` (PLAYWRIGHT_CORE=<dir containing node_modules/playwright-core>),
+# the daemon's `web_harness` binary (HARNESS=..., else ~/Library/Caches/neko/target/debug/web_harness).
+set -euo pipefail
+here="$(cd "$(dirname "$0")/.." && pwd)"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/Library/Caches/neko/rune-target}"
+data=/tmp/neko-polish-data
+web=/tmp/neko-polish-data-web
+out=/tmp/neko-polish
+port=4761
+harness="${HARNESS:-$HOME/Library/Caches/neko/target/debug/web_harness}"
+live="$HOME/Library/Application Support/neko"
+theme="${THEME:-dark}"
+
+if command -v "$HOME/.agents/bin/machine-ok" >/dev/null; then
+  case "$("$HOME/.agents/bin/machine-ok" 2>&1 | head -n 1)" in WAIT*) echo "machine says wait" >&2; exit 3;; esac
+fi
+mkdir -p "$data" "$out"
+rm -f "$data"/neko.db*
+sqlite3 -readonly "$live/neko.db" ".backup $data/neko.db"
+rm -rf "$web"; cp -RL "$live/web-live" "$web"
+
+( cd "$data" && exec env -i PATH="$PATH" HOME="$data" NEKO_DATA_DIR="$data" NEKO_WEB_PORT="$port" NEKO_WEB_DIR="$web" "$harness" >"$data.log" 2>&1 ) &
+pid=$!
+trap 'ps -p "$pid" -o command= 2>/dev/null | grep -q web_harness && kill -TERM "$pid" 2>/dev/null || true' EXIT
+for _ in $(seq 1 50); do [[ -S "$data/neko.sock" ]] && break; sleep 0.2; done
+[[ -S "$data/neko.sock" ]] || { echo "the harness did not start: see $data.log" >&2; exit 1; }
+
+(cd "$here" && cargo build --quiet)
+bin="$CARGO_TARGET_DIR/debug/neko-rune"
+export NEKO_RUNE_SOCKET="$data/neko.sock" NEKO_DATA_DIR="$data" NEKO_RUNE_ACCOUNT=1
+snap() { # name [ENV=value ...]
+  local name="$1"; shift
+  env "$@" "$bin" --snap "$out/$name-rune.png" --scene default --theme "$theme" --size 1440x900 --scale 2 >/dev/null 2>&1
+  echo "rune $name"
+}
+snap home
+snap session-plan NEKO_RUNE_OPEN_TASK="${PLAN_TITLE:-Optimize flow screens for mobile views}"
+snap session-panel NEKO_RUNE_OPEN_TASK="${PANEL_TITLE:-Send Ria's cards as images and read member files on WhatsApp}"
+snap neko-column
+snap routines NEKO_RUNE_VIEW=inbox
+snap settings NEKO_RUNE_VIEW=settings
+
+# The web half: the same screens at the same size and scale (routes need the task ids, in PLAN_ID and PANEL_ID).
+"$HOME/.agents/bin/shared-chrome" acquire neko-polish >/dev/null
+token="$(cat "$data/web-token")"
+SHOTS="[[\"home\",\"/\"],[\"session-plan\",\"/tasks?task=${PLAN_ID:-}&view=full\"],[\"session-panel\",\"/tasks?task=${PANEL_ID:-}&view=full\"],[\"neko-column\",\"/\"],[\"routines\",\"/inbox\"],[\"settings\",\"/settings\"]]" \
+  PORT="$port" TOKEN="$token" OUT="$out" THEME="$theme" PLAYWRIGHT_CORE="${PLAYWRIGHT_CORE:?set PLAYWRIGHT_CORE}" node "$here/scripts/polish-web.mjs"
+"$HOME/.agents/bin/shared-chrome" release neko-polish >/dev/null
+echo "pairs are in $out (not committed)"

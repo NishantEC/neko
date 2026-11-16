@@ -87,6 +87,13 @@ fn init() -> App {
                     app.select(&id);
                 }
             }
+            // For the side-by-side pairs against the web UI (`/tmp/neko-polish`): the person's own name, and a full view.
+            if std::env::var_os("NEKO_RUNE_ACCOUNT").is_some() {
+                app.account = account::Account::load(|| {});
+            }
+            if let Some(view) = std::env::var("NEKO_RUNE_VIEW").ok().and_then(|v| views::FullView::ALL.into_iter().find(|f| f.web_id() == v)) {
+                app.open_view(view);
+            }
             if let Some(id) = std::env::var("NEKO_RUNE_SHOW").ok().filter(|t| !t.is_empty()) {
                 app.show_artifact(&id, None);
             }

@@ -98,7 +98,7 @@ fn the_art_costs_at_most_a_millisecond_of_gpu_at_2560_by_1600() {
         eprintln!("no GPU timestamp queries on this machine; the budget is not checked here:\n{log}");
         return;
     };
-    let number = |key: &str| -> f64 { line.split(key).nth(1).and_then(|r| r.trim_start().split_whitespace().next()).and_then(|v| v.trim_end_matches(',').parse().ok()).unwrap_or_else(|| panic!("{key} in {line}")) };
+    let number = |key: &str| -> f64 { line.split(key).nth(1).and_then(|r| r.split_whitespace().next()).and_then(|v| v.trim_end_matches(',').parse().ok()).unwrap_or_else(|| panic!("{key} in {line}")) };
     let (mean, p50) = (number("mean"), number("p50"));
     eprintln!("{line}");
     // The median is what a frame costs; the mean also carries the other GPU clients' interruptions (a loaded Mac).

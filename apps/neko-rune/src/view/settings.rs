@@ -104,7 +104,7 @@ fn rail(s: &App, t: &Neko, narrow: bool) -> El {
         .key("settings-search")
         .w_full();
     let searching = !s.pages.text("settings:search").trim().is_empty();
-    let mut c = col().key("settings-rail").w(if narrow { 150.0 } else { 200.0 }).h_full().px(if narrow { 8.0 } else { 12.0 }).pt(4.0).gap(2.0).child(search).child(el().h(8.0));
+    let mut c = col().key("settings-rail").w(if narrow { 150.0 } else { 200.0 }).h_full().px(if narrow { 8.0 } else { 12.0 }).pt(4.0).gap(0.0).child(search.h(32.0)).child(el().h(8.0));
     for section in Section::ALL {
         let active = !searching && s.pages.section == section;
         c = c.child(nav_label_row(section.title(), &format!("settings-section-{}", section.key()), active, t).on_press(move |s: &mut App| {

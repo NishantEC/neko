@@ -6,6 +6,9 @@ default.
 
 ### The decided numbers
 
+> Superseded on 2026-11-16 by [the polish pass](rune-polish.md) for the sessions column: 248 default, 232 to 360, rows of 32,
+> grouped Needs you / Running / Recent / Waiting a while, with no "Done today" and no foot of its own (the nav rows and the account footer).
+
 | Region | Default | Min | Max |
 | --- | --- | --- | --- |
 | Sessions column | 300 | 240 | 420 |

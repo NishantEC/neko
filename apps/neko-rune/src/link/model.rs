@@ -79,7 +79,7 @@ pub fn wait_of(task: &Task, goals: &[Goal]) -> Wait {
             }
         }
         TaskStatus::Queued | TaskStatus::Planning | TaskStatus::Building | TaskStatus::Reviewing => {
-            let goal = goals.iter().filter(|g| g.ticket_id.as_deref() == Some(task.id.as_str()) && !g.status.is_finished()).last();
+            let goal = goals.iter().rfind(|g| g.ticket_id.as_deref() == Some(task.id.as_str()) && !g.status.is_finished());
             match goal.map(|g| g.status) {
                 Some(GoalStatus::Blocked) => Wait::Question,
                 Some(GoalStatus::Paused) => {
@@ -95,7 +95,7 @@ pub fn wait_of(task: &Task, goals: &[Goal]) -> Wait {
 /// `(done, of)`: a live goal's turns used of its cap; else the ticked `- [x]` steps of the plan's
 /// `- [ ]`/`- [x]` steps; else nothing (the ring turns instead).
 pub fn progress_of(task: &Task, goals: &[Goal]) -> Option<(u32, u32)> {
-    let goal = goals.iter().filter(|g| g.ticket_id.as_deref() == Some(task.id.as_str()) && !g.status.is_finished()).last();
+    let goal = goals.iter().rfind(|g| g.ticket_id.as_deref() == Some(task.id.as_str()) && !g.status.is_finished());
     if let Some(g) = goal.filter(|g| g.budget.max_turns > 0) {
         return Some((g.turns.min(g.budget.max_turns), g.budget.max_turns));
     }

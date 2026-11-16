@@ -344,6 +344,22 @@ pub type Scene = (&'static str, fn(&mut App));
 
 pub const SCENES: &[Scene] = &[
     ("default", |_| {}),
+    // Home over a live workbench: the greeting, the status line, the composer and the art (polish spec §2, §3).
+    ("home", |s| {
+        live(s);
+        s.account.name = "Ada Lovelace".into();
+        s.open_new();
+    }),
+    // Neko's column with the Activity line open: the daemon's own notices folded out of the chat (polish spec §0).
+    ("activity", |s| {
+        live(s);
+        if let Some(m) = s.summary.as_mut() {
+            for (i, text) in ["Neko updated itself to 3df08dcd (UI live).", "Reinstalling Neko at 3df08dcd now that it is idle.", "Neko updated itself to 3df08dcd (app reinstalled)."].into_iter().enumerate() {
+                m.conversation.push(ChatMessage { id: format!("notice-{i}"), at_ms: DEMO_NOW - 5_000 + i as i64, role: ChatRole::Neko, parts: ChatMessage::text_parts(text), ..blank() });
+            }
+        }
+        s.activity_open = true;
+    }),
     ("settings-narrow", crate::scenes_pages::settings_narrow),
     ("routines", crate::scenes_pages::routines),
     ("routines-open", crate::scenes_pages::routines_open),

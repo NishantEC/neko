@@ -147,7 +147,7 @@ fn needs_you_shows_eight_then_show_n_more_and_recent_five_and_view_all_and_waiti
     assert_eq!(needs_rows, 8, "eight rows");
     click(&mut rt, "needs-more");
     assert!(texts(&rt).contains(&"Show fewer".to_owned()));
-    assert_eq!(rt.elements().iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("meta-"))).count() >= 18, true);
+    assert!(rt.elements().iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("meta-"))).count() >= 18);
     // Recent: five rows and "View all".
     let recent = rect(&rt, "section-2");
     assert!(rt.find("view-all").is_some());
