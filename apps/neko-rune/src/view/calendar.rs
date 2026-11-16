@@ -283,7 +283,7 @@ fn neko_item(t: &Neko, item: &NekoCalendarItem) -> El {
         .center_y()
         .radius(5.0)
         .hover(t.surface.hover)
-        .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(move |s: &mut App| s.open_neko_item(&route))
         .child(lead)
         .child(text(title).font(t.ty.id).color(t.text.base).truncate().grow(1.0).min_w(0.0).a11y_hidden())
@@ -304,7 +304,7 @@ fn event_block(t: &Neko, e: &CalendarEvent, selected: bool) -> El {
         .radius(6.0)
         .fill(t.meaning.mint.alpha(if selected { 0.42 } else { 0.24 }))
         .hover(t.meaning.mint.alpha(0.14))
-        .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(move |s: &mut App| s.pages.cal_event = Some(id.clone()))
         .child(text(e.title.clone()).font(t.ty.id).color(t.text.base).truncate().min_w(0.0).a11y_hidden())
 }

@@ -83,7 +83,7 @@ fn icon_tabs(tabs: &[Tab], selected: Option<usize>, t: &Neko) -> El {
             .help(tab.title())
             .focusable(true)
             .focus_selected(on)
-            .focus_ring(2.0, 1.0, c.border_focus)
+            .focus_ring(2.0, 2.0, c.border_focus)
             .position_in_set(i + 1, n)
             .w(34.0)
             .h(28.0)
@@ -148,7 +148,7 @@ fn canvas(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
             .radius(t.radius.row)
             .fill(if selected { t.surface.selected } else { rune::Color::TRANSPARENT })
             .hover(t.surface.hover)
-            .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+            .focus_ring(2.0, 2.0, t.kit.c.border_focus)
             .on_press(move |s: &mut App| s.panel_pick_artifact(&pick))
             .child(rune::icon(kind_icon(&kind), 16.0).color(t.text.muted).a11y_hidden())
             .child(text(title).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0).a11y_hidden());

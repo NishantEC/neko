@@ -65,7 +65,7 @@ pub fn tab(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
                             .center_y()
                             .radius(t.radius.row)
                             .hover(t.surface.hover)
-                            .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+                            .focus_ring(2.0, 2.0, t.kit.c.border_focus)
                             .on_press_tx(move |s: &mut App, tx| {
                                 if let Some(d) = s.work.diffs.get_mut(&k) {
                                     d.scroll_to_file(i, tx);

@@ -219,7 +219,7 @@ pub fn workspaces(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
                 .center_y()
                 .radius(t.radius.row)
                 .hover(t.surface.hover)
-                .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+                .focus_ring(2.0, 2.0, t.kit.c.border_focus)
                 .on_press(move |s: &mut App| s.toggle_workspace(&id))
                 .child(text(if open { "▾" } else { "▸" }).font(t.ty.meta).color(t.text.faint).a11y_hidden())
                 .child(text(w.name.clone()).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0).a11y_hidden())

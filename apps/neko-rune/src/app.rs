@@ -132,6 +132,9 @@ pub struct App {
     pub steer_open: bool,
     /// The account footer's menu is open.
     pub more_open: bool,
+    /// One line the window says for a few seconds ("Saved to Downloads"): its words, and the time it goes
+    /// (set the first tick after it shows).
+    pub toast: Option<(String, Option<f64>)>,
     /// The system's Reduce Motion, as the last build saw it (Home's art stops under it).
     pub reduce_motion: std::cell::Cell<bool>,
     /// The web view of the context panel and of a plugin's page (P3b).
@@ -232,6 +235,7 @@ impl Default for App {
             steer_open: false,
             more_open: false,
             reduce_motion: std::cell::Cell::new(false),
+            toast: None,
             web_view: crate::web_panel::WebHost::default(),
             plugin_pages: None,
             plugin_view: None,
@@ -264,6 +268,9 @@ impl Default for App {
         }
     }
 }
+
+/// How long a toast stays.
+pub const TOAST_SECONDS: f64 = 3.0;
 
 /// The time headless scenes pretend it is (a fixed instant, so a snapshot is a fact).
 pub const DEMO_NOW: i64 = 1_800_000_000_000;
@@ -487,6 +494,31 @@ impl App {
         match route.strip_prefix("tasks?task=").map(|r| r.split('&').next().unwrap_or(r)) {
             Some(id) if self.summary.as_ref().is_some_and(|m| m.task(id).is_some()) => self.select(id),
             _ => self.open_in_web(Some(route)),
+        }
+    }
+
+    /// Says `words` in a toast for [`TOAST_SECONDS`].
+    pub fn show_toast(&mut self, words: &str) {
+        self.toast = Some((words.to_owned(), None));
+    }
+
+    /// Once a frame: starts the toast's clock and takes it down when it is up. True when what shows changed.
+    pub fn tick_toast(&mut self, t: f64, tx: &mut rune::Tx) -> bool {
+        let Some((_, until)) = self.toast.as_mut() else { return false };
+        match *until {
+            None => {
+                *until = Some(t + TOAST_SECONDS);
+                tx.wake_after(std::time::Duration::from_secs_f64(TOAST_SECONDS));
+                true
+            }
+            Some(at) if t >= at => {
+                self.toast = None;
+                true
+            }
+            Some(at) => {
+                tx.wake_after(std::time::Duration::from_secs_f64((at - t).max(0.05)));
+                false
+            }
         }
     }
 

@@ -8,7 +8,12 @@
 //! What this file decides, and nothing of it needs a window to be tested:
 //!
 //! - **The navigation lock** ([`decide`]): only the signed daemon origin may load. Another http(s) address
-//!   opens in the person's browser and is cancelled in the panel; anything else is refused.
+//!   opens in the person's browser and is cancelled in the panel; anything else is refused. It opens the
+//!   browser only when it follows a click or a keypress inside the view within the last second
+//!   ([`external_decision`], fed by a trusted-event script over the view's IPC); a page that navigates on
+//!   its own is blocked, and the block is logged once.
+//! - **Downloads** ([`downloads_destination`]): a download link saves to `~/Downloads` under its own name
+//!   (never a path, never over a file), and the window says "Saved to Downloads".
 //! - **Where the view is** ([`fit`]): the slot's rect, cut to the region it sits in.
 //! - **When it shows** ([`Overlays`], [`WebHost::visible`]): never while any Rune popover, menu, dialog,
 //!   ⌘K palette or toast is open (a native view always draws above Rune's own surface).
@@ -20,7 +25,9 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::Instant;
 
 use rune::WindowHandle;
 
@@ -59,6 +66,108 @@ pub fn decide(address: &str, daemon_port: u16) -> Nav {
     } else {
         Nav::Refuse
     }
+}
+
+// ---- what may open the browser ------------------------------------------------------------------
+
+/// A click or a keypress inside the view opens the browser for this long.
+pub const GESTURE_WINDOW_MS: u64 = 1000;
+
+/// What to do with an external address the page asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum External {
+    /// The person clicked or pressed a key in the view a moment ago: open it in their browser.
+    Open,
+    /// Nothing the person did explains it (a script set `location`): cancel it.
+    Block,
+}
+
+/// Opens the browser only when the last click or keypress inside the view was at most [`GESTURE_WINDOW_MS`]
+/// ago (`since_gesture_ms`, None when there has been none).
+pub fn external_decision(since_gesture_ms: Option<u64>) -> External {
+    match since_gesture_ms {
+        Some(ms) if ms <= GESTURE_WINDOW_MS => External::Open,
+        _ => External::Block,
+    }
+}
+
+/// The page's report of a trusted click or keypress: a script run in every frame of the view that tells the
+/// host over IPC. `isTrusted` is false for an event a script made up, so a page cannot give itself the gesture.
+pub const GESTURE_SCRIPT: &str = "(function(){if(window.__nekoGesture){return;}window.__nekoGesture=true;\
+function g(e){if(e.isTrusted&&window.ipc){window.ipc.postMessage('gesture');}}\
+['pointerdown','mousedown','click','keydown','touchstart'].forEach(function(t){window.addEventListener(t,g,true);});})();";
+
+/// When the person last clicked or pressed a key in the view.
+#[derive(Clone, Default)]
+pub struct Gesture(Rc<Cell<Option<Instant>>>);
+
+impl Gesture {
+    fn touch(&self) {
+        self.0.set(Some(Instant::now()));
+    }
+
+    fn since_ms(&self) -> Option<u64> {
+        self.0.get().map(|at| at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64)
+    }
+}
+
+/// Blocks are logged once: the same address twice in a row says nothing more.
+#[derive(Clone, Default)]
+pub struct BlockLog(Rc<RefCell<Option<String>>>);
+
+impl BlockLog {
+    /// True when `address` is not the one logged last (so the caller logs it).
+    pub fn first_time(&self, address: &str) -> bool {
+        let mut last = self.0.borrow_mut();
+        if last.as_deref() == Some(address) {
+            return false;
+        }
+        *last = Some(address.to_owned());
+        true
+    }
+}
+
+/// What the lock does with an external address now: opens it for a person who just clicked, else blocks it and
+/// logs the block once. Returns whether the browser was opened.
+fn external(address: &str, gesture: &Gesture, log: &BlockLog) -> bool {
+    match external_decision(gesture.since_ms()) {
+        External::Open => {
+            open_in_browser(address);
+            true
+        }
+        External::Block => {
+            if log.first_time(address) {
+                let host = url::Url::parse(address).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or_default();
+                eprintln!("neko-rune: blocked the web panel opening {host} without a click or keypress");
+            }
+            false
+        }
+    }
+}
+
+// ---- downloads ---------------------------------------------------------------------------------
+
+/// Where a download is saved: `dir` (the person's Downloads folder) and the file's own name from `suggested`,
+/// the path the web view proposed. Only the final name is used (no folders, no `..`, no leading dot), and a
+/// file already there is never replaced: `report.csv` becomes `report 2.csv`.
+pub fn downloads_destination(suggested: &Path, dir: &Path) -> PathBuf {
+    let raw = suggested.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let clean: String = raw.chars().filter(|c| !c.is_control() && !matches!(c, '/' | '\\' | ':')).collect();
+    let clean = clean.trim().trim_start_matches('.').trim().to_owned();
+    let name = if clean.is_empty() { "download".to_owned() } else { clean };
+    let first = dir.join(&name);
+    if !first.exists() {
+        return first;
+    }
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_owned(), format!(".{e}")),
+        _ => (name.clone(), String::new()),
+    };
+    (2..10_000).map(|n| dir.join(format!("{stem} {n}{ext}"))).find(|p| !p.exists()).unwrap_or_else(|| dir.join(format!("{stem} {}{ext}", std::process::id())))
+}
+
+fn downloads_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Downloads")).filter(|d| d.is_dir())
 }
 
 /// The port of a signed address, when it is one this client may use: `http://127.0.0.1:<port>/…`.
@@ -143,7 +252,11 @@ pub fn remember_window(handle: &WindowHandle) {
 
 /// `wry`'s web view: transparent (the page paints only its content over the panel), no developer tools,
 /// no persistent storage (the sign-in cookie is not left on disk), and the navigation lock.
-pub struct WryFactory;
+#[derive(Default)]
+pub struct WryFactory {
+    /// What the view tells the window ("Saved to Downloads"): the host passes it on as a toast.
+    notes: Rc<RefCell<Vec<String>>>,
+}
 
 struct WryNative(wry::WebView);
 
@@ -175,8 +288,33 @@ impl Native for WryNative {
 impl Factory for WryFactory {
     fn create(&self, address: &str, port: u16, bounds: Rect, visible: bool) -> Result<Box<dyn Native>, String> {
         let window = WINDOW.with(|w| w.borrow().clone()).ok_or("The window is not ready.")?;
+        let gesture = Gesture::default();
+        let log = BlockLog::default();
+        let (nav_gesture, nav_log, window_gesture, window_log, ipc_gesture) = (gesture.clone(), log.clone(), gesture.clone(), log.clone(), gesture);
+        let (started, finished) = (self.notes.clone(), self.notes.clone());
         let builder = wry::WebViewBuilder::new()
             .with_url(address)
+            // A trusted click or keypress in any frame tells the host, so a link the person pressed may open their browser.
+            .with_initialization_script(GESTURE_SCRIPT)
+            .with_ipc_handler(move |request| {
+                if request.body() == "gesture" && decide(&request.uri().to_string(), port) == Nav::Allow {
+                    ipc_gesture.touch();
+                }
+            })
+            // Downloads go to ~/Downloads under their own name, and the window says so.
+            .with_download_started_handler(move |_url, path| match downloads_dir() {
+                Some(dir) => {
+                    *path = downloads_destination(path, &dir);
+                    true
+                }
+                None => {
+                    started.borrow_mut().push("The download could not be saved: there is no Downloads folder.".to_owned());
+                    false
+                }
+            })
+            .with_download_completed_handler(move |_url, _path, ok| {
+                finished.borrow_mut().push(if ok { "Saved to Downloads".to_owned() } else { "The download did not finish.".to_owned() });
+            })
             .with_bounds(wry_rect(bounds))
             .with_visible(visible)
             .with_transparent(true)
@@ -187,15 +325,15 @@ impl Factory for WryFactory {
             .with_navigation_handler(move |next| match decide(&next, port) {
                 Nav::Allow => true,
                 Nav::Browser => {
-                    open_in_browser(&next);
+                    external(&next, &nav_gesture, &nav_log);
                     false
                 }
                 Nav::Refuse => false,
             })
-            // `window.open` and `target=_blank` never open a second view.
+            // `window.open` and `target=_blank` never open a second view; the browser opens for a click only.
             .with_new_window_req_handler(move |next, _| {
                 if decide(&next, port) == Nav::Browser {
-                    open_in_browser(&next);
+                    external(&next, &window_gesture, &window_log);
                 }
                 wry::NewWindowResponse::Deny
             });
@@ -260,6 +398,8 @@ pub struct WebHost {
     /// Views made so far (a measurement and a test read this).
     made: Cell<usize>,
     last_error: RefCell<Option<String>>,
+    /// What the view told the window to say (shared with the factory).
+    notes: Rc<RefCell<Vec<String>>>,
 }
 
 impl Default for WebHost {
@@ -283,12 +423,20 @@ impl WebHost {
             off_since: Cell::new(None),
             made: Cell::new(0),
             last_error: RefCell::new(None),
+            notes: Rc::new(RefCell::new(Vec::new())),
         }
     }
 
     /// The real one, for the window.
     pub fn windowed() -> WebHost {
-        WebHost::new(Some(Rc::new(WryFactory)))
+        let factory = WryFactory::default();
+        let notes = factory.notes.clone();
+        WebHost { notes, ..WebHost::new(Some(Rc::new(factory))) }
+    }
+
+    /// What the view has said since the last call ("Saved to Downloads"), for the window to show.
+    pub fn drain_notes(&self) -> Vec<String> {
+        std::mem::take(&mut *self.notes.borrow_mut())
     }
 
     /// What the panel asks for in this build of the view (`None`: no web viewer is on screen).
@@ -721,5 +869,78 @@ mod tests {
         assert_eq!(fresh.needs_signing(), None);
         fresh.signing_failed(&route, "no".into());
         assert_eq!(fresh.needs_signing().as_deref(), Some(route.as_str()));
+    }
+
+    // ---- the click rule and downloads (the P3b review's open items) -----------------------------
+
+    #[test]
+    fn the_browser_opens_only_within_a_second_of_a_click_or_keypress_in_the_view() {
+        assert_eq!(GESTURE_WINDOW_MS, 1000);
+        // No gesture at all (a page that set `location` by itself): blocked.
+        assert_eq!(external_decision(None), External::Block);
+        // After one: open while it is at most a second old.
+        for ms in [0, 1, 250, 999, 1000] {
+            assert_eq!(external_decision(Some(ms)), External::Open, "{ms} ms after the click");
+        }
+        for ms in [1001, 1500, 60_000, u64::MAX] {
+            assert_eq!(external_decision(Some(ms)), External::Block, "{ms} ms after the click is too late");
+        }
+    }
+
+    #[test]
+    fn a_gesture_counts_from_when_it_happened_and_a_block_is_logged_once() {
+        let g = Gesture::default();
+        assert_eq!(g.since_ms(), None, "no gesture yet");
+        g.touch();
+        assert!(g.since_ms().is_some_and(|ms| ms < GESTURE_WINDOW_MS), "just now");
+        let log = BlockLog::default();
+        assert!(log.first_time("https://a.example/"), "the first block is logged");
+        assert!(!log.first_time("https://a.example/"), "the same address again says nothing");
+        assert!(log.first_time("https://b.example/"), "another address is a new line");
+        assert!(log.first_time("https://a.example/"), "and back again is new once more");
+    }
+
+    #[test]
+    fn the_view_hears_only_trusted_clicks_and_keys_and_says_nothing_else() {
+        assert!(GESTURE_SCRIPT.contains("e.isTrusted"), "a script's own events do not count");
+        for event in ["pointerdown", "click", "keydown"] {
+            assert!(GESTURE_SCRIPT.contains(event), "{event}");
+        }
+        assert!(GESTURE_SCRIPT.contains("postMessage('gesture')") && GESTURE_SCRIPT.contains("true"), "capturing listeners");
+        assert!(!GESTURE_SCRIPT.contains("fetch(") && !GESTURE_SCRIPT.contains("XMLHttpRequest"), "it only posts the one word");
+    }
+
+    #[test]
+    fn a_download_saves_to_downloads_under_its_own_name_and_never_over_a_file() {
+        let dir = std::env::temp_dir().join(format!("neko-rune-downloads-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = |p: PathBuf| p.file_name().unwrap().to_string_lossy().into_owned();
+        // The view proposes a path; only its final name is used, and it lands in Downloads.
+        let first = downloads_destination(Path::new("/private/var/tmp/report.csv"), &dir);
+        assert_eq!(first, dir.join("report.csv"));
+        std::fs::write(&first, b"a").unwrap();
+        let second = downloads_destination(Path::new("report.csv"), &dir);
+        assert_eq!(name(second.clone()), "report 2.csv", "a file there is never replaced");
+        std::fs::write(&second, b"b").unwrap();
+        assert_eq!(name(downloads_destination(Path::new("report.csv"), &dir)), "report 3.csv");
+        // Names that try to leave the folder or hide, and names with nothing in them.
+        assert_eq!(downloads_destination(Path::new("../../.ssh/authorized_keys"), &dir), dir.join("authorized_keys"));
+        assert_eq!(downloads_destination(Path::new(".hidden"), &dir), dir.join("hidden"));
+        assert_eq!(downloads_destination(Path::new("a\u{0}b:c/d.txt"), &dir), dir.join("d.txt"));
+        assert_eq!(downloads_destination(Path::new(""), &dir), dir.join("download"));
+        assert_eq!(downloads_destination(Path::new("noext"), &dir), dir.join("noext"));
+        for p in [first, second] {
+            assert!(p.starts_with(&dir));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn what_the_view_says_reaches_the_window_once() {
+        let host = WebHost::windowed();
+        assert!(host.drain_notes().is_empty());
+        host.notes.borrow_mut().push("Saved to Downloads".to_owned());
+        assert_eq!(host.drain_notes(), ["Saved to Downloads"]);
+        assert!(host.drain_notes().is_empty(), "taken once");
     }
 }

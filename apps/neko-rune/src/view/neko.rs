@@ -269,7 +269,7 @@ fn handoffs(s: &App, t: &Neko, ids: &[String]) -> Vec<El> {
                 .center_y()
                 .radius(t.radius.row)
                 .hover(t.surface.hover)
-                .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+                .focus_ring(2.0, 2.0, t.kit.c.border_focus)
                 .on_press(move |s: &mut App| s.open_linked(&id))
                 .child(text(format!("Neko → {role}")).font(t.ty.id).color(t.text.muted).a11y_hidden())
                 .child(status_glyph(status_of(task.status), t, 12.0, Some("")))
@@ -428,7 +428,7 @@ pub fn strip(s: &App, t: &Neko) -> El {
         .center()
         .radius(t.radius.row)
         .hover(t.surface.hover)
-        .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(|s: &mut App| s.layout.set_neko_open(true))
         .child(icon(&icons::SPARK, 18.0).color(t.text.base).a11y_hidden());
     if waiting > 0 {

@@ -746,12 +746,18 @@ impl App {
         let panel_open = self.layout.context.is_open() || self.plugin_view.is_some();
         let existed = self.web_view.exists();
         self.web_view.tick(t, panel_open);
+        // What the view says (a download finished) is a toast of the window's.
+        let notes = self.web_view.drain_notes();
+        let spoke = !notes.is_empty();
+        if let Some(last) = notes.last() {
+            self.show_toast(last);
+        }
         // A view that is not on screen is looked at again, so its five minutes are kept.
         if self.web_view.exists() && !self.web_view.shown() {
             tx.wake_after(std::time::Duration::from_secs(30));
         }
         // The slot says "Opening…" until the view exists, and not after: the view is built again when that changes.
-        existed != self.web_view.exists()
+        existed != self.web_view.exists() || spoke
     }
 
     /// Keys the panel owns: ⌘+, ⌘−, ⌘0 zoom a PDF; W toggles a model's wireframe; Esc restores an

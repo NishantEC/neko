@@ -148,7 +148,8 @@ pub fn run() {
             let moved = s.tick_stream(t);
             s.tick_layout(t, tx);
             let panel = s.panel_tick(t, tx);
-            moved || panel
+            let toast = s.tick_toast(t, tx);
+            moved || panel || toast
         }),
         ..rune::AppSpec::new("Neko (Rune)", (1360.0, 840.0), init, view::view)
     };

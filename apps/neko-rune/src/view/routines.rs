@@ -93,7 +93,7 @@ fn routine_row(s: &App, t: &Neko, layer: &mut Vec<El>, data: &crate::link::Routi
         .radius(t.radius.row)
         .fill(if open { t.surface.hover } else { rune::Color::TRANSPARENT })
         .hover(t.surface.hover)
-        .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press({
             let id = id.clone();
             move |s: &mut App| s.open_routine(&id)

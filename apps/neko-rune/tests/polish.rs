@@ -301,3 +301,28 @@ fn the_chat_shows_30_messages_and_earlier_ones_load_on_request() {
     assert!(texts(&rt).contains(&"Earlier messages (40)".to_owned()), "30 more load");
     assert_eq!(rt.state.chat_pages, 2);
 }
+
+// ---------------------------------------------------------------- the web panel's download toast (P3b review)
+
+#[test]
+fn a_finished_download_says_saved_to_downloads_for_three_seconds() {
+    let mut rt = runtime(true, live);
+    assert!(!texts(&rt).contains(&"Saved to Downloads".to_owned()));
+    rt.update(|s, _| s.show_toast("Saved to Downloads"));
+    for _ in 0..10 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(texts(&rt).contains(&"Saved to Downloads".to_owned()), "the toast shows");
+    // Its clock starts the first tick after it shows, and it goes three seconds on.
+    rt.update(|s, tx| {
+        s.tick_toast(10.0, tx);
+    });
+    rt.update(|s, tx| {
+        assert!(!s.tick_toast(12.9, tx), "still up");
+        assert!(s.tick_toast(13.1, tx), "taken down");
+    });
+    for _ in 0..60 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(!texts(&rt).contains(&"Saved to Downloads".to_owned()), "and gone");
+}

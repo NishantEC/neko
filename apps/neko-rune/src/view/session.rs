@@ -276,7 +276,7 @@ fn composer(s: &App, t: &Neko, layer: &mut Vec<El>, ready: bool) -> El {
         .radius(t.radius.control)
         .fill(if s.steer_open { t.surface.active } else { Color::TRANSPARENT })
         .hover(t.surface.hover)
-        .focus_ring(2.0, 0.0, k.c.border_focus)
+        .focus_ring(2.0, 2.0, k.c.border_focus)
         .on_press(|s: &mut App| s.steer_open = !s.steer_open)
         .child(text(s.steer.label()).font(t.ty.meta).color(t.text.muted).a11y_hidden())
         .child(icon(k.glyph.chevron_down, 14.0).color(t.text.muted).a11y_hidden());

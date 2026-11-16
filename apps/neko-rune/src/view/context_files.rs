@@ -27,7 +27,7 @@ pub fn tab(s: &App, t: &Neko) -> El {
             .center_y()
             .radius(t.radius.control)
             .hover(t.surface.hover)
-            .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+            .focus_ring(2.0, 2.0, t.kit.c.border_focus)
             .on_press(|s: &mut App| s.panel_close_file())
             .child(icon(&icons::CHEVRON_LEFT, 16.0).color(t.text.muted).a11y_hidden())
             .child(text(name).font(t.ty.mono_meta).color(t.text.muted).truncate().min_w(0.0).a11y_hidden());

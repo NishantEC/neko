@@ -89,7 +89,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         window = window.child(session::region(s, &t, &mut layer, frame));
         if fit.context > 0.0 {
             window = window.child(grip(Region::Context, &t));
-            window = window.child(context::panel(s, &t, &mut layer, fit.context).w(fit.context));
+            window = window.child(context::panel(s, &t, &mut layer, fit.context).w(fit.context).transition(panel_transition()));
         }
     }
     if fit.neko_open {
@@ -99,12 +99,23 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         window = window.child(neko::strip(s, &t).w(NEKO_STRIP).key("neko"));
     }
     palette::mount(s, &t, &mut layer);
+    if let Some((words, _)) = s.toast.as_ref() {
+        // Standing still, like everything that is not the hover fill or the panel (polish spec §4).
+        let toast = rune_kit::Toast::new("toast", words.clone()).icon(&t.kit, &crate::icons::CHECK_LINE).build(&t.kit).transition(rune::Transition::none()).motion(rune::Spring::NONE);
+        layer.push(rune_kit::ToastRegion::new().toast(toast).build(&t.kit));
+    }
     // Every popover, menu, select, dialog, the palette and toast is an element of this layer: while there is
     // one, a native web view (always above Rune's surface) is hidden.
     s.web_view.overlays.set(layer.len());
     s.web_view.sync();
     // Hover fills arrive and leave in 120 ms, ease-out, everywhere in the window (polish spec §4).
     root(window, layer).hover_motion_within(crate::motion::hover(), crate::motion::hover())
+}
+
+/// How the context panel comes and goes: it slides in from its edge and fades, on a 180 ms Snappy spring (polish spec §4).
+fn panel_transition() -> rune::Transition {
+    let spring = crate::motion::panel();
+    rune::Transition::move_edge(rune::Edge::Trailing).combined(rune::Transition::opacity()).springs(rune::SpringPair::new(spring, spring))
 }
 
 /// The draggable edge between two regions: a transparent strip that resizes the region beside it
@@ -159,7 +170,7 @@ fn icon_button(glyph: &'static rune::Icon, label: &str, key: &str, t: &Neko, on_
         .center()
         .radius(t.radius.control)
         .hover(t.surface.hover)
-        .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(on_press)
         .child(icon(glyph, 16.0).color(t.text.muted).a11y_hidden())
 }
@@ -178,7 +189,7 @@ fn nav_label_row(label: &str, key: &str, active: bool, t: &Neko) -> El {
         .radius(t.radius.row)
         .fill(if active { t.surface.selected } else { rune::Color::TRANSPARENT })
         .hover(t.surface.hover)
-        .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .child(text(label.to_owned()).font(t.ty.row).color(if active { t.text.base } else { t.text.muted }).truncate().a11y_hidden())
 }
 

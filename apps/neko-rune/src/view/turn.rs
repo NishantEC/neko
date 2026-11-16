@@ -59,7 +59,7 @@ pub fn tool_card(s: &App, t: &Neko, w: Where, tool: &Tool, turn_id: &str) -> El 
         .center_y()
         .radius(t.radius.row)
         .hover(t.surface.hover)
-        .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(move |s: &mut App| s.toggle_tool(&owned))
         .child(text(if open { "▾" } else { "▸" }).font(t.ty.meta).color(t.text.faint).a11y_hidden())
         .child(status_glyph(tool_kind(tool.state), t, 12.0, Some("")))
