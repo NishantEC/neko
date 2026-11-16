@@ -89,6 +89,12 @@ write-side field). Decision and phases: `docs/decisions/0002-rune-for-everything
 - **Plugin pages (slot b).** "More" has a **Plugins** heading with one entry per reported page (`App::plugin_pages`); choosing one
   opens `App::plugin_view`: the middle region is the page's whole content, `<page-route>?embed=1`. Choosing a session or a full view leaves it.
 
+### Licences
+
+New crates are MIT or Apache-2.0 (`wry` 0.57, `url`, `objc2-web-kit` also Zlib) with one exception: **`option-ext` 0.2.0 is MPL-2.0**,
+pulled in by `wry` → `dirs` → `dirs-sys` and not avoidable by a feature. It is an unmodified dependency, as `resvg`/`usvg` already
+are (P3a); no GPL, LGPL or AGPL came in. Say so if the "MIT/Apache only" rule is meant to cover transitive MPL.
+
 ### Not verified, on purpose
 
 The rules say a real window may only open when the keyboard and mouse have been idle for 180 s; the Mac was in use for the whole
