@@ -52,12 +52,13 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
             }
         }
     }
-    for (ws, name, list) in &groups {
+    for (i, (ws, name, list)) in groups.iter().enumerate() {
         body = body.child(
             row()
                 .key(format!("routines-group-{ws}"))
                 .w_full()
                 .h(32.0)
+                .mt(if i == 0 { 0.0 } else { 16.0 })
                 .px(6.0)
                 .gap(8.0)
                 .center_y()

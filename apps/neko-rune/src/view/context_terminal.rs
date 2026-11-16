@@ -76,6 +76,7 @@ pub fn tab(s: &App, t: &Neko) -> El {
                                 .focusable(true)
                                 .h(24.0)
                                 .px(6.0)
+                                .ml(-6.0)
                                 .mt(2.0)
                                 .center_y()
                                 .radius(t.radius.control)

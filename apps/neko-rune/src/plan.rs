@@ -20,36 +20,49 @@ pub struct Step {
     pub state: StepState,
 }
 
-fn strip_marker(line: &str) -> Option<&str> {
+/// A list line: its marker taken off, and whether it sits at the left edge (an indented line explains the step above it).
+/// A bullet is `-`, `*` or `+` and a space (so `**bold**` is not one); a number is digits and `.` or `)`.
+fn list_item(line: &str) -> Option<(&str, bool, bool)> {
+    let top = !line.starts_with([' ', '\t']);
     let line = line.trim_start();
-    if let Some(rest) = line.strip_prefix(['-', '*', '+']) {
-        return Some(rest.trim_start());
+    if let Some(rest) = line.strip_prefix(['-', '*', '+']).filter(|r| r.starts_with(' ')) {
+        return Some((rest.trim_start(), top, false));
     }
     let digits = line.chars().take_while(char::is_ascii_digit).count();
-    if digits > 0 && line[digits..].starts_with(['.', ')']) {
-        return Some(line[digits + 1..].trim_start());
+    if digits > 0 && line[digits..].starts_with(['.', ')']) && line[digits + 1..].starts_with(' ') {
+        return Some((line[digits + 1..].trim_start(), top, true));
     }
     None
 }
 
-/// The plan's steps, in order, with the first unticked one active while the task builds.
+/// A step's words without the Markdown around them (`**bold**`, `` `code` ``).
+fn plain(text: &str) -> String {
+    text.replace("**", "").replace('`', "").trim().to_owned()
+}
+
+/// The plan's steps, in order, with the first unticked one active while the task builds. A plan with boxes is its
+/// boxes; else its numbered lines at the left edge; else its bullets at the left edge. Indented lines and prose explain
+/// a step and are not one.
 pub fn steps(plan: &str, status: TaskStatus) -> Vec<Step> {
     let mut boxed: Vec<(String, bool)> = Vec::new();
-    let mut listed: Vec<String> = Vec::new();
+    let mut numbered: Vec<String> = Vec::new();
+    let mut bullets: Vec<String> = Vec::new();
     for line in plan.lines() {
-        let Some(item) = strip_marker(line) else { continue };
+        let Some((item, top, is_number)) = list_item(line) else { continue };
         if let Some(rest) = item.strip_prefix("[x]").or_else(|| item.strip_prefix("[X]")) {
-            boxed.push((rest.trim().to_owned(), true));
+            boxed.push((plain(rest), true));
         } else if let Some(rest) = item.strip_prefix("[ ]") {
-            boxed.push((rest.trim().to_owned(), false));
-        } else if !item.is_empty() {
-            listed.push(item.to_owned());
+            boxed.push((plain(rest), false));
+        } else if top && !item.is_empty() {
+            if is_number { numbered.push(plain(item)) } else { bullets.push(plain(item)) }
         }
     }
-    let mut out: Vec<Step> = if boxed.is_empty() {
-        listed.into_iter().map(|text| Step { text, state: StepState::Todo }).collect()
-    } else {
+    let mut out: Vec<Step> = if !boxed.is_empty() {
         boxed.into_iter().map(|(text, done)| Step { text, state: if done { StepState::Done } else { StepState::Todo } }).collect()
+    } else if !numbered.is_empty() {
+        numbered.into_iter().map(|text| Step { text, state: StepState::Todo }).collect()
+    } else {
+        bullets.into_iter().map(|text| Step { text, state: StepState::Todo }).collect()
     };
     if status == TaskStatus::Building
         && let Some(first) = out.iter_mut().find(|s| s.state == StepState::Todo)
@@ -73,9 +86,12 @@ mod tests {
     }
 
     #[test]
-    fn a_plan_without_boxes_is_its_numbered_and_bulleted_lines() {
-        let s = steps("Steps:\n1. Read the job\n2) Add a retry\n- Test it\nand some prose", TaskStatus::AwaitingApproval);
-        assert_eq!(s.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(), ["Read the job", "Add a retry", "Test it"]);
+    fn a_plan_without_boxes_is_its_numbered_lines_else_its_bullets_and_markdown_is_not_a_step() {
+        let s = steps("Steps:\n1. Read the job\n2) Add a **retry**\n   - an explaining bullet\n- Test it\nand some prose", TaskStatus::AwaitingApproval);
+        assert_eq!(s.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(), ["Read the job", "Add a retry"], "numbered lines at the left edge");
+        let s = steps("- Read the job\n- Add a retry\n  - detail", TaskStatus::AwaitingApproval);
+        assert_eq!(s.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(), ["Read the job", "Add a retry"], "else the bullets");
+        assert!(steps("**Bold lead.** prose\n*emphasis* prose", TaskStatus::Building).is_empty(), "emphasis is not a bullet");
         assert!(steps("Only prose.", TaskStatus::Building).is_empty());
     }
 }

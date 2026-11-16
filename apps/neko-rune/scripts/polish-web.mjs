@@ -13,9 +13,14 @@ try {
   const page = await context.newPage();
   await page.goto(`${base}/?token=${process.env.TOKEN}`, { waitUntil: "load" });
   await page.waitForTimeout(3000);
-  for (const [name, hash] of JSON.parse(process.env.SHOTS)) {
+  for (const [name, hash, scrollTo] of JSON.parse(process.env.SHOTS)) {
     await page.evaluate((h) => { location.hash = h; }, hash);
     await page.waitForTimeout(2500);
+    // A third entry scrolls the first element with that text to the top (the Inbox page lists the routines under the Needs-you items).
+    if (scrollTo) {
+      await page.getByText(scrollTo, { exact: true }).first().evaluate((e) => e.scrollIntoView({ block: "start" })).catch(() => {});
+      await page.waitForTimeout(500);
+    }
     await page.screenshot({ path: `${process.env.OUT}/${name}-web.png` });
     console.log("web", name, await page.evaluate(() => location.hash));
   }

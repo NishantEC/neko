@@ -62,11 +62,16 @@ snap neko-column
 snap routines NEKO_RUNE_VIEW=inbox
 snap settings NEKO_RUNE_VIEW=settings
 snap settings-permissions NEKO_RUNE_VIEW=settings NEKO_RUNE_SECTION=permissions
+# Rune-only extras, for what the pairs' tickets do not show: the Plan and Info tabs, the header menu, the other new sections.
+snap session-plan-tab NEKO_RUNE_OPEN_TASK="${PLAN_TAB_TITLE:-Let web checkout choose its payment gateway}" NEKO_RUNE_TAB=plan
+snap session-info-pr NEKO_RUNE_OPEN_TASK="${INFO_TITLE:-Triage interrupted message stream errors in unified messenger on Firefox}" NEKO_RUNE_TAB=info
+snap session-menu NEKO_RUNE_OPEN_TASK="${PLAN_TITLE:-Optimize flow screens for mobile views}" NEKO_RUNE_MENU=1
+for section in appearance diagnostics rulebook; do snap "settings-$section" NEKO_RUNE_VIEW=settings NEKO_RUNE_SECTION="$section"; done
 
 # The web half: the same screens at the same size and scale (routes need the task ids, in PLAN_ID and PANEL_ID).
 "$HOME/.agents/bin/shared-chrome" acquire neko-polish >/dev/null
 token="$(cat "$data/web-token")"
-SHOTS="[[\"home\",\"/\"],[\"session-plan\",\"/tasks?task=${PLAN_ID:-}&view=full\"],[\"session-panel\",\"/tasks?task=${PANEL_ID:-}&view=full\"],[\"neko-column\",\"/\"],[\"routines\",\"/inbox\"],[\"settings\",\"/settings\"],[\"settings-permissions\",\"/settings?section=permissions\"]]" \
+SHOTS="[[\"home\",\"/\"],[\"session-plan\",\"/tasks?task=${PLAN_ID:-}&view=full\"],[\"session-panel\",\"/tasks?task=${PANEL_ID:-}&view=full\"],[\"neko-column\",\"/\"],[\"routines\",\"/inbox\",\"Quiet\"],[\"settings\",\"/settings\"],[\"settings-permissions\",\"/settings?section=permissions\"]]" \
   PORT="$port" TOKEN="$token" OUT="$out" THEME="$theme" PLAYWRIGHT_CORE="${PLAYWRIGHT_CORE:?set PLAYWRIGHT_CORE}" node "$here/scripts/polish-web.mjs"
 "$HOME/.agents/bin/shared-chrome" release neko-polish >/dev/null
 echo "pairs are in $out (not committed)"

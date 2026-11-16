@@ -104,6 +104,10 @@ fn init() -> App {
             if let Some(view) = std::env::var("NEKO_RUNE_VIEW").ok().and_then(|v| views::FullView::ALL.into_iter().find(|f| f.web_id() == v)) {
                 app.open_view(view);
             }
+            // The session header's menu open, for the pictures.
+            if std::env::var_os("NEKO_RUNE_MENU").is_some() {
+                app.session_menu = true;
+            }
             // The Settings section for the pictures (`NEKO_RUNE_SECTION=permissions`).
             if let Some(section) = std::env::var("NEKO_RUNE_SECTION").ok().and_then(|v| pages::Section::ALL.into_iter().find(|x| x.key() == v)) {
                 app.pages.section = section;
