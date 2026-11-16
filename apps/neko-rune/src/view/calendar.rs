@@ -126,7 +126,7 @@ fn header(s: &App, t: &Neko, days: &[i64]) -> Vec<El> {
         icon_button(&icons::CHEVRON_RIGHT, "Later", "cal-next", t, |s: &mut App| s.cal_step(1)),
         SegmentedControl::new(&["Day", "Week", "Month"], Some(selected))
             .label("View")
-            .width(Some(180.0))
+            .width(Some(216.0))
             .on_pick(|s: &mut App, i, _| s.cal_mode([CalMode::Day, CalMode::Week, CalMode::Month][i.min(2)]))
             .build(&t.kit)
             .key("cal-mode"),

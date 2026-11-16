@@ -154,20 +154,18 @@ pub fn drop_overlay(s: &App, t: &Neko) -> Option<El> {
         return None;
     }
     Some(
-        el().key("drop-overlay")
+        col().key("drop-overlay")
             .role("status")
             .label("Drop to attach")
             .absolute(0.0, 0.0)
             .w_full()
             .h_full()
+            .padding(12.0)
             .child(
                 row()
                     .key("drop-frame")
-                    .absolute(12.0, 12.0)
                     .w_full()
-                    .h_full()
-                    .mr(24.0)
-                    .mb(24.0)
+                    .grow(1.0)
                     .center()
                     .radius(16.0)
                     .fill(t.meaning.iris.alpha(0.06))

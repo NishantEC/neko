@@ -195,7 +195,7 @@ fn base(s: &mut App, view: FullView) {
 
 /// The made-up now of the calendar scenes: late morning in the viewer's own time zone, so the
 /// current-time line is on the grid wherever the snapshot is made.
-fn calendar_now() -> i64 {
+pub fn calendar_now() -> i64 {
     local_at(clock::week_start(DEMO_NOW), 2 * 24 + 11, 40)
 }
 

@@ -32,6 +32,7 @@ pub mod scope;
 pub mod scenes;
 pub mod readers;
 pub mod runtime_pick;
+pub mod scenes_batch_a;
 pub mod scenes_pages;
 pub mod scenes_panel;
 pub mod status;
@@ -113,6 +114,33 @@ fn init() -> App {
             }
             if let Some(view) = std::env::var("NEKO_RUNE_VIEW").ok().and_then(|v| views::FullView::ALL.into_iter().find(|f| f.web_id() == v)) {
                 app.open_view(view);
+            }
+            // Parity batch A's screens on the person's own data, for the pictures (`NEKO_RUNE_PREVIEW=palette|all|month|closed|model|shortcuts|slash|scope|cadence`).
+            if let Some(what) = std::env::var("NEKO_RUNE_PREVIEW").ok().filter(|v| !v.is_empty()) {
+                match what.as_str() {
+                    "palette" => app.palette_toggle(),
+                    "all" => app.open_all_sessions(),
+                    "month" => {
+                        app.open_view(views::FullView::Calendar);
+                        app.cal_mode(pages::CalMode::Month);
+                    }
+                    "closed" => app.toggle("closed:open"),
+                    "model" => app.runtime_toggle(),
+                    "shortcuts" => app.shortcuts_open = true,
+                    "slash" => {
+                        app.ask.replace_text("/");
+                        app.ask.focused = true;
+                    }
+                    "scope" => app.scope_open = true,
+                    "cadence" => {
+                        app.open_view(views::FullView::Routines);
+                        let first = app.pages.routines.as_ref().and_then(|r| r.views.first().map(|v| v.routine.id.clone()));
+                        if let Some(id) = first {
+                            app.open_routine(&id);
+                        }
+                    }
+                    _ => {}
+                }
             }
             // The session header's menu open, for the pictures.
             if std::env::var_os("NEKO_RUNE_MENU").is_some() {

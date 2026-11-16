@@ -244,7 +244,7 @@ fn panel(s: &App, t: &Neko) -> El {
         .child(icon(&icons::REFRESH, 16.0).color(t.text.muted).a11y_hidden());
     let head = row().w_full().gap(8.0).center_y().child(text("Model & effort").font(TextStyle { size: 15.0, weight: 600.0, ..t.ty.row }).color(t.text.base).grow(1.0)).child(refresh);
 
-    let search = TextInput::new(&ui.query).placeholder("Search models").label("Search available models").on_edit(|s: &mut App| &mut s.runtime.query).build(&t.kit).key("runtime-search");
+    let search = TextInput::new(&ui.query).placeholder("Search models").label("Search available models").on_edit(|s: &mut App| &mut s.runtime.query).build(&t.kit).key("runtime-search").w_full();
     let list = col().key("runtime-model-scroll").w_full().max_h(216.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(models(s, t));
 
     let mut effort_options = vec![("auto".to_owned(), "Auto".to_owned())];

@@ -250,6 +250,10 @@ fn panel_closed(s: &mut App) {
     s.layout.context.set_open(false);
 }
 
+pub fn live_scene(s: &mut App) {
+    live(s);
+}
+
 fn live(s: &mut App) {
     s.apply_link(LinkEvent::Live(demo_full("t0")));
     s.open_first_session();
@@ -361,6 +365,28 @@ pub const SCENES: &[Scene] = &[
         s.activity_open = true;
     }),
     ("settings-narrow", crate::scenes_pages::settings_narrow),
+    ("ba-review", |s| crate::scenes_batch_a::run("ba-review", s)),
+    ("ba-model", |s| crate::scenes_batch_a::run("ba-model", s)),
+    ("ba-menu", |s| crate::scenes_batch_a::run("ba-menu", s)),
+    ("ba-delete", |s| crate::scenes_batch_a::run("ba-delete", s)),
+    ("ba-stop-all", |s| crate::scenes_batch_a::run("ba-stop-all", s)),
+    ("ba-all-sessions", |s| crate::scenes_batch_a::run("ba-all-sessions", s)),
+    ("ba-slash", |s| crate::scenes_batch_a::run("ba-slash", s)),
+    ("ba-mention", |s| crate::scenes_batch_a::run("ba-mention", s)),
+    ("ba-chips", |s| crate::scenes_batch_a::run("ba-chips", s)),
+    ("ba-drop", |s| crate::scenes_batch_a::run("ba-drop", s)),
+    ("ba-queue", |s| crate::scenes_batch_a::run("ba-queue", s)),
+    ("ba-palette", |s| crate::scenes_batch_a::run("ba-palette", s)),
+    ("ba-palette-typed", |s| crate::scenes_batch_a::run("ba-palette-typed", s)),
+    ("ba-shortcuts", |s| crate::scenes_batch_a::run("ba-shortcuts", s)),
+    ("ba-text-menu", |s| crate::scenes_batch_a::run("ba-text-menu", s)),
+    ("ba-scope", |s| crate::scenes_batch_a::run("ba-scope", s)),
+    ("ba-inbox", |s| crate::scenes_batch_a::run("ba-inbox", s)),
+    ("ba-cadence", |s| crate::scenes_batch_a::run("ba-cadence", s)),
+    ("ba-cadence-daily", |s| crate::scenes_batch_a::run("ba-cadence-daily", s)),
+    ("ba-month", |s| crate::scenes_batch_a::run("ba-month", s)),
+    ("ba-event", |s| crate::scenes_batch_a::run("ba-event", s)),
+    ("ba-toasts", |s| crate::scenes_batch_a::run("ba-toasts", s)),
     ("routines", crate::scenes_pages::routines),
     ("routines-open", crate::scenes_pages::routines_open),
     ("calendar", crate::scenes_pages::calendar),

@@ -31,9 +31,9 @@ mkdir -p "$data" "$out"
 rm -f "$data"/neko.db*
 sqlite3 -readonly "$live/neko.db" ".backup $data/neko.db"
 # The web build the installed app serves: its swapped-in `web-live`, else the build of its own clone of the published
-# repository. A copy, so nothing of the live folder is ever written.
+# repository, else the one inside the installed app. A copy, so nothing of the live folder is ever written.
 rm -rf "$web"
-for candidate in "$live/web-live" "$live/source/web/dist"; do
+for candidate in "$live/web-live" "$live/source/web/dist" "/Applications/Neko.app/Contents/Resources/web"; do
   if [[ -f "$candidate/index.html" ]]; then cp -RL "$candidate" "$web"; break; fi
 done
 [[ -f "$web/index.html" ]] || { echo "no web build found: the web half of the pairs needs one (web-live or source/web/dist)" >&2; exit 1; }
@@ -67,11 +67,23 @@ snap session-plan-tab NEKO_RUNE_OPEN_TASK="${PLAN_TAB_TITLE:-Let web checkout ch
 snap session-info-pr NEKO_RUNE_OPEN_TASK="${INFO_TITLE:-Triage interrupted message stream errors in unified messenger on Firefox}" NEKO_RUNE_TAB=info
 snap session-menu NEKO_RUNE_OPEN_TASK="${PLAN_TITLE:-Optimize flow screens for mobile views}" NEKO_RUNE_MENU=1
 for section in appearance diagnostics rulebook; do snap "settings-$section" NEKO_RUNE_VIEW=settings NEKO_RUNE_SECTION="$section"; done
+# Parity batch A (2026-11-16): the new screens on the same data. The ones with a web page are paired below (All sessions, Calendar,
+# Inbox); the rest are Rune-only because the web reaches them by a click or a key, not an address.
+snap ba-all NEKO_RUNE_PREVIEW=all
+snap ba-month NEKO_RUNE_PREVIEW=month
+snap ba-closed NEKO_RUNE_PREVIEW=closed
+snap ba-palette NEKO_RUNE_PREVIEW=palette
+snap ba-shortcuts NEKO_RUNE_PREVIEW=shortcuts
+snap ba-model NEKO_RUNE_OPEN_TASK="${PLAN_TITLE:-Optimize flow screens for mobile views}" NEKO_RUNE_PREVIEW=model
+snap ba-slash NEKO_RUNE_PREVIEW=slash
+snap ba-scope NEKO_RUNE_PREVIEW=scope
+snap ba-cadence NEKO_RUNE_PREVIEW=cadence
+snap ba-menu NEKO_RUNE_OPEN_TASK="${PLAN_TITLE:-Optimize flow screens for mobile views}" NEKO_RUNE_MENU=1
 
 # The web half: the same screens at the same size and scale (routes need the task ids, in PLAN_ID and PANEL_ID).
 "$HOME/.agents/bin/shared-chrome" acquire neko-polish >/dev/null
 token="$(cat "$data/web-token")"
-SHOTS="[[\"home\",\"/\"],[\"session-plan\",\"/tasks?task=${PLAN_ID:-}&view=full\"],[\"session-panel\",\"/tasks?task=${PANEL_ID:-}&view=full\"],[\"neko-column\",\"/\"],[\"routines\",\"/inbox\",\"Quiet\"],[\"settings\",\"/settings\"],[\"settings-permissions\",\"/settings?section=permissions\"]]" \
+SHOTS="[[\"home\",\"/\"],[\"session-plan\",\"/tasks?task=${PLAN_ID:-}&view=full\"],[\"session-panel\",\"/tasks?task=${PANEL_ID:-}&view=full\"],[\"neko-column\",\"/\"],[\"routines\",\"/inbox\",\"Quiet\"],[\"settings\",\"/settings\"],[\"settings-permissions\",\"/settings?section=permissions\"],[\"ba-all\",\"/tasks\"],[\"ba-month\",\"/calendar\"],[\"ba-closed\",\"/inbox\"]]" \
   PORT="$port" TOKEN="$token" OUT="$out" THEME="$theme" PLAYWRIGHT_CORE="${PLAYWRIGHT_CORE:?set PLAYWRIGHT_CORE}" node "$here/scripts/polish-web.mjs"
 "$HOME/.agents/bin/shared-chrome" release neko-polish >/dev/null
 echo "pairs are in $out (not committed)"
