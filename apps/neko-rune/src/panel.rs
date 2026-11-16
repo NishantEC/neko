@@ -638,6 +638,10 @@ impl App {
     /// file or artifact when nothing shows it. Runs every frame; cheap when there is nothing to drop.
     pub fn panel_settle(&mut self) {
         let target = self.panel_target();
+        // The Terminal tab's rows (up to 200 commands) are kept only while the tab is the one showing.
+        if !(self.layout.context.is_open() && !self.panel.hidden.get() && self.panel_tab() == Some(Tab::Terminal)) {
+            self.panel.terminal.replace(None);
+        }
         let resident = self.panel.open.as_ref().filter(|o| Some(&o.target) == target.as_ref() && matches!(o.content, Content::Ready(_))).map(|o| o.target.key());
         self.panel.states.release_except(resident.as_ref());
         if target.is_none() && self.panel.open.is_some() {

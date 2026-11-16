@@ -103,24 +103,47 @@ impl Confined {
         Ok(real)
     }
 
-    /// The file's canonical path and size, checked as [`Confined::read`] checks them.
-    pub fn file(&self, path: &Path) -> Result<(PathBuf, u64), Refused> {
+    /// The file's canonical path and what it was when it was checked, as [`Confined::read`] checks it.
+    /// A canonical path is never a link: one that is now is a swap, and is refused.
+    fn checked(&self, path: &Path) -> Result<(PathBuf, std::fs::Metadata), Refused> {
         let real = self.resolve(path)?;
-        let meta = std::fs::metadata(&real).map_err(|_| Refused::Unreadable)?;
+        let meta = std::fs::symlink_metadata(&real).map_err(|_| Refused::Unreadable)?;
+        if meta.file_type().is_symlink() {
+            return Err(Refused::Outside);
+        }
         if !meta.is_file() {
             return Err(Refused::NotAFile);
         }
         if meta.len() > MAX_PREVIEW {
             return Err(Refused::TooLarge(meta.len()));
         }
+        Ok((real, meta))
+    }
+
+    /// The file's canonical path and size, checked as [`Confined::read`] checks them.
+    pub fn file(&self, path: &Path) -> Result<(PathBuf, u64), Refused> {
+        let (real, meta) = self.checked(path)?;
         Ok((real, meta.len()))
+    }
+
+    /// Opens `real` and proves it is the very file that was checked (same device and inode): a path
+    /// swapped for a link, or a folder above it swapped, between the check and the open opens something
+    /// else, which is refused.
+    fn open_same(real: &Path, checked: &std::fs::Metadata) -> Result<std::fs::File, Refused> {
+        use std::os::unix::fs::MetadataExt;
+        let file = std::fs::File::open(real).map_err(|_| Refused::Unreadable)?;
+        let now = file.metadata().map_err(|_| Refused::Unreadable)?;
+        if (now.dev(), now.ino()) != (checked.dev(), checked.ino()) {
+            return Err(Refused::Outside);
+        }
+        Ok(file)
     }
 
     /// The file's bytes: at most [`MAX_PREVIEW`], read through `take` so a file that grows while it
     /// is read is refused too.
     pub fn read(&self, path: &Path) -> Result<(PathBuf, Vec<u8>), Refused> {
-        let (real, _) = self.file(path)?;
-        let file = std::fs::File::open(&real).map_err(|_| Refused::Unreadable)?;
+        let (real, meta) = self.checked(path)?;
+        let file = Self::open_same(&real, &meta)?;
         let mut bytes = Vec::new();
         file.take(MAX_PREVIEW + 1).read_to_end(&mut bytes).map_err(|_| Refused::Unreadable)?;
         if bytes.len() as u64 > MAX_PREVIEW {
@@ -242,6 +265,17 @@ mod tests {
         fs::write(root.join(".git"), "gitdir: /elsewhere").unwrap();
         assert_eq!(c.read(Path::new(".git")), Err(Refused::Hidden));
         assert!(!c.list().files.iter().any(|f| f.starts_with(".git")));
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn a_file_swapped_after_the_check_is_not_the_file_that_is_opened() {
+        let (base, root) = folder("swap");
+        let checked = std::fs::symlink_metadata(root.join("a.txt")).unwrap();
+        // The same file opens; another one (what a swapped link would lead to) does not.
+        assert!(Confined::open_same(&root.join("a.txt"), &checked).is_ok());
+        assert_eq!(Confined::open_same(&base.join("secret.txt"), &checked).unwrap_err(), Refused::Outside);
+        assert_eq!(Confined::open_same(&root.join("src/b.rs"), &checked).unwrap_err(), Refused::Outside);
         let _ = fs::remove_dir_all(base);
     }
 
