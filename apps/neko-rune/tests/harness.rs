@@ -692,3 +692,159 @@ fn the_files_tab_reads_the_sessions_folder_through_the_daemon_and_cannot_leave_i
     assert!(matches!(ask(&socket(&h), Request::TaskFolder { task_id: other }), Ok(Response::TaskFolder { path: None })));
     assert!(matches!(ask(&socket(&h), Request::TaskFolder { task_id: "no-such-task".into() }), Ok(Response::Error { .. })));
 }
+
+// ------------------------------------------------------------------------------------------------ parity batch A (the owner's brief of 2026-11-16)
+
+/// A free loopback port for the harness's web server (the harness turns the web bridge off unless it is given one).
+fn free_port() -> String {
+    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port().to_string()
+}
+
+#[test]
+fn batch_a_files_are_uploaded_over_http_and_found_for_a_mention() {
+    let port = free_port();
+    let Some(h) = start(&[("NEKO_WEB_PORT", port.as_str())]) else { return };
+    wait_for("the web token", || h.data.join("web-token").exists());
+    let mut rt = runtime(app(&h));
+    let id = id_of(&rt, "Rework the export batching");
+    pick(&mut rt, &id);
+    let dir = std::env::temp_dir().join(format!("nrh-a-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("notes.txt");
+    std::fs::write(&file, b"hello from the harness").unwrap();
+    rt.update(|s, _| s.attach_files(neko_rune::compose::Dest::Reply, std::slice::from_ref(&file)));
+    settle(&mut rt);
+    assert!(rt.state.http.is_some(), "the daemon signed its address (SignedWebUrl) and the client took the token from it");
+    let chips = rt.state.chips(neko_rune::compose::Dest::Reply).to_vec();
+    assert_eq!(chips.len(), 1);
+    let neko_rune::compose::ChipState::Ready { reference, is_image } = &chips[0].state else { panic!("{:?}", chips[0]) };
+    assert!(!is_image && reference.starts_with("[notes.txt](file://") && reference.contains("/attachments/"), "{reference}");
+    let kept = std::fs::read_dir(h.data.join("attachments")).unwrap().count();
+    assert_eq!(kept, 1, "the daemon kept the file in its own attachments folder");
+    // It rides in the message exactly as the web's composer sends it.
+    rt.update(|s, _| s.composer.replace_text("see the notes"));
+    let composed = rt.state.composed(neko_rune::compose::Dest::Reply, "see the notes");
+    assert_eq!(composed, format!("see the notes\n{reference}"));
+    // The `@` search is the web's `/api/files`: an answer (empty here: the harness's workspaces have no folders), never an error.
+    let http = rt.state.http.clone().unwrap();
+    assert!(http.files("note", "").is_ok());
+    // A refused token is one calm sentence, not a panic.
+    let wrong = neko_rune::link::http::Http::new(port.parse().unwrap(), &"0".repeat(64));
+    assert!(wrong.upload("x.txt", b"x").unwrap_err().0.contains("401") || wrong.upload("x.txt", b"x").is_err());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn batch_a_a_session_is_renamed_pinned_and_stopped_through_the_daemon() {
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    let id = id_of(&rt, "Rework the export batching");
+    pick(&mut rt, &id);
+    // Rename: Enter saves what the title field holds; the daemon's answer is the new title.
+    rt.update(|s, _| s.do_action(&id, neko_rune::task_actions::Act::Rename));
+    settle(&mut rt);
+    rt.update(|s, _| s.rename.as_mut().unwrap().edit.replace_text("Batch the exports"));
+    press(&mut rt, Key::Enter, Mods::default());
+    assert!(rt.state.session().is_some_and(|t| t.title == "Batch the exports"), "{:?}", rt.state.session().map(|t| t.title.clone()));
+    assert!(has_text(&rt, "Batch the exports"));
+    // The model chip's request: pins on `task:<id>`. The harness has no connected model, so the daemon refuses an effort pin in its own
+    // words, and the popover shows them verbatim (the web's `applyError`).
+    rt.update(|s, _| {
+        s.runtime_toggle();
+        s.runtime.draft.reasoning_effort = Some("high".into());
+        s.runtime.saving = true;
+        let prefs = neko_protocol::workbench::RuntimePreferences { reasoning_effort: Some("high".into()), ..Default::default() };
+        s.call(Call::SetRuntimePrefs { conversation_id: format!("task:{id}"), prefs });
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.runtime.apply_error.as_deref(), Some("No connected model supports these settings. Refresh models or reset to Neko decides."));
+    assert!(!rt.state.runtime.saving && has_text(&rt, "Settings were not applied."));
+    // Resetting to "Neko decides" is accepted: the daemon's snapshot comes back and the pin stays empty.
+    rt.update(|s, _| {
+        s.runtime.reset();
+        s.runtime.saved.reasoning_effort = Some("high".into());
+    });
+    rt.update(|s, _| s.runtime_apply());
+    settle(&mut rt);
+    assert!(rt.state.runtime.apply_error.is_none(), "{:?}", rt.state.runtime.apply_error);
+    assert_eq!(rt.state.detail().map(|d| d.prefs.reasoning_effort.clone()), Some(None));
+    // Mark unread and Copy link are the app's own; Stop all asks first and the daemon stops what runs.
+    let (running, _) = rt.state.running_agents();
+    assert!(running > 0, "the seed has work in flight");
+    rt.update(|s, tx| {
+        let ev = KeyEvent { key: Key::Escape, mods: Mods { cmd: true, shift: true, ..Mods::default() } };
+        assert!(neko_rune::on_key(s, &ev, tx));
+    });
+    settle(&mut rt);
+    assert!(rt.state.dialog.is_some(), "Stop all N running agents? is asked first");
+    click(&mut rt, "ask-yes");
+    assert_eq!(rt.state.running_agents().0, 0, "CancelAllWork stopped them");
+}
+
+#[test]
+fn batch_a_a_finished_session_is_deleted_only_after_the_dialog_says_yes() {
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    let finished = rt.state.summary.as_ref().unwrap().tasks.iter().find(|t| matches!(t.status, neko_protocol::workbench::TaskStatus::Completed | neko_protocol::workbench::TaskStatus::Cancelled)).map(|t| t.id.clone());
+    let Some(id) = finished else {
+        eprintln!("skipped: the seed has no finished session");
+        return;
+    };
+    let before = rt.state.summary.as_ref().unwrap().tasks.len();
+    rt.update(|s, _| s.do_action(&id, neko_rune::task_actions::Act::Delete));
+    settle(&mut rt);
+    assert!(has_text(&rt, "Delete this task?") && rt.state.summary.as_ref().unwrap().tasks.len() == before, "asked, nothing deleted yet");
+    click(&mut rt, "ask-no");
+    assert_eq!(rt.state.summary.as_ref().unwrap().tasks.len(), before);
+    rt.update(|s, _| s.do_action(&id, neko_rune::task_actions::Act::Delete));
+    settle(&mut rt);
+    click(&mut rt, "ask-yes");
+    assert_eq!(rt.state.summary.as_ref().unwrap().tasks.len(), before - 1, "the daemon removed it after the yes");
+}
+
+#[test]
+fn batch_a_an_inbox_item_is_marked_done_closes_under_closed_recently_and_reopens() {
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    let item = rt.state.neko.inbox.iter().find(|i| i.default.is_none()).cloned().expect("an open item without a default");
+    let open_before = rt.state.neko.inbox.len();
+    click(&mut rt, &format!("inbox-done-{}", item.seq));
+    assert_eq!(rt.state.neko.inbox.len(), open_before - 1, "the item left the open list");
+    let closed = rt.state.neko.closed.iter().find(|c| c.seq == item.seq).cloned().expect("it is under Closed recently");
+    assert_eq!(closed.reason, "Done by you", "the daemon says why it closed");
+    click(&mut rt, "closed-toggle");
+    assert!(has_text(&rt, "Done by you ·"), "{:?}", texts(&rt));
+    click(&mut rt, &format!("closed-reopen-{}", item.seq));
+    assert_eq!(rt.state.neko.inbox.len(), open_before, "reopened: it is open again");
+    assert!(!rt.state.neko.closed.iter().any(|c| c.seq == item.seq));
+}
+
+#[test]
+fn batch_a_a_routine_is_saved_with_the_new_cadence_the_way_the_web_saves_it() {
+    use neko_protocol::routines::Cadence;
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    open_page(&mut rt, neko_rune::views::FullView::Routines);
+    let (id, _, _) = first_routine(&rt);
+    rt.update(|s, _| s.open_routine(&id));
+    settle(&mut rt);
+    rt.update(|s, _| {
+        s.set_cadence_mode(false);
+        s.pages.set_field("rt:time", "07:45");
+        s.cadence_time_typed();
+    });
+    settle(&mut rt);
+    click(&mut rt, "rt-save");
+    let saved = rt.state.pages.routines.as_ref().unwrap().views.iter().find(|v| v.routine.id == id).map(|v| v.routine.cadence.clone());
+    assert_eq!(saved, Some(Cadence::Daily { hour: 7, minute: 45 }), "the daemon saved the cadence");
+    rt.update(|s, _| {
+        s.set_cadence_mode(true);
+        s.pages.set_field("rt:minutes", "30");
+        s.cadence_minutes_typed();
+        s.cadence_hours(Some(9), Some(18));
+    });
+    settle(&mut rt);
+    click(&mut rt, "rt-save");
+    let saved = rt.state.pages.routines.as_ref().unwrap().views.iter().find(|v| v.routine.id == id).map(|v| v.routine.cadence.clone());
+    assert_eq!(saved, Some(Cadence::Every { minutes: 30, from_hour: 9, to_hour: 18 }));
+}
