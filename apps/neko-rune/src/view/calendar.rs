@@ -61,6 +61,27 @@ pub fn lanes(events: &[&CalendarEvent]) -> Vec<(usize, usize)> {
         .collect()
 }
 
+/// Groups of events that overlap one another (a group's span is where its lanes are shared).
+pub fn clusters<'a>(events: &[&'a CalendarEvent]) -> Vec<Vec<&'a CalendarEvent>> {
+    let mut sorted: Vec<&CalendarEvent> = events.to_vec();
+    sorted.sort_by_key(|e| (e.start_ms, e.end_ms));
+    let mut out: Vec<Vec<&CalendarEvent>> = Vec::new();
+    let mut end = i64::MIN;
+    for e in sorted {
+        let e_end = e.end_ms.max(e.start_ms + 15 * 60_000);
+        if out.is_empty() || e.start_ms >= end {
+            out.push(Vec::new());
+            end = e_end;
+        } else {
+            end = end.max(e_end);
+        }
+        if let Some(last) = out.last_mut() {
+            last.push(e);
+        }
+    }
+    out
+}
+
 fn days_shown(s: &App) -> Vec<i64> {
     let (from, to) = s.calendar_range();
     let mut days = Vec::new();
@@ -81,7 +102,7 @@ fn kind_of(status: &str) -> StatusKind {
     }
 }
 
-fn day_items<'a>(items: &'a [NekoCalendarItem], day: i64, next: i64) -> Vec<&'a NekoCalendarItem> {
+fn day_items(items: &[NekoCalendarItem], day: i64, next: i64) -> Vec<&NekoCalendarItem> {
     items.iter().filter(|i| i.at_ms >= day && i.at_ms < next).collect()
 }
 
@@ -200,25 +221,35 @@ fn grid(s: &App, t: &Neko, days: &[i64], events: &[&CalendarEvent], neko: &[Neko
     for &d in days {
         let next = clock::add_days(d, 1);
         let timed: Vec<&CalendarEvent> = events.iter().copied().filter(|e| !e.all_day && e.start_ms < next && e.end_ms.max(e.start_ms + 1) > d).collect();
-        let lane = lanes(&timed);
-        let lane_count = lane.iter().map(|(_, n)| *n).max().unwrap_or(1);
         let mut day = row().grow(1.0).min_w(0.0).h(grid_height());
         for h in FIRST_HOUR..=LAST_HOUR {
             day = day.child(el().w_full().h(1.0).fill(t.surface.border.alpha(0.3)).absolute(0.0, ((h - FIRST_HOUR) as f32 * HOUR_H).min(grid_height() - 1.0)));
         }
-        // Lane columns, each its own box the blocks hang in.
-        for n in 0..lane_count {
-            let mut lane_col = col().grow(1.0).min_w(0.0).h(grid_height()).px(1.0);
-            for (e, (at, _)) in timed.iter().zip(lane.iter()) {
-                if *at != n {
-                    continue;
+        // Events that overlap share a band of the column side by side; the others have it all.
+        for cluster in clusters(&timed) {
+            let spans: Vec<(f32, f32)> = cluster
+                .iter()
+                .map(|e| {
+                    let top = y_of(e.start_ms.max(d), d);
+                    let bottom = if e.end_ms >= next { grid_height() } else { y_of(e.end_ms, d) };
+                    (top, (top + (bottom - top).max(18.0)).min(grid_height().max(top + 18.0)))
+                })
+                .collect();
+            let top = spans.iter().map(|s| s.0).fold(f32::MAX, f32::min);
+            let bottom = spans.iter().map(|s| s.1).fold(0.0, f32::max);
+            let lane = lanes(&cluster);
+            let count = lane.iter().map(|(_, n)| *n).max().unwrap_or(1);
+            let mut band = row().w_full().h(bottom - top).absolute(0.0, top);
+            for n in 0..count {
+                let mut lane_col = col().grow(1.0).min_w(0.0).h(bottom - top).px(1.0);
+                for ((e, (at, _)), (y0, y1)) in cluster.iter().zip(lane.iter()).zip(spans.iter()) {
+                    if *at == n {
+                        lane_col = lane_col.child(event_block(t, e, s.pages.cal_event.as_deref() == Some(e.id.as_str())).w_full().h(y1 - y0).absolute(0.0, y0 - top));
+                    }
                 }
-                let top = y_of(e.start_ms.max(d), d);
-                let bottom = if e.end_ms >= next { grid_height() } else { y_of(e.end_ms, d) };
-                let height = (bottom - top).max(18.0);
-                lane_col = lane_col.child(event_block(t, e, s.pages.cal_event.as_deref() == Some(e.id.as_str())).w_full().h(height).absolute(0.0, top));
+                band = band.child(lane_col);
             }
-            day = day.child(lane_col);
+            day = day.child(band);
         }
         if d == today {
             let y = y_of(s.now_ms, d);
@@ -294,6 +325,15 @@ mod tests {
         assert_eq!(l[1], (1, 2));
         assert_eq!(l[2], (0, 1), "a later event has the whole column");
         assert_eq!(lanes(&[]), Vec::<(usize, usize)>::new());
+    }
+
+    #[test]
+    fn clusters_hold_only_events_that_touch() {
+        let (a, b, c) = (ev(0, 3_600_000), ev(1_800_000, 5_400_000), ev(7_200_000, 8_000_000));
+        let groups = clusters(&[&c, &a, &b]);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].len(), 2);
+        assert_eq!(groups[1].len(), 1);
     }
 
     #[test]

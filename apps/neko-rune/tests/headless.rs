@@ -112,7 +112,7 @@ fn the_tree_has_the_four_regions_and_no_layout_warnings() {
         let t = tree("live", theme);
         assert_eq!(t["title"], "Neko (Rune)");
         assert_eq!(t["warnings"].as_array().unwrap().len(), 0, "{theme}: {}", t["warnings"]);
-        for key in ["sessions", "session-region", "neko", "group-0", "group-1", "group-2", "session-t0", "composer-input", "steer-trigger", "crew", "inbox", "ask", "grip-sessions", "grip-neko", "view-calendar", "view-schedules", "view-settings", "more", "new-session"] {
+        for key in ["sessions", "session-region", "neko", "group-0", "group-1", "group-2", "session-t0", "composer-input", "steer-trigger", "crew", "inbox", "ask", "grip-sessions", "grip-neko", "view-calendar", "view-inbox", "view-settings", "more", "new-session"] {
             assert!(element(&t, key).is_some(), "{theme}: {key}");
         }
         assert!(element(&t, "context").is_none(), "the context panel starts closed");
@@ -156,8 +156,10 @@ fn offline_and_notice_scenes_say_what_they_should() {
     assert!(element(&tree("context", "dark"), "context-picker").is_some());
     assert!(element(&tree("collapsed", "dark"), "neko-expand").is_some());
     assert!(texts(&tree("steer", "dark")).contains(&"Interrupt and restart".to_owned()));
-    assert!(texts(&tree("more", "dark")).contains(&"Usage & machine".to_owned()));
-    assert!(texts(&tree("full-view", "dark")).contains(&"Coming in P2. The web UI has it today.".to_owned()));
+    let more = texts(&tree("more", "dark"));
+    assert!(["Usage", "Workspaces", "Plugins", "Open the web UI"].iter().all(|w| more.contains(&(*w).to_owned())), "{more:?}");
+    let settings = texts(&tree("full-view", "dark"));
+    assert!(settings.contains(&"Settings".to_owned()) && settings.contains(&"AI and agents".to_owned()), "a full view is its own page now, not a placeholder");
 }
 
 #[test]
@@ -165,10 +167,20 @@ fn every_scene_renders_in_both_appearances() {
     let list = Command::new(BIN).arg("--list-scenes").output().unwrap();
     let scenes: Vec<String> = String::from_utf8(list.stdout).unwrap().lines().map(str::to_owned).collect();
     assert!(scenes.len() >= 10, "{scenes:?}");
-    for scene in &scenes {
-        for theme in ["light", "dark"] {
-            let image = Image::read(&snap(scene, theme));
-            assert_eq!(image.width, SIZE.0 * SCALE, "{scene} {theme}");
+    // Each render is its own process; four at a time keep the gate near a minute (nothing is shared).
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..4 {
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(scene) = scenes.get(i) else { break };
+                    for theme in ["light", "dark"] {
+                        let image = Image::read(&snap(scene, theme));
+                        assert_eq!(image.width, SIZE.0 * SCALE, "{scene} {theme}");
+                    }
+                }
+            });
         }
-    }
+    });
 }

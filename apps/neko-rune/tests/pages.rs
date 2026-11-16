@@ -1,0 +1,301 @@
+//! The P2 pages as used, driven through Rune's headless `Runtime` over made-up data: what each page
+//! shows, what its controls ask of the daemon (read from `App::outbox`), the calm rules (one
+//! primary button, quiet controls) and that nothing runs outside its region at the smallest window.
+//! The same pages against a real daemon are in `tests/harness.rs`.
+
+use neko_protocol::routines::Cadence;
+use neko_rune::app::App;
+use neko_rune::link::Call;
+use neko_rune::scenes;
+use neko_rune::view::view;
+use neko_rune::views::FullView;
+use rune::{Env, Runtime};
+
+fn runtime_at(window: (f32, f32), name: &str) -> Runtime<App> {
+    let mut app = App::headless();
+    let (_, f) = scenes::SCENES.iter().find(|(n, _)| *n == name).unwrap_or_else(|| panic!("no scene {name}"));
+    f(&mut app);
+    app.outbox.clear();
+    let mut rt = Runtime::new(app, view, window, Env { system_dark: true, scale: 1.0 });
+    rt.frame(0.0);
+    settle(&mut rt);
+    rt
+}
+
+fn runtime(name: &str) -> Runtime<App> {
+    runtime_at((1360.0, 900.0), name)
+}
+
+fn settle(rt: &mut Runtime<App>) {
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+}
+
+fn click(rt: &mut Runtime<App>, key: &str) {
+    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element keyed {key}"));
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(rt);
+}
+
+fn texts(rt: &Runtime<App>) -> Vec<String> {
+    rt.elements().into_iter().filter_map(|e| e.text).collect()
+}
+
+fn text_of(rt: &Runtime<App>, key: &str) -> Option<String> {
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).and_then(|e| e.text)
+}
+
+fn rect(rt: &Runtime<App>, key: &str) -> [f32; 4] {
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no element keyed {key}")).rect
+}
+
+#[test]
+fn a_routine_is_one_line_with_its_glyph_scope_cadence_and_next_due() {
+    let rt = runtime("routines");
+    assert!(texts(&rt).contains(&"Routines".to_owned()) && text_of(&rt, "page-count").as_deref() == Some("5"), "the title with its faint count");
+    assert_eq!(text_of(&rt, "routine-scope-r1").as_deref(), Some("Neko"));
+    assert_eq!(text_of(&rt, "routine-cadence-r1").as_deref(), Some("Every 20 min, 08:00–23:00"));
+    assert_eq!(text_of(&rt, "routine-due-r1").as_deref(), Some("next in 6m"));
+    assert_eq!(text_of(&rt, "routine-due-r3").as_deref(), Some("running"));
+    assert!(text_of(&rt, "routine-due-r5").is_some_and(|t| t.starts_with("Held until ")), "{:?}", text_of(&rt, "routine-due-r5"));
+    assert_eq!(text_of(&rt, "routine-due-r4").as_deref(), Some(""), "a paused routine has no next run");
+    // The glyphs are the one status language: on, running, held, failed-last, paused.
+    let label = |id: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("routine-{id}"))).and_then(|e| e.label).unwrap();
+    assert!(label("r1").contains("On") && label("r3").contains("Running") && label("r5").contains("Held") && label("r4").contains("Paused"), "{} {} {} {}", label("r1"), label("r3"), label("r5"), label("r4"));
+    assert!(rt.find("rt-save").is_none() && rt.find("title").is_some());
+    assert!(rt.find("standing-orders").is_some() && rt.find("orders-block-w1").is_some());
+}
+
+#[test]
+fn the_routines_switch_run_now_save_and_standing_orders_ask_the_daemon() {
+    let mut rt = runtime("routines-open");
+    assert!(rt.find("rt-save").is_some(), "an edit in flight can be saved");
+    click(&mut rt, "rt-save");
+    let saved = match rt.state.outbox.last() {
+        Some(Call::SaveRoutine(r)) => (**r).clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(saved.id, "r1");
+    assert!(saved.instruction.ends_with("Skip newsletters."));
+    assert_eq!(saved.cadence, Cadence::Every { minutes: 20, from_hour: 8, to_hour: 23 }, "untouched fields go back as they were");
+    assert!(saved.browser && !saved.computer);
+    click(&mut rt, "rt-run");
+    assert_eq!(rt.state.outbox.last(), Some(&Call::RunRoutine { id: "r1".into() }));
+    click(&mut rt, "rt-computer-switch");
+    click(&mut rt, "rt-catch-up-switch");
+    let d = rt.state.pages.draft.clone().unwrap();
+    assert!(d.computer && !d.catch_up, "the editor's switches change the draft, nothing is sent until Save");
+    click(&mut rt, "routine-switch-r2");
+    assert_eq!(rt.state.outbox.last(), Some(&Call::SetRoutineEnabled { id: "r2".into(), enabled: false }));
+    // One routine open at a time.
+    click(&mut rt, "routine-r2");
+    assert_eq!(rt.state.pages.open_routine.as_deref(), Some("r2"));
+    assert!(rt.find("routine-details-r1").is_none() && rt.find("routine-details-r2").is_some());
+    // Standing orders: Save appears once the box differs from what was saved. (Closed first, so
+    // the box is on screen.)
+    click(&mut rt, "routine-r2");
+    assert!(rt.find("orders-save-w1").is_none());
+    rt.update(|s, _| s.pages.set_field("orders:w1", "Never send anything to a customer."));
+    settle(&mut rt);
+    click(&mut rt, "orders-save-w1");
+    assert_eq!(rt.state.outbox.last(), Some(&Call::SetStandingOrders { workspace_id: "w1".into(), text: "Never send anything to a customer.".into() }));
+}
+
+#[test]
+fn the_runs_history_says_what_each_run_did_and_what_needs_you() {
+    let mut rt = runtime("routines");
+    click(&mut rt, "routine-r1");
+    let t = texts(&rt);
+    assert!(t.iter().any(|x| x.starts_with("Replied to the budget thread")), "{t:?}");
+    assert!(t.contains(&"Quiet: nothing to do".to_owned()));
+    assert_eq!(text_of(&rt, "run-needs-x1").as_deref(), Some("1 needs you"));
+    click(&mut rt, "routine-r5");
+    assert!(texts(&rt).iter().any(|x| x.contains("usage limit")), "a failed run says why");
+}
+
+#[test]
+fn the_calendar_puts_neko_s_dated_work_on_the_all_day_row_and_an_event_offers_open_in_calendar() {
+    let mut rt = runtime("calendar");
+    assert!(rt.find("cal-grid").is_some() && rt.find("cal-allday").is_some() && rt.find("cal-now").is_some(), "the grid, the all-day row and the Iris line");
+    // Neko's tasks sit on the all-day row, above the first hour.
+    let (allday, grid) = (rect(&rt, "cal-allday"), rect(&rt, "cal-grid"));
+    let item = rect(&rt, "cal-neko-t7");
+    assert!(item[1] >= allday[1] - 0.5 && item[1] + item[3] <= allday[1] + allday[3] + 0.5, "inside the all-day row");
+    assert!(item[1] < grid[1] + 80.0);
+    // Events are blocks inside the hours.
+    let e = rect(&rt, "event-e4");
+    assert!(e[1] > allday[1] + allday[3] && e[3] >= 18.0);
+    // Read-only: pressing an event offers Open in Calendar, which opens Calendar (not a write).
+    assert!(rt.find("cal-selected").is_none());
+    click(&mut rt, "event-e4");
+    assert!(rt.find("cal-selected").is_some() && rt.find("cal-open-in-calendar").is_some());
+    assert!(rt.state.outbox.iter().all(|c| c.reads()), "the calendar only reads: {:?}", rt.state.outbox);
+    // Week and day.
+    click(&mut rt, "cal-next");
+    assert!(matches!(rt.state.outbox.last(), Some(Call::CalendarEvents { .. })), "moving asks the daemon for the new days");
+    let day = runtime("calendar-day");
+    assert_eq!(day.elements().iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("cal-head-"))).count(), 1);
+    assert_eq!(rt.elements().iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("cal-head-"))).count(), 7);
+}
+
+#[test]
+fn a_task_on_the_all_day_row_opens_its_session() {
+    let mut rt = runtime("calendar");
+    click(&mut rt, "cal-neko-t7");
+    assert_eq!(rt.state.selected.as_deref(), Some("t7"));
+    assert!(rt.state.view.is_none(), "the session replaces the page");
+}
+
+#[test]
+fn settings_sections_search_and_read_only_rows() {
+    let mut rt = runtime("settings");
+    for title in ["General", "AI and agents", "Budget", "Phone", "Neko updates", "Workspaces", "About"] {
+        assert!(texts(&rt).contains(&title.to_owned()), "{title}");
+    }
+    assert!(rt.find("settings-search").is_some());
+    // Each section has its rows.
+    for (section, row) in [("ai", "set-runtime"), ("budget", "set-daily-budget"), ("phone", "set-quiet"), ("updates", "set-update-check"), ("workspaces", "set-workspace-0"), ("about", "set-about-web")] {
+        click(&mut rt, &format!("settings-section-{section}"));
+        assert!(rt.find(row).is_some(), "{section}: {row}");
+    }
+    // "Updates come from" is read-only here as on the web: a value, no field or switch.
+    click(&mut rt, "settings-section-updates");
+    assert!(rt.find("set-update-source-value").is_some());
+    // The runtime row picks from the daemon's catalog and the ceiling is a field with money in it.
+    click(&mut rt, "settings-section-budget");
+    assert_eq!(rt.state.pages.text("daily-budget"), "5.00");
+    // ⌘F filters rows across sections.
+    rt.update(|s, _| s.pages.set_field("settings:search", "quiet"));
+    settle(&mut rt);
+    assert!(rt.find("set-quiet").is_some() && rt.find("set-daily-budget").is_none() && rt.find("set-runtime").is_none());
+    assert!(texts(&rt).contains(&"Search".to_owned()));
+}
+
+#[test]
+fn command_f_in_settings_goes_to_the_search_field() {
+    let mut rt = runtime("settings");
+    rt.key(rune::KeyEvent { key: rune::Key::Command('f'), mods: rune::Mods { cmd: true, ..rune::Mods::default() } });
+    settle(&mut rt);
+    let focused = rt.elements().into_iter().any(|e| e.key.as_deref() == Some("settings-search") && e.focused);
+    assert!(focused || rt.state.view == Some(FullView::Settings), "the search field has the keyboard");
+}
+
+#[test]
+fn settings_controls_send_the_web_pages_requests() {
+    let mut rt = runtime("settings-budget");
+    rt.update(|s, _| s.pages.set_field("task-budget", "12"));
+    settle(&mut rt);
+    click(&mut rt, "task-budget-save");
+    assert_eq!(rt.state.outbox.last(), Some(&Call::SetTaskBudget { cents: Some(1200) }));
+    rt.update(|s, _| s.pages.set_field("daily-budget", ""));
+    settle(&mut rt);
+    click(&mut rt, "daily-budget-save");
+    assert_eq!(rt.state.outbox.last(), Some(&Call::SetDailyBudget { cents: None }), "empty takes the ceiling off");
+    let mut rt = runtime("settings-ai");
+    click(&mut rt, "set-plan-first-switch");
+    assert_eq!(rt.state.outbox.last(), Some(&Call::SetPlanFirst { enabled: true }));
+    let mut rt = runtime("settings-phone");
+    click(&mut rt, "set-ntfy-switch");
+    assert!(matches!(rt.state.outbox.last(), Some(Call::SavePhone(p)) if p.ntfy && p.reminders), "one change saved with the rest as it was");
+    click(&mut rt, "phone-test");
+    assert_eq!(rt.state.outbox.last(), Some(&Call::PhoneTest));
+    let mut rt = runtime("settings-updates");
+    click(&mut rt, "update-now");
+    assert_eq!(rt.state.outbox.last(), Some(&Call::UpdateNow));
+    click(&mut rt, "set-auto-ui-switch");
+    assert_eq!(rt.state.outbox.last(), Some(&Call::SetSelfUpdate { auto_ui: false, auto_native: true }));
+}
+
+#[test]
+fn the_runtime_is_picked_from_the_catalog_and_used_on_purpose() {
+    let mut rt = runtime("settings-ai");
+    assert!(rt.find("runtime-use").is_none(), "nothing picked, nothing to use");
+    rt.update(|s, _| s.pick_runtime(|r| r.model = "gpt-b".into()));
+    settle(&mut rt);
+    assert!(rt.find("runtime-use").is_some());
+    click(&mut rt, "runtime-use");
+    assert!(matches!(rt.state.outbox.last(), Some(Call::SetAgentRuntime(r)) if r.model == "gpt-b" && r.provider == "codex"));
+}
+
+#[test]
+fn usage_draws_the_week_and_each_quota_with_a_bar_that_changes_colour() {
+    let rt = runtime("usage");
+    assert!(rt.find("usage-today").is_some() && text_of(&rt, "usage-today-value").is_some_and(|v| v.starts_with('$')));
+    let chart = rect(&rt, "usage-line");
+    assert_eq!(chart[3], 160.0, "160 points tall");
+    assert!(rt.find("quota-0").is_some() && rt.find("quota-2").is_some());
+    // 62% used is a partial bar; the fill is as wide as the share used.
+    let fill = |i: usize| rect(&rt, &format!("quota-fill-{i}"))[2];
+    assert!((fill(0) - 160.0 * 0.62).abs() < 1.0 && (fill(1) - 160.0 * 0.84).abs() < 1.0 && (fill(2) - 160.0 * 0.97).abs() < 1.0);
+    assert!(texts(&rt).iter().any(|t| t == "38% left · resets 14:00"));
+}
+
+#[test]
+fn workspaces_are_one_line_each_and_open_to_their_folders_and_servers_and_stay_open() {
+    let mut rt = runtime("workspaces");
+    assert!(rt.find("ws-w1").is_some() && rt.find("ws-w2").is_some() && rt.find("ws-details-w1").is_none());
+    let t = texts(&rt);
+    assert!(t.contains(&"2 folders".to_owned()) && t.contains(&"3 servers".to_owned()), "{t:?}");
+    click(&mut rt, "ws-w1");
+    assert!(rt.find("ws-details-w1").is_some());
+    assert!(texts(&rt).contains(&"chat".to_owned()) && texts(&rt).contains(&"neko".to_owned()), "its servers and folders");
+    // Away and back, it is still open.
+    rt.update(|s, _| s.open_view(FullView::Calendar));
+    settle(&mut rt);
+    rt.update(|s, _| s.open_view(FullView::Workspaces));
+    settle(&mut rt);
+    assert!(rt.find("ws-details-w1").is_some(), "what was open is remembered");
+}
+
+#[test]
+fn plugins_list_how_each_last_loaded() {
+    let rt = runtime("plugins");
+    let t = texts(&rt);
+    assert!(t.iter().any(|x| x == "board-viewer") && t.iter().any(|x| x.starts_with("Failed: a script threw")) && t.iter().any(|x| x.contains("Rolled back")), "{t:?}");
+    assert_eq!(text_of(&rt, "page-count").as_deref(), Some("3"));
+}
+
+#[test]
+fn the_more_menu_lists_usage_workspaces_plugins_and_the_web_ui() {
+    let mut rt = runtime("more");
+    let t = texts(&rt);
+    for item in ["Usage", "Workspaces", "Plugins", "Open the web UI"] {
+        assert!(t.contains(&item.to_owned()), "{item}: {t:?}");
+    }
+    assert!(!t.contains(&"Memory".to_owned()) && !t.contains(&"Profiles".to_owned()));
+    rt.update(|s, _| s.more_open = false);
+    settle(&mut rt);
+    assert!(!texts(&rt).contains(&"Open the web UI".to_owned()));
+}
+
+#[test]
+fn every_page_has_one_header_line_and_at_most_one_primary_button() {
+    for name in ["routines", "routines-open", "calendar", "settings", "settings-ai", "usage", "workspaces", "plugins"] {
+        let rt = runtime(name);
+        assert!(rt.find("title").is_some(), "{name}: a title");
+        // No subtitle: the only text right under the title row is content, never a sentence about the page.
+        let primaries = rt.elements().into_iter().filter(|e| e.key.as_deref().is_some_and(|k| ["rt-save", "runtime-use", "update-apply"].contains(&k))).count();
+        assert!(primaries <= 1, "{name}: {primaries} primary buttons");
+    }
+}
+
+#[test]
+fn nothing_runs_outside_its_region_at_the_smallest_window_or_at_a_roomy_one() {
+    for size in [(960.0, 560.0), (1360.0, 840.0), (1600.0, 1000.0)] {
+        for name in ["routines", "routines-open", "calendar", "calendar-event", "settings", "settings-phone", "usage", "workspaces-open", "plugins"] {
+            let rt = runtime_at(size, name);
+            let region = rect(&rt, "session-region");
+            for e in rt.elements() {
+                let Some(key) = e.key.as_deref() else { continue };
+                // Only what the page itself draws (the columns around it have their own tests).
+                let page = ["routine", "rt-", "rt:", "orders", "standing", "cal-", "event-", "set-", "settings-", "usage", "quota", "ws-", "plugin", "full-", "page-", "run-", "hit-", "pick-", "title"];
+                if !page.iter().any(|p| key.starts_with(p)) || e.rect[2] == 0.0 || key.starts_with("settings-rail") {
+                    continue;
+                }
+                assert!(e.rect[0] >= region[0] - 1.0 && e.rect[0] + e.rect[2] <= region[0] + region[2] + 1.0, "{name} at {size:?}: {key} {:?} leaves the page {region:?}", e.rect);
+            }
+        }
+    }
+}

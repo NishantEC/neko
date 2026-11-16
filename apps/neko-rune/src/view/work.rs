@@ -25,7 +25,7 @@ pub fn goal_line(s: &App, t: &Neko, goal: &Goal) -> El {
     let key = format!("goal:{}", goal.id);
     let open = s.open(&key);
     let gid = goal.id.clone();
-    let header = row()
+    row()
         .key(format!("goal-{}", goal.id))
         .role("button")
         .label(format!("Goal: {}, {}, {}", goal_word(goal.status), goal.objective, turn_text(goal)))
@@ -42,8 +42,7 @@ pub fn goal_line(s: &App, t: &Neko, goal: &Goal) -> El {
         .on_press(move |s: &mut App| s.toggle(&format!("goal:{gid}")))
         .child(status_glyph(goal_kind(goal.status), t, 14.0, Some("")))
         .child(text(goal.objective.clone()).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0).a11y_hidden())
-        .child(text(format!("{} · {}", turn_text(goal), goal_state(goal))).key(format!("goal-meta-{}", goal.id)).font(t.ty.meta).color(t.text.muted).truncate().a11y_hidden());
-    header
+        .child(text(format!("{} · {}", turn_text(goal), goal_state(goal))).key(format!("goal-meta-{}", goal.id)).font(t.ty.meta).color(t.text.muted).truncate().a11y_hidden())
 }
 
 /// What a goal adds under its line when it has something to say: a blocked goal's one question

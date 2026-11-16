@@ -319,4 +319,5 @@ finished.
 - [Keeping Neko public (2026-11-13)](docs/knowledge/keeping-neko-public.md) — Nothing personal or work-related enters the repo; placeholders to use; `scripts/privacy-check.sh` (pre-commit).
 - [Neko maintains itself (2026-11-14)](docs/knowledge/neko-maintains-itself.md) — Daily skill curator with lock and archive, one catch-up run per routine after downtime, usage-limit hold, oversized-output spill, daily spend ceiling.
 - [Rune P1: session view, Neko column, write requests (2026-11-16)](docs/knowledge/rune-p1-the-core.md) — Where the Rune client's data comes from, the request allow-list, composer and steer rules, same-glyph-different-words, how it is tested.
+- [Rune P2: the pages and the P1 review fixes (2026-11-16)](docs/knowledge/rune-p2-the-pages.md) — Decided region sizes and session row, the Neko column's layout, calm rules, saved layout; Routines, Calendar, Settings, Usage, Workspaces, Plugins, their requests and tests.
 - [Maintaining this file](docs/knowledge/maintaining-this-file.md) — Keep this file for knowledge useful to almost every future agent session in this project.

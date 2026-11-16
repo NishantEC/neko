@@ -98,7 +98,7 @@ registration. Slot (a) needs that registration added on Neko's side before plugi
 1. **P1, the core (built 2026-11-16, see [the knowledge note](../knowledge/rune-p1-the-core.md)).** The session view (turns, streaming chat, the composer sends, steer modes), the
    Neko column (Inbox, digest, ask), the sessions column's actions (new, approve, answer) and
    DESIGN.md for Rune. Parity with Home, Inbox, Tasks (list and board), task detail and chat.
-2. **P2, the rest of the pages.** Calendar, Routines, Settings and everything in "More".
+2. **P2, the rest of the pages (built 2026-11-16, see [the knowledge note](../knowledge/rune-p2-the-pages.md)).** Calendar, Routines, Settings and the pages in "More" (Usage, Workspaces, Plugins, and a link to the web UI).
 3. **P3, the context panel and plugins.** Diff, Files, Terminal, Browser and Screen (live), Canvas;
    an embedded web view for HTML artifacts, JS plugins and Excalidraw; native 3D, PDF, image and
    CSV viewers; Luau native plugins and the four slots above.

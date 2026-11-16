@@ -15,7 +15,7 @@ use crate::theme::Neko;
 pub fn page(t: &Neko, key: &str, title: &str, count: Option<usize>, trailing: Vec<El>, body: El) -> El {
     let mut head = row().w_full().gap(8.0).center_y().min_h(32.0).child(text(title.to_owned()).key("title").font(t.ty.title).color(t.text.base).role("heading"));
     if let Some(n) = count {
-        head = head.child(text(n.to_string()).key("count").font(t.ty.row).color(t.text.faint));
+        head = head.child(text(n.to_string()).key("page-count").font(t.ty.row).color(t.text.faint));
     }
     head = head.child(el().grow(1.0));
     for e in trailing {
@@ -67,6 +67,7 @@ pub fn switch(t: &Neko, key: &str, label: &str, on: bool, f: impl Fn(&mut App) +
 
 /// A choice from a short list: the current option shows, a list opens under it. Options are shown
 /// by their words; `choose` hears the words picked.
+#[allow(clippy::too_many_arguments)]
 pub fn pick(s: &App, t: &Neko, layer: &mut Vec<El>, key: &str, label: &str, options: &[String], current: &str, width: f32, choose: impl Fn(&mut App, &str) + Clone + 'static) -> El {
     let open_key = key.to_owned();
     let close_key = key.to_owned();

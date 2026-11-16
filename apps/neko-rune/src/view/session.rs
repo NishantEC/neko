@@ -36,7 +36,12 @@ pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
             None => empty(s, t),
         }
     };
-    col().key("session-region").grow(1.0).min_w(0.0).h_full().my(8.0).mx(2.0).radius(t.radius.window).fill(t.surface.window).child(inner)
+    // One calm line when a button could not do its job (opening the web UI while Neko is not running).
+    let mut region = col().key("session-region").grow(1.0).min_w(0.0).h_full().my(8.0).mx(2.0).radius(t.radius.window).fill(t.surface.window).child(col().w_full().grow(1.0).min_h(0.0).child(inner));
+    if let Some(notice) = &s.notice {
+        region = region.child(text(notice.clone()).key("notice").font(t.ty.meta).color(t.text.muted).px(20.0).py(6.0).live_region(rune::LiveRegion::Polite));
+    }
+    region
 }
 
 /// The top line: status glyph, title, then the runtime and the goal's first line in quiet text,

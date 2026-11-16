@@ -353,6 +353,7 @@ fn dollars(cents: Option<u32>) -> String {
     cents.map_or(String::new(), |c| format!("{:.2}", c as f64 / 100.0))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn money_row(s: &App, t: &Neko, id: &'static str, label: &str, help: &str, placeholder: &str, max: f64, saved: Option<u32>, make: fn(Option<u32>) -> crate::link::Call) -> Item {
     let dirty = s.pages.text(id).trim().trim_start_matches('$') != dollars(saved);
     let mut control = row().gap(6.0).center_y().child(text("US$").font(t.ty.mono).color(t.text.muted)).child(super::ui::input(s, t, id, label, placeholder, 96.0, move |s: &mut App| s.save_money(id, max, make)));
@@ -380,7 +381,7 @@ fn budget(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
         t,
         "daily-budget",
         "Pause new work for the day at",
-        "When today’s reported cost reaches this, new goal turns and routine runs wait until tomorrow and one Inbox item asks whether to raise it. Work already running finishes. Off when empty.",
+        "A daily ceiling: when today’s reported cost reaches this, new goal turns and routine runs wait until tomorrow and one Inbox item asks whether to raise it. Work already running finishes. Off when empty.",
         "Off",
         10000.0,
         st.daily_budget_cents,

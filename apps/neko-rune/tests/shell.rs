@@ -129,13 +129,13 @@ fn groups_collapse_and_expand_with_their_count_kept() {
 #[test]
 fn the_foot_opens_full_views_in_the_sessions_place_and_a_session_brings_it_back() {
     let mut rt = runtime(true, live);
-    for key in ["view-calendar", "view-schedules", "view-settings", "more", "new-session"] {
+    for key in ["view-calendar", "view-inbox", "view-settings", "more", "new-session"] {
         assert!(rt.find(key).is_some(), "{key} is at the foot of the sessions column");
     }
     click(&mut rt, "view-settings");
     assert_eq!(rt.state.view, Some(FullView::Settings));
     assert!(rt.find("full-settings").is_some() && rt.find("composer").is_none(), "the view replaces the session and its composer");
-    assert!(texts(&rt).contains(&"Coming in P2. The web UI has it today.".to_owned()));
+    assert!(rt.find("settings-search").is_some() && texts(&rt).contains(&"AI and agents".to_owned()), "Settings is its own page now");
     click(&mut rt, "session-t0");
     assert_eq!(rt.state.view, None);
     assert!(rt.find("composer").is_some());
@@ -147,10 +147,10 @@ fn more_lists_the_other_views_and_opens_one() {
     click(&mut rt, "more");
     assert!(rt.state.more_open);
     let t = texts(&rt);
-    for title in ["Usage & machine", "Pull requests", "Watching", "Memory", "Profiles", "Tools & skills"] {
+    for title in ["Usage", "Workspaces", "Plugins", "Open the web UI"] {
         assert!(t.contains(&title.to_owned()), "{title} in More: {t:?}");
     }
-    let e = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Usage & machine")).unwrap();
+    let e = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Usage")).unwrap();
     let (x, y) = (e.rect[0] + e.rect[2] / 2.0, e.rect[1] + e.rect[3] / 2.0);
     rt.pointer_down(x, y);
     rt.pointer_up(x, y);
@@ -292,9 +292,10 @@ fn the_web_buttons_open_the_same_place_and_without_a_daemon_say_why() {
             OPENED.with(|o| o.borrow_mut().push(url.to_owned()));
             Ok(())
         };
-        a.open_view(FullView::Routines);
+        a.open_view(FullView::Settings);
+        a.pages.section = neko_rune::pages::Section::About;
     });
-    click(&mut rt, "open-web");
+    click(&mut rt, "about-open-web");
     assert!(OPENED.with(|o| o.borrow().is_empty()), "nothing opens without an address");
     assert!(texts(&rt).iter().any(|t| t.starts_with("Neko is running, but its web address isn't known yet")), "{:?}", texts(&rt));
 
@@ -302,10 +303,10 @@ fn the_web_buttons_open_the_same_place_and_without_a_daemon_say_why() {
         s.set_web(Some(WebTarget::new(4747, &"ab".repeat(32))));
     });
     settle(&mut rt);
-    click(&mut rt, "open-web");
+    click(&mut rt, "about-open-web");
     let opened = OPENED.with(|o| o.borrow().clone());
     assert_eq!(opened.len(), 1);
-    assert!(opened[0].starts_with("http://127.0.0.1:4747/?token=") && opened[0].ends_with("#/schedules"), "routines are the web UI's schedules");
+    assert!(opened[0].starts_with("http://127.0.0.1:4747/?token=") && !opened[0].contains('#'), "the web UI's home");
     assert!(!texts(&rt).iter().any(|t| t.contains(&"ab".repeat(32))), "the token is never on screen");
 }
 

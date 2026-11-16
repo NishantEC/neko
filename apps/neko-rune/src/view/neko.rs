@@ -293,7 +293,7 @@ fn body(s: &App, t: &Neko, win_h: f32, layer: &mut Vec<El>) -> El {
     let mut c = col().key("neko-body").w_full().grow(1.0).min_h(0.0).child(col().key("neko-scroll").w_full().max_h(cap).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(top));
     if let Some(conv) = conversation(s, t) {
         c = c.child(row().key("neko-divider").w_full().h(1.0).fill(t.surface.border));
-        c = c.child(col().key("neko-chat-scroll").w_full().grow(1.0).min_h(0.0).px(14.0).pb(8.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: true }).child(conv));
+        c = c.child(col().key("neko-chat-scroll").w_full().grow(1.0).min_h(0.0).px(14.0).pb(8.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: true }).scroll_edge_fade(16.0).child(conv));
     } else {
         c = c.child(el_grow());
     }

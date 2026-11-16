@@ -764,7 +764,16 @@ impl App {
                 self.call(Call::Inbox);
                 true
             }
-            Reply::Done => false,
+            Reply::Done => {
+                // A page's write the daemon took without sending the page back: read the page again.
+                if !call.reads() && crate::pages::control_key(call).is_some() {
+                    self.pages.asked_ms = i64::MIN / 2;
+                    if let Some(view) = self.view {
+                        self.refresh_page(view);
+                    }
+                }
+                false
+            }
             Reply::Refused(message) => {
                 if self.page_refused(call, message.clone()) {
                     return true;

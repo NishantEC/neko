@@ -437,3 +437,120 @@ fn marking_unread_and_opening_move_the_dot_through_the_daemon() {
     settle(&mut rt);
     assert!(!rt.state.unseen.contains(&id) && rt.find(&format!("unseen-{id}")).is_none());
 }
+
+// ---- The P2 pages, each main action against the daemon's own answers.
+
+fn open_page(rt: &mut Runtime<App>, view: neko_rune::views::FullView) {
+    rt.update(|s, _| s.open_view(view));
+    settle(rt);
+}
+
+fn first_routine(rt: &Runtime<App>) -> (String, bool, String) {
+    let data = rt.state.pages.routines.as_ref().expect("the daemon sent its routines");
+    let v = data.views.iter().find(|v| !neko_rune::pages::is_goal_routine(v)).expect("a routine");
+    (v.routine.id.clone(), v.routine.enabled, v.routine.workspace_id.clone())
+}
+
+#[test]
+fn the_routines_page_lists_the_daemons_routines_and_its_controls_ask_it() {
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    click(&mut rt, "view-inbox");
+    let (id, was, workspace) = first_routine(&rt);
+    assert!(rt.find(&format!("routine-{id}")).is_some(), "a line for each routine");
+    // The switch asks the daemon and the line follows its answer.
+    click(&mut rt, &format!("routine-switch-{id}"));
+    assert_eq!(rt.state.pages.routine(&id).map(|v| v.routine.enabled), Some(!was));
+    click(&mut rt, &format!("routine-switch-{id}"));
+    assert_eq!(rt.state.pages.routine(&id).map(|v| v.routine.enabled), Some(was));
+    // Opening a routine shows its editor; Run now makes it due.
+    click(&mut rt, &format!("routine-{id}"));
+    assert!(rt.find("rt-run").is_some() && rt.find("rt:instruction").is_some() && rt.find("rt-cadence").is_some() && rt.find("rt-catch-up-switch").is_some());
+    click(&mut rt, "rt-run");
+    assert!(rt.state.pages.routine(&id).is_some_and(|v| v.state.run_requested || v.state.running), "the daemon was asked to run it");
+    // An edit is saved with the whole routine, and Save goes away.
+    assert!(rt.find("rt-save").is_none(), "nothing to save yet");
+    rt.update(|s, _| s.pages.set_field("rt:instruction", "A new instruction written by a test."));
+    settle(&mut rt);
+    click(&mut rt, "rt-save");
+    assert_eq!(rt.state.pages.routine(&id).map(|v| v.routine.instruction.clone()).as_deref(), Some("A new instruction written by a test."));
+    assert!(rt.find("rt-save").is_none(), "saved, so quiet again");
+    // Standing orders are saved per workspace.
+    rt.update(|s, _| {
+        s.pages.set_field(&format!("orders:{workspace}"), "Keep replies short.");
+        s.save_orders(&workspace);
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.pages.routines.as_ref().and_then(|d| d.standing_orders.get(&workspace)).map(String::as_str), Some("Keep replies short."));
+}
+
+#[test]
+fn settings_change_the_daemons_budgets_and_switches_and_search_finds_rows() {
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    click(&mut rt, "view-settings");
+    // Budget: the daily ceiling is a field with Save; empty takes the ceiling off.
+    click(&mut rt, "settings-section-budget");
+    rt.update(|s, _| s.pages.set_field("daily-budget", "7.50"));
+    settle(&mut rt);
+    click(&mut rt, "daily-budget-save");
+    assert_eq!(rt.state.summary.as_ref().and_then(|m| m.settings.daily_budget_cents), Some(750));
+    rt.update(|s, _| s.pages.set_field("daily-budget", "abc"));
+    settle(&mut rt);
+    click(&mut rt, "daily-budget-save");
+    assert!(rt.state.pages.notes.contains_key("setting:daily-budget"), "an amount that is not one is refused next to its field");
+    assert_eq!(rt.state.summary.as_ref().and_then(|m| m.settings.daily_budget_cents), Some(750), "and nothing was sent");
+    rt.update(|s, _| s.pages.set_field("daily-budget", ""));
+    settle(&mut rt);
+    click(&mut rt, "daily-budget-save");
+    assert_eq!(rt.state.summary.as_ref().and_then(|m| m.settings.daily_budget_cents), None);
+    // AI and agents: plan before working.
+    click(&mut rt, "settings-section-ai");
+    let before = rt.state.summary.as_ref().is_some_and(|m| m.settings.plan_first);
+    click(&mut rt, "set-plan-first-switch");
+    assert_eq!(rt.state.summary.as_ref().map(|m| m.settings.plan_first), Some(!before));
+    // General: Calendar on and off.
+    click(&mut rt, "settings-section-general");
+    click(&mut rt, "set-calendar-switch");
+    assert!(rt.state.pages.calendar.as_ref().is_some_and(|c| c.status.enabled), "{:?}", rt.state.pages.calendar.as_ref().map(|c| &c.status));
+    click(&mut rt, "set-calendar-switch");
+    assert!(rt.state.pages.calendar.as_ref().is_some_and(|c| !c.status.enabled));
+    // Phone: Reminders is a switch on the daemon's own settings.
+    click(&mut rt, "settings-section-phone");
+    let reminders = rt.state.pages.phone.as_ref().map(|p| p.settings.reminders).expect("the phone settings arrived");
+    click(&mut rt, "set-reminders-switch");
+    assert_eq!(rt.state.pages.phone.as_ref().map(|p| p.settings.reminders), Some(!reminders));
+    click(&mut rt, "set-reminders-switch");
+    // Search finds a row in another section, and says when nothing matches.
+    rt.update(|s, _| s.pages.set_field("settings:search", "ceiling"));
+    settle(&mut rt);
+    assert!(rt.find("set-daily-budget").is_some() && rt.find("set-reminders").is_none());
+    rt.update(|s, _| s.pages.set_field("settings:search", "zzzzqq"));
+    settle(&mut rt);
+    assert!(rt.find("settings-none").is_some());
+}
+
+#[test]
+fn calendar_usage_workspaces_and_plugins_read_what_the_daemon_has() {
+    use neko_rune::views::FullView;
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    open_page(&mut rt, FullView::Calendar);
+    assert!(rt.state.pages.calendar.is_some(), "the week came from the daemon");
+    assert!(rt.find("cal-grid").is_some() && rt.find("cal-mode").is_some());
+    assert!(rt.find("cal-access").is_some(), "Calendar is off in a fresh data folder, and the page says so");
+    click(&mut rt, "cal-next");
+    click(&mut rt, "cal-today");
+    open_page(&mut rt, FullView::Usage);
+    assert!(rt.find("usage-today").is_some() && rt.state.pages.routines.is_some());
+    assert!(rt.find("quota").is_some());
+    open_page(&mut rt, FullView::Workspaces);
+    let first = rt.state.pages.routines.as_ref().and_then(|d| d.scopes.first()).map(|s| s.workspace_id.clone().unwrap_or_else(|| s.name.clone()));
+    if let Some(first) = first {
+        assert!(rt.find(&format!("ws-{first}")).is_some(), "a line for each scope");
+        click(&mut rt, &format!("ws-{first}"));
+        assert!(rt.find(&format!("ws-details-{first}")).is_some(), "a scope opens to its details");
+    }
+    open_page(&mut rt, FullView::Plugins);
+    assert!(rt.find("full-plugins").is_some());
+}

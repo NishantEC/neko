@@ -126,7 +126,7 @@ pub fn usage(s: &App, t: &Neko) -> El {
 fn quota(s: &App, t: &Neko) -> El {
     let mut c = col().key("quota").w_full().gap(2.0).child(group(t, "Quota"));
     match &s.pages.quota {
-        None => c = c.child(quiet_line(t, "quota-loading", "Reading what each vendor has left…")),
+        None => c = c.child(quiet_line(t, "quota-loading", s.pages.notes.get("page:quota").map_or("Reading what each vendor has left…", String::as_str))),
         Some(rows) if rows.is_empty() => c = c.child(quiet_line(t, "quota-none", "No vendor is signed in, or none has a metered window.")),
         Some(rows) => {
             for (i, r) in rows.iter().enumerate() {
@@ -268,7 +268,7 @@ pub fn plugins(s: &App, t: &Neko) -> El {
     let mut body = col().w_full().gap(2.0);
     let list = s.pages.plugins.clone();
     match &list {
-        None => body = body.child(quiet_line(t, "plugins-loading", "Reading the plugins…")),
+        None => body = body.child(quiet_line(t, "plugins-loading", s.pages.notes.get("page:plugins").map_or("Reading the plugins…", String::as_str))),
         Some(l) if l.is_empty() => body = body.child(quiet_line(t, "plugins-none", "No plugin has loaded yet")),
         Some(l) => {
             for p in l {
