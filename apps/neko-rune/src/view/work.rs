@@ -5,12 +5,13 @@
 use neko_protocol::checkpoints::CheckpointList;
 use neko_protocol::goals::{Goal, GoalStatus};
 use neko_protocol::workbench::{Task, TaskStatus};
-use rune::{El, ScrollSpec, col, row, text};
+use rune::{El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::diff::DiffView;
 use rune_kit::{MenuItem, context_menu};
 
 use super::{accent_button, primary_button, quiet_button};
 use crate::app::App;
+use crate::icons;
 use crate::link::Call;
 use crate::status::{StatusKind, status_glyph};
 use crate::theme::Neko;
@@ -375,26 +376,26 @@ pub fn tray(s: &App, t: &Neko, task: &Task) -> Option<El> {
         );
     }
     let question = waiting_reason(task);
+    // The calm lead: while an undo is to be confirmed, the card's button steps back to an accent.
+    let calm = s.work.confirm.is_some();
     if let Some(body) = &question {
         any = true;
-        c = c.child(note(t, "The planner has a question", body, false));
+        c = c.child(note(s, t, Card::Question, "The planner has a question", body, Some(("Answer", "answer"))));
     } else if task.status == TaskStatus::Failed {
         any = true;
-        c = c.child(note(t, "Why it stopped", &stop_reason(task), true));
+        c = c.child(note(s, t, Card::Stopped, "Why it stopped", &stop_reason(task), None));
+    } else if task.status == TaskStatus::AwaitingApproval {
+        any = true;
+        c = c.child(note(s, t, Card::Plan, "Plan ready", "Read the plan above, then approve it to start building.", Some(("Approve plan", "approve"))));
     }
     // What the person can do about the task, as the web's action list decides. The region has one
     // primary button: while a question is open (an undo to confirm), the lead action steps back.
-    let calm = s.work.confirm.is_some();
     let lead = move |label: &str, key: &str, t: &Neko, f: Box<dyn Fn(&mut App)>| if calm { accent_button(label, key, t, f) } else { primary_button(label, key, t, f) };
     let mut actions = row().gap(8.0).center_y();
     let mut has_action = false;
     let id = task.id.clone();
     let title = task.display_title.clone().unwrap_or_else(|| task.title.clone());
     match task.status {
-        TaskStatus::AwaitingApproval if question.is_none() => {
-            has_action = true;
-            actions = actions.child(lead("Approve plan", "approve", t, Box::new(move |s: &mut App| s.call(Call::Approve { task_id: id.clone() }))));
-        }
         TaskStatus::ReadyForReview => {
             has_action = true;
             if let Some(url) = task.pull_request.as_ref().filter(|p| p.is_open()).map(|p| p.url.clone()).filter(|u| !u.is_empty()) {
@@ -453,15 +454,81 @@ pub fn tray(s: &App, t: &Neko, task: &Task) -> Option<El> {
     any.then_some(c)
 }
 
-fn note(t: &Neko, title: &str, body: &str, error: bool) -> El {
-    col()
+/// Which card: the planner's question and the plan to approve are amber, a stop is coral.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Card {
+    Question,
+    Plan,
+    Stopped,
+}
+
+/// Whether a card's text is longer than its two lines: the first line only, as the web shows it, unless it is open.
+fn is_long(body: &str) -> bool {
+    let first = body.lines().next().unwrap_or("");
+    body.len() > first.len() || body.len() > 140
+}
+
+/// The question or approval card on the composer's top edge: the reason icon at the left, amber at 8% with a 1 px border at 30%,
+/// radius 12, padding 12 and 16. The body is clamped to two lines (never cut mid-line; the ellipsis ends the second) and
+/// "Full text" at the bottom right opens it in place. Its primary button sits inside, bottom left.
+fn note(s: &App, t: &Neko, kind: Card, title: &str, body: &str, button: Option<(&str, &str)>) -> El {
+    let ink = if kind == Card::Stopped { t.meaning.coral } else { t.meaning.amber };
+    let glyph = match kind {
+        Card::Question => &icons::REASON_QUESTION,
+        Card::Plan => &icons::REASON_LIST,
+        Card::Stopped => &icons::CROSS,
+    };
+    let open = s.open("tray-full");
+    let long = is_long(body);
+    let first = body.lines().next().unwrap_or("");
+    let words = if open { body.to_owned() } else { first.to_owned() };
+    let shown = if open { text(words).font(t.ty.meta).color(t.text.base).wrap().selectable(true) } else { text(words).font(t.ty.meta).color(t.text.base).max_lines(2).selectable(true) };
+    let mut text_col = col().w_full().grow(1.0).min_w(0.0).gap(2.0).child(text(title.to_owned()).font(rune::TextStyle { weight: 500.0, ..t.ty.meta }).color(ink));
+    text_col = text_col.child(if open { col().key("task-note-body").w_full().max_h(240.0).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(shown) } else { col().key("task-note-body").w_full().child(shown) });
+    let mut foot = row().w_full().center_y().gap(8.0);
+    if let Some((label, key)) = button {
+        let lead = if key == "approve" {
+            let id = s.selected.clone().unwrap_or_default();
+            primary_button(label.trim(), key, t, move |s: &mut App| s.call(Call::Approve { task_id: id.clone() }))
+        } else {
+            primary_button(label, key, t, |_: &mut App| {}).on_press_tx(|_: &mut App, tx: &mut rune::Tx| tx.focus("input", true))
+        };
+        foot = foot.child(lead);
+    }
+    foot = foot.child(el().grow(1.0));
+    if long {
+        foot = foot.child(
+            row()
+                .key("task-note-full")
+                .role("button")
+                .label(if open { "Less" } else { "Full text" })
+                .expanded(open)
+                .focusable(true)
+                .px(6.0)
+                .h(24.0)
+                .center_y()
+                .radius(t.radius.control)
+                .hover(t.surface.hover)
+                .focus_ring(2.0, 2.0, t.kit.c.border_focus)
+                .on_press(|s: &mut App| s.toggle("tray-full"))
+                .child(text(if open { "Less" } else { "Full text" }).font(t.ty.meta).color(t.text.muted).a11y_hidden()),
+        );
+    }
+    let has_foot = button.is_some() || long;
+    let mut inner = text_col;
+    if has_foot {
+        inner = inner.child(el().h(6.0)).child(foot);
+    }
+    row()
         .key("task-note")
         .w_full()
-        .px(14.0)
-        .py(10.0)
-        .gap(2.0)
-        .radius(t.radius.row + 4.0)
-        .fill(t.surface.card)
-        .child(text(title.to_owned()).font(rune::TextStyle { weight: 500.0, ..t.ty.meta }).color(if error { t.meaning.coral } else { t.meaning.amber }))
-        .child(col().max_h(120.0).scroll(ScrollSpec { stick_bottom: false }).child(text(body.to_owned()).font(t.ty.meta).color(t.text.base).wrap().selectable(true)))
+        .px(16.0)
+        .py(12.0)
+        .gap(12.0)
+        .items_start()
+        .radius(12.0)
+        .fill(ink.alpha(0.08))
+        .border(1.0, ink.alpha(0.30))
+        .child(el().mt(1.0).child(icon(glyph, 16.0).color(ink).a11y_hidden()))
+        .child(inner)
 }
