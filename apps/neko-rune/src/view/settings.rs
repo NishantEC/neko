@@ -11,8 +11,8 @@ use neko_protocol::phone::RemindersAccess;
 use rune::{El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::TextInput;
 
-use super::ui::{edit_of, editing, note, pick, setting_row, switch};
-use super::{band, nav_label_row, primary_button, quiet_button};
+use super::ui::{edit_of, editing, note, pick, setting_row, switch, switch_when};
+use super::{Frame, band, nav_label_row, primary_button, quiet_button};
 use crate::app::App;
 use crate::icons;
 use crate::pages::{Section, ago};
@@ -63,7 +63,7 @@ fn limit_of(chosen: &str) -> Option<u32> {
     chosen.parse().ok()
 }
 
-pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
+pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     let query = s.pages.text("settings:search").trim().to_lowercase();
     let words: Vec<&str> = query.split_whitespace().collect();
     let all = items(s, t, layer);
@@ -83,13 +83,16 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         }
     }
     let title = if words.is_empty() { s.pages.section.title() } else { "Search" };
-    let column = col().key("full-settings").w_full().max_w(640.0 + 64.0).px(32.0).pt(8.0).pb(40.0).gap(16.0).child(text(title.to_owned()).key("title").font(t.ty.title).color(t.text.base).role("heading")).child(content);
+    // Under 760 points the rail narrows to 150 and the sides to 16, so the rows keep their room.
+    let narrow = frame.region_w < 760.0;
+    let side = if narrow { 16.0 } else { 32.0 };
+    let column = col().key("full-settings").w_full().max_w(640.0 + 2.0 * side).px(side).pt(8.0).pb(40.0).gap(16.0).child(text(title.to_owned()).key("title").font(t.ty.title).color(t.text.base).role("heading")).child(content);
     let scroll = col().key("page-scroll").grow(1.0).min_w(0.0).h_full().clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(row().w_full().justify_center().child(column));
-    col().w_full().h_full().child(band(t)).child(row().w_full().grow(1.0).min_h(0.0).child(rail(s, t)).child(scroll))
+    col().w_full().h_full().child(band(t)).child(row().w_full().grow(1.0).min_h(0.0).child(rail(s, t, narrow)).child(scroll))
 }
 
 /// The section list, with the search field above it.
-fn rail(s: &App, t: &Neko) -> El {
+fn rail(s: &App, t: &Neko, narrow: bool) -> El {
     let search = TextInput::new(edit_of(s, "settings:search"))
         .label("Find a setting")
         .placeholder("Find a setting  ⌘F")
@@ -101,7 +104,7 @@ fn rail(s: &App, t: &Neko) -> El {
         .key("settings-search")
         .w_full();
     let searching = !s.pages.text("settings:search").trim().is_empty();
-    let mut c = col().key("settings-rail").w(200.0).h_full().px(12.0).pt(4.0).gap(2.0).child(search).child(el().h(8.0));
+    let mut c = col().key("settings-rail").w(if narrow { 150.0 } else { 200.0 }).h_full().px(if narrow { 8.0 } else { 12.0 }).pt(4.0).gap(2.0).child(search).child(el().h(8.0));
     for section in Section::ALL {
         let active = !searching && s.pages.section == section;
         c = c.child(nav_label_row(section.title(), &format!("settings-section-{}", section.key()), active, t).on_press(move |s: &mut App| {
@@ -126,6 +129,7 @@ fn items(s: &App, t: &Neko, layer: &mut Vec<El>) -> Vec<Item> {
 }
 
 fn general(s: &App, t: &Neko, out: &mut Vec<Item>) {
+    let loaded = s.pages.routines.is_some();
     let routines_on = s.pages.routines.as_ref().is_none_or(|d| d.routines_on);
     let help = "Neko checks messages, PRs and your day in the background. Off until you turn it on.";
     out.push(item(
@@ -133,7 +137,7 @@ fn general(s: &App, t: &Neko, out: &mut Vec<Item>) {
         "routines-on",
         "Routines",
         help,
-        with_note(s, t, "setting:routines-on", setting_row(t, "set-routines-on", "Routines", Some(help), switch(t, "set-routines-switch", "Routines", routines_on, move |s: &mut App| s.call(crate::link::Call::SetRoutinesOn { enabled: !routines_on })))),
+        with_note(s, t, "setting:routines-on", setting_row(t, "set-routines-on", "Routines", Some(help), switch_when(t, "set-routines-switch", "Routines", routines_on, loaded, move |s: &mut App| s.call(crate::link::Call::SetRoutinesOn { enabled: !routines_on })))),
     ));
     let cal = s.pages.calendar.as_ref().map(|c| c.status.clone());
     let enabled = cal.as_ref().is_some_and(|c| c.enabled);
@@ -349,14 +353,11 @@ fn ai(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     ));
 }
 
-fn dollars(cents: Option<u32>) -> String {
-    cents.map_or(String::new(), |c| format!("{:.2}", c as f64 / 100.0))
-}
-
 #[allow(clippy::too_many_arguments)]
 fn money_row(s: &App, t: &Neko, id: &'static str, label: &str, help: &str, placeholder: &str, max: f64, saved: Option<u32>, make: fn(Option<u32>) -> crate::link::Call) -> Item {
-    let dirty = s.pages.text(id).trim().trim_start_matches('$') != dollars(saved);
-    let mut control = row().gap(6.0).center_y().child(text("US$").font(t.ty.mono).color(t.text.muted)).child(super::ui::input(s, t, id, label, placeholder, 96.0, move |s: &mut App| s.save_money(id, max, make)));
+    let _ = saved;
+    let dirty = s.pages.edited(id, true);
+    let mut control = row().gap(6.0).center_y().shrink().child(text("US$").font(t.ty.mono).color(t.text.muted)).child(super::ui::input(s, t, id, label, placeholder, 96.0, move |s: &mut App| s.save_money(id, max, make)));
     if dirty {
         control = control.child(quiet_button("Save", &format!("{id}-save"), t, move |s: &mut App| s.save_money(id, max, make)));
     }
@@ -411,9 +412,10 @@ fn budget(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
 
 fn phone(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     let Some(data) = &s.pages.phone else {
-        out.push(item(Section::Phone, "phone-loading", "Phone", "", text("Reading the phone settings…").key("phone-loading").font(t.ty.meta).color(t.text.muted).px(6.0).py(8.0)));
+        out.push(item(Section::Phone, "phone-loading", "Phone", "", text(s.pages.notes.get("page:phone").map_or("Reading the phone settings…", String::as_str).to_owned()).key("phone-loading").font(t.ty.meta).color(t.text.muted).px(6.0).py(8.0)));
         return;
     };
+    let start = out.len();
     let p = data.settings.clone();
     let status = &data.status;
     let denied = status.reminders_access == RemindersAccess::Denied;
@@ -423,27 +425,19 @@ fn phone(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
         "phone-reminders",
         "Apple Reminders",
         help,
-        with_note(
-            s,
-            t,
-            "setting:phone",
-            setting_row(t, "set-reminders", "Apple Reminders", Some(help), row().gap(10.0).center_y().child(value(t, "set-reminders-state", if denied { "Not allowed in System Settings" } else { "" })).child(switch(t, "set-reminders-switch", "Apple Reminders", p.reminders, move |s: &mut App| s.change_phone(|p| p.reminders = !p.reminders)))),
-        ),
+        setting_row(t, "set-reminders", "Apple Reminders", Some(help), row().gap(10.0).center_y().child(value(t, "set-reminders-state", if denied { "Not allowed in System Settings" } else { "" })).child(switch(t, "set-reminders-switch", "Apple Reminders", p.reminders, move |s: &mut App| s.change_phone("reminders", |p| p.reminders = !p.reminders)))),
     ));
     let help = "Pushes to the ntfy topic Neko made for you. Only the title is sent unless you turn that off.";
-    out.push(item(Section::Phone, "phone-ntfy", "ntfy", help, setting_row(t, "set-ntfy", "ntfy", Some(help), switch(t, "set-ntfy-switch", "ntfy", p.ntfy, move |s: &mut App| s.change_phone(|p| p.ntfy = !p.ntfy)))));
+    out.push(item(Section::Phone, "phone-ntfy", "ntfy", help, setting_row(t, "set-ntfy", "ntfy", Some(help), switch(t, "set-ntfy-switch", "ntfy", p.ntfy, move |s: &mut App| s.change_phone("ntfy", |p| p.ntfy = !p.ntfy)))));
     out.push(item(
         Section::Phone,
         "phone-ntfy-server",
         "ntfy server",
         "Where pushes are sent. Press Return to save.",
-        setting_row(t, "set-ntfy-server", "ntfy server", Some("Where pushes are sent. Press Return to save."), super::ui::input(s, t, "ntfy-server", "ntfy server", "https://ntfy.sh", 240.0, |s: &mut App| {
-            let server = s.pages.text("ntfy-server").trim().to_owned();
-            s.change_phone(|p| p.ntfy_server = server);
-        })),
+        setting_row(t, "set-ntfy-server", "ntfy server", Some("Where pushes are sent. Press Return to save."), super::ui::input(s, t, "ntfy-server", "ntfy server", "https://ntfy.sh", 240.0, |s: &mut App| s.save_ntfy_server())),
     ));
-    out.push(item(Section::Phone, "phone-titles-only", "Send only the title", "The ntfy server sees the text of a push unless this is on.", setting_row(t, "set-titles-only", "Send only the title", Some("The ntfy server sees the text of a push unless this is on."), switch(t, "set-titles-switch", "Send only the title", p.titles_only, move |s: &mut App| s.change_phone(|p| p.titles_only = !p.titles_only)))));
-    out.push(item(Section::Phone, "phone-quiet", "Quiet hours", "Pushes wait until quiet hours end, except what cannot wait.", setting_row(t, "set-quiet", "Quiet hours", Some("Pushes wait until quiet hours end, except what cannot wait."), switch(t, "set-quiet-switch", "Quiet hours", p.quiet_enabled, move |s: &mut App| s.change_phone(|p| p.quiet_enabled = !p.quiet_enabled)))));
+    out.push(item(Section::Phone, "phone-titles-only", "Send only the title", "The ntfy server sees the text of a push unless this is on.", setting_row(t, "set-titles-only", "Send only the title", Some("The ntfy server sees the text of a push unless this is on."), switch(t, "set-titles-switch", "Send only the title", p.titles_only, move |s: &mut App| s.change_phone("titles-only", |p| p.titles_only = !p.titles_only)))));
+    out.push(item(Section::Phone, "phone-quiet", "Quiet hours", "Pushes wait until quiet hours end, except what cannot wait.", setting_row(t, "set-quiet", "Quiet hours", Some("Pushes wait until quiet hours end, except what cannot wait."), switch(t, "set-quiet-switch", "Quiet hours", p.quiet_enabled, move |s: &mut App| s.change_phone("quiet", |p| p.quiet_enabled = !p.quiet_enabled)))));
     if p.quiet_enabled {
         let hs = hours();
         out.push(item(
@@ -459,13 +453,13 @@ fn phone(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
                 row()
                     .gap(8.0)
                     .center_y()
-                    .child(pick(s, t, layer, "set-quiet-from", "Quiet from", &hs, &format!("{:02}:00", p.quiet_from_hour), 100.0, |s: &mut App, chosen: &str| s.change_phone(|p| p.quiet_from_hour = hour_of(chosen))))
+                    .child(pick(s, t, layer, "set-quiet-from", "Quiet from", &hs, &format!("{:02}:00", p.quiet_from_hour), 100.0, |s: &mut App, chosen: &str| s.change_phone("quiet-window", |p| p.quiet_from_hour = hour_of(chosen))))
                     .child(text("to").font(t.ty.meta).color(t.text.muted))
-                    .child(pick(s, t, layer, "set-quiet-to", "Quiet until", &hs, &format!("{:02}:00", p.quiet_to_hour), 100.0, |s: &mut App, chosen: &str| s.change_phone(|p| p.quiet_to_hour = hour_of(chosen)))),
+                    .child(pick(s, t, layer, "set-quiet-to", "Quiet until", &hs, &format!("{:02}:00", p.quiet_to_hour), 100.0, |s: &mut App, chosen: &str| s.change_phone("quiet-window", |p| p.quiet_to_hour = hour_of(chosen)))),
             ),
         ));
     }
-    out.push(item(Section::Phone, "phone-digest", "Morning digest", "One calm summary of what finished, what is stuck and what needs a decision.", setting_row(t, "set-digest", "Morning digest", Some("One calm summary of what finished, what is stuck and what needs a decision."), switch(t, "set-digest-switch", "Morning digest", p.digest, move |s: &mut App| s.change_phone(|p| p.digest = !p.digest)))));
+    out.push(item(Section::Phone, "phone-digest", "Morning digest", "One calm summary of what finished, what is stuck and what needs a decision.", setting_row(t, "set-digest", "Morning digest", Some("One calm summary of what finished, what is stuck and what needs a decision."), switch(t, "set-digest-switch", "Morning digest", p.digest, move |s: &mut App| s.change_phone("digest", |p| p.digest = !p.digest)))));
     if p.digest {
         let hs = hours();
         let minutes: Vec<String> = ["00", "15", "30", "45"].iter().map(|m| (*m).to_owned()).collect();
@@ -487,8 +481,8 @@ fn phone(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
                 row()
                     .gap(8.0)
                     .center_y()
-                    .child(pick(s, t, layer, "set-digest-hour", "Digest hour", &hs, &format!("{:02}:00", p.digest_hour), 100.0, |s: &mut App, chosen: &str| s.change_phone(|p| p.digest_hour = hour_of(chosen))))
-                    .child(pick(s, t, layer, "set-digest-minute", "Digest minute", &minutes, &minute_now, 80.0, |s: &mut App, chosen: &str| s.change_phone(|p| p.digest_minute = chosen.parse().unwrap_or(0)))),
+                    .child(pick(s, t, layer, "set-digest-hour", "Digest hour", &hs, &format!("{:02}:00", p.digest_hour), 100.0, |s: &mut App, chosen: &str| s.change_phone("digest-time", |p| p.digest_hour = hour_of(chosen))))
+                    .child(pick(s, t, layer, "set-digest-minute", "Digest minute", &minutes, &minute_now, 80.0, |s: &mut App, chosen: &str| s.change_phone("digest-time", |p| p.digest_minute = chosen.parse().unwrap_or(0)))),
             ),
         ));
     }
@@ -505,6 +499,12 @@ fn phone(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
         "Sends a push on every channel that is on, ignoring quiet hours.",
         setting_row(t, "set-phone-test", "Send a test", Some("Sends a push on every channel that is on, ignoring quiet hours."), row().gap(10.0).center_y().child(value(t, "set-phone-last", if tests.is_empty() { &last } else { &tests })).child(quiet_button("Send a test", "phone-test", t, |s: &mut App| s.call(crate::link::Call::PhoneTest)))),
     ));
+    // A refusal of a change shows under the row that made it.
+    for it in &mut out[start..] {
+        let row = it.id.trim_start_matches("phone-").to_owned();
+        let el = std::mem::replace(&mut it.el, rune::el());
+        it.el = with_note(s, t, &format!("setting:phone:{row}"), el);
+    }
 }
 
 fn short(commit: &Option<String>) -> String {
@@ -552,17 +552,10 @@ fn updates(s: &App, t: &Neko, out: &mut Vec<Item>) {
     let (ui, native) = (u.auto_ui, u.auto_native);
     out.push(item(Section::Updates, "auto-update-ui", "Update the web UI automatically", "Rebuilds and swaps in the web UI after a change lands.", setting_row(t, "set-auto-ui", "Update the web UI automatically", Some("Rebuilds and swaps in the web UI after a change lands."), switch(t, "set-auto-ui-switch", "Update the web UI automatically", ui, move |s: &mut App| s.call(crate::link::Call::SetSelfUpdate { auto_ui: !ui, auto_native: native })))));
     out.push(item(Section::Updates, "auto-update-app", "Reinstall the app automatically", "Reinstalls the app once Neko is idle and the Mac is fine to build.", setting_row(t, "set-auto-native", "Reinstall the app automatically", Some("Reinstalls the app once Neko is idle and the Mac is fine to build."), switch(t, "set-auto-native-switch", "Reinstall the app automatically", native, move |s: &mut App| s.call(crate::link::Call::SetSelfUpdate { auto_ui: ui, auto_native: !native })))));
-    let saved = u.dev_checkout.clone().unwrap_or_default();
-    let dirty = s.pages.text("dev-checkout").trim() != saved;
-    let mut control = row().gap(6.0).center_y().child(super::ui::input(s, t, "dev-checkout", "Development checkout", "Not set", 260.0, |s: &mut App| {
-        let path = s.pages.text("dev-checkout").trim().to_owned();
-        s.call(crate::link::Call::SetDevCheckout { path });
-    }));
+    let dirty = s.pages.edited("dev-checkout", false);
+    let mut control = row().gap(6.0).center_y().shrink().child(super::ui::input(s, t, "dev-checkout", "Development checkout", "Not set", 260.0, |s: &mut App| s.save_dev_checkout()));
     if dirty {
-        control = control.child(quiet_button("Save", "dev-checkout-save", t, |s: &mut App| {
-            let path = s.pages.text("dev-checkout").trim().to_owned();
-            s.call(crate::link::Call::SetDevCheckout { path });
-        }));
+        control = control.child(quiet_button("Save", "dev-checkout-save", t, |s: &mut App| s.save_dev_checkout()));
     }
     let help = "The folder where Neko’s own tasks change Neko. A task that lands there is pushed to the published main.";
     out.push(item(Section::Updates, "dev-checkout", "Development checkout", help, with_note(s, t, "setting:dev-checkout", setting_row(t, "set-dev-checkout", "Development checkout", Some(help), control))));

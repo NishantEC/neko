@@ -22,6 +22,8 @@ mod turn;
 mod ui;
 mod work;
 
+pub use session::goal_body_cap;
+
 use rune::{Cursor, Cx, Drag, El, Phase, col, el, icon, row, text};
 use rune_kit::root;
 
@@ -34,22 +36,32 @@ pub const COLUMN: f32 = 880.0;
 /// The height of the band across the top of each region (the window's titlebar height).
 pub const BAND: f32 = 44.0;
 
+/// What the window gives the middle region: its height and its own width, for the parts that must
+/// fit them (an open goal, Settings' rail).
+#[derive(Clone, Copy, Debug)]
+pub struct Frame {
+    pub win_h: f32,
+    pub region_w: f32,
+}
+
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let t = theme(cx.system_dark());
     let mut layer = Vec::new();
     let layout = &s.layout;
     // What fits: the session keeps its minimum, so a small window narrows or hides the others.
     // Before the first layout there is no width to read, and the state's own widths stand.
-    let (fit, win_h) = match cx.layout_size("window") {
-        Some([w, h]) => (layout.fit(w), h),
-        None => (crate::layout::Fit { context: layout.context.shown_width(), neko_open: layout.neko.is_open() }, 840.0),
+    let (fit, win_h, win_w) = match cx.layout_size("window") {
+        Some([w, h]) => (layout.fit(w), h, w),
+        None => (crate::layout::Fit { context: layout.context.shown_width(), neko_open: layout.neko.is_open() }, 840.0, 1360.0),
     };
+    let neko_w = if fit.neko_open { layout.neko.width() } else { NEKO_STRIP };
+    let frame = Frame { win_h, region_w: (win_w - layout.sessions.width() - fit.context - neko_w - 3.0 * GRIP - 4.0).max(0.0) };
 
     let mut window = row().key("window").w_full().h_full().fill(t.surface.sidebar);
     window = window.child(sessions::column(s, &t, &mut layer).w(layout.sessions.width()).key("sessions"));
     window = window.child(grip(Region::Sessions, &t));
     // The session and the context panel are two cards in the window, inset from its edges.
-    window = window.child(session::region(s, &t, &mut layer));
+    window = window.child(session::region(s, &t, &mut layer, frame));
     if fit.context > 0.0 {
         window = window.child(grip(Region::Context, &t));
         window = window.child(context::panel(s, &t).w(fit.context));

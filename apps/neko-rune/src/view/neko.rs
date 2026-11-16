@@ -18,13 +18,28 @@ use crate::theme::Neko;
 use crate::turns::{Role, chat_turns};
 
 const CHAT: Where = Where { ns: "neko-", compact: true };
-/// How many Inbox items the column lists before saying how many more.
+/// How many Inbox items the column lists before saying how many more (two in a short window, so
+/// the chat keeps room to read).
 const INBOX_ITEMS: usize = 3;
+const INBOX_ITEMS_SHORT: usize = 2;
+/// A window this short or shorter is "short".
+pub const SHORT_WINDOW: f32 = 600.0;
+/// The chat keeps at least this much height at any window height.
+const CHAT_MIN: f32 = 160.0;
+
+fn inbox_limit(win_h: f32) -> usize {
+    if win_h <= SHORT_WINDOW { INBOX_ITEMS_SHORT } else { INBOX_ITEMS }
+}
+
+/// The tallest the ask box grows.
+fn ask_max(win_h: f32) -> f32 {
+    if win_h <= SHORT_WINDOW { 80.0 } else { 120.0 }
+}
 /// How many of Neko's turns are drawn in the column.
 const TURNS_SHOWN: usize = 8;
 
 pub fn column(s: &App, t: &Neko, win_h: f32, layer: &mut Vec<El>) -> El {
-    col().h_full().min_w(0.0).child(header(t)).child(body(s, t, win_h, layer)).child(foot(s, t))
+    col().h_full().min_w(0.0).child(header(t)).child(body(s, t, win_h, layer)).child(foot(s, t, win_h))
 }
 
 /// "Neko" and the toggle that folds the column to its icon: 36 points.
@@ -137,23 +152,36 @@ fn inbox_item(s: &App, t: &Neko, item: &InboxItem, layer: &mut Vec<El>) -> El {
 }
 
 /// The Inbox: open by default, at most three items and "and N more" that opens the rest.
-fn inbox(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
+fn inbox(s: &App, t: &Neko, layer: &mut Vec<El>, win_h: f32) -> El {
     let items = &s.neko.inbox;
     let open = !s.open("inbox:closed");
     let mut c = col().key("inbox").w_full().gap(2.0).child(section_head(t, "inbox-toggle", "Inbox", (!items.is_empty()).then_some(items.len()), open, "inbox:closed"));
     if !open {
         return c;
     }
-    if items.is_empty() {
+    if items.is_empty() && s.neko.failed && !s.neko.loaded {
+        c = c.child(
+            row()
+                .key("inbox-failed")
+                .w_full()
+                .min_h(28.0)
+                .px(6.0)
+                .gap(8.0)
+                .center_y()
+                .child(text("Couldn’t read the Inbox").font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0))
+                .child(quiet_button("Retry", "inbox-retry", t, |s: &mut App| s.retry_inbox())),
+        );
+    } else if items.is_empty() {
         c = c.child(text(if s.neko.loaded { "Nothing needs you right now" } else { "Looking for what needs you…" }).key("inbox-empty").font(t.ty.meta).color(t.text.muted).px(6.0).py(2.0));
     }
+    let limit = inbox_limit(win_h);
     let all = s.open("inbox:all");
-    let shown = if all { items.len() } else { items.len().min(INBOX_ITEMS) };
+    let shown = if all { items.len() } else { items.len().min(limit) };
     for item in items.iter().take(shown) {
         c = c.child(inbox_item(s, t, item, layer));
     }
-    if items.len() > INBOX_ITEMS {
-        let label = if all { "Show fewer".to_owned() } else { format!("and {} more", items.len() - INBOX_ITEMS) };
+    if items.len() > limit {
+        let label = if all { "Show fewer".to_owned() } else { format!("and {} more", items.len() - limit) };
         c = c.child(
             row()
                 .key("inbox-more")
@@ -285,10 +313,13 @@ fn conversation(s: &App, t: &Neko) -> Option<El> {
 fn body(s: &App, t: &Neko, win_h: f32, layer: &mut Vec<El>) -> El {
     let working = s.summary.as_ref().map_or(0, |m| m.working());
     let waiting = s.waiting();
-    let cap = (win_h * 0.46).clamp(120.0, 440.0);
+    // The top block takes what it needs up to a share of the window, but never so much that the chat
+    // (header 36, the ask box and status below it) is left under CHAT_MIN.
+    let foot = ask_max(win_h) + 70.0;
+    let cap = (win_h * 0.46).min(win_h - 36.0 - foot - CHAT_MIN).clamp(100.0, 440.0);
     let mut top = col().key("neko-top").w_full().px(8.0).pb(8.0).gap(8.0);
     top = top.child(row().key("crew-row").w_full().h(24.0).px(6.0).center_y().child(text(crew_line(working, waiting)).key("crew").font(t.ty.row).color(t.text.base).truncate()));
-    top = top.child(inbox(s, t, layer));
+    top = top.child(inbox(s, t, layer, win_h));
     top = top.child(digest(s, t));
     let mut c = col().key("neko-body").w_full().grow(1.0).min_h(0.0).child(col().key("neko-scroll").w_full().max_h(cap).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(top));
     if let Some(conv) = conversation(s, t) {
@@ -306,7 +337,7 @@ fn el_grow() -> El {
 
 /// The ask box and the link's state. Enter asks; Shift+Enter is a new line; the reply streams in
 /// above while it is written, with a Stop.
-fn foot(s: &App, t: &Neko) -> El {
+fn foot(s: &App, t: &Neko, win_h: f32) -> El {
     let replying = s.summary.as_ref().is_some_and(|m| m.replying());
     let ask = TextArea::new(&s.ask)
         .placeholder("Ask Neko…")
@@ -325,7 +356,7 @@ fn foot(s: &App, t: &Neko) -> El {
         .w_full()
         .min_w(0.0)
         .min_h(40.0)
-        .max_h(120.0);
+        .max_h(ask_max(win_h));
     let mut c = col().key("neko-foot").w_full().px(14.0).pb(8.0).gap(6.0).child(ask);
     if replying {
         let turn = s.summary.as_ref().and_then(|m| m.conversation.last()).map(|m| m.id.clone()).unwrap_or_default();

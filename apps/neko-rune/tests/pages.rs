@@ -284,7 +284,7 @@ fn every_page_has_one_header_line_and_at_most_one_primary_button() {
 #[test]
 fn nothing_runs_outside_its_region_at_the_smallest_window_or_at_a_roomy_one() {
     for size in [(960.0, 560.0), (1360.0, 840.0), (1600.0, 1000.0)] {
-        for name in ["routines", "routines-open", "calendar", "calendar-event", "settings", "settings-phone", "usage", "workspaces-open", "plugins"] {
+        for name in ["routines", "routines-open", "calendar", "calendar-event", "settings", "settings-phone", "settings-narrow", "usage", "workspaces-open", "plugins"] {
             let rt = runtime_at(size, name);
             let region = rect(&rt, "session-region");
             for e in rt.elements() {
@@ -298,4 +298,117 @@ fn nothing_runs_outside_its_region_at_the_smallest_window_or_at_a_roomy_one() {
             }
         }
     }
+}
+
+#[test]
+fn an_untouched_field_saves_nothing_and_a_never_seeded_one_cannot_clear_a_setting() {
+    // The fields show what is saved; pressing Save or Return on one the person has not changed sends nothing.
+    let mut rt = runtime("settings-budget");
+    assert_eq!((rt.state.pages.text("task-budget"), rt.state.pages.text("daily-budget"), rt.state.pages.text("dev-checkout")), ("3.00", "5.00", "/work/neko"));
+    rt.update(|s, _| {
+        s.save_money("task-budget", 1000.0, |cents| Call::SetTaskBudget { cents });
+        s.save_money("daily-budget", 10000.0, |cents| Call::SetDailyBudget { cents });
+        s.save_dev_checkout();
+        s.save_ntfy_server();
+    });
+    assert!(rt.state.outbox.is_empty(), "nothing changed, nothing sent: {:?}", rt.state.outbox);
+    assert!(rt.find("task-budget-save").is_none(), "and no Save to press");
+    // A field that was never filled (the daemon had not answered) is not a request to clear it.
+    let mut fresh = App::headless();
+    fresh.save_money("daily-budget", 10000.0, |cents| Call::SetDailyBudget { cents });
+    fresh.save_dev_checkout();
+    fresh.save_ntfy_server();
+    assert!(fresh.outbox.is_empty());
+    // Edited, it sends; emptied on purpose, it clears.
+    rt.update(|s, _| {
+        s.pages.set_field("daily-budget", "");
+        s.save_money("daily-budget", 10000.0, |cents| Call::SetDailyBudget { cents });
+    });
+    assert_eq!(rt.state.outbox.last(), Some(&Call::SetDailyBudget { cents: None }));
+    // The ntfy server field shows what is saved, and Return on it untouched sends nothing.
+    let phone = runtime("settings-phone");
+    assert_eq!(phone.state.pages.text("ntfy-server"), "https://ntfy.sh");
+}
+
+#[test]
+fn a_new_saved_value_replaces_an_untouched_field_but_not_a_typed_one() {
+    let mut app = App::headless();
+    app.pages.seed("daily-budget", "5.00");
+    app.pages.seed("daily-budget", "6.00");
+    assert_eq!(app.pages.text("daily-budget"), "6.00", "untouched, it follows what is saved");
+    app.pages.set_field("daily-budget", "9");
+    app.pages.seed("daily-budget", "7.00");
+    assert_eq!(app.pages.text("daily-budget"), "9", "typed, it keeps the person's words");
+}
+
+#[test]
+fn settings_at_a_narrow_width_narrows_the_rail_and_keeps_inputs_inside() {
+    let rt = runtime_at((960.0, 700.0), "settings-narrow");
+    assert_eq!(rect(&rt, "settings-rail")[2], 150.0);
+    assert!(rect(&rt, "dev-checkout")[2] <= 320.5, "inputs stop at 320");
+    let wide = runtime_at((1600.0, 900.0), "settings");
+    assert_eq!(rect(&wide, "settings-rail")[2], 200.0);
+}
+
+#[test]
+fn rows_have_right_click_menus_with_their_actions() {
+    let secondary = |rt: &mut Runtime<App>, key: &str| {
+        let (x, y) = rt.find(key).unwrap();
+        rt.secondary_down(x, y);
+        rt.secondary_up(x, y);
+        settle(rt);
+    };
+    let mut rt = runtime("routines");
+    secondary(&mut rt, "routine-r1");
+    let t = texts(&rt);
+    assert!(t.contains(&"Run now".to_owned()) && t.contains(&"Pause".to_owned()) && t.contains(&"Edit".to_owned()), "{t:?}");
+    let mut rt = runtime("workspaces");
+    secondary(&mut rt, "ws-w1");
+    assert!(texts(&rt).iter().any(|x| x.starts_with("Open folder: ")));
+    let mut rt = runtime("plugins");
+    secondary(&mut rt, "plugin-board-viewer");
+    let t = texts(&rt);
+    assert!(t.contains(&"Check again".to_owned()) && t.contains(&"Open folder".to_owned()), "{t:?}");
+}
+
+#[test]
+fn a_calendar_answer_for_days_no_longer_on_screen_is_dropped() {
+    let mut app = App::headless();
+    app.open_view(FullView::Calendar);
+    let (from, to) = app.calendar_range();
+    let data = |f, t| neko_rune::link::CalendarData { events: vec![], neko: vec![], status: Default::default(), from_ms: f, to_ms: t };
+    app.apply_reply(&Call::CalendarEvents { from_ms: from, to_ms: to }, neko_rune::link::Reply::Calendar(Box::new(data(from - 7 * 86_400_000, from))));
+    assert!(app.pages.calendar.is_none(), "last week's answer arrived after the person moved on");
+    app.apply_reply(&Call::CalendarEvents { from_ms: from, to_ms: to }, neko_rune::link::Reply::Calendar(Box::new(data(from, to))));
+    assert!(app.pages.calendar.is_some());
+}
+
+#[test]
+fn the_routines_master_switch_waits_for_its_data() {
+    let rt = runtime("default");
+    let mut app = App::headless();
+    let _ = rt;
+    app.open_view(FullView::Settings);
+    let mut rt = Runtime::new(app, view, (1360.0, 900.0), Env { system_dark: true, scale: 1.0 });
+    rt.frame(0.0);
+    settle(&mut rt);
+    click(&mut rt, "set-routines-switch");
+    assert!(!rt.state.outbox.iter().any(|c| matches!(c, Call::SetRoutinesOn { .. })), "the switch cannot be pressed before routines load");
+}
+
+#[test]
+fn the_runs_list_is_rows_with_the_undo_on_the_row_and_a_menu() {
+    let mut rt = runtime("running");
+    assert!(rt.find("undo-run-1").is_some() && rt.find("runs-card").is_some());
+    let (x, y) = rt.find("run-row-2").unwrap();
+    rt.secondary_down(x, y);
+    rt.secondary_up(x, y);
+    settle(&mut rt);
+    let t = texts(&rt);
+    assert!(t.contains(&"Undo this run".to_owned()) && t.contains(&"Undo back to here".to_owned()) && t.contains(&"View diff".to_owned()), "{t:?}");
+    let e = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Undo back to here")).unwrap();
+    rt.pointer_down(e.rect[0] + 4.0, e.rect[1] + e.rect[3] / 2.0);
+    rt.pointer_up(e.rect[0] + 4.0, e.rect[1] + e.rect[3] / 2.0);
+    settle(&mut rt);
+    assert!(rt.state.work.confirm.as_ref().is_some_and(|c| matches!(&c.call, Call::Undo { run: 2, through_later: true, .. })), "it asks before undoing back to run 2");
 }

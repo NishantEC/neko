@@ -7,7 +7,7 @@
 use neko_protocol::routines::{RoutineRun, RoutineView};
 use rune::{El, col, el, row, text};
 
-use super::ui::{area, group, note, page, pick, quiet_line, setting_row, switch};
+use super::ui::{MenuEntry, area, group, note, page, pick, quiet_line, setting_row, switch, with_menu};
 use super::{primary_button, quiet_button};
 use crate::app::App;
 use crate::pages::{RoutineGlyph, ago, cadence_options, cadence_text, is_goal_routine, model_options, next_due_text, routine_glyph};
@@ -33,7 +33,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
                 .py(4.0)
                 .gap(10.0)
                 .center_y()
-                .child(text("Routines are off. Neko won’t check messages, PRs or your day until you turn them on.").font(t.ty.meta).color(t.text.muted).wrap().grow(1.0).min_w(0.0))
+                .child(text("Routines are off").font(t.ty.meta).color(t.text.muted).wrap().grow(1.0).min_w(0.0))
                 .child(quiet_button("Turn on", "routines-turn-on", t, |s: &mut App| s.call(crate::link::Call::SetRoutinesOn { enabled: true }))),
         );
     }
@@ -41,7 +41,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         body = body.child(quiet_line(t, "routines-empty", "No routines yet"));
     }
     for v in &views {
-        body = body.child(routine_row(s, t, data, v));
+        body = body.child(routine_row(s, t, layer, data, v));
         if s.pages.open_routine.as_deref() == Some(v.routine.id.as_str()) {
             body = body.child(details(s, t, layer, v));
         }
@@ -65,7 +65,7 @@ fn glyph_of(g: &RoutineGlyph) -> (StatusKind, &'static str) {
     }
 }
 
-fn routine_row(s: &App, t: &Neko, data: &crate::link::RoutinesData, v: &RoutineView) -> El {
+fn routine_row(s: &App, t: &Neko, layer: &mut Vec<El>, data: &crate::link::RoutinesData, v: &RoutineView) -> El {
     let routine = &v.routine;
     let id = routine.id.clone();
     let toggle_id = id.clone();
@@ -79,7 +79,7 @@ fn routine_row(s: &App, t: &Neko, data: &crate::link::RoutinesData, v: &RoutineV
         _ => next_due_text(v, s.now_ms),
     };
     let due_color = if matches!(glyph, RoutineGlyph::Held(_)) { t.meaning.amber } else { t.text.muted };
-    row()
+    let line = row()
         .key(format!("routine-{id}"))
         .role("button")
         .label(format!("{}, {word}, {}, {due}", routine.name, cadence_text(&routine.cadence)))
@@ -99,14 +99,30 @@ fn routine_row(s: &App, t: &Neko, data: &crate::link::RoutinesData, v: &RoutineV
             move |s: &mut App| s.open_routine(&id)
         })
         .child(status_glyph(kind, t, 14.0, Some(word)))
-        .child(text(routine.name.clone()).font(t.ty.row).color(t.text.base).truncate().w(150.0).a11y_hidden())
-        .child(text(scope).key(format!("routine-scope-{id}")).font(t.ty.meta).color(t.text.muted).truncate().w(110.0).a11y_hidden())
+        .child(text(routine.name.clone()).font(t.ty.row).color(t.text.base).truncate().min_w(0.0).max_w(150.0).grow(1.0).a11y_hidden())
+        .child(text(scope).key(format!("routine-scope-{id}")).font(t.ty.meta).color(t.text.muted).truncate().min_w(0.0).max_w(110.0).a11y_hidden())
         .child(text(cadence_text(&routine.cadence)).key(format!("routine-cadence-{id}")).font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden())
         .child(text(due).key(format!("routine-due-{id}")).font(t.ty.meta).color(due_color).truncate().max_w(170.0).a11y_hidden())
         .child(switch(t, &format!("routine-switch-{id}"), &format!("{} {}", if routine.enabled { "Pause" } else { "Resume" }, routine.name), routine.enabled, move |s: &mut App| {
             let on = s.pages.routine(&toggle_id).is_some_and(|v| v.routine.enabled);
             s.set_routine_enabled(&toggle_id, !on)
-        }))
+        }));
+    // Everything the row does is also in its right-click menu.
+    let busy = v.state.running || v.state.run_requested;
+    let mut entries: Vec<MenuEntry> = Vec::new();
+    if !busy {
+        let rid = id.clone();
+        entries.push(("Run now".to_owned(), std::rc::Rc::new(move |s: &mut App| s.run_routine(&rid))));
+    }
+    let (eid, on) = (id.clone(), routine.enabled);
+    entries.push((if on { "Pause" } else { "Resume" }.to_owned(), std::rc::Rc::new(move |s: &mut App| s.set_routine_enabled(&eid, !on))));
+    let oid = id.clone();
+    entries.push(("Edit".to_owned(), std::rc::Rc::new(move |s: &mut App| {
+        if s.pages.open_routine.as_deref() != Some(oid.as_str()) {
+            s.open_routine(&oid);
+        }
+    })));
+    with_menu(s, t, layer, &format!("routine:{id}"), line, entries)
 }
 
 /// The open routine: its editor, Run now, and its recent runs.

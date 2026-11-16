@@ -70,7 +70,7 @@ fn init() -> App {
         // The last run's widths (read once, before the first frame); the window then keeps them.
         let saved = app::load_layout();
         let layout = saved.map(layout::Layout::restored).unwrap_or_default();
-        App { linked: !has("nolink"), layout, layout_written: saved, persist_layout: true, ..App::default() }
+        App { linked: !has("nolink"), layout, layout_written: saved, layout_seen: saved, persist_layout: true, ..App::default() }
     }
 }
 

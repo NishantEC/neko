@@ -9,7 +9,7 @@ use rune::{Color, El, Key, KeyEvent, ScrollSpec, col, el, icon, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant, Menu, MenuItem, Placement};
 
 use super::turn::{self, Where};
-use super::{COLUMN, band, icon_button, placeholder, primary_button, work};
+use super::{COLUMN, Frame, band, icon_button, placeholder, primary_button, work};
 use crate::app::{App, Steer};
 use crate::icons;
 use crate::lab::lab;
@@ -22,17 +22,23 @@ use crate::work::{SHOWN_TURNS, working_line};
 
 const LIST: Where = Where { ns: "", compact: false };
 
+/// The most an open goal's body takes: 380, or 35% of the window when that is less, so the
+/// conversation and the composer under it are never covered.
+pub fn goal_body_cap(win_h: f32) -> f32 {
+    380.0f32.min(win_h * 0.35)
+}
+
 /// The card in the middle: inset from the window's edges with the window's radius.
-pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
+pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     let inner = if s.lab {
         col().w_full().grow(1.0).min_h(0.0).child(band(t)).child(row().w_full().grow(1.0).min_h(0.0).justify_center().child(lab(t)))
     } else if s.new_form.is_some() {
         super::new::form(s, t, layer)
     } else if let Some(view) = s.view {
-        full_view(s, view, t, layer)
+        full_view(s, view, t, layer, frame)
     } else {
         match s.session() {
-            Some(task) => session(s, task, t, layer),
+            Some(task) => session(s, task, t, layer, frame),
             None => empty(s, t),
         }
     };
@@ -68,7 +74,7 @@ fn top_line(s: &App, task: &TaskRow, t: &Neko) -> El {
         .child(icon_button(&icons::PANEL_RIGHT, if s.layout.context.is_open() { "Hide context" } else { "Show context" }, "context-toggle", t, |s: &mut App| s.layout.context.toggle()))
 }
 
-fn session(s: &App, row_task: &TaskRow, t: &Neko, layer: &mut Vec<El>) -> El {
+fn session(s: &App, row_task: &TaskRow, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     let mut c = col().w_full().h_full().min_w(0.0).child(top_line(s, row_task, t));
     let Some(detail) = s.detail() else {
         // The row is here and its events are on the way (one read after choosing it).
@@ -82,8 +88,8 @@ fn session(s: &App, row_task: &TaskRow, t: &Neko, layer: &mut Vec<El>) -> El {
     // scroll area is inset by its height plus 8, so its first line is never under it.
     // The lines' own padding (4 above, 4 below) and 8 of air.
     let inset = if goals.is_empty() { 0.0 } else { goals.len() as f32 * work::GOAL_LINE_H + 16.0 };
-    let content = col().w_full().max_w(COLUMN - 120.0).px(24.0).pb(20.0).pt(inset).child(conversation(s, t, task, detail.has_folder));
-    let mut region = col().key("turns-region").w_full().grow(1.0).min_h(0.0).child(
+    let content = col().w_full().max_w(COLUMN - 120.0).px(24.0).pb(20.0).pt(inset).child(conversation(s, t, task, detail.has_folder, layer));
+    let mut region = col().key("turns-region").w_full().grow(1.0).min_h(0.0).clip_rounded(0.0).child(
         col()
             .key("turns")
             .w_full()
@@ -101,7 +107,7 @@ fn session(s: &App, row_task: &TaskRow, t: &Neko, layer: &mut Vec<El>) -> El {
             // What a goal adds (its question, a refusal, its evidence when opened) hangs under its line
             // and scrolls on its own, over the conversation, until it is closed.
             if let Some(body) = work::goal_body(s, t, goal) {
-                lines = lines.child(col().key(format!("goal-body-{}", goal.id)).w_full().max_h(380.0).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body));
+                lines = lines.child(col().key(format!("goal-body-{}", goal.id)).w_full().max_h(goal_body_cap(frame.win_h)).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body));
             }
         }
         region = region.child(lines.absolute(0.0, 0.0));
@@ -114,7 +120,7 @@ fn session(s: &App, row_task: &TaskRow, t: &Neko, layer: &mut Vec<El>) -> El {
 }
 
 /// The turns, then the plan and the result, the runs and the working line.
-fn conversation(s: &App, t: &Neko, task: &Task, has_folder: bool) -> El {
+fn conversation(s: &App, t: &Neko, task: &Task, has_folder: bool, layer: &mut Vec<El>) -> El {
     let all = task_turns(task);
     let hidden = if s.work.all_turns { 0 } else { all.len().saturating_sub(SHOWN_TURNS) };
     let mut c = col().key("conversation").w_full().pt(4.0);
@@ -155,7 +161,7 @@ fn conversation(s: &App, t: &Neko, task: &Task, has_folder: bool) -> El {
     }
     if has_folder
         && let Some(list) = s.work.checkpoints.get(&task.id)
-        && let Some(runs) = work::runs(s, t, &task.id, list)
+        && let Some(runs) = work::runs(s, t, &task.id, list, layer)
     {
         c = c.child(col().w_full().mt(22.0).child(runs));
     }
@@ -190,14 +196,14 @@ fn empty(s: &App, t: &Neko) -> El {
 }
 
 /// A full view: its own page (Calendar, Routines, Settings, Usage, Workspaces, Plugins).
-fn full_view(s: &App, view: FullView, t: &Neko, layer: &mut Vec<El>) -> El {
+fn full_view(s: &App, view: FullView, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     match view {
         FullView::Calendar => super::calendar::view(s, t),
         FullView::Routines => super::routines::view(s, t, layer),
-        FullView::Settings => super::settings::view(s, t, layer),
+        FullView::Settings => super::settings::view(s, t, layer, frame),
         FullView::Usage => super::more::usage(s, t),
-        FullView::Workspaces => super::more::workspaces(s, t),
-        FullView::Plugins => super::more::plugins(s, t),
+        FullView::Workspaces => super::more::workspaces(s, t, layer),
+        FullView::Plugins => super::more::plugins(s, t, layer),
     }
 }
 

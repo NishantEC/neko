@@ -73,6 +73,22 @@ Behaviour worth knowing:
   without sending the page back. A failed read keeps the old data and says nothing; a refused write says why next
   to its control (`Pages::notes`).
 
+### The reviewer's round (2026-11-16)
+
+- **Fields show what is saved.** The budgets, the development checkout and the ntfy server are filled from the
+  daemon (`App::seed_settings`, `Pages::seed`) and follow it until the person types; Save and Return send nothing
+  for a field that was never filled or still shows what is saved (an empty, never-seeded box once read as "no
+  limit"). `tests/pages.rs` covers it.
+- **Short and narrow**: under 600 points tall the Inbox shows two rows, the ask box stops at 80 and the chat keeps
+  160; an open goal is capped at 35% of the window and scrolls; under 760 points of page width Settings' rail is 150
+  and its sides 16, rows wrap their control under the label and inputs shrink (max 320).
+- **Runs** are rows: the undo shows on hover or focus, and a right-click menu has Undo this run, Undo back to here,
+  View diff. Routine, workspace and plugin rows have right-click menus too (plugins: Check again and Open folder; a
+  plugin cannot be reloaded from here, the web page does that).
+- **Errors stay where they belong**: a failed read keeps the old page and says nothing; with no data the page says why in
+  place of "Looking for…"; the Inbox says "Couldn't read the Inbox" with Retry; a phone refusal shows under its row;
+  a calendar answer for days no longer shown is dropped; layout saves wait for half a second after the last change.
+
 ### Testing
 
 `tests/pages.rs` (made-up data through the headless `Runtime`: each page's lines, controls and requests, one

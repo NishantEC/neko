@@ -323,6 +323,7 @@ pub type Scene = (&'static str, fn(&mut App));
 
 pub const SCENES: &[Scene] = &[
     ("default", |_| {}),
+    ("settings-narrow", crate::scenes_pages::settings_narrow),
     ("routines", crate::scenes_pages::routines),
     ("routines-open", crate::scenes_pages::routines_open),
     ("calendar", crate::scenes_pages::calendar),

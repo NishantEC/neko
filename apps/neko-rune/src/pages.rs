@@ -204,6 +204,10 @@ pub struct Pages {
     /// Standing orders as last saved, per workspace, to tell an edited box from an untouched one.
     pub orders_saved: HashMap<String, String>,
     pub fields: HashMap<String, TextEdit>,
+    /// What a seeded field last showed as saved: a field still showing that has not been edited.
+    pub field_saved: HashMap<String, String>,
+    /// The phone row last changed, so a refusal shows under it.
+    pub phone_row: &'static str,
     pub calendar: Option<CalendarData>,
     pub cal_mode: CalMode,
     /// The local midnight of the day the calendar is on (the week that holds it in week view).
@@ -237,6 +241,8 @@ impl Default for Pages {
             draft: None,
             orders_saved: HashMap::new(),
             fields: HashMap::new(),
+            field_saved: HashMap::new(),
+            phone_row: "test",
             calendar: None,
             cal_mode: CalMode::Week,
             cal_day: 0,
@@ -273,6 +279,32 @@ impl Pages {
         self.field(key).replace_text(text);
     }
 
+    /// Shows what is saved in a field, unless the person has edited it (it then shows their words).
+    /// A field that was never seeded is never saved: Save and Return do nothing for it.
+    pub fn seed(&mut self, key: &str, saved: &str) {
+        let untouched = match (self.fields.get(key), self.field_saved.get(key)) {
+            (None, _) => true,
+            (Some(f), Some(prev)) => f.text == *prev,
+            (Some(_), None) => false,
+        };
+        if untouched {
+            self.set_field(key, saved);
+        }
+        self.field_saved.insert(key.to_owned(), saved.to_owned());
+    }
+
+    /// The field has been seeded and now shows something other than what is saved.
+    pub fn edited(&self, key: &str, trim_dollar: bool) -> bool {
+        match (self.fields.get(key), self.field_saved.get(key)) {
+            (Some(f), Some(saved)) => {
+                let now = f.text.trim();
+                let now = if trim_dollar { now.trim_start_matches('$').trim() } else { now };
+                now != saved.trim()
+            }
+            _ => false,
+        }
+    }
+
     pub fn routine(&self, id: &str) -> Option<&RoutineView> {
         self.routines.as_ref()?.views.iter().find(|v| v.routine.id == id)
     }
@@ -304,6 +336,11 @@ pub fn control_key(call: &Call) -> Option<String> {
         Call::Plugins => "page:plugins".to_owned(),
         _ => return None,
     })
+}
+
+/// A budget as its field shows it: dollars and cents, or empty for none.
+pub fn dollars(cents: Option<u32>) -> String {
+    cents.map_or(String::new(), |c| format!("{:.2}", c as f64 / 100.0))
 }
 
 /// Cents from the text a money field holds ("12.50" or "$12.50"); None for empty (no limit).
@@ -480,6 +517,11 @@ impl App {
 
     /// A money setting saved from its field: refuses what is not an amount, says so next to it.
     pub fn save_money(&mut self, field: &str, max: f64, make: impl FnOnce(Option<u32>) -> Call) {
+        // A field that was never filled from what is saved, or still shows it, sends nothing: an empty
+        // box that was never seeded must not read as "no limit".
+        if !self.pages.edited(field, true) {
+            return;
+        }
         match parse_dollars(self.pages.text(field), max) {
             Ok(cents) => {
                 self.pages.notes.remove(&format!("setting:{field}"));
@@ -491,10 +533,42 @@ impl App {
         }
     }
 
-    /// Changes one phone setting and saves, as the web does on each change.
-    pub fn change_phone(&mut self, change: impl FnOnce(&mut PhoneSettings)) {
+    /// The development checkout from its field; nothing when it still shows what is saved.
+    pub fn save_dev_checkout(&mut self) {
+        if self.pages.edited("dev-checkout", false) {
+            let path = self.pages.text("dev-checkout").trim().to_owned();
+            self.call(Call::SetDevCheckout { path });
+        }
+    }
+
+    /// The ntfy server from its field; nothing when it still shows what is saved.
+    pub fn save_ntfy_server(&mut self) {
+        if self.pages.edited("ntfy-server", false) {
+            let server = self.pages.text("ntfy-server").trim().to_owned();
+            if !server.is_empty() {
+                self.change_phone("ntfy-server", |p| p.ntfy_server = server);
+            }
+        }
+    }
+
+    /// Fills the settings fields from what the daemon says is saved (until the person edits them).
+    pub fn seed_settings(&mut self) {
+        if let Some(st) = self.summary.as_ref().map(|m| m.settings.clone()) {
+            self.pages.seed("task-budget", &dollars(st.task_budget_cents));
+            self.pages.seed("daily-budget", &dollars(st.daily_budget_cents));
+            self.pages.seed("dev-checkout", &st.self_update.as_ref().and_then(|u| u.dev_checkout.clone()).unwrap_or_default());
+        }
+        if let Some(server) = self.pages.phone.as_ref().map(|p| p.settings.ntfy_server.clone()) {
+            self.pages.seed("ntfy-server", &server);
+        }
+    }
+
+    /// Changes one phone setting and saves, as the web does on each change. `row` is the row it
+    /// belongs to: a refusal shows under it.
+    pub fn change_phone(&mut self, row: &'static str, change: impl FnOnce(&mut PhoneSettings)) {
         let Some(mut settings) = self.pages.phone.as_ref().map(|p| p.settings.clone()) else { return };
         change(&mut settings);
+        self.pages.phone_row = row;
         self.call(Call::SavePhone(Box::new(settings)));
     }
 
@@ -522,6 +596,10 @@ impl App {
                 Some(changed)
             }
             Reply::Calendar(data) => {
+                // An answer for days that are no longer on screen (the person moved on) is dropped.
+                if (data.from_ms, data.to_ms) != self.calendar_range() {
+                    return Some(false);
+                }
                 let changed = self.pages.calendar.as_ref() != Some(&**data);
                 self.pages.calendar = Some((**data).clone());
                 self.pages.notes.remove("page:calendar");
@@ -538,7 +616,8 @@ impl App {
             Reply::Phone(data) => {
                 let changed = self.pages.phone.as_ref() != Some(&**data);
                 self.pages.phone = Some((**data).clone());
-                self.pages.notes.remove("setting:phone");
+                self.pages.notes.retain(|k, _| !k.starts_with("setting:phone") && k != "page:phone");
+                self.seed_settings();
                 Some(changed)
             }
             Reply::PhoneTest(lines) => {
@@ -565,19 +644,21 @@ impl App {
         }
     }
 
-    /// A refusal or failure of a page request: said next to the control it belongs to.
-    pub fn page_refused(&mut self, call: &Call, message: String) -> bool {
-        match control_key(call) {
-            Some(key) => {
-                // Reads that fail stay quiet while the page has older data.
-                if call.reads() && self.pages_have(call) {
-                    return false;
-                }
-                self.pages.notes.insert(key, message);
-                true
-            }
-            None => false,
+    /// A refusal or failure of a page request: said next to the control it belongs to, never in the
+    /// session. None when the call is not a page's; Some(changed) when it is. A read that fails while
+    /// the page has older data stays quiet.
+    pub fn page_refused(&mut self, call: &Call, message: String) -> Option<bool> {
+        let mut key = control_key(call)?;
+        if call.reads() && self.pages_have(call) {
+            return Some(false);
         }
+        if matches!(call, Call::SavePhone(_)) {
+            key = format!("setting:phone:{}", self.pages.phone_row);
+        } else if matches!(call, Call::PhoneTest) {
+            key = "setting:phone:test".to_owned();
+        }
+        self.pages.notes.insert(key, message);
+        Some(true)
     }
 
     fn pages_have(&self, call: &Call) -> bool {

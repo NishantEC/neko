@@ -43,11 +43,13 @@ pub fn setting_row(t: &Neko, key: &str, label: &str, help: Option<&str>, control
         .min_h(40.0)
         .px(6.0)
         .py(4.0)
-        .gap(12.0)
+        .gap(4.0)
         .center_y()
+        // In a narrow page the control drops under its label instead of squeezing it.
+        .wrap()
         .radius(t.radius.row)
         .hover(t.surface.hover)
-        .child(text(label.to_owned()).font(t.ty.row).color(t.text.base).grow(1.0).min_w(0.0).wrap())
+        .child(text(label.to_owned()).font(t.ty.row).color(t.text.base).grow(1.0).min_w(140.0).wrap())
         .child(control);
     if let Some(h) = help {
         r = r.help(h);
@@ -63,6 +65,11 @@ pub fn note(s: &App, t: &Neko, key: &str) -> Option<El> {
 /// A switch that says what it does to assistive technology and shows only its state.
 pub fn switch(t: &Neko, key: &str, label: &str, on: bool, f: impl Fn(&mut App) + 'static) -> El {
     Switch::new(on).label(label).hide_label().on_toggle(f).build(&t.kit).key(key.to_owned())
+}
+
+/// A switch that cannot be pressed yet (what it changes has not loaded).
+pub fn switch_when(t: &Neko, key: &str, label: &str, on: bool, enabled: bool, f: impl Fn(&mut App) + 'static) -> El {
+    Switch::new(on).label(label).hide_label().disabled(!enabled).on_toggle(f).build(&t.kit).key(key.to_owned())
 }
 
 /// A choice from a short list: the current option shows, a list opens under it. Options are shown
@@ -111,9 +118,37 @@ pub fn input(s: &App, t: &Neko, key: &str, label: &str, placeholder: &str, width
         .on_submit(move |s: &mut App, _| submit(s))
         .build(&t.kit)
         .key(key.to_owned())
+        .shrink()
+        .max_w(320.0)
 }
 
 /// A multi-line text field of a few rows.
 pub fn area(s: &App, t: &Neko, key: &str, label: &str, placeholder: &str, rows: usize) -> El {
     TextArea::new(edit_of(s, key)).label(label).placeholder(placeholder).rows(rows).on_edit(editing(key.to_owned())).build(&t.kit).key(key.to_owned()).w_full().min_w(0.0)
+}
+
+/// One entry of a row's right-click menu.
+pub type MenuEntry = (String, std::rc::Rc<dyn Fn(&mut App)>);
+
+/// A row with a right-click menu (every action of a row is also in its menu). `key` names the row for
+/// the menu's open state.
+pub fn with_menu(s: &App, t: &Neko, layer: &mut Vec<El>, key: &str, row: El, entries: Vec<MenuEntry>) -> El {
+    if entries.is_empty() {
+        return row;
+    }
+    let owner = key.to_owned();
+    let row = row.on_secondary_press(move |s: &mut App, p, _| s.page_menu = Some((owner.clone(), p)));
+    match s.page_menu.as_ref().filter(|(open, _)| open == key) {
+        Some((_, at)) => {
+            let mut menu = rune_kit::context_menu(format!("menu-{key}"), row, Some(*at)).on_close(|s: &mut App| s.page_menu = None);
+            for (label, act) in entries {
+                menu = menu.item(rune_kit::MenuItem::new(label).on_select(move |s: &mut App| {
+                    s.page_menu = None;
+                    act(s);
+                }));
+            }
+            menu.build(&t.kit, layer)
+        }
+        None => row,
+    }
 }

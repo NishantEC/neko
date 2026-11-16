@@ -160,11 +160,13 @@ pub struct NekoCol {
     pub note: Option<String>,
     /// A refusal or failure shown next to what it belongs to: `inbox:<seq>` or `goal:<id>`.
     pub notes: HashMap<String, String>,
+    /// The Inbox could not be read and nothing is on screen yet: a quiet line and Retry.
+    pub failed: bool,
 }
 
 impl Default for NekoCol {
     fn default() -> Self {
-        NekoCol { inbox: Vec::new(), digest: None, asked_ms: i64::MIN / 2, loaded: false, note: None, notes: HashMap::new() }
+        NekoCol { inbox: Vec::new(), digest: None, asked_ms: i64::MIN / 2, loaded: false, note: None, notes: HashMap::new(), failed: false }
     }
 }
 
@@ -656,6 +658,19 @@ impl App {
         self.call(Call::MarkDigestRead);
     }
 
+    /// The Inbox read failed: with nothing shown yet, say so quietly (and offer Retry). True when that changed the screen.
+    pub fn inbox_unreadable(&mut self) -> bool {
+        let changed = !self.neko.loaded && !self.neko.failed;
+        self.neko.failed = !self.neko.loaded;
+        changed
+    }
+
+    /// Retry on the Inbox's failure line.
+    pub fn retry_inbox(&mut self) {
+        self.neko.failed = false;
+        self.call(Call::Inbox);
+    }
+
     /// Sends the ask box's text to Neko.
     pub fn ask_neko(&mut self) {
         let text = self.ask.text.trim().to_owned();
@@ -690,6 +705,15 @@ impl App {
                 let mut created = None;
                 if let Some(key) = note_key(call) {
                     self.neko.notes.remove(&key);
+                }
+                // A page write the daemon took clears the refusal that sat next to its control.
+                if !call.reads()
+                    && let Some(key) = crate::pages::control_key(call)
+                {
+                    self.pages.notes.remove(&key);
+                    if matches!(call, Call::SavePhone(_) | Call::PhoneTest) {
+                        self.pages.notes.retain(|k, _| !k.starts_with("setting:phone"));
+                    }
                 }
                 // The answer to a write is the new workbench; a text the daemon took leaves the box.
                 match call {
@@ -753,6 +777,7 @@ impl App {
                 changed
             }
             Reply::Inbox(items) => {
+                self.neko.failed = false;
                 let changed = self.neko.inbox != items || !self.neko.loaded;
                 self.neko.inbox = items;
                 self.neko.loaded = true;
@@ -775,8 +800,11 @@ impl App {
                 false
             }
             Reply::Refused(message) => {
-                if self.page_refused(call, message.clone()) {
-                    return true;
+                if let Some(changed) = self.page_refused(call, message.clone()) {
+                    return changed;
+                }
+                if matches!(call, Call::Inbox) {
+                    return self.inbox_unreadable();
                 }
                 if let Some(key) = note_key(call) {
                     self.neko.notes.insert(key, message);
@@ -807,8 +835,11 @@ impl App {
             }
             Reply::Failed(error) => {
                 let line = crate::link::calm(&error, std::time::Duration::from_secs(1));
-                if self.page_refused(call, line.clone()) {
-                    return true;
+                if let Some(changed) = self.page_refused(call, line.clone()) {
+                    return changed;
+                }
+                if matches!(call, Call::Inbox) {
+                    return self.inbox_unreadable();
                 }
                 if let Some(key) = note_key(call) {
                     self.neko.notes.insert(key, line);

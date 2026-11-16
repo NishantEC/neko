@@ -7,7 +7,7 @@
 use neko_protocol::routines::ScopeProposal;
 use rune::{Color, El, Shape, canvas, col, el, row, text};
 
-use super::ui::{group, page, quiet_line};
+use super::ui::{MenuEntry, group, page, quiet_line, with_menu};
 use crate::app::App;
 use crate::pages::ago;
 use crate::status::{StatusKind, status_glyph};
@@ -115,7 +115,7 @@ pub fn usage(s: &App, t: &Neko) -> El {
     let mut body = col().w_full().gap(18.0).child(figure(t, "usage-today", "Today", &usd(today), &detail));
     let days = spend_by_day(&usage, s.now_ms);
     body = if usage.is_empty() {
-        body.child(quiet_line(t, "usage-none", "No priced runs yet. When an agent that reports its cost finishes a run, its spend shows up here."))
+        body.child(quiet_line(t, "usage-none", "No priced runs yet"))
     } else {
         body.child(col().w_full().gap(6.0).child(group(t, "Last 7 days")).child(chart(t, &days)))
     };
@@ -150,7 +150,7 @@ fn quota(s: &App, t: &Neko) -> El {
                         .hover(t.surface.hover)
                         .child(text(r.label.clone()).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0))
                         .child(bar)
-                        .child(text(words).key(format!("quota-words-{i}")).font(t.ty.meta).color(t.text.muted).truncate().w(200.0)),
+                        .child(text(words).key(format!("quota-words-{i}")).font(t.ty.meta).color(t.text.muted).truncate().min_w(0.0).max_w(200.0)),
                 );
             }
         }
@@ -196,7 +196,7 @@ fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
-pub fn workspaces(s: &App, t: &Neko) -> El {
+pub fn workspaces(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     let list = scopes(s);
     let mut body = col().w_full().gap(2.0);
     if list.is_empty() {
@@ -206,8 +206,7 @@ pub fn workspaces(s: &App, t: &Neko) -> El {
     for w in &list {
         let open = s.pages.ws_open.contains(&w.id);
         let id = w.id.clone();
-        body = body.child(
-            row()
+        let line = row()
                 .key(format!("ws-{}", w.id))
                 .role("button")
                 .label(format!("{}, {}, {}", w.name, plural(w.folders.len(), "folder", "folders"), plural(w.servers.len(), "server", "servers")))
@@ -225,8 +224,12 @@ pub fn workspaces(s: &App, t: &Neko) -> El {
                 .child(text(if open { "▾" } else { "▸" }).font(t.ty.meta).color(t.text.faint).a11y_hidden())
                 .child(text(w.name.clone()).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0).a11y_hidden())
                 .child(text(plural(w.folders.len(), "folder", "folders")).font(t.ty.meta).color(t.text.muted).a11y_hidden())
-                .child(text(plural(w.servers.len(), "server", "servers")).font(t.ty.meta).color(t.text.muted).w(80.0).a11y_hidden()),
-        );
+                .child(text(plural(w.servers.len(), "server", "servers")).font(t.ty.meta).color(t.text.muted).min_w(0.0).max_w(80.0).a11y_hidden());
+        let entries: Vec<MenuEntry> = w.folders.iter().take(4).map(|f| {
+            let path = f.clone();
+            (format!("Open folder: {}", folder_name(f)), std::rc::Rc::new(move |s: &mut App| s.open_path(&path)) as std::rc::Rc<dyn Fn(&mut App)>)
+        }).collect();
+        body = body.child(with_menu(s, t, layer, &format!("ws:{}", w.id), line, entries));
         if open {
             let mut inner = col().key(format!("ws-details-{}", w.id)).w_full().pl(34.0).pb(8.0).gap(1.0);
             for f in &w.folders {
@@ -264,7 +267,7 @@ fn detail_row(t: &Neko, name: &str, faint: &str) -> El {
 
 // ---- Plugins
 
-pub fn plugins(s: &App, t: &Neko) -> El {
+pub fn plugins(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     let mut body = col().w_full().gap(2.0);
     let list = s.pages.plugins.clone();
     match &list {
@@ -281,8 +284,7 @@ pub fn plugins(s: &App, t: &Neko) -> El {
                 } else {
                     (StatusKind::Backlog, "Not loaded".to_owned())
                 };
-                body = body.child(
-                    row()
+                let line = row()
                         .key(format!("plugin-{}", p.id))
                         .w_full()
                         .min_h(36.0)
@@ -295,8 +297,13 @@ pub fn plugins(s: &App, t: &Neko) -> El {
                         .child(status_glyph(kind, t, 14.0, Some(&words)))
                         .child(text(p.id.clone()).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0))
                         .child(text(format!("v{}", p.version)).font(t.ty.id).color(t.text.faint))
-                        .child(text(words).key(format!("plugin-words-{}", p.id)).font(t.ty.meta).color(if kind == StatusKind::Failed { t.meaning.coral } else { t.text.muted }).truncate().max_w(300.0)),
-                );
+                        .child(text(words).key(format!("plugin-words-{}", p.id)).font(t.ty.meta).color(if kind == StatusKind::Failed { t.meaning.coral } else { t.text.muted }).truncate().min_w(0.0).max_w(300.0));
+                let mut entries: Vec<MenuEntry> = vec![("Check again".to_owned(), std::rc::Rc::new(|s: &mut App| s.call(crate::link::Call::Plugins)))];
+                if p.id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.') && !p.id.starts_with('.') {
+                    let dir = neko_protocol::support_dir().join("plugins").join(&p.id);
+                    entries.push(("Open folder".to_owned(), std::rc::Rc::new(move |s: &mut App| s.open_path(&dir.to_string_lossy()))));
+                }
+                body = body.child(with_menu(s, t, layer, &format!("plugin:{}", p.id), line, entries));
             }
         }
     }

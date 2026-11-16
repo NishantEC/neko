@@ -64,14 +64,14 @@ fn session_rows_have_no_id_and_their_titles_get_the_room() {
 }
 
 #[test]
-fn the_neko_column_never_overlaps_at_700_840_or_1200_high() {
-    for h in [700.0f32, 840.0, 1200.0] {
+fn the_neko_column_never_overlaps_at_560_700_840_or_1200_high() {
+    for h in [560.0f32, 700.0, 840.0, 1200.0] {
         let rt = runtime_at((1360.0, h), "live", |_| {});
         let (neko, top, chat, foot) = (rect(&rt, "neko"), rect(&rt, "neko-scroll"), rect(&rt, "neko-chat-scroll"), rect(&rt, "neko-foot"));
         assert!(bottom(top) <= chat[1] + 0.5, "{h}: the top block ends at {} where the chat starts at {}", bottom(top), chat[1]);
         assert!(bottom(chat) <= foot[1] + 0.5, "{h}: the chat ends at {} where the ask box starts at {}", bottom(chat), foot[1]);
         assert!(bottom(foot) <= bottom(neko) + 0.5 && foot[1] >= neko[1], "{h}: the foot stays inside the column");
-        assert!(chat[3] >= 120.0, "{h}: the chat keeps room to read: {}", chat[3]);
+        assert!(chat[3] >= if h <= 600.0 { 160.0 } else { 120.0 }, "{h}: the chat keeps room to read: {}", chat[3]);
         // The sessions column: the list ends where the pinned foot begins, and the foot is on screen.
         let (list, sfoot) = (rect(&rt, "sessions-scroll"), rect(&rt, "sessions-foot"));
         assert!(bottom(list) <= sfoot[1] + 0.5, "{h}: the list scrolls inside its region");
@@ -180,4 +180,55 @@ fn a_finished_session_is_seen_only_while_the_window_is_focused_and_the_session_i
     app.set_focused(true);
     assert!(!app.unseen.contains(&id));
     assert!(app.outbox.contains(&Call::MarkSeen { task_id: id, seen: true }));
+}
+
+#[test]
+fn a_short_window_shows_two_inbox_rows_and_a_small_ask_box() {
+    let rt = runtime_at((1360.0, 560.0), "live", |_| {});
+    let rows = rt.elements().iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("inbox-") && k.len() > 6 && k[6..].chars().all(|c| c.is_ascii_digit()))).count();
+    assert_eq!(rows, 2, "two items, the third behind \"and 1 more\"");
+    assert!(texts(&rt).contains(&"and 1 more".to_owned()));
+    assert!(rect(&rt, "ask")[3] <= 80.5, "the ask box stops at 80: {}", rect(&rt, "ask")[3]);
+}
+
+#[test]
+fn an_open_goal_never_covers_the_composer_even_in_a_short_window() {
+    for h in [560.0f32, 700.0, 840.0] {
+        let rt = runtime_at((1360.0, h), "goal-open", |_| {});
+        let body = rect(&rt, "goal-body-g1");
+        assert!(body[3] <= neko_rune::view::goal_body_cap(h) + 0.5, "{h}: the open goal is {} tall", body[3]);
+        let composer = rect(&rt, "composer");
+        assert!(bottom(body) <= composer[1] + 0.5, "{h}: the goal ends at {} where the composer starts at {}", bottom(body), composer[1]);
+    }
+}
+
+#[test]
+fn the_inbox_says_when_it_could_not_be_read_and_offers_retry() {
+    let mut rt = runtime_at((1360.0, 900.0), "default", |s| {
+        s.apply_reply(&Call::Inbox, Reply::Refused("The daemon is busy.".into()));
+    });
+    assert!(rt.find("inbox-failed").is_some() && texts(&rt).contains(&"Couldn’t read the Inbox".to_owned()));
+    assert!(!texts(&rt).iter().any(|t| t.starts_with("Looking for what needs you")));
+    click(&mut rt, "inbox-retry");
+    assert_eq!(rt.state.outbox.last(), Some(&Call::Inbox));
+    assert!(rt.find("inbox-failed").is_none());
+}
+
+#[test]
+fn a_failed_page_read_never_leaks_into_the_session() {
+    let mut app = App::headless();
+    scene("live", &mut app);
+    app.open_view(neko_rune::views::FullView::Routines);
+    app.apply_reply(&Call::RoutinesFull, Reply::Routines(Box::new(neko_rune::scenes_pages::routines_data())));
+    app.work.notice = None;
+    // The page has data; a later read fails: nothing is said anywhere.
+    app.apply_reply(&Call::RoutinesFull, Reply::Refused("Neko is slow to answer.".into()));
+    assert!(app.work.notice.is_none() && app.pages.notes.is_empty(), "{:?} {:?}", app.work.notice, app.pages.notes);
+    // With no data, the page says why in place of "Looking for…".
+    let mut fresh = App::headless();
+    scene("live", &mut fresh);
+    fresh.open_view(neko_rune::views::FullView::Settings);
+    fresh.apply_reply(&Call::PhoneSettings, Reply::Refused("Neko is slow to answer.".into()));
+    assert_eq!(fresh.pages.notes.get("page:phone").map(String::as_str), Some("Neko is slow to answer."));
+    assert!(fresh.work.notice.is_none());
 }

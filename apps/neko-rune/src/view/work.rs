@@ -7,6 +7,7 @@ use neko_protocol::goals::{Goal, GoalStatus};
 use neko_protocol::workbench::{Task, TaskStatus};
 use rune::{El, ScrollSpec, col, row, text};
 use rune_kit::diff::DiffView;
+use rune_kit::{MenuItem, context_menu};
 
 use super::{accent_button, primary_button, quiet_button};
 use crate::app::App;
@@ -191,7 +192,7 @@ fn run_diff(s: &App, t: &Neko, task_id: &str, run: Option<u32>) -> El {
 }
 
 /// A task's runs, one line each (`Run 3 · 4 files · +120 −30`), from the per-run checkpoints.
-pub fn runs(s: &App, t: &Neko, task_id: &str, list: &CheckpointList) -> Option<El> {
+pub fn runs(s: &App, t: &Neko, task_id: &str, list: &CheckpointList, layer: &mut Vec<El>) -> Option<El> {
     if list.runs.is_empty() {
         return None;
     }
@@ -209,7 +210,8 @@ pub fn runs(s: &App, t: &Neko, task_id: &str, list: &CheckpointList) -> Option<E
         let b = quiet_button(&label, "redo", t, move |s: &mut App| s.redo(&id));
         head = head.child(if undo_off.is_some() || s.work.undoing { b.disabled(true) } else { b });
     }
-    let mut card = col().key("runs-card").w_full().radius(t.radius.row + 4.0).fill(t.surface.card).clip_rounded(t.radius.row);
+    // Runs are rows, not a card: no fill, the row lights up under the pointer.
+    let mut card = col().key("runs-card").w_full();
     for r in &list.runs {
         let key = RunKey::Run(r.n);
         let open = s.work.open_run == Some(key);
@@ -227,7 +229,6 @@ pub fn runs(s: &App, t: &Neko, task_id: &str, list: &CheckpointList) -> Option<E
             .px(12.0)
             .gap(8.0)
             .center_y()
-            .hover(t.surface.hover)
             .focus_ring(2.0, 0.0, t.kit.c.border_focus)
             .on_press(move |s: &mut App| s.toggle_run(&id, key))
             .child(text(if open { "▾" } else { "▸" }).font(t.ty.meta).color(t.text.faint).a11y_hidden())
@@ -242,11 +243,50 @@ pub fn runs(s: &App, t: &Neko, task_id: &str, list: &CheckpointList) -> Option<E
         if r.skipped_count > 0 {
             line = line.child(text(format!("{} large {} not saved", r.skipped_count, if r.skipped_count == 1 { "file" } else { "files" })).font(t.ty.id).color(t.meaning.amber).a11y_hidden());
         }
-        let mut top = row().w_full().center_y().child(line);
-        if !r.undone && r.outcome != "running" {
+        let run_n = r.n;
+        let mut top = row().key(format!("run-row-{}", r.n)).w_full().center_y().radius(t.radius.row).hover_group().hover(t.surface.hover).on_secondary_press(move |s: &mut App, p, _| s.run_menu = Some((run_n, p))).child(line);
+        let can_undo = !r.undone && r.outcome != "running";
+        if can_undo {
             let (id, n) = (task_id.to_owned(), r.n);
-            let b = quiet_button("Undo this run", &format!("undo-run-{}", r.n), t, move |s: &mut App| s.ask_undo(&id, UndoOptions { run: n, ..UndoOptions::default() }));
-            top = top.child(row().pr(8.0).child(if undo_off.is_some() || s.work.undoing { b.disabled(true).help(undo_off.unwrap_or("Working on it.")) } else { b }));
+            // The one action of a row shows on hover or focus, at the right.
+            let action = row()
+                .key(format!("undo-run-{}", r.n))
+                .role("button")
+                .label(format!("Undo run {}", r.n))
+                .focusable(true)
+                .h(26.0)
+                .px(10.0)
+                .mr(8.0)
+                .center()
+                .radius(t.radius.control)
+                .hover(t.surface.active)
+                .focus_ring(2.0, 0.0, t.kit.c.border_focus)
+                .group_opacity(0.0, 1.0)
+                .child(text("Undo this run").font(t.ty.meta).color(t.text.muted).a11y_hidden());
+            top = top.child(if undo_off.is_some() || s.work.undoing { action.disabled(true).help(undo_off.unwrap_or("Working on it.")) } else { action.on_press(move |s: &mut App| s.ask_undo(&id, UndoOptions { run: n, ..UndoOptions::default() })) });
+        }
+        // Right-click: Undo this run, Undo back to here, View diff.
+        if s.run_menu.as_ref().is_some_and(|(open, _)| *open == r.n) {
+            let at = s.run_menu.as_ref().map(|(_, p)| *p);
+            let mut menu = context_menu(format!("run-menu-{}", r.n), top, at).on_close(|s: &mut App| s.run_menu = None);
+            if can_undo && undo_off.is_none() && !s.work.undoing {
+                let (a, b) = (task_id.to_owned(), task_id.to_owned());
+                menu = menu
+                    .item(MenuItem::new("Undo this run").on_select(move |s: &mut App| {
+                        s.run_menu = None;
+                        s.ask_undo(&a, UndoOptions { run: run_n, ..UndoOptions::default() });
+                    }))
+                    .item(MenuItem::new("Undo back to here").on_select(move |s: &mut App| {
+                        s.run_menu = None;
+                        s.ask_undo(&b, UndoOptions { run: run_n, through_later: true, ..UndoOptions::default() });
+                    }));
+            }
+            let c = task_id.to_owned();
+            menu = menu.item(MenuItem::new(if open { "Hide diff" } else { "View diff" }).on_select(move |s: &mut App| {
+                s.run_menu = None;
+                s.toggle_run(&c, key);
+            }));
+            top = menu.build(&t.kit, layer);
         }
         let mut item = col().w_full().child(top);
         if open {

@@ -217,11 +217,11 @@ fn grid(s: &App, t: &Neko, days: &[i64], events: &[&CalendarEvent], neko: &[Neko
     for h in FIRST_HOUR..=LAST_HOUR {
         axis = axis.child(text(format!("{h:02}:00")).font(t.ty.id).color(t.text.faint).absolute(2.0, ((h - FIRST_HOUR) as f32 * HOUR_H - 8.0).max(0.0)));
     }
-    let mut columns = row().grow(1.0).min_w(0.0).h(grid_height());
+    let mut columns = row().grow(1.0).min_w(0.0).h(grid_height()).clip_rounded(0.0);
     for &d in days {
         let next = clock::add_days(d, 1);
         let timed: Vec<&CalendarEvent> = events.iter().copied().filter(|e| !e.all_day && e.start_ms < next && e.end_ms.max(e.start_ms + 1) > d).collect();
-        let mut day = row().grow(1.0).min_w(0.0).h(grid_height());
+        let mut day = row().grow(1.0).min_w(0.0).h(grid_height()).clip_rounded(0.0);
         for h in FIRST_HOUR..=LAST_HOUR {
             day = day.child(el().w_full().h(1.0).fill(t.surface.border.alpha(0.3)).absolute(0.0, ((h - FIRST_HOUR) as f32 * HOUR_H).min(grid_height() - 1.0)));
         }

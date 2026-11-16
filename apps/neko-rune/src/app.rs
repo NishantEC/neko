@@ -179,6 +179,12 @@ pub struct App {
     /// What was last written, and when a newer layout was first seen (it is written once it stops moving).
     pub layout_written: Option<Saved>,
     pub layout_changed_at: Option<f64>,
+    /// The layout the last tick saw, so a change restarts the wait.
+    pub layout_seen: Option<Saved>,
+    /// The right-click menu on a run in the runs list: which run, and where.
+    pub run_menu: Option<(u32, PointerPress)>,
+    /// The right-click menu on a page's row (a routine, a workspace, a plugin): its key, and where.
+    pub page_menu: Option<(String, PointerPress)>,
     /// The window has the keyboard. A finished session is only seen while it does.
     pub focused: bool,
     /// The right-click menu on an Inbox item: which, and where.
@@ -246,6 +252,9 @@ impl Default for App {
             persist_layout: false,
             layout_written: None,
             layout_changed_at: None,
+            layout_seen: None,
+            run_menu: None,
+            page_menu: None,
             focused: true,
             inbox_menu: None,
             pages: Pages::default(),
@@ -308,6 +317,7 @@ impl App {
         let gone = self.selected.as_ref().is_none_or(|id| !summary.tasks.iter().any(|t| &t.id == id));
         let first = if gone { first_session(&summary, self.now_ms) } else { None };
         self.summary = Some(summary);
+        self.seed_settings();
         if gone {
             self.selected = first;
             self.wanted.set(self.selected.as_deref());
@@ -355,19 +365,23 @@ impl App {
             return false;
         }
         let now = self.layout.saved();
-        match (self.layout_written, self.layout_changed_at) {
-            (Some(w), _) if w == now => self.layout_changed_at = None,
-            (None, None) if self.layout == Layout::default() => {}
-            (_, None) => {
-                self.layout_changed_at = Some(t);
-                tx.wake_at(t + 0.6);
+        // The write waits until the layout has not changed for half a second: each change starts the wait again.
+        if self.layout_seen != Some(now) {
+            self.layout_seen = Some(now);
+            self.layout_changed_at = Some(t);
+        }
+        match self.layout_changed_at {
+            Some(at) if self.layout_written == Some(now) => {
+                let _ = at;
+                self.layout_changed_at = None;
             }
-            (_, Some(at)) if t - at >= 0.5 => {
+            Some(at) if t - at >= 0.5 => {
                 write_layout(now);
                 self.layout_written = Some(now);
                 self.layout_changed_at = None;
             }
-            (_, Some(_)) => tx.wake_at(t + 0.6),
+            Some(at) => tx.wake_at(at + 0.55),
+            None => {}
         }
         false
     }
@@ -393,6 +407,13 @@ impl App {
             None => last.parts.push(serde_json::json!({"type": "text", "text": add, "state": "streaming"})),
         }
         true
+    }
+
+    /// Opens a folder in Finder. Only absolute paths, and never one that could read as an option.
+    pub fn open_path(&mut self, path: &str) {
+        if !path.starts_with('/') || (self.opener)(path).is_err() {
+            self.notice = Some("Couldn’t open that folder.".to_owned());
+        }
     }
 
     /// Opens a link (a pull request) in the browser; says why in one calm line when it cannot.

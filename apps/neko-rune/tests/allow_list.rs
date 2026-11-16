@@ -269,3 +269,18 @@ fn only_the_attachments_module_writes_files_and_only_in_its_own_cache() {
     let code = production(&attachments);
     assert!(code.contains("composer-attachments") && !code.contains("support_dir") && !code.contains("neko_protocol"), "pasted images go to the client's cache, never the daemon's data folder");
 }
+
+#[test]
+fn only_the_app_state_touches_rune_prefs_and_only_to_keep_the_layout() {
+    // The window's widths are kept in Rune's own preferences store (its config folder), written on a
+    // thread from `app.rs`. Nothing else may open it, and it is never the daemon's data folder.
+    for (path, text) in crate_sources() {
+        let code = production(&text);
+        let is_app = path.ends_with("src/app.rs");
+        assert!(is_app || !code.contains("prefs::") && !code.contains("Prefs::"), "{} touches the preferences store", path.display());
+    }
+    let app = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs")).unwrap();
+    let code = production(&app);
+    assert!(code.contains("PREFS_ID") && !code.contains("support_dir") && !code.contains("neko_protocol::socket_path"), "the layout goes to Rune's store, not the daemon's folder");
+    assert_eq!(code.matches("prefs::Prefs::open").count(), 2, "one read at startup, one write on a thread");
+}

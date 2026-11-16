@@ -208,10 +208,8 @@ fn with_settings(s: &mut App) {
     s.pages.phone = Some(phone_data());
     s.pages.catalog = Some(catalog());
     s.pages.calendar = Some(calendar_data(DEMO_NOW, 0, 0));
-    s.pages.set_field("task-budget", "3.00");
-    s.pages.set_field("daily-budget", "5.00");
-    s.pages.set_field("dev-checkout", "/work/neko");
-    s.pages.set_field("ntfy-server", "https://ntfy.sh");
+    // The fields show what the daemon says is saved, as they do in the app.
+    s.seed_settings();
 }
 
 pub fn routines(s: &mut App) {
@@ -313,4 +311,11 @@ pub fn workspaces_open(s: &mut App) {
 pub fn plugins(s: &mut App) {
     base(s, FullView::Plugins);
     s.pages.plugins = Some(plugin_list());
+}
+
+/// Settings with the sessions column dragged wide: the page's own width is under 760.
+pub fn settings_narrow(s: &mut App) {
+    with_settings(s);
+    s.pages.section = crate::pages::Section::Updates;
+    s.layout.drag(crate::layout::Region::Sessions, 300.0, 120.0);
 }
