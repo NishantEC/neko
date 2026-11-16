@@ -63,6 +63,35 @@ pub fn week_start(ms: i64) -> i64 {
     add_days(start, -(local(start + 12 * 3_600_000).weekday as i64))
 }
 
+/// Local midnight of the first day of the month `ms` falls in.
+pub fn month_start(ms: i64) -> i64 {
+    let mut tm = tm_at(ms);
+    tm.tm_mday = 1;
+    tm.tm_hour = 0;
+    tm.tm_min = 0;
+    tm.tm_sec = 0;
+    from_tm(tm)
+}
+
+/// Local midnight of the first day of the month `n` months after the one that starts at `month_start_ms`.
+pub fn add_months(month_start_ms: i64, n: i64) -> i64 {
+    let mut tm = tm_at(month_start_ms + 12 * 3_600_000);
+    tm.tm_mday = 1;
+    tm.tm_mon += n as i32;
+    tm.tm_hour = 0;
+    tm.tm_min = 0;
+    tm.tm_sec = 0;
+    from_tm(tm)
+}
+
+pub const MONTHS_LONG: [&str; 12] = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/// "November 2026".
+pub fn month_label(ms: i64) -> String {
+    let l = local(ms + 12 * 3_600_000);
+    format!("{} {}", MONTHS_LONG[l.month as usize - 1], l.year)
+}
+
 /// "14:05".
 pub fn hhmm(ms: i64) -> String {
     let l = local(ms);
@@ -107,6 +136,20 @@ mod tests {
             assert!((d - start - n * 86_400_000).abs() <= 3_600_000, "{n}: within the clock change");
         }
         assert_eq!(add_days(add_days(start, 3), -3), start);
+    }
+
+    #[test]
+    fn months_start_on_the_first_and_step_by_whole_months() {
+        let ms = 1_800_000_000_000;
+        let first = month_start(ms);
+        assert_eq!((local(first + 12 * 3_600_000).day, local(first).hour, local(first).minute), (1, 0, 0));
+        assert!(first <= ms && ms - first < 32 * 86_400_000);
+        let next = add_months(first, 1);
+        assert_eq!(local(next + 12 * 3_600_000).day, 1);
+        assert!(next - first >= 28 * 86_400_000 - 3_600_000 && next - first <= 31 * 86_400_000 + 3_600_000);
+        assert_eq!(add_months(next, -1), first);
+        assert!(add_months(first, 12) - first >= 364 * 86_400_000);
+        assert!(month_label(first).ends_with(&local(first + 12 * 3_600_000).year.to_string()));
     }
 
     #[test]

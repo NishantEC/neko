@@ -697,3 +697,237 @@ fn a_toast_with_undo_sends_the_request_when_pressed() {
     assert_eq!(rt.state.outbox, vec![Call::Unseen]);
     assert!(rt.state.toasts.is_empty());
 }
+
+// ------------------------------------------------------------------------------------------------ 5. the Inbox
+
+fn inbox_item(seq: u64, default: Option<&str>) -> neko_rune::link::InboxItem {
+    neko_rune::link::InboxItem {
+        seq,
+        title: format!("Item {seq}"),
+        detail: "Something to decide.".into(),
+        default: default.map(str::to_owned),
+        routine_id: "r-messages".into(),
+        run_id: format!("run-{seq}"),
+        from: "Messages".into(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn an_inbox_row_has_use_the_default_then_mark_done_and_mark_done_sends_clear_needs_you() {
+    let mut rt = runtime(scene("live"));
+    rt.update(|s, _| {
+        s.neko.inbox = vec![inbox_item(9, Some("Send it")), inbox_item(8, None)];
+        s.neko.loaded = true;
+    });
+    settle(&mut rt);
+    // The check only where there is a default; Mark done on every row, to the right of it.
+    assert!(has_key(&rt, "inbox-use-9") && !has_key(&rt, "inbox-use-8"));
+    assert!(has_key(&rt, "inbox-done-9") && has_key(&rt, "inbox-done-8"));
+    assert!(rect(&rt, "inbox-done-9")[0] > rect(&rt, "inbox-use-9")[0], "Use the default comes first, then Mark done");
+    rt.state.outbox.clear();
+    click(&mut rt, "inbox-done-9");
+    assert_eq!(rt.state.outbox, vec![Call::ClearNeedsYou { routine_id: "r-messages".into(), run_id: "run-9".into(), seq: 9 }]);
+    assert!(rt.state.toast_words().contains("Done. 1 left."), "{:?}", rt.state.toast_words());
+    // On the wire: the web's own request.
+    let wire = serde_json::to_value(Call::ClearNeedsYou { routine_id: "r".into(), run_id: "u".into(), seq: 9 }.wire()).unwrap();
+    assert_eq!(wire["ClearNeedsYou"], serde_json::json!({"routine_id": "r", "run_id": "u", "seq": 9}));
+}
+
+#[test]
+fn the_right_click_menu_of_an_inbox_row_has_the_same_actions_and_open() {
+    let mut rt = runtime(scene("live"));
+    rt.update(|s, _| {
+        let mut item = inbox_item(9, Some("Send it"));
+        item.link = Some("https://example.com/x".into());
+        s.neko.inbox = vec![item];
+        s.neko.loaded = true;
+    });
+    settle(&mut rt);
+    right_click(&mut rt, "inbox-9");
+    assert!(has_text(&rt, "Use the default: Send it") && has_text(&rt, "Mark done") && has_text(&rt, "Open"), "{:?}", texts(&rt));
+    click_text(&mut rt, "Mark done");
+    assert!(matches!(rt.state.outbox.last(), Some(Call::ClearNeedsYou { seq: 9, .. })));
+}
+
+#[test]
+fn closed_recently_is_folded_shows_why_each_closed_and_reopen_sends_reopen_needs_you() {
+    let mut rt = runtime(scene("live"));
+    rt.update(|s, _| {
+        let now = s.now_ms;
+        let mut closed = inbox_item(5, None);
+        closed.closed_ms = Some(now - 3_600_000);
+        closed.reason = "PR merged".into();
+        s.neko.closed = vec![closed];
+        s.neko.loaded = true;
+    });
+    settle(&mut rt);
+    assert!(has_text(&rt, "Closed recently"));
+    assert!(!has_key(&rt, "closed-5"), "folded by default");
+    click(&mut rt, "closed-toggle");
+    assert!(has_key(&rt, "closed-5"));
+    assert_eq!(rt.elements().into_iter().find(|e| e.key.as_deref() == Some("closed-reason-5")).and_then(|e| e.text).as_deref(), Some("PR merged · 1h"));
+    // It is after the Inbox section.
+    assert!(rect(&rt, "closed")[1] > rect(&rt, "inbox")[1]);
+    rt.state.outbox.clear();
+    click(&mut rt, "closed-reopen-5");
+    assert_eq!(rt.state.outbox, vec![Call::ReopenNeedsYou { routine_id: "r-messages".into(), run_id: "run-5".into(), seq: 5 }]);
+    let wire = serde_json::to_value(rt.state.outbox[0].wire()).unwrap();
+    assert_eq!(wire["ReopenNeedsYou"]["seq"], 5);
+}
+
+#[test]
+fn the_inbox_reads_open_items_and_the_last_three_days_of_closed_ones_from_the_routines_answer() {
+    use neko_protocol::routines::{NeedsYou, RoutineRun};
+    let item = |seq: u64, done: bool, closed_ms: Option<i64>, reason: Option<&str>| NeedsYou { seq, title: format!("t{seq}"), done, closed_ms, reason: reason.map(str::to_owned), ..Default::default() };
+    let now = 10 * 86_400_000;
+    let run = RoutineRun {
+        id: "run".into(),
+        routine_id: "r".into(),
+        needs_you: vec![item(1, false, None, None), item(2, true, Some(now - 86_400_000), Some("Done by you")), item(3, true, Some(now - 4 * 86_400_000), Some("Expired")), item(4, true, Some(now - 3 * 86_400_000), Some("Aged out"))],
+        ..Default::default()
+    };
+    let mut view: neko_protocol::routines::RoutineView = serde_json::from_value(serde_json::json!({
+        "routine": {"id": "r", "workspace_id": "w", "kind": "Messages", "name": "Messages", "instruction": "x", "cadence": {"Daily": {"hour": 9, "minute": 0}}, "enabled": true},
+        "state": {"last_run_ms": null, "next_due_ms": null, "quiet_streak": 0, "running": false},
+        "runs": [],
+    }))
+    .expect("a routine view");
+    view.runs = vec![run];
+    let items = neko_rune::link::inbox_items(&[view], now);
+    let shape: Vec<(u64, bool)> = items.iter().map(|i| (i.seq, i.closed_ms.is_some())).collect();
+    assert_eq!(shape, [(1, false), (2, true), (4, true)], "open first; closed within 3 days (the 3-day edge stays in), newest closed first; older ones are gone");
+    assert_eq!(items[1].reason, "Done by you");
+    assert_eq!((items[1].routine_id.as_str(), items[1].run_id.as_str()), ("r", "run"));
+}
+
+// ------------------------------------------------------------------------------------------------ 6. routines and calendar
+
+fn routines_open(app: &mut App) {
+    let (_, f) = scenes::SCENES.iter().find(|(n, _)| *n == "routines-open").unwrap();
+    f(app);
+    app.outbox.clear();
+}
+
+#[test]
+fn the_routine_editor_has_every_and_daily_with_the_webs_fields_and_saves_with_save_routine() {
+    use neko_protocol::routines::Cadence;
+    let mut rt = runtime(routines_open);
+    assert!(has_key(&rt, "rt-cadence-mode") && has_key(&rt, "rt-minutes") && has_key(&rt, "pick-rt-from-pick") && has_key(&rt, "pick-rt-to-pick"), "Every: minutes, From, Until");
+    assert!(!has_key(&rt, "rt-time"));
+    // Minutes: the stepper moves by 5, typed numbers are kept between 5 and 720.
+    click(&mut rt, "rt-minutes-more");
+    assert_eq!(rt.state.pages.text("rt:minutes"), "25");
+    click(&mut rt, "rt-minutes-less");
+    click(&mut rt, "rt-minutes-less");
+    assert_eq!(rt.state.pages.text("rt:minutes"), "15");
+    rt.update(|s, _| {
+        s.pages.set_field("rt:minutes", "9999");
+        s.cadence_minutes_typed();
+    });
+    assert!(matches!(rt.state.pages.draft.as_ref().unwrap().cadence, Cadence::Every { minutes: 720, .. }), "at most 720");
+    rt.update(|s, _| {
+        s.pages.set_field("rt:minutes", "30");
+        s.cadence_minutes_typed();
+        s.cadence_hours(Some(9), Some(18));
+    });
+    settle(&mut rt);
+    click(&mut rt, "rt-save");
+    let Some(Call::SaveRoutine(saved)) = rt.state.outbox.last().cloned() else { panic!("{:?}", rt.state.outbox) };
+    assert_eq!(saved.cadence, Cadence::Every { minutes: 30, from_hour: 9, to_hour: 18 });
+    // The wire is the web's: SaveRoutine { routine } with the cadence as { Every: { ... } }.
+    let wire = serde_json::to_value(Call::SaveRoutine(saved).wire()).unwrap();
+    assert_eq!(wire["SaveRoutine"]["routine"]["cadence"], serde_json::json!({"Every": {"minutes": 30, "from_hour": 9, "to_hour": 18}}));
+    // Daily: an HH:MM field.
+    let mode = rect(&rt, "rt-cadence-mode");
+    rt.pointer_down(mode[0] + mode[2] * 0.75, mode[1] + mode[3] / 2.0);
+    rt.pointer_up(mode[0] + mode[2] * 0.75, mode[1] + mode[3] / 2.0);
+    settle(&mut rt);
+    assert!(has_key(&rt, "rt-time") && !has_key(&rt, "rt-minutes"));
+    assert_eq!(rt.state.pages.text("rt:time"), "10:30", "the web's default time");
+    rt.update(|s, _| {
+        s.pages.set_field("rt:time", "07:45");
+        s.cadence_time_typed();
+    });
+    settle(&mut rt);
+    click(&mut rt, "rt-save");
+    let Some(Call::SaveRoutine(saved)) = rt.state.outbox.last().cloned() else { panic!() };
+    assert_eq!(saved.cadence, Cadence::Daily { hour: 7, minute: 45 });
+    // A time that is not a time leaves the last good one.
+    rt.update(|s, _| {
+        s.pages.set_field("rt:time", "25:99");
+        s.cadence_time_typed();
+    });
+    assert_eq!(rt.state.pages.draft.as_ref().unwrap().cadence, Cadence::Daily { hour: 7, minute: 45 });
+}
+
+#[test]
+fn month_is_a_six_by_seven_grid_with_28_point_date_headers_three_chips_and_a_plus_n() {
+    let mut rt = runtime(scene("live"));
+    rt.update(|s, _| {
+        s.open_view(neko_rune::views::FullView::Calendar);
+        s.cal_mode(neko_rune::pages::CalMode::Month);
+        // A month's worth of data: five events on the 15th.
+        let (from, to) = s.calendar_range();
+        let mid = neko_rune::clock::add_days(from, 17);
+        let status = neko_protocol::calendar::CalendarStatus { access: neko_protocol::calendar::CalendarAccess::Granted, source: "macOS Calendar".into(), last_sync_ms: None, events: 5, truncated: false, enabled: true };
+        let events: Vec<neko_protocol::calendar::CalendarEvent> = (0..5)
+            .map(|i| neko_protocol::calendar::CalendarEvent { id: format!("m{i}"), title: format!("Meeting {i}"), start_ms: mid + (9 + i) * 3_600_000, end_ms: mid + (10 + i) * 3_600_000, ..Default::default() })
+            .collect();
+        s.pages.calendar = Some(neko_rune::link::CalendarData { events, neko: Vec::new(), status, from_ms: from, to_ms: to });
+    });
+    settle(&mut rt);
+    assert!(has_key(&rt, "cal-month"));
+    let (from, to) = rt.state.calendar_range();
+    assert_eq!(((to - from) as f64 / 86_400_000.0).round() as i64, 42, "6 x 7 days");
+    let cells: Vec<String> = rt.elements().into_iter().filter_map(|e| e.key).filter(|k| k.starts_with("cal-cell-")).collect();
+    assert_eq!(cells.len(), 42);
+    let day = neko_rune::clock::add_days(from, 17);
+    let number = rect(&rt, &format!("cal-day-{day}"));
+    assert_eq!(number[3], 28.0, "a 28 point date header");
+    let chips: usize = rt.elements().iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("event-m"))).count();
+    assert_eq!(chips, 3, "up to three chips");
+    assert!(has_key(&rt, &format!("cal-more-{day}")) && has_text(&rt, "+2"), "then +N");
+    // A header opens that day.
+    click(&mut rt, &format!("cal-day-{day}"));
+    assert_eq!(rt.state.pages.cal_mode, neko_rune::pages::CalMode::Day);
+    assert_eq!(rt.state.pages.cal_day, day);
+}
+
+#[test]
+fn an_event_opens_a_popover_with_join_meeting_for_a_meeting_link_and_open_link_for_another() {
+    assert!(neko_rune::view::is_meeting("https://meet.google.com/abc-defg-hij"));
+    assert!(neko_rune::view::is_meeting("https://us02web.zoom.us/j/123"), "a subdomain of a meeting host");
+    assert!(neko_rune::view::is_meeting("https://teams.microsoft.com/l/meetup-join/x"));
+    assert!(!neko_rune::view::is_meeting("https://example.com/zoom.us"), "the host decides, not the path");
+    assert!(!neko_rune::view::is_meeting("https://notzoom.us/j/1"));
+    let mut rt = runtime(scene("live"));
+    rt.update(|s, _| {
+        s.open_view(neko_rune::views::FullView::Calendar);
+        s.cal_mode(neko_rune::pages::CalMode::Day);
+        let (from, to) = s.calendar_range();
+        let status = neko_protocol::calendar::CalendarStatus { access: neko_protocol::calendar::CalendarAccess::Granted, source: "macOS Calendar".into(), last_sync_ms: None, events: 2, truncated: false, enabled: true };
+        let ev = |id: &str, title: &str, h: i64, url: Option<&str>| neko_protocol::calendar::CalendarEvent {
+            id: id.into(),
+            title: title.into(),
+            start_ms: from + h * 3_600_000,
+            end_ms: from + (h + 1) * 3_600_000,
+            location: Some("Room 4".into()),
+            url: url.map(str::to_owned),
+            ..Default::default()
+        };
+        s.pages.calendar = Some(neko_rune::link::CalendarData { events: vec![ev("a", "Standup", 9, Some("https://meet.google.com/abc-defg-hij")), ev("b", "Docs review", 11, Some("https://example.com/doc")), ev("c", "Lunch", 12, None)], neko: Vec::new(), status, from_ms: from, to_ms: to });
+    });
+    settle(&mut rt);
+    click(&mut rt, "event-a");
+    assert!(has_key(&rt, "cal-selected"));
+    assert!(has_text(&rt, "Standup") && has_text(&rt, "Room 4") && has_text(&rt, "Join meeting"), "{:?}", texts(&rt));
+    assert_eq!(fill_of(&rt, "cal-event-link"), neko_rune::theme::theme(true).meaning.iris.hex(), "Join meeting is the primary button");
+    click(&mut rt, "cal-event-link");
+    assert!(!has_key(&rt, "cal-selected"), "opening the link puts the popover away");
+    click(&mut rt, "event-b");
+    assert!(has_text(&rt, "Open link") && !has_text(&rt, "Join meeting"));
+    click(&mut rt, "scrim-event-popover");
+    click(&mut rt, "event-c");
+    assert!(!has_key(&rt, "cal-event-link"), "no address, no button");
+}

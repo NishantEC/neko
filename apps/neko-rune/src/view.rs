@@ -33,6 +33,7 @@ mod turn;
 mod ui;
 mod work;
 
+pub use calendar::is_meeting;
 pub use compose::MsgMenu;
 pub use session::goal_body_cap;
 

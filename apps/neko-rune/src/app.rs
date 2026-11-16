@@ -196,6 +196,8 @@ pub struct App {
     pub focused: bool,
     /// The right-click menu on an Inbox item: which, and where.
     pub inbox_menu: Option<(u64, PointerPress)>,
+    /// The right-click menu on a closed Inbox item: which, and where.
+    pub closed_menu: Option<(u64, PointerPress)>,
     /// What the full views keep (Routines, Calendar, Settings, Usage, Workspaces, Plugins).
     pub pages: Pages,
     /// The context panel: its tabs, the loaded file or artifact, the viewers' state.
@@ -322,6 +324,7 @@ impl Default for App {
             page_menu: None,
             focused: true,
             inbox_menu: None,
+            closed_menu: None,
             pages: Pages::default(),
             panel: crate::panel::Panel::standard(),
             msg_menu: None,

@@ -72,6 +72,7 @@ icon_body!(UNDO, "undo", r#"<path d="M3 6.5H9.5A3.5 3.5 0 0 1 9.5 13.5H6M3 6.5L5
 icon_body!(KEYBOARD, "keyboard", r#"<rect x="1.8" y="3.8" width="12.4" height="8.4" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4.5 7H5M7.7 7H8.3M11 7H11.5M5 10H11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 icon_body!(EDIT, "edit", r#"<path d="M9.5 3.5L12.5 6.5M3 13L3.6 10L10.8 2.8C11.2 2.4 11.8 2.4 12.2 2.8L13.2 3.8C13.6 4.2 13.6 4.8 13.2 5.2L6 12.4Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
 icon_body!(SEND_NOW, "send-now", r#"<path d="M3.5 12.5V8.5A2 2 0 0 1 5.5 6.5H12M9 3.5L12 6.5L9 9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(DONE, "done", r#"<circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.7 8.3L7.3 9.9L10.4 6.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
 
 /// A progress ring's arc of `fraction` (0 to 1) on the 16-unit grid: 2 px stroke, starting at the top and
 /// running clockwise. Quantised to 2% so the icons cached for it stay few (icons are static, as the kit's
@@ -116,7 +117,7 @@ mod tests {
         let declared = src.lines().filter(|l| l.starts_with("icon_body!(")).count();
         let icons = vec![
             &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND,
-            &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO, &KEYBOARD, &EDIT, &SEND_NOW, &CHECKLIST, &INFO,
+            &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO, &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &CHECKLIST, &INFO,
         ];
         // The two filled ones (MORE's dots count as line icons here: they carry no stroke) are `icon_body!` lines too.
         assert_eq!(icons.len() + 1, declared, "a declared icon is missing from this list (the dot is the +1)");

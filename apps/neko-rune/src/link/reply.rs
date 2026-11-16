@@ -40,6 +40,16 @@ pub struct InboxItem {
     /// The goal that raised it (its link is `goal:<id>`): it is answered with the goal's own actions.
     #[serde(default)]
     pub goal: Option<String>,
+    /// Where it lives, which `ClearNeedsYou` and `ReopenNeedsYou` name (the routine and the run that reported it).
+    #[serde(default)]
+    pub routine_id: String,
+    #[serde(default)]
+    pub run_id: String,
+    /// When it closed and why, for the items under "Closed recently"; None while it is open.
+    #[serde(default)]
+    pub closed_ms: Option<i64>,
+    #[serde(default)]
+    pub reason: String,
     pub urgent: bool,
     /// The routine that raised it.
     pub from: String,
@@ -114,28 +124,44 @@ pub fn ask(socket: &Path, request: Request) -> Result<Response, LinkError> {
     }
 }
 
-/// The Inbox's open items from a `Routines` answer, newest first (the web's `Inbox` page).
-pub fn inbox_items(routines: &[neko_protocol::routines::RoutineView]) -> Vec<InboxItem> {
-    let mut items: Vec<InboxItem> = Vec::new();
+/// How long a closed item stays under "Closed recently" (the web's `CLOSED_DAYS`, which the daemon keeps too).
+pub const CLOSED_DAYS: i64 = 3;
+
+/// The Inbox's items from a `Routines` answer: the open ones newest first, then the ones closed within the last
+/// [`CLOSED_DAYS`] days, newest closed first (the web's `Inbox` page).
+pub fn inbox_items(routines: &[neko_protocol::routines::RoutineView], now_ms: i64) -> Vec<InboxItem> {
+    let mut open: Vec<InboxItem> = Vec::new();
+    let mut closed: Vec<InboxItem> = Vec::new();
     for view in routines {
         for run in &view.runs {
-            for item in run.needs_you.iter().filter(|i| !i.done) {
-                items.push(InboxItem {
+            for item in &run.needs_you {
+                let made = |closed_ms: Option<i64>, reason: String| InboxItem {
                     seq: item.seq,
                     title: item.title.clone(),
                     detail: item.detail.clone(),
                     default: item.default.clone().filter(|d| !d.trim().is_empty()),
                     link: item.link.clone().filter(|l| l.starts_with("http://") || l.starts_with("https://")),
                     goal: item.link.as_deref().and_then(|l| l.strip_prefix("goal:")).filter(|g| !g.is_empty()).map(str::to_owned),
+                    routine_id: view.routine.id.clone(),
+                    run_id: run.id.clone(),
+                    closed_ms,
+                    reason,
                     urgent: item.urgent,
                     from: view.routine.name.clone(),
                     at_ms: run.finished_ms.unwrap_or(run.started_ms),
-                });
+                };
+                if !item.done {
+                    open.push(made(None, String::new()));
+                } else if let Some(at) = item.closed_ms.filter(|at| now_ms - at <= CLOSED_DAYS * 86_400_000) {
+                    closed.push(made(Some(at), item.reason.clone().filter(|r| !r.is_empty()).unwrap_or_else(|| "Closed".to_owned())));
+                }
             }
         }
     }
-    items.sort_by_key(|i| std::cmp::Reverse(i.seq));
-    items
+    open.sort_by_key(|i| std::cmp::Reverse(i.seq));
+    closed.sort_by_key(|i| std::cmp::Reverse(i.closed_ms));
+    open.extend(closed);
+    open
 }
 
 /// Makes one call and reads the answer. `open` is the task whose detail a snapshot answer carries.
@@ -183,8 +209,8 @@ pub fn make(socket: &Path, call: &Call, open: Option<&str>) -> Reply {
         Response::UnseenTasks { ids } => Reply::Unseen(ids),
         Response::Digest { digest } => Reply::Digest(digest),
         Response::Routines { routines, standing_orders, scopes, owner_name, age_out_days, routines_on, spend_today } => match call {
-            // The Inbox asks the same request and keeps only the open items.
-            Call::Inbox => Reply::Inbox(inbox_items(&routines)),
+            // The Inbox asks the same request and keeps the open items and the recently closed; closing or reopening one answers the same.
+            Call::Inbox | Call::ClearNeedsYou { .. } | Call::ReopenNeedsYou { .. } => Reply::Inbox(inbox_items(&routines, crate::app::system_ms())),
             _ => Reply::Routines(Box::new(RoutinesData { views: routines, standing_orders, scopes, owner_name, age_out_days, routines_on, spend_today })),
         },
         Response::AgentModels(catalog) => Reply::Models { choices: runtime_choices(&catalog), catalog: Box::new(catalog) },

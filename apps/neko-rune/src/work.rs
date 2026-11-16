@@ -152,6 +152,8 @@ impl Default for Work {
 /// What the Neko column keeps.
 pub struct NekoCol {
     pub inbox: Vec<InboxItem>,
+    /// Items closed in the last three days, newest first, with why (the Inbox's "Closed recently").
+    pub closed: Vec<InboxItem>,
     pub digest: Option<Digest>,
     /// When the Inbox and digest were last asked for, by the app's clock.
     pub asked_ms: i64,
@@ -166,7 +168,7 @@ pub struct NekoCol {
 
 impl Default for NekoCol {
     fn default() -> Self {
-        NekoCol { inbox: Vec::new(), digest: None, asked_ms: i64::MIN / 2, loaded: false, note: None, notes: HashMap::new(), failed: false }
+        NekoCol { inbox: Vec::new(), closed: Vec::new(), digest: None, asked_ms: i64::MIN / 2, loaded: false, note: None, notes: HashMap::new(), failed: false }
     }
 }
 
@@ -176,7 +178,7 @@ pub const NEKO_POLL_MS: i64 = 60_000;
 /// Where a refusal of this call is shown: next to the Inbox item or goal it belongs to.
 pub fn note_key(call: &Call) -> Option<String> {
     match call {
-        Call::AnswerNeedsYou { seq } => Some(format!("inbox:{seq}")),
+        Call::AnswerNeedsYou { seq } | Call::ClearNeedsYou { seq, .. } | Call::ReopenNeedsYou { seq, .. } => Some(format!("inbox:{seq}")),
         Call::GoalPause { id } | Call::GoalResume { id } | Call::GoalExtend { id, .. } | Call::GoalDone { id } | Call::GoalStop { id } | Call::GoalAnswer { id, .. } => Some(format!("goal:{id}")),
         _ => None,
     }
@@ -644,10 +646,29 @@ impl App {
         } else if let Some(d) = &item.default {
             out.push(ItemAction { label: format!("Use the default: {d}"), act: ItemAct::Call(Call::AnswerNeedsYou { seq: item.seq }) });
         }
+        if !item.routine_id.is_empty() {
+            out.push(ItemAction { label: "Mark done".to_owned(), act: ItemAct::Call(Call::ClearNeedsYou { routine_id: item.routine_id.clone(), run_id: item.run_id.clone(), seq: item.seq }) });
+        }
         if let Some(link) = &item.link {
             out.push(ItemAction { label: "Open".to_owned(), act: ItemAct::Link(link.clone()) });
         }
         out
+    }
+
+    /// "Mark done" on an Inbox item: it closes, and the window says how many are left (the web's "Done. 2 left.").
+    pub fn mark_item_done(&mut self, item: &InboxItem) {
+        if item.routine_id.is_empty() {
+            return;
+        }
+        let left = self.neko.inbox.iter().filter(|i| i.seq != item.seq).count();
+        self.call(Call::ClearNeedsYou { routine_id: item.routine_id.clone(), run_id: item.run_id.clone(), seq: item.seq });
+        self.show_toast(&if left > 0 { format!("Done. {left} left.") } else { "All clear.".to_owned() });
+    }
+
+    /// "Reopen" on an item under "Closed recently".
+    pub fn reopen_item(&mut self, item: &InboxItem) {
+        self.call(Call::ReopenNeedsYou { routine_id: item.routine_id.clone(), run_id: item.run_id.clone(), seq: item.seq });
+        self.show_toast("Reopened");
     }
 
     pub fn run_item_action(&mut self, act: ItemAct) {
@@ -820,7 +841,9 @@ impl App {
             }
             Reply::Inbox(items) => {
                 self.neko.failed = false;
-                let changed = self.neko.inbox != items || !self.neko.loaded;
+                let (closed, items): (Vec<InboxItem>, Vec<InboxItem>) = items.into_iter().partition(|i| i.closed_ms.is_some());
+                let changed = self.neko.inbox != items || self.neko.closed != closed || !self.neko.loaded;
+                self.neko.closed = closed;
                 self.neko.inbox = items;
                 self.neko.loaded = true;
                 changed

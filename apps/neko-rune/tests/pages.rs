@@ -119,7 +119,9 @@ fn the_runs_history_says_what_each_run_did_and_what_needs_you() {
     assert!(t.iter().any(|x| x.starts_with("Replied to the budget thread")), "{t:?}");
     assert!(t.contains(&"Quiet: nothing to do".to_owned()));
     assert_eq!(text_of(&rt, "run-needs-x1").as_deref(), Some("1 needs you"));
-    click(&mut rt, "routine-r5");
+    // The editor above is taller now (the cadence has its own line), so the fifth row is opened as the app does, not by a click below the fold.
+    rt.update(|s, _| s.open_routine("r5"));
+    settle(&mut rt);
     assert!(texts(&rt).iter().any(|x| x.contains("usage limit")), "a failed run says why");
 }
 
@@ -140,7 +142,9 @@ fn the_calendar_puts_neko_s_dated_work_on_the_all_day_row_and_an_event_offers_op
     click(&mut rt, "event-e4");
     assert!(rt.find("cal-selected").is_some() && rt.find("cal-open-in-calendar").is_some());
     assert!(rt.state.outbox.iter().all(|c| c.reads()), "the calendar only reads: {:?}", rt.state.outbox);
-    // Week and day.
+    // Week and day. The popover is put away by a press outside it; then moving works.
+    click(&mut rt, "scrim-event-popover");
+    assert!(rt.find("cal-selected").is_none());
     click(&mut rt, "cal-next");
     assert!(matches!(rt.state.outbox.last(), Some(Call::CalendarEvents { .. })), "moving asks the daemon for the new days");
     let day = runtime("calendar-day");

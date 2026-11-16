@@ -198,9 +198,9 @@ fn blank() -> ChatMessage {
 
 fn inbox() -> Vec<InboxItem> {
     vec![
-        InboxItem { goal: None, seq: 3, title: "Reply before the 3pm call".into(), detail: "Sam is waiting on the budget numbers.".into(), default: Some("Send the numbers from last week".into()), link: None, urgent: false, from: "Messages".into(), at_ms: DEMO_NOW - 600_000 },
-        InboxItem { goal: Some("g1".into()), seq: 2, title: "Extend by 10 turns?".into(), detail: "Paused: it used its 20 turns.".into(), default: Some("Extend by 10 turns".into()), link: None, urgent: false, from: "Goals".into(), at_ms: DEMO_NOW - 3_600_000 },
-        InboxItem { goal: None, seq: 1, title: "Enable the calendar API".into(), detail: "The calendar server needs the API enabled for its project.".into(), default: None, link: Some("https://example.com/enable".into()), urgent: false, from: "Calendar".into(), at_ms: DEMO_NOW - 7_200_000 },
+        InboxItem { goal: None, routine_id: "r-messages".into(), run_id: "run-3".into(), closed_ms: None, reason: String::new(), seq: 3, title: "Reply before the 3pm call".into(), detail: "Sam is waiting on the budget numbers.".into(), default: Some("Send the numbers from last week".into()), link: None, urgent: false, from: "Messages".into(), at_ms: DEMO_NOW - 600_000 },
+        InboxItem { goal: Some("g1".into()), routine_id: "goals:g1".into(), run_id: "run-2".into(), closed_ms: None, reason: String::new(), seq: 2, title: "Extend by 10 turns?".into(), detail: "Paused: it used its 20 turns.".into(), default: Some("Extend by 10 turns".into()), link: None, urgent: false, from: "Goals".into(), at_ms: DEMO_NOW - 3_600_000 },
+        InboxItem { goal: None, routine_id: "r-calendar".into(), run_id: "run-1".into(), closed_ms: None, reason: String::new(), seq: 1, title: "Enable the calendar API".into(), detail: "The calendar server needs the API enabled for its project.".into(), default: None, link: Some("https://example.com/enable".into()), urgent: false, from: "Calendar".into(), at_ms: DEMO_NOW - 7_200_000 },
     ]
 }
 

@@ -81,6 +81,10 @@ pub enum Call {
     Redo { task_id: String },
     // The Inbox and the digest.
     AnswerNeedsYou { seq: u64 },
+    /// "Mark done" on an Inbox item (the web's `ClearNeedsYou`): the item closes as "Done by you".
+    ClearNeedsYou { routine_id: String, run_id: String, seq: u64 },
+    /// "Reopen" on an item under "Closed recently".
+    ReopenNeedsYou { routine_id: String, run_id: String, seq: u64 },
     MarkDigestRead,
     // Seen and unread.
     MarkSeen { task_id: String, seen: bool },
@@ -224,6 +228,8 @@ impl Call {
             }
             Call::Redo { task_id } => Request::Workbench(Command::Checkpoints(CheckpointCommand::Redo { task_id })),
             Call::AnswerNeedsYou { seq } => Request::AnswerNeedsYou { seq, text: None },
+            Call::ClearNeedsYou { routine_id, run_id, seq } => Request::ClearNeedsYou { routine_id, run_id, seq },
+            Call::ReopenNeedsYou { routine_id, run_id, seq } => Request::ReopenNeedsYou { routine_id, run_id, seq },
             Call::MarkDigestRead => Request::MarkDigestRead,
             Call::MarkSeen { task_id, seen } => Request::MarkTaskSeen { task_id, seen },
             Call::CreateTask { workspace_id, title, goal } => Request::Workbench(Command::CreateTask { workspace_id, title, goal }),

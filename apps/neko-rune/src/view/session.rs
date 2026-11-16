@@ -311,7 +311,7 @@ fn plugin_page(s: &App, page: &neko_protocol::PluginPage, t: &Neko) -> El {
 /// A full view: its own page (Calendar, Routines, Settings, Usage, Workspaces, Plugins).
 fn full_view(s: &App, view: FullView, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     match view {
-        FullView::Calendar => super::calendar::view(s, t),
+        FullView::Calendar => super::calendar::view(s, t, layer),
         FullView::Routines => super::routines::view(s, t, layer),
         FullView::Settings => super::settings::view(s, t, layer, frame),
         FullView::Usage => super::more::usage(s, t),

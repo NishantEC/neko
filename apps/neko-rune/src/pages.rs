@@ -28,6 +28,8 @@ pub const PAGE_POLL_MS: i64 = 30_000;
 pub enum CalMode {
     Day,
     Week,
+    /// Six weeks of seven days that hold the month (the web's `daysFor("month")`).
+    Month,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -121,6 +123,18 @@ pub fn cadence_text(c: &Cadence) -> String {
         Cadence::Every { minutes, from_hour, to_hour } => format!("Every {minutes} min, {from_hour:02}:00–{to_hour:02}:00"),
         Cadence::Daily { hour, minute } => format!("Daily at {hour:02}:{minute:02}"),
     }
+}
+
+/// The web's `clampInt`: the number a field holds, kept between `min` and `max`; `fallback` when it holds none.
+pub fn clamp_int(text: &str, min: u32, max: u32, fallback: u32) -> u32 {
+    text.trim().parse::<u32>().map_or(fallback, |n| n.clamp(min, max))
+}
+
+/// "HH:MM" as the daily time field reads it (the web's `time.split(":").map(Number || 0)`), hour kept in 0-23 and minute in 0-59.
+pub fn parse_time(text: &str) -> Option<(u32, u32)> {
+    let (h, m) = text.trim().split_once(':')?;
+    let (h, m) = (h.trim().parse::<u32>().ok()?, m.trim().parse::<u32>().ok()?);
+    (h < 24 && m < 60).then_some((h, m))
 }
 
 /// What the cadence select offers: the routine's own first, then the usual choices. A choice keeps
@@ -435,6 +449,11 @@ impl App {
                 let monday = clock::week_start(day + 12 * 3_600_000);
                 (monday, clock::add_days(monday, 7))
             }
+            CalMode::Month => {
+                // The week of the 1st, then six weeks: 42 days, 6 x 7.
+                let monday = clock::week_start(clock::month_start(day) + 12 * 3_600_000);
+                (monday, clock::add_days(monday, 42))
+            }
         }
     }
 
@@ -454,9 +473,25 @@ impl App {
         let today = clock::day_start(self.now_ms);
         let step = if self.pages.cal_mode == CalMode::Week { 7 } else { 1 };
         let day = if self.pages.cal_day == 0 { today } else { self.pages.cal_day };
-        self.pages.cal_day = if direction == 0 { today } else { clock::add_days(day, direction * step) };
+        self.pages.cal_day = match (direction, self.pages.cal_mode) {
+            (0, _) => today,
+            (_, CalMode::Month) => clock::add_months(clock::month_start(day), direction),
+            _ => clock::add_days(day, direction * step),
+        };
         self.pages.cal_event = None;
         self.ask_calendar();
+    }
+
+    /// A day number in the month grid: that day, in the Day view (the web's `onPickDay`).
+    pub fn cal_pick_day(&mut self, day: i64) {
+        self.pages.cal_day = day;
+        self.cal_mode(CalMode::Day);
+    }
+
+    /// "Join meeting" and "Open link" in an event's popover: the event's own address, in the browser.
+    pub fn cal_open_link(&mut self, url: &str) {
+        self.pages.cal_event = None;
+        self.open_link(url);
     }
 
     /// "Open in Calendar": macOS Calendar at the event's day (`calshow:`), not a web page.
@@ -480,8 +515,68 @@ impl App {
         self.pages.open_routine = Some(id.to_owned());
         self.pages.draft = Some(RoutineDraft::of(&view.routine));
         self.pages.set_field("rt:instruction", &view.routine.instruction);
+        self.seed_cadence_fields();
         self.pages.open_select = None;
         self.pages.notes.remove(&format!("routine:{id}"));
+    }
+
+    /// The cadence fields show the draft's numbers (the minutes as typed text, the time as HH:MM).
+    pub fn seed_cadence_fields(&mut self) {
+        let Some(draft) = self.pages.draft.clone() else { return };
+        match draft.cadence {
+            Cadence::Every { minutes, .. } => self.pages.set_field("rt:minutes", &minutes.to_string()),
+            Cadence::Daily { hour, minute } => self.pages.set_field("rt:time", &format!("{hour:02}:{minute:02}")),
+        }
+    }
+
+    /// The segmented control: Every (repeats through the day) or Daily (once a day). Each starts from the web's own defaults.
+    pub fn set_cadence_mode(&mut self, every: bool) {
+        let Some(d) = self.pages.draft.as_mut() else { return };
+        let is_every = matches!(d.cadence, Cadence::Every { .. });
+        if is_every == every {
+            return;
+        }
+        d.cadence = if every { Cadence::Every { minutes: 20, from_hour: 8, to_hour: 23 } } else { Cadence::Daily { hour: 10, minute: 30 } };
+        self.seed_cadence_fields();
+    }
+
+    /// The minutes field was typed in: the draft follows (kept between 5 and 720; the field keeps what was typed until it is saved).
+    pub fn cadence_minutes_typed(&mut self) {
+        let typed = self.pages.text("rt:minutes").to_owned();
+        if let Some(Cadence::Every { minutes, .. }) = self.pages.draft.as_mut().map(|d| &mut d.cadence) {
+            *minutes = clamp_int(&typed, 5, 720, 20);
+        }
+    }
+
+    /// The steppers beside the minutes: 5 more or fewer.
+    pub fn cadence_minutes_step(&mut self, by: i32) {
+        let current = clamp_int(self.pages.text("rt:minutes"), 5, 720, 20) as i32;
+        let next = (((current + by) / 5) * 5).clamp(5, 720) as u32;
+        if let Some(Cadence::Every { minutes, .. }) = self.pages.draft.as_mut().map(|d| &mut d.cadence) {
+            *minutes = next;
+        }
+        self.pages.set_field("rt:minutes", &next.to_string());
+    }
+
+    /// From and Until: whole hours, 0 to 23 (an Until the routine already has of 24 stays).
+    pub fn cadence_hours(&mut self, from: Option<u32>, to: Option<u32>) {
+        if let Some(Cadence::Every { from_hour, to_hour, .. }) = self.pages.draft.as_mut().map(|d| &mut d.cadence) {
+            if let Some(f) = from {
+                *from_hour = f.min(23);
+            }
+            if let Some(t) = to {
+                *to_hour = t.min(24);
+            }
+        }
+    }
+
+    /// The time field was typed in: a valid HH:MM becomes the draft's time (anything else leaves it, as the web's `|| "10:30"`).
+    pub fn cadence_time_typed(&mut self) {
+        let typed = self.pages.text("rt:time").to_owned();
+        if let (Some((hour, minute)), Some(Cadence::Daily { hour: h, minute: m })) = (parse_time(&typed), self.pages.draft.as_mut().map(|d| &mut d.cadence)) {
+            *h = hour;
+            *m = minute;
+        }
     }
 
     /// The editor differs from the saved routine.
@@ -499,6 +594,12 @@ impl App {
             return;
         }
         let Some(view) = self.pages.routine(&id) else { return };
+        // The numbers are kept in range as the web keeps them when it saves (`clampInt`): minutes 5 to 720, hours 0 to 23.
+        let cadence = match draft.cadence {
+            Cadence::Every { minutes, from_hour, to_hour } => Cadence::Every { minutes: minutes.clamp(5, 720), from_hour: from_hour.min(23), to_hour: to_hour.clamp(0, 24) },
+            Cadence::Daily { hour, minute } => Cadence::Daily { hour: hour.min(23), minute: minute.min(59) },
+        };
+        let draft = RoutineDraft { cadence, ..draft };
         // The web sends the whole routine with the edited fields replaced.
         let routine = Routine { instruction, cadence: draft.cadence, model: draft.model.trim().to_owned(), browser: draft.browser, computer: draft.computer, catch_up: Some(draft.catch_up), ..view.routine.clone() };
         self.pages.notes.remove(&format!("routine:{id}"));

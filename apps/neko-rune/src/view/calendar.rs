@@ -86,7 +86,7 @@ fn days_shown(s: &App) -> Vec<i64> {
     let (from, to) = s.calendar_range();
     let mut days = Vec::new();
     let mut d = from;
-    while d < to && days.len() < 7 {
+    while d < to && days.len() < 42 {
         days.push(d);
         d = clock::add_days(d, 1);
     }
@@ -107,27 +107,33 @@ fn day_items(items: &[NekoCalendarItem], day: i64, next: i64) -> Vec<&NekoCalend
 }
 
 fn header(s: &App, t: &Neko, days: &[i64]) -> Vec<El> {
+    let anchor = if s.pages.cal_day == 0 { clock::day_start(s.now_ms) } else { s.pages.cal_day };
     let range = match (days.first(), days.last()) {
+        _ if s.pages.cal_mode == CalMode::Month => clock::month_label(anchor),
         (Some(a), Some(b)) if a != b => format!("{} – {}", clock::day_label(*a), clock::day_label(*b)),
         (Some(a), _) => clock::day_label(*a),
         _ => String::new(),
     };
-    let selected = if s.pages.cal_mode == CalMode::Week { 1 } else { 0 };
+    let selected = match s.pages.cal_mode {
+        CalMode::Day => 0,
+        CalMode::Week => 1,
+        CalMode::Month => 2,
+    };
     vec![
         text(range).key("cal-range").font(t.ty.meta).color(t.text.muted),
         icon_button(&icons::CHEVRON_LEFT, "Earlier", "cal-prev", t, |s: &mut App| s.cal_step(-1)),
         quiet_button("Today", "cal-today", t, |s: &mut App| s.cal_step(0)),
         icon_button(&icons::CHEVRON_RIGHT, "Later", "cal-next", t, |s: &mut App| s.cal_step(1)),
-        SegmentedControl::new(&["Day", "Week"], Some(selected))
+        SegmentedControl::new(&["Day", "Week", "Month"], Some(selected))
             .label("View")
-            .width(Some(120.0))
-            .on_pick(|s: &mut App, i, _| s.cal_mode(if i == 0 { CalMode::Day } else { CalMode::Week }))
+            .width(Some(180.0))
+            .on_pick(|s: &mut App, i, _| s.cal_mode([CalMode::Day, CalMode::Week, CalMode::Month][i.min(2)]))
             .build(&t.kit)
             .key("cal-mode"),
     ]
 }
 
-pub fn view(s: &App, t: &Neko) -> El {
+pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     let days = days_shown(s);
     let data = s.pages.calendar.as_ref();
     let events: Vec<&CalendarEvent> = data.map(|d| d.events.iter().collect()).unwrap_or_default();
@@ -155,34 +161,154 @@ pub fn view(s: &App, t: &Neko) -> El {
         body = body.child(quiet_line(t, "cal-note", n));
     }
     if let Some(chosen) = s.pages.cal_event.as_ref().and_then(|id| events.iter().find(|e| &e.id == id)) {
-        body = body.child(selected_bar(t, chosen));
+        mount_event_popover(t, chosen, layer);
     }
-    body = body.child(grid(s, t, &days, &events, &neko));
+    body = body.child(if s.pages.cal_mode == CalMode::Month { month_grid(s, t, &days, &events, &neko) } else { grid(s, t, &days, &events, &neko) });
     page(t, "calendar", "Calendar", (count > 0).then_some(count), header(s, t, &days), body)
 }
 
-fn selected_bar(t: &Neko, e: &CalendarEvent) -> El {
+/// The hosts the web calls a meeting (`MEETING_HOSTS` in `pages/Calendar.tsx`).
+const MEETING_HOSTS: [&str; 12] = ["meet.google.com", "zoom.us", "zoom.com", "teams.microsoft.com", "teams.live.com", "webex.com", "whereby.com", "meet.jit.si", "chime.aws", "facetime.apple.com", "gotomeeting.com", "around.co"];
+
+/// Whether an address is a meeting: its host is one of the meeting hosts or a subdomain of one (the web's `isMeeting`).
+pub fn is_meeting(url: &str) -> bool {
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")).unwrap_or("");
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("").rsplit('@').next().unwrap_or("").split(':').next().unwrap_or("").to_lowercase();
+    MEETING_HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{h}")))
+}
+
+/// The event's address when it is an http(s) one (the web's `webLink`).
+pub fn web_link(url: Option<&str>) -> Option<String> {
+    url.filter(|u| u.starts_with("https://") || u.starts_with("http://")).map(str::to_owned)
+}
+
+/// What an event says of when it is: "Mon 16 Nov · 14:00 – 15:00", or "... · All day".
+pub fn when_words(e: &CalendarEvent) -> String {
+    if e.all_day { format!("{} · All day", clock::day_label(e.start_ms)) } else { format!("{} · {} – {}", clock::day_label(e.start_ms), clock::hhmm(e.start_ms), clock::hhmm(e.end_ms)) }
+}
+
+/// An event's popover (the web's `EventDetails`): its title, when, where and in which calendar, and "Join meeting" (the primary
+/// button) when its address is a meeting (Meet, Zoom, Teams and the web's other hosts), else "Open link" when it has one.
+fn mount_event_popover(t: &Neko, e: &CalendarEvent, layer: &mut Vec<El>) {
     let start = e.start_ms;
-    let when = if e.all_day { "All day".to_owned() } else { format!("{}–{}", clock::hhmm(e.start_ms), clock::hhmm(e.end_ms)) };
-    let mut words = format!("{} · {when}", e.title);
+    let link = web_link(e.url.as_deref());
+    let mut c = col().key("cal-selected").role("dialog").label(if e.title.is_empty() { "Event".to_owned() } else { e.title.clone() }).w(300.0).padding(14.0).gap(10.0);
+    let mut head = col().gap(4.0).child(text(if e.title.is_empty() { "Untitled event".to_owned() } else { e.title.clone() }).key("cal-event-title").font(rune::TextStyle { weight: 600.0, ..t.ty.row }).color(t.text.base).wrap());
+    head = head.child(row().gap(6.0).center_y().child(icon(&icons::CLOCK, 14.0).color(t.text.muted).a11y_hidden()).child(text(when_words(e)).key("cal-event-when").font(t.ty.meta).color(t.text.muted).wrap().grow(1.0).min_w(0.0)));
     if let Some(loc) = e.location.as_ref().filter(|l| !l.is_empty()) {
-        words.push_str(&format!(" · {loc}"));
+        head = head.child(row().gap(6.0).items_start().child(icon(&icons::FOLDER, 14.0).color(t.text.muted).a11y_hidden()).child(text(loc.clone()).key("cal-event-where").font(t.ty.meta).color(t.text.muted).wrap().grow(1.0).min_w(0.0)));
     }
     if !e.calendar.is_empty() {
-        words.push_str(&format!(" · {}", e.calendar));
+        head = head.child(text(e.calendar.clone()).font(t.ty.meta).color(t.text.muted));
     }
+    c = c.child(head);
+    let mut buttons = row().gap(8.0).center_y().wrap();
+    if let Some(link) = link {
+        let meeting = is_meeting(&link);
+        let label = if meeting { "Join meeting" } else { "Open link" };
+        let go = link.clone();
+        buttons = buttons.child(if meeting {
+            super::primary_button(label, "cal-event-link", t, move |s: &mut App| s.cal_open_link(&go))
+        } else {
+            quiet_button(label, "cal-event-link", t, move |s: &mut App| s.cal_open_link(&go))
+        });
+    }
+    buttons = buttons.child(quiet_button("Open in Calendar", "cal-open-in-calendar", t, move |s: &mut App| s.open_in_calendar(start)));
+    c = c.child(buttons);
+    let surface = rune_kit::popover::raised(&t.kit, c, t.kit.radius.md);
+    layer.push(rune_kit::scrim("scrim-event-popover", |s: &mut App| s.pages.cal_event = None));
+    layer.push(rune_kit::popover::anchored(&t.kit, surface, &format!("event-{}", e.id), rune_kit::Placement::BottomStart, 6.0));
+}
+
+/// The month: six weeks of seven days, each cell a 28 point date header (the day number, today in Iris, days of other months
+/// muted; pressing it opens that day), up to three chips (all-day and timed events, Neko's own work), then "+N".
+fn month_grid(s: &App, t: &Neko, days: &[i64], events: &[&CalendarEvent], neko: &[NekoCalendarItem]) -> El {
+    const SHOWN: usize = 3;
+    let today = clock::day_start(s.now_ms);
+    let anchor = if s.pages.cal_day == 0 { today } else { s.pages.cal_day };
+    let month = clock::local(clock::month_start(anchor) + 12 * 3_600_000).month;
+    let mut heads = row().w_full().h(26.0).center_y();
+    for name in clock::WEEKDAYS {
+        heads = heads.child(row().grow(1.0).w(0.0).px(8.0).child(text(name).font(t.ty.meta).color(t.text.muted)));
+    }
+    let mut c = col().key("cal-month").w_full().child(heads);
+    for week in days.chunks(7) {
+        let mut line = row().w_full().min_h(112.0).border(1.0, t.surface.border.alpha(0.5));
+        for &d in week {
+            let next = clock::add_days(d, 1);
+            let l = clock::local(d + 12 * 3_600_000);
+            let mut chips: Vec<El> = Vec::new();
+            for e in events.iter().filter(|e| e.all_day && e.start_ms < next && e.end_ms.max(e.start_ms + 1) > d) {
+                chips.push(event_block(t, e, false).h(20.0).w_full());
+            }
+            for e in events.iter().filter(|e| !e.all_day && e.start_ms < next && e.end_ms.max(e.start_ms + 1) > d) {
+                chips.push(timed_chip(t, e, d));
+            }
+            for item in day_items(neko, d, next) {
+                chips.push(neko_item(t, item));
+            }
+            let hidden = chips.len().saturating_sub(SHOWN);
+            let number = row()
+                .key(format!("cal-day-{d}"))
+                .role("button")
+                .label(clock::day_label(d))
+                .focusable(true)
+                .w_full()
+                .h(28.0)
+                .px(4.0)
+                .center_y()
+                .radius(6.0)
+                .hover(t.surface.hover)
+                .focus_ring(2.0, 2.0, t.surface.ring)
+                .on_press(move |s: &mut App| s.cal_pick_day(d))
+                .child(text(l.day.to_string()).font(rune::TextStyle { weight: if d == today { 600.0 } else { 400.0 }, ..t.ty.meta }).color(if d == today { t.meaning.iris } else if l.month != month { t.text.faint } else { t.text.base }));
+            let mut cell = col().key(format!("cal-cell-{d}")).grow(1.0).w(0.0).min_h(112.0).padding(2.0).gap(2.0).child(number);
+            for chip in chips.into_iter().take(SHOWN) {
+                cell = cell.child(chip);
+            }
+            if hidden > 0 {
+                cell = cell.child(
+                    row()
+                        .key(format!("cal-more-{d}"))
+                        .role("button")
+                        .label(format!("{hidden} more on {}", clock::day_label(d)))
+                        .focusable(true)
+                        .h(18.0)
+                        .px(4.0)
+                        .center_y()
+                        .radius(4.0)
+                        .hover(t.surface.hover)
+                        .on_press(move |s: &mut App| s.cal_pick_day(d))
+                        .child(text(format!("+{hidden}")).font(t.ty.id).color(t.text.muted).a11y_hidden()),
+                );
+            }
+            line = line.child(cell);
+        }
+        c = c.child(line);
+    }
+    c
+}
+
+/// A timed event in a month cell: a mint dot, its time and its title.
+fn timed_chip(t: &Neko, e: &CalendarEvent, day: i64) -> El {
+    let id = e.id.clone();
     row()
-        .key("cal-selected")
+        .key(format!("event-{}", e.id))
+        .role("button")
+        .label(format!("{}, {} to {}", e.title, clock::hhmm(e.start_ms), clock::hhmm(e.end_ms)))
+        .focusable(true)
         .w_full()
-        .min_h(36.0)
-        .px(10.0)
-        .gap(10.0)
+        .h(20.0)
+        .px(4.0)
+        .gap(5.0)
         .center_y()
-        .radius(t.radius.row)
-        .fill(t.surface.hover)
-        .child(text(words).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0))
-        .child(quiet_button("Open in Calendar", "cal-open-in-calendar", t, move |s: &mut App| s.open_in_calendar(start)))
-        .child(icon_button(&icons::CLOSE_SMALL, "Close", "cal-close", t, |s: &mut App| s.pages.cal_event = None))
+        .radius(5.0)
+        .hover(t.surface.hover)
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
+        .on_press(move |s: &mut App| s.pages.cal_event = Some(id.clone()))
+        .child(el().size(7.0, 7.0).radius(3.5).fill(t.meaning.mint).a11y_hidden())
+        .child(text(clock::hhmm(e.start_ms.max(day))).font(t.ty.id).color(t.text.muted).a11y_hidden())
+        .child(text(e.title.clone()).font(t.ty.id).color(t.text.base).truncate().grow(1.0).min_w(0.0).a11y_hidden())
 }
 
 fn grid(s: &App, t: &Neko, days: &[i64], events: &[&CalendarEvent], neko: &[NekoCalendarItem]) -> El {

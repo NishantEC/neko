@@ -10,7 +10,7 @@ use rune::{El, col, el, row, text};
 use super::ui::{MenuEntry, area, group, note, page, pick, quiet_line, setting_row, switch, with_menu};
 use super::{primary_button, quiet_button};
 use crate::app::App;
-use crate::pages::{RoutineGlyph, ago, cadence_options, cadence_text, is_goal_routine, model_options, next_due_text, routine_glyph};
+use crate::pages::{RoutineGlyph, ago, cadence_text, is_goal_routine, model_options, next_due_text, routine_glyph};
 use crate::status::{StatusKind, status_glyph};
 use crate::theme::Neko;
 
@@ -184,6 +184,71 @@ fn routine_row(s: &App, t: &Neko, layer: &mut Vec<El>, v: &RoutineView) -> El {
     with_menu(s, t, layer, &format!("routine:{id}"), line, entries)
 }
 
+/// The cadence, as the web's editor has it: a segmented control (Every, Daily); for Every a minutes field (5 to 720, in steps of
+/// 5) with From and Until hour selects (0 to 23); for Daily an HH:MM time field. It is saved with `SaveRoutine`, the whole routine
+/// with its cadence replaced, exactly as the web sends it.
+fn cadence_editor(s: &App, t: &Neko, layer: &mut Vec<El>, cadence: &neko_protocol::routines::Cadence) -> El {
+    use neko_protocol::routines::Cadence;
+    use rune_kit::{SegmentedControl, TextInput};
+    let every = matches!(cadence, Cadence::Every { .. });
+    let mode = SegmentedControl::new(&["Every", "Daily"], Some(if every { 0 } else { 1 }))
+        .label("How often")
+        .width(Some(160.0))
+        .on_pick(|s: &mut App, i, _| s.set_cadence_mode(i == 0))
+        .build(&t.kit)
+        .key("rt-cadence-mode");
+    // One line for the segmented control and, beside it, what the mode needs.
+    let mut fields = row().key("rt-cadence-fields").gap(6.0).center_y().wrap();
+    let label = |words: &str| text(words.to_owned()).font(t.ty.meta).color(t.text.muted).a11y_hidden();
+    match cadence {
+        Cadence::Every { from_hour, to_hour, .. } => {
+            let stepper = |key: &str, label: &str, by: i32| {
+                row()
+                    .key(key.to_owned())
+                    .role("button")
+                    .label(label.to_owned())
+                    .focusable(true)
+                    .size(28.0, 28.0)
+                    .center()
+                    .radius(t.radius.control)
+                    .hover(t.surface.hover)
+                    .focus_ring(2.0, 2.0, t.surface.ring)
+                    .on_press(move |s: &mut App| s.cadence_minutes_step(by))
+                    .child(text(if by < 0 { "−" } else { "+" }).font(t.ty.row).color(t.text.muted).a11y_hidden())
+            };
+            let minutes = TextInput::new(super::ui::edit_of(s, "rt:minutes"))
+                .label("Every (minutes), 5 to 720 in steps of 5")
+                .width(Some(64.0))
+                .on_edit(super::ui::editing("rt:minutes".to_owned()))
+                .on_change(|s: &mut App, _| s.cadence_minutes_typed())
+                .build(&t.kit)
+                .key("rt-minutes");
+            fields = fields.child(stepper("rt-minutes-less", "5 minutes less", -5)).child(minutes).child(stepper("rt-minutes-more", "5 minutes more", 5)).child(label("min, from"));
+            let hours = |from: bool| -> Vec<String> { (0..=23).map(|h| format!("{h:02}:00")).chain((!from && *to_hour == 24).then(|| "24:00".to_owned())).collect() };
+            let (from_now, to_now) = (format!("{:02}:00", from_hour), format!("{:02}:00", to_hour));
+            fields = fields.child(pick(s, t, layer, "rt-from-pick", "From hour", &hours(true), &from_now, 96.0, |s: &mut App, chosen: &str| s.cadence_hours(chosen.get(..2).and_then(|h| h.parse().ok()), None)));
+            fields = fields.child(label("until")).child(pick(s, t, layer, "rt-to-pick", "Until hour", &hours(false), &to_now, 96.0, |s: &mut App, chosen: &str| s.cadence_hours(None, chosen.get(..2).and_then(|h| h.parse().ok()))));
+        }
+        Cadence::Daily { .. } => {
+            let time = TextInput::new(super::ui::edit_of(s, "rt:time"))
+                .label("At, as HH:MM")
+                .placeholder("10:30")
+                .width(Some(96.0))
+                .on_edit(super::ui::editing("rt:time".to_owned()))
+                .on_change(|s: &mut App, _| s.cadence_time_typed())
+                .build(&t.kit)
+                .key("rt-time");
+            fields = fields.child(label("at")).child(time);
+        }
+    }
+    let help = match cadence {
+        Cadence::Every { from_hour, to_hour, .. } if from_hour == to_hour => "Same start and end hour: runs all day and night.".to_owned(),
+        Cadence::Every { from_hour, to_hour, .. } => format!("Runs between {from_hour:02}:00 and {to_hour:02}:00, less often while nothing is happening."),
+        Cadence::Daily { .. } => "Once a day, at this time.".to_owned(),
+    };
+    col().key("rt-cadence").w_full().gap(2.0).child(setting_row(t, "rt-cadence-row", "Cadence", Some(&help), mode)).child(row().w_full().pl(6.0).pb(4.0).child(fields))
+}
+
 /// The open routine: its editor, Run now, and its recent runs.
 fn details(s: &App, t: &Neko, layer: &mut Vec<El>, v: &RoutineView) -> El {
     let id = v.routine.id.clone();
@@ -203,23 +268,7 @@ fn details(s: &App, t: &Neko, layer: &mut Vec<El>, v: &RoutineView) -> El {
     }
     c = c.child(group(t, "Instruction")).child(area(s, t, "rt:instruction", "What this routine does each run", "", 6));
 
-    let options = cadence_options(&draft.cadence);
-    let labels: Vec<String> = options.iter().map(|(l, _)| l.clone()).collect();
-    let current = cadence_text(&draft.cadence);
-    let opts = options.clone();
-    c = c.child(setting_row(
-        t,
-        "rt-cadence",
-        "Cadence",
-        Some("Repeats through the day, less often while nothing is happening, or once a day."),
-        pick(s, t, layer, "rt-cadence-pick", "Cadence", &labels, &current, 240.0, move |s: &mut App, chosen: &str| {
-            if let Some((_, cadence)) = opts.iter().find(|(l, _)| l == chosen)
-                && let Some(d) = s.pages.draft.as_mut()
-            {
-                d.cadence = cadence.clone();
-            }
-        }),
-    ));
+    c = c.child(cadence_editor(s, t, layer, &draft.cadence));
 
     let models = model_options(&draft.model);
     let model_labels: Vec<String> = models.iter().map(|(l, _)| l.clone()).collect();

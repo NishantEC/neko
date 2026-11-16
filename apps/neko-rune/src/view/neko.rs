@@ -104,25 +104,31 @@ fn inbox_item(s: &App, t: &Neko, item: &InboxItem, layer: &mut Vec<El>) -> El {
         .on_press(move |s: &mut App| s.toggle(&format!("inbox:{seq}")))
         .on_secondary_press(move |s: &mut App, p, _| s.inbox_menu = Some((seq, p)))
         .child(text_col);
-    // The quick action, only for a routine's item with a default; hidden until the row is hovered or focused.
+    // The quick actions, hidden until the row is hovered or focused, in this order: Use the default (only when the item has one),
+    // then Mark done.
+    let hover = |key: String, glyph: &'static rune::Icon, help: String, f: Box<dyn Fn(&mut App)>| {
+        row()
+            .key(key)
+            .role("button")
+            .label(help.clone())
+            .help(help)
+            .focusable(true)
+            .size(24.0, 24.0)
+            .center()
+            .radius(t.radius.control)
+            .hover(t.surface.active)
+            .focus_ring(2.0, 2.0, t.surface.ring)
+            .group_opacity(0.0, 1.0)
+            .on_press(move |s: &mut App| f(s))
+            .child(icon(glyph, 14.0).color(t.text.muted).a11y_hidden())
+    };
     if item.goal.is_none() && item.default.is_some() {
         let help = item.default.as_ref().map_or_else(String::new, |d| format!("Use the default: {d}"));
-        line = line.child(
-            row()
-                .key(format!("inbox-use-{seq}"))
-                .role("button")
-                .label(help.clone())
-                .help(help)
-                .focusable(true)
-                .size(24.0, 24.0)
-                .center()
-                .radius(t.radius.control)
-                .hover(t.surface.active)
-                .focus_ring(2.0, 2.0, t.surface.ring)
-                .group_opacity(0.0, 1.0)
-                .on_press(move |s: &mut App| s.answer_default(seq))
-                .child(icon(&icons::CHECK_LINE, 14.0).color(t.text.muted).a11y_hidden()),
-        );
+        line = line.child(hover(format!("inbox-use-{seq}"), &icons::CHECK_LINE, help, Box::new(move |s| s.answer_default(seq))));
+    }
+    if !item.routine_id.is_empty() {
+        let done = item.clone();
+        line = line.child(hover(format!("inbox-done-{seq}"), &icons::DONE, format!("Mark done: {}", item.title), Box::new(move |s| s.mark_item_done(&done))));
     }
     let note_key = item.goal.as_ref().map_or_else(|| format!("inbox:{seq}"), |g| format!("goal:{g}"));
     let mut c = col().w_full().child(match s.inbox_menu.as_ref().filter(|(open, _)| *open == seq) {
@@ -198,6 +204,91 @@ fn inbox(s: &App, t: &Neko, layer: &mut Vec<El>, win_h: f32) -> El {
         c = c.child(text(note.clone()).key("inbox-note").font(t.ty.meta).color(t.text.muted).wrap().px(6.0).live_region(rune::LiveRegion::Polite));
     }
     c
+}
+
+/// One item closed in the last three days: its title, why it closed in 12.5 muted, and on hover Reopen. The right-click menu
+/// has Reopen, Open (its link) and Copy.
+fn closed_item(s: &App, t: &Neko, item: &InboxItem, layer: &mut Vec<El>) -> El {
+    let seq = item.seq;
+    let key = format!("closed-{seq}");
+    let at = item.closed_ms.unwrap_or(item.at_ms);
+    let words = format!("{} · {}", if item.reason.is_empty() { "Closed" } else { item.reason.as_str() }, crate::groups::age(s.now_ms, at));
+    let reopen = item.clone();
+    let line = row()
+        .key(key.clone())
+        .role("listitem")
+        .label(format!("{}, {words}", item.title))
+        .help(if item.detail.is_empty() { item.title.clone() } else { item.detail.clone() })
+        .focusable(true)
+        .hover_group()
+        .w_full()
+        .min_h(32.0)
+        .px(8.0)
+        .gap(8.0)
+        .center_y()
+        .radius(t.radius.row)
+        .hover(t.surface.hover)
+        .focus_ring(2.0, 2.0, t.surface.ring)
+        .on_secondary_press(move |s: &mut App, p, _| s.closed_menu = Some((seq, p)))
+        .child(text(item.title.clone()).font(t.ty.row).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden())
+        .child(text(words).key(format!("closed-reason-{seq}")).font(t.ty.meta).color(t.text.muted).a11y_hidden())
+        .child(
+            row()
+                .key(format!("closed-reopen-{seq}"))
+                .role("button")
+                .label(format!("Reopen “{}”", item.title))
+                .help("Reopen")
+                .focusable(true)
+                .size(24.0, 24.0)
+                .center()
+                .radius(t.radius.control)
+                .hover(t.surface.active)
+                .focus_ring(2.0, 2.0, t.surface.ring)
+                .group_opacity(0.0, 1.0)
+                .on_press(move |s: &mut App| s.reopen_item(&reopen))
+                .child(icon(&icons::UNDO, 14.0).color(t.text.muted).a11y_hidden()),
+        );
+    match s.closed_menu.as_ref().filter(|(open, _)| *open == seq) {
+        Some((_, at)) => {
+            let mut menu = rune_kit::context_menu(format!("closed-menu-{seq}"), line, Some(*at)).on_close(|s: &mut App| s.closed_menu = None);
+            let again = item.clone();
+            menu = menu.item(rune_kit::MenuItem::new("Reopen").icon(&icons::UNDO).on_select(move |s: &mut App| {
+                s.closed_menu = None;
+                s.reopen_item(&again);
+            }));
+            if let Some(link) = item.link.clone() {
+                menu = menu.item(rune_kit::MenuItem::new("Open link").icon(&icons::EXTERNAL).on_select(move |s: &mut App| {
+                    s.closed_menu = None;
+                    s.open_link(&link);
+                }));
+            }
+            let copy = [item.title.as_str(), item.detail.as_str()].iter().filter(|p| !p.is_empty()).copied().collect::<Vec<_>>().join("\n\n");
+            menu = menu.separator().item(rune_kit::MenuItem::new("Copy").icon(&icons::COPY).on_select_tx(move |s: &mut App, tx: &mut rune::Tx| {
+                s.closed_menu = None;
+                tx.copy(copy.clone());
+            }));
+            menu.build(&t.kit, layer)
+        }
+        None => line,
+    }
+}
+
+/// "Closed recently": after the Inbox, folded until opened, the last three days' closed items with why each closed.
+fn closed_section(s: &App, t: &Neko, layer: &mut Vec<El>) -> Option<El> {
+    let items = &s.neko.closed;
+    if items.is_empty() {
+        return None;
+    }
+    // Opened by the person: `closed:open` is in the expanded set (folded by default, as the web's `defaultOpen={false}`).
+    let open = s.open("closed:open");
+    let head = section_head(t, "closed-toggle", "Closed recently", Some(items.len()), open, "closed:open");
+    let mut c = col().key("closed").w_full().gap(2.0).child(head);
+    if open {
+        for item in items {
+            c = c.child(closed_item(s, t, item, layer));
+        }
+    }
+    Some(c)
 }
 
 fn lines(t: &Neko, title: &str, items: &[neko_protocol::digest::DigestLine], defaults: bool) -> Option<El> {
@@ -344,6 +435,9 @@ fn body(s: &App, t: &Neko, win_h: f32, layer: &mut Vec<El>) -> El {
     let mut top = col().key("neko-top").w_full().px(12.0).pb(8.0).gap(8.0);
     top = top.child(row().key("crew-row").w_full().h(32.0).px(8.0).center_y().child(text(crew_line(working, waiting, s.neko.inbox.len())).key("crew").font(t.ty.row).color(t.text.base).truncate()));
     top = top.child(inbox(s, t, layer, win_h));
+    if let Some(closed) = closed_section(s, t, layer) {
+        top = top.child(closed);
+    }
     top = top.child(digest(s, t));
     let mut c = col().key("neko-body").w_full().grow(1.0).min_h(0.0).child(col().key("neko-scroll").w_full().max_h(cap).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(top));
     let activity = activity_line(s, t);
