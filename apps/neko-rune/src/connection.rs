@@ -24,7 +24,7 @@ pub fn describe(event: &LinkEvent) -> String {
 
 /// `neko-rune probe`: connect to a daemon without a window, print what the link sees, exit 0 once
 /// the workbench arrives and 1 if it does not within `limit`. Read-only, like the window.
-pub fn probe(socket: PathBuf, data_dir: PathBuf, limit: Duration) -> i32 {
+pub fn probe(socket: PathBuf, data_dir: PathBuf, limit: Duration, json: bool) -> i32 {
     let connector = UnixConnector::new(socket);
     let stop = AtomicBool::new(false);
     let live = AtomicBool::new(false);
@@ -33,13 +33,19 @@ pub fn probe(socket: PathBuf, data_dir: PathBuf, limit: Duration) -> i32 {
         &connector,
         &stop,
         |event| {
-            println!("{}", describe(&event));
+            // With `json`, stdout carries only the summary (for `scripts/snap-harness.sh`); the
+            // narration moves to stderr.
+            if json { eprintln!("{}", describe(&event)) } else { println!("{}", describe(&event)) }
+            if let (true, LinkEvent::Live(summary)) = (json, &event) {
+                println!("{}", serde_json::to_string(summary).unwrap_or_default());
+            }
             if matches!(event, LinkEvent::Live(_)) {
                 live.store(true, Ordering::Relaxed);
                 let port = std::env::var("NEKO_WEB_PORT").ok();
                 match WebTarget::discover(&data_dir, port.as_deref()) {
-                    Some(web) => println!("web UI: {}", web.display()),
-                    None => println!("web UI: address not known (no web-token yet)"),
+                    Some(web) if !json => println!("web UI: {}", web.display()),
+                    None if !json => println!("web UI: address not known (no web-token yet)"),
+                    _ => {}
                 }
                 stop.store(true, Ordering::Relaxed);
             } else if started.elapsed() > limit {

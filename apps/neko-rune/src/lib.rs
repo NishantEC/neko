@@ -1,16 +1,20 @@
 //! Neko's native client on Rune, built beside the web UI (docs/decisions/0002-rune-for-everything.md).
 //! P0 is the foundation: the pinned Rune, the read-only daemon link, the theme and the status
-//! glyphs, and one plain placeholder view. The layout (sessions, an agent workspace, Neko as a side
-//! agent, contextual panels) is pending an owner decision; tabs and a rail are dropped.
+//! glyphs, and the four-region shell (sessions, the session, a context panel, Neko), with the
+//! sessions and counts live from the daemon and the rest placeholders. No tabs.
 
 pub mod app;
 pub mod connection;
+pub mod groups;
+pub mod icons;
 pub mod lab;
+pub mod layout;
 pub mod link;
 pub mod scenes;
 pub mod status;
 pub mod theme;
 pub mod view;
+pub mod views;
 pub mod web_link;
 
 use std::path::PathBuf;
@@ -51,16 +55,17 @@ fn socket_path() -> PathBuf {
 
 /// Opens the window and, unless `nolink`, starts the read-only link to the running daemon.
 pub fn run() {
-    // `neko-rune probe [socket=PATH]`: no window; connect, print, exit. For checking a daemon.
+    // `neko-rune probe [json] [socket=PATH]`: no window; connect, print, exit. For checking a daemon
+    // (`json` prints the workbench summary alone, for `scripts/snap-harness.sh`).
     if std::env::args().nth(1).as_deref() == Some("probe") {
         let socket = std::env::args().find_map(|a| a.strip_prefix("socket=").map(PathBuf::from)).unwrap_or_else(|| std::env::var("NEKO_SOCKET").map(PathBuf::from).unwrap_or_else(|_| neko_protocol::socket_path()));
-        std::process::exit(connection::probe(socket, neko_protocol::support_dir(), std::time::Duration::from_secs(15)));
+        std::process::exit(connection::probe(socket, neko_protocol::support_dir(), std::time::Duration::from_secs(15), std::env::args().any(|a| a == "json")));
     }
     rune::prewarm_gpu();
     let spec = rune::AppSpec {
         scenes: scenes::SCENES,
-        min_size: Some((720.0, 480.0)),
-        ..rune::AppSpec::new("Neko (Rune)", (1180.0, 760.0), init, view::view)
+        min_size: Some((960.0, 560.0)),
+        ..rune::AppSpec::new("Neko (Rune)", (1360.0, 840.0), init, view::view)
     };
     let app = rune::App::new(spec).titlebar(rune::Titlebar::new(44.0));
     let handle = app.handle();

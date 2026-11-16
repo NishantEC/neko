@@ -1,0 +1,302 @@
+//! The four-region shell driven through Rune's headless `Runtime`: real layout, real hit-testing,
+//! no window. Clicks and drags go where a person's would, so this checks the app as used.
+
+use neko_rune::app::{App, ContextKind, Steer, down};
+use neko_rune::layout::{MIDDLE_MIN, Region};
+use neko_rune::link::{LinkError, LinkEvent};
+use neko_rune::scenes;
+use neko_rune::view::view;
+use neko_rune::views::FullView;
+use neko_rune::web_link::WebTarget;
+use rune::{Env, Runtime};
+
+const WINDOW: (f32, f32) = (1280.0, 800.0);
+
+fn runtime(dark: bool, setup: impl FnOnce(&mut App)) -> Runtime<App> {
+    let mut app = App::headless();
+    setup(&mut app);
+    let mut rt = Runtime::new(app, view, WINDOW, Env { system_dark: dark, scale: 2.0 });
+    rt.frame(0.0);
+    rt
+}
+
+fn live(app: &mut App) {
+    app.apply_link(LinkEvent::Live(scenes::demo_summary()));
+}
+
+fn settle(rt: &mut Runtime<App>) {
+    for _ in 0..30 {
+        rt.frame(1.0 / 60.0);
+    }
+}
+
+fn click(rt: &mut Runtime<App>, key: &str) {
+    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element keyed {key}"));
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(rt);
+}
+
+fn texts(rt: &Runtime<App>) -> Vec<String> {
+    rt.elements().into_iter().filter_map(|e| e.text).collect()
+}
+
+fn keyed(rt: &Runtime<App>, prefix: &str) -> usize {
+    rt.elements().iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with(prefix))).count()
+}
+
+fn rect(rt: &Runtime<App>, key: &str) -> [f32; 4] {
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no element keyed {key}")).rect
+}
+
+#[test]
+fn the_four_regions_stand_left_to_right_and_there_are_no_tabs() {
+    let rt = runtime(true, live);
+    let (sessions, session, neko) = (rect(&rt, "sessions"), rect(&rt, "session-region"), rect(&rt, "neko"));
+    assert!(sessions[0] < session[0] && session[0] < neko[0], "sessions, session, Neko");
+    assert!(rt.find("context").is_none(), "the context panel is closed until a session has something");
+    for e in rt.elements() {
+        let key = e.key.as_deref().unwrap_or("");
+        assert!(!key.starts_with("rail") && key != "tabs" && key != "new-tab" && !key.starts_with("t-"), "no tabs, no rail: {key}");
+    }
+    // The defaults: 260 for sessions, 300 for Neko, the rest for the session.
+    assert_eq!(sessions[2], 260.0);
+    assert_eq!(neko[2], 300.0);
+    assert!(session[2] >= MIDDLE_MIN && session[2] > 650.0, "{}", session[2]);
+}
+
+#[test]
+fn sessions_are_grouped_by_state_with_counts_and_the_first_one_that_needs_you_is_open() {
+    let rt = runtime(true, live);
+    let t = texts(&rt);
+    for title in ["Needs you", "Running", "Done today"] {
+        assert!(t.contains(&title.to_owned()), "{title}: {t:?}");
+    }
+    // 2 awaiting approval + 3 ready for review + 1 failed; 3 + 1 + 1 + 4 queued; 6 done + 1 cancelled.
+    assert_eq!(keyed(&rt, "session-t"), 22, "every task has a row");
+    assert_eq!(keyed(&rt, "group-"), 3);
+    assert!(rt.state.selected.is_some());
+    assert_eq!(rt.state.session().map(|t| t.status), Some(neko_protocol::workbench::TaskStatus::AwaitingApproval));
+}
+
+#[test]
+fn a_row_is_one_line_with_a_glyph_a_faint_id_a_title_and_quiet_meta() {
+    let rt = runtime(true, live);
+    let t = texts(&rt);
+    assert!(t.iter().any(|x| x.starts_with("NK-1")), "ids: {t:?}");
+    assert!(t.iter().any(|x| x == "Add a retry to the sync job"));
+    assert!(t.iter().any(|x| x.ends_with('m')), "quiet meta in minutes");
+    assert!(keyed(&rt, "status-") >= 20, "a glyph on every row");
+    let row = rect(&rt, "session-t0");
+    assert_eq!(row[3], 32.0, "one line");
+}
+
+#[test]
+fn clicking_a_session_selects_it_and_the_top_line_names_it() {
+    let mut rt = runtime(true, live);
+    click(&mut rt, "session-t6");
+    assert_eq!(rt.state.selected.as_deref(), Some("t6"));
+    let t = texts(&rt);
+    let title = rt.state.session().unwrap().title.clone();
+    assert!(t.contains(&title));
+    assert!(t.iter().any(|x| x.contains("Codex · default model · In progress")), "runtime and status in the top line: {t:?}");
+    assert!(t.iter().any(|x| x.contains("tests pass") || x.contains("shows a message") || x.contains("one section")), "the goal line: {t:?}");
+}
+
+#[test]
+fn groups_collapse_and_expand_with_their_count_kept() {
+    let mut rt = runtime(true, live);
+    let before = keyed(&rt, "session-t");
+    click(&mut rt, "group-1");
+    assert!(rt.state.collapsed[1]);
+    assert_eq!(keyed(&rt, "session-t"), before - 9, "the nine running rows are hidden");
+    assert!(texts(&rt).contains(&"Running".to_owned()), "the heading stays");
+    click(&mut rt, "group-1");
+    assert_eq!(keyed(&rt, "session-t"), before);
+}
+
+#[test]
+fn the_foot_opens_full_views_in_the_sessions_place_and_a_session_brings_it_back() {
+    let mut rt = runtime(true, live);
+    for key in ["view-calendar", "view-schedules", "view-settings", "more", "new-session"] {
+        assert!(rt.find(key).is_some(), "{key} is at the foot of the sessions column");
+    }
+    click(&mut rt, "view-settings");
+    assert_eq!(rt.state.view, Some(FullView::Settings));
+    assert!(rt.find("full-settings").is_some() && rt.find("composer").is_none(), "the view replaces the session and its composer");
+    assert!(texts(&rt).contains(&"Coming in P2. The web UI has it today.".to_owned()));
+    click(&mut rt, "session-t0");
+    assert_eq!(rt.state.view, None);
+    assert!(rt.find("composer").is_some());
+}
+
+#[test]
+fn more_lists_the_other_views_and_opens_one() {
+    let mut rt = runtime(true, live);
+    click(&mut rt, "more");
+    assert!(rt.state.more_open);
+    let t = texts(&rt);
+    for title in ["Usage & machine", "Pull requests", "Watching", "Memory", "Profiles", "Tools & skills"] {
+        assert!(t.contains(&title.to_owned()), "{title} in More: {t:?}");
+    }
+    let e = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Usage & machine")).unwrap();
+    let (x, y) = (e.rect[0] + e.rect[2] / 2.0, e.rect[1] + e.rect[3] / 2.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert_eq!(rt.state.view, Some(FullView::Usage));
+    assert!(!rt.state.more_open);
+}
+
+#[test]
+fn the_context_panel_toggles_from_the_top_line_and_picks_a_kind() {
+    let mut rt = runtime(true, live);
+    click(&mut rt, "context-toggle");
+    assert!(rt.state.layout.context.is_open());
+    assert!(rt.find("context").is_some() && rt.find("context-picker").is_some());
+    assert_eq!(rect(&rt, "context")[2], 360.0);
+    let t = texts(&rt);
+    for kind in ContextKind::ALL {
+        assert!(t.contains(&kind.title().to_owned()), "{}", kind.title());
+    }
+    assert!(t.contains(&"Diff appears here when the session produces one.".to_owned()), "{t:?}");
+    rt.update(|s, _| s.context = ContextKind::Browser);
+    settle(&mut rt);
+    assert!(texts(&rt).contains(&"Live views arrive in P3.".to_owned()));
+    click(&mut rt, "context-close");
+    assert!(!rt.state.layout.context.is_open());
+    assert!(rt.find("context").is_none());
+}
+
+#[test]
+fn the_composer_has_a_steer_menu_and_send_waits_for_p1() {
+    let mut rt = runtime(true, live);
+    assert!(rt.find("composer-input").is_some() && rt.find("steer-trigger").is_some());
+    assert_eq!(rt.state.steer, Steer::AfterTurn);
+    click(&mut rt, "steer-trigger");
+    assert!(rt.state.steer_open);
+    let t = texts(&rt);
+    for mode in Steer::ALL {
+        assert!(t.contains(&mode.label().to_owned()), "{}", mode.label());
+    }
+    let e = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Interrupt and restart")).unwrap();
+    let (x, y) = (e.rect[0] + e.rect[2] / 2.0, e.rect[1] + e.rect[3] / 2.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert_eq!(rt.state.steer, Steer::Interrupt);
+    let send = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("send")).unwrap();
+    assert_eq!(send.label.as_deref(), Some("Send"));
+}
+
+#[test]
+fn neko_shows_the_crew_the_inbox_and_collapses_to_an_icon_and_back() {
+    let mut rt = runtime(true, live);
+    let t = texts(&rt);
+    assert!(t.contains(&"5 agents working · 6 need you".to_owned()), "5 working (3 building, 1 planning, 1 reviewing), 6 waiting: {t:?}");
+    assert!(t.contains(&"Inbox".to_owned()) && t.contains(&"Digest".to_owned()));
+    assert!(rt.find("inbox-t0").is_some(), "what needs you is listed");
+    assert!(rt.find("ask").is_some());
+    click(&mut rt, "inbox-t1");
+    assert_eq!(rt.state.selected.as_deref(), Some("t1"), "an Inbox item opens its session");
+
+    click(&mut rt, "neko-collapse");
+    assert!(!rt.state.layout.neko.is_open());
+    assert!((rect(&rt, "neko")[2] - 48.0).abs() < 1.0, "collapsed to an icon");
+    assert!(rt.find("neko-title").is_none());
+    assert!(rt.elements().iter().any(|e| e.label.as_deref() == Some("Neko, 6 need you")), "the icon carries the count");
+    click(&mut rt, "neko-expand");
+    assert!((rect(&rt, "neko")[2] - 300.0).abs() < 1.0);
+}
+
+#[test]
+fn dragging_an_edge_resizes_its_region_within_the_range() {
+    let mut rt = runtime(true, live);
+    let (x, y) = rt.find("grip-sessions").unwrap();
+    rt.pointer_down(x, y);
+    rt.pointer_move(x + 60.0, y);
+    rt.pointer_up(x + 60.0, y);
+    settle(&mut rt);
+    assert_eq!(rt.state.layout.sessions.width(), 320.0);
+    assert_eq!(rect(&rt, "sessions")[2], 320.0);
+
+    let (x, y) = rt.find("grip-neko").unwrap();
+    rt.pointer_down(x, y);
+    rt.pointer_move(x - 80.0, y);
+    rt.pointer_up(x - 80.0, y);
+    settle(&mut rt);
+    assert_eq!(rt.state.layout.neko.width(), 380.0, "dragging a right-hand edge left widens it");
+    assert!(rt.state.layout.middle(WINDOW.0) >= MIDDLE_MIN);
+    rt.update(|s, _| s.layout.drag(Region::Sessions, 320.0, 900.0));
+    settle(&mut rt);
+    assert_eq!(rt.state.layout.sessions.width(), 420.0);
+}
+
+#[test]
+fn before_and_without_a_daemon_it_says_so_calmly_in_the_column() {
+    let rt = runtime(true, |_| {});
+    assert!(texts(&rt).iter().filter(|t| *t == "Connecting to Neko…").count() >= 1);
+    assert_eq!(keyed(&rt, "session-t"), 0);
+    let mut rt = runtime(true, live);
+    rt.update(|s, _| {
+        s.apply_link(down(LinkError::NotRunning, 4));
+    });
+    settle(&mut rt);
+    let t = texts(&rt);
+    assert!(t.iter().any(|l| l.starts_with("Neko isn't running. Trying again in 4 s. Last known: 22 tasks")), "{t:?}");
+    assert!(keyed(&rt, "session-t") > 0, "what was known stays on screen");
+}
+
+#[test]
+fn an_empty_workbench_says_no_sessions_once() {
+    let (_, scene) = scenes::SCENES.iter().find(|(n, _)| *n == "empty").unwrap();
+    let rt = runtime(false, scene);
+    assert_eq!(texts(&rt).iter().filter(|t| *t == "No sessions").count(), 1);
+    assert!(texts(&rt).contains(&"Nothing needs you right now".to_owned()));
+}
+
+#[test]
+fn the_web_buttons_open_the_same_place_and_without_a_daemon_say_why() {
+    thread_local! { static OPENED: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) }; }
+    let mut rt = runtime(true, |a| {
+        live(a);
+        a.opener = |url| {
+            OPENED.with(|o| o.borrow_mut().push(url.to_owned()));
+            Ok(())
+        };
+        a.open_view(FullView::Routines);
+    });
+    click(&mut rt, "open-web");
+    assert!(OPENED.with(|o| o.borrow().is_empty()), "nothing opens without an address");
+    assert!(texts(&rt).iter().any(|t| t.starts_with("Neko is running, but its web address isn't known yet")), "{:?}", texts(&rt));
+
+    rt.update(|s, _| {
+        s.set_web(Some(WebTarget::new(4747, &"ab".repeat(32))));
+    });
+    settle(&mut rt);
+    click(&mut rt, "open-web");
+    let opened = OPENED.with(|o| o.borrow().clone());
+    assert_eq!(opened.len(), 1);
+    assert!(opened[0].starts_with("http://127.0.0.1:4747/?token=") && opened[0].ends_with("#/schedules"), "routines are the web UI's schedules");
+    assert!(!texts(&rt).iter().any(|t| t.contains(&"ab".repeat(32))), "the token is never on screen");
+}
+
+#[test]
+fn every_scene_lays_out_in_both_appearances() {
+    for dark in [true, false] {
+        for (name, scene) in scenes::SCENES {
+            let rt = runtime(dark, scene);
+            assert!(rt.find("sessions").is_some() && rt.find("session-region").is_some() && rt.find("neko").is_some(), "{name} dark={dark}");
+        }
+    }
+}
+
+#[test]
+fn light_and_dark_follow_the_system() {
+    let fill = |rt: &Runtime<App>, key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).map(|e| e.fill.hex()).unwrap();
+    let (dark, light) = (runtime(true, |_| {}), runtime(false, |_| {}));
+    assert_eq!(fill(&dark, "window"), "#121212ff");
+    assert_eq!(fill(&light, "window"), "#f3f3f3ff");
+    assert_eq!(fill(&dark, "session-region"), "#0f0f0fff");
+    assert_eq!(fill(&light, "session-region"), "#fafafaff");
+}

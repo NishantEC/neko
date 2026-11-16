@@ -1,5 +1,5 @@
-//! "Open the web UI": the way out of the placeholder, so nobody is stuck while the native app has
-//! no screens yet.
+//! "Open the web UI": the way out of a placeholder, so nobody is stuck while the native app has
+//! no screen for something yet.
 //!
 //! The daemon serves the web UI on 127.0.0.1 and wants the secret it keeps in
 //! `<data dir>/web-token` (`crates/neko-daemon/src/web.rs`, `WebHome.swift` does the same). The
@@ -49,10 +49,11 @@ impl WebTarget {
         WebTarget { port, token: token.to_owned() }
     }
 
-    /// `http://127.0.0.1:<port>/?token=…`. The daemon answers the token URL with a cookie and a
-    /// redirect to `/`.
-    pub fn url(&self) -> String {
-        format!("http://127.0.0.1:{}/?token={}", self.port, self.token)
+    /// `http://127.0.0.1:<port>/?token=…`, then the web UI's hash route for `page` (`inbox`,
+    /// `tasks`, none for home). The daemon answers the token URL with a cookie and a redirect to
+    /// `/`, and the fragment survives the redirect.
+    pub fn url(&self, page: Option<&str>) -> String {
+        format!("http://127.0.0.1:{}/?token={}{}", self.port, self.token, page.map(|p| format!("#/{p}")).unwrap_or_default())
     }
 
     /// The same address without the token, safe to show.
@@ -88,11 +89,12 @@ mod tests {
     }
 
     #[test]
-    fn a_valid_token_makes_the_url() {
+    fn a_valid_token_makes_the_url_to_the_same_place() {
         let dir = temp("ok");
         std::fs::write(dir.join("web-token"), format!("{TOKEN}\n")).unwrap();
         let target = WebTarget::discover(&dir, Some("4750")).unwrap();
-        assert_eq!(target.url(), format!("http://127.0.0.1:4750/?token={TOKEN}"));
+        assert_eq!(target.url(None), format!("http://127.0.0.1:4750/?token={TOKEN}"));
+        assert_eq!(target.url(Some("schedules")), format!("http://127.0.0.1:4750/?token={TOKEN}#/schedules"));
         assert!(!target.display().contains(TOKEN), "what is shown never carries the secret");
         assert!(!format!("{target:?}").contains(TOKEN), "nor does a debug print");
         std::fs::remove_dir_all(dir).ok();

@@ -93,7 +93,7 @@ pub fn calm(error: &LinkError, retry_in: Duration) -> String {
 }
 
 /// One task as a row: what lists and counts need, and nothing of its events or plan.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskRow {
     pub id: String,
     /// The source's short key (`ENG-12`), when the task has one.
@@ -101,20 +101,37 @@ pub struct TaskRow {
     pub title: String,
     pub status: TaskStatus,
     pub updated_at_ms: i64,
+    /// The first line of the task's goal, cut short.
+    #[serde(default)]
+    pub goal: String,
 }
 
 /// What the app keeps of a workbench snapshot. The multi-megabyte snapshot itself is dropped
 /// as soon as it is summarised, so the client's memory does not grow with the daemon's history.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Summary {
     pub digest: String,
+    /// The runtime new work uses, as words ("Codex · default model").
+    #[serde(default)]
+    pub runtime: String,
     pub tasks: Vec<TaskRow>,
+}
+
+/// The first line of a goal, at most 140 characters.
+fn first_line(goal: &str) -> String {
+    let line = goal.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    if line.chars().count() > 140 { format!("{}…", line.chars().take(139).collect::<String>()) } else { line.to_owned() }
 }
 
 impl Summary {
     pub fn from_snapshot(snapshot: &Snapshot) -> Summary {
         Summary {
             digest: snapshot.digest.clone(),
+            runtime: format!(
+                "{} · {}",
+                if snapshot.agent_runtime.provider.is_empty() { "Codex" } else { snapshot.agent_runtime.provider.as_str() },
+                if snapshot.agent_runtime.model.is_empty() { "default model" } else { snapshot.agent_runtime.model.as_str() }
+            ),
             tasks: snapshot
                 .tasks
                 .iter()
@@ -124,6 +141,7 @@ impl Summary {
                     title: t.display_title.clone().unwrap_or_else(|| t.title.clone()),
                     status: t.status,
                     updated_at_ms: t.updated_at_ms,
+                    goal: first_line(&t.goal),
                 })
                 .collect(),
         }
@@ -384,10 +402,19 @@ mod tests {
     }
 
     #[test]
+    fn a_goal_keeps_its_first_line_cut_short() {
+        assert_eq!(first_line("\n  Fix the bug\nthen more"), "Fix the bug");
+        assert_eq!(first_line(""), "");
+        let long = "x".repeat(300);
+        assert_eq!(first_line(&long).chars().count(), 140);
+    }
+
+    #[test]
     fn summaries_count_what_needs_the_person() {
-        let task = |id: &str, status| TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: 0 };
+        let task = |id: &str, status| TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: 0, goal: String::new() };
         let s = Summary {
             digest: String::new(),
+            runtime: String::new(),
             tasks: vec![
                 task("a", TaskStatus::AwaitingApproval),
                 task("b", TaskStatus::Building),

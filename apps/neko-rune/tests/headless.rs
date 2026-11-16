@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const BIN: &str = env!("CARGO_BIN_EXE_neko-rune");
-const SIZE: (u32, u32) = (1180, 760);
+const SIZE: (u32, u32) = (1280, 800);
 const SCALE: u32 = 2;
 
 fn out_dir() -> PathBuf {
@@ -22,8 +22,14 @@ fn run(args: &[&str]) {
     assert!(out.status.success(), "{args:?}\n{}", String::from_utf8_lossy(&out.stderr));
 }
 
+/// Tests run in parallel, so every render gets a file of its own.
+fn unique() -> usize {
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 fn snap(scene: &str, theme: &str) -> PathBuf {
-    let path = out_dir().join(format!("{scene}-{theme}.png"));
+    let path = out_dir().join(format!("{scene}-{theme}-{}.png", unique()));
     run(&["--snap", path.to_str().unwrap(), "--scene", scene, "--theme", theme, "--size", &format!("{}x{}", SIZE.0, SIZE.1), "--scale", &SCALE.to_string()]);
     path
 }
@@ -62,7 +68,7 @@ fn near(got: [u8; 3], want: [u8; 3]) -> bool {
 }
 
 fn tree(scene: &str, theme: &str) -> serde_json::Value {
-    let path = out_dir().join(format!("{scene}-{theme}.tree.json"));
+    let path = out_dir().join(format!("{scene}-{theme}-{}.tree.json", unique()));
     run(&["--tree", path.to_str().unwrap(), "--scene", scene, "--theme", theme, "--size", &format!("{}x{}", SIZE.0, SIZE.1)]);
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
@@ -76,15 +82,23 @@ fn texts(tree: &serde_json::Value) -> Vec<String> {
 }
 
 #[test]
-fn the_view_snaps_in_light_and_dark_with_the_neko_surfaces() {
-    // Dark: the window is #0f0f0f. Light: #fafafa. The primary button is Iris in both.
-    for (theme, window) in [("dark", [0x0f, 0x0f, 0x0f]), ("light", [0xfa, 0xfa, 0xfa])] {
+fn the_shell_snaps_in_light_and_dark_with_the_neko_surfaces() {
+    // The sessions and Neko columns are the sidebar surface (#121212 dark, #f3f3f3 light); the
+    // session is the window surface (#0f0f0f, #fafafa); the context panel is the card surface
+    // (#151515, #ffffff).
+    let cases = [("dark", [0x12, 0x12, 0x12], [0x0f, 0x0f, 0x0f], [0x15, 0x15, 0x15]), ("light", [0xf3, 0xf3, 0xf3], [0xfa, 0xfa, 0xfa], [0xff, 0xff, 0xff])];
+    for (theme, column, session, card) in cases {
         let image = Image::read(&snap("live", theme));
         assert_eq!((image.width, image.height), (SIZE.0 * SCALE, SIZE.1 * SCALE), "{theme}");
-        assert!(near(image.at(4.0, 400.0), window), "{theme}: the window is {window:?}, got {:?}", image.at(4.0, 400.0));
-        assert!(near(image.at(1100.0, 600.0), window), "{theme}: empty space is the window's colour");
-        let button = button_pixel(&tree("live", theme), &image);
-        assert!(near(button, [0x34, 0x6b, 0xf1]), "{theme}: the primary button is Iris, got {button:?}");
+        let t = tree("live", theme);
+        let r = rect_of(&t, "session-region");
+        assert!(near(image.at(3.0, 400.0), column), "{theme}: the sessions column edge is {column:?}, got {:?}", image.at(3.0, 400.0));
+        assert!(near(image.at(r[0] + r[2] / 2.0, r[1] + 200.0), session), "{theme}: the session is {session:?}, got {:?}", image.at(r[0] + r[2] / 2.0, r[1] + 200.0));
+        let n = rect_of(&t, "neko");
+        assert!(near(image.at(n[0] + n[2] - 3.0, 400.0), column), "{theme}: the Neko column is {column:?}");
+        let ctx = Image::read(&snap("context", theme));
+        let c = rect_of(&tree("context", theme), "context");
+        assert!(near(ctx.at(c[0] + c[2] / 2.0, c[1] + 400.0), card), "{theme}: the context panel is {card:?}, got {:?}", ctx.at(c[0] + c[2] / 2.0, c[1] + 400.0));
     }
 }
 
@@ -92,26 +106,24 @@ fn rect_of(tree: &serde_json::Value, key: &str) -> Vec<f32> {
     element(tree, key).unwrap_or_else(|| panic!("no element keyed {key}"))["rect"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap() as f32).collect()
 }
 
-/// A pixel just inside the primary button's left edge, found from the tree.
-fn button_pixel(tree: &serde_json::Value, image: &Image) -> [u8; 3] {
-    let r = rect_of(tree, "open-web");
-    image.at(r[0] + 4.0, r[1] + r[3] / 2.0)
-}
-
 #[test]
-fn the_tree_has_the_rows_and_no_layout_warnings() {
+fn the_tree_has_the_four_regions_and_no_layout_warnings() {
     for theme in ["dark", "light"] {
         let t = tree("live", theme);
         assert_eq!(t["title"], "Neko (Rune)");
         assert_eq!(t["warnings"].as_array().unwrap().len(), 0, "{theme}: {}", t["warnings"]);
-        for key in ["window", "page", "title", "rows", "open-web", "status-text", "task-t0", "status-InProgress"] {
+        for key in ["sessions", "session-region", "neko", "group-0", "group-1", "group-2", "session-t0", "composer-input", "steer-trigger", "crew", "inbox", "ask", "grip-sessions", "grip-neko", "view-calendar", "view-schedules", "view-settings", "more", "new-session"] {
             assert!(element(&t, key).is_some(), "{theme}: {key}");
         }
+        assert!(element(&t, "context").is_none(), "the context panel starts closed");
         let words = texts(&t);
-        assert!(words.contains(&"Connected · 25 tasks · 2 need you".to_owned()), "{words:?}");
-        assert!(words.contains(&"Tasks".to_owned()));
-        // The button has a name for assistive technology.
-        assert_eq!(element(&t, "open-web").unwrap()["label"], "Open in the web UI");
+        assert!(words.contains(&"5 agents working · 6 need you".to_owned()), "{words:?}");
+        assert!(words.contains(&"Connected · 22 tasks".to_owned()), "{words:?}");
+        // Everything that does something has a name for assistive technology.
+        for key in ["session-t0", "context-toggle", "neko-collapse", "view-settings", "more", "new-session", "steer-trigger", "grip-sessions"] {
+            let label = element(&t, key).unwrap()["label"].as_str().unwrap_or("");
+            assert!(!label.is_empty(), "{theme}: {key} has no label");
+        }
         // No tabs, no rail.
         assert!(element(&t, "tabs").is_none() && element(&t, "rail").is_none());
     }
@@ -140,13 +152,19 @@ fn the_glyph_lab_shows_all_seven_status_glyphs_in_their_colours() {
 fn offline_and_notice_scenes_say_what_they_should() {
     assert!(texts(&tree("offline", "dark")).contains(&"Neko isn't running. Trying again in 4 s.".to_owned()));
     assert!(texts(&tree("notice", "dark")).contains(&"Neko isn't running, so there's no web UI to open yet.".to_owned()));
+    // The context panel, the collapsed Neko, the open menus and a full view each render something.
+    assert!(element(&tree("context", "dark"), "context-picker").is_some());
+    assert!(element(&tree("collapsed", "dark"), "neko-expand").is_some());
+    assert!(texts(&tree("steer", "dark")).contains(&"Interrupt and restart".to_owned()));
+    assert!(texts(&tree("more", "dark")).contains(&"Usage & machine".to_owned()));
+    assert!(texts(&tree("full-view", "dark")).contains(&"Coming in P2. The web UI has it today.".to_owned()));
 }
 
 #[test]
 fn every_scene_renders_in_both_appearances() {
     let list = Command::new(BIN).arg("--list-scenes").output().unwrap();
     let scenes: Vec<String> = String::from_utf8(list.stdout).unwrap().lines().map(str::to_owned).collect();
-    assert!(scenes.len() >= 6, "{scenes:?}");
+    assert!(scenes.len() >= 10, "{scenes:?}");
     for scene in &scenes {
         for theme in ["light", "dark"] {
             let image = Image::read(&snap(scene, theme));

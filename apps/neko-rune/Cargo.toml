@@ -31,6 +31,7 @@ rune-kit = { git = "https://github.com/anomalyco/rune", rev = "bc05f817ed19488a1
 # The wire types and framing, shared with the daemon: the only thing this client knows of it.
 neko-protocol = { path = "../../crates/neko-protocol" }
 serde_json = "1"
+serde = { version = "1.0.229", features = ["derive"] }
 
 [dev-dependencies]
 png = "0.17"

@@ -22,9 +22,9 @@ if [ ${#scenes[@]} -eq 0 ]; then
 fi
 for scene in "${scenes[@]}"; do
   for theme in light dark; do
-    "$bin" --snap "$out/$scene-$theme.png" --scene "$scene" --theme "$theme" --size 1180x760 --scale 2 >/dev/null 2>&1
+    "$bin" --snap "$out/$scene-$theme.png" --scene "$scene" --theme "$theme" --size 1280x800 --scale 2 >/dev/null 2>&1
   done
-  "$bin" --tree "$out/$scene-dark.tree.json" --scene "$scene" --theme dark --size 1180x760 >/dev/null 2>&1
+  "$bin" --tree "$out/$scene-dark.tree.json" --scene "$scene" --theme dark --size 1280x800 >/dev/null 2>&1
   echo "$scene"
 done
 echo "wrote $out"
