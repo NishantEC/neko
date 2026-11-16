@@ -1,5 +1,5 @@
-//! "Open this in the web UI": the way out of every placeholder page, so nobody is stuck while a
-//! screen has no native version yet.
+//! "Open the web UI": the way out of the placeholder, so nobody is stuck while the native app has
+//! no screens yet.
 //!
 //! The daemon serves the web UI on 127.0.0.1 and wants the secret it keeps in
 //! `<data dir>/web-token` (`crates/neko-daemon/src/web.rs`, `WebHome.swift` does the same). The
@@ -8,8 +8,6 @@
 
 use std::io;
 use std::path::Path;
-
-use crate::pages::Page;
 
 /// The daemon's default web port (`web::DEFAULT_PORT`).
 pub const DEFAULT_PORT: u16 = 4747;
@@ -51,15 +49,15 @@ impl WebTarget {
         WebTarget { port, token: token.to_owned() }
     }
 
-    /// `http://127.0.0.1:<port>/?token=…#/<route>`. The daemon answers the token URL with a
-    /// cookie and a redirect to `/`, and the fragment survives the redirect.
-    pub fn url(&self, page: Page) -> String {
-        format!("http://127.0.0.1:{}/?token={}{}", self.port, self.token, page.hash())
+    /// `http://127.0.0.1:<port>/?token=…`. The daemon answers the token URL with a cookie and a
+    /// redirect to `/`.
+    pub fn url(&self) -> String {
+        format!("http://127.0.0.1:{}/?token={}", self.port, self.token)
     }
 
     /// The same address without the token, safe to show.
-    pub fn display(&self, page: Page) -> String {
-        format!("127.0.0.1:{}/{}", self.port, page.hash())
+    pub fn display(&self) -> String {
+        format!("127.0.0.1:{}", self.port)
     }
 }
 
@@ -90,13 +88,12 @@ mod tests {
     }
 
     #[test]
-    fn a_valid_token_makes_a_url_to_the_same_route() {
+    fn a_valid_token_makes_the_url() {
         let dir = temp("ok");
         std::fs::write(dir.join("web-token"), format!("{TOKEN}\n")).unwrap();
         let target = WebTarget::discover(&dir, Some("4750")).unwrap();
-        assert_eq!(target.url(Page::Home), format!("http://127.0.0.1:4750/?token={TOKEN}#/"));
-        assert_eq!(target.url(Page::Inbox), format!("http://127.0.0.1:4750/?token={TOKEN}#/inbox"));
-        assert!(!target.display(Page::Inbox).contains(TOKEN), "what is shown never carries the secret");
+        assert_eq!(target.url(), format!("http://127.0.0.1:4750/?token={TOKEN}"));
+        assert!(!target.display().contains(TOKEN), "what is shown never carries the secret");
         assert!(!format!("{target:?}").contains(TOKEN), "nor does a debug print");
         std::fs::remove_dir_all(dir).ok();
     }

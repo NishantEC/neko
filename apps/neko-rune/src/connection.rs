@@ -3,13 +3,53 @@
 //! the app and writes nothing to the daemon (`link/` only knows read requests).
 
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use rune::AppHandle;
 
 use crate::app::App;
 use crate::link::{LinkEvent, UnixConnector, run};
 use crate::web_link::WebTarget;
+
+/// One line for a link event: what `NEKO_RUNE_LOG=1` and `probe` print.
+pub fn describe(event: &LinkEvent) -> String {
+    match event {
+        LinkEvent::Connecting => "connecting".to_owned(),
+        LinkEvent::Live(s) => format!("live: {} tasks, {} need you, {} in review, {} working", s.tasks.len(), s.needs_you(), s.in_review(), s.working()),
+        LinkEvent::Quiet => "quiet: nothing changed".to_owned(),
+        LinkEvent::Down { error, attempt, retry_in } => format!("down (attempt {attempt}, retry in {retry_in:?}): {}", crate::link::calm(error, *retry_in)),
+    }
+}
+
+/// `neko-rune probe`: connect to a daemon without a window, print what the link sees, exit 0 once
+/// the workbench arrives and 1 if it does not within `limit`. Read-only, like the window.
+pub fn probe(socket: PathBuf, data_dir: PathBuf, limit: Duration) -> i32 {
+    let connector = UnixConnector::new(socket);
+    let stop = AtomicBool::new(false);
+    let live = AtomicBool::new(false);
+    let started = std::time::Instant::now();
+    run(
+        &connector,
+        &stop,
+        |event| {
+            println!("{}", describe(&event));
+            if matches!(event, LinkEvent::Live(_)) {
+                live.store(true, Ordering::Relaxed);
+                let port = std::env::var("NEKO_WEB_PORT").ok();
+                match WebTarget::discover(&data_dir, port.as_deref()) {
+                    Some(web) => println!("web UI: {}", web.display()),
+                    None => println!("web UI: address not known (no web-token yet)"),
+                }
+                stop.store(true, Ordering::Relaxed);
+            } else if started.elapsed() > limit {
+                stop.store(true, Ordering::Relaxed);
+            }
+        },
+        |d| std::thread::sleep(d.min(Duration::from_millis(500))),
+    );
+    if live.load(Ordering::Relaxed) { 0 } else { 1 }
+}
 
 /// Starts the worker. `socket` is the daemon's Unix socket, `data_dir` where it keeps `web-token`.
 pub fn spawn(handle: AppHandle<App>, socket: PathBuf, data_dir: PathBuf) {
@@ -22,6 +62,9 @@ pub fn spawn(handle: AppHandle<App>, socket: PathBuf, data_dir: PathBuf) {
             &connector,
             &stop,
             |event| {
+                if std::env::var_os("NEKO_RUNE_LOG").is_some() {
+                    eprintln!("neko-rune link: {}", describe(&event));
+                }
                 // The token is read here, off the UI thread, whenever the link starts, drops or
                 // first goes live: it may not exist before the daemon has run once.
                 let look = matches!(event, LinkEvent::Connecting | LinkEvent::Down { .. }) || (matches!(event, LinkEvent::Live(_)) && web.is_none());

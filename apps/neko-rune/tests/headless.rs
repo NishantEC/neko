@@ -76,68 +76,77 @@ fn texts(tree: &serde_json::Value) -> Vec<String> {
 }
 
 #[test]
-fn the_shell_snaps_in_light_and_dark_with_the_neko_surfaces() {
-    // Dark: the rail and titlebar are the sidebar surface #121212, the page is the window
-    // surface #0f0f0f. Light: #f3f3f3 and #fafafa.
-    for (theme, rail, page) in [("dark", [0x12, 0x12, 0x12], [0x0f, 0x0f, 0x0f]), ("light", [0xf3, 0xf3, 0xf3], [0xfa, 0xfa, 0xfa])] {
+fn the_view_snaps_in_light_and_dark_with_the_neko_surfaces() {
+    // Dark: the window is #0f0f0f. Light: #fafafa. The primary button is Iris in both.
+    for (theme, window) in [("dark", [0x0f, 0x0f, 0x0f]), ("light", [0xfa, 0xfa, 0xfa])] {
         let image = Image::read(&snap("live", theme));
         assert_eq!((image.width, image.height), (SIZE.0 * SCALE, SIZE.1 * SCALE), "{theme}");
-        assert!(near(image.at(4.0, 400.0), rail), "{theme}: the rail's edge is {rail:?}, got {:?}", image.at(4.0, 400.0));
-        assert!(near(image.at(900.0, 500.0), page), "{theme}: the page is {page:?}, got {:?}", image.at(900.0, 500.0));
-        // The primary button is Iris, #346bf1, in both appearances.
-        let button = image.at(212.0, 174.0);
+        assert!(near(image.at(4.0, 400.0), window), "{theme}: the window is {window:?}, got {:?}", image.at(4.0, 400.0));
+        assert!(near(image.at(1100.0, 600.0), window), "{theme}: empty space is the window's colour");
+        let button = button_pixel(&tree("live", theme), &image);
         assert!(near(button, [0x34, 0x6b, 0xf1]), "{theme}: the primary button is Iris, got {button:?}");
     }
 }
 
+fn rect_of(tree: &serde_json::Value, key: &str) -> Vec<f32> {
+    element(tree, key).unwrap_or_else(|| panic!("no element keyed {key}"))["rect"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap() as f32).collect()
+}
+
+/// A pixel just inside the primary button's left edge, found from the tree.
+fn button_pixel(tree: &serde_json::Value, image: &Image) -> [u8; 3] {
+    let r = rect_of(tree, "open-web");
+    image.at(r[0] + 4.0, r[1] + r[3] / 2.0)
+}
+
 #[test]
-fn the_tree_has_the_shell_and_no_layout_warnings() {
+fn the_tree_has_the_rows_and_no_layout_warnings() {
     for theme in ["dark", "light"] {
         let t = tree("live", theme);
         assert_eq!(t["title"], "Neko (Rune)");
         assert_eq!(t["warnings"].as_array().unwrap().len(), 0, "{theme}: {}", t["warnings"]);
-        for key in ["rail-home", "rail-inbox", "rail-tasks", "rail-calendar", "rail-workspaces", "rail-settings", "rail-more", "back", "forward", "new-tab", "tabs", "open-web", "card"] {
+        for key in ["window", "page", "title", "rows", "open-web", "status-text", "task-t0", "status-InProgress"] {
             assert!(element(&t, key).is_some(), "{theme}: {key}");
         }
         let words = texts(&t);
-        assert!(words.contains(&"Coming in P1: open in the web UI".to_owned()), "{words:?}");
         assert!(words.contains(&"Connected · 25 tasks · 2 need you".to_owned()), "{words:?}");
-        // Everything that does something has a name for assistive technology.
-        for key in ["rail-home", "rail-tasks", "rail-more", "open-web", "back", "forward", "new-tab"] {
-            let label = element(&t, key).unwrap()["label"].as_str().unwrap_or("");
-            assert!(!label.is_empty(), "{theme}: {key} has no label");
-        }
+        assert!(words.contains(&"Tasks".to_owned()));
+        // The button has a name for assistive technology.
+        assert_eq!(element(&t, "open-web").unwrap()["label"], "Open in the web UI");
+        // No tabs, no rail.
+        assert!(element(&t, "tabs").is_none() && element(&t, "rail").is_none());
     }
 }
 
 #[test]
-fn the_rail_places_stay_inside_the_rail_and_the_page_clear_of_it() {
-    let t = tree("live", "dark");
-    let rect = |key: &str| -> Vec<f64> { element(&t, key).unwrap()["rect"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect() };
-    let (home, settings, card) = (rect("rail-home"), rect("rail-settings"), rect("card"));
-    assert_eq!(home[2], 36.0);
-    assert!(home[0] + home[2] <= 56.0, "the rail is 56 points wide");
-    assert!(settings[1] > home[1], "Settings sits at the foot");
-    assert!(card[0] >= 56.0, "the page starts after the rail");
+fn the_glyph_lab_shows_all_seven_status_glyphs_in_their_colours() {
+    let t = tree("lab", "dark");
+    let words = texts(&t);
+    for label in ["Backlog", "To do", "In progress", "In review", "Done", "Failed", "Cancelled"] {
+        assert!(words.contains(&label.to_owned()), "{label}");
+    }
+    let image = Image::read(&snap("lab", "dark"));
+    // The glyph is 14 points wide and sits 8 before its label. A point inside the disc, off the
+    // mark in the middle, shows the glyph's own colour: Done is Mint, Failed is Coral.
+    let disc = |label: &str| {
+        let e = t["elements"].as_array().unwrap().iter().find(|e| e["text"] == label).unwrap();
+        let r: Vec<f32> = e["rect"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap() as f32).collect();
+        image.at(r[0] - 8.0 - 12.5, r[1] + r[3] / 2.0)
+    };
+    assert!(near(disc("Done"), [0x4c, 0xc3, 0x8a]), "Done is Mint, got {:?}", disc("Done"));
+    assert!(near(disc("Failed"), [0xe5, 0x48, 0x4d]), "Failed is Coral, got {:?}", disc("Failed"));
 }
 
 #[test]
-fn offline_and_palette_scenes_say_what_they_should() {
-    let offline = tree("offline", "dark");
-    assert!(texts(&offline).contains(&"Neko isn't running. Trying again in 4 s.".to_owned()));
-    let palette = tree("palette", "dark");
-    assert!(element(&palette, "palette-input").is_some());
-    assert!(texts(&palette).contains(&"Pull requests".to_owned()));
-    let image = Image::read(&snap("palette", "dark"));
-    // A scrim dims the page: the colour at the page's empty corner is darker than the page.
-    assert!(image.at(900.0, 700.0)[0] < 0x0f, "the scrim darkens the page");
+fn offline_and_notice_scenes_say_what_they_should() {
+    assert!(texts(&tree("offline", "dark")).contains(&"Neko isn't running. Trying again in 4 s.".to_owned()));
+    assert!(texts(&tree("notice", "dark")).contains(&"Neko isn't running, so there's no web UI to open yet.".to_owned()));
 }
 
 #[test]
 fn every_scene_renders_in_both_appearances() {
     let list = Command::new(BIN).arg("--list-scenes").output().unwrap();
     let scenes: Vec<String> = String::from_utf8(list.stdout).unwrap().lines().map(str::to_owned).collect();
-    assert!(scenes.len() >= 8, "{scenes:?}");
+    assert!(scenes.len() >= 6, "{scenes:?}");
     for scene in &scenes {
         for theme in ["light", "dark"] {
             let image = Image::read(&snap(scene, theme));

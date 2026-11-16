@@ -1,13 +1,12 @@
 //! Neko's native client on Rune, built beside the web UI (docs/decisions/0002-rune-for-everything.md).
-//! P0 is the foundation: the daemon link, the theme, the status glyphs, the shell with tabs and
-//! rail, and placeholder pages that hand over to the web UI. Screens arrive in P1 onward.
+//! P0 is the foundation: the pinned Rune, the read-only daemon link, the theme and the status
+//! glyphs, and one plain placeholder view. The layout (sessions, an agent workspace, Neko as a side
+//! agent, contextual panels) is pending an owner decision; tabs and a rail are dropped.
 
 pub mod app;
 pub mod connection;
 pub mod lab;
 pub mod link;
-pub mod nav;
-pub mod pages;
 pub mod scenes;
 pub mod status;
 pub mod theme;
@@ -52,11 +51,15 @@ fn socket_path() -> PathBuf {
 
 /// Opens the window and, unless `nolink`, starts the read-only link to the running daemon.
 pub fn run() {
+    // `neko-rune probe [socket=PATH]`: no window; connect, print, exit. For checking a daemon.
+    if std::env::args().nth(1).as_deref() == Some("probe") {
+        let socket = std::env::args().find_map(|a| a.strip_prefix("socket=").map(PathBuf::from)).unwrap_or_else(|| std::env::var("NEKO_SOCKET").map(PathBuf::from).unwrap_or_else(|_| neko_protocol::socket_path()));
+        std::process::exit(connection::probe(socket, neko_protocol::support_dir(), std::time::Duration::from_secs(15)));
+    }
     rune::prewarm_gpu();
     let spec = rune::AppSpec {
         scenes: scenes::SCENES,
         min_size: Some((720.0, 480.0)),
-        on_key: Some(app::on_key),
         ..rune::AppSpec::new("Neko (Rune)", (1180.0, 760.0), init, view::view)
     };
     let app = rune::App::new(spec).titlebar(rune::Titlebar::new(44.0));

@@ -6,8 +6,8 @@
 #   apps/neko-rune/scripts/run.sh --no-launch          build only
 #
 # P0 is read-only: the window listens to the daemon's Unix socket (the same snapshot the web UI
-# holds) and never writes to it or to its database. Every page says "Coming in P1" and its button
-# opens the same place in the web UI. The installed app and what it ships are untouched; this is a
+# holds) and never writes to it or to its database. It shows the connection and a few live tasks
+# with the status glyphs, and one button that opens the web UI. The installed app and what it ships are untouched; this is a
 # second, separate process, and quitting it (⌘Q) leaves Neko as it was.
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"

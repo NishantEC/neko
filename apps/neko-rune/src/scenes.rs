@@ -5,7 +5,6 @@ use neko_protocol::workbench::TaskStatus;
 
 use crate::app::{App, down};
 use crate::link::{LinkError, LinkEvent, Summary, TaskRow};
-use crate::pages::Page;
 use crate::web_link::WebTarget;
 
 /// A made-up workbench: a few of each status, titles that name nothing real.
@@ -46,32 +45,14 @@ pub const SCENES: &[Scene] = &[
     ("offline", |s| {
         s.apply_link(down(LinkError::NotRunning, 4));
     }),
-    ("tabs", |s| {
-        live(s);
-        for page in [Page::Inbox, Page::Tasks, Page::Calendar, Page::Usage] {
-            s.open(page);
-        }
-        s.tabs.select(Page::Tasks);
-    }),
-    ("more", |s| {
-        live(s);
-        s.more_open = true;
-    }),
-    ("palette", |s| {
-        live(s);
-        s.open_palette();
-    }),
-    ("palette-query", |s| {
-        live(s);
-        s.open_palette();
-        s.palette.query.text = "in".into();
+    ("empty", |s| {
+        s.apply_link(LinkEvent::Live(Summary { digest: "empty".into(), tasks: Vec::new() }));
     }),
     ("lab", |s| {
         live(s);
         s.lab = true;
     }),
     ("notice", |s| {
-        s.open(Page::Inbox);
-        s.open_in_web(Page::Inbox);
+        s.open_in_web();
     }),
 ];
