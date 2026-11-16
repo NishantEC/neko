@@ -204,7 +204,7 @@ fn body(s: &App, t: &Neko) -> El {
     top = top.child(text(crew_line(working, waiting)).key("crew").font(t.ty.row).color(t.text.base));
     top = top.child(inbox(s, t));
     top = top.child(digest(s, t));
-    let mut c = col().key("neko-body").w_full().grow(1.0).min_h(0.0).child(col().key("neko-scroll").w_full().max_h(360.0).scroll(ScrollSpec { stick_bottom: false }).child(top));
+    let mut c = col().key("neko-body").w_full().grow(1.0).min_h(0.0).child(col().key("neko-scroll").w_full().max_h(420.0).scroll(ScrollSpec { stick_bottom: false }).child(top));
     if let Some(conv) = conversation(s, t) {
         c = c.child(col().key("neko-chat-scroll").w_full().grow(1.0).min_h(0.0).px(14.0).pb(8.0).scroll(ScrollSpec { stick_bottom: true }).child(conv));
     }

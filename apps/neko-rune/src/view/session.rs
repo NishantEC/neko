@@ -6,7 +6,7 @@
 use neko_protocol::crew::DeliveryMode;
 use neko_protocol::workbench::{Task, TaskStatus};
 use rune::{Color, El, Key, KeyEvent, ScrollSpec, col, el, icon, row, text};
-use rune_kit::{ControlSize, IconButton, IconButtonVariant, Menu, MenuItem, Placement, TextArea};
+use rune_kit::{ControlSize, IconButton, IconButtonVariant, Menu, MenuItem, Placement};
 
 use super::turn::{self, Where};
 use super::{COLUMN, band, icon_button, placeholder, primary_button, work};
@@ -193,34 +193,42 @@ fn mode_of(steer: Steer) -> DeliveryMode {
 /// The composer: a multi-line field (IME and image paste), the steer-mode menu and Send.
 fn composer(s: &App, t: &Neko, layer: &mut Vec<El>, ready: bool) -> El {
     let k = &t.kit;
-    let field = TextArea::new(&s.composer)
-        .placeholder(placeholder_for(s))
-        .label("Message the agent")
-        .auto_grow(1, 8)
-        .on_edit(|s: &mut App| &mut s.composer)
-        .on_key(|s: &mut App, ev: &KeyEvent, _| {
-            // Enter sends, Shift+Enter is a new line, ⌘↩ steers now; never while an input method
-            // is composing (the Enter that confirms a word is not a send).
-            if ev.key != Key::Enter || ev.mods.shift || ev.mods.alt || s.composer.is_composing() {
-                return false;
-            }
-            s.send_composer(ev.mods.cmd.then_some(DeliveryMode::SteerNow));
-            true
-        })
-        .build(k)
-        .key("composer-input")
-        .w_full()
-        .on_input_paste(|s: &mut App, content, _| {
-            let Some(image) = content.image() else { return false };
-            match crate::attachments::save_png(image.png()) {
-                Ok(path) => {
-                    let reference = crate::attachments::reference(&path);
-                    s.composer.insert(&reference);
+    // A multi-line field with the input method (composition shows in place) and image paste:
+    // the kit's TextArea has no paste hook, so it is built from Rune's text input directly.
+    let style = rune::TextStyle { line_height: (13.0f32 * 1.35 * 2.0).round() / 2.0, ..k.ty.ui };
+    let field = rune::auto_grow(
+        rune::text_input(&s.composer, style)
+            .key("input")
+            .w_full()
+            .color(t.text.base)
+            .placeholder(placeholder_for(s), t.text.faint)
+            .caret(t.text.base, k.selection())
+            .label("Message the agent")
+            .on_edit(|s: &mut App| &mut s.composer)
+            .on_input_key(|s: &mut App, ev: &KeyEvent, _| {
+                // Enter sends, Shift+Enter is a new line, ⌘↩ steers now; never while an input method
+                // is composing (the Enter that confirms a word is not a send).
+                if ev.key != Key::Enter || ev.mods.shift || ev.mods.alt || s.composer.is_composing() {
+                    return false;
                 }
-                Err(_) => s.work.notice = Some("Couldn’t keep that image. Your message is unchanged.".to_owned()),
-            }
-            true
-        });
+                s.send_composer(ev.mods.cmd.then_some(DeliveryMode::SteerNow));
+                true
+            })
+            .on_input_paste(|s: &mut App, content, _| {
+                let Some(image) = content.image() else { return false };
+                match crate::attachments::save_png(image.png()) {
+                    Ok(path) => {
+                        let reference = crate::attachments::reference(&path);
+                        s.composer.insert(&reference);
+                    }
+                    Err(_) => s.work.notice = Some("Couldn’t keep that image. Your message is unchanged.".to_owned()),
+                }
+                true
+            }),
+        1,
+        8,
+    );
+    let field = col().key("composer-input").role("textbox").w_full().px(2.0).py(4.0).child(field);
 
     let trigger = row()
         .key("steer-trigger")
