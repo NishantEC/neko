@@ -298,3 +298,21 @@ fn the_find_a_setting_hint_hides_while_the_field_has_text() {
     settle(&mut rt);
     assert!(!has_key(&rt, "settings-search-hint"), "and goes when there is text, so the clear button never shares its corner");
 }
+
+#[test]
+fn six_panel_tabs_keep_whole_labels_just_over_the_icon_threshold() {
+    let mut rt = runtime_sized(scene("running"), (1800.0, 900.0));
+    rt.update(|s, _| {
+        s.layout.drag(neko_rune::layout::Region::Context, 420.0, -30.0);
+        s.panel_set_open(true);
+    });
+    settle(&mut rt);
+    let width = rect(&rt, "context")[2];
+    assert!((440.0..520.0).contains(&width), "{width}");
+    assert!(has_key(&rt, "context-picker") && !has_key(&rt, "context-icon-tabs"), "labels, not icons, at {width}");
+    let labels: Vec<String> = rt.elements().into_iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("segment"))).filter_map(|e| e.label).collect();
+    let shown: Vec<String> = texts(&rt);
+    for l in &labels {
+        assert!(shown.iter().any(|t| t == l), "the label {l} is shown whole at {width}: {shown:?}");
+    }
+}
