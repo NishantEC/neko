@@ -47,7 +47,9 @@ fn top_line(s: &App, task: &TaskRow, t: &Neko) -> El {
     if let Some(m) = s.summary.as_ref().filter(|m| !m.runtime.is_empty()) {
         meta.push(m.runtime.clone());
     }
-    if !task.goal.is_empty() {
+    // The goal's first line, unless it only says the title again.
+    let plain = |s: &str| s.trim().trim_end_matches(|c: char| c == '.' || c == ':').to_lowercase();
+    if !task.goal.is_empty() && plain(&task.goal) != plain(&task.title) {
         meta.push(task.goal.clone());
     }
     band(t)

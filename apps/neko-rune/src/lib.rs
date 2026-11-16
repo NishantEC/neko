@@ -54,6 +54,13 @@ fn init() -> App {
             app.call(link::Call::Unseen);
             app.call(link::Call::Inbox);
             app.call(link::Call::Digest);
+            // The daemon's own times, so "5m" counts from the newest change in it.
+            if let Some(newest) = app.summary.as_ref().and_then(|m| m.tasks.iter().map(|t| t.updated_at_ms).max()) {
+                app.now_ms = newest + 60_000;
+                app.selected = app.summary.as_ref().and_then(|m| groups::first_session(m, app.now_ms));
+                app.wanted.set(app.selected.as_deref());
+                app.call(link::Call::Refresh);
+            }
         }
         app
     } else {

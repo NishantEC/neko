@@ -20,7 +20,7 @@ if command -v "$HOME/.agents/bin/machine-ok" >/dev/null; then
 fi
 
 # The harness is the daemon's own workspace (target/ beside the repo), the client is Rune's.
-harness="$repo/target/debug/web_harness"
+harness="${NEKO_WEB_HARNESS:-$repo/target/debug/web_harness}"
 [[ -x "$harness" ]] || (cd "$repo" && env -u CARGO_TARGET_DIR cargo build --quiet -p neko-daemon --bin web_harness)
 (cd "$here" && cargo build --quiet)
 bin="$CARGO_TARGET_DIR/debug/neko-rune"
@@ -51,4 +51,8 @@ echo "workbench from the harness daemon: $(python3 -c 'import json,sys; d=json.l
 for theme in light dark; do
   NEKO_RUNE_SUMMARY="$summary" "$bin" --snap "$out/shell-$theme.png" --scene harness --theme "$theme" --size 1280x800 --scale 2 >/dev/null 2>&1
   echo "wrote $out/shell-$theme.png"
+  # The session view, Neko column and runs, live from the same daemon: the app asks it itself,
+  # on the calling thread (NEKO_RUNE_SOCKET), as the headless tests do.
+  NEKO_RUNE_SOCKET="$data/neko.sock" "$bin" --snap "$out/harness-session-$theme.png" --scene default --theme "$theme" --size 1360x840 --scale 1 >/dev/null 2>&1
+  echo "wrote $out/harness-session-$theme.png"
 done

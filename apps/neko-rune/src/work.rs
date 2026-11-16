@@ -600,6 +600,8 @@ impl App {
                     Call::CreateTask { .. } => created = self.created_task(&summary),
                     _ => {}
                 }
+                // An answer from the daemon proves the link is up.
+                self.link = crate::app::LinkState::Live;
                 self.apply_summary(summary);
                 if let Some(id) = created {
                     self.after_created(&id);
