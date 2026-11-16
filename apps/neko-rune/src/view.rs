@@ -16,11 +16,13 @@ mod context_diff;
 mod context_files;
 mod context_info;
 mod context_terminal;
+mod dialogs;
 mod home;
 mod more;
 mod neko;
 mod palette;
 mod routines;
+mod runtime;
 mod session;
 mod sessions;
 mod settings;
@@ -105,11 +107,9 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         window = window.child(neko::strip(s, &t).w(NEKO_STRIP).key("neko"));
     }
     palette::mount(s, &t, &mut layer);
-    if let Some((words, _)) = s.toast.as_ref() {
-        // Standing still, like everything that is not the hover fill or the panel (polish spec §4).
-        let toast = rune_kit::Toast::new("toast", words.clone()).icon(&t.kit, &crate::icons::CHECK_LINE).build(&t.kit).transition(rune::Transition::none()).motion(rune::Spring::NONE);
-        layer.push(rune_kit::ToastRegion::new().toast(toast).build(&t.kit));
-    }
+    runtime::mount(s, &t, &mut layer);
+    dialogs::mount(s, &t, &mut layer);
+    crate::toasts::mount(s, &t, &mut layer);
     // Every popover, menu, select, dialog, the palette and toast is an element of this layer: while there is
     // one, a native web view (always above Rune's surface) is hidden.
     s.web_view.overlays.set(layer.len());

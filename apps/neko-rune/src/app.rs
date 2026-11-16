@@ -136,9 +136,17 @@ pub struct App {
     pub session_menu: bool,
     /// The account footer's menu is open.
     pub more_open: bool,
-    /// One line the window says for a few seconds ("Saved to Downloads"): its words, and the time it goes
-    /// (set the first tick after it shows).
-    pub toast: Option<(String, Option<f64>)>,
+    /// The lines the window says for a few seconds ("Saved to Downloads"), newest last, at most three
+    /// (`toasts.rs`): each goes four seconds after the first tick that shows it.
+    pub toasts: Vec<crate::toasts::ToastItem>,
+    pub toast_counter: u64,
+    /// A question in a dialog before something that cannot be taken back (`task_actions.rs`).
+    pub dialog: Option<crate::task_actions::Ask>,
+    /// The title of the open session is being renamed.
+    pub rename: Option<crate::task_actions::Rename>,
+    /// The workspace the sessions list, Routines, Calendar's Neko rows and Home's composer are scoped to
+    /// (None = all workspaces). Kept between runs (`scope.rs`).
+    pub workspace_scope: Option<String>,
     /// The system's Reduce Motion, as the last build saw it (Home's art stops under it).
     pub reduce_motion: std::cell::Cell<bool>,
     /// The web view of the context panel and of a plugin's page (P3b).
@@ -192,6 +200,10 @@ pub struct App {
     pub pages: Pages,
     /// The context panel: its tabs, the loaded file or artifact, the viewers' state.
     pub panel: crate::panel::Panel,
+    /// "All sessions": its search, cursor and filters (`all_sessions.rs`).
+    pub all: crate::all_sessions::AllState,
+    /// The model chip's popover (`runtime_pick.rs`, `view/runtime.rs`).
+    pub runtime: crate::runtime_pick::RuntimeUi,
     /// The web server's port and token (from `SignedWebUrl`), for the three paths `link/http.rs` reaches.
     pub http: Option<crate::link::http::Http>,
     /// The address was asked for (once; asked again when the answer failed).
@@ -247,7 +259,11 @@ impl Default for App {
             session_menu: false,
             more_open: false,
             reduce_motion: std::cell::Cell::new(false),
-            toast: None,
+            toasts: Vec::new(),
+            toast_counter: 0,
+            dialog: None,
+            rename: None,
+            workspace_scope: None,
             web_view: crate::web_panel::WebHost::default(),
             plugin_pages: None,
             plugin_view: None,
@@ -278,14 +294,14 @@ impl Default for App {
             inbox_menu: None,
             pages: Pages::default(),
             panel: crate::panel::Panel::standard(),
+            all: crate::all_sessions::AllState::default(),
+            runtime: crate::runtime_pick::RuntimeUi::default(),
             http: None,
             http_asked: false,
         }
     }
 }
 
-/// How long a toast stays.
-pub const TOAST_SECONDS: f64 = 3.0;
 
 /// The time headless scenes pretend it is (a fixed instant, so a snapshot is a fact).
 pub const DEMO_NOW: i64 = 1_800_000_000_000;
@@ -536,31 +552,6 @@ impl App {
         self.http.clone()
     }
 
-    /// Says `words` in a toast for [`TOAST_SECONDS`].
-    pub fn show_toast(&mut self, words: &str) {
-        self.toast = Some((words.to_owned(), None));
-    }
-
-    /// Once a frame: starts the toast's clock and takes it down when it is up. True when what shows changed.
-    pub fn tick_toast(&mut self, t: f64, tx: &mut rune::Tx) -> bool {
-        let Some((_, until)) = self.toast.as_mut() else { return false };
-        match *until {
-            None => {
-                *until = Some(t + TOAST_SECONDS);
-                tx.wake_after(std::time::Duration::from_secs_f64(TOAST_SECONDS));
-                true
-            }
-            Some(at) if t >= at => {
-                self.toast = None;
-                true
-            }
-            Some(at) => {
-                tx.wake_after(std::time::Duration::from_secs_f64((at - t).max(0.05)));
-                false
-            }
-        }
-    }
-
     /// Opens or folds a workspace's details; what was open is remembered.
     pub fn toggle_workspace(&mut self, id: &str) {
         if !self.pages.ws_open.remove(id) {
@@ -584,6 +575,7 @@ impl App {
     /// "View all" in the sessions column: every session, newest first, in the middle region.
     pub fn open_all_sessions(&mut self) {
         self.open_view(FullView::AllSessions);
+        self.enter_all_sessions();
     }
 
     /// How many of the calendar's events start today (local time; an all-day event counts).

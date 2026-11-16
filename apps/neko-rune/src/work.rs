@@ -741,6 +741,19 @@ impl App {
                         self.work.diff_load.clear();
                     }
                     Call::CreateTask { .. } => created = self.created_task(&summary),
+                    Call::SetRuntimePrefs { task_id, prefs } => {
+                        // The web checks the daemon confirmed exactly what was sent before it says so.
+                        let confirmed = summary.detail.as_ref().filter(|d| &d.task.id == task_id).map(|d| crate::runtime_pick::clean(&d.prefs));
+                        self.runtime.saving = false;
+                        if confirmed.as_ref().is_none_or(|c| c == prefs) {
+                            self.runtime.saved = prefs.clone();
+                            self.runtime.draft = prefs.clone();
+                            self.runtime.status = Some("Settings applied.".to_owned());
+                            self.runtime.notes.clear();
+                        } else {
+                            self.runtime.apply_error = Some("The daemon did not confirm these conversation settings. Refresh before trying again.".to_owned());
+                        }
+                    }
                     _ => {}
                 }
                 // An answer from the daemon proves the link is up.
@@ -751,10 +764,13 @@ impl App {
                 }
                 true
             }
-            Reply::Models { choices, .. } => {
+            Reply::Models { choices, catalog } => {
                 if let Some(form) = self.new_form.as_mut() {
                     form.choices = choices;
                 }
+                self.runtime.catalog = Some(*catalog);
+                self.runtime.loading = false;
+                self.runtime.catalog_error = None;
                 true
             }
             Reply::Routines(_) | Reply::Calendar(_) | Reply::CalendarStatus(_) | Reply::Phone(_) | Reply::Appearance(_) | Reply::PhoneTest(_) | Reply::Quota(_) | Reply::Plugins(_) => page_changed.take().unwrap_or(false),
@@ -856,11 +872,19 @@ impl App {
                         self.work.undoing = false;
                         self.work.notice = Some(message);
                     }
+                    Call::SetRuntimePrefs { .. } => {
+                        self.runtime.saving = false;
+                        self.runtime.apply_error = Some(message);
+                    }
+                    Call::Models | Call::ModelsRefresh => {
+                        self.runtime.loading = false;
+                        self.runtime.catalog_error = Some(message);
+                    }
                     Call::Enqueue { .. } | Call::Reply { .. } => self.work.notice = Some(format!("{message} Your text is still here.")),
                     Call::CheckpointDiff { task_id, run } => {
                         self.work.diff_load.insert(diff_key(task_id, *run), DiffLoad::Failed(message));
                     }
-                    Call::Checkpoints { .. } | Call::Unseen | Call::Digest | Call::Inbox | Call::Refresh | Call::Models | Call::TaskFolder { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } => {}
+                    Call::Checkpoints { .. } | Call::Unseen | Call::Digest | Call::Inbox | Call::Refresh | Call::TaskFolder { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } => {}
                     Call::ArtifactFile { id, version } => self.artifact_unreadable(id, *version, message),
                     Call::SignedWebUrl { route } if route == crate::link::http::ROUTE => self.http_asked = false,
                     Call::SignedWebUrl { route } => self.web_view.signing_failed(route, message),
@@ -884,10 +908,22 @@ impl App {
                 }
                 match call {
                     Call::Undo { .. } | Call::Redo { .. } => self.work.undoing = false,
+                    Call::SetRuntimePrefs { .. } => {
+                        self.runtime.saving = false;
+                        self.runtime.apply_error = Some(line);
+                    }
+                    Call::ModelsRefresh => {
+                        self.runtime.loading = false;
+                        self.runtime.catalog_error = Some(line);
+                    }
                     Call::CheckpointDiff { task_id, run } => {
                         self.work.diff_load.insert(diff_key(task_id, *run), DiffLoad::Failed(line));
                     }
-                    Call::Refresh | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::Checkpoints { .. } | Call::TaskFolder { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } => return false,
+                    Call::Models => {
+                        self.runtime.loading = false;
+                        return false;
+                    }
+                    Call::Refresh | Call::Unseen | Call::Digest | Call::Inbox | Call::Checkpoints { .. } | Call::TaskFolder { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } => return false,
                     Call::ArtifactFile { id, version } => self.artifact_unreadable(id, *version, line),
                     Call::SignedWebUrl { route } if route == crate::link::http::ROUTE => self.http_asked = false,
                     Call::SignedWebUrl { route } => self.web_view.signing_failed(route, line),

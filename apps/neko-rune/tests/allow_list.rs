@@ -310,7 +310,7 @@ fn destructive_requests_are_only_sent_from_a_confirm_dialog() {
             }
         }
     }
-    let _ = built;
+    assert!(built >= 4, "the destructive calls were not found ({built}): the scan is looking at nothing");
 }
 
 /// `word` appears in `code` as a whole word.

@@ -1,0 +1,470 @@
+//! What you can do to a session, decided once, as the web's `work/taskActions.ts` does: the session's "..." menu and
+//! the sessions column's right-click menu both read [`entries`], so they can never disagree about which item a task in
+//! a given state gets. Each item is shown under the conditions the web shows it under; the ones that destroy, restart
+//! or stop something go through [`App::confirm`], a modal dialog, and a request is only built inside it.
+//!
+//! Stop all work (⌘⇧Esc, the account menu) is here too: it counts what runs as the web's `stopAllWork` does and asks
+//! "Stop all N running agents?" before it stops everything.
+
+use neko_protocol::workbench::TaskStatus;
+use rune::{PointerPress, TextEdit};
+use rune_kit::{Menu, MenuItem};
+
+use crate::app::App;
+use crate::link::Call;
+
+/// A question asked in a dialog before a press that cannot be taken back; "Yes" sends `call`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ask {
+    pub title: String,
+    pub detail: String,
+    pub ok: String,
+    pub cancel: String,
+    /// The yes button is coral.
+    pub destructive: bool,
+    pub call: Call,
+    /// What the window says once it is sent ("Deleted “Fix it”.").
+    pub done: String,
+}
+
+/// The title being renamed in the session's header.
+pub struct Rename {
+    pub id: String,
+    pub edit: TextEdit,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Act {
+    Rename,
+    Retry,
+    Publish,
+    RunNext,
+    LandOnMain,
+    MarkUnread,
+    CopyLink,
+    OpenWeb,
+    Stop,
+    Cancel,
+    Delete,
+}
+
+/// One item of a task's menu.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Entry {
+    pub act: Act,
+    pub label: String,
+    /// A checkbox item (Land on main): its state.
+    pub checked: Option<bool>,
+    pub danger: bool,
+}
+
+/// The web's `isRunning`.
+pub fn is_running(status: TaskStatus) -> bool {
+    matches!(status, TaskStatus::Queued | TaskStatus::Planning | TaskStatus::Building | TaskStatus::Reviewing)
+}
+
+/// The web's `isFinished`.
+pub fn is_finished(status: TaskStatus) -> bool {
+    matches!(status, TaskStatus::Completed | TaskStatus::Cancelled | TaskStatus::Failed)
+}
+
+fn entry(act: Act, label: impl Into<String>) -> Entry {
+    Entry { act, label: label.into(), checked: None, danger: false }
+}
+
+/// The last folder of a path ("/Users/me/code/neko" -> "neko"): the web's `repo` label.
+pub fn repo_name(path: &str) -> String {
+    path.trim_end_matches('/').rsplit('/').next().unwrap_or(path).to_owned()
+}
+
+/// The items for task `id`, in the order of the menu, under the web's conditions. Empty when the task is not known.
+pub fn entries(s: &App, id: &str) -> Vec<Entry> {
+    let Some(summary) = s.summary.as_ref() else { return Vec::new() };
+    let Some(task) = summary.task(id) else { return Vec::new() };
+    let meta = summary.meta_of(id);
+    let status = task.status;
+    let mut items = vec![entry(Act::Rename, "Rename…")];
+    if matches!(status, TaskStatus::Failed | TaskStatus::Cancelled) {
+        items.push(entry(Act::Retry, "Retry from start…"));
+    }
+    if status == TaskStatus::ReadyForReview && meta.is_none_or(|m| m.pull_request.is_none()) {
+        items.push(entry(Act::Publish, "Publish pull request"));
+    }
+    if status == TaskStatus::Queued {
+        items.push(entry(Act::RunNext, "Run next"));
+    }
+    if let Some(repository) = meta.map(|m| m.repository.as_str()).filter(|r| !r.is_empty()) {
+        items.push(Entry { checked: Some(summary.land_on_main.iter().any(|p| p == repository)), ..entry(Act::LandOnMain, format!("Land on main in {}", repo_name(repository))) });
+    }
+    items.push(entry(Act::MarkUnread, "Mark as unread"));
+    items.push(entry(Act::CopyLink, "Copy link"));
+    items.push(entry(Act::OpenWeb, "Open in web UI"));
+    if is_running(status) {
+        items.push(entry(Act::Stop, "Stop"));
+    } else if matches!(status, TaskStatus::AwaitingApproval | TaskStatus::ReadyForReview) {
+        items.push(entry(Act::Cancel, "Cancel task"));
+    }
+    if is_finished(status) {
+        items.push(Entry { danger: true, ..entry(Act::Delete, "Delete…") });
+    }
+    items
+}
+
+/// A menu with the task's items: used by the session's "..." menu and the row's right-click menu. `close` puts the
+/// menu away; a destructive item opens its confirm dialog first.
+pub fn fill_menu(mut menu: Menu, s: &App, id: &str) -> Menu {
+    let items = entries(s, id);
+    for item in items {
+        if item.danger {
+            menu = menu.separator();
+        }
+        let owner = id.to_owned();
+        let act = item.act;
+        let mut line = MenuItem::new(item.label.clone()).danger(item.danger);
+        if let Some(on) = item.checked {
+            line = line.checked(on);
+        }
+        line = if act == Act::CopyLink {
+            line.on_select_tx(move |s: &mut App, tx: &mut rune::Tx| {
+                s.close_task_menus();
+                if let Some(link) = s.task_link(&owner) {
+                    tx.copy(link);
+                    s.show_toast("Link copied");
+                }
+            })
+        } else {
+            line.on_select(move |s: &mut App| {
+                s.close_task_menus();
+                s.do_action(&owner, act);
+            })
+        };
+        menu = menu.item(line);
+    }
+    menu
+}
+
+impl App {
+    /// Puts both task menus away (the session's "..." and the row's right-click).
+    pub fn close_task_menus(&mut self) {
+        self.session_menu = false;
+        self.row_menu = None;
+    }
+
+    /// The task's link in the web UI, without the token (safe to paste anywhere).
+    pub fn task_link(&self, id: &str) -> Option<String> {
+        self.web.as_ref().map(|w| format!("http://{}/#/tasks?task={id}&view=full", w.display()))
+    }
+
+    /// Opens the right-click menu of a row.
+    pub fn open_row_menu(&mut self, id: &str, at: PointerPress) {
+        self.row_menu = Some((id.to_owned(), at));
+    }
+
+    /// Asks in a dialog; the call goes out only when the person says yes.
+    pub fn confirm(&mut self, ask: Ask) {
+        self.dialog = Some(ask);
+    }
+
+    pub fn ask_yes(&mut self) {
+        if let Some(ask) = self.dialog.take() {
+            self.call(ask.call);
+            if !ask.done.is_empty() {
+                self.show_toast(&ask.done);
+            }
+        }
+    }
+
+    pub fn ask_no(&mut self) {
+        self.dialog = None;
+    }
+
+    /// The title a task shows now (the name the person gave it, else its own).
+    fn title_of(&self, id: &str) -> String {
+        self.summary.as_ref().and_then(|m| m.task(id)).map(|t| t.title.clone()).unwrap_or_default()
+    }
+
+    /// Runs one item of a task's menu.
+    pub fn do_action(&mut self, id: &str, act: Act) {
+        let title = self.title_of(id);
+        let task_id = id.to_owned();
+        match act {
+            Act::Rename => self.start_rename(id),
+            Act::Retry => self.confirm(Ask {
+                title: format!("Retry “{title}” from the start?"),
+                detail: "The agent starts over from the beginning. What it already did stays in its history, and its worktree stays on disk.".into(),
+                ok: "Retry from start".into(),
+                cancel: "Keep it".into(),
+                destructive: true,
+                call: Call::Retry { task_id },
+                done: format!("Retrying “{title}”."),
+            }),
+            Act::Publish => {
+                self.call(Call::Publish { task_id });
+                self.show_toast("Opening a pull request.");
+            }
+            Act::RunNext => {
+                self.call(Call::RunNext { task_id });
+                self.show_toast("Moved to the front of the queue.");
+            }
+            Act::LandOnMain => {
+                let Some(repository) = self.summary.as_ref().and_then(|m| m.meta_of(id)).map(|m| m.repository.clone()).filter(|r| !r.is_empty()) else {
+                    self.show_toast("This task has no repository yet.");
+                    return;
+                };
+                let enabled = !self.summary.as_ref().is_some_and(|m| m.land_on_main.contains(&repository));
+                self.call(Call::SetLandOnMain { repository, enabled });
+                self.show_toast(if enabled { "Reviewed tasks here now land on local main." } else { "Reviewed tasks here now open a pull request." });
+            }
+            Act::MarkUnread => self.mark_unread(id),
+            Act::CopyLink => {}
+            Act::OpenWeb => self.open_in_web(Some(&format!("tasks?task={id}&view=full"))),
+            Act::Stop => self.confirm(Ask {
+                title: format!("Stop “{title}”?"),
+                detail: "The agent stops where it is. Its files and worktree stay on disk, and you can start it again.".into(),
+                ok: "Stop it".into(),
+                cancel: "Keep working".into(),
+                destructive: true,
+                call: Call::Stop { task_id },
+                done: format!("Stopped “{title}”."),
+            }),
+            Act::Cancel => self.confirm(Ask {
+                title: format!("Cancel “{title}”?"),
+                detail: "It hasn’t been reviewed yet, so this closes it. Its files and worktree stay on disk.".into(),
+                ok: "Cancel task".into(),
+                cancel: "Keep it".into(),
+                destructive: true,
+                call: Call::Stop { task_id },
+                done: format!("Cancelled “{title}”."),
+            }),
+            Act::Delete => self.confirm(Ask {
+                title: "Delete this task?".into(),
+                detail: "Removes the task, its subtasks and their history from Neko. Your files and the task’s worktree on disk stay as they are.".into(),
+                ok: "Delete task".into(),
+                cancel: "Keep it".into(),
+                destructive: true,
+                call: Call::Delete { task_id },
+                done: format!("Deleted “{title}”."),
+            }),
+        }
+    }
+
+    /// "Rename…": the session opens and its title becomes a field holding the name (Enter saves, Esc cancels).
+    pub fn start_rename(&mut self, id: &str) {
+        if self.selected.as_deref() != Some(id) || self.view.is_some() {
+            self.select(id);
+        }
+        let initial = self.summary.as_ref().and_then(|m| m.meta_of(id)).and_then(|m| m.display_title.clone()).unwrap_or_else(|| self.title_of(id));
+        let mut edit = TextEdit::new(initial.clone());
+        edit.focused = true;
+        let end = edit.text.len();
+        edit.set_selection(0, end);
+        self.rename = Some(Rename { id: id.to_owned(), edit });
+    }
+
+    /// Enter in the title field: saves it (an empty name lets Neko name the task again).
+    pub fn finish_rename(&mut self) {
+        let Some(r) = self.rename.take() else { return };
+        let title = r.edit.text.trim().to_owned();
+        self.call(Call::Rename { task_id: r.id, title: title.clone() });
+        self.show_toast(if title.is_empty() { "Neko will name it again." } else { "Renamed." });
+    }
+
+    /// Esc in the title field.
+    pub fn cancel_rename(&mut self) {
+        self.rename = None;
+    }
+
+    /// How many agents run, as the web's `stopAllWork` counts them: tasks that are not waiting for review or finished,
+    /// and Neko's own reply while it is being written.
+    pub fn running_agents(&self) -> (usize, bool) {
+        let Some(m) = self.summary.as_ref() else { return (0, false) };
+        let tasks = m.tasks.iter().filter(|t| !matches!(t.status, TaskStatus::ReadyForReview | TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled)).count();
+        (tasks, m.replying())
+    }
+
+    /// ⌘⇧Esc and the account menu's "Stop all work": confirms with how many agents will stop.
+    pub fn ask_stop_all(&mut self) {
+        let (tasks, replying) = self.running_agents();
+        let n = tasks + usize::from(replying);
+        if n == 0 {
+            self.show_toast("Nothing is running.");
+            return;
+        }
+        let what = match (tasks, replying) {
+            (0, _) => "Neko’s current reply".to_owned(),
+            (t, false) => format!("{t} {}", if t == 1 { "task" } else { "tasks" }),
+            (t, true) => format!("{t} {} and Neko’s current reply", if t == 1 { "task" } else { "tasks" }),
+        };
+        self.confirm(Ask {
+            title: format!("Stop all {n} running {}?", if n == 1 { "agent" } else { "agents" }),
+            detail: format!("{what} will stop now. Worktrees and files are kept."),
+            ok: "Stop all work".into(),
+            cancel: "Keep working".into(),
+            destructive: true,
+            call: Call::StopAll,
+            done: if tasks == 0 { "Stopped Neko’s reply.".into() } else { format!("Stopped {tasks} {}. Worktrees are kept.", if tasks == 1 { "task" } else { "tasks" }) },
+        });
+    }
+
+    /// "Clear finished" in All sessions: removes every completed or cancelled task (in the workspace chosen, or all).
+    pub fn ask_clear_finished(&mut self) {
+        let workspace = self.workspace_scope.clone();
+        let Some(m) = self.summary.as_ref() else { return };
+        let count = m.tasks.iter().filter(|t| matches!(t.status, TaskStatus::Completed | TaskStatus::Cancelled) && workspace.as_deref().is_none_or(|w| m.workspace_of(&t.id) == w)).count();
+        if count == 0 {
+            self.show_toast("Nothing finished to clear.");
+            return;
+        }
+        self.confirm(Ask {
+            title: format!("Clear {count} finished {}?", if count == 1 { "task" } else { "tasks" }),
+            detail: "Removes every completed or cancelled task from Neko’s history. Failed tasks stay so they can be retried. Your files and worktrees stay as they are.".into(),
+            ok: "Clear finished".into(),
+            cancel: "Keep them".into(),
+            destructive: true,
+            call: Call::ClearFinished { workspace_id: workspace },
+            done: format!("Cleared {count} finished {}.", if count == 1 { "task" } else { "tasks" }),
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::link::{Summary, TaskMeta, TaskRow, Wait};
+    use neko_protocol::workbench::TaskStatus::*;
+
+    fn app_with(status: TaskStatus, repository: &str, pr: Option<&str>, land: &[&str]) -> App {
+        let mut app = App::headless();
+        let row = TaskRow { id: "t".into(), key: None, title: "Fix it".into(), status, updated_at_ms: 0, goal: String::new(), wait: Wait::None, progress: None };
+        let mut summary = Summary { tasks: vec![row], land_on_main: land.iter().map(|s| (*s).to_owned()).collect(), ..Summary::default() };
+        summary.meta.insert("t".into(), TaskMeta { repository: repository.into(), pull_request: pr.map(str::to_owned), ..TaskMeta::default() });
+        app.summary = Some(summary);
+        app
+    }
+
+    fn labels(app: &App) -> Vec<String> {
+        entries(app, "t").into_iter().map(|e| e.label).collect()
+    }
+
+    #[test]
+    fn each_item_shows_under_the_webs_condition() {
+        // A running task: Stop, not Delete or Retry.
+        let running = app_with(Building, "", None, &[]);
+        assert_eq!(labels(&running), ["Rename…", "Mark as unread", "Copy link", "Open in web UI", "Stop"]);
+        // A queued task can be moved up.
+        assert!(labels(&app_with(Queued, "", None, &[])).contains(&"Run next".to_owned()));
+        // Failed and cancelled: retry, and delete (finished).
+        let failed = labels(&app_with(Failed, "", None, &[]));
+        assert!(failed.contains(&"Retry from start…".to_owned()) && failed.contains(&"Delete…".to_owned()) && !failed.contains(&"Stop".to_owned()));
+        // Completed: delete but no retry.
+        let done = labels(&app_with(Completed, "", None, &[]));
+        assert!(done.contains(&"Delete…".to_owned()) && !done.contains(&"Retry from start…".to_owned()));
+        // Ready for review: publish only while there is no open pull request; cancel instead of stop.
+        let review = labels(&app_with(ReadyForReview, "", None, &[]));
+        assert!(review.contains(&"Publish pull request".to_owned()) && review.contains(&"Cancel task".to_owned()));
+        assert!(!labels(&app_with(ReadyForReview, "", Some("https://github.com/x/y/pull/1"), &[])).contains(&"Publish pull request".to_owned()));
+        // Awaiting approval can be cancelled.
+        assert!(labels(&app_with(AwaitingApproval, "", None, &[])).contains(&"Cancel task".to_owned()));
+    }
+
+    #[test]
+    fn land_on_main_is_a_checkbox_per_repository_shown_once_it_has_one() {
+        assert!(!labels(&app_with(Building, "", None, &[])).iter().any(|l| l.starts_with("Land on main")));
+        let off = entries(&app_with(Building, "/Users/me/code/neko", None, &[]), "t");
+        let item = off.iter().find(|e| e.act == Act::LandOnMain).unwrap();
+        assert_eq!((item.label.as_str(), item.checked), ("Land on main in neko", Some(false)));
+        let on = entries(&app_with(Building, "/Users/me/code/neko", None, &["/Users/me/code/neko"]), "t");
+        assert_eq!(on.iter().find(|e| e.act == Act::LandOnMain).unwrap().checked, Some(true));
+    }
+
+    #[test]
+    fn delete_is_last_and_dangerous_and_nothing_is_sent_before_the_dialog_says_yes() {
+        let mut app = app_with(Completed, "", None, &[]);
+        let items = entries(&app, "t");
+        assert!(items.last().is_some_and(|e| e.act == Act::Delete && e.danger));
+        app.do_action("t", Act::Delete);
+        assert!(app.outbox.is_empty(), "the request waits for the dialog");
+        let ask = app.dialog.clone().expect("a dialog is open");
+        assert_eq!(ask.call, Call::Delete { task_id: "t".into() });
+        assert!(ask.destructive);
+        app.ask_no();
+        assert!(app.dialog.is_none() && app.outbox.is_empty(), "Keep it sends nothing");
+        app.do_action("t", Act::Delete);
+        app.ask_yes();
+        assert_eq!(app.outbox, vec![Call::Delete { task_id: "t".into() }]);
+    }
+
+    #[test]
+    fn retry_and_stop_ask_first_and_publish_and_run_next_do_not() {
+        let mut app = app_with(Failed, "", None, &[]);
+        app.do_action("t", Act::Retry);
+        assert!(app.outbox.is_empty() && app.dialog.as_ref().is_some_and(|a| a.call == Call::Retry { task_id: "t".into() }));
+        let mut app = app_with(Building, "", None, &[]);
+        app.do_action("t", Act::Stop);
+        assert!(app.outbox.is_empty() && app.dialog.as_ref().is_some_and(|a| a.call == Call::Stop { task_id: "t".into() }));
+        let mut app = app_with(ReadyForReview, "", None, &[]);
+        app.do_action("t", Act::Publish);
+        assert_eq!(app.outbox, vec![Call::Publish { task_id: "t".into() }]);
+        let mut app = app_with(Queued, "", None, &[]);
+        app.do_action("t", Act::RunNext);
+        assert_eq!(app.outbox, vec![Call::RunNext { task_id: "t".into() }]);
+    }
+
+    #[test]
+    fn land_on_main_flips_the_repositorys_delivery() {
+        let mut app = app_with(Building, "/r/neko", None, &[]);
+        app.do_action("t", Act::LandOnMain);
+        assert_eq!(app.outbox, vec![Call::SetLandOnMain { repository: "/r/neko".into(), enabled: true }]);
+        let mut app = app_with(Building, "/r/neko", None, &["/r/neko"]);
+        app.do_action("t", Act::LandOnMain);
+        assert_eq!(app.outbox, vec![Call::SetLandOnMain { repository: "/r/neko".into(), enabled: false }]);
+    }
+
+    #[test]
+    fn rename_edits_the_title_and_enter_saves_escape_cancels() {
+        let mut app = app_with(Building, "", None, &[]);
+        app.do_action("t", Act::Rename);
+        assert_eq!(app.selected.as_deref(), Some("t"));
+        let r = app.rename.as_mut().expect("the title is a field now");
+        assert_eq!(r.edit.text, "Fix it");
+        r.edit.replace_text("Better name".to_owned());
+        app.finish_rename();
+        assert!(app.rename.is_none());
+        assert!(app.outbox.contains(&Call::Rename { task_id: "t".into(), title: "Better name".into() }));
+        app.do_action("t", Act::Rename);
+        app.cancel_rename();
+        assert!(app.rename.is_none());
+        assert_eq!(app.outbox.iter().filter(|c| matches!(c, Call::Rename { .. })).count(), 1, "Esc sends nothing");
+        // An empty name lets Neko name it again: it is sent as an empty title.
+        app.do_action("t", Act::Rename);
+        app.rename.as_mut().unwrap().edit.replace_text(String::new());
+        app.finish_rename();
+        assert!(app.outbox.contains(&Call::Rename { task_id: "t".into(), title: String::new() }));
+    }
+
+    #[test]
+    fn stop_all_counts_what_runs_and_says_nothing_is_running_when_nothing_is() {
+        let mut app = app_with(Completed, "", None, &[]);
+        app.ask_stop_all();
+        assert!(app.dialog.is_none() && app.toast_words().contains("Nothing is running."));
+        let mut app = app_with(Building, "", None, &[]);
+        let row = |id: &str, status| TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: 0, goal: String::new(), wait: Wait::None, progress: None };
+        app.summary.as_mut().unwrap().tasks.extend([row("a", Planning), row("b", AwaitingApproval), row("c", ReadyForReview), row("d", Completed)]);
+        app.ask_stop_all();
+        let ask = app.dialog.clone().unwrap();
+        assert_eq!(ask.title, "Stop all 3 running agents?", "building, planning and awaiting approval run; review and done do not");
+        assert_eq!(ask.call, Call::StopAll);
+        assert!(app.outbox.is_empty());
+    }
+
+    #[test]
+    fn clear_finished_counts_completed_and_cancelled_only_and_stays_in_the_workspace() {
+        let mut app = app_with(Completed, "", None, &[]);
+        let row = |id: &str, status| TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: 0, goal: String::new(), wait: Wait::None, progress: None };
+        app.summary.as_mut().unwrap().tasks.extend([row("a", Cancelled), row("b", Failed), row("c", Building)]);
+        app.ask_clear_finished();
+        let ask = app.dialog.clone().unwrap();
+        assert_eq!(ask.title, "Clear 2 finished tasks?", "failed tasks stay so they can be retried");
+        assert_eq!(ask.call, Call::ClearFinished { workspace_id: None });
+    }
+}

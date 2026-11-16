@@ -4,6 +4,7 @@
 //! sessions and counts live from the daemon and the rest placeholders. No tabs.
 
 pub mod account;
+pub mod all_sessions;
 pub mod activity;
 pub mod app;
 pub mod art;
@@ -25,10 +26,13 @@ pub mod panel;
 pub mod samples;
 pub mod scenes;
 pub mod readers;
+pub mod runtime_pick;
 pub mod scenes_pages;
 pub mod scenes_panel;
 pub mod status;
+pub mod task_actions;
 pub mod terminal;
+pub mod toasts;
 pub mod theme;
 pub mod turns;
 pub mod view;
@@ -132,7 +136,7 @@ fn socket_path() -> PathBuf {
 }
 
 /// Keys the window handles before any field: ⌘K opens the palette; ⌘N starts a session.
-fn on_key(s: &mut App, ev: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
+pub fn on_key(s: &mut App, ev: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
     // The context panel's keys: Esc restores an expanded panel; ⌘+, ⌘−, ⌘0 zoom a PDF; W turns a model's wireframe on.
     if s.panel_on_key(ev) {
         return true;
@@ -140,6 +144,15 @@ fn on_key(s: &mut App, ev: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
     // ⌘F in Settings goes to its search field, which filters the rows of every section.
     if ev.is_command('f') && !ev.mods.shift && s.view == Some(views::FullView::Settings) {
         tx.focus("settings-search", true);
+        return true;
+    }
+    // All sessions: `/` focuses its search, J and K move, Return opens (never while a field has the keyboard).
+    if s.all_key(ev, tx) {
+        return true;
+    }
+    // ⌘⇧Esc: stop all work (asks first).
+    if ev.mods.cmd && ev.mods.shift && ev.key == rune::Key::Escape {
+        s.ask_stop_all();
         return true;
     }
     if ev.is_command('k') && !ev.mods.shift {

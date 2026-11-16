@@ -4,7 +4,7 @@
 
 use neko_protocol::crew::QueuedMessage;
 use neko_protocol::goals::Goal;
-use neko_protocol::workbench::{AgentRuntime, ChatMessage, ChatRole, SelfUpdate, Snapshot, Task, TaskStatus};
+use neko_protocol::workbench::{AgentRuntime, ChatMessage, ChatRole, RuntimePreferences, SelfUpdate, Snapshot, Task, TaskStatus};
 
 /// One task as a row: what lists and counts need, and nothing of its events or plan.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -164,6 +164,29 @@ pub struct Detail {
     /// The ticket's source, when a watch filed it: its identifier and its address.
     #[serde(default)]
     pub source: Option<(String, String)>,
+    /// What the conversation `task:<id>` has pinned (model, effort, speed), and the revision of that pin.
+    #[serde(default)]
+    pub prefs: RuntimePreferences,
+    #[serde(default)]
+    pub prefs_revision: u64,
+}
+
+/// What a task's menus and filters need that its row does not carry: the web's `taskActions` reads the same fields
+/// (`task_roots`, the open pull request, the display title).
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TaskMeta {
+    pub workspace_id: String,
+    /// The repository it works in (`snapshot.task_roots`), empty until it has one.
+    #[serde(default)]
+    pub repository: String,
+    /// The pull request that is still open (the web's `openPullRequest`).
+    #[serde(default)]
+    pub pull_request: Option<String>,
+    /// The name the person gave it (`Rename`), when they did.
+    #[serde(default)]
+    pub display_title: Option<String>,
+    #[serde(default)]
+    pub created_at_ms: i64,
 }
 
 /// A runtime in words, as the web's header chip says it (`modelLabel` with a default): "Claude · default".
@@ -219,6 +242,12 @@ pub struct Summary {
     /// Settings, budgets and spend.
     #[serde(default)]
     pub settings: SettingsView,
+    /// Per task: its workspace, repository, open pull request and given name.
+    #[serde(default)]
+    pub meta: std::collections::BTreeMap<String, TaskMeta>,
+    /// The repositories whose reviewed tasks land on local main instead of opening a pull request.
+    #[serde(default)]
+    pub land_on_main: Vec<String>,
 }
 
 /// How many of Neko's messages the client keeps (a long reply is ~8 MB of layout; DESIGN: bounded). The column
@@ -273,6 +302,15 @@ impl Summary {
                 usage: usage_points(snapshot, now),
             },
             digest: snapshot.digest.clone(),
+            meta: snapshot
+                .tasks
+                .iter()
+                .map(|t| {
+                    let pull_request = t.pull_request.as_ref().filter(|p| !p.url.is_empty() && !p.status.as_ref().is_some_and(|s| matches!(s.state.as_str(), "MERGED" | "CLOSED"))).map(|p| p.url.clone());
+                    (t.id.clone(), TaskMeta { workspace_id: t.workspace_id.clone(), repository: snapshot.task_roots.get(&t.id).cloned().unwrap_or_default(), pull_request, display_title: t.display_title.clone().filter(|d| !d.is_empty()), created_at_ms: t.created_at_ms })
+                })
+                .collect(),
+            land_on_main: snapshot.land_on_main.iter().cloned().collect(),
             home_runtime: runtime_for(snapshot, "home:"),
             runtime: format!(
                 "{} · {}",
@@ -307,7 +345,10 @@ impl Summary {
                 let workspace = snapshot.workspaces.iter().find(|w| w.id == t.workspace_id).map(|w| w.name.clone()).unwrap_or_default();
                 let can_split = t.status == TaskStatus::AwaitingApproval && !snapshot.splits.iter().any(|s| s.parent_id == t.id || s.subtasks.iter().any(|sub| sub.task_id.as_deref() == Some(t.id.as_str())));
                 let source = t.issue_id.as_ref().and_then(|id| snapshot.issues.iter().find(|i| &i.id == id)).filter(|i| !i.url.is_empty()).map(|i| (if i.identifier.is_empty() { i.external_id.clone() } else { i.identifier.clone() }, i.url.clone()));
-                Detail { has_folder: t.worktree.is_some() || t.parked.is_some(), workspace, runtime: runtime_for(snapshot, &format!("task:{}", t.id)), can_split, source, task }
+                let conversation = format!("task:{}", t.id);
+                let prefs = snapshot.conversation_runtime.get(&conversation).cloned().unwrap_or_default();
+                let prefs_revision = snapshot.conversation_runtime_revisions.get(&conversation).copied().unwrap_or(0);
+                Detail { has_folder: t.worktree.is_some() || t.parked.is_some(), workspace, runtime: runtime_for(snapshot, &conversation), can_split, source, prefs, prefs_revision, task }
             }),
         }
     }
@@ -329,6 +370,16 @@ impl Summary {
     /// An agent is working on it.
     pub fn working(&self) -> usize {
         self.count(|s| matches!(s, TaskStatus::Planning | TaskStatus::Building | TaskStatus::Reviewing))
+    }
+
+    /// A task's workspace, repository, open pull request and given name.
+    pub fn meta_of(&self, id: &str) -> Option<&TaskMeta> {
+        self.meta.get(id)
+    }
+
+    /// The task's workspace id ("" when the snapshot does not say).
+    pub fn workspace_of(&self, id: &str) -> &str {
+        self.meta.get(id).map_or("", |m| m.workspace_id.as_str())
     }
 
     pub fn task(&self, id: &str) -> Option<&TaskRow> {

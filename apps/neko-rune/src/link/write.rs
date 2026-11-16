@@ -50,6 +50,8 @@ pub enum Call {
     Inbox,
     /// The runtimes and models "+ New" offers.
     Models,
+    /// The same list, read again from the sources (the popover's refresh button).
+    ModelsRefresh,
     // Messages to a task.
     /// A message to a task that is in a turn: the durable queue, with its delivery mode. A retry
     /// of the same `command_id` is one message.
@@ -85,6 +87,25 @@ pub enum Call {
     // A new session.
     CreateTask { workspace_id: String, title: String, goal: String },
     SetRuntime { task_id: String, provider: String, model: String },
+    /// The model chip's "Check & apply": every pin of the conversation `task:<id>`, as the web sends them.
+    SetRuntimePrefs { task_id: String, prefs: RuntimePreferences },
+    // What the web's task menu does (`work/taskActions.ts`).
+    /// A name the person gives it; empty lets Neko name it again.
+    Rename { task_id: String, title: String },
+    /// Commit, push and open a pull request for a reviewed result.
+    Publish { task_id: String },
+    /// Moves a queued task to the front of the queue.
+    RunNext { task_id: String },
+    /// How reviewed tasks in one repository are delivered: landed on local main, or as a pull request.
+    SetLandOnMain { repository: String, enabled: bool },
+    /// Retry from the beginning (a failed or cancelled task). Only built inside a confirm dialog.
+    Retry { task_id: String },
+    /// Remove one finished task and its subtasks from history. Only built inside a confirm dialog.
+    Delete { task_id: String },
+    /// Stop everything at once: every unfinished ticket and Neko's reply. Only built inside a confirm dialog.
+    StopAll,
+    /// Remove every completed or cancelled task, in one workspace or all. Only built inside a confirm dialog.
+    ClearFinished { workspace_id: Option<String> },
     // Neko's own conversation.
     Ask { text: String },
     StopAsking { turn_id: String },
@@ -129,7 +150,7 @@ pub enum Call {
 impl Call {
     /// Whether this only fetches.
     pub fn reads(&self) -> bool {
-        matches!(self, Call::Refresh | Call::Checkpoints { .. } | Call::CheckpointDiff { .. } | Call::TaskFolder { .. } | Call::ArtifactFile { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } | Call::SignedWebUrl { .. } | Call::PluginViewers | Call::PluginPages | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::RoutinesFull | Call::CalendarEvents { .. } | Call::PhoneSettings | Call::Appearance | Call::Quota | Call::Plugins)
+        matches!(self, Call::Refresh | Call::Checkpoints { .. } | Call::CheckpointDiff { .. } | Call::TaskFolder { .. } | Call::ArtifactFile { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } | Call::SignedWebUrl { .. } | Call::PluginViewers | Call::PluginPages | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::ModelsRefresh | Call::RoutinesFull | Call::CalendarEvents { .. } | Call::PhoneSettings | Call::Appearance | Call::Quota | Call::Plugins)
     }
 
     /// The request the daemon receives: the same JSON the web UI posts.
@@ -149,6 +170,7 @@ impl Call {
             Call::Digest => Request::MorningDigest,
             Call::Inbox => Request::Routines,
             Call::Models => Request::AgentModels { refresh: false },
+            Call::ModelsRefresh => Request::AgentModels { refresh: true },
             Call::Enqueue { task_id, command_id, text, mode } => {
                 // The kind the web sends with each mode (`work/queue.tsx`).
                 let kind = match mode {
@@ -192,6 +214,15 @@ impl Call {
                 conversation_id: format!("task:{task_id}"),
                 preferences: RuntimePreferences { provider: Some(provider).filter(|p| !p.is_empty()), model: Some(model).filter(|m| !m.is_empty()), ..RuntimePreferences::default() },
             }),
+            Call::SetRuntimePrefs { task_id, prefs } => Request::Workbench(Command::SetConversationRuntime { conversation_id: format!("task:{task_id}"), preferences: prefs }),
+            Call::Rename { task_id, title } => Request::Workbench(Command::RenameTask { task_id, title }),
+            Call::Publish { task_id } => Request::Workbench(Command::PublishTask { task_id }),
+            Call::RunNext { task_id } => Request::Workbench(Command::PrioritizeTask { task_id }),
+            Call::SetLandOnMain { repository, enabled } => Request::Workbench(Command::SetLandOnMain { repository, enabled }),
+            Call::Retry { task_id } => Request::Workbench(Command::RetryTask { task_id }),
+            Call::Delete { task_id } => Request::Workbench(Command::DeleteTask { task_id }),
+            Call::StopAll => Request::Workbench(Command::CancelAllWork),
+            Call::ClearFinished { workspace_id } => Request::Workbench(Command::ClearFinishedTasks { workspace_id }),
             Call::Ask { text } => Request::Workbench(Command::SendMessage { text, workspace_id: None }),
             Call::StopAsking { turn_id } => Request::Workbench(Command::CancelChat { turn_id }),
             Call::DecideChatTool { turn_id, call_id, approve } => Request::Workbench(Command::DecideChatTool { turn_id, call_id, approve }),

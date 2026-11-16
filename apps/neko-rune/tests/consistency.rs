@@ -48,7 +48,8 @@ fn only_the_hover_fill_the_panel_and_the_ring_animate() {
     // Anything that moves on its own is named here, in the files that own it: the hover curve (motion.rs, set once on
     // the root in view.rs), the context panel's spring (view.rs), the progress ring's turn (view/sessions.rs) and
     // Home's art (art.rs, art_gpu.rs). A new `transition`, `looping`, `.motion(` or tween elsewhere fails here.
-    let owners = ["motion.rs", "view.rs", "sessions.rs", "art.rs", "art_gpu.rs", "model3d_gpu.rs"];
+    // toasts.rs only declares that a toast stands still (`Transition::none()`), as the one that came before it did in view.rs.
+    let owners = ["motion.rs", "view.rs", "sessions.rs", "art.rs", "art_gpu.rs", "model3d_gpu.rs", "toasts.rs"];
     for (path, text) in all_sources() {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
         for word in [".transition(", ".looping(", ".motion(", ".token_motion(", ".offset_motion(", ".opacity_motion(", ".scale_motion(", ".sequence(", ".fold_glide(", "Curve::tween", "Spring::new"] {

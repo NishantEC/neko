@@ -23,6 +23,9 @@ use crate::work::{SHOWN_TURNS, working_line};
 
 const LIST: Where = Where { ns: "", compact: false };
 
+/// The fade under the header and the goal lines.
+pub const FADE: f32 = 8.0;
+
 /// The most an open goal's body takes: 380, or 35% of the window when that is less, so the
 /// conversation and the composer under it are never covered.
 pub fn goal_body_cap(win_h: f32) -> f32 {
@@ -58,80 +61,99 @@ pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     region
 }
 
-/// The state badge the web shows beside the title, where it shows one: its words and its colour (amber for what is
-/// waiting on the person or being worked on, coral for a failure). Other states have none here.
-pub fn state_badge(task: &Task) -> Option<(&'static str, bool)> {
+/// The colour of the state badge beside the title.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    /// Waiting on the person, or being worked on.
+    Amber,
+    /// A failure.
+    Coral,
+    /// A result to review.
+    Sky,
+}
+
+/// The state badge the web shows beside the title, where it shows one: its words and its tone (amber for what is
+/// waiting on the person or being worked on, coral for a failure, sky for a result ready to review). Queued,
+/// Completed and Cancelled have none.
+pub fn state_badge(task: &Task) -> Option<(&'static str, Tone)> {
     match task.status {
-        TaskStatus::AwaitingApproval if crate::work::waiting_reason(task).is_some() => Some(("Needs answer", false)),
-        TaskStatus::AwaitingApproval => Some(("Needs approval", false)),
-        TaskStatus::Planning => Some(("Planning", false)),
-        TaskStatus::Building => Some(("Building", false)),
-        TaskStatus::Reviewing => Some(("Reviewing", false)),
-        TaskStatus::Failed => Some(("Failed", true)),
+        TaskStatus::AwaitingApproval if crate::work::waiting_reason(task).is_some() => Some(("Needs answer", Tone::Amber)),
+        TaskStatus::AwaitingApproval => Some(("Needs approval", Tone::Amber)),
+        TaskStatus::Planning => Some(("Planning", Tone::Amber)),
+        TaskStatus::Building => Some(("Building", Tone::Amber)),
+        TaskStatus::Reviewing => Some(("Reviewing", Tone::Amber)),
+        TaskStatus::ReadyForReview => Some(("Ready to review", Tone::Sky)),
+        TaskStatus::Failed => Some(("Failed", Tone::Coral)),
         _ => None,
     }
 }
 
-/// 12.5 medium, amber or coral text on that colour at 12%, radius 6, padding 2 and 8.
-fn badge(t: &Neko, words: &str, failed: bool) -> El {
-    let ink = if failed { t.meaning.coral } else { t.meaning.amber };
+/// 12.5 medium, the tone's text on that colour at 12%, radius 6, padding 2 and 8.
+fn badge(t: &Neko, words: &str, tone: Tone) -> El {
+    let ink = match tone {
+        Tone::Amber => t.meaning.amber,
+        Tone::Coral => t.meaning.coral,
+        Tone::Sky => t.meaning.sky,
+    };
     row().key("state-badge").px(8.0).py(2.0).radius(6.0).fill(ink.alpha(0.12)).child(text(words.to_owned()).font(rune::TextStyle { weight: 500.0, ..t.ty.meta }).color(ink).a11y_hidden())
 }
 
-/// The top line, one 32 point row and nothing else: status glyph, title (14 semibold, ellipsis), the state badge where
-/// the web shows one, then at the right the runtime chip, the "..." menu and the context panel's toggle.
+/// The top line, one 32 point row and nothing else: status glyph, title (14 semibold, ellipsis; a field while it is being
+/// renamed), the state badge where the web shows one, then at the right the runtime chip, the "..." menu and the context
+/// panel's toggle. Its fill is the region's own, opaque, so nothing under it ever shows through.
 fn top_line(s: &App, task: &TaskRow, t: &Neko, layer: &mut Vec<El>) -> El {
     let detail = s.detail().filter(|d| d.task.id == task.id);
-    let mut line = band(t).px(20.0).child(status_glyph(status_of(task.status), t, 14.0, Some(status_label(task.status))));
-    line = line.child(text(task.title.clone()).key("top-title").font(t.ty.brand).color(t.text.base).truncate().min_w(0.0).a11y_hidden().role("heading"));
-    if let Some((words, failed)) = detail.and_then(|d| state_badge(&d.task)) {
-        line = line.child(badge(t, words, failed));
+    let mut line = band(t).px(20.0).fill(t.surface.window).child(status_glyph(status_of(task.status), t, 14.0, Some(status_label(task.status))));
+    let renaming = s.rename.as_ref().filter(|r| r.id == task.id);
+    if let Some(r) = renaming {
+        // Enter saves, Esc cancels; leaving the field saves nothing.
+        let field = rune_kit::TextInput::new(&r.edit)
+            .label("Session name")
+            .placeholder("Name this session")
+            .on_edit(|s: &mut App| &mut s.rename.as_mut().expect("renaming").edit)
+            .on_submit(|s: &mut App, _| s.finish_rename())
+            .on_key(|s: &mut App, ev: &KeyEvent, _| {
+                if ev.key == Key::Escape {
+                    s.cancel_rename();
+                    return true;
+                }
+                false
+            })
+            .build(&t.kit)
+            .key("rename-input")
+            .grow(1.0)
+            .min_w(0.0);
+        line = line.child(field);
+    } else {
+        line = line.child(text(task.title.clone()).key("top-title").font(t.ty.brand).color(t.text.base).truncate().min_w(0.0).a11y_hidden().role("heading"));
     }
-    line = line.child(el().grow(1.0).min_w(0.0));
-    let runtime = detail.map(|d| d.runtime.clone()).filter(|r| !r.is_empty()).or_else(|| s.summary.as_ref().map(|m| m.runtime.clone()));
+    if let Some((words, tone)) = detail.and_then(|d| state_badge(&d.task)) {
+        line = line.child(badge(t, words, tone));
+    }
+    if renaming.is_none() {
+        line = line.child(el().grow(1.0).min_w(0.0));
+    }
+    let runtime = super::runtime::chip_words(s);
+    let runtime = Some(runtime).filter(|r| !r.is_empty()).or_else(|| s.summary.as_ref().map(|m| m.runtime.clone()));
     if let Some(r) = runtime {
-        line = line.child(text(r).key("top-runtime").font(t.ty.meta).color(t.text.muted));
+        line = line.child(text(r).key("top-runtime").font(t.ty.meta).color(t.text.muted).on_press(|s: &mut App| s.runtime_toggle()));
     }
     line.child(overflow_menu(s, task, detail.map(|d| d.can_split).unwrap_or(false), t, layer))
         .child(icon_button(&icons::PANEL_RIGHT, if s.layout.context.is_open() { "Hide context" } else { "Show context" }, "context-toggle", t, |s: &mut App| s.panel_toggle()))
 }
 
-/// The "..." menu: Propose parallel work, Copy link, Open in web UI, Stop, Mark as unread.
+/// The "..." menu: Propose parallel work, then what the web's task menu offers (`task_actions.rs`).
 fn overflow_menu(s: &App, task: &TaskRow, can_split: bool, t: &Neko, layer: &mut Vec<El>) -> El {
     let trigger = icon_button(&icons::MORE, "More actions", "session-more", t, |s: &mut App| s.session_menu = !s.session_menu);
-    let (a, b, c, d) = (task.id.clone(), task.id.clone(), task.id.clone(), task.id.clone());
-    let title = task.title.clone();
-    let link = s.web.as_ref().map(|w| format!("{}/#/tasks?task={}&view=full", w.display(), task.id));
-    let running = crate::work::in_turn(task.status) || task.status == TaskStatus::Queued;
-    let menu = Menu::new("session-menu")
-        .trigger(trigger)
-        .open(s.session_menu)
-        .placement(Placement::BottomEnd)
-        .min_width(220.0)
-        .on_close(|s: &mut App| s.session_menu = false)
-        .item(MenuItem::new("Propose parallel work").disabled(!can_split).on_select(move |s: &mut App| {
+    let split = task.id.clone();
+    let mut menu = Menu::new("session-menu").trigger(trigger).open(s.session_menu).placement(Placement::BottomEnd).min_width(240.0).on_close(|s: &mut App| s.session_menu = false);
+    if task.status == TaskStatus::AwaitingApproval {
+        menu = menu.item(MenuItem::new("Propose parallel work").disabled(!can_split).on_select(move |s: &mut App| {
             s.session_menu = false;
-            s.call(Call::ProposeSplit { task_id: a.clone() });
-        }))
-        .item(MenuItem::new("Copy link").disabled(link.is_none()).on_select_tx(move |s: &mut App, tx: &mut rune::Tx| {
-            s.session_menu = false;
-            if let Some(link) = &link {
-                tx.copy(link.clone());
-            }
-        }))
-        .item(MenuItem::new("Open in web UI").on_select(move |s: &mut App| {
-            s.session_menu = false;
-            s.open_in_web(Some(&format!("tasks?task={b}&view=full")));
-        }))
-        .item(MenuItem::new("Stop").disabled(!running).on_select(move |s: &mut App| {
-            s.session_menu = false;
-            s.ask_stop(&c, &title);
-        }))
-        .item(MenuItem::new("Mark as unread").on_select(move |s: &mut App| {
-            s.session_menu = false;
-            s.mark_unread(&d);
+            s.call(Call::ProposeSplit { task_id: split.clone() });
         }));
-    menu.build(&t.kit, layer)
+    }
+    crate::task_actions::fill_menu(menu, s, &task.id).build(&t.kit, layer)
 }
 
 fn session(s: &App, row_task: &TaskRow, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
@@ -160,6 +182,9 @@ fn session(s: &App, row_task: &TaskRow, t: &Neko, layer: &mut Vec<El>, frame: Fr
             .scroll_margin(inset)
             .child(row().w_full().justify_center().child(content)),
     );
+    // What stays over the top of the conversation: the goal lines when there are any, opaque, and under them an 8 point
+    // fade into the window's colour, so a line of the conversation never shows through or ends against an edge.
+    let mut sticky = col().key("sticky").w_full();
     if !goals.is_empty() {
         let mut lines = col().key("goals").w_full().px(8.0).pt(4.0).pb(4.0).fill(t.surface.window);
         for goal in &goals {
@@ -170,8 +195,10 @@ fn session(s: &App, row_task: &TaskRow, t: &Neko, layer: &mut Vec<El>, frame: Fr
                 lines = lines.child(col().key(format!("goal-body-{}", goal.id)).w_full().max_h(goal_body_cap(frame.win_h)).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(body));
             }
         }
-        region = region.child(lines.absolute(0.0, 0.0));
+        sticky = sticky.child(lines);
     }
+    sticky = sticky.child(el().key("header-fade").w_full().h(FADE).gradient(t.surface.window, t.surface.window.alpha(0.0)).a11y_hidden());
+    region = region.child(sticky.absolute(0.0, 0.0));
     c = c.child(region);
     if let Some(tray) = work::tray(s, t, task) {
         c = c.child(text_column(tray.w_full().pb(8.0)));
@@ -320,8 +347,7 @@ fn composer(s: &App, t: &Neko, layer: &mut Vec<El>, ready: bool) -> El {
 
     let can_send = ready && !s.composer.text.trim().is_empty();
     let send = super::composer::send(t, "send", &format!("Send, {}", mode_label(s)), &format!("Send, {}", mode_label(s)), can_send, false, |s: &mut App| s.send_composer(None));
-    let runtime = s.detail().map(|d| d.runtime.clone()).filter(|r| !r.is_empty()).unwrap_or_default();
-    let model = super::composer::chip(t, "composer-model", &runtime);
+    let model = super::runtime::chip(s, t);
     let attach = super::composer::attach(t, "composer-attach", App::attach_to_reply);
     text_column(super::composer::card(t, "composer-card", field, vec![attach], vec![steer, model], send).mb(16.0)).key("composer")
 }

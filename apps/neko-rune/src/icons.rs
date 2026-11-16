@@ -64,6 +64,12 @@ icon_body!(CODEX_GLYPH, "runtime-codex", r#"<path d="M3.5 5L6.5 8L3.5 11M8 11.5H
 icon_body!(OPENCODE_GLYPH, "runtime-opencode", r#"<path d="M5.5 4.5L2.5 8L5.5 11.5M10.5 4.5L13.5 8L10.5 11.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
 icon_body!(POWER, "power", r#"<path d="M8 2.5V7.5M4.9 4.6A5 5 0 1 0 11.1 4.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 icon_body!(ARROW_UP, "arrow-up", r#"<path d="M8 13V3.5M4 7.5L8 3.5L12 7.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(REFRESH, "refresh", r#"<path d="M13 8A5 5 0 1 1 11.2 4.2M13 2.5V5.2H10.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(FILE, "file", r#"<path d="M4 2.5H9L12 5.5V13.5H4Z M9 2.5V5.5H12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>"#);
+icon_body!(QUOTE, "quote", r#"<path d="M3.5 4V12M6.5 5H12.5M6.5 8H11M6.5 11H12.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
+icon_body!(COPY, "copy", r#"<rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 3.5V3.2C10.5 2.8 10.2 2.5 9.8 2.5H3.7C3.3 2.5 3 2.8 3 3.2V9.3C3 9.7 3.3 10 3.7 10H4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
+icon_body!(UNDO, "undo", r#"<path d="M3 6.5H9.5A3.5 3.5 0 0 1 9.5 13.5H6M3 6.5L5.8 3.7M3 6.5L5.8 9.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(KEYBOARD, "keyboard", r#"<rect x="1.8" y="3.8" width="12.4" height="8.4" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4.5 7H5M7.7 7H8.3M11 7H11.5M5 10H11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 
 /// A progress ring's arc of `fraction` (0 to 1) on the 16-unit grid: 2 px stroke, starting at the top and
 /// running clockwise. Quantised to 2% so the icons cached for it stay few (icons are static, as the kit's
@@ -108,7 +114,7 @@ mod tests {
         let declared = src.lines().filter(|l| l.starts_with("icon_body!(")).count();
         let icons = vec![
             &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND,
-            &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &CHECKLIST, &INFO,
+            &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO, &KEYBOARD, &CHECKLIST, &INFO,
         ];
         // The two filled ones (MORE's dots count as line icons here: they carry no stroke) are `icon_body!` lines too.
         assert_eq!(icons.len() + 1, declared, "a declared icon is missing from this list (the dot is the +1)");

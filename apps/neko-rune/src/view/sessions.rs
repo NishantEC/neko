@@ -265,10 +265,6 @@ fn list(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     col().key("sessions-scroll").w_full().grow(1.0).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).scroll_edge_fade(18.0).child(c.pb(8.0))
 }
 
-fn running(status: TaskStatus) -> bool {
-    matches!(status, TaskStatus::Queued | TaskStatus::Planning | TaskStatus::Building | TaskStatus::Reviewing)
-}
-
 /// The reason icon for a Needs-you row (polish spec §1) and whether it is coral (only a failure is).
 fn reason_icon(task: &TaskRow) -> (&'static rune::Icon, bool) {
     if task.status == TaskStatus::Failed {
@@ -345,24 +341,9 @@ pub(super) fn session_row(s: &App, task: &TaskRow, group: Group, t: &Neko, layer
 
     match s.row_menu.as_ref().filter(|(open, _)| *open == task.id) {
         Some((_, at)) => {
-            let (a, b, c, d) = (task.id.clone(), task.id.clone(), task.id.clone(), task.title.clone());
-            let mut menu = context_menu(format!("row-menu-{}", task.id), r, Some(*at)).on_close(|s: &mut App| s.row_menu = None);
-            menu = menu.item(MenuItem::new("Mark as unread").on_select(move |s: &mut App| {
-                s.row_menu = None;
-                s.mark_unread(&a);
-            }));
-            if running(task.status) {
-                menu = menu.item(MenuItem::new("Stop").on_select(move |s: &mut App| {
-                    s.row_menu = None;
-                    s.open_task(&b);
-                    s.ask_stop(&b, &d);
-                }));
-            }
-            menu.item(MenuItem::new("Open in web UI").on_select(move |s: &mut App| {
-                s.row_menu = None;
-                s.open_in_web(Some(&format!("tasks?task={c}&view=full")));
-            }))
-            .build(&t.kit, layer)
+            // The same items as the session's "..." menu (`task_actions.rs`): one list, decided once.
+            let menu = context_menu(format!("row-menu-{}", task.id), r, Some(*at)).on_close(|s: &mut App| s.row_menu = None);
+            crate::task_actions::fill_menu(menu, s, &task.id).build(&t.kit, layer)
         }
         None => r,
     }
@@ -415,7 +396,11 @@ fn footer(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
             }));
         }
     }
-    menu = menu.separator().item(MenuItem::new("Open the web UI").icon(&icons::EXTERNAL).on_select(|s: &mut App| {
+    menu = menu.separator().item(MenuItem::new("Stop all work").icon(&icons::CROSS).shortcut("⌘⇧Esc").on_select(|s: &mut App| {
+        s.more_open = false;
+        s.ask_stop_all();
+    }));
+    menu = menu.item(MenuItem::new("Open the web UI").icon(&icons::EXTERNAL).on_select(|s: &mut App| {
         s.more_open = false;
         s.open_in_web(None);
     }));

@@ -97,7 +97,7 @@ fn awaiting_detail(row: &TaskRow) -> Detail {
         ("scout", receipt("rg -n retry crates/sync/src", "crates/sync/src/job.rs:42: // TODO retry", 0)),
         ("scout", "Plan ready.".to_owned()),
     ];
-    Detail { task: task(row, events, plan, ""), has_folder: false, workspace: "Neko".into(), runtime: "Claude · default".into(), can_split: true, source: None }
+    Detail { task: task(row, events, plan, ""), has_folder: false, workspace: "Neko".into(), runtime: "Claude · default".into(), can_split: true, source: None, prefs: Default::default(), prefs_revision: 0 }
 }
 
 /// A session being built: the planner's words, commands, an edit, an open question for review.
@@ -113,7 +113,7 @@ fn running_detail(row: &TaskRow) -> Detail {
         ("builder", receipt("cargo test -p board", "test result: ok. 12 passed; 0 failed", 0)),
         ("builder", "Added the message, with a test. All twelve board tests pass.".to_owned()),
     ];
-    Detail { task: task(row, events, "", ""), has_folder: true, workspace: "Neko".into(), runtime: "Claude · default".into(), can_split: false, source: None }
+    Detail { task: task(row, events, "", ""), has_folder: true, workspace: "Neko".into(), runtime: "Claude · default".into(), can_split: false, source: None, prefs: Default::default(), prefs_revision: 0 }
 }
 
 fn goal_for(task_id: &str) -> Goal {
