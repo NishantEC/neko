@@ -19,6 +19,7 @@ pub mod samples;
 pub mod scenes;
 pub mod readers;
 pub mod scenes_pages;
+pub mod scenes_panel;
 pub mod status;
 pub mod terminal;
 pub mod theme;
@@ -120,6 +121,8 @@ pub fn run() {
     let spec = rune::AppSpec {
         scenes: scenes::SCENES,
         min_size: Some((960.0, 560.0)),
+        // Inter for text, the system's monospaced face for commands, paths and output (`ui-monospace`).
+        families: ("Inter", "ui-monospace"),
         on_key: Some(on_key),
         poll: Some(|s: &mut App, t: f64, tx: &mut rune::Tx| {
             let moved = s.tick_stream(t);

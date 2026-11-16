@@ -232,6 +232,15 @@ pub fn demo_full(open: &str) -> Summary {
     s
 }
 
+/// The session views of P1 and P2 are shown with the context panel closed, as the person left it:
+/// the demo sessions have commands in their events, which would otherwise open it (`panel.rs`).
+fn panel_closed(s: &mut App) {
+    if let Some(id) = s.selected.clone() {
+        s.panel.sessions.entry(id).or_default().person_closed = true;
+    }
+    s.layout.context.set_open(false);
+}
+
 fn live(s: &mut App) {
     s.apply_link(LinkEvent::Live(demo_full("t0")));
     s.set_web(Some(WebTarget::new(4747, &"0".repeat(64))));
@@ -240,10 +249,11 @@ fn live(s: &mut App) {
     s.neko.digest = Some(digest());
     s.unseen.insert("t2".into());
     s.unseen.insert("t3".into());
+    panel_closed(s);
 }
 
 /// A session being built, with its goal, runs and a queue of waiting messages.
-fn running(s: &mut App) {
+pub(crate) fn running(s: &mut App) {
     s.apply_link(LinkEvent::Live(demo_full("t6")));
     s.set_web(Some(WebTarget::new(4747, &"0".repeat(64))));
     s.selected = Some("t6".into());
@@ -251,6 +261,7 @@ fn running(s: &mut App) {
     s.neko.loaded = true;
     s.neko.digest = None;
     s.work.checkpoints.insert("t6".into(), runs());
+    panel_closed(s);
 }
 
 fn with_diff(s: &mut App, run: Option<u32>) {
@@ -339,6 +350,26 @@ pub const SCENES: &[Scene] = &[
     ("workspaces", crate::scenes_pages::workspaces),
     ("workspaces-open", crate::scenes_pages::workspaces_open),
     ("plugins", crate::scenes_pages::plugins),
+    ("p3a-auto-canvas", crate::scenes_panel::auto_canvas),
+    ("p3a-auto-diff", crate::scenes_panel::auto_diff),
+    ("p3a-auto-closed", crate::scenes_panel::auto_closed),
+    ("p3a-diff", crate::scenes_panel::diff),
+    ("p3a-files", crate::scenes_panel::files),
+    ("p3a-file-open", crate::scenes_panel::file_open),
+    ("p3a-terminal", crate::scenes_panel::terminal),
+    ("p3a-canvas", crate::scenes_panel::canvas_image),
+    ("p3a-gif", crate::scenes_panel::image_gif),
+    ("p3a-svg", crate::scenes_panel::image_svg),
+    ("p3a-markdown", crate::scenes_panel::markdown),
+    ("p3a-code", crate::scenes_panel::code),
+    ("p3a-table", crate::scenes_panel::table),
+    ("p3a-pdf", crate::scenes_panel::pdf),
+    ("p3a-model3d", crate::scenes_panel::model),
+    ("p3a-model3d-solid", crate::scenes_panel::model_solid),
+    ("p3a-web", crate::scenes_panel::web),
+    ("p3a-fallback", crate::scenes_panel::fallback),
+    ("p3a-too-large", crate::scenes_panel::too_large),
+    ("p3a-expanded", crate::scenes_panel::expanded),
     ("live", live),
     ("harness", harness),
     ("offline", |s| {

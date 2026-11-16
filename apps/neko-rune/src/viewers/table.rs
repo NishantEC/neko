@@ -64,7 +64,7 @@ impl CsvData {
                 Err(_) => break,
             }
         }
-        let widths = longest.iter().map(|n| (*n as f32 * 7.2 + 24.0).clamp(COLUMN_MIN, COLUMN_MAX)).collect();
+        let widths = longest.iter().map(|n| ((*n as f32 + 3.0) * 7.2 + 24.0).clamp(COLUMN_MIN, COLUMN_MAX)).collect();
         CsvData { bytes: bytes.to_vec(), delimiter, offsets, header, widths }
     }
 

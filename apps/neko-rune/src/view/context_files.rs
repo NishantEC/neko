@@ -50,7 +50,9 @@ pub fn tab(s: &App, t: &Neko) -> El {
             }
         })
         .name("Files")
-        .build(s, &t.kit);
+        .build(s, &t.kit)
+        .grow(1.0)
+        .min_h(0.0);
     let mut c = col().key("files-tree").w_full().grow(1.0).min_h(0.0).px(4.0).child(col().w_full().grow(1.0).min_h(0.0).child(tree));
     if meta.truncated {
         c = c.child(text(format!("Showing the first {} files.", super::super::viewers::table::group_digits(meta.count))).font(t.ty.id).color(t.text.faint).px(12.0).py(6.0));

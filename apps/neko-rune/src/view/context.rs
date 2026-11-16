@@ -101,7 +101,8 @@ fn canvas(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     if let Some(Target::Artifact { id, version }) = &target {
         // The chosen artifact's own line: a version select at the right when it has more than one.
         let versions: Vec<u32> = s.panel.artifacts.get(id).map(|a| { let mut v: Vec<u32> = a.versions.iter().map(|v| v.n).collect(); v.sort_unstable_by(|a, b| b.cmp(a)); v }).unwrap_or_default();
-        let mut line = row().key("canvas-head").w_full().h(32.0).px(12.0).gap(8.0).center_y().child(el().grow(1.0));
+        let title = s.panel.artifacts.get(id).map_or_else(|| id.clone(), |a| a.title.clone());
+        let mut line = row().key("canvas-head").w_full().h(32.0).px(12.0).gap(8.0).center_y().child(text(title).font(rune::TextStyle { weight: 500.0, ..t.ty.meta }).color(t.text.base).truncate().grow(1.0).min_w(0.0));
         if !versions.is_empty() {
             let options: Vec<String> = versions.iter().map(|v| format!("v{v}")).collect();
             let owner = id.clone();

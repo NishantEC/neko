@@ -225,7 +225,8 @@ impl Panel {
 
     pub fn new(data_dir: PathBuf) -> Panel {
         viewers::ensure_builtins();
-        Panel { data_dir, files_tree: FileTree::new().build(Vec::<(&str, bool)>::new()), ..Panel::default() }
+        // Laid out until a view says it is not: before the first view nothing is known to be hidden.
+        Panel { data_dir, files_tree: FileTree::new().build(Vec::<(&str, bool)>::new()), shown: Cell::new(true), ..Panel::default() }
     }
 
     pub fn session(&self, id: &str) -> Option<&SessionPanel> {
@@ -589,6 +590,8 @@ impl App {
         for path in changed {
             if let Some(node) = self.panel.files_tree.get_mut(&path) {
                 node.data = Some(true);
+                // What changed is what the person came to see: its folders are open.
+                self.panel.files_tree.expand_to(&path);
             }
         }
     }
@@ -648,7 +651,7 @@ impl App {
         self.panel_settle();
         self.panel_want_target();
         if let Some(key) = self.panel.pending_scroll.take() {
-            tx.scroll_into_view(key);
+            tx.scroll_center(key);
         }
         if let Some(target) = self.panel_target() {
             self.panel.states.with(&target.key(), |st| viewers::image_view::tick(st, t, tx));

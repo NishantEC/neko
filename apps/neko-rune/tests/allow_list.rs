@@ -305,7 +305,7 @@ fn the_panel_reads_files_only_through_the_confined_readers() {
     }
     let readers = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/readers.rs")).unwrap();
     let code = production(&readers);
-    for writer in ["fs::write", "File::create", "OpenOptions", "fs::remove", "fs::rename", "fs::copy", "File::options", "create_dir", "set_permissions", "symlink("] {
+    for writer in ["fs::write", "File::create", "OpenOptions", "fs::remove", "fs::rename", "fs::copy", "File::options", "create_dir", "set_permissions", "fs::symlink"] {
         assert!(!code.contains(writer), "the readers never write: `{writer}`");
     }
 }

@@ -156,8 +156,10 @@ pub fn visible(state: &mut ViewerState, range: std::ops::Range<usize>) -> bool {
     let zoom = state.zoom();
     let Some(doc) = state.peek::<SharedDoc>().cloned() else { return false };
     let drew = doc.borrow_mut().draw(range.clone(), zoom);
-    let moved = state.page != range.start;
-    state.page = range.start;
+    // The page the reader is on: the middle of the pages showing (the lower one when two share the view).
+    let page = ((range.start + range.end) / 2).min(range.end.saturating_sub(1)).max(range.start);
+    let moved = state.page != page;
+    state.page = page;
     drew || moved
 }
 
