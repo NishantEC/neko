@@ -153,7 +153,7 @@ const DESTRUCTIVE: &[(&str, &str)] = &[
     ("DeleteTask", "Call::Delete"),
     ("CancelTask", "Call::Stop"),
     ("StartOver", "Call::StartOver"),
-    ("ClosePullRequest", "Call::ClosePullRequest"),
+    ("ClosePullRequest", "Call::ClosePr"),
     ("RemoveTheme", "Call::RemoveTheme"),
     ("CancelAllWork", "Call::StopAll"),
     ("RetryTask", "Call::Retry"),
@@ -423,7 +423,7 @@ fn only_the_app_state_touches_rune_prefs_and_only_to_keep_the_layout() {
     let app = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs")).unwrap();
     let code = production(&app);
     assert!(code.contains("PREFS_ID") && !code.contains("support_dir") && !code.contains("neko_protocol::socket_path"), "the layout goes to Rune's store, not the daemon's folder");
-    assert_eq!(code.matches("prefs::Prefs::open").count(), 4, "at startup one read of the layout and one of the workspace scope, each written on a thread when it changes");
+    assert_eq!(code.matches("prefs::Prefs::open").count(), 6, "at startup one read of the layout, of the workspace scope and of the All sessions layout, each written on a thread when it changes");
 }
 
 #[test]

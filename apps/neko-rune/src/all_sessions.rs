@@ -59,11 +59,36 @@ pub struct AllState {
     /// The workspace filter: None is every workspace.
     pub workspace: Option<String>,
     pub menu_open: bool,
+    /// The layout: List, Board or Tree (kept between runs).
+    pub layout: crate::board::Layout,
+    /// The layout changed and is to be written (the real window only).
+    pub layout_dirty: bool,
+    /// The stage filter: None is every stage (the board then shows one column per stage).
+    pub stage: Option<Stage>,
+    /// A card being carried across the board.
+    pub carry: Option<crate::board::Carry>,
+    /// The press that ends a carry is not a click on the card.
+    pub suppress_press: bool,
+    /// Tasks of the tree whose children are folded.
+    pub tree_folded: std::collections::HashSet<String>,
 }
 
 impl Default for AllState {
     fn default() -> Self {
-        AllState { search: TextEdit::new(""), cursor: 0, cursor_shown: false, include_stopped: false, workspace: None, menu_open: false }
+        AllState {
+            search: TextEdit::new(""),
+            cursor: 0,
+            cursor_shown: false,
+            include_stopped: false,
+            workspace: None,
+            menu_open: false,
+            layout: crate::board::Layout::List,
+            layout_dirty: false,
+            stage: None,
+            carry: None,
+            suppress_press: false,
+            tree_folded: std::collections::HashSet::new(),
+        }
     }
 }
 
@@ -77,10 +102,19 @@ impl App {
             .iter()
             .filter(|t| self.all.workspace.as_deref().is_none_or(|w| summary.workspace_of(&t.id) == w))
             .filter(|t| self.all.include_stopped || !matches!(t.status, TaskStatus::Failed | TaskStatus::Cancelled))
+            .filter(|t| self.all.stage.is_none_or(|s| Stage::of(t.status) == s))
             .filter(|t| q.is_empty() || t.title.to_lowercase().contains(&q))
             .collect();
         rows.sort_by(|a, b| Stage::of(a.status).cmp_index().cmp(&Stage::of(b.status).cmp_index()).then(b.updated_at_ms.cmp(&a.updated_at_ms)));
         rows
+    }
+
+    /// The tasks J and K walk, in the order the layout shows them: the list's and the board's rows, or the tree's open rows.
+    pub fn nav_ids(&self) -> Vec<String> {
+        match self.all.layout {
+            crate::board::Layout::Tree => self.tree_visible().into_iter().map(|r| r.id).collect(),
+            _ => self.all_rows().into_iter().map(|t| t.id.clone()).collect(),
+        }
     }
 
     /// Opens the view with the workspace the window is scoped to.
@@ -96,7 +130,7 @@ impl App {
         if self.view != Some(FullView::AllSessions) || self.all.search.focused || ev.mods.cmd || ev.mods.ctrl || ev.mods.alt {
             return false;
         }
-        let rows = self.all_rows().len();
+        let rows = self.nav_ids().len();
         match &ev.key {
             Key::Text(t) if t == "/" => {
                 tx.focus("all-search", true);
@@ -114,7 +148,7 @@ impl App {
                 true
             }
             Key::Enter if rows > 0 => {
-                let id = self.all_rows().get(self.all.cursor.min(rows - 1)).map(|t| t.id.clone());
+                let id = self.nav_ids().get(self.all.cursor.min(rows - 1)).cloned();
                 if let Some(id) = id {
                     self.select(&id);
                 }

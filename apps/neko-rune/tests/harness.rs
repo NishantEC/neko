@@ -848,3 +848,167 @@ fn batch_a_a_routine_is_saved_with_the_new_cadence_the_way_the_web_saves_it() {
     let saved = rt.state.pages.routines.as_ref().unwrap().views.iter().find(|v| v.routine.id == id).map(|v| v.routine.cadence.clone());
     assert_eq!(saved, Some(Cadence::Every { minutes: 30, from_hour: 9, to_hour: 18 }));
 }
+
+// ------------------------------------------------------------------------------------------------ parity batch B: the work views
+
+/// Board layout in All sessions, with the sessions and Neko columns folded so the first columns are in the pointer's reach.
+fn board_open(rt: &mut Runtime<App>) {
+    rt.update(|s, _| {
+        s.layout.sessions.set_open(false);
+        s.layout.set_neko_open(false);
+        s.open_all_sessions();
+        s.all.include_stopped = true;
+        s.set_all_layout(neko_rune::board::Layout::Board);
+    });
+    settle(rt);
+}
+
+/// Takes the card keyed `key`, carries it `dx` points sideways with the pointer and lets go.
+fn carry_card(rt: &mut Runtime<App>, key: &str, dx: f32) {
+    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element keyed {key}"));
+    rt.pointer_down(x, y);
+    for i in 1..=6 {
+        rt.pointer_move(x + dx * i as f32 / 6.0, y);
+        rt.frame(1.0 / 60.0);
+    }
+    rt.pointer_up(x + dx, y);
+    settle(rt);
+}
+
+fn status_of(rt: &Runtime<App>, id: &str) -> neko_protocol::workbench::TaskStatus {
+    rt.state.summary.as_ref().unwrap().task(id).unwrap_or_else(|| panic!("no task {id}")).status
+}
+
+#[test]
+fn batch_b_a_board_drag_starts_a_stopped_task_through_the_daemon_and_a_refused_one_changes_nothing() {
+    use neko_protocol::workbench::TaskStatus;
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    board_open(&mut rt);
+    // Refused first: a task being built, carried to Needs you, is not moved, and the daemon is not asked.
+    let building = id_of(&rt, "Rework the export batching");
+    let before: Vec<_> = rt.state.summary.as_ref().unwrap().tasks.iter().map(|t| (t.id.clone(), t.status)).collect();
+    carry_card(&mut rt, &format!("board-card-{building}"), -2.0 * 292.0);
+    assert_eq!(status_of(&rt, &building), TaskStatus::Building);
+    let after: Vec<_> = rt.state.summary.as_ref().unwrap().tasks.iter().map(|t| (t.id.clone(), t.status)).collect();
+    assert_eq!(before, after, "nothing changed");
+    assert!(rt.state.toast_words().contains("can’t go back to waiting"), "{}", rt.state.toast_words());
+    // Allowed: a stopped task, carried from Needs you to Running, is started by the daemon (`StartTask`).
+    let stopped = id_of(&rt, "Stop the nightly export running twice");
+    assert_eq!(status_of(&rt, &stopped), TaskStatus::Failed);
+    // Narrowed by the search so its card is the one in view (Needs you holds ten cards, which scroll).
+    rt.update(|s, _| s.all.search.replace_text("nightly export"));
+    settle(&mut rt);
+    carry_card(&mut rt, &format!("board-card-{stopped}"), 2.0 * 292.0);
+    assert_ne!(status_of(&rt, &stopped), TaskStatus::Failed, "the daemon started it");
+    assert!(rt.find(&format!("board-card-{stopped}")).is_some(), "it is still on the board, in its new column");
+}
+
+#[test]
+fn batch_b_the_layouts_show_the_daemons_tasks_and_the_tree_lists_each_once() {
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    board_open(&mut rt);
+    let total = rt.state.all_rows().len();
+    assert!(total > 10, "the seed has work: {total}");
+    assert!(!keyed(&rt, "board-card-").is_empty(), "the board draws cards");
+    rt.update(|s, _| s.set_all_layout(neko_rune::board::Layout::Tree));
+    settle(&mut rt);
+    assert_eq!(rt.state.tree_visible().len(), total, "every task is a row, once");
+    assert!(!keyed(&rt, "tree-row-").is_empty());
+}
+
+fn pr_of(rt: &Runtime<App>, id: &str) -> neko_rune::link::PrRow {
+    rt.state.summary.as_ref().unwrap().pull_requests.iter().find(|r| r.id == id).unwrap_or_else(|| panic!("no pull request for {id}")).clone()
+}
+
+#[test]
+fn batch_b_merge_when_ready_is_toggled_and_merge_all_ready_is_confirmed_through_the_daemon() {
+    use neko_rune::link::Verdict;
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    open_page(&mut rt, neko_rune::views::FullView::PullRequests);
+    let ready: Vec<String> = rt.state.summary.as_ref().unwrap().pull_requests.iter().filter(|r| r.verdict == Verdict::Ready).map(|r| r.id.clone()).collect();
+    assert!(ready.len() >= 3, "the seed has pull requests ready to merge: {ready:?}");
+    assert!(keyed(&rt, "pr-group-").iter().any(|k| k == "pr-group-Ready to merge"));
+    // The switch: on, the daemon records the request; off, it is taken back.
+    let one = ready[0].clone();
+    click(&mut rt, &format!("pr-merge-{one}"));
+    assert_eq!(pr_of(&rt, &one).verdict, Verdict::Merging, "the daemon has it merging when ready");
+    assert!(rt.find(&format!("pr-row-{one}")).is_some());
+    click(&mut rt, &format!("pr-merge-{one}"));
+    assert_eq!(pr_of(&rt, &one).verdict, Verdict::Ready, "taken back");
+    // Merge all ready: the dialog lists them; nothing is asked of the daemon before yes.
+    click(&mut rt, "pr-merge-all");
+    assert!(has_text(&rt, &format!("Merge {} pull requests?", ready.len())), "{:?}", texts(&rt));
+    assert!(ready.iter().all(|id| pr_of(&rt, id).verdict == Verdict::Ready), "nothing before yes");
+    click(&mut rt, "ask-yes");
+    for id in &ready {
+        assert_eq!(pr_of(&rt, id).verdict, Verdict::Merging, "{id} is merging when ready");
+    }
+    assert!(rt.find("pr-merge-all").is_none(), "nothing is left to merge");
+}
+
+#[test]
+fn batch_b_close_with_a_reason_is_asked_first_and_goes_to_the_daemon_only_when_confirmed() {
+    use neko_rune::link::Verdict;
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    open_page(&mut rt, neko_rune::views::FullView::PullRequests);
+    let id = rt.state.summary.as_ref().unwrap().pull_requests.iter().find(|r| r.verdict == Verdict::Ready).map(|r| r.id.clone()).expect("a ready pull request");
+    let before = rt.state.summary.as_ref().unwrap().tasks.iter().map(|t| (t.id.clone(), t.status)).collect::<Vec<_>>();
+    click(&mut rt, &format!("pr-close-{id}"));
+    assert!(rt.find("ask-yes").is_some());
+    click(&mut rt, "ask-no");
+    assert_eq!(before, rt.state.summary.as_ref().unwrap().tasks.iter().map(|t| (t.id.clone(), t.status)).collect::<Vec<_>>(), "Keep it changes nothing");
+    click(&mut rt, &format!("pr-close-{id}"));
+    rt.update(|s, _| s.pages.set_field(neko_rune::task_actions::ASK_FIELD, "A duplicate of #99"));
+    settle(&mut rt);
+    click(&mut rt, "ask-yes");
+    assert!(rt.find("ask-yes").is_none(), "the dialog is closed once the request went");
+    // The harness has no GitHub: the daemon answers in its own words (and never reaches a real pull request).
+    eprintln!("close answered: {:?} / {:?}", rt.state.work.notice, rt.state.toast_words());
+}
+
+#[test]
+fn batch_b_the_details_tab_lists_its_sections_for_a_daemon_task() {
+    use neko_rune::panel::Tab;
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    let id = id_of(&rt, "Rework the export batching");
+    pick(&mut rt, &id);
+    rt.update(|s, _| {
+        s.panel_choose_tab(Tab::Details);
+        s.panel_set_open(true);
+    });
+    settle(&mut rt);
+    for section in ["Working copy", "Info", "Activity log"] {
+        assert!(has_text(&rt, section), "{section}: {:?}", texts(&rt));
+    }
+    assert!(!has_text(&rt, "Risk assessment"), "no assessment was written for it");
+    assert!(rt.find("info-workspace").is_some() && rt.find("info-runtime").is_some());
+    assert!(has_text(&rt, "No working copy yet."), "{:?}", texts(&rt));
+    // The log, once opened, has a row for each event the daemon kept, newest first.
+    click(&mut rt, "details-log");
+    assert!(rt.find("log-row-0").is_some(), "{:?}", texts(&rt));
+}
+
+#[test]
+fn batch_b_slash_in_the_session_composer_runs_the_webs_commands() {
+    use neko_protocol::workbench::TaskStatus::{Cancelled, Completed};
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    let id = id_of(&rt, "Rework the export batching");
+    pick(&mut rt, &id);
+    click(&mut rt, "composer-input");
+    rt.update(|s, _| s.composer.replace_text("/cl"));
+    settle(&mut rt);
+    assert!(rt.find("reply-popover").is_some() && rt.find("reply-pop-0").is_some(), "{:?}", texts(&rt));
+    let finished = |rt: &Runtime<App>| rt.state.summary.as_ref().unwrap().tasks.iter().filter(|t| matches!(t.status, Completed | Cancelled)).count();
+    assert!(finished(&rt) > 0);
+    press(&mut rt, Key::Enter, Mods::default());
+    assert!(rt.state.composer.text.is_empty(), "the command left the box");
+    assert!(has_text(&rt, "finished"), "/clear asks first: {:?}", texts(&rt));
+    click(&mut rt, "ask-yes");
+    assert_eq!(finished(&rt), 0, "the daemon cleared them");
+}

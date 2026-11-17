@@ -11,6 +11,7 @@ pub mod app;
 pub mod art;
 pub mod art_gpu;
 pub mod attachments;
+pub mod board;
 pub mod clock;
 pub mod compose;
 pub mod connection;
@@ -26,6 +27,7 @@ pub mod pages;
 pub mod palette;
 pub mod permissions;
 pub mod plan;
+pub mod pull_requests;
 pub mod panel;
 pub mod samples;
 pub mod scope;
@@ -33,6 +35,7 @@ pub mod scenes;
 pub mod readers;
 pub mod runtime_pick;
 pub mod scenes_batch_a;
+pub mod scenes_batch_b;
 pub mod scenes_pages;
 pub mod scenes_setup;
 pub mod scenes_panel;
@@ -116,7 +119,7 @@ fn init() -> App {
             if let Some(view) = std::env::var("NEKO_RUNE_VIEW").ok().and_then(|v| views::FullView::ALL.into_iter().find(|f| f.web_id() == v)) {
                 app.open_view(view);
             }
-            // Parity batch A's screens on the person's own data, for the pictures (`NEKO_RUNE_PREVIEW=palette|all|month|closed|model|shortcuts|slash|scope|cadence`).
+            // Parity batch A's screens on the person's own data, for the pictures (`NEKO_RUNE_PREVIEW=palette|all|month|closed|model|shortcuts|slash|scope|cadence|board|tree|prs`).
             if let Some(what) = std::env::var("NEKO_RUNE_PREVIEW").ok().filter(|v| !v.is_empty()) {
                 match what.as_str() {
                     "palette" => app.palette_toggle(),
@@ -133,6 +136,14 @@ fn init() -> App {
                         app.ask.focused = true;
                     }
                     "scope" => app.scope_open = true,
+                    // Parity batch B: All sessions as a board or a tree, and Pull requests.
+                    "board" | "tree" => {
+                        app.open_all_sessions();
+                        app.all.include_stopped = true;
+                        app.set_all_layout(if what == "board" { board::Layout::Board } else { board::Layout::Tree });
+                        app.all.layout_dirty = false;
+                    }
+                    "prs" => app.open_view(views::FullView::PullRequests),
                     "cadence" => {
                         app.open_view(views::FullView::Routines);
                         let first = app.pages.routines.as_ref().and_then(|r| r.views.first().map(|v| v.routine.id.clone()));
@@ -164,7 +175,7 @@ fn init() -> App {
         // The last run's widths (read once, before the first frame); the window then keeps them.
         let saved = app::load_layout();
         let layout = saved.map(layout::Layout::restored).unwrap_or_default();
-        App { linked: !has("nolink"), dock: dock::set_badge, workspace_scope: app::load_scope(), layout, layout_written: saved, layout_seen: saved, persist_layout: true, web_view: web_panel::WebHost::windowed(), ..App::default() }
+        App { linked: !has("nolink"), dock: dock::set_badge, workspace_scope: app::load_scope(), all: all_sessions::AllState { layout: app::load_all_layout().unwrap_or_default(), ..Default::default() }, layout, layout_written: saved, layout_seen: saved, persist_layout: true, web_view: web_panel::WebHost::windowed(), ..App::default() }
     }
 }
 

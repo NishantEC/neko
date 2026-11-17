@@ -210,6 +210,8 @@ pub struct App {
     pub compose: crate::compose::ComposeUi,
     /// "All sessions": its search, cursor and filters (`all_sessions.rs`).
     pub all: crate::all_sessions::AllState,
+    /// Pull requests: the groups folded, merged and closed shown, the header's menu (`pull_requests.rs`).
+    pub prs: crate::pull_requests::PrState,
     /// The workspace switcher's list is open.
     pub scope_open: bool,
     /// The scope changed and is to be written (the real window only).
@@ -243,6 +245,18 @@ pub fn load_layout() -> Option<Saved> {
 /// The workspace the window was scoped to the last run (None: all workspaces).
 pub fn load_scope() -> Option<String> {
     rune::prefs::Prefs::open(PREFS_ID).get::<Option<String>>(crate::scope::KEY).flatten()
+}
+
+/// The layout All sessions had the last run (List, Board or Tree).
+pub fn load_all_layout() -> Option<crate::board::Layout> {
+    rune::prefs::Prefs::open(PREFS_ID).get::<crate::board::Layout>("all-layout")
+}
+
+/// Writes the All sessions layout on its own thread.
+fn write_all_layout(layout: crate::board::Layout) {
+    let _ = std::thread::Builder::new().name("neko-all-layout".into()).spawn(move || {
+        let _ = rune::prefs::Prefs::open(PREFS_ID).set("all-layout", &layout);
+    });
 }
 
 /// Writes the scope on its own thread.
@@ -333,6 +347,7 @@ impl Default for App {
             msg_menu: None,
             compose: crate::compose::ComposeUi::default(),
             all: crate::all_sessions::AllState::default(),
+            prs: crate::pull_requests::PrState::default(),
             scope_open: false,
             scope_dirty: false,
             shortcuts_open: false,
@@ -480,6 +495,9 @@ impl App {
         }
         if std::mem::take(&mut self.scope_dirty) {
             write_scope(self.workspace_scope.clone());
+        }
+        if std::mem::take(&mut self.all.layout_dirty) {
+            write_all_layout(self.all.layout);
         }
         let now = self.layout.saved();
         // The write waits until the layout has not changed for half a second: each change starts the wait again.

@@ -9,6 +9,7 @@
 //! sizes and fonts come from `theme.rs`; the regions name none.
 
 mod all;
+mod board;
 mod calendar;
 mod compose;
 mod composer;
@@ -23,6 +24,7 @@ mod home;
 mod more;
 mod neko;
 mod palette;
+mod prs;
 mod routines;
 mod runtime;
 mod shortcuts;
@@ -30,6 +32,7 @@ mod session;
 mod sessions;
 pub mod setup;
 mod settings;
+mod tree;
 mod turn;
 mod ui;
 mod work;

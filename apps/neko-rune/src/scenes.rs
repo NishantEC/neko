@@ -97,7 +97,7 @@ fn awaiting_detail(row: &TaskRow) -> Detail {
         ("scout", receipt("rg -n retry crates/sync/src", "crates/sync/src/job.rs:42: // TODO retry", 0)),
         ("scout", "Plan ready.".to_owned()),
     ];
-    Detail { task: task(row, events, plan, ""), has_folder: false, workspace: "Neko".into(), runtime: "Claude · default".into(), can_split: true, source: None, prefs: Default::default(), prefs_revision: 0 }
+    Detail { task: task(row, events, plan, ""), has_folder: false, workspace: "Neko".into(), runtime: "Claude · default".into(), can_split: true, source: None, prefs: Default::default(), prefs_revision: 0, splits: Vec::new(), decisions: Vec::new() }
 }
 
 /// A session being built: the planner's words, commands, an edit, an open question for review.
@@ -113,7 +113,7 @@ fn running_detail(row: &TaskRow) -> Detail {
         ("builder", receipt("cargo test -p board", "test result: ok. 12 passed; 0 failed", 0)),
         ("builder", "Added the message, with a test. All twelve board tests pass.".to_owned()),
     ];
-    Detail { task: task(row, events, "", ""), has_folder: true, workspace: "Neko".into(), runtime: "Claude · default".into(), can_split: false, source: None, prefs: Default::default(), prefs_revision: 0 }
+    Detail { task: task(row, events, "", ""), has_folder: true, workspace: "Neko".into(), runtime: "Claude · default".into(), can_split: false, source: None, prefs: Default::default(), prefs_revision: 0, splits: Vec::new(), decisions: Vec::new() }
 }
 
 fn goal_for(task_id: &str) -> Goal {
@@ -399,6 +399,18 @@ pub const SCENES: &[Scene] = &[
     ("settings-updates", crate::scenes_pages::settings_updates),
     ("settings-search", crate::scenes_pages::settings_search),
     ("usage", crate::scenes_pages::usage),
+    ("bb-board", crate::scenes_batch_b::board),
+    ("bb-board-drag", crate::scenes_batch_b::board_drag),
+    ("bb-board-refused", crate::scenes_batch_b::board_refused),
+    ("bb-tree", crate::scenes_batch_b::tree),
+    ("bb-tree-folded", crate::scenes_batch_b::tree_folded),
+    ("bb-prs", crate::scenes_batch_b::prs),
+    ("bb-prs-close", crate::scenes_batch_b::prs_close),
+    ("bb-prs-merge-all", crate::scenes_batch_b::prs_merge_all),
+    ("bb-prs-menu", crate::scenes_batch_b::prs_menu),
+    ("bb-details", crate::scenes_batch_b::details),
+    ("bb-details-propose", crate::scenes_batch_b::details_proposable),
+    ("bb-slash", crate::scenes_batch_b::slash),
     ("setup-workspaces", crate::scenes_setup::workspaces),
     ("setup-workspaces-open", crate::scenes_setup::workspaces_open),
     ("setup-workspace-dialog", crate::scenes_setup::workspace_dialog),

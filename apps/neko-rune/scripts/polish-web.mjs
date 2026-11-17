@@ -1,5 +1,5 @@
 // The web half of `polish-pairs.sh`: screenshots of the web UI over the shared headless Chrome (never launches its own).
-// Env: PORT, TOKEN, OUT, THEME (dark|light), SHOTS (JSON [[name, route], ...]), PLAYWRIGHT_CORE (a folder with node_modules/playwright-core).
+// Env: PORT, TOKEN, OUT, THEME (dark|light), SHOTS (JSON [[name, route, scrollTo?, localStorage?], ...]), PLAYWRIGHT_CORE (a folder with node_modules/playwright-core).
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -13,7 +13,13 @@ try {
   const page = await context.newPage();
   await page.goto(`${base}/?token=${process.env.TOKEN}`, { waitUntil: "load" });
   await page.waitForTimeout(3000);
-  for (const [name, hash, scrollTo] of JSON.parse(process.env.SHOTS)) {
+  for (const [name, hash, scrollTo, storage] of JSON.parse(process.env.SHOTS)) {
+    // A fourth entry sets localStorage first (the Tasks page keeps its layout there: {"neko.work.layout": "board"}).
+    if (storage) {
+      await page.evaluate((entries) => { for (const [k, v] of Object.entries(entries)) localStorage.setItem(k, v); }, storage);
+      await page.reload({ waitUntil: "load" });
+      await page.waitForTimeout(2000);
+    }
     await page.evaluate((h) => { location.hash = h; }, hash);
     await page.waitForTimeout(2500);
     // A third entry scrolls the first element with that text to the top (the Inbox page lists the routines under the Needs-you items).
