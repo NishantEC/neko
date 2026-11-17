@@ -337,6 +337,12 @@ pub fn replace_group(group: &'static str, specs: Vec<ViewerSpec>) {
     all.extend(specs.into_iter().map(|s| (group, &*Box::leak(Box::new(s)))));
 }
 
+/// Every viewer registered now, with its group ("" for Rune's own, `web-plugin` for a plugin's): what `ReportApp` lists.
+pub fn listed() -> Vec<(&'static str, &'static ViewerSpec)> {
+    ensure_builtins();
+    registry().lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+}
+
 /// The built-in viewers, at priority 0 (once).
 pub fn ensure_builtins() {
     static ONCE: Once = Once::new();

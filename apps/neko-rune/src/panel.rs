@@ -589,6 +589,7 @@ impl App {
         if let Some(open) = self.panel.open.as_mut() {
             open.content = content;
         }
+        self.report_artifact(target);
     }
 
     /// Runs `job` off the UI thread and applies its answer on it; inline when there is no window
@@ -705,6 +706,7 @@ impl App {
         if let Some(open) = self.panel.open.as_mut().filter(|o| o.target == target) {
             open.content = Content::Failed(message);
         }
+        self.report_artifact(&target);
     }
 
     /// The session's folder arrived: list it off the UI thread and build the Files tab's tree.
@@ -837,6 +839,12 @@ impl App {
         let spoke = !notes.is_empty();
         if let Some(last) = notes.last() {
             self.show_toast(last);
+        }
+        // A comment quoted or a `data-neko-send` posted from the embedded page (already checked for its origin).
+        let said = self.web_view.drain_said();
+        let spoke = spoke || !said.is_empty();
+        for message in said {
+            self.page_said(message);
         }
         // A view that is not on screen is looked at again, so its five minutes are kept.
         if self.web_view.exists() && !self.web_view.shown() {
