@@ -160,6 +160,10 @@ fn main() {
     eprintln!("neko-daemon: indexed {} applications", apps.len());
 
     let state = Arc::new(AppState::new(db, apps));
+    // An install or update a crash cut short is undone before anything else touches packs.
+    for line in neko_core::packs::recover(&state.db, &neko_core::packs::Paths::system()) {
+        eprintln!("packs: {line}");
+    }
 
     // Icon extraction is real AppKit work per app (tens of ms each) — do it
     // after the index is already searchable, not before, so the daemon's

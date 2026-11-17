@@ -707,6 +707,9 @@ mod tests {
             "apps/neko-rune/scripts/run.sh",
             "experiments/rune/chat/src/main.rs",
             "docs/design/rune/shell-dark.png",
+            // The bundled pack catalog is read from the source clone as it is; no reinstall.
+            "packs/spaceo/pack.toml",
+            "packs/spaceo/skills/use-spaceo/SKILL.md",
         ]);
         assert_eq!(classify(&touched), Classification::default());
         assert_eq!(decide(None, "abc", &touched, None, false, &SelfUpdate::default(), 0), Decision::Nothing);

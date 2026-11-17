@@ -11,9 +11,11 @@ pub fn handle(state: &AppState, command: PackCommand) -> Response {
     let done = match command {
         PackCommand::Preview { source } => return packs::preview(db, &paths, &env, &source).map_or_else(|message| Response::Error { message }, Response::PackPreview),
         PackCommand::List => Ok(()),
-        PackCommand::Install { source, approve, env: values } => packs::install(db, &paths, &env, &source, approve, &values.into_iter().map(|(k, v)| (k, v.0)).collect()),
+        PackCommand::Install { source, digest, env: values } => packs::install(db, &paths, &env, &source, &digest, &values.into_iter().map(|(k, v)| (k, v.0)).collect()),
         PackCommand::Remove { name } => packs::remove(db, &paths, &name),
-        PackCommand::Update { name } => packs::update(db, &paths, &env, &name),
+        PackCommand::Update { name, digest } => packs::update(db, &paths, &env, &name, digest.as_deref()),
+        PackCommand::Approve { name, digest } => packs::approve(db, &paths, &env, &name, &digest),
+        PackCommand::CleanUp { name } => packs::clean_up(db, &paths, &name),
         PackCommand::Health { name } => packs::health(db, &paths, &env, &name),
     };
     if let Err(message) = done {

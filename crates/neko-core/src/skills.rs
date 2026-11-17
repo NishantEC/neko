@@ -475,6 +475,10 @@ fn discover_bounded(roots: &[Root], remaining: &mut usize) -> Vec<Skill> {
                 *remaining -= 1;
                 if let Ok(entry) = entry {
                     let path = entry.path();
+                    // Dot-folders are never skills (moved-aside copies, caches).
+                    if entry.file_name().to_string_lossy().starts_with('.') {
+                        continue;
+                    }
                     if fs::symlink_metadata(&path).is_ok_and(|metadata| {
                         metadata.is_dir() && !metadata.file_type().is_symlink()
                     }) {
