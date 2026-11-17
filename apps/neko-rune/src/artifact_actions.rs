@@ -18,7 +18,7 @@ pub const MIN_GAP_MS: i64 = 1000;
 pub enum Said {
     /// A comment on an element of the artifact: goes into the session's composer as a quotation.
     Quote(String),
-    /// The text of a `data-neko-send` element: posted as the person's message.
+    /// The text of a `data-neko-send` element: drafted into the composer for the person to send.
     Send(String),
 }
 
@@ -108,7 +108,7 @@ impl App {
         self.web.as_ref().map(|w| format!("http://{}/#/artifact?id={id}{}", w.display(), version.map(|v| format!("&v={v}")).unwrap_or_default()))
     }
 
-    /// A message from the embedded page, already checked for its origin. Comments quote into the open session's composer; a send posts.
+    /// A message from the embedded page, already checked for its origin. Comments quote into the open session's composer; a send is drafted there too, never posted.
     pub fn page_said(&mut self, said: Said) {
         let now = (self.clock)();
         if now - self.extra.last_said_ms < MIN_GAP_MS && self.extra.last_said_ms != 0 {
@@ -131,19 +131,14 @@ impl App {
                     }
                     _ => return,
                 };
+                // Drafted, never posted: like the web, an artifact's offer goes into the composer and the person sends it.
+                // An agent-made page must not be able to speak as the person.
                 let message = from_artifact(&text, &id, version, &title);
-                // Shown as sent: the person sees what went and from which artifact.
-                self.show_toast(&format!("Sent “{}” from {}", text.chars().take(60).collect::<String>(), if title.is_empty() { "an artifact" } else { title.as_str() }));
-                let scope = self.scope().map(str::to_owned);
-                match self.detail().map(|d| d.task.clone()) {
-                    // The open session: queued behind its turn when it is in one, else a reply (the composer's own rule).
-                    Some(task) if crate::work::in_turn(task.status) => {
-                        let command_id = self.next_id();
-                        self.call(Call::Enqueue { task_id: task.id, command_id, text: message, mode: crate::work::delivery(self.steer) });
-                    }
-                    Some(task) => self.call(Call::Reply { task_id: task.id, text: message }),
-                    None => self.call(Call::Ask { text: message, workspace_id: scope }),
-                }
+                let current = self.composer.text.clone();
+                let joined = if current.trim().is_empty() { message } else { format!("{}\n\n{message}", current.trim_end()) };
+                self.composer.replace_text(joined);
+                self.composer.focused = true;
+                self.show_toast("Added to your message. Send it when ready.");
             }
         }
     }
@@ -200,5 +195,18 @@ mod tests {
         app.page_said(Said::Quote("two".into()));
         assert!(app.composer.text.contains("> one") && !app.composer.text.contains("two"));
         assert!(app.composer.text.ends_with("\n\n"));
+    }
+}
+
+#[cfg(test)]
+mod draft_only {
+    /// An artifact's send offer is drafted, never posted: no call may be made from it.
+    #[test]
+    fn send_offers_never_call_the_daemon() {
+        let src = include_str!("artifact_actions.rs");
+        let body = &src[src.find("Said::Send(text) => {").unwrap()..src.find("#[cfg(test)]").unwrap()];
+        for call in ["Call::Reply", "Call::Enqueue", "Call::Ask"] {
+            assert!(!body.contains(call), "a send offer must only draft, found {call}");
+        }
     }
 }

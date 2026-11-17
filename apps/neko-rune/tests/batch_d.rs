@@ -407,25 +407,23 @@ fn plugins_are_managed_enabled_disabled_removed_after_a_yes_reloaded_and_changed
 // ---- 5. Artifacts ---------------------------------------------------------------------------------------------
 
 #[test]
-fn the_page_bridge_quotes_into_the_composer_and_a_send_is_posted_as_the_persons_message() {
+fn the_page_bridge_quotes_into_the_composer_and_a_send_is_drafted_never_posted() {
     use neko_rune::artifact_actions::Said;
     let mut rt = runtime("p3a-canvas");
     // A comment is quoted into the open session's composer.
     rt.update(|s, _| s.page_said(Said::Quote("[artifact a1 v1, element h1: \"Title\"]".into())));
     settle(&mut rt);
     assert!(rt.state.composer.text.starts_with("> [artifact a1 v1, element h1"), "{:?}", rt.state.composer.text);
-    // A send is the person's message, ending with the line that names the artifact.
+    // A send offer is drafted into the composer, ending with the line that names the artifact; nothing is posted.
+    rt.state.outbox.clear();
     rt.update(|s, _| {
         s.extra.last_said_ms = 0;
         s.clock = || neko_rune::app::DEMO_NOW + 5_000;
         s.page_said(Said::Send("Make the heading blue".into()));
     });
-    let sent = rt.state.outbox.iter().find_map(|c| match c {
-        Call::Reply { text, .. } | Call::Enqueue { text, .. } | Call::Ask { text, .. } => Some(text.clone()),
-        _ => None,
-    });
-    let text = sent.expect("posted");
-    assert!(text.starts_with("Make the heading blue\n[from artifact ") && text.ends_with("\"]"), "{text}");
+    assert!(!rt.state.outbox.iter().any(|c| matches!(c, Call::Reply { .. } | Call::Enqueue { .. } | Call::Ask { .. })), "posted: {:?}", rt.state.outbox);
+    let text = rt.state.composer.text.clone();
+    assert!(text.contains("Make the heading blue\n[from artifact ") && text.trim_end().ends_with("\"]"), "{text}");
 }
 
 #[test]
