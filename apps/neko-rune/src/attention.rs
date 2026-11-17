@@ -145,7 +145,9 @@ impl App {
             }
             "pull-requests" => self.open_view(crate::views::FullView::PullRequests),
             _ => {
-                if let Some(page) = self.plugin_pages.as_ref().and_then(|pages| pages.iter().find(|p| p.id == path)).cloned() {
+                if let Some(page) = self.luau.views().iter().filter_map(|p| p.page()).find(|p| p.id == path) {
+                    self.open_plugin_page(page);
+                } else if let Some(page) = self.plugin_pages.as_ref().and_then(|pages| pages.iter().find(|p| p.id == path)).cloned() {
                     self.open_plugin_page(page);
                 } else if let Some(view) = crate::views::FullView::ALL.into_iter().find(|v| v.web_id() == path || (path == "tools" && *v == crate::views::FullView::Plugins)) {
                     self.open_view(view);

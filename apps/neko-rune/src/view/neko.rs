@@ -46,7 +46,7 @@ fn header(t: &Neko) -> El {
 }
 
 /// A section's heading row: a caret, the name, a faint count. A button that folds the section.
-fn section_head(t: &Neko, key: &str, label: &str, count: Option<usize>, open: bool, toggle: &'static str) -> El {
+pub(super) fn section_head(t: &Neko, key: &str, label: &str, count: Option<usize>, open: bool, toggle: &'static str) -> El {
     let mut h = row()
         .key(key.to_owned())
         .role("button")
@@ -439,6 +439,10 @@ fn body(s: &App, t: &Neko, win_h: f32, layer: &mut Vec<El>) -> El {
         top = top.child(closed);
     }
     top = top.child(digest(s, t));
+    // Cards that installed packs ship (Luau), below the Digest.
+    if let Some(cards) = super::luau::cards(s, t, layer) {
+        top = top.child(cards);
+    }
     let mut c = col().key("neko-body").w_full().grow(1.0).min_h(0.0).child(col().key("neko-scroll").w_full().max_h(cap).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(top));
     let activity = activity_line(s, t);
     if let Some(conv) = conversation(s, t) {

@@ -21,6 +21,7 @@ mod context_terminal;
 mod dialogs;
 mod fences;
 mod home;
+mod luau;
 mod more;
 mod onboarding;
 mod plugins;
@@ -80,6 +81,9 @@ pub struct Frame {
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let t = s.theme_now(cx.system_dark());
     s.panel.dark.set(t.dark);
+    // What Luau plugins draw with this frame: Neko's own theme, and the text of their inputs.
+    crate::luau::host::set_theme(t.clone());
+    crate::luau::nodes::mirror_inputs(&s.luau.inputs);
     s.reduce_motion.set(cx.system_reduced_motion());
     let mut layer = Vec::new();
     let layout = &s.layout;

@@ -142,6 +142,9 @@ const RUNE_EXTRAS: &[&str] = &[
     "CalendarEvents",
     "AgentModels",
     "Search",
+    // Luau plugins (`src/luau/`): the files of a healthy, unchanged pack, which Rune runs in a sandbox. The daemon refuses a pack that is
+    // not Healthy or whose files differ from what the person approved; Rune never reads a pack folder itself.
+    "PackUi",
 ];
 
 /// The envelopes: the web sends `Crew`, `Goals` and `Checkpoints` with the sub-command in the payload, and
@@ -396,7 +399,7 @@ fn http_goes_only_to_the_paths_the_web_uses() {
         let path: String = code[at + 1..].chars().take_while(|c| *c != '"' && *c != '?' && *c != '{').collect();
         paths.insert(path);
     }
-    let allowed: BTreeSet<String> = ["/api/attachments", "/api/files", "/api/plugins", "/api/plugins/", "/api/customisation"].map(str::to_owned).into();
+    let allowed: BTreeSet<String> = ["/api/attachments", "/api/files", "/api/plugins", "/api/plugins/", "/api/customisation", "/api/storage/"].map(str::to_owned).into();
     assert!(paths.is_subset(&allowed), "http.rs reaches paths the web UI does not use: {paths:?}");
     assert!(paths.contains("/api/attachments") && paths.contains("/api/files"));
     for path in &paths {
@@ -455,7 +458,7 @@ fn only_the_app_state_touches_rune_prefs_and_only_to_keep_the_layout() {
     let app = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs")).unwrap();
     let code = production(&app);
     assert!(code.contains("PREFS_ID") && !code.contains("support_dir") && !code.contains("neko_protocol::socket_path"), "the layout goes to Rune's store, not the daemon's folder");
-    assert_eq!(code.matches("prefs::Prefs::open").count(), 6, "at startup one read of the layout, of the workspace scope and of the All sessions layout, each written on a thread when it changes");
+    assert_eq!(code.matches("prefs::Prefs::open").count(), 8, "at startup one read of the layout, of the workspace scope, of the All sessions layout and of the hidden Luau cards, each written on a thread when it changes");
 }
 
 #[test]

@@ -12,6 +12,7 @@ macro_rules! icon_body {
     };
 }
 
+icon_body!(INBOX, "inbox", r#"<path d="M2.5 9.5L4.3 3.5H11.7L13.5 9.5V12.5H2.5ZM2.5 9.5H5.8L6.6 11H9.4L10.2 9.5H13.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>"#);
 icon_body!(CALENDAR, "calendar", r#"<rect x="2.5" y="3.5" width="11" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 6.5H13.5M5.5 2V4.5M10.5 2V4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 icon_body!(GEAR, "gear", r#"<circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 2V3.6M8 12.4V14M2 8H3.6M12.4 8H14M3.8 3.8L4.9 4.9M11.1 11.1L12.2 12.2M3.8 12.2L4.9 11.1M11.1 4.9L12.2 3.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 icon_body!(MORE, "more", r#"<circle cx="3.5" cy="8" r="1.1" fill="currentColor"/><circle cx="8" cy="8" r="1.1" fill="currentColor"/><circle cx="12.5" cy="8" r="1.1" fill="currentColor"/>"#);
@@ -108,6 +109,18 @@ pub fn ring_arc(fraction: f32) -> &'static Icon {
     icon
 }
 
+/// Every icon of the set, for a name a plugin gives (`icon = "inbox"`): the name without the `neko-` prefix.
+static ALL: &[&Icon] = &[
+    &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND, &COLLAPSE, &CANVAS, &DIFF,
+    &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CHECKLIST, &INFO, &CROSS, &DOT, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO,
+    &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &PENCIL, &TRASH, &LOCK, &KEY,
+];
+
+/// The icon named `name` (`"inbox"`, `"clock"`, ...), or none: a plugin that names an icon the set does not have gets the dot.
+pub fn by_name(name: &str) -> Option<&'static Icon> {
+    ALL.iter().copied().find(|i| i.name.strip_prefix("neko-") == Some(name))
+}
+
 /// The ring's 2 px track: a full circle (drawn at the foreground's 12%).
 pub static RING_TRACK: Icon = Icon { name: "neko-ring-track", view: 16.0, body: r#"<circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="2"/>"# };
 /// The indeterminate ring's arc: a quarter turn, rotated by the loop.
@@ -122,12 +135,26 @@ mod tests {
         let src = include_str!("icons.rs");
         let declared = src.lines().filter(|l| l.starts_with("icon_body!(")).count();
         let icons = vec![
-            &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND,
+            &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND,
             &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO, &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &CHECKLIST, &INFO, &PENCIL, &TRASH, &KEY, &LOCK,
         ];
         // The two filled ones (MORE's dots count as line icons here: they carry no stroke) are `icon_body!` lines too.
         assert_eq!(icons.len() + 1, declared, "a declared icon is missing from this list (the dot is the +1)");
         icons
+    }
+
+    #[test]
+    fn a_plugin_names_an_icon_by_its_short_name_and_an_unknown_name_is_none() {
+        let src = include_str!("icons.rs");
+        let declared = src.lines().filter(|l| l.starts_with("icon_body!(")).count();
+        assert_eq!(ALL.len(), declared, "every declared icon is in the table a plugin picks from");
+        assert_eq!(by_name("inbox").map(|i| i.name), Some("neko-inbox"));
+        assert_eq!(by_name("clock").map(|i| i.name), Some("neko-clock"));
+        assert!(by_name("neko-inbox").is_none() && by_name("nope").is_none() && by_name("").is_none());
+        let mut names: Vec<&str> = ALL.iter().map(|i| i.name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), ALL.len(), "no icon is listed twice");
     }
 
     #[test]

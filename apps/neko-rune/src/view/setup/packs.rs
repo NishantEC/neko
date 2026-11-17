@@ -271,12 +271,20 @@ fn detail(s: &App, t: &Neko, layer: &mut Vec<El>, p: &InstalledPack) -> Page {
     }
     if !c.luau.is_empty() {
         any = true;
-        contents = contents.child(content_row(t, "pack-c-luau", "Luau files", &format!("{} (stored; nothing runs them yet)", c.luau.join(", ")), None));
+        contents = contents.child(content_row(t, "pack-c-luau", "Native panels", &c.luau.join(", "), None));
     }
     if !any {
         contents = contents.child(kit::words(t, "pack-no-contents", "It adds nothing."));
     }
     body = body.child(contents);
+    // Each Luau file: running (a mint check) or stopped (a coral cross) and why.
+    if !c.luau.is_empty() {
+        body = body.child(kit::heading(t, "pack-luau-head", "Native panels", Some(c.luau.len()), false));
+        body = body.child(match super::super::luau::pack_files(s, t, &name) {
+            Some(rows) => rows,
+            None => kit::words(t, "pack-luau-none", "Not asked for yet."),
+        });
+    }
     // Requirements.
     if !p.info.requirements.is_empty() {
         body = body.child(kit::heading(t, "pack-requirements-head", "Requirements", Some(p.info.requirements.len()), false));

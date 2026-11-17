@@ -17,6 +17,7 @@
 //! fake server in `link/unix.rs`.
 
 pub mod http;
+pub mod luau;
 mod extra;
 mod model;
 mod pages;

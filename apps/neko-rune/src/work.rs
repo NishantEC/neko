@@ -719,6 +719,10 @@ impl App {
 
     /// What a daemon answer does to the state. True when something on screen changed.
     pub fn apply_reply(&mut self, call: &Call, reply: Reply) -> bool {
+        // A pack was installed, updated, approved or removed: its panels are asked for again at the next tick.
+        if matches!(reply, Reply::Packs(_)) {
+            self.luau.resync();
+        }
         // The pages' own answers (routines, calendar, phone, quota, plugins, the model catalog).
         let mut page_changed = self.apply_page_reply(call, &reply);
         // Whatever the answer, the write is no longer in flight.

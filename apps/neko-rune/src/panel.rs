@@ -831,7 +831,7 @@ impl App {
             self.call(Call::SignedWebUrl { route });
         }
         // A plugin's page keeps the view as long as it is open, even with the context panel closed.
-        let panel_open = self.layout.context.is_open() || self.plugin_view.is_some();
+        let panel_open = self.layout.context.is_open() || self.plugin_view.as_ref().is_some_and(|p| !crate::luau::is_luau_page(p));
         let existed = self.web_view.exists();
         self.web_view.tick(t, panel_open);
         // What the view says (a download finished) is a toast of the window's.

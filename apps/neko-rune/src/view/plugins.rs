@@ -176,6 +176,10 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         }
     }
     body = body.child(list);
+    // The native plugins (Luau) that installed packs ship, with their status.
+    if let Some(native) = super::luau::plugins_group(s, t) {
+        body = body.child(native);
+    }
     if let Some(note) = &ui.note {
         body = body.child(text(note.clone()).key("plugins-note").font(t.ty.meta).color(t.meaning.amber).wrap().px(6.0).live_region(rune::LiveRegion::Polite));
     }

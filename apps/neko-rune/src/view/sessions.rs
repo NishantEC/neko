@@ -425,9 +425,12 @@ fn footer(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         }));
     }
     // The pages plugins registered (plugin slot b), under their own heading.
-    if let Some(pages) = s.plugin_pages.as_ref().filter(|p| !p.is_empty()) {
+    // The web's pages first, then the native views (Luau) that installed packs ship.
+    let mut pages: Vec<neko_protocol::PluginPage> = s.plugin_pages.clone().unwrap_or_default();
+    pages.extend(s.luau.views().iter().filter_map(|p| p.page()));
+    if !pages.is_empty() {
         menu = menu.separator().group_label("Plugin pages");
-        for page in pages {
+        for page in &pages {
             let open = page.clone();
             menu = menu.item(MenuItem::new(page.title.clone()).icon(&icons::WRENCH).checked(s.plugin_view.as_ref().is_some_and(|p| p.id == page.id)).on_select(move |s: &mut App| {
                 s.more_open = false;

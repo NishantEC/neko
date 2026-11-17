@@ -272,6 +272,7 @@ fn pack_info(name: &str, title: &str, version: &str, description: &str) -> PackI
         plugin: None,
         routine_texts: Vec::new(),
         skills_hash: String::new(),
+        luau_hash: String::new(),
     }
 }
 

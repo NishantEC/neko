@@ -28,6 +28,9 @@ path = "src/main.rs"
 [dependencies]
 rune = { git = "https://github.com/anomalyco/rune", rev = "bc05f817ed19488a10a6f1a928cc0521c1c70c75", features = ["tooling"] }
 rune-kit = { git = "https://github.com/anomalyco/rune", rev = "bc05f817ed19488a10a6f1a928cc0521c1c70c75", features = ["markdown"] }
+# Native plugins (docs/knowledge/luau-plugins.md): Luau in a sandbox (250 ms an entry, 64 MB, no io/os/net). `serde` is `Data::to_json`.
+# Its Luau VM is `mlua` (MIT) with Luau (MIT), built from C++ by `cargo`; no other crate comes with it.
+rune-luau = { git = "https://github.com/anomalyco/rune", rev = "bc05f817ed19488a10a6f1a928cc0521c1c70c75", features = ["serde"] }
 # The wire types and framing, shared with the daemon: the only thing this client knows of it.
 neko-protocol = { path = "../../crates/neko-protocol" }
 # Fuzzy matching for the ⌘K palette (docs/research/reuse-for-rune-2026-11.md: MIT).

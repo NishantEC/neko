@@ -46,7 +46,7 @@ pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     } else if s.home_shown() {
         super::home::home(s, t, layer)
     } else if let Some(page) = s.plugin_view.as_ref() {
-        plugin_page(s, page, t)
+        if crate::luau::is_luau_page(page) { super::luau::page(s, t, page) } else { plugin_page(s, page, t) }
     } else if let Some(view) = s.view {
         full_view(s, view, t, layer, frame)
     } else {

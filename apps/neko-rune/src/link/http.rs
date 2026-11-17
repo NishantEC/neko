@@ -245,6 +245,40 @@ impl Http {
 
     /// `POST /api/plugins/<id>/enable` or `/disable` (the web's Plugins page switch).
     pub fn set_plugin_enabled(&self, id: &str, enabled: bool) -> Result<(), HttpError> {
+        self.set_plugin_switch(id, enabled)
+    }
+
+    /// `GET /api/storage/<namespace>/<key>`: one stored value (the daemon's plugin storage, as `host.storage.get` in the web UI).
+    /// A key never set is JSON `null`, as there.
+    pub fn storage_get(&self, namespace: &str, key: &str) -> Result<serde_json::Value, HttpError> {
+        let reply = self.send("GET", &format!("/api/storage/{}/{}", percent_encode(namespace), percent_encode(key)), &[], &[])?;
+        if reply.status != 200 {
+            return Err(HttpError(format!("Couldn’t read that from storage ({}).", reply.status)));
+        }
+        serde_json::from_slice(&reply.body).map_err(|_| HttpError("The stored value wasn’t readable.".into()))
+    }
+
+    /// `PUT /api/storage/<namespace>/<key>` with a JSON body.
+    pub fn storage_set(&self, namespace: &str, key: &str, json: &str) -> Result<(), HttpError> {
+        let reply = self.send("PUT", &format!("/api/storage/{}/{}", percent_encode(namespace), percent_encode(key)), &[("Content-Type", "application/json".into())], json.as_bytes())?;
+        match reply.status {
+            200 => Ok(()),
+            413 => Err(HttpError("That value is too big to store.".into())),
+            other => Err(HttpError(format!("Couldn’t store that ({other})."))),
+        }
+    }
+
+    /// `GET /api/storage/<namespace>`: the keys with their sizes in bytes.
+    pub fn storage_list(&self, namespace: &str) -> Result<Vec<(String, u64)>, HttpError> {
+        let reply = self.send("GET", &format!("/api/storage/{}", percent_encode(namespace)), &[], &[])?;
+        if reply.status != 200 {
+            return Err(HttpError(format!("Couldn’t list what is stored ({}).", reply.status)));
+        }
+        let json: serde_json::Value = serde_json::from_slice(&reply.body).map_err(|_| HttpError("The list wasn’t readable.".into()))?;
+        Ok(json["keys"].as_array().map(|keys| keys.iter().filter_map(|k| Some((k["key"].as_str()?.to_owned(), k["size"].as_u64().unwrap_or(0)))).collect()).unwrap_or_default())
+    }
+
+    fn set_plugin_switch(&self, id: &str, enabled: bool) -> Result<(), HttpError> {
         let target = format!("/api/plugins/{}/{}", percent_encode(id), if enabled { "enable" } else { "disable" });
         let reply = self.send("POST", &target, &[], &[])?;
         if reply.status == 200 { Ok(()) } else { Err(HttpError(format!("The daemon refused ({}).", reply.status))) }

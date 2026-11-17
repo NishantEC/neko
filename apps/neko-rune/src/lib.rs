@@ -22,6 +22,7 @@ pub mod extra;
 pub mod groups;
 pub mod icons;
 pub mod lab;
+pub mod luau;
 pub mod motion;
 pub mod layout;
 pub mod link;
@@ -43,6 +44,7 @@ pub mod runtime_pick;
 pub mod scenes_batch_a;
 pub mod scenes_batch_b;
 pub mod scenes_batch_d;
+pub mod scenes_luau;
 pub mod scenes_pages;
 pub mod scenes_setup;
 pub mod scenes_panel;
@@ -193,7 +195,7 @@ fn init() -> App {
         // The last run's widths (read once, before the first frame); the window then keeps them.
         let saved = app::load_layout();
         let layout = saved.map(layout::Layout::restored).unwrap_or_default();
-        App { pending_route: FIRST_ROUTE.with(|r| r.borrow_mut().take()), linked: !has("nolink"), dock: dock::set_badge, workspace_scope: app::load_scope(), all: all_sessions::AllState { layout: app::load_all_layout().unwrap_or_default(), ..Default::default() }, layout, layout_written: saved, layout_seen: saved, persist_layout: true, web_view: web_panel::WebHost::windowed(), ..App::default() }
+        App { pending_route: FIRST_ROUTE.with(|r| r.borrow_mut().take()), linked: !has("nolink"), dock: dock::set_badge, workspace_scope: app::load_scope(), all: all_sessions::AllState { layout: app::load_all_layout().unwrap_or_default(), ..Default::default() }, layout, layout_written: saved, layout_seen: saved, persist_layout: true, web_view: web_panel::WebHost::windowed(), luau: luau::Luau { persist: true, hidden: App::luau_load_hidden(), ..Default::default() }, ..App::default() }
     }
 }
 
@@ -311,11 +313,18 @@ pub fn run() {
             let toast = s.tick_toast(t, tx);
             s.tick_compose(t, tx);
             s.tick_dock();
+            // Luau plugins: asks for the packs' panels when due, runs what is due in each, applies what they asked of the window.
+            let luau = s.luau_tick(t, tx);
             // Tell the daemon what is on screen (at most every two seconds); ask to be woken for a change that has to wait.
             if let Some(wait) = s.tick_report(s.window_size.get()) {
                 tx.wake_after(std::time::Duration::from_millis(wait.max(50) as u64));
             }
-            moved || panel || toast
+            moved || panel || toast || luau
+        }),
+        // The waker finished reads and storage calls of a Luau plugin ask a frame with.
+        setup: Some(|s: &mut App, waker: rune::Waker| {
+            luau::nodes::set_waker(waker.clone());
+            s.luau.waker = Some(waker);
         }),
         ..rune::AppSpec::new("Neko (Rune)", (1360.0, 840.0), init, view::view)
     };

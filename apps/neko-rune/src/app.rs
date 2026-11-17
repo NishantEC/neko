@@ -238,6 +238,8 @@ pub struct App {
     pub onboarding: crate::onboarding::Onboarding,
     /// Plugins as full management (`plugin_manage.rs`).
     pub plugin_ui: crate::plugin_manage::PluginUi,
+    /// Luau cards and views that installed packs ship (`src/luau/`).
+    pub luau: crate::luau::Luau,
     /// What this window tells the daemon about itself (`report.rs`).
     pub reporter: crate::report::Reporter,
     /// A route from `--open` that waits for the daemon's first answer (tasks are only known then).
@@ -257,6 +259,18 @@ pub fn load_layout() -> Option<Saved> {
 /// The workspace the window was scoped to the last run (None: all workspaces).
 pub fn load_scope() -> Option<String> {
     rune::prefs::Prefs::open(PREFS_ID).get::<Option<String>>(crate::scope::KEY).flatten()
+}
+
+/// The Luau cards the person hid (`<pack>/<card id>`), as the last run left them.
+pub fn load_luau_hidden() -> Vec<String> {
+    rune::prefs::Prefs::open(PREFS_ID).get::<Vec<String>>("luau-hidden").unwrap_or_default()
+}
+
+/// Writes the hidden cards on their own thread.
+pub fn write_luau_hidden(hidden: Vec<String>) {
+    let _ = std::thread::Builder::new().name("neko-luau-hidden".into()).spawn(move || {
+        let _ = rune::prefs::Prefs::open(PREFS_ID).set("luau-hidden", &hidden);
+    });
 }
 
 /// The layout All sessions had the last run (List, Board or Tree).
@@ -373,6 +387,7 @@ impl Default for App {
             extra: Default::default(),
             onboarding: Default::default(),
             plugin_ui: Default::default(),
+            luau: Default::default(),
             reporter: Default::default(),
             pending_route: None,
             window_size: Default::default(),
