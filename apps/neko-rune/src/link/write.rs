@@ -231,7 +231,7 @@ impl Call {
 
     /// Whether this only fetches.
     pub fn reads(&self) -> bool {
-        matches!(self, Call::Refresh | Call::Checkpoints { .. } | Call::CheckpointDiff { .. } | Call::TaskFolder { .. } | Call::ArtifactFile { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } | Call::SignedWebUrl { .. } | Call::PluginViewers | Call::PluginPages | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::ModelsRefresh | Call::RoutinesFull | Call::CalendarEvents { .. } | Call::PhoneSettings | Call::Appearance | Call::Quota | Call::Plugins)
+        matches!(self, Call::Refresh | Call::Checkpoints { .. } | Call::CheckpointDiff { .. } | Call::TaskFolder { .. } | Call::ArtifactFile { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } | Call::SignedWebUrl { .. } | Call::PluginViewers | Call::PluginPages | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::ModelsRefresh | Call::RoutinesFull | Call::CalendarEvents { .. } | Call::PhoneSettings | Call::Appearance | Call::Quota | Call::Plugins) || matches!(self, Call::Setup(a) if a.reads())
     }
 
     /// The request the daemon receives: the same JSON the web UI posts.

@@ -112,13 +112,24 @@ pub fn footer(buttons: Vec<El>) -> El {
 /// A modal dialog: its body scrolls when the window is short.
 #[allow(clippy::too_many_arguments)]
 pub fn dialog(t: &Neko, layer: &mut Vec<El>, key: &str, title: &str, description: Option<&str>, width: f32, win_h: f32, body: El) {
+    dialog_with_footer(t, layer, key, title, description, width, win_h, body, None);
+}
+
+/// A modal dialog whose buttons stay in view: the body scrolls and the footer (the buttons) sits below it, so a long preview never
+/// pushes the person's yes out of reach.
+#[allow(clippy::too_many_arguments)]
+pub fn dialog_with_footer(t: &Neko, layer: &mut Vec<El>, key: &str, title: &str, description: Option<&str>, width: f32, win_h: f32, body: El, foot: Option<El>) {
     // The description wraps inside the body (the kit's header line does not wrap a long one).
     let mut inner = col().w_full().gap(12.0);
     if let Some(desc) = description {
         inner = inner.child(text(desc.to_owned()).key(format!("{key}-description")).font(t.ty.meta).color(t.text.muted).wrap().min_w(0.0));
     }
     let scroll = col().key(format!("{key}-body")).w_full().max_h((win_h - 240.0).max(160.0)).scroll(rune::ScrollSpec { stick_bottom: false }).child(body);
-    let d = KitDialog::new(key.to_owned(), title.to_owned()).open(true).width(width).fit().child(col().w_full().px(16.0).pb(16.0).gap(12.0).child(inner.child(scroll))).on_close(|s: &mut App| s.close_dialog());
+    let mut inner = inner.child(scroll);
+    if let Some(foot) = foot {
+        inner = inner.child(foot);
+    }
+    let d = KitDialog::new(key.to_owned(), title.to_owned()).open(true).width(width).fit().child(col().w_full().px(16.0).pb(16.0).gap(12.0).child(inner)).on_close(|s: &mut App| s.close_dialog());
     d.build(&t.kit, layer);
 }
 

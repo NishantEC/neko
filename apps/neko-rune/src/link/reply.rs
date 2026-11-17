@@ -130,6 +130,10 @@ pub enum Reply {
     PhoneTest(Vec<String>),
     Quota(Vec<QuotaRow>),
     Plugins(Vec<neko_protocol::PluginHealth>),
+    /// The installed packs and the bundled catalog (the answer to every pack request but a preview).
+    Packs(neko_protocol::packs::PackListing),
+    /// What installing a source would add.
+    PackPreview(neko_protocol::packs::PackPreview),
     Answered(String),
     /// Done, and nothing to apply.
     Done,
@@ -259,6 +263,8 @@ pub fn make(socket: &Path, call: &Call, open: Option<&str>) -> Reply {
         Response::Appearance { mode, light, dark, .. } => Reply::Appearance(AppearanceChoice { mode, light, dark }),
         Response::Themes { dir, themes, problems } => Reply::Extra(Box::new(ExtraAnswer::Themes { dir, themes: themes.into_iter().map(|t| (t.id, t.file, t.theme)).collect(), problems: problems.into_iter().map(|p| (p.file, p.message)).collect() })),
         Response::PluginStatus { plugins } => Reply::Plugins(plugins),
+        Response::Packs(listing) => Reply::Packs(listing),
+        Response::PackPreview(preview) => Reply::PackPreview(preview),
         Response::SearchResults { items, .. } => Reply::Quota(quota_rows(&items)),
         Response::NeedsYouAnswered { summary } => Reply::Answered(summary),
         Response::Error { message } => Reply::Refused(message),

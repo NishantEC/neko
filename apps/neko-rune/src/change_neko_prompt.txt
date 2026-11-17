@@ -18,7 +18,7 @@ export default function register(host) {
   }
   host.registerPage({ id: "main", title: "Short title", icon: "Heart", component: Page });
 }
-- A new id is a page of its own in the sidebar group, marked "yours". A built-in's id (home, tasks, prs, tree, workspaces, watching, schedules, memory, profiles, tools, settings, usage) replaces it: registerPage({ id: "tasks", component }), or wraps it: registerPage({ id: "tasks", wrap: (Original) => function Wrapped(props) { return h(React.Fragment, null, h(Banner), h(Original, props)); } }). It shows as Customised and can be reset to the original.
+- A new id is a page of its own in the sidebar group, marked "yours". A built-in's id (home, tasks, prs, tree, workspaces, watching, schedules, memory, packs, profiles, tools, settings, usage) replaces it: registerPage({ id: "tasks", component }), or wraps it: registerPage({ id: "tasks", wrap: (Original) => function Wrapped(props) { return h(React.Fragment, null, h(Banner), h(Original, props)); } }). It shows as Customised and can be reset to the original.
 - host.storage.get(key, fallback) / set / delete / list keep JSON on the daemon; use it, not localStorage. host.addSection({ id, title, component }) adds to Settings; host.addTab({ id, title, component }) adds a task tab (it gets { task }); host.registerCommands([{ id, title, run }]) adds to the command palette; host.navigation.navigate(route); host.request(...) talks to the daemon, the same JSON the app sends; call no other site.
 - Styles: CSS in {{CSS_PATH}} applies live. Restyle with the app's variables (--background, --foreground, --primary, --card, --border, --radius), not new colours.
 

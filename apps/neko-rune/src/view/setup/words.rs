@@ -488,6 +488,44 @@ pub fn diff_line(line: &str) -> DiffLine {
     }
 }
 
+// ---- packs
+
+/// The glyph a pack's status takes: Healthy a mint check, NeedsSetup an amber half-filled circle, Failing a coral cross.
+pub fn pack_glyph(status: neko_protocol::packs::PackStatus) -> StatusKind {
+    use neko_protocol::packs::PackStatus;
+    match status {
+        PackStatus::Healthy => StatusKind::Done,
+        // Nothing runs until the person reviews a changed pack: amber, as a pack that needs setup, with its own words.
+        PackStatus::NeedsSetup | PackStatus::Changed => StatusKind::InProgress,
+        PackStatus::Failing => StatusKind::Failed,
+    }
+}
+
+pub fn pack_status_label(status: neko_protocol::packs::PackStatus) -> &'static str {
+    use neko_protocol::packs::PackStatus;
+    match status {
+        PackStatus::Healthy => "Healthy",
+        PackStatus::NeedsSetup => "Needs setup",
+        PackStatus::Failing => "Failing",
+        PackStatus::Changed => "Changed on disk",
+    }
+}
+
+/// Where a pack came from, short, as the web's `shortSource`: `catalog` for a bundled one, otherwise the folder or address, the end of
+/// it (which names it) when longer than 48.
+pub fn pack_source_label(source: &str) -> String {
+    if source.starts_with("catalog:") {
+        return "catalog".to_owned();
+    }
+    let n = source.chars().count();
+    if n <= 48 { source.to_owned() } else { format!("…{}", source.chars().skip(n - 47).collect::<String>()) }
+}
+
+/// The id of a pack's plugin: the last part of its folder (`/api/plugins/<id>/enable`).
+pub fn plugin_id_of(dir: &str) -> Option<String> {
+    dir.trim_end_matches('/').rsplit('/').next().filter(|n| !n.is_empty()).map(str::to_owned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -620,5 +658,19 @@ mod tests {
         assert_eq!(diff_line("--- a/x"), DiffLine::Hunk);
         assert_eq!(diff_line(" same"), DiffLine::Context);
         assert_eq!(phrases(" a, b ,, c"), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn a_pack_has_its_glyph_words_and_a_short_source() {
+        use neko_protocol::packs::PackStatus;
+        assert_eq!((pack_glyph(PackStatus::Healthy), pack_glyph(PackStatus::NeedsSetup), pack_glyph(PackStatus::Failing)), (StatusKind::Done, StatusKind::InProgress, StatusKind::Failed));
+        assert_eq!(pack_status_label(PackStatus::NeedsSetup), "Needs setup");
+        assert_eq!(pack_source_label("catalog:demo"), "catalog");
+        assert_eq!(pack_source_label("https://git.example.com/team/demo-pack.git"), "https://git.example.com/team/demo-pack.git");
+        let long = pack_source_label("/Users/someone/projects/a/very/long/folder/name/for/a/pack/that/keeps/going");
+        assert!(long.starts_with('…') && long.chars().count() == 48 && long.ends_with("a/pack/that/keeps/going"), "{long}");
+        assert_eq!(pack_status_label(PackStatus::Changed), "Changed on disk");
+        assert_eq!(pack_glyph(PackStatus::Changed), StatusKind::InProgress);
+        assert_eq!(plugin_id_of("/data/plugins/demo-board/").as_deref(), Some("demo-board"));
     }
 }

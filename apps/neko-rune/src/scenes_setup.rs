@@ -6,13 +6,14 @@
 use neko_protocol::agent_profiles::{AgentProfile, AgentProfiles, ProfileReadGrant, WorkspaceAssignment};
 use neko_protocol::decision_context::{DecisionRecord, PreferenceApplicability, PreferenceState, WorkingPreference};
 use neko_protocol::mcp_host::{McpConnection, McpTool, Responsibility, ServerConfig, SourceLink, ToolGrant};
+use neko_protocol::packs::{CatalogEntry, InstalledPack, PackContents, PackHealth, PackInfo, PackListing, PackPreview, PackOrphan, PackRequirement, PackStatus, PluginPower, RoutineText};
 use neko_protocol::scheduled_plans::Schedule;
 use neko_protocol::setup_import::{ImportCandidate, ImportCandidateKind};
 use neko_protocol::skills::{CuratedSkill, Curation, CuratorApplied, EnabledSkill, Skill, SkillPatch, SkillProposal, SkillState};
 use neko_protocol::workbench::{MemoryEntry, MemoryKind, MemoryOptions, MemoryProposal, Workspace};
 
 use crate::app::{App, DEMO_NOW};
-use crate::link::SetupData;
+use crate::link::{SetupAction, SetupData};
 use crate::view::setup::{AddTab, SetupSection};
 use crate::views::FullView;
 
@@ -249,4 +250,139 @@ pub fn confirm(s: &mut App) {
 pub fn counted(s: &mut App) {
     base(s, SetupSection::Tools);
     s.view = Some(FullView::Setup);
+}
+
+// ---- packs (made-up: nothing here names a real tool or person)
+
+fn pack_info(name: &str, title: &str, version: &str, description: &str) -> PackInfo {
+    PackInfo {
+        name: name.into(),
+        title: title.into(),
+        version: version.into(),
+        description: description.into(),
+        homepage: format!("https://packs.example.com/{name}"),
+        licence: "MIT".into(),
+        permissions: vec!["Reads the notes folder you point it at".into(), "Starts the tool server on this Mac".into()],
+        requirements: vec![PackRequirement { name: "demo-cli".into(), hint: "brew install demo-cli".into(), found: true, path: Some("/usr/local/bin/demo-cli".into()) }],
+        env: Vec::new(),
+        contents: PackContents { connections: vec!["Demo notes".into()], skills: vec!["demo-summary".into()], plugin: None, routines: vec!["Demo digest".into()], luau: Vec::new() },
+        health_command: vec!["demo-cli".into(), "--check".into()],
+        runs: vec!["demo-cli serve --stdio".into(), "demo-cli --check".into()],
+        warnings: Vec::new(),
+        plugin: None,
+        routine_texts: Vec::new(),
+        skills_hash: String::new(),
+    }
+}
+
+fn installed_pack(info: PackInfo, source: &str, status: PackStatus, update: Option<&str>, health: Option<(bool, &str)>) -> InstalledPack {
+    InstalledPack {
+        info,
+        source: source.into(),
+        status,
+        installed_ms: DEMO_NOW - 3 * DAY,
+        approved_ms: DEMO_NOW - 3 * DAY,
+        approved_digest: "d-approved".into(),
+        health: health.map(|(ok, output)| PackHealth { ok, at_ms: DEMO_NOW - 20 * MIN, output: output.into() }),
+        connection_ids: vec!["c1".into()],
+        skill_paths: Vec::new(),
+        plugin_dir: None,
+        plugin_disabled: false,
+        routine_ids: Vec::new(),
+        update_available: update.map(str::to_owned),
+        orphans: Vec::new(),
+    }
+}
+
+pub fn demo_packs() -> PackListing {
+    let mut needs = pack_info("demo-board", "Demo board", "0.3.0", "Shows a board of cards from a folder of notes.");
+    needs.requirements = vec![PackRequirement { name: "demo-cli".into(), hint: "brew install demo-cli".into(), found: false, path: None }, PackRequirement { name: "demo-sync".into(), hint: "npm install --global demo-sync".into(), found: true, path: Some("/usr/local/bin/demo-sync".into()) }];
+    needs.contents = PackContents { connections: vec!["Demo board".into()], skills: vec![], plugin: Some("demo-board".into()), routines: vec![], luau: vec!["layout.luau".into()] };
+    let mut failing = pack_info("demo-feed", "Demo feed", "2.0.1", "Reads a feed and files what is new.");
+    failing.contents.plugin = None;
+    let notes = pack_info("demo-notes", "Demo notes", "1.2.0", "Keeps short notes next to your tasks.");
+    let mut sketch = installed_pack(pack_info("demo-sketch", "Demo sketch", "0.9.0", "A small drawing page."), "/work/packs/demo-sketch", PackStatus::Changed, None, None);
+    sketch.plugin_dir = Some("/data/plugins/demo-sketch".into());
+    sketch.plugin_disabled = true;
+    sketch.orphans = vec![PackOrphan { target: "/data/skills/old-sketch".into(), reason: "A folder from the last update could not be deleted.".into() }];
+    PackListing {
+        installed: vec![
+            installed_pack(notes, "catalog:demo-notes", PackStatus::Healthy, Some("1.3.0"), Some((true, "demo-cli 1.2.0\nall checks passed"))),
+            installed_pack(needs, "/work/packs/demo-board", PackStatus::NeedsSetup, None, Some((false, "demo-cli: command not found"))),
+            installed_pack(failing, "https://git.example.com/team/demo-feed.git", PackStatus::Failing, None, Some((false, "The feed answered 503 twice.\nTry again in a few minutes."))),
+            sketch,
+        ],
+        catalog: vec![
+            CatalogEntry { info: pack_info("demo-notes", "Demo notes", "1.3.0", "Keeps short notes next to your tasks."), source: "catalog:demo-notes".into(), installed: true },
+            CatalogEntry { info: pack_info("demo-clock", "Demo clock", "0.1.0", "Adds a world clock tool."), source: "catalog:demo-clock".into(), installed: false },
+        ],
+    }
+}
+
+/// A preview for a pack that asks for one value.
+pub fn demo_preview() -> PackPreview {
+    let mut info = pack_info("demo-clock", "Demo clock", "0.1.0", "Adds a world clock tool.");
+    info.env = vec!["DEMO_CLOCK_KEY".into()];
+    info.requirements = vec![PackRequirement { name: "demo-cli".into(), hint: "brew install demo-cli".into(), found: false, path: None }];
+    info.warnings = vec!["Runs a script interpreter: bash".into(), "Runs inside Neko with access to Neko's own API".into()];
+    info.plugin = Some(PluginPower { title: "Demo clock".into(), pages: vec!["Clocks".into()], viewers: vec![], fences: vec!["clock".into()], prompt: "When asked for the time somewhere, use the clock tool.".into(), hash: "ph".into() });
+    info.routine_texts = vec![RoutineText { name: "Demo digest".into(), instruction: "Tell me the time in three cities.".into(), cadence: "Daily 09:00".into() }];
+    PackPreview { info, source: "catalog:demo-clock".into(), installed_version: None, digest: "digest-clock-1".into(), changes: Vec::new(), needs_approval: false }
+}
+
+/// The preview of an update whose power changed.
+pub fn demo_update_preview() -> PackPreview {
+    let mut info = pack_info("demo-notes", "Demo notes", "1.3.0", "Keeps short notes next to your tasks.");
+    info.warnings = vec!["Runs a script interpreter: bash".into()];
+    PackPreview { info, source: "catalog:demo-notes".into(), installed_version: Some("1.2.0".into()), digest: "digest-notes-2".into(), changes: vec!["Its tool server now runs: bash -c demo-cli serve".into()], needs_approval: true }
+}
+
+fn packs_base(s: &mut App) {
+    base(s, SetupSection::Packs);
+    s.setup.packs = Some(demo_packs());
+}
+
+pub fn packs(s: &mut App) {
+    packs_base(s);
+}
+
+pub fn packs_empty(s: &mut App) {
+    base(s, SetupSection::Packs);
+    s.setup.packs = Some(PackListing::default());
+}
+
+pub fn pack_detail(s: &mut App) {
+    packs_base(s);
+    s.open_pack("demo-board");
+}
+
+pub fn pack_add(s: &mut App) {
+    packs_base(s);
+    s.open_pack_dialog();
+    s.outbox.clear();
+}
+
+pub fn pack_preview(s: &mut App) {
+    packs_base(s);
+    s.open_pack_dialog();
+    s.outbox.clear();
+    s.setup.dialog = Some(crate::view::setup::Dialog::Pack { tab: crate::view::setup::PackTab::Catalog, preview: Some(Box::new(demo_preview())), intent: crate::view::setup::PackIntent::Install });
+}
+
+pub fn pack_update(s: &mut App) {
+    packs_base(s);
+    s.update_pack("demo-notes");
+    let call = SetupAction::PackPreview { source: "catalog:demo-notes".into() };
+    s.pack_previewed(&call, demo_update_preview());
+    s.outbox.clear();
+}
+
+pub fn pack_changed(s: &mut App) {
+    packs_base(s);
+    s.open_pack("demo-sketch");
+}
+
+pub fn pack_remove(s: &mut App) {
+    packs_base(s);
+    s.confirm_remove_pack("demo-feed");
 }

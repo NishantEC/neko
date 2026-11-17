@@ -1,4 +1,4 @@
-//! The Setup pages' data and requests (Workspaces, Watching, Tools, Skills, Memory, Profiles,
+//! The Setup pages' data and requests (Packs, Workspaces, Watching, Tools, Skills, Memory, Profiles,
 //! Schedules). [`SetupData`] is what the client keeps of the workbench for them; [`SetupAction`] is one
 //! request each of the web UI's setup pages sends (`pages/setup/*.tsx`), with the same fields, so a
 //! click here and a click there do the same thing. The daemon stays the only writer: every request
@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use neko_protocol::agent_profiles::{AgentProfile, AgentProfiles, ProfileCommand};
 use neko_protocol::decision_context::{DecisionContextCommand, DecisionRecord, PreferenceApplicability, PreferenceState, WorkingPreference};
 use neko_protocol::mcp_host::{McpCommand, McpConnection, Responsibility, ServerConfig, ToolGrant};
+use neko_protocol::packs::PackCommand;
 use neko_protocol::scheduled_plans::{Schedule, ScheduleCommand};
 use neko_protocol::setup_import::{ImportCandidate, ImportCandidateKind, ImportCommand};
 use neko_protocol::skills::{SkillCommand, SkillState};
@@ -171,6 +172,24 @@ pub enum SetupAction {
     ScheduleEnabled { id: String, enabled: bool },
     RemoveSchedule { id: String },
     RunSchedule { id: String },
+    // Packs. Their answers are the pack listing and a preview, not the workbench (`Reply::Packs`, `Reply::PackPreview`).
+    /// The installed packs and the bundled catalog.
+    PackList,
+    /// What installing a source (a folder, a repository URL or `catalog:<name>`) would add. Changes nothing.
+    PackPreview { source: String },
+    /// Installs it: pressing Install is the person's approval of what the preview showed, so the preview's `digest` goes with it (the
+    /// daemon recomputes it and refuses a mismatch). `env` are the typed values of the names the pack asks for (they go to the
+    /// Keychain; never printed).
+    PackInstall { source: String, digest: String, env: BTreeMap<String, Hidden> },
+    /// Removes the pack and everything it owns. Only built inside `state.rs`'s `confirm_remove_pack`.
+    PackRemove { name: String },
+    /// The newer version, with the digest of the preview the person saw (always sent; the daemon requires it when the power changed).
+    PackUpdate { name: String, digest: Option<String> },
+    PackHealth { name: String },
+    /// After "Changed on disk": approves exactly the installed copy the person reviewed.
+    PackApprove { name: String, digest: String },
+    /// Deletes what a failed update or removal left behind.
+    PackCleanUp { name: String },
 }
 
 impl SetupAction {
@@ -193,6 +212,9 @@ impl SetupAction {
             AssignProfile { profile_id, .. } => row(profile_id),
             ActivateProfile { id } | ScheduleEnabled { id, .. } | RemoveSchedule { id } | RunSchedule { id } => row(id),
             ReadGrant { reader, .. } => row(reader),
+            PackRemove { name } | PackHealth { name } | PackCleanUp { name } | PackUpdate { name, digest: None } => format!("setup:pack:{name}"),
+            PackPreview { .. } | PackInstall { .. } | PackApprove { .. } | PackUpdate { digest: Some(_), .. } => "setup:form".to_owned(),
+            PackList => "setup:page".to_owned(),
             SaveWorkspace { .. } | AddConnection { .. } | SaveWatch(_) | SaveMemory(_) | SavePreference { .. } | SaveProfile(_) | SaveSchedule(_) => "setup:form".to_owned(),
             Discover { .. } | AskIn { .. } | SkillsRefresh | SkillPreview { .. } | SkillCurator { .. } | SetMemoryOptions(_) => "setup:page".to_owned(),
         }
@@ -253,7 +275,20 @@ impl SetupAction {
             ScheduleEnabled { id, enabled } => schedules(ScheduleCommand::SetEnabled { id, enabled }),
             RemoveSchedule { id } => schedules(ScheduleCommand::Remove { id }),
             RunSchedule { id } => schedules(ScheduleCommand::RunNow { id }),
+            PackList => Request::Packs(PackCommand::List),
+            PackPreview { source } => Request::Packs(PackCommand::Preview { source }),
+            PackInstall { source, digest, env } => Request::Packs(PackCommand::Install { source, digest, env: env.into_iter().map(|(name, value)| (name, Secret(value.0))).collect() }),
+            PackRemove { name } => Request::Packs(PackCommand::Remove { name }),
+            PackUpdate { name, digest } => Request::Packs(PackCommand::Update { name, digest }),
+            PackHealth { name } => Request::Packs(PackCommand::Health { name }),
+            PackApprove { name, digest } => Request::Packs(PackCommand::Approve { name, digest }),
+            PackCleanUp { name } => Request::Packs(PackCommand::CleanUp { name }),
         }
+    }
+
+    /// Whether this only fetches (a refusal of it stays quiet while the page has older data).
+    pub fn reads(&self) -> bool {
+        matches!(self, SetupAction::PackList)
     }
 }
 
@@ -300,6 +335,33 @@ mod tests {
     fn a_schedule_command_names_its_variant() {
         assert_eq!(json(&SetupAction::RunSchedule { id: "s".into() })["Workbench"]["Schedules"]["RunNow"]["id"], "s");
         assert_eq!(json(&SetupAction::ScheduleEnabled { id: "s".into(), enabled: true })["Workbench"]["Schedules"]["SetEnabled"]["enabled"], true);
+    }
+
+    #[test]
+    fn the_pack_requests_are_the_protocols_with_the_install_approved() {
+        assert_eq!(json(&SetupAction::PackList), serde_json::json!({"Packs": "List"}));
+        assert_eq!(json(&SetupAction::PackPreview { source: "/p/demo".into() }), serde_json::json!({"Packs": {"Preview": {"source": "/p/demo"}}}));
+        let env: BTreeMap<String, Hidden> = [("DEMO_TOKEN".to_owned(), Hidden("s3cret".into()))].into_iter().collect();
+        let install = SetupAction::PackInstall { source: "catalog:demo".into(), digest: "d1".into(), env };
+        assert_eq!(json(&install), serde_json::json!({"Packs": {"Install": {"source": "catalog:demo", "digest": "d1", "env": {"DEMO_TOKEN": "s3cret"}}}}));
+        assert!(!format!("{install:?}").contains("s3cret"), "a typed value is never printed");
+        assert_eq!(json(&SetupAction::PackRemove { name: "demo".into() }), serde_json::json!({"Packs": {"Remove": {"name": "demo"}}}));
+        assert_eq!(json(&SetupAction::PackUpdate { name: "demo".into(), digest: Some("d2".into()) }), serde_json::json!({"Packs": {"Update": {"name": "demo", "digest": "d2"}}}));
+        assert_eq!(json(&SetupAction::PackApprove { name: "demo".into(), digest: "d3".into() }), serde_json::json!({"Packs": {"Approve": {"name": "demo", "digest": "d3"}}}));
+        assert_eq!(json(&SetupAction::PackCleanUp { name: "demo".into() }), serde_json::json!({"Packs": {"CleanUp": {"name": "demo"}}}));
+        assert_eq!(json(&SetupAction::PackHealth { name: "demo".into() }), serde_json::json!({"Packs": {"Health": {"name": "demo"}}}));
+        assert!(SetupAction::PackList.reads() && !SetupAction::PackRemove { name: "demo".into() }.reads());
+    }
+
+    #[test]
+    fn a_pack_refusal_lands_on_its_row_or_its_form() {
+        assert_eq!(SetupAction::PackHealth { name: "demo".into() }.key(), "setup:pack:demo");
+        assert_eq!(SetupAction::PackInstall { source: "x".into(), digest: "d".into(), env: BTreeMap::new() }.key(), "setup:form");
+        assert_eq!(SetupAction::PackUpdate { name: "demo".into(), digest: Some("d".into()) }.key(), "setup:form");
+        assert_eq!(SetupAction::PackApprove { name: "demo".into(), digest: "d".into() }.key(), "setup:form");
+        assert_eq!(SetupAction::PackCleanUp { name: "demo".into() }.key(), "setup:pack:demo");
+        assert_eq!(SetupAction::PackPreview { source: "x".into() }.key(), "setup:form");
+        assert_eq!(SetupAction::PackList.key(), "setup:page");
     }
 
     #[test]

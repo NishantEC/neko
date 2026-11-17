@@ -48,7 +48,7 @@ fn bare(code: &str, needle: &str) -> usize {
         .count()
 }
 
-const PREFIXES: [&str; 11] = ["Request::", "Command::", "CrewCommand::", "CheckpointCommand::", "GoalCommand::", "McpCommand::", "SkillCommand::", "ProfileCommand::", "ScheduleCommand::", "ImportCommand::", "DecisionContextCommand::"];
+const PREFIXES: [&str; 12] = ["Request::", "Command::", "CrewCommand::", "CheckpointCommand::", "GoalCommand::", "McpCommand::", "SkillCommand::", "ProfileCommand::", "ScheduleCommand::", "ImportCommand::", "DecisionContextCommand::", "PackCommand::"];
 
 /// Every `Prefix::Name` the code names, as the daemon's request paths.
 fn named(code: &str) -> BTreeSet<String> {
@@ -150,7 +150,7 @@ const ENVELOPES: &[&str] = &["Workbench", "Crew", "Goals", "Checkpoints"];
 
 /// The sub-commands carried inside an envelope: checked by their name appearing in the web's sources.
 /// The Setup pages' sub-commands (`mcp("Wake", ...)`, `skillsCmd("Refresh")`, `schedulesCmd("Save", ...)` in `web/src/setup/lib.ts`) are carried the same way.
-const SUBCOMMAND_PREFIXES: [&str; 9] = ["CrewCommand", "GoalCommand", "CheckpointCommand", "McpCommand", "SkillCommand", "ProfileCommand", "ScheduleCommand", "ImportCommand", "DecisionContextCommand"];
+const SUBCOMMAND_PREFIXES: [&str; 10] = ["CrewCommand", "GoalCommand", "CheckpointCommand", "McpCommand", "SkillCommand", "ProfileCommand", "ScheduleCommand", "ImportCommand", "DecisionContextCommand", "PackCommand"];
 
 /// Requests that destroy, publish or restart something, with the `Call` that carries each. A `Call` is only built
 /// inside a `confirm(` (see `destructive_requests_are_only_sent_from_a_confirm_dialog`).
@@ -281,12 +281,35 @@ fn rune_sends_only_what_the_web_sends_and_its_extras() {
     for full in sent() {
         let (prefix, tail) = full.split_once("::").unwrap();
         assert!(!NEVER.contains(&tail), "{full} is for agents, never for this client");
-        let known = web.contains(tail) || RUNE_EXTRAS.contains(&tail) || ENVELOPES.contains(&tail) || (SUBCOMMAND_PREFIXES.contains(&prefix) && web_mentions(tail));
+        let known = web.contains(tail)
+            || RUNE_EXTRAS.contains(&tail)
+            || ENVELOPES.contains(&tail)
+            || (SUBCOMMAND_PREFIXES.contains(&prefix) && web_mentions(tail));
         if !known {
             unreviewed.push(full.clone());
         }
     }
     assert!(unreviewed.is_empty(), "requests Rune sends that the web UI does not (send what the web sends, or give the extra a reason in RUNE_EXTRAS): {unreviewed:?}");
+}
+
+#[test]
+fn the_packs_requests_are_exactly_the_protocols() {
+    // Rune names every `PackCommand` the protocol has and `Request::Packs`, and nothing else of that family.
+    let used = sent();
+    let packs: BTreeSet<&str> = used.iter().filter_map(|s| s.strip_prefix("PackCommand::")).collect();
+    let protocol = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/neko-protocol/src/packs.rs")).unwrap();
+    let enum_text = protocol.split("pub enum PackCommand {").nth(1).unwrap().split("\n}\n").next().unwrap();
+    let variants: BTreeSet<&str> = enum_text.lines().filter(|l| l.starts_with("    ") && !l.starts_with("     ") && !l.trim_start().starts_with("//")).filter_map(|l| l.trim().split(|c: char| !c.is_alphanumeric()).next()).filter(|v| v.chars().next().is_some_and(char::is_uppercase)).collect();
+    assert!(variants.len() >= 8, "{variants:?}");
+    assert_eq!(packs, variants);
+    assert!(used.contains("Request::Packs"));
+    // The one destructive pack request is built only in a confirmation (`state.rs`'s `confirm_remove_pack`): see
+    // `setup_destroying_requests_are_only_sent_from_a_confirmation`. The wire name never leaves `link/`.
+    for (path, text) in crate_sources() {
+        if !path.components().any(|c| c.as_os_str() == "link") {
+            assert!(!production(&text).contains("PackCommand"), "{} names `PackCommand`: pack requests belong in src/link/", path.display());
+        }
+    }
 }
 
 #[test]
@@ -334,7 +357,7 @@ fn destructive_requests_are_only_sent_from_a_confirm_dialog() {
 fn setup_destroying_requests_are_only_sent_from_a_confirmation() {
     // A delete, a forget, a dismissed suggestion and a pause that revokes grants are built in `state.rs`'s `confirm_*`
     // functions (the coral button's dialog) and nowhere else: no view file builds one for a button to send directly.
-    let destroying = ["SetupAction::RemoveWatch", "SetupAction::RemoveSchedule", "SetupAction::ForgetMemory", "SetupAction::ForgetPreference"];
+    let destroying = ["SetupAction::RemoveWatch", "SetupAction::RemoveSchedule", "SetupAction::ForgetMemory", "SetupAction::ForgetPreference", "SetupAction::PackRemove"];
     let mut built_in_state = 0;
     for (path, text) in crate_sources() {
         let name = path.to_string_lossy().into_owned();
@@ -351,7 +374,7 @@ fn setup_destroying_requests_are_only_sent_from_a_confirmation() {
             }
         }
     }
-    assert!(built_in_state >= 4, "the confirmations build the destroying requests ({built_in_state})");
+    assert!(built_in_state >= 5, "the confirmations build the destroying requests ({built_in_state})");
 }
 
 

@@ -166,6 +166,10 @@ impl App {
                 match result {
                     Ok(()) => {
                         self.plugin_ui.note = None;
+                        // A pack's plugin is switched here too: its detail shows the new state.
+                        if self.setup.packs.is_some() && self.view == Some(crate::views::FullView::Setup) {
+                            self.packs_refresh();
+                        }
                         if removed && self.plugin_ui.detail.as_deref() == Some(id.as_str()) {
                             self.plugin_details_close();
                         }

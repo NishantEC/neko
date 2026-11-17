@@ -9,6 +9,7 @@ use std::collections::HashSet;
 
 use neko_protocol::agent_profiles::AgentProfile;
 use neko_protocol::mcp_host::{Responsibility, ServerConfig};
+use neko_protocol::packs::{PackListing, PackPreview};
 use neko_protocol::scheduled_plans::Schedule;
 use neko_protocol::workbench::{MemoryEntry, MemoryKind, MemoryOptions, Workspace};
 
@@ -19,6 +20,7 @@ use crate::views::FullView;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SetupSection {
+    Packs,
     Workspaces,
     Watching,
     Tools,
@@ -30,10 +32,11 @@ pub enum SetupSection {
 
 impl SetupSection {
     /// The rail's order.
-    pub const ALL: [SetupSection; 7] = [SetupSection::Workspaces, SetupSection::Watching, SetupSection::Tools, SetupSection::Skills, SetupSection::Memory, SetupSection::Profiles, SetupSection::Schedules];
+    pub const ALL: [SetupSection; 8] = [SetupSection::Packs, SetupSection::Workspaces, SetupSection::Watching, SetupSection::Tools, SetupSection::Skills, SetupSection::Memory, SetupSection::Profiles, SetupSection::Schedules];
 
     pub fn title(self) -> &'static str {
         match self {
+            SetupSection::Packs => "Packs",
             SetupSection::Workspaces => "Workspaces",
             SetupSection::Watching => "Watching",
             SetupSection::Tools => "Tools",
@@ -46,6 +49,7 @@ impl SetupSection {
 
     pub fn key(self) -> &'static str {
         match self {
+            SetupSection::Packs => "packs",
             SetupSection::Workspaces => "workspaces",
             SetupSection::Watching => "watching",
             SetupSection::Tools => "tools",
@@ -78,6 +82,22 @@ pub enum AddTab {
     Manual,
 }
 
+/// The two ways to add a pack.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PackTab {
+    Catalog,
+    Source,
+}
+
+/// What the pack dialog's preview step ends in: a new install, an update of an installed pack, or the person's review of a
+/// pack that changed on disk.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PackIntent {
+    Install,
+    Update { name: String },
+    Review { name: String },
+}
+
 /// A confirmation: what is about to happen, the button that does it (coral when it destroys something).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Confirm {
@@ -103,6 +123,10 @@ pub enum Dialog {
     Memory { id: Option<String>, kind: MemoryKind, workspace: String },
     Preference { id: Option<String>, workspace: String },
     Correct { record_id: String, workspace_id: String, version: u32 },
+    /// Add a pack: choose from the bundled catalog or type a folder or repository address (fields `pack:source`), then
+    /// the preview of what it would add (the person's approval is the Install button; its environment values are the
+    /// masked fields `pack:env:<NAME>`).
+    Pack { tab: PackTab, preview: Option<Box<PackPreview>>, intent: PackIntent },
     Confirm(Confirm),
 }
 
@@ -143,6 +167,13 @@ pub struct SetupState {
     pub audit_opened: HashSet<String>,
     /// Which watch groups show their paused watches.
     pub dismissed_reply: bool,
+    /// The installed packs and the bundled catalog as the daemon last said (None until it answers). Not in the workbench:
+    /// asked for on open, after each action and slowly.
+    pub packs: Option<PackListing>,
+    /// The pack whose detail shows inside Packs, by name.
+    pub pack: Option<String>,
+    /// Packs a check or an update is running for (their buttons are off until it answers).
+    pub pack_busy: HashSet<String>,
 }
 
 impl Default for SetupState {
@@ -162,6 +193,9 @@ impl Default for SetupState {
             awaiting: None,
             audit_opened: HashSet::new(),
             dismissed_reply: false,
+            packs: None,
+            pack: None,
+            pack_busy: HashSet::new(),
         }
     }
 }
@@ -219,6 +253,9 @@ impl App {
         if self.setup.awaiting.as_ref() == Some(call) {
             self.setup.awaiting = None;
         }
+        if let SetupAction::PackHealth { name } | SetupAction::PackCleanUp { name } = call {
+            self.setup.pack_busy.remove(name);
+        }
     }
 
     // ---- sections and rows
@@ -228,6 +265,7 @@ impl App {
         self.setup.section = section;
         self.setup.dialog = None;
         self.setup.connection = None;
+        self.setup.pack = None;
         self.pages.open_select = None;
         self.pages.notes.retain(|k, _| !k.starts_with("setup:"));
         if self.view == Some(FullView::Setup) {
@@ -260,6 +298,7 @@ impl App {
         self.setup.awaiting = None;
         // A secret typed into a form does not outlive it.
         self.pages.set_field("conn:credentials", "");
+        self.pages.fields.retain(|key, _| !key.starts_with("pack:env:"));
         self.pages.open_select = None;
         self.pages.notes.remove("setup:form");
     }
@@ -300,6 +339,9 @@ impl App {
         }
         if matches!((&self.setup.dialog, call), (Some(Dialog::RenameWatch { .. }), SetupAction::RenameWatch { .. }) | (Some(Dialog::Correct { .. }), SetupAction::CorrectDecision { .. })) {
             self.close_dialog();
+            return;
+        }
+        if matches!(call, SetupAction::PackPreview { .. }) {
             return;
         }
         if call.key() == "setup:form" {
@@ -998,5 +1040,183 @@ impl App {
         if let Some(Dialog::Watch { prepare, .. }) = self.setup.dialog.as_mut() {
             *prepare = on;
         }
+    }
+}
+
+/// Packs: one installable bundle of tools, skills, a plugin and routines (`neko_protocol::packs`).
+impl App {
+    pub fn packs(&self) -> Option<&PackListing> {
+        self.setup.packs.as_ref()
+    }
+
+    /// Asks for the listing again (after opening the page or the dialog; the answer to every pack action carries it too).
+    pub fn packs_refresh(&mut self) {
+        self.setup_call(SetupAction::PackList);
+    }
+
+    pub fn open_pack(&mut self, name: &str) {
+        self.setup.pack = Some(name.to_owned());
+        self.pages.notes.retain(|k, _| !k.starts_with("setup:"));
+    }
+
+    pub fn close_pack(&mut self) {
+        self.setup.pack = None;
+    }
+
+    /// "Add pack": the dialog on its catalog tab.
+    pub fn open_pack_dialog(&mut self) {
+        self.seed_dialog("", "", "");
+        self.pages.set_field("pack:source", "");
+        self.setup.dialog = Some(Dialog::Pack { tab: PackTab::Catalog, preview: None, intent: PackIntent::Install });
+        // The catalog may have changed since the page was opened.
+        self.packs_refresh();
+    }
+
+    pub fn pack_dialog_tab(&mut self, to: PackTab) {
+        if let Some(Dialog::Pack { tab, .. }) = self.setup.dialog.as_mut() {
+            *tab = to;
+        }
+        self.pages.notes.remove("setup:form");
+    }
+
+    /// Looks at a source (a catalog entry's, or what was typed): the dialog moves to the preview when the daemon answers.
+    pub fn pack_preview(&mut self, source: &str) {
+        let source = source.trim().to_owned();
+        if source.is_empty() {
+            self.form_note("Enter a folder path or a repository address.");
+            return;
+        }
+        self.pages.notes.remove("setup:form");
+        self.setup_call_awaited(SetupAction::PackPreview { source });
+    }
+
+    /// Preview of what the field holds.
+    pub fn pack_preview_typed(&mut self) {
+        let typed = self.pages.text("pack:source").to_owned();
+        self.pack_preview(&typed);
+    }
+
+    /// Back from the preview to choosing.
+    pub fn pack_preview_back(&mut self) {
+        if self.setup.awaiting.is_some() {
+            return;
+        }
+        if let Some(Dialog::Pack { preview, .. }) = self.setup.dialog.as_mut() {
+            *preview = None;
+        }
+        self.pages.fields.retain(|key, _| !key.starts_with("pack:env:"));
+        self.pages.notes.remove("setup:form");
+    }
+
+    /// The preview step's button: Install, Update (or Approve and update) or Approve. It is the person's approval of exactly what
+    /// the preview showed, so the preview's digest goes with it. For an install, the typed values of the names the pack asks for go
+    /// too (a name left empty is not sent; the daemon says if the pack cannot go without it).
+    pub fn pack_confirm(&mut self) {
+        let Some(Dialog::Pack { preview: Some(preview), intent, .. }) = self.setup.dialog.clone() else { return };
+        self.pages.notes.remove("setup:form");
+        match intent {
+            PackIntent::Update { name } => return self.setup_call_awaited(SetupAction::PackUpdate { name, digest: Some(preview.digest) }),
+            PackIntent::Review { name } => return self.setup_call_awaited(SetupAction::PackApprove { name, digest: preview.digest }),
+            PackIntent::Install => {}
+        }
+        let env = preview
+            .info
+            .env
+            .iter()
+            .filter_map(|name| {
+                let value = self.pages.text(&format!("pack:env:{name}")).trim().to_owned();
+                (!value.is_empty()).then(|| (name.clone(), Hidden(value)))
+            })
+            .collect();
+        self.setup_call_awaited(SetupAction::PackInstall { source: preview.source, digest: preview.digest, env });
+    }
+
+    /// The daemon answered a preview: the dialog shows it, if this is still the request it waits on.
+    pub fn pack_previewed(&mut self, call: &SetupAction, preview: PackPreview) -> bool {
+        if self.setup.awaiting.as_ref() != Some(call) {
+            return false;
+        }
+        self.setup.awaiting = None;
+        self.pages.notes.remove("setup:form");
+        if matches!(self.setup.dialog, Some(Dialog::Pack { intent: PackIntent::Install, .. })) {
+            for name in &preview.info.env {
+                self.pages.set_field(&format!("pack:env:{name}"), "");
+            }
+        }
+        if let Some(Dialog::Pack { preview: shown, .. }) = self.setup.dialog.as_mut() {
+            *shown = Some(Box::new(preview));
+        }
+        true
+    }
+
+    /// The daemon answered with the listing (to a list, an install, a remove, an update or a health check).
+    pub fn packs_arrived(&mut self, call: &SetupAction, listing: PackListing) -> bool {
+        let changed = self.setup.packs.as_ref() != Some(&listing);
+        if let Some(open) = self.setup.pack.clone()
+            && !listing.installed.iter().any(|p| p.info.name == open)
+        {
+            self.setup.pack = None;
+        }
+        self.setup.packs = Some(listing);
+        if let SetupAction::PackHealth { name } | SetupAction::PackCleanUp { name } = call {
+            self.setup.pack_busy.remove(name);
+        }
+        self.pages.notes.remove(&call.key());
+        if !call.reads() {
+            self.setup_applied(call);
+        }
+        changed || !call.reads()
+    }
+
+    pub fn check_pack(&mut self, name: &str) {
+        if self.setup.pack_busy.insert(name.to_owned()) {
+            self.pages.notes.remove(&format!("setup:pack:{name}"));
+            self.setup_call(SetupAction::PackHealth { name: name.to_owned() });
+        }
+    }
+
+    /// Deletes what a failed update or removal left behind.
+    pub fn clean_up_pack(&mut self, name: &str) {
+        if self.setup.pack_busy.insert(name.to_owned()) {
+            self.pages.notes.remove(&format!("setup:pack:{name}"));
+            self.setup_call(SetupAction::PackCleanUp { name: name.to_owned() });
+        }
+    }
+
+    /// "Update to <version>": looks at the source's version first, then the dialog shows what changed and asks (a plain update, or
+    /// an approval when its power changed). Nothing is changed by looking.
+    pub fn update_pack(&mut self, name: &str) {
+        let Some(source) = self.packs().and_then(|l| l.installed.iter().find(|p| p.info.name == name)).map(|p| p.source.clone()) else { return };
+        self.pack_look(PackIntent::Update { name: name.to_owned() }, source);
+    }
+
+    /// "Review": the installed copy as it is on disk now, to approve exactly that.
+    pub fn review_pack(&mut self, name: &str) {
+        self.pack_look(PackIntent::Review { name: name.to_owned() }, format!("installed:{name}"));
+    }
+
+    fn pack_look(&mut self, intent: PackIntent, source: String) {
+        self.close_dialog();
+        self.seed_dialog("", "", "");
+        self.setup.dialog = Some(Dialog::Pack { tab: PackTab::Catalog, preview: None, intent });
+        self.setup_call_awaited(SetupAction::PackPreview { source });
+    }
+
+    /// The pack's plugin installs switched off: this switches it on or off through the Plugins page's own path, then the listing is read again.
+    pub fn pack_plugin_set(&mut self, name: &str, enabled: bool) {
+        let Some(id) = self.packs().and_then(|l| l.installed.iter().find(|p| p.info.name == name)).and_then(|p| p.plugin_dir.as_deref()).and_then(super::words::plugin_id_of) else { return };
+        self.plugin_set(&id, enabled);
+    }
+
+    /// Removing a pack takes out everything it added: it asks first, and nothing is sent before the yes.
+    pub fn confirm_remove_pack(&mut self, name: &str) {
+        let Some(pack) = self.packs().and_then(|l| l.installed.iter().find(|p| p.info.name == name)).cloned() else { return };
+        self.setup.dialog = Some(Dialog::Confirm(Confirm {
+            title: format!("Remove “{}”?", pack.info.title),
+            description: "Its connections, skills, plugin and routines are removed. A copy is kept in the cleanup archive.".to_owned(),
+            button: "Remove pack".to_owned(),
+            coral: true,
+            calls: vec![SetupAction::PackRemove { name: pack.info.name }],
+        }));
     }
 }

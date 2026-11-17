@@ -18,7 +18,7 @@
 // (conversation pieces). See docs/design/one-registry.md.
 import type { ComponentType } from "react";
 import { Brain, Gauge } from "@phosphor-icons/react";
-import { Clock, Eye, Gear, GitPullRequest, House, ListChecks, Palette, SlidersHorizontal, Stack, TreeStructure, Tray, Users, Wrench, type Icon } from "@/ui/icons";
+import { Clock, Cube, Eye, Gear, GitPullRequest, House, ListChecks, Palette, SlidersHorizontal, Stack, TreeStructure, Tray, Users, Wrench, type Icon } from "@/ui/icons";
 import { HOME } from "@/router";
 import { builtinHost } from "@/host";
 import { registerBuiltinViewers } from "@/canvas/builtin-viewers";
@@ -49,6 +49,7 @@ page({ id: "workspaces", title: "Workspaces", icon: Stack, keywords: ["folders",
 page({ id: "watching", title: "Watching", icon: Eye, keywords: ["watches", "responsibilities", "sources", "sentry", "linear"], group: "main", load: () => import("@/pages/setup/Watching") });
 page({ id: "schedules", title: "Schedules", icon: Clock, keywords: ["recurring", "brief", "cron", "routine"], group: "main", load: () => import("@/pages/setup/Schedules") });
 page({ id: "memory", title: "Memory", icon: Brain, keywords: ["remember", "working style", "guidance", "context"], group: "main", load: () => import("@/pages/setup/Memory") });
+page({ id: "packs", title: "Packs", icon: Cube, keywords: ["install", "bundle", "tools", "skills", "plugin", "routines", "add", "catalog"], group: "main", load: () => import("@/pages/setup/Packs") });
 page({ id: "profiles", title: "Profiles", icon: Users, keywords: ["agent profiles", "persona", "instructions"], group: "main", load: () => import("@/pages/setup/Profiles") });
 page({ id: "tools", title: "Tools & skills", icon: Wrench, keywords: ["mcp", "connections", "servers", "skills", "integrations"], group: "main", load: () => import("@/pages/setup/Tools") });
 page({ id: "settings", title: "Settings", icon: Gear, keywords: ["preferences", "rulebook", "runtime", "model", "budget", "permissions", "diagnostics", "about"], group: "system", load: () => import("@/pages/setup/Settings") });

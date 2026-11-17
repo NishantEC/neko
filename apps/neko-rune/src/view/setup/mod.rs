@@ -1,5 +1,5 @@
 //! Setup: one full view with a section rail at the left (200 wide, the same component as Settings' rail) in
-//! this order: Workspaces, Watching, Tools, Skills, Memory, Profiles, Schedules. Each section is the web's
+//! this order: Packs, Workspaces, Watching, Tools, Skills, Memory, Profiles, Schedules. Each section is the web's
 //! page of the same name made native (`web/src/pages/setup/*`): the same requests and the same states,
 //! on Rune's page conventions (a 20 point header with a count, an 880 column, 32 point rows whose actions
 //! show on hover and are all in the right-click menu, one quiet line and one action for an empty list).
@@ -10,6 +10,8 @@
 mod dialogs;
 mod kit;
 mod memory;
+mod pack_dialog;
+mod packs;
 mod profiles;
 mod schedules;
 mod skills;
@@ -19,7 +21,7 @@ mod watching;
 mod workspaces;
 pub mod words;
 
-pub use state::{AddTab, Confirm, Dialog, Fetch, Registry, SetupSection, SetupState};
+pub use state::{AddTab, Confirm, Dialog, Fetch, PackIntent, PackTab, Registry, SetupSection, SetupState};
 
 use rune::{El, col, row, text};
 
@@ -53,6 +55,7 @@ pub fn attention(s: &App) -> usize {
 pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     let section = s.setup.section;
     let page = match section {
+        SetupSection::Packs => packs::view(s, t, layer),
         SetupSection::Workspaces => workspaces::view(s, t, layer),
         SetupSection::Watching => watching::view(s, t, layer),
         SetupSection::Tools => tools::view(s, t, layer),

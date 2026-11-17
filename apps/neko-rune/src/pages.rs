@@ -428,7 +428,14 @@ impl App {
         self.pages.asked_ms = self.now_ms;
         match view {
             // Setup's scope details (folders' servers, routines and standing orders) come with the Routines answer; the rest is in the workbench.
-            FullView::Routines | FullView::Setup => self.call(Call::RoutinesFull),
+            FullView::Routines => self.call(Call::RoutinesFull),
+            FullView::Setup => {
+                self.call(Call::RoutinesFull);
+                // Packs are not in the workbench: their listing is asked for here, on open, after each action and slowly.
+                if self.setup.section == crate::view::setup::SetupSection::Packs {
+                    self.setup_call(crate::link::SetupAction::PackList);
+                }
+            }
             FullView::Calendar => self.ask_calendar(),
             FullView::Usage => {
                 self.call(Call::RoutinesFull);
@@ -789,6 +796,14 @@ impl App {
                 self.pages.plugins = Some(list.clone());
                 Some(changed)
             }
+            Reply::Packs(listing) => match call {
+                Call::Setup(action) => Some(self.packs_arrived(action, listing.clone())),
+                _ => Some(false),
+            },
+            Reply::PackPreview(preview) => match call {
+                Call::Setup(action) => Some(self.pack_previewed(action, preview.clone())),
+                _ => Some(false),
+            },
             Reply::Models { catalog, .. } => {
                 let changed = self.pages.catalog.as_ref() != Some(&**catalog);
                 self.pages.catalog = Some((**catalog).clone());
@@ -827,6 +842,7 @@ impl App {
             Call::Appearance => self.pages.appearance.is_some(),
             Call::Quota => self.pages.quota.is_some(),
             Call::Plugins => self.pages.plugins.is_some(),
+            Call::Setup(action) if action.reads() => self.setup.packs.is_some(),
             _ => false,
         }
     }
