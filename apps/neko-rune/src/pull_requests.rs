@@ -77,7 +77,7 @@ impl App {
     /// The repositories the pull requests belong to, with whether merging without review is allowed in each: (path, name, on).
     pub fn pr_repositories(&self) -> Vec<(String, String, bool)> {
         let Some(summary) = self.summary.as_ref() else { return Vec::new() };
-        let mut paths: Vec<&str> = summary.pull_requests.iter().map(|r| r.repository_path.as_str()).filter(|p| !p.is_empty()).collect();
+        let mut paths: Vec<&str> = self.pr_rows().into_iter().map(|r| r.repository_path.as_str()).filter(|p| !p.is_empty()).collect();
         paths.sort_unstable();
         paths.dedup();
         paths.into_iter().map(|p| (p.to_owned(), crate::task_actions::repo_name(p), summary.merge_without_review.iter().any(|r| r == p))).collect()

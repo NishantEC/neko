@@ -100,8 +100,8 @@ fn card(s: &App, t: &Neko, task: &TaskRow, cursor_on: bool, layer: &mut Vec<El>)
         c = c.box_shadow(Shadow { spread: 2.0, color: t.meaning.iris, ..Default::default() });
     }
     if carrying {
-        c = c.cursor(match s.all.carry.as_ref().and_then(|carry| verdict(s, carry.over)) {
-            Some(Decision::Refuse(_)) => Cursor::NotAllowed,
+        c = c.cursor(match s.all.carry.as_ref().and_then(|carry| carry.over.and_then(|over| verdict(s, over))) {
+            Some(Decision::Refuse(_)) | None => Cursor::NotAllowed,
             _ => Cursor::Grabbing,
         });
     }
@@ -147,7 +147,7 @@ fn drop_slot(t: &Neko, words: &str, stage: Stage) -> El {
 fn column(s: &App, t: &Neko, stage: Stage, cursor_id: Option<&str>, layer: &mut Vec<El>) -> El {
     let tasks = s.board_column(stage);
     let decision = verdict(s, stage);
-    let over = s.all.carry.as_ref().is_some_and(|c| c.moved && c.over == stage);
+    let over = s.all.carry.as_ref().is_some_and(|c| c.moved && c.over == Some(stage));
     let mut cards = col().key(format!("board-cards-{}", stage.title())).w_full().gap(8.0).pb(16.0);
     for task in &tasks {
         cards = cards.child(card(s, t, task, cursor_id == Some(task.id.as_str()), layer));

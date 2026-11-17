@@ -264,6 +264,9 @@ pub struct ComposeUi {
     pub index: usize,
     /// The draft the person pressed Esc on: the popover stays shut until it changes.
     pub dismissed: Option<String>,
+    /// The same two for the session's reply box (its own, so Esc or an arrow in one box does not touch the other).
+    pub reply_index: usize,
+    pub reply_dismissed: Option<String>,
     /// Files the daemon found for `files_for`.
     pub files: Vec<MentionFile>,
     pub files_for: Option<String>,
@@ -289,6 +292,8 @@ impl Default for ComposeUi {
         ComposeUi {
             index: 0,
             dismissed: None,
+            reply_index: 0,
+            reply_dismissed: None,
             files: Vec::new(),
             files_for: None,
             files_loading: false,
@@ -493,7 +498,7 @@ impl App {
     /// (The web's task reply box has no `/` menu of its own; this is the list its Home composer has.)
     pub fn reply_rows(&self) -> Vec<MenuRow> {
         let text = self.composer.text.as_str();
-        if self.selected.is_none() || self.view.is_some() || self.compose.dismissed.as_deref() == Some(text) {
+        if self.selected.is_none() || self.view.is_some() || self.compose.reply_dismissed.as_deref() == Some(text) {
             return Vec::new();
         }
         slash_suggestions(text)
@@ -511,7 +516,7 @@ impl App {
                 self.run_session_slash(&command);
             }
         }
-        self.compose.index = 0;
+        self.compose.reply_index = 0;
     }
 
     /// Runs a command chosen in the session's reply box: the ask box's, except that the model is the session's own and Help
@@ -534,15 +539,20 @@ impl App {
         if rows.is_empty() {
             return false;
         }
-        let active = self.ask_active(rows.len()).unwrap_or(0);
+        let active = self.reply_active(rows.len());
         match ev.key {
-            Key::Down => self.compose.index = (active + 1) % rows.len(),
-            Key::Up => self.compose.index = (active + rows.len() - 1) % rows.len(),
+            Key::Down => self.compose.reply_index = (active + 1) % rows.len(),
+            Key::Up => self.compose.reply_index = (active + rows.len() - 1) % rows.len(),
             Key::Enter | Key::Tab => self.reply_apply(&rows[active]),
-            Key::Escape => self.compose.dismissed = Some(self.composer.text.clone()),
+            Key::Escape => self.compose.reply_dismissed = Some(self.composer.text.clone()),
             _ => return false,
         }
         true
+    }
+
+    /// The row of the session's popover the arrow keys are on.
+    pub fn reply_active(&self, rows: usize) -> usize {
+        self.compose.reply_index.min(rows.saturating_sub(1))
     }
 
     /// The row the arrow keys are on (None when the popover is shut).

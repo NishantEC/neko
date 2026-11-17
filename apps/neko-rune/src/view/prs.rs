@@ -5,7 +5,7 @@
 //! the row's actions replace the checks and age, and every one is in its right-click menu: the "Merge when ready" switch, Close…
 //! (a dialog with the reason and a coral button), Open on GitHub, Open its task.
 
-use rune::{Color, El, TextStyle, col, el, icon, row, text};
+use rune::{El, TextStyle, col, el, icon, row, text};
 use rune_kit::{Menu, MenuItem, Placement};
 
 use super::{icon_button, primary_button, quiet_button, ui};
@@ -227,6 +227,5 @@ pub fn page(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         }
     };
     let open = s.pr_rows().iter().filter(|r| !r.verdict.finished()).count();
-    let _ = Color::TRANSPARENT;
     ui::page(t, "prs", "Pull requests", Some(open), trailing, body)
 }

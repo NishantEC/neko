@@ -130,13 +130,13 @@ pub fn board(s: &mut App) {
 /// A stopped task carried over Running: the column lights up and says what the drop does (Start work).
 pub fn board_drag(s: &mut App) {
     all_sessions(s, Layout::Board);
-    s.all.carry = Some(Carry { id: "t5".into(), from: Stage::NeedsYou, over: Stage::Running, grab: (40.0, 18.0), at: (960.0, 250.0), moved: true });
+    s.all.carry = Some(Carry { id: "t5".into(), from: Stage::NeedsYou, over: Some(Stage::Running), grab: (40.0, 18.0), at: (960.0, 250.0), moved: true });
 }
 
 /// A running task carried over Needs you: the web does not allow it, so the column does not light up and the cursor says so.
 pub fn board_refused(s: &mut App) {
     all_sessions(s, Layout::Board);
-    s.all.carry = Some(Carry { id: "t6".into(), from: Stage::Running, over: Stage::NeedsYou, grab: (40.0, 18.0), at: (360.0, 330.0), moved: true });
+    s.all.carry = Some(Carry { id: "t6".into(), from: Stage::Running, over: Some(Stage::NeedsYou), grab: (40.0, 18.0), at: (360.0, 330.0), moved: true });
 }
 
 pub fn tree(s: &mut App) {

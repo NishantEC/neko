@@ -398,6 +398,7 @@ impl App {
             self.park_draft();
         }
         self.selected = Some(id.to_owned());
+        self.panel.log_all = false;
         self.view = None;
         self.plugin_view = None;
         self.notice = None;

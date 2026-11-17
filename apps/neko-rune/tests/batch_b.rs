@@ -185,7 +185,7 @@ fn a_refused_drag_sends_nothing_and_says_why_and_the_column_does_not_light_up() 
     let (x, y) = hold(&mut rt, "board-card-t6", -2.0 * 292.0);
     assert!(has_key(&rt, "board-ghost"));
     assert!(!has_key(&rt, "board-slot-Needs you"), "a refused column shows no drop slot");
-    assert!(rt.state.all.carry.as_ref().is_some_and(|c| c.over == neko_rune::all_sessions::Stage::NeedsYou));
+    assert!(rt.state.all.carry.as_ref().is_some_and(|c| c.over == Some(neko_rune::all_sessions::Stage::NeedsYou)));
     rt.pointer_up(x, y);
     settle(&mut rt);
     assert!(rt.state.outbox.is_empty(), "nothing is sent: {:?}", rt.state.outbox);
@@ -204,6 +204,31 @@ fn a_drag_that_is_cancelled_or_barely_moves_sends_nothing_and_a_click_opens_the_
     click(&mut rt, "board-card-t4");
     assert_eq!(rt.state.selected.as_deref(), Some("t4"));
     assert!(rt.state.outbox.iter().all(|c| c.reads()), "opening a session only reads: {:?}", rt.state.outbox);
+}
+
+#[test]
+fn a_drop_past_the_board_moves_nothing() {
+    let mut rt = runtime(board);
+    // A task ready for review carried off the right of the columns (onto the window's edge): no column, no request.
+    carry(&mut rt, "board-card-t3", 5.0 * 292.0);
+    assert!(rt.state.outbox.iter().all(|c| c.reads()) && rt.state.dialog.is_none(), "{:?}", rt.state.outbox);
+}
+
+#[test]
+fn the_two_slash_popovers_do_not_share_their_state() {
+    let mut rt = runtime(scene("bb-slash"));
+    // Neko's ask box holds a draft too: the box with the keyboard shows its popover, and Esc in it leaves the other alone.
+    rt.update(|s, _| {
+        s.ask.replace_text("/");
+        s.composer.focused = true;
+        s.ask.focused = false;
+    });
+    settle(&mut rt);
+    assert!(has_key(&rt, "reply-popover") && !has_key(&rt, "ask-popover"));
+    click(&mut rt, "composer-input");
+    press(&mut rt, Key::Escape);
+    assert!(!has_key(&rt, "reply-popover"));
+    assert!(rt.state.compose.dismissed.is_none(), "the ask box's popover was not dismissed");
 }
 
 #[test]
@@ -462,7 +487,7 @@ fn slash_in_the_session_composer_opens_the_webs_commands() {
     settle(&mut rt);
     click(&mut rt, "composer-input");
     press(&mut rt, Key::Down);
-    assert_eq!(rt.state.compose.index, 1);
+    assert_eq!(rt.state.compose.reply_index, 1);
     press(&mut rt, Key::Escape);
     assert!(!has_key(&rt, "reply-popover"));
 }

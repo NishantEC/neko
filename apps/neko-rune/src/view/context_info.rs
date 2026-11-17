@@ -147,11 +147,11 @@ fn risk_body(t: &Neko, d: &SupervisorDecision) -> El {
 }
 
 /// One linked row of Parallel work: a number, the title, the subtask's state, a chevron; pressing it opens that task.
-fn child_row(s: &App, t: &Neko, split: usize, i: usize, c: &ChildView) -> El {
+fn child_row(t: &Neko, split: usize, i: usize, c: &ChildView) -> El {
     let key = format!("split-{split}-{i}");
     let state = match &c.task {
         Some((_, status)) => crate::board::friendly_status(*status).to_owned(),
-        None => "Awaiting approval".to_owned(),
+        None => "Subtask not available in this snapshot".to_owned(),
     };
     let mut r = row().key(key.clone()).w_full().min_h(32.0).px(4.0).gap(8.0).center_y().radius(t.radius.row).child(text(format!("{}.", i + 1)).font(t.ty.id).color(t.text.faint).w(18.0).a11y_hidden()).child(text(c.title.clone()).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0).help(c.goal.clone()).a11y_hidden());
     r = r.child(text(state.clone()).font(t.ty.meta).color(t.text.muted).a11y_hidden());
@@ -162,11 +162,10 @@ fn child_row(s: &App, t: &Neko, split: usize, i: usize, c: &ChildView) -> El {
         }
         None => r = r.label(format!("{}, {state}", c.title)),
     }
-    let _ = s;
     r
 }
 
-fn parallel_body(s: &App, t: &Neko, d: &Detail) -> El {
+fn parallel_body(t: &Neko, d: &Detail) -> El {
     let mut c = col().key("parallel-body").w_full().gap(2.0);
     for (si, split) in d.splits.iter().enumerate() {
         let line = if split.approved {
@@ -176,7 +175,7 @@ fn parallel_body(s: &App, t: &Neko, d: &Detail) -> El {
         };
         c = c.child(words(t, format!("split-note-{si}"), line));
         for (i, child) in split.children.iter().enumerate() {
-            c = c.child(child_row(s, t, si, i, child));
+            c = c.child(child_row(t, si, i, child));
         }
     }
     if d.splits.is_empty() {
@@ -217,7 +216,7 @@ fn decisions_body(t: &Neko, d: &Detail) -> El {
 }
 
 /// The task's working folder written `~/…`, and the branch its work is on.
-fn copy_body(s: &App, t: &Neko, d: &Detail) -> El {
+fn copy_body(t: &Neko, d: &Detail) -> El {
     let task = &d.task;
     let home = std::env::var("HOME").unwrap_or_default();
     let mut c = col().key("copy-body").w_full().gap(2.0);
@@ -250,7 +249,6 @@ fn copy_body(s: &App, t: &Neko, d: &Detail) -> El {
         None if task.parked.is_none() => c = c.child(words(t, "copy-none".to_owned(), "No working copy yet.")),
         None => {}
     }
-    let _ = s;
     c
 }
 
@@ -337,12 +335,12 @@ pub fn details(s: &App, t: &Neko) -> El {
     }
     if d.can_split || !d.splits.is_empty() {
         let n = d.splits.iter().map(|x| x.children.len()).sum::<usize>();
-        c = c.child(section(s, t, Section::Parallel, Some(n).filter(|n| *n > 0).map(|n| (n.to_string(), t.text.faint)), || parallel_body(s, t, d)));
+        c = c.child(section(s, t, Section::Parallel, Some(n).filter(|n| *n > 0).map(|n| (n.to_string(), t.text.faint)), || parallel_body(t, d)));
     }
     if !d.decisions.is_empty() {
         c = c.child(section(s, t, Section::Decisions, Some((d.decisions.len().to_string(), t.text.faint)), || decisions_body(t, d)));
     }
-    c = c.child(section(s, t, Section::Copy, None, || copy_body(s, t, d)));
+    c = c.child(section(s, t, Section::Copy, None, || copy_body(t, d)));
     c = c.child(section(s, t, Section::Info, None, || info_body(s, t, d)));
     c = c.child(section(s, t, Section::Log, Some((d.task.events.len().to_string(), t.text.faint)), || log_body(s, t, d)));
     col().key("info").w_full().grow(1.0).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(c)

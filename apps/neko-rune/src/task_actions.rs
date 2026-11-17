@@ -182,6 +182,10 @@ impl App {
     }
 
     pub fn ask_yes(&mut self) {
+        // A dialog that asks for words does not say yes to none (the view keeps its button off; this is the rule).
+        if self.dialog.as_ref().is_some_and(|a| a.field.is_some()) && self.pages.text(ASK_FIELD).trim().is_empty() {
+            return;
+        }
         if let Some(ask) = self.dialog.take() {
             let mut call = ask.call;
             if ask.field.is_some() {
@@ -438,7 +442,7 @@ impl App {
 
     /// "Review pull requests": hands every open one back to its agent to re-check (the web's "Re-check all").
     pub fn ask_review_prs(&mut self) {
-        let n = self.summary.as_ref().map_or(0, |m| m.pull_requests.iter().filter(|r| matches!(r.verdict, crate::link::Verdict::Ready | crate::link::Verdict::Close)).count());
+        let n = self.pr_rows().iter().filter(|r| matches!(r.verdict, crate::link::Verdict::Ready | crate::link::Verdict::Close)).count();
         if n == 0 {
             self.show_toast("No open pull request to re-check.");
             return;

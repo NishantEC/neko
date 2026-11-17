@@ -26,20 +26,22 @@ fn glyph(kind: ItemKind, row: &MenuRow) -> &'static rune::Icon {
 
 /// The popover above the ask box, or above the session's reply box: at most 8 rows of 32 before it scrolls, the active one filled.
 pub fn mount_popover(s: &App, t: &Neko, layer: &mut Vec<El>) {
-    let ask = s.ask_rows();
-    if !(ask.is_empty() || !s.ask.focused && s.ask.text.is_empty()) {
-        return show_popover(s, t, layer, ask, false);
-    }
-    let reply = s.reply_rows();
-    if !(reply.is_empty() || !s.composer.focused && s.composer.text.is_empty()) {
+    // The box that has the keyboard shows its popover (the keys it handles are the ones it draws); a draft left in the other box
+    // keeps its own while that box is not focused, so a press on a row still lands.
+    let (ask, reply) = (s.ask_rows(), s.reply_rows());
+    let ask_shown = !(ask.is_empty() || !s.ask.focused && s.ask.text.is_empty());
+    let reply_shown = !(reply.is_empty() || !s.composer.focused && s.composer.text.is_empty());
+    if reply_shown && (s.composer.focused || !ask_shown) {
         show_popover(s, t, layer, reply, true);
+    } else if ask_shown {
+        show_popover(s, t, layer, ask, false);
     }
 }
 
 /// The popover's rows over `anchor`: `reply` is the session's, otherwise Neko's ask box's.
 fn show_popover(s: &App, t: &Neko, layer: &mut Vec<El>, rows: Vec<MenuRow>, reply: bool) {
     let (prefix, anchor) = if reply { ("reply", "composer-card") } else { ("ask", "ask-card") };
-    let active = s.ask_active(rows.len()).unwrap_or(0);
+    let active = if reply { s.reply_active(rows.len()) } else { s.ask_active(rows.len()).unwrap_or(0) };
     let mut list = col().key(format!("{prefix}-popover-list")).role("listbox").label("Suggestions").w_full().gap(0.0);
     for (i, r) in rows.iter().enumerate() {
         let on = i == active;

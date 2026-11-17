@@ -275,7 +275,7 @@ pub struct Carry {
     pub id: String,
     /// Where it was picked up, and where the pointer is now (the column under it).
     pub from: Stage,
-    pub over: Stage,
+    pub over: Option<Stage>,
     /// Where on the card it was taken, and where the pointer is in the window.
     pub grab: (f32, f32),
     pub at: (f32, f32),
@@ -312,12 +312,13 @@ impl App {
     }
 
     /// The column the pointer is over, from where the card was taken and how far the pointer has travelled.
-    pub fn column_under(&self, from: Stage, grab_x: f32, dx: f32) -> Stage {
+    /// None when the pointer is past the first or last column: a drop there is no drop (the web's "dropped outside a column").
+    pub fn column_under(&self, from: Stage, grab_x: f32, dx: f32) -> Option<Stage> {
         let stages = self.board_stages();
-        let Some(home) = stages.iter().position(|s| *s == from) else { return from };
+        let home = stages.iter().position(|s| *s == from)?;
         let at = ((grab_x + dx) / PITCH).floor() as i32;
-        let to = (home as i32 + at).clamp(0, stages.len() as i32 - 1) as usize;
-        stages[to]
+        let to = home as i32 + at;
+        (0..stages.len() as i32).contains(&to).then(|| stages[to as usize])
     }
 
     /// A card's pointer gesture (Rune's `on_drag`): Down picks it up, Move carries it, Up drops it unless it was cancelled.
@@ -326,7 +327,7 @@ impl App {
             Phase::Down => {
                 self.all.suppress_press = false;
                 let Some(from) = self.summary.as_ref().and_then(|m| m.task(id)).map(|t| Stage::of(t.status)) else { return };
-                self.all.carry = Some(Carry { id: id.to_owned(), from, over: from, grab, at: (window[0], window[1]), moved: false });
+                self.all.carry = Some(Carry { id: id.to_owned(), from, over: Some(from), grab, at: (window[0], window[1]), moved: false });
             }
             Phase::Move => {
                 let Some(mut carry) = self.all.carry.take() else { return };
@@ -346,8 +347,7 @@ impl App {
                 }
                 // The press that follows this release is the end of a carry, not a click.
                 self.all.suppress_press = true;
-                if !cancelled {
-                    let over = self.column_under(carry.from, grab.0, travel.0);
+                if !cancelled && let Some(over) = self.column_under(carry.from, grab.0, travel.0) {
                     self.board_drop(&carry.id, over);
                 }
             }
@@ -474,16 +474,24 @@ mod tests {
     fn the_column_under_the_pointer_follows_how_far_it_travelled() {
         let app = app();
         // Taken 40 in on a card of the Running column (third): 292 right is the next column.
-        assert_eq!(app.column_under(Stage::Running, 40.0, 0.0), Stage::Running);
-        assert_eq!(app.column_under(Stage::Running, 40.0, 292.0), Stage::UpNext);
-        assert_eq!(app.column_under(Stage::Running, 40.0, 292.0 * 2.0), Stage::Done);
-        assert_eq!(app.column_under(Stage::Running, 40.0, 5000.0), Stage::Done, "past the last column is the last column");
-        assert_eq!(app.column_under(Stage::Running, 40.0, -292.0 * 2.0), Stage::NeedsYou);
-        assert_eq!(app.column_under(Stage::Running, 40.0, -5000.0), Stage::NeedsYou);
+        assert_eq!(app.column_under(Stage::Running, 40.0, 0.0), Some(Stage::Running));
+        assert_eq!(app.column_under(Stage::Running, 40.0, 292.0), Some(Stage::UpNext));
+        assert_eq!(app.column_under(Stage::Running, 40.0, 292.0 * 2.0), Some(Stage::Done));
+        assert_eq!(app.column_under(Stage::Running, 40.0, 5000.0), None, "past the last column is no column");
+        assert_eq!(app.column_under(Stage::Running, 40.0, -292.0 * 2.0), Some(Stage::NeedsYou));
+        assert_eq!(app.column_under(Stage::Running, 40.0, -5000.0), None);
         // With a stage filter there is one column and nothing to move to.
         let mut app = app;
         app.all.stage = Some(Stage::Running);
-        assert_eq!(app.column_under(Stage::Running, 40.0, 292.0), Stage::Running);
+        assert_eq!(app.column_under(Stage::Running, 40.0, 292.0), None, "one column, nothing to move to");
+    }
+
+    #[test]
+    fn a_drop_past_the_board_sends_nothing() {
+        let mut app = app();
+        carry(&mut app, "rev", 5000.0, false);
+        carry(&mut app, "fail", -5000.0, false);
+        assert!(app.outbox.is_empty() && app.dialog.is_none(), "{:?}", app.outbox);
     }
 
     fn carry(app: &mut App, id: &str, dx: f32, cancelled: bool) {
