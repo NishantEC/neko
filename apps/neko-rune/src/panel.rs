@@ -43,17 +43,17 @@ pub enum Tab {
     Terminal,
     /// The plan as a checklist.
     Plan,
-    /// Where the session lives: workspace, branch, pull request, runtime, dates, the ticket.
-    Info,
+    /// The task's details, in sections: risk, parallel work, decisions, its working copy, info and the activity log.
+    Details,
 }
 
 impl Tab {
     /// In the order the segmented control shows them.
-    pub const ALL: [Tab; 6] = [Tab::Canvas, Tab::Diff, Tab::Files, Tab::Terminal, Tab::Plan, Tab::Info];
+    pub const ALL: [Tab; 6] = [Tab::Canvas, Tab::Diff, Tab::Files, Tab::Terminal, Tab::Plan, Tab::Details];
 
-    /// A tab the person asks for: it never opens the panel by itself (Info always has something to say).
+    /// A tab the person asks for: it never opens the panel by itself (Details always has something to say).
     pub fn on_request(self) -> bool {
-        matches!(self, Tab::Plan | Tab::Info)
+        matches!(self, Tab::Plan | Tab::Details)
     }
 
     pub fn title(self) -> &'static str {
@@ -63,8 +63,51 @@ impl Tab {
             Tab::Files => "Files",
             Tab::Terminal => "Terminal",
             Tab::Plan => "Plan",
-            Tab::Info => "Info",
+            Tab::Details => "Details",
         }
+    }
+}
+
+/// One collapsible section of the Details tab, in the order the tab shows them (the web's `Details` in `work/TaskDetail.tsx`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Section {
+    Risk,
+    Parallel,
+    Decisions,
+    Copy,
+    Info,
+    Log,
+}
+
+impl Section {
+    pub const ALL: [Section; 6] = [Section::Risk, Section::Parallel, Section::Decisions, Section::Copy, Section::Info, Section::Log];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Section::Risk => "Risk assessment",
+            Section::Parallel => "Parallel work",
+            Section::Decisions => "Decisions",
+            Section::Copy => "Working copy",
+            Section::Info => "Info",
+            Section::Log => "Activity log",
+        }
+    }
+
+    /// The part of an element key that names the section.
+    pub fn key(self) -> &'static str {
+        match self {
+            Section::Risk => "risk",
+            Section::Parallel => "parallel",
+            Section::Decisions => "decisions",
+            Section::Copy => "copy",
+            Section::Info => "info",
+            Section::Log => "log",
+        }
+    }
+
+    /// Open until the person folds it: all but the log, which is long.
+    pub fn default_open(self) -> bool {
+        self != Section::Log
     }
 }
 
@@ -244,6 +287,10 @@ pub struct Panel {
     pub folder_rev: HashMap<String, String>,
     /// The session whose folder is being listed now (there is one tree, for the session on screen).
     pub listing: Option<String>,
+    /// The Details tab's sections the person turned over from how they open by default.
+    pub toggled: HashSet<Section>,
+    /// The Activity log shows every event, not only the newest.
+    pub log_all: bool,
 }
 
 impl Panel {
@@ -255,6 +302,18 @@ impl Panel {
     pub fn new(data_dir: PathBuf) -> Panel {
         viewers::ensure_builtins();
         Panel { data_dir, files_tree: FileTree::new().build(Vec::<(&str, bool)>::new()), ..Panel::default() }
+    }
+
+    /// Whether a Details section is open now.
+    pub fn section_open(&self, section: Section) -> bool {
+        section.default_open() != self.toggled.contains(&section)
+    }
+
+    /// Folds or opens a Details section.
+    pub fn toggle_section(&mut self, section: Section) {
+        if !self.toggled.remove(&section) {
+            self.toggled.insert(section);
+        }
     }
 
     pub fn session(&self, id: &str) -> Option<&SessionPanel> {
@@ -327,12 +386,12 @@ impl App {
             if !crate::plan::steps(&d.task.plan, d.task.status).is_empty() {
                 tabs.push(Tab::Plan);
             }
-            tabs.push(Tab::Info);
+            tabs.push(Tab::Details);
         }
         tabs
     }
 
-    /// The tabs whose content opens the panel by itself: all but Plan and Info.
+    /// The tabs whose content opens the panel by itself: all but Plan and Details.
     pub fn panel_content_tabs(&self) -> Vec<Tab> {
         self.panel_tabs().into_iter().filter(|t| !t.on_request()).collect()
     }
@@ -458,7 +517,7 @@ impl App {
                 self.want_diff(&id, run);
                 // The Files tab marks changed files from the whole task's diff.
             }
-            Some(Tab::Canvas | Tab::Files | Tab::Terminal | Tab::Plan | Tab::Info) | None => {}
+            Some(Tab::Canvas | Tab::Files | Tab::Terminal | Tab::Plan | Tab::Details) | None => {}
         }
         // The Files tab marks what changed from the whole task's diff.
         if self.panel_tab() == Some(Tab::Files) && self.session_panel(&id).is_some_and(|p| matches!(&p.folder, Some(Some(_)))) && self.work.checkpoints.get(&id).is_some_and(|l| l.runs.iter().any(|r| r.files > 0)) {
@@ -877,8 +936,8 @@ mod tests {
         assert_eq!(first_tab(&[Files], false), Some(Files));
         assert_eq!(first_tab(&[Canvas], false), Some(Canvas), "an old artifact alone is still what there is");
         assert_eq!(first_tab(&[], true), None);
-        assert_eq!(Tab::ALL.map(Tab::title), ["Canvas", "Diff", "Files", "Terminal", "Plan", "Info"]);
-        assert_eq!(first_tab(&[Plan, Info], false), Some(Plan), "only when the person asked for the panel");
+        assert_eq!(Tab::ALL.map(Tab::title), ["Canvas", "Diff", "Files", "Terminal", "Plan", "Details"]);
+        assert_eq!(first_tab(&[Plan, Details], false), Some(Plan), "only when the person asked for the panel");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 //! The session-view parity pass (the owner's brief of 2026-11-16): the text column, the header, the goal line, the
-//! question card, hand-off lines, the one composer, the context panel's Plan and Info tabs, the terminal's headers,
+//! question card, hand-off lines, the one composer, the context panel's Plan and Details tabs, the terminal's headers,
 //! and the pages' parity changes. Real layout, read by geometry and text, headless.
 
 use neko_rune::app::App;
@@ -130,15 +130,15 @@ fn plan_prefixes_neko_s_words_with_the_web_s_instruction_and_ask_does_not() {
 #[test]
 fn the_panel_has_plan_and_info_after_terminal_and_they_never_open_it_by_themselves() {
     use neko_rune::panel::Tab;
-    // A session that has a plan in checklist form: Plan and Info follow Terminal.
+    // A session that has a plan in checklist form: Plan and Details follow Terminal.
     let mut rt = runtime(scene("running"));
     let tabs = rt.state.panel_tabs();
-    assert_eq!(tabs.last(), Some(&Tab::Info), "{tabs:?}");
+    assert_eq!(tabs.last(), Some(&Tab::Details), "{tabs:?}");
     let at = |t: Tab| tabs.iter().position(|x| *x == t);
     if let (Some(term), Some(plan)) = (at(Tab::Terminal), at(Tab::Plan)) {
-        assert!(term < plan && plan < at(Tab::Info).unwrap_or(0), "{tabs:?}");
+        assert!(term < plan && plan < at(Tab::Details).unwrap_or(0), "{tabs:?}");
     }
-    // Info alone does not open the panel: a session with nothing else to show keeps it closed.
+    // Details alone does not open the panel: a session with nothing else to show keeps it closed.
     let mut rt2 = runtime(scene("answer"));
     rt2.update(|s, _| {
         if let Some(d) = s.summary.as_mut().and_then(|m| m.detail.as_mut()) {
@@ -148,10 +148,10 @@ fn the_panel_has_plan_and_info_after_terminal_and_they_never_open_it_by_themselv
     });
     settle(&mut rt2);
     assert!(rt2.state.panel_content_tabs().is_empty(), "{:?}", rt2.state.panel_tabs());
-    assert!(!rt2.state.layout.context.is_open(), "Info is always there, so it must not open the panel");
-    // Asked for, Info lists the session's workspace, runtime and dates.
+    assert!(!rt2.state.layout.context.is_open(), "Details is always there, so it must not open the panel");
+    // Asked for, Details lists the session's workspace, runtime and dates.
     rt.update(|s, _| {
-        s.panel_choose_tab(Tab::Info);
+        s.panel_choose_tab(Tab::Details);
         s.panel_set_open(true);
     });
     settle(&mut rt);
