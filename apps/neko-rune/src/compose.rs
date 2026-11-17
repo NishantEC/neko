@@ -51,6 +51,9 @@ pub const SLASH_ENTRIES: [SlashEntry; 11] = [
 /// Commands whose argument is typed after the name: choosing one only fills it in.
 pub const TAKES_ARGUMENT: [&str; 2] = ["/remember", "/forget"];
 
+/// The commands that are about Neko's own conversation (Plan first, what it remembers): the session's reply box does not offer them.
+pub const NEKO_ONLY: [&str; 4] = ["/plan", "/remember", "/forget", "/recall"];
+
 /// Commands matching a partial "/re…" draft; empty once a space is typed.
 pub fn slash_suggestions(draft: &str) -> Vec<SlashEntry> {
     let text = draft.trim().to_lowercase();
@@ -483,6 +486,63 @@ impl App {
                 },
             })
             .collect()
+    }
+
+    /// The rows of the `/` popover above the session's reply box: the web's command list (`ChatInputSlash.ts`) without the ones
+    /// that are Neko's own conversation. Empty when it is shut, when no session is open, or after Esc until the draft changes.
+    /// (The web's task reply box has no `/` menu of its own; this is the list its Home composer has.)
+    pub fn reply_rows(&self) -> Vec<MenuRow> {
+        let text = self.composer.text.as_str();
+        if self.selected.is_none() || self.view.is_some() || self.compose.dismissed.as_deref() == Some(text) {
+            return Vec::new();
+        }
+        slash_suggestions(text)
+            .into_iter()
+            .filter(|e| !NEKO_ONLY.contains(&e.name))
+            .map(|e| MenuRow { id: e.name.to_owned(), kind: ItemKind::Command, title: e.name.to_owned(), detail: e.detail.to_owned(), shortcut: e.shortcut.map(str::to_owned), apply: Apply::Run(e.name.to_owned()) })
+            .collect()
+    }
+
+    /// Accepts a row of the session's popover: the command runs and the box is emptied.
+    pub fn reply_apply(&mut self, row: &MenuRow) {
+        if let Apply::Run(name) = &row.apply {
+            self.composer.clear();
+            if let Some(command) = parse_slash(name) {
+                self.run_session_slash(&command);
+            }
+        }
+        self.compose.index = 0;
+    }
+
+    /// Runs a command chosen in the session's reply box: the ask box's, except that the model is the session's own and Help
+    /// writes `/` into this box.
+    pub fn run_session_slash(&mut self, command: &Slash) {
+        match command {
+            Slash::Models => self.runtime_toggle(),
+            Slash::Help => self.composer.replace_text("/"),
+            other => self.run_slash(other),
+        }
+    }
+
+    /// The keys of the session's reply box that belong to its `/` popover: Up and Down choose, Return and Tab accept, Esc closes.
+    /// False when the key is the field's own (a Return then sends).
+    pub fn reply_key(&mut self, ev: &KeyEvent) -> bool {
+        if self.composer.is_composing() || ev.mods.cmd || ev.mods.ctrl || ev.mods.alt || ev.mods.shift {
+            return false;
+        }
+        let rows = self.reply_rows();
+        if rows.is_empty() {
+            return false;
+        }
+        let active = self.ask_active(rows.len()).unwrap_or(0);
+        match ev.key {
+            Key::Down => self.compose.index = (active + 1) % rows.len(),
+            Key::Up => self.compose.index = (active + rows.len() - 1) % rows.len(),
+            Key::Enter | Key::Tab => self.reply_apply(&rows[active]),
+            Key::Escape => self.compose.dismissed = Some(self.composer.text.clone()),
+            _ => return false,
+        }
+        true
     }
 
     /// The row the arrow keys are on (None when the popover is shut).

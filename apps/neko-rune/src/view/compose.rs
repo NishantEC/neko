@@ -24,19 +24,28 @@ fn glyph(kind: ItemKind, row: &MenuRow) -> &'static rune::Icon {
     }
 }
 
-/// The popover above the ask box: at most 8 rows of 32 before it scrolls, the active one filled.
+/// The popover above the ask box, or above the session's reply box: at most 8 rows of 32 before it scrolls, the active one filled.
 pub fn mount_popover(s: &App, t: &Neko, layer: &mut Vec<El>) {
-    let rows = s.ask_rows();
-    if rows.is_empty() || !s.ask.focused && s.ask.text.is_empty() {
-        return;
+    let ask = s.ask_rows();
+    if !(ask.is_empty() || !s.ask.focused && s.ask.text.is_empty()) {
+        return show_popover(s, t, layer, ask, false);
     }
+    let reply = s.reply_rows();
+    if !(reply.is_empty() || !s.composer.focused && s.composer.text.is_empty()) {
+        show_popover(s, t, layer, reply, true);
+    }
+}
+
+/// The popover's rows over `anchor`: `reply` is the session's, otherwise Neko's ask box's.
+fn show_popover(s: &App, t: &Neko, layer: &mut Vec<El>, rows: Vec<MenuRow>, reply: bool) {
+    let (prefix, anchor) = if reply { ("reply", "composer-card") } else { ("ask", "ask-card") };
     let active = s.ask_active(rows.len()).unwrap_or(0);
-    let mut list = col().key("ask-popover-list").role("listbox").label("Suggestions").w_full().gap(0.0);
+    let mut list = col().key(format!("{prefix}-popover-list")).role("listbox").label("Suggestions").w_full().gap(0.0);
     for (i, r) in rows.iter().enumerate() {
         let on = i == active;
         let pressed = r.clone();
         let mut line = row()
-            .key(format!("ask-pop-{i}"))
+            .key(format!("{prefix}-pop-{i}"))
             .role("option")
             .label(format!("{}, {}", r.title, r.detail))
             .checked(on)
@@ -48,7 +57,7 @@ pub fn mount_popover(s: &App, t: &Neko, layer: &mut Vec<El>) {
             .radius(t.radius.row)
             .fill(if on { t.surface.active } else { Color::TRANSPARENT })
             .hover(t.surface.hover)
-            .on_press(move |s: &mut App| s.ask_apply(&pressed))
+            .on_press(move |s: &mut App| if reply { s.reply_apply(&pressed) } else { s.ask_apply(&pressed) })
             .child(icon(glyph(r.kind, r), 16.0).color(t.text.muted).a11y_hidden())
             .child(text(r.title.clone()).font(TextStyle { weight: 500.0, ..t.ty.row }).color(t.text.base).truncate().max_w(150.0).a11y_hidden())
             .child(text(r.detail.clone()).font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden());
@@ -58,9 +67,9 @@ pub fn mount_popover(s: &App, t: &Neko, layer: &mut Vec<El>) {
         list = list.child(line);
     }
     let shown = rows.len().min(VISIBLE_ROWS) as f32;
-    let body = col().key("ask-popover-scroll").w_full().h(shown * ROW_H).max_h(VISIBLE_ROWS as f32 * ROW_H).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(list);
-    let surface = popover::raised(&t.kit, col().key("ask-popover").role("dialog").label("Commands and mentions").w(WIDTH).padding(4.0).child(body), t.kit.radius.md);
-    layer.push(popover::anchored(&t.kit, surface, "ask-card", Placement::TopStart, 8.0));
+    let body = col().key(format!("{prefix}-popover-scroll")).w_full().h(shown * ROW_H).max_h(VISIBLE_ROWS as f32 * ROW_H).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(list);
+    let surface = popover::raised(&t.kit, col().key(format!("{prefix}-popover")).role("dialog").label(if reply { "Commands" } else { "Commands and mentions" }).w(WIDTH).padding(4.0).child(body), t.kit.radius.md);
+    layer.push(popover::anchored(&t.kit, surface, anchor, Placement::TopStart, 8.0));
 }
 
 /// One queued message of Neko's chat: its words, and on hover Edit, Send now and Cancel. Edit turns the row into a field.
