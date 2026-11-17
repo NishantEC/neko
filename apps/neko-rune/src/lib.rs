@@ -34,6 +34,7 @@ pub mod readers;
 pub mod runtime_pick;
 pub mod scenes_batch_a;
 pub mod scenes_pages;
+pub mod scenes_setup;
 pub mod scenes_panel;
 pub mod status;
 pub mod task_actions;
@@ -149,6 +150,10 @@ fn init() -> App {
             // The Settings section for the pictures (`NEKO_RUNE_SECTION=permissions`).
             if let Some(section) = std::env::var("NEKO_RUNE_SECTION").ok().and_then(|v| pages::Section::ALL.into_iter().find(|x| x.key() == v)) {
                 app.pages.section = section;
+            }
+            // The Setup section for the pictures (`NEKO_RUNE_VIEW=setup NEKO_RUNE_SETUP=watching`).
+            if let Some(section) = std::env::var("NEKO_RUNE_SETUP").ok().and_then(|v| view::setup::SetupSection::from_key(&v)) {
+                app.open_setup(section);
             }
             if let Some(id) = std::env::var("NEKO_RUNE_SHOW").ok().filter(|t| !t.is_empty()) {
                 app.show_artifact(&id, None);

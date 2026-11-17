@@ -297,17 +297,6 @@ pub fn usage(s: &mut App) {
     s.pages.quota = Some(quota_rows());
 }
 
-pub fn workspaces(s: &mut App) {
-    base(s, FullView::Workspaces);
-    s.pages.routines = Some(routines_data());
-}
-
-pub fn workspaces_open(s: &mut App) {
-    base(s, FullView::Workspaces);
-    s.pages.routines = Some(routines_data());
-    s.toggle_workspace("w1");
-}
-
 pub fn plugins(s: &mut App) {
     base(s, FullView::Plugins);
     s.pages.plugins = Some(plugin_list());
