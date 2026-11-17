@@ -30,7 +30,7 @@ const { chromium } = require("playwright-core");
 
 const pairs = JSON.parse(fs.readFileSync(path.join(here, "identity-pairs.json"), "utf8")).filter((p) => !ONLY || ONLY.has(p.name));
 fs.mkdirSync(`${OUT}/pairs`, { recursive: true });
-const size = process.env.WINDOW ?? "1600x900";
+const size = process.env.WINDOW ?? "1440x900";
 
 /** Rune's half: the picture and the tree of one state. */
 function rune(pair) {
