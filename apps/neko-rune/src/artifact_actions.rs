@@ -132,6 +132,8 @@ impl App {
                     _ => return,
                 };
                 let message = from_artifact(&text, &id, version, &title);
+                // Shown as sent: the person sees what went and from which artifact.
+                self.show_toast(&format!("Sent “{}” from {}", text.chars().take(60).collect::<String>(), if title.is_empty() { "an artifact" } else { title.as_str() }));
                 let scope = self.scope().map(str::to_owned);
                 match self.detail().map(|d| d.task.clone()) {
                     // The open session: queued behind its turn when it is in one, else a reply (the composer's own rule).

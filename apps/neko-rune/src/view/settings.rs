@@ -597,7 +597,7 @@ fn appearance(s: &App, t: &Neko, out: &mut Vec<Item>) {
     const MODES: [&str; 3] = ["system", "light", "dark"];
     let now = s.pages.appearance.as_deref().and_then(|m| MODES.iter().position(|x| *x == m)).unwrap_or(0);
     let help = "System follows macOS. The choice is kept by Neko, so the web UI and this window agree.";
-    let control = SegmentedControl::new(&["System", "Light", "Dark"], Some(now)).label("Theme").width(None).on_pick(|s: &mut App, i: usize, _| s.set_appearance(MODES[i.min(2)])).build(&t.kit).key("set-appearance-pick");
+    let control = SegmentedControl::new(&["System", "Light", "Dark"], Some(now)).label("Theme").width(Some(260.0)).on_pick(|s: &mut App, i: usize, _| s.set_appearance(MODES[i.min(2)])).build(&t.kit).key("set-appearance-pick");
     out.push(item(Section::Appearance, "appearance-mode", "Theme", help, with_note(s, t, "setting:appearance", setting_row(t, "set-appearance", "Theme", Some(help), control))));
 }
 

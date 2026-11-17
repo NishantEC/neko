@@ -147,7 +147,10 @@ impl ExtraCall {
             let started = std::time::Instant::now();
             match ask(socket, request) {
                 Ok(response) => {
-                    round_trip_ms = started.elapsed().as_millis() as u64;
+                    // The web times only the Ping (`System.tsx`): the first request of a call.
+                    if answer.is_none() {
+                        round_trip_ms = started.elapsed().as_millis() as u64;
+                    }
                     answer = Some(response);
                 }
                 Err(error) => return Reply::Failed(error),

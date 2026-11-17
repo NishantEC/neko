@@ -198,7 +198,8 @@ fn tone(t: &Neko, level: u8) -> rune::Color {
 fn machine(s: &App, t: &Neko) -> El {
     let mut c = col().key("machine").w_full().gap(2.0).child(group(t, "Machine health"));
     let Some((h, read_at)) = s.extra.machine.as_ref() else {
-        return c.child(quiet_line(t, "machine-loading", s.pages.notes.get("page:machine").map_or("Reading the machine…", String::as_str)));
+        let line = if s.extra.machine_empty { "No reading yet. The daemon samples the machine every 15 seconds while it runs." } else { s.pages.notes.get("page:machine").map_or("Reading the machine…", String::as_str) };
+        return c.child(quiet_line(t, "machine-loading", line));
     };
     let state = machine_state(h);
     c = c.child(

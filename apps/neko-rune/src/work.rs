@@ -393,7 +393,7 @@ impl App {
 
     /// Opens a task: its detail and runs are read, a finished task is marked seen.
     pub fn open_task(&mut self, id: &str) {
-        if self.selected.as_deref() != Some(id) && !self.guard(crate::extra::Going::Session(id.to_owned())) {
+        if (self.selected.as_deref() != Some(id) || self.view.is_some()) && !self.guard(crate::extra::Going::Session(id.to_owned())) {
             return;
         }
         let same = self.selected.as_deref() == Some(id);

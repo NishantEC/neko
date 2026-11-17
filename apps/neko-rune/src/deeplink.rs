@@ -10,6 +10,9 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// What `forward` says when nothing is listening: the only answer that lets a launch open a window of its own.
+pub const NO_WINDOW: &str = "No Neko window is running.";
+
 /// The longest route taken (the daemon's own limit for `OpenTab` is the same order).
 pub const MAX_ROUTE: usize = 300;
 
@@ -34,9 +37,16 @@ pub fn clean_route(route: &str) -> Option<String> {
     if route.is_empty() || route.len() > MAX_ROUTE || route.contains("..") || route.contains("//") {
         return None;
     }
-    // `tasks?task=<id>` has a `?`; a scheme would be `name:` before any `/` or `?`: only a plugin page's `<plugin>:<page>` has a colon, and it has no `/` after it.
     if !route.chars().all(|c| c.is_ascii_alphanumeric() || "-_:/?=&.%~".contains(c)) {
         return None;
+    }
+    // A colon is only a plugin page's `<plugin>:<page>` (letters, digits, - and _); anything else with one would read as a scheme.
+    let path = route.split('?').next().unwrap_or(route);
+    if let Some((plugin, page)) = path.split_once(':') {
+        let id = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if !id(plugin) || !id(page) {
+            return None;
+        }
     }
     Some(route.to_owned())
 }
@@ -52,7 +62,7 @@ pub fn socket_path() -> PathBuf {
 /// Hands `route` to the running window. Ok when it answered "ok"; Err says why not (nothing is listening, or it refused).
 pub fn forward(route: &str, socket: &Path) -> Result<(), String> {
     let route = clean_route(route).ok_or("That is not a route in Neko.")?;
-    let mut stream = UnixStream::connect(socket).map_err(|_| "No Neko window is running.".to_owned())?;
+    let mut stream = UnixStream::connect(socket).map_err(|_| NO_WINDOW.to_owned())?;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
     stream.write_all(format!("{route}\n").as_bytes()).map_err(|_| "The running window did not take it.".to_owned())?;
@@ -121,7 +131,13 @@ pub fn listen(socket: &Path, on_route: impl Fn(String) + Send + Sync + 'static) 
         }
         let _ = std::fs::remove_file(socket);
     }
-    let listener = UnixListener::bind(socket).map_err(|e| e.to_string())?;
+    // Bound under a umask that leaves the socket reachable by the person alone from its first moment, then set explicitly.
+    // SAFETY: `umask` only changes this process's file-creation mask and cannot fail.
+    let old = unsafe { libc::umask(0o177) };
+    let bound = UnixListener::bind(socket);
+    // SAFETY: as above; the previous mask is put back.
+    unsafe { libc::umask(old) };
+    let listener = bound.map_err(|e| e.to_string())?;
     std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
     let on_route: std::sync::Arc<dyn Fn(String) + Send + Sync> = std::sync::Arc::new(on_route);
     std::thread::Builder::new()
@@ -158,6 +174,8 @@ mod tests {
         assert_eq!(clean_route("/setup/tools").as_deref(), Some("setup/tools"));
         assert_eq!(clean_route("pull-requests").as_deref(), Some("pull-requests"));
         assert_eq!(clean_route("my-plugin:board").as_deref(), Some("my-plugin:board"));
+        assert_eq!(clean_route("javascript:void"), None, "a colon is only a plugin page's");
+        assert_eq!(clean_route("a:b:c"), None);
         for bad in ["", "   ", "../etc/passwd", "a//b", "https://example.com", "javascript:alert(1)", "tasks task", "tasks\nsettings", "a;b", "<script>", &"x".repeat(MAX_ROUTE + 1)] {
             // `https://example.com` has `//`, `javascript:alert(1)` has parentheses.
             assert_eq!(clean_route(bad), None, "{bad:?}");
@@ -193,6 +211,6 @@ mod tests {
     #[test]
     fn with_no_window_running_nothing_is_listening() {
         let sock = std::env::temp_dir().join(format!("neko-open-none-{}.sock", std::process::id()));
-        assert_eq!(forward("tasks", &sock), Err("No Neko window is running.".to_owned()));
+        assert_eq!(forward("tasks", &sock), Err(NO_WINDOW.to_owned()));
     }
 }

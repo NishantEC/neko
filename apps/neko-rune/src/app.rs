@@ -610,6 +610,9 @@ impl App {
 
     /// A plugin's page: the middle region shows its whole content, in the web view.
     pub fn open_plugin_page(&mut self, page: neko_protocol::PluginPage) {
+        if !self.guard(crate::extra::Going::Plugin(page.clone())) {
+            return;
+        }
         self.plugin_view = Some(page);
         self.view = None;
         self.more_open = false;

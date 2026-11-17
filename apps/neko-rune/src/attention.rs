@@ -138,10 +138,10 @@ impl App {
                 None => self.open_view(crate::views::FullView::Setup),
             },
             "settings" => {
-                if let Some(section) = param("section").and_then(|k| crate::pages::Section::ALL.into_iter().find(|s| s.key() == k)) {
-                    self.pages.section = section;
-                }
                 self.open_view(crate::views::FullView::Settings);
+                if let Some(section) = param("section").and_then(|k| crate::pages::Section::ALL.into_iter().find(|s| s.key() == k)) {
+                    self.go_section(section);
+                }
             }
             "pull-requests" => self.open_view(crate::views::FullView::PullRequests),
             _ => {

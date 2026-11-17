@@ -23,6 +23,8 @@ pub enum Going {
     View(FullView),
     Session(String),
     Home,
+    Plugin(neko_protocol::PluginPage),
+    Onboarding,
 }
 
 /// A line under a control, with whether it is good news.
@@ -51,6 +53,8 @@ pub struct ExtraState {
     pub diag_running: bool,
     /// The machine's last reading and when it was taken, by the app's clock.
     pub machine: Option<(MachineHealth, i64)>,
+    /// The daemon answered the machine request with no reading yet (it samples every 15 seconds while it runs).
+    pub machine_empty: bool,
     pub folders: Option<Vec<ProviderRow>>,
     pub login: Option<bool>,
     /// Where the rulebook guard is sending the person if they discard.
@@ -390,6 +394,8 @@ impl App {
             Going::View(view) => self.open_view(view),
             Going::Session(id) => self.select(&id),
             Going::Home => self.open_new(),
+            Going::Plugin(page) => self.open_plugin_page(page),
+            Going::Onboarding => self.open_onboarding(crate::onboarding::Step::Welcome),
         }
     }
 
@@ -476,6 +482,7 @@ impl App {
             }
             ExtraAnswer::Machine(health) => {
                 let at = self.now_ms;
+                self.extra.machine_empty = health.is_none() && self.extra.machine.is_none();
                 // Held: an unchanged reading does not replace the one on screen (the web compares `at_ms`).
                 let same = matches!((&self.extra.machine, &health), (Some((old, _)), Some(new)) if old.at_ms == new.at_ms);
                 if let (false, Some(h)) = (same, health) {

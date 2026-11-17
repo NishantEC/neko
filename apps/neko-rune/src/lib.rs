@@ -157,6 +157,11 @@ fn init() -> App {
                         app.all.layout_dirty = false;
                     }
                     "prs" => app.open_view(views::FullView::PullRequests),
+                    // Parity batch D: the first-run setup at a step (`NEKO_RUNE_STEP=agents`).
+                    "onboarding" => {
+                        let step = std::env::var("NEKO_RUNE_STEP").ok().and_then(|k| onboarding::Step::from_key(&k)).unwrap_or(onboarding::Step::Welcome);
+                        app.open_onboarding(step);
+                    }
                     "cadence" => {
                         app.open_view(views::FullView::Routines);
                         let first = app.pages.routines.as_ref().and_then(|r| r.views.first().map(|v| v.routine.id.clone()));
@@ -275,7 +280,12 @@ pub fn run() {
         if let Some(route) = deeplink::route_arg(&raw) {
             match deeplink::forward(&route, &deeplink::socket_path()) {
                 Ok(()) => std::process::exit(0),
-                Err(_) => first_route = deeplink::clean_route(&route),
+                // Only "nothing is listening" starts a window; a refusal or silence from a running one is not a second window's job.
+                Err(why) if why == deeplink::NO_WINDOW => first_route = deeplink::clean_route(&route),
+                Err(why) => {
+                    eprintln!("neko-rune: {why}");
+                    std::process::exit(1);
+                }
             }
         }
     }

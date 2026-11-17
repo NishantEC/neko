@@ -113,6 +113,9 @@ impl App {
 
     /// Opens it at a step (Settings, General: "Show again"; the web's `openOnboarding`).
     pub fn open_onboarding(&mut self, at: Step) {
+        if !self.guard(crate::extra::Going::Onboarding) {
+            return;
+        }
         self.onboarding.step = at.index();
         self.onboarding.manual = true;
         self.onboarding.error = None;
