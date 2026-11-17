@@ -1012,3 +1012,158 @@ fn batch_b_slash_in_the_session_composer_runs_the_webs_commands() {
     click(&mut rt, "ask-yes");
     assert_eq!(finished(&rt), 0, "the daemon cleared them");
 }
+
+// ---- parity batch D, against the isolated daemon -------------------------------------------------------------------
+
+fn extra(rt: &mut Runtime<App>, call: neko_rune::link::ExtraCall) {
+    rt.update(move |s, _| s.extra_call(call));
+    settle(rt);
+}
+
+#[test]
+fn batch_d_themes_are_listed_picked_and_removed_through_the_daemon() {
+    use neko_rune::link::ExtraCall;
+    let Some(h) = start(&[]) else { return };
+    let dir = h.data.join("themes");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("ocean.json"), r##"{"id":"ocean","name":"Ocean","appearance":"dark","colors":{"background":"#0b1f2a","foreground":"#d7e9f0","primary":"#3ab0d0"}}"##).unwrap();
+    let mut rt = runtime(app(&h));
+    extra(&mut rt, ExtraCall::Themes);
+    assert_eq!(rt.state.extra.user_themes.len(), 1, "the daemon listed the person's theme file");
+    assert!(rt.state.theme_entries().iter().any(|t| t.id == "ocean" && t.source == neko_rune::themes::Source::User) && rt.state.theme_entries().len() == 13);
+    // Picking it is the daemon's setting too: asked again, it says ocean.
+    rt.update(|s, _| s.pick_theme(true, "ocean"));
+    settle(&mut rt);
+    rt.update(|s, _| s.call(Call::Appearance));
+    assert_eq!(rt.state.theme_choice().1, "ocean");
+    let now = rt.state.theme_now(true);
+    assert_eq!(&now.surface.window.hex()[..7], "#0b1f2a", "the window is painted in the picked theme");
+    // Removing: asked first (the file is still there), deleted after yes, the listing comes back without it.
+    rt.update(|s, _| s.ask_remove_theme("ocean"));
+    settle(&mut rt);
+    assert!(dir.join("ocean.json").exists());
+    click(&mut rt, "ask-yes");
+    assert!(!dir.join("ocean.json").exists(), "the daemon deleted the file");
+    extra(&mut rt, ExtraCall::Themes);
+    assert!(rt.state.extra.user_themes.is_empty());
+}
+
+#[test]
+fn batch_d_the_summon_shortcut_full_power_clipboard_and_diagnostics_round_trip() {
+    use neko_protocol::{HotkeyCombo, Modifier};
+    use neko_rune::link::ExtraCall;
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    extra(&mut rt, ExtraCall::Hotkey);
+    assert!(rt.state.extra.hotkey.is_some(), "the daemon says what the summon shortcut is");
+    // A reserved combination is refused with the daemon's reason; a free one is committed.
+    let reserved = HotkeyCombo::new(vec![Modifier::Cmd], "Space");
+    rt.update(move |s, _| s.extra_call(ExtraCall::HotkeyCheck(reserved)));
+    settle(&mut rt);
+    assert!(rt.state.extra.hotkey_say.as_ref().is_some_and(|s| !s.ok), "{:?}", rt.state.extra.hotkey_say);
+    let free = HotkeyCombo::new(vec![Modifier::Ctrl, Modifier::Alt], "KeyJ");
+    rt.update({
+        let free = free.clone();
+        move |s, _| s.extra_call(ExtraCall::HotkeyCheck(free))
+    });
+    settle(&mut rt);
+    assert_eq!(rt.state.extra.hotkey.as_ref().map(|c| c.combo.clone()), Some(free), "checked, then committed");
+    // Full power and the clipboard switch read and write the daemon's own settings.
+    extra(&mut rt, ExtraCall::SuperAgent(None));
+    let before = rt.state.extra.super_agent.expect("read");
+    extra(&mut rt, ExtraCall::SuperAgent(Some(!before)));
+    assert_eq!(rt.state.extra.super_agent, Some(!before));
+    extra(&mut rt, ExtraCall::Clipboard(Some(true)));
+    assert_eq!(rt.state.extra.clipboard, Some(true));
+    // Diagnostics: Ping, then the checks.
+    rt.update(|s, _| s.run_diagnostics());
+    settle(&mut rt);
+    assert!(!rt.state.extra.diag_running && rt.state.extra.diag.is_some());
+    // The machine reading is asked for (a harness may have none yet).
+    extra(&mut rt, ExtraCall::Machine);
+}
+
+#[test]
+fn batch_d_the_rulebook_the_update_source_and_the_model_check_go_to_the_daemon() {
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    rt.update(|s, _| s.pages.section = neko_rune::pages::Section::Rulebook);
+    open_page(&mut rt, neko_rune::views::FullView::Settings);
+    rt.update(|s, _| s.pages.set_field("rulebook", "Only small changes.\n"));
+    settle(&mut rt);
+    assert!(rt.state.rulebook_dirty());
+    click(&mut rt, "rulebook-save");
+    assert_eq!(rt.state.summary.as_ref().unwrap().settings.rulebook, "Only small changes.", "the daemon kept it (trimmed, as it keeps every text)");
+    assert!(!rt.state.rulebook_dirty() && has_text(&rt, "Using your own rules"));
+    click(&mut rt, "rulebook-restore");
+    click(&mut rt, "ask-yes");
+    assert!(rt.state.summary.as_ref().unwrap().settings.rulebook.is_empty(), "restored to the default");
+    // The update source: a github address is kept as owner/name.
+    rt.update(|s, _| s.pages.section = neko_rune::pages::Section::Updates);
+    settle(&mut rt);
+    rt.update(|s, _| s.pages.set_field("update-source", "https://github.com/acme/neko-fork.git"));
+    settle(&mut rt);
+    click(&mut rt, "update-source-save");
+    assert_eq!(rt.state.summary.as_ref().unwrap().settings.self_update.as_ref().map(|u| u.source.clone()).as_deref(), Some("acme/neko-fork"));
+    // The model check: one real prompt through the runner; the harness has no agents, so the answer is the daemon's own words, shown.
+    rt.update(|s, _| s.check_model());
+    settle(&mut rt);
+    assert!(!rt.state.extra.checking && rt.state.extra.model_check.is_some(), "{:?}", rt.state.extra.model_check);
+}
+
+#[test]
+fn batch_d_start_over_and_roll_back_ask_first_and_the_daemon_answers_in_its_words() {
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    let before = rt.state.summary.as_ref().unwrap().tasks.len();
+    rt.update(|s, _| s.ask_start_over());
+    settle(&mut rt);
+    assert_eq!(rt.state.summary.as_ref().unwrap().tasks.len(), before, "nothing before yes");
+    click(&mut rt, "ask-no");
+    assert_eq!(rt.state.summary.as_ref().unwrap().tasks.len(), before);
+    rt.update(|s, _| s.ask_start_over());
+    settle(&mut rt);
+    click(&mut rt, "ask-yes");
+    assert!(rt.find("ask-yes").is_none(), "the dialog is closed once the request went");
+    eprintln!("start over: {before} tasks before, {} after, notice {:?}", rt.state.summary.as_ref().unwrap().tasks.len(), rt.state.work.notice);
+    rt.update(|s, _| s.ask_roll_back_web());
+    settle(&mut rt);
+    click(&mut rt, "ask-yes");
+    assert!(rt.find("ask-yes").is_none());
+}
+
+#[test]
+fn batch_d_the_first_run_state_and_done_go_to_the_daemon() {
+    use neko_rune::link::ExtraCall;
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    extra(&mut rt, ExtraCall::Onboarding);
+    if rt.state.onboarding.completed == Some(false) {
+        assert!(rt.state.onboarding_shown(), "a fresh data folder opens the setup in Home's place");
+    }
+    rt.update(|s, _| s.open_onboarding(neko_rune::onboarding::Step::Done));
+    settle(&mut rt);
+    click(&mut rt, "onb-next");
+    assert_eq!(rt.state.onboarding.completed, Some(true), "the daemon marked it complete");
+    assert!(!rt.state.onboarding_shown());
+    let Ok(Response::OnboardingState { completed, .. }) = ask(&socket(&h), Request::GetOnboardingState) else { panic!("no state") };
+    assert!(completed);
+}
+
+#[test]
+fn batch_d_inspect_app_lists_rune_with_its_size_apart_from_the_web() {
+    let Some(h) = start(&[]) else { return };
+    let mut rt = runtime(app(&h));
+    rt.update(|s, _| {
+        s.focused = true;
+        s.linked = true;
+        // The report is built and sent through the blocking dispatch.
+        let _ = s.tick_report(Some([1360, 900]));
+    });
+    settle(&mut rt);
+    let Ok(Response::App { window: Some(window), windows, .. }) = ask(&socket(&h), Request::InspectApp) else { panic!("the daemon heard no report") };
+    assert_eq!((window.client.as_str(), window.size), ("rune", Some([1360, 900])));
+    assert!(window.viewers.iter().any(|v| v.id == "image"), "the registered viewers");
+    assert!(window.pages.iter().any(|p| p.id == "settings") && window.theme.is_some());
+    assert!(windows.iter().any(|w| w.client == "rune" && w.reporting));
+}

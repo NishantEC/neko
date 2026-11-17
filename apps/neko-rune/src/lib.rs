@@ -9,12 +9,14 @@ pub mod all_sessions;
 pub mod activity;
 pub mod app;
 pub mod art;
+pub mod artifact_actions;
 pub mod art_gpu;
 pub mod attachments;
 pub mod board;
 pub mod clock;
 pub mod compose;
 pub mod connection;
+pub mod deeplink;
 pub mod dock;
 pub mod extra;
 pub mod groups;
@@ -36,9 +38,11 @@ pub mod samples;
 pub mod scope;
 pub mod scenes;
 pub mod readers;
+pub mod report;
 pub mod runtime_pick;
 pub mod scenes_batch_a;
 pub mod scenes_batch_b;
+pub mod scenes_batch_d;
 pub mod scenes_pages;
 pub mod scenes_setup;
 pub mod scenes_panel;
@@ -68,6 +72,11 @@ const HEADLESS_FLAGS: [&str; 10] = ["--snap", "--tree", "--script", "--trace", "
 /// Whether this process was started for a headless run (`--snap`, `--tree`, ...).
 pub fn headless_run() -> bool {
     std::env::args().any(|a| HEADLESS_FLAGS.contains(&a.as_str()))
+}
+
+thread_local! {
+    /// The route `--open` named when no window was running to take it: the first window opens it once the daemon has answered.
+    static FIRST_ROUTE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
 fn flag(name: &str) -> Option<String> {
@@ -179,7 +188,7 @@ fn init() -> App {
         // The last run's widths (read once, before the first frame); the window then keeps them.
         let saved = app::load_layout();
         let layout = saved.map(layout::Layout::restored).unwrap_or_default();
-        App { linked: !has("nolink"), dock: dock::set_badge, workspace_scope: app::load_scope(), all: all_sessions::AllState { layout: app::load_all_layout().unwrap_or_default(), ..Default::default() }, layout, layout_written: saved, layout_seen: saved, persist_layout: true, web_view: web_panel::WebHost::windowed(), ..App::default() }
+        App { pending_route: FIRST_ROUTE.with(|r| r.borrow_mut().take()), linked: !has("nolink"), dock: dock::set_badge, workspace_scope: app::load_scope(), all: all_sessions::AllState { layout: app::load_all_layout().unwrap_or_default(), ..Default::default() }, layout, layout_written: saved, layout_seen: saved, persist_layout: true, web_view: web_panel::WebHost::windowed(), ..App::default() }
     }
 }
 
@@ -198,6 +207,15 @@ pub fn on_key(s: &mut App, ev: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
     // ⌘F in Settings goes to its search field, which filters the rows of every section.
     if ev.is_command('f') && !ev.mods.shift && s.view == Some(views::FullView::Settings) {
         tx.focus("settings-search", true);
+        return true;
+    }
+    // ⌘S in the rulebook saves it (the web's textarea does the same).
+    if ev.is_command('s') && !ev.mods.shift && s.view == Some(views::FullView::Settings) && s.pages.section == pages::Section::Rulebook {
+        s.save_rulebook();
+        return true;
+    }
+    // The summon shortcut's recorder takes the next key press.
+    if s.hotkey_key(ev) {
         return true;
     }
     // All sessions: `/` focuses its search, J and K move, Return opens (never while a field has the keyboard).
@@ -250,6 +268,18 @@ pub fn on_key(s: &mut App, ev: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
 
 /// Opens the window and, unless `nolink`, starts the read-only link to the running daemon.
 pub fn run() {
+    // `neko-rune --open <route>`: hand the route to the window that is running and exit. With none running this launch opens it.
+    let mut first_route = None;
+    if !headless_run() {
+        let raw: Vec<String> = std::env::args().skip(1).collect();
+        if let Some(route) = deeplink::route_arg(&raw) {
+            match deeplink::forward(&route, &deeplink::socket_path()) {
+                Ok(()) => std::process::exit(0),
+                Err(_) => first_route = deeplink::clean_route(&route),
+            }
+        }
+    }
+    FIRST_ROUTE.with(|r| *r.borrow_mut() = first_route);
     // `neko-rune probe [json] [socket=PATH]`: no window; connect, print, exit. For checking a daemon
     // (`json` prints the workbench summary alone, for `scripts/snap-harness.sh`).
     if std::env::args().nth(1).as_deref() == Some("probe") {
@@ -271,6 +301,10 @@ pub fn run() {
             let toast = s.tick_toast(t, tx);
             s.tick_compose(t, tx);
             s.tick_dock();
+            // Tell the daemon what is on screen (at most every two seconds); ask to be woken for a change that has to wait.
+            if let Some(wait) = s.tick_report(s.window_size.get()) {
+                tx.wake_after(std::time::Duration::from_millis(wait.max(50) as u64));
+            }
             moved || panel || toast
         }),
         ..rune::AppSpec::new("Neko (Rune)", (1360.0, 840.0), init, view::view)
@@ -285,7 +319,20 @@ pub fn run() {
     let handle = app.handle();
     let mut started = false;
     app.on_ready(move |_| {
-        if std::mem::replace(&mut started, true) || has("nolink") {
+        if std::mem::replace(&mut started, true) {
+            return;
+        }
+        // Routes from `neko-rune --open <route>` run in another process land here and bring the window forward.
+        let opener = handle.clone();
+        let _ = deeplink::listen(&deeplink::socket_path(), move |route| {
+            opener.update_if(move |s, tx| {
+                s.open_route(&route);
+                tx.instant();
+                true
+            });
+            opener.activate("");
+        });
+        if has("nolink") {
             return;
         }
         // The window and the link thread share which task is open.

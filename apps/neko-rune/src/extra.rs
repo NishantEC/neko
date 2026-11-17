@@ -22,6 +22,7 @@ pub enum Going {
     Section(Section),
     View(FullView),
     Session(String),
+    Home,
 }
 
 /// A line under a control, with whether it is good news.
@@ -54,6 +55,10 @@ pub struct ExtraState {
     pub login: Option<bool>,
     /// Where the rulebook guard is sending the person if they discard.
     pub going: Option<Going>,
+    /// Routes whose signed address was asked for to open in the browser (Open in browser on a Canvas row).
+    pub browser_routes: Vec<String>,
+    /// When the embedded page last spoke, by the app's clock (a page that floods is ignored).
+    pub last_said_ms: i64,
 }
 
 // ---- pure rules --------------------------------------------------------------------------------
@@ -345,11 +350,8 @@ impl App {
 
     /// The editor's text differs from what is saved (compared as typed: a trailing line counts).
     pub fn rulebook_dirty(&self) -> bool {
-        self.field_is_seeded("rulebook") && self.pages.text("rulebook") != self.rulebook_saved()
-    }
-
-    fn field_is_seeded(&self, key: &str) -> bool {
-        self.pages.field_saved.contains_key(key)
+        // Compared with what the field was last seeded with (the daemon trims the text it keeps, so edges do not count), so a saved text that changed under an untouched editor is not a draft.
+        self.pages.field_saved.get("rulebook").is_some_and(|seeded| self.pages.text("rulebook").trim() != seeded.trim())
     }
 
     pub fn save_rulebook(&mut self) {
@@ -387,6 +389,7 @@ impl App {
             }
             Going::View(view) => self.open_view(view),
             Going::Session(id) => self.select(&id),
+            Going::Home => self.open_new(),
         }
     }
 
@@ -539,6 +542,11 @@ impl App {
     }
 
     /// The machine's reading is asked for while Usage is open (the web polls every few seconds).
+    /// The window paints dark: the daemon's mode when it is Light or Dark, else the system's as last built.
+    pub fn theme_now_dark(&self) -> bool {
+        self.appearance_dark(self.panel.dark.get())
+    }
+
     pub fn extra_ask_machine(&mut self) {
         self.extra_call(ExtraCall::Machine);
     }

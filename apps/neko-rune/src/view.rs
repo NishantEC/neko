@@ -83,6 +83,9 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     s.reduce_motion.set(cx.system_reduced_motion());
     let mut layer = Vec::new();
     let layout = &s.layout;
+    if let Some([w, h]) = cx.layout_size("window") {
+        s.window_size.set(Some([w as u32, h as u32]));
+    }
     // What fits: the session keeps its minimum, so a small window narrows or hides the others.
     // Before the first layout there is no width to read, and the state's own widths stand.
     let (fit, win_h, win_w) = match cx.layout_size("window") {

@@ -378,7 +378,7 @@ impl App {
         self.summary.as_ref()?.detail.as_ref().filter(|d| d.task.id == id)
     }
 
-    fn next_id(&mut self) -> String {
+    pub fn next_id(&mut self) -> String {
         self.work.counter += 1;
         format!("rune-{}-{}-{}", std::process::id(), crate::app::system_ms(), self.work.counter)
     }
@@ -393,6 +393,9 @@ impl App {
 
     /// Opens a task: its detail and runs are read, a finished task is marked seen.
     pub fn open_task(&mut self, id: &str) {
+        if self.selected.as_deref() != Some(id) && !self.guard(crate::extra::Going::Session(id.to_owned())) {
+            return;
+        }
         let same = self.selected.as_deref() == Some(id);
         if !same {
             self.park_draft();
@@ -460,6 +463,9 @@ impl App {
     pub fn after_live(&mut self) {
         if self.summary.is_none() {
             return;
+        }
+        if let Some(route) = self.pending_route.take() {
+            self.open_route(&route);
         }
         // Once per run: the appearance and the themes (so the window paints the person's choice) and whether the first-run setup is due.
         if !self.extra.started && self.linked && !matches!(self.dispatch, crate::app::Dispatch::None) {
@@ -815,6 +821,9 @@ impl App {
             Reply::TaskArtifacts { task_id, artifacts } => self.task_artifacts(&task_id, artifacts),
             Reply::SignedUrl { route, url } => {
                 let url = url.reveal().to_owned();
+                if self.browser_route_signed(&route, &url) {
+                    return false;
+                }
                 if route == crate::link::http::ROUTE {
                     self.http = crate::link::http::Http::from_signed_url(&url);
                     self.flush_http();

@@ -183,16 +183,15 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         body = body.child(details(s, t, detail));
     }
     body = body.child(
-        row()
+        col()
             .w_full()
             .px(6.0)
             .gap(6.0)
-            .wrap()
-            .child(text("Changes Neko makes to its own source go live after they land, and the previous web UI is kept.").font(t.ty.meta).color(t.text.muted))
-            .child(quiet_button("Roll back the web UI in Settings", "plugins-roll-back", t, |s: &mut App| {
+            .child(text("Changes Neko makes to its own source go live after they land, and the previous web UI is kept.").font(t.ty.meta).color(t.text.muted).wrap().min_w(0.0))
+            .child(row().child(quiet_button("Roll back the web UI in Settings", "plugins-roll-back", t, |s: &mut App| {
                 s.pages.section = crate::pages::Section::Updates;
                 s.open_view(crate::views::FullView::Settings);
-            })),
+            }))),
     );
     let _ = group;
     let trailing = vec![

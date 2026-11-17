@@ -79,6 +79,9 @@ pub fn title_of(request: &str) -> String {
 impl App {
     /// Home with a clean composer: "New session" and a fresh window both land here.
     pub fn open_new(&mut self) {
+        if !self.guard(crate::extra::Going::Home) {
+            return;
+        }
         self.new_request = TextEdit::new("");
         self.new_request.focused = true;
         let keep = self.new_form.take().map(|f| (f.workspace, f.mode, f.choices, f.runtime, f.model, f.branches));

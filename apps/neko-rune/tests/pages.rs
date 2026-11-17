@@ -172,9 +172,14 @@ fn settings_sections_search_and_read_only_rows() {
         click(&mut rt, &format!("settings-section-{section}"));
         assert!(rt.find(row).is_some(), "{section}: {row}");
     }
-    // "Updates come from" is read-only here as on the web: a value, no field or switch.
+    // "Updates come from" is a field (owner/name) with the roll-back beside it, as in the web's Neko updates.
     click(&mut rt, "settings-section-updates");
-    assert!(rt.find("set-update-source-value").is_some());
+    assert!(rt.find("update-source").is_some() && rt.find("roll-back-web").is_some());
+    // The rulebook and the quick panel's folders are edited here, not linked to the web UI.
+    click(&mut rt, "settings-section-rulebook");
+    assert!(rt.find("rulebook").is_some() && rt.find("rulebook-open-web").is_none());
+    click(&mut rt, "settings-section-quick-panel");
+    assert!(rt.find("folder-path").is_some() && rt.find("quick-panel-open-web").is_none());
     // The runtime row picks from the daemon's catalog and the ceiling is a field with money in it.
     click(&mut rt, "settings-section-budget");
     assert_eq!(rt.state.pages.text("daily-budget"), "5.00");
@@ -266,7 +271,8 @@ fn workspaces_are_one_line_each_and_open_to_their_details_and_stay_open() {
 fn plugins_list_how_each_last_loaded() {
     let rt = runtime("plugins");
     let t = texts(&rt);
-    assert!(t.iter().any(|x| x == "board-viewer") && t.iter().any(|x| x.starts_with("Failed: a script threw")) && t.iter().any(|x| x.contains("Rolled back")), "{t:?}");
+    assert!(t.iter().any(|x| x == "board-viewer") && t.iter().any(|x| x == "a script threw on load") && t.iter().any(|x| x == "Error") && t.iter().any(|x| x == "Off"), "{t:?}");
+    assert!(t.iter().any(|x| x == "Running · 1 page") && t.iter().any(|x| x == "Change Neko…"), "{t:?}");
     assert_eq!(text_of(&rt, "page-count").as_deref(), Some("3"));
 }
 
@@ -381,7 +387,7 @@ fn rows_have_right_click_menus_with_their_actions() {
     let mut rt = runtime("plugins");
     secondary(&mut rt, "plugin-board-viewer");
     let t = texts(&rt);
-    assert!(t.contains(&"Check again".to_owned()) && t.contains(&"Open folder".to_owned()), "{t:?}");
+    assert!(t.contains(&"Details".to_owned()) && t.contains(&"Open folder".to_owned()) && t.contains(&"Remove…".to_owned()), "{t:?}");
 }
 
 #[test]

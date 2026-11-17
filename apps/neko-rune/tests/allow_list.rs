@@ -407,11 +407,14 @@ fn only_the_attachments_module_writes_files_and_only_in_its_own_cache() {
     // (not the daemon's data folder); that is the one place this client writes a file.
     for (path, text) in crate_sources() {
         let code = production(&text);
-        let is_attachments = path.ends_with("attachments.rs");
+        // The deep-link socket (`deeplink.rs`) is the one other file: a Unix socket in the client's own cache folder, replaced when a window died.
+        let is_attachments = path.ends_with("attachments.rs") || path.ends_with("deeplink.rs");
         for forbidden in ["fs::write", "File::create", "OpenOptions", "fs::remove", "fs::rename", "fs::copy", "File::options", "create_dir"] {
             assert!(is_attachments || !code.contains(forbidden), "{} uses `{forbidden}`", path.display());
         }
     }
+    let deeplink = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/deeplink.rs")).unwrap();
+    assert!(!production(&deeplink).contains("support_dir") && !production(&deeplink).contains("neko_protocol"), "the deep-link socket is in the client's cache, never the daemon's data folder");
     let attachments = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/attachments.rs")).unwrap();
     let code = production(&attachments);
     assert!(code.contains("composer-attachments") && !code.contains("support_dir") && !code.contains("neko_protocol"), "pasted images go to the client's cache, never the daemon's data folder");

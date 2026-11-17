@@ -137,6 +137,13 @@ pub struct Resolved {
     pub code: String,
     /// The border's opacity (`--border`): 0.07 in dark, 0.08 in light, 0.14 with a backdrop.
     pub border_alpha: f32,
+    /// What the web's contrast rule measures besides the text greys (`contrastPairs` in `derive.js`).
+    pub sidebar_foreground: String,
+    pub bubble: String,
+    pub bubble_foreground: String,
+    pub status_foregrounds: [String; 4],
+    /// The surfaces as they look (with a backdrop: the translucent fill over the brightest part of the wash).
+    pub effective: [String; 4],
 }
 
 const BACKDROP_ALPHA: [(&str, f64); 5] = [("background", 0.42), ("card", 0.48), ("popover", 0.78), ("sidebar", 0.46), ("code", 0.62)];
@@ -191,7 +198,17 @@ pub fn resolve(theme: &Value) -> Option<Resolved> {
     };
     let muted = get("mutedForeground").unwrap_or_else(|| ensure(&mix(&fg, &bg, 0.38), &[&eff[0], &eff[1], &eff[2]], 4.5));
     let primary_foreground = get("primaryForeground").unwrap_or_else(|| best_on(&primary, &[&bg, white, black]));
+    let all = [eff[0].as_str(), eff[1].as_str(), eff[2].as_str(), eff[3].as_str()];
+    let bubble = get("bubble").unwrap_or_else(|| if dark { mix(&bg, &primary, 0.35) } else { mix(white, &primary, 0.14) });
+    let bubble_foreground = get("bubbleForeground").unwrap_or_else(|| best_on(&bubble, &[&strong, white, black]));
+    let status_foregrounds = [&destructive, &success, &warning, &info].map(|c| ensure(c, &all, 4.5));
+    let sidebar_foreground = ensure(&mix(&fg, &sidebar, 0.25), &[&eff[3]], 4.5);
     Some(Resolved {
+        sidebar_foreground,
+        bubble,
+        bubble_foreground,
+        status_foregrounds,
+        effective: eff.clone(),
         dark,
         code: mix(&bg, &fg, 0.04),
         border: get("border").unwrap_or_else(|| fg.clone()),
@@ -265,8 +282,26 @@ pub struct ThemeEntry {
     pub low_contrast: bool,
 }
 
-fn low(c: &Resolved) -> bool {
-    [(&c.foreground, &c.background), (&c.foreground, &c.card), (&c.muted, &c.background), (&c.muted, &c.card), (&c.muted, &c.sidebar)].iter().any(|(a, b)| contrast(a, b) < 4.5)
+/// The web's `contrastFailures` is non-empty: a text colour under 4.5:1 on a surface it is read on.
+pub fn low_contrast(c: &Resolved) -> bool {
+    let [background, card, popover, sidebar] = &c.effective;
+    let mut pairs: Vec<(&str, &str)> = Vec::new();
+    for surface in [background, card, popover, sidebar] {
+        pairs.push((&c.foreground, surface));
+        pairs.push((&c.strong, surface));
+    }
+    for surface in [background, card, popover] {
+        pairs.push((&c.muted, surface));
+    }
+    pairs.push((&c.sidebar_foreground, sidebar));
+    pairs.push((&c.primary_foreground, &c.primary));
+    pairs.push((&c.bubble_foreground, &c.bubble));
+    pairs.push((&c.foreground, &c.code));
+    for fg in &c.status_foregrounds {
+        pairs.push((fg, background));
+        pairs.push((fg, card));
+    }
+    pairs.iter().any(|(a, b)| contrast(a, b) < 4.5)
 }
 
 fn entry(data: &Value, source: Source, file: Option<String>) -> Option<ThemeEntry> {
@@ -281,7 +316,7 @@ fn entry(data: &Value, source: Source, file: Option<String>) -> Option<ThemeEntr
         source,
         overrides: false,
         file,
-        low_contrast: low(&colors),
+        low_contrast: low_contrast(&colors),
         colors,
     })
 }
@@ -380,6 +415,9 @@ mod tests {
                 for (name, ours) in [("background", &c.background), ("card", &c.card), ("popover", &c.popover), ("sidebar", &c.sidebar), ("code", &c.code)] {
                     assert_eq!(&css[name], ours, "{}: --{name}", t.id);
                 }
+            }
+            for (name, ours) in [("sidebar-foreground", &c.sidebar_foreground), ("bubble", &c.bubble), ("bubble-foreground", &c.bubble_foreground), ("destructive-foreground", &c.status_foregrounds[0]), ("success-foreground", &c.status_foregrounds[1]), ("warning-foreground", &c.status_foregrounds[2]), ("info-foreground", &c.status_foregrounds[3])] {
+                assert_eq!(&css[name], ours, "{}: --{name}", t.id);
             }
             let (edge, alpha) = rgba(&css["border"]);
             assert_eq!((edge.as_str(), alpha), (c.border.as_str(), c.border_alpha), "{}: --border", t.id);

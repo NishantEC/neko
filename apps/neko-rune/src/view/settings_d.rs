@@ -253,7 +253,7 @@ pub(super) fn rulebook(s: &App, t: &Neko, out: &mut Vec<Item>) {
         .child(area)
         .child(row().w_full().px(6.0).gap(8.0).center_y().child(text(if dirty { "Unsaved changes · ⌘S saves" } else { "Saved · ⌘S saves" }).key("rulebook-state").font(t.ty.id).color(if dirty { t.meaning.amber } else { t.text.faint })).child(el().grow(1.0)).child(buttons));
     let open = s.open("rulebook:default");
-    r = r.child(quiet_button(if open { "Hide Neko’s built-in default" } else { "View Neko’s built-in default" }, "rulebook-default-toggle", t, |s: &mut App| s.toggle("rulebook:default")));
+    r = r.child(row().child(quiet_button(if open { "Hide Neko’s built-in default" } else { "View Neko’s built-in default" }, "rulebook-default-toggle", t, |s: &mut App| s.toggle("rulebook:default"))));
     if open {
         let built_in = s.summary.as_ref().map_or("", |m| m.settings.rulebook_default.as_str());
         let words = if built_in.is_empty() { "The daemon didn’t send the built-in default." } else { built_in };

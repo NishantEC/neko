@@ -135,7 +135,7 @@ pub fn plugin_list() -> Vec<PluginHealth> {
     ]
 }
 
-fn catalog() -> ModelCatalog {
+pub(crate) fn catalog() -> ModelCatalog {
     let model = |id: &str, label: &str, efforts: &[(&str, &str)], speeds: &[(&str, &str)]| CatalogModel {
         id: id.into(),
         label: label.into(),
@@ -189,7 +189,7 @@ pub fn settings_view() -> SettingsView {
 }
 
 /// Opens a view over the usual made-up workbench, with the page's data already in.
-fn base(s: &mut App, view: FullView) {
+pub(crate) fn base(s: &mut App, view: FullView) {
     super::scenes::live_for_pages(s);
     s.now_ms = DEMO_NOW;
     s.open_view(view);
@@ -202,7 +202,7 @@ pub fn calendar_now() -> i64 {
     local_at(clock::week_start(DEMO_NOW), 2 * 24 + 11, 40)
 }
 
-fn with_settings(s: &mut App) {
+pub(crate) fn with_settings(s: &mut App) {
     base(s, FullView::Settings);
     if let Some(m) = s.summary.as_mut() {
         m.settings = settings_view();
@@ -300,9 +300,22 @@ pub fn usage(s: &mut App) {
     s.pages.quota = Some(quota_rows());
 }
 
+/// The plugins as `/api/plugins` lists them, made up: three plugins, one switched off.
+pub fn plugin_listings() -> Vec<crate::link::http::PluginListing> {
+    use crate::link::http::PluginListing;
+    vec![
+        PluginListing { id: "board-viewer".into(), title: "board-viewer".into(), entry: "/plugins/board-viewer/index.js".into(), version: 4, manifest_version: "0.4.0".into(), path: "/data/plugins/board-viewer".into(), description: "Draws a board artifact".into(), viewers: vec![("board".into(), "Board".into(), vec!["board".into()])], ..PluginListing::default() },
+        PluginListing { id: "release-notes".into(), title: "release-notes".into(), entry: "/plugins/release-notes/index.js".into(), version: 2, manifest_version: "0.2.0".into(), path: "/data/plugins/release-notes".into(), description: "A page of release notes".into(), ..PluginListing::default() },
+        PluginListing { id: "calendar-sync".into(), title: "calendar-sync".into(), entry: "/plugins/calendar-sync/index.js".into(), version: 7, manifest_version: "1.0.0".into(), path: "/data/plugins/calendar-sync".into(), description: "Mirrors a calendar".into(), disabled: true, ..PluginListing::default() },
+    ]
+}
+
 pub fn plugins(s: &mut App) {
     base(s, FullView::Plugins);
     s.pages.plugins = Some(plugin_list());
+    s.plugin_ui.listings = Some(plugin_listings());
+    s.plugin_ui.custom = Some(crate::link::http::Customisation { plugins_dir: "/data/plugins".into(), css_path: "/data/custom.css".into(), css_exists: false });
+    s.plugin_pages = Some(vec![neko_protocol::PluginPage { id: "board-viewer:board".into(), plugin: "board-viewer".into(), title: "Board".into() }]);
 }
 
 /// Settings with the sessions column dragged wide: the page's own width is under 760.

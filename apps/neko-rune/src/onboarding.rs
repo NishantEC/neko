@@ -117,6 +117,10 @@ impl App {
         self.onboarding.manual = true;
         self.onboarding.error = None;
         self.onboarding.open = true;
+        // Home's place: no session, no page.
+        self.selected = None;
+        self.wanted.set(None);
+        self.new_form = None;
         self.view = None;
         self.plugin_view = None;
         self.onboarding_load();

@@ -238,6 +238,12 @@ pub struct App {
     pub onboarding: crate::onboarding::Onboarding,
     /// Plugins as full management (`plugin_manage.rs`).
     pub plugin_ui: crate::plugin_manage::PluginUi,
+    /// What this window tells the daemon about itself (`report.rs`).
+    pub reporter: crate::report::Reporter,
+    /// A route from `--open` that waits for the daemon's first answer (tasks are only known then).
+    pub pending_route: Option<String>,
+    /// The window's size in points, as the last build saw it.
+    pub window_size: std::cell::Cell<Option<[u32; 2]>>,
 }
 
 /// Where the window's own settings are kept (Rune's `prefs` store).
@@ -367,6 +373,9 @@ impl Default for App {
             extra: Default::default(),
             onboarding: Default::default(),
             plugin_ui: Default::default(),
+            reporter: Default::default(),
+            pending_route: None,
+            window_size: Default::default(),
         }
     }
 }
@@ -609,6 +618,9 @@ impl App {
     }
 
     pub fn open_view(&mut self, view: FullView) {
+        if view != FullView::Settings && !self.guard(crate::extra::Going::View(view)) {
+            return;
+        }
         self.plugin_view = None;
         self.view = Some(view);
         self.more_open = false;
