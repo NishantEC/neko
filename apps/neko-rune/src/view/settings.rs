@@ -20,14 +20,14 @@ use crate::permissions::{Access, Pane};
 use crate::theme::Neko;
 
 /// One row of a section, with the words search matches against.
-struct Item {
-    section: Section,
-    id: String,
-    words: String,
-    el: El,
+pub(super) struct Item {
+    pub(super) section: Section,
+    pub(super) id: String,
+    pub(super) words: String,
+    pub(super) el: El,
 }
 
-fn item(section: Section, id: impl Into<String>, label: &str, help: &str, el: El) -> Item {
+pub(super) fn item(section: Section, id: impl Into<String>, label: &str, help: &str, el: El) -> Item {
     Item { section, id: id.into(), words: format!("{label} {help} {}", section.title()).to_lowercase(), el }
 }
 
@@ -106,11 +106,7 @@ fn rail(s: &App, t: &Neko, narrow: bool) -> El {
             rows.push(text(heading.to_owned()).key(format!("settings-group-{}", section.key())).font(t.ty.group).color(t.text.muted).px(10.0).pt(if section == Section::General { 0.0 } else { 12.0 }).pb(4.0));
         }
         let active = !searching && s.pages.section == section;
-        rows.push(nav_label_row(section.title(), &format!("settings-section-{}", section.key()), active, t).on_press(move |s: &mut App| {
-            s.pages.section = section;
-            s.pages.set_field("settings:search", "");
-            s.pages.open_select = None;
-        }));
+        rows.push(nav_label_row(section.title(), &format!("settings-section-{}", section.key()), active, t).on_press(move |s: &mut App| s.go_section(section)));
     }
     super::ui::rail("settings", narrow, Some(search), rows)
 }
@@ -118,15 +114,22 @@ fn rail(s: &App, t: &Neko, narrow: bool) -> El {
 fn items(s: &App, t: &Neko, layer: &mut Vec<El>) -> Vec<Item> {
     let mut out = Vec::new();
     general(s, t, &mut out);
+    super::settings_d::general(s, t, &mut out);
     ai(s, t, layer, &mut out);
+    super::settings_d::ai(s, t, &mut out);
     appearance(s, t, &mut out);
-    web_only(s, t, &mut out);
+    super::settings_d::appearance(s, t, layer, &mut out);
+    super::settings_d::rulebook(s, t, &mut out);
+    super::settings_d::quick_panel(s, t, &mut out);
     budget(s, t, layer, &mut out);
     phone(s, t, layer, &mut out);
     updates(s, t, &mut out);
+    super::settings_d::updates(s, t, &mut out);
     workspaces(s, t, &mut out);
+    super::settings_d::clipboard(s, t, &mut out);
     permissions(s, t, &mut out);
     diagnostics(s, t, &mut out);
+    super::settings_d::diagnostics(s, t, &mut out);
     about(s, t, &mut out);
     out
 }
@@ -516,8 +519,6 @@ fn short(commit: &Option<String>) -> String {
 
 fn updates(s: &App, t: &Neko, out: &mut Vec<Item>) {
     let Some(u) = s.summary.as_ref().and_then(|m| m.settings.self_update.clone()) else { return };
-    let source = if u.source.is_empty() { "Neko’s public repository".to_owned() } else { u.source.clone() };
-    out.push(item(Section::Updates, "update-source", "Updates come from", "The repository the installed app follows. Set in the app.", setting_row(t, "set-update-source", "Updates come from", Some("The repository the installed app follows. Set in the app."), value(t, "set-update-source-value", &source))));
     let last = if u.check.at_ms == 0 {
         "Never".to_owned()
     } else if u.check.error.is_empty() {
@@ -598,18 +599,6 @@ fn appearance(s: &App, t: &Neko, out: &mut Vec<Item>) {
     let help = "System follows macOS. The choice is kept by Neko, so the web UI and this window agree.";
     let control = SegmentedControl::new(&["System", "Light", "Dark"], Some(now)).label("Theme").width(None).on_pick(|s: &mut App, i: usize, _| s.set_appearance(MODES[i.min(2)])).build(&t.kit).key("set-appearance-pick");
     out.push(item(Section::Appearance, "appearance-mode", "Theme", help, with_note(s, t, "setting:appearance", setting_row(t, "set-appearance", "Theme", Some(help), control))));
-}
-
-/// The Rulebook and the Quick panel's folders are edited in the web UI; each is one row that opens it there.
-fn web_only(s: &App, t: &Neko, out: &mut Vec<Item>) {
-    let _ = s;
-    for (section, id, label, help, route) in [
-        (Section::Rulebook, "rulebook", "Rulebook", "The rules Neko and every agent it hands work to follow.", "settings?section=rulebook"),
-        (Section::QuickPanel, "quick-panel", "Quick panel", "Choose which folders appear in the quick panel.", "settings?section=search"),
-    ] {
-        let button = row().gap(8.0).center_y().child(icon(&icons::EXTERNAL, 14.0).color(t.text.muted).a11y_hidden()).child(quiet_button("Open in web UI", &format!("{id}-open-web"), t, move |s: &mut App| s.open_in_web(Some(route))));
-        out.push(item(section, id, label, help, setting_row(t, &format!("set-{id}"), label, Some(help), button)));
-    }
 }
 
 /// Permissions: each kind of access with its status and a button that opens its pane of System Settings. Accessibility,

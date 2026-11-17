@@ -72,6 +72,15 @@ pub fn read_for_upload(path: &Path) -> Result<Vec<u8>, String> {
     std::fs::read(path).map_err(|_| format!("Couldn’t read {name}."))
 }
 
+/// A downloaded artifact saved under its own name in the person's Downloads folder (`NEKO_RUNE_DOWNLOADS` in tests), never over a file
+/// that is there: `report.csv` becomes `report 2.csv`. Returns where it went.
+pub fn save_download(name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+    let dir = std::env::var_os("NEKO_RUNE_DOWNLOADS").map(PathBuf::from).or_else(crate::web_panel::downloads_dir).ok_or_else(|| "There is no Downloads folder.".to_owned())?;
+    let dest = crate::web_panel::downloads_destination(Path::new(name), &dir);
+    std::fs::write(&dest, bytes).map_err(|_| "The download could not be saved.".to_owned())?;
+    Ok(dest)
+}
+
 /// The Markdown the message carries for a kept image.
 pub fn reference(path: &Path) -> String {
     // A space or a bracket in the folder's name would end the Markdown link early.

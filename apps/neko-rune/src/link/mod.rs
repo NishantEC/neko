@@ -17,6 +17,7 @@
 //! fake server in `link/unix.rs`.
 
 pub mod http;
+mod extra;
 mod model;
 mod pages;
 mod prs;
@@ -32,6 +33,7 @@ use std::time::{Duration, Instant};
 use neko_protocol::workbench::Command;
 use neko_protocol::{Request, Response};
 
+pub use extra::*;
 pub use model::*;
 pub use pages::*;
 pub use prs::*;

@@ -61,12 +61,34 @@ pub struct MentionFile {
     pub location: String,
 }
 
-/// One plugin as `/api/plugins` lists it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PluginEntry {
+/// One plugin as `/api/plugins` lists it (the web's `PluginListing`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PluginListing {
     pub id: String,
-    pub name: String,
-    pub enabled: bool,
+    pub title: String,
+    pub entry: String,
+    /// The entry file's mtime: changes when the module does.
+    pub version: u64,
+    /// The manifest's own "version" (for people).
+    pub manifest_version: String,
+    /// A `.disabled` marker file is in the plugin's folder: listed, never loaded.
+    pub disabled: bool,
+    /// Absolute path of the plugin's folder.
+    pub path: String,
+    pub description: String,
+    /// Why the daemon could not read the manifest or entry.
+    pub error: String,
+    /// The viewers its manifest declares: (id, title, kinds).
+    pub viewers: Vec<(String, String, Vec<String>)>,
+    pub fences: Vec<String>,
+}
+
+/// Where the person's customisations live (`/api/customisation`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Customisation {
+    pub plugins_dir: String,
+    pub css_path: String,
+    pub css_exists: bool,
 }
 
 struct Reply {
@@ -145,22 +167,80 @@ impl Http {
             .unwrap_or_default())
     }
 
-    /// `GET /api/plugins`: the plugins the daemon found, with whether each is on.
-    pub fn plugins(&self) -> Result<Vec<PluginEntry>, HttpError> {
+    /// `GET /api/plugins`: the plugins the daemon found, with everything the web's Customisations page shows of each.
+    pub fn plugins(&self) -> Result<Vec<PluginListing>, HttpError> {
         let reply = self.send("GET", "/api/plugins", &[], &[])?;
         if reply.status != 200 {
             return Err(HttpError(format!("Couldn’t list the plugins ({}).", reply.status)));
         }
         let json: serde_json::Value = serde_json::from_slice(&reply.body).map_err(|_| HttpError("The daemon's answer wasn’t readable.".into()))?;
         let list = json.as_array().or_else(|| json["plugins"].as_array());
+        let text = |v: &serde_json::Value, k: &str| v[k].as_str().unwrap_or_default().to_owned();
         Ok(list
             .map(|plugins| {
                 plugins
                     .iter()
-                    .filter_map(|p| Some(PluginEntry { id: p["id"].as_str().or_else(|| p["name"].as_str())?.to_owned(), name: p["name"].as_str().unwrap_or_default().to_owned(), enabled: p["enabled"].as_bool().unwrap_or(true) }))
+                    .filter_map(|p| {
+                        let id = p["id"].as_str().or_else(|| p["name"].as_str())?.to_owned();
+                        Some(PluginListing {
+                            title: p["title"].as_str().or_else(|| p["name"].as_str()).unwrap_or_default().to_owned(),
+                            entry: text(p, "entry"),
+                            version: p["version"].as_u64().unwrap_or(0),
+                            manifest_version: text(p, "manifest_version"),
+                            disabled: p["disabled"].as_bool().unwrap_or(false) || p["enabled"].as_bool() == Some(false),
+                            path: text(p, "path"),
+                            description: text(p, "description"),
+                            error: text(p, "error"),
+                            viewers: p["viewers"]
+                                .as_array()
+                                .map(|v| v.iter().map(|v| (text(v, "id"), text(v, "title"), v["kinds"].as_array().map(|k| k.iter().filter_map(|k| k.as_str().map(str::to_owned)).collect()).unwrap_or_default())).collect())
+                                .unwrap_or_default(),
+                            fences: p["fences"].as_array().map(|f| f.iter().filter_map(|f| f.as_str().map(str::to_owned)).collect()).unwrap_or_default(),
+                            id,
+                        })
+                    })
                     .collect()
             })
             .unwrap_or_default())
+    }
+
+    /// `GET /api/customisation`: the plugins folder and `custom.css`.
+    pub fn customisation(&self) -> Result<Customisation, HttpError> {
+        let reply = self.send("GET", "/api/customisation", &[], &[])?;
+        if reply.status != 200 {
+            return Err(HttpError(format!("Couldn’t read where the customisations live ({}).", reply.status)));
+        }
+        let json: serde_json::Value = serde_json::from_slice(&reply.body).map_err(|_| HttpError("The daemon's answer wasn’t readable.".into()))?;
+        Ok(Customisation { plugins_dir: json["plugins_dir"].as_str().unwrap_or_default().to_owned(), css_path: json["css_path"].as_str().unwrap_or_default().to_owned(), css_exists: json["css_exists"].as_bool().unwrap_or(false) })
+    }
+
+    /// `DELETE /api/plugins/<id>`: deletes the plugin's folder. Only sent after a confirmation.
+    pub fn remove_plugin(&self, id: &str) -> Result<(), HttpError> {
+        let reply = self.send("DELETE", &format!("/api/plugins/{}", percent_encode(id)), &[], &[])?;
+        match reply.status {
+            200 | 204 => Ok(()),
+            404 => Err(HttpError("That plugin is no longer installed.".into())),
+            _ => Err(HttpError(format!("The daemon answered {}.", reply.status))),
+        }
+    }
+
+    /// `GET /plugins/<id>/manifest.json`: the manifest as written, as the web's details panel reads it.
+    pub fn manifest(&self, id: &str) -> Result<String, HttpError> {
+        let reply = self.send("GET", &format!("/plugins/{}/manifest.json", percent_encode(id)), &[], &[])?;
+        if reply.status != 200 {
+            return Err(HttpError(format!("Could not read manifest.json: HTTP {}", reply.status)));
+        }
+        let text = String::from_utf8_lossy(&reply.body).into_owned();
+        Ok(serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|v| serde_json::to_string_pretty(&v).ok()).unwrap_or(text))
+    }
+
+    /// `GET /artifact/<id>/<n>?download=1`: one version of an artifact, as the web's Download link fetches it.
+    pub fn artifact_bytes(&self, id: &str, version: u32) -> Result<Vec<u8>, HttpError> {
+        let reply = self.send("GET", &format!("/artifact/{}/{version}?download=1", percent_encode(id)), &[], &[])?;
+        if reply.status != 200 {
+            return Err(HttpError(format!("The daemon refused the download ({}).", reply.status)));
+        }
+        Ok(reply.body)
     }
 
     /// `POST /api/plugins/<id>/enable` or `/disable` (the web's Plugins page switch).

@@ -166,7 +166,7 @@ pub fn downloads_destination(suggested: &Path, dir: &Path) -> PathBuf {
     (2..10_000).map(|n| dir.join(format!("{stem} {n}{ext}"))).find(|p| !p.exists()).unwrap_or_else(|| dir.join(format!("{stem} {}{ext}", std::process::id())))
 }
 
-fn downloads_dir() -> Option<PathBuf> {
+pub fn downloads_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Downloads")).filter(|d| d.is_dir())
 }
 

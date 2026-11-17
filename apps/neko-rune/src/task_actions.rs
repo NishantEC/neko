@@ -487,6 +487,111 @@ impl App {
     }
 }
 
+// ---- parity batch D: the confirmations of Settings, the theme files and the plugins -----------------------------------
+
+impl App {
+    /// "Start over…" (Settings, AI and agents): the web's exact warning.
+    pub fn ask_start_over(&mut self) {
+        self.confirm(Ask {
+            title: "Start over?".into(),
+            detail: "Tasks without a pull request are removed, along with their worktrees and unpublished changes. Tasks with a pull request stay. This can’t be undone.".into(),
+            ok: "Remove tasks and start over".into(),
+            cancel: "Cancel".into(),
+            destructive: true,
+            call: Call::WipeTasks,
+            done: "Started over. Tasks without a pull request were removed.".into(),
+            field: None,
+            list: Vec::new(),
+            more: Vec::new(),
+        });
+    }
+
+    /// "Roll back" (Settings, Neko updates): back to the web UI build the last swap replaced.
+    pub fn ask_roll_back_web(&mut self) {
+        self.confirm(Ask {
+            title: "Roll back the web UI?".into(),
+            detail: "The web UI goes back to the previous build. Pages reload on their own. The next published change brings the newer one back.".into(),
+            ok: "Roll back".into(),
+            cancel: "Cancel".into(),
+            destructive: true,
+            call: Call::PreviousWebBuild,
+            done: "Rolled the web UI back.".into(),
+            field: None,
+            list: Vec::new(),
+            more: Vec::new(),
+        });
+    }
+
+    /// Remove one of the person's theme files (the web's `ConfirmDialog` in Appearance).
+    pub fn ask_remove_theme(&mut self, id: &str) {
+        let Some(theme) = self.theme_entries().into_iter().find(|t| t.id == id && t.file.is_some()) else { return };
+        let file = theme.file.clone().unwrap_or_default();
+        self.confirm(Ask {
+            title: format!("Remove {}?", theme.name),
+            detail: format!("Deletes {file} from your themes folder. {}", if theme.overrides { "The built-in theme with this name comes back." } else { "You can ask Neko to make it again, but this cannot be undone." }),
+            ok: "Remove".into(),
+            cancel: "Cancel".into(),
+            destructive: true,
+            call: Call::DropTheme { id: theme.id.clone() },
+            done: format!("Removed {}.{}", theme.name, if theme.overrides { " The built-in came back." } else { "" }),
+            field: None,
+            list: Vec::new(),
+            more: Vec::new(),
+        });
+    }
+
+    /// Remove a plugin: its folder and everything in it (the web's `remove` in Customisations).
+    pub fn ask_remove_plugin(&mut self, id: &str) {
+        let (label, path) = self.plugin_ui.listings.as_ref().and_then(|l| l.iter().find(|p| p.id == id)).map(|p| (if p.title.is_empty() { p.id.clone() } else { p.title.clone() }, p.path.clone())).unwrap_or_else(|| (id.to_owned(), String::new()));
+        self.confirm(Ask {
+            title: format!("Remove “{label}”?"),
+            detail: format!("This deletes its folder{} and everything in it. It cannot be undone. Turn it off instead if you may want it back.", if path.is_empty() { String::new() } else { format!(" ({path})") }),
+            ok: "Remove".into(),
+            cancel: "Cancel".into(),
+            destructive: true,
+            call: Call::RemovePlugin { id: id.to_owned() },
+            done: format!("Removed {label}."),
+            field: None,
+            list: Vec::new(),
+            more: Vec::new(),
+        });
+    }
+
+    /// "Make me a theme": what should it look like, then one message to Neko (the web's ThemeDialog).
+    pub fn ask_make_theme(&mut self) {
+        self.pages.set_field(ASK_FIELD, "");
+        let dir = self.extra.themes_dir.clone().unwrap_or_default();
+        self.confirm(Ask {
+            title: "Make me a theme".into(),
+            detail: "Describe how it should look. Neko opens a task, writes a theme file into your themes folder and checks it. It appears in the pickers when the file is saved, and you can remove it any time.".into(),
+            ok: "Ask Neko".into(),
+            cancel: "Cancel".into(),
+            destructive: false,
+            call: Call::MakeTheme { dir, wish: String::new() },
+            done: "Asked Neko to make a theme.".into(),
+            field: Some(AskField { label: "What should it look like?".into(), placeholder: "A dark theme in deep teal with a soft gold accent…".into() }),
+            list: Vec::new(),
+            more: Vec::new(),
+        });
+    }
+
+    /// "Restore default" (Settings, Rulebook): the person's own rules go and Neko's are used again.
+    pub fn ask_restore_rulebook(&mut self) {
+        self.confirm(Ask {
+            title: "Restore the default rulebook?".into(),
+            detail: "Your own rules are removed and Neko’s built-in rules are used again from the next agent that starts.".into(),
+            ok: "Restore default".into(),
+            cancel: "Cancel".into(),
+            destructive: false,
+            call: Call::SetRulebook { text: String::new() },
+            done: "Restored the default rulebook.".into(),
+            field: None,
+            list: Vec::new(),
+            more: Vec::new(),
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

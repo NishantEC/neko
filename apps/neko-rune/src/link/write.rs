@@ -168,6 +168,23 @@ pub enum Call {
     SetDevCheckout { path: String },
     /// Saves the mode (`system`, `light`, `dark`): what the web's Appearance page sets.
     SetAppearance { mode: String },
+    // Settings, the rest (parity batch D). The three destructive ones, and the plugin's removal, are built only in `task_actions.rs`.
+    /// Removes every task except those with a pull request (the web's "Start over"). Only built inside a confirm dialog.
+    WipeTasks,
+    /// Deletes one of the person's theme files; a built-in it overrode comes back. Only built inside a confirm dialog.
+    DropTheme { id: String },
+    /// Back to the web UI build the last swap replaced. Only built inside a confirm dialog.
+    PreviousWebBuild,
+    /// Deletes a plugin's folder over HTTP (`DELETE /api/plugins/<id>`). Only built inside a confirm dialog; `App::call` sends it.
+    RemovePlugin { id: String },
+    /// Replaces the rulebook every agent works to; empty restores the default.
+    SetRulebook { text: String },
+    /// "Make me a theme" (the web's ThemeDialog): one message to Neko's chat with the theme prompt. `wish` is what the dialog collected.
+    MakeTheme { dir: String, wish: String },
+    /// "Change Neko…" (the web's ChangeDialog): one message to Neko's chat with the change prompt and where things live.
+    ChangeNeko { plugins_dir: String, css_path: String, checkout: String, wish: String },
+    /// The rest of Settings, Usage's machine reading, the first-run setup and the reports (`link/extra.rs`).
+    Extra(Box<super::ExtraCall>),
     /// One request of the Setup pages (Workspaces, Watching, Tools, Skills, Memory, Profiles, Schedules): `link/setup.rs`.
     Setup(Box<super::SetupAction>),
 }
@@ -177,6 +194,8 @@ impl Call {
     pub fn with_text(self, text: &str) -> Call {
         match self {
             Call::ClosePr { task_id, .. } => Call::ClosePr { task_id, comment: text.trim().to_owned() },
+            Call::MakeTheme { dir, .. } => Call::MakeTheme { dir, wish: text.trim().to_owned() },
+            Call::ChangeNeko { plugins_dir, css_path, checkout, .. } => Call::ChangeNeko { plugins_dir, css_path, checkout, wish: text.trim().to_owned() },
             other => other,
         }
     }
@@ -187,6 +206,25 @@ impl Call {
             Call::SteerQueued { text, workspace_id, .. } => Some(Request::Workbench(Command::InterruptAndSendMessage { text: text.clone(), workspace_id: workspace_id.clone() })),
             // An edited message goes first and the old one is taken back second: if the second step fails the person has the words twice, never none.
             Call::EditQueued { message_id, .. } => Some(Request::Workbench(Command::DiscardQueuedMessage { message_id: message_id.clone() })),
+            _ => None,
+        }
+    }
+
+    /// The plugin this call deletes: it goes over HTTP, not the socket (`App::call`).
+    pub fn plugin_to_remove(&self) -> Option<&str> {
+        match self {
+            Call::RemovePlugin { id } => Some(id),
+            _ => None,
+        }
+    }
+
+    /// Where a refusal of a destructive settings call shows (these calls are only built in `task_actions.rs`, so no other file names them).
+    pub fn destructive_key(&self) -> Option<&'static str> {
+        match self {
+            Call::WipeTasks => Some("setting:start-over"),
+            Call::DropTheme { .. } => Some("setting:themes"),
+            Call::PreviousWebBuild => Some("setting:updates"),
+            Call::RemovePlugin { .. } => Some("page:plugins"),
             _ => None,
         }
     }
@@ -308,6 +346,18 @@ impl Call {
             Call::ApplyUpdate => Request::Workbench(Command::ApplyPendingUpdate),
             Call::SetDevCheckout { path } => Request::Workbench(Command::SetDevCheckout { path }),
             Call::Setup(call) => call.wire(),
+            Call::WipeTasks => Request::Workbench(Command::StartOver { keep_published: true }),
+            Call::DropTheme { id } => Request::RemoveTheme { id },
+            Call::PreviousWebBuild => Request::Workbench(Command::RollBackWebUi),
+            // Over HTTP, never the socket: `App::call` sends it and nothing reaches here. A harmless read keeps the match whole.
+            Call::RemovePlugin { .. } => Request::Ping,
+            Call::SetRulebook { text } => Request::Workbench(Command::SetRulebook { text }),
+            Call::Extra(call) => call.wire().pop().unwrap_or(Request::Ping),
+            Call::MakeTheme { dir, wish } => Request::Workbench(Command::SendMessage { text: crate::extra::theme_prompt(&wish, Some(dir.as_str()).filter(|d| !d.is_empty())), workspace_id: None }),
+            Call::ChangeNeko { plugins_dir, css_path, checkout, wish } => {
+                let places = crate::plugin_manage::Places { plugins_dir, css_path, checkout: Some(checkout).filter(|c| !c.is_empty()) };
+                Request::Workbench(Command::SendMessage { text: crate::plugin_manage::change_prompt(&wish, &places), workspace_id: None })
+            }
         }
     }
 }

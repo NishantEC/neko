@@ -1,0 +1,27 @@
+Open a task that changes Neko the way I describe.
+
+What to change: {{REQUEST}}
+
+Use the lighter route that does the job.
+
+A. My own page, override or styles (live in seconds, no review, only mine). For a new page, a replacement or wrapper of a built-in page, an extra Settings section or task tab, or restyling. Write a folder {{PLUGINS_DIR}}/<name>/ (lowercase letters, digits, - or _):
+manifest.json
+{ "title": "Short title", "description": "One sentence", "version": "0.1.0", "entry": "index.js", "group": "main" }   (group: main, work or system)
+index.js (an ES module; React and Neko's components come from host, so no imports and no bundler)
+export default function register(host) {
+  const { React, ui } = host;
+  const h = React.createElement;
+  function Page() {
+    return h("div", { className: "mx-auto w-full max-w-3xl px-6 py-10 flex flex-col gap-6" },
+      h(ui.PageHeader, { title: "Short title" }),
+      h(ui.Panel, null, h(ui.Button, { onClick: () => ui.toast.success("Hi") }, "Save")));
+  }
+  host.registerPage({ id: "main", title: "Short title", icon: "Heart", component: Page });
+}
+- A new id is a page of its own in the sidebar group, marked "yours". A built-in's id (home, tasks, prs, tree, workspaces, watching, schedules, memory, profiles, tools, settings, usage) replaces it: registerPage({ id: "tasks", component }), or wraps it: registerPage({ id: "tasks", wrap: (Original) => function Wrapped(props) { return h(React.Fragment, null, h(Banner), h(Original, props)); } }). It shows as Customised and can be reset to the original.
+- host.storage.get(key, fallback) / set / delete / list keep JSON on the daemon; use it, not localStorage. host.addSection({ id, title, component }) adds to Settings; host.addTab({ id, title, component }) adds a task tab (it gets { task }); host.registerCommands([{ id, title, run }]) adds to the command palette; host.navigation.navigate(route); host.request(...) talks to the daemon, the same JSON the app sends; call no other site.
+- Styles: CSS in {{CSS_PATH}} applies live. Restyle with the app's variables (--background, --foreground, --primary, --card, --border, --radius), not new colours.
+
+B. The app's own source in the development checkout {{CHECKOUT}} (web/src for the UI), for what a page cannot reach: the chat, the shell, the daemon, or a fix everyone should get. Work on a branch as usual. A change that lands on main there is pushed to the published repository, and the installed app updates itself from that within about ten minutes (a UI-only change goes live by itself; the previous web UI is kept as web-live.prev and Settings, Neko updates has "Roll back the web UI"; daemon or app changes reinstall when Neko is idle). Never edit the app's own clone (Settings, Neko updates shows where updates come from); it is reset on every update.
+
+Choose A for anything personal and reversible, B when it should become part of Neko. Build from host.ui (PageHeader, Panel, Button, Input, Textarea, Select*, Switch, Checkbox, Badge, StatusBadge, Tabs*, Table*, Dialog*, DropdownMenu*, Tooltip*, Progress, Skeleton, Spinner, Empty*, toast), icons from host.icons, never hand-styled elements. Read Neko's plugin guide first (run Neko's command line, the program you use for --request, with --plugin-guide): libraries go inside the plugin folder, the old version is kept in previous/, and you check the result with --open-page <id> and the PluginStatus request until it is ok. Then tell me where to find it.

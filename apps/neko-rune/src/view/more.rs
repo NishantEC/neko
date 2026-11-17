@@ -6,10 +6,10 @@
 
 use rune::{Color, El, Shape, canvas, col, el, row, text};
 
-use super::ui::{MenuEntry, group, page, quiet_line, with_menu};
+use neko_protocol::workbench::MachineHealth;
+
+use super::ui::{group, page, quiet_line};
 use crate::app::App;
-use crate::pages::ago;
-use crate::status::{StatusKind, status_glyph};
 use crate::theme::Neko;
 
 const DAY_MS: i64 = 86_400_000;
@@ -111,15 +111,162 @@ pub fn usage(s: &App, t: &Neko) -> El {
         (Some(c), false) => format!("of a {} daily ceiling", usd(c as f64 / 100.0)),
         (None, _) => "No daily ceiling. Set one in Settings.".to_owned(),
     };
-    let mut body = col().w_full().gap(18.0).child(figure(t, "usage-today", "Today", &usd(today), &detail));
+    let mut body = col().w_full().gap(18.0).child(machine(s, t)).child(figure(t, "usage-today", "Today", &usd(today), &detail));
     let days = spend_by_day(&usage, s.now_ms);
     body = if usage.is_empty() {
         body.child(quiet_line(t, "usage-none", "No priced runs yet"))
     } else {
         body.child(col().w_full().gap(6.0).child(group(t, "Last 7 days")).child(chart(t, &days)))
     };
+    body = body.child(models(s, t));
     body = body.child(quota(s, t));
     page(t, "usage", "Usage", None, Vec::new(), body)
+}
+
+/// What the machine reading says to the person, in the web's words (`machineState` in Usage.tsx): a tone and a line, with a detail.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MachineState {
+    /// 0 fine, 1 warning (amber), 2 on hold (coral).
+    pub level: u8,
+    pub title: String,
+    pub detail: String,
+}
+
+pub fn machine_state(h: &MachineHealth) -> MachineState {
+    if let Some(why) = h.holding.as_ref().filter(|w| !w.is_empty()) {
+        return MachineState { level: 2, title: "New work is on hold".to_owned(), detail: why.clone() };
+    }
+    if h.cap.is_some() {
+        let (title, detail) = if h.night {
+            ("Night: one task at a time", "01:00–06:00: Neko runs one task at a time, and new work waits while the load is above 12.")
+        } else {
+            ("Memory tight: one at a time", "Memory pressure is high, so agents start one at a time until it eases.")
+        };
+        return MachineState { level: 1, title: title.to_owned(), detail: detail.to_owned() };
+    }
+    let detail = if h.night { "Night hours: one heavy job at a time." } else { "New agent work starts normally." };
+    MachineState { level: 0, title: format!("Mac OK · load {}", h.load.round() as i64), detail: detail.to_owned() }
+}
+
+/// One figure of the reading: its words, and how loudly it speaks (0 quiet, 1 amber, 2 coral): colour only when it needs the person.
+pub fn machine_figures(h: &MachineHealth) -> Vec<(&'static str, String, String, u8)> {
+    let cores = h.cores.max(1) as f64;
+    let per_core = h.load / cores;
+    let pressure = if h.pressure.is_empty() { "normal".to_owned() } else { h.pressure.clone() };
+    let pressure_cap = pressure.chars().next().map(|c| c.to_uppercase().collect::<String>() + &pressure[c.len_utf8()..]).unwrap_or_default();
+    vec![
+        (
+            "Load",
+            format!("{:.1} of {} cores", h.load, h.cores.max(1)),
+            if h.load >= 20.0 { "No new agents start above a load of 20.".to_owned() } else if per_core >= 0.85 { format!("Busy: {per_core:.2} per core") } else { format!("{per_core:.2} per core") },
+            if h.load >= 20.0 { 2 } else if per_core >= 0.85 { 1 } else { 0 },
+        ),
+        (
+            "Memory pressure",
+            pressure_cap,
+            format!("{:.1} GB compressed · swap {:.1} of {:.1} GB", h.compressed_gb, h.swap_used_gb, h.swap_total_gb),
+            match pressure.as_str() {
+                "critical" => 2,
+                "warning" => 1,
+                _ => 0,
+            },
+        ),
+        (
+            "Free disk",
+            format!("{:.0} GB", h.free_disk_gb),
+            if h.free_disk_gb < 15.0 { "Under 15 GB: nothing new starts.".to_owned() } else { "Neko holds new work under 15 GB.".to_owned() },
+            if h.free_disk_gb < 15.0 { 2 } else if h.free_disk_gb < 30.0 { 1 } else { 0 },
+        ),
+        (
+            "Cooling",
+            if h.kernel_task_cpu >= 50.0 { "Throttling".to_owned() } else { "Normal".to_owned() },
+            if h.kernel_task_cpu >= 50.0 { format!("macOS is throttling (kernel_task {:.0}%)", h.kernel_task_cpu) } else { format!("kernel_task {:.0}%", h.kernel_task_cpu) },
+            if h.kernel_task_cpu >= 50.0 { 1 } else { 0 },
+        ),
+    ]
+}
+
+fn tone(t: &Neko, level: u8) -> rune::Color {
+    match level {
+        2 => t.meaning.coral,
+        1 => t.meaning.amber,
+        _ => t.text.base,
+    }
+}
+
+/// "Machine health": the hold or cap on new work, then load, memory, disk and cooling as one-line figures (DESIGN.md §8 rule 12).
+fn machine(s: &App, t: &Neko) -> El {
+    let mut c = col().key("machine").w_full().gap(2.0).child(group(t, "Machine health"));
+    let Some((h, read_at)) = s.extra.machine.as_ref() else {
+        return c.child(quiet_line(t, "machine-loading", s.pages.notes.get("page:machine").map_or("Reading the machine…", String::as_str)));
+    };
+    let state = machine_state(h);
+    c = c.child(
+        row()
+            .key("machine-state")
+            .w_full()
+            .min_h(32.0)
+            .px(6.0)
+            .gap(10.0)
+            .center_y()
+            .child(text(state.title.clone()).key("machine-state-title").font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(tone(t, state.level)))
+            .child(text(format!("{}{}", state.detail, if h.slowed > 0 { format!(" Slowed {} build and test {}; nothing was stopped.", h.slowed, if h.slowed == 1 { "process" } else { "processes" }) } else { String::new() })).font(t.ty.meta).color(t.text.muted).wrap().grow(1.0).min_w(0.0))
+            .child(text(format!("read {}", crate::pages::ago(s.now_ms, *read_at))).font(t.ty.id).color(t.text.faint)),
+    );
+    for (i, (label, value, detail, level)) in machine_figures(h).into_iter().enumerate() {
+        c = c.child(
+            row()
+                .key(format!("machine-{i}"))
+                .w_full()
+                .min_h(32.0)
+                .px(6.0)
+                .gap(10.0)
+                .center_y()
+                .child(text(label).font(t.ty.row).color(t.text.muted))
+                .child(text(value).key(format!("machine-{i}-value")).font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(tone(t, level)))
+                .child(text(detail).font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0)),
+        );
+    }
+    if !h.agents.is_empty() {
+        c = c.child(group(t, "Memory held by agents").pt(8.0));
+        for (i, a) in h.agents.iter().take(6).enumerate() {
+            let size = if a.mb >= 1024 { format!("{:.1} GB", a.mb as f64 / 1024.0) } else { format!("{} MB", a.mb) };
+            c = c.child(figure(t, &format!("machine-agent-{i}"), &a.name, &size, &format!("{} {}", a.processes, if a.processes == 1 { "process" } else { "processes" })));
+        }
+    } else {
+        c = c.child(quiet_line(t, "machine-agents-none", "No agent processes are running right now."));
+    }
+    c
+}
+
+/// Runs by model, from the last runs the workbench kept (the web's `ModelSection`): at most six, most used first.
+pub fn model_counts(runs: &[(String, Option<String>)]) -> Vec<(String, usize)> {
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for (model, effort) in runs {
+        let name = format!("{}{}", if model.is_empty() { "default model" } else { model.as_str() }, effort.as_ref().filter(|e| !e.is_empty()).map(|e| format!(" · {e}")).unwrap_or_default());
+        match counts.iter_mut().find(|(n, _)| *n == name) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((name, 1)),
+        }
+    }
+    counts.sort_by(|a, b| b.1.cmp(&a.1));
+    counts.truncate(6);
+    counts
+}
+
+fn models(s: &App, t: &Neko) -> El {
+    let runs = s.summary.as_ref().map(|m| m.settings.model_runs.clone()).unwrap_or_default();
+    let counts = model_counts(&runs);
+    if counts.is_empty() {
+        return el().h(0.0);
+    }
+    let top = counts.first().map_or(1, |c| c.1).max(1) as f32;
+    let mut c = col().key("models").w_full().gap(2.0).child(row().w_full().gap(8.0).child(group(t, "Models")).child(text(format!("last {} runs", runs.len())).font(t.ty.id).color(t.text.faint)));
+    for (i, (name, n)) in counts.iter().enumerate() {
+        let bar = row().w(160.0).h(4.0).radius(2.0).fill(t.surface.active).child(el().key(format!("model-fill-{i}")).w(160.0 * *n as f32 / top).h(4.0).radius(2.0).fill(t.meaning.iris));
+        c = c.child(row().key(format!("model-{i}")).w_full().min_h(32.0).px(6.0).gap(12.0).center_y().radius(t.radius.row).hover(t.surface.hover).child(text(name.clone()).key(format!("model-{i}-name")).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0)).child(bar).child(text(format!("{n} {}", if *n == 1 { "run" } else { "runs" })).key(format!("model-{i}-runs")).font(t.ty.meta).color(t.text.muted)));
+    }
+    c
 }
 
 fn quota(s: &App, t: &Neko) -> El {
@@ -155,51 +302,6 @@ fn quota(s: &App, t: &Neko) -> El {
         }
     }
     c
-}
-
-// ---- Plugins
-
-pub fn plugins(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
-    let mut body = col().w_full().gap(2.0);
-    let list = s.pages.plugins.clone();
-    match &list {
-        None => body = body.child(quiet_line(t, "plugins-loading", s.pages.notes.get("page:plugins").map_or("Reading the plugins…", String::as_str))),
-        Some(l) if l.is_empty() => body = body.child(quiet_line(t, "plugins-none", "No plugin has loaded yet")),
-        Some(l) => {
-            for p in l {
-                let (kind, words) = if let Some(problem) = &p.problem {
-                    (StatusKind::Failed, format!("Failed: {problem}"))
-                } else if p.rolled_back {
-                    (StatusKind::InProgress, "Rolled back to the previous version".to_owned())
-                } else if p.ok {
-                    (StatusKind::Done, format!("Loaded {}", ago(s.now_ms, p.at_ms)))
-                } else {
-                    (StatusKind::Backlog, "Not loaded".to_owned())
-                };
-                let line = row()
-                        .key(format!("plugin-{}", p.id))
-                        .w_full()
-                        .min_h(36.0)
-                        .px(6.0)
-                        .gap(12.0)
-                        .center_y()
-                        .radius(t.radius.row)
-                        .hover(t.surface.hover)
-                        .help(words.clone())
-                        .child(status_glyph(kind, t, 14.0, Some(&words)))
-                        .child(text(p.id.clone()).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0))
-                        .child(text(format!("v{}", p.version)).font(t.ty.id).color(t.text.faint))
-                        .child(text(words).key(format!("plugin-words-{}", p.id)).font(t.ty.meta).color(if kind == StatusKind::Failed { t.meaning.coral } else { t.text.muted }).truncate().min_w(0.0).max_w(300.0));
-                let mut entries: Vec<MenuEntry> = vec![("Check again".to_owned(), std::rc::Rc::new(|s: &mut App| s.call(crate::link::Call::Plugins)))];
-                if p.id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.') && !p.id.starts_with('.') {
-                    let dir = neko_protocol::support_dir().join("plugins").join(&p.id);
-                    entries.push(("Open folder".to_owned(), std::rc::Rc::new(move |s: &mut App| s.open_path(&dir.to_string_lossy()))));
-                }
-                body = body.child(with_menu(s, t, layer, &format!("plugin:{}", p.id), line, entries));
-            }
-        }
-    }
-    page(t, "plugins", "Plugins", list.as_ref().filter(|l| !l.is_empty()).map(Vec::len), Vec::new(), body)
 }
 
 #[cfg(test)]

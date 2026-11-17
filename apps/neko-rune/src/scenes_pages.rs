@@ -182,6 +182,9 @@ pub fn settings_view() -> SettingsView {
             WorkspaceInfo { id: "w2".into(), name: "Home".into(), repository: "/home/me".into(), folders: vec!["/home/me".into()] },
         ],
         usage: (0..40).map(|i| (DEMO_NOW - (i * 4 * HOUR + 17 * MIN), ((0.3 + ((i * 7) % 11) as f64 / 20.0) * 1_000_000.0) as u64)).filter(|(at, _)| DEMO_NOW - at < 7 * day).collect(),
+        rulebook: String::new(),
+        rulebook_default: "Be careful with other people's files.\nPrefer small, reviewable changes.\nRun the tests before saying a task is done.".into(),
+        model_runs: [("gpt-a", Some("high")), ("gpt-a", Some("high")), ("gpt-a", None), ("claude-x", Some("medium")), ("", None)].iter().map(|(m, e)| ((*m).to_owned(), e.map(str::to_owned))).collect(),
     }
 }
 

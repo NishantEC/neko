@@ -143,6 +143,14 @@ pub struct SettingsView {
     /// Reported spend, newest 8 days: (when, millionths of a US dollar). Each priced agent run is one
     /// `USAGE` event on its task (the web's Usage page reads the same events).
     pub usage: Vec<(i64, u64)>,
+    /// The person's own rulebook ("" when none: Neko's default is used) and the built-in default (Settings, Rulebook).
+    #[serde(default)]
+    pub rulebook: String,
+    #[serde(default)]
+    pub rulebook_default: String,
+    /// The model and reasoning effort of each recent run (the web's Usage page, "Models").
+    #[serde(default)]
+    pub model_runs: Vec<(String, Option<String>)>,
 }
 
 /// How far back the client keeps priced runs (the Usage chart shows seven days).
@@ -438,6 +446,9 @@ impl Summary {
                     .map(|w| WorkspaceInfo { id: w.id.clone(), name: w.name.clone(), repository: w.repository.clone(), folders: snapshot.workspace_folders.get(&w.id).cloned().unwrap_or_default() })
                     .collect(),
                 usage: usage_points(snapshot, now),
+                rulebook: snapshot.rulebook.clone().unwrap_or_default(),
+                rulebook_default: snapshot.rulebook_default.clone(),
+                model_runs: snapshot.runtime_selections.iter().map(|r| (r.runtime.model.clone(), r.runtime.reasoning_effort.clone())).collect(),
             },
             setup: super::SetupData::from_snapshot(snapshot),
             pull_requests: super::prs::rows(snapshot, |t| author_of(snapshot, &t.id)),

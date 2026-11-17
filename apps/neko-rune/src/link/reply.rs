@@ -12,7 +12,7 @@ use neko_protocol::{Frame, Request, Response, read_frame, write_frame};
 
 use super::pages::{CalendarData, PhoneData, QuotaRow, RoutinesData};
 use super::write::Call;
-use super::{LinkError, Summary};
+use super::{ExtraAnswer, LinkError, Summary};
 
 /// The task the person has open, shared with the link thread so each snapshot it summarises
 /// carries that task's detail.
@@ -84,6 +84,16 @@ pub struct RuntimeChoice {
     pub label: String,
 }
 
+/// The web UI's appearance as the daemon keeps it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppearanceChoice {
+    /// `system`, `light` or `dark`.
+    pub mode: String,
+    /// The theme ids for light and for dark.
+    pub light: String,
+    pub dark: String,
+}
+
 /// What came back, ready for the app. (One is made per call and moved once, so the big variant
 /// is not boxed.)
 #[derive(Clone, Debug, PartialEq)]
@@ -113,8 +123,10 @@ pub enum Reply {
     Calendar(Box<CalendarData>),
     CalendarStatus(neko_protocol::calendar::CalendarStatus),
     Phone(Box<PhoneData>),
-    /// The appearance mode the daemon keeps: `system`, `light` or `dark`.
-    Appearance(String),
+    /// The appearance the daemon keeps: the mode and the theme for light and for dark.
+    Appearance(AppearanceChoice),
+    /// The answer of an [`ExtraCall`] (and of removing a theme).
+    Extra(Box<ExtraAnswer>),
     PhoneTest(Vec<String>),
     Quota(Vec<QuotaRow>),
     Plugins(Vec<neko_protocol::PluginHealth>),
@@ -186,6 +198,9 @@ pub fn inbox_items(routines: &[neko_protocol::routines::RoutineView], now_ms: i6
 
 /// Makes one call and reads the answer. `open` is the task whose detail a snapshot answer carries.
 pub fn make(socket: &Path, call: &Call, open: Option<&str>) -> Reply {
+    if let Call::Extra(extra) = call {
+        return extra.run(socket, open);
+    }
     let mut response = match ask(socket, call.wire()) {
         Ok(response) => response,
         Err(error) => return Reply::Failed(error),
@@ -241,7 +256,8 @@ pub fn make(socket: &Path, call: &Call, open: Option<&str>) -> Reply {
         Response::CalendarStatus(status) => Reply::CalendarStatus(status),
         Response::Phone { settings, status } => Reply::Phone(Box::new(PhoneData { settings, status })),
         Response::PhoneTest { lines } => Reply::PhoneTest(lines),
-        Response::Appearance { mode, .. } => Reply::Appearance(mode),
+        Response::Appearance { mode, light, dark, .. } => Reply::Appearance(AppearanceChoice { mode, light, dark }),
+        Response::Themes { dir, themes, problems } => Reply::Extra(Box::new(ExtraAnswer::Themes { dir, themes: themes.into_iter().map(|t| (t.id, t.file, t.theme)).collect(), problems: problems.into_iter().map(|p| (p.file, p.message)).collect() })),
         Response::PluginStatus { plugins } => Reply::Plugins(plugins),
         Response::SearchResults { items, .. } => Reply::Quota(quota_rows(&items)),
         Response::NeedsYouAnswered { summary } => Reply::Answered(summary),

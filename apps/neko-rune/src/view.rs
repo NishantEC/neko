@@ -22,6 +22,8 @@ mod dialogs;
 mod fences;
 mod home;
 mod more;
+mod onboarding;
+mod plugins;
 mod neko;
 mod palette;
 mod prs;
@@ -32,6 +34,7 @@ mod session;
 mod sessions;
 pub mod setup;
 mod settings;
+mod settings_d;
 mod tree;
 mod turn;
 mod ui;
@@ -46,7 +49,7 @@ use rune_kit::root;
 
 use crate::app::App;
 use crate::layout::{GRIP, NEKO_STRIP, Region};
-use crate::theme::{Neko, theme};
+use crate::theme::Neko;
 
 /// Home's scrim: the window's colour at this strength over this radius.
 pub fn home_scrim() -> (f32, f32) {
@@ -75,7 +78,7 @@ pub struct Frame {
 }
 
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
-    let t = theme(s.appearance_dark(cx.system_dark()));
+    let t = s.theme_now(cx.system_dark());
     s.panel.dark.set(t.dark);
     s.reduce_motion.set(cx.system_reduced_motion());
     let mut layer = Vec::new();
@@ -122,6 +125,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     compose::mount_message_menu(s, &t, &mut layer);
     runtime::mount(s, &t, &mut layer);
     dialogs::mount(s, &t, &mut layer);
+    settings_d::mount_guard(s, &t, &mut layer);
     crate::toasts::mount(s, &t, &mut layer);
     // Every popover, menu, select, dialog, the palette and toast is an element of this layer: while there is
     // one, a native web view (always above Rune's surface) is hidden.

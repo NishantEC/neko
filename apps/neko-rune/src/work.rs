@@ -458,6 +458,13 @@ impl App {
     /// What a Live snapshot asks for next: the open task's runs when its revision moved, the
     /// unseen marks, and (once a minute) the Inbox and the digest.
     pub fn after_live(&mut self) {
+        if self.summary.is_none() {
+            return;
+        }
+        // Once per run: the appearance and the themes (so the window paints the person's choice) and whether the first-run setup is due.
+        if !self.extra.started && self.linked && !matches!(self.dispatch, crate::app::Dispatch::None) {
+            self.extra_started();
+        }
         let Some(summary) = self.summary.as_ref() else { return };
         if let Some(detail) = summary.detail.as_ref().filter(|d| Some(d.task.id.as_str()) == self.selected.as_deref()) {
             let id = detail.task.id.clone();
@@ -775,7 +782,9 @@ impl App {
                 }
                 true
             }
+            Reply::Extra(answer) => self.extra_answer(call, *answer),
             Reply::Models { choices, catalog } => {
+                self.onboarding.checking = false;
                 if let Some(form) = self.new_form.as_mut() {
                     form.choices = choices;
                 }
@@ -864,6 +873,9 @@ impl App {
                 false
             }
             Reply::Refused(message) => {
+                if let Some(changed) = self.extra_refused(call, &message) {
+                    return changed;
+                }
                 if let Some(changed) = self.page_refused(call, message.clone()) {
                     return changed;
                 }
@@ -916,6 +928,9 @@ impl App {
             }
             Reply::Failed(error) => {
                 let line = crate::link::calm(&error, std::time::Duration::from_secs(1));
+                if let Some(changed) = self.extra_refused(call, &line) {
+                    return changed;
+                }
                 if let Some(changed) = self.page_refused(call, line.clone()) {
                     return changed;
                 }

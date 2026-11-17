@@ -246,7 +246,11 @@ fn lighten(colour: Color, by: f32) -> Color {
 
 impl Neko {
     pub fn build(dark: bool) -> Neko {
-        let hex = if dark { DARK } else { LIGHT };
+        Neko::from_hex(dark, if dark { DARK } else { LIGHT })
+    }
+
+    /// The theme for a token table: the defaults above, or a picked theme mapped onto the same tokens (`themes.rs`).
+    pub fn from_hex(dark: bool, hex: Hex) -> Neko {
         let window = c(hex.background);
         let fg = c(hex.foreground);
         let muted = c(hex.muted);

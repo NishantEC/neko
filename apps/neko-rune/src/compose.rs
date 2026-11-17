@@ -17,7 +17,7 @@ use neko_protocol::workbench::ChatRole;
 use rune::{Key, KeyEvent, TextEdit};
 
 use crate::app::{App, Dispatch};
-use crate::link::http::{Http, HttpError, Kept, MentionFile};
+use crate::link::http::{Customisation, Http, HttpError, Kept, MentionFile, PluginListing};
 use crate::link::{Call, Summary};
 use crate::work::PLAN_PREFIX;
 
@@ -233,6 +233,13 @@ pub fn size_words(bytes: u64) -> String {
 pub enum HttpWork {
     Upload { dest: Dest, id: u64, name: String, path: PathBuf },
     Files { query: String, workspace: String },
+    /// Plugins (Customisations): list them with where they live, switch one, delete one, read one's manifest.
+    Plugins,
+    PluginSet { id: String, enabled: bool },
+    PluginRemove { id: String },
+    PluginManifest { id: String },
+    /// An artifact version saved to the Downloads folder under this name.
+    Download { id: String, version: u32, name: String },
 }
 
 /// What came back.
@@ -240,6 +247,11 @@ pub enum HttpWork {
 pub enum HttpDone {
     Uploaded { dest: Dest, id: u64, result: Result<Kept, HttpError> },
     Files { query: String, result: Result<Vec<MentionFile>, HttpError> },
+    Plugins(Result<(Vec<PluginListing>, Option<Customisation>), HttpError>),
+    /// A plugin switched or removed: `removed` says which.
+    PluginChanged { id: String, removed: bool, result: Result<(), HttpError> },
+    Manifest { id: String, result: Result<String, HttpError> },
+    Downloaded { name: String, result: Result<PathBuf, HttpError> },
 }
 
 /// Does the work on the calling thread. Reading the file happens here, not in a frame.
@@ -252,6 +264,24 @@ pub fn run_http(http: &Http, work: HttpWork) -> HttpDone {
         HttpWork::Files { query, workspace } => {
             let result = http.files(&query, &workspace);
             HttpDone::Files { query, result }
+        }
+        // The listing and where the customisations live are two reads; a failed second one only leaves the folder lines out.
+        HttpWork::Plugins => HttpDone::Plugins(http.plugins().map(|list| (list, http.customisation().ok()))),
+        HttpWork::PluginSet { id, enabled } => {
+            let result = http.set_plugin_enabled(&id, enabled);
+            HttpDone::PluginChanged { id, removed: false, result }
+        }
+        HttpWork::PluginRemove { id } => {
+            let result = http.remove_plugin(&id);
+            HttpDone::PluginChanged { id, removed: true, result }
+        }
+        HttpWork::PluginManifest { id } => {
+            let result = http.manifest(&id);
+            HttpDone::Manifest { id, result }
+        }
+        HttpWork::Download { id, version, name } => {
+            let result = http.artifact_bytes(&id, version).and_then(|bytes| crate::attachments::save_download(&name, &bytes).map_err(HttpError));
+            HttpDone::Downloaded { name, result }
         }
     }
 }
@@ -441,6 +471,7 @@ impl App {
                 self.compose.files = result.unwrap_or_default();
                 true
             }
+            other => self.plugin_http_done(other),
         }
     }
 

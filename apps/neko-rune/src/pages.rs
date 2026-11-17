@@ -238,6 +238,8 @@ pub fn ago(now_ms: i64, at_ms: i64) -> String {
 pub struct Pages {
     /// The appearance mode the daemon keeps (`system`, `light`, `dark`); None until it answers.
     pub appearance: Option<String>,
+    /// The theme chosen for light and for dark (`themes.rs`); None until the daemon answers.
+    pub theme_ids: Option<(String, String)>,
     /// What this process may do on the Mac, as last probed (Settings, Permissions).
     pub access: Option<crate::permissions::Local>,
     pub routines: Option<RoutinesData>,
@@ -279,6 +281,7 @@ impl Default for Pages {
     fn default() -> Self {
         Pages {
             appearance: None,
+            theme_ids: None,
             access: None,
             routines: None,
             open_routine: None,
@@ -381,7 +384,9 @@ pub fn control_key(call: &Call) -> Option<String> {
         Call::Quota => "page:quota".to_owned(),
         Call::Plugins => "page:plugins".to_owned(),
         Call::Setup(call) => call.key(),
-        _ => return None,
+        Call::SetRulebook { .. } => "setting:rulebook".to_owned(),
+        Call::Extra(call) => call.key(),
+        other => return other.destructive_key().map(str::to_owned),
     })
 }
 
@@ -428,8 +433,9 @@ impl App {
             FullView::Usage => {
                 self.call(Call::RoutinesFull);
                 self.call(Call::Quota);
+                self.extra_ask_machine();
             }
-            FullView::Plugins => self.call(Call::Plugins),
+            FullView::Plugins => self.plugins_ask(),
             // The pull requests, like every session, are in the workbench: nothing to ask for.
             FullView::AllSessions | FullView::PullRequests => {}
             FullView::Settings => {
@@ -439,6 +445,7 @@ impl App {
                 self.call(Call::Appearance);
                 self.pages.access = Some((self.access_probe)());
                 self.ask_calendar();
+                self.extra_ask_settings();
             }
         }
     }
@@ -696,6 +703,8 @@ impl App {
             self.pages.seed("task-budget", &dollars(st.task_budget_cents));
             self.pages.seed("daily-budget", &dollars(st.daily_budget_cents));
             self.pages.seed("dev-checkout", &st.self_update.as_ref().and_then(|u| u.dev_checkout.clone()).unwrap_or_default());
+            self.pages.seed("update-source", &st.self_update.as_ref().map(|u| u.source.clone()).unwrap_or_default());
+            self.pages.seed("rulebook", &crate::extra::rulebook_saved(&st.rulebook, &st.rulebook_default));
         }
         if let Some(server) = self.pages.phone.as_ref().map(|p| p.settings.ntfy_server.clone()) {
             self.pages.seed("ntfy-server", &server);
@@ -759,9 +768,10 @@ impl App {
                 self.seed_settings();
                 Some(changed)
             }
-            Reply::Appearance(mode) => {
-                let changed = self.pages.appearance.as_ref() != Some(mode);
-                self.pages.appearance = Some(mode.clone());
+            Reply::Appearance(choice) => {
+                let changed = self.pages.appearance.as_ref() != Some(&choice.mode) || self.pages.theme_ids.as_ref() != Some(&(choice.light.clone(), choice.dark.clone()));
+                self.pages.appearance = Some(choice.mode.clone());
+                self.pages.theme_ids = Some((choice.light.clone(), choice.dark.clone()));
                 self.pages.notes.remove("setting:appearance");
                 Some(changed)
             }

@@ -232,6 +232,12 @@ pub struct App {
     pub http: Option<crate::link::http::Http>,
     /// The address was asked for (once; asked again when the answer failed).
     pub http_asked: bool,
+    /// Settings' second half, Usage's machine reading and the rulebook guard (`extra.rs`).
+    pub extra: crate::extra::ExtraState,
+    /// The first-run setup (`onboarding.rs`).
+    pub onboarding: crate::onboarding::Onboarding,
+    /// Plugins as full management (`plugin_manage.rs`).
+    pub plugin_ui: crate::plugin_manage::PluginUi,
 }
 
 /// Where the window's own settings are kept (Rune's `prefs` store).
@@ -358,6 +364,9 @@ impl Default for App {
             runtime: crate::runtime_pick::RuntimeUi::default(),
             http: None,
             http_asked: false,
+            extra: Default::default(),
+            onboarding: Default::default(),
+            plugin_ui: Default::default(),
         }
     }
 }
@@ -465,6 +474,12 @@ impl App {
 
     /// Sends one request to the daemon (see [`Dispatch`]).
     pub fn call(&mut self, call: Call) {
+        // A plugin's removal goes over HTTP, not the socket (only after its confirmation: `task_actions.rs`).
+        if let Some(id) = call.plugin_to_remove() {
+            self.plugin_ui.busy = Some(id.to_owned());
+            self.http_work(crate::compose::HttpWork::PluginRemove { id: id.to_owned() });
+            return;
+        }
         match self.dispatch.clone() {
             Dispatch::None => self.outbox.push(call),
             Dispatch::Blocking { socket } => {

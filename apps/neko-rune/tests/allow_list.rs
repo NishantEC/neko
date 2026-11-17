@@ -122,6 +122,11 @@ const RUNE_EXTRAS: &[&str] = &[
     // Tools: a tool's unattended-use grant. The web's Tools page shows tools read-only; the earlier native app had this control.
     "SetToolGrant",
     "SetWorkspaceToolGrant",
+    // The summon shortcut and the update source: the web shows or links them (and the native app sets them), Rune's Settings sets them
+    // the same way the native app does: a side-effect-free check, then the commit, and the source as `owner/name`.
+    "CheckHotkeyConflict",
+    "CommitHotkey",
+    "SetUpdateSource",
     // Reads Rune made before this rule that the web UI reaches through a store or helper the scan does not follow.
     "Snapshot",
     "WorkbenchIfChanged",
@@ -152,12 +157,13 @@ const SUBCOMMAND_PREFIXES: [&str; 9] = ["CrewCommand", "GoalCommand", "Checkpoin
 const DESTRUCTIVE: &[(&str, &str)] = &[
     ("DeleteTask", "Call::Delete"),
     ("CancelTask", "Call::Stop"),
-    ("StartOver", "Call::StartOver"),
+    ("StartOver", "Call::WipeTasks"),
     ("ClosePullRequest", "Call::ClosePr"),
-    ("RemoveTheme", "Call::RemoveTheme"),
+    ("RemoveTheme", "Call::DropTheme"),
     ("CancelAllWork", "Call::StopAll"),
     ("RetryTask", "Call::Retry"),
-    ("RollBackWebUi", "Call::RollBackWebUi"),
+    ("RollBackWebUi", "Call::PreviousWebBuild"),
+    ("DELETE /api/plugins/<id>", "Call::RemovePlugin"),
     ("ClearFinishedTasks", "Call::ClearFinished"),
 ];
 
@@ -367,7 +373,7 @@ fn http_goes_only_to_the_paths_the_web_uses() {
         let path: String = code[at + 1..].chars().take_while(|c| *c != '"' && *c != '?' && *c != '{').collect();
         paths.insert(path);
     }
-    let allowed: BTreeSet<String> = ["/api/attachments", "/api/files", "/api/plugins", "/api/plugins/"].map(str::to_owned).into();
+    let allowed: BTreeSet<String> = ["/api/attachments", "/api/files", "/api/plugins", "/api/plugins/", "/api/customisation"].map(str::to_owned).into();
     assert!(paths.is_subset(&allowed), "http.rs reaches paths the web UI does not use: {paths:?}");
     assert!(paths.contains("/api/attachments") && paths.contains("/api/files"));
     for path in &paths {
