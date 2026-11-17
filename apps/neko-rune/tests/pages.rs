@@ -44,7 +44,17 @@ fn go_section(rt: &mut Runtime<App>, key: &str) {
 }
 
 fn click(rt: &mut Runtime<App>, key: &str) {
-    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element keyed {key}"));
+    let mut at = rt.find(key).unwrap_or_else(|| panic!("no element keyed {key}"));
+    // A long page (Settings shows a description under every row): scroll it until the element is in view.
+    for _ in 0..40 {
+        if at.1 > 260.0 && at.1 < 800.0 || at.1 < 60.0 {
+            break;
+        }
+        rt.wheel(800.0, 500.0, if at.1 >= 800.0 { -300.0 } else { 300.0 });
+        settle(rt);
+        at = rt.find(key).unwrap_or(at);
+    }
+    let (x, y) = at;
     rt.pointer_down(x, y);
     rt.pointer_up(x, y);
     settle(rt);
@@ -239,12 +249,27 @@ fn settings_controls_send_the_web_pages_requests() {
 #[test]
 fn the_runtime_is_picked_from_the_catalog_and_used_on_purpose() {
     let mut rt = runtime("settings-ai");
-    assert!(rt.find("runtime-use").is_none(), "nothing picked, nothing to use");
+    // The web's "Use without checking" is always there and does nothing until something is picked.
+    click(&mut rt, "runtime-use");
+    assert!(!rt.state.outbox.iter().any(|c| matches!(c, Call::SetAgentRuntime(_))), "nothing picked, nothing to use");
     rt.update(|s, _| s.pick_runtime(|r| r.model = "gpt-b".into()));
     settle(&mut rt);
-    assert!(rt.find("runtime-use").is_some());
     click(&mut rt, "runtime-use");
     assert!(matches!(rt.state.outbox.last(), Some(Call::SetAgentRuntime(r)) if r.model == "gpt-b" && r.provider == "codex"));
+}
+
+#[test]
+fn home_chat_pins_are_edited_in_settings_and_applied_as_the_web_sends_them() {
+    let mut rt = runtime("settings-ai");
+    // Nothing pinned: Neko decides everything, and Apply is there but does nothing.
+    assert!(texts(&rt).contains(&"Neko decides everything.".to_owned()), "{:?}", texts(&rt));
+    click(&mut rt, "set-pin-apply");
+    assert!(!rt.state.outbox.iter().any(|c| matches!(c, Call::SetRuntimePrefs { .. })));
+    // The paid-speed switch edits the draft; Apply sends the whole pin set for `home:<profile>:*`.
+    click(&mut rt, "set-pin-paid-switch");
+    assert!(rt.state.pins_dirty());
+    click(&mut rt, "set-pin-apply");
+    assert!(matches!(rt.state.outbox.last(), Some(Call::SetRuntimePrefs { conversation_id, prefs }) if conversation_id.starts_with("home:") && conversation_id.ends_with(":*") && prefs.allow_paid_speed), "{:?}", rt.state.outbox.last());
 }
 
 #[test]
@@ -342,7 +367,9 @@ fn an_untouched_field_saves_nothing_and_a_never_seeded_one_cannot_clear_a_settin
         s.save_ntfy_server();
     });
     assert!(rt.state.outbox.is_empty(), "nothing changed, nothing sent: {:?}", rt.state.outbox);
-    assert!(rt.find("task-budget-save").is_none(), "and no Save to press");
+    // The web's Save button is always there and does nothing while the field shows what is saved.
+    click(&mut rt, "task-budget-save");
+    assert!(rt.state.outbox.is_empty(), "and pressing Save sends nothing");
     // A field that was never filled (the daemon had not answered) is not a request to clear it.
     let mut fresh = App::headless();
     fresh.save_money("daily-budget", 10000.0, |cents| Call::SetDailyBudget { cents });

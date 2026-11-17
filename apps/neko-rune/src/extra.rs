@@ -48,6 +48,8 @@ pub struct ExtraState {
     pub checking: bool,
     pub custom_model_open: bool,
     pub super_agent: Option<bool>,
+    /// Whether Neko looks for trouble that repeats (the daemon's `Improve` switch); None until it answers.
+    pub suggestions: Option<bool>,
     pub clipboard: Option<bool>,
     pub diag: Option<(u64, Vec<DiagnosticCheck>)>,
     pub diag_running: bool,
@@ -208,7 +210,7 @@ impl App {
 
     /// Settings opens or polls: everything its extra rows show.
     pub fn extra_ask_settings(&mut self) {
-        for call in [ExtraCall::Themes, ExtraCall::Hotkey, ExtraCall::SuperAgent(None), ExtraCall::Clipboard(None), ExtraCall::Folders, ExtraCall::Preferences] {
+        for call in [ExtraCall::Themes, ExtraCall::Hotkey, ExtraCall::SuperAgent(None), ExtraCall::Improve(None), ExtraCall::Clipboard(None), ExtraCall::Folders, ExtraCall::Preferences] {
             self.extra_call(call);
         }
     }
@@ -302,6 +304,10 @@ impl App {
 
     pub fn set_super_agent(&mut self, on: bool) {
         self.extra_call(ExtraCall::SuperAgent(Some(on)));
+    }
+
+    pub fn set_suggestions(&mut self, on: bool) {
+        self.extra_call(ExtraCall::Improve(Some(on)));
     }
 
     // ---- This Mac
@@ -479,6 +485,11 @@ impl App {
                 self.extra.super_agent = Some(on);
                 changed
             }
+            ExtraAnswer::Suggestions(on) => {
+                let changed = self.extra.suggestions != Some(on);
+                self.extra.suggestions = Some(on);
+                changed
+            }
             ExtraAnswer::Clipboard(on) => {
                 let changed = self.extra.clipboard != Some(on);
                 self.extra.clipboard = Some(on);
@@ -548,7 +559,7 @@ impl App {
             quiet if quiet.quiet() => return Some(false),
             other => {
                 // A read that fails while older data is on screen stays quiet; a write says why.
-                let write = matches!(other, ExtraCall::PickTheme { .. } | ExtraCall::SuperAgent(Some(_)) | ExtraCall::Clipboard(Some(_)) | ExtraCall::UpdateSource(_) | ExtraCall::FolderChange { .. } | ExtraCall::PreferenceToggle { .. });
+                let write = matches!(other, ExtraCall::PickTheme { .. } | ExtraCall::SuperAgent(Some(_)) | ExtraCall::Improve(Some(_)) | ExtraCall::Clipboard(Some(_)) | ExtraCall::UpdateSource(_) | ExtraCall::FolderChange { .. } | ExtraCall::PreferenceToggle { .. });
                 if write {
                     self.pages.notes.insert(other.key(), message.to_owned());
                 }

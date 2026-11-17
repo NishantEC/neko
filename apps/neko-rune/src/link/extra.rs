@@ -33,6 +33,8 @@ pub enum ExtraCall {
     ModelCheck(AgentRuntime),
     /// `SuperAgent`: read (`None`) or set Home chat's full-power mode.
     SuperAgent(Option<bool>),
+    /// `Improve`: read (`None`) or set (`SetEnabled`) whether Neko looks for trouble that repeats (Settings, AI, "Suggestions").
+    Improve(Option<bool>),
     /// `GetClipboardHistoryEnabled` (`None`) or `SetClipboardHistoryEnabled`.
     Clipboard(Option<bool>),
     /// `Ping` (timed), then `Diagnostics`.
@@ -75,6 +77,7 @@ pub enum ExtraAnswer {
     Conflict(Option<String>),
     ModelCheck(ModelCheck),
     SuperAgent(bool),
+    Suggestions(bool),
     Clipboard(bool),
     /// The round trip to the daemon and every check it ran.
     Diagnostics { round_trip_ms: u64, checks: Vec<DiagnosticCheck> },
@@ -95,6 +98,7 @@ impl ExtraCall {
             ExtraCall::Hotkey | ExtraCall::HotkeyCheck(_) | ExtraCall::HotkeyCommit(_) => "setting:hotkey".to_owned(),
             ExtraCall::ModelCheck(_) => "setting:model-check".to_owned(),
             ExtraCall::SuperAgent(_) => "setting:super-agent".to_owned(),
+            ExtraCall::Improve(_) => "setting:suggestions".to_owned(),
             ExtraCall::Clipboard(_) => "setting:clipboard".to_owned(),
             ExtraCall::Diagnostics => "setting:diagnostics".to_owned(),
             ExtraCall::Machine => "page:machine".to_owned(),
@@ -122,6 +126,8 @@ impl ExtraCall {
             ExtraCall::HotkeyCommit(candidate) => vec![Request::CommitHotkey { candidate }],
             ExtraCall::ModelCheck(runtime) => vec![Request::CheckAgentModel { runtime, save: true }],
             ExtraCall::SuperAgent(on) => vec![Request::SuperAgent { on }],
+            ExtraCall::Improve(None) => vec![Request::Improve(neko_protocol::improve::ImproveCommand::List)],
+            ExtraCall::Improve(Some(enabled)) => vec![Request::Improve(neko_protocol::improve::ImproveCommand::SetEnabled { enabled })],
             ExtraCall::Clipboard(None) => vec![Request::GetClipboardHistoryEnabled],
             ExtraCall::Clipboard(Some(enabled)) => vec![Request::SetClipboardHistoryEnabled { enabled }],
             ExtraCall::Diagnostics => vec![Request::Ping, Request::Diagnostics],
@@ -181,6 +187,7 @@ fn read(call: &ExtraCall, response: Response, round_trip_ms: u64) -> Result<Extr
         Response::HotkeyConflict { reason } => ExtraAnswer::Conflict(reason),
         Response::AgentModelCheck(check) => ExtraAnswer::ModelCheck(check),
         Response::SuperAgent { on } => ExtraAnswer::SuperAgent(on),
+        Response::Improve(reply) => ExtraAnswer::Suggestions(reply.enabled),
         Response::ClipboardHistoryEnabled { enabled } => ExtraAnswer::Clipboard(enabled),
         Response::Diagnostics(report) => ExtraAnswer::Diagnostics { round_trip_ms, checks: report.checks },
         Response::MachineHealth(health) => ExtraAnswer::Machine(health),
@@ -229,6 +236,8 @@ mod tests {
     fn full_power_reads_with_null_and_sets_with_a_value() {
         assert!(json(&ExtraCall::SuperAgent(None))[0]["SuperAgent"]["on"].is_null());
         assert_eq!(json(&ExtraCall::SuperAgent(Some(false)))[0]["SuperAgent"]["on"], false);
+        assert_eq!(json(&ExtraCall::Improve(None))[0]["Improve"], "List");
+        assert_eq!(json(&ExtraCall::Improve(Some(false)))[0]["Improve"]["SetEnabled"]["enabled"], false);
     }
 
     #[test]

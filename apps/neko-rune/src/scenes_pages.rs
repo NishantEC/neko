@@ -185,6 +185,7 @@ pub fn settings_view() -> SettingsView {
         rulebook: String::new(),
         rulebook_default: "Be careful with other people's files.\nPrefer small, reviewable changes.\nRun the tests before saying a task is done.".into(),
         model_runs: [("gpt-a", Some("high")), ("gpt-a", Some("high")), ("gpt-a", None), ("claude-x", Some("medium")), ("", None)].iter().map(|(m, e)| ((*m).to_owned(), e.map(str::to_owned))).collect(),
+        home_last: Some(crate::link::LastRun { model: "gpt-a".into(), effort: Some("high".into()), automatic: true, reason: "Picked the model that fits a small question.".into() }),
     }
 }
 
@@ -273,7 +274,7 @@ pub fn settings_ai(s: &mut App) {
 
 pub fn settings_budget(s: &mut App) {
     with_settings(s);
-    s.pages.section = crate::pages::Section::Budget;
+    s.pages.section = crate::pages::Section::Ai;
 }
 
 pub fn settings_phone(s: &mut App) {

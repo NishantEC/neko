@@ -547,7 +547,7 @@ fn settings_change_the_daemons_budgets_and_switches_and_search_finds_rows() {
     assert_eq!(rt.state.pages.phone.as_ref().map(|p| p.settings.reminders), Some(!reminders));
     click_in_page(&mut rt, "set-reminders-switch");
     // Search finds a row in another section, and says when nothing matches.
-    rt.update(|s, _| s.pages.set_field("settings:search", "ceiling"));
+    rt.update(|s, _| s.pages.set_field("settings:search", "pause new work"));
     settle(&mut rt);
     assert!(rt.find("set-daily-budget").is_some() && rt.find("set-reminders").is_none());
     rt.update(|s, _| s.pages.set_field("settings:search", "zzzzqq"));

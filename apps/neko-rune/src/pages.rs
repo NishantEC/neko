@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use neko_protocol::agent_models::ModelCatalog;
 use neko_protocol::phone::PhoneSettings;
 use neko_protocol::routines::{Cadence, Routine, RoutineView};
-use neko_protocol::workbench::AgentRuntime;
+use neko_protocol::workbench::{AgentRuntime, RuntimePreferences};
 use neko_protocol::PluginHealth;
 use rune::TextEdit;
 
@@ -123,6 +123,14 @@ impl RoutineDraft {
 /// The runtime being chosen in Settings: the saved one until something is picked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeDraft(pub AgentRuntime);
+
+/// The Home chat pins being edited in Settings (a copy of what is saved until something changes), and the saved pins it was copied from:
+/// when those change underneath, the copy is dropped, as the web's pins panel follows what the daemon saved.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PinDraft {
+    pub base: RuntimePreferences,
+    pub now: RuntimePreferences,
+}
 
 /// The words for a routine's cadence, as the web's Inbox page writes them.
 pub fn cadence_text(c: &Cadence) -> String {
@@ -270,6 +278,7 @@ pub struct Pages {
     pub phone_test: Vec<String>,
     pub catalog: Option<ModelCatalog>,
     pub runtime_draft: Option<RuntimeDraft>,
+    pub pins_draft: Option<PinDraft>,
     pub quota: Option<Vec<QuotaRow>>,
     pub plugins: Option<Vec<PluginHealth>>,
     pub section: Section,
@@ -306,6 +315,7 @@ impl Default for Pages {
             phone_test: Vec::new(),
             catalog: None,
             runtime_draft: None,
+            pins_draft: None,
             quota: None,
             plugins: None,
             section: Section::General,
@@ -668,6 +678,41 @@ impl App {
         let mut runtime = self.runtime_shown();
         change(&mut runtime);
         self.pages.runtime_draft = Some(RuntimeDraft(runtime));
+    }
+
+    /// The Home chat's saved pins (cleaned as the web parses them) and the conversation they belong to.
+    pub fn home_pins(&self) -> (String, RuntimePreferences) {
+        let m = self.summary.as_ref();
+        let conversation = m.map_or_else(|| "home:default:*".to_owned(), |m| m.home_conversation(None));
+        let saved = m.and_then(|m| m.pins.get(&conversation)).map(|(p, _)| crate::runtime_pick::clean(p)).unwrap_or_default();
+        (conversation, saved)
+    }
+
+    /// The pins as shown: the draft while it is still about what is saved, else what is saved.
+    pub fn pins_shown(&self) -> RuntimePreferences {
+        let (_, saved) = self.home_pins();
+        match &self.pages.pins_draft {
+            Some(d) if d.base == saved => d.now.clone(),
+            _ => saved,
+        }
+    }
+
+    pub fn pins_dirty(&self) -> bool {
+        self.pins_shown() != self.home_pins().1
+    }
+
+    pub fn pick_pins(&mut self, change: impl FnOnce(&mut RuntimePreferences)) {
+        let (_, saved) = self.home_pins();
+        let mut now = self.pins_shown();
+        change(&mut now);
+        self.pages.pins_draft = Some(PinDraft { base: saved, now });
+    }
+
+    /// "Apply" (or "Reset to Neko decides" with `prefs` empty): the same request the web sends, for `home:<profile>:*`.
+    pub fn apply_pins(&mut self, prefs: Option<RuntimePreferences>) {
+        let (conversation, _) = self.home_pins();
+        let prefs = crate::runtime_pick::clean(&prefs.unwrap_or_else(|| self.pins_shown()));
+        self.call(Call::SetRuntimePrefs { conversation_id: conversation, prefs });
     }
 
     pub fn use_runtime(&mut self) {

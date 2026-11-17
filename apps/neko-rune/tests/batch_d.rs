@@ -159,6 +159,9 @@ fn the_summon_shortcut_is_recorded_checked_then_committed_and_a_bare_key_is_refu
 #[test]
 fn the_exact_model_id_is_validated_and_checked_and_full_power_and_start_over_work_as_the_web_does() {
     let mut rt = runtime("bd-ai");
+    // The row is collapsed, as the web's is; its button opens the field.
+    assert!(rt.find("set-custom-use").is_none());
+    click(&mut rt, "set-custom-toggle");
     // "Use ID" is only on for a valid id.
     rt.update(|s, _| s.pages.set_field("custom-model", "has space"));
     settle(&mut rt);

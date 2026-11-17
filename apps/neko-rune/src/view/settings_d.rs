@@ -11,7 +11,7 @@ use super::ui::{edit_of, editing, note, switch, switch_when, with_menu};
 use super::webkit::{self, button, setting_row};
 use super::{primary_button, quiet_button};
 use crate::app::App;
-use crate::extra::{combo_keys, valid_model_id};
+use crate::extra::combo_keys;
 use crate::icons;
 use crate::onboarding::Step;
 use crate::pages::Section;
@@ -38,11 +38,6 @@ fn mono_input(s: &App, t: &Neko, key: &str, label: &str, placeholder: &str, widt
 
 fn word(t: &Neko, key: &str, words: &str, ink: rune::Color) -> El {
     text(words.to_owned()).key(key.to_owned()).font(t.ty.meta).color(ink).wrap().min_w(0.0)
-}
-
-fn marked(t: &Neko, key: &str, ok: bool, unavailable: bool, words: &str) -> El {
-    let (glyph, ink) = if ok { (&icons::CHECK_LINE, t.meaning.mint) } else if unavailable { (&icons::INFO, t.meaning.amber) } else { (&icons::CROSS, t.meaning.coral) };
-    row().key(key.to_owned()).w_full().gap(8.0).px(6.0).py(4.0).child(icon(glyph, 16.0).color(ink).a11y_hidden()).child(word(t, &format!("{key}-words"), words, t.text.base).shrink()).live_region(rune::LiveRegion::Polite)
 }
 
 // ---- General ------------------------------------------------------------------------------------
@@ -81,52 +76,6 @@ pub(super) fn general(s: &App, t: &Neko, out: &mut Vec<Item>) {
         None => switch_when(t, "set-login-switch", "Launch at login", false, false, |_| {}),
     };
     out.push(item(Section::General, "Summon & startup", "launch-at-login", "Launch at login", help, with_note(s, t, "setting:launch-at-login", setting_row(t, "set-login", "Launch at login", Some(help), control))));
-}
-
-// ---- AI and agents ------------------------------------------------------------------------------
-
-pub(super) fn ai(s: &App, t: &Neko, out: &mut Vec<Item>) {
-    let typed = s.pages.text("custom-model").trim().to_owned();
-    let help = "For a model that isn’t in the list.";
-    let control = row()
-        .gap(6.0)
-        .center_y()
-        .shrink()
-        .child(mono_input(s, t, "custom-model", "Exact model ID", "Or enter an exact model ID", 240.0, |s: &mut App| s.use_exact_model()))
-        .child(if valid_model_id(&typed) { quiet_button("Use ID", "set-custom-use", t, |s: &mut App| s.use_exact_model()) } else { quiet_button("Use ID", "set-custom-use", t, |_| {}).disabled(true) });
-    out.push(item(Section::Ai, "Agent runtime", "custom-model", "Exact model ID", help, setting_row(t, "set-custom-model", "Exact model ID", Some(help), control)));
-
-    let help = "Sends one real prompt through the runner with the runtime shown above. It becomes the default only when it works.";
-    let button = if s.extra.checking { quiet_button("Checking…", "set-check-model", t, |_| {}).disabled(true) } else { quiet_button("Check model", "set-check-model", t, |s: &mut App| s.check_model()) };
-    let mut r = col().w_full().child(setting_row(t, "set-check", "Check model", Some(help), button));
-    if let Some(check) = &s.extra.model_check {
-        r = r.child(marked(t, "set-check-result", check.ok, check.unavailable, &check.message));
-    }
-    out.push(item(Section::Ai, "Agent runtime", "check-model", "Check model", help, with_note(s, t, "setting:model-check", r)));
-
-    let help = "Home chat works like your own Claude Code session in bypass mode: it edits files, runs commands, uses your tools and browser, and manages Neko itself, without asking per step. Off makes it read-only, with an approval for each action.";
-    let control = match s.extra.super_agent {
-        Some(on) => switch(t, "set-super-agent-switch", "Full power for Home chat", on, move |s: &mut App| s.set_super_agent(!on)),
-        None => switch_when(t, "set-super-agent-switch", "Full power for Home chat", false, false, |_| {}),
-    };
-    out.push(item(Section::Ai, "What Home chat may do", "super-agent", "Full power", help, with_note(s, t, "setting:super-agent", setting_row(t, "set-super-agent", "Full power", Some(help), control))));
-
-    let help = "Removes every task except those with a pull request, and lets your watches file their issues again from scratch. Memory, settings, workspaces, tools and watches stay.";
-    let danger = row()
-        .key("set-start-over-button")
-        .role("button")
-        .label("Start over…")
-        .focusable(true)
-        .h(26.0)
-        .px(10.0)
-        .radius(t.radius.control)
-        .center()
-        .border(1.0, t.meaning.coral.alpha(0.5))
-        .hover(t.meaning.coral.alpha(0.12))
-        .focus_ring(2.0, 2.0, t.surface.ring)
-        .on_press(|s: &mut App| s.ask_start_over())
-        .child(text("Start over…").font(t.ty.meta).color(t.meaning.coral).a11y_hidden());
-    out.push(item(Section::Ai, "How work starts", "start-over", "Start over", help, with_note(s, t, "setting:start-over", setting_row(t, "set-start-over", "Start over", Some(help), danger))));
 }
 
 // ---- Appearance ---------------------------------------------------------------------------------

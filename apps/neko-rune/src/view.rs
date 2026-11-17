@@ -35,6 +35,7 @@ mod session;
 mod sessions;
 pub mod setup;
 mod settings;
+mod settings_ai;
 mod settings_d;
 mod tree;
 mod turn;

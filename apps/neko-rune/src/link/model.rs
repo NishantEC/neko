@@ -128,6 +128,15 @@ pub struct WorkspaceInfo {
     pub folders: Vec<String>,
 }
 
+/// The run Home chat last chose a model for (Settings, AI, "Model pins": "Last run").
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LastRun {
+    pub model: String,
+    pub effort: Option<String>,
+    pub automatic: bool,
+    pub reason: String,
+}
+
 /// What Settings and Usage read from the workbench, beyond the sessions.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SettingsView {
@@ -151,6 +160,9 @@ pub struct SettingsView {
     /// The model and reasoning effort of each recent run (the web's Usage page, "Models").
     #[serde(default)]
     pub model_runs: Vec<(String, Option<String>)>,
+    /// What Home chat last ran on, and why.
+    #[serde(default)]
+    pub home_last: Option<LastRun>,
 }
 
 /// How far back the client keeps priced runs (the Usage chart shows seven days).
@@ -449,6 +461,11 @@ impl Summary {
                 rulebook: snapshot.rulebook.clone().unwrap_or_default(),
                 rulebook_default: snapshot.rulebook_default.clone(),
                 model_runs: snapshot.runtime_selections.iter().map(|r| (r.runtime.model.clone(), r.runtime.reasoning_effort.clone())).collect(),
+                home_last: {
+                    let profile = if snapshot.agent_profiles.active_profile_id.is_empty() { "default" } else { snapshot.agent_profiles.active_profile_id.as_str() };
+                    let conversation = format!("home:{profile}:*");
+                    snapshot.runtime_selections.iter().rev().find(|r| r.conversation_id == conversation).map(|r| LastRun { model: r.runtime.model.clone(), effort: r.runtime.reasoning_effort.clone(), automatic: r.automatic, reason: r.reason.clone() })
+                },
             },
             setup: super::SetupData::from_snapshot(snapshot),
             pull_requests: super::prs::rows(snapshot, |t| author_of(snapshot, &t.id)),

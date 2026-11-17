@@ -5,7 +5,7 @@
 //! the digest's time), Neko updates, Workspaces and About. Rows the web shows read-only are
 //! read-only here. Ported from `pages/setup/Settings.tsx` and its sections; the same requests.
 
-use neko_protocol::agent_models::{CatalogModel, ModelAccess, SourceStatus};
+use neko_protocol::agent_models::{CatalogModel, ModelAccess};
 use neko_protocol::calendar::CalendarAccess;
 use neko_protocol::phone::RemindersAccess;
 use rune::{El, ScrollSpec, col, el, icon, row, text};
@@ -35,11 +35,11 @@ pub(super) fn item(section: Section, group: &'static str, id: impl Into<String>,
 }
 
 /// A read-only value at the right of a row.
-fn value(t: &Neko, key: &str, words: &str) -> El {
+pub(super) fn value(t: &Neko, key: &str, words: &str) -> El {
     text(words.to_owned()).key(key.to_owned()).font(t.ty.meta).color(t.text.muted).truncate().max_w(300.0)
 }
 
-fn with_note(s: &App, t: &Neko, key: &str, r: El) -> El {
+pub(super) fn with_note(s: &App, t: &Neko, key: &str, r: El) -> El {
     match note(s, t, key) {
         Some(n) => col().w_full().child(r).child(n),
         None => r,
@@ -54,7 +54,7 @@ fn hour_of(label: &str) -> u32 {
     label.get(..2).and_then(|h| h.parse().ok()).unwrap_or(0)
 }
 
-fn limit_options(values: &[u32], zero: &str, current: Option<u32>) -> Vec<String> {
+pub(super) fn limit_options(values: &[u32], zero: &str, current: Option<u32>) -> Vec<String> {
     let mut all: Vec<u32> = values.to_vec();
     if let Some(c) = current.filter(|c| !all.contains(c)) {
         all.push(c);
@@ -63,7 +63,7 @@ fn limit_options(values: &[u32], zero: &str, current: Option<u32>) -> Vec<String
     std::iter::once(zero.to_owned()).chain(all.iter().map(u32::to_string)).collect()
 }
 
-fn limit_of(chosen: &str) -> Option<u32> {
+pub(super) fn limit_of(chosen: &str) -> Option<u32> {
     chosen.parse().ok()
 }
 
@@ -79,8 +79,8 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     let all = items(s, t, layer);
     let mut content = col().key("settings-content").w_full().gap(if words.is_empty() { 32.0 } else { 2.0 });
     if words.is_empty() {
-        // The web has no Budget section (its settings are in "AI & agents") and no Workspaces one (that is a Setup page).
-        let shown = |i: &Item| i.section == s.pages.section || (s.pages.section == Section::Ai && i.section == Section::Budget);
+        // The web has no Budget section (its settings are "Budget & limits" in "AI & agents") and no Workspaces one (a Setup page).
+        let shown = |i: &Item| i.section == s.pages.section;
         // One block per web `<Section>`, in the order its first row appears; an item with no group already is a section.
         let mut blocks: Vec<(&'static str, Vec<El>)> = Vec::new();
         for it in all.into_iter().filter(shown) {
@@ -180,13 +180,11 @@ fn items(s: &App, t: &Neko, layer: &mut Vec<El>) -> Vec<Item> {
     let mut out = Vec::new();
     general(s, t, &mut out);
     super::settings_d::general(s, t, &mut out);
-    ai(s, t, layer, &mut out);
-    super::settings_d::ai(s, t, &mut out);
+    super::settings_ai::all(s, t, layer, &mut out);
     appearance(s, t, &mut out);
     super::settings_d::appearance(s, t, layer, &mut out);
     super::settings_d::rulebook(s, t, &mut out);
     super::settings_d::quick_panel(s, t, &mut out);
-    budget(s, t, layer, &mut out);
     phone(s, t, layer, &mut out);
     updates(s, t, &mut out);
     super::settings_d::updates(s, t, &mut out);
@@ -223,260 +221,13 @@ fn general(s: &App, t: &Neko, out: &mut Vec<Item>) {
     out.push(item(Section::General, "Setup", "calendar-on", "Calendar", help, with_note(s, t, "setting:calendar-on", setting_row(t, "set-calendar-on", "Calendar", Some(help), control.child(toggle)))));
 }
 
-fn usable(m: &CatalogModel) -> bool {
+pub(super) fn usable(m: &CatalogModel) -> bool {
     m.access != ModelAccess::Unavailable
 }
 
-fn cap(word: &str) -> String {
+pub(super) fn cap(word: &str) -> String {
     let mut c = word.chars();
     c.next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + c.as_str())
-}
-
-fn ai(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
-    let runtime = s.runtime_shown();
-    let provider_now = if runtime.provider.is_empty() { "codex".to_owned() } else { runtime.provider.clone() };
-    let catalog = s.pages.catalog.as_ref();
-    let sources: Vec<(String, String)> = catalog.map(|c| c.sources.iter().filter(|x| x.status == SourceStatus::Ready || x.provider == provider_now).map(|x| (x.provider.clone(), x.label.clone())).collect()).unwrap_or_default();
-    let source = catalog.and_then(|c| c.sources.iter().find(|x| x.provider == provider_now));
-    let model = source.and_then(|x| x.models.iter().find(|m| m.id == runtime.model));
-
-    // Runs with.
-    let provider_labels: Vec<String> = if sources.is_empty() { vec![cap(&provider_now)] } else { sources.iter().map(|(_, l)| l.clone()).collect() };
-    let provider_label = sources.iter().find(|(p, _)| *p == provider_now).map_or_else(|| cap(&provider_now), |(_, l)| l.clone());
-    let by = sources.clone();
-    let help = "The runtime that does the work for new conversations, tasks and background checks. Work already running isn’t interrupted.";
-    out.push(item(
-        Section::Ai,
-        "Agent runtime",
-        "runtime",
-        "Runs with",
-        help,
-        setting_row(
-            t,
-            "set-runtime",
-            "Runs with",
-            Some(help),
-            pick(s, t, layer, "set-runtime-pick", "Agent runtime", &provider_labels, &provider_label, 220.0, move |s: &mut App, chosen: &str| {
-                if let Some((p, _)) = by.iter().find(|(_, l)| l == chosen) {
-                    let p = p.clone();
-                    s.pick_runtime(|r| {
-                        r.provider = p;
-                        r.model.clear();
-                        r.reasoning_effort = None;
-                        r.service_tier = None;
-                    });
-                }
-            }),
-        ),
-    ));
-
-    // Model.
-    let mut model_labels = vec!["Default model".to_owned()];
-    let mut model_ids = vec![String::new()];
-    if let Some(src) = source {
-        for m in src.models.iter().filter(|m| usable(m)) {
-            model_labels.push(m.label.clone());
-            model_ids.push(m.id.clone());
-        }
-    }
-    if !runtime.model.is_empty() && !model_ids.contains(&runtime.model) {
-        model_labels.push(runtime.model.clone());
-        model_ids.push(runtime.model.clone());
-    }
-    let model_now = model_ids.iter().position(|m| *m == runtime.model).map_or("Default model".to_owned(), |i| model_labels[i].clone());
-    let (labels, ids) = (model_labels.clone(), model_ids.clone());
-    out.push(item(
-        Section::Ai,
-        "Agent runtime",
-        "model",
-        "Model",
-        "Leave on Default to let the runtime choose.",
-        setting_row(
-            t,
-            "set-model",
-            "Model",
-            Some("Leave on Default to let the runtime choose."),
-            pick(s, t, layer, "set-model-pick", "Model", &model_labels, &model_now, 220.0, move |s: &mut App, chosen: &str| {
-                if let Some(i) = labels.iter().position(|l| l == chosen) {
-                    let id = ids[i].clone();
-                    s.pick_runtime(|r| {
-                        r.model = id;
-                        r.reasoning_effort = None;
-                        r.service_tier = None;
-                    });
-                }
-            }),
-        ),
-    ));
-
-    // Reasoning effort and speed: only what the model advertises.
-    let efforts: Vec<(String, String)> = model
-        .map(|m| match &m.effort_options {
-            Some(list) => list.iter().map(|o| (o.id.clone(), o.label.clone())).collect(),
-            None => m.reasoning_efforts.iter().map(|e| (e.clone(), cap(e))).collect(),
-        })
-        .unwrap_or_default();
-    let mut effort_labels = vec!["Auto".to_owned()];
-    effort_labels.extend(efforts.iter().map(|(_, l)| l.clone()));
-    let effort_now = runtime.reasoning_effort.as_ref().and_then(|e| efforts.iter().find(|(id, _)| id == e).map(|(_, l)| l.clone()).or_else(|| Some(e.clone()))).unwrap_or_else(|| "Auto".to_owned());
-    let e2 = efforts.clone();
-    out.push(item(
-        Section::Ai,
-        "Agent runtime",
-        "effort",
-        "Reasoning effort",
-        "Only the levels this model advertises.",
-        setting_row(
-            t,
-            "set-effort",
-            "Reasoning effort",
-            Some("Only the levels this model advertises."),
-            pick(s, t, layer, "set-effort-pick", "Reasoning effort", &effort_labels, &effort_now, 160.0, move |s: &mut App, chosen: &str| {
-                let id = e2.iter().find(|(_, l)| l == chosen).map(|(id, _)| id.clone());
-                s.pick_runtime(|r| r.reasoning_effort = id);
-            }),
-        ),
-    ));
-    let speeds: Vec<(String, String)> = model.and_then(|m| m.speed_options.as_ref()).map(|list| list.iter().map(|o| (o.id.clone(), o.label.clone())).collect()).unwrap_or_default();
-    let mut speed_labels = vec!["Auto".to_owned(), "Normal".to_owned()];
-    speed_labels.extend(speeds.iter().map(|(_, l)| l.clone()));
-    let speed_now = match runtime.service_tier.as_deref() {
-        None => "Auto".to_owned(),
-        Some("default") => "Normal".to_owned(),
-        Some(id) => speeds.iter().find(|(i, _)| i == id).map_or_else(|| id.to_owned(), |(_, l)| l.clone()),
-    };
-    let s2 = speeds.clone();
-    out.push(item(
-        Section::Ai,
-        "Agent runtime",
-        "speed",
-        "Speed",
-        "Extra speed may use more allowance.",
-        setting_row(
-            t,
-            "set-speed",
-            "Speed",
-            Some("Extra speed may use more allowance."),
-            pick(s, t, layer, "set-speed-pick", "Speed", &speed_labels, &speed_now, 160.0, move |s: &mut App, chosen: &str| {
-                let tier = match chosen {
-                    "Auto" => None,
-                    "Normal" => Some("default".to_owned()),
-                    other => s2.iter().find(|(_, l)| l == other).map(|(id, _)| id.clone()),
-                };
-                s.pick_runtime(|r| r.service_tier = tier);
-            }),
-        ),
-    ));
-    if s.runtime_dirty() {
-        out.push(item(
-            Section::Ai,
-            "Agent runtime",
-            "runtime-use",
-            "Use this runtime",
-            "Saves the runtime without sending a test message.",
-            with_note(s, t, "setting:runtime", row().w_full().px(6.0).py(4.0).gap(8.0).child(primary_button("Use this runtime", "runtime-use", t, |s: &mut App| s.use_runtime())).child(quiet_button("Cancel", "runtime-cancel", t, |s: &mut App| s.pages.runtime_draft = None))),
-        ));
-    }
-
-    // Work style and the Inbox clean-up.
-    let st = s.summary.as_ref().map(|m| m.settings.clone()).unwrap_or_default();
-    let plan = st.plan_first;
-    let help = "Off: a ticket is a normal session that writes code right away. On: every ticket first gets a read-only plan to approve.";
-    out.push(item(Section::Ai, "How work starts", "plan-first", "Plan before working", help, with_note(s, t, "setting:plan-first", setting_row(t, "set-plan-first", "Plan before working", Some(help), switch(t, "set-plan-first-switch", "Plan before working", plan, move |s: &mut App| s.call(crate::link::Call::SetPlanFirst { enabled: !plan }))))));
-    let swa = st.start_without_approval;
-    let help = "When plans are required, a planned chat or manual ticket starts building without waiting. Nothing is ever published.";
-    out.push(item(Section::Ai, "How work starts", "start-without-approval", "Start without approval", help, with_note(s, t, "setting:start-without-approval", setting_row(t, "set-swa", "Start without approval", Some(help), switch(t, "set-swa-switch", "Start without approval", swa, move |s: &mut App| s.call(crate::link::Call::SetStartWithoutApproval { enabled: !swa }))))));
-    let days = s.pages.routines.as_ref().map_or(7, |d| d.age_out_days);
-    let mut day_labels = vec!["Never".to_owned()];
-    for d in [3u32, 7, 14, 30] {
-        day_labels.push(format!("{d} days"));
-    }
-    if days > 0 && ![3, 7, 14, 30].contains(&days) {
-        day_labels.push(format!("{days} days"));
-    }
-    let days_now = if days == 0 { "Never".to_owned() } else { format!("{days} days") };
-    let help = "An Inbox item nothing has touched for this long closes itself and moves to Closed recently, where you can reopen it. Items also close when their pull request is merged or closed.";
-    out.push(item(
-        Section::Ai,
-        "Inbox clean-up",
-        "inbox-age-out",
-        "Inbox items age out after",
-        help,
-        with_note(
-            s,
-            t,
-            "setting:age-out",
-            setting_row(
-                t,
-                "set-age-out",
-                "Inbox items age out after",
-                Some(help),
-                pick(s, t, layer, "set-age-out-pick", "Inbox items age out after", &day_labels, &days_now, 140.0, |s: &mut App, chosen: &str| {
-                    let days = chosen.split(' ').next().and_then(|d| d.parse().ok()).unwrap_or(0);
-                    s.call(crate::link::Call::SetInboxAgeOut { days });
-                }),
-            ),
-        ),
-    ));
-}
-
-#[allow(clippy::too_many_arguments)]
-fn money_row(s: &App, t: &Neko, id: &'static str, label: &str, help: &str, placeholder: &str, max: f64, saved: Option<u32>, make: fn(Option<u32>) -> crate::link::Call) -> Item {
-    let _ = saved;
-    let dirty = s.pages.edited(id, true);
-    let mut control = row().gap(6.0).center_y().shrink().child(text("US$").font(t.ty.mono).color(t.text.muted)).child(super::ui::input(s, t, id, label, placeholder, 96.0, move |s: &mut App| s.save_money(id, max, make)));
-    if dirty {
-        control = control.child(quiet_button("Save", &format!("{id}-save"), t, move |s: &mut App| s.save_money(id, max, make)));
-    }
-    item(Section::Budget, "Budget & limits", id, label, help, with_note(s, t, &format!("setting:{id}"), setting_row(t, &format!("set-{id}"), label, Some(help), control)))
-}
-
-fn budget(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
-    let st = s.summary.as_ref().map(|m| m.settings.clone()).unwrap_or_default();
-    out.push(money_row(
-        s,
-        t,
-        "task-budget",
-        "Stop a task after",
-        "Counts the cost Claude Code and OpenCode report for each task and stops it past this amount. Codex subscriptions don’t report a price. Empty is no limit.",
-        "No limit",
-        1000.0,
-        st.task_budget_cents,
-        |cents| crate::link::Call::SetTaskBudget { cents },
-    ));
-    out.push(money_row(
-        s,
-        t,
-        "daily-budget",
-        "Pause new work for the day at",
-        "A daily ceiling: when today’s reported cost reaches this, new goal turns and routine runs wait until tomorrow and one Inbox item asks whether to raise it. Work already running finishes. Off when empty.",
-        "Off",
-        10000.0,
-        st.daily_budget_cents,
-        |cents| crate::link::Call::SetDailyBudget { cents },
-    ));
-    let running = limit_options(&[1, 2, 3, 5], "No limit", st.max_running);
-    let running_now = st.max_running.map_or("No limit".to_owned(), |n| n.to_string());
-    let help = "Other tasks wait their turn and start as running ones finish. Work already running is not stopped.";
-    out.push(item(
-        Section::Budget,
-        "Budget & limits",
-        "tasks-at-once",
-        "Tasks at once",
-        help,
-        with_note(s, t, "setting:max-running", setting_row(t, "set-max-running", "Tasks at once", Some(help), pick(s, t, layer, "set-max-running-pick", "Tasks at once", &running, &running_now, 140.0, |s: &mut App, chosen: &str| s.call(crate::link::Call::SetMaxRunning { limit: limit_of(chosen) })))),
-    ));
-    let writable = limit_options(&[1, 2, 3, 6, 8], "2 (default)", st.max_writable);
-    let writable_now = st.max_writable.map_or("2 (default)".to_owned(), |n| n.to_string());
-    let help = "Each writing task has its own copy of the repository. Extra tasks in the same repository wait; planning and questions are not limited.";
-    out.push(item(
-        Section::Budget,
-        "Budget & limits",
-        "writing-per-repository",
-        "Writing per repository",
-        help,
-        with_note(s, t, "setting:max-writable", setting_row(t, "set-max-writable", "Writing per repository", Some(help), pick(s, t, layer, "set-max-writable-pick", "Writing per repository", &writable, &writable_now, 140.0, |s: &mut App, chosen: &str| s.call(crate::link::Call::SetMaxWritable { limit: limit_of(chosen) })))),
-    ));
 }
 
 fn phone(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
