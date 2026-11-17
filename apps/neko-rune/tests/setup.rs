@@ -155,8 +155,9 @@ fn a_watch_is_turned_on_only_after_it_says_what_that_allows_and_then_checks_at_o
     assert!(has_text(&rt, "Turn on this watch?") && has_text(&rt, "Allows unattended checks every 10 minutes"), "{:?}", texts(&rt));
     click(&mut rt, "confirm-yes");
     assert!(matches!(sent(&rt).as_slice(), [SetupAction::SaveWatch(w)] if w.enabled && w.id == "r3"), "{:?}", sent(&rt));
-    // The wake follows the daemon's answer, not the click.
-    rt.update(|s, _| s.setup_applied(&SetupAction::Wake { id: "r3".into() }));
+    // The wake follows the daemon's answer to the save, not the click.
+    let saved = sent(&rt)[0].clone();
+    rt.update(move |s, _| s.setup_applied(&saved));
     assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::Wake { id } if id == "r3")), "{:?}", sent(&rt));
 }
 
@@ -690,4 +691,39 @@ fn daemon_schedules_are_saved_paused_enabled_run_and_deleted_with_a_confirm() {
     assert!(rt.find("confirm-yes").is_some() && data(&rt).schedules.iter().any(|x| x.id == s.id));
     click(&mut rt, "confirm-yes");
     assert!(data(&rt).schedules.iter().all(|x| x.id != s.id), "{:?}", rt.state.pages.notes);
+}
+
+#[test]
+fn an_unrelated_answer_never_moves_a_form_and_a_second_press_sends_nothing() {
+    let mut rt = scene("setup-workspaces");
+    click(&mut rt, "ws-add");
+    fill(&mut rt, "dlg:name", "Scratch");
+    fill(&mut rt, "dlg:path", "/work/scratch");
+    click(&mut rt, "dlg-ws-save");
+    assert_eq!(sent(&rt).len(), 1);
+    // While the daemon has not answered: the button is off, and another request's answer leaves the form open.
+    rt.update(|s, _| s.save_workspace());
+    assert_eq!(sent(&rt).len(), 1, "no second request");
+    rt.update(|s, _| s.setup_applied(&SetupAction::SkillsRefresh));
+    rt.update(|s, _| s.setup_applied(&SetupAction::Wake { id: "r1".into() }));
+    assert!(matches!(rt.state.setup.dialog, Some(Dialog::Workspace { .. })), "still open, text kept");
+    assert_eq!(rt.state.pages.text("dlg:name"), "Scratch");
+    // Its own answer closes it; a refusal gives the button back instead.
+    let call = sent(&rt)[0].clone();
+    rt.update({
+        let call = call.clone();
+        move |s, _| s.setup_failed(&call)
+    });
+    assert!(rt.state.setup.awaiting.is_none());
+    rt.update(|s, _| s.save_workspace());
+    assert_eq!(sent(&rt).len(), 2);
+    rt.update(move |s, _| s.setup_applied(&call));
+    assert!(rt.state.setup.dialog.is_none());
+}
+
+#[test]
+fn a_proposal_with_an_audit_cannot_be_applied_from_its_row_or_menu_before_the_review() {
+    let rt = scene_in("setup-skills", (1360.0, 1700.0));
+    assert!(rt.find("proposal-apply-p1").is_some(), "no audit: Apply is on the row");
+    assert!(rt.find("proposal-apply-p2").is_none(), "an audit to read first: no Apply on the row");
 }

@@ -70,7 +70,7 @@ fn workspace(s: &App, t: &Neko, layer: &mut Vec<El>, win_h: f32, id: Option<&str
     if let Some(n) = form_note(s, t) {
         body = body.child(n);
     }
-    body = body.child(form_buttons(t, "Save workspace", "dlg-ws", name_ok && has_folder, |s: &mut App| s.save_workspace()));
+    body = body.child(form_buttons(s, t, "Save workspace", "dlg-ws", name_ok && has_folder, |s: &mut App| s.save_workspace()));
     kit::dialog(t, layer, "dlg-workspace", if id.is_some() { "Workspace settings" } else { "Create workspace" }, Some("Give this work a name, a home, and its own instructions."), 520.0, win_h, body);
 }
 
@@ -120,7 +120,7 @@ fn watch(s: &App, t: &Neko, popups: &mut Vec<El>, layer: &mut Vec<El>, win_h: f3
         body = body.child(n);
     }
     let ok = !s.pages.text(F_TEXT).trim().is_empty() && !connections.is_empty() && missing.is_empty();
-    body = body.child(form_buttons(t, "Save", "dlg-watch", ok, |s: &mut App| s.save_watch()));
+    body = body.child(form_buttons(s, t, "Save", "dlg-watch", ok, |s: &mut App| s.save_watch()));
     kit::dialog(t, layer, "dlg-watch", if id.is_some() { "Edit watch" } else { "New watch" }, Some("Choose what to watch, its sources, and the actions you allow."), 520.0, win_h, body);
 }
 
@@ -134,7 +134,7 @@ fn rename(s: &App, t: &Neko, layer: &mut Vec<El>, win_h: f32) {
     {
         body = body.child(n);
     }
-    body = body.child(form_buttons(t, "Rename", "dlg-rename", true, |s: &mut App| s.rename_watch()));
+    body = body.child(form_buttons(s, t, "Rename", "dlg-rename", true, |s: &mut App| s.rename_watch()));
     kit::dialog(t, layer, "dlg-rename-watch", "Rename watch", None, 440.0, win_h, body);
 }
 
@@ -174,7 +174,7 @@ fn connection(s: &App, t: &Neko, popups: &mut Vec<El>, layer: &mut Vec<El>, win_
                 body = body.child(n);
             }
             let ok = !s.pages.text("conn:label").trim().is_empty() && !s.pages.text("conn:target").trim().is_empty() && (!form.local || form.trust);
-            body = body.child(form_buttons(t, "Add connection", "dlg-conn", ok, |s: &mut App| s.add_connection_manually()));
+            body = body.child(form_buttons(s, t, "Add connection", "dlg-conn", ok, |s: &mut App| s.add_connection_manually()));
         }
         AddTab::Browse => {
             let searching = s.setup.registry.searching;
@@ -243,6 +243,9 @@ fn connection(s: &App, t: &Neko, popups: &mut Vec<El>, layer: &mut Vec<El>, win_
                 let chip = if !problem.is_empty() { "Needs setup" } else if paused { "Paused at source" } else if local { "Local" } else { "Remote" };
                 let cid = c.id.clone();
                 body = body.child(kit::list_row(t, format!("dlg-import-{}", c.id), format!("{}, {}", c.name, if local { "local" } else { "remote" }), Some(open)).on_press(move |s: &mut App| s.import_expand(&cid)).child(icon(&icons::EXTERNAL, 16.0).color(t.text.muted).a11y_hidden()).child(text(c.name.clone()).font(t.ty.row).color(t.text.base).truncate().min_w(0.0).max_w(200.0).a11y_hidden()).child(text(if c.source.is_empty() { "Local configuration".to_owned() } else { c.source.clone() }).font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden()).child(text(chip.to_owned()).font(t.ty.meta).color(if problem.is_empty() { t.text.faint } else { t.meaning.amber }).a11y_hidden()));
+                if let Some(n) = note(s, t, &format!("setup:{}", c.id)) {
+                    body = body.child(n);
+                }
                 if open {
                     let mut d = kit::details_block(format!("dlg-import-details-{}", c.id));
                     if !problem.is_empty() {
@@ -303,7 +306,7 @@ fn schedule(s: &App, t: &Neko, popups: &mut Vec<El>, layer: &mut Vec<El>, win_h:
         body = body.child(n);
     }
     let ok = !s.pages.text(F_NAME).trim().is_empty() && !s.pages.text(F_TEXT).trim().is_empty() && !s.pages.text("sch:zone").trim().is_empty();
-    body = body.child(form_buttons(t, "Save", "dlg-sch", ok, |s: &mut App| s.save_schedule()));
+    body = body.child(form_buttons(s, t, "Save", "dlg-sch", ok, |s: &mut App| s.save_schedule()));
     kit::dialog(t, layer, "dlg-schedule", if id.is_some() { "Edit schedule" } else { "New schedule" }, Some("Choose what to prepare and when it should run. Saving pauses this schedule; enable it after reviewing the saved settings."), 520.0, win_h, body);
 }
 
@@ -314,7 +317,7 @@ fn profile(s: &App, t: &Neko, layer: &mut Vec<El>, win_h: f32, id: Option<&str>)
     if let Some(n) = form_note(s, t) {
         body = body.child(n);
     }
-    body = body.child(form_buttons(t, "Save", "dlg-profile", !s.pages.text(F_NAME).trim().is_empty(), |s: &mut App| s.save_profile()));
+    body = body.child(form_buttons(s, t, "Save", "dlg-profile", !s.pages.text(F_NAME).trim().is_empty(), |s: &mut App| s.save_profile()));
     kit::dialog(t, layer, "dlg-profile", if id.is_some() { "Edit profile" } else { "New profile" }, Some("Set the instructions Neko uses for this kind of work."), 520.0, win_h, body);
 }
 
@@ -349,7 +352,7 @@ fn memory(s: &App, t: &Neko, popups: &mut Vec<El>, layer: &mut Vec<El>, win_h: f
     if let Some(n) = form_note(s, t) {
         body = body.child(n);
     }
-    body = body.child(form_buttons(t, "Save", "dlg-mem", !s.pages.text(F_TEXT).trim().is_empty(), |s: &mut App| s.save_memory()));
+    body = body.child(form_buttons(s, t, "Save", "dlg-mem", !s.pages.text(F_TEXT).trim().is_empty(), |s: &mut App| s.save_memory()));
     kit::dialog(t, layer, "dlg-memory", if id.is_some() { "Edit memory" } else { "Add memory" }, Some("Save context in your own words."), 520.0, win_h, body);
 }
 
@@ -361,7 +364,7 @@ fn preference(s: &App, t: &Neko, layer: &mut Vec<El>, win_h: f32, id: Option<&st
     if let Some(n) = form_note(s, t) {
         body = body.child(n);
     }
-    body = body.child(form_buttons(t, "Save suggestion", "dlg-pref", !s.pages.text(F_TEXT).trim().is_empty(), |s: &mut App| s.save_preference()));
+    body = body.child(form_buttons(s, t, "Save suggestion", "dlg-pref", !s.pages.text(F_TEXT).trim().is_empty(), |s: &mut App| s.save_preference()));
     kit::dialog(t, layer, "dlg-preference", if id.is_some() { "Edit working guidance" } else { "Add working guidance" }, Some("Describe a recurring situation and how you want Neko to approach it. Saved guidance returns to Suggested until you keep it; it does not grant new permissions."), 520.0, win_h, body);
 }
 
@@ -371,7 +374,12 @@ fn correct(s: &App, t: &Neko, layer: &mut Vec<El>, win_h: f32) {
     if let Some(n) = form_note(s, t) {
         body = body.child(n);
     }
-    body = body.child(form_buttons(t, "Save correction", "dlg-correct", !s.pages.text(F_TEXT).trim().is_empty(), |s: &mut App| s.save_correction()));
+    if let Some(Dialog::Correct { record_id, .. }) = &s.setup.dialog
+        && let Some(n) = note(s, t, &format!("setup:{record_id}"))
+    {
+        body = body.child(n);
+    }
+    body = body.child(form_buttons(s, t, "Save correction", "dlg-correct", !s.pages.text(F_TEXT).trim().is_empty(), |s: &mut App| s.save_correction()));
     kit::dialog(t, layer, "dlg-correct-decision", "Correct this decision", Some("The original observation stays in history. This correction applies to this decision; broader guidance needs your confirmation in Working style."), 480.0, win_h, body);
 }
 
@@ -389,7 +397,13 @@ fn confirm(s: &App, t: &Neko, layer: &mut Vec<El>, win_h: f32, c: &Confirm) {
             body = body.child(n);
         }
     }
-    let go = if c.coral { coral_button(&c.button, "confirm-yes", t, |s: &mut App| s.confirm_setup()) } else { primary_button(&c.button, "confirm-yes", t, |s: &mut App| s.confirm_setup()) };
+    let go = if s.setup.awaiting.is_some() {
+        primary_button(&c.button, "confirm-yes", t, |_| {}).disabled(true).fill(if c.coral { t.meaning.coral.alpha(0.4) } else { t.meaning.iris.alpha(0.4) })
+    } else if c.coral {
+        coral_button(&c.button, "confirm-yes", t, |s: &mut App| s.confirm_setup())
+    } else {
+        primary_button(&c.button, "confirm-yes", t, |s: &mut App| s.confirm_setup())
+    };
     body = body.child(footer(vec![quiet_button("Cancel", "confirm-no", t, |s: &mut App| s.close_dialog()), go]));
     kit::dialog(t, layer, "dlg-confirm", &c.title, None, 440.0, win_h, body);
 }

@@ -793,6 +793,9 @@ impl App {
     /// the page has older data stays quiet.
     pub fn page_refused(&mut self, call: &Call, message: String) -> Option<bool> {
         let mut key = control_key(call)?;
+        if let Call::Setup(setup) = call {
+            self.setup_failed(setup);
+        }
         if call.reads() && self.pages_have(call) {
             return Some(false);
         }

@@ -216,29 +216,31 @@ fn proposal(s: &App, t: &Neko, layer: &mut Vec<El>, p: &SkillProposal) -> El {
     let reviewed = audit.is_empty() || p.audit_reviewed_hash.as_deref() == Some(p.content_hash.as_str());
     let (apply_id, apply_hash, reject_id, reject_hash) = (p.id.clone(), p.content_hash.clone(), p.id.clone(), p.content_hash.clone());
     let improves = p.patch.is_some();
-    let line = list_row(t, format!("proposal-{}", p.id), format!("{}, {}", p.name, if improves { "suggested change" } else { "suggested skill" }), Some(open))
+    let mut line = list_row(t, format!("proposal-{}", p.id), format!("{}, {}", p.name, if improves { "suggested change" } else { "suggested skill" }), Some(open))
         .on_press(move |s: &mut App| s.toggle_row(&toggle))
         .child(glyph(t, StatusKind::InProgress, "Needs you"))
         .child(text(p.name.clone()).font(t.ty.row).color(t.text.base).truncate().min_w(0.0).max_w(260.0).a11y_hidden())
         .child(text(if improves { "Suggested change · review the diff" } else { "Suggested skill · review instructions" }.to_owned()).font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden())
-        .child(action(t, format!("proposal-apply-{}", p.id), "Apply", &icons::CHECK_LINE, {
-            let (i, h) = (apply_id.clone(), apply_hash.clone());
-            move |s: &mut App| s.setup_call(SetupAction::SkillDecide { id: i.clone(), content_hash: h.clone(), accept: true })
-        }))
+        ;
+    // Apply is held until the published audit has been read and confirmed, wherever it is offered.
+    if reviewed {
+        let (i, h) = (apply_id.clone(), apply_hash.clone());
+        line = line.child(action(t, format!("proposal-apply-{}", p.id), "Apply", &icons::CHECK_LINE, move |s: &mut App| s.setup_call(SetupAction::SkillDecide { id: i.clone(), content_hash: h.clone(), accept: true })));
+    }
+    line = line
         .child(action(t, format!("proposal-reject-{}", p.id), "Reject", &icons::CLOSE_SMALL, {
             let (i, h) = (reject_id.clone(), reject_hash.clone());
             move |s: &mut App| s.setup_call(SetupAction::SkillDecide { id: i.clone(), content_hash: h.clone(), accept: false })
         }));
-    let entries: Vec<MenuEntry> = vec![
-        ("Apply".to_owned(), std::rc::Rc::new({
-            let (i, h) = (apply_id.clone(), apply_hash.clone());
-            move |s: &mut App| s.setup_call(SetupAction::SkillDecide { id: i.clone(), content_hash: h.clone(), accept: true })
-        })),
-        ("Reject".to_owned(), std::rc::Rc::new({
-            let (i, h) = (reject_id.clone(), reject_hash.clone());
-            move |s: &mut App| s.setup_call(SetupAction::SkillDecide { id: i.clone(), content_hash: h.clone(), accept: false })
-        })),
-    ];
+    let mut entries: Vec<MenuEntry> = Vec::new();
+    if reviewed {
+        let (i, h) = (apply_id.clone(), apply_hash.clone());
+        entries.push(("Apply".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupAction::SkillDecide { id: i.clone(), content_hash: h.clone(), accept: true }))));
+    }
+    {
+        let (i, h) = (reject_id.clone(), reject_hash.clone());
+        entries.push(("Reject".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupAction::SkillDecide { id: i.clone(), content_hash: h.clone(), accept: false }))));
+    }
     let mut out = col().key(format!("proposal-block-{}", p.id)).w_full().child(with_menu(s, t, layer, &format!("proposal:{}", p.id), line, entries));
     if let Some(n) = note(s, t, &format!("setup:{}", p.id)) {
         out = out.child(n);

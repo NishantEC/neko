@@ -109,6 +109,12 @@ fn workspace(s: &App, t: &Neko, layer: &mut Vec<El>, data: &SetupData, id: &str)
     if let Some(n) = note(s, t, &format!("setup:{id}")) {
         out = out.child(n);
     }
+    // A watch that refused to check shows why here, where Sync now was pressed.
+    for x in &watches {
+        if let Some(n) = note(s, t, &format!("setup:{}", x.id)) {
+            out = out.child(n);
+        }
+    }
     if open {
         out = out.child(details(s, t, data, w, &folders, &views, &sum, active, &watches));
     }

@@ -112,11 +112,13 @@ pub fn footer(buttons: Vec<El>) -> El {
 /// A modal dialog: its body scrolls when the window is short.
 #[allow(clippy::too_many_arguments)]
 pub fn dialog(t: &Neko, layer: &mut Vec<El>, key: &str, title: &str, description: Option<&str>, width: f32, win_h: f32, body: El) {
-    let scroll = col().key(format!("{key}-body")).w_full().max_h((win_h - 240.0).max(160.0)).scroll(rune::ScrollSpec { stick_bottom: false }).child(body);
-    let mut d = KitDialog::new(key.to_owned(), title.to_owned()).open(true).width(width).fit().child(col().w_full().px(16.0).pb(16.0).gap(12.0).child(scroll)).on_close(|s: &mut App| s.close_dialog());
+    // The description wraps inside the body (the kit's header line does not wrap a long one).
+    let mut inner = col().w_full().gap(12.0);
     if let Some(desc) = description {
-        d = d.description(desc.to_owned());
+        inner = inner.child(text(desc.to_owned()).key(format!("{key}-description")).font(t.ty.meta).color(t.text.muted).wrap().min_w(0.0));
     }
+    let scroll = col().key(format!("{key}-body")).w_full().max_h((win_h - 240.0).max(160.0)).scroll(rune::ScrollSpec { stick_bottom: false }).child(body);
+    let d = KitDialog::new(key.to_owned(), title.to_owned()).open(true).width(width).fit().child(col().w_full().px(16.0).pb(16.0).gap(12.0).child(inner.child(scroll))).on_close(|s: &mut App| s.close_dialog());
     d.build(&t.kit, layer);
 }
 
@@ -126,7 +128,8 @@ pub fn form_note(s: &App, t: &Neko) -> Option<El> {
 }
 
 /// The Cancel and the form's one primary button.
-pub fn form_buttons(t: &Neko, save_label: &str, key: &str, enabled: bool, save: impl Fn(&mut App) + 'static) -> El {
+pub fn form_buttons(s: &App, t: &Neko, save_label: &str, key: &str, enabled: bool, save: impl Fn(&mut App) + 'static) -> El {
+    let enabled = enabled && s.setup.awaiting.is_none();
     let cancel = quiet_button("Cancel", &format!("{key}-cancel"), t, |s: &mut App| s.close_dialog());
     let main = if enabled { primary_button(save_label, &format!("{key}-save"), t, save) } else { primary_button(save_label, &format!("{key}-save"), t, |_| {}).disabled(true).fill(t.meaning.iris.alpha(0.4)) };
     footer(vec![cancel, main])

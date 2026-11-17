@@ -79,11 +79,13 @@ snap ba-slash NEKO_RUNE_PREVIEW=slash
 snap ba-scope NEKO_RUNE_PREVIEW=scope
 snap ba-cadence NEKO_RUNE_PREVIEW=cadence
 snap ba-menu NEKO_RUNE_OPEN_TASK="${PLAN_TITLE:-Optimize flow screens for mobile views}" NEKO_RUNE_MENU=1
+# Parity batch C (2026-11-17): the Setup sections, each paired with the web page of the same name (Skills is a tab of the web's Tools page).
+for section in workspaces watching tools skills memory profiles schedules; do snap "bc-$section" NEKO_RUNE_VIEW=setup NEKO_RUNE_SETUP="$section"; done
 
 # The web half: the same screens at the same size and scale (routes need the task ids, in PLAN_ID and PANEL_ID).
 "$HOME/.agents/bin/shared-chrome" acquire neko-polish >/dev/null
 token="$(cat "$data/web-token")"
-SHOTS="[[\"home\",\"/\"],[\"session-plan\",\"/tasks?task=${PLAN_ID:-}&view=full\"],[\"session-panel\",\"/tasks?task=${PANEL_ID:-}&view=full\"],[\"neko-column\",\"/\"],[\"routines\",\"/inbox\",\"Quiet\"],[\"settings\",\"/settings\"],[\"settings-permissions\",\"/settings?section=permissions\"],[\"ba-all\",\"/tasks\"],[\"ba-month\",\"/calendar\"],[\"ba-closed\",\"/inbox\"]]" \
+SHOTS="[[\"home\",\"/\"],[\"session-plan\",\"/tasks?task=${PLAN_ID:-}&view=full\"],[\"session-panel\",\"/tasks?task=${PANEL_ID:-}&view=full\"],[\"neko-column\",\"/\"],[\"routines\",\"/inbox\",\"Quiet\"],[\"settings\",\"/settings\"],[\"settings-permissions\",\"/settings?section=permissions\"],[\"ba-all\",\"/tasks\"],[\"ba-month\",\"/calendar\"],[\"ba-closed\",\"/inbox\"],[\"bc-workspaces\",\"/workspaces\"],[\"bc-watching\",\"/watching\"],[\"bc-tools\",\"/tools\"],[\"bc-skills\",\"/tools\"],[\"bc-memory\",\"/memory\"],[\"bc-profiles\",\"/profiles\"],[\"bc-schedules\",\"/schedules\"]]" \
   PORT="$port" TOKEN="$token" OUT="$out" THEME="$theme" PLAYWRIGHT_CORE="${PLAYWRIGHT_CORE:?set PLAYWRIGHT_CORE}" node "$here/scripts/polish-web.mjs"
 "$HOME/.agents/bin/shared-chrome" release neko-polish >/dev/null
 echo "pairs are in $out (not committed)"

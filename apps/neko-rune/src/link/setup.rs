@@ -137,6 +137,8 @@ pub enum SetupAction {
     Grant { connection_id: String, workspace_id: String, tool: String, schema_hash: String, allowed: bool },
     // Watching.
     SaveWatch(Box<Responsibility>),
+    /// The activation switch turned off: the same request as a save, answered beside its row.
+    PauseWatch(Box<Responsibility>),
     RemoveWatch { id: String },
     RenameWatch { id: String, name: String },
     /// A message to Neko in a workspace (the web's "Suggest from tools").
@@ -182,6 +184,7 @@ impl SetupAction {
             LinkSource { candidate_id, .. } => row(candidate_id),
             Grant { connection_id, .. } => row(connection_id),
             RemoveWatch { id } | RenameWatch { id, .. } => row(id),
+            PauseWatch(w) => row(&w.id),
             SkillEnable { path, .. } | SkillLock { path, .. } => row(path),
             SkillDecide { id, .. } | SkillAudit { id, .. } => row(id),
             ForgetMemory { id } | DecideMemory { id, .. } => row(id),
@@ -214,7 +217,7 @@ impl SetupAction {
             LinkSource { workspace_id, candidate_id, trust_local_process } => mcp(McpCommand::LinkSource { workspace_id, candidate_id, trust_local_process }),
             Grant { connection_id, workspace_id, tool, schema_hash, allowed } if workspace_id.is_empty() => mcp(McpCommand::SetToolGrant { connection_id, tool_name: tool, schema_hash, allowed }),
             Grant { connection_id, workspace_id, tool, schema_hash, allowed } => mcp(McpCommand::SetWorkspaceToolGrant { workspace_id, connection_id, tool_name: tool, schema_hash, allowed }),
-            SaveWatch(responsibility) => mcp(McpCommand::SaveResponsibility { responsibility: *responsibility }),
+            SaveWatch(responsibility) | PauseWatch(responsibility) => mcp(McpCommand::SaveResponsibility { responsibility: *responsibility }),
             RemoveWatch { id } => mcp(McpCommand::RemoveResponsibility { responsibility_id: id }),
             RenameWatch { id, name } => mcp(McpCommand::RenameResponsibility { responsibility_id: id, name }),
             AskIn { text, workspace_id } => Request::Workbench(Command::SendMessage { text, workspace_id: Some(workspace_id) }),

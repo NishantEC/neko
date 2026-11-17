@@ -137,6 +137,8 @@ pub struct SetupState {
     pub asked: Option<(i64, String)>,
     /// What a confirmation still has to send, each once the one before it was answered.
     pub queue: Vec<SetupAction>,
+    /// The one request the open form or confirmation waits on.
+    pub awaiting: Option<SetupAction>,
     /// Skill proposals whose published audit link was opened here (the web enables the confirm button only after).
     pub audit_opened: HashSet<String>,
     /// Which watch groups show their paused watches.
@@ -157,6 +159,7 @@ impl Default for SetupState {
             fetch: curl_registry,
             asked: None,
             queue: Vec::new(),
+            awaiting: None,
             audit_opened: HashSet::new(),
             dismissed_reply: false,
         }
@@ -201,6 +204,23 @@ impl App {
         self.call(Call::Setup(Box::new(call)));
     }
 
+    /// A request a form or a confirmation waits on: its answer closes or advances the dialog, and until it
+    /// comes the dialog's buttons are off (a second press would make a second one).
+    pub fn setup_call_awaited(&mut self, call: SetupAction) {
+        if self.setup.awaiting.is_some() {
+            return;
+        }
+        self.setup.awaiting = Some(call.clone());
+        self.setup_call(call);
+    }
+
+    /// The daemon refused or could not answer a setup request: the dialog's buttons come back.
+    pub fn setup_failed(&mut self, call: &SetupAction) {
+        if self.setup.awaiting.as_ref() == Some(call) {
+            self.setup.awaiting = None;
+        }
+    }
+
     // ---- sections and rows
 
     /// Opens Setup on a section (a deep link from elsewhere).
@@ -237,6 +257,9 @@ impl App {
     pub fn close_dialog(&mut self) {
         self.setup.dialog = None;
         self.setup.queue.clear();
+        self.setup.awaiting = None;
+        // A secret typed into a form does not outlive it.
+        self.pages.set_field("conn:credentials", "");
         self.pages.open_select = None;
         self.pages.notes.remove("setup:form");
     }
@@ -256,12 +279,22 @@ impl App {
 
     /// Runs when the daemon took a setup request: a form closes; a confirmation sends its next request, or closes.
     pub fn setup_applied(&mut self, call: &SetupAction) {
+        // The sign-in opens in the browser once the daemon has taken the request.
+        if let SetupAction::Authenticate { id, .. } = call {
+            let label = self.setup_data().and_then(|d| d.connection(id)).map_or("the connection".to_owned(), |c| c.label.clone());
+            self.show_toast(&format!("Finish signing in to {label} in your browser."));
+        }
+        // Only the answer to the request a form or confirmation is waiting on moves it.
+        if self.setup.awaiting.as_ref() != Some(call) {
+            return;
+        }
+        self.setup.awaiting = None;
         if matches!(self.setup.dialog, Some(Dialog::Confirm(_))) {
             if self.setup.queue.is_empty() {
                 self.close_dialog();
             } else {
                 let next = self.setup.queue.remove(0);
-                self.setup_call(next);
+                self.setup_call_awaited(next);
             }
             return;
         }
@@ -333,7 +366,7 @@ impl App {
         let away = id.as_deref().and_then(|i| self.setup_data().and_then(|d| d.workspace(i))).is_some_and(|w| w.away_enabled);
         let workspace = Workspace { id: id.unwrap_or_default(), name, repository: all[0].clone(), instructions: self.pages.text(F_TEXT).to_owned(), away_enabled: away };
         self.pages.notes.remove("setup:form");
-        self.setup_call(SetupAction::SaveWorkspace { workspace, folders: all });
+        self.setup_call_awaited(SetupAction::SaveWorkspace { workspace, folders: all });
     }
 
     /// Wakes the active watches of a workspace, one at a time (a paused or suggested one is refused by the daemon).
@@ -347,7 +380,6 @@ impl App {
         for watch in ids {
             self.setup_call(SetupAction::Wake { id: watch });
         }
-        self.show_toast("Asked this workspace’s watches to check now.");
     }
 
     // ---- watching
@@ -371,7 +403,7 @@ impl App {
     pub fn rename_watch(&mut self) {
         let Some(Dialog::RenameWatch { id }) = self.setup.dialog.clone() else { return };
         let name = self.pages.text(F_NAME).trim().to_owned();
-        self.setup_call(SetupAction::RenameWatch { id, name });
+        self.setup_call_awaited(SetupAction::RenameWatch { id, name });
     }
 
     pub fn watch_toggle_connection(&mut self, connection: &str) {
@@ -428,7 +460,7 @@ impl App {
         match self.watch_from_form(self.now_ms) {
             Ok(w) => {
                 self.pages.notes.remove("setup:form");
-                self.setup_call(SetupAction::SaveWatch(Box::new(w)));
+                self.setup_call_awaited(SetupAction::SaveWatch(Box::new(w)));
             }
             Err(why) => self.form_note(why),
         }
@@ -438,7 +470,7 @@ impl App {
     pub fn watch_switch(&mut self, id: &str, on: bool) {
         let Some(w) = self.setup_data().and_then(|d| d.watch(id)).cloned() else { return };
         if !on {
-            self.setup_call(SetupAction::SaveWatch(Box::new(Responsibility { enabled: false, ..w })));
+            self.setup_call(SetupAction::PauseWatch(Box::new(Responsibility { enabled: false, ..w })));
             return;
         }
         let missing = self.setup_data().map(|d| words::ungranted(d, &w.workspace_id, &w.connection_ids)).unwrap_or_default();
@@ -496,7 +528,6 @@ impl App {
             Some(Reconnect::SignIn) => {
                 let client = self.pages.text("conn:client").trim().to_owned();
                 self.setup_call(SetupAction::Authenticate { id: c.id.clone(), client_id: (!client.is_empty()).then_some(client) });
-                self.show_toast(&format!("Finish signing in to {} in your browser.", c.label));
             }
             Some(Reconnect::Relink) => {
                 let local = !matches!(c.config, ServerConfig::Http { .. });
@@ -616,7 +647,7 @@ impl App {
             Ok(config) => {
                 let credentials = self.pages.text("conn:credentials").trim().to_owned();
                 self.pages.notes.remove("setup:form");
-                self.setup_call(SetupAction::AddConnection { workspace_id: workspace, label, config, trust_local_process: form.local && form.trust, credentials: (!credentials.is_empty()).then_some(Hidden(credentials)) });
+                self.setup_call_awaited(SetupAction::AddConnection { workspace_id: workspace, label, config, trust_local_process: form.local && form.trust, credentials: (!credentials.is_empty()).then_some(Hidden(credentials)) });
             }
             Err(why) => self.form_note(&why),
         }
@@ -639,7 +670,7 @@ impl App {
             }
             return;
         }
-        self.setup_call(SetupAction::AddConnection { workspace_id: workspace, label: server.short_name.clone(), config: ServerConfig::Http { url: server.url.clone() }, trust_local_process: false, credentials: None });
+        self.setup_call_awaited(SetupAction::AddConnection { workspace_id: workspace, label: server.short_name.clone(), config: ServerConfig::Http { url: server.url.clone() }, trust_local_process: false, credentials: None });
     }
 
     /// Searches the public registry for what the field holds. The answer comes back through the window.
@@ -753,7 +784,7 @@ impl App {
             self.form_note("Write what to remember.");
             return;
         }
-        if kind != MemoryKind::Profile && workspace.is_empty() {
+        if kind == MemoryKind::Workspace && workspace.is_empty() {
             self.form_note("Choose a workspace.");
             return;
         }
@@ -763,14 +794,14 @@ impl App {
             agent_profile_id: base.as_ref().map_or_else(|| self.memory_profile(), |b| b.agent_profile_id.clone()),
             id: id.unwrap_or_default(),
             kind,
-            workspace_id: (kind != MemoryKind::Profile).then_some(workspace),
+            workspace_id: (kind != MemoryKind::Profile && !workspace.is_empty()).then_some(workspace),
             text,
             source: base.as_ref().map_or("user".to_owned(), |b| b.source.clone()),
             created_at_ms: base.as_ref().map_or(now, |b| b.created_at_ms),
             updated_at_ms: now,
         };
         self.pages.notes.remove("setup:form");
-        self.setup_call(SetupAction::SaveMemory(Box::new(entry)));
+        self.setup_call_awaited(SetupAction::SaveMemory(Box::new(entry)));
     }
 
     pub fn confirm_forget_memory(&mut self, id: &str) {
@@ -806,7 +837,7 @@ impl App {
         }
         let exceptions = words::phrases(self.pages.text(F_PATH));
         self.pages.notes.remove("setup:form");
-        self.setup_call(SetupAction::SavePreference { workspace_id: base.as_ref().map_or(workspace, |b| b.workspace_id.clone()), id: id.unwrap_or_default(), expected_version: base.as_ref().map(|b| b.version), terms, task_ids, instruction, supporting: base.map(|b| b.supporting_record_ids).unwrap_or_default(), exceptions });
+        self.setup_call_awaited(SetupAction::SavePreference { workspace_id: base.as_ref().map_or(workspace, |b| b.workspace_id.clone()), id: id.unwrap_or_default(), expected_version: base.as_ref().map(|b| b.version), terms, task_ids, instruction, supporting: base.map(|b| b.supporting_record_ids).unwrap_or_default(), exceptions });
     }
 
     pub fn confirm_forget_preference(&mut self, id: &str) {
@@ -827,7 +858,7 @@ impl App {
             self.form_note("Say what Neko should do differently.");
             return;
         }
-        self.setup_call(SetupAction::CorrectDecision { workspace_id, record_id, version, correction });
+        self.setup_call_awaited(SetupAction::CorrectDecision { workspace_id, record_id, version, correction });
     }
 
     // ---- profiles
@@ -849,7 +880,7 @@ impl App {
             return;
         }
         self.pages.notes.remove("setup:form");
-        self.setup_call(SetupAction::SaveProfile(AgentProfile { id: id.unwrap_or_default(), name, instructions: self.pages.text(F_TEXT).to_owned() }));
+        self.setup_call_awaited(SetupAction::SaveProfile(AgentProfile { id: id.unwrap_or_default(), name, instructions: self.pages.text(F_TEXT).to_owned() }));
     }
 
     // ---- schedules
@@ -904,7 +935,7 @@ impl App {
             ..base.unwrap_or_default()
         };
         self.pages.notes.remove("setup:form");
-        self.setup_call(SetupAction::SaveSchedule(Box::new(schedule)));
+        self.setup_call_awaited(SetupAction::SaveSchedule(Box::new(schedule)));
     }
 
     pub fn confirm_delete_schedule(&mut self, id: &str) {
@@ -917,9 +948,12 @@ impl App {
     pub fn confirm_setup(&mut self) {
         let Some(Dialog::Confirm(c)) = self.setup.dialog.clone() else { return };
         self.pages.notes.retain(|k, _| !k.starts_with("setup:"));
+        if self.setup.awaiting.is_some() {
+            return;
+        }
         self.setup.queue = c.calls.iter().skip(1).cloned().collect();
         if let Some(first) = c.calls.first().cloned() {
-            self.setup_call(first);
+            self.setup_call_awaited(first);
         }
     }
 

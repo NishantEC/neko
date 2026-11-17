@@ -44,15 +44,18 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
             s.open_watch_dialog(None, &ws)
         })))));
     }
-    for (i, w) in data.workspaces.iter().enumerate() {
+    let mut shown = 0;
+    for w in &data.workspaces {
         let list: Vec<&Responsibility> = data.watches.iter().filter(|x| x.workspace_id == w.id).collect();
         if data.watches.is_empty() {
             break;
         }
-        body = body.child(group_head(t, s, &w.id, &w.name, list.len(), i == 0));
+        // A workspace with no watch has no group (the web lists watches, not workspaces); "New watch" picks the workspace.
         if list.is_empty() {
-            body = body.child(kit::words(t, &format!("watch-none-{}", w.id), "No watches here"));
+            continue;
         }
+        body = body.child(group_head(t, s, &w.id, &w.name, list.len(), shown == 0));
+        shown += 1;
         // Suggestions first, then the active, then the paused.
         let mut ordered: Vec<&Responsibility> = list.iter().copied().filter(|x| data.suggested.contains(&x.id)).collect();
         ordered.extend(list.iter().copied().filter(|x| !data.suggested.contains(&x.id) && x.enabled));
@@ -99,8 +102,8 @@ fn watch_row(s: &App, t: &Neko, layer: &mut Vec<El>, data: &SetupData, w: &Respo
         .child(text(title.clone()).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0).help(w.instruction.clone()).a11y_hidden())
         .child(text(status.clone()).key(format!("watch-status-{id}")).font(t.ty.meta).color(if tone == Tone::Warning { t.meaning.amber } else { t.text.muted }).truncate().min_w(0.0).a11y_hidden());
     let (c, e, d) = (id.clone(), id.clone(), id.clone());
+    let line = if w.enabled { line.child(action(t, format!("watch-check-{id}"), &format!("Check {title} now"), &icons::REFRESH, move |s: &mut App| s.setup_call(crate::link::SetupAction::Wake { id: c.clone() }))) } else { line };
     let line = line
-        .child(action(t, format!("watch-check-{id}"), &format!("Check {title} now"), &icons::REFRESH, move |s: &mut App| s.setup_call(crate::link::SetupAction::Wake { id: c.clone() })))
         .child(action(t, format!("watch-edit-{id}"), "Edit", &icons::PENCIL, move |s: &mut App| s.open_watch_dialog(Some(&e), "")))
         .child(action(t, format!("watch-delete-{id}"), "Delete watch…", &icons::TRASH, move |s: &mut App| s.confirm_delete_watch(&d)))
         .child(switch(t, &format!("watch-switch-{id}"), &format!("Watch {title}"), w.enabled, move |s: &mut App| {

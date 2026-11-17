@@ -71,7 +71,9 @@ fn connection_row(s: &App, t: &Neko, layer: &mut Vec<El>, c: &McpConnection) -> 
     }
     let (rf, en) = (id.clone(), id.clone());
     let enabled = c.enabled;
-    line = line.child(action(t, format!("conn-refresh-{id}"), &format!("Refresh {} tools", c.label), &icons::REFRESH, move |s: &mut App| s.setup_call(SetupAction::Refresh { id: rf.clone() })));
+    if enabled {
+        line = line.child(action(t, format!("conn-refresh-{id}"), &format!("Refresh {} tools", c.label), &icons::REFRESH, move |s: &mut App| s.setup_call(SetupAction::Refresh { id: rf.clone() })));
+    }
     line = line.child(switch_when(t, &format!("conn-switch-{id}"), &format!("{} {}", if enabled { "Pause" } else { "Enable" }, c.label), enabled, true, move |s: &mut App| s.toggle_connection(&en)));
 
     let mut entries: Vec<MenuEntry> = Vec::new();
