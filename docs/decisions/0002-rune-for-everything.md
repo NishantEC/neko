@@ -83,6 +83,9 @@ view (`wry`, P3).
 - **(d) Neko cards.** A plugin adds a card to the Neko column (a digest block, a metric, a
   question with a default).
 
+**Built 2026-11-17 (slots (b) and (d) only):** cards and views from installed, approved packs, see
+[the knowledge note](../knowledge/luau-plugins.md). Slots (a) and (c) are not built.
+
 The spike's gap applies: stock Luau UI places only host-built nodes, with no viewer or fence
 registration. Slot (a) needs that registration added on Neko's side before plugins can use it.
 
