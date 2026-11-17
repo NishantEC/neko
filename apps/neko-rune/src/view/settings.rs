@@ -11,7 +11,7 @@ use neko_protocol::phone::RemindersAccess;
 use rune::{El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::TextInput;
 
-use super::ui::{edit_of, editing, note, pick, switch};
+use super::ui::{edit_of, editing, note, switch};
 use super::webkit::{self, setting_row};
 use super::{Frame, band, primary_button, quiet_button};
 use crate::app::App;
@@ -232,104 +232,100 @@ pub(super) fn cap(word: &str) -> String {
 
 fn phone(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     let Some(data) = &s.pages.phone else {
-        out.push(item(Section::Phone, "", "phone-loading", "Phone", "", text(s.pages.notes.get("page:phone").map_or("Reading the phone settings…", String::as_str).to_owned()).key("phone-loading").font(t.ty.meta).color(t.text.muted).px(6.0).py(8.0)));
+        out.push(item(Section::Phone, "", "phone-loading", "Phone", "", text(s.pages.notes.get("page:phone").map_or("Loading…", String::as_str).to_owned()).key("phone-loading").font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted)));
         return;
     };
     let start = out.len();
     let p = data.settings.clone();
     let status = &data.status;
-    let denied = status.reminders_access == RemindersAccess::Denied;
-    let help = "A reminder in the Neko list for each thing that needs you while you are away.";
-    out.push(item(
-        Section::Phone,
-        "Channels",
-        "phone-reminders",
-        "Apple Reminders",
-        help,
-        setting_row(t, "set-reminders", "Apple Reminders", Some(help), row().gap(10.0).center_y().child(value(t, "set-reminders-state", if denied { "Not allowed in System Settings" } else { "" })).child(switch(t, "set-reminders-switch", "Apple Reminders", p.reminders, move |s: &mut App| s.change_phone("reminders", |p| p.reminders = !p.reminders)))),
-    ));
-    let help = "Pushes to the ntfy topic Neko made for you. Only the title is sent unless you turn that off.";
-    out.push(item(Section::Phone, "Channels", "phone-ntfy", "ntfy", help, setting_row(t, "set-ntfy", "ntfy", Some(help), switch(t, "set-ntfy-switch", "ntfy", p.ntfy, move |s: &mut App| s.change_phone("ntfy", |p| p.ntfy = !p.ntfy)))));
-    out.push(item(
-        Section::Phone,
-        "ntfy",
-        "phone-ntfy-server",
-        "ntfy server",
-        "Where pushes are sent. Press Return to save.",
-        setting_row(t, "set-ntfy-server", "ntfy server", Some("Where pushes are sent. Press Return to save."), super::ui::input(s, t, "ntfy-server", "ntfy server", "https://ntfy.sh", 240.0, |s: &mut App| s.save_ntfy_server())),
-    ));
-    out.push(item(Section::Phone, "ntfy", "phone-titles-only", "Send only the title", "The ntfy server sees the text of a push unless this is on.", setting_row(t, "set-titles-only", "Send only the title", Some("The ntfy server sees the text of a push unless this is on."), switch(t, "set-titles-switch", "Send only the title", p.titles_only, move |s: &mut App| s.change_phone("titles-only", |p| p.titles_only = !p.titles_only)))));
-    out.push(item(Section::Phone, "When", "phone-quiet", "Quiet hours", "Pushes wait until quiet hours end, except what cannot wait.", setting_row(t, "set-quiet", "Quiet hours", Some("Pushes wait until quiet hours end, except what cannot wait."), switch(t, "set-quiet-switch", "Quiet hours", p.quiet_enabled, move |s: &mut App| s.change_phone("quiet", |p| p.quiet_enabled = !p.quiet_enabled)))));
-    if p.quiet_enabled {
-        let hs = hours();
-        out.push(item(
-            Section::Phone,
-            "When",
-            "phone-quiet-window",
-            "Quiet from and until",
-            "",
-            setting_row(
-                t,
-                "set-quiet-window",
-                "Quiet from and until",
-                None,
-                row()
-                    .gap(8.0)
-                    .center_y()
-                    .child(pick(s, t, layer, "set-quiet-from", "Quiet from", &hs, &format!("{:02}:00", p.quiet_from_hour), 100.0, |s: &mut App, chosen: &str| s.change_phone("quiet-window", |p| p.quiet_from_hour = hour_of(chosen))))
-                    .child(text("to").font(t.ty.meta).color(t.text.muted))
-                    .child(pick(s, t, layer, "set-quiet-to", "Quiet until", &hs, &format!("{:02}:00", p.quiet_to_hour), 100.0, |s: &mut App, chosen: &str| s.change_phone("quiet-window", |p| p.quiet_to_hour = hour_of(chosen)))),
-            ),
-        ));
+    let note_font = webkit::font(t, 12.5, 400.0, 20.3125);
+
+    // Channels: one line each, no subtitles (the web's Phone page has none), then the paragraph about replies.
+    out.push(item(Section::Phone, "Channels", "phone-reminders", "Apple Reminders", "", setting_row(t, "set-reminders", "Apple Reminders", None, switch(t, "set-reminders-switch", "Apple Reminders", p.reminders, move |s: &mut App| s.change_phone("reminders", |p| p.reminders = !p.reminders)))));
+    out.push(item(Section::Phone, "Channels", "phone-ntfy", "ntfy", "", setting_row(t, "set-ntfy", "ntfy", None, switch(t, "set-ntfy-switch", "ntfy", p.ntfy, move |s: &mut App| s.change_phone("ntfy", |p| p.ntfy = !p.ntfy)))));
+    let replies = "Replies need Apple Reminders: complete a reminder to take its default, or add a line that starts with > to answer in words. ntfy only notifies, because answering through it would mean opening your Mac to the internet.";
+    out.push(item(Section::Phone, "Channels", "phone-replies", "Replies", replies, col().key("phone-replies").w_full().px(24.0).pt(14.0).child(text(replies.to_owned()).font(note_font).color(t.text.muted).wrap().min_w(0.0))));
+
+    // ntfy, only while it is on.
+    if p.ntfy {
+        const G: &str = "ntfy";
+        out.push(item(Section::Phone, G, "phone-ntfy-server", "Server", "", setting_row(t, "set-ntfy-server", "Server", None, webkit::input(s, t, "ntfy-server", "ntfy server", "", 256.0, false, |s: &mut App| s.save_ntfy_server()))));
+        let topic = p.ntfy_topic.clone();
+        let mono = rune::TextStyle { size: 12.5, line_height: 20.3125, ..t.ty.mono };
+        let copy_topic = topic.clone();
+        let copy = |key: &str, label: &'static str, words: String| {
+            webkit::ghost_button(t, key, "Copy", None, |_: &mut App| {}).label(label).on_press_tx(move |s: &mut App, tx: &mut rune::Tx| {
+                tx.copy(words.clone());
+                s.show_toast("Copied");
+            })
+        };
+        let control = row().gap(8.0).center_y().flex_wrap().child(text(topic).key("set-ntfy-topic-value").font(mono).color(t.text.muted).wrap().min_w(0.0)).child(copy("set-ntfy-topic-copy", "Copy topic", copy_topic)).child(webkit::ghost_button(t, "set-ntfy-topic-new", "New topic", None, |s: &mut App| s.change_phone("ntfy-topic", |p| p.ntfy_topic = String::new())));
+        out.push(item(Section::Phone, G, "phone-ntfy-topic", "Topic", "", setting_row(t, "set-ntfy-topic", "Topic", None, control)));
+        let link = status.subscribe_link.clone();
+        let control = row().gap(8.0).center_y().flex_wrap().child(text(link.clone()).key("set-ntfy-link-value").font(mono).color(t.meaning.iris).wrap().min_w(0.0)).child(copy("set-ntfy-link-copy", "Copy subscribe link", link));
+        out.push(item(Section::Phone, G, "phone-ntfy-link", "Subscribe", "", setting_row(t, "set-ntfy-link", "Subscribe", None, control)));
+        out.push(item(Section::Phone, G, "phone-titles-only", "Send titles only", "", setting_row(t, "set-titles-only", "Send titles only", None, switch(t, "set-titles-switch", "Send titles only", p.titles_only, move |s: &mut App| s.change_phone("titles-only", |p| p.titles_only = !p.titles_only)))));
+        out.push(item(Section::Phone, G, "phone-ntfy-open", "Open in Neko address", "", setting_row(t, "set-ntfy-open", "Open in Neko address", None, webkit::input(s, t, "ntfy-open", "Open in Neko address", "Empty: no button", 256.0, false, |s: &mut App| s.save_ntfy_open()))));
     }
-    out.push(item(Section::Phone, "Morning digest", "phone-digest", "Morning digest", "One calm summary of what finished, what is stuck and what needs a decision.", setting_row(t, "set-digest", "Morning digest", Some("One calm summary of what finished, what is stuck and what needs a decision."), switch(t, "set-digest-switch", "Morning digest", p.digest, move |s: &mut App| s.change_phone("digest", |p| p.digest = !p.digest)))));
-    if p.digest {
-        let hs = hours();
-        let minutes: Vec<String> = ["00", "15", "30", "45"].iter().map(|m| (*m).to_owned()).collect();
-        let minute_now = format!("{:02}", p.digest_minute);
-        let mut minutes = minutes;
-        if !minutes.contains(&minute_now) {
-            minutes.push(minute_now.clone());
+
+    // Morning digest: the switch and the time (HH:MM; Return saves it).
+    let digest = p.digest;
+    let time = webkit::input(s, t, "digest-time", "Digest time", "08:00", 112.0, false, move |s: &mut App| {
+        if digest {
+            s.save_digest_time();
         }
-        out.push(item(
-            Section::Phone,
-            "Morning digest",
-            "phone-digest-time",
-            "Digest time",
-            "",
-            setting_row(
-                t,
-                "set-digest-time",
-                "Digest time",
-                None,
-                row()
-                    .gap(8.0)
-                    .center_y()
-                    .child(pick(s, t, layer, "set-digest-hour", "Digest hour", &hs, &format!("{:02}:00", p.digest_hour), 100.0, |s: &mut App, chosen: &str| s.change_phone("digest-time", |p| p.digest_hour = hour_of(chosen))))
-                    .child(pick(s, t, layer, "set-digest-minute", "Digest minute", &minutes, &minute_now, 80.0, |s: &mut App, chosen: &str| s.change_phone("digest-time", |p| p.digest_minute = chosen.parse().unwrap_or(0)))),
-            ),
-        ));
-    }
-    let last = match (status.last_push_ms, status.last_error.as_ref()) {
-        (_, Some(e)) => e.clone(),
-        (Some(at), None) => format!("{} · {}", status.last_channel, ago(s.now_ms, at)),
-        (None, None) => "Nothing sent yet".to_owned(),
-    };
-    let tests = if s.pages.phone_test.is_empty() { String::new() } else { s.pages.phone_test.join(" · ") };
-    out.push(item(
-        Section::Phone,
-        "When",
-        "phone-test",
-        "Send a test",
-        "Sends a push on every channel that is on, ignoring quiet hours.",
-        setting_row(t, "set-phone-test", "Send a test", Some("Sends a push on every channel that is on, ignoring quiet hours."), row().gap(10.0).center_y().child(value(t, "set-phone-last", if tests.is_empty() { &last } else { &tests })).child(quiet_button("Send a test", "phone-test", t, |s: &mut App| s.call(crate::link::Call::PhoneTest)))),
-    ));
+    });
+    let time = if digest { time } else { time.opacity(0.5) };
+    let control = row().gap(8.0).center_y().child(switch(t, "set-digest-switch", "Morning digest", digest, move |s: &mut App| s.change_phone("digest", |p| p.digest = !p.digest))).child(time);
+    out.push(item(Section::Phone, "Morning digest", "phone-digest", "Morning digest", "", setting_row(t, "set-digest", "Morning digest", None, control)));
+
+    // When: quiet hours, then a test.
+    let hs = hours();
+    let on = p.quiet_enabled;
+    let from = webkit::select(s, t, layer, "set-quiet-from", "Quiet hours start", &hs, &format!("{:02}:00", p.quiet_from_hour), 96.0, move |s: &mut App, chosen: &str| {
+        if on {
+            s.change_phone("quiet", |p| p.quiet_from_hour = hour_of(chosen));
+        }
+    });
+    let to = webkit::select(s, t, layer, "set-quiet-to", "Quiet hours end", &hs, &format!("{:02}:00", p.quiet_to_hour), 96.0, move |s: &mut App, chosen: &str| {
+        if on {
+            s.change_phone("quiet", |p| p.quiet_to_hour = hour_of(chosen));
+        }
+    });
+    let (from, to) = if on { (from, to) } else { (from.opacity(0.5), to.opacity(0.5)) };
+    let control = row().gap(8.0).center_y().child(switch(t, "set-quiet-switch", "Quiet hours", on, move |s: &mut App| s.change_phone("quiet", |p| p.quiet_enabled = !p.quiet_enabled))).child(from).child(text("to".to_owned()).font(note_font).color(t.text.muted)).child(to);
+    out.push(item(Section::Phone, "When", "phone-quiet", "Quiet hours", "", setting_row(t, "set-quiet", "Quiet hours", None, control)));
+    let can_test = p.reminders || p.ntfy;
+    let test = webkit::button(t, "phone-test", "Send a test", None, false, false, webkit::gated(can_test, |s: &mut App| s.call(crate::link::Call::PhoneTest)));
+    out.push(item(Section::Phone, "When", "phone-test", "Send a test", "", setting_row(t, "set-phone-test", "Send a test", None, if can_test { test } else { test.disabled(true).opacity(0.5) })));
+
     // A refusal of a change shows under the row that made it.
     for it in &mut out[start..] {
         let row = it.id.trim_start_matches("phone-").to_owned();
         let el = std::mem::replace(&mut it.el, rune::el());
         it.el = with_note(s, t, &format!("setting:phone:{row}"), el);
     }
+
+    // Status: plain lines, not rows.
+    let line = webkit::font(t, 13.0, 400.0, 21.125);
+    let access = match status.reminders_access {
+        RemindersAccess::Granted => "Reminders allowed",
+        RemindersAccess::Denied => "Reminders blocked: allow Neko in System Settings → Privacy & Security → Reminders",
+        _ if p.reminders => "Waiting for the app to ask for Reminders access",
+        _ => "Reminders not asked yet",
+    };
+    let last = match status.last_push_ms {
+        Some(at) => format!("Last push: {}, {}", status.last_channel, webkit::relative_time(s.now_ms, at)),
+        None => "No push sent yet".to_owned(),
+    } + &if status.held > 0 { format!(", {} waiting for quiet hours to end", status.held) } else { String::new() };
+    let mut lines = col().key("phone-status").w_full().gap(4.0).child(text(access.to_owned()).key("phone-access").font(line).color(t.text.muted).wrap().min_w(0.0)).child(text(last).key("phone-last-push").font(line).color(t.text.muted).wrap().min_w(0.0));
+    if let Some(e) = status.last_error.as_ref() {
+        lines = lines.child(text(format!("Last error: {e}")).key("phone-error").font(line).color(t.meaning.amber).wrap().min_w(0.0));
+    }
+    for (i, l) in s.pages.phone_test.iter().enumerate() {
+        lines = lines.child(text(l.clone()).key(format!("phone-test-line-{i}")).font(line).color(t.text.muted).wrap().min_w(0.0));
+    }
+    out.push(item(Section::Phone, "", "phone-status", "Status", "", webkit::section(t, "group-status", "Status", None, None, lines)));
 }
 
 fn short(commit: &Option<String>) -> String {

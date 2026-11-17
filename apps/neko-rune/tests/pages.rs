@@ -273,6 +273,28 @@ fn home_chat_pins_are_edited_in_settings_and_applied_as_the_web_sends_them() {
 }
 
 #[test]
+fn phone_is_the_webs_one_line_rows_in_four_groups_and_a_status_block() {
+    let mut rt = runtime("settings-phone");
+    for group in ["group-channels", "group-morning-digest", "group-when", "group-status"] {
+        assert!(rt.find(group).is_some(), "{group}");
+    }
+    assert!(rt.find("phone-access").is_some() && rt.find("phone-last-push").is_some(), "the status lines");
+    assert!(texts(&rt).contains(&"Apple Reminders".to_owned()) && !texts(&rt).iter().any(|t| t.starts_with("A reminder in the Neko list")), "no subtitle under a row");
+    // The digest's time is typed as HH:MM and saved with the rest as it was; anything else is refused beside the row.
+    rt.update(|s, _| {
+        s.pages.set_field("digest-time", "07:45");
+        s.save_digest_time();
+    });
+    assert!(matches!(rt.state.outbox.last(), Some(Call::SavePhone(p)) if p.digest_hour == 7 && p.digest_minute == 45), "{:?}", rt.state.outbox.last());
+    rt.state.outbox.clear();
+    rt.update(|s, _| {
+        s.pages.set_field("digest-time", "25:99");
+        s.save_digest_time();
+    });
+    assert!(rt.state.outbox.is_empty() && rt.state.pages.notes.contains_key("setting:phone:digest"));
+}
+
+#[test]
 fn usage_draws_the_week_and_each_quota_with_a_bar_that_changes_colour() {
     let rt = runtime("usage");
     assert!(rt.find("usage-today").is_some() && text_of(&rt, "usage-today-value").is_some_and(|v| v.starts_with('$')));

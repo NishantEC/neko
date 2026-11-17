@@ -757,6 +757,32 @@ impl App {
         }
     }
 
+    /// "Open in Neko address": saved when it was changed; empty takes the button away.
+    pub fn save_ntfy_open(&mut self) {
+        if self.pages.edited("ntfy-open", false) {
+            let url = self.pages.text("ntfy-open").trim().to_owned();
+            self.change_phone("ntfy-open", |p| p.open_url = url);
+        }
+    }
+
+    /// The digest's time, typed as `HH:MM`: a time that is not one is refused next to the row and nothing is sent.
+    pub fn save_digest_time(&mut self) {
+        if !self.pages.edited("digest-time", false) {
+            return;
+        }
+        let words = self.pages.text("digest-time").trim().to_owned();
+        let parsed = words.split_once(':').and_then(|(h, m)| Some((h.trim().parse::<u32>().ok()?, m.trim().parse::<u32>().ok()?))).filter(|(h, m)| *h < 24 && *m < 60);
+        match parsed {
+            Some((h, m)) => self.change_phone("digest", |p| {
+                p.digest_hour = h;
+                p.digest_minute = m;
+            }),
+            None => {
+                self.pages.notes.insert("setting:phone:digest".to_owned(), "Type the time as HH:MM, for example 08:00.".to_owned());
+            }
+        }
+    }
+
     /// Fills the settings fields from what the daemon says is saved (until the person edits them).
     pub fn seed_settings(&mut self) {
         if let Some(st) = self.summary.as_ref().map(|m| m.settings.clone()) {
@@ -766,8 +792,10 @@ impl App {
             self.pages.seed("update-source", &st.self_update.as_ref().map(|u| u.source.clone()).unwrap_or_default());
             self.pages.seed("rulebook", &crate::extra::rulebook_saved(&st.rulebook, &st.rulebook_default));
         }
-        if let Some(server) = self.pages.phone.as_ref().map(|p| p.settings.ntfy_server.clone()) {
-            self.pages.seed("ntfy-server", &server);
+        if let Some(p) = self.pages.phone.as_ref().map(|p| p.settings.clone()) {
+            self.pages.seed("ntfy-server", &p.ntfy_server);
+            self.pages.seed("ntfy-open", &p.open_url);
+            self.pages.seed("digest-time", &format!("{:02}:{:02}", p.digest_hour, p.digest_minute));
         }
     }
 
