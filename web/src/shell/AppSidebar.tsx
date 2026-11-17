@@ -66,7 +66,7 @@ const PRIMARY = [HOME, "inbox", "tasks", "calendar", "workspaces"];
 const FOOT = "settings";
 /** In "More pages", in this order: the daily ones, then pages of yours and plugins, then the ones you set up once. */
 const MORE_DAILY = ["prs", "watching", "schedules", "memory"];
-const MORE_SETUP = ["packs", "profiles", "tools", "usage"];
+const MORE_SETUP = ["packs", "improvements", "profiles", "tools", "usage"];
 /** Not listed: the agent tree is the Tasks page's Tree view (and ⌘K). */
 const HIDDEN = ["tree"];
 

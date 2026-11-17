@@ -11,6 +11,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/ui/collap
 import { Panel } from "@/setup/kit";
 import { useWorkbench } from "@/useStore";
 import { ConfirmDialog, ErrorNote, PanelFooter, Pick, Section, SettingRow, Status, Toggle, type Option } from "@/setup/kit";
+import { listImprovements, setImproveEnabled } from "@/setup/improve";
 import { arr, num, profileFor, relativeTime, str, useLoad, useRun } from "@/setup/lib";
 
 const SEP = "\u001f";
@@ -368,6 +369,40 @@ function InboxPanel() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Suggestions: whether Neko looks for trouble that repeats (the Improvements page)
+// ---------------------------------------------------------------------------
+
+function SuggestionsPanel() {
+  const [on, setOn] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    listImprovements(controller.signal).then((r) => setOn(r.enabled), (e) => { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e)); });
+    return () => controller.abort();
+  }, []);
+  const change = async (enabled: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setOn((await setImproveEnabled(enabled)).enabled);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Panel data-slot="suggestions-switch">
+      <SettingRow id="suggestions" title="Suggestions" description="Neko looks for trouble that repeats and suggests a fix. Off means it gathers nothing.">
+        {on === null ? <Skeleton className="h-5 w-9" /> : <Toggle checked={on} onChange={(v) => void change(v)} label="Suggestions" disabled={busy} />}
+      </SettingRow>
+      <ErrorNote error={error} title="Couldn’t save" onDismiss={() => setError(null)} />
+    </Panel>
+  );
+}
+
 function WorkStylePanel({ snapshot }: { snapshot: Json }) {
   const { run, busy, error, clear } = useRun();
   const [confirm, setConfirm] = useState(false);
@@ -443,6 +478,9 @@ export function AiSection() {
       </Section>
       <Section title="Inbox clean-up">
         <InboxPanel />
+      </Section>
+      <Section title="Suggestions">
+        <SuggestionsPanel />
       </Section>
       <Section title="How work starts">
         <WorkStylePanel snapshot={snapshot} />

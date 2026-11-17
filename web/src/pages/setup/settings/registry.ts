@@ -41,6 +41,7 @@ export const SETTINGS: SettingDef[] = [
   { id: "tickets-at-once", section: "ai", title: "Tasks at once", keywords: ["concurrency", "parallel", "one at a time", "queue", "limit", "workers"] },
   { id: "writable-per-repo", section: "ai", title: "Writing per repository", keywords: ["worktrees", "limit", "repository", "concurrency"] },
   { id: "inbox-age-out", section: "ai", title: "Inbox items age out after", keywords: ["inbox", "routines", "needs you", "stale", "expire", "days", "clean up"] },
+  { id: "suggestions", section: "ai", title: "Suggestions", keywords: ["improvements", "patterns", "repeats", "trouble", "fix", "self-improvement", "off", "gathers"] },
   { id: "plan-first", section: "ai", title: "Plan before working", keywords: ["approval", "read-only", "plan"] },
   { id: "start-over", section: "ai", title: "Start over", keywords: ["reset", "clear", "delete tasks", "delete tickets", "fresh", "wipe"] },
   { id: "phone-reminders", section: "phone", title: "Apple Reminders", keywords: ["phone", "push", "icloud", "iphone", "notification"] },

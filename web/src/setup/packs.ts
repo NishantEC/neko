@@ -67,3 +67,8 @@ export const cleanUpPack = async (name: string) => listing(await request({ Packs
 /** A plugin's id is the last part of its folder's path. */
 export const pluginIdOf = (dir: string | null | undefined) => (dir ?? "").replace(/\/+$/, "").split("/").pop() ?? "";
 export const checkPackHealth = async (name: string) => listing(await request({ Packs: { Health: { name } } }));
+
+// A suggestion that installs a pack opens that pack's preview on the Packs page: the source waits here until the page reads it once.
+let pendingPreview: string | null = null;
+export const openPackPreviewNext = (source: string) => { pendingPreview = source; };
+export const takePendingPackPreview = (): string | null => { const s = pendingPreview; pendingPreview = null; return s; };

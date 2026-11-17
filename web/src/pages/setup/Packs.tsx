@@ -14,7 +14,7 @@ import { useContextMenu } from "@/shell/context-menu";
 import { confirm } from "@/shell/confirm";
 import { useSetupCommands } from "@/setup/commands";
 import {
-  PACK_STATUS_WORDS, checkPackHealth, cleanUpPack, listPacks, packGlyph, pluginIdOf, previewPack, removePack, shortSource,
+  PACK_STATUS_WORDS, checkPackHealth, cleanUpPack, listPacks, packGlyph, pluginIdOf, previewPack, removePack, shortSource, takePendingPackPreview,
   type InstalledPack, type PackListing,
 } from "@/setup/packs";
 import { setPluginEnabled } from "@/plugins";
@@ -88,6 +88,7 @@ function PacksBody() {
   const [listing, setListing] = useState<PackListing | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [autoSource, setAutoSource] = useState<string | null>(null);
   const [openName, setOpenName] = useState<string | null>(null);
   const [busyName, setBusyName] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -112,6 +113,12 @@ function PacksBody() {
     const id = setInterval(() => void reload(controller.signal), REFRESH_MS);
     return () => { controller.abort(); clearInterval(id); };
   }, [reload]);
+
+  // An Improvements suggestion that installs a pack leaves its source here to preview.
+  useEffect(() => {
+    const source = takePendingPackPreview();
+    if (source) { setAutoSource(source); setAdding(true); }
+  }, []);
 
   useEffect(
     () => registerCommands([{ id: "packs.add", title: "Add a pack", keywords: ["install", "bundle", "tools", "skills", "plugin"], icon: Plus, group: "Packs", run: () => setAdding(true) }]),
@@ -204,7 +211,8 @@ function PacksBody() {
       ) : null}
       <AddPackDialog
         open={adding}
-        onOpenChange={setAdding}
+        onOpenChange={(o) => { setAdding(o); if (!o) setAutoSource(null); }}
+        autoSource={autoSource}
         catalog={listing?.catalog ?? []}
         onInstalled={(next) => { setListing(next); setLoadError(null); }}
       />

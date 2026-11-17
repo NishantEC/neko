@@ -44,11 +44,13 @@ function Preview({ preview, env, setEnv, busy, error, onBack, onInstall }: {
   );
 }
 
-export function AddPackDialog({ open, onOpenChange, catalog, onInstalled }: {
+export function AddPackDialog({ open, onOpenChange, catalog, onInstalled, autoSource }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   catalog: CatalogEntry[];
   onInstalled: (listing: PackListing) => void;
+  /** A source to preview as soon as the dialog opens (an Improvements suggestion). */
+  autoSource?: string | null;
 }) {
   const [tab, setTab] = useState("catalog");
   const [source, setSource] = useState("");
@@ -58,8 +60,8 @@ export function AddPackDialog({ open, onOpenChange, catalog, onInstalled }: {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) { setTab("catalog"); setSource(""); setPreview(null); setEnvValues({}); setBusy(false); setError(null); }
-  }, [open]);
+    if (open) { setTab("catalog"); setSource(""); setPreview(null); setEnvValues({}); setBusy(false); setError(null); if (autoSource) void look(autoSource); }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const look = async (from: string) => {
     setBusy(true);
