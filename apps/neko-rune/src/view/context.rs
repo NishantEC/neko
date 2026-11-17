@@ -159,7 +159,30 @@ fn canvas(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         if let Some(v) = version {
             line = line.child(text(format!("v{v}")).font(t.ty.id).color(t.text.faint).a11y_hidden());
         }
-        list = list.child(line.child(text(age(s.now_ms, when)).font(t.ty.meta).color(t.text.muted).a11y_hidden()));
+        line = line.child(text(age(s.now_ms, when)).font(t.ty.meta).color(t.text.muted).a11y_hidden());
+        // Download, Open in browser and Copy link at the right of the row on hover or focus (the web's `artifactMenu`), and in its right-click menu.
+        let (dl, br, cp) = (shown.id.clone(), shown.id.clone(), shown.id.clone());
+        let link = s.artifact_link(&shown.id);
+        let act = |key: String, label: &str, glyph: &'static rune::Icon| row().key(key).role("button").label(label.to_owned()).help(label.to_owned()).focusable(true).size(24.0, 24.0).center().radius(t.radius.control).hover(t.surface.active).focus_ring(2.0, 2.0, t.kit.c.border_focus).child(rune::icon(glyph, 14.0).color(t.text.muted).a11y_hidden());
+        let copy = {
+            let link = link.clone();
+            act(format!("canvas-copy-{}", shown.id), "Copy link", &crate::icons::COPY).on_press_tx(move |s: &mut App, tx: &mut rune::Tx| match &link {
+                Some(l) => {
+                    tx.copy(l.clone());
+                    s.show_toast("Link copied");
+                }
+                None => s.show_toast("Neko’s web address isn’t known yet."),
+            })
+        };
+        let actions = row()
+            .key(format!("canvas-actions-{}", shown.id))
+            .gap(2.0)
+            .group_opacity(0.0, 1.0)
+            .child(act(format!("canvas-download-{}", shown.id), "Download", &crate::icons::ARROW_UP).on_press(move |s: &mut App| s.artifact_download(&dl)))
+            .child(act(format!("canvas-browser-{}", shown.id), "Open in browser", &crate::icons::EXTERNAL).on_press(move |s: &mut App| s.artifact_open_in_browser(&br)))
+            .child(copy);
+        let _ = cp;
+        list = list.child(line.child(actions));
     }
     let mut c = col().w_full().grow(1.0).min_h(0.0).child(col().key("canvas-scroll").w_full().max_h(4.0 * 32.0 + 8.0).min_h(0.0).clip_rounded(0.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(list));
     if let Some(Target::Artifact { id, version }) = &target {

@@ -256,6 +256,8 @@ pub fn remember_window(handle: &WindowHandle) {
 pub struct WryFactory {
     /// What the view tells the window ("Saved to Downloads"): the host passes it on as a toast.
     notes: Rc<RefCell<Vec<String>>>,
+    /// What the embedded page said through `window.ipc` (a quoted comment, a `data-neko-send`), only from the signed origin.
+    said: Rc<RefCell<Vec<crate::artifact_actions::Said>>>,
 }
 
 struct WryNative(wry::WebView);
@@ -292,6 +294,7 @@ impl Factory for WryFactory {
         let log = BlockLog::default();
         let (nav_gesture, nav_log, window_gesture, window_log, ipc_gesture) = (gesture.clone(), log.clone(), gesture.clone(), log.clone(), gesture);
         let (started, finished) = (self.notes.clone(), self.notes.clone());
+        let said = self.said.clone();
         let builder = wry::WebViewBuilder::new()
             .with_url(address)
             // A trusted click or keypress in any frame tells the host, so a link the person pressed may open their browser.
@@ -299,6 +302,8 @@ impl Factory for WryFactory {
             .with_ipc_handler(move |request| {
                 if request.body() == "gesture" && decide(&request.uri().to_string(), port) == Nav::Allow {
                     ipc_gesture.touch();
+                } else if let Some(message) = crate::artifact_actions::parse(request.body()).filter(|_| crate::artifact_actions::origin_ok(&request.uri().to_string(), port)) {
+                    said.borrow_mut().push(message);
                 }
             })
             // Downloads go to ~/Downloads under their own name, and the window says so.
@@ -400,6 +405,7 @@ pub struct WebHost {
     last_error: RefCell<Option<String>>,
     /// What the view told the window to say (shared with the factory).
     notes: Rc<RefCell<Vec<String>>>,
+    said: Rc<RefCell<Vec<crate::artifact_actions::Said>>>,
 }
 
 impl Default for WebHost {
@@ -424,6 +430,7 @@ impl WebHost {
             made: Cell::new(0),
             last_error: RefCell::new(None),
             notes: Rc::new(RefCell::new(Vec::new())),
+            said: Rc::new(RefCell::new(Vec::new())),
         }
     }
 
@@ -431,12 +438,23 @@ impl WebHost {
     pub fn windowed() -> WebHost {
         let factory = WryFactory::default();
         let notes = factory.notes.clone();
-        WebHost { notes, ..WebHost::new(Some(Rc::new(factory))) }
+        let said = factory.said.clone();
+        WebHost { notes, said, ..WebHost::new(Some(Rc::new(factory))) }
     }
 
     /// What the view has said since the last call ("Saved to Downloads"), for the window to show.
     pub fn drain_notes(&self) -> Vec<String> {
         std::mem::take(&mut *self.notes.borrow_mut())
+    }
+
+    /// What the embedded page said since the last call, for the window to act on.
+    pub fn drain_said(&self) -> Vec<crate::artifact_actions::Said> {
+        std::mem::take(&mut *self.said.borrow_mut())
+    }
+
+    /// Hands the host a message as the page's IPC would (a test; the real handler checks the origin first).
+    pub fn push_said(&self, said: crate::artifact_actions::Said) {
+        self.said.borrow_mut().push(said);
     }
 
     /// What the panel asks for in this build of the view (`None`: no web viewer is on screen).

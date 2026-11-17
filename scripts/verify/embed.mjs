@@ -79,6 +79,22 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   check((await page.evaluate(() => location.hash)) === hashBefore, "data-neko-send does not carry the embedded page away from its route");
   await shot("embed-artifact-comment");
 
+  // In the Rune client's web view the page has `window.ipc`: a picked comment and a data-neko-send go to the window, not to a docked composer.
+  await page.goto(`${base}/#/artifact/${html.id}/1?embed=1&theme=dark`);
+  await page.reload();
+  await page.waitForSelector(`[data-slot='artifact-panel'][data-artifact='${html.id}'] iframe`, { timeout: 15000 });
+  await page.evaluate(() => { window.__ipc = []; window.ipc = { postMessage: (m) => window.__ipc.push(m) }; });
+  const bridged = page.frameLocator(`[data-slot='artifact-panel'][data-artifact='${html.id}'] iframe`);
+  await page.getByRole("button", { name: "Comment" }).click();
+  await bridged.locator("h1").click({ timeout: 5000 }).catch(() => {});
+  await page.waitForFunction(() => window.__ipc.length >= 1, null, { timeout: 8000 }).catch(() => {});
+  await bridged.locator("#offer").click({ timeout: 5000 }).catch(() => {});
+  await page.waitForFunction(() => window.__ipc.length >= 2, null, { timeout: 8000 }).catch(() => {});
+  const said = (await page.evaluate(() => window.__ipc)).map((m) => { try { return JSON.parse(m); } catch { return null; } });
+  check(said[0]?.type === "quote" && /^\[artifact [\w-]+ v1, element /.test(said[0]?.text ?? ""), `with window.ipc a picked comment is posted to the host as a quote (${JSON.stringify(said[0])})`);
+  check(said[1]?.type === "send" && said[1]?.text === "Make the heading blue", `with window.ipc a data-neko-send is posted to the host as a send (${JSON.stringify(said[1])})`);
+  check((await page.locator("[data-slot='embed-composer']").count()) === 0, "with window.ipc no composer is docked in the page");
+
   // A sketch, and an unknown artifact in embed mode.
   await page.goto(`${base}/#/artifact/${sketch.id}/1?embed=1&theme=dark`);
   await page.waitForSelector(`[data-slot='artifact-panel'][data-artifact='${sketch.id}'] [data-slot='sketch-board'] canvas`, { timeout: 20000 })

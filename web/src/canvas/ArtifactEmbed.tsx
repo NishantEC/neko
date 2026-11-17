@@ -15,6 +15,22 @@ import { OFFER_EVENT, referenceText, SCOPE_NOTE, takeOffers } from "@/canvas/art
 
 type Task = (draft: ComposerHandle) => void;
 
+/**
+ * The Rune client's web view hands the page `window.ipc`. In it a picked comment and an artifact's `data-neko-send` text go to the
+ * window (`{ type: "quote" | "send", text }`) instead of a docked composer: the window quotes the comment into the open session's
+ * composer and posts the send as the person's message. Without `window.ipc` nothing here changes.
+ */
+export const hostBridge = (): { postMessage(message: string): void } | null => {
+  const ipc = (window as unknown as { ipc?: { postMessage?: unknown } }).ipc;
+  return ipc && typeof ipc.postMessage === "function" ? (ipc as { postMessage(message: string): void }) : null;
+};
+export const tellHost = (type: "quote" | "send", text: string): boolean => {
+  const host = hostBridge();
+  if (!host) return false;
+  host.postMessage(JSON.stringify({ type, text }));
+  return true;
+};
+
 /** The composer, docked at the foot of the embedded panel. */
 function EmbedComposer({ queue, ticks }: { queue: React.RefObject<Task[]>; ticks: number }) {
   const { snapshot } = useWorkbench();
@@ -69,6 +85,7 @@ export function ArtifactEmbed({ id, version }: { id: string | null; version: num
   useEffect(() => {
     const take = () => {
       for (const offer of takeOffers()) {
+        if (tellHost("send", offer.text)) continue;
         add((draft) => {
           if (!draft.offer(offer.text, offer.name, offer.reference)) toast(`The composer already holds ${MAX_OFFERS} suggestions from artifacts; send or clear them first.`);
         });
@@ -95,6 +112,7 @@ export function ArtifactEmbed({ id, version }: { id: string | null; version: num
             location.hash = `/artifact/${shownId}/${n}${tail ? `?${tail}` : ""}`;
           }}
           onComment={(artifact, n, pick) => {
+            if (tellHost("quote", referenceText(artifact.id, n, pick))) return;
             const what = pick.text ? `“${pick.text.slice(0, 40)}${pick.text.length > 40 ? "…" : ""}”` : pick.selector;
             add((draft) => draft.reference(`${artifact.title} v${n} · ${what}`, referenceText(artifact.id, n, pick), SCOPE_NOTE));
           }}
