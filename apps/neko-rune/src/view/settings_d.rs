@@ -41,7 +41,7 @@ fn word(t: &Neko, key: &str, words: &str, ink: rune::Color) -> El {
 
 fn marked(t: &Neko, key: &str, ok: bool, unavailable: bool, words: &str) -> El {
     let (glyph, ink) = if ok { (&icons::CHECK_LINE, t.meaning.mint) } else if unavailable { (&icons::INFO, t.meaning.amber) } else { (&icons::CROSS, t.meaning.coral) };
-    row().key(key.to_owned()).w_full().gap(8.0).px(6.0).py(4.0).child(icon(glyph, 16.0).color(ink).a11y_hidden()).child(word(t, &format!("{key}-words"), words, t.text.base)).live_region(rune::LiveRegion::Polite)
+    row().key(key.to_owned()).w_full().gap(8.0).px(6.0).py(4.0).child(icon(glyph, 16.0).color(ink).a11y_hidden()).child(word(t, &format!("{key}-words"), words, t.text.base).shrink()).live_region(rune::LiveRegion::Polite)
 }
 
 // ---- General ------------------------------------------------------------------------------------
@@ -63,6 +63,7 @@ pub(super) fn general(s: &App, t: &Neko, out: &mut Vec<Item>) {
         row()
             .gap(8.0)
             .center_y()
+            .flex_wrap()
             .child(word(t, "set-hotkey-recording", "Press the new shortcut. Esc cancels.", t.meaning.iris))
             .child(quiet_button("Cancel", "set-hotkey-cancel", t, |s: &mut App| s.hotkey_stop()))
     } else {
@@ -237,7 +238,7 @@ pub(super) fn rulebook(s: &App, t: &Neko, out: &mut Vec<Item>) {
     let help = "Changes apply to the next agent that starts; agents already running keep the rules they started with.";
     let status = if custom { "Using your own rules" } else { "Using Neko’s default rules" };
     let area = TextArea::new(edit_of(s, "rulebook")).label("Rulebook").placeholder("The rules Neko and every agent it hands work to follow.").rows(18).on_edit(editing("rulebook".to_owned())).build(&kit_mono(t)).key("rulebook").w_full().min_w(0.0);
-    let mut buttons = row().gap(8.0).center_y();
+    let mut buttons = row().gap(8.0).center_y().flex_wrap();
     if dirty {
         buttons = buttons.child(quiet_button("Revert changes", "rulebook-revert", t, |s: &mut App| s.revert_rulebook()));
     }
@@ -251,7 +252,7 @@ pub(super) fn rulebook(s: &App, t: &Neko, out: &mut Vec<Item>) {
         .gap(8.0)
         .child(row().w_full().px(6.0).gap(8.0).center_y().child(text(help).font(t.ty.meta).color(t.text.muted).wrap().grow(1.0).min_w(0.0)).child(text(status).key("rulebook-status").font(t.ty.id).color(if custom { t.meaning.mint } else { t.text.muted })))
         .child(area)
-        .child(row().w_full().px(6.0).gap(8.0).center_y().child(text(if dirty { "Unsaved changes · ⌘S saves" } else { "Saved · ⌘S saves" }).key("rulebook-state").font(t.ty.id).color(if dirty { t.meaning.amber } else { t.text.faint })).child(el().grow(1.0)).child(buttons));
+        .child(row().w_full().px(6.0).gap(8.0).center_y().flex_wrap().child(text(if dirty { "Unsaved changes · ⌘S saves" } else { "Saved · ⌘S saves" }).key("rulebook-state").font(t.ty.id).color(if dirty { t.meaning.amber } else { t.text.faint })).child(el().grow(1.0)).child(buttons));
     let open = s.open("rulebook:default");
     r = r.child(row().child(quiet_button(if open { "Hide Neko’s built-in default" } else { "View Neko’s built-in default" }, "rulebook-default-toggle", t, |s: &mut App| s.toggle("rulebook:default"))));
     if open {

@@ -129,7 +129,8 @@ fn header(s: &App, t: &Neko, days: &[i64]) -> Vec<El> {
             .fit()
             .on_pick(|s: &mut App, i, _| s.cal_mode([CalMode::Day, CalMode::Week, CalMode::Month][i.min(2)]))
             .build(&t.kit)
-            .key("cal-mode"),
+            .key("cal-mode")
+            .min_w(160.0),
     ]
 }
 

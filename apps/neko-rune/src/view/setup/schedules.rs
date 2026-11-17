@@ -16,7 +16,7 @@ use crate::link::SetupAction;
 use crate::status::StatusKind;
 use crate::theme::Neko;
 use crate::view::ui::{MenuEntry, note, switch, with_menu};
-use crate::view::{primary_button, quiet_button};
+use crate::view::{page_button, quiet_button};
 
 pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     let Some(data) = s.setup_data() else { return Page::quiet(t, "sch-none", "Looking for your schedules…") };
@@ -25,7 +25,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
         return Page { count: None, trailing: Vec::new(), body, title: None, back: None };
     }
     let first = data.workspaces[0].id.clone();
-    let new = primary_button("New schedule", "sch-new", t, move |s: &mut App| s.open_schedule_dialog(None, &first));
+    let new = page_button("New schedule", "sch-new", t, move |s: &mut App| s.open_schedule_dialog(None, &first));
     let mut body = col().w_full().gap(2.0);
     if let Some(n) = note(s, t, "setup:page") {
         body = body.child(n);

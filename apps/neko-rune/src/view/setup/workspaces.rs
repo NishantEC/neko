@@ -45,7 +45,7 @@ fn routine_summary(views: &[&RoutineView]) -> Summary {
 
 pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     let Some(data) = s.setup_data() else { return Page::quiet(t, "ws-none", "Looking for your workspaces…") };
-    let add = crate::view::primary_button("Add workspace", "ws-add", t, |s: &mut App| s.open_workspace_dialog(None));
+    let add = crate::view::page_button("Add workspace", "ws-add", t, |s: &mut App| s.open_workspace_dialog(None));
     let mut body = col().w_full().gap(2.0);
     if data.workspaces.is_empty() {
         body = body.child(empty(t, "ws-none", "A workspace is a name plus the folders where the work lives.", Some(("Add workspace", Box::new(|s: &mut App| s.open_workspace_dialog(None))))));

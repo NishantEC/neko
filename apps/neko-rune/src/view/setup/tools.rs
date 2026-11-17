@@ -14,14 +14,14 @@ use crate::icons;
 use crate::link::SetupAction;
 use crate::theme::Neko;
 use crate::view::ui::{MenuEntry, note, pick, switch_when, with_menu};
-use crate::view::{primary_button, quiet_button};
+use crate::view::{page_button, primary_button, quiet_button};
 
 pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     let Some(data) = s.setup_data() else { return Page::quiet(t, "tools-none", "Looking for your connections…") };
     if let Some(c) = s.setup.connection.as_deref().and_then(|id| data.connection(id)) {
         return detail(s, t, layer, c);
     }
-    let add = primary_button("Add connection", "tools-add", t, |s: &mut App| s.open_add_connection(super::state::AddTab::Browse));
+    let add = page_button("Add connection", "tools-add", t, |s: &mut App| s.open_add_connection(super::state::AddTab::Browse));
     let mut body = col().w_full().gap(2.0);
     if let Some(n) = note(s, t, "setup:page") {
         body = body.child(n);

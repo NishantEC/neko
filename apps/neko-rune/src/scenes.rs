@@ -354,6 +354,11 @@ pub const SCENES: &[Scene] = &[
         s.account.name = "Ada Lovelace".into();
         s.open_new();
     }),
+    // The Neko column folded to its 44 point strip: the spark at the top, the count of what needs you under it (docs/knowledge/rune-identity.md).
+    ("neko-strip", |s| {
+        live(s);
+        s.layout.set_neko_open(false);
+    }),
     // Neko's column with the Activity line open: the daemon's own notices folded out of the chat (polish spec §0).
     ("activity", |s| {
         live(s);

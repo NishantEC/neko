@@ -63,6 +63,7 @@ pub fn ask_chip(s: &App, t: &Neko) -> El {
 pub fn chip(s: &App, t: &Neko) -> El {
     row()
         .key("runtime-chip")
+        .shrink()
         .role("button")
         .label(format!("Conversation settings: {}", chip_words(s)))
         .help("Model, effort and speed for this conversation. Changes apply to the next turn or worker.")

@@ -299,6 +299,14 @@ fn memory_adds_edits_and_filters_and_guidance_is_kept_or_dismissed() {
     assert!(matches!(sent(&rt).as_slice(), [SetupAction::DecideMemory { id, accept: true }] if id == "mp1"));
     click(&mut rt, "preference-keep-g1");
     assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::KeepPreference { id, version: 2, .. } if id == "g1")));
+    // The page is taller now (the web's 44 point rows): the switches are under the list, so scroll to them first.
+    for _ in 0..12 {
+        if rt.find("mem-switch-learning").is_some_and(|(_, y)| y < 880.0) {
+            break;
+        }
+        rt.wheel(800.0, 500.0, -400.0);
+        settle(&mut rt);
+    }
     click(&mut rt, "mem-switch-learning");
     assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::SetMemoryOptions(o) if !o.learning && o.use_memory)));
 }

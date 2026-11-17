@@ -17,11 +17,11 @@ fn swatch(name: &str, colour: rune::Color, t: &Neko) -> El {
 }
 
 pub fn lab(t: &Neko) -> El {
-    let mut glyphs = row().key("lab-glyphs").gap(20.0).center_y();
+    let mut glyphs = row().key("lab-glyphs").gap(20.0).center_y().flex_wrap();
     for kind in StatusKind::ALL {
         glyphs = glyphs.child(row().gap(8.0).center_y().child(status_glyph(kind, t, 14.0, Some(""))).child(text(kind.label()).font(t.ty.row).color(t.text.base)));
     }
-    let meanings = row().key("lab-meanings").gap(20.0).child(swatch("Iris: now, action", t.meaning.iris, t)).child(swatch("Amber: needs you", t.meaning.amber, t)).child(swatch("Sky: in review", t.meaning.sky, t)).child(swatch("Mint: done", t.meaning.mint, t)).child(swatch("Coral: failed", t.meaning.coral, t));
+    let meanings = row().key("lab-meanings").gap(20.0).flex_wrap().child(swatch("Iris: now, action", t.meaning.iris, t)).child(swatch("Amber: needs you", t.meaning.amber, t)).child(swatch("Sky: in review", t.meaning.sky, t)).child(swatch("Mint: done", t.meaning.mint, t)).child(swatch("Coral: failed", t.meaning.coral, t));
     let greys = col()
         .key("lab-greys")
         .gap(2.0)

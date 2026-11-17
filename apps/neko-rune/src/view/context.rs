@@ -56,7 +56,7 @@ pub fn panel(s: &App, t: &Neko, layer: &mut Vec<El>, width: f32) -> El {
         Some(Tab::Details) => context_info::details(s, t),
         None => placeholder(&["Nothing to show yet."], t),
     };
-    col().key("context").h_full().min_w(0.0).my(8.0).mx(2.0).radius(t.radius.window).clip_rounded(t.radius.window).fill(t.surface.card).child(head).child(viewers::web::region(col().key("context-body").w_full().grow(1.0).min_h(0.0).child(body)))
+    col().key("context").min_w(0.0).my(8.0).mx(2.0).radius(t.radius.window).clip_rounded(t.radius.window).fill(t.surface.card).child(head).child(viewers::web::region(col().key("context-body").w_full().grow(1.0).min_h(0.0).child(body)))
 }
 
 /// The icon of a tab.

@@ -12,10 +12,12 @@ use crate::status::{StatusKind, status_glyph};
 use crate::theme::Neko;
 
 pub const ROW_H: f32 = 32.0;
+/// The web's `Row` (`setup/kit.tsx`): 8 above and below a 28 point line, 12 at the sides, and the hover wash bleeding 12 past the column.
+pub const WEB_ROW_H: f32 = 44.0;
 
 /// A list row: 32 high, 8 of padding, radius 8, hover fill; its hover actions appear on hover or focus.
 pub fn list_row(t: &Neko, key: String, label: String, open: Option<bool>) -> El {
-    let r = row().key(key).role("button").label(label).focusable(true).w_full().min_h(ROW_H).px(8.0).gap(10.0).center_y().radius(t.radius.row).hover_group().hover(t.surface.hover).focus_ring(2.0, 2.0, t.surface.ring);
+    let r = row().key(key).role("button").label(label).focusable(true).mx(-12.0).min_h(WEB_ROW_H).px(12.0).gap(12.0).center_y().radius(10.0).hover_group().hover(t.surface.hover).focus_ring(2.0, 2.0, t.surface.ring);
     match open {
         Some(open) => r.expanded(open),
         None => r,
@@ -24,7 +26,7 @@ pub fn list_row(t: &Neko, key: String, label: String, open: Option<bool>) -> El 
 
 /// A group heading: 12.5 medium muted with the count right after it, 32 high.
 pub fn heading(t: &Neko, key: &str, label: &str, count: Option<usize>, first: bool) -> El {
-    let mut r = row().key(key.to_owned()).w_full().h(ROW_H).mt(if first { 0.0 } else { 16.0 }).px(8.0).gap(8.0).center_y().child(text(label.to_owned()).font(t.ty.group).color(t.text.muted).truncate().min_w(0.0));
+    let mut r = row().key(key.to_owned()).w_full().h(28.0).mt(if first { 0.0 } else { 32.0 }).mb(6.0).gap(6.0).center_y().child(text(label.to_owned()).font(t.ty.group).color(t.text.muted).truncate().min_w(0.0));
     if let Some(n) = count {
         r = r.child(text(n.to_string()).key(format!("{key}-count")).font(t.ty.meta).color(t.text.faint));
     }
@@ -41,7 +43,7 @@ pub fn action(t: &Neko, key: String, label: &str, glyph: &'static rune::Icon, on
 pub type Act = Box<dyn Fn(&mut App)>;
 
 pub fn empty(t: &Neko, key: &str, line: &str, act: Option<(&str, Act)>) -> El {
-    let mut r = row().key(key.to_owned()).w_full().min_h(ROW_H).px(8.0).gap(12.0).center_y().child(text(line.to_owned()).font(t.ty.meta).color(t.text.muted).wrap().min_w(0.0));
+    let mut r = row().key(key.to_owned()).w_full().min_h(28.0).gap(12.0).center_y().child(text(line.to_owned()).font(rune::TextStyle { size: 13.0, line_height: 20.0, ..t.ty.row }).color(t.text.muted).wrap().min_w(0.0));
     if let Some((label, f)) = act {
         r = r.child(quiet_button(label, &format!("{key}-action"), t, f));
     }

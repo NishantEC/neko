@@ -40,7 +40,7 @@ fn text_column(inner: El) -> El {
 /// The card in the middle: inset from the window's edges with the window's radius.
 pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     let inner = if s.lab {
-        col().w_full().grow(1.0).min_h(0.0).child(band(t)).child(row().w_full().grow(1.0).min_h(0.0).justify_center().child(lab(t)))
+        col().w_full().grow(1.0).min_h(0.0).child(band(t)).child(col().w_full().grow(1.0).min_h(0.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(row().w_full().justify_center().child(lab(t))))
     } else if s.home_shown() && s.onboarding_shown() {
         super::onboarding::view(s, t)
     } else if s.home_shown() {
@@ -60,7 +60,6 @@ pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
         .key("session-region")
         .grow(1.0)
         .min_w(0.0)
-        .h_full()
         .my(8.0)
         .mx(2.0)
         .radius(t.radius.window)
@@ -153,7 +152,7 @@ fn top_line(s: &App, task: &TaskRow, t: &Neko, layer: &mut Vec<El>) -> El {
     let runtime = super::runtime::chip_words(s);
     let runtime = Some(runtime).filter(|r| !r.is_empty()).or_else(|| s.summary.as_ref().map(|m| m.runtime.clone()));
     if let Some(r) = runtime {
-        line = line.child(text(r).key("top-runtime").font(t.ty.meta).color(t.text.muted).on_press(|s: &mut App| s.runtime_toggle()));
+        line = line.child(text(r).key("top-runtime").font(t.ty.meta).color(t.text.muted).truncate().min_w(0.0).on_press(|s: &mut App| s.runtime_toggle()));
     }
     line.child(overflow_menu(s, task, detail.map(|d| d.can_split).unwrap_or(false), t, layer))
         .child(icon_button(&icons::PANEL_RIGHT, if s.layout.context.is_open() { "Hide context" } else { "Show context" }, "context-toggle", t, |s: &mut App| s.panel_toggle()))

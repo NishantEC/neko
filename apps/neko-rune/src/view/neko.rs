@@ -494,10 +494,11 @@ fn foot(s: &App, t: &Neko, win_h: f32) -> El {
     c.child(row().h(20.0).center_y().child(text(status_line(&s.link, s.summary.as_ref())).key("status-text").font(t.ty.id).color(t.text.faint).truncate().live_region(rune::LiveRegion::Polite)))
 }
 
-/// The column collapsed to an icon: Neko's mark, with a count of what needs you.
+/// The column collapsed to its strip (44 wide): the spark at the top, the count of what needs you under it, a press opens the column.
+/// Never a lone icon: the count is always there (a quiet 0 when nothing waits).
 pub fn strip(s: &App, t: &Neko) -> El {
     let waiting = s.waiting();
-    let mut button = row()
+    let button = row()
         .key("neko-expand")
         .role("button")
         .label(if waiting > 0 { format!("Neko, {waiting} need you") } else { "Neko".to_owned() })
@@ -510,12 +511,17 @@ pub fn strip(s: &App, t: &Neko) -> El {
         .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(|s: &mut App| s.layout.set_neko_open(true))
         .child(icon(&icons::SPARK, 18.0).color(t.text.base).a11y_hidden());
-    if waiting > 0 {
-        button = button.child(
-            row().key("badge").absolute(18.0, 0.0).h(16.0).min_w(16.0).px(4.0).radius(8.0).center().fill(t.meaning.amber).a11y_hidden().child(
-                text(if waiting > 99 { "99+".to_owned() } else { waiting.to_string() }).font(rune::TextStyle { weight: 500.0, ..t.ty.id }).color(t.surface.window),
-            ),
-        );
-    }
-    col().h_full().items_center().child(flat_band(t).px(0.0).justify_center().child(button))
+    let label = if waiting > 99 { "99+".to_owned() } else { waiting.to_string() };
+    let count = row()
+        .key("neko-strip-count")
+        .role("status")
+        .label(if waiting > 0 { format!("{waiting} need you") } else { "Nothing needs you".to_owned() })
+        .h(16.0)
+        .min_w(16.0)
+        .px(4.0)
+        .radius(8.0)
+        .center()
+        .fill(if waiting > 0 { t.meaning.amber } else { rune::Color::TRANSPARENT })
+        .child(text(label).font(rune::TextStyle { weight: 500.0, ..t.ty.id }).color(if waiting > 0 { t.surface.window } else { t.text.faint }).a11y_hidden());
+    col().h_full().items_center().gap(4.0).child(flat_band(t).px(0.0).justify_center().child(button)).child(count)
 }

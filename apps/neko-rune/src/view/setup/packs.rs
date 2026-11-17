@@ -15,7 +15,7 @@ use crate::app::App;
 use crate::icons;
 use crate::theme::Neko;
 use crate::view::ui::{MenuEntry, note, with_menu};
-use crate::view::{primary_button, quiet_button};
+use crate::view::{page_button, primary_button, quiet_button};
 use crate::views::FullView;
 
 pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
@@ -29,7 +29,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     if let Some(p) = s.setup.pack.as_deref().and_then(|name| listing.installed.iter().find(|p| p.info.name == name)) {
         return detail(s, t, layer, p);
     }
-    let add = primary_button("Add pack", "packs-add", t, |s: &mut App| s.open_pack_dialog());
+    let add = page_button("Add pack", "packs-add", t, |s: &mut App| s.open_pack_dialog());
     let mut body = col().w_full().gap(2.0);
     if let Some(n) = note(s, t, "setup:page") {
         body = body.child(n);

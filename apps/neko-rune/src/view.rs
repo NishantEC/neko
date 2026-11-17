@@ -287,6 +287,27 @@ fn accent_button(label: &str, key: &str, t: &Neko, on_press: impl Fn(&mut App) +
         .child(text(label.to_owned()).font(rune::TextStyle { weight: 500.0, ..t.ty.meta }).color(t.meaning.iris).a11y_hidden())
 }
 
+/// The page's one action in the web's shape (`Button` at `h-9`, `rounded-full`, `text-sm font-medium`, the plus before the words):
+/// 36 high, 14 at the sides, a pill, Iris.
+fn page_button(label: &str, key: &str, t: &Neko, on_press: impl Fn(&mut App) + 'static) -> El {
+    row()
+        .key(key.to_owned())
+        .role("button")
+        .label(label)
+        .focusable(true)
+        .h(36.0)
+        .px(14.0)
+        .gap(6.0)
+        .radius(18.0)
+        .center()
+        .fill(t.meaning.iris)
+        .hover(rune::Color::WHITE.alpha(0.14))
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
+        .on_press(on_press)
+        .child(icon(&crate::icons::PLUS, 16.0).color(rune::Color::WHITE.alpha(0.8)).a11y_hidden())
+        .child(text(label.to_owned()).font(rune::TextStyle { weight: 500.0, ..t.ty.brand }).color(rune::Color::WHITE).a11y_hidden())
+}
+
 /// The one primary action on a view: Iris, the colour of "do this".
 fn primary_button(label: &str, key: &str, t: &Neko, on_press: impl Fn(&mut App) + 'static) -> El {
     row()

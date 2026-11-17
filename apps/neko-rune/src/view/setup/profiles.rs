@@ -12,11 +12,11 @@ use crate::icons;
 use crate::link::SetupAction;
 use crate::theme::Neko;
 use crate::view::ui::{MenuEntry, note, with_menu};
-use crate::view::{primary_button, quiet_button};
+use crate::view::{page_button, quiet_button};
 
 pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     let Some(data) = s.setup_data() else { return Page::quiet(t, "profiles-none", "Looking for your profiles…") };
-    let new = primary_button("New profile", "profile-new", t, |s: &mut App| s.open_profile_dialog(None));
+    let new = page_button("New profile", "profile-new", t, |s: &mut App| s.open_profile_dialog(None));
     let mut body = col().w_full().gap(2.0);
     if let Some(n) = note(s, t, "setup:page") {
         body = body.child(n);

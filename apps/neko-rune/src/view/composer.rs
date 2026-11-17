@@ -18,7 +18,7 @@ pub const MIN_LINES: usize = 3;
 
 /// The card: `field` (a text area built without a fill), then the bar. `key` names it.
 pub fn card(t: &Neko, key: &str, field: El, left: Vec<El>, right: Vec<El>, send: El) -> El {
-    let mut bar = row().key(format!("{key}-bar")).w_full().gap(4.0).center_y();
+    let mut bar = row().key(format!("{key}-bar")).w_full().min_w(0.0).gap(4.0).center_y().flex_wrap();
     for e in left {
         bar = bar.child(e);
     }
@@ -52,7 +52,7 @@ pub fn chips(s: &App, t: &Neko, dest: Dest) -> Option<El> {
     if list.is_empty() {
         return None;
     }
-    let mut r = row().key(format!("chips-{dest:?}").to_lowercase()).w_full().gap(6.0).wrap().px(2.0).pb(4.0);
+    let mut r = row().key(format!("chips-{dest:?}").to_lowercase()).w_full().min_w(0.0).gap(6.0).flex_wrap().px(2.0).pb(4.0);
     for chip in list {
         let id = chip.id;
         let failed = matches!(chip.state, ChipState::Failed(_));
@@ -64,6 +64,7 @@ pub fn chips(s: &App, t: &Neko, dest: Dest) -> Option<El> {
         r = r.child(
             row()
                 .key(format!("chip-{id}"))
+                .shrink()
                 .role("group")
                 .label(format!("{}, {words}", chip.name))
                 .h(28.0)
@@ -76,7 +77,7 @@ pub fn chips(s: &App, t: &Neko, dest: Dest) -> Option<El> {
                 .border(1.0, if failed { t.meaning.coral.alpha(0.5) } else { t.surface.field_border })
                 .child(icon(&icons::FILE, 14.0).color(if failed { t.meaning.coral } else { t.text.muted }).a11y_hidden())
                 .child(text(chip.name.clone()).key(format!("chip-name-{id}")).font(t.ty.meta).color(t.text.base).truncate().max_w(180.0).min_w(0.0).a11y_hidden())
-                .child(text(words).key(format!("chip-size-{id}")).font(t.ty.id).color(if failed { t.meaning.coral } else { t.text.faint }).truncate().max_w(220.0).a11y_hidden())
+                .child(text(words).key(format!("chip-size-{id}")).font(t.ty.id).color(if failed { t.meaning.coral } else { t.text.faint }).truncate().max_w(220.0).min_w(0.0).a11y_hidden())
                 .child(
                     row()
                         .key(format!("chip-x-{id}"))

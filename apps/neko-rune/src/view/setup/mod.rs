@@ -67,7 +67,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     dialogs::mount(s, t, layer, frame.win_h);
     // Under 760 points the rail narrows to 150 and the sides to 16, so the rows keep their room.
     let narrow = frame.region_w < 760.0;
-    let side = if narrow { 16.0 } else { 32.0 };
+    let side = if narrow { 16.0 } else { 28.0 };
     let rows: Vec<El> = SetupSection::ALL
         .iter()
         .map(|&sec| {
@@ -77,19 +77,19 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
         })
         .collect();
     let title = page.title.clone().unwrap_or_else(|| section.title().to_owned());
-    let mut head = row().w_full().gap(8.0).center_y().min_h(32.0);
+    let mut head = row().w_full().gap(10.0).center_y().flex_wrap().min_h(36.0);
     if let Some(back) = page.back {
         head = head.child(back);
     }
     head = head.child(text(title).key("title").font(t.ty.title).color(t.text.base).truncate().min_w(0.0).role("heading"));
     if let Some(n) = page.count {
-        head = head.child(text(n.to_string()).key("page-count").font(t.ty.row).color(t.text.faint));
+        head = head.child(text(n.to_string()).key("page-count").font(rune::TextStyle { weight: 400.0, ..t.ty.brand }).color(t.text.muted));
     }
     head = head.child(kit::fill());
     for e in page.trailing {
         head = head.child(e);
     }
-    let column = col().key(format!("full-setup-{}", section.key())).w_full().max_w(super::COLUMN + 2.0 * (side - 32.0)).px(side).pt(8.0).pb(40.0).gap(20.0).child(head).child(page.body);
+    let column = col().key(format!("full-setup-{}", section.key())).w_full().max_w(super::COLUMN + 2.0 * (side - 32.0)).px(side).pt(24.0).pb(40.0).gap(32.0).child(head).child(page.body);
     // The window's drag band, then the rail and the scrolling column.
     let scroll = col().key("page-scroll").grow(1.0).min_w(0.0).h_full().clip_rounded(0.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(row().w_full().justify_center().child(column));
     col().key("setup").w_full().h_full().child(band(t)).child(row().w_full().grow(1.0).min_h(0.0).child(rail("setup", narrow, None, rows)).child(scroll))

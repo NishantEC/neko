@@ -34,15 +34,15 @@ pub fn rail(prefix: &str, narrow: bool, search: Option<El>, rows: Vec<El>) -> El
 
 /// The column of a full view: its header line (title, count, the page's own controls), then the body.
 pub fn page_column(t: &Neko, key: &str, title: &str, count: Option<usize>, trailing: Vec<El>, body: El) -> El {
-    let mut head = row().w_full().gap(8.0).center_y().min_h(32.0).child(text(title.to_owned()).key("title").font(t.ty.title).color(t.text.base).role("heading"));
+    let mut head = row().w_full().gap(10.0).center_y().flex_wrap().min_h(36.0).child(text(title.to_owned()).key("title").font(t.ty.title).color(t.text.base).role("heading"));
     if let Some(n) = count {
-        head = head.child(text(n.to_string()).key("page-count").font(t.ty.row).color(t.text.faint));
+        head = head.child(text(n.to_string()).key("page-count").font(rune::TextStyle { weight: 400.0, ..t.ty.brand }).color(t.text.muted));
     }
     head = head.child(el().grow(1.0));
     for e in trailing {
         head = head.child(e);
     }
-    col().key(format!("full-{key}")).w_full().max_w(COLUMN).px(32.0).pt(8.0).pb(40.0).gap(20.0).child(head).child(body)
+    col().key(format!("full-{key}")).w_full().max_w(COLUMN).px(28.0).pt(24.0).pb(40.0).gap(32.0).child(head).child(body)
 }
 
 /// A quiet group heading ("Standing orders", "Recent runs").
@@ -66,7 +66,7 @@ pub fn setting_row(t: &Neko, key: &str, label: &str, help: Option<&str>, control
         .gap(4.0)
         .center_y()
         // In a narrow page the control drops under its label instead of squeezing it.
-        .wrap()
+        .flex_wrap()
         .radius(t.radius.row)
         .hover(t.surface.hover)
         .child(text(label.to_owned()).font(t.ty.row).color(t.text.base).grow(1.0).min_w(140.0).wrap())

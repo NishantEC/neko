@@ -15,7 +15,7 @@ use crate::icons;
 use crate::link::SetupData;
 use crate::theme::Neko;
 use crate::view::ui::{MenuEntry, note, switch, with_menu};
-use crate::view::{quiet_button, primary_button};
+use crate::view::{page_button, quiet_button};
 
 pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     let Some(data) = s.setup_data() else { return Page::quiet(t, "watch-none", "Looking for your watches…") };
@@ -30,7 +30,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
         Some(ws) => quiet_button("Suggest watches", "watch-suggest", t, move |s: &mut App| s.suggest_watches(&ws)),
         None => quiet_button("Suggest watches", "watch-suggest", t, |_| {}).disabled(true).help("Connect a tool in Tools first: Neko suggests what those tools can check."),
     };
-    let new = primary_button("New watch", "watch-new", t, move |s: &mut App| s.open_watch_dialog(None, &first));
+    let new = page_button("New watch", "watch-new", t, move |s: &mut App| s.open_watch_dialog(None, &first));
     let mut body = col().w_full().gap(2.0);
     if let Some((pending, text_)) = s.suggestion_reply().filter(|_| !s.setup.dismissed_reply) {
         body = body.child(reply(t, pending, &text_));
