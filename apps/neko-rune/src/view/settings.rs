@@ -11,7 +11,8 @@ use neko_protocol::phone::RemindersAccess;
 use rune::{El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::TextInput;
 
-use super::ui::{edit_of, editing, note, pick, setting_row, switch, switch_when};
+use super::ui::{edit_of, editing, note, pick, switch};
+use super::webkit::{self, setting_row};
 use super::{Frame, band, primary_button, quiet_button};
 use crate::app::App;
 use crate::icons;
@@ -22,13 +23,15 @@ use crate::theme::Neko;
 /// One row of a section, with the words search matches against.
 pub(super) struct Item {
     pub(super) section: Section,
+    /// The title of the web `<Section title="...">` this row sits under; "" for an item that brings its own section.
+    pub(super) group: &'static str,
     pub(super) id: String,
     pub(super) words: String,
     pub(super) el: El,
 }
 
-pub(super) fn item(section: Section, id: impl Into<String>, label: &str, help: &str, el: El) -> Item {
-    Item { section, id: id.into(), words: format!("{label} {help} {}", section.title()).to_lowercase(), el }
+pub(super) fn item(section: Section, group: &'static str, id: impl Into<String>, label: &str, help: &str, el: El) -> Item {
+    Item { section, group, id: id.into(), words: format!("{label} {help} {}", section.title()).to_lowercase(), el }
 }
 
 /// A read-only value at the right of a row.
@@ -64,23 +67,40 @@ fn limit_of(chosen: &str) -> Option<u32> {
     chosen.parse().ok()
 }
 
+/// A group's title as a key: lowercase, anything that is not a letter or digit becomes a dash.
+fn slug(group: &str) -> String {
+    group.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { '-' }).collect()
+}
+
 pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     let query = s.pages.text("settings:search").trim().to_lowercase();
     let words: Vec<&str> = query.split_whitespace().collect();
     super::webkit::set_page_width(frame.region_w);
     let all = items(s, t, layer);
-    let mut content = col().key("settings-content").w_full().gap(if s.pages.section == Section::Appearance && words.is_empty() { 32.0 } else { 2.0 });
+    let mut content = col().key("settings-content").w_full().gap(if words.is_empty() { 32.0 } else { 2.0 });
     if words.is_empty() {
         // The web has no Budget section (its settings are in "AI & agents") and no Workspaces one (that is a Setup page).
         let shown = |i: &Item| i.section == s.pages.section || (s.pages.section == Section::Ai && i.section == Section::Budget);
+        // One block per web `<Section>`, in the order its first row appears; an item with no group already is a section.
+        let mut blocks: Vec<(&'static str, Vec<El>)> = Vec::new();
         for it in all.into_iter().filter(shown) {
-            content = content.child(it.el);
+            match blocks.iter_mut().find(|(g, _)| !g.is_empty() && *g == it.group) {
+                Some((_, rows)) => rows.push(it.el),
+                None => blocks.push((it.group, vec![it.el])),
+            }
+        }
+        for (group, rows) in blocks {
+            if group.is_empty() {
+                content = content.children(rows);
+            } else {
+                content = content.child(webkit::section(t, &format!("group-{}", slug(group)), group, None, None, webkit::panel(rows)));
+            }
         }
     } else {
         let mut any = false;
         for it in all.into_iter().filter(|i| i.section != Section::Workspaces).filter(|i| words.iter().all(|w| i.words.contains(w))) {
             any = true;
-            content = content.child(col().key(format!("hit-{}", it.id)).w_full().child(text(it.section.title().to_owned()).font(t.ty.id).color(t.text.faint).px(6.0)).child(it.el));
+            content = content.child(col().key(format!("hit-{}", it.id)).w_full().child(text(it.section.title().to_owned()).font(t.ty.id).color(t.text.faint).px(12.0)).child(it.el));
         }
         if !any {
             content = content.child(text(format!("No setting matches “{}”.", s.pages.text("settings:search").trim())).key("settings-none").font(t.ty.meta).color(t.text.muted).px(6.0).py(8.0));
@@ -182,35 +202,25 @@ fn items(s: &App, t: &Neko, layer: &mut Vec<El>) -> Vec<Item> {
 fn general(s: &App, t: &Neko, out: &mut Vec<Item>) {
     let loaded = s.pages.routines.is_some();
     let routines_on = s.pages.routines.as_ref().is_none_or(|d| d.routines_on);
-    let help = "Neko checks messages, PRs and your day in the background. Off until you turn it on.";
-    out.push(item(
-        Section::General,
-        "routines-on",
-        "Routines",
-        help,
-        with_note(s, t, "setting:routines-on", setting_row(t, "set-routines-on", "Routines", Some(help), switch_when(t, "set-routines-switch", "Routines", routines_on, loaded, move |s: &mut App| s.call(crate::link::Call::SetRoutinesOn { enabled: !routines_on })))),
-    ));
+    let help = "Background checks of messages, pull requests and your day. Off until you turn them on.";
+    let control = if loaded { switch(t, "set-routines-switch", "Routines", routines_on, move |s: &mut App| s.call(crate::link::Call::SetRoutinesOn { enabled: !routines_on })) } else { webkit::skeleton(t, "set-routines-loading", 36.0, 20.0) };
+    out.push(item(Section::General, "Setup", "routines-on", "Routines", help, with_note(s, t, "setting:routines-on", setting_row(t, "set-routines-on", "Routines", Some(help), control))));
     let cal = s.pages.calendar.as_ref().map(|c| c.status.clone());
     let enabled = cal.as_ref().is_some_and(|c| c.enabled);
+    // What the app reports about macOS access: not in the web's row, so it shows only when there is something to say.
     let state = match &cal {
         Some(c) if c.enabled && c.access == CalendarAccess::Granted => "Reading your calendars".to_owned(),
         Some(c) if c.enabled && c.access == CalendarAccess::Denied => "Not allowed in System Settings".to_owned(),
         Some(c) if c.enabled => "Waiting for the app".to_owned(),
         _ => String::new(),
     };
-    let help = "Shows your meetings beside Neko’s dated work. Off until you turn it on; the app then asks macOS for access.";
-    out.push(item(
-        Section::General,
-        "calendar-on",
-        "Calendar",
-        help,
-        with_note(
-            s,
-            t,
-            "setting:calendar-on",
-            setting_row(t, "set-calendar-on", "Calendar", Some(help), row().gap(10.0).center_y().child(value(t, "set-calendar-state", &state)).child(switch(t, "set-calendar-switch", "Calendar", enabled, move |s: &mut App| s.call(crate::link::Call::SetCalendarOn { enabled: !enabled })))),
-        ),
-    ));
+    let help = "Show your macOS Calendar beside Neko’s work. macOS asks once.";
+    let toggle = if cal.is_some() { switch(t, "set-calendar-switch", "Calendar", enabled, move |s: &mut App| s.call(crate::link::Call::SetCalendarOn { enabled: !enabled })) } else { webkit::skeleton(t, "set-calendar-loading", 36.0, 20.0) };
+    let mut control = row().gap(10.0).center_y();
+    if !state.is_empty() {
+        control = control.child(value(t, "set-calendar-state", &state));
+    }
+    out.push(item(Section::General, "Setup", "calendar-on", "Calendar", help, with_note(s, t, "setting:calendar-on", setting_row(t, "set-calendar-on", "Calendar", Some(help), control.child(toggle)))));
 }
 
 fn usable(m: &CatalogModel) -> bool {
@@ -237,6 +247,7 @@ fn ai(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     let help = "The runtime that does the work for new conversations, tasks and background checks. Work already running isn’t interrupted.";
     out.push(item(
         Section::Ai,
+        "Agent runtime",
         "runtime",
         "Runs with",
         help,
@@ -276,6 +287,7 @@ fn ai(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     let (labels, ids) = (model_labels.clone(), model_ids.clone());
     out.push(item(
         Section::Ai,
+        "Agent runtime",
         "model",
         "Model",
         "Leave on Default to let the runtime choose.",
@@ -310,6 +322,7 @@ fn ai(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     let e2 = efforts.clone();
     out.push(item(
         Section::Ai,
+        "Agent runtime",
         "effort",
         "Reasoning effort",
         "Only the levels this model advertises.",
@@ -335,6 +348,7 @@ fn ai(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     let s2 = speeds.clone();
     out.push(item(
         Section::Ai,
+        "Agent runtime",
         "speed",
         "Speed",
         "Extra speed may use more allowance.",
@@ -356,6 +370,7 @@ fn ai(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     if s.runtime_dirty() {
         out.push(item(
             Section::Ai,
+            "Agent runtime",
             "runtime-use",
             "Use this runtime",
             "Saves the runtime without sending a test message.",
@@ -367,10 +382,10 @@ fn ai(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     let st = s.summary.as_ref().map(|m| m.settings.clone()).unwrap_or_default();
     let plan = st.plan_first;
     let help = "Off: a ticket is a normal session that writes code right away. On: every ticket first gets a read-only plan to approve.";
-    out.push(item(Section::Ai, "plan-first", "Plan before working", help, with_note(s, t, "setting:plan-first", setting_row(t, "set-plan-first", "Plan before working", Some(help), switch(t, "set-plan-first-switch", "Plan before working", plan, move |s: &mut App| s.call(crate::link::Call::SetPlanFirst { enabled: !plan }))))));
+    out.push(item(Section::Ai, "How work starts", "plan-first", "Plan before working", help, with_note(s, t, "setting:plan-first", setting_row(t, "set-plan-first", "Plan before working", Some(help), switch(t, "set-plan-first-switch", "Plan before working", plan, move |s: &mut App| s.call(crate::link::Call::SetPlanFirst { enabled: !plan }))))));
     let swa = st.start_without_approval;
     let help = "When plans are required, a planned chat or manual ticket starts building without waiting. Nothing is ever published.";
-    out.push(item(Section::Ai, "start-without-approval", "Start without approval", help, with_note(s, t, "setting:start-without-approval", setting_row(t, "set-swa", "Start without approval", Some(help), switch(t, "set-swa-switch", "Start without approval", swa, move |s: &mut App| s.call(crate::link::Call::SetStartWithoutApproval { enabled: !swa }))))));
+    out.push(item(Section::Ai, "How work starts", "start-without-approval", "Start without approval", help, with_note(s, t, "setting:start-without-approval", setting_row(t, "set-swa", "Start without approval", Some(help), switch(t, "set-swa-switch", "Start without approval", swa, move |s: &mut App| s.call(crate::link::Call::SetStartWithoutApproval { enabled: !swa }))))));
     let days = s.pages.routines.as_ref().map_or(7, |d| d.age_out_days);
     let mut day_labels = vec!["Never".to_owned()];
     for d in [3u32, 7, 14, 30] {
@@ -383,6 +398,7 @@ fn ai(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     let help = "An Inbox item nothing has touched for this long closes itself and moves to Closed recently, where you can reopen it. Items also close when their pull request is merged or closed.";
     out.push(item(
         Section::Ai,
+        "Inbox clean-up",
         "inbox-age-out",
         "Inbox items age out after",
         help,
@@ -412,7 +428,7 @@ fn money_row(s: &App, t: &Neko, id: &'static str, label: &str, help: &str, place
     if dirty {
         control = control.child(quiet_button("Save", &format!("{id}-save"), t, move |s: &mut App| s.save_money(id, max, make)));
     }
-    item(Section::Budget, id, label, help, with_note(s, t, &format!("setting:{id}"), setting_row(t, &format!("set-{id}"), label, Some(help), control)))
+    item(Section::Budget, "Budget & limits", id, label, help, with_note(s, t, &format!("setting:{id}"), setting_row(t, &format!("set-{id}"), label, Some(help), control)))
 }
 
 fn budget(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
@@ -444,6 +460,7 @@ fn budget(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     let help = "Other tasks wait their turn and start as running ones finish. Work already running is not stopped.";
     out.push(item(
         Section::Budget,
+        "Budget & limits",
         "tasks-at-once",
         "Tasks at once",
         help,
@@ -454,6 +471,7 @@ fn budget(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     let help = "Each writing task has its own copy of the repository. Extra tasks in the same repository wait; planning and questions are not limited.";
     out.push(item(
         Section::Budget,
+        "Budget & limits",
         "writing-per-repository",
         "Writing per repository",
         help,
@@ -463,7 +481,7 @@ fn budget(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
 
 fn phone(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     let Some(data) = &s.pages.phone else {
-        out.push(item(Section::Phone, "phone-loading", "Phone", "", text(s.pages.notes.get("page:phone").map_or("Reading the phone settings…", String::as_str).to_owned()).key("phone-loading").font(t.ty.meta).color(t.text.muted).px(6.0).py(8.0)));
+        out.push(item(Section::Phone, "", "phone-loading", "Phone", "", text(s.pages.notes.get("page:phone").map_or("Reading the phone settings…", String::as_str).to_owned()).key("phone-loading").font(t.ty.meta).color(t.text.muted).px(6.0).py(8.0)));
         return;
     };
     let start = out.len();
@@ -473,26 +491,29 @@ fn phone(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     let help = "A reminder in the Neko list for each thing that needs you while you are away.";
     out.push(item(
         Section::Phone,
+        "Channels",
         "phone-reminders",
         "Apple Reminders",
         help,
         setting_row(t, "set-reminders", "Apple Reminders", Some(help), row().gap(10.0).center_y().child(value(t, "set-reminders-state", if denied { "Not allowed in System Settings" } else { "" })).child(switch(t, "set-reminders-switch", "Apple Reminders", p.reminders, move |s: &mut App| s.change_phone("reminders", |p| p.reminders = !p.reminders)))),
     ));
     let help = "Pushes to the ntfy topic Neko made for you. Only the title is sent unless you turn that off.";
-    out.push(item(Section::Phone, "phone-ntfy", "ntfy", help, setting_row(t, "set-ntfy", "ntfy", Some(help), switch(t, "set-ntfy-switch", "ntfy", p.ntfy, move |s: &mut App| s.change_phone("ntfy", |p| p.ntfy = !p.ntfy)))));
+    out.push(item(Section::Phone, "Channels", "phone-ntfy", "ntfy", help, setting_row(t, "set-ntfy", "ntfy", Some(help), switch(t, "set-ntfy-switch", "ntfy", p.ntfy, move |s: &mut App| s.change_phone("ntfy", |p| p.ntfy = !p.ntfy)))));
     out.push(item(
         Section::Phone,
+        "ntfy",
         "phone-ntfy-server",
         "ntfy server",
         "Where pushes are sent. Press Return to save.",
         setting_row(t, "set-ntfy-server", "ntfy server", Some("Where pushes are sent. Press Return to save."), super::ui::input(s, t, "ntfy-server", "ntfy server", "https://ntfy.sh", 240.0, |s: &mut App| s.save_ntfy_server())),
     ));
-    out.push(item(Section::Phone, "phone-titles-only", "Send only the title", "The ntfy server sees the text of a push unless this is on.", setting_row(t, "set-titles-only", "Send only the title", Some("The ntfy server sees the text of a push unless this is on."), switch(t, "set-titles-switch", "Send only the title", p.titles_only, move |s: &mut App| s.change_phone("titles-only", |p| p.titles_only = !p.titles_only)))));
-    out.push(item(Section::Phone, "phone-quiet", "Quiet hours", "Pushes wait until quiet hours end, except what cannot wait.", setting_row(t, "set-quiet", "Quiet hours", Some("Pushes wait until quiet hours end, except what cannot wait."), switch(t, "set-quiet-switch", "Quiet hours", p.quiet_enabled, move |s: &mut App| s.change_phone("quiet", |p| p.quiet_enabled = !p.quiet_enabled)))));
+    out.push(item(Section::Phone, "ntfy", "phone-titles-only", "Send only the title", "The ntfy server sees the text of a push unless this is on.", setting_row(t, "set-titles-only", "Send only the title", Some("The ntfy server sees the text of a push unless this is on."), switch(t, "set-titles-switch", "Send only the title", p.titles_only, move |s: &mut App| s.change_phone("titles-only", |p| p.titles_only = !p.titles_only)))));
+    out.push(item(Section::Phone, "When", "phone-quiet", "Quiet hours", "Pushes wait until quiet hours end, except what cannot wait.", setting_row(t, "set-quiet", "Quiet hours", Some("Pushes wait until quiet hours end, except what cannot wait."), switch(t, "set-quiet-switch", "Quiet hours", p.quiet_enabled, move |s: &mut App| s.change_phone("quiet", |p| p.quiet_enabled = !p.quiet_enabled)))));
     if p.quiet_enabled {
         let hs = hours();
         out.push(item(
             Section::Phone,
+            "When",
             "phone-quiet-window",
             "Quiet from and until",
             "",
@@ -510,7 +531,7 @@ fn phone(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
             ),
         ));
     }
-    out.push(item(Section::Phone, "phone-digest", "Morning digest", "One calm summary of what finished, what is stuck and what needs a decision.", setting_row(t, "set-digest", "Morning digest", Some("One calm summary of what finished, what is stuck and what needs a decision."), switch(t, "set-digest-switch", "Morning digest", p.digest, move |s: &mut App| s.change_phone("digest", |p| p.digest = !p.digest)))));
+    out.push(item(Section::Phone, "Morning digest", "phone-digest", "Morning digest", "One calm summary of what finished, what is stuck and what needs a decision.", setting_row(t, "set-digest", "Morning digest", Some("One calm summary of what finished, what is stuck and what needs a decision."), switch(t, "set-digest-switch", "Morning digest", p.digest, move |s: &mut App| s.change_phone("digest", |p| p.digest = !p.digest)))));
     if p.digest {
         let hs = hours();
         let minutes: Vec<String> = ["00", "15", "30", "45"].iter().map(|m| (*m).to_owned()).collect();
@@ -521,6 +542,7 @@ fn phone(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
         }
         out.push(item(
             Section::Phone,
+            "Morning digest",
             "phone-digest-time",
             "Digest time",
             "",
@@ -545,6 +567,7 @@ fn phone(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     let tests = if s.pages.phone_test.is_empty() { String::new() } else { s.pages.phone_test.join(" · ") };
     out.push(item(
         Section::Phone,
+        "When",
         "phone-test",
         "Send a test",
         "Sends a push on every channel that is on, ignoring quiet hours.",
@@ -575,6 +598,7 @@ fn updates(s: &App, t: &Neko, out: &mut Vec<Item>) {
     let help = "Looks at the published repository now and applies everything new.";
     out.push(item(
         Section::Updates,
+        "Neko updates",
         "update-check",
         "Last check",
         help,
@@ -586,50 +610,52 @@ fn updates(s: &App, t: &Neko, out: &mut Vec<Item>) {
         ),
     ));
     if !u.status.is_empty() {
-        out.push(item(Section::Updates, "update-status", "Status", "", setting_row(t, "set-update-status", "Status", None, value(t, "set-update-status-value", &u.status))));
+        out.push(item(Section::Updates, "Neko updates", "update-status", "Status", "", setting_row(t, "set-update-status", "Status", None, value(t, "set-update-status-value", &u.status))));
     }
     if u.pending.is_some() {
         out.push(item(
             Section::Updates,
+            "Neko updates",
             "pending-update",
             "Apply update",
             "An update waits for your click: it touches safety-critical code, or its automatic update is off.",
             setting_row(t, "set-pending", "An update is waiting", Some("It touches safety-critical code, or its automatic update is off."), primary_button("Apply update", "update-apply", t, |s: &mut App| s.call(crate::link::Call::ApplyUpdate))),
         ));
     }
-    out.push(item(Section::Updates, "update-version", "Version in use", "", setting_row(t, "set-version", "Version in use", None, value(t, "set-version-value", &format!("app {} · web {}", short(&u.native_commit), short(&u.web_commit))))));
+    out.push(item(Section::Updates, "Neko updates", "update-version", "Version in use", "", setting_row(t, "set-version", "Version in use", None, value(t, "set-version-value", &format!("app {} · web {}", short(&u.native_commit), short(&u.web_commit))))));
     let (ui, native) = (u.auto_ui, u.auto_native);
-    out.push(item(Section::Updates, "auto-update-ui", "Update the web UI automatically", "Rebuilds and swaps in the web UI after a change lands.", setting_row(t, "set-auto-ui", "Update the web UI automatically", Some("Rebuilds and swaps in the web UI after a change lands."), switch(t, "set-auto-ui-switch", "Update the web UI automatically", ui, move |s: &mut App| s.call(crate::link::Call::SetSelfUpdate { auto_ui: !ui, auto_native: native })))));
-    out.push(item(Section::Updates, "auto-update-app", "Reinstall the app automatically", "Reinstalls the app once Neko is idle and the Mac is fine to build.", setting_row(t, "set-auto-native", "Reinstall the app automatically", Some("Reinstalls the app once Neko is idle and the Mac is fine to build."), switch(t, "set-auto-native-switch", "Reinstall the app automatically", native, move |s: &mut App| s.call(crate::link::Call::SetSelfUpdate { auto_ui: ui, auto_native: !native })))));
+    out.push(item(Section::Updates, "Neko updates", "auto-update-ui", "Update the web UI automatically", "Rebuilds and swaps in the web UI after a change lands.", setting_row(t, "set-auto-ui", "Update the web UI automatically", Some("Rebuilds and swaps in the web UI after a change lands."), switch(t, "set-auto-ui-switch", "Update the web UI automatically", ui, move |s: &mut App| s.call(crate::link::Call::SetSelfUpdate { auto_ui: !ui, auto_native: native })))));
+    out.push(item(Section::Updates, "Neko updates", "auto-update-app", "Reinstall the app automatically", "Reinstalls the app once Neko is idle and the Mac is fine to build.", setting_row(t, "set-auto-native", "Reinstall the app automatically", Some("Reinstalls the app once Neko is idle and the Mac is fine to build."), switch(t, "set-auto-native-switch", "Reinstall the app automatically", native, move |s: &mut App| s.call(crate::link::Call::SetSelfUpdate { auto_ui: ui, auto_native: !native })))));
     let dirty = s.pages.edited("dev-checkout", false);
     let mut control = row().gap(6.0).center_y().shrink().child(super::ui::input(s, t, "dev-checkout", "Development checkout", "Not set", 260.0, |s: &mut App| s.save_dev_checkout()));
     if dirty {
         control = control.child(quiet_button("Save", "dev-checkout-save", t, |s: &mut App| s.save_dev_checkout()));
     }
     let help = "The folder where Neko’s own tasks change Neko. A task that lands there is pushed to the published main.";
-    out.push(item(Section::Updates, "dev-checkout", "Development checkout", help, with_note(s, t, "setting:dev-checkout", setting_row(t, "set-dev-checkout", "Development checkout", Some(help), control))));
+    out.push(item(Section::Updates, "Neko updates", "dev-checkout", "Development checkout", help, with_note(s, t, "setting:dev-checkout", setting_row(t, "set-dev-checkout", "Development checkout", Some(help), control))));
 }
 
 fn workspaces(s: &App, t: &Neko, out: &mut Vec<Item>) {
     let list = s.summary.as_ref().map(|m| m.settings.workspaces.clone()).unwrap_or_default();
     if list.is_empty() {
-        out.push(item(Section::Workspaces, "workspaces-none", "Workspaces", "", text("No workspaces yet").key("workspaces-none").font(t.ty.meta).color(t.text.muted).px(6.0).py(8.0)));
+        out.push(item(Section::Workspaces, "", "workspaces-none", "Workspaces", "", text("No workspaces yet").key("workspaces-none").font(t.ty.meta).color(t.text.muted).px(6.0).py(8.0)));
     }
     for (i, w) in list.iter().enumerate() {
         let n = w.folders.len().max(usize::from(!w.repository.is_empty()));
         let words = format!("{n} {}", if n == 1 { "folder" } else { "folders" });
         let id = format!("workspace-{i}");
-        out.push(item(Section::Workspaces, id.clone(), &w.name, &w.repository, setting_row(t, &format!("set-{id}"), &w.name, Some(&w.repository), value(t, &format!("set-{id}-value"), &words))));
+        out.push(item(Section::Workspaces, "", id.clone(), &w.name, &w.repository, setting_row(t, &format!("set-{id}"), &w.name, Some(&w.repository), value(t, &format!("set-{id}-value"), &words))));
     }
 }
 
 fn about(s: &App, t: &Neko, out: &mut Vec<Item>) {
     let u = s.summary.as_ref().and_then(|m| m.settings.self_update.clone());
     let version = u.as_ref().map_or("unknown".to_owned(), |u| format!("app {} · web {}", short(&u.native_commit), short(&u.web_commit)));
-    out.push(item(Section::About, "about-version", "Version", "", setting_row(t, "set-about-version", "Version", None, value(t, "set-about-version-value", &version))));
-    out.push(item(Section::About, "about-link", "Connection to Neko", "", setting_row(t, "set-about-link", "Connection to Neko", None, value(t, "set-about-link-value", &crate::app::status_line(&s.link, s.summary.as_ref())))));
+    out.push(item(Section::About, "About", "about-version", "Version", "", setting_row(t, "set-about-version", "Version", None, value(t, "set-about-version-value", &version))));
+    out.push(item(Section::About, "About", "about-link", "Connection to Neko", "", setting_row(t, "set-about-link", "Connection to Neko", None, value(t, "set-about-link-value", &crate::app::status_line(&s.link, s.summary.as_ref())))));
     out.push(item(
         Section::About,
+        "About",
         "about-web",
         "The web UI",
         "The web UI stays the default while this app reaches parity.",
@@ -639,7 +665,7 @@ fn about(s: &App, t: &Neko, out: &mut Vec<Item>) {
 
 /// Appearance, Mode: System, Light or Dark. It is the daemon's setting (the web UI's own), so the window and every browser agree.
 fn appearance(s: &App, t: &Neko, out: &mut Vec<Item>) {
-    use super::webkit::{button, panel, section, setting_row};
+    use super::webkit::button;
     const MODES: [(&str, &str, &icons::IconRef); 3] = [("system", "System", &icons::CIRCLE_HALF), ("light", "Light", &icons::SUN), ("dark", "Dark", &icons::MOON)];
     let now = s.pages.appearance.as_deref().unwrap_or("system");
     let (light_id, dark_id) = s.theme_choice();
@@ -656,8 +682,7 @@ fn appearance(s: &App, t: &Neko, out: &mut Vec<Item>) {
     }
     let help = "System follows macOS. The choice is kept by Neko, so the web UI and this window agree.";
     let line = setting_row(t, "set-appearance", "Mode", Some(&format!("Showing {shown} ({}).", if dark_now { "dark" } else { "light" })), modes);
-    let body = with_note(s, t, "setting:appearance", panel(vec![line]));
-    out.push(item(Section::Appearance, "appearance-mode", "Theme Mode", help, section(t, "set-appearance-section", "Appearance", None, None, body)));
+    out.push(item(Section::Appearance, "Appearance", "appearance-mode", "Theme Mode", help, with_note(s, t, "setting:appearance", line)));
 }
 
 /// Permissions: each kind of access with its status and a button that opens its pane of System Settings. Accessibility,
@@ -697,7 +722,7 @@ fn permissions(s: &App, t: &Neko, out: &mut Vec<Item>) {
                     s.notice = Some("Couldn’t open System Settings.".to_owned());
                 }
             }));
-        out.push(item(Section::Permissions, format!("perm-{id}"), label, help, setting_row(t, &format!("set-perm-{id}"), label, Some(help), control)));
+        out.push(item(Section::Permissions, "What Neko can access", format!("perm-{id}"), label, help, setting_row(t, &format!("set-perm-{id}"), label, Some(help), control)));
     }
 }
 
@@ -712,12 +737,12 @@ fn diagnostics(s: &App, t: &Neko, out: &mut Vec<Item>) {
     let daemon = crate::app::status_line(&s.link, s.summary.as_ref());
     let rows = [("app", "This app", app), ("neko", "Neko", neko), ("data", "Data folder", data), ("daemon", "Daemon", daemon)];
     for (id, label, words) in &rows {
-        out.push(item(Section::Diagnostics, format!("diag-{id}"), label, words, setting_row(t, &format!("set-diag-{id}"), label, None, value(t, &format!("diag-{id}-value"), words))));
+        out.push(item(Section::Diagnostics, "Diagnostics", format!("diag-{id}"), label, words, setting_row(t, &format!("set-diag-{id}"), label, None, value(t, &format!("diag-{id}-value"), words))));
     }
     let report: String = rows.iter().map(|(_, label, words)| format!("{label}: {words}")).collect::<Vec<_>>().join("\n");
     let button = quiet_button("Copy diagnostics", "diag-copy", t, |_: &mut App| {}).on_press_tx(move |s: &mut App, tx: &mut rune::Tx| {
         tx.copy(report.clone());
         s.show_toast("Copied the diagnostics");
     });
-    out.push(item(Section::Diagnostics, "diag-copy", "Copy diagnostics", "Versions, the data folder and the daemon's state, as text to paste into a report.", setting_row(t, "set-diag-copy", "Copy diagnostics", Some("Versions, the data folder and the daemon's state, as text to paste into a report."), button)));
+    out.push(item(Section::Diagnostics, "Diagnostics", "diag-copy", "Copy diagnostics", "Versions, the data folder and the daemon's state, as text to paste into a report.", setting_row(t, "set-diag-copy", "Copy diagnostics", Some("Versions, the data folder and the daemon's state, as text to paste into a report."), button)));
 }

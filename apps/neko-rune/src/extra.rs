@@ -154,6 +154,15 @@ pub fn combo_words(combo: &HotkeyCombo) -> String {
     if mods.is_empty() { key.to_owned() } else { format!("{mods} {key}") }
 }
 
+/// A shortcut as separate keys, the way the web draws it: each modifier, then the key (`["⌥", "Space"]`).
+pub fn combo_keys(combo: &HotkeyCombo) -> Vec<String> {
+    let words = combo_words(combo);
+    match words.split_once(' ') {
+        Some((mods, key)) => mods.chars().map(String::from).chain(std::iter::once(key.to_owned())).collect(),
+        None => vec![words],
+    }
+}
+
 /// What "Make me a theme" tells Neko (`web/src/themes/prompt.ts`, `THEME_PROMPT`): one constant, filled in at send time. A test reads the
 /// web's file and requires this to be the same text.
 pub const THEME_PROMPT: &str = include_str!("theme_prompt.txt");

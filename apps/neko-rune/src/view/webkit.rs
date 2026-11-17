@@ -45,14 +45,33 @@ pub fn panel(rows: Vec<El>) -> El {
     col().mx(-12.0).children(rows)
 }
 
-/// `SettingRow`: the title (13.5) and under it the description (12.5 muted) at the left, the control at the right; 48 high at least,
-/// 12 at the sides, 10 above and below, radius 10.
+/// `SettingRow`: the title (13.5) and under it the description (12.5 muted, at most 65ch = 512.6 wide) at the left, the control at the
+/// right; 48 high at least, 12 at the sides, 10 above and below, radius 10. Under 640 (`sm:`) the control drops under the words.
 pub fn setting_row(t: &Neko, key: &str, title: &str, description: Option<&str>, control: El) -> El {
-    let mut left = col().min_w(0.0).grow(1.0).gap(2.0).child(text(title.to_owned()).font(font(t, 13.5, 400.0, 21.9375)).color(t.text.base).wrap().min_w(0.0));
+    build_row(t, key, title, description, control, false)
+}
+
+fn build_row(t: &Neko, key: &str, title: &str, description: Option<&str>, control: El, stacked: bool) -> El {
+    let narrow = stacked || page_width() < 640.0;
+    let mut left = col().min_w(0.0).gap(2.0).child(text(title.to_owned()).font(font(t, 13.5, 400.0, 21.9375)).color(t.text.base).wrap().min_w(0.0));
     if let Some(d) = description {
-        left = left.child(text(d.to_owned()).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).wrap().min_w(0.0));
+        left = left.child(text(d.to_owned()).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).wrap().min_w(0.0).max_w(512.6));
     }
-    row().key(key.to_owned()).min_h(48.0).px(12.0).py(10.0).gap(16.0).center_y().radius(10.0).child(left).child(row().gap(8.0).center_y().child(control))
+    if narrow {
+        let controls = row().w_full().gap(8.0).center_y().flex_wrap().child(control);
+        return col().key(key.to_owned()).min_h(48.0).px(12.0).py(10.0).gap(8.0).radius(10.0).child(left.w_full()).child(controls);
+    }
+    row().key(key.to_owned()).min_h(48.0).px(12.0).py(10.0).gap(16.0).center_y().radius(10.0).child(left.shrink().grow(1.0)).child(row().gap(8.0).center_y().child(control))
+}
+
+/// `Kbd` (`ui/kbd.tsx`): 20 high, 20 wide at least, 4 at the sides, radius 6, 12 point medium muted words on a faint wash.
+pub fn kbd(t: &Neko, key: &str, words: &str) -> El {
+    row().key(key.to_owned()).h(20.0).min_w(20.0).px(4.0).center().radius(6.0).fill(t.text.base.alpha(0.04)).child(text(words.to_owned()).font(font(t, 12.0, 500.0, 16.0)).color(t.text.muted).a11y_hidden())
+}
+
+/// `Skeleton`: a quiet pulse-less block the size of what is loading.
+pub fn skeleton(t: &Neko, key: &str, w: f32, h: f32) -> El {
+    el().key(key.to_owned()).w(w).h(h).radius(6.0).fill(t.text.base.alpha(0.06))
 }
 
 /// The web's `Button` at its usual size: 36 high, 14 at the sides, a pill, 14 medium words, the icon 16 before them. `primary` is the

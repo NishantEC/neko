@@ -153,6 +153,20 @@ fn click(rt: &mut Runtime<App>, key: &str) {
     settle(rt);
 }
 
+/// Clicks a row of a long page (Settings shows a description under every row): scrolls the page until the row is in view.
+fn click_in_page(rt: &mut Runtime<App>, key: &str) {
+    let mut at = rt.find(key).unwrap_or_else(|| panic!("no element keyed {key}"));
+    for _ in 0..40 {
+        if at.1 > 260.0 && at.1 < 800.0 {
+            break;
+        }
+        rt.wheel(800.0, 500.0, if at.1 >= 800.0 { -300.0 } else { 300.0 });
+        settle(rt);
+        at = rt.find(key).unwrap_or(at);
+    }
+    click(rt, key);
+}
+
 fn press(rt: &mut Runtime<App>, key: Key, mods: Mods) {
     rt.key(KeyEvent { key, mods });
     settle(rt);
@@ -504,34 +518,34 @@ fn settings_change_the_daemons_budgets_and_switches_and_search_finds_rows() {
     click(&mut rt, "settings-section-ai");
     rt.update(|s, _| s.pages.set_field("daily-budget", "7.50"));
     settle(&mut rt);
-    click(&mut rt, "daily-budget-save");
+    click_in_page(&mut rt, "daily-budget-save");
     assert_eq!(rt.state.summary.as_ref().and_then(|m| m.settings.daily_budget_cents), Some(750));
     rt.update(|s, _| s.pages.set_field("daily-budget", "abc"));
     settle(&mut rt);
-    click(&mut rt, "daily-budget-save");
+    click_in_page(&mut rt, "daily-budget-save");
     assert!(rt.state.pages.notes.contains_key("setting:daily-budget"), "an amount that is not one is refused next to its field");
     assert_eq!(rt.state.summary.as_ref().and_then(|m| m.settings.daily_budget_cents), Some(750), "and nothing was sent");
     rt.update(|s, _| s.pages.set_field("daily-budget", ""));
     settle(&mut rt);
-    click(&mut rt, "daily-budget-save");
+    click_in_page(&mut rt, "daily-budget-save");
     assert_eq!(rt.state.summary.as_ref().and_then(|m| m.settings.daily_budget_cents), None);
     // AI and agents: plan before working.
     click(&mut rt, "settings-section-ai");
     let before = rt.state.summary.as_ref().is_some_and(|m| m.settings.plan_first);
-    click(&mut rt, "set-plan-first-switch");
+    click_in_page(&mut rt, "set-plan-first-switch");
     assert_eq!(rt.state.summary.as_ref().map(|m| m.settings.plan_first), Some(!before));
     // General: Calendar on and off.
     click(&mut rt, "settings-section-general");
-    click(&mut rt, "set-calendar-switch");
+    click_in_page(&mut rt, "set-calendar-switch");
     assert!(rt.state.pages.calendar.as_ref().is_some_and(|c| c.status.enabled), "{:?}", rt.state.pages.calendar.as_ref().map(|c| &c.status));
-    click(&mut rt, "set-calendar-switch");
+    click_in_page(&mut rt, "set-calendar-switch");
     assert!(rt.state.pages.calendar.as_ref().is_some_and(|c| !c.status.enabled));
     // Phone: Reminders is a switch on the daemon's own settings.
     click(&mut rt, "settings-section-phone");
     let reminders = rt.state.pages.phone.as_ref().map(|p| p.settings.reminders).expect("the phone settings arrived");
-    click(&mut rt, "set-reminders-switch");
+    click_in_page(&mut rt, "set-reminders-switch");
     assert_eq!(rt.state.pages.phone.as_ref().map(|p| p.settings.reminders), Some(!reminders));
-    click(&mut rt, "set-reminders-switch");
+    click_in_page(&mut rt, "set-reminders-switch");
     // Search finds a row in another section, and says when nothing matches.
     rt.update(|s, _| s.pages.set_field("settings:search", "ceiling"));
     settle(&mut rt);

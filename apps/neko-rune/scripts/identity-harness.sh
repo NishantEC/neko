@@ -25,7 +25,9 @@ case "${1:-}" in
     # The web UI of THIS checkout (embed mode included), built into /tmp; node_modules come from the main checkout when this one has none.
     if [[ ! -e $root/web/node_modules && -d "$HOME/Documents/neko/web/node_modules" ]]; then ln -s "$HOME/Documents/neko/web/node_modules" "$root/web/node_modules"; fi
     if [[ "${REBUILD_WEB:-1}" == 1 || ! -f $web/index.html ]]; then (cd "$root/web" && node_modules/.bin/vite build --outDir "$web" --emptyOutDir >"$base/web-build.log" 2>&1); fi
-    ( cd "$data" && nohup env -i PATH="$PATH" HOME="$data" NEKO_DATA_DIR="$data" NEKO_WEB_PORT="$port" NEKO_WEB_DIR="$web" "$harness" >"$base/harness.log" 2>&1 & echo $! >"$base/harness.pid" )
+    # `;` not `&&`: only the one command goes to the background, so `$!` is the harness itself (not a lingering subshell that holds the
+    # caller's `$(...)` pipe open and makes `identity.sh` hang), and `stop` finds it by name.
+    ( cd "$data"; nohup env -i PATH="$PATH" HOME="$data" NEKO_DATA_DIR="$data" NEKO_WEB_PORT="$port" NEKO_WEB_DIR="$web" "$harness" >"$base/harness.log" 2>&1 </dev/null & echo $! >"$base/harness.pid" )
     for _ in $(seq 1 60); do [[ -S "$data/neko.sock" ]] && break; sleep 0.2; done
     [[ -S "$data/neko.sock" ]] || { echo "the harness did not start: see $base/harness.log" >&2; exit 1; }
     echo "$data"

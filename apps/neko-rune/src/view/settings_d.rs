@@ -7,10 +7,11 @@ use rune::{El, TextStyle, col, el, icon, row, text};
 use rune_kit::{TextArea, TextInput};
 
 use super::settings::{Item, item};
-use super::ui::{edit_of, editing, note, setting_row, switch, switch_when, with_menu};
+use super::ui::{edit_of, editing, note, switch, switch_when, with_menu};
+use super::webkit::{self, button, setting_row};
 use super::{primary_button, quiet_button};
 use crate::app::App;
-use crate::extra::{combo_words, valid_model_id};
+use crate::extra::{combo_keys, valid_model_id};
 use crate::icons;
 use crate::onboarding::Step;
 use crate::pages::Section;
@@ -48,36 +49,38 @@ fn marked(t: &Neko, key: &str, ok: bool, unavailable: bool, words: &str) -> El {
 
 pub(super) fn general(s: &App, t: &Neko, out: &mut Vec<Item>) {
     let help = "Agents, workspaces, routines and phone reminders, one calm pass.";
-    out.push(item(Section::General, "first-run-setup", "First-run setup", help, setting_row(t, "set-first-run", "First-run setup", Some(help), quiet_button("Show again", "set-first-run-open", t, |s: &mut App| s.open_onboarding(Step::Welcome)))));
+    out.push(item(Section::General, "Setup", "first-run-setup", "First-run setup", help, setting_row(t, "set-first-run", "First-run setup", Some(help), button(t, "set-first-run-open", "Show again", None, false, false, |s: &mut App| s.open_onboarding(Step::Welcome)))));
 
-    let help = "Opens Neko when you log in. This changes the same login item the web UI and the native app do, so it is one setting on this Mac.";
-    let control = match s.extra.login {
-        Some(on) => switch(t, "set-login-switch", "Launch at login", on, |s: &mut App| s.toggle_login()),
-        None => switch_when(t, "set-login-switch", "Launch at login", false, false, |_| {}),
-    };
-    out.push(item(Section::General, "launch-at-login", "Launch at login", help, with_note(s, t, "setting:launch-at-login", setting_row(t, "set-login", "Launch at login", Some(help), control))));
-
-    let help = "Recording a shortcut checks it against what macOS reserves, then saves it. The app that owns the global key registers it.";
-    let shown = s.extra.hotkey.as_ref().map_or_else(|| "…".to_owned(), |h| combo_words(&h.combo));
+    // The keys are the button that records a new one (the web shows them and sends you to the native app).
+    let help = "Recording a new shortcut needs the native app: macOS only lets that app register global keys.";
     let control = if s.extra.recording {
         row()
             .gap(8.0)
             .center_y()
             .flex_wrap()
             .child(word(t, "set-hotkey-recording", "Press the new shortcut. Esc cancels.", t.meaning.iris))
-            .child(quiet_button("Cancel", "set-hotkey-cancel", t, |s: &mut App| s.hotkey_stop()))
+            .child(button(t, "set-hotkey-cancel", "Cancel", None, false, false, |s: &mut App| s.hotkey_stop()))
+    } else if let Some(h) = &s.extra.hotkey {
+        let mut keys = row().key("set-hotkey-change").role("button").label("Change summon shortcut").focusable(true).gap(4.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(|s: &mut App| s.hotkey_record());
+        for (i, k) in combo_keys(&h.combo).iter().enumerate() {
+            keys = keys.child(webkit::kbd(t, &format!("set-hotkey-key-{i}"), k));
+        }
+        keys
     } else {
-        row()
-            .gap(8.0)
-            .center_y()
-            .child(text(shown).key("set-hotkey-value").font(t.ty.row).color(t.text.base).role("status"))
-            .child(quiet_button("Change…", "set-hotkey-change", t, |s: &mut App| s.hotkey_record()))
+        webkit::skeleton(t, "set-hotkey-loading", 80.0, 24.0)
     };
     let mut r = col().w_full().child(setting_row(t, "set-hotkey", "Summon shortcut", Some(help), control));
     if let Some(say) = &s.extra.hotkey_say {
-        r = r.child(word(t, "set-hotkey-say", &say.words, if say.ok { t.text.muted } else { t.meaning.coral }).px(6.0).pb(4.0).live_region(rune::LiveRegion::Polite));
+        r = r.child(word(t, "set-hotkey-say", &say.words, if say.ok { t.text.muted } else { t.meaning.coral }).px(12.0).pb(4.0).live_region(rune::LiveRegion::Polite));
     }
-    out.push(item(Section::General, "summon-shortcut", "Summon shortcut", help, with_note(s, t, "setting:hotkey", r)));
+    out.push(item(Section::General, "Summon & startup", "summon-shortcut", "Summon shortcut", help, with_note(s, t, "setting:hotkey", r)));
+
+    let help = "Opens Neko when you log in. Writes a login item for this Mac.";
+    let control = match s.extra.login {
+        Some(on) => switch(t, "set-login-switch", "Launch at login", on, |s: &mut App| s.toggle_login()),
+        None => switch_when(t, "set-login-switch", "Launch at login", false, false, |_| {}),
+    };
+    out.push(item(Section::General, "Summon & startup", "launch-at-login", "Launch at login", help, with_note(s, t, "setting:launch-at-login", setting_row(t, "set-login", "Launch at login", Some(help), control))));
 }
 
 // ---- AI and agents ------------------------------------------------------------------------------
@@ -91,7 +94,7 @@ pub(super) fn ai(s: &App, t: &Neko, out: &mut Vec<Item>) {
         .shrink()
         .child(mono_input(s, t, "custom-model", "Exact model ID", "Or enter an exact model ID", 240.0, |s: &mut App| s.use_exact_model()))
         .child(if valid_model_id(&typed) { quiet_button("Use ID", "set-custom-use", t, |s: &mut App| s.use_exact_model()) } else { quiet_button("Use ID", "set-custom-use", t, |_| {}).disabled(true) });
-    out.push(item(Section::Ai, "custom-model", "Exact model ID", help, setting_row(t, "set-custom-model", "Exact model ID", Some(help), control)));
+    out.push(item(Section::Ai, "Agent runtime", "custom-model", "Exact model ID", help, setting_row(t, "set-custom-model", "Exact model ID", Some(help), control)));
 
     let help = "Sends one real prompt through the runner with the runtime shown above. It becomes the default only when it works.";
     let button = if s.extra.checking { quiet_button("Checking…", "set-check-model", t, |_| {}).disabled(true) } else { quiet_button("Check model", "set-check-model", t, |s: &mut App| s.check_model()) };
@@ -99,14 +102,14 @@ pub(super) fn ai(s: &App, t: &Neko, out: &mut Vec<Item>) {
     if let Some(check) = &s.extra.model_check {
         r = r.child(marked(t, "set-check-result", check.ok, check.unavailable, &check.message));
     }
-    out.push(item(Section::Ai, "check-model", "Check model", help, with_note(s, t, "setting:model-check", r)));
+    out.push(item(Section::Ai, "Agent runtime", "check-model", "Check model", help, with_note(s, t, "setting:model-check", r)));
 
     let help = "Home chat works like your own Claude Code session in bypass mode: it edits files, runs commands, uses your tools and browser, and manages Neko itself, without asking per step. Off makes it read-only, with an approval for each action.";
     let control = match s.extra.super_agent {
         Some(on) => switch(t, "set-super-agent-switch", "Full power for Home chat", on, move |s: &mut App| s.set_super_agent(!on)),
         None => switch_when(t, "set-super-agent-switch", "Full power for Home chat", false, false, |_| {}),
     };
-    out.push(item(Section::Ai, "super-agent", "Full power", help, with_note(s, t, "setting:super-agent", setting_row(t, "set-super-agent", "Full power", Some(help), control))));
+    out.push(item(Section::Ai, "What Home chat may do", "super-agent", "Full power", help, with_note(s, t, "setting:super-agent", setting_row(t, "set-super-agent", "Full power", Some(help), control))));
 
     let help = "Removes every task except those with a pull request, and lets your watches file their issues again from scratch. Memory, settings, workspaces, tools and watches stay.";
     let danger = row()
@@ -123,7 +126,7 @@ pub(super) fn ai(s: &App, t: &Neko, out: &mut Vec<Item>) {
         .focus_ring(2.0, 2.0, t.surface.ring)
         .on_press(|s: &mut App| s.ask_start_over())
         .child(text("Start over…").font(t.ty.meta).color(t.meaning.coral).a11y_hidden());
-    out.push(item(Section::Ai, "start-over", "Start over", help, with_note(s, t, "setting:start-over", setting_row(t, "set-start-over", "Start over", Some(help), danger))));
+    out.push(item(Section::Ai, "How work starts", "start-over", "Start over", help, with_note(s, t, "setting:start-over", setting_row(t, "set-start-over", "Start over", Some(help), danger))));
 }
 
 // ---- Appearance ---------------------------------------------------------------------------------
@@ -249,7 +252,7 @@ pub(super) fn appearance(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<I
     };
     for (dark, id, title, help) in [(false, "light-theme", "Light theme", "The theme used when the window is light."), (true, "dark-theme", "Dark theme", "The theme used when the window is dark.")] {
         let body = with_note(s, t, "setting:themes", theme_grid(s, t, layer, dark));
-        out.push(item(Section::Appearance, id, title, help, section(t, &format!("set-{id}"), title, in_use(dark), None, body)));
+        out.push(item(Section::Appearance, "", id, title, help, section(t, &format!("set-{id}"), title, in_use(dark), None, body)));
     }
     let mine = s.extra.user_themes.len();
     let words = match mine {
@@ -263,7 +266,7 @@ pub(super) fn appearance(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<I
         rows.push(word(t, &format!("theme-problem-{i}"), &format!("{file} was skipped: {message}"), t.meaning.amber).px(12.0).py(12.0));
     }
     let make = button(t, "make-theme", "Make me a theme", Some(&icons::SPARK), true, false, |s: &mut App| s.ask_make_theme());
-    out.push(item(Section::Appearance, "make-theme", "Make me a theme", help, section(t, "set-your-themes", "Your themes", None, Some(make), with_note(s, t, "setting:make-theme", panel(rows)))));
+    out.push(item(Section::Appearance, "", "make-theme", "Make me a theme", help, section(t, "set-your-themes", "Your themes", None, Some(make), with_note(s, t, "setting:make-theme", panel(rows)))));
 }
 
 // ---- Rulebook -----------------------------------------------------------------------------------
@@ -296,7 +299,7 @@ pub(super) fn rulebook(s: &App, t: &Neko, out: &mut Vec<Item>) {
         let words = if built_in.is_empty() { "The daemon didn’t send the built-in default." } else { built_in };
         r = r.child(text(words.to_owned()).key("rulebook-default").font(t.ty.mono).color(t.text.muted).wrap().w_full().px(12.0).py(10.0).radius(t.radius.row).fill(t.surface.hover));
     }
-    out.push(item(Section::Rulebook, "rulebook", "Rulebook", help, with_note(s, t, "setting:rulebook", r)));
+    out.push(item(Section::Rulebook, "Rulebook", "rulebook", "Rulebook", help, with_note(s, t, "setting:rulebook", r)));
 }
 
 // ---- Quick panel --------------------------------------------------------------------------------
@@ -327,11 +330,11 @@ pub(super) fn quick_panel(s: &App, t: &Neko, out: &mut Vec<Item>) {
             }
         }
     }
-    out.push(item(Section::QuickPanel, "folders", "Included folders", help, with_note(s, t, "setting:folders", list)));
+    out.push(item(Section::QuickPanel, "Included folders", "folders", "Included folders", help, with_note(s, t, "setting:folders", list)));
     let typed = !s.pages.text("folder-path").trim().is_empty();
     let help = "An absolute path on this Mac. The daemon checks that it is a folder.";
     let control = row().gap(6.0).center_y().shrink().child(mono_input(s, t, "folder-path", "Folder path", "/Users/you/Documents", 260.0, |s: &mut App| s.add_folder())).child(if typed { quiet_button("Add folder", "folder-add", t, |s: &mut App| s.add_folder()) } else { quiet_button("Add folder", "folder-add", t, |_| {}).disabled(true) });
-    out.push(item(Section::QuickPanel, "add-folder", "Add a folder", help, setting_row(t, "set-add-folder", "Add a folder", Some(help), control)));
+    out.push(item(Section::QuickPanel, "Included folders", "add-folder", "Add a folder", help, setting_row(t, "set-add-folder", "Add a folder", Some(help), control)));
 }
 
 // ---- This Mac: permissions, diagnostics, updates -------------------------------------------------
@@ -342,7 +345,7 @@ pub(super) fn clipboard(s: &App, t: &Neko, out: &mut Vec<Item>) {
         Some(on) => switch(t, "set-clipboard-switch", "Clipboard history", on, move |s: &mut App| s.set_clipboard(!on)),
         None => switch_when(t, "set-clipboard-switch", "Clipboard history", false, false, |_| {}),
     };
-    out.push(item(Section::Permissions, "clipboard-history", "Clipboard history", help, with_note(s, t, "setting:clipboard", setting_row(t, "set-clipboard", "Clipboard history", Some(help), control))));
+    out.push(item(Section::Permissions, "What Neko can access", "clipboard-history", "Clipboard history", help, with_note(s, t, "setting:clipboard", setting_row(t, "set-clipboard", "Clipboard history", Some(help), control))));
 }
 
 pub(super) fn diagnostics(s: &App, t: &Neko, out: &mut Vec<Item>) {
@@ -365,7 +368,7 @@ pub(super) fn diagnostics(s: &App, t: &Neko, out: &mut Vec<Item>) {
             }
         }
     }
-    out.push(item(Section::Diagnostics, "diagnostics", "Run diagnostics", help, with_note(s, t, "setting:diagnostics", r)));
+    out.push(item(Section::Diagnostics, "Diagnostics", "diagnostics", "Run diagnostics", help, with_note(s, t, "setting:diagnostics", r)));
 }
 
 pub(super) fn updates(s: &App, t: &Neko, out: &mut Vec<Item>) {
@@ -377,9 +380,9 @@ pub(super) fn updates(s: &App, t: &Neko, out: &mut Vec<Item>) {
     if dirty {
         control = control.child(quiet_button("Save", "update-source-save", t, |s: &mut App| s.save_update_source()));
     }
-    out.push(item(Section::Updates, "update-source", "Updates come from", help, with_note(s, t, "setting:update-source", setting_row(t, "set-update-source", "Updates come from", Some(help), control))));
+    out.push(item(Section::Updates, "Neko updates", "update-source", "Updates come from", help, with_note(s, t, "setting:update-source", setting_row(t, "set-update-source", "Updates come from", Some(help), control))));
     let help = "Back to the build it replaced, or the one the app shipped with.";
-    out.push(item(Section::Updates, "roll-back-web", "Roll back the web UI", help, with_note(s, t, "setting:updates-roll", setting_row(t, "set-roll-back", "Roll back the web UI", Some(help), quiet_button("Roll back", "roll-back-web", t, |s: &mut App| s.ask_roll_back_web())))));
+    out.push(item(Section::Updates, "Neko updates", "roll-back-web", "Roll back the web UI", help, with_note(s, t, "setting:updates-roll", setting_row(t, "set-roll-back", "Roll back the web UI", Some(help), quiet_button("Roll back", "roll-back-web", t, |s: &mut App| s.ask_roll_back_web())))));
 }
 
 // ---- the unsaved-rulebook question --------------------------------------------------------------

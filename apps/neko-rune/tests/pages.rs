@@ -423,8 +423,23 @@ fn the_routines_master_switch_waits_for_its_data() {
     let mut rt = Runtime::new(app, view, (1360.0, 900.0), Env { system_dark: true, scale: 1.0 });
     rt.frame(0.0);
     settle(&mut rt);
-    click(&mut rt, "set-routines-switch");
-    assert!(!rt.state.outbox.iter().any(|c| matches!(c, Call::SetRoutinesOn { .. })), "the switch cannot be pressed before routines load");
+    // The web shows a skeleton where the switch will be; there is nothing to press until routines load.
+    assert!(rt.find("set-routines-switch").is_none() && rt.find("set-routines-loading").is_some(), "a skeleton, not a switch");
+    assert!(!rt.state.outbox.iter().any(|c| matches!(c, Call::SetRoutinesOn { .. })), "nothing was asked of the daemon");
+}
+
+#[test]
+fn settings_rows_show_their_description_under_a_group_heading_as_the_web_does() {
+    let mut app = App::headless();
+    app.open_view(FullView::Settings);
+    let mut rt = Runtime::new(app, view, (1360.0, 900.0), Env { system_dark: true, scale: 1.0 });
+    rt.frame(0.0);
+    settle(&mut rt);
+    let t = texts(&rt);
+    assert!(rt.find("group-setup").is_some() && t.contains(&"Setup".to_owned()), "the web's `<Section title=\"Setup\">` heading");
+    assert!(t.contains(&"Background checks of messages, pull requests and your day. Off until you turn them on.".to_owned()), "the description is words under the title, not a tooltip: {t:?}");
+    go_section(&mut rt, "general");
+    assert!(rt.find("group-summon---startup").is_some() && t.contains(&"First-run setup".to_owned()));
 }
 
 #[test]
