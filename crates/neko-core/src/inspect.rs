@@ -44,6 +44,8 @@ fn bound_artifact(a: &mut AppArtifact) {
 
 /// Every list and string of a report cut to a size worth keeping.
 fn bound(report: &mut AppReport) {
+    // Only the two clients that exist; anything else (or nothing) is the web UI.
+    report.client = if report.client == "rune" { "rune".to_owned() } else { "web".to_owned() };
     report.route = clip(&report.route, 300);
     report.title = clip(&report.title, 200);
     report.tabs.truncate(60);
@@ -127,6 +129,7 @@ impl App {
         report.at_ms = now;
         let window = AppWindow {
             page_id: report.page_id.clone(),
+            client: report.client.clone(),
             focused: report.focused,
             visible: report.visible,
             route: report.route.clone(),
@@ -387,5 +390,22 @@ mod tests {
         assert_eq!(seen.versions.len(), MAX_TRACKED);
         assert!(seen.status("x0").is_empty(), "the least recently touched went first");
         assert_eq!(seen.status(&format!("x{}", MAX_TRACKED + 24)).len(), 1);
+    }
+
+    #[test]
+    fn web_and_rune_reports_are_kept_apart() {
+        let mut app = App::default();
+        app.report(window("w", false), 1_000).unwrap();
+        let mut rune = window("r", true);
+        rune.client = "rune".into();
+        rune.size = Some([1440, 900]);
+        app.report(rune, 2_000).unwrap();
+        let mut odd = window("o", false);
+        odd.client = "something else".into();
+        app.report(odd, 3_000).unwrap();
+        let seen = app.inspect(4_000);
+        let client = |id: &str| seen.windows.iter().find(|w| w.page_id == id).map(|w| w.client.clone());
+        assert_eq!((client("w").as_deref(), client("r").as_deref(), client("o").as_deref()), (Some("web"), Some("rune"), Some("web")));
+        assert_eq!(seen.window.as_ref().map(|w| (w.client.as_str(), w.size)), Some(("rune", Some([1440, 900]))));
     }
 }

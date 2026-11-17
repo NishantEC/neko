@@ -936,6 +936,11 @@ pub struct ArtifactVersion {
     pub message_id: Option<String>,
 }
 
+/// What a report that names no client is: the web UI.
+fn web_client() -> String {
+    "web".to_owned()
+}
+
 /// A number as a whole one, truncated and clamped; anything else is 0.
 fn whole_number<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<i64, D::Error> {
     let value = serde_json::Value::deserialize(deserializer)?;
@@ -948,6 +953,13 @@ fn whole_number<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<i64
 pub struct AppReport {
     /// Random per page load.
     pub page_id: String,
+    /// Which client reports: `web` (the browser UI; also what an older page that sends nothing is) or `rune`.
+    /// The daemon keeps the two apart in `InspectApp`'s window list.
+    #[serde(default = "web_client")]
+    pub client: String,
+    /// The window's size in logical points, for clients that have a window of their own (Rune).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<[u32; 2]>,
     /// Everything below is filled (the window used last); otherwise only
     /// `focused`, `visible`, `route` and `title`.
     #[serde(default)]
@@ -1078,6 +1090,9 @@ pub struct AppTheme {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppWindow {
     pub page_id: String,
+    /// `web` or `rune` (`AppReport::client`).
+    #[serde(default = "web_client")]
+    pub client: String,
     pub focused: bool,
     pub visible: bool,
     pub route: String,
