@@ -11,7 +11,7 @@ use super::kit::{self, action, details_block, empty, glyph, list_row};
 use super::words::{self, DiffLine};
 use crate::app::App;
 use crate::icons;
-use crate::link::SetupCall;
+use crate::link::SetupAction;
 use crate::status::StatusKind;
 use crate::theme::Neko;
 use crate::view::ui::{MenuEntry, note, pick, switch, with_menu};
@@ -40,7 +40,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
             }
         }));
     }
-    trailing.push(quiet_button("Refresh", "skills-refresh", t, |s: &mut App| s.setup_call(SetupCall::SkillsRefresh)));
+    trailing.push(quiet_button("Refresh", "skills-refresh", t, |s: &mut App| s.setup_call(SetupAction::SkillsRefresh)));
 
     let mut body = col().w_full().gap(2.0).child(kit::text_field(s, t, "skills:search", "Search skills", "Search skills", false, false, |_| {}));
     if let Some(n) = note(s, t, "setup:page") {
@@ -51,7 +51,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     }
     if visible.is_empty() {
         let line = if query.is_empty() { "No local skills available yet. Refresh local skills, or fetch an instruction file below.".to_owned() } else { format!("No skills match “{}”", s.pages.text("skills:search").trim()) };
-        body = body.child(empty(t, "skills-empty", &line, query.is_empty().then(|| ("Refresh", Box::new(|s: &mut App| s.setup_call(SetupCall::SkillsRefresh)) as Box<dyn Fn(&mut App)>))));
+        body = body.child(empty(t, "skills-empty", &line, query.is_empty().then(|| ("Refresh", Box::new(|s: &mut App| s.setup_call(SetupAction::SkillsRefresh)) as Box<dyn Fn(&mut App)>))));
     }
     for k in visible {
         body = body.child(skill_row(s, t, layer, &workspace, k));
@@ -73,7 +73,7 @@ fn unavailable_row(t: &Neko, r: &neko_protocol::skills::EnabledSkill) -> El {
         .child(glyph(t, StatusKind::Failed, "Unavailable"))
         .child(text("Unavailable enabled skill".to_owned()).font(t.ty.row).color(t.text.base).a11y_hidden())
         .child(text(r.path.clone()).font(t.ty.mono_meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden())
-        .child(quiet_button("Disable", &format!("skill-gone-disable-{}", r.path), t, move |s: &mut App| s.setup_call(SetupCall::SkillEnable { workspace_id: ws.clone(), path: path.clone(), content_hash: hash.clone(), enabled: false })))
+        .child(quiet_button("Disable", &format!("skill-gone-disable-{}", r.path), t, move |s: &mut App| s.setup_call(SetupAction::SkillEnable { workspace_id: ws.clone(), path: path.clone(), content_hash: hash.clone(), enabled: false })))
 }
 
 fn skill_row(s: &App, t: &Neko, layer: &mut Vec<El>, workspace: &str, k: &neko_protocol::skills::Skill) -> El {
@@ -96,24 +96,24 @@ fn skill_row(s: &App, t: &Neko, layer: &mut Vec<El>, workspace: &str, k: &neko_p
         .child(text(word.to_owned()).key(format!("skill-state-{}", k.name)).font(t.ty.meta).color(if changed { t.meaning.amber } else { t.text.faint }).a11y_hidden());
     if state.is_some() {
         let p = k.path.clone();
-        line = line.child(action(t, format!("skill-lock-{}", k.name), if locked { "Unlock for the curator" } else { "Lock against the curator" }, &icons::LOCK, move |s: &mut App| s.setup_call(SetupCall::SkillLock { path: p.clone(), locked: !locked })));
+        line = line.child(action(t, format!("skill-lock-{}", k.name), if locked { "Unlock for the curator" } else { "Lock against the curator" }, &icons::LOCK, move |s: &mut App| s.setup_call(SetupAction::SkillLock { path: p.clone(), locked: !locked })));
     }
     line = line.child(switch(t, &format!("skill-switch-{}", k.name), &format!("{} {}", if record.is_some() { "Disable" } else { "Enable" }, k.name), record.is_some(), move |s: &mut App| match &sw_rec {
-        Some(r) => s.setup_call(SetupCall::SkillEnable { workspace_id: r.workspace_id.clone(), path: r.path.clone(), content_hash: r.content_hash.clone(), enabled: false }),
-        None => s.setup_call(SetupCall::SkillEnable { workspace_id: sw_ws.clone(), path: sw_path.clone(), content_hash: sw_hash.clone(), enabled: true }),
+        Some(r) => s.setup_call(SetupAction::SkillEnable { workspace_id: r.workspace_id.clone(), path: r.path.clone(), content_hash: r.content_hash.clone(), enabled: false }),
+        None => s.setup_call(SetupAction::SkillEnable { workspace_id: sw_ws.clone(), path: sw_path.clone(), content_hash: sw_hash.clone(), enabled: true }),
     }));
     let mut entries: Vec<MenuEntry> = Vec::new();
     {
         let (w, p, h) = (workspace.to_owned(), k.path.clone(), k.content_hash.clone());
         let rec = record.cloned();
         entries.push((if rec.is_some() { "Disable in this workspace" } else { "Enable current instructions" }.to_owned(), std::rc::Rc::new(move |s: &mut App| match &rec {
-            Some(r) => s.setup_call(SetupCall::SkillEnable { workspace_id: r.workspace_id.clone(), path: r.path.clone(), content_hash: r.content_hash.clone(), enabled: false }),
-            None => s.setup_call(SetupCall::SkillEnable { workspace_id: w.clone(), path: p.clone(), content_hash: h.clone(), enabled: true }),
+            Some(r) => s.setup_call(SetupAction::SkillEnable { workspace_id: r.workspace_id.clone(), path: r.path.clone(), content_hash: r.content_hash.clone(), enabled: false }),
+            None => s.setup_call(SetupAction::SkillEnable { workspace_id: w.clone(), path: p.clone(), content_hash: h.clone(), enabled: true }),
         })));
     }
     if state.is_some() {
         let p = k.path.clone();
-        entries.push((if locked { "Unlock for the curator" } else { "Lock against the curator" }.to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupCall::SkillLock { path: p.clone(), locked: !locked }))));
+        entries.push((if locked { "Unlock for the curator" } else { "Lock against the curator" }.to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupAction::SkillLock { path: p.clone(), locked: !locked }))));
     }
     let mut out = col().key(format!("skill-block-{}", k.name)).w_full().child(with_menu(s, t, layer, &format!("skill:{}", k.name), line, entries));
     if let Some(n) = note(s, t, &format!("setup:{}", k.path)) {
@@ -127,7 +127,7 @@ fn skill_row(s: &App, t: &Neko, layer: &mut Vec<El>, workspace: &str, k: &neko_p
         }
         if record.is_none() || changed {
             let (w, p, h) = (workspace.to_owned(), k.path.clone(), k.content_hash.clone());
-            d = d.child(row().px(8.0).child(primary_button(if changed { "Enable reviewed changes" } else { "Enable current instructions" }, &format!("skill-enable-{}", k.name), t, move |s: &mut App| s.setup_call(SetupCall::SkillEnable { workspace_id: w.clone(), path: p.clone(), content_hash: h.clone(), enabled: true }))));
+            d = d.child(row().px(8.0).child(primary_button(if changed { "Enable reviewed changes" } else { "Enable current instructions" }, &format!("skill-enable-{}", k.name), t, move |s: &mut App| s.setup_call(SetupAction::SkillEnable { workspace_id: w.clone(), path: p.clone(), content_hash: h.clone(), enabled: true }))));
         }
         if let Some(c) = state.as_deref() {
             d = d.child(kit::words(t, &format!("skill-curated-{}", k.name), words::curator_words(c)));
@@ -175,7 +175,7 @@ fn curator(s: &App, t: &Neko) -> El {
             .help(help)
             .child(text("Tidy skills once a day".to_owned()).font(t.ty.row).color(t.text.base).a11y_hidden())
             .child(text(last).key("skill-curator-last").font(t.ty.meta).color(t.text.muted).grow(1.0).min_w(0.0).a11y_hidden())
-            .child(switch(t, "skill-curator-switch", "Skill curator", on, move |s: &mut App| s.setup_call(SetupCall::SkillCurator { on: !on }))),
+            .child(switch(t, "skill-curator-switch", "Skill curator", on, move |s: &mut App| s.setup_call(SetupAction::SkillCurator { on: !on }))),
     );
     for r in cur.recent.iter().take(3) {
         let key = format!("applied:{}:{}", r.path, r.at_ms);
@@ -223,20 +223,20 @@ fn proposal(s: &App, t: &Neko, layer: &mut Vec<El>, p: &SkillProposal) -> El {
         .child(text(if improves { "Suggested change · review the diff" } else { "Suggested skill · review instructions" }.to_owned()).font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden())
         .child(action(t, format!("proposal-apply-{}", p.id), "Apply", &icons::CHECK_LINE, {
             let (i, h) = (apply_id.clone(), apply_hash.clone());
-            move |s: &mut App| s.setup_call(SetupCall::SkillDecide { id: i.clone(), content_hash: h.clone(), accept: true })
+            move |s: &mut App| s.setup_call(SetupAction::SkillDecide { id: i.clone(), content_hash: h.clone(), accept: true })
         }))
         .child(action(t, format!("proposal-reject-{}", p.id), "Reject", &icons::CLOSE_SMALL, {
             let (i, h) = (reject_id.clone(), reject_hash.clone());
-            move |s: &mut App| s.setup_call(SetupCall::SkillDecide { id: i.clone(), content_hash: h.clone(), accept: false })
+            move |s: &mut App| s.setup_call(SetupAction::SkillDecide { id: i.clone(), content_hash: h.clone(), accept: false })
         }));
     let entries: Vec<MenuEntry> = vec![
         ("Apply".to_owned(), std::rc::Rc::new({
             let (i, h) = (apply_id.clone(), apply_hash.clone());
-            move |s: &mut App| s.setup_call(SetupCall::SkillDecide { id: i.clone(), content_hash: h.clone(), accept: true })
+            move |s: &mut App| s.setup_call(SetupAction::SkillDecide { id: i.clone(), content_hash: h.clone(), accept: true })
         })),
         ("Reject".to_owned(), std::rc::Rc::new({
             let (i, h) = (reject_id.clone(), reject_hash.clone());
-            move |s: &mut App| s.setup_call(SetupCall::SkillDecide { id: i.clone(), content_hash: h.clone(), accept: false })
+            move |s: &mut App| s.setup_call(SetupAction::SkillDecide { id: i.clone(), content_hash: h.clone(), accept: false })
         })),
     ];
     let mut out = col().key(format!("proposal-block-{}", p.id)).w_full().child(with_menu(s, t, layer, &format!("proposal:{}", p.id), line, entries));
@@ -258,7 +258,7 @@ fn proposal(s: &App, t: &Neko, layer: &mut Vec<El>, p: &SkillProposal) -> El {
         d = d.child(kit::words(t, &format!("proposal-audit-note-{}", p.id), "Read the published audit results. If none are available, do not confirm or install. Confirmation records your review, not a passing audit."));
         let (cid, chash, curl) = (p.id.clone(), p.content_hash.clone(), audit.clone());
         let confirm = if opened && !reviewed {
-            accent_button("I reviewed the linked published audit results", &format!("proposal-confirm-{}", p.id), t, move |s: &mut App| s.setup_call(SetupCall::SkillAudit { id: cid.clone(), content_hash: chash.clone(), audit_url: curl.clone() }))
+            accent_button("I reviewed the linked published audit results", &format!("proposal-confirm-{}", p.id), t, move |s: &mut App| s.setup_call(SetupAction::SkillAudit { id: cid.clone(), content_hash: chash.clone(), audit_url: curl.clone() }))
         } else {
             accent_button(if reviewed { "Audit review recorded" } else { "I reviewed the linked published audit results" }, &format!("proposal-confirm-{}", p.id), t, |_| {}).disabled(true)
         };
@@ -267,7 +267,7 @@ fn proposal(s: &App, t: &Neko, layer: &mut Vec<El>, p: &SkillProposal) -> El {
     d = d.child(code(t, &format!("proposal-body-{}", p.id), &p.body, improves));
     d = d.child(kit::words(t, &format!("proposal-note-{}", p.id), if improves { "Apply rewrites that skill with these changes." } else { "Apply saves these exact instructions. Enable separately after installation." }));
     let (a_id, a_hash, r_id, r_hash) = (p.id.clone(), p.content_hash.clone(), p.id.clone(), p.content_hash.clone());
-    let apply = if reviewed { primary_button("Apply", &format!("proposal-apply-btn-{}", p.id), t, move |s: &mut App| s.setup_call(SetupCall::SkillDecide { id: a_id.clone(), content_hash: a_hash.clone(), accept: true })) } else { primary_button("Apply", &format!("proposal-apply-btn-{}", p.id), t, |_| {}).disabled(true).fill(t.meaning.iris.alpha(0.4)) };
-    d = d.child(row().px(8.0).gap(8.0).child(apply).child(quiet_button("Reject", &format!("proposal-reject-btn-{}", p.id), t, move |s: &mut App| s.setup_call(SetupCall::SkillDecide { id: r_id.clone(), content_hash: r_hash.clone(), accept: false }))));
+    let apply = if reviewed { primary_button("Apply", &format!("proposal-apply-btn-{}", p.id), t, move |s: &mut App| s.setup_call(SetupAction::SkillDecide { id: a_id.clone(), content_hash: a_hash.clone(), accept: true })) } else { primary_button("Apply", &format!("proposal-apply-btn-{}", p.id), t, |_| {}).disabled(true).fill(t.meaning.iris.alpha(0.4)) };
+    d = d.child(row().px(8.0).gap(8.0).child(apply).child(quiet_button("Reject", &format!("proposal-reject-btn-{}", p.id), t, move |s: &mut App| s.setup_call(SetupAction::SkillDecide { id: r_id.clone(), content_hash: r_hash.clone(), accept: false }))));
     out.child(d)
 }

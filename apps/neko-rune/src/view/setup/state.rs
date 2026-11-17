@@ -14,7 +14,7 @@ use neko_protocol::workbench::{MemoryEntry, MemoryKind, MemoryOptions, Workspace
 
 use super::words::{self, ConnectionForm, Recurrence, RegistryServer, Reconnect};
 use crate::app::{App, Dispatch};
-use crate::link::{Call, Hidden, SetupCall, SetupData};
+use crate::link::{Call, Hidden, SetupAction, SetupData};
 use crate::views::FullView;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -85,7 +85,7 @@ pub struct Confirm {
     pub description: String,
     pub button: String,
     pub coral: bool,
-    pub calls: Vec<SetupCall>,
+    pub calls: Vec<SetupAction>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -136,7 +136,7 @@ pub struct SetupState {
     /// "Suggest watches" was asked at this time for this workspace: Neko's reply is shown under the list.
     pub asked: Option<(i64, String)>,
     /// What a confirmation still has to send, each once the one before it was answered.
-    pub queue: Vec<SetupCall>,
+    pub queue: Vec<SetupAction>,
     /// Skill proposals whose published audit link was opened here (the web enables the confirm button only after).
     pub audit_opened: HashSet<String>,
     /// Which watch groups show their paused watches.
@@ -197,7 +197,7 @@ impl App {
         self.summary.as_ref().map(|m| &m.setup)
     }
 
-    pub fn setup_call(&mut self, call: SetupCall) {
+    pub fn setup_call(&mut self, call: SetupAction) {
         self.call(Call::Setup(Box::new(call)));
     }
 
@@ -255,7 +255,7 @@ impl App {
     }
 
     /// Runs when the daemon took a setup request: a form closes; a confirmation sends its next request, or closes.
-    pub fn setup_applied(&mut self, call: &SetupCall) {
+    pub fn setup_applied(&mut self, call: &SetupAction) {
         if matches!(self.setup.dialog, Some(Dialog::Confirm(_))) {
             if self.setup.queue.is_empty() {
                 self.close_dialog();
@@ -265,11 +265,15 @@ impl App {
             }
             return;
         }
+        if matches!((&self.setup.dialog, call), (Some(Dialog::RenameWatch { .. }), SetupAction::RenameWatch { .. }) | (Some(Dialog::Correct { .. }), SetupAction::CorrectDecision { .. })) {
+            self.close_dialog();
+            return;
+        }
         if call.key() == "setup:form" {
             // A connection added from the registry stays open to say so, as the web's dialog does.
-            let stay = matches!(call, SetupCall::AddConnection { .. }) && matches!(self.setup.dialog, Some(Dialog::Connection { tab: AddTab::Browse, .. }));
+            let stay = matches!(call, SetupAction::AddConnection { .. }) && matches!(self.setup.dialog, Some(Dialog::Connection { tab: AddTab::Browse, .. }));
             if stay {
-                if let (Some(Dialog::Connection { added, .. }), SetupCall::AddConnection { label, .. }) = (self.setup.dialog.as_mut(), call) {
+                if let (Some(Dialog::Connection { added, .. }), SetupAction::AddConnection { label, .. }) = (self.setup.dialog.as_mut(), call) {
                     *added = Some(label.clone());
                 }
             } else {
@@ -329,7 +333,7 @@ impl App {
         let away = id.as_deref().and_then(|i| self.setup_data().and_then(|d| d.workspace(i))).is_some_and(|w| w.away_enabled);
         let workspace = Workspace { id: id.unwrap_or_default(), name, repository: all[0].clone(), instructions: self.pages.text(F_TEXT).to_owned(), away_enabled: away };
         self.pages.notes.remove("setup:form");
-        self.setup_call(SetupCall::SaveWorkspace { workspace, folders: all });
+        self.setup_call(SetupAction::SaveWorkspace { workspace, folders: all });
     }
 
     /// Wakes the active watches of a workspace, one at a time (a paused or suggested one is refused by the daemon).
@@ -341,7 +345,7 @@ impl App {
         }
         self.pages.notes.remove(&format!("setup:{id}"));
         for watch in ids {
-            self.setup_call(SetupCall::Wake { id: watch });
+            self.setup_call(SetupAction::Wake { id: watch });
         }
         self.show_toast("Asked this workspace’s watches to check now.");
     }
@@ -367,7 +371,7 @@ impl App {
     pub fn rename_watch(&mut self) {
         let Some(Dialog::RenameWatch { id }) = self.setup.dialog.clone() else { return };
         let name = self.pages.text(F_NAME).trim().to_owned();
-        self.setup_call(SetupCall::RenameWatch { id, name });
+        self.setup_call(SetupAction::RenameWatch { id, name });
     }
 
     pub fn watch_toggle_connection(&mut self, connection: &str) {
@@ -424,7 +428,7 @@ impl App {
         match self.watch_from_form(self.now_ms) {
             Ok(w) => {
                 self.pages.notes.remove("setup:form");
-                self.setup_call(SetupCall::SaveWatch(Box::new(w)));
+                self.setup_call(SetupAction::SaveWatch(Box::new(w)));
             }
             Err(why) => self.form_note(why),
         }
@@ -434,7 +438,7 @@ impl App {
     pub fn watch_switch(&mut self, id: &str, on: bool) {
         let Some(w) = self.setup_data().and_then(|d| d.watch(id)).cloned() else { return };
         if !on {
-            self.setup_call(SetupCall::SaveWatch(Box::new(Responsibility { enabled: false, ..w })));
+            self.setup_call(SetupAction::SaveWatch(Box::new(Responsibility { enabled: false, ..w })));
             return;
         }
         let missing = self.setup_data().map(|d| words::ungranted(d, &w.workspace_id, &w.connection_ids)).unwrap_or_default();
@@ -451,8 +455,8 @@ impl App {
         let Some(w) = data.watch(id).cloned() else { return };
         let sources = w.connection_ids.iter().map(|c| words::connection_label(data, c)).collect::<Vec<_>>().join(", ");
         let description = format!("{}\n\nAllows unattended checks every 10 minutes using {} in {}. Connected tools may read or change data.", w.instruction, if sources.is_empty() { "the selected connections".to_owned() } else { sources }, data.workspace_name(&w.workspace_id));
-        let wake = SetupCall::Wake { id: w.id.clone() };
-        self.setup.dialog = Some(Dialog::Confirm(Confirm { title: "Turn on this watch?".to_owned(), description, button: "Turn on watch".to_owned(), coral: false, calls: vec![SetupCall::SaveWatch(Box::new(Responsibility { enabled: true, ..w })), wake] }));
+        let wake = SetupAction::Wake { id: w.id.clone() };
+        self.setup.dialog = Some(Dialog::Confirm(Confirm { title: "Turn on this watch?".to_owned(), description, button: "Turn on watch".to_owned(), coral: false, calls: vec![SetupAction::SaveWatch(Box::new(Responsibility { enabled: true, ..w })), wake] }));
     }
 
     /// "Turn on…" from a suggestion or a menu.
@@ -462,7 +466,7 @@ impl App {
 
     pub fn confirm_delete_watch(&mut self, id: &str) {
         let Some(w) = self.setup_data().and_then(|d| d.watch(id)).cloned() else { return };
-        self.setup.dialog = Some(Dialog::Confirm(Confirm { title: format!("Delete “{}”?", words::watch_title(&w)), description: "Neko stops checking it. Tasks it already filed stay.".to_owned(), button: "Delete watch".to_owned(), coral: true, calls: vec![SetupCall::RemoveWatch { id: w.id }] }));
+        self.setup.dialog = Some(Dialog::Confirm(Confirm { title: format!("Delete “{}”?", words::watch_title(&w)), description: "Neko stops checking it. Tasks it already filed stay.".to_owned(), button: "Delete watch".to_owned(), coral: true, calls: vec![SetupAction::RemoveWatch { id: w.id }] }));
     }
 
     /// Asks Neko, in a workspace, to suggest watches from its connected tools (the web's flow).
@@ -472,7 +476,7 @@ impl App {
         }
         self.setup.asked = Some((self.now_ms, workspace.to_owned()));
         self.setup.dismissed_reply = false;
-        self.setup_call(SetupCall::AskIn { text: words::WATCH_SUGGEST_PROMPT.to_owned(), workspace_id: workspace.to_owned() });
+        self.setup_call(SetupAction::AskIn { text: words::WATCH_SUGGEST_PROMPT.to_owned(), workspace_id: workspace.to_owned() });
     }
 
     /// Neko's newest reply to the suggestion, in the workspace asked.
@@ -491,7 +495,7 @@ impl App {
         match words::reconnect_action(&c) {
             Some(Reconnect::SignIn) => {
                 let client = self.pages.text("conn:client").trim().to_owned();
-                self.setup_call(SetupCall::Authenticate { id: c.id.clone(), client_id: (!client.is_empty()).then_some(client) });
+                self.setup_call(SetupAction::Authenticate { id: c.id.clone(), client_id: (!client.is_empty()).then_some(client) });
                 self.show_toast(&format!("Finish signing in to {} in your browser.", c.label));
             }
             Some(Reconnect::Relink) => {
@@ -511,10 +515,10 @@ impl App {
                     description,
                     button: "Approve again".to_owned(),
                     coral: false,
-                    calls: vec![SetupCall::LinkSource { workspace_id: c.workspace_id.clone(), candidate_id: candidate, trust_local_process: local }, SetupCall::Refresh { id: c.id.clone() }],
+                    calls: vec![SetupAction::LinkSource { workspace_id: c.workspace_id.clone(), candidate_id: candidate, trust_local_process: local }, SetupAction::Refresh { id: c.id.clone() }],
                 }));
             }
-            Some(Reconnect::Discover) => self.setup_call(SetupCall::Refresh { id: c.id }),
+            Some(Reconnect::Discover) => self.setup_call(SetupAction::Refresh { id: c.id }),
             None => {}
         }
     }
@@ -530,10 +534,10 @@ impl App {
                 description: "Pausing revokes the unattended-use access you gave its tools. Watches and agents that use it stop until you allow it again.".to_owned(),
                 button: "Pause & revoke access".to_owned(),
                 coral: true,
-                calls: vec![SetupCall::SetEnabled { id: c.id, enabled: false }],
+                calls: vec![SetupAction::SetEnabled { id: c.id, enabled: false }],
             }));
         } else {
-            self.setup_call(SetupCall::SetEnabled { id: c.id, enabled: !c.enabled });
+            self.setup_call(SetupAction::SetEnabled { id: c.id, enabled: !c.enabled });
         }
     }
 
@@ -548,7 +552,7 @@ impl App {
     pub fn set_tool_grant(&mut self, connection_id: &str, tool: &str, schema_hash: &str, allowed: bool) {
         let Some(c) = self.setup_data().and_then(|d| d.connection(connection_id)).cloned() else { return };
         let workspace_id = if c.workspace_id.is_empty() { self.grant_workspace() } else { String::new() };
-        self.setup_call(SetupCall::Grant { connection_id: c.id, workspace_id, tool: tool.to_owned(), schema_hash: schema_hash.to_owned(), allowed });
+        self.setup_call(SetupAction::Grant { connection_id: c.id, workspace_id, tool: tool.to_owned(), schema_hash: schema_hash.to_owned(), allowed });
     }
 
     pub fn open_add_connection(&mut self, tab: AddTab) {
@@ -612,7 +616,7 @@ impl App {
             Ok(config) => {
                 let credentials = self.pages.text("conn:credentials").trim().to_owned();
                 self.pages.notes.remove("setup:form");
-                self.setup_call(SetupCall::AddConnection { workspace_id: workspace, label, config, trust_local_process: form.local && form.trust, credentials: (!credentials.is_empty()).then_some(Hidden(credentials)) });
+                self.setup_call(SetupAction::AddConnection { workspace_id: workspace, label, config, trust_local_process: form.local && form.trust, credentials: (!credentials.is_empty()).then_some(Hidden(credentials)) });
             }
             Err(why) => self.form_note(&why),
         }
@@ -635,7 +639,7 @@ impl App {
             }
             return;
         }
-        self.setup_call(SetupCall::AddConnection { workspace_id: workspace, label: server.short_name.clone(), config: ServerConfig::Http { url: server.url.clone() }, trust_local_process: false, credentials: None });
+        self.setup_call(SetupAction::AddConnection { workspace_id: workspace, label: server.short_name.clone(), config: ServerConfig::Http { url: server.url.clone() }, trust_local_process: false, credentials: None });
     }
 
     /// Searches the public registry for what the field holds. The answer comes back through the window.
@@ -686,7 +690,7 @@ impl App {
     pub fn import_scan(&mut self) {
         let Some(Dialog::Connection { workspace, .. }) = self.setup.dialog.clone() else { return };
         let folders = self.setup_data().and_then(|d| d.workspace(&workspace).map(|w| d.folders_of(w))).unwrap_or_default();
-        self.setup_call(SetupCall::Discover { repositories: folders });
+        self.setup_call(SetupAction::Discover { repositories: folders });
     }
 
     pub fn import_expand(&mut self, id: &str) {
@@ -697,7 +701,7 @@ impl App {
 
     pub fn import_link(&mut self, candidate: &str, local: bool) {
         let Some(Dialog::Connection { workspace, .. }) = self.setup.dialog.clone() else { return };
-        self.setup_call(SetupCall::LinkSource { workspace_id: workspace, candidate_id: candidate.to_owned(), trust_local_process: local });
+        self.setup_call(SetupAction::LinkSource { workspace_id: workspace, candidate_id: candidate.to_owned(), trust_local_process: local });
     }
 
     // ---- skills
@@ -717,7 +721,7 @@ impl App {
         let url = self.pages.text("skill:url").trim().to_owned();
         let workspace_id = self.skills_workspace();
         if !url.is_empty() && !workspace_id.is_empty() {
-            self.setup_call(SetupCall::SkillPreview { workspace_id, url });
+            self.setup_call(SetupAction::SkillPreview { workspace_id, url });
         }
     }
 
@@ -766,16 +770,16 @@ impl App {
             updated_at_ms: now,
         };
         self.pages.notes.remove("setup:form");
-        self.setup_call(SetupCall::SaveMemory(Box::new(entry)));
+        self.setup_call(SetupAction::SaveMemory(Box::new(entry)));
     }
 
     pub fn confirm_forget_memory(&mut self, id: &str) {
-        self.setup.dialog = Some(Dialog::Confirm(Confirm { title: "Forget this memory?".to_owned(), description: "Agents stop using it. This can’t be undone.".to_owned(), button: "Forget memory".to_owned(), coral: true, calls: vec![SetupCall::ForgetMemory { id: id.to_owned() }] }));
+        self.setup.dialog = Some(Dialog::Confirm(Confirm { title: "Forget this memory?".to_owned(), description: "Agents stop using it. This can’t be undone.".to_owned(), button: "Forget memory".to_owned(), coral: true, calls: vec![SetupAction::ForgetMemory { id: id.to_owned() }] }));
     }
 
     pub fn set_memory_options(&mut self, learning: Option<bool>, use_memory: Option<bool>) {
         let current = self.setup_data().and_then(|d| d.memory_options).unwrap_or_default();
-        self.setup_call(SetupCall::SetMemoryOptions(MemoryOptions { learning: learning.unwrap_or(current.learning), use_memory: use_memory.unwrap_or(current.use_memory) }));
+        self.setup_call(SetupAction::SetMemoryOptions(MemoryOptions { learning: learning.unwrap_or(current.learning), use_memory: use_memory.unwrap_or(current.use_memory) }));
     }
 
     pub fn open_preference_dialog(&mut self, id: Option<&str>) {
@@ -802,12 +806,12 @@ impl App {
         }
         let exceptions = words::phrases(self.pages.text(F_PATH));
         self.pages.notes.remove("setup:form");
-        self.setup_call(SetupCall::SavePreference { workspace_id: base.as_ref().map_or(workspace, |b| b.workspace_id.clone()), id: id.unwrap_or_default(), expected_version: base.as_ref().map(|b| b.version), terms, task_ids, instruction, supporting: base.map(|b| b.supporting_record_ids).unwrap_or_default(), exceptions });
+        self.setup_call(SetupAction::SavePreference { workspace_id: base.as_ref().map_or(workspace, |b| b.workspace_id.clone()), id: id.unwrap_or_default(), expected_version: base.as_ref().map(|b| b.version), terms, task_ids, instruction, supporting: base.map(|b| b.supporting_record_ids).unwrap_or_default(), exceptions });
     }
 
     pub fn confirm_forget_preference(&mut self, id: &str) {
         let Some(p) = self.setup_data().and_then(|d| d.preferences.iter().find(|p| p.id == id)).cloned() else { return };
-        self.setup.dialog = Some(Dialog::Confirm(Confirm { title: "Forget this guidance?".to_owned(), description: "Neko stops applying it. This can’t be undone.".to_owned(), button: "Forget guidance".to_owned(), coral: true, calls: vec![SetupCall::ForgetPreference { workspace_id: p.workspace_id, id: p.id, version: p.version }] }));
+        self.setup.dialog = Some(Dialog::Confirm(Confirm { title: "Forget this guidance?".to_owned(), description: "Neko stops applying it. This can’t be undone.".to_owned(), button: "Forget guidance".to_owned(), coral: true, calls: vec![SetupAction::ForgetPreference { workspace_id: p.workspace_id, id: p.id, version: p.version }] }));
     }
 
     pub fn open_correct_dialog(&mut self, record_id: &str) {
@@ -823,7 +827,7 @@ impl App {
             self.form_note("Say what Neko should do differently.");
             return;
         }
-        self.setup_call(SetupCall::CorrectDecision { workspace_id, record_id, version, correction });
+        self.setup_call(SetupAction::CorrectDecision { workspace_id, record_id, version, correction });
     }
 
     // ---- profiles
@@ -845,7 +849,7 @@ impl App {
             return;
         }
         self.pages.notes.remove("setup:form");
-        self.setup_call(SetupCall::SaveProfile(AgentProfile { id: id.unwrap_or_default(), name, instructions: self.pages.text(F_TEXT).to_owned() }));
+        self.setup_call(SetupAction::SaveProfile(AgentProfile { id: id.unwrap_or_default(), name, instructions: self.pages.text(F_TEXT).to_owned() }));
     }
 
     // ---- schedules
@@ -900,12 +904,12 @@ impl App {
             ..base.unwrap_or_default()
         };
         self.pages.notes.remove("setup:form");
-        self.setup_call(SetupCall::SaveSchedule(Box::new(schedule)));
+        self.setup_call(SetupAction::SaveSchedule(Box::new(schedule)));
     }
 
     pub fn confirm_delete_schedule(&mut self, id: &str) {
         let Some(s) = self.setup_data().and_then(|d| d.schedules.iter().find(|s| s.id == id)).cloned() else { return };
-        self.setup.dialog = Some(Dialog::Confirm(Confirm { title: format!("Delete “{}”?", s.name), description: "Future runs stop. Tasks it already created stay.".to_owned(), button: "Delete schedule".to_owned(), coral: true, calls: vec![SetupCall::RemoveSchedule { id: s.id }] }));
+        self.setup.dialog = Some(Dialog::Confirm(Confirm { title: format!("Delete “{}”?", s.name), description: "Future runs stop. Tasks it already created stay.".to_owned(), button: "Delete schedule".to_owned(), coral: true, calls: vec![SetupAction::RemoveSchedule { id: s.id }] }));
     }
 
     /// The confirmation's button: its requests go out one after the other, and the dialog stays open until the last was

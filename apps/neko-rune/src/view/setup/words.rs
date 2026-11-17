@@ -453,11 +453,12 @@ pub fn decision_title(action: DecisionAction) -> &'static str {
         DecisionAction::Skip => "Defer this work",
         DecisionAction::ApproveLocalBuild => "You approved a local build",
         DecisionAction::AcceptLocalResult => "You accepted the local result",
-        DecisionAction::CancelTask => "You stopped this task",
         DecisionAction::ReportFailure => "Work stopped",
         DecisionAction::ReviewLocalResult => "Local work is ready to review",
         DecisionAction::AddNote => "Your direction was recorded",
         DecisionAction::ProposePlan => "Prepare a plan",
+        // The only remaining one is the person stopping the task.
+        _ => "You stopped this task",
     }
 }
 

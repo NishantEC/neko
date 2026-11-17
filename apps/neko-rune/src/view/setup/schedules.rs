@@ -12,7 +12,7 @@ use super::state::SetupSection;
 use super::words;
 use crate::app::App;
 use crate::icons;
-use crate::link::SetupCall;
+use crate::link::SetupAction;
 use crate::status::StatusKind;
 use crate::theme::Neko;
 use crate::view::ui::{MenuEntry, note, switch, with_menu};
@@ -72,23 +72,23 @@ fn schedule_row(s: &App, t: &Neko, layer: &mut Vec<El>, item: &Schedule) -> El {
         .child(text(item.prompt.clone()).font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0).help(item.prompt.clone()).a11y_hidden())
         .child(text(when.clone()).key(format!("schedule-when-{id}")).font(t.ty.meta).color(t.text.faint).truncate().min_w(0.0).max_w(260.0).help(item.timezone.clone()).a11y_hidden())
         .child(action(t, format!("schedule-run-{id}"), &format!("Run {} now", item.name), &icons::PLAY, move |s: &mut App| {
-            s.setup_call(SetupCall::RunSchedule { id: run.clone() });
+            s.setup_call(SetupAction::RunSchedule { id: run.clone() });
             s.show_toast("Queued a read-only plan. It appears as a task.");
         }))
         .child(action(t, format!("schedule-edit-{id}"), "Edit schedule", &icons::PENCIL, move |s: &mut App| s.open_schedule_dialog(Some(&edit), "")))
         .child(action(t, format!("schedule-delete-{id}"), "Delete schedule…", &icons::TRASH, move |s: &mut App| s.confirm_delete_schedule(&del)))
         .child(switch(t, &format!("schedule-switch-{id}"), &format!("{} {}", if enabled { "Pause" } else { "Enable" }, item.name), enabled, move |s: &mut App| {
             let on = s.setup_data().and_then(|d| d.schedules.iter().find(|x| x.id == sw)).is_some_and(|x| x.enabled);
-            s.setup_call(SetupCall::ScheduleEnabled { id: sw.clone(), enabled: !on })
+            s.setup_call(SetupAction::ScheduleEnabled { id: sw.clone(), enabled: !on })
         }));
     let mut entries: Vec<MenuEntry> = Vec::new();
     let (a, b, c, d) = (id.clone(), id.clone(), id.clone(), id.clone());
     entries.push(("Run now".to_owned(), std::rc::Rc::new(move |s: &mut App| {
-        s.setup_call(SetupCall::RunSchedule { id: a.clone() });
+        s.setup_call(SetupAction::RunSchedule { id: a.clone() });
         s.show_toast("Queued a read-only plan. It appears as a task.");
     })));
     entries.push(("Edit schedule…".to_owned(), std::rc::Rc::new(move |s: &mut App| s.open_schedule_dialog(Some(&b), ""))));
-    entries.push((if enabled { "Pause" } else { "Enable" }.to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupCall::ScheduleEnabled { id: c.clone(), enabled: !enabled }))));
+    entries.push((if enabled { "Pause" } else { "Enable" }.to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupAction::ScheduleEnabled { id: c.clone(), enabled: !enabled }))));
     entries.push(("Delete schedule…".to_owned(), std::rc::Rc::new(move |s: &mut App| s.confirm_delete_schedule(&d))));
     let mut out = col().key(format!("schedule-block-{id}")).w_full().child(with_menu(s, t, layer, &key, line, entries));
     if let Some(n) = note(s, t, &format!("setup:{id}")) {

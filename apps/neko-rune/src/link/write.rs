@@ -158,7 +158,7 @@ pub enum Call {
     /// Saves the mode (`system`, `light`, `dark`): what the web's Appearance page sets.
     SetAppearance { mode: String },
     /// One request of the Setup pages (Workspaces, Watching, Tools, Skills, Memory, Profiles, Schedules): `link/setup.rs`.
-    Setup(Box<super::SetupCall>),
+    Setup(Box<super::SetupAction>),
 }
 
 impl Call {

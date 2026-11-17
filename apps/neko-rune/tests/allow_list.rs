@@ -328,7 +328,7 @@ fn destructive_requests_are_only_sent_from_a_confirm_dialog() {
 fn setup_destroying_requests_are_only_sent_from_a_confirmation() {
     // A delete, a forget, a dismissed suggestion and a pause that revokes grants are built in `state.rs`'s `confirm_*`
     // functions (the coral button's dialog) and nowhere else: no view file builds one for a button to send directly.
-    let destroying = ["SetupCall::RemoveWatch", "SetupCall::RemoveSchedule", "SetupCall::ForgetMemory", "SetupCall::ForgetPreference"];
+    let destroying = ["SetupAction::RemoveWatch", "SetupAction::RemoveSchedule", "SetupAction::ForgetMemory", "SetupAction::ForgetPreference"];
     let mut built_in_state = 0;
     for (path, text) in crate_sources() {
         let name = path.to_string_lossy().into_owned();

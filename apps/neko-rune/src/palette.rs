@@ -275,7 +275,7 @@ mod tests {
         assert_eq!(sessions.len(), RECENT);
         assert!(sessions[0].starts_with("Task number 8"), "the newest first: {sessions:?}");
         let go: Vec<&str> = items.iter().filter(|i| i.section == Section::GoTo).map(|i| i.title.as_str()).collect();
-        for want in ["Go to Home", "Go to Routines", "Go to Calendar", "Go to Settings", "Go to Usage", "Go to Workspaces", "Go to Plugins", "Go to All sessions"] {
+        for want in ["Go to Home", "Go to Routines", "Go to Calendar", "Go to Settings", "Go to Usage", "Go to Setup", "Go to Plugins", "Go to All sessions"] {
             assert!(go.contains(&want), "{want} in {go:?}");
         }
         assert!(items.iter().any(|i| i.title == "Start selected session again"), "the selected session is failed: it can be started again");

@@ -13,7 +13,7 @@ use super::kit::{self, action, details_block, empty, glyph, list_row};
 use super::words;
 use crate::app::App;
 use crate::icons;
-use crate::link::SetupCall;
+use crate::link::SetupAction;
 use crate::status::StatusKind;
 use crate::theme::Neko;
 use crate::view::ui::{MenuEntry, note, pick, switch, with_menu};
@@ -140,11 +140,11 @@ fn proposal_row(s: &App, t: &Neko, layer: &mut Vec<El>, data: &crate::link::Setu
         .child(glyph(t, StatusKind::Todo, "Suggested"))
         .child(text(p.text.clone()).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0).help(p.text.clone()).a11y_hidden())
         .child(text(format!("{place} · {}", words::memory_source(&p.source))).font(t.ty.meta).color(t.text.faint).truncate().min_w(0.0).a11y_hidden())
-        .child(action(t, format!("memory-keep-{id}"), "Keep memory", &icons::CHECK_LINE, move |s: &mut App| s.setup_call(SetupCall::DecideMemory { id: keep.clone(), accept: true })))
-        .child(action(t, format!("memory-dismiss-{id}"), "Dismiss", &icons::CLOSE_SMALL, move |s: &mut App| s.setup_call(SetupCall::DecideMemory { id: drop.clone(), accept: false })));
+        .child(action(t, format!("memory-keep-{id}"), "Keep memory", &icons::CHECK_LINE, move |s: &mut App| s.setup_call(SetupAction::DecideMemory { id: keep.clone(), accept: true })))
+        .child(action(t, format!("memory-dismiss-{id}"), "Dismiss", &icons::CLOSE_SMALL, move |s: &mut App| s.setup_call(SetupAction::DecideMemory { id: drop.clone(), accept: false })));
     let _ = g;
     let (ma, mb) = (id.clone(), id.clone());
-    let entries: Vec<MenuEntry> = vec![("Keep memory".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupCall::DecideMemory { id: ma.clone(), accept: true }))), ("Dismiss".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupCall::DecideMemory { id: mb.clone(), accept: false })))];
+    let entries: Vec<MenuEntry> = vec![("Keep memory".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupAction::DecideMemory { id: ma.clone(), accept: true }))), ("Dismiss".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupAction::DecideMemory { id: mb.clone(), accept: false })))];
     let mut out = col().key(format!("memory-proposal-block-{id}")).w_full().child(with_menu(s, t, layer, &key, line, entries));
     if let Some(n) = note(s, t, &format!("setup:{id}")) {
         out = out.child(n);
@@ -209,24 +209,24 @@ fn preference_row(s: &App, t: &Neko, layer: &mut Vec<El>, data: &crate::link::Se
     let (k, e, d, f) = (id.clone(), id.clone(), id.clone(), id.clone());
     if !confirmed {
         let (w2, k2) = (ws.clone(), k.clone());
-        line = line.child(action(t, format!("preference-keep-{id}"), "Keep guidance", &icons::CHECK_LINE, move |s: &mut App| s.setup_call(SetupCall::KeepPreference { workspace_id: w2.clone(), id: k2.clone(), version })));
+        line = line.child(action(t, format!("preference-keep-{id}"), "Keep guidance", &icons::CHECK_LINE, move |s: &mut App| s.setup_call(SetupAction::KeepPreference { workspace_id: w2.clone(), id: k2.clone(), version })));
     }
     line = line.child(action(t, format!("preference-edit-{id}"), "Edit guidance", &icons::PENCIL, move |s: &mut App| s.open_preference_dialog(Some(&e))));
     if !dismissed {
         let (w2, d2) = (ws.clone(), d.clone());
-        line = line.child(action(t, format!("preference-dismiss-{id}"), "Dismiss guidance", &icons::CLOSE_SMALL, move |s: &mut App| s.setup_call(SetupCall::DismissPreference { workspace_id: w2.clone(), id: d2.clone(), version })));
+        line = line.child(action(t, format!("preference-dismiss-{id}"), "Dismiss guidance", &icons::CLOSE_SMALL, move |s: &mut App| s.setup_call(SetupAction::DismissPreference { workspace_id: w2.clone(), id: d2.clone(), version })));
     }
     line = line.child(action(t, format!("preference-forget-{id}"), "Forget guidance…", &icons::TRASH, move |s: &mut App| s.confirm_forget_preference(&f)));
     let mut entries: Vec<MenuEntry> = Vec::new();
     if !confirmed {
         let (w2, k2) = (ws.clone(), k.clone());
-        entries.push(("Keep guidance".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupCall::KeepPreference { workspace_id: w2.clone(), id: k2.clone(), version }))));
+        entries.push(("Keep guidance".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupAction::KeepPreference { workspace_id: w2.clone(), id: k2.clone(), version }))));
     }
     let me = id.clone();
     entries.push(("Edit…".to_owned(), std::rc::Rc::new(move |s: &mut App| s.open_preference_dialog(Some(&me)))));
     if !dismissed {
         let (w2, d2) = (ws.clone(), d.clone());
-        entries.push(("Dismiss".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupCall::DismissPreference { workspace_id: w2.clone(), id: d2.clone(), version }))));
+        entries.push(("Dismiss".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupAction::DismissPreference { workspace_id: w2.clone(), id: d2.clone(), version }))));
     }
     let mf = id.clone();
     entries.push(("Forget…".to_owned(), std::rc::Rc::new(move |s: &mut App| s.confirm_forget_preference(&mf))));

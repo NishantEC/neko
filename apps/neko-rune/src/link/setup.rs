@@ -1,5 +1,5 @@
 //! The Setup pages' data and requests (Workspaces, Watching, Tools, Skills, Memory, Profiles,
-//! Schedules). [`SetupData`] is what the client keeps of the workbench for them; [`SetupCall`] is one
+//! Schedules). [`SetupData`] is what the client keeps of the workbench for them; [`SetupAction`] is one
 //! request each of the web UI's setup pages sends (`pages/setup/*.tsx`), with the same fields, so a
 //! click here and a click there do the same thing. The daemon stays the only writer: every request
 //! answers with the new workbench, which carries the new [`SetupData`].
@@ -121,7 +121,7 @@ impl std::fmt::Debug for Hidden {
 
 /// One request of a setup page.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SetupCall {
+pub enum SetupAction {
     // Workspaces.
     SaveWorkspace { workspace: Workspace, folders: Vec<String> },
     /// Looks for connections other apps on this Mac configured, in these folders (the web's "Scan again").
@@ -171,11 +171,11 @@ pub enum SetupCall {
     RunSchedule { id: String },
 }
 
-impl SetupCall {
+impl SetupAction {
     /// The control a refusal shows next to: the page's `notes` key. Row actions name the row; a form's
     /// requests name the form (`setup:form`), the rest the page (`setup:page`).
     pub fn key(&self) -> String {
-        use SetupCall::*;
+        use SetupAction::*;
         let row = |id: &str| format!("setup:{id}");
         match self {
             Wake { id } | Authenticate { id, .. } | Refresh { id } | SetEnabled { id, .. } => row(id),
@@ -197,7 +197,7 @@ impl SetupCall {
 
     /// The request the daemon receives: the same JSON the web UI posts.
     pub fn wire(&self) -> Request {
-        use SetupCall::*;
+        use SetupAction::*;
         let mcp = |c: McpCommand| Request::Workbench(Command::Mcp(c));
         let skills = |c: SkillCommand| Request::Workbench(Command::Skills(c));
         let profile = |c: ProfileCommand| Request::Workbench(Command::AgentProfiles(c));
@@ -258,14 +258,14 @@ impl SetupCall {
 mod tests {
     use super::*;
 
-    fn json(call: &SetupCall) -> serde_json::Value {
+    fn json(call: &SetupAction) -> serde_json::Value {
         serde_json::to_value(call.wire()).unwrap()
     }
 
     #[test]
     fn a_workspace_is_saved_with_its_folders_as_the_web_does() {
         let ws = Workspace { id: String::new(), name: "acme".into(), repository: "/a".into(), instructions: "be brief".into(), away_enabled: false };
-        let body = json(&SetupCall::SaveWorkspace { workspace: ws, folders: vec!["/a".into(), "/b".into()] });
+        let body = json(&SetupAction::SaveWorkspace { workspace: ws, folders: vec!["/a".into(), "/b".into()] });
         let save = &body["Workbench"]["SaveWorkspaceWithFolders"];
         assert_eq!(save["workspace"]["name"], "acme");
         assert_eq!(save["folders"], serde_json::json!(["/a", "/b"]));
@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn tool_grants_use_the_connections_own_workspace_unless_one_is_named() {
-        let grant = |ws: &str| SetupCall::Grant { connection_id: "c".into(), workspace_id: ws.into(), tool: "search".into(), schema_hash: "h".into(), allowed: true };
+        let grant = |ws: &str| SetupAction::Grant { connection_id: "c".into(), workspace_id: ws.into(), tool: "search".into(), schema_hash: "h".into(), allowed: true };
         assert!(json(&grant(""))["Workbench"]["Mcp"]["SetToolGrant"].is_object());
         let named = json(&grant("w1"));
         assert_eq!(named["Workbench"]["Mcp"]["SetWorkspaceToolGrant"]["workspace_id"], "w1");
@@ -281,29 +281,29 @@ mod tests {
 
     #[test]
     fn a_watch_is_woken_renamed_and_removed_with_the_webs_fields() {
-        assert_eq!(json(&SetupCall::Wake { id: "r".into() })["Workbench"]["Mcp"]["Wake"]["responsibility_id"], "r");
-        assert_eq!(json(&SetupCall::RenameWatch { id: "r".into(), name: "N".into() })["Workbench"]["Mcp"]["RenameResponsibility"]["name"], "N");
-        assert_eq!(json(&SetupCall::RemoveWatch { id: "r".into() })["Workbench"]["Mcp"]["RemoveResponsibility"]["responsibility_id"], "r");
+        assert_eq!(json(&SetupAction::Wake { id: "r".into() })["Workbench"]["Mcp"]["Wake"]["responsibility_id"], "r");
+        assert_eq!(json(&SetupAction::RenameWatch { id: "r".into(), name: "N".into() })["Workbench"]["Mcp"]["RenameResponsibility"]["name"], "N");
+        assert_eq!(json(&SetupAction::RemoveWatch { id: "r".into() })["Workbench"]["Mcp"]["RemoveResponsibility"]["responsibility_id"], "r");
     }
 
     #[test]
     fn credentials_are_never_printed() {
-        let call = SetupCall::AddConnection { workspace_id: String::new(), label: "x".into(), config: ServerConfig::Http { url: "https://e.com/mcp".into() }, trust_local_process: false, credentials: Some(Hidden("s3cret".into())) };
+        let call = SetupAction::AddConnection { workspace_id: String::new(), label: "x".into(), config: ServerConfig::Http { url: "https://e.com/mcp".into() }, trust_local_process: false, credentials: Some(Hidden("s3cret".into())) };
         assert!(!format!("{call:?}").contains("s3cret"));
         assert_eq!(json(&call)["Workbench"]["Mcp"]["AddConnection"]["credentials"], "s3cret");
     }
 
     #[test]
     fn a_schedule_command_names_its_variant() {
-        assert_eq!(json(&SetupCall::RunSchedule { id: "s".into() })["Workbench"]["Schedules"]["RunNow"]["id"], "s");
-        assert_eq!(json(&SetupCall::ScheduleEnabled { id: "s".into(), enabled: true })["Workbench"]["Schedules"]["SetEnabled"]["enabled"], true);
+        assert_eq!(json(&SetupAction::RunSchedule { id: "s".into() })["Workbench"]["Schedules"]["RunNow"]["id"], "s");
+        assert_eq!(json(&SetupAction::ScheduleEnabled { id: "s".into(), enabled: true })["Workbench"]["Schedules"]["SetEnabled"]["enabled"], true);
     }
 
     #[test]
     fn a_refusal_lands_beside_the_control_that_asked() {
-        assert_eq!(SetupCall::Wake { id: "w1".into() }.key(), "setup:w1");
-        assert_eq!(SetupCall::SaveProfile(AgentProfile { id: String::new(), name: "n".into(), instructions: String::new() }).key(), "setup:form");
-        assert_eq!(SetupCall::SkillsRefresh.key(), "setup:page");
+        assert_eq!(SetupAction::Wake { id: "w1".into() }.key(), "setup:w1");
+        assert_eq!(SetupAction::SaveProfile(AgentProfile { id: String::new(), name: "n".into(), instructions: String::new() }).key(), "setup:form");
+        assert_eq!(SetupAction::SkillsRefresh.key(), "setup:page");
     }
 
     #[test]

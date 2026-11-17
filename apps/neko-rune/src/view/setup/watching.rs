@@ -100,7 +100,7 @@ fn watch_row(s: &App, t: &Neko, layer: &mut Vec<El>, data: &SetupData, w: &Respo
         .child(text(status.clone()).key(format!("watch-status-{id}")).font(t.ty.meta).color(if tone == Tone::Warning { t.meaning.amber } else { t.text.muted }).truncate().min_w(0.0).a11y_hidden());
     let (c, e, d) = (id.clone(), id.clone(), id.clone());
     let line = line
-        .child(action(t, format!("watch-check-{id}"), &format!("Check {title} now"), &icons::REFRESH, move |s: &mut App| s.setup_call(crate::link::SetupCall::Wake { id: c.clone() })))
+        .child(action(t, format!("watch-check-{id}"), &format!("Check {title} now"), &icons::REFRESH, move |s: &mut App| s.setup_call(crate::link::SetupAction::Wake { id: c.clone() })))
         .child(action(t, format!("watch-edit-{id}"), "Edit", &icons::PENCIL, move |s: &mut App| s.open_watch_dialog(Some(&e), "")))
         .child(action(t, format!("watch-delete-{id}"), "Delete watch…", &icons::TRASH, move |s: &mut App| s.confirm_delete_watch(&d)))
         .child(switch(t, &format!("watch-switch-{id}"), &format!("Watch {title}"), w.enabled, move |s: &mut App| {
@@ -112,7 +112,7 @@ fn watch_row(s: &App, t: &Neko, layer: &mut Vec<El>, data: &SetupData, w: &Respo
     let enabled = w.enabled;
     if enabled {
         let i = id.clone();
-        entries.push(("Check now".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(crate::link::SetupCall::Wake { id: i.clone() }))));
+        entries.push(("Check now".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(crate::link::SetupAction::Wake { id: i.clone() }))));
     }
     let i = id.clone();
     entries.push(("Edit…".to_owned(), std::rc::Rc::new(move |s: &mut App| s.open_watch_dialog(Some(&i), ""))));
@@ -164,7 +164,7 @@ fn details(s: &App, t: &Neko, data: &SetupData, w: &Responsibility) -> El {
         c = c.child(text(w.last_result.clone()).key(format!("watch-d-result-{id}")).font(t.ty.meta).color(t.text.base).wrap().min_w(0.0).px(8.0).py(8.0).radius(t.radius.row).fill(t.surface.hover));
     }
     let (a, b) = (id.to_owned(), id.to_owned());
-    let check = if w.enabled { quiet_button("Check now", &format!("watch-d-check-{id}"), t, move |s: &mut App| s.setup_call(crate::link::SetupCall::Wake { id: a.clone() })) } else { quiet_button("Check now", &format!("watch-d-check-{id}"), t, |_| {}).disabled(true) };
+    let check = if w.enabled { quiet_button("Check now", &format!("watch-d-check-{id}"), t, move |s: &mut App| s.setup_call(crate::link::SetupAction::Wake { id: a.clone() })) } else { quiet_button("Check now", &format!("watch-d-check-{id}"), t, |_| {}).disabled(true) };
     c.child(row().w_full().gap(8.0).px(8.0).pt(4.0).child(check).child(quiet_button("Edit watch", &format!("watch-d-edit-{id}"), t, move |s: &mut App| s.open_watch_dialog(Some(&b), ""))))
 }
 

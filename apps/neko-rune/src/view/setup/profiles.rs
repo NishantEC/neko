@@ -9,7 +9,7 @@ use super::Page;
 use super::kit::{self, action, details_block, empty, list_row};
 use crate::app::App;
 use crate::icons;
-use crate::link::SetupCall;
+use crate::link::SetupAction;
 use crate::theme::Neko;
 use crate::view::ui::{MenuEntry, note, with_menu};
 use crate::view::{primary_button, quiet_button};
@@ -52,7 +52,7 @@ fn profile_row(s: &App, t: &Neko, layer: &mut Vec<El>, p: &AgentProfile) -> El {
     }
     let (d, e) = (id.clone(), id.clone());
     if !active {
-        line = line.child(action(t, format!("profile-default-btn-{id}"), "Make default", &icons::CHECK_LINE, move |s: &mut App| s.setup_call(SetupCall::ActivateProfile { id: d.clone() })));
+        line = line.child(action(t, format!("profile-default-btn-{id}"), "Make default", &icons::CHECK_LINE, move |s: &mut App| s.setup_call(SetupAction::ActivateProfile { id: d.clone() })));
     }
     line = line.child(action(t, format!("profile-edit-{id}"), "Edit", &icons::PENCIL, move |s: &mut App| s.open_profile_dialog(Some(&e))));
 
@@ -62,11 +62,11 @@ fn profile_row(s: &App, t: &Neko, layer: &mut Vec<El>, p: &AgentProfile) -> El {
     entries.push(("Edit…".to_owned(), std::rc::Rc::new(move |s: &mut App| s.open_profile_dialog(Some(&me)))));
     if !active {
         let md = id.clone();
-        entries.push(("Make default".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupCall::ActivateProfile { id: md.clone() }))));
+        entries.push(("Make default".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupAction::ActivateProfile { id: md.clone() }))));
     }
     for w in &data.workspaces {
         let (ws, pid) = (w.id.clone(), id.clone());
-        entries.push((format!("Use in {}", w.name), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupCall::AssignProfile { workspace_id: ws.clone(), profile_id: pid.clone() }))));
+        entries.push((format!("Use in {}", w.name), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupAction::AssignProfile { workspace_id: ws.clone(), profile_id: pid.clone() }))));
     }
     let mut out = col().key(format!("profile-block-{id}")).w_full().child(with_menu(s, t, layer, &key, line, entries));
     if let Some(n) = note(s, t, &format!("setup:{id}")) {
@@ -80,7 +80,7 @@ fn profile_row(s: &App, t: &Neko, layer: &mut Vec<El>, p: &AgentProfile) -> El {
             for w in &data.workspaces {
                 let assigned = info.owner(&w.id) == p.id;
                 let (ws, pid) = (w.id.clone(), id.clone());
-                let b = quiet_button(&w.name, &format!("profile-use-{id}-{}", w.id), t, move |s: &mut App| s.setup_call(SetupCall::AssignProfile { workspace_id: ws.clone(), profile_id: pid.clone() }));
+                let b = quiet_button(&w.name, &format!("profile-use-{id}-{}", w.id), t, move |s: &mut App| s.setup_call(SetupAction::AssignProfile { workspace_id: ws.clone(), profile_id: pid.clone() }));
                 uses = uses.child(if assigned { b.fill(t.surface.selected).help("Used in this workspace") } else { b });
             }
             c = c.child(uses);
@@ -92,7 +92,7 @@ fn profile_row(s: &App, t: &Neko, layer: &mut Vec<El>, p: &AgentProfile) -> El {
         for other in others {
             let granted = info.read_grants.iter().any(|g| g.reader_id == p.id && g.source_id == other.id);
             let (r, o) = (id.clone(), other.id.clone());
-            c = c.child(row().w_full().px(8.0).min_h(28.0).center_y().child(kit::check(t, &format!("profile-grant-{id}-{}", other.id), &format!("Can read {}’s general memories", other.name), granted, move |s: &mut App| s.setup_call(SetupCall::ReadGrant { reader: r.clone(), source: o.clone(), allowed: !granted }))));
+            c = c.child(row().w_full().px(8.0).min_h(28.0).center_y().child(kit::check(t, &format!("profile-grant-{id}-{}", other.id), &format!("Can read {}’s general memories", other.name), granted, move |s: &mut App| s.setup_call(SetupAction::ReadGrant { reader: r.clone(), source: o.clone(), allowed: !granted }))));
         }
         out = out.child(c);
     }

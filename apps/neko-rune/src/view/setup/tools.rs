@@ -11,7 +11,7 @@ use super::kit::{self, action, details_block, empty, glyph, list_row};
 use super::words::{self, Conn};
 use crate::app::App;
 use crate::icons;
-use crate::link::SetupCall;
+use crate::link::SetupAction;
 use crate::theme::Neko;
 use crate::view::ui::{MenuEntry, note, pick, switch_when, with_menu};
 use crate::view::{primary_button, quiet_button};
@@ -71,7 +71,7 @@ fn connection_row(s: &App, t: &Neko, layer: &mut Vec<El>, c: &McpConnection) -> 
     }
     let (rf, en) = (id.clone(), id.clone());
     let enabled = c.enabled;
-    line = line.child(action(t, format!("conn-refresh-{id}"), &format!("Refresh {} tools", c.label), &icons::REFRESH, move |s: &mut App| s.setup_call(SetupCall::Refresh { id: rf.clone() })));
+    line = line.child(action(t, format!("conn-refresh-{id}"), &format!("Refresh {} tools", c.label), &icons::REFRESH, move |s: &mut App| s.setup_call(SetupAction::Refresh { id: rf.clone() })));
     line = line.child(switch_when(t, &format!("conn-switch-{id}"), &format!("{} {}", if enabled { "Pause" } else { "Enable" }, c.label), enabled, true, move |s: &mut App| s.toggle_connection(&en)));
 
     let mut entries: Vec<MenuEntry> = Vec::new();
@@ -83,7 +83,7 @@ fn connection_row(s: &App, t: &Neko, layer: &mut Vec<El>, c: &McpConnection) -> 
     }
     if enabled {
         let i = id.clone();
-        entries.push(("Refresh tools".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupCall::Refresh { id: i.clone() }))));
+        entries.push(("Refresh tools".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup_call(SetupAction::Refresh { id: i.clone() }))));
     }
     let i = id.clone();
     entries.push((if enabled { "Pause connection" } else { "Enable connection" }.to_owned(), std::rc::Rc::new(move |s: &mut App| s.toggle_connection(&i))));
@@ -126,14 +126,14 @@ fn detail(s: &App, t: &Neko, layer: &mut Vec<El>, c: &McpConnection) -> Page {
         actions = actions.child(primary_button(r.label(), "tool-reconnect", t, move |s: &mut App| s.reconnect(&i)));
     }
     let (rf, en) = (id.clone(), id.clone());
-    actions = actions.child(if c.enabled { quiet_button("Refresh tools", "tool-refresh", t, move |s: &mut App| s.setup_call(SetupCall::Refresh { id: rf.clone() })) } else { quiet_button("Refresh tools", "tool-refresh", t, |_| {}).disabled(true) });
+    actions = actions.child(if c.enabled { quiet_button("Refresh tools", "tool-refresh", t, move |s: &mut App| s.setup_call(SetupAction::Refresh { id: rf.clone() })) } else { quiet_button("Refresh tools", "tool-refresh", t, |_| {}).disabled(true) });
     let enabled = c.enabled;
     actions = actions.child(quiet_button(if enabled { "Pause connection" } else { "Enable connection" }, "tool-pause", t, move |s: &mut App| s.toggle_connection(&en)));
     if matches!(c.config, ServerConfig::Http { .. }) && words::reconnect_action(c).is_none() && c.enabled {
         let i = id.clone();
         actions = actions.child(quiet_button("Sign in", "tool-signin", t, move |s: &mut App| {
             let client = s.pages.text("conn:client").trim().to_owned();
-            s.setup_call(SetupCall::Authenticate { id: i.clone(), client_id: (!client.is_empty()).then_some(client) });
+            s.setup_call(SetupAction::Authenticate { id: i.clone(), client_id: (!client.is_empty()).then_some(client) });
             s.show_toast("Finish signing in in your browser.");
         }));
     }

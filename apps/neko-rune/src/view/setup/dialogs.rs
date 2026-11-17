@@ -382,7 +382,7 @@ fn confirm(s: &App, t: &Neko, layer: &mut Vec<El>, win_h: f32, c: &Confirm) {
         body = body.child(text(line.to_owned()).key(format!("confirm-line-{i}")).font(t.ty.meta).color(t.text.muted).wrap().min_w(0.0));
     }
     // A refusal of any of its requests, or of the form it came from, shows here.
-    let mut keys: Vec<String> = c.calls.iter().map(crate::link::SetupCall::key).collect();
+    let mut keys: Vec<String> = c.calls.iter().map(crate::link::SetupAction::key).collect();
     keys.dedup();
     for k in keys {
         if let Some(n) = note(s, t, &k) {

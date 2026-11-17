@@ -9,7 +9,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use neko_rune::app::{App, Dispatch};
-use neko_rune::link::{Call, SetupCall};
+use neko_rune::link::{Call, SetupAction};
 use neko_rune::scenes;
 use neko_rune::view::setup::{AddTab, Dialog, SetupSection};
 use neko_rune::view::view;
@@ -46,17 +46,28 @@ fn fill(rt: &mut Runtime<App>, key: &str, text: &str) {
 }
 
 fn scene(name: &str) -> Runtime<App> {
+    scene_in(name, WINDOW)
+}
+
+fn scene_in(name: &str, window: (f32, f32)) -> Runtime<App> {
     let mut app = App::headless();
     let (_, f) = scenes::SCENES.iter().find(|(n, _)| *n == name).unwrap_or_else(|| panic!("no scene {name}"));
     f(&mut app);
     app.outbox.clear();
-    let mut rt = Runtime::new(app, view, WINDOW, Env { system_dark: true, scale: 1.0 });
+    let mut rt = Runtime::new(app, view, window, Env { system_dark: true, scale: 1.0 });
     rt.frame(0.0);
     settle(&mut rt);
     rt
 }
 
-fn sent(rt: &Runtime<App>) -> Vec<SetupCall> {
+/// Without a daemon nothing answers, so a form stays open: this closes it as the answer would.
+fn answered(rt: &mut Runtime<App>) {
+    rt.update(|s, _| s.close_dialog());
+    settle(rt);
+    rt.state.outbox.clear();
+}
+
+fn sent(rt: &Runtime<App>) -> Vec<SetupAction> {
     rt.state.outbox.iter().filter_map(|c| if let Call::Setup(s) = c { Some((**s).clone()) } else { None }).collect()
 }
 
@@ -64,7 +75,7 @@ fn sent(rt: &Runtime<App>) -> Vec<SetupCall> {
 
 #[test]
 fn the_rail_lists_the_seven_sections_in_order_and_each_opens_its_own_page() {
-    let mut rt = scene("setup-workspaces");
+    let mut rt = scene_in("setup-workspaces", (1800.0, 900.0));
     let order: Vec<&str> = SetupSection::ALL.iter().map(|s| s.title()).collect();
     assert_eq!(order, ["Workspaces", "Watching", "Tools", "Skills", "Memory", "Profiles", "Schedules"]);
     let rail = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("setup-rail")).expect("the rail").rect;
@@ -76,7 +87,7 @@ fn the_rail_lists_the_seven_sections_in_order_and_each_opens_its_own_page() {
         click(&mut rt, &key);
         assert_eq!(rt.state.setup.section, s);
         assert!(rt.find(&format!("full-setup-{}", s.key())).is_some(), "{} has its page", s.title());
-        assert_eq!(texts(&rt).iter().filter(|t| *t == s.title()).count().min(2) >= 1, true);
+        assert!(texts(&rt).iter().any(|t| t == s.title()), "{} is a title", s.title());
     }
     assert!(ys.windows(2).all(|w| w[0] < w[1]), "top to bottom in that order: {ys:?}");
 }
@@ -108,12 +119,13 @@ fn a_status_glyph_says_connected_needs_sign_in_or_failed() {
 #[test]
 fn every_destructive_action_asks_first_and_sends_only_when_confirmed() {
     // (scene, the button that starts it, what the confirmation says, the request after "yes")
-    let cases: [(&str, &str, &str, fn(&SetupCall) -> bool); 5] = [
-        ("setup-watching", "watch-delete-r1", "Delete watch", |c| matches!(c, SetupCall::RemoveWatch { id } if id == "r1")),
-        ("setup-schedules", "schedule-delete-s2", "Delete schedule", |c| matches!(c, SetupCall::RemoveSchedule { id } if id == "s2")),
-        ("setup-memory", "memory-forget-m1", "Forget memory", |c| matches!(c, SetupCall::ForgetMemory { id } if id == "m1")),
-        ("setup-memory", "preference-forget-g1", "Forget guidance", |c| matches!(c, SetupCall::ForgetPreference { id, .. } if id == "g1")),
-        ("setup-tools", "conn-switch-c1", "Pause & revoke access", |c| matches!(c, SetupCall::SetEnabled { id, enabled: false } if id == "c1")),
+    #[allow(clippy::type_complexity)]
+    let cases: [(&str, &str, &str, fn(&SetupAction) -> bool); 5] = [
+        ("setup-watching", "watch-delete-r1", "Delete watch", |c| matches!(c, SetupAction::RemoveWatch { id } if id == "r1")),
+        ("setup-schedules", "schedule-delete-s2", "Delete schedule", |c| matches!(c, SetupAction::RemoveSchedule { id } if id == "s2")),
+        ("setup-memory", "memory-forget-m1", "Forget memory", |c| matches!(c, SetupAction::ForgetMemory { id } if id == "m1")),
+        ("setup-memory", "preference-forget-g1", "Forget guidance", |c| matches!(c, SetupAction::ForgetPreference { id, .. } if id == "g1")),
+        ("setup-tools", "conn-switch-c1", "Pause & revoke access", |c| matches!(c, SetupAction::SetEnabled { id, enabled: false } if id == "c1")),
     ];
     for (name, start, button, is_it) in cases {
         let mut rt = scene(name);
@@ -142,10 +154,10 @@ fn a_watch_is_turned_on_only_after_it_says_what_that_allows_and_then_checks_at_o
     click(&mut rt, "suggestion-on-r3");
     assert!(has_text(&rt, "Turn on this watch?") && has_text(&rt, "Allows unattended checks every 10 minutes"), "{:?}", texts(&rt));
     click(&mut rt, "confirm-yes");
-    assert!(matches!(sent(&rt).as_slice(), [SetupCall::SaveWatch(w)] if w.enabled && w.id == "r3"), "{:?}", sent(&rt));
+    assert!(matches!(sent(&rt).as_slice(), [SetupAction::SaveWatch(w)] if w.enabled && w.id == "r3"), "{:?}", sent(&rt));
     // The wake follows the daemon's answer, not the click.
-    rt.update(|s, _| s.setup_applied(&SetupCall::Wake { id: "r3".into() }));
-    assert!(sent(&rt).iter().any(|c| matches!(c, SetupCall::Wake { id } if id == "r3")), "{:?}", sent(&rt));
+    rt.update(|s, _| s.setup_applied(&SetupAction::Wake { id: "r3".into() }));
+    assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::Wake { id } if id == "r3")), "{:?}", sent(&rt));
 }
 
 #[test]
@@ -169,7 +181,7 @@ fn a_form_that_is_not_ready_says_what_is_missing_and_sends_nothing() {
     assert!(has_text(&rt, "/work/scratch-notes/"));
     click(&mut rt, "dlg-ws-save");
     let ws = sent(&rt);
-    assert!(matches!(ws.as_slice(), [SetupCall::SaveWorkspace { workspace, folders }] if workspace.name == "scratch-notes" && workspace.repository == "/work/scratch-notes/" && folders.len() == 1), "{ws:?}");
+    assert!(matches!(ws.as_slice(), [SetupAction::SaveWorkspace { workspace, folders }] if workspace.name == "scratch-notes" && workspace.repository == "/work/scratch-notes/" && folders.len() == 1), "{ws:?}");
 }
 
 #[test]
@@ -189,7 +201,7 @@ fn a_local_connection_needs_its_trust_and_credentials_never_show() {
     rt.update(|s, _| s.connection_form_trust());
     settle(&mut rt);
     click(&mut rt, "dlg-conn-save");
-    assert!(matches!(sent(&rt).as_slice(), [SetupCall::AddConnection { trust_local_process: true, credentials: Some(_), .. }]));
+    assert!(matches!(sent(&rt).as_slice(), [SetupAction::AddConnection { trust_local_process: true, credentials: Some(_), .. }]));
     assert!(!format!("{:?}", rt.state.outbox).contains("s3cret-token"), "a secret is never printed");
     assert!(!texts(&rt).iter().any(|t| t.contains("s3cret-token")), "and never shown");
 }
@@ -221,7 +233,7 @@ fn the_registry_search_shows_hosted_servers_and_says_why_when_it_cannot() {
     click(&mut rt, "dlg-registry-acme-mcp");
     assert!(has_text(&rt, "https://mcp.acme.example/mcp"));
     click(&mut rt, "dlg-registry-add");
-    assert!(matches!(sent(&rt).as_slice(), [SetupCall::AddConnection { label, config, credentials: None, .. }] if label == "acme-mcp" && matches!(config, neko_protocol::mcp_host::ServerConfig::Http { url } if url == "https://mcp.acme.example/mcp")), "{:?}", sent(&rt));
+    assert!(matches!(sent(&rt).as_slice(), [SetupAction::AddConnection { label, config, credentials: None, .. }] if label == "acme-mcp" && matches!(config, neko_protocol::mcp_host::ServerConfig::Http { url } if url == "https://mcp.acme.example/mcp")), "{:?}", sent(&rt));
 }
 
 #[test]
@@ -229,28 +241,28 @@ fn a_tool_is_allowed_per_workspace_through_the_right_request() {
     let mut rt = scene("setup-tool-detail");
     // The global tracker is granted per workspace (the one shown); a connection that belongs to a workspace uses its own.
     click(&mut rt, "tool-get_issue-grant");
-    assert!(matches!(sent(&rt).as_slice(), [SetupCall::Grant { connection_id, workspace_id, tool, allowed: true, .. }] if connection_id == "c1" && workspace_id == "w1" && tool == "get_issue"), "{:?}", sent(&rt));
+    assert!(matches!(sent(&rt).as_slice(), [SetupAction::Grant { connection_id, workspace_id, tool, allowed: true, .. }] if connection_id == "c1" && workspace_id == "w1" && tool == "get_issue"), "{:?}", sent(&rt));
     rt.update(|s, _| s.open_connection("c3"));
     settle(&mut rt);
     rt.state.outbox.clear();
     // c3 is broken: it cannot be granted until it works.
     rt.update(|s, _| s.set_tool_grant("c3", "x", "h", true));
-    assert!(matches!(sent(&rt).as_slice(), [SetupCall::Grant { workspace_id, .. }] if workspace_id.is_empty()), "the connection's own workspace: {:?}", sent(&rt));
+    assert!(matches!(sent(&rt).as_slice(), [SetupAction::Grant { workspace_id, .. }] if workspace_id.is_empty()), "the connection's own workspace: {:?}", sent(&rt));
 }
 
 #[test]
 fn skills_enable_lock_and_apply_or_reject_a_proposal() {
-    let mut rt = scene("setup-skills");
+    let mut rt = scene_in("setup-skills", (1360.0, 1700.0));
     click(&mut rt, "skill-switch-bug-triage");
-    assert!(matches!(sent(&rt).as_slice(), [SetupCall::SkillEnable { enabled: true, path, .. }] if path.ends_with("bug-triage/SKILL.md")), "{:?}", sent(&rt));
+    assert!(matches!(sent(&rt).as_slice(), [SetupAction::SkillEnable { enabled: true, path, .. }] if path.ends_with("bug-triage/SKILL.md")), "{:?}", sent(&rt));
     click(&mut rt, "skill-lock-code-review");
-    assert!(sent(&rt).iter().any(|c| matches!(c, SetupCall::SkillLock { locked: true, .. })));
+    assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::SkillLock { locked: true, .. })));
     // A proposal that improves a skill shows its diff; Apply and Reject decide it.
     assert!(rt.find("proposal-body-p1").is_some() && has_text(&rt, "+Skip style notes a formatter would fix."));
     click(&mut rt, "proposal-apply-btn-p1");
-    assert!(sent(&rt).iter().any(|c| matches!(c, SetupCall::SkillDecide { id, accept: true, .. } if id == "p1")));
+    assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::SkillDecide { id, accept: true, .. } if id == "p1")));
     click(&mut rt, "proposal-reject-btn-p1");
-    assert!(sent(&rt).iter().any(|c| matches!(c, SetupCall::SkillDecide { id, accept: false, .. } if id == "p1")));
+    assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::SkillDecide { id, accept: false, .. } if id == "p1")));
     // A proposal with a published audit: Apply waits for the person to open it and confirm they read it.
     rt.update(|s, _| s.toggle_row("proposal:p2"));
     settle(&mut rt);
@@ -260,7 +272,7 @@ fn skills_enable_lock_and_apply_or_reject_a_proposal() {
     assert!(sent(&rt).is_empty(), "Apply is held until the audit is confirmed");
     click(&mut rt, "proposal-view-audit-p2");
     click(&mut rt, "proposal-confirm-p2");
-    assert!(sent(&rt).iter().any(|c| matches!(c, SetupCall::SkillAudit { id, .. } if id == "p2")), "{:?}", sent(&rt));
+    assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::SkillAudit { id, .. } if id == "p2")), "{:?}", sent(&rt));
 }
 
 #[test]
@@ -269,24 +281,25 @@ fn memory_adds_edits_and_filters_and_guidance_is_kept_or_dismissed() {
     click(&mut rt, "mem-add");
     fill(&mut rt, "dlg:text", "Prefer small pull requests.");
     click(&mut rt, "dlg-mem-save");
-    assert!(matches!(sent(&rt).as_slice(), [SetupCall::SaveMemory(m)] if m.id.is_empty() && m.text == "Prefer small pull requests." && m.source == "user" && m.workspace_id.is_none()), "{:?}", sent(&rt));
-    rt.state.outbox.clear();
+    assert!(matches!(sent(&rt).as_slice(), [SetupAction::SaveMemory(m)] if m.id.is_empty() && m.text == "Prefer small pull requests." && m.source == "user" && m.workspace_id.is_none()), "{:?}", sent(&rt));
+    answered(&mut rt);
     click(&mut rt, "memory-edit-m3");
     assert_eq!(rt.state.pages.text("dlg:text"), "Run the check script before every push; it takes about a minute.");
     fill(&mut rt, "dlg:text", "Run the check script before every push.");
     click(&mut rt, "dlg-mem-save");
-    assert!(matches!(sent(&rt).as_slice(), [SetupCall::SaveMemory(m)] if m.id == "m3" && m.workspace_id.as_deref() == Some("w1") && m.text == "Run the check script before every push."), "{:?}", sent(&rt));
+    assert!(matches!(sent(&rt).as_slice(), [SetupAction::SaveMemory(m)] if m.id == "m3" && m.workspace_id.as_deref() == Some("w1") && m.text == "Run the check script before every push."), "{:?}", sent(&rt));
+    answered(&mut rt);
     // Search narrows the list.
     fill(&mut rt, "mem:search", "retries");
     assert!(rt.find("memory-m4").is_some() && rt.find("memory-m1").is_none());
     fill(&mut rt, "mem:search", "");
     rt.state.outbox.clear();
     click(&mut rt, "memory-keep-mp1");
-    assert!(matches!(sent(&rt).as_slice(), [SetupCall::DecideMemory { id, accept: true }] if id == "mp1"));
+    assert!(matches!(sent(&rt).as_slice(), [SetupAction::DecideMemory { id, accept: true }] if id == "mp1"));
     click(&mut rt, "preference-keep-g1");
-    assert!(sent(&rt).iter().any(|c| matches!(c, SetupCall::KeepPreference { id, version: 2, .. } if id == "g1")));
+    assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::KeepPreference { id, version: 2, .. } if id == "g1")));
     click(&mut rt, "mem-switch-learning");
-    assert!(sent(&rt).iter().any(|c| matches!(c, SetupCall::SetMemoryOptions(o) if !o.learning && o.use_memory)));
+    assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::SetMemoryOptions(o) if !o.learning && o.use_memory)));
 }
 
 #[test]
@@ -296,15 +309,15 @@ fn profiles_save_assign_default_and_share_memories() {
     fill(&mut rt, "dlg:name", "Writer");
     fill(&mut rt, "dlg:text", "Short sentences.");
     click(&mut rt, "dlg-profile-save");
-    assert!(matches!(sent(&rt).as_slice(), [SetupCall::SaveProfile(p)] if p.id.is_empty() && p.name == "Writer" && p.instructions == "Short sentences."), "{:?}", sent(&rt));
-    rt.state.outbox.clear();
+    assert!(matches!(sent(&rt).as_slice(), [SetupAction::SaveProfile(p)] if p.id.is_empty() && p.name == "Writer" && p.instructions == "Short sentences."), "{:?}", sent(&rt));
+    answered(&mut rt);
     click(&mut rt, "profile-default-btn-reviewer");
-    assert!(matches!(sent(&rt).as_slice(), [SetupCall::ActivateProfile { id }] if id == "reviewer"));
+    assert!(matches!(sent(&rt).as_slice(), [SetupAction::ActivateProfile { id }] if id == "reviewer"));
     // Open, "Use in" a workspace, and the read grant.
     click(&mut rt, "profile-use-reviewer-w1");
-    assert!(sent(&rt).iter().any(|c| matches!(c, SetupCall::AssignProfile { workspace_id, profile_id } if workspace_id == "w1" && profile_id == "reviewer")));
+    assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::AssignProfile { workspace_id, profile_id } if workspace_id == "w1" && profile_id == "reviewer")));
     click(&mut rt, "profile-grant-reviewer-default");
-    assert!(sent(&rt).iter().any(|c| matches!(c, SetupCall::ReadGrant { reader, source, allowed: false } if reader == "reviewer" && source == "default")), "{:?}", sent(&rt));
+    assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::ReadGrant { reader, source, allowed: false } if reader == "reviewer" && source == "default")), "{:?}", sent(&rt));
 }
 
 #[test]
@@ -316,18 +329,18 @@ fn schedules_save_paused_enable_and_run_now() {
     fill(&mut rt, "sch:time", "18:30");
     click(&mut rt, "dlg-sch-save");
     let calls = sent(&rt);
-    assert!(matches!(calls.as_slice(), [SetupCall::SaveSchedule(s)] if s.id.is_empty() && !s.enabled && s.rule == "FREQ=DAILY;BYHOUR=18;BYMINUTE=30" && s.workspace_id.as_deref() == Some("w1") && !s.timezone.is_empty()), "saving always pauses: {calls:?}");
-    rt.state.outbox.clear();
+    assert!(matches!(calls.as_slice(), [SetupAction::SaveSchedule(s)] if s.id.is_empty() && !s.enabled && s.rule == "FREQ=DAILY;BYHOUR=18;BYMINUTE=30" && s.workspace_id.as_deref() == Some("w1") && !s.timezone.is_empty()), "saving always pauses: {calls:?}");
+    answered(&mut rt);
     click(&mut rt, "schedule-switch-s2");
-    assert!(matches!(sent(&rt).as_slice(), [SetupCall::ScheduleEnabled { id, enabled: true }] if id == "s2"));
+    assert!(matches!(sent(&rt).as_slice(), [SetupAction::ScheduleEnabled { id, enabled: true }] if id == "s2"));
     click(&mut rt, "schedule-run-s1");
-    assert!(sent(&rt).iter().any(|c| matches!(c, SetupCall::RunSchedule { id } if id == "s1")));
+    assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::RunSchedule { id } if id == "s1")));
     // Editing keeps its anchor and workspace and pauses it again.
     rt.state.outbox.clear();
     click(&mut rt, "schedule-edit-s1");
     assert_eq!(rt.state.pages.text("sch:time"), "08:30");
     click(&mut rt, "dlg-sch-save");
-    assert!(matches!(sent(&rt).as_slice(), [SetupCall::SaveSchedule(s)] if s.id == "s1" && !s.enabled && s.rule == "FREQ=DAILY;BYHOUR=8;BYMINUTE=30" && s.anchor_ms != 0), "{:?}", sent(&rt));
+    assert!(matches!(sent(&rt).as_slice(), [SetupAction::SaveSchedule(s)] if s.id == "s1" && !s.enabled && s.rule == "FREQ=DAILY;BYHOUR=8;BYMINUTE=30" && s.anchor_ms != 0), "{:?}", sent(&rt));
 }
 
 #[test]
@@ -484,7 +497,9 @@ fn daemon_workspaces_are_created_and_edited_through_the_dialog() {
     click(&mut rt, "dlg-ws-save");
     assert!(rt.state.setup.dialog.is_none(), "the daemon took it: {:?}", rt.state.pages.notes);
     let made = data(&rt).workspaces.iter().find(|w| w.name == "Scratch notes").cloned().expect("the new workspace");
-    assert_eq!((made.instructions.as_str(), data(&rt).folders_of(&made)), ("Keep it small.", vec![folder.clone()]));
+    // The daemon keeps the real path (`/tmp` is `/private/tmp` on a Mac).
+    let kept = data(&rt).folders_of(&made);
+    assert!(made.instructions == "Keep it small." && kept.len() == 1 && std::fs::canonicalize(&kept[0]).ok() == std::fs::canonicalize(&folder).ok(), "{kept:?}");
     // Edit: its details are indented rows under it; its instructions change.
     click(&mut rt, &format!("ws-edit-{}", made.id));
     assert_eq!(rt.state.pages.text("dlg:name"), "Scratch notes");
@@ -492,7 +507,7 @@ fn daemon_workspaces_are_created_and_edited_through_the_dialog() {
     click(&mut rt, "dlg-ws-save");
     assert_eq!(data(&rt).workspace(&made.id).map(|w| w.instructions.as_str()), Some("Keep it small and tested."));
     click(&mut rt, &format!("ws-{}", made.id));
-    assert!(rt.find(&format!("ws-details-{}", made.id)).is_some() && has_text(&rt, &folder));
+    assert!(rt.find(&format!("ws-details-{}", made.id)).is_some() && has_text(&rt, &kept[0]));
     // Sync now with nothing to wake says so beside the row.
     click(&mut rt, &format!("ws-sync-{}", made.id));
     assert!(has_text(&rt, "No active watches to sync here."), "{:?}", texts(&rt));
@@ -635,10 +650,15 @@ fn daemon_profiles_are_saved_assigned_and_made_the_default() {
     click(&mut rt, &format!("profile-default-btn-{}", p.id));
     assert_eq!(data(&rt).profiles.active_profile_id, p.id);
     // Open it and use it in a workspace.
+    // A workspace with tickets cannot change its agent (the daemon says so beside the profile); an empty one can.
+    let folder = format!("{}-files", h.data.display());
+    std::fs::create_dir_all(&folder).unwrap();
+    rt.update(move |s, _| s.setup_call(SetupAction::SaveWorkspace { workspace: neko_protocol::workbench::Workspace { id: String::new(), name: "Quiet".into(), repository: folder.clone(), instructions: String::new(), away_enabled: false }, folders: vec![folder] }));
+    settle(&mut rt);
+    let ws = data(&rt).workspaces.iter().find(|w| w.name == "Quiet").expect("the quiet workspace").id.clone();
     click(&mut rt, &format!("profile-{}", p.id));
-    let ws = data(&rt).workspaces[0].id.clone();
     click(&mut rt, &format!("profile-use-{}-{ws}", p.id));
-    assert_eq!(data(&rt).profiles.owner(&ws), p.id);
+    assert_eq!(data(&rt).profiles.owner(&ws), p.id, "{:?}", rt.state.pages.notes);
     // And let it read the original's memories.
     click(&mut rt, &format!("profile-grant-{}-default", p.id));
     assert!(data(&rt).profiles.read_grants.iter().any(|g| g.reader_id == p.id && g.source_id == "default"), "{:?}", rt.state.pages.notes);
