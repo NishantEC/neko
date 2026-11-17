@@ -112,7 +112,7 @@ fn the_tree_has_the_four_regions_and_no_layout_warnings() {
         let t = tree("live", theme);
         assert_eq!(t["title"], "Neko (Rune)");
         assert_eq!(t["warnings"].as_array().unwrap().len(), 0, "{theme}: {}", t["warnings"]);
-        for key in ["sessions", "session-region", "neko", "group-0", "group-1", "group-2", "session-t0", "composer-input", "steer-trigger", "crew", "inbox", "ask", "grip-sessions", "grip-neko", "view-calendar", "view-inbox", "view-workspaces", "account", "sessions-search", "new-session"] {
+        for key in ["sessions", "session-region", "neko", "group-0", "group-1", "group-2", "session-t0", "composer-input", "steer-trigger", "crew", "inbox", "ask", "grip-sessions", "grip-neko", "view-calendar", "view-inbox", "view-setup", "account", "sessions-search", "new-session"] {
             assert!(element(&t, key).is_some(), "{theme}: {key}");
         }
         assert!(element(&t, "context").is_none(), "the context panel starts closed");

@@ -157,6 +157,8 @@ pub enum Call {
     SetDevCheckout { path: String },
     /// Saves the mode (`system`, `light`, `dark`): what the web's Appearance page sets.
     SetAppearance { mode: String },
+    /// One request of the Setup pages (Workspaces, Watching, Tools, Skills, Memory, Profiles, Schedules): `link/setup.rs`.
+    Setup(Box<super::SetupCall>),
 }
 
 impl Call {
@@ -281,6 +283,7 @@ impl Call {
             Call::UpdateNow => Request::Workbench(Command::UpdateNekoNow),
             Call::ApplyUpdate => Request::Workbench(Command::ApplyPendingUpdate),
             Call::SetDevCheckout { path } => Request::Workbench(Command::SetDevCheckout { path }),
+            Call::Setup(call) => call.wire(),
         }
     }
 }

@@ -725,6 +725,9 @@ impl App {
                     && let Some(key) = crate::pages::control_key(call)
                 {
                     self.pages.notes.remove(&key);
+                    if let Call::Setup(setup) = call {
+                        self.setup_applied(setup);
+                    }
                     if matches!(call, Call::SavePhone(_) | Call::PhoneTest) {
                         self.pages.notes.retain(|k, _| !k.starts_with("setting:phone"));
                     }

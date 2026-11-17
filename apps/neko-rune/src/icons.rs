@@ -74,6 +74,13 @@ icon_body!(EDIT, "edit", r#"<path d="M9.5 3.5L12.5 6.5M3 13L3.6 10L10.8 2.8C11.2
 icon_body!(SEND_NOW, "send-now", r#"<path d="M3.5 12.5V8.5A2 2 0 0 1 5.5 6.5H12M9 3.5L12 6.5L9 9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
 icon_body!(DONE, "done", r#"<circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.7 8.3L7.3 9.9L10.4 6.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
 
+// The Setup pages' row actions (edit, delete, sync or refresh, sign in).
+icon_body!(PENCIL, "pencil", r#"<path d="M3 13L3.6 10.2L10.8 3L13 5.2L5.8 12.4L3 13Z M9.4 4.4L11.6 6.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(TRASH, "trash", r#"<path d="M3 4.5H13M6.2 4.5V3H9.8V4.5M4.5 4.5L5 13H11L11.5 4.5M7 7V10.5M9 7V10.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(REFRESH, "refresh", r#"<path d="M13 8A5 5 0 1 1 11.2 4.2M13 2.5V5H10.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(LOCK, "lock", r#"<rect x="3.5" y="7" width="9" height="6.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 7V5.2C5.5 3.9 6.6 3 8 3C9.4 3 10.5 3.9 10.5 5.2V7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
+icon_body!(KEY, "key", r#"<circle cx="5.5" cy="10.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7.3 8.7L13 3M11 5L12.5 6.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
+
 /// A progress ring's arc of `fraction` (0 to 1) on the 16-unit grid: 2 px stroke, starting at the top and
 /// running clockwise. Quantised to 2% so the icons cached for it stay few (icons are static, as the kit's
 /// own progress circle does it).
@@ -117,7 +124,7 @@ mod tests {
         let declared = src.lines().filter(|l| l.starts_with("icon_body!(")).count();
         let icons = vec![
             &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND,
-            &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO, &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &CHECKLIST, &INFO,
+            &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO, &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &CHECKLIST, &INFO, &PENCIL, &TRASH, &REFRESH, &KEY, &LOCK,
         ];
         // The two filled ones (MORE's dots count as line icons here: they carry no stroke) are `icon_body!` lines too.
         assert_eq!(icons.len() + 1, declared, "a declared icon is missing from this list (the dot is the +1)");

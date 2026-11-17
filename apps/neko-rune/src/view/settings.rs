@@ -8,7 +8,7 @@
 use neko_protocol::agent_models::{CatalogModel, ModelAccess, SourceStatus};
 use neko_protocol::calendar::CalendarAccess;
 use neko_protocol::phone::RemindersAccess;
-use rune::{El, ScrollSpec, col, el, icon, row, text};
+use rune::{El, ScrollSpec, col, icon, row, text};
 use rune_kit::{SegmentedControl, TextInput};
 
 use super::ui::{edit_of, editing, note, pick, setting_row, switch, switch_when};
@@ -99,22 +99,20 @@ fn rail(s: &App, t: &Neko, narrow: bool) -> El {
     // The ⌘F hint hides while the field has text (the clear button takes its place), so the two never share the corner.
     field = if searching { field.clear_button() } else { field.trailing(text("⌘F").key("settings-search-hint").font(t.ty.hint).color(t.text.faint).a11y_hidden()) };
     let search = field.build(&t.kit).key("settings-search").w_full();
-    let mut c = col().key("settings-rail").w(if narrow { 150.0 } else { 200.0 }).h_full().px(if narrow { 8.0 } else { 12.0 }).pt(4.0).gap(0.0).child(search.h(32.0)).child(el().h(8.0));
     // The sections, under the web's two headings (Neko, This Mac); the list scrolls when the window is short.
-    let mut list = col().key("settings-rail-list").w_full().gap(0.0);
+    let mut rows = Vec::new();
     for section in Section::ALL {
         if let Some(heading) = section.group() {
-            list = list.child(text(heading.to_owned()).key(format!("settings-group-{}", section.key())).font(t.ty.group).color(t.text.muted).px(10.0).pt(if section == Section::General { 0.0 } else { 12.0 }).pb(4.0));
+            rows.push(text(heading.to_owned()).key(format!("settings-group-{}", section.key())).font(t.ty.group).color(t.text.muted).px(10.0).pt(if section == Section::General { 0.0 } else { 12.0 }).pb(4.0));
         }
         let active = !searching && s.pages.section == section;
-        list = list.child(nav_label_row(section.title(), &format!("settings-section-{}", section.key()), active, t).on_press(move |s: &mut App| {
+        rows.push(nav_label_row(section.title(), &format!("settings-section-{}", section.key()), active, t).on_press(move |s: &mut App| {
             s.pages.section = section;
             s.pages.set_field("settings:search", "");
             s.pages.open_select = None;
         }));
     }
-    c = c.child(col().key("settings-rail-scroll").w_full().grow(1.0).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(list));
-    c
+    super::ui::rail("settings", narrow, Some(search), rows)
 }
 
 fn items(s: &App, t: &Neko, layer: &mut Vec<El>) -> Vec<Item> {

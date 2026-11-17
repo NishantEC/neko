@@ -259,6 +259,9 @@ pub struct Summary {
     /// What each conversation has pinned (model, effort, speed) and the revision of that pin.
     #[serde(default)]
     pub pins: std::collections::BTreeMap<String, (RuntimePreferences, u64)>,
+    /// What the Setup pages read: workspaces, connections, watches, skills, memory, profiles, schedules.
+    #[serde(default)]
+    pub setup: super::SetupData,
 }
 
 /// How many of Neko's messages the client keeps (a long reply is ~8 MB of layout; DESIGN: bounded). The column
@@ -312,6 +315,7 @@ impl Summary {
                     .collect(),
                 usage: usage_points(snapshot, now),
             },
+            setup: super::SetupData::from_snapshot(snapshot),
             digest: snapshot.digest.clone(),
             meta: snapshot
                 .tasks

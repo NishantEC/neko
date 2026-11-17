@@ -380,6 +380,7 @@ pub fn control_key(call: &Call) -> Option<String> {
         Call::PhoneSettings => "page:phone".to_owned(),
         Call::Quota => "page:quota".to_owned(),
         Call::Plugins => "page:plugins".to_owned(),
+        Call::Setup(call) => call.key(),
         _ => return None,
     })
 }
@@ -421,7 +422,8 @@ impl App {
         }
         self.pages.asked_ms = self.now_ms;
         match view {
-            FullView::Routines | FullView::Workspaces => self.call(Call::RoutinesFull),
+            // Setup's scope details (folders' servers, routines and standing orders) come with the Routines answer; the rest is in the workbench.
+            FullView::Routines | FullView::Setup => self.call(Call::RoutinesFull),
             FullView::Calendar => self.ask_calendar(),
             FullView::Usage => {
                 self.call(Call::RoutinesFull);

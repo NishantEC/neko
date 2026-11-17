@@ -13,6 +13,27 @@ use crate::theme::Neko;
 /// sides) that scrolls. The header is the title (20, semibold) with a faint count beside it and, at
 /// the right, at most the page's own controls. No subtitle, no sentence under it.
 pub fn page(t: &Neko, key: &str, title: &str, count: Option<usize>, trailing: Vec<El>, body: El) -> El {
+    col().w_full().h_full().child(band(t)).child(scrolled(page_column(t, key, title, count, trailing, body)))
+}
+
+/// A page column, centred and scrolling inside the free space.
+pub fn scrolled(column: El) -> El {
+    col().key("page-scroll").w_full().grow(1.0).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(row().w_full().justify_center().child(column))
+}
+
+/// The section rail of Settings and Setup: 200 wide (150 when narrow), 12 of padding (8 narrow), an optional field
+/// above, then the rows in a list that scrolls when the window is short.
+pub fn rail(prefix: &str, narrow: bool, search: Option<El>, rows: Vec<El>) -> El {
+    let mut c = col().key(format!("{prefix}-rail")).w(if narrow { 150.0 } else { 200.0 }).h_full().px(if narrow { 8.0 } else { 12.0 }).pt(4.0).gap(0.0);
+    if let Some(search) = search {
+        c = c.child(search.h(32.0)).child(el().h(8.0));
+    }
+    let list = col().key(format!("{prefix}-rail-list")).w_full().gap(0.0).children(rows);
+    c.child(col().key(format!("{prefix}-rail-scroll")).w_full().grow(1.0).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(list))
+}
+
+/// The column of a full view: its header line (title, count, the page's own controls), then the body.
+pub fn page_column(t: &Neko, key: &str, title: &str, count: Option<usize>, trailing: Vec<El>, body: El) -> El {
     let mut head = row().w_full().gap(8.0).center_y().min_h(32.0).child(text(title.to_owned()).key("title").font(t.ty.title).color(t.text.base).role("heading"));
     if let Some(n) = count {
         head = head.child(text(n.to_string()).key("page-count").font(t.ty.row).color(t.text.faint));
@@ -21,8 +42,7 @@ pub fn page(t: &Neko, key: &str, title: &str, count: Option<usize>, trailing: Ve
     for e in trailing {
         head = head.child(e);
     }
-    let column = col().key(format!("full-{key}")).w_full().max_w(COLUMN).px(32.0).pt(8.0).pb(40.0).gap(20.0).child(head).child(body);
-    col().w_full().h_full().child(band(t)).child(col().key("page-scroll").w_full().grow(1.0).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(row().w_full().justify_center().child(column)))
+    col().key(format!("full-{key}")).w_full().max_w(COLUMN).px(32.0).pt(8.0).pb(40.0).gap(20.0).child(head).child(body)
 }
 
 /// A quiet group heading ("Standing orders", "Recent runs").

@@ -169,7 +169,8 @@ fn nav_count(s: &App, view: FullView) -> Option<usize> {
     match view {
         FullView::Routines => s.pages.routines.as_ref().map(|r| r.views.iter().filter(|v| v.routine.enabled && s.scope().is_none_or(|w| v.routine.workspace_id == w)).count()),
         FullView::Calendar => s.pages.calendar.as_ref().filter(|c| c.status.enabled).map(|c| s.events_today(c)),
-        FullView::Workspaces => s.summary.as_ref().map(|m| m.workspaces.len()),
+        // How many setup items need you (broken connections, pending proposals); no count when none do.
+        FullView::Setup => Some(super::setup::attention(s)).filter(|n| *n > 0),
         _ => None,
     }
 }

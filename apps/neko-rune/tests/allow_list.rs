@@ -48,7 +48,7 @@ fn bare(code: &str, needle: &str) -> usize {
         .count()
 }
 
-const PREFIXES: [&str; 5] = ["Request::", "Command::", "CrewCommand::", "CheckpointCommand::", "GoalCommand::"];
+const PREFIXES: [&str; 11] = ["Request::", "Command::", "CrewCommand::", "CheckpointCommand::", "GoalCommand::", "McpCommand::", "SkillCommand::", "ProfileCommand::", "ScheduleCommand::", "ImportCommand::", "DecisionContextCommand::"];
 
 /// Every `Prefix::Name` the code names, as the daemon's request paths.
 fn named(code: &str) -> BTreeSet<String> {
@@ -119,6 +119,9 @@ const RUNE_EXTRAS: &[&str] = &[
     // Settings' two limits, which the web sends through a `limit(name, value)` helper the scan does not follow.
     "SetMaxRunningTickets",
     "SetMaxWritablePerRepository",
+    // Tools: a tool's unattended-use grant. The web's Tools page shows tools read-only; the earlier native app had this control.
+    "SetToolGrant",
+    "SetWorkspaceToolGrant",
     // Reads Rune made before this rule that the web UI reaches through a store or helper the scan does not follow.
     "Snapshot",
     "WorkbenchIfChanged",
@@ -141,7 +144,8 @@ const RUNE_EXTRAS: &[&str] = &[
 const ENVELOPES: &[&str] = &["Workbench", "Crew", "Goals", "Checkpoints"];
 
 /// The sub-commands carried inside an envelope: checked by their name appearing in the web's sources.
-const SUBCOMMAND_PREFIXES: [&str; 3] = ["CrewCommand", "GoalCommand", "CheckpointCommand"];
+/// The Setup pages' sub-commands (`mcp("Wake", ...)`, `skillsCmd("Refresh")`, `schedulesCmd("Save", ...)` in `web/src/setup/lib.ts`) are carried the same way.
+const SUBCOMMAND_PREFIXES: [&str; 9] = ["CrewCommand", "GoalCommand", "CheckpointCommand", "McpCommand", "SkillCommand", "ProfileCommand", "ScheduleCommand", "ImportCommand", "DecisionContextCommand"];
 
 /// Requests that destroy, publish or restart something, with the `Call` that carries each. A `Call` is only built
 /// inside a `confirm(` (see `destructive_requests_are_only_sent_from_a_confirm_dialog`).
@@ -319,6 +323,31 @@ fn destructive_requests_are_only_sent_from_a_confirm_dialog() {
     }
     assert!(built >= 4, "the destructive calls were not found ({built}): the scan is looking at nothing");
 }
+
+#[test]
+fn setup_destroying_requests_are_only_sent_from_a_confirmation() {
+    // A delete, a forget, a dismissed suggestion and a pause that revokes grants are built in `state.rs`'s `confirm_*`
+    // functions (the coral button's dialog) and nowhere else: no view file builds one for a button to send directly.
+    let destroying = ["SetupCall::RemoveWatch", "SetupCall::RemoveSchedule", "SetupCall::ForgetMemory", "SetupCall::ForgetPreference"];
+    let mut built_in_state = 0;
+    for (path, text) in crate_sources() {
+        let name = path.to_string_lossy().into_owned();
+        if !name.contains("view/setup/") {
+            continue;
+        }
+        let code = production(&text);
+        for what in destroying {
+            let n = code.matches(what).count();
+            if name.ends_with("view/setup/state.rs") {
+                built_in_state += n;
+            } else {
+                assert_eq!(n, 0, "{name} builds `{what}` outside a confirmation");
+            }
+        }
+    }
+    assert!(built_in_state >= 4, "the confirmations build the destroying requests ({built_in_state})");
+}
+
 
 /// `word` appears in `code` as a whole word.
 fn bare_word(code: &str, word: &str) -> bool {

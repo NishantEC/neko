@@ -4,7 +4,6 @@
 //! Ported from `pages/setup/Usage.tsx`, `pages/setup/Workspaces.tsx` and the plugin status the web
 //! reports to the daemon; the same requests, no writes.
 
-use neko_protocol::routines::ScopeProposal;
 use rune::{Color, El, Shape, canvas, col, el, row, text};
 
 use super::ui::{MenuEntry, group, page, quiet_line, with_menu};
@@ -156,113 +155,6 @@ fn quota(s: &App, t: &Neko) -> El {
         }
     }
     c
-}
-
-// ---- Workspaces
-
-/// A scope as the Workspaces page lists it.
-struct Scope {
-    id: String,
-    name: String,
-    folders: Vec<String>,
-    servers: Vec<(String, String)>,
-    problems: usize,
-    routines: usize,
-}
-
-fn scopes(s: &App) -> Vec<Scope> {
-    if let Some(data) = &s.pages.routines {
-        return data
-            .scopes
-            .iter()
-            .map(|sc: &ScopeProposal| Scope {
-                id: sc.workspace_id.clone().unwrap_or_else(|| sc.name.clone()),
-                name: sc.name.clone(),
-                folders: sc.folders.clone(),
-                servers: sc.servers.iter().map(|x| (x.name.clone(), x.origin.clone())).collect(),
-                problems: sc.problems.len(),
-                routines: sc.workspace_id.as_ref().map_or(0, |w| data.views.iter().filter(|v| &v.routine.workspace_id == w && !crate::pages::is_goal_routine(v)).count()),
-            })
-            .collect();
-    }
-    s.summary.as_ref().map(|m| m.settings.workspaces.iter().map(|w| Scope { id: w.id.clone(), name: w.name.clone(), folders: w.folders.clone(), servers: Vec::new(), problems: 0, routines: 0 }).collect()).unwrap_or_default()
-}
-
-fn folder_name(path: &str) -> String {
-    path.trim_end_matches('/').rsplit('/').next().unwrap_or(path).to_owned()
-}
-
-fn plural(n: usize, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
-}
-
-pub fn workspaces(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
-    let list = scopes(s);
-    let mut body = col().w_full().gap(2.0);
-    if list.is_empty() {
-        let line = if s.pages.routines.is_none() && s.summary.is_none() { "Looking for your workspaces…" } else { "No workspaces yet" };
-        body = body.child(quiet_line(t, "ws-none", line));
-    }
-    for w in &list {
-        let open = s.pages.ws_open.contains(&w.id);
-        let id = w.id.clone();
-        let line = row()
-                .key(format!("ws-{}", w.id))
-                .role("button")
-                .label(format!("{}, {}, {}", w.name, plural(w.folders.len(), "folder", "folders"), plural(w.servers.len(), "server", "servers")))
-                .expanded(open)
-                .focusable(true)
-                .w_full()
-                .min_h(36.0)
-                .px(6.0)
-                .gap(12.0)
-                .center_y()
-                .radius(t.radius.row)
-                .hover(t.surface.hover)
-                .focus_ring(2.0, 2.0, t.kit.c.border_focus)
-                .on_press(move |s: &mut App| s.toggle_workspace(&id))
-                .child(text(if open { "▾" } else { "▸" }).font(t.ty.meta).color(t.text.faint).a11y_hidden())
-                .child(text(w.name.clone()).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0).a11y_hidden())
-                .child(text(plural(w.folders.len(), "folder", "folders")).font(t.ty.meta).color(t.text.muted).a11y_hidden())
-                .child(text(plural(w.servers.len(), "server", "servers")).font(t.ty.meta).color(t.text.muted).min_w(0.0).max_w(80.0).a11y_hidden());
-        let entries: Vec<MenuEntry> = w.folders.iter().take(4).map(|f| {
-            let path = f.clone();
-            (format!("Open folder: {}", folder_name(f)), std::rc::Rc::new(move |s: &mut App| s.open_path(&path)) as std::rc::Rc<dyn Fn(&mut App)>)
-        }).collect();
-        body = body.child(with_menu(s, t, layer, &format!("ws:{}", w.id), line, entries));
-        if open {
-            let mut inner = col().key(format!("ws-details-{}", w.id)).w_full().pl(34.0).pb(8.0).gap(1.0);
-            for f in &w.folders {
-                inner = inner.child(detail_row(t, &folder_name(f), f));
-            }
-            for (name, origin) in &w.servers {
-                inner = inner.child(detail_row(t, name, &folder_name(origin)));
-            }
-            if w.routines > 0 {
-                inner = inner.child(detail_row(t, &plural(w.routines, "routine", "routines"), ""));
-            }
-            if w.problems > 0 {
-                inner = inner.child(text(format!("{} to tidy in the MCP config on disk; routines still run", plural(w.problems, "thing", "things"))).font(t.ty.meta).color(t.meaning.amber).px(6.0).py(2.0));
-            }
-            if w.folders.is_empty() && w.servers.is_empty() && w.routines == 0 {
-                inner = inner.child(quiet_line(t, "ws-empty", "Nothing set up here yet"));
-            }
-            body = body.child(inner);
-        }
-    }
-    page(t, "workspaces", "Workspaces", (!list.is_empty()).then_some(list.len()), Vec::new(), body)
-}
-
-fn detail_row(t: &Neko, name: &str, faint: &str) -> El {
-    row()
-        .w_full()
-        .min_h(26.0)
-        .px(6.0)
-        .gap(10.0)
-        .center_y()
-        .help(faint)
-        .child(text(name.to_owned()).font(t.ty.meta).color(t.text.base).truncate())
-        .child(text(faint.to_owned()).font(t.ty.id).color(t.text.faint).truncate().grow(1.0).min_w(0.0))
 }
 
 // ---- Plugins

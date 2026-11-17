@@ -20,6 +20,7 @@ pub mod http;
 mod model;
 mod pages;
 mod reply;
+mod setup;
 mod unix;
 pub mod write;
 
@@ -33,6 +34,7 @@ use neko_protocol::{Request, Response};
 pub use model::*;
 pub use pages::*;
 pub use reply::*;
+pub use setup::*;
 pub use write::Call;
 pub use unix::UnixConnector;
 

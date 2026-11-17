@@ -245,18 +245,19 @@ fn usage_draws_the_week_and_each_quota_with_a_bar_that_changes_colour() {
 }
 
 #[test]
-fn workspaces_are_one_line_each_and_open_to_their_folders_and_servers_and_stay_open() {
-    let mut rt = runtime("workspaces");
+fn workspaces_are_one_line_each_and_open_to_their_details_and_stay_open() {
+    let mut rt = runtime("setup-workspaces");
     assert!(rt.find("ws-w1").is_some() && rt.find("ws-w2").is_some() && rt.find("ws-details-w1").is_none());
-    let t = texts(&rt);
-    assert!(t.contains(&"2 folders".to_owned()) && t.contains(&"3 servers".to_owned()), "{t:?}");
+    assert_eq!(text_of(&rt, "page-count").as_deref(), Some("2"));
     click(&mut rt, "ws-w1");
     assert!(rt.find("ws-details-w1").is_some());
-    assert!(texts(&rt).contains(&"chat".to_owned()) && texts(&rt).contains(&"neko".to_owned()), "its servers and folders");
+    let t = texts(&rt);
+    assert!(t.contains(&"/work/neko".to_owned()) && t.contains(&"/work/neko-web".to_owned()), "its folders: {t:?}");
+    assert!(t.iter().any(|x| x.contains("Small pull requests")), "its instructions: {t:?}");
     // Away and back, it is still open.
     rt.update(|s, _| s.open_view(FullView::Calendar));
     settle(&mut rt);
-    rt.update(|s, _| s.open_view(FullView::Workspaces));
+    rt.update(|s, _| s.open_view(FullView::Setup));
     settle(&mut rt);
     assert!(rt.find("ws-details-w1").is_some(), "what was open is remembered");
 }
@@ -273,7 +274,7 @@ fn plugins_list_how_each_last_loaded() {
 fn the_more_menu_lists_usage_workspaces_plugins_and_the_web_ui() {
     let mut rt = runtime("more");
     let t = texts(&rt);
-    for item in ["Usage", "Workspaces", "Plugins", "Open the web UI"] {
+    for item in ["Usage", "Setup", "Plugins", "Open the web UI"] {
         assert!(t.contains(&item.to_owned()), "{item}: {t:?}");
     }
     assert!(!t.contains(&"Memory".to_owned()) && !t.contains(&"Profiles".to_owned()));
@@ -284,7 +285,7 @@ fn the_more_menu_lists_usage_workspaces_plugins_and_the_web_ui() {
 
 #[test]
 fn every_page_has_one_header_line_and_at_most_one_primary_button() {
-    for name in ["routines", "routines-open", "calendar", "settings", "settings-ai", "usage", "workspaces", "plugins"] {
+    for name in ["routines", "routines-open", "calendar", "settings", "settings-ai", "usage", "setup-workspaces", "plugins"] {
         let rt = runtime(name);
         assert!(rt.find("title").is_some(), "{name}: a title");
         // No subtitle: the only text right under the title row is content, never a sentence about the page.
@@ -296,13 +297,13 @@ fn every_page_has_one_header_line_and_at_most_one_primary_button() {
 #[test]
 fn nothing_runs_outside_its_region_at_the_smallest_window_or_at_a_roomy_one() {
     for size in [(960.0, 560.0), (1360.0, 840.0), (1600.0, 1000.0)] {
-        for name in ["routines", "routines-open", "calendar", "calendar-event", "settings", "settings-phone", "settings-narrow", "usage", "workspaces-open", "plugins"] {
+        for name in ["routines", "routines-open", "calendar", "calendar-event", "settings", "settings-phone", "settings-narrow", "usage", "setup-workspaces-open", "setup-watching", "setup-tools", "setup-tool-detail", "setup-skills", "setup-memory", "setup-profiles", "setup-schedules", "plugins"] {
             let rt = runtime_at(size, name);
             let region = rect(&rt, "session-region");
             for e in rt.elements() {
                 let Some(key) = e.key.as_deref() else { continue };
                 // Only what the page itself draws (the columns around it have their own tests).
-                let page = ["routine", "rt-", "rt:", "orders", "standing", "cal-", "event-", "set-", "settings-", "usage", "quota", "ws-", "plugin", "full-", "page-", "run-", "hit-", "pick-", "title"];
+                let page = ["routine", "rt-", "rt:", "orders", "standing", "cal-", "event-", "set-", "settings-", "usage", "quota", "ws-", "plugin", "full-", "page-", "run-", "hit-", "pick-", "title", "conn-", "watch-", "suggestion-", "tool-", "skill", "proposal-", "memory-", "preference-", "decision-", "mem-", "profile-", "schedule-", "sch-", "setup"];
                 if !page.iter().any(|p| key.starts_with(p)) || e.rect[2] == 0.0 || key.starts_with("settings-rail") {
                     continue;
                 }
@@ -374,7 +375,7 @@ fn rows_have_right_click_menus_with_their_actions() {
     secondary(&mut rt, "routine-r1");
     let t = texts(&rt);
     assert!(t.contains(&"Run now".to_owned()) && t.contains(&"Pause".to_owned()) && t.contains(&"Edit".to_owned()), "{t:?}");
-    let mut rt = runtime("workspaces");
+    let mut rt = runtime("setup-workspaces");
     secondary(&mut rt, "ws-w1");
     assert!(texts(&rt).iter().any(|x| x.starts_with("Open folder: ")));
     let mut rt = runtime("plugins");

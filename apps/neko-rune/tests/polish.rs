@@ -74,14 +74,14 @@ fn the_sessions_column_is_248_wide_with_12_of_padding_and_32_point_rows_on_an_8_
     let rt = runtime(true, live);
     let col = rect(&rt, "sessions");
     assert_eq!(col[2], 248.0);
-    for key in ["sessions-search", "new-session", "view-inbox", "view-calendar", "view-workspaces", "session-t0", "session-t6"] {
+    for key in ["sessions-search", "new-session", "view-inbox", "view-calendar", "view-setup", "session-t0", "session-t6"] {
         let r = rect(&rt, key);
         assert_eq!(r[3], 32.0, "{key} is 32 high");
         assert_eq!(r[0], col[0] + 12.0, "{key} is 12 in from the column's left");
         assert_eq!(r[2], 248.0 - 24.0, "{key} fills the column inside its 12 point padding");
     }
     // Top to bottom: header 32, gap 8, search 32 with the workspace switcher (32) flush under it, gap 8, New session 32, three nav rows of 32.
-    let (header, search, new, routines, calendar, workspaces) = (rect(&rt, "sessions-header"), rect(&rt, "sessions-search"), rect(&rt, "new-session"), rect(&rt, "view-inbox"), rect(&rt, "view-calendar"), rect(&rt, "view-workspaces"));
+    let (header, search, new, routines, calendar, workspaces) = (rect(&rt, "sessions-header"), rect(&rt, "sessions-search"), rect(&rt, "new-session"), rect(&rt, "view-inbox"), rect(&rt, "view-calendar"), rect(&rt, "view-setup"));
     assert_eq!(search[1], header[1] + header[3] + 8.0);
     let scope = rect(&rt, "scope");
     assert_eq!((scope[1], scope[3]), (search[1] + search[3], 32.0), "the switcher is a 32 point row right under the search field");
@@ -106,9 +106,9 @@ fn the_nav_rows_carry_their_counts_and_the_footer_carries_the_account_and_its_me
         s.account.name = "Ada Lovelace".into();
     });
     let t = texts(&rt);
-    // Routines, Calendar, Workspaces: in that order, Workspaces counting the two the demo has.
-    assert_eq!(rt.elements().into_iter().find(|e| e.key.as_deref() == Some("count-workspaces")).and_then(|e| e.text).as_deref(), Some("2"));
-    for word in ["Routines", "Calendar", "Workspaces", "New session", "Search sessions", "⌘K", "Ada Lovelace", "AL"] {
+    // Routines, Calendar, Setup: in that order; Setup counts what needs attention and shows no count when nothing does.
+    assert!(rt.find("count-setup").is_none(), "no count when nothing needs attention");
+    for word in ["Routines", "Calendar", "Setup", "New session", "Search sessions", "⌘K", "Ada Lovelace", "AL"] {
         assert!(t.contains(&word.to_owned()), "{word}: {t:?}");
     }
     assert!(t.iter().any(|x| x.ends_with(" agents") || x.contains(" agents")), "the subtitle counts agents: {t:?}");

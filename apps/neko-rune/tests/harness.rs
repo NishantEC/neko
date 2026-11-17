@@ -554,12 +554,12 @@ fn calendar_usage_workspaces_and_plugins_read_what_the_daemon_has() {
     open_page(&mut rt, FullView::Usage);
     assert!(rt.find("usage-today").is_some() && rt.state.pages.routines.is_some());
     assert!(rt.find("quota").is_some());
-    open_page(&mut rt, FullView::Workspaces);
-    let first = rt.state.pages.routines.as_ref().and_then(|d| d.scopes.first()).map(|s| s.workspace_id.clone().unwrap_or_else(|| s.name.clone()));
+    open_page(&mut rt, FullView::Setup);
+    let first = rt.state.summary.as_ref().and_then(|m| m.setup.workspaces.first()).map(|w| w.id.clone());
     if let Some(first) = first {
-        assert!(rt.find(&format!("ws-{first}")).is_some(), "a line for each scope");
+        assert!(rt.find(&format!("ws-{first}")).is_some(), "a line for each workspace");
         click(&mut rt, &format!("ws-{first}"));
-        assert!(rt.find(&format!("ws-details-{first}")).is_some(), "a scope opens to its details");
+        assert!(rt.find(&format!("ws-details-{first}")).is_some(), "a workspace opens to its details");
     }
     open_page(&mut rt, FullView::Plugins);
     assert!(rt.find("full-plugins").is_some());

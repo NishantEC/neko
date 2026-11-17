@@ -1,5 +1,5 @@
 //! Full views: what replaces the session in the middle region when chosen from the sessions
-//! column's nav (Routines, Calendar, Workspaces) or the account footer's menu (Settings, Usage, Plugins).
+//! column's nav (Routines, Calendar, Setup) or the account footer's menu (Settings, Usage, Plugins).
 //! Plugin pages join "More" in P3 (docs/decisions/0002-rune-for-everything.md, plugin slot (b)).
 
 use rune::Icon;
@@ -12,7 +12,8 @@ pub enum FullView {
     Routines,
     Settings,
     Usage,
-    Workspaces,
+    /// Setup: Workspaces, Watching, Tools, Skills, Memory, Profiles, Schedules (a section rail).
+    Setup,
     Plugins,
     /// Every session, newest first: what "View all" in the sessions column opens.
     AllSessions,
@@ -20,11 +21,11 @@ pub enum FullView {
 
 impl FullView {
     /// The sessions column's nav rows, in order (polish spec §1): each with its count.
-    pub const NAV: [FullView; 3] = [FullView::Routines, FullView::Calendar, FullView::Workspaces];
+    pub const NAV: [FullView; 3] = [FullView::Routines, FullView::Calendar, FullView::Setup];
     /// In the account footer's menu, above "Open the web UI" and "Quit".
     pub const MENU: [FullView; 3] = [FullView::Settings, FullView::Usage, FullView::Plugins];
     /// The views the nav and the account menu place (every one has exactly one place).
-    pub const ALL: [FullView; 6] = [FullView::Calendar, FullView::Routines, FullView::Settings, FullView::Usage, FullView::Workspaces, FullView::Plugins];
+    pub const ALL: [FullView; 6] = [FullView::Calendar, FullView::Routines, FullView::Settings, FullView::Usage, FullView::Setup, FullView::Plugins];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -32,7 +33,7 @@ impl FullView {
             FullView::Routines => "Routines",
             FullView::Settings => "Settings",
             FullView::Usage => "Usage",
-            FullView::Workspaces => "Workspaces",
+            FullView::Setup => "Setup",
             FullView::Plugins => "Plugins",
             FullView::AllSessions => "All sessions",
         }
@@ -46,7 +47,7 @@ impl FullView {
             FullView::Routines => "inbox",
             FullView::Settings => "settings",
             FullView::Usage => "usage",
-            FullView::Workspaces => "workspaces",
+            FullView::Setup => "setup",
             FullView::Plugins => "tools",
             FullView::AllSessions => "tasks",
         }
@@ -58,7 +59,7 @@ impl FullView {
             FullView::Routines => &icons::CLOCK,
             FullView::Settings => &icons::GEAR,
             FullView::Usage => &icons::GAUGE,
-            FullView::Workspaces => &icons::PEOPLE,
+            FullView::Setup => &icons::PEOPLE,
             FullView::Plugins => &icons::WRENCH,
             FullView::AllSessions => &icons::REASON_LIST,
         }
@@ -85,7 +86,7 @@ mod tests {
         icons.sort_unstable();
         icons.dedup();
         assert_eq!(icons.len(), FullView::ALL.len());
-        assert_eq!(FullView::NAV.map(FullView::title), ["Routines", "Calendar", "Workspaces"]);
+        assert_eq!(FullView::NAV.map(FullView::title), ["Routines", "Calendar", "Setup"]);
         assert_eq!(FullView::MENU.map(FullView::title), ["Settings", "Usage", "Plugins"]);
     }
 }

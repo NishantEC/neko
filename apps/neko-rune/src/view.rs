@@ -28,6 +28,7 @@ mod runtime;
 mod shortcuts;
 mod session;
 mod sessions;
+pub mod setup;
 mod settings;
 mod turn;
 mod ui;

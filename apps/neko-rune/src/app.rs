@@ -198,8 +198,10 @@ pub struct App {
     pub inbox_menu: Option<(u64, PointerPress)>,
     /// The right-click menu on a closed Inbox item: which, and where.
     pub closed_menu: Option<(u64, PointerPress)>,
-    /// What the full views keep (Routines, Calendar, Settings, Usage, Workspaces, Plugins).
+    /// What the full views keep (Routines, Calendar, Settings, Usage, Plugins).
     pub pages: Pages,
+    /// Setup: its section, the open dialog and rows (`view/setup/`).
+    pub setup: crate::view::setup::SetupState,
     /// The context panel: its tabs, the loaded file or artifact, the viewers' state.
     pub panel: crate::panel::Panel,
     /// The right-click menu on a message: which, and where.
@@ -326,6 +328,7 @@ impl Default for App {
             inbox_menu: None,
             closed_menu: None,
             pages: Pages::default(),
+            setup: crate::view::setup::SetupState::default(),
             panel: crate::panel::Panel::standard(),
             msg_menu: None,
             compose: crate::compose::ComposeUi::default(),

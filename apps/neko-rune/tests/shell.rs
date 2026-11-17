@@ -132,7 +132,7 @@ fn groups_collapse_and_expand_with_their_count_kept() {
 #[test]
 fn the_foot_opens_full_views_in_the_sessions_place_and_a_session_brings_it_back() {
     let mut rt = runtime(true, live);
-    for key in ["view-calendar", "view-inbox", "view-workspaces", "account", "new-session"] {
+    for key in ["view-calendar", "view-inbox", "view-setup", "account", "new-session"] {
         assert!(rt.find(key).is_some(), "{key} is in the sessions column");
     }
     // Settings is in the account footer's menu.
