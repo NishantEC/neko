@@ -90,9 +90,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     // The web's two layouts (`min-[900px]`): under 900 the sections are a strip of pills under the search box; from 900 a 240 point rail.
     let wide = frame.region_w >= 900.0;
     let mut column = col().key("settings-body").w_full().grow(1.0).min_h(0.0);
-    if frame.region_w >= 768.0 {
-        column = column.child(breadcrumb(t, title));
-    }
+    column = column.child(breadcrumb(t, title));
     let side = if wide { 240.0 } else { 0.0 };
     // `w-full max-w-[52rem] px-10 pt-6 pb-24`: at most 832 wide counting the 40 point sides.
     let inner = (frame.region_w - side - if wide { 1.0 } else { 0.0 }).min(832.0) - 80.0;
@@ -115,7 +113,7 @@ fn breadcrumb(t: &Neko, current: &str) -> El {
         .center_y()
         .child(text("Settings".to_owned()).font(plain).color(t.text.muted))
         .child(text("/".to_owned()).font(plain).color(t.text.muted.alpha(0.5)).a11y_hidden())
-        .child(text(current.to_owned()).key("settings-current").font(rune::TextStyle { weight: 500.0, ..plain }).color(t.text.base).role("heading"))
+        .child(text(current.to_owned()).key("title").font(rune::TextStyle { weight: 500.0, ..plain }).color(t.text.base).role("heading"))
 }
 
 /// The search box and the section list: a strip of pills with a line under it, or a 240 point rail with a line beside it.

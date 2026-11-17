@@ -32,6 +32,17 @@ fn settle(rt: &mut Runtime<App>) {
     }
 }
 
+/// Opens a Settings section. The web's pills are a strip that scrolls sideways when the page is narrow, so a section may be out of
+/// reach of a click; the section is what is being tested, not the strip.
+fn go_section(rt: &mut Runtime<App>, key: &str) {
+    let key = key.to_owned();
+    rt.update(move |s, _| {
+        let section = neko_rune::pages::Section::ALL.into_iter().find(|x| x.key() == key).expect("a section");
+        s.go_section(section);
+    });
+    settle(rt);
+}
+
 fn click(rt: &mut Runtime<App>, key: &str) {
     let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element keyed {key}"));
     rt.pointer_down(x, y);
@@ -163,25 +174,25 @@ fn a_task_on_the_all_day_row_opens_its_session() {
 #[test]
 fn settings_sections_search_and_read_only_rows() {
     let mut rt = runtime("settings");
-    for title in ["General", "AI and agents", "Budget", "Phone", "Neko updates", "Workspaces", "About"] {
+    for title in ["General", "AI & agents", "Phone", "Neko updates", "About"] {
         assert!(texts(&rt).contains(&title.to_owned()), "{title}");
     }
     assert!(rt.find("settings-search").is_some());
     // Each section has its rows.
-    for (section, row) in [("ai", "set-runtime"), ("budget", "set-daily-budget"), ("phone", "set-quiet"), ("updates", "set-update-check"), ("workspaces", "set-workspace-0"), ("about", "set-about-web")] {
-        click(&mut rt, &format!("settings-section-{section}"));
+    for (section, row) in [("ai", "set-runtime"), ("ai", "set-daily-budget"), ("phone", "set-quiet"), ("updates", "set-update-check"), ("about", "set-about-web")] {
+        go_section(&mut rt, section);
         assert!(rt.find(row).is_some(), "{section}: {row}");
     }
     // "Updates come from" is a field (owner/name) with the roll-back beside it, as in the web's Neko updates.
-    click(&mut rt, "settings-section-updates");
+    go_section(&mut rt, "updates");
     assert!(rt.find("update-source").is_some() && rt.find("roll-back-web").is_some());
     // The rulebook and the quick panel's folders are edited here, not linked to the web UI.
-    click(&mut rt, "settings-section-rulebook");
+    go_section(&mut rt, "rulebook");
     assert!(rt.find("rulebook").is_some() && rt.find("rulebook-open-web").is_none());
-    click(&mut rt, "settings-section-quick-panel");
+    go_section(&mut rt, "quick-panel");
     assert!(rt.find("folder-path").is_some() && rt.find("quick-panel-open-web").is_none());
     // The runtime row picks from the daemon's catalog and the ceiling is a field with money in it.
-    click(&mut rt, "settings-section-budget");
+    go_section(&mut rt, "ai");
     assert_eq!(rt.state.pages.text("daily-budget"), "5.00");
     // ⌘F filters rows across sections.
     rt.update(|s, _| s.pages.set_field("settings:search", "quiet"));
@@ -310,7 +321,7 @@ fn nothing_runs_outside_its_region_at_the_smallest_window_or_at_a_roomy_one() {
                 let Some(key) = e.key.as_deref() else { continue };
                 // Only what the page itself draws (the columns around it have their own tests).
                 let page = ["routine", "rt-", "rt:", "orders", "standing", "cal-", "event-", "set-", "settings-", "usage", "quota", "ws-", "plugin", "full-", "page-", "run-", "hit-", "pick-", "title", "conn-", "watch-", "suggestion-", "tool-", "skill", "proposal-", "memory-", "preference-", "decision-", "mem-", "profile-", "schedule-", "sch-", "setup"];
-                if !page.iter().any(|p| key.starts_with(p)) || e.rect[2] == 0.0 || key.starts_with("settings-rail") {
+                if !page.iter().any(|p| key.starts_with(p)) || e.rect[2] == 0.0 || key.starts_with("settings-rail") || key.starts_with("settings-section-") {
                     continue;
                 }
                 assert!(e.rect[0] >= region[0] - 1.0 && e.rect[0] + e.rect[2] <= region[0] + region[2] + 1.0, "{name} at {size:?}: {key} {:?} leaves the page {region:?}", e.rect);
@@ -363,10 +374,11 @@ fn a_new_saved_value_replaces_an_untouched_field_but_not_a_typed_one() {
 #[test]
 fn settings_at_a_narrow_width_narrows_the_rail_and_keeps_inputs_inside() {
     let rt = runtime_at((960.0, 700.0), "settings-narrow");
-    assert_eq!(rect(&rt, "settings-rail")[2], 150.0);
+    // Under the web's 900 point breakpoint the sections are a strip under the search box, across the page.
+    assert_eq!(rect(&rt, "settings-rail")[2], rect(&rt, "session-region")[2]);
     assert!(rect(&rt, "dev-checkout")[2] <= 320.5, "inputs stop at 320");
     let wide = runtime_at((1600.0, 900.0), "settings");
-    assert_eq!(rect(&wide, "settings-rail")[2], 200.0);
+    assert_eq!(rect(&wide, "settings-rail")[2], 241.0);
 }
 
 #[test]

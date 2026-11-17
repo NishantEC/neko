@@ -85,7 +85,21 @@ fn skill_row(s: &App, t: &Neko, layer: &mut Vec<El>, workspace: &str, k: &neko_p
     let (sw_ws, sw_path, sw_hash, sw_rec) = (workspace.to_owned(), k.path.clone(), k.content_hash.clone(), record.cloned());
     let chevron = icon(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 12.0).color(t.text.muted);
     let line = kit::web_row(t, format!("skill-{}", k.name), format!("{}, {word}", k.name), Some(chevron), &k.name, &k.description, vec![kit::trail(t, &format!("skill-state-{}", k.name), word, if changed { t.meaning.amber } else { t.text.muted.alpha(0.7) })]).expanded(open).on_press(move |s: &mut App| s.toggle_row(&toggle));
-    let _ = (&sw_ws, &sw_path, &sw_hash, &sw_rec);
+    let mut acts: Vec<kit::RowAct> = Vec::new();
+    if state.is_some() {
+        let p = k.path.clone();
+        acts.push((format!("skill-lock-{}", k.name), if locked { "Unlock for the curator" } else { "Lock against the curator" }.to_owned(), &icons::LOCK, Box::new(move |s: &mut App| s.setup_call(SetupAction::SkillLock { path: p.clone(), locked: !locked }))));
+    }
+    acts.push((
+        format!("skill-switch-{}", k.name),
+        format!("{} {}", if record.is_some() { "Disable" } else { "Enable" }, k.name),
+        if record.is_some() { &icons::PAUSE } else { &icons::PLAY },
+        Box::new(move |s: &mut App| match &sw_rec {
+            Some(r) => s.setup_call(SetupAction::SkillEnable { workspace_id: r.workspace_id.clone(), path: r.path.clone(), content_hash: r.content_hash.clone(), enabled: false }),
+            None => s.setup_call(SetupAction::SkillEnable { workspace_id: sw_ws.clone(), path: sw_path.clone(), content_hash: sw_hash.clone(), enabled: true }),
+        }),
+    ));
+    let line = line.child(kit::hover_actions(t, acts));
     let mut entries: Vec<MenuEntry> = Vec::new();
     {
         let (w, p, h) = (workspace.to_owned(), k.path.clone(), k.content_hash.clone());

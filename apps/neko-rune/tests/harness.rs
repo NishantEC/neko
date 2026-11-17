@@ -500,7 +500,8 @@ fn settings_change_the_daemons_budgets_and_switches_and_search_finds_rows() {
     rt.update(|s, _| s.open_view(neko_rune::views::FullView::Settings));
     settle(&mut rt);
     // Budget: the daily ceiling is a field with Save; empty takes the ceiling off.
-    click(&mut rt, "settings-section-budget");
+    // Budget is a group of "AI & agents" in the web, so it is under that section.
+    click(&mut rt, "settings-section-ai");
     rt.update(|s, _| s.pages.set_field("daily-budget", "7.50"));
     settle(&mut rt);
     click(&mut rt, "daily-budget-save");

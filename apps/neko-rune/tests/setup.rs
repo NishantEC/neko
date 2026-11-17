@@ -25,7 +25,17 @@ fn settle(rt: &mut Runtime<App>) {
 }
 
 fn click(rt: &mut Runtime<App>, key: &str) {
-    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element keyed {key}"));
+    let mut at = rt.find(key).unwrap_or_else(|| panic!("no element keyed {key}"));
+    // A long page: scroll it until the element is in view.
+    for _ in 0..30 {
+        if at.1 < 860.0 && at.1 > 60.0 {
+            break;
+        }
+        rt.wheel(800.0, 500.0, if at.1 >= 860.0 { -300.0 } else { 300.0 });
+        settle(rt);
+        at = rt.find(key).unwrap_or(at);
+    }
+    let (x, y) = at;
     rt.pointer_down(x, y);
     rt.pointer_up(x, y);
     settle(rt);

@@ -83,6 +83,19 @@ pub fn web_row(t: &Neko, key: String, label: String, leading: Option<El>, title:
     r
 }
 
+/// One hover action of a row: (key, label, icon, press).
+pub type RowAct = (String, String, &'static rune::Icon, Box<dyn Fn(&mut App)>);
+
+/// The web's `RowActions`: small icon buttons at the row's right, there only while the row is hovered or holds focus. They are
+/// pinned over the row's end, so they never move its words. Every one is also in the row's right-click menu.
+pub fn hover_actions(t: &Neko, acts: Vec<RowAct>) -> El {
+    let mut r = row().key("hover-actions").pin(None, Some(0.0), Some(8.0), Some(0.0)).gap(2.0).center_y().pl(8.0).fill(t.surface.window).group_opacity(0.0, 1.0);
+    for (key, label, glyph, press) in acts {
+        r = r.child(row().key(key).role("button").label(label.clone()).help(label).focusable(true).size(28.0, 28.0).center().radius(t.radius.control).hover(t.surface.active).focus_ring(2.0, 2.0, t.surface.ring).on_press(move |s: &mut App| press(s)).child(icon(glyph, 16.0).color(t.text.muted).a11y_hidden()));
+    }
+    r
+}
+
 /// The words at a row's right: 12.5, muted (or the meaning's colour).
 pub fn trail(t: &Neko, key: &str, words: &str, ink: rune::Color) -> El {
     text(words.to_owned()).key(key.to_owned()).font(super::super::webkit::font(t, 12.5, 400.0, 20.3125)).color(ink).a11y_hidden()

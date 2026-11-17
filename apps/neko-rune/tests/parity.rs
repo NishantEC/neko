@@ -252,7 +252,7 @@ fn settings_has_appearance_permissions_and_diagnostics_and_the_rulebook_and_quic
         assert!(has_key(&rt, key), "{key}");
     }
     // Appearance writes the daemon's mode, the web's own request, and the window follows at once.
-    assert!(has_key(&rt, "set-appearance-pick"));
+    assert!(has_key(&rt, "set-appearance-light") && has_key(&rt, "set-appearance-dark") && has_key(&rt, "set-appearance-system"));
     assert!(rt.state.appearance_dark(true) && !rt.state.appearance_dark(false), "follows the system until the daemon says");
     rt.update(|s, _| s.set_appearance("light"));
     assert_eq!(rt.state.outbox, vec![Call::SetAppearance { mode: "light".into() }]);

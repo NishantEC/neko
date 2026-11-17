@@ -66,7 +66,18 @@ fn connection_row(s: &App, t: &Neko, layer: &mut Vec<El>, c: &McpConnection) -> 
     let mut line = kit::web_row(t, format!("conn-{id}"), format!("{}, {scope}, {}, {summary}", c.label, status.label()), Some(leading), &c.label, &words::conn_detail(c), trailing).on_press(move |s: &mut App| s.setup.connection = Some(open_id.clone()));
     let reconnect = words::reconnect_action(c);
     let enabled = c.enabled;
-    let _ = &mut line;
+    let mut acts: Vec<kit::RowAct> = Vec::new();
+    if let Some(r) = reconnect {
+        let i = id.clone();
+        acts.push((format!("conn-reconnect-{id}"), r.label().to_owned(), &icons::REFRESH, Box::new(move |s: &mut App| s.reconnect(&i))));
+    }
+    if enabled {
+        let i = id.clone();
+        acts.push((format!("conn-refresh-{id}"), format!("Refresh {} tools", c.label), &icons::REFRESH, Box::new(move |s: &mut App| s.setup_call(SetupAction::Refresh { id: i.clone() }))));
+    }
+    let i = id.clone();
+    acts.push((format!("conn-switch-{id}"), format!("{} {}", if enabled { "Pause" } else { "Enable" }, c.label), if enabled { &icons::PAUSE } else { &icons::PLAY }, Box::new(move |s: &mut App| s.toggle_connection(&i))));
+    line = line.child(kit::hover_actions(t, acts));
     let mut entries: Vec<MenuEntry> = Vec::new();
     let i = id.clone();
     entries.push(("Open".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup.connection = Some(i.clone()))));

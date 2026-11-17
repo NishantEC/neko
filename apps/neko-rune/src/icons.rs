@@ -33,6 +33,7 @@ icon_body!(CIRCLE_HALF, "circle-half", r#"<circle cx="8" cy="8" r="5.75" fill="n
 icon_body!(SUN, "sun", r#"<circle cx="8" cy="8" r="2.75" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.75V3M8 13V14.25M1.75 8H3M13 8H14.25M3.6 3.6L4.5 4.5M11.5 11.5L12.4 12.4M3.6 12.4L4.5 11.5M11.5 4.5L12.4 3.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 icon_body!(MOON, "moon", r#"<path d="M12.75 9.6A5.5 5.5 0 0 1 6.4 3.25A5.5 5.5 0 1 0 12.75 9.6Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>"#);
 icon_body!(GLOBE, "globe", r#"<circle cx="8" cy="8" r="5.75" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2.25 8H13.75M8 2.25C9.6 4 10.4 6 10.4 8S9.6 12 8 13.75C6.4 12 5.6 10 5.6 8S6.4 4 8 2.25Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>"#);
+icon_body!(PAUSE, "pause", r#"<path d="M5.5 3.5V12.5M10.5 3.5V12.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 icon_body!(SPARK, "spark", r#"<path d="M8 2.5L9.3 6.7L13.5 8L9.3 9.3L8 13.5L6.7 9.3L2.5 8L6.7 6.7Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>"#);
 icon_body!(SEND, "send", r#"<path d="M8 13V3.5M4 7.5L8 3.5L12 7.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
 icon_body!(CHECK_LINE, "check-line", r#"<path d="M3.5 8.5L6.5 11.5L12.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
@@ -117,7 +118,7 @@ pub fn ring_arc(fraction: f32) -> &'static Icon {
 
 /// Every icon of the set, for a name a plugin gives (`icon = "inbox"`): the name without the `neko-` prefix.
 static ALL: &[&Icon] = &[
-    &CIRCLE_HALF, &SUN, &MOON, &GLOBE, &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND, &COLLAPSE, &CANVAS, &DIFF,
+    &CIRCLE_HALF, &SUN, &MOON, &GLOBE, &PAUSE, &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND, &COLLAPSE, &CANVAS, &DIFF,
     &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CHECKLIST, &INFO, &CROSS, &DOT, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO,
     &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &PENCIL, &TRASH, &LOCK, &KEY,
 ];
@@ -141,7 +142,7 @@ mod tests {
         let src = include_str!("icons.rs");
         let declared = src.lines().filter(|l| l.starts_with("icon_body!(")).count();
         let icons = vec![
-            &CIRCLE_HALF, &SUN, &MOON, &GLOBE, &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND,
+            &CIRCLE_HALF, &SUN, &MOON, &GLOBE, &PAUSE, &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND,
             &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO, &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &CHECKLIST, &INFO, &PENCIL, &TRASH, &KEY, &LOCK,
         ];
         // The two filled ones (MORE's dots count as line icons here: they carry no stroke) are `icon_body!` lines too.

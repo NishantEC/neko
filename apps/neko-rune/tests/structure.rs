@@ -60,7 +60,7 @@ fn runtime(app: App, size: (f32, f32), dark: bool) -> Runtime<App> {
 /// Keys that are overlays or deliberate layers over their siblings: they sit on top by design.
 fn overlay_key(key: &str) -> bool {
     // Hover overlays (a board card's action slot) and the Calendar's "now" line lie over their siblings by design.
-    ["badge", "grip-", "scrim", "art", "hairline", "ring", "caret", "toast", "tip", "board-action-slot", "cal-now"].iter().any(|p| key.starts_with(p))
+    ["badge", "grip-", "scrim", "art", "hairline", "ring", "caret", "toast", "tip", "board-action-slot", "cal-now", "hover-actions"].iter().any(|p| key.starts_with(p))
 }
 
 /// What is wrong with the window as drawn now (empty when nothing). `label` names the state in each line.
@@ -125,7 +125,7 @@ fn crawl(rt: &Runtime<App>, label: &str) -> Vec<String> {
         let name = e.key.clone().unwrap_or_else(|| e.path.rsplit('/').next().unwrap_or("").to_owned());
         // A board scrolls sideways and the context panel's viewers (code, tables, diffs) scroll both ways: what they clip is
         // not cut off, it is scrolled.
-        let scrolls_sideways = e.path.contains("scroll-x") || e.path.contains("/context-body/") || e.path.contains("diff");
+        let scrolls_sideways = e.path.contains("scroll-x") || e.path.contains("settings-nav") || e.path.contains("/context-body/") || e.path.contains("diff");
         // c. inside the window and inside its region
         if !inside(e.visible, window) {
             bad.push(format!("{label}: (c) {name} {:?} extends outside the window", e.visible));

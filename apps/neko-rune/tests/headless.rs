@@ -159,7 +159,7 @@ fn offline_and_notice_scenes_say_what_they_should() {
     let more = texts(&tree("more", "dark"));
     assert!(["Settings", "Usage", "Plugins", "Open the web UI", "Quit"].iter().all(|w| more.contains(&(*w).to_owned())), "{more:?}");
     let settings = texts(&tree("full-view", "dark"));
-    assert!(settings.contains(&"AI and agents".to_owned()), "a full view is its own page now, not a placeholder");
+    assert!(settings.contains(&"AI & agents".to_owned()), "a full view is its own page now, not a placeholder");
 }
 
 #[test]

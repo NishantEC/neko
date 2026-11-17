@@ -144,7 +144,7 @@ fn the_foot_opens_full_views_in_the_sessions_place_and_a_session_brings_it_back(
     settle(&mut rt);
     assert_eq!(rt.state.view, Some(FullView::Settings));
     assert!(rt.find("full-settings").is_some() && rt.find("composer").is_none(), "the view replaces the session and its composer");
-    assert!(rt.find("settings-search").is_some() && texts(&rt).contains(&"AI and agents".to_owned()), "Settings is its own page now");
+    assert!(rt.find("settings-search").is_some() && texts(&rt).contains(&"AI & agents".to_owned()), "Settings is its own page now");
     click(&mut rt, "session-t0");
     assert_eq!(rt.state.view, None);
     assert!(rt.find("composer").is_some());

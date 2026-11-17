@@ -133,7 +133,7 @@ fn hexc(hex: &str, fallback: rune::Color) -> rune::Color {
 }
 
 /// `ThemeSwatch`: the mock window drawn from the theme's own colours (a sidebar, a page with one card, a button and three dots), 72 high.
-fn swatch_mock(t: &Neko, e: &themes::ThemeEntry, width: f32) -> El {
+fn swatch_mock(t: &Neko, key: &str, e: &themes::ThemeEntry, width: f32) -> El {
     let c = &e.colors;
     let wash = hexc(&c.background, t.surface.window);
     let line = |w: f32, ink: &str| el().w(w.max(1.0)).h(3.0).radius(1.5).fill(hexc(ink, t.text.base));
@@ -141,9 +141,9 @@ fn swatch_mock(t: &Neko, e: &themes::ThemeEntry, width: f32) -> El {
     let side_w = ((inner * 0.26) * 10.0).round() / 10.0;
     let page_w = inner - side_w;
     let box_w = page_w - 12.0;
-    let sidebar = col().w(side_w).h_full().padding(6.0).gap(6.0).fill(hexc(&c.sidebar, wash)).child(line((side_w - 12.0) * 0.7, &c.sidebar_foreground)).child(line((side_w - 12.0) * 0.5, &c.muted)).child(line((side_w - 12.0) * 0.6, &c.muted));
-    let card = col().w(box_w).padding(6.0).gap(4.0).radius(5.0).fill(hexc(&c.card, wash)).child(line((box_w - 12.0) * 0.8, &c.foreground)).child(line((box_w - 12.0) * 0.55, &c.muted));
-    let dots = row().w(box_w).h(10.0).gap(4.0).center_y().child(el().w(28.0).h(10.0).radius(5.0).fill(hexc(&c.primary, t.meaning.iris))).child(el().grow(1.0)).child(el().size(6.0, 6.0).radius(3.0).fill(hexc(&c.success, t.meaning.mint))).child(el().size(6.0, 6.0).radius(3.0).fill(hexc(&c.warning, t.meaning.amber))).child(el().size(6.0, 6.0).radius(3.0).fill(hexc(&c.destructive, t.meaning.coral)));
+    let sidebar = col().key(format!("{key}-a")).w(side_w).h_full().padding(6.0).gap(6.0).fill(hexc(&c.sidebar, wash)).child(line((side_w - 12.0) * 0.7, &c.sidebar_foreground)).child(line((side_w - 12.0) * 0.5, &c.muted)).child(line((side_w - 12.0) * 0.6, &c.muted));
+    let card = col().key(format!("{key}-b")).w(box_w).padding(6.0).gap(4.0).radius(5.0).fill(hexc(&c.card, wash)).child(line((box_w - 12.0) * 0.8, &c.foreground)).child(line((box_w - 12.0) * 0.55, &c.muted));
+    let dots = row().w(box_w).h(10.0).gap(4.0).center_y().child(el().key(format!("{key}-c")).w(28.0).h(10.0).radius(5.0).fill(hexc(&c.primary, t.meaning.iris))).child(el().grow(1.0)).child(el().size(6.0, 6.0).radius(3.0).fill(hexc(&c.success, t.meaning.mint))).child(el().size(6.0, 6.0).radius(3.0).fill(hexc(&c.warning, t.meaning.amber))).child(el().size(6.0, 6.0).radius(3.0).fill(hexc(&c.destructive, t.meaning.coral)));
     let page = col().w(page_w).h_full().padding(6.0).gap(6.0).child(card).child(el().grow(1.0)).child(dots);
     let edge = hexc(&c.foreground, t.text.base).alpha(0.18);
     row().w(width).h(72.0).radius(14.0).clip_rounded(14.0).fill(wash).border(1.0, edge).child(sidebar).child(page)
@@ -197,7 +197,7 @@ fn theme_grid(s: &App, t: &Neko, layer: &mut Vec<El>, dark: bool) -> El {
             .hover(t.surface.hover)
             .focus_ring(2.0, 2.0, t.surface.ring)
             .on_press(move |s: &mut App| s.pick_theme(dark, &id))
-            .child(swatch_mock(t, &e, card_w - 18.0))
+            .child(swatch_mock(t, &key, &e, card_w - 18.0))
             .child(name)
             .child(meta);
         if on {
@@ -208,7 +208,30 @@ fn theme_grid(s: &App, t: &Neko, layer: &mut Vec<El>, dark: bool) -> El {
             let remove_id = e.id.clone();
             entries.push(("Remove…".to_owned(), std::rc::Rc::new(move |s: &mut App| s.ask_remove_theme(&remove_id))));
         }
-        grid = grid.child(with_menu(s, t, layer, &key, card, entries));
+        // The web's trash button on a card of the person's own: top right, there while the card is hovered or focused.
+        let mut cell = col().w(card_w).hover_group().child(with_menu(s, t, layer, &key, card, entries));
+        if e.file.is_some() {
+            let remove_id = e.id.clone();
+            cell = cell.child(
+                row()
+                    .key(format!("{key}-remove"))
+                    .role("button")
+                    .label(format!("Remove {}", e.name))
+                    .help("Remove this theme")
+                    .focusable(true)
+                    .pin(None, Some(14.0), Some(14.0), None)
+                    .size(24.0, 24.0)
+                    .center()
+                    .radius(6.0)
+                    .fill(t.surface.window.alpha(0.8))
+                    .hover(t.surface.active)
+                    .focus_ring(2.0, 2.0, t.surface.ring)
+                    .group_opacity(0.0, 1.0)
+                    .on_press(move |s: &mut App| s.ask_remove_theme(&remove_id))
+                    .child(icon(&icons::TRASH, 13.0).color(t.text.muted).a11y_hidden()),
+            );
+        }
+        grid = grid.child(cell);
     }
     grid
 }
