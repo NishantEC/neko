@@ -250,7 +250,7 @@ pub fn model_counts(runs: &[(String, Option<String>)]) -> Vec<(String, usize)> {
             None => counts.push((name, 1)),
         }
     }
-    counts.sort_by(|a, b| b.1.cmp(&a.1));
+    counts.sort_by_key(|c| std::cmp::Reverse(c.1));
     counts.truncate(6);
     counts
 }

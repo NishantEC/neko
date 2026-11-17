@@ -163,8 +163,7 @@ impl ExtraCall {
         }
         match read(self, response, round_trip_ms) {
             Ok(answer) => Reply::Extra(Box::new(answer)),
-            Err(Reply::Refused(m)) => Reply::Refused(m),
-            Err(other) => other,
+            Err(reply) => *reply,
         }
     }
 }
@@ -174,9 +173,9 @@ fn provider(name: &str) -> Request {
 }
 
 /// The answer to `call` as data; the `Err` is a refusal or failure to hand on.
-fn read(call: &ExtraCall, response: Response, round_trip_ms: u64) -> Result<ExtraAnswer, Reply> {
+fn read(call: &ExtraCall, response: Response, round_trip_ms: u64) -> Result<ExtraAnswer, Box<Reply>> {
     Ok(match response {
-        Response::Error { message } => return Err(Reply::Refused(message)),
+        Response::Error { message } => return Err(Box::new(Reply::Refused(message))),
         Response::Themes { dir, themes, problems } => ExtraAnswer::Themes { dir, themes: themes.into_iter().map(|t| (t.id, t.file, t.theme)).collect(), problems: problems.into_iter().map(|p| (p.file, p.message)).collect() },
         Response::Hotkey { config } => ExtraAnswer::Hotkey(config),
         Response::HotkeyConflict { reason } => ExtraAnswer::Conflict(reason),
@@ -195,7 +194,7 @@ fn read(call: &ExtraCall, response: Response, round_trip_ms: u64) -> Result<Extr
         // the caller reads the page again.
         Response::Appearance { mode, light, dark, .. } => ExtraAnswer::Appearance { mode, light, dark },
         Response::Workbench(_) | Response::Activated => ExtraAnswer::Noted,
-        other => return Err(Reply::Failed(LinkError::Unreadable(format!("unexpected answer: {}", format!("{other:?}").chars().take(60).collect::<String>())))),
+        other => return Err(Box::new(Reply::Failed(LinkError::Unreadable(format!("unexpected answer: {}", format!("{other:?}").chars().take(60).collect::<String>()))))),
     })
 }
 

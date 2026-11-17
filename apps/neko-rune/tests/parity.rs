@@ -245,7 +245,7 @@ fn settings(section: &str) -> Runtime<App> {
 }
 
 #[test]
-fn settings_has_appearance_permissions_and_diagnostics_and_one_row_each_for_the_web_only_pages() {
+fn settings_has_appearance_permissions_and_diagnostics_and_the_rulebook_and_quick_panel_editors() {
     use neko_rune::link::Call;
     let mut rt = settings("appearance");
     for key in ["settings-section-appearance", "settings-section-permissions", "settings-section-diagnostics", "settings-section-rulebook", "settings-section-quick-panel"] {
@@ -282,12 +282,11 @@ fn settings_has_appearance_permissions_and_diagnostics_and_one_row_each_for_the_
     }
     assert!(!has_text(&rt, &std::env::var("HOME").unwrap_or_else(|_| "/nonexistent".into())) || std::env::var("HOME").unwrap_or_default().is_empty(), "the home folder is written ~");
 
-    // Rulebook and Quick panel: one row each, "Open in web UI".
-    for (section, id) in [("rulebook", "rulebook"), ("quick-panel", "quick-panel")] {
-        let rt = settings(section);
-        assert!(has_key(&rt, &format!("{id}-open-web")) && has_text(&rt, "Open in web UI"), "{section}");
-        assert_eq!(rt.elements().iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("set-"))).count(), 1, "{section} is one row");
-    }
+    // Rulebook and Quick panel are edited here now (batch D), not a link to the web UI.
+    let rt = settings("rulebook");
+    assert!(has_key(&rt, "rulebook") && has_key(&rt, "rulebook-save") && !has_key(&rt, "rulebook-open-web"));
+    let rt = settings("quick-panel");
+    assert!(has_key(&rt, "folder-path") && has_key(&rt, "folder-add") && !has_key(&rt, "quick-panel-open-web"));
 }
 
 #[test]
