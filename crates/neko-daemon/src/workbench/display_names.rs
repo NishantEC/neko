@@ -212,7 +212,7 @@ mod tests {
                 tools: vec![],
                 discovered_ms: None,
                 error: None,
-                source_link: None,
+                source_link: None, pack: None,
             });
             snapshot.mcp.responsibilities.push(neko_protocol::mcp_host::Responsibility {
                 id: watch_id.clone(),

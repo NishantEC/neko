@@ -436,7 +436,7 @@ mod tests {
             }],
             discovered_ms: Some(100),
             error: None,
-            source_link: None,
+            source_link: None, pack: None,
         });
         state.mcp.grants.push(ToolGrant {
             connection_id: "c".into(),

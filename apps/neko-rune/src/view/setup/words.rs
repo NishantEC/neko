@@ -506,7 +506,7 @@ mod tests {
             tools: (0..tools).map(|i| McpTool { read_only: true, name: format!("t{i}"), description: String::new(), input_schema: String::new(), schema_hash: "h".into() }).collect(),
             discovered_ms: discovered,
             error: error.map(str::to_owned),
-            source_link: None,
+            source_link: None, pack: None,
         }
     }
 

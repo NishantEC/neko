@@ -181,6 +181,17 @@ pub fn with_computer_use(mut config: Value, peekaboo: &Path) -> Value {
     config
 }
 
+/// Adds the tool servers of the pack that owns a routine (`packs::routine_servers`) to its
+/// config. A server the scope already configures under the same name is left as it is.
+pub fn with_pack_servers(mut config: Value, servers: &[crate::packs::PackServer]) -> Value {
+    if let Some(map) = config["mcpServers"].as_object_mut() {
+        for server in servers {
+            map.entry(server.name.clone()).or_insert_with(|| serde_json::json!({"type": "stdio", "command": server.command, "args": server.args}));
+        }
+    }
+    config
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,5 +306,14 @@ mod tests {
         write(&docs.join("clientco/support-fe/.mcp.json"), r#"{"mcpServers":{"slack-client-a":{}}}"#);
         let scopes = discover(home.path(), None);
         assert!(scopes[0].problems[0].starts_with("slack-client-a is set up both in clientco/.mcp.json and in support-fe"));
+    }
+
+    #[test]
+    fn pack_servers_are_added_without_replacing_the_scopes_own() {
+        let server = |name: &str| crate::packs::PackServer { pack: "p".into(), name: name.into(), command: "/x/tool".into(), args: vec!["mcp".into()] };
+        let config = serde_json::json!({"mcpServers": {"keep": {"command": "/own"}}});
+        let config = with_pack_servers(config, &[server("tool"), server("keep")]);
+        assert_eq!(config["mcpServers"]["tool"]["args"][0], "mcp");
+        assert_eq!(config["mcpServers"]["keep"]["command"], "/own");
     }
 }

@@ -1284,6 +1284,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             }
         }
 
+        Request::Packs(command) => crate::packs::handle(state, command),
         Request::ListThemes => themes_listing(),
 
         Request::RemoveTheme { id } => match neko_core::appearance::remove_user_theme(&themes_dir(), &id) {

@@ -56,6 +56,7 @@ pub mod task_chat;
 pub mod neko_memory;
 pub mod new_agent;
 pub mod onboarding;
+pub mod packs;
 pub mod permissions;
 pub mod preferences;
 pub mod provider;

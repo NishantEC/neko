@@ -1,0 +1,32 @@
+name = "spaceo"
+title = "SpaceO"
+version = "0.1.0"
+description = "Agents get their own invisible Mac display for app work."
+homepage = "https://github.com/ParthJadhav/SpaceO"
+licence = "MIT"
+
+[requires]
+binaries = [{ name = "spaceo", hint = "curl -fsSL https://raw.githubusercontent.com/ParthJadhav/SpaceO/main/install.sh | bash" }]
+
+[[mcp]]
+name = "spaceo"
+command = "spaceo"
+args = ["mcp"]
+env = []
+
+[[skills]]
+path = "skills/use-spaceo"
+
+[ui]
+web_plugin = ""
+luau = []
+
+[health]
+command = ["spaceo", "doctor"]
+
+[permissions]
+summary = [
+  "Runs apps on a virtual display",
+  "Reads and clicks app interfaces through Accessibility",
+  "Takes screenshots of agent displays",
+]

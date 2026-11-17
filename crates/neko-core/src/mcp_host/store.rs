@@ -84,6 +84,10 @@ pub fn allow_discovered_tools(state: &mut Snapshot, connection_id: &str) {
     let Some(connection) = state.mcp.connections.iter().find(|c| c.id == connection_id) else {
         return;
     };
+    // A pack's tools are granted by the person, per workspace, never by discovery.
+    if connection.pack.is_some() {
+        return;
+    }
     let existing = &mut state.mcp.grants;
     for workspace in &state.workspaces {
         if !connection.available_in(&workspace.id) {
@@ -614,7 +618,7 @@ mod tests {
             }],
             discovered_ms: Some(1),
             error: None,
-            source_link: None,
+            source_link: None, pack: None,
         });
         state
     }

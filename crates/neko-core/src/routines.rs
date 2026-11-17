@@ -58,11 +58,11 @@ impl Store {
     }
 }
 
-fn state_key(id: &str) -> String {
+pub(crate) fn state_key(id: &str) -> String {
     format!("routine_state_v1:{id}")
 }
 
-fn runs_key(id: &str) -> String {
+pub(crate) fn runs_key(id: &str) -> String {
     format!("routine_runs_v1:{id}")
 }
 

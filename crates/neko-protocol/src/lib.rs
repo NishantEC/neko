@@ -20,6 +20,7 @@ pub mod agent_models;
 pub mod decision_context;
 pub mod goals;
 pub mod mcp_host;
+pub mod packs;
 pub mod routines;
 pub mod scheduled_plans;
 pub mod setup_import;
@@ -448,6 +449,9 @@ pub struct MeterStat {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Request {
     McpBridge(mcp_host::BridgeRequest),
+    /// Packs: install, preview, update, remove and check bundles of tools,
+    /// skills, a web plugin and routines (`neko_core::packs`).
+    Packs(packs::PackCommand),
     Workbench(workbench::Command),
     /// The workbench, unless it is still what the client has: `digest` is
     /// the `Snapshot::digest` the client last received. Answered with
@@ -1231,6 +1235,9 @@ pub enum Response {
         themes: Vec<UserTheme>,
         problems: Vec<ThemeProblem>,
     },
+    /// `Packs(List)` and what the other pack commands answer with.
+    Packs(packs::PackListing),
+    PackPreview(packs::PackPreview),
     Routines {
         routines: Vec<routines::RoutineView>,
         standing_orders: std::collections::BTreeMap<String, String>,

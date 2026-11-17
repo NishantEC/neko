@@ -962,7 +962,7 @@ fn source_fixture(db: &Db) -> Snapshot {
         trusted: true,
         has_credentials: false,
         oauth: false,
-        source_link: None,
+        source_link: None, pack: None,
         tools: vec![McpTool {
             name: "read".into(),
             description: String::new(),

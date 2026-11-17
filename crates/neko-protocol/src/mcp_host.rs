@@ -57,6 +57,10 @@ pub struct McpConnection {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_link: Option<SourceLink>,
+    /// The pack that owns this connection (`neko_core::packs`). Discovery never
+    /// grants a pack's tools by itself: the person grants them per workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pack: Option<String>,
 }
 
 #[cfg(test)]

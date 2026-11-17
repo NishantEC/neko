@@ -549,7 +549,7 @@ impl Host {
                     tools: Vec::new(),
                     discovered_ms: None,
                     error: None,
-                    source_link: Some(source_link),
+                    source_link: Some(source_link), pack: None,
                 };
                 state.mcp.connections.push(connection);
                 policy::validate(&state)?;
@@ -755,7 +755,7 @@ impl Host {
             tools: vec![],
             discovered_ms: None,
             error: None,
-            source_link: None,
+            source_link: None, pack: None,
         };
         {
             let db = self
@@ -1503,7 +1503,7 @@ mod tests {
                 tools: vec![
                     McpTool { read_only: true, name: "lookup".into(), description: "Read".into(), input_schema: "{}".into(), schema_hash: "read".into() },
                     McpTool { read_only: false, name: "delete".into(), description: "Write".into(), input_schema: "{}".into(), schema_hash: "write".into() },
-                ], discovered_ms: Some(1), error: None, source_link: None,
+                ], discovered_ms: Some(1), error: None, source_link: None, pack: None,
             });
             for (name, hash) in [("lookup", "read"), ("delete", "write")] {
                 state.mcp.grants.push(ToolGrant {
@@ -1557,7 +1557,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
             state.mcp.connections.push(McpConnection {
                 oauth: false, id: "issues".into(), workspace_id: "w".into(), label: "Issues".into(), config,
                 enabled: true, trusted: true, has_credentials: false, tools: tools.clone(),
-                discovered_ms: Some(1), error: None, source_link: None,
+                discovered_ms: Some(1), error: None, source_link: None, pack: None,
             });
             state.mcp.grants.push(ToolGrant { workspace_id: "w".into(), connection_id: "issues".into(), tool_name: "list_issues".into(), schema_hash: tools[0].schema_hash.clone() });
             store::save(&db, &state).unwrap();
@@ -1908,7 +1908,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
                 }],
                 discovered_ms: None,
                 error: None,
-                source_link: None,
+                source_link: None, pack: None,
             });
             state.mcp.grants.push(ToolGrant {
                 connection_id: "c".into(),

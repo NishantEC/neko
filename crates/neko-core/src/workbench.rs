@@ -2944,7 +2944,7 @@ mod tests {
             }],
             discovered_ms: Some(1),
             error: None,
-            source_link: None,
+            source_link: None, pack: None,
         });
         save(&db, &initial).unwrap();
         let folder = tempfile::tempdir().unwrap();

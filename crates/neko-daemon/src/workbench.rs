@@ -2998,7 +2998,7 @@ mod tests {
                 tools: vec![],
                 discovered_ms: None,
                 error: None,
-                source_link: None,
+                source_link: None, pack: None,
             });
             store::save(&db, &state).unwrap();
         }

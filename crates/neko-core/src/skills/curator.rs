@@ -132,6 +132,18 @@ pub fn note_patch(db: &Db, path: &str, base_hash: &str, revised: &str, source: &
     write_row(db, &row)
 }
 
+/// Forgets what the curator knows about `path` (a skill that was deleted).
+pub fn forget(db: &Db, path: &str) -> Result<(), String> {
+    let mut row = read_row(db);
+    let before = row.entries.len();
+    let (path, plain) = (canonical(path), path);
+    row.entries.retain(|e| e.path != path && e.path != plain);
+    if row.entries.len() == before {
+        return Ok(());
+    }
+    write_row(db, &row)
+}
+
 /// The person locks or unlocks a skill. Unlocking a skill Neko wrote hands it back as it is now.
 pub fn set_locked(db: &Db, path: &str, locked: bool) -> Result<(), String> {
     let mut row = read_row(db);

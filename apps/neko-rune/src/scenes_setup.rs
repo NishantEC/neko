@@ -25,7 +25,7 @@ fn tool(name: &str, description: &str, read_only: bool) -> McpTool {
 }
 
 fn connection(id: &str, workspace: &str, label: &str, config: ServerConfig, enabled: bool, error: Option<&str>, tools: Vec<McpTool>) -> McpConnection {
-    McpConnection { oauth: false, id: id.into(), workspace_id: workspace.into(), label: label.into(), config, enabled, trusted: true, has_credentials: false, discovered_ms: (!tools.is_empty()).then_some(DEMO_NOW - HOUR), tools, error: error.map(str::to_owned), source_link: None }
+    McpConnection { oauth: false, id: id.into(), workspace_id: workspace.into(), label: label.into(), config, enabled, trusted: true, has_credentials: false, discovered_ms: (!tools.is_empty()).then_some(DEMO_NOW - HOUR), tools, error: error.map(str::to_owned), source_link: None, pack: None }
 }
 
 #[allow(clippy::too_many_arguments)]

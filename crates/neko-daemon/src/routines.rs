@@ -893,6 +893,9 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
                         config = neko_core::scopes::with_computer_use(config, &peekaboo);
                     }
                 }
+                // A pack's routines see the tools of the pack that owns them.
+                let pack_servers = neko_core::packs::routine_servers(&db(state), &neko_core::packs::Paths::system(), &neko_core::packs::Env::system(), &routine.id);
+                config = neko_core::scopes::with_pack_servers(config, &pack_servers);
                 let ran = run_agent(state, routine, &spec, &config, &cancel);
                 meta = ran.meta;
                 match ran.result {
