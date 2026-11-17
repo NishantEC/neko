@@ -360,11 +360,23 @@ pub fn finish(db: &Db, data: &Path, prepared: &Prepared, answer: &str, now_ms: i
             return Ok(Outcome::Unchanged);
         }
     };
+    let source = format!("{SOURCE_PREFIX} {}", &base_hash[..12]);
+    submit(db, data, &prepared.skill, &prepared.workspace_id, &prepared.base, revised, auto_safe, &source, now_ms)
+}
+
+/// The curator's rules for a revised skill, whoever wrote the revision: it is saved as a `Patch`
+/// proposal (the same diff review and base-hash check as a lesson), and applied by itself only when
+/// the skill is one Neko wrote and nobody changed (`Ownership::Neko`) and the revision is selection
+/// only (`auto_safe`). Anything else waits for the person in Skills. `source` must start with
+/// `SOURCE_PREFIX` and be unique per revision.
+#[allow(clippy::too_many_arguments)]
+pub fn submit(db: &Db, data: &Path, skill: &Skill, workspace_id: &str, base: &str, revised: String, auto_safe: bool, source: &str, now_ms: i64) -> Result<Outcome, String> {
+    let path = &skill.path;
+    let base_hash = hash(base);
     let row = read_row(db);
     let owner = ownership(row.entries.iter().find(|e| e.path == canonical(path)), &base_hash);
-    let source = format!("{SOURCE_PREFIX} {}", &base_hash[..12]);
-    let lesson = lessons::TicketLesson::Patch { target: prepared.skill.clone(), base: prepared.base.clone(), revised: revised.clone() };
-    lessons::propose_lesson(db, &prepared.workspace_id, &lesson, &source)?;
+    let lesson = lessons::TicketLesson::Patch { target: skill.clone(), base: base.to_owned(), revised: revised.clone() };
+    lessons::propose_lesson(db, workspace_id, &lesson, source)?;
     mark_curated(db, path, &base_hash)?;
     if !owner.applies_itself() {
         return Ok(Outcome::Proposed(owner.label()));
@@ -373,10 +385,10 @@ pub fn finish(db: &Db, data: &Path, prepared: &Prepared, answer: &str, now_ms: i
         // Words or frontmatter the file did not have: a person reads it first.
         return Ok(Outcome::Proposed("changed wording"));
     }
-    let proposal = load(db)?.proposals.into_iter().find(|p| p.source == source && p.workspace_id == prepared.workspace_id).ok_or("The proposal was not saved")?;
+    let proposal = load(db)?.proposals.into_iter().find(|p| p.source == source && p.workspace_id == workspace_id).ok_or("The proposal was not saved")?;
     super::decide(db, data, &proposal.id, &proposal.content_hash, true)?;
     let mut row = read_row(db);
-    row.recent.insert(0, CuratorApplied { path: canonical(path), name: prepared.skill.name.clone(), at_ms: now_ms, diff: proposal.body.clone() });
+    row.recent.insert(0, CuratorApplied { path: canonical(path), name: skill.name.clone(), at_ms: now_ms, diff: proposal.body.clone() });
     row.recent.truncate(MAX_RECENT);
     let new_hash = hash(&revised);
     entry_mut(&mut row, path).curated_hash = new_hash;

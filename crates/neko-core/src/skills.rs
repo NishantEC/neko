@@ -14,6 +14,8 @@ use std::{
 mod lessons;
 #[path = "skills/curator.rs"]
 pub mod curator;
+#[path = "skills/revise.rs"]
+pub mod revise;
 pub use lessons::{catalog_section, learning_catalog, lesson_prompt, propose_lesson, read_lesson, unified_diff, TicketLesson};
 
 const SETTING: &str = "neko_skills_v1";

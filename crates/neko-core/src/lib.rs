@@ -32,6 +32,7 @@ pub mod db;
 pub mod digest;
 pub mod duplicates;
 pub mod goals;
+pub mod improve;
 pub mod inbox;
 pub mod decision_context;
 pub mod decomposition;

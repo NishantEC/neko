@@ -33,12 +33,17 @@ pub fn bounded(label: &str, text: &str) -> String {
 }
 
 pub fn bounded_in(directory: &Path, label: &str, text: &str) -> String {
-    if text.len() <= LIMIT {
+    bounded_with(directory, label, text, LIMIT, HEAD, TAIL)
+}
+
+/// `bounded_in` with its own sizes: text over `limit` bytes is spilled and shown as `head` + `tail` bytes.
+pub fn bounded_with(directory: &Path, label: &str, text: &str, limit: usize, head: usize, tail: usize) -> String {
+    if text.len() <= limit {
         return text.to_owned();
     }
     let path = write(directory, label, text);
-    let head = cut_head(text, HEAD);
-    let tail = cut_tail(text, TAIL);
+    let head = cut_head(text, head);
+    let tail = cut_tail(text, tail);
     let omitted = text.len().saturating_sub(head.len() + tail.len());
     let place = match &path {
         Some(path) => format!("the full output ({} bytes) is in {}", text.len(), path.display()),

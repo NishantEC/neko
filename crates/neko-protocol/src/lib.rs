@@ -19,6 +19,7 @@ pub mod digest;
 pub mod agent_models;
 pub mod decision_context;
 pub mod goals;
+pub mod improve;
 pub mod mcp_host;
 pub mod packs;
 pub mod routines;
@@ -455,6 +456,8 @@ pub enum Request {
     /// The `.luau` files of an installed pack (native cards and views for the Rune client). A read: answered with
     /// `PackUi`, and only while the pack is Healthy and its files are exactly what the person approved (otherwise an error).
     PackUi { name: String },
+    /// The self-improvement loop: suggestions Neko made from trouble it saw again, applied, rejected or undone by the person.
+    Improve(improve::ImproveCommand),
     Workbench(workbench::Command),
     /// The workbench, unless it is still what the client has: `digest` is
     /// the `Snapshot::digest` the client last received. Answered with
@@ -1242,6 +1245,7 @@ pub enum Response {
     Packs(packs::PackListing),
     PackPreview(packs::PackPreview),
     PackUi(Vec<packs::PackUiFile>),
+    Improve(improve::ImproveReply),
     Routines {
         routines: Vec<routines::RoutineView>,
         standing_orders: std::collections::BTreeMap<String, String>,

@@ -188,6 +188,23 @@ fn skill_curator() {
     check("skill-curator", &skills::curator::prompt("rust-tests", body));
 }
 
+#[test]
+fn improve_proposal() {
+    use neko_core::improve::{prompt, signals::Signal};
+    let signal = Signal {
+        key: "missing_tool:rg".into(),
+        label: "A run or turn said the tool or command \"rg\" is missing, not connected or not installed.".into(),
+        count: 2,
+        evidence: "- [2026-11-16] zsh: command not found: rg\n- [2026-11-15] ripgrep is not installed".into(),
+        workspace_id: "w1".into(),
+    };
+    let packs = vec![("linear".to_owned(), "Issues and projects from Linear".to_owned()), ("search-tools".to_owned(), "ripgrep and fd for agents".to_owned())];
+    let skills = vec![("rust-tests".to_owned(), "Run and fix Rust tests in a workspace".to_owned())];
+    let text = |dev| prompt::prompt(&prompt::Context { signal: &signal, packs: &packs, skills: &skills, standing_orders: "Reply without asking.", dev_checkout: dev });
+    check("improve-proposal", &text(false));
+    check("improve-proposal-dev", &text(true));
+}
+
 fn golden_goal() -> neko_protocol::goals::Goal {
     use neko_protocol::goals::{CheckResult, JournalEntry};
     let mut goal = neko_core::goals::new_goal("w1", "Make the invoice export handle empty rows", "cargo test -p acme-export", "Do not change the CSV header", Some(12), 1_000).unwrap();
