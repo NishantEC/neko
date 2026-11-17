@@ -29,7 +29,7 @@ impl Controller {
     }
 
     /// Whether the Mac is idle enough: nothing held, no goal active, no worker running.
-    fn idle_for_curator(&self) -> Result<bool, String> {
+    pub(crate) fn idle_for_curator(&self) -> Result<bool, String> {
         let machine_ok = neko_core::machine::latest().is_some_and(|h| h.holding.is_none() && h.comfort_wait.is_none());
         if !machine_ok || !self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_empty() {
             return Ok(false);
@@ -92,7 +92,7 @@ impl Controller {
 }
 
 /// One tool-free cheap-model call (Haiku, else a Codex mini model), as the goal judge makes it.
-fn ask(db: &Mutex<Db>, prompt: &str) -> Result<String, String> {
+pub(crate) fn ask(db: &Mutex<Db>, prompt: &str) -> Result<String, String> {
     let claude_ok = !neko_core::runtime_health::load(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)).is_bad();
     let mut last = String::from("No model is available");
     for runtime in super::goals::judge_runtimes(claude_ok) {

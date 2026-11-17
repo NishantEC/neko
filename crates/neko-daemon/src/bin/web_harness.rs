@@ -23,6 +23,8 @@
 
 #[path = "../codex.rs"]
 mod codex;
+#[path = "../improve.rs"]
+mod improve;
 #[path = "../inbox_reply.rs"]
 mod inbox_reply;
 #[path = "../mcp_host.rs"]
@@ -120,6 +122,10 @@ fn main() {
     // items closed for each reason, so the Inbox's "Closed recently" shows.
     if let Err(e) = seed_inbox(&state) {
         eprintln!("web-harness: cannot seed the inbox: {e}");
+        std::process::exit(1);
+    }
+    if let Err(e) = seed_improve(&state) {
+        eprintln!("web-harness: cannot seed the suggestions: {e}");
         std::process::exit(1);
     }
     // A reply is "in progress" for the whole run, so a message sent from the
@@ -229,6 +235,58 @@ fn seed_inbox(state: &server::AppState) -> Result<(), String> {
     items[0].default = Some("Approve it with a comment".into());
     let run = RoutineRun { id: "seed-run".into(), routine_id: routine.id.clone(), started_ms: now - hour, finished_ms: Some(now - hour), ok: true, needs_you: items, ..Default::default() };
     neko_core::routines::push_run(&db, &routine.id, run)
+}
+
+/// Five suggestions, one in each state (`scripts/verify/improve.mjs`). Applied ones carry the undo
+/// record a real apply writes, so the Undo buttons work.
+fn seed_improve(state: &server::AppState) -> Result<(), String> {
+    use neko_core::improve::{self, Undo};
+    use neko_protocol::improve::{ImproveKind, ImproveState, Improvement};
+    let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let now = neko_core::workbench::now_ms();
+    let day = improve::DAY_MS;
+    let base = |id: &str, key: &str, kind: ImproveKind, title: &str, why: &str| Improvement {
+        id: id.into(), signal_key: key.into(), kind, title: title.into(), why: why.into(), workspace_id: "seed".into(), created_ms: now - day, evidence: format!("- [2026-11-16] {why}"), ..Default::default()
+    };
+    let mut open = base("imp-open", "correction:check-type-types", ImproveKind::SkillPatch, "Run the type check before reviewing", "You corrected the review order three times in two weeks.");
+    open.target = "reviews".into();
+    open.default_label = "Improve the reviews skill".into();
+    open.diff = "@@ -3,3 +3,4 @@\n # Steps\n+- Run the type check before reading the diff.\n - Read the diff.\n - Run the tests.\n".into();
+    open.change = "---\nname: reviews\ndescription: Reviewing code\n---\n# Steps\n- Run the type check before reading the diff.\n- Read the diff.\n- Run the tests.\n".into();
+    let mut applied = base("imp-applied", "ask:which-branch", ImproveKind::StandingOrder, "Say which branch a PR targets", "The same question about the target branch reached the Inbox four times.");
+    applied.change = "Say which branch a pull request targets.".into();
+    applied.default_label = "Add this standing order".into();
+    applied.state = ImproveState::Applied;
+    applied.applied_ms = Some(now - 2 * day);
+    applied.before = 4;
+    let mut helped = base("imp-helped", "missing_tool:linear", ImproveKind::InstallPack, "Install the Linear pack", "A run said the Linear tools were not connected.");
+    helped.target = "linear".into();
+    helped.default_label = "Install the Linear pack".into();
+    helped.state = ImproveState::Helped;
+    helped.created_ms = now - 12 * day;
+    helped.applied_ms = Some(now - 10 * day);
+    helped.resolved_ms = Some(now - 3 * day);
+    helped.before = 3;
+    let mut bad = base("imp-bad", "missing_tool:jest", ImproveKind::CodeTask, "Retry flaky test setup", "Runs kept failing with jest not found.");
+    bad.change = "Make the test runner find jest on the PATH it gives agents.".into();
+    bad.default_label = "Start the change".into();
+    bad.state = ImproveState::DidntHelp;
+    bad.created_ms = now - 12 * day;
+    bad.applied_ms = Some(now - 9 * day);
+    bad.resolved_ms = Some(now - 2 * day);
+    bad.before = 2;
+    bad.after = 3;
+    bad.task_id = Some("seed-task".into());
+    let mut rejected = base("imp-rejected", "ask:release-notes", ImproveKind::NewSkill, "A skill for release notes", "Release notes were asked for again and again.");
+    rejected.target = "release-notes".into();
+    rejected.default_label = "Review the release-notes skill".into();
+    rejected.state = ImproveState::Rejected;
+    rejected.created_ms = now - 5 * day;
+    rejected.resolved_ms = Some(now - 4 * day);
+    improve::save(&db, &[open, applied, helped, bad, rejected])?;
+    improve::save_undo(&db, "imp-applied", &Undo { order_workspace: "seed".into(), order_line: "Say which branch a pull request targets.".into(), ..Undo::default() })?;
+    improve::save_undo(&db, "imp-helped", &Undo { pack: "linear".into(), ..Undo::default() })?;
+    improve::save_undo(&db, "imp-bad", &Undo { task_id: "seed-task".into(), ..Undo::default() })
 }
 
 /// Sample self-update state: an applied update, a rollback, a recent check,

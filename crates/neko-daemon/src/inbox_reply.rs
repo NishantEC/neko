@@ -35,6 +35,10 @@ pub enum Target {
     GoalExtend { goal_id: String, turns: u32, subject: String },
     Spend { to_cents: u32 },
     Task { task_id: String },
+    /// A self-improvement suggestion (`improve:<id>`): the default applies it.
+    Improve { link: String, default: String },
+    /// "That didn't help" (`improve-undo:<id>`): the default is Undo.
+    ImproveUndo { link: String },
     Plain { routine_id: String },
 }
 
@@ -90,6 +94,12 @@ pub fn target_of(db: &neko_core::Db, routine_id: &str, item: &NeedsYou) -> Targe
             }
         }
     }
+    if link.starts_with(neko_core::improve::UNDO_LINK) {
+        return Target::ImproveUndo { link: link.to_owned() };
+    }
+    if link.starts_with(neko_core::improve::LINK) {
+        return Target::Improve { link: link.to_owned(), default: item.default.clone().unwrap_or_default() };
+    }
     if item.link.is_none() {
         if let Some(to_cents) = spend_raise(db, item.seq) {
             return Target::Spend { to_cents };
@@ -123,6 +133,8 @@ pub fn action_label(db: &neko_core::Db, routine_id: &str, item: &NeedsYou) -> Op
         Target::GoalBlocked { default, .. } => Some(format!("answer \"{}\"", line(&default))),
         Target::GoalExtend { turns, subject, .. } => Some(format!("extend {subject} by {turns} turns")),
         Target::Spend { to_cents } => Some(format!("raise the daily ceiling to ${}", to_cents / 100)),
+        Target::Improve { default, .. } => (!default.trim().is_empty()).then(|| line(&default).to_lowercase()),
+        Target::ImproveUndo { .. } => Some("undo it".to_owned()),
         Target::Task { .. } => default.map(|d| format!("tell the task \"{}\"", line(d))),
         Target::Plain { .. } => default.map(|d| format!("reply \"{}\"", line(d))),
     }
@@ -163,6 +175,12 @@ pub fn apply(state: &AppState, seq: u64, answer: Answer, phone: bool) -> Result<
         (Target::Spend { .. }, Answer::Text(text)) => {
             let cents = dollars_in(text).filter(|c| (1..=1_000_000).contains(c)).ok_or("To raise the ceiling, answer with an amount like $20")?;
             raise_ceiling(state, seq, cents, reason)?
+        }
+        // A suggestion is applied only by accepting its default, which is the person's own click (or reminder tick);
+        // words are never read as an instruction to change anything.
+        (Target::Improve { link, .. } | Target::ImproveUndo { link }, Answer::Default) => crate::improve::answer_default(state, link, reason)?,
+        (Target::Improve { .. } | Target::ImproveUndo { .. }, Answer::Text(_)) => {
+            return Err("Accept the default to apply this, or open Setup, Improvements to reject it".into());
         }
         (Target::Task { task_id }, _) => {
             let text = match &answer {

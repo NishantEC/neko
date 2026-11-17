@@ -14,6 +14,7 @@ mod memory_learning;
 mod checkpoints;
 #[path = "workbench/skill_curator.rs"]
 mod skill_curator;
+pub(crate) use skill_curator::ask as ask_cheap_model;
 #[path = "workbench/responsibilities.rs"]
 mod responsibilities;
 #[path = "workbench/scheduled_plans.rs"]
@@ -83,6 +84,8 @@ fn save_with_failure_records(db: &Db, snapshot: &Snapshot, already_failed: &std:
         store::save(db, snapshot)?;
         for task in snapshot.tasks.iter().filter(|t| t.status == TaskStatus::Failed && !already_failed.contains(&t.id)) {
             record_host_failure(db, snapshot, &task.id)?;
+            // A run failed: the self-improvement loop looks soon (it checks its own setting).
+            crate::improve::note_event();
         }
         Ok(())
     })

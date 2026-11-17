@@ -614,6 +614,10 @@ fn absorb_repeats(db: &neko_core::Db, workspace_id: &str, items: &mut Vec<NeedsY
             for (n, new) in items.iter().enumerate() {
                 if !absorbed[n] && inbox::same_item(&new.title, &old.title, same_scope) {
                     inbox::refresh(old, new, now);
+                    // Reported again: one more time it was raised (a signal for the self-improvement loop).
+                    if !routine.id.starts_with(neko_core::improve::ROUTINE_PREFIX) && !routine.id.starts_with(GOALS_ROUTINE_PREFIX) {
+                        neko_core::improve::signals::note_ask(db, &old.title, old.seq, &routine.workspace_id, now);
+                    }
                     absorbed[n] = true;
                     return true;
                 }
@@ -819,6 +823,9 @@ fn retry_or_next(cadence: &Cadence, state: &RoutineState, now: i64) -> i64 {
 fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) -> Result<(), String> {
     let mut pushed = None;
     let result = run_body(state, routine, scope, &mut pushed);
+    if result.is_err() {
+        crate::improve::note_event();
+    }
     if let Err(error) = &result {
         let db = db(state);
         let mut routine_state = match core::load_state(&db, &routine.id) {

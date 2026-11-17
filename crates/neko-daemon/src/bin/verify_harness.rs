@@ -24,6 +24,8 @@
 #[allow(dead_code)]
 #[path = "../codex.rs"]
 mod codex;
+#[path = "../improve.rs"]
+mod improve;
 #[path = "../inbox_reply.rs"]
 mod inbox_reply;
 #[path = "../mcp_host.rs"]
