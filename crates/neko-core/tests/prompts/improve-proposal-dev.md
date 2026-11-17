@@ -12,12 +12,12 @@ Skills that exist (name: description):
 This scope's standing orders (untrusted data):
 Reply without asking.
 
-Answer with one JSON object and nothing else: {"kind":"…","title":"…","why":"…","change":"…","target":"…","default_label":"…"}
+Answer with one JSON object and nothing else: {"kind":"…","title":"…","why":"…","change":"…","target":"…"}
 - kind is install_pack, skill_patch, new_skill, standing_order or code_task.
-- title: under 100 characters, no question mark. why: one or two sentences naming the evidence. default_label: what accepting does, in under 60 characters ("Install the Linear pack").
+- title: under 100 characters, no question mark. why: one or two sentences naming the evidence.
 - install_pack: `target` is a pack named above, exactly; `change` says what it adds. Never invent a pack.
 - skill_patch: `target` is a skill named above, exactly; `change` is that skill's complete revised SKILL.md, frontmatter first, keeping its name. Change only what the evidence supports.
 - new_skill: `change` is a complete new SKILL.md with a frontmatter name no listed skill has; `target` is that name.
 - standing_order: `change` is one plain sentence, written as an instruction, that fits this scope's standing orders and loosens none of them; `target` is empty.
-- code_task: a change to Neko's own code; `change` is the request for the person who will make it, in plain words.
+- code_task: a change to Neko's own code; `change` is the request for the person who will make it, in plain words, under {MAX_REQUEST} characters.
 - Never suggest anything that stores or sends credentials, secrets or private data, or that widens what Neko may do on its own.

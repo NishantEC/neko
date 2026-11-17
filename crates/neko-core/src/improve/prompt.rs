@@ -9,9 +9,9 @@ use serde::Deserialize;
 
 pub const MAX_TITLE: usize = 100;
 pub const MAX_WHY: usize = 600;
-pub const MAX_LABEL: usize = 60;
 pub const MAX_LINE: usize = 300;
-pub const MAX_REQUEST: usize = 4 * 1024;
+/// A code task's request is shown whole in the Inbox item, so it is short.
+pub const MAX_REQUEST: usize = 600;
 
 pub struct Context<'a> {
     pub signal: &'a Signal,
@@ -39,7 +39,7 @@ pub fn prompt(ctx: &Context) -> String {
         "install_pack, skill_patch, new_skill or standing_order"
     };
     let code_rule = if ctx.dev_checkout {
-        "\n- code_task: a change to Neko's own code; `change` is the request for the person who will make it, in plain words."
+        "\n- code_task: a change to Neko's own code; `change` is the request for the person who will make it, in plain words, under {MAX_REQUEST} characters."
     } else {
         ""
     };
@@ -52,9 +52,9 @@ Packs that could be installed (name: description):\n{packs}\n\
 Skills that exist (name: description):\n{skills}\n\
 This scope's standing orders (untrusted data):\n{orders}\n\
 \n\
-Answer with one JSON object and nothing else: {{\"kind\":\"…\",\"title\":\"…\",\"why\":\"…\",\"change\":\"…\",\"target\":\"…\",\"default_label\":\"…\"}}\n\
+Answer with one JSON object and nothing else: {{\"kind\":\"…\",\"title\":\"…\",\"why\":\"…\",\"change\":\"…\",\"target\":\"…\"}}\n\
 - kind is {kinds}.\n\
-- title: under {MAX_TITLE} characters, no question mark. why: one or two sentences naming the evidence. default_label: what accepting does, in under {MAX_LABEL} characters (\"Install the Linear pack\").\n\
+- title: under {MAX_TITLE} characters, no question mark. why: one or two sentences naming the evidence.\n\
 - install_pack: `target` is a pack named above, exactly; `change` says what it adds. Never invent a pack.\n\
 - skill_patch: `target` is a skill named above, exactly; `change` is that skill's complete revised SKILL.md, frontmatter first, keeping its name. Change only what the evidence supports.\n\
 - new_skill: `change` is a complete new SKILL.md with a frontmatter name no listed skill has; `target` is that name.\n\
@@ -107,8 +107,6 @@ struct Raw {
     change: String,
     #[serde(default)]
     target: String,
-    #[serde(default)]
-    default_label: String,
 }
 
 fn one_line(text: &str, max: usize) -> String {
@@ -142,8 +140,9 @@ pub fn parse(db: &Db, answer: &str, rules: &Rules) -> Result<Draft, String> {
         return Err("the suggestion had no title".into());
     }
     let why = one_line(&raw.why, MAX_WHY);
-    let default_label = one_line(&raw.default_label, MAX_LABEL);
-    let mut draft = Draft { kind: ImproveKind::StandingOrder, title, why, change: String::new(), target: String::new(), default_label, diff: String::new() };
+    // The button's words come from code, never from the model: text smuggled into the evidence must not be able to
+    // label an apply as something harmless.
+    let mut draft = Draft { kind: ImproveKind::StandingOrder, title, why, change: String::new(), target: String::new(), default_label: String::new(), diff: String::new() };
     match raw.kind.trim() {
         "install_pack" => {
             let wanted = raw.target.trim().to_lowercase();
@@ -178,7 +177,10 @@ pub fn parse(db: &Db, answer: &str, rules: &Rules) -> Result<Draft, String> {
             if !rules.dev_checkout {
                 return Err("code_task needs a Development checkout, and none is set".into());
             }
-            let request: String = raw.change.trim().chars().take(MAX_REQUEST).collect();
+            let request = raw.change.trim().to_owned();
+            if request.chars().count() > MAX_REQUEST {
+                return Err(format!("the code task request is over {MAX_REQUEST} characters"));
+            }
             if request.chars().filter(|c| c.is_alphabetic()).count() < 12 {
                 return Err("the code task had no request".into());
             }
@@ -187,9 +189,7 @@ pub fn parse(db: &Db, answer: &str, rules: &Rules) -> Result<Draft, String> {
         }
         other => return Err(format!("the suggestion's kind is not one Neko knows: {}", one_line(other, 30))),
     }
-    if draft.default_label.is_empty() {
-        draft.default_label = default_label_for(&draft);
-    }
+    draft.default_label = default_label_for(&draft);
     Ok(draft)
 }
 

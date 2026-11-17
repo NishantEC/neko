@@ -278,13 +278,23 @@ pub fn verify(dbm: &Mutex<Db>, fx: &dyn Effects, data: &Path, now: i64) -> Resul
     for mut p in load(&db) {
         let before = p.state;
         match p.state {
-            ImproveState::Open if installed.contains(&p.id) => {
+            // Only a pack the person installed from the preview this suggestion opened counts; one they already had does not.
+            ImproveState::Open if installed.contains(&p.id) && p.history.iter().any(|e| e.text.starts_with("Opened the pack")) => {
                 save_undo(&db, &p.id, &Undo { pack: p.target.clone(), ..Undo::default() })?;
                 start_watch(&db, &mut p, now);
                 let said = format!("The {} pack was installed", p.target);
                 note(&mut p, now, said);
                 if let Some(seq) = p.inbox_seq {
                     close_item(&db, seq, inbox::BY_YOU, now)?;
+                }
+            }
+            // Nobody answered in a month (the Inbox item ages out by itself): it counts as turned down, so the key can be asked again later.
+            ImproveState::Open if now - p.created_ms > 30 * DAY_MS => {
+                p.state = ImproveState::Rejected;
+                p.resolved_ms = Some(now);
+                note(&mut p, now, "No answer in 30 days");
+                if let Some(seq) = p.inbox_seq {
+                    close_item(&db, seq, inbox::EXPIRED, now)?;
                 }
             }
             ImproveState::Sent => settle_sent(&db, data, &mut p, now)?,
@@ -467,7 +477,7 @@ mod tests {
         let p = add(&rig, p);
         // Nothing changed before the click, however long it sits.
         assert!(routines::load(&rig.db.lock().unwrap()).unwrap().standing_orders.is_empty());
-        verify(&rig.db, &fx, &rig.data, 100 * DAY).unwrap();
+        verify(&rig.db, &fx, &rig.data, 10 * DAY).unwrap();
         assert!(routines::load(&rig.db.lock().unwrap()).unwrap().standing_orders.is_empty());
         apply(&rig.db, &fx, &rig.data, &p.id, 2000, inbox::ANSWERED).unwrap();
         let orders = routines::load(&rig.db.lock().unwrap()).unwrap().standing_orders;
@@ -629,7 +639,7 @@ mod tests {
         assert_eq!(done.open_pack.as_deref(), Some("catalog:linear"));
         assert_eq!(fx.installs.get(), 0);
         assert!(!fx.installed.get());
-        verify(&rig.db, &fx, &rig.data, 100 * DAY).unwrap();
+        verify(&rig.db, &fx, &rig.data, 10 * DAY).unwrap();
         assert_eq!(find(&rig.db.lock().unwrap(), &p.id).unwrap().state, ImproveState::Open, "still waiting for the person's Install");
         // The person installs it from the preview.
         fx.installed.set(true);
@@ -643,6 +653,25 @@ mod tests {
         gone.target = "other".into();
         let gone = add(&rig, gone);
         assert!(apply(&rig.db, &fx, &rig.data, &gone.id, 5000, inbox::ANSWERED).is_err());
+    }
+
+    #[test]
+    fn a_pack_the_person_already_had_is_never_promoted_and_an_unanswered_suggestion_expires() {
+        let rig = rig(false);
+        let fx = Fake::default();
+        fx.installed.set(true);
+        let mut p = proposal(ImproveKind::InstallPack, "missing_tool:linear");
+        p.target = "linear".into();
+        let p = add(&rig, p);
+        // Installed, but its preview was never opened from the suggestion: nothing changes, nothing can be undone.
+        assert_eq!(verify(&rig.db, &fx, &rig.data, 2000).unwrap(), 0);
+        assert_eq!(find(&rig.db.lock().unwrap(), &p.id).unwrap().state, ImproveState::Open);
+        assert!(!super::super::view(&rig.db.lock().unwrap(), 2000, false).proposals[0].can_undo);
+        // A month with no answer: it counts as turned down (so the key is asked again after 30 more days).
+        assert_eq!(verify(&rig.db, &fx, &rig.data, 31 * DAY).unwrap(), 1);
+        let gone = find(&rig.db.lock().unwrap(), &p.id).unwrap();
+        assert_eq!((gone.state, gone.resolved_ms), (ImproveState::Rejected, Some(31 * DAY)));
+        assert!(open_items(&rig).is_empty());
     }
 
     #[test]

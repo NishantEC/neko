@@ -306,7 +306,8 @@ pub fn change_summary(p: &Improvement) -> String {
         ImproveKind::SkillPatch => format!("Revises the skill {}. Neko applies it itself only when its own rules allow; otherwise you approve it in Skills.", p.target),
         ImproveKind::NewSkill => format!("Adds a new skill, {}, for you to review in Skills.", p.target),
         ImproveKind::StandingOrder => format!("Adds this line to the standing orders: {}", crate::goals::head(&p.change, 300)),
-        ImproveKind::CodeTask => format!("Starts a task in the Development checkout: {}", crate::goals::head(&p.change, 300)),
+        // Shown whole: it becomes the task's request word for word.
+        ImproveKind::CodeTask => format!("Starts a task in the Development checkout with this request: {}", p.change),
     };
     format!("Change: {words}")
 }

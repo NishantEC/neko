@@ -84,7 +84,7 @@ pub(crate) fn gather_pass(state: &AppState, now: i64, ask: &dyn Fn(&str) -> Resu
         return Ok(0);
     }
     // Listing packs takes the database lock itself, so it is done before this one is held.
-    let packs: Vec<(String, String)> = neko_core::packs::list(&state.db, &neko_core::packs::Paths::system(), &neko_core::packs::Env::system()).map(|l| l.catalog.into_iter().map(|c| (c.info.name, c.info.description)).collect()).unwrap_or_default();
+    let packs: Vec<(String, String)> = neko_core::packs::list(&state.db, &neko_core::packs::Paths::system(), &neko_core::packs::Env::system()).map(|l| l.catalog.into_iter().filter(|c| !c.installed).map(|c| (c.info.name, c.info.description)).collect()).unwrap_or_default();
     let (inputs, world) = {
         let db = lock(state);
         let snapshot = neko_core::workbench::load(&db)?;
@@ -188,6 +188,10 @@ impl Effects for Real<'_> {
     }
 
     fn remove_pack(&self, pack: &str) -> Result<(), String> {
+        // Already removed by hand: nothing left to undo.
+        if !self.pack_installed(pack) {
+            return Ok(());
+        }
         neko_core::packs::remove(&self.state.db, &neko_core::packs::Paths::system(), pack)
     }
 
@@ -210,6 +214,10 @@ impl Effects for Real<'_> {
         let list = self.state.workbench.checkpoint_list(task_id, false).unwrap_or_default();
         if list.busy {
             return Err("The task is still running; stop it first, then undo".into());
+        }
+        // The goal that keeps working on this task must not start another turn and redo what is being undone.
+        for goal in snapshot.goals.iter().filter(|g| g.ticket_id.as_deref() == Some(task_id) && !g.status.is_finished()) {
+            self.state.workbench.command(Command::Goals(GoalCommand::Stop { id: goal.id.clone() }))?;
         }
         let Some(first) = list.runs.iter().filter(|r| !r.undone).map(|r| r.n).min() else {
             // Nothing ran, so there is nothing to put back: the task is cancelled instead.

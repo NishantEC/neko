@@ -132,6 +132,12 @@ pub fn note_patch(db: &Db, path: &str, base_hash: &str, revised: &str, source: &
     write_row(db, &row)
 }
 
+/// Tells the curator it has looked at this exact content (a skill restored to what it was, so the
+/// curator does not tidy it into the same revision again by itself).
+pub fn mark_looked_at(db: &Db, path: &str, content_hash: &str) -> Result<(), String> {
+    mark_curated(db, path, content_hash)
+}
+
 /// Forgets what the curator knows about `path` (a skill that was deleted).
 pub fn forget(db: &Db, path: &str) -> Result<(), String> {
     let mut row = read_row(db);

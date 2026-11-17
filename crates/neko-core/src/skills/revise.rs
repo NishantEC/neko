@@ -116,6 +116,8 @@ pub fn restore(db: &Db, data: &Path, path: &str, original: &str, written: &str, 
     let done = super::decide(db, data, &proposal.id, &proposal.content_hash, true);
     if done.is_err() {
         let _ = super::decide(db, data, &proposal.id, &proposal.content_hash, false);
+    } else {
+        let _ = curator::mark_looked_at(db, path, &hash(original));
     }
     done
 }

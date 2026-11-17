@@ -30,10 +30,13 @@ ticket-lesson skill proposals (dated when first seen).
 `improve::run_pass`: for each due signal one tool-free call on the judge's runtime (`workbench::ask_cheap_model`, Haiku
 else a Codex mini), prompt `improve::prompt::prompt` (golden `tests/prompts/improve-proposal*.md`: signal, evidence ≤4 KB
 with the spill rule from `spill::bounded_with`, the catalog's packs, the related skills, the scope's standing orders).
-JSON `{kind, title, why, change, target, default_label}` (**`target` is an addition to the brief's shape**: the pack or
-skill the change is for). `prompt::parse` validates: `install_pack` names a catalog pack, `skill_patch` an existing skill
+JSON `{kind, title, why, change, target}` (**`target` is an addition to the brief's shape**: the pack or skill the change
+is for). **`default_label` is written by code, not the model** (`prompt::default_label_for`, review finding: text smuggled
+into the evidence must not be able to label an apply as something harmless, and the label is what a phone reminder says).
+The catalog list given to the model leaves out packs already installed. `prompt::parse` validates: `install_pack` names a catalog pack, `skill_patch` an existing skill
 and a complete SKILL.md the curator's `consolidate` accepts, `new_skill` a fresh name, `standing_order` one sentence,
-`code_task` only with a Development checkout. A failure drops it, logs once and the key waits a day; no model stops the pass.
+`code_task` only with a Development checkout and a request of at most 600 characters (the Inbox item shows it whole; it
+becomes the task's request word for word). A failure drops it, logs once and the key waits a day; no model stops the pass.
 At most 3 a day (rolling), one open (open, sent, applied) per key, a rejected or settled key quiet for 30 days.
 
 ### Delivery and apply
@@ -51,6 +54,10 @@ why plus the change, default = `default_label`, link `improve:<id>`. `inbox_repl
 | `install_pack` | returns `open_pack: catalog:<name>`; the UI opens the preview; **nothing installs** (the row stays Open until the pack is installed through the digest flow, which `verify` notices) |
 | `code_task` | `GoalCommand::Create` (by the person) in the workspace of the Development checkout, `done_check` = `bash scripts/check.sh` when it exists; refused with no checkout or no such workspace |
 
+A pack suggestion becomes Applied only if the pack is installed *after* its preview was opened from the suggestion (a pack
+the person already had is never claimed, so Undo can never remove it). An Open suggestion nobody answers for 30 days turns
+Rejected (the Inbox item ages out by itself), so its key is not blocked forever.
+
 A Sent suggestion becomes Applied once the person approves it in Skills (file or folder is as proposed) and Rejected if
 they turn it down there; rejecting a Sent one withdraws the Skills proposal.
 
@@ -67,7 +74,7 @@ only named "stops firing"). Undo state is `improve_undo_v1:<id>` and an undone s
 - standing order: if the text is exactly what apply wrote, the earlier text (or "no entry") comes back exactly; otherwise
   only that line is removed and later edits stay.
 - pack: `packs::remove` (which archives). Confirms in the UI.
-- code task: checkpoints `Undo` (all runs, snapshotting unsaved edits first); if pushed, foreign commits or history moved,
+- code task: first stops the task's goal (so it cannot start another turn and redo the change), then checkpoints `Undo` (all runs, snapshotting unsaved edits first); if pushed, foreign commits or history moved,
   a revert task is made instead; a task that never ran is cancelled. Confirms in the UI.
 
 ### Tests
