@@ -12,6 +12,50 @@ use crate::status::{StatusKind, status_glyph};
 use crate::theme::Neko;
 
 pub const ROW_H: f32 = 32.0;
+/// Tools & skills (`pages/setup/Tools.tsx`): the title, then one line of tabs with the workspace picker and the action at the right,
+/// then the open tab's content 24 below it.
+pub fn tools_page(s: &App, t: &Neko, layer: &mut Vec<El>, skills: bool, action: Option<El>, content: El) -> super::Page {
+    use super::state::SetupSection;
+    let tabs = super::super::webkit::tabs(
+        t,
+        vec![
+            ("tab-connections".to_owned(), "Connections".to_owned(), !skills, Box::new(|s: &mut App| s.open_setup(SetupSection::Tools))),
+            ("tab-skills".to_owned(), "Skills".to_owned(), skills, Box::new(|s: &mut App| s.open_setup(SetupSection::Skills))),
+        ],
+    );
+    let mut line = row().w_full().gap(12.0).center_y().flex_wrap().child(tabs).child(fill());
+    let mut tools = row().gap(8.0).center_y();
+    if let Some(data) = s.setup_data().filter(|d| d.workspaces.len() > 1) {
+        let mut names = vec!["All workspaces".to_owned()];
+        names.extend(data.workspaces.iter().map(|w| w.name.clone()));
+        let by: Vec<(String, String)> = data.workspaces.iter().map(|w| (w.name.clone(), w.id.clone())).collect();
+        let current = s.scope_name();
+        let big = super::super::webkit::page_width() < 640.0;
+        let trigger = crate::view::ui::pick(s, t, layer, "setup-scope", "Show for", &names, &current, 176.0, move |s: &mut App, chosen: &str| s.set_scope(by.iter().find(|(n, _)| n == chosen).map(|(_, id)| id.clone())))
+            .h(36.0)
+            .radius(18.0)
+            .fill(t.text.base.alpha(0.05));
+        let _ = big;
+        tools = tools.child(trigger);
+    }
+    if skills && let Some(data) = s.setup_data().filter(|d| d.workspaces.len() > 1) {
+        let names: Vec<String> = data.workspaces.iter().map(|w| w.name.clone()).collect();
+        let by: Vec<(String, String)> = data.workspaces.iter().map(|w| (w.name.clone(), w.id.clone())).collect();
+        let current = data.workspace_name(&s.skills_workspace());
+        tools = tools.child(crate::view::ui::pick(s, t, layer, "skills-workspace", "Workspace for skills", &names, &current, 176.0, move |s: &mut App, chosen: &str| {
+            if let Some((_, id)) = by.iter().find(|(n, _)| n == chosen) {
+                s.setup.skills_workspace = Some(id.clone());
+            }
+        }).h(36.0).radius(18.0).fill(t.text.base.alpha(0.05)));
+    }
+    if let Some(a) = action {
+        tools = tools.child(a);
+    }
+    line = line.child(tools);
+    let body = col().w_full().gap(8.0).child(line).child(col().w_full().pt(24.0).gap(24.0).child(content));
+    super::Page { count: None, trailing: Vec::new(), body, title: Some("Tools & skills".to_owned()), back: None }
+}
+
 /// The web's `Row` (`setup/kit.tsx`): 8 above and below a 28 point line, 12 at the sides, and the hover wash bleeding 12 past the column.
 pub const WEB_ROW_H: f32 = 44.0;
 
@@ -22,6 +66,26 @@ pub fn list_row(t: &Neko, key: String, label: String, open: Option<bool>) -> El 
         Some(open) => r.expanded(open),
         None => r,
     }
+}
+
+/// The web's `Row` (`setup/kit.tsx`): 44 high, 12 at the sides (the hover wash bleeds 12 past the column), an optional 20 point leading
+/// icon, the title (13.5) and the muted description (12.5, cut off) 12 apart, the trailing words at the right (12.5 muted).
+pub fn web_row(t: &Neko, key: String, label: String, leading: Option<El>, title: &str, description: &str, trailing: Vec<El>) -> El {
+    let mut r = row().key(key).role("button").label(label).focusable(true).min_h(WEB_ROW_H).px(12.0).gap(12.0).center_y().radius(10.0).hover_group().hover(t.text.base.alpha(0.03)).focus_ring(2.0, 2.0, t.surface.ring);
+    if let Some(l) = leading {
+        r = r.child(l.a11y_hidden());
+    }
+    r = r.child(text(title.to_owned()).font(super::super::webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().max_w(280.0).a11y_hidden());
+    r = r.child(text(description.to_owned()).font(super::super::webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden());
+    for e in trailing {
+        r = r.child(e);
+    }
+    r
+}
+
+/// The words at a row's right: 12.5, muted (or the meaning's colour).
+pub fn trail(t: &Neko, key: &str, words: &str, ink: rune::Color) -> El {
+    text(words.to_owned()).key(key.to_owned()).font(super::super::webkit::font(t, 12.5, 400.0, 20.3125)).color(ink).a11y_hidden()
 }
 
 /// A group heading: 12.5 medium muted with the count right after it, 32 high.

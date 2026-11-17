@@ -49,12 +49,12 @@ pub enum Section {
 }
 
 impl Section {
-    pub const ALL: [Section; 12] = [Section::General, Section::Ai, Section::Appearance, Section::Rulebook, Section::Budget, Section::Phone, Section::QuickPanel, Section::Permissions, Section::Diagnostics, Section::Updates, Section::Workspaces, Section::About];
+    pub const ALL: [Section; 10] = [Section::General, Section::Appearance, Section::Ai, Section::Rulebook, Section::Phone, Section::QuickPanel, Section::Permissions, Section::Diagnostics, Section::Updates, Section::About];
 
     pub fn title(self) -> &'static str {
         match self {
             Section::General => "General",
-            Section::Ai => "AI and agents",
+            Section::Ai => "AI & agents",
             Section::Appearance => "Appearance",
             Section::Rulebook => "Rulebook",
             Section::QuickPanel => "Quick panel",
@@ -65,6 +65,14 @@ impl Section {
             Section::Updates => "Neko updates",
             Section::Workspaces => "Workspaces",
             Section::About => "About",
+        }
+    }
+
+    /// The heading this section sits under in the web's rail: Neko's own settings, or this Mac's.
+    pub fn group_name(self) -> &'static str {
+        match self {
+            Section::General | Section::Appearance | Section::Ai | Section::Rulebook | Section::Phone | Section::Budget => "Neko",
+            _ => "This Mac",
         }
     }
 
@@ -896,10 +904,10 @@ mod tests {
 
     #[test]
     fn sections_have_keys_and_titles() {
-        assert_eq!(Section::ALL.map(Section::title), ["General", "AI and agents", "Appearance", "Rulebook", "Budget", "Phone", "Quick panel", "Permissions", "Diagnostics", "Neko updates", "Workspaces", "About"]);
+        assert_eq!(Section::ALL.map(Section::title), ["General", "Appearance", "AI & agents", "Rulebook", "Phone", "Quick panel", "Permissions", "Diagnostics", "Neko updates", "About"]);
         let mut keys: Vec<_> = Section::ALL.iter().map(|s| s.key()).collect();
         keys.sort();
         keys.dedup();
-        assert_eq!(keys.len(), 12);
+        assert_eq!(keys.len(), 10);
     }
 }

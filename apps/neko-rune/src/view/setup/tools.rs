@@ -7,7 +7,7 @@ use neko_protocol::mcp_host::{McpConnection, McpTool, ServerConfig};
 use rune::{El, col, icon, row, text};
 
 use super::Page;
-use super::kit::{self, action, details_block, empty, glyph, list_row};
+use super::kit::{self, details_block, empty, list_row};
 use super::words::{self, Conn};
 use crate::app::App;
 use crate::icons;
@@ -22,23 +22,28 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
         return detail(s, t, layer, c);
     }
     let add = page_button("Add connection", "tools-add", t, |s: &mut App| s.open_add_connection(super::state::AddTab::Browse));
-    let mut body = col().w_full().gap(2.0);
+    let mut content = col().w_full().gap(24.0);
     if let Some(n) = note(s, t, "setup:page") {
-        body = body.child(n);
+        content = content.child(n);
     }
     let sorted = words::sort_connections(&data.connections);
     let broken: Vec<&&McpConnection> = sorted.iter().filter(|c| words::conn_status(c).broken()).collect();
     if !broken.is_empty() {
         let line = if broken.len() == 1 { format!("{} needs attention.", broken[0].label) } else { format!("{} connections need attention.", broken.len()) };
-        body = body.child(kit::amber(t, "tools-attention", &format!("{line} Agents and watches that use them can’t run until they’re reconnected.")).py(4.0));
+        let banner = row().key("tools-attention").w_full().gap(10.0).child(icon(&icons::INFO, 16.0).color(t.meaning.amber).mt(3.0).a11y_hidden()).child(text(format!("{line} Agents and watches that use them can’t run until they’re reconnected.")).font(crate::view::webkit::font(t, 13.0, 400.0, 21.125)).color(t.meaning.amber).wrap().grow(1.0).min_w(0.0));
+        content = content.child(banner);
     }
     if sorted.is_empty() {
-        body = body.child(empty(t, "tools-empty", "No connections yet. Browse MCP servers, import from this Mac, or add a URL.", Some(("Add connection", Box::new(|s: &mut App| s.open_add_connection(super::state::AddTab::Browse))))));
+        content = content.child(empty(t, "tools-empty", "No connections yet. Browse MCP servers, import from this Mac, or add a URL.", Some(("Add connection", Box::new(|s: &mut App| s.open_add_connection(super::state::AddTab::Browse))))));
+    } else {
+        let mut list = col().mx(-12.0);
+        for c in sorted {
+            list = list.child(connection_row(s, t, layer, c));
+        }
+        let count = data.connections.len().to_string();
+        content = content.child(crate::view::webkit::section(t, "tools-connections", "Connections", Some(&count), None, list));
     }
-    for c in sorted {
-        body = body.child(connection_row(s, t, layer, c));
-    }
-    Page { count: (!data.connections.is_empty()).then_some(data.connections.len()), trailing: vec![add], body, title: None, back: None }
+    kit::tools_page(s, t, layer, false, Some(add), content)
 }
 
 fn status_ink(t: &Neko, c: Conn) -> rune::Color {
@@ -55,27 +60,13 @@ fn connection_row(s: &App, t: &Neko, layer: &mut Vec<El>, c: &McpConnection) -> 
     let summary = words::tool_summary(c);
     let scope = if c.workspace_id.is_empty() { "All workspaces".to_owned() } else { s.setup_data().map_or(String::new(), |d| d.workspace_name(&c.workspace_id)) };
     let open_id = id.clone();
-    let mut line = list_row(t, format!("conn-{id}"), format!("{}, {scope}, {}, {summary}", c.label, status.label()), None)
-        .on_press(move |s: &mut App| s.setup.connection = Some(open_id.clone()))
-        .child(glyph(t, status.glyph(), status.label()))
-        .child(text(c.label.clone()).font(t.ty.row).color(t.text.base).truncate().min_w(0.0).max_w(220.0).a11y_hidden())
-        .child(text(words::conn_detail(c)).key(format!("conn-detail-{id}")).font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden());
-    if !c.tools.is_empty() && summary != status.label() {
-        line = line.child(text(summary).font(t.ty.meta).color(t.text.faint).a11y_hidden());
-    }
-    line = line.child(text(status.label().to_owned()).key(format!("conn-status-{id}")).font(t.ty.meta).color(status_ink(t, status)).a11y_hidden());
+    let leading = row().size(20.0, 20.0).center().child(icon(if matches!(c.config, neko_protocol::mcp_host::ServerConfig::Stdio { .. }) { &icons::TERMINAL } else { &icons::GLOBE }, 16.0).color(t.text.muted));
+    let tools_words = if c.tools.is_empty() { "No tools".to_owned() } else { summary.clone() };
+    let trailing = vec![kit::trail(t, &format!("conn-tools-{id}"), if summary == status.label() { "" } else { &tools_words }, t.text.muted.alpha(0.7)), kit::trail(t, &format!("conn-status-{id}"), status.label(), status_ink(t, status))];
+    let mut line = kit::web_row(t, format!("conn-{id}"), format!("{}, {scope}, {}, {summary}", c.label, status.label()), Some(leading), &c.label, &words::conn_detail(c), trailing).on_press(move |s: &mut App| s.setup.connection = Some(open_id.clone()));
     let reconnect = words::reconnect_action(c);
-    if let Some(r) = reconnect {
-        let i = id.clone();
-        line = line.child(quiet_button(r.label(), &format!("conn-reconnect-{id}"), t, move |s: &mut App| s.reconnect(&i)));
-    }
-    let (rf, en) = (id.clone(), id.clone());
     let enabled = c.enabled;
-    if enabled {
-        line = line.child(action(t, format!("conn-refresh-{id}"), &format!("Refresh {} tools", c.label), &icons::REFRESH, move |s: &mut App| s.setup_call(SetupAction::Refresh { id: rf.clone() })));
-    }
-    line = line.child(switch_when(t, &format!("conn-switch-{id}"), &format!("{} {}", if enabled { "Pause" } else { "Enable" }, c.label), enabled, true, move |s: &mut App| s.toggle_connection(&en)));
-
+    let _ = &mut line;
     let mut entries: Vec<MenuEntry> = Vec::new();
     let i = id.clone();
     entries.push(("Open".to_owned(), std::rc::Rc::new(move |s: &mut App| s.setup.connection = Some(i.clone()))));

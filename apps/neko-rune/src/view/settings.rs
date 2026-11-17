@@ -8,11 +8,11 @@
 use neko_protocol::agent_models::{CatalogModel, ModelAccess, SourceStatus};
 use neko_protocol::calendar::CalendarAccess;
 use neko_protocol::phone::RemindersAccess;
-use rune::{El, ScrollSpec, col, icon, row, text};
-use rune_kit::{SegmentedControl, TextInput};
+use rune::{El, ScrollSpec, col, el, icon, row, text};
+use rune_kit::TextInput;
 
 use super::ui::{edit_of, editing, note, pick, setting_row, switch, switch_when};
-use super::{Frame, band, nav_label_row, primary_button, quiet_button};
+use super::{Frame, band, primary_button, quiet_button};
 use crate::app::App;
 use crate::icons;
 use crate::pages::{Section, ago};
@@ -67,15 +67,18 @@ fn limit_of(chosen: &str) -> Option<u32> {
 pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     let query = s.pages.text("settings:search").trim().to_lowercase();
     let words: Vec<&str> = query.split_whitespace().collect();
+    super::webkit::set_page_width(frame.region_w);
     let all = items(s, t, layer);
-    let mut content = col().key("settings-content").w_full().gap(2.0);
+    let mut content = col().key("settings-content").w_full().gap(if s.pages.section == Section::Appearance && words.is_empty() { 32.0 } else { 2.0 });
     if words.is_empty() {
-        for it in all.into_iter().filter(|i| i.section == s.pages.section) {
+        // The web has no Budget section (its settings are in "AI & agents") and no Workspaces one (that is a Setup page).
+        let shown = |i: &Item| i.section == s.pages.section || (s.pages.section == Section::Ai && i.section == Section::Budget);
+        for it in all.into_iter().filter(shown) {
             content = content.child(it.el);
         }
     } else {
         let mut any = false;
-        for it in all.into_iter().filter(|i| words.iter().all(|w| i.words.contains(w))) {
+        for it in all.into_iter().filter(|i| i.section != Section::Workspaces).filter(|i| words.iter().all(|w| i.words.contains(w))) {
             any = true;
             content = content.child(col().key(format!("hit-{}", it.id)).w_full().child(text(it.section.title().to_owned()).font(t.ty.id).color(t.text.faint).px(6.0)).child(it.el));
         }
@@ -84,31 +87,75 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
         }
     }
     let title = if words.is_empty() { s.pages.section.title() } else { "Search" };
-    // Under 760 points the rail narrows to 150 and the sides to 16, so the rows keep their room.
-    let narrow = frame.region_w < 760.0;
-    let side = if narrow { 16.0 } else { 32.0 };
-    let column = col().key("full-settings").w_full().max_w(640.0 + 2.0 * side).px(side).pt(8.0).pb(40.0).gap(16.0).child(text(title.to_owned()).key("title").font(t.ty.title).color(t.text.base).role("heading")).child(content);
-    let scroll = col().key("page-scroll").grow(1.0).min_w(0.0).h_full().clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(row().w_full().justify_center().child(column));
-    col().w_full().h_full().child(band(t)).child(row().w_full().grow(1.0).min_h(0.0).child(rail(s, t, narrow)).child(scroll))
+    // The web's two layouts (`min-[900px]`): under 900 the sections are a strip of pills under the search box; from 900 a 240 point rail.
+    let wide = frame.region_w >= 900.0;
+    let mut column = col().key("settings-body").w_full().grow(1.0).min_h(0.0);
+    if frame.region_w >= 768.0 {
+        column = column.child(breadcrumb(t, title));
+    }
+    let side = if wide { 240.0 } else { 0.0 };
+    // `w-full max-w-[52rem] px-10 pt-6 pb-24`: at most 832 wide counting the 40 point sides.
+    let inner = (frame.region_w - side - if wide { 1.0 } else { 0.0 }).min(832.0) - 80.0;
+    let page = col().key("full-settings").w(inner + 80.0).px(40.0).pt(24.0).pb(96.0).gap(12.0).child(content);
+    let scroll = col().key("page-scroll").grow(1.0).min_w(0.0).h_full().clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(page);
+    let rail = rail(s, t, wide);
+    column = if wide { column.child(row().w_full().grow(1.0).min_h(0.0).child(rail).child(scroll)) } else { column.child(rail).child(scroll) };
+    col().w_full().h_full().child(band(t)).child(column)
 }
 
-/// The section list, with the search field above it.
-fn rail(s: &App, t: &Neko, narrow: bool) -> El {
+/// `Settings / Appearance`: 48 high, 24 at the sides, 14 point words 8 apart (`<header>` in `Settings.tsx`).
+fn breadcrumb(t: &Neko, current: &str) -> El {
+    let plain = rune::TextStyle { size: 14.0, line_height: 20.0, ..t.ty.row };
+    row()
+        .key("settings-breadcrumb")
+        .w_full()
+        .h(48.0)
+        .px(24.0)
+        .gap(8.0)
+        .center_y()
+        .child(text("Settings".to_owned()).font(plain).color(t.text.muted))
+        .child(text("/".to_owned()).font(plain).color(t.text.muted.alpha(0.5)).a11y_hidden())
+        .child(text(current.to_owned()).key("settings-current").font(rune::TextStyle { weight: 500.0, ..plain }).color(t.text.base).role("heading"))
+}
+
+/// The search box and the section list: a strip of pills with a line under it, or a 240 point rail with a line beside it.
+fn rail(s: &App, t: &Neko, wide: bool) -> El {
     let searching = !s.pages.text("settings:search").trim().is_empty();
     let mut field = TextInput::new(edit_of(s, "settings:search")).label("Find a setting").placeholder("Find a setting").width(None).leading_icon(&icons::SEARCH).on_edit(editing("settings:search".to_owned()));
     // The ⌘F hint hides while the field has text (the clear button takes its place), so the two never share the corner.
-    field = if searching { field.clear_button() } else { field.trailing(text("⌘F").key("settings-search-hint").font(t.ty.hint).color(t.text.faint).a11y_hidden()) };
-    let search = field.build(&t.kit).key("settings-search").w_full();
-    // The sections, under the web's two headings (Neko, This Mac); the list scrolls when the window is short.
-    let mut rows = Vec::new();
-    for section in Section::ALL {
-        if let Some(heading) = section.group() {
-            rows.push(text(heading.to_owned()).key(format!("settings-group-{}", section.key())).font(t.ty.group).color(t.text.muted).px(10.0).pt(if section == Section::General { 0.0 } else { 12.0 }).pb(4.0));
-        }
+    field = if searching { field.clear_button() } else { field.trailing(text("⌘ F").key("settings-search-hint").font(t.ty.hint).color(t.text.muted).a11y_hidden()) };
+    let search = field.build(&t.kit).key("settings-search").w_full().h(40.0).radius(24.0).fill(t.text.base.alpha(0.05));
+    let pill = |section: Section| {
         let active = !searching && s.pages.section == section;
-        rows.push(nav_label_row(section.title(), &format!("settings-section-{}", section.key()), active, t).on_press(move |s: &mut App| s.go_section(section)));
+        let ink = if active { t.text.base } else { t.text.base.alpha(0.65) };
+        row()
+            .key(format!("settings-section-{}", section.key()))
+            .role("button")
+            .label(section.title())
+            .focusable(true)
+            .h(36.0)
+            .px(if wide { 12.0 } else { 16.0 })
+            .center_y()
+            .radius(if wide { 8.0 } else { 18.0 })
+            .fill(if active { t.text.base.alpha(0.07) } else { rune::Color::TRANSPARENT })
+            .hover(t.surface.hover)
+            .focus_ring(2.0, 2.0, t.kit.c.border_focus)
+            .on_press(move |s: &mut App| s.go_section(section))
+            .child(text(section.title().to_owned()).font(rune::TextStyle { size: 13.5, line_height: 21.9375, weight: if active { 500.0 } else { 400.0 }, ..t.ty.row }).color(ink).a11y_hidden())
+    };
+    if !wide {
+        let strip = row().key("settings-nav").mx(-4.0).h(40.0).px(4.0).pb(4.0).gap(4.0).scroll_x().children(Section::ALL.iter().map(|&section| pill(section)));
+        return col().key("settings-rail").w_full().px(16.0).pt(12.0).pb(8.0).gap(12.0).child(search).child(strip).child(el().w_full().h(1.0).mt(-12.0).fill(t.surface.border));
     }
-    super::ui::rail("settings", narrow, Some(search), rows)
+    let mut groups = col().key("settings-nav").w_full().gap(16.0);
+    for group in ["Neko", "This Mac"] {
+        let mut g = col().w_full().gap(2.0).child(text(group.to_owned()).key(format!("settings-group-{group}")).font(rune::TextStyle { size: 12.0, line_height: 16.0, weight: 500.0, ..t.ty.meta }).color(t.text.muted).px(12.0).pb(4.0));
+        for section in Section::ALL.iter().copied().filter(|s| s.group_name() == group) {
+            g = g.child(pill(section));
+        }
+        groups = groups.child(g);
+    }
+    row().key("settings-rail").w(241.0).h_full().child(col().w(240.0).h_full().px(12.0).pt(24.0).pb(24.0).gap(16.0).scroll(ScrollSpec { stick_bottom: false }).child(search).child(groups)).child(el().w(1.0).h_full().fill(t.surface.border))
 }
 
 fn items(s: &App, t: &Neko, layer: &mut Vec<El>) -> Vec<Item> {
@@ -592,13 +639,27 @@ fn about(s: &App, t: &Neko, out: &mut Vec<Item>) {
     ));
 }
 
-/// Appearance: System, Light or Dark. It is the daemon's setting (the web UI's own), so the window and every browser agree.
+/// Appearance, Mode: System, Light or Dark. It is the daemon's setting (the web UI's own), so the window and every browser agree.
 fn appearance(s: &App, t: &Neko, out: &mut Vec<Item>) {
-    const MODES: [&str; 3] = ["system", "light", "dark"];
-    let now = s.pages.appearance.as_deref().and_then(|m| MODES.iter().position(|x| *x == m)).unwrap_or(0);
+    use super::webkit::{button, panel, section, setting_row};
+    const MODES: [(&str, &str, &icons::IconRef); 3] = [("system", "System", &icons::CIRCLE_HALF), ("light", "Light", &icons::SUN), ("dark", "Dark", &icons::MOON)];
+    let now = s.pages.appearance.as_deref().unwrap_or("system");
+    let (light_id, dark_id) = s.theme_choice();
+    let (dark_now, name) = match now {
+        "light" => (false, light_id),
+        "dark" => (true, dark_id),
+        _ if t.dark => (true, dark_id),
+        _ => (false, light_id),
+    };
+    let shown = s.theme_entries().into_iter().find(|e| e.id == name).map(|e| e.name).unwrap_or_default();
+    let mut modes = row().role("radiogroup").label("Mode").gap(6.0);
+    for (mode, label, glyph) in MODES {
+        modes = modes.child(button(t, &format!("set-appearance-{mode}"), label, Some(glyph), false, now == mode, move |s: &mut App| s.set_appearance(mode)).role("radio").checked(now == mode));
+    }
     let help = "System follows macOS. The choice is kept by Neko, so the web UI and this window agree.";
-    let control = SegmentedControl::new(&["System", "Light", "Dark"], Some(now)).label("Theme").width(Some(260.0)).on_pick(|s: &mut App, i: usize, _| s.set_appearance(MODES[i.min(2)])).build(&t.kit).key("set-appearance-pick");
-    out.push(item(Section::Appearance, "appearance-mode", "Theme", help, with_note(s, t, "setting:appearance", setting_row(t, "set-appearance", "Theme", Some(help), control))));
+    let line = setting_row(t, "set-appearance", "Mode", Some(&format!("Showing {shown} ({}).", if dark_now { "dark" } else { "light" })), modes);
+    let body = with_note(s, t, "setting:appearance", panel(vec![line]));
+    out.push(item(Section::Appearance, "appearance-mode", "Theme Mode", help, section(t, "set-appearance-section", "Appearance", None, None, body)));
 }
 
 /// Permissions: each kind of access with its status and a button that opens its pane of System Settings. Accessibility,

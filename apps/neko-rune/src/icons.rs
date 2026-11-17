@@ -6,6 +6,8 @@
 
 use rune::Icon;
 
+pub type IconRef = Icon;
+
 macro_rules! icon_body {
     ($name:ident, $id:literal, $body:literal) => {
         pub static $name: Icon = Icon { name: concat!("neko-", $id), view: 16.0, body: $body };
@@ -27,6 +29,10 @@ icon_body!(PEOPLE, "people", r#"<circle cx="6" cy="5.5" r="2.2" fill="none" stro
 icon_body!(WRENCH, "wrench", r#"<path d="M10.2 2.5C8.4 2.5 7 3.9 7 5.7C7 6.1 7.1 6.5 7.2 6.8L2.7 11.3C2.2 11.8 2.2 12.6 2.7 13.1C3.2 13.6 4 13.6 4.5 13.1L9 8.6C9.3 8.7 9.7 8.8 10.1 8.8C11.9 8.8 13.3 7.4 13.3 5.6L11.5 7.4L9.6 6.4L8.7 4.5L10.5 2.7Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>"#);
 icon_body!(GAUGE, "gauge", r#"<path d="M2.5 11.5A5.5 5.5 0 1 1 13.5 11.5M8 9L10.5 5.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="9.2" r="1" fill="currentColor"/>"#);
 icon_body!(PANEL_RIGHT, "panel-right", r#"<rect x="2.5" y="3" width="11" height="10" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9.5 3V13" fill="none" stroke="currentColor" stroke-width="1.5"/>"#);
+icon_body!(CIRCLE_HALF, "circle-half", r#"<circle cx="8" cy="8" r="5.75" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 2.25V13.75A5.75 5.75 0 0 1 8 2.25Z" fill="currentColor"/>"#);
+icon_body!(SUN, "sun", r#"<circle cx="8" cy="8" r="2.75" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.75V3M8 13V14.25M1.75 8H3M13 8H14.25M3.6 3.6L4.5 4.5M11.5 11.5L12.4 12.4M3.6 12.4L4.5 11.5M11.5 4.5L12.4 3.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
+icon_body!(MOON, "moon", r#"<path d="M12.75 9.6A5.5 5.5 0 0 1 6.4 3.25A5.5 5.5 0 1 0 12.75 9.6Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>"#);
+icon_body!(GLOBE, "globe", r#"<circle cx="8" cy="8" r="5.75" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2.25 8H13.75M8 2.25C9.6 4 10.4 6 10.4 8S9.6 12 8 13.75C6.4 12 5.6 10 5.6 8S6.4 4 8 2.25Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>"#);
 icon_body!(SPARK, "spark", r#"<path d="M8 2.5L9.3 6.7L13.5 8L9.3 9.3L8 13.5L6.7 9.3L2.5 8L6.7 6.7Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>"#);
 icon_body!(SEND, "send", r#"<path d="M8 13V3.5M4 7.5L8 3.5L12 7.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
 icon_body!(CHECK_LINE, "check-line", r#"<path d="M3.5 8.5L6.5 11.5L12.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
@@ -111,7 +117,7 @@ pub fn ring_arc(fraction: f32) -> &'static Icon {
 
 /// Every icon of the set, for a name a plugin gives (`icon = "inbox"`): the name without the `neko-` prefix.
 static ALL: &[&Icon] = &[
-    &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND, &COLLAPSE, &CANVAS, &DIFF,
+    &CIRCLE_HALF, &SUN, &MOON, &GLOBE, &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND, &COLLAPSE, &CANVAS, &DIFF,
     &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CHECKLIST, &INFO, &CROSS, &DOT, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO,
     &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &PENCIL, &TRASH, &LOCK, &KEY,
 ];
@@ -135,7 +141,7 @@ mod tests {
         let src = include_str!("icons.rs");
         let declared = src.lines().filter(|l| l.starts_with("icon_body!(")).count();
         let icons = vec![
-            &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND,
+            &CIRCLE_HALF, &SUN, &MOON, &GLOBE, &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND,
             &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO, &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &CHECKLIST, &INFO, &PENCIL, &TRASH, &KEY, &LOCK,
         ];
         // The two filled ones (MORE's dots count as line icons here: they carry no stroke) are `icon_body!` lines too.

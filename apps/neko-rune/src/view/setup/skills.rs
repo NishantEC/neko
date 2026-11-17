@@ -14,7 +14,7 @@ use crate::icons;
 use crate::link::SetupAction;
 use crate::status::StatusKind;
 use crate::theme::Neko;
-use crate::view::ui::{MenuEntry, note, pick, switch, with_menu};
+use crate::view::ui::{MenuEntry, note, switch, with_menu};
 use crate::view::{accent_button, primary_button, quiet_button};
 
 pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
@@ -30,41 +30,36 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     let unavailable: Vec<_> = skills.enabled.iter().filter(|r| r.workspace_id == workspace && !skills.available.iter().any(|a| a.path == r.path && (a.workspace_id.as_deref().unwrap_or("").is_empty() || a.workspace_id.as_deref() == Some(workspace.as_str())))).collect();
     let proposals: Vec<&SkillProposal> = skills.proposals.iter().filter(|p| p.workspace_id == workspace).collect();
 
-    let mut trailing = Vec::new();
-    if data.workspaces.len() > 1 {
-        let names: Vec<String> = data.workspaces.iter().map(|w| w.name.clone()).collect();
-        let by: Vec<(String, String)> = data.workspaces.iter().map(|w| (w.name.clone(), w.id.clone())).collect();
-        trailing.push(pick(s, t, layer, "skills-workspace", "Workspace for skills", &names, &data.workspace_name(&workspace), 180.0, move |s: &mut App, chosen: &str| {
-            if let Some((_, id)) = by.iter().find(|(n, _)| n == chosen) {
-                s.setup.skills_workspace = Some(id.clone());
-            }
-        }));
-    }
-    trailing.push(quiet_button("Refresh", "skills-refresh", t, |s: &mut App| s.setup_call(SetupAction::SkillsRefresh)));
-
-    let mut body = col().w_full().gap(2.0).child(kit::text_field(s, t, "skills:search", "Search skills", "Search skills", false, false, |_| {}));
+    let mut content = col().w_full().gap(24.0);
     if let Some(n) = note(s, t, "setup:page") {
-        body = body.child(n);
+        content = content.child(n);
     }
+    // The search line: a 40 high pill field and the Refresh button beside it (`Skills.tsx`).
+    let search = rune_kit::TextInput::new(crate::view::ui::edit_of(s, "skills:search")).label("Search skills").placeholder("Search skills").width(None).leading_icon(&icons::SEARCH).on_edit(crate::view::ui::editing("skills:search".to_owned())).build(&t.kit).key("skills:search").w_full().h(40.0).radius(24.0).fill(t.text.base.alpha(0.05));
+    let refresh = crate::view::webkit::button(t, "skills-refresh", "Refresh", Some(&icons::REFRESH), false, false, |s: &mut App| s.setup_call(SetupAction::SkillsRefresh)).radius(14.0);
+    content = content.child(row().w_full().gap(8.0).center_y().child(search.grow(1.0).min_w(0.0)).child(refresh));
+    let mut list = col().mx(-12.0);
     for r in unavailable {
-        body = body.child(unavailable_row(t, r));
+        list = list.child(unavailable_row(t, r));
     }
     if visible.is_empty() {
         let line = if query.is_empty() { "No local skills available yet. Refresh local skills, or fetch an instruction file below.".to_owned() } else { format!("No skills match “{}”", s.pages.text("skills:search").trim()) };
-        body = body.child(empty(t, "skills-empty", &line, query.is_empty().then(|| ("Refresh", Box::new(|s: &mut App| s.setup_call(SetupAction::SkillsRefresh)) as Box<dyn Fn(&mut App)>))));
+        list = list.child(empty(t, "skills-empty", &line, query.is_empty().then(|| ("Refresh", Box::new(|s: &mut App| s.setup_call(SetupAction::SkillsRefresh)) as Box<dyn Fn(&mut App)>))));
     }
     for k in visible {
-        body = body.child(skill_row(s, t, layer, &workspace, k));
+        list = list.child(skill_row(s, t, layer, &workspace, k));
     }
-    body = body.child(find_a_skill(s, t));
-    body = body.child(curator(s, t));
+    content = content.child(list);
+    content = content.child(find_a_skill(s, t));
+    content = content.child(curator(s, t));
     if !proposals.is_empty() {
-        body = body.child(kit::heading(t, "skills-proposals-head", "Proposals", Some(proposals.len()), false));
-        for p in proposals {
-            body = body.child(proposal(s, t, layer, p));
+        let mut p = col().w_full().gap(2.0);
+        for x in proposals {
+            p = p.child(proposal(s, t, layer, x));
         }
+        content = content.child(crate::view::webkit::section(t, "skills-proposals", "Proposals", None, None, p));
     }
-    Page { count: (!skills.available.is_empty()).then_some(skills.available.len()), trailing, body, title: None, back: None }
+    kit::tools_page(s, t, layer, true, None, content)
 }
 
 fn unavailable_row(t: &Neko, r: &neko_protocol::skills::EnabledSkill) -> El {
@@ -83,25 +78,14 @@ fn skill_row(s: &App, t: &Neko, layer: &mut Vec<El>, workspace: &str, k: &neko_p
     let changed = record.is_some_and(|r| r.content_hash != k.content_hash);
     let state = skills.and_then(|sk| sk.curator.skills.iter().find(|c| c.path == k.path)).map(|c| c.state.clone());
     let locked = matches!(state.as_deref(), Some("locked" | "edited"));
-    let (kind, word) = if record.is_none() { (StatusKind::Backlog, "Available") } else if changed { (StatusKind::InProgress, "Changed") } else { (StatusKind::Done, "Enabled") };
+    let word = if record.is_none() { "Available" } else if changed { "Changed" } else { "Enabled" };
     let key = format!("skill:{}", k.path);
     let open = s.row_open(&key);
     let toggle = key.clone();
     let (sw_ws, sw_path, sw_hash, sw_rec) = (workspace.to_owned(), k.path.clone(), k.content_hash.clone(), record.cloned());
-    let mut line = list_row(t, format!("skill-{}", k.name), format!("{}, {word}", k.name), Some(open))
-        .on_press(move |s: &mut App| s.toggle_row(&toggle))
-        .child(glyph(t, kind, word))
-        .child(text(k.name.clone()).font(t.ty.row).color(t.text.base).truncate().min_w(0.0).max_w(240.0).a11y_hidden())
-        .child(text(k.description.clone()).font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden())
-        .child(text(word.to_owned()).key(format!("skill-state-{}", k.name)).font(t.ty.meta).color(if changed { t.meaning.amber } else { t.text.faint }).a11y_hidden());
-    if state.is_some() {
-        let p = k.path.clone();
-        line = line.child(action(t, format!("skill-lock-{}", k.name), if locked { "Unlock for the curator" } else { "Lock against the curator" }, &icons::LOCK, move |s: &mut App| s.setup_call(SetupAction::SkillLock { path: p.clone(), locked: !locked })));
-    }
-    line = line.child(switch(t, &format!("skill-switch-{}", k.name), &format!("{} {}", if record.is_some() { "Disable" } else { "Enable" }, k.name), record.is_some(), move |s: &mut App| match &sw_rec {
-        Some(r) => s.setup_call(SetupAction::SkillEnable { workspace_id: r.workspace_id.clone(), path: r.path.clone(), content_hash: r.content_hash.clone(), enabled: false }),
-        None => s.setup_call(SetupAction::SkillEnable { workspace_id: sw_ws.clone(), path: sw_path.clone(), content_hash: sw_hash.clone(), enabled: true }),
-    }));
+    let chevron = icon(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 12.0).color(t.text.muted);
+    let line = kit::web_row(t, format!("skill-{}", k.name), format!("{}, {word}", k.name), Some(chevron), &k.name, &k.description, vec![kit::trail(t, &format!("skill-state-{}", k.name), word, if changed { t.meaning.amber } else { t.text.muted.alpha(0.7) })]).expanded(open).on_press(move |s: &mut App| s.toggle_row(&toggle));
+    let _ = (&sw_ws, &sw_path, &sw_hash, &sw_rec);
     let mut entries: Vec<MenuEntry> = Vec::new();
     {
         let (w, p, h) = (workspace.to_owned(), k.path.clone(), k.content_hash.clone());

@@ -128,106 +128,119 @@ pub(super) fn ai(s: &App, t: &Neko, out: &mut Vec<Item>) {
 
 // ---- Appearance ---------------------------------------------------------------------------------
 
-fn swatch(t: &Neko, key: &str, hex: &str, r: f32) -> El {
-    el().key(key.to_owned()).size(14.0, 14.0).radius(r).fill(rune::color::hex(hex).unwrap_or(t.surface.window)).border(1.0, t.surface.field_border)
+fn hexc(hex: &str, fallback: rune::Color) -> rune::Color {
+    rune::color::hex(hex).unwrap_or(fallback)
 }
 
-fn theme_rows(s: &App, t: &Neko, layer: &mut Vec<El>, dark: bool) -> El {
+/// `ThemeSwatch`: the mock window drawn from the theme's own colours (a sidebar, a page with one card, a button and three dots), 72 high.
+fn swatch_mock(t: &Neko, e: &themes::ThemeEntry, width: f32) -> El {
+    let c = &e.colors;
+    let wash = hexc(&c.background, t.surface.window);
+    let line = |w: f32, ink: &str| el().w(w.max(1.0)).h(3.0).radius(1.5).fill(hexc(ink, t.text.base));
+    let inner = width - 2.0;
+    let side_w = ((inner * 0.26) * 10.0).round() / 10.0;
+    let page_w = inner - side_w;
+    let box_w = page_w - 12.0;
+    let sidebar = col().w(side_w).h_full().padding(6.0).gap(6.0).fill(hexc(&c.sidebar, wash)).child(line((side_w - 12.0) * 0.7, &c.sidebar_foreground)).child(line((side_w - 12.0) * 0.5, &c.muted)).child(line((side_w - 12.0) * 0.6, &c.muted));
+    let card = col().w(box_w).padding(6.0).gap(4.0).radius(5.0).fill(hexc(&c.card, wash)).child(line((box_w - 12.0) * 0.8, &c.foreground)).child(line((box_w - 12.0) * 0.55, &c.muted));
+    let dots = row().w(box_w).h(10.0).gap(4.0).center_y().child(el().w(28.0).h(10.0).radius(5.0).fill(hexc(&c.primary, t.meaning.iris))).child(el().grow(1.0)).child(el().size(6.0, 6.0).radius(3.0).fill(hexc(&c.success, t.meaning.mint))).child(el().size(6.0, 6.0).radius(3.0).fill(hexc(&c.warning, t.meaning.amber))).child(el().size(6.0, 6.0).radius(3.0).fill(hexc(&c.destructive, t.meaning.coral)));
+    let page = col().w(page_w).h_full().padding(6.0).gap(6.0).child(card).child(el().grow(1.0)).child(dots);
+    let edge = hexc(&c.foreground, t.text.base).alpha(0.18);
+    row().w(width).h(72.0).radius(14.0).clip_rounded(14.0).fill(wash).border(1.0, edge).child(sidebar).child(page)
+}
+
+fn theme_grid(s: &App, t: &Neko, layer: &mut Vec<El>, dark: bool) -> El {
     let slot = if dark { "dark" } else { "light" };
     let (light_id, dark_id) = s.theme_choice();
     let chosen = if dark { dark_id } else { light_id };
     let all: Vec<themes::ThemeEntry> = s.theme_entries().into_iter().filter(|e| e.dark == dark).collect();
-    // The id in use, or the first when the chosen one is not listed (the web's `selected`).
     let selected = if all.iter().any(|e| e.id == chosen) { chosen } else { all.first().map(|e| e.id.clone()).unwrap_or_default() };
-    let mut list = col().key(format!("themes-{slot}")).w_full().gap(1.0).role("radiogroup").label(if dark { "Dark theme" } else { "Light theme" });
+    // `grid-cols-2 sm:grid-cols-3 lg:grid-cols-4`, gap 12, by the page's own width (the web's viewport).
+    let page_w = super::webkit::page_width();
+    let cols = if page_w >= 1024.0 { 4 } else if page_w >= 640.0 { 3 } else { 2 };
+    let avail = if page_w >= 900.0 { page_w - 241.0 } else { page_w };
+    let grid_w = avail.min(832.0) - 80.0;
+    let card_w = ((grid_w - 12.0 * (cols as f32 - 1.0)) / cols as f32 * 10.0).floor() / 10.0;
+    let mut grid = row().key(format!("themes-{slot}")).w(grid_w).gap(12.0).flex_wrap().role("radiogroup").label(if dark { "Dark theme" } else { "Light theme" });
     for e in all {
         let key = format!("theme-{slot}-{}", e.id);
         let on = e.id == selected;
         let id = e.id.clone();
-        let [a, b, c] = themes::swatch(&e);
-        let tag = match (e.source, e.overrides) {
-            (Source::User, true) => "Customised",
-            (Source::User, false) => "Yours",
-            _ => "",
-        };
-        let mut line = row()
+        let mut name = row().w_full().min_h(21.0).px(2.0).gap(6.0).center_y().child(text(e.name.clone()).font(super::webkit::font(t, 13.0, 500.0, 21.125)).color(t.text.strong).truncate().min_w(0.0).a11y_hidden());
+        if on {
+            name = name.child(el().grow(1.0)).child(icon(&icons::CHECK_LINE, 14.0).color(t.meaning.iris).a11y_hidden());
+        }
+        let mut meta = row().w_full().min_h(20.0).px(2.0).gap(4.0).center_y().flex_wrap();
+        if !e.family.is_empty() {
+            meta = meta.child(text(e.family.clone()).font(super::webkit::font(t, 11.5, 400.0, 18.6875)).color(t.text.muted).a11y_hidden());
+        }
+        match (e.source, e.overrides) {
+            (Source::User, true) => meta = meta.child(text("Yours · replaces built-in").font(t.ty.id).color(t.text.muted).a11y_hidden()),
+            (Source::User, false) => meta = meta.child(text("Yours").font(t.ty.id).color(t.text.muted).a11y_hidden()),
+            _ => {}
+        }
+        if e.low_contrast {
+            meta = meta.child(text("Low contrast").font(t.ty.id).color(t.meaning.coral).a11y_hidden());
+        }
+        let mut card = col()
             .key(key.clone())
             .role("radio")
             .label(e.name.clone())
             .checked(on)
             .focusable(true)
-            .w_full()
-            .h(32.0)
-            .px(8.0)
-            .gap(10.0)
-            .center_y()
-            .radius(t.radius.row)
-            .fill(if on { t.surface.selected } else { rune::Color::TRANSPARENT })
+            .w(card_w)
+            .padding(9.0)
+            .gap(8.0)
+            .radius(20.0)
+            .fill(t.surface.card)
+            .border(1.0, if on { t.meaning.iris } else { t.surface.border })
             .hover(t.surface.hover)
             .focus_ring(2.0, 2.0, t.surface.ring)
             .on_press(move |s: &mut App| s.pick_theme(dark, &id))
-            .child(row().gap(2.0).a11y_hidden().child(swatch(t, &format!("{key}-a"), &a, 4.0)).child(swatch(t, &format!("{key}-b"), &b, 4.0)).child(swatch(t, &format!("{key}-c"), &c, 7.0)))
-            .child(text(e.name.clone()).font(t.ty.row).color(t.text.base).truncate().min_w(0.0).a11y_hidden());
-        if !e.family.is_empty() && e.family != e.name {
-            line = line.child(text(e.family.clone()).font(t.ty.meta).color(t.text.faint).truncate().min_w(0.0).a11y_hidden());
+            .child(swatch_mock(t, &e, card_w - 18.0))
+            .child(name)
+            .child(meta);
+        if on {
+            card = card.box_shadow(rune::Shadow { spread: 1.0, color: t.meaning.iris, ..Default::default() });
         }
-        if !tag.is_empty() {
-            line = line.child(text(tag).font(t.ty.id).color(t.text.muted).a11y_hidden());
-        }
-        if e.low_contrast {
-            line = line.child(text("Low contrast").font(t.ty.id).color(t.meaning.amber).a11y_hidden());
-        }
-        line = line.child(el().grow(1.0).min_w(0.0));
         let mut entries: Vec<super::ui::MenuEntry> = Vec::new();
         if e.file.is_some() {
             let remove_id = e.id.clone();
-            line = line.child(
-                row()
-                    .key(format!("{key}-remove"))
-                    .role("button")
-                    .label(format!("Remove {}", e.name))
-                    .help("Remove this theme file")
-                    .focusable(true)
-                    .size(24.0, 24.0)
-                    .center()
-                    .radius(t.radius.control)
-                    .hover(t.surface.active)
-                    .focus_ring(2.0, 2.0, t.surface.ring)
-                    .on_press({
-                        let id = remove_id.clone();
-                        move |s: &mut App| s.ask_remove_theme(&id)
-                    })
-                    .child(icon(&icons::TRASH, 14.0).color(t.text.muted).a11y_hidden()),
-            );
             entries.push(("Remove…".to_owned(), std::rc::Rc::new(move |s: &mut App| s.ask_remove_theme(&remove_id))));
         }
-        if on {
-            line = line.child(icon(&icons::CHECK_LINE, 16.0).color(t.meaning.iris).a11y_hidden());
-        }
-        list = list.child(with_menu(s, t, layer, &key, line, entries));
+        grid = grid.child(with_menu(s, t, layer, &key, card, entries));
     }
-    list
+    grid
 }
 
 pub(super) fn appearance(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
+    use super::webkit::{button, panel, section};
+    let in_use = |dark: bool| {
+        let mode = s.pages.appearance.as_deref().unwrap_or("system");
+        let on = match mode {
+            "dark" => dark,
+            "light" => !dark,
+            _ => t.dark == dark,
+        };
+        on.then_some("In use")
+    };
     for (dark, id, title, help) in [(false, "light-theme", "Light theme", "The theme used when the window is light."), (true, "dark-theme", "Dark theme", "The theme used when the window is dark.")] {
-        let heading = row().w_full().px(6.0).pt(6.0).pb(2.0).child(text(title).font(t.ty.group).color(t.text.muted));
-        let body = col().w_full().child(heading).child(theme_rows(s, t, layer, dark));
-        out.push(item(Section::Appearance, id, title, help, with_note(s, t, "setting:themes", body)));
+        let body = with_note(s, t, "setting:themes", theme_grid(s, t, layer, dark));
+        out.push(item(Section::Appearance, id, title, help, section(t, &format!("set-{id}"), title, in_use(dark), None, body)));
     }
     let mine = s.extra.user_themes.len();
     let words = match mine {
         0 => "None yet.".to_owned(),
-        1 => "1 theme of yours, marked “Yours” above. Hover it to remove it.".to_owned(),
-        n => format!("{n} themes of yours, marked “Yours” above. Hover one to remove it."),
+        1 => "1 theme of yours, marked “Yours” above. Hover a card to remove it.".to_owned(),
+        n => format!("{n} themes of yours, marked “Yours” above. Hover a card to remove it."),
     };
     let help = "Neko writes a theme file for you and checks it.";
-    let mut r = col().w_full().child(setting_row(t, "set-make-theme", "Your themes", Some(help), quiet_button("Make me a theme", "make-theme", t, |s: &mut App| s.ask_make_theme())));
-    r = r.child(word(t, "your-themes", &words, t.text.muted).px(6.0).pb(4.0));
+    let mut rows = vec![col().w_full().padding(12.0).child(word(t, "your-themes", &words, t.text.muted).font(super::webkit::font(t, 14.0, 400.0, 20.0)))];
     for (i, (file, message)) in s.extra.theme_problems.iter().enumerate() {
-        r = r.child(word(t, &format!("theme-problem-{i}"), &format!("{file} was skipped: {message}"), t.meaning.amber).px(6.0).pb(2.0));
+        rows.push(word(t, &format!("theme-problem-{i}"), &format!("{file} was skipped: {message}"), t.meaning.amber).px(12.0).py(12.0));
     }
-    out.push(item(Section::Appearance, "make-theme", "Make me a theme", help, r));
+    let make = button(t, "make-theme", "Make me a theme", Some(&icons::SPARK), true, false, |s: &mut App| s.ask_make_theme());
+    out.push(item(Section::Appearance, "make-theme", "Make me a theme", help, section(t, "set-your-themes", "Your themes", None, Some(make), with_note(s, t, "setting:make-theme", panel(rows)))));
 }
 
 // ---- Rulebook -----------------------------------------------------------------------------------

@@ -39,6 +39,7 @@ mod settings_d;
 mod tree;
 mod turn;
 mod ui;
+mod webkit;
 mod work;
 
 pub use calendar::is_meeting;
@@ -97,7 +98,9 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         None => (crate::layout::Fit { context: layout.context.shown_width(), neko_open: layout.neko.is_open() }, 840.0, 1360.0),
     };
     let neko_w = if fit.neko_open { layout.neko.width() } else { NEKO_STRIP };
-    let frame = Frame { win_h, region_w: (win_w - layout.sessions.shown_width() - fit.context - neko_w - 3.0 * GRIP - 4.0).max(0.0) };
+    // The edges between regions are drawn only beside a region that shows (the strip has none), so count the ones that are there.
+    let grips = f32::from(layout.sessions.is_open()) + f32::from(fit.context > 0.0 && !(s.panel.expanded && fit.context > 0.0)) + f32::from(fit.neko_open);
+    let frame = Frame { win_h, region_w: (win_w - layout.sessions.shown_width() - fit.context - neko_w - grips * GRIP - 4.0).max(0.0) };
 
     s.panel.hidden.set(layout.context.is_open() && fit.context <= 0.0);
     // The web view is wanted by whatever shows it below, in this very build (`viewers::web`, `context.rs`, `session.rs`).
@@ -290,6 +293,9 @@ fn accent_button(label: &str, key: &str, t: &Neko, on_press: impl Fn(&mut App) +
 /// The page's one action in the web's shape (`Button` at `h-9`, `rounded-full`, `text-sm font-medium`, the plus before the words):
 /// 36 high, 14 at the sides, a pill, Iris.
 fn page_button(label: &str, key: &str, t: &Neko, on_press: impl Fn(&mut App) + 'static) -> El {
+    if true {
+        return webkit::button(t, key, label, Some(&crate::icons::PLUS), true, false, on_press);
+    }
     row()
         .key(key.to_owned())
         .role("button")

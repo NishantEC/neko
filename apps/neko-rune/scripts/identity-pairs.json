@@ -108,7 +108,15 @@
    "NEKO_RUNE_VIEW": "setup",
    "NEKO_RUNE_SETUP": "skills"
   },
-  "web": "tools"
+  "web": "tools",
+  "steps": [
+   {
+    "clickRole": [
+     "tab",
+     "Skills"
+    ]
+   }
+  ]
  },
  {
   "name": "setup-memory",
@@ -187,19 +195,6 @@
   ]
  },
  {
-  "name": "settings-budget",
-  "rune": {
-   "NEKO_RUNE_VIEW": "settings",
-   "NEKO_RUNE_SECTION": "budget"
-  },
-  "web": "settings?section=budget",
-  "region": "session-region",
-  "crop": [
-   0,
-   36
-  ]
- },
- {
   "name": "settings-phone",
   "rune": {
    "NEKO_RUNE_VIEW": "settings",
@@ -258,19 +253,6 @@
    "NEKO_RUNE_SECTION": "updates"
   },
   "web": "settings?section=updates",
-  "region": "session-region",
-  "crop": [
-   0,
-   36
-  ]
- },
- {
-  "name": "settings-workspaces",
-  "rune": {
-   "NEKO_RUNE_VIEW": "settings",
-   "NEKO_RUNE_SECTION": "workspaces"
-  },
-  "web": "settings?section=workspaces",
   "region": "session-region",
   "crop": [
    0,

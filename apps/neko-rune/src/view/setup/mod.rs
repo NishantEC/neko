@@ -54,6 +54,8 @@ pub fn attention(s: &App) -> usize {
 
 pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     let section = s.setup.section;
+    // The web's viewport for a Setup page is the content beside the rail.
+    super::webkit::set_page_width(frame.region_w - if frame.region_w < 760.0 { 150.0 } else { 200.0 });
     let page = match section {
         SetupSection::Packs => packs::view(s, t, layer),
         SetupSection::Workspaces => workspaces::view(s, t, layer),
