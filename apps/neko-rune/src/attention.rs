@@ -131,6 +131,19 @@ impl App {
                     self.show_artifact(&id, version);
                 }
             }
+            // The web's `#/setup` is the first-run setup; `setup/<section>` is Rune's Setup page at that section (`setup/tools`).
+            "setup" => self.open_onboarding(crate::onboarding::Step::Welcome),
+            p if p.starts_with("setup/") => match crate::view::setup::SetupSection::from_key(&p["setup/".len()..]) {
+                Some(section) => self.open_setup(section),
+                None => self.open_view(crate::views::FullView::Setup),
+            },
+            "settings" => {
+                if let Some(section) = param("section").and_then(|k| crate::pages::Section::ALL.into_iter().find(|s| s.key() == k)) {
+                    self.pages.section = section;
+                }
+                self.open_view(crate::views::FullView::Settings);
+            }
+            "pull-requests" => self.open_view(crate::views::FullView::PullRequests),
             _ => {
                 if let Some(page) = self.plugin_pages.as_ref().and_then(|pages| pages.iter().find(|p| p.id == path)).cloned() {
                     self.open_plugin_page(page);
