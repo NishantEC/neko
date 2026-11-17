@@ -12,13 +12,13 @@ it or nudges anyone towards it; Peekaboo and `scopes::with_computer_use` are unt
 
 `name` (`[a-z0-9-]`), `title`, `version`, `description`, `homepage`, `licence`; `[requires] binaries` (name + install hint); `[[mcp]]`
 (name, `command` by plain program name, `args`, `env` = names of variables the person must supply); `[[skills]] path` (a folder with
-`SKILL.md`); `[ui] web_plugin` (a folder with `manifest.json` + entry) and `luau` (stored, not run); `[[routines]]` (kind must be `Custom`,
+`SKILL.md`); `[ui] web_plugin` (a folder with `manifest.json` + entry) and `luau` (native cards and views the Rune client runs in a sandbox: [luau-plugins.md](luau-plugins.md)); `[[routines]]` (kind must be `Custom`,
 instruction, cadence); `[health] command`; `[permissions] summary` (required, plain words shown before install).
 
 ### Approval is tied to what was shown (the digest)
 
 `Preview` returns `digest`: SHA-256 over the `PackInfo` (permissions, every command and argument, health, env names, warnings, the plugin's
-declared pages/viewers/fences/prompt **and a hash of every plugin file**, routine texts, a hash of the skills, requirement names and hints; not
+declared pages/viewers/fences/prompt **and a hash of every plugin file**, **a hash of every listed `.luau` file's contents** (`PackInfo.luau_hash`; editing one sends the pack to "Changed on disk"), routine texts, a hash of the skills, requirement names and hints; not
 what was found where). `Install { source, digest }` recomputes it from the tree it fetched and refuses on a mismatch; there is no `approve`
 flag. The approved digest is stored in the state row. An interpreter command (sh, bash, zsh, fish, python*, node, deno, bun, perl, ruby,
 osascript, curl, wget, env) is allowed but flagged "Runs a script interpreter: <cmd>" in `info.warnings`; a plugin adds "Runs inside Neko with
@@ -84,6 +84,6 @@ access to Neko's own API". Both are inside the digest.
 
 ### Not done
 
-`luau` files are stored only. No publisher signing beyond the person's approval of the digest (permissions, every command, the plugin's
+Luau files are run only by the Rune client, from `Request::PackUi` (Healthy and digest-matching packs only). No publisher signing beyond the person's approval of the digest (permissions, every command, the plugin's
 declared power). A remote source's newer version is only noticed on Update/preview (List cannot clone). A routine run by Claude gets the
 pack's server through Claude's MCP config, which cannot be given a cleared environment; Neko's own MCP launches can.

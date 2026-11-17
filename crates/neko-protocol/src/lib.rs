@@ -452,6 +452,9 @@ pub enum Request {
     /// Packs: install, preview, update, remove and check bundles of tools,
     /// skills, a web plugin and routines (`neko_core::packs`).
     Packs(packs::PackCommand),
+    /// The `.luau` files of an installed pack (native cards and views for the Rune client). A read: answered with
+    /// `PackUi`, and only while the pack is Healthy and its files are exactly what the person approved (otherwise an error).
+    PackUi { name: String },
     Workbench(workbench::Command),
     /// The workbench, unless it is still what the client has: `digest` is
     /// the `Snapshot::digest` the client last received. Answered with
@@ -1238,6 +1241,7 @@ pub enum Response {
     /// `Packs(List)` and what the other pack commands answer with.
     Packs(packs::PackListing),
     PackPreview(packs::PackPreview),
+    PackUi(Vec<packs::PackUiFile>),
     Routines {
         routines: Vec<routines::RoutineView>,
         standing_orders: std::collections::BTreeMap<String, String>,

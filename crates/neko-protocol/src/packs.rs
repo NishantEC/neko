@@ -81,7 +81,7 @@ pub struct PackContents {
     pub skills: Vec<String>,
     pub plugin: Option<String>,
     pub routines: Vec<String>,
-    /// `.luau` files stored for later; nothing runs them yet.
+    /// The `.luau` files (native panels for Rune): cards and views, run in a sandbox by the Rune client.
     #[serde(default)]
     pub luau: Vec<String>,
 }
@@ -140,6 +140,19 @@ pub struct PackInfo {
     /// SHA-256 over the skill folders.
     #[serde(default)]
     pub skills_hash: String,
+    /// SHA-256 over every `[ui] luau` file's path and **contents** (empty when the pack has none; an empty value is
+    /// left out of the digest, so packs without Luau keep the digests they were approved with). Editing a `.luau`
+    /// file changes the digest and sends an installed pack to "Changed on disk".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub luau_hash: String,
+}
+
+/// One `.luau` file of an installed, healthy pack whose files are exactly what the person approved: its path
+/// inside the pack (`ui/card.luau`) and its text. Answered by `Request::PackUi`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PackUiFile {
+    pub path: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

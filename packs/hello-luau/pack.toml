@@ -1,0 +1,16 @@
+name = "hello-luau"
+title = "Hello, Luau"
+version = "0.1.0"
+description = "Two native panels in Neko's own window: a card that shows what needs you, and a view that lists your routines. A small example of a pack that ships Luau."
+homepage = ""
+licence = "MIT"
+
+[ui]
+web_plugin = ""
+luau = ["ui/needs-you.luau", "ui/routines.luau"]
+
+[permissions]
+summary = [
+  "Shows two panels in Neko's own window",
+  "Reads your sessions and routines (read only: it cannot change, send or run anything)",
+]

@@ -13,7 +13,7 @@ export interface RoutineText { name: string; instruction: string; cadence: strin
 export interface PackInfo {
   name: string; title: string; version: string; description: string; homepage: string; licence: string;
   permissions: string[]; requirements: PackRequirement[]; env: string[]; contents: PackContents; health_command: string[]; runs?: string[];
-  warnings?: string[]; plugin?: PluginPower | null; routine_texts?: RoutineText[]; skills_hash?: string;
+  warnings?: string[]; plugin?: PluginPower | null; routine_texts?: RoutineText[]; skills_hash?: string; luau_hash?: string;
 }
 export interface PackOrphan { target: string; reason: string }
 export interface PackHealth { ok: boolean; at_ms: number; output: string }

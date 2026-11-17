@@ -47,6 +47,10 @@ const CLONE_MAX_BYTES: u64 = 200 * 1024 * 1024;
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const CLONE_TIMEOUT: Duration = Duration::from_secs(120);
 const OUTPUT_TAIL: usize = 2000;
+/// The most one `.luau` file may hold (a card or a view is a page of script, not a program).
+const MAX_LUAU_BYTES: u64 = 128 * 1024;
+/// Shown before the person approves a pack that draws native panels.
+const LUAU_WARNING: &str = "Draws panels in Neko's own window with sandboxed Luau code (it can read Neko's data, never change it)";
 const CHANGED_SINCE_PREVIEW: &str = "This pack changed since you reviewed it. Preview it again and approve what you see.";
 const INTERPRETERS: &[&str] = &["sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "node", "deno", "bun", "perl", "ruby", "osascript", "curl", "wget", "env"];
 
@@ -547,6 +551,39 @@ fn hash_tree(dir: &Path) -> Result<String, String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+/// One `.luau` file's text: opened without following a link, a regular file, at most [`MAX_LUAU_BYTES`], UTF-8.
+fn read_luau(dir: &Path, rel: &Path) -> Result<String, String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let path = dir.join(rel);
+    let file = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(&path).map_err(|e| format!("Cannot read {}: {e}", rel.display()))?;
+    if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+        return Err(format!("{} is not a regular file", rel.display()));
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_LUAU_BYTES + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > MAX_LUAU_BYTES {
+        return Err(format!("{} is over {} KB", rel.display(), MAX_LUAU_BYTES / 1024));
+    }
+    String::from_utf8(bytes).map_err(|_| format!("{} is not text", rel.display()))
+}
+
+/// SHA-256 over the listed `.luau` files, in the order the manifest lists them: each path, the length and the bytes.
+/// This is what the digest carries, so any edit to a file the pack draws with changes what the person approved.
+fn luau_hash_of(files: &[(String, String)]) -> String {
+    if files.is_empty() {
+        return String::new();
+    }
+    let mut hasher = Sha256::new();
+    for (path, source) in files {
+        hasher.update(path.as_bytes());
+        hasher.update([0]);
+        hasher.update((source.len() as u64).to_le_bytes());
+        hasher.update(source.as_bytes());
+    }
+    format!("{:x}", hasher.finalize())
+}
+
 fn names_of(value: Option<&serde_json::Value>) -> Vec<String> {
     value
         .and_then(|v| v.as_array())
@@ -661,11 +698,19 @@ fn parse_dir(dir: &Path, env: &Env) -> Result<Parsed, String> {
         warnings.push("Runs inside Neko with access to Neko's own API".into());
         Some((rel.clone(), plugin_dir_name(&m.name, &rel)))
     };
+    let mut luau_files: Vec<(String, String)> = Vec::new();
     for path in &m.ui.luau {
         let rel = inside(path)?;
         if rel.extension().and_then(|e| e.to_str()) != Some("luau") || !dir.join(&rel).is_file() {
             return Err(format!("{path} must be a .luau file in the pack"));
         }
+        if luau_files.iter().any(|(p, _)| p == path) {
+            return Err(format!("{path} is listed twice"));
+        }
+        luau_files.push((path.clone(), read_luau(dir, &rel).map_err(|e| format!("{path}: {e}"))?));
+    }
+    if !luau_files.is_empty() {
+        warnings.push(LUAU_WARNING.into());
     }
     let mut routine_ids = BTreeSet::new();
     for routine in &m.routines {
@@ -730,6 +775,7 @@ fn parse_dir(dir: &Path, env: &Env) -> Result<Parsed, String> {
         plugin: plugin_power,
         routine_texts: m.routines.iter().map(|r| RoutineText { name: r.name.trim().to_string(), instruction: r.instruction.clone(), cadence: cadence_words(&r.cadence) }).collect(),
         skills_hash: format!("{:x}", skills_hasher.finalize()),
+        luau_hash: luau_hash_of(&luau_files),
     };
     let digest = digest_of(&info);
     Ok(Parsed { manifest, info, digest, skills: skills_found, plugin })
@@ -757,6 +803,9 @@ fn power_changes(old: &PackInfo, new: &PackInfo, enabled_routines: &BTreeSet<Str
     }
     if old.plugin != new.plugin {
         changes.push("The web plugin changed".into());
+    }
+    if old.luau_hash != new.luau_hash || old.contents.luau != new.contents.luau {
+        changes.push("The native panels (Luau) changed".into());
     }
     for text in &new.routine_texts {
         if enabled_routines.contains(&routine_id(&new.name, &text.name)) && !old.routine_texts.contains(text) {
@@ -1962,6 +2011,35 @@ pub fn remove(dbm: &Mutex<Db>, paths: &Paths, name: &str) -> Result<(), String> 
 }
 
 // ---------------------------------------------------------------------------
+// Native panels (Luau)
+// ---------------------------------------------------------------------------
+
+/// The `.luau` files of an installed pack, for the Rune client to run in its sandbox. Refused unless the pack is
+/// Healthy **and** the files read now hash to the digest the person approved: the bytes returned are the bytes
+/// that were hashed (each file is opened once, without following a link), so a file edited between the check and
+/// the read cannot slip through. Nothing else of the pack folder is ever served.
+pub fn ui_sources(db: &Mutex<Db>, paths: &Paths, env: &Env, name: &str) -> Result<Vec<PackUiFile>, String> {
+    if !plain_name(name, 40) {
+        return Err("That pack name is not valid".into());
+    }
+    let state = load_state(&lock(db), name).ok_or("That pack is not installed")?;
+    if state.status != PackStatus::Healthy {
+        return Err("That pack is not healthy, so its panels are not shown".into());
+    }
+    let parsed = verify_installed(paths, env, &state)?;
+    let dir = paths.packs().join(name);
+    let mut files = Vec::new();
+    for path in &parsed.manifest.ui.luau {
+        let rel = inside(path)?;
+        files.push((path.clone(), read_luau(&dir, &rel)?));
+    }
+    if luau_hash_of(&files) != parsed.info.luau_hash {
+        return Err("The installed files changed on disk since you approved them. Nothing runs until you review them.".into());
+    }
+    Ok(files.into_iter().map(|(path, source)| PackUiFile { path, source }).collect())
+}
+
+// ---------------------------------------------------------------------------
 // Tool servers a run may be given
 // ---------------------------------------------------------------------------
 
@@ -2829,6 +2907,82 @@ summary = ["Does fake things", "Reads fake screens"]
         std::fs::remove_dir_all(f.paths.data.join("packs/fakepack")).unwrap();
         health(&f.db, &f.paths, &f.env(), "fakepack").unwrap();
         assert_eq!(f.state().unwrap().status, PackStatus::Changed);
+    }
+
+    // ----- native panels (Luau)
+
+    #[test]
+    fn the_digest_covers_the_contents_of_every_luau_file() {
+        let f = Fixture::new();
+        let before = f.digest();
+        let info = preview(&f.db, &f.paths, &f.env(), &f.source()).unwrap().info;
+        assert!(!info.luau_hash.is_empty() && info.warnings.iter().any(|w| w == LUAU_WARNING), "{info:?}");
+        // One changed character in a listed file changes what the person is asked to approve.
+        write(&f.source.join("scripts/a.luau"), "print('hi!')\n");
+        assert_ne!(f.digest(), before, "editing a .luau file must change the digest");
+        write(&f.source.join("scripts/a.luau"), "print('hi')\n");
+        assert_eq!(f.digest(), before);
+        // A pack without Luau keeps the digest it always had: the field is left out when empty.
+        let plain = Fixture::new();
+        write(&plain.source.join("pack.toml"), &PACK_TOML.replace("luau = [\"scripts/a.luau\"]", "luau = []"));
+        let info = preview(&plain.db, &plain.paths, &plain.env(), &plain.source()).unwrap().info;
+        assert!(info.luau_hash.is_empty() && !serde_json::to_string(&info).unwrap().contains("luau_hash"));
+    }
+
+    #[test]
+    fn editing_an_installed_luau_file_sends_the_pack_to_changed_on_disk() {
+        let f = Fixture::new();
+        f.install().unwrap();
+        assert_eq!(f.state().unwrap().status, PackStatus::Healthy);
+        let installed = f.paths.data.join("packs/fakepack/scripts/a.luau");
+        std::fs::write(&installed, "print('evil')\n").unwrap();
+        assert_eq!(list(&f.db, &f.paths, &f.env()).unwrap().installed[0].status, PackStatus::Changed);
+        health(&f.db, &f.paths, &f.env(), "fakepack").unwrap();
+        assert_eq!(f.state().unwrap().status, PackStatus::Changed);
+        // Reviewing shows it as a change to the native panels, and approving that digest brings it back.
+        let shown = preview(&f.db, &f.paths, &f.env(), "installed:fakepack").unwrap();
+        assert!(shown.changes.iter().any(|c| c.contains("native panels")), "{:?}", shown.changes);
+        approve(&f.db, &f.paths, &f.env(), "fakepack", &shown.digest).unwrap();
+        assert_eq!(f.state().unwrap().status, PackStatus::Healthy);
+    }
+
+    #[test]
+    fn pack_ui_serves_the_files_only_while_healthy_and_unchanged() {
+        let f = Fixture::new();
+        assert!(ui_sources(&f.db, &f.paths, &f.env(), "fakepack").unwrap_err().contains("not installed"));
+        assert!(ui_sources(&f.db, &f.paths, &f.env(), "../etc").is_err(), "a name is a plain name");
+        f.install().unwrap();
+        let files = ui_sources(&f.db, &f.paths, &f.env(), "fakepack").unwrap();
+        assert_eq!(files, vec![PackUiFile { path: "scripts/a.luau".into(), source: "print('hi')\n".into() }]);
+        // Changed on disk: refused, and the file's text is not in the error.
+        let installed = f.paths.data.join("packs/fakepack/scripts/a.luau");
+        std::fs::write(&installed, "print('evil')\n").unwrap();
+        let why = ui_sources(&f.db, &f.paths, &f.env(), "fakepack").unwrap_err();
+        assert!(why.contains("changed on disk") && !why.contains("evil"), "{why}");
+        std::fs::write(&installed, "print('hi')\n").unwrap();
+        assert!(ui_sources(&f.db, &f.paths, &f.env(), "fakepack").is_ok(), "restored to what was approved");
+        // Not healthy: a program it needs is missing, so nothing is served even though the files match.
+        f.found.borrow_mut().clear();
+        health(&f.db, &f.paths, &f.env(), "fakepack").unwrap();
+        assert_eq!(f.state().unwrap().status, PackStatus::NeedsSetup);
+        assert!(ui_sources(&f.db, &f.paths, &f.env(), "fakepack").unwrap_err().contains("not healthy"));
+        f.found.borrow_mut().insert("fakebin".into());
+        *f.health_code.borrow_mut() = Some(1);
+        health(&f.db, &f.paths, &f.env(), "fakepack").unwrap();
+        assert_eq!(f.state().unwrap().status, PackStatus::Failing);
+        assert!(ui_sources(&f.db, &f.paths, &f.env(), "fakepack").is_err());
+    }
+
+    #[test]
+    fn a_luau_file_that_is_a_link_or_too_big_or_not_text_is_refused() {
+        let f = Fixture::new();
+        write(&f.source.join("scripts/a.luau"), &"x".repeat(MAX_LUAU_BYTES as usize + 1));
+        assert!(preview(&f.db, &f.paths, &f.env(), &f.source()).unwrap_err().contains("over 128 KB"));
+        std::fs::write(f.source.join("scripts/a.luau"), [0xff, 0xfe, 0x00]).unwrap();
+        assert!(preview(&f.db, &f.paths, &f.env(), &f.source()).unwrap_err().contains("not text"));
+        std::fs::remove_file(f.source.join("scripts/a.luau")).unwrap();
+        std::os::unix::fs::symlink("/etc/hosts", f.source.join("scripts/a.luau")).unwrap();
+        assert!(preview(&f.db, &f.paths, &f.env(), &f.source()).is_err());
     }
 
     // ----- locks, health results, sources

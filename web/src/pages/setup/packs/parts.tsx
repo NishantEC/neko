@@ -70,7 +70,7 @@ export function Contents({ contents, links = false }: { contents: PackContents; 
         <Names label="Skills" names={skills} to={links ? "tools" : undefined} linkLabel="Open Skills" />
         <Names label="Plugin" names={plugin ? [plugin] : []} to={links ? "customisations" : undefined} linkLabel="Open Customisations" />
         <Names label="Routines" names={routines} to={links ? "inbox" : undefined} linkLabel="Open Routines" />
-        <Names label="Luau files (stored, nothing runs them yet)" names={luau} />
+        <Names label="Native panels (Luau, shown by the Rune app)" names={luau} />
       </div>
     </div>
   );

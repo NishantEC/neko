@@ -30,3 +30,8 @@ pub fn handle(state: &AppState, command: PackCommand) -> Response {
     }
     packs::list(db, &paths, &env).map_or_else(|message| Response::Error { message }, Response::Packs)
 }
+
+/// `Request::PackUi`: the `.luau` files of a healthy, unchanged pack. A read; the files are only ever served from here.
+pub fn ui(state: &AppState, name: &str) -> Response {
+    packs::ui_sources(&state.db, &Paths::system(), &Env::system(), name).map_or_else(|message| Response::Error { message }, Response::PackUi)
+}
