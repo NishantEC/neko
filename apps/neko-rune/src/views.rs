@@ -15,17 +15,19 @@ pub enum FullView {
     /// Setup: Workspaces, Watching, Tools, Skills, Memory, Profiles, Schedules (a section rail).
     Setup,
     Plugins,
+    /// Every pull request Neko opened, grouped by where it stands.
+    PullRequests,
     /// Every session, newest first: what "View all" in the sessions column opens.
     AllSessions,
 }
 
 impl FullView {
     /// The sessions column's nav rows, in order (polish spec §1): each with its count.
-    pub const NAV: [FullView; 3] = [FullView::Routines, FullView::Calendar, FullView::Setup];
+    pub const NAV: [FullView; 4] = [FullView::Routines, FullView::Calendar, FullView::PullRequests, FullView::Setup];
     /// In the account footer's menu, above "Open the web UI" and "Quit".
     pub const MENU: [FullView; 3] = [FullView::Settings, FullView::Usage, FullView::Plugins];
     /// The views the nav and the account menu place (every one has exactly one place).
-    pub const ALL: [FullView; 6] = [FullView::Calendar, FullView::Routines, FullView::Settings, FullView::Usage, FullView::Setup, FullView::Plugins];
+    pub const ALL: [FullView; 7] = [FullView::Calendar, FullView::Routines, FullView::Settings, FullView::Usage, FullView::Setup, FullView::Plugins, FullView::PullRequests];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -35,6 +37,7 @@ impl FullView {
             FullView::Usage => "Usage",
             FullView::Setup => "Setup",
             FullView::Plugins => "Plugins",
+            FullView::PullRequests => "Pull requests",
             FullView::AllSessions => "All sessions",
         }
     }
@@ -49,6 +52,7 @@ impl FullView {
             FullView::Usage => "usage",
             FullView::Setup => "setup",
             FullView::Plugins => "tools",
+            FullView::PullRequests => "prs",
             FullView::AllSessions => "tasks",
         }
     }
@@ -61,6 +65,7 @@ impl FullView {
             FullView::Usage => &icons::GAUGE,
             FullView::Setup => &icons::PEOPLE,
             FullView::Plugins => &icons::WRENCH,
+            FullView::PullRequests => &icons::PULL_REQUEST,
             FullView::AllSessions => &icons::REASON_LIST,
         }
     }
@@ -86,7 +91,7 @@ mod tests {
         icons.sort_unstable();
         icons.dedup();
         assert_eq!(icons.len(), FullView::ALL.len());
-        assert_eq!(FullView::NAV.map(FullView::title), ["Routines", "Calendar", "Setup"]);
+        assert_eq!(FullView::NAV.map(FullView::title), ["Routines", "Calendar", "Pull requests", "Setup"]);
         assert_eq!(FullView::MENU.map(FullView::title), ["Settings", "Usage", "Plugins"]);
     }
 }

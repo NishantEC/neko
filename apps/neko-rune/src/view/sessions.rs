@@ -171,6 +171,8 @@ fn nav_count(s: &App, view: FullView) -> Option<usize> {
         FullView::Calendar => s.pages.calendar.as_ref().filter(|c| c.status.enabled).map(|c| s.events_today(c)),
         // How many setup items need you (broken connections, pending proposals); no count when none do.
         FullView::Setup => Some(super::setup::attention(s)).filter(|n| *n > 0),
+        // Pull requests that wait on you: ready to merge, checks failing, a review requested. No count at 0.
+        FullView::PullRequests => s.pr_attention(),
         _ => None,
     }
 }

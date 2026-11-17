@@ -430,7 +430,8 @@ impl App {
                 self.call(Call::Quota);
             }
             FullView::Plugins => self.call(Call::Plugins),
-            FullView::AllSessions => {}
+            // The pull requests, like every session, are in the workbench: nothing to ask for.
+            FullView::AllSessions | FullView::PullRequests => {}
             FullView::Settings => {
                 self.call(Call::RoutinesFull);
                 self.call(Call::PhoneSettings);

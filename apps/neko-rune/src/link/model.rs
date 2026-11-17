@@ -169,6 +169,121 @@ pub struct Detail {
     pub prefs: RuntimePreferences,
     #[serde(default)]
     pub prefs_revision: u64,
+    /// The parallel work proposed or approved for it (the Details tab's "Parallel work").
+    #[serde(default)]
+    pub splits: Vec<SplitView>,
+    /// What was decided about it (the Details tab's "Decisions"), newest first.
+    #[serde(default)]
+    pub decisions: Vec<DecisionRow>,
+}
+
+/// A parallel-work proposal (`TaskSplit`) with its subtasks' states, as the Details tab lists it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SplitView {
+    pub approved: bool,
+    pub integrated: bool,
+    pub children: Vec<ChildView>,
+}
+
+/// One subtask of a split: what was proposed, and the task it became (if it did).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ChildView {
+    pub title: String,
+    pub goal: String,
+    /// The task made for it and its state, once the split was approved.
+    pub task: Option<(String, TaskStatus)>,
+}
+
+/// One decision record of a task: when, what, and what came of it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DecisionRow {
+    pub at_ms: i64,
+    pub title: String,
+    /// What was observed after it, when anything was.
+    pub outcome: Option<String>,
+    pub accepted_locally: bool,
+    /// The person's own correction of it.
+    pub correction: Option<String>,
+}
+
+/// The web's `decisionTitle`.
+pub fn decision_title(action: neko_protocol::decision_context::DecisionAction) -> &'static str {
+    use neko_protocol::decision_context::DecisionAction::*;
+    match action {
+        PrepareFix => "Prepare a local fix",
+        AskUser => "Ask for your decision",
+        Skip => "Defer this work",
+        ApproveLocalBuild => "You approved a local build",
+        AcceptLocalResult => "You accepted the local result",
+        CancelTask => "You stopped this task",
+        ReportFailure => "Work stopped",
+        ReviewLocalResult => "Local work is ready to review",
+        AddNote => "Your direction was recorded",
+        ProposePlan => "Prepare a plan",
+    }
+}
+
+/// The agent runtime's name for a task, as the Pull requests view names an author: the newest runtime chosen for it, else the default.
+pub fn author_of(snapshot: &Snapshot, task_id: &str) -> String {
+    let words = runtime_for(snapshot, &format!("task:{task_id}"));
+    words.split(" · ").next().unwrap_or("").to_owned()
+}
+
+/// The web's `latestDecisions`: the newest version of each episode, newest first.
+pub fn decisions_of(snapshot: &Snapshot, task_id: &str) -> Vec<DecisionRow> {
+    let mut episodes: std::collections::BTreeMap<&str, &neko_protocol::decision_context::DecisionRecord> = std::collections::BTreeMap::new();
+    for r in snapshot.decision_records.iter().filter(|r| r.task_id.as_deref() == Some(task_id)) {
+        let keep = episodes.get(r.episode_id.as_str()).is_none_or(|seen| r.version > seen.version);
+        if keep {
+            episodes.insert(r.episode_id.as_str(), r);
+        }
+    }
+    let mut rows: Vec<DecisionRow> = episodes
+        .values()
+        .map(|r| DecisionRow {
+            at_ms: r.created_at_ms,
+            title: decision_title(r.action).to_owned(),
+            outcome: r.observed_outcome.clone().filter(|o| !o.trim().is_empty()),
+            accepted_locally: r.delivery_stage == neko_protocol::decision_context::DeliveryStage::LocalAccepted,
+            correction: r.correction.as_ref().map(|c| c.text.clone()).filter(|t| !t.trim().is_empty()),
+        })
+        .collect();
+    rows.sort_by_key(|r| std::cmp::Reverse(r.at_ms));
+    rows
+}
+
+/// The parallel work proposed for a task.
+pub fn splits_of(snapshot: &Snapshot, task_id: &str) -> Vec<SplitView> {
+    snapshot
+        .splits
+        .iter()
+        .filter(|s| s.parent_id == task_id)
+        .map(|s| SplitView {
+            approved: s.approved,
+            integrated: s.integrated,
+            children: s
+                .subtasks
+                .iter()
+                .map(|c| ChildView { title: c.title.clone(), goal: c.goal.clone(), task: c.task_id.as_ref().and_then(|id| snapshot.tasks.iter().find(|t| &t.id == id)).map(|t| (t.id.clone(), t.status)) })
+                .collect(),
+        })
+        .collect()
+}
+
+/// Who started whom: a split's subtasks sit under their parent, a fix an agent proposed in another repository under the task that found it.
+pub fn parents_of(snapshot: &Snapshot) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    for split in &snapshot.splits {
+        for sub in &split.subtasks {
+            if let Some(id) = sub.task_id.as_ref().filter(|i| !i.is_empty()) {
+                out.insert(id.clone(), split.parent_id.clone());
+            }
+        }
+    }
+    for (child, parent) in &snapshot.follow_up_of {
+        out.insert(child.clone(), parent.clone());
+    }
+    out
 }
 
 /// What a task's menus and filters need that its row does not carry: the web's `taskActions` reads the same fields
@@ -262,6 +377,15 @@ pub struct Summary {
     /// What the Setup pages read: workspaces, connections, watches, skills, memory, profiles, schedules.
     #[serde(default)]
     pub setup: super::SetupData,
+    /// Every pull request Neko opened, decisions first (the Pull requests view and the sidebar's count).
+    #[serde(default)]
+    pub pull_requests: Vec<super::PrRow>,
+    /// The repositories where Neko may merge without GitHub's approving review.
+    #[serde(default)]
+    pub merge_without_review: Vec<String>,
+    /// Who started whom: a task made by a split, or proposed by another task, by its parent's id (the Tree layout).
+    #[serde(default)]
+    pub parents: std::collections::BTreeMap<String, String>,
 }
 
 /// How many of Neko's messages the client keeps (a long reply is ~8 MB of layout; DESIGN: bounded). The column
@@ -316,6 +440,9 @@ impl Summary {
                 usage: usage_points(snapshot, now),
             },
             setup: super::SetupData::from_snapshot(snapshot),
+            pull_requests: super::prs::rows(snapshot, |t| author_of(snapshot, &t.id)),
+            merge_without_review: snapshot.merge_without_review.iter().cloned().collect(),
+            parents: parents_of(snapshot),
             digest: snapshot.digest.clone(),
             meta: snapshot
                 .tasks
@@ -367,7 +494,8 @@ impl Summary {
                 let conversation = format!("task:{}", t.id);
                 let prefs = snapshot.conversation_runtime.get(&conversation).cloned().unwrap_or_default();
                 let prefs_revision = snapshot.conversation_runtime_revisions.get(&conversation).copied().unwrap_or(0);
-                Detail { has_folder: t.worktree.is_some() || t.parked.is_some(), workspace, runtime: runtime_for(snapshot, &conversation), can_split, source, prefs, prefs_revision, task }
+                let (splits, decisions) = (splits_of(snapshot, &t.id), decisions_of(snapshot, &t.id));
+                Detail { has_folder: t.worktree.is_some() || t.parked.is_some(), workspace, runtime: runtime_for(snapshot, &conversation), can_split, source, prefs, prefs_revision, splits, decisions, task }
             }),
         }
     }

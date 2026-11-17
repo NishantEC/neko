@@ -25,7 +25,23 @@ pub struct Ask {
     pub call: Call,
     /// What the window says once it is sent ("Deleted “Fix it”.").
     pub done: String,
+    /// A text box in the dialog (the reason of a closed pull request): its words go into `call` when the answer is yes.
+    pub field: Option<AskField>,
+    /// What the question is about, one line each (the pull requests a merge will take).
+    pub list: Vec<String>,
+    /// Calls that go out with `call` when the answer is yes (merging several at once).
+    pub more: Vec<Call>,
 }
+
+/// The text box of a dialog that asks for words (`Ask::field`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AskField {
+    pub label: String,
+    pub placeholder: String,
+}
+
+/// The page field a dialog's text box edits.
+pub const ASK_FIELD: &str = "ask-field";
 
 /// The title being renamed in the session's header.
 pub struct Rename {
@@ -167,7 +183,16 @@ impl App {
 
     pub fn ask_yes(&mut self) {
         if let Some(ask) = self.dialog.take() {
-            self.call(ask.call);
+            let mut call = ask.call;
+            if ask.field.is_some() {
+                // The words of the dialog's box go with the call (a closed pull request's comment).
+                call = call.with_text(self.pages.text(ASK_FIELD));
+                self.pages.set_field(ASK_FIELD, "");
+            }
+            self.call(call);
+            for more in ask.more {
+                self.call(more);
+            }
             if !ask.done.is_empty() {
                 self.show_toast(&ask.done);
             }
@@ -175,6 +200,9 @@ impl App {
     }
 
     pub fn ask_no(&mut self) {
+        if self.dialog.as_ref().is_some_and(|a| a.field.is_some()) {
+            self.pages.set_field(ASK_FIELD, "");
+        }
         self.dialog = None;
     }
 
@@ -197,6 +225,9 @@ impl App {
                 destructive: true,
                 call: Call::Retry { task_id },
                 done: format!("Retrying “{title}”."),
+                field: None,
+                list: Vec::new(),
+                more: Vec::new(),
             }),
             Act::Publish => {
                 self.call(Call::Publish { task_id });
@@ -226,6 +257,9 @@ impl App {
                 destructive: true,
                 call: Call::Stop { task_id },
                 done: format!("Stopped “{title}”."),
+                field: None,
+                list: Vec::new(),
+                more: Vec::new(),
             }),
             Act::Cancel => self.confirm(Ask {
                 title: format!("Cancel “{title}”?"),
@@ -235,6 +269,9 @@ impl App {
                 destructive: true,
                 call: Call::Stop { task_id },
                 done: format!("Cancelled “{title}”."),
+                field: None,
+                list: Vec::new(),
+                more: Vec::new(),
             }),
             Act::Delete => self.confirm(Ask {
                 title: "Delete this task?".into(),
@@ -244,6 +281,9 @@ impl App {
                 destructive: true,
                 call: Call::Delete { task_id },
                 done: format!("Deleted “{title}”."),
+                field: None,
+                list: Vec::new(),
+                more: Vec::new(),
             }),
         }
     }
@@ -303,6 +343,9 @@ impl App {
             destructive: true,
             call: Call::StopAll,
             done: if tasks == 0 { "Stopped Neko’s reply.".into() } else { format!("Stopped {tasks} {}. Worktrees are kept.", if tasks == 1 { "task" } else { "tasks" }) },
+            field: None,
+            list: Vec::new(),
+            more: Vec::new(),
         });
     }
 
@@ -323,6 +366,119 @@ impl App {
             destructive: true,
             call: Call::ClearFinished { workspace_id: workspace },
             done: "Cleared finished tasks.".to_owned(),
+            field: None,
+            list: Vec::new(),
+            more: Vec::new(),
+        });
+    }
+}
+
+impl App {
+    /// A card dropped on Done while its work is live or waiting: moving it there stops the work, so it asks first (the web's `moveTask`).
+    pub fn ask_cancel_by_move(&mut self, id: &str) {
+        let title = self.title_of(id);
+        self.confirm(Ask {
+            title: format!("Cancel “{title}”?"),
+            detail: "It hasn’t been reviewed yet, so moving it to Done stops the work. Its files and worktree stay on disk.".into(),
+            ok: "Cancel task".into(),
+            cancel: "Keep working".into(),
+            destructive: true,
+            call: Call::Stop { task_id: id.to_owned() },
+            done: format!("Cancelled “{title}”. Its files and worktree stay on disk."),
+            field: None,
+            list: Vec::new(),
+            more: Vec::new(),
+        });
+    }
+
+    /// "Close…" on a pull request: a dialog with the reason (posted on the pull request as a comment) and a coral button.
+    pub fn ask_close_pr(&mut self, id: &str) {
+        let Some(row) = self.summary.as_ref().and_then(|m| m.pull_requests.iter().find(|r| r.id == id)).cloned() else { return };
+        self.pages.set_field(ASK_FIELD, row.reason.as_deref().unwrap_or(""));
+        let number = if row.number.is_empty() { "the pull request".to_owned() } else { row.number.clone() };
+        self.confirm(Ask {
+            title: format!("Close {number}?"),
+            detail: "The comment goes on the pull request, so the next person knows why. Its task is cancelled once GitHub confirms.".into(),
+            ok: "Close pull request".into(),
+            cancel: "Keep it".into(),
+            destructive: true,
+            call: Call::ClosePr { task_id: id.to_owned(), comment: String::new() },
+            done: format!("Closing {number}. Its task is cancelled once GitHub confirms."),
+            field: Some(AskField { label: "Why (posted as a comment)".into(), placeholder: "Why is it being closed?".into() }),
+            list: Vec::new(),
+            more: Vec::new(),
+        });
+    }
+
+    /// "Merge all ready": lists the pull requests, and on yes asks Neko to merge each once its checks pass (the web's `mergeAll`).
+    pub fn ask_merge_all(&mut self) {
+        let ready = self.ready_pull_requests();
+        let Some((first, rest)) = ready.split_first() else {
+            self.show_toast("No pull request is ready to merge.");
+            return;
+        };
+        let n = ready.len();
+        let noun = if n == 1 { "pull request" } else { "pull requests" };
+        let list = ready.iter().map(|r| format!("{} · {} · {}", r.number, if r.repository.is_empty() { "—" } else { r.repository.as_str() }, r.title)).collect();
+        let call = |r: &crate::link::PrRow| Call::SetMergeWhenReady { task_id: r.id.clone(), enabled: true };
+        let (call_first, more) = (call(first), rest.iter().map(call).collect());
+        self.confirm(Ask {
+            title: format!("Merge {n} {noun}?"),
+            detail: "Each is squashed with an empty body once its checks pass and nothing conflicts. A failure or a conflict stops that one and tells you.".into(),
+            ok: format!("Merge {n}"),
+            cancel: "Cancel".into(),
+            destructive: false,
+            call: call_first,
+            done: "Neko merges each one as soon as its checks pass.".into(),
+            field: None,
+            list,
+            more,
+        });
+    }
+
+    /// "Review pull requests": hands every open one back to its agent to re-check (the web's "Re-check all").
+    pub fn ask_review_prs(&mut self) {
+        let n = self.summary.as_ref().map_or(0, |m| m.pull_requests.iter().filter(|r| matches!(r.verdict, crate::link::Verdict::Ready | crate::link::Verdict::Close)).count());
+        if n == 0 {
+            self.show_toast("No open pull request to re-check.");
+            return;
+        }
+        let workspace_id = self.scope().map(str::to_owned);
+        self.confirm(Ask {
+            title: format!("Re-check {n} open pull {}?", if n == 1 { "request" } else { "requests" }),
+            detail: "Each task’s agent updates its pull request with main, re-checks the cause against the evidence, cuts it to the smallest fix, and says whether it is ready, should be closed, or needs your decision. Agents run a few at a time per repository.".into(),
+            ok: "Re-check them".into(),
+            cancel: "Cancel".into(),
+            destructive: false,
+            call: Call::ReviewPullRequests { workspace_id },
+            done: "Each agent is re-checking its pull request. They run a few at a time, so this takes a while.".into(),
+            field: None,
+            list: Vec::new(),
+            more: Vec::new(),
+        });
+    }
+
+    /// "Merge without review" for a repository: turning it on asks first (it skips the approving review GitHub requires);
+    /// turning it off is one press.
+    pub fn toggle_merge_without_review(&mut self, repository: &str) {
+        let on = self.summary.as_ref().is_some_and(|m| m.merge_without_review.iter().any(|r| r == repository));
+        let name = repo_name(repository);
+        if on {
+            self.call(Call::SetMergeWithoutReview { repository: repository.to_owned(), enabled: false });
+            self.show_toast(&format!("Neko will wait for an approving review in {name}."));
+            return;
+        }
+        self.confirm(Ask {
+            title: format!("Merge without review in {name}?"),
+            detail: "Neko may then merge this repository’s pull requests without the approving review GitHub requires (an administrator merge), once checks pass. You can turn it off again here.".into(),
+            ok: "Allow it".into(),
+            cancel: "Keep requiring review".into(),
+            destructive: true,
+            call: Call::SetMergeWithoutReview { repository: repository.to_owned(), enabled: true },
+            done: format!("Neko may now merge pull requests in {name} without review."),
+            field: None,
+            list: Vec::new(),
+            more: Vec::new(),
         });
     }
 }

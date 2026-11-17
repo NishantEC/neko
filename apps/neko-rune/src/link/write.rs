@@ -110,6 +110,17 @@ pub enum Call {
     StopAll,
     /// Remove every completed or cancelled task, in one workspace or all. Only built inside a confirm dialog.
     ClearFinished { workspace_id: Option<String> },
+    // The Pull requests view (`pages/work/PullRequests.tsx`).
+    /// Merge a task's pull request once its checks pass and nothing conflicts; `enabled: false` takes the request back.
+    SetMergeWhenReady { task_id: String, enabled: bool },
+    /// Close the pull request on GitHub with a comment and cancel its task. Only built inside a confirm dialog.
+    ClosePr { task_id: String, comment: String },
+    /// Whether Neko may merge without the approving review GitHub requires, in one repository.
+    SetMergeWithoutReview { repository: String, enabled: bool },
+    /// Hands every open pull request (in one workspace or all) back to its agent to re-check.
+    ReviewPullRequests { workspace_id: Option<String> },
+    /// Reads every open pull request on GitHub now.
+    CheckPullRequests,
     // Neko's own conversation.
     Ask { text: String, workspace_id: Option<String> },
     /// Stops the reply and sends this first (`InterruptAndSendMessage`, the web's ⌘↵).
@@ -162,6 +173,14 @@ pub enum Call {
 }
 
 impl Call {
+    /// The call with the words a dialog collected (the reason of a closed pull request); any other call is unchanged.
+    pub fn with_text(self, text: &str) -> Call {
+        match self {
+            Call::ClosePr { task_id, .. } => Call::ClosePr { task_id, comment: text.trim().to_owned() },
+            other => other,
+        }
+    }
+
     /// The request that follows `wire()` when a call is two steps (the old message leaves the queue, then the new one goes).
     pub fn then(&self) -> Option<Request> {
         match self {
@@ -249,6 +268,11 @@ impl Call {
             Call::Delete { task_id } => Request::Workbench(Command::DeleteTask { task_id }),
             Call::StopAll => Request::Workbench(Command::CancelAllWork),
             Call::ClearFinished { workspace_id } => Request::Workbench(Command::ClearFinishedTasks { workspace_id }),
+            Call::SetMergeWhenReady { task_id, enabled } => Request::Workbench(Command::SetMergeWhenReady { task_id, enabled }),
+            Call::ClosePr { task_id, comment } => Request::Workbench(Command::ClosePullRequest { task_id, comment }),
+            Call::SetMergeWithoutReview { repository, enabled } => Request::Workbench(Command::SetMergeWithoutReview { repository, enabled }),
+            Call::ReviewPullRequests { workspace_id } => Request::Workbench(Command::ReviewPullRequests { workspace_id }),
+            Call::CheckPullRequests => Request::Workbench(Command::CheckPullRequests),
             Call::Ask { text, workspace_id } => Request::Workbench(Command::SendMessage { text, workspace_id }),
             Call::AskNow { text, workspace_id } => Request::Workbench(Command::InterruptAndSendMessage { text, workspace_id }),
             Call::EditQueued { text, workspace_id, .. } => Request::Workbench(Command::SendMessage { text, workspace_id }),
@@ -305,6 +329,21 @@ mod tests {
         assert_eq!(body["Workbench"]["Crew"]["Enqueue"]["command_id"], "c1");
         assert_eq!(json(&enqueue(DeliveryMode::SteerNow))["Workbench"]["Crew"]["Enqueue"]["kind"], "steer");
         assert_eq!(json(&enqueue(DeliveryMode::InterruptRestart))["Workbench"]["Crew"]["Enqueue"]["kind"], "interrupt");
+    }
+
+    #[test]
+    fn the_pull_request_calls_are_the_webs_requests() {
+        let ready = json(&Call::SetMergeWhenReady { task_id: "t".into(), enabled: true });
+        assert_eq!((ready["Workbench"]["SetMergeWhenReady"]["task_id"].as_str(), ready["Workbench"]["SetMergeWhenReady"]["enabled"].as_bool()), (Some("t"), Some(true)));
+        let close = json(&Call::ClosePr { task_id: "t".into(), comment: "dup".into() });
+        assert_eq!((close["Workbench"]["ClosePullRequest"]["task_id"].as_str(), close["Workbench"]["ClosePullRequest"]["comment"].as_str()), (Some("t"), Some("dup")));
+        let repo = json(&Call::SetMergeWithoutReview { repository: "/r/a".into(), enabled: false });
+        assert_eq!((repo["Workbench"]["SetMergeWithoutReview"]["repository"].as_str(), repo["Workbench"]["SetMergeWithoutReview"]["enabled"].as_bool()), (Some("/r/a"), Some(false)));
+        assert!(json(&Call::ReviewPullRequests { workspace_id: None })["Workbench"]["ReviewPullRequests"]["workspace_id"].is_null());
+        assert_eq!(json(&Call::CheckPullRequests)["Workbench"], "CheckPullRequests");
+        // A dialog's words become the comment, trimmed; no other call takes them.
+        assert_eq!(Call::ClosePr { task_id: "t".into(), comment: String::new() }.with_text("  a duplicate \n"), Call::ClosePr { task_id: "t".into(), comment: "a duplicate".into() });
+        assert_eq!(Call::CheckPullRequests.with_text("x"), Call::CheckPullRequests);
     }
 
     #[test]

@@ -74,21 +74,22 @@ fn the_sessions_column_is_248_wide_with_12_of_padding_and_32_point_rows_on_an_8_
     let rt = runtime(true, live);
     let col = rect(&rt, "sessions");
     assert_eq!(col[2], 248.0);
-    for key in ["sessions-search", "new-session", "view-inbox", "view-calendar", "view-setup", "session-t0", "session-t6"] {
+    for key in ["sessions-search", "new-session", "view-inbox", "view-calendar", "view-prs", "view-setup", "session-t0", "session-t6"] {
         let r = rect(&rt, key);
         assert_eq!(r[3], 32.0, "{key} is 32 high");
         assert_eq!(r[0], col[0] + 12.0, "{key} is 12 in from the column's left");
         assert_eq!(r[2], 248.0 - 24.0, "{key} fills the column inside its 12 point padding");
     }
-    // Top to bottom: header 32, gap 8, search 32 with the workspace switcher (32) flush under it, gap 8, New session 32, three nav rows of 32.
-    let (header, search, new, routines, calendar, workspaces) = (rect(&rt, "sessions-header"), rect(&rt, "sessions-search"), rect(&rt, "new-session"), rect(&rt, "view-inbox"), rect(&rt, "view-calendar"), rect(&rt, "view-setup"));
+    // Top to bottom: header 32, gap 8, search 32 with the workspace switcher (32) flush under it, gap 8, New session 32, four nav rows of 32 (Routines, Calendar, Pull requests, Setup).
+    let (header, search, new, routines, calendar, prs, workspaces) = (rect(&rt, "sessions-header"), rect(&rt, "sessions-search"), rect(&rt, "new-session"), rect(&rt, "view-inbox"), rect(&rt, "view-calendar"), rect(&rt, "view-prs"), rect(&rt, "view-setup"));
     assert_eq!(search[1], header[1] + header[3] + 8.0);
     let scope = rect(&rt, "scope");
     assert_eq!((scope[1], scope[3]), (search[1] + search[3], 32.0), "the switcher is a 32 point row right under the search field");
     assert_eq!(new[1], scope[1] + scope[3] + 8.0);
     assert_eq!(routines[1], new[1] + new[3]);
     assert_eq!(calendar[1], routines[1] + routines[3]);
-    assert_eq!(workspaces[1], calendar[1] + calendar[3]);
+    assert_eq!(prs[1], calendar[1] + calendar[3]);
+    assert_eq!(workspaces[1], prs[1] + prs[3]);
     // The list's sections are 8 apart, each header 32 tall.
     let (needs, running) = (rect(&rt, "section-0"), rect(&rt, "section-1"));
     assert_eq!(rect(&rt, "group-0")[3], 32.0);

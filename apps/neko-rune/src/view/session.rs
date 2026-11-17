@@ -317,6 +317,7 @@ fn full_view(s: &App, view: FullView, t: &Neko, layer: &mut Vec<El>, frame: Fram
         FullView::Usage => super::more::usage(s, t),
         FullView::Setup => super::setup::view(s, t, layer, frame),
         FullView::Plugins => super::more::plugins(s, t, layer),
+        FullView::PullRequests => super::prs::page(s, t, layer),
         FullView::AllSessions => super::all::page(s, t, layer),
     }
 }
@@ -329,8 +330,11 @@ fn mode_of(steer: Steer) -> DeliveryMode {
 fn composer(s: &App, t: &Neko, layer: &mut Vec<El>, ready: bool) -> El {
     let k = &t.kit;
     let field = super::composer::field(t, &s.composer, "composer-input", "input", "Message the agent", placeholder_for(s), 8, |s: &mut App| &mut s.composer, |s: &mut App, ev: &KeyEvent| {
-        // Enter sends, Shift+Enter is a new line, ⌘↩ steers now; never while an input method
-        // is composing (the Enter that confirms a word is not a send).
+        // The `/` popover's keys first (Up, Down, Return and Tab accept, Esc), then: Enter sends, Shift+Enter is a new line, ⌘↩
+        // steers now; never while an input method is composing (the Enter that confirms a word is not a send).
+        if s.reply_key(ev) {
+            return true;
+        }
         if ev.key != Key::Enter || ev.mods.shift || ev.mods.alt || s.composer.is_composing() {
             return false;
         }
