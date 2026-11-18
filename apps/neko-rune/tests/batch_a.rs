@@ -892,7 +892,17 @@ fn month_is_a_six_by_seven_grid_with_28_point_date_headers_three_chips_and_a_plu
     assert_eq!(number[3], 28.0, "a 28 point date header");
     let chips: usize = rt.elements().iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("event-m"))).count();
     assert_eq!(chips, 3, "up to three chips");
-    assert!(has_key(&rt, &format!("cal-more-{day}")) && has_text(&rt, "+2"), "then +N");
+    assert!(has_key(&rt, &format!("cal-more-{day}")) && has_text(&rt, "2") && has_text(&rt, " more"), "then the web's \"2 more\"");
+    // The web's page: the month as the title with no count, then Today, the arrows and Day / Week / Month in that order; the weekday
+    // line, and a "W<week>" label at the start of each of the six weeks.
+    let y_of = |rt: &Runtime<App>, k: &str| rect(rt, k)[0];
+    assert!(has_text(&rt, &neko_rune::clock::month_label(neko_rune::clock::day_start(rt.state.now_ms))), "the month is the title");
+    assert!(rt.find("page-count").is_none(), "a month has no 'Week N' beside its title");
+    assert!(y_of(&rt, "cal-today") < y_of(&rt, "cal-prev") && y_of(&rt, "cal-prev") < y_of(&rt, "cal-next") && y_of(&rt, "cal-next") < y_of(&rt, "cal-mode"), "Today, the arrows, the switch");
+    for name in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] {
+        assert!(has_text(&rt, name), "{name}");
+    }
+    assert_eq!(rt.elements().iter().filter(|e| e.text.as_deref() == Some("W")).count(), 6, "a week label for each of the six weeks");
     // A header opens that day.
     click(&mut rt, &format!("cal-day-{day}"));
     assert_eq!(rt.state.pages.cal_mode, neko_rune::pages::CalMode::Day);

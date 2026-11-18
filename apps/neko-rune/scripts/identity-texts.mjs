@@ -24,6 +24,11 @@ try {
   await page.goto(`http://127.0.0.1:${port}/?token=${token}#/${route}${route.includes("?") ? "&" : "?"}embed=1&theme=${theme}`, { waitUntil: "load" });
   await page.reload({ waitUntil: "load" });
   await page.waitForTimeout(3000);
+  // CLICK="Month,Some text": visible texts to click first (comma separated), for states that need a click to show.
+  for (const step of (process.env.CLICK ?? "").split(",").filter(Boolean)) {
+    await page.getByText(step, { exact: true }).first().click();
+    await page.waitForTimeout(800);
+  }
   const texts = await page.evaluate(() => {
     const found = [];
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);

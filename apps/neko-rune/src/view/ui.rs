@@ -16,6 +16,11 @@ pub fn page(t: &Neko, key: &str, title: &str, count: Option<usize>, trailing: Ve
     col().w_full().h_full().child(band(t)).child(scrolled(page_column(t, key, title, count, trailing, body)))
 }
 
+/// [`page`] with a count in words ("Week 47") and its own column width (the Calendar's 1400).
+pub fn page_wide(t: &Neko, key: &str, title: &str, count: Option<String>, trailing: Vec<El>, body: El, max_w: f32) -> El {
+    col().w_full().h_full().child(band(t)).child(scrolled(page_column_with(t, key, title, count, trailing, body, max_w)))
+}
+
 /// A page column, centred and scrolling inside the free space.
 pub fn scrolled(column: El) -> El {
     col().key("page-scroll").w_full().grow(1.0).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(row().w_full().justify_center().child(column))
@@ -34,15 +39,19 @@ pub fn rail(prefix: &str, narrow: bool, search: Option<El>, rows: Vec<El>) -> El
 
 /// The column of a full view: its header line (title, count, the page's own controls), then the body.
 pub fn page_column(t: &Neko, key: &str, title: &str, count: Option<usize>, trailing: Vec<El>, body: El) -> El {
+    page_column_with(t, key, title, count.map(|n| n.to_string()), trailing, body, COLUMN)
+}
+
+fn page_column_with(t: &Neko, key: &str, title: &str, count: Option<String>, trailing: Vec<El>, body: El, max_w: f32) -> El {
     let mut head = row().w_full().gap(10.0).center_y().flex_wrap().min_h(36.0).child(text(title.to_owned()).key("title").font(t.ty.title).color(t.text.base).role("heading"));
     if let Some(n) = count {
-        head = head.child(text(n.to_string()).key("page-count").font(rune::TextStyle { weight: 400.0, ..t.ty.brand }).color(t.text.muted));
+        head = head.child(text(n).key("page-count").font(rune::TextStyle { weight: 400.0, ..t.ty.brand }).color(t.text.muted));
     }
     head = head.child(el().grow(1.0));
     for e in trailing {
         head = head.child(e);
     }
-    col().key(format!("full-{key}")).w_full().max_w(COLUMN).px(28.0).pt(24.0).pb(40.0).gap(32.0).child(head).child(body)
+    col().key(format!("full-{key}")).w_full().max_w(max_w).px(28.0).pt(24.0).pb(40.0).gap(32.0).child(head).child(body)
 }
 
 /// A quiet group heading ("Standing orders", "Recent runs").
