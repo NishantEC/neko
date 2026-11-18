@@ -331,6 +331,8 @@ pub fn run() {
             s.tick_dock();
             // The activity pill (only with `--overlays`): what Neko is doing, and when an outcome's time is up.
             s.tick_presence(tx);
+            // `--app`: the menu bar item and the application menu follow the snapshot.
+            s.tick_shell();
             // Luau plugins: asks for the packs' panels when due, runs what is due in each, applies what they asked of the window.
             let luau = s.luau_tick(t, tx);
             // The Browser tab: tells its thread whether to watch, shows the newest frame.
@@ -355,6 +357,10 @@ pub fn run() {
         .on_focus(|s: &mut App, focused: bool, _| s.set_focused(focused))
         // The web view (P3b) is built on the window's own handle, when first needed.
         .on_window(web_panel::remember_window);
+    // `--app` while Rune holds the duties: closing the window leaves it running in the menu bar (Swift's app does the same); Quit is in the menu.
+    if app_flag() && !shell::swift_app_running() {
+        app = app.keep_running();
+    }
     let handle = app.handle();
     // The overlays (P4) are off unless asked for: with the gate off nothing is created and no shortcut is registered (`overlays.rs`).
     // `--app` implies `--overlays`: they are made at build time and attached once Rune holds the duties (the Swift app may run first).
@@ -384,7 +390,9 @@ pub fn run() {
         // `--app`: asks whether the Swift app runs before anything starts, then keeps asking.
         let swift = app_flag().then(shell::swift_app_running);
         let main = handle.clone();
+        let for_shell = handle.clone();
         handle.update_if(move |s, _| {
+            s.shell.handle = Some(for_shell);
             if let Some(made) = made {
                 s.overlays.stash(made, main);
             }

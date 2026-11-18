@@ -9,12 +9,15 @@
 //! not this process) is running; while it is, [`duties`] gives Rune none of them and Settings, Neko updates, says so. When the Swift app
 //! quits, Rune takes the duties over without a restart. The takeover is one way: once Rune holds the duties it keeps them for this run.
 
+pub mod app_menu;
 pub mod daemon;
+pub mod open_in;
+pub mod status_item;
 
 use std::path::PathBuf;
 use std::time::Duration;
 
-use rune::AppHandle;
+use rune::{AppHandle, Tx};
 
 use crate::app::App;
 
@@ -100,7 +103,7 @@ pub const GUARD_LOG: &str = "neko-rune: --app: the Swift Neko app is running, so
 pub const TAKEOVER_LOG: &str = "neko-rune: --app: the Swift Neko app has quit; Rune takes over the menu bar, notifications, hotkeys and the daemon watch";
 
 /// What the window keeps of the Mac-app mode.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Shell {
     /// `--app` (or `NEKO_RUNE_APP=1`) was given.
     pub app_flag: bool,
@@ -113,11 +116,17 @@ pub struct Shell {
     /// The daemon's socket, for the daemon watch and the notifier.
     pub socket: PathBuf,
     daemon_started: bool,
+    /// The window's own handle: what the menu bar item, the app menu and the notifier call back into.
+    pub handle: Option<AppHandle<App>>,
+    /// Where "Open Neko" goes (`open_in.rs`), kept in this client's saved state.
+    pub open_in: open_in::OpenIn,
+    /// The application menu as last set (it is only replaced when the model changes).
+    pub app_menu_shown: Option<Vec<app_menu::Item>>,
 }
 
 impl Shell {
     pub fn new(app_flag: bool, overlays_flag: bool, socket: PathBuf) -> Shell {
-        Shell { app_flag, overlays_flag, socket, ..Shell::default() }
+        Shell { app_flag, overlays_flag, socket, open_in: crate::app::load_open_in(), ..Shell::default() }
     }
 
     /// Whether the overlays (pill, launcher, global keys) should be attached now.
@@ -162,6 +171,82 @@ impl App {
         }
         if self.shell.wants_overlays() {
             self.overlays.attach_pending();
+        }
+    }
+}
+
+impl App {
+    /// Once a poll: the menu bar item and the application menu follow the snapshot (only what changed is touched).
+    pub fn tick_shell(&mut self) {
+        let d = self.shell.duties;
+        let Some(handle) = self.shell.handle.clone() else { return };
+        if d.status_item {
+            let counts = self.summary.as_ref().map(status_item::Counts::of).unwrap_or_default();
+            // Uninstall is offered from an installed app; the uninstaller arrives in the next commit, so it is not offered yet.
+            let entries = status_item::menu(&counts, self.shell.open_in, false);
+            status_item::sync(&handle, status_item::IconState::of(&counts), &entries);
+        }
+        if d.app_menu {
+            let model = app_menu::model(self.pages.appearance.as_deref());
+            if self.shell.app_menu_shown.as_ref() != Some(&model) && handle.set_menu(app_menu::items(&model)).is_ok() {
+                self.shell.app_menu_shown = Some(model);
+            }
+        }
+    }
+
+    /// A choice in the menu bar item's menu.
+    pub fn shell_action(&mut self, action: status_item::Action, _tx: &mut Tx) {
+        use status_item::Action;
+        match action {
+            Action::QuickPanel => self.quick_panel(),
+            Action::OpenNeko => self.open_neko(None),
+            Action::Settings => self.open_neko(Some("settings")),
+            Action::OpenIn(choice) => self.set_open_in(choice),
+            Action::StopAll => self.stop_all_key(),
+            // The menu does not offer it until the uninstaller is built.
+            Action::Uninstall => {}
+            Action::Quit => {
+                if let Some(h) = &self.shell.handle {
+                    h.quit();
+                }
+            }
+        }
+    }
+
+    /// "Quick panel": the launcher panel when the overlays are on, else the palette in the window.
+    pub fn quick_panel(&mut self) {
+        if self.overlays.launcher.is_some() {
+            self.summon_launcher();
+        } else {
+            self.palette_toggle();
+            if let Some(h) = &self.shell.handle {
+                h.open();
+            }
+        }
+    }
+
+    /// "Open Neko" (and "Settings…"): where the person chose (`OpenNeko.workspace`). The browser needs the daemon's address; without it the
+    /// window opens, as Swift's `usesBrowser` falls back. The window opens at the route.
+    pub fn open_neko(&mut self, route: Option<&str>) {
+        if self.shell.open_in == open_in::OpenIn::Browser && self.web.is_some() {
+            let route = route.unwrap_or_default().to_owned();
+            self.extra.browser_routes.push(route.clone());
+            self.call(crate::link::Call::SignedWebUrl { route });
+            return;
+        }
+        if let Some(route) = route {
+            self.open_route(route);
+        }
+        if let Some(h) = &self.shell.handle {
+            h.open();
+        }
+    }
+
+    /// The Open-in choice: kept, and the menu follows.
+    pub fn set_open_in(&mut self, choice: open_in::OpenIn) {
+        self.shell.open_in = choice;
+        if self.persist_layout {
+            crate::app::write_open_in(choice.key());
         }
     }
 }

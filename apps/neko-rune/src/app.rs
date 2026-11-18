@@ -296,6 +296,18 @@ pub fn load_presence() -> bool {
     rune::prefs::Prefs::open(PREFS_ID).get::<bool>("presence").unwrap_or(true)
 }
 
+/// Where "Open Neko" goes (Swift: UserDefaults `neko.openIn`; this client's default is its own window), kept in this client's saved state.
+pub fn load_open_in() -> crate::shell::open_in::OpenIn {
+    rune::prefs::Prefs::open(PREFS_ID).get::<String>("open-in").map(|k| crate::shell::open_in::OpenIn::from_key(&k)).unwrap_or_default()
+}
+
+/// Writes the Open-in choice on its own thread.
+pub fn write_open_in(key: &'static str) {
+    let _ = std::thread::Builder::new().name("neko-open-in".into()).spawn(move || {
+        let _ = rune::prefs::Prefs::open(PREFS_ID).set("open-in", &key.to_owned());
+    });
+}
+
 /// Writes the pill's preference on its own thread.
 pub fn write_presence(on: bool) {
     let _ = std::thread::Builder::new().name("neko-presence".into()).spawn(move || {

@@ -71,8 +71,8 @@ base64 = "0.22"
 # The Dock badge (`src/dock.rs`): NSApp.dockTile through objc2, the versions Rune already builds (no new crate in the tree).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSDockTile", "NSResponder", "NSScreen", "NSEvent", "NSRunningApplication", "libc", "objc2-core-foundation"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSGeometry", "NSArray"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSDockTile", "NSResponder", "NSScreen", "NSEvent", "NSRunningApplication", "libc", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSMenu", "NSMenuItem", "NSImage", "NSImageRep", "NSButton", "NSControl", "NSCell", "NSView", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSGeometry", "NSArray", "NSData", "NSObject"] }
 
 [dev-dependencies]
 png = "0.17"
