@@ -8,7 +8,7 @@
 //! Deep links from elsewhere select a section: [`App::open_setup`], [`App::open_connection`].
 
 mod dialogs;
-mod kit;
+pub(crate) mod kit;
 mod memory;
 mod pack_dialog;
 mod packs;
@@ -18,7 +18,7 @@ mod skills;
 mod state;
 mod tools;
 mod watching;
-mod workspaces;
+pub(crate) mod workspaces;
 pub mod words;
 
 pub use state::{AddTab, Confirm, Dialog, Fetch, PackIntent, PackTab, Registry, SetupSection, SetupState};

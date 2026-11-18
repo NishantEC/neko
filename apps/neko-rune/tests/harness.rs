@@ -482,20 +482,20 @@ fn the_routines_page_lists_the_daemons_routines_and_its_controls_ask_it() {
     let (id, was, workspace) = first_routine(&rt);
     assert!(rt.find(&format!("routine-{id}")).is_some(), "a line for each routine");
     // The switch asks the daemon and the line follows its answer.
-    click(&mut rt, &format!("routine-switch-{id}"));
+    click_in_page(&mut rt, &format!("routine-switch-{id}"));
     assert_eq!(rt.state.pages.routine(&id).map(|v| v.routine.enabled), Some(!was));
-    click(&mut rt, &format!("routine-switch-{id}"));
+    click_in_page(&mut rt, &format!("routine-switch-{id}"));
     assert_eq!(rt.state.pages.routine(&id).map(|v| v.routine.enabled), Some(was));
     // Opening a routine shows its editor; Run now makes it due.
-    click(&mut rt, &format!("routine-{id}"));
+    click_in_page(&mut rt, &format!("routine-{id}"));
     assert!(rt.find("rt-run").is_some() && rt.find("rt:instruction").is_some() && rt.find("rt-cadence").is_some() && rt.find("rt-catch-up-switch").is_some());
-    click(&mut rt, "rt-run");
+    click_in_page(&mut rt, "rt-run");
     assert!(rt.state.pages.routine(&id).is_some_and(|v| v.state.run_requested || v.state.running), "the daemon was asked to run it");
     // An edit is saved with the whole routine, and Save goes away.
     assert!(rt.find("rt-save").is_none(), "nothing to save yet");
     rt.update(|s, _| s.pages.set_field("rt:instruction", "A new instruction written by a test."));
     settle(&mut rt);
-    click(&mut rt, "rt-save");
+    click_in_page(&mut rt, "rt-save");
     assert_eq!(rt.state.pages.routine(&id).map(|v| v.routine.instruction.clone()).as_deref(), Some("A new instruction written by a test."));
     assert!(rt.find("rt-save").is_none(), "saved, so quiet again");
     // Standing orders are saved per workspace.
@@ -850,7 +850,7 @@ fn batch_a_a_routine_is_saved_with_the_new_cadence_the_way_the_web_saves_it() {
         s.cadence_time_typed();
     });
     settle(&mut rt);
-    click(&mut rt, "rt-save");
+    click_in_page(&mut rt, "rt-save");
     let saved = rt.state.pages.routines.as_ref().unwrap().views.iter().find(|v| v.routine.id == id).map(|v| v.routine.cadence.clone());
     assert_eq!(saved, Some(Cadence::Daily { hour: 7, minute: 45 }), "the daemon saved the cadence");
     rt.update(|s, _| {
@@ -860,7 +860,7 @@ fn batch_a_a_routine_is_saved_with_the_new_cadence_the_way_the_web_saves_it() {
         s.cadence_hours(Some(9), Some(18));
     });
     settle(&mut rt);
-    click(&mut rt, "rt-save");
+    click_in_page(&mut rt, "rt-save");
     let saved = rt.state.pages.routines.as_ref().unwrap().views.iter().find(|v| v.routine.id == id).map(|v| v.routine.cadence.clone());
     assert_eq!(saved, Some(Cadence::Every { minutes: 30, from_hour: 9, to_hour: 18 }));
 }

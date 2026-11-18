@@ -17,7 +17,7 @@ the web has no such sections (Budget is part of "AI & agents", Workspaces is a S
 | all-sessions-list | 5.77 | 5.77 | 5.77 | 0% | no |
 | setup-memory | 6.08 | 5.07 | 5.07 | 3.8% | no |
 | setup-watching | 4.61 | 4.65 | 4.74 | 4.2% | no |
-| routines | 4.75 | 4.63 | 4.64 | 0% | no |
+| routines | 4.75 | 4.63 | 0.86 | 95.3% | yes |
 | calendar-month | 4.22 | 4.12 | 4.12 | 1.1% | no |
 | all-sessions-board | 3.95 | 3.95 | 3.95 | 0% | no |
 | usage | 4.0 | 3.84 | 3.88 | 0% | no |
@@ -41,6 +41,8 @@ the web has no such sections (Budget is part of "AI & agents", Workspaces is a S
 | setup-packs | 4.42 | 3.16 | 0.16 | 50% | yes |
 
 ## Done in this pass
+
+Routines (2026-11-18): the page is the web's Inbox page (`pages/Inbox.tsx`) under its own title "Inbox" (the sessions column still says Routines): "Needs you" cards, "Closed recently" (folded), then one folding section per scope with routine rows, standing orders, setup notes and "What Neko did".
 
 Setup, Workspaces (2026-11-18): every workspace shows expanded as on the web (`pages/setup/Workspaces.tsx`): the 40 point head line (caret, name, "N open", "N of M routines on"; at the right what needs you and the folder, with Sync now and Edit over the folder on hover) and its detail lines in the web's order (Routines, Setup notes, Folders, Connections, Watching, Tools in Neko, Standing orders, Instructions), each a 28 point line that opens its list under itself, then the empty facets as quiet "+ Add ..." links. The words-placed measure now counts only the words inside the window (a long page's text below the fold is in neither picture).
 

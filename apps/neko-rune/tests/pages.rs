@@ -73,28 +73,31 @@ fn rect(rt: &Runtime<App>, key: &str) -> [f32; 4] {
 }
 
 #[test]
-fn a_routine_is_one_line_with_its_glyph_scope_cadence_and_next_due() {
+fn routines_is_the_webs_inbox_with_its_sections_in_order_and_each_routine_one_line() {
     let rt = runtime("routines");
-    assert!(texts(&rt).contains(&"Routines".to_owned()) && text_of(&rt, "page-count").as_deref() == Some("5"), "the title with its faint count");
-    // Under the workspace's heading, not a scope on every row; the cadence in one 180 point column; the web's 36 x 21 switch.
-    assert!(rt.find("routine-scope-r1").is_none() && texts(&rt).contains(&"Neko".to_owned()) && rt.find("routines-group-w1").is_some());
-    let columns: Vec<[f32; 4]> = ["r1", "r2", "r3"].iter().map(|id| rect(&rt, &format!("routine-cadence-{id}"))).collect();
-    assert!(columns.iter().all(|c| (c[0] - columns[0][0]).abs() < 0.5 && (c[2] - 180.0).abs() < 0.5), "one 180 point cadence column: {columns:?}");
+    let t = texts(&rt);
+    assert!(t.contains(&"Inbox".to_owned()) && rt.find("page-count").is_none(), "the web's title, with no count: {t:?}");
+    // The web's sections in the web's order: Needs you, (Closed recently), then one folding section per scope.
+    let y = |key: &str| rect(&rt, key)[1];
+    assert!(t.contains(&"Needs you".to_owned()));
+    assert!(y("needs-you") < y("routines-group-w1") && y("routines-group-w1") < y("routines-group-w2"), "Needs you above each scope, in the order the scopes come");
+    assert!(texts(&rt).contains(&"Neko".to_owned()) && rt.find("routine-scope-r1").is_none());
+    // A routine is one 28 point line: name, status in the one language, when it runs, then the 36 x 22 switch.
     let sw = rect(&rt, "routine-switch-r1");
-    assert_eq!((sw[2], sw[3]), (36.0, 21.0), "the web's switch");
-    let due = rect(&rt, "routine-due-r1");
-    let row = rect(&rt, "routine-r1");
-    assert!(due[0] + due[2] <= sw[0] && due[0] > columns[0][0] + 150.0 && row[0] + row[2] >= sw[0] + sw[2], "next due sits between the cadence and the switch: {due:?} {sw:?}");
-    assert_eq!(text_of(&rt, "routine-cadence-r1").as_deref(), Some("Every 20 min, 08:00–23:00"));
-    assert_eq!(text_of(&rt, "routine-due-r1").as_deref(), Some("next in 6m"));
-    assert_eq!(text_of(&rt, "routine-due-r3").as_deref(), Some("running"));
-    assert!(text_of(&rt, "routine-due-r5").is_some_and(|t| t.starts_with("Held until ")), "{:?}", text_of(&rt, "routine-due-r5"));
-    assert_eq!(text_of(&rt, "routine-due-r4").as_deref(), Some(""), "a paused routine has no next run");
-    // The glyphs are the one status language: on, running, held, failed-last, paused.
+    assert_eq!((sw[2], sw[3]), (36.0, 22.0), "the web's switch");
+    let facts = rect(&rt, "routine-facts-r1");
+    assert!(facts[0] + facts[2] <= sw[0], "when it runs sits before the switch: {facts:?} {sw:?}");
+    let facts_of = |id: &str| text_of(&rt, &format!("routine-facts-{id}")).unwrap_or_default();
+    assert!(facts_of("r1").starts_with("Every 20 min, 08:00–23:00 · next in "), "{}", facts_of("r1"));
+    assert!(facts_of("r1").contains(" · last "), "{}", facts_of("r1"));
+    assert!(!facts_of("r3").contains("next") && !facts_of("r3").contains("due now"), "a running routine has no next run: {}", facts_of("r3"));
+    assert_eq!(facts_of("r4"), "Daily at 22:00", "a paused routine has no next run");
     let label = |id: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("routine-{id}"))).and_then(|e| e.label).unwrap();
-    assert!(label("r1").contains("On") && label("r3").contains("Running") && label("r5").contains("Held") && label("r4").contains("Paused"), "{} {} {} {}", label("r1"), label("r3"), label("r5"), label("r4"));
+    assert!(label("r1").contains("Acted") && label("r3").contains("Running") && label("r5").contains("Held") && label("r4").contains("Paused"), "{} {} {} {}", label("r1"), label("r3"), label("r5"), label("r4"));
     assert!(rt.find("rt-save").is_none() && rt.find("title").is_some());
-    assert!(rt.find("standing-orders").is_some() && rt.find("orders-block-w1").is_some());
+    // Standing orders are folded to their first line; the scope with only notes shows them under its heading.
+    assert!(rt.find("orders-head-w1").is_some() && rt.find("rt:instruction").is_none());
+    assert!(t.contains(&"What Neko did".to_owned()), "{t:?}");
 }
 
 #[test]
@@ -122,9 +125,9 @@ fn the_routines_switch_run_now_save_and_standing_orders_ask_the_daemon() {
     click(&mut rt, "routine-r2");
     assert_eq!(rt.state.pages.open_routine.as_deref(), Some("r2"));
     assert!(rt.find("routine-details-r1").is_none() && rt.find("routine-details-r2").is_some());
-    // Standing orders: Save appears once the box differs from what was saved. (Closed first, so
-    // the box is on screen.)
+    // Standing orders: folded to their first line; open, Save appears once the box differs from what was saved.
     click(&mut rt, "routine-r2");
+    click(&mut rt, "orders-head-w1");
     assert!(rt.find("orders-save-w1").is_none());
     rt.update(|s, _| s.pages.set_field("orders:w1", "Never send anything to a customer."));
     settle(&mut rt);

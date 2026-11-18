@@ -226,8 +226,8 @@ fn the_terminal_tab_has_a_32_point_header_per_command_and_collapses_long_output(
 #[test]
 fn routines_have_status_chips_and_keep_the_last_run_for_the_details() {
     let rt = runtime(scene("routines"));
-    let chips: Vec<String> = rt.elements().into_iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("routine-chip-"))).filter_map(|e| e.key).collect();
-    assert!(!chips.is_empty(), "a routine that has run wears a chip");
+    let chips: Vec<String> = rt.elements().into_iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("routine-status-"))).filter_map(|e| e.key).collect();
+    assert!(!chips.is_empty(), "a routine says its status in the web's words");
     assert!(texts(&rt).iter().any(|t| matches!(t.as_str(), "Quiet" | "Acted" | "Failed")), "{:?}", texts(&rt));
     assert!(!rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("routine-last-"))), "no last-run line on a closed row");
     let open = runtime(scene("routines-open"));

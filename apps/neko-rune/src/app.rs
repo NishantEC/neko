@@ -675,6 +675,13 @@ impl App {
         self.pages.ws_open.get(id).copied().unwrap_or(true)
     }
 
+    /// Folds or opens something on the Routines page away from its default (see `Pages::inbox_flags`).
+    pub fn toggle_inbox_flag(&mut self, flag: &str) {
+        if !self.pages.inbox_flags.remove(flag) {
+            self.pages.inbox_flags.insert(flag.to_owned());
+        }
+    }
+
     /// Opens or folds one detail line of a workspace (or a list's "Show N more"), by `<workspace id>/<line>`.
     pub fn toggle_ws_line(&mut self, key: &str) {
         if !self.pages.ws_lines.remove(key) {

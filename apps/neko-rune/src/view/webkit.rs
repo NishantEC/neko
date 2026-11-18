@@ -27,6 +27,11 @@ pub fn font(t: &Neko, size: f32, weight: f32, line_height: f32) -> TextStyle {
     TextStyle { size, weight, line_height, ..t.ty.row }
 }
 
+/// The web's `tabular-nums`: figures of one width.
+pub fn tnum(style: TextStyle) -> TextStyle {
+    TextStyle { features: "'tnum' 1", ..style }
+}
+
 /// `Section` (`kit.tsx`): a heading line 28 high (12.5 medium muted, a faint count after it, actions at the right), 6 below it, then
 /// the body.
 pub fn section(t: &Neko, key: &str, title: &str, count: Option<&str>, actions: Option<El>, body: El) -> El {
@@ -385,4 +390,34 @@ pub fn tabs(t: &Neko, tabs: Vec<Tab>) -> El {
         );
     }
     well
+}
+
+/// `Section collapsible` (`kit.tsx`): the heading is a button (caret 11, title, faint count; 4 points left of the column, 4 at its
+/// sides, 2 above and below) that folds the body; only an open section has a body. `flag` is the page's fold flag for it.
+pub fn section_collapsible(t: &Neko, key: &str, title: &str, count: Option<&str>, open: bool, flag: &str, body: El) -> El {
+    section_collapsible_keyed(t, key, title, count, open, flag, body)
+}
+
+/// [`section_collapsible`] whose section is named `key` (the heading button is `<key>-toggle`).
+pub fn section_collapsible_keyed(t: &Neko, key: &str, title: &str, count: Option<&str>, open: bool, flag: &str, body: El) -> El {
+    let flag = flag.to_owned();
+    let mut label = row().gap(6.0).center_y().child(icon(if open { &crate::icons::CHEVRON_DOWN } else { &crate::icons::CHEVRON_RIGHT }, 11.0).color(t.text.muted).a11y_hidden()).child(text(title.to_owned()).font(font(t, 12.5, 500.0, 20.3125)).color(t.text.muted).a11y_hidden());
+    if let Some(count) = count {
+        label = label.child(text(count.to_owned()).font(font(t, 12.5, 500.0, 20.3125)).color(t.text.muted.alpha(0.7)).a11y_hidden());
+    }
+    let button = row().key(format!("{key}-toggle")).role("button").label(title.to_owned()).expanded(open).focusable(true).ml(-4.0).px(4.0).py(2.0).radius(10.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(move |s: &mut App| s.toggle_inbox_flag(&flag)).child(label);
+    let head = row().w_full().min_h(28.0).gap(16.0).center_y().child(button);
+    let mut c = col().key(key.to_owned()).w_full().gap(6.0).child(head);
+    if open {
+        c = c.child(body);
+    }
+    c
+}
+
+/// The web's `Switch` (`ui/switch.tsx`, `Toggle`): 36 x 22, the thumb 18 with 2 around it, Iris when on.
+pub fn toggle(t: &Neko, key: &str, label: &str, on: bool, f: impl Fn(&mut App) + 'static) -> El {
+    let thumb = if on { Color::WHITE } else { t.text.base };
+    let track = if on { t.meaning.iris } else { t.text.base.alpha(0.18) };
+    let r = row().key(key.to_owned()).role("switch").label(label.to_owned()).checked(on).focusable(true).size(36.0, 22.0).px(2.0).center_y().radius(11.0).fill(track).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(f).child(el().size(18.0, 18.0).radius(9.0).fill(thumb).a11y_hidden());
+    if on { r.justify_end() } else { r.justify_start() }
 }
