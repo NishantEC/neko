@@ -246,6 +246,8 @@ pub struct App {
     pub pending_route: Option<String>,
     /// The window's size in points, as the last build saw it.
     pub window_size: std::cell::Cell<Option<[u32; 2]>>,
+    /// The Browser tab's live view of a Chrome on this Mac (`src/browser/`).
+    pub browser: crate::browser::BrowserTab,
 }
 
 /// Where the window's own settings are kept (Rune's `prefs` store).
@@ -391,6 +393,7 @@ impl Default for App {
             reporter: Default::default(),
             pending_route: None,
             window_size: Default::default(),
+            browser: Default::default(),
         }
     }
 }

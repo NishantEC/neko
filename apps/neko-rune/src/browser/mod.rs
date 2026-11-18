@@ -2,7 +2,8 @@
 //! this Mac while an agent drives it. Nothing here controls, creates, closes or reads anything else.
 //!
 //! * [`discover`] finds the browser (loopback only); [`cdp`] is one thread with one browser-level websocket speaking a seven
-//!   method allow-list ([`cdp::CDP_METHODS`]); this file is the model they share ([`BrowserView`]).
+//!   method allow-list ([`cdp::CDP_METHODS`]); this file is the model they share ([`BrowserView`]) and the window's side of it
+//!   ([`tab`]).
 //! * **This talks to Chrome, not to the daemon.** Rune's request allow-list for the daemon (`link/`, `tests/allow_list.rs`) is
 //!   unaffected: no `Call` and no daemon request is added, and no frame, title or address is ever sent to the daemon, an agent or a
 //!   log. Frames live in memory only and are dropped the moment the tab is not on screen.
@@ -13,6 +14,9 @@ use serde_json::Value;
 
 pub mod cdp;
 pub mod discover;
+pub mod tab;
+
+pub use tab::BrowserTab;
 
 /// How the connection to Chrome is going.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -36,15 +40,18 @@ pub struct PageInfo {
 }
 
 impl PageInfo {
-    /// The address's host, for the top bar and the picker ("docs.acme.test"); the whole address when it has none.
+    /// The address's host, for the top bar and the picker ("docs.acme.test"); the scheme ("data:", "file:") when it has none, so a
+    /// long address never fills the bar.
     pub fn host(&self) -> String {
-        url::Url::parse(&self.url).ok().and_then(|u| u.host_str().map(str::to_owned)).filter(|h| !h.is_empty()).unwrap_or_else(|| self.url.clone())
+        let Ok(u) = url::Url::parse(&self.url) else { return String::new() };
+        u.host_str().filter(|h| !h.is_empty()).map_or_else(|| format!("{}:", u.scheme()), str::to_owned)
     }
 
     /// The page as a picker row: "title — host".
     pub fn label(&self) -> String {
-        let title = if self.title.trim().is_empty() { self.host() } else { self.title.trim().to_owned() };
-        format!("{title} — {}", self.host())
+        let host = self.host();
+        let title = if self.title.trim().is_empty() { host.clone() } else { self.title.trim().to_owned() };
+        if host.is_empty() { title } else { format!("{title} — {host}") }
     }
 
     /// The address when it is one a person's own browser may open: `http` or `https`, nothing else.
@@ -224,6 +231,8 @@ mod tests {
         assert_eq!(p.openable().as_deref(), Some("https://docs.acme.test/start"));
         let odd = PageInfo { target_id: "b".into(), title: "".into(), url: "file:///tmp/x.html".into() };
         assert_eq!(odd.openable(), None, "only http and https go to the person's browser");
+        let data = PageInfo { target_id: "c".into(), title: "Demo".into(), url: "data:text/html,%3Cp%3Ehello".into() };
+        assert_eq!((data.host().as_str(), data.label().as_str()), ("data:", "Demo — data:"));
     }
 
     #[test]

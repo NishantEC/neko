@@ -209,6 +209,37 @@ pub fn glb(rings: u32, segs: u32) -> Vec<u8> {
     out
 }
 
+/// A made-up page for the Browser tab's scenes: a blue-to-violet gradient, a header bar, a card with three lines and a round
+/// button, as RGBA (`w` by `h`). Generated here; never a screenshot of anything.
+pub fn browser_frame(w: u32, h: u32) -> Vec<u8> {
+    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+    let (cx, cy, r) = (w as f32 * 0.78, h as f32 * 0.72, h as f32 * 0.11);
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
+            let mut px = [(40.0 + 90.0 * fx) as u8, (70.0 + 60.0 * fy) as u8, (170.0 + 60.0 * (1.0 - fx)) as u8];
+            if fy < 0.1 {
+                px = [24, 28, 48];
+            }
+            // The card and its text lines.
+            if (0.1..=0.55).contains(&fx) && (0.22..=0.62).contains(&fy) {
+                px = [244, 246, 250];
+                for line in 0..3u32 {
+                    let top = 0.30 + line as f32 * 0.10;
+                    if (top..top + 0.03).contains(&fy) && fx < 0.5 - line as f32 * 0.06 {
+                        px = [150, 158, 178];
+                    }
+                }
+            }
+            if ((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)).sqrt() < r {
+                px = [255, 196, 64];
+            }
+            rgba.extend_from_slice(&[px[0], px[1], px[2], 255]);
+        }
+    }
+    rgba
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -11,6 +11,7 @@ use rune_kit::FileTree;
 
 use crate::app::{App, DEMO_NOW};
 use crate::panel::{Content, FilesMeta, Loaded, Opened, Shown, Tab, Target};
+use crate::browser::{BrowserTab, PageInfo, Status};
 use crate::samples;
 use crate::scenes::running;
 use crate::work::{DiffLoad, diff_key};
@@ -241,4 +242,28 @@ pub fn plugin_page(s: &mut App) {
 /// The Canvas with four tabs in a panel too narrow for their words: icons with tooltips.
 pub fn pressure_icons(s: &mut App) {
     auto_canvas(s);
+}
+
+/// The two made-up pages of the Browser tab's scenes.
+pub fn browser_pages() -> Vec<PageInfo> {
+    vec![
+        PageInfo { target_id: "pg-docs".into(), title: "Acme docs".into(), url: "https://docs.acme.test/start".into() },
+        PageInfo { target_id: "pg-board".into(), title: "Asha's board".into(), url: "https://board.acme.test/q3".into() },
+    ]
+}
+
+/// The Browser tab connected, following the newest page, with a made-up frame (a gradient and shapes).
+pub fn browser(s: &mut App) {
+    base(s);
+    s.layout.context.set_open(true);
+    session(s).tab = Some(Tab::Browser);
+    s.browser = BrowserTab::staged(Status::Connected, browser_pages(), Some("pg-docs"), Some((960, 600, samples::browser_frame(960, 600))));
+}
+
+/// No browser answered.
+pub fn browser_none(s: &mut App) {
+    base(s);
+    s.layout.context.set_open(true);
+    session(s).tab = Some(Tab::Browser);
+    s.browser = BrowserTab::staged(Status::None, Vec::new(), None, None);
 }

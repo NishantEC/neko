@@ -488,6 +488,8 @@ pub const SCENES: &[Scene] = &[
     ("p3a-files", crate::scenes_panel::files),
     ("p3a-file-open", crate::scenes_panel::file_open),
     ("p3a-terminal", crate::scenes_panel::terminal),
+    ("panel-browser", crate::scenes_panel::browser),
+    ("panel-browser-none", crate::scenes_panel::browser_none),
     ("p3a-canvas", crate::scenes_panel::canvas_image),
     ("p3a-gif", crate::scenes_panel::image_gif),
     ("p3a-svg", crate::scenes_panel::image_svg),

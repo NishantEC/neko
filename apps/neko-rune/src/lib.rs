@@ -317,11 +317,13 @@ pub fn run() {
             s.tick_dock();
             // Luau plugins: asks for the packs' panels when due, runs what is due in each, applies what they asked of the window.
             let luau = s.luau_tick(t, tx);
+            // The Browser tab: tells its thread whether to watch, shows the newest frame.
+            let browser = s.browser_tick(t, tx);
             // Tell the daemon what is on screen (at most every two seconds); ask to be woken for a change that has to wait.
             if let Some(wait) = s.tick_report(s.window_size.get()) {
                 tx.wake_after(std::time::Duration::from_millis(wait.max(50) as u64));
             }
-            moved || panel || toast || luau
+            moved || panel || toast || luau || browser
         }),
         // The waker finished reads and storage calls of a Luau plugin ask a frame with.
         setup: Some(|s: &mut App, waker: rune::Waker| {
@@ -370,10 +372,26 @@ pub fn run() {
                 true
             });
         });
+        // The Browser tab's thread calls this after every change; one build is asked for at a time (frames can come 30 a second).
+        let browser_waker = std::sync::Mutex::new(handle.clone());
+        let asked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let browser_wake: std::sync::Arc<dyn Fn() + Send + Sync> = std::sync::Arc::new(move || {
+            if asked.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            let done = asked.clone();
+            browser_waker.lock().unwrap_or_else(std::sync::PoisonError::into_inner).update_if(move |s, tx| {
+                done.store(false, std::sync::atomic::Ordering::SeqCst);
+                s.browser.pull();
+                tx.instant();
+                true
+            });
+        });
         handle.update_if(move |s, _| {
             s.wanted = for_app;
             s.dispatch = dispatch;
             s.panel.states.use_threads(wake);
+            s.browser.use_wake(browser_wake);
             false
         });
         connection::spawn(thread_handle, socket, neko_protocol::support_dir(), wanted);

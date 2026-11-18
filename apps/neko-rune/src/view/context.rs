@@ -8,7 +8,7 @@ use rune::{El, col, el, row, text};
 use rune_kit::SegmentedControl;
 use rune_kit::glyphs::{FILE, FILE_CODE, FILE_IMAGE, FILE_TEXT};
 
-use super::{context_diff, context_files, context_info, context_terminal, icon_button, placeholder, quiet_button, ui};
+use super::{context_browser, context_diff, context_files, context_info, context_terminal, icon_button, placeholder, quiet_button, ui};
 use crate::app::App;
 use crate::groups::age;
 use crate::icons;
@@ -52,6 +52,7 @@ pub fn panel(s: &App, t: &Neko, layer: &mut Vec<El>, width: f32) -> El {
         Some(Tab::Diff) => context_diff::tab(s, t, layer),
         Some(Tab::Files) => context_files::tab(s, t),
         Some(Tab::Terminal) => context_terminal::tab(s, t),
+        Some(Tab::Browser) => context_browser::tab(s, t, layer),
         Some(Tab::Plan) => context_info::plan(s, t),
         Some(Tab::Details) => context_info::details(s, t),
         None => placeholder(&["Nothing to show yet."], t),
@@ -66,6 +67,7 @@ pub fn tab_icon(tab: Tab) -> &'static rune::Icon {
         Tab::Diff => &icons::DIFF,
         Tab::Files => &icons::FILES,
         Tab::Terminal => &icons::TERMINAL,
+        Tab::Browser => &icons::GLOBE,
         Tab::Plan => &icons::CHECKLIST,
         Tab::Details => &icons::INFO,
     }

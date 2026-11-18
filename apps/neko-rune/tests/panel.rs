@@ -110,7 +110,7 @@ fn the_tabs_that_have_content_show_in_order_and_a_recent_artifact_wins_the_first
     assert_eq!(tab_titles(&rt.state), ["Canvas", "Diff", "Files", "Terminal"]);
     assert_eq!(rt.state.panel_tab(), Some(Tab::Canvas), "an artifact shown two minutes ago");
     assert!(rt.state.layout.context.is_open());
-    assert_eq!(segments(&rt), ["Canvas", "Diff", "Files", "Terminal", "Details"], "the control shows each, in this order, then the tabs asked for");
+    assert_eq!(segments(&rt), ["Canvas", "Diff", "Files", "Terminal", "Browser", "Details"], "the control shows each, in this order, then the tabs asked for");
     assert!(rt.find("context-picker").is_some() && rt.find("context-expand").is_some() && rt.find("context-close").is_some());
     assert_eq!(rect(&rt, "context-head")[3], 36.0, "the header is 36 points");
     assert_eq!(rect(&rt, "context")[2], 420.0, "the default width");
@@ -287,7 +287,7 @@ fn layout_pressure_collapses_neko_and_icon_tabs_never_truncate() {
     assert!(rect(&rt, "session-region")[2] >= 480.0, "the session keeps 480: {:?}", rect(&rt, "session-region"));
     // 420 is under 440: icons only, each named (tooltip and accessible name), never a cut label.
     assert!(rt.find("context-icon-tabs").is_some());
-    assert_eq!(segments(&rt), ["Canvas", "Diff", "Files", "Terminal", "Details"]);
+    assert_eq!(segments(&rt), ["Canvas", "Diff", "Files", "Terminal", "Browser", "Details"]);
     assert!(texts(&rt).iter().all(|t| !t.ends_with('…') || !["Canvas", "Diff", "Files", "Termi"].iter().any(|w| t.starts_with(w))), "{:?}", texts(&rt));
     // Closing the panel ends the pressure: Neko is back at its width.
     click(&mut rt, "context-close");
@@ -315,7 +315,7 @@ fn a_wide_panel_shows_the_words() {
     assert!(rt.find("context-icon-tabs").is_none() && rt.find("context-picker").is_some());
     let mut names = segments(&rt);
     names.dedup();
-    assert_eq!(names, ["Canvas", "Diff", "Files", "Terminal", "Details"]);
+    assert_eq!(names, ["Canvas", "Diff", "Files", "Terminal", "Browser", "Details"]);
 }
 
 // ---------------------------------------------------------------- the tabs

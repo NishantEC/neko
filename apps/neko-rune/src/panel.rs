@@ -41,6 +41,8 @@ pub enum Tab {
     Diff,
     Files,
     Terminal,
+    /// A live view of a page of a Chrome on this Mac (`src/browser/`): watch only, connected while it is the tab on screen.
+    Browser,
     /// The plan as a checklist.
     Plan,
     /// The task's details, in sections: risk, parallel work, decisions, its working copy, info and the activity log.
@@ -49,11 +51,11 @@ pub enum Tab {
 
 impl Tab {
     /// In the order the segmented control shows them.
-    pub const ALL: [Tab; 6] = [Tab::Canvas, Tab::Diff, Tab::Files, Tab::Terminal, Tab::Plan, Tab::Details];
+    pub const ALL: [Tab; 7] = [Tab::Canvas, Tab::Diff, Tab::Files, Tab::Terminal, Tab::Browser, Tab::Plan, Tab::Details];
 
     /// A tab the person asks for: it never opens the panel by itself (Details always has something to say).
     pub fn on_request(self) -> bool {
-        matches!(self, Tab::Plan | Tab::Details)
+        matches!(self, Tab::Browser | Tab::Plan | Tab::Details)
     }
 
     pub fn title(self) -> &'static str {
@@ -62,6 +64,7 @@ impl Tab {
             Tab::Diff => "Diff",
             Tab::Files => "Files",
             Tab::Terminal => "Terminal",
+            Tab::Browser => "Browser",
             Tab::Plan => "Plan",
             Tab::Details => "Details",
         }
@@ -357,7 +360,8 @@ pub fn first_tab(available: &[Tab], recent_artifact: bool) -> Option<Tab> {
     if recent_artifact && has(Tab::Canvas) {
         return Some(Tab::Canvas);
     }
-    [Tab::Diff, Tab::Terminal, Tab::Files].into_iter().find(|t| has(*t)).or_else(|| available.first().copied())
+    // The Browser tab is only ever chosen by the person: it connects to a browser while it is on screen.
+    [Tab::Diff, Tab::Terminal, Tab::Files].into_iter().find(|t| has(*t)).or_else(|| available.iter().copied().find(|t| *t != Tab::Browser)).or_else(|| available.first().copied())
 }
 
 impl App {
@@ -383,6 +387,8 @@ impl App {
             tabs.push(Tab::Terminal);
         }
         if let Some(d) = self.detail().filter(|d| d.task.id == id) {
+            // The live Browser tab: every session with its details has it, like Details; it never opens the panel by itself.
+            tabs.push(Tab::Browser);
             if !crate::plan::steps(&d.task.plan, d.task.status).is_empty() {
                 tabs.push(Tab::Plan);
             }
@@ -517,7 +523,7 @@ impl App {
                 self.want_diff(&id, run);
                 // The Files tab marks changed files from the whole task's diff.
             }
-            Some(Tab::Canvas | Tab::Files | Tab::Terminal | Tab::Plan | Tab::Details) | None => {}
+            Some(Tab::Canvas | Tab::Files | Tab::Terminal | Tab::Browser | Tab::Plan | Tab::Details) | None => {}
         }
         // The Files tab marks what changed from the whole task's diff.
         if self.panel_tab() == Some(Tab::Files) && self.session_panel(&id).is_some_and(|p| matches!(&p.folder, Some(Some(_)))) && self.work.checkpoints.get(&id).is_some_and(|l| l.runs.iter().any(|r| r.files > 0)) {
@@ -944,8 +950,11 @@ mod tests {
         assert_eq!(first_tab(&[Files], false), Some(Files));
         assert_eq!(first_tab(&[Canvas], false), Some(Canvas), "an old artifact alone is still what there is");
         assert_eq!(first_tab(&[], true), None);
-        assert_eq!(Tab::ALL.map(Tab::title), ["Canvas", "Diff", "Files", "Terminal", "Plan", "Details"]);
+        assert_eq!(Tab::ALL.map(Tab::title), ["Canvas", "Diff", "Files", "Terminal", "Browser", "Plan", "Details"]);
         assert_eq!(first_tab(&[Plan, Details], false), Some(Plan), "only when the person asked for the panel");
+        assert_eq!(first_tab(&[Browser, Plan, Details], false), Some(Plan), "the Browser tab, which connects to a browser, is never the default");
+        assert_eq!(first_tab(&[Browser], false), Some(Browser), "unless it is all there is");
+        assert!(Browser.on_request() && Tab::ALL.iter().position(|t| *t == Browser) == Some(4));
     }
 
     #[test]

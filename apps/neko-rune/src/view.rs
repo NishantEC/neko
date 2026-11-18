@@ -14,6 +14,7 @@ mod calendar;
 mod compose;
 mod composer;
 mod context;
+mod context_browser;
 mod context_diff;
 mod context_files;
 mod context_info;
@@ -88,6 +89,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     crate::luau::host::set_theme(t.clone());
     crate::luau::nodes::mirror_inputs(&s.luau.inputs);
     s.reduce_motion.set(cx.system_reduced_motion());
+    s.browser.scale.set(cx.env().scale);
     let mut layer = Vec::new();
     let layout = &s.layout;
     if let Some([w, h]) = cx.layout_size("window") {
