@@ -372,8 +372,21 @@ fn plugins_list_how_each_last_loaded() {
     let rt = runtime("plugins");
     let t = texts(&rt);
     assert!(t.iter().any(|x| x == "board-viewer") && t.iter().any(|x| x == "a script threw on load") && t.iter().any(|x| x == "Error") && t.iter().any(|x| x == "Off"), "{t:?}");
-    assert!(t.iter().any(|x| x == "Running · 1 page") && t.iter().any(|x| x == "Change Neko…"), "{t:?}");
-    assert_eq!(text_of(&rt, "page-count").as_deref(), Some("3"));
+    assert!(t.iter().any(|x| x == "Running · 1 page") && t.iter().any(|x| x == "Change Neko"), "{t:?}");
+    // The web's page is "Customisations" with no count; its Panel of paths comes first, the list next, the roll-back note last.
+    assert!(text_of(&rt, "title").as_deref() == Some("Customisations") && rt.find("page-count").is_none());
+    let ys: Vec<f32> = ["plugin-places", "plugin-list", "plugins-roll-back"].iter().map(|k| rect(&rt, k)[1]).collect();
+    assert!(ys.windows(2).all(|w| w[0] < w[1]), "Pages and Styles, the customisations, then the note: {ys:?}");
+}
+
+#[test]
+fn nothing_customised_is_the_webs_empty_state_with_the_manifest_example() {
+    let rt = runtime("plugins-none");
+    assert!(rt.find("plugins-none").is_some(), "the web's Empty");
+    let t = texts(&rt);
+    assert!(t.iter().any(|x| x == "Nothing customised yet") && t.iter().any(|x| x.contains("\"title\": \"PR board\"")) && t.iter().any(|x| x == "manifest.json"), "{t:?}");
+    let ys: Vec<f32> = ["plugins-none-title", "plugins-none-description", "plugins-example", "plugins-none-change"].iter().map(|k| rect(&rt, k)[1]).collect();
+    assert!(ys.windows(2).all(|w| w[0] < w[1]), "title, words, the example, then Change Neko: {ys:?}");
 }
 
 #[test]

@@ -317,7 +317,7 @@ fn full_view(s: &App, view: FullView, t: &Neko, layer: &mut Vec<El>, frame: Fram
         FullView::Settings => super::settings::view(s, t, layer, frame),
         FullView::Usage => super::more::usage(s, t, frame.region_w),
         FullView::Setup => super::setup::view(s, t, layer, frame),
-        FullView::Plugins => super::plugins::view(s, t, layer),
+        FullView::Plugins => super::plugins::view(s, t, layer, frame.region_w),
         FullView::PullRequests => super::prs::page(s, t, layer),
         FullView::AllSessions => super::all::page(s, t, layer, frame.region_w),
     }

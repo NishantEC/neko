@@ -4,37 +4,37 @@
 
 use rune::{El, TextStyle, col, el, icon, row, text};
 
-use super::ui::{MenuEntry, group, page, quiet_line, switch_when, with_menu};
-use super::{primary_button, quiet_button};
+use super::ui::{MenuEntry, page, with_menu};
+use super::{quiet_button, webkit};
 use crate::app::App;
-use crate::icons;
+use crate::icons_phosphor;
 use crate::link::http::PluginListing;
 use crate::pages::ago;
 use crate::plugin_manage::{Tone, status_of};
 use crate::theme::Neko;
 
-fn small_button(t: &Neko, key: &str, label: &str, glyph: &'static rune::Icon, enabled: bool, on_press: impl Fn(&mut App) + 'static) -> El {
-    let b = row().key(key.to_owned()).role("button").label(label.to_owned()).help(label.to_owned()).focusable(enabled).size(26.0, 26.0).center().radius(t.radius.control).hover(t.surface.active).focus_ring(2.0, 2.0, t.surface.ring).child(icon(glyph, 14.0).color(if enabled { t.text.muted } else { t.text.faint }).a11y_hidden());
-    if enabled { b.on_press(on_press) } else { b.disabled(true) }
-}
+const MANIFEST_EXAMPLE: &str = "{\n  \"title\": \"PR board\",\n  \"description\": \"Open pull requests by stage\",\n  \"version\": \"0.1.0\",\n  \"entry\": \"index.js\",\n  \"group\": \"work\"\n}";
 
-fn copy_button(t: &Neko, key: &str, label: &str, value: String, toast: &'static str) -> El {
-    small_button(t, key, label, &icons::COPY, true, |_| {}).on_press_tx(move |s: &mut App, tx: &mut rune::Tx| {
+/// A `RowAction` that copies `value` and says so.
+fn copy_action(t: &Neko, key: &str, label: &str, value: String, toast: &'static str) -> El {
+    webkit::row_action(t, key, label, &icons_phosphor::COPY_REGULAR, |_| {}).on_press_tx(move |s: &mut App, tx: &mut rune::Tx| {
         tx.copy(value.clone());
         s.show_toast(toast);
     })
 }
 
-fn path_row(s: &App, t: &Neko, key: &str, label: &str, path: Option<&str>, note: &str, toast: &'static str) -> El {
-    let _ = s;
-    let mut r = row().key(key.to_owned()).w_full().min_h(36.0).px(8.0).gap(12.0).center_y().radius(t.radius.row).hover(t.surface.hover).child(text(label.to_owned()).font(t.ty.row).color(t.text.base).w(64.0)).child(text(path.unwrap_or("…").to_owned()).key(format!("{key}-path")).font(t.ty.mono_meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0).help(path.unwrap_or("").to_owned()));
+/// `PathRow`: the label (80 wide), the path in mono (12) that gives way, a note, and the copy action on hover; 36 high, 12 at the sides.
+#[allow(clippy::too_many_arguments)]
+fn path_row(t: &Neko, key: &str, label: &str, path: Option<&str>, note: &str, toast: &'static str) -> El {
+    let mut r = row().key(key.to_owned()).w_full().min_h(36.0).px(12.0).py(4.0).gap(12.0).center_y().radius(10.0).hover_group().hover(t.text.base.alpha(0.03)).child(text(label.to_owned()).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).w(80.0)).child(text(path.unwrap_or("…").to_owned()).key(format!("{key}-path")).font(webkit::mono(webkit::font(t, 12.0, 400.0, 19.5))).color(t.text.muted).truncate().grow(1.0).shrink().min_w(0.0).help(path.unwrap_or("").to_owned()));
     if !note.is_empty() {
-        r = r.child(text(note.to_owned()).font(t.ty.meta).color(t.text.muted));
+        r = r.child(text(note.to_owned()).font(webkit::font(t, 12.0, 400.0, 19.5)).color(t.text.muted));
     }
-    match path {
-        Some(p) => r.child(copy_button(t, &format!("{key}-copy"), &format!("Copy the {} path", label.to_lowercase()), p.to_owned(), toast)),
-        None => r,
-    }
+    let action = match path {
+        Some(p) => copy_action(t, &format!("{key}-copy"), &format!("Copy the {} path", label.to_lowercase()), p.to_owned(), toast),
+        None => webkit::row_action(t, &format!("{key}-copy"), &format!("Copy the {} path", label.to_lowercase()), &icons_phosphor::COPY_REGULAR, |_| {}).opacity(0.4),
+    };
+    r.child(webkit::row_actions(vec![action]))
 }
 
 fn plugin_row(s: &App, t: &Neko, layer: &mut Vec<El>, p: &PluginListing) -> El {
@@ -46,46 +46,53 @@ fn plugin_row(s: &App, t: &Neko, layer: &mut Vec<El>, p: &PluginListing) -> El {
     let busy = s.plugin_ui.busy.as_deref() == Some(p.id.as_str());
     let key = format!("plugin-{}", p.id);
     let id = p.id.clone();
-    let mut head = row().w_full().min_h(32.0).gap(10.0).center_y();
+    let small = webkit::font(t, 12.0, 400.0, 19.5);
+    let mut head = row().w_full().min_h(32.0).gap(12.0).center_y();
     if tone == Tone::Error {
-        head = head.child(icon(&icons::INFO, 16.0).color(t.meaning.coral).a11y_hidden());
+        head = head.child(icon(&icons_phosphor::WARNING_REGULAR, 16.0).color(t.meaning.coral).a11y_hidden());
     }
-    head = head.child(text(label.clone()).key(format!("{key}-title")).font(t.ty.row).color(t.text.base).help(p.id.clone()));
+    head = head.child(text(label.clone()).key(format!("{key}-title")).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).help(p.id.clone()));
     if !p.manifest_version.is_empty() {
-        head = head.child(text(format!("v{}", p.manifest_version)).font(t.ty.id).color(t.text.faint));
+        head = head.child(row().children([text("v".to_owned()).font(webkit::tnum(small)).color(t.text.muted.alpha(0.7)).a11y_hidden(), text(p.manifest_version.clone()).font(webkit::tnum(small)).color(t.text.muted.alpha(0.7)).a11y_hidden()]));
     }
     if !p.entry.is_empty() {
-        head = head.child(text(p.entry.trim_start_matches(&format!("/plugins/{}/", p.id)).to_owned()).font(t.ty.mono).color(t.text.faint));
+        head = head.child(text(p.entry.trim_start_matches(&format!("/plugins/{}/", p.id)).to_owned()).font(webkit::mono(webkit::font(t, 11.5, 400.0, 18.6875))).color(t.text.muted.alpha(0.7)));
     }
-    head = head.child(text(p.description.clone()).font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0));
-    head = head.child(text(status).key(format!("{key}-status")).font(t.ty.meta).color(match tone {
+    head = head.child(text(p.description.clone()).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().grow(1.0).shrink().min_w(0.0));
+    head = head.child(text(status).key(format!("{key}-status")).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(match tone {
         Tone::Ok => t.text.muted,
-        Tone::Off => t.text.faint,
+        Tone::Off => t.text.muted.alpha(0.7),
         Tone::Error => t.meaning.coral,
     }));
     let (a, b, c) = (id.clone(), id.clone(), id.clone());
-    head = head
-        .child(small_button(t, &format!("{key}-details"), &format!("Details of {label}"), &icons::INFO, true, move |s: &mut App| s.plugin_details(&a)))
-        .child(small_button(t, &format!("{key}-reload"), &format!("Reload {label}"), &icons::REFRESH, !p.disabled, move |s: &mut App| s.plugin_reload(Some(&b))));
+    let mut acts = vec![
+        webkit::row_action(t, &format!("{key}-details"), &format!("Details of {label}"), &icons_phosphor::INFO_REGULAR, move |s: &mut App| s.plugin_details(&a)),
+        {
+            let reload = webkit::row_action(t, &format!("{key}-reload"), &format!("Reload {label}"), &icons_phosphor::ARROWS_CLOCKWISE, webkit::gated(!p.disabled && !busy, move |s: &mut App| s.plugin_reload(Some(&b))));
+            if p.disabled || busy { reload.opacity(0.4) } else { reload }
+        },
+    ];
     if !p.path.is_empty() {
-        head = head.child(copy_button(t, &format!("{key}-copy"), &format!("Copy the folder path of {label}"), p.path.clone(), "Folder path copied"));
+        acts.push(copy_action(t, &format!("{key}-copy"), &format!("Copy the folder path of {label}"), p.path.clone(), "Folder path copied"));
     }
-    head = head.child(small_button(t, &format!("{key}-remove"), &format!("Remove {label}"), &icons::TRASH, !busy, move |s: &mut App| s.ask_remove_plugin(&c)));
+    let remove = webkit::row_action(t, &format!("{key}-remove"), &format!("Remove {label}"), &icons_phosphor::TRASH_REGULAR, webkit::gated(!busy, move |s: &mut App| s.ask_remove_plugin(&c)));
+    acts.push(if busy { remove.opacity(0.4) } else { remove });
+    head = head.child(webkit::row_actions(acts));
     let on = !p.disabled;
     let toggle_id = id.clone();
-    head = head.child(switch_when(t, &format!("{key}-switch"), &format!("{} {label}", if on { "Disable" } else { "Enable" }), on, !busy, move |s: &mut App| s.plugin_set(&toggle_id, !on)));
-    let mut r = col().key(key.clone()).w_full().radius(t.radius.row).hover(t.surface.hover).px(8.0).child(head);
+    head = head.child(webkit::toggle(t, &format!("{key}-switch"), &format!("{} {label}", if on { "Disable" } else { "Enable" }), on, webkit::gated(!busy, move |s: &mut App| s.plugin_set(&toggle_id, !on))));
+    let mut r = col().key(key.clone()).w_full().radius(10.0).hover_group().hover(t.text.base.alpha(0.03)).px(12.0).py(6.0).gap(4.0).child(head);
     if !pages.is_empty() {
-        let mut chips = row().w_full().gap(6.0).pb(4.0).wrap();
+        let mut chips = row().w_full().gap(6.0).wrap().center_y();
         for page in &pages {
             let pg = page.clone();
-            chips = chips.child(row().key(format!("{key}-page-{}", page.id)).role("button").label(format!("Open {}", page.title)).focusable(true).h(22.0).px(8.0).center().radius(11.0).fill(t.surface.hover).hover(t.surface.active).focus_ring(2.0, 2.0, t.surface.ring).on_press(move |s: &mut App| s.open_plugin_page(pg.clone())).child(text(page.title.clone()).font(t.ty.meta).color(t.text.base).a11y_hidden()));
+            chips = chips.child(row().key(format!("{key}-page-{}", page.id)).role("button").label(format!("Open {}", page.title)).focusable(true).px(8.0).py(2.0).center().radius(12.0).fill(t.text.base.alpha(0.06)).hover(t.text.base.alpha(0.1)).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(move |s: &mut App| s.open_plugin_page(pg.clone())).child(text(page.title.clone()).font(small).color(t.text.base).a11y_hidden()));
         }
         r = r.child(chips);
     }
     let last_error = if !p.error.is_empty() { Some(p.error.clone()) } else { problem.map(str::to_owned) };
     if let Some(e) = last_error {
-        r = r.child(col().key(format!("{key}-error")).w_full().pb(6.0).gap(2.0).role("alert").child(text("Last error").font(t.ty.meta).color(t.meaning.coral)).child(text(e).font(t.ty.mono).color(t.meaning.coral).wrap().min_w(0.0)));
+        r = r.child(col().key(format!("{key}-error")).w_full().gap(2.0).role("alert").child(text("Last error".to_owned()).font(small).color(t.meaning.coral)).child(text(e).font(webkit::mono(small)).color(t.meaning.coral).wrap().min_w(0.0)));
     }
     let mut entries: Vec<MenuEntry> = vec![
         ("Details".to_owned(), { let id = id.clone(); std::rc::Rc::new(move |s: &mut App| s.plugin_details(&id)) }),
@@ -143,40 +150,61 @@ fn details(s: &App, t: &Neko, p: &PluginListing) -> El {
     c.child(text("Edit the files in that folder (or ask Neko to); the page reloads by itself a few seconds after a file changes.").font(t.ty.meta).color(t.text.faint).wrap().min_w(0.0))
 }
 
-pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
+pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, region_w: f32) -> El {
+    webkit::set_page_width(region_w);
     let ui = &s.plugin_ui;
-    let mut body = col().w_full().gap(14.0);
-    // Where things live.
     let custom = ui.custom.as_ref();
-    body = body.child(
-        col()
-            .key("plugin-places")
-            .w_full()
-            .child(path_row(s, t, "plugin-folder", "Pages", custom.map(|c| c.plugins_dir.as_str()), "", "Folder path copied"))
-            .child(path_row(s, t, "css-path", "Styles", custom.map(|c| c.css_path.as_str()), custom.map_or("", |c| if c.css_exists { "In use" } else { "Not created yet" }), "File path copied")),
-    );
-    let mut list = col().key("plugin-list").w_full().gap(1.0);
+    let small = webkit::font(t, 12.0, 400.0, 19.5);
+    let muted80 = t.text.muted.alpha(0.8);
+    // Where things live, and the line under them (`Go to Folder … custom.css …`).
+    let note = row().w_full().flex_wrap().px(12.0).pt(4.0).children([
+        text("Go to Folder (⇧⌘G) in Finder opens a path. ".to_owned()).font(small).color(muted80).a11y_hidden(),
+        text("custom.css".to_owned()).font(webkit::mono(webkit::font(t, 11.5, 400.0, 18.6875))).color(muted80).a11y_hidden(),
+        text(" applies as you save.".to_owned()).font(small).color(muted80).a11y_hidden(),
+    ]);
+    let places = col()
+        .key("plugin-places")
+        .w_full()
+        .child(path_row(t, "plugin-folder", "Pages", custom.map(|c| c.plugins_dir.as_str()), "", "Folder path copied"))
+        .child(path_row(t, "css-path", "Styles", custom.map(|c| c.css_path.as_str()), custom.map_or("", |c| if c.css_exists { "In use" } else { "Not created yet" }), "File path copied"))
+        .child(note);
+    let mut body = col().key("plugins-body").w_full().gap(32.0).child(webkit::panel(vec![places]));
+    let change = |key: &str| {
+        // The default `Button` as the web's Empty draws it: 40 high, 16 at the sides, 8 between the icon and the words.
+        row().key(key.to_owned()).role("button").label("Change Neko").focusable(true).h(40.0).px(17.0).gap(8.0).center().radius(20.0).fill(t.meaning.iris).hover(rune::Color::WHITE.alpha(0.14)).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(|s: &mut App| s.ask_change_neko()).child(icon(&icons_phosphor::SPARKLE, 16.0).color(rune::Color::WHITE.alpha(0.8)).mx(-2.0).a11y_hidden()).child(text("Change Neko".to_owned()).font(webkit::font(t, 14.0, 500.0, 20.0)).color(rune::Color::WHITE).a11y_hidden())
+    };
     match &ui.listings {
         None => {
-            let line = ui.failed.clone().unwrap_or_else(|| "Reading the plugins…".to_owned());
-            list = list.child(quiet_line(t, "plugins-loading", &line));
-            if ui.failed.is_some() {
-                list = list.child(row().px(6.0).child(quiet_button("Try now", "plugins-retry", t, |s: &mut App| s.plugin_reload(None))));
-            }
+            let line = ui.failed.clone();
+            body = body.child(match line {
+                Some(_) => webkit::empty_rich(
+                    t,
+                    "plugins-error",
+                    &icons_phosphor::WARNING_REGULAR,
+                    "Neko’s daemon did not answer",
+                    text("The list could not be read. It tries again every few seconds.".to_owned()).font(webkit::font(t, 14.0, 400.0, 22.75)).color(t.text.muted).wrap().align(rune::Align::Center),
+                    Vec::new(),
+                    Some(webkit::button(t, "plugins-retry", "Try now", None, false, false, |s: &mut App| s.plugin_reload(None))),
+                ),
+                None => {
+                    let bars: Vec<El> = [(192.0, 20.0), (0.0, 16.0), (160.0, 20.0), (0.0, 16.0)].iter().enumerate().map(|(i, (w, h))| { let b = el().key(format!("plugins-loading-{i}")).h(*h).radius(6.0).fill(t.text.base.alpha(0.06)); if *w > 0.0 { b.w(*w) } else { b.w_full() } }).collect();
+                    webkit::panel(vec![col().key("plugins-loading").role("status").label("Loading customisations").w_full().px(12.0).py(12.0).gap(16.0).children(bars)])
+                }
+            });
         }
         Some(l) if l.is_empty() => {
-            list = list
-                .child(quiet_line(t, "plugins-none", "Nothing customised yet"))
-                .child(quiet_line(t, "plugins-none-help", "A page of yours is a folder with a manifest.json and an ES module. Give it a built-in page’s id and it replaces that page. Describe what you want and Neko writes it for you."));
+            let style = webkit::font(t, 14.0, 400.0, 22.75);
+            let code_style = webkit::mono(webkit::font(t, 12.0, 400.0, 19.5));
+            let description = webkit::inline_flow(t, "plugins-none-description", &[("A page of yours is a folder with a ", false), ("manifest.json", true), (" and an ES module. Give it a built-in page’s id and it replaces that page. Describe what you want and Neko writes it for you.", false)], style, code_style, 384.0);
+            let example = col().key("plugins-example").px(16.0).py(12.0).radius(10.0).fill(t.text.base.alpha(0.03)).child(text(MANIFEST_EXAMPLE.to_owned()).key("plugins-example-text").font(webkit::mono(webkit::font(t, 12.0, 400.0, 19.5))).color(t.text.muted));
+            body = body.child(webkit::empty_rich(t, "plugins-none", &icons_phosphor::SLIDERS_HORIZONTAL, "Nothing customised yet", description, vec![example], Some(change("plugins-none-change"))));
         }
         Some(l) => {
-            for p in l {
-                list = list.child(plugin_row(s, t, layer, p));
-            }
+            let rows: Vec<El> = l.iter().map(|p| plugin_row(s, t, layer, p)).collect();
+            body = body.child(webkit::panel(vec![col().key("plugin-list").role("list").w_full().children(rows)]));
         }
     }
-    body = body.child(list);
-    // The native plugins (Luau) that installed packs ship, with their status.
+    // The native plugins (Luau) that installed packs ship, with their status (Rune's own, after the web's list).
     if let Some(native) = super::luau::plugins_group(s, t) {
         body = body.child(native);
     }
@@ -186,22 +214,24 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     if let Some(detail) = ui.detail.as_deref().and_then(|id| ui.listings.as_ref().and_then(|l| l.iter().find(|p| p.id == id))) {
         body = body.child(details(s, t, detail));
     }
-    body = body.child(
-        col()
-            .w_full()
-            .px(6.0)
-            .gap(6.0)
-            .child(text("Changes Neko makes to its own source go live after they land, and the previous web UI is kept.").font(t.ty.meta).color(t.text.muted).wrap().min_w(0.0))
-            .child(row().child(quiet_button("Roll back the web UI in Settings", "plugins-roll-back", t, |s: &mut App| {
-                s.pages.section = crate::pages::Section::Updates;
-                s.open_view(crate::views::FullView::Settings);
-            }))),
-    );
-    let _ = group;
-    let trailing = vec![
-        small_button(t, "plugins-reload-all", "Reload all customisations", &icons::REFRESH, !ui.reloading, |s: &mut App| s.plugin_reload(None)),
-        primary_button("Change Neko…", "change-neko", t, |s: &mut App| s.ask_change_neko()),
-    ];
-    let _ = el;
-    page(t, "plugins", "Plugins", ui.listings.as_ref().filter(|l| !l.is_empty()).map(Vec::len), trailing, body)
+    let foot_style = webkit::font(t, 12.5, 400.0, 20.3125);
+    let link_text = "Roll back the web UI in Settings.";
+    let link = row()
+        .key("plugins-roll-back")
+        .role("button")
+        .label(link_text)
+        .focusable(true)
+        .radius(4.0)
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
+        .on_press(|s: &mut App| {
+            s.pages.section = crate::pages::Section::Updates;
+            s.open_view(crate::views::FullView::Settings);
+        })
+        .child(rune::rich(link_text, vec![rune::Span::new(0, link_text.len()).underline(t.text.muted)]).font(foot_style).color(t.text.muted).a11y_hidden());
+    body = body.child(row().w_full().flex_wrap().children([text("Changes Neko makes to its own source go live after they land, and the previous web UI is kept. ".to_owned()).font(foot_style).color(t.text.muted).wrap().shrink().min_w(0.0).a11y_hidden(), link]));
+    let reloading = ui.reloading;
+    let reload = row().key("plugins-reload-all").role("button").label("Reload all customisations").help("Reload all").focusable(true).size(36.0, 36.0).center().radius(18.0).hover(t.text.base.alpha(0.07)).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(webkit::gated(!reloading, |s: &mut App| s.plugin_reload(None))).child(icon(&icons_phosphor::ARROWS_CLOCKWISE, 16.0).color(t.text.base).a11y_hidden());
+    let reload = if reloading { reload.opacity(0.64) } else { reload };
+    let trailing = vec![row().gap(6.0).center_y().child(reload).child(webkit::button(t, "change-neko", "Change Neko", Some(&icons_phosphor::SPARKLE), true, false, |s: &mut App| s.ask_change_neko()))];
+    page(t, "plugins", "Customisations", None, trailing, body)
 }

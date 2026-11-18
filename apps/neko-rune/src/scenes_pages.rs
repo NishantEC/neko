@@ -333,6 +333,14 @@ pub fn plugins(s: &mut App) {
     s.plugin_pages = Some(vec![neko_protocol::PluginPage { id: "board-viewer:board".into(), plugin: "board-viewer".into(), title: "Board".into() }]);
 }
 
+/// The Customisations page with nothing customised yet (the web's Empty with the manifest example).
+pub fn plugins_none(s: &mut App) {
+    plugins(s);
+    s.pages.plugins = Some(Vec::new());
+    s.plugin_ui.listings = Some(Vec::new());
+    s.plugin_pages = Some(Vec::new());
+}
+
 /// Settings with the sessions column dragged wide: the page's own width is under 760.
 pub fn settings_narrow(s: &mut App) {
     with_settings(s);

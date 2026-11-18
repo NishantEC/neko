@@ -441,6 +441,7 @@ pub const SCENES: &[Scene] = &[
     ("setup-confirm", crate::scenes_setup::confirm),
     ("setup-counted", crate::scenes_setup::counted),
     ("plugins", crate::scenes_pages::plugins),
+    ("plugins-none", crate::scenes_pages::plugins_none),
     // Luau plugins: the example pack's card and view over made-up data, a card that stopped, more cards than fit, the status rows.
     ("luau-card", crate::scenes_luau::card),
     ("luau-cards-more", crate::scenes_luau::cards_more),

@@ -9,31 +9,31 @@ pixels (pixelmatch, threshold 0.1, anti-aliasing ignored). "First run" is the or
 after Gate 1 (structure fixes); "After" is the last run of this pass. The settings-budget and settings-workspaces pairs are dropped:
 the web has no such sections (Budget is part of "AI & agents", Workspaces is a Setup page).
 
-**21 of 26 pairs pass; all ten Settings pairs pass, with at least 85% of the words placed. The goal for the other pages (every pair at or under 2.5%) is NOT met.**
+**26 of 26 pairs pass the 2.5% pixel measure (the last full run, 2026-11-18, after Memory, Watching, Usage, Calendar month and Plugins were ported). The words-placed measure is at least 85% for the five pages of the last pass (Memory 100%, Watching 100%, Usage 94.4%, Calendar month 100%, Plugins 94.4%) and for every Settings pair. Under 85% and not part of that pass: all-sessions-board (76.9%, was 90.1% on an older copy of the data), setup-tools (73.5%), setup-packs (50%), pull-requests (3.2%) and setup-schedules (5%); their pixel numbers are under 2.5%, their text is where the web puts it only in part.**
 
 | Pair | First run | Baseline at 1440 | After | Words placed | Pass |
 | --- | ---: | ---: | ---: | ---: | :---: |
-| all-sessions-tree | 7.36 | 7.36 | 1.02 | 99% | yes |
-| all-sessions-list | 5.77 | 5.77 | 1.34 | 98.9% | yes |
-| setup-memory | 6.08 | 5.07 | 5.07 | 3.8% | no |
-| setup-watching | 4.61 | 4.65 | 4.74 | 4.2% | no |
-| routines | 4.75 | 4.63 | 0.86 | 95.3% | yes |
-| calendar-month | 4.22 | 4.12 | 4.12 | 1.1% | no |
-| all-sessions-board | 3.95 | 3.95 | 0.63 | 90.1% | yes |
-| usage | 4.0 | 3.84 | 3.88 | 0% | no |
-| plugins | 3.23 | 3.26 | 3.26 | 0% | no |
+| all-sessions-tree | 7.36 | 7.36 | 1.01 | 99% | yes |
+| all-sessions-list | 5.77 | 5.77 | 1.33 | 98.9% | yes |
+| setup-memory | 6.08 | 5.07 | 0.45 | 100% | yes |
+| setup-watching | 4.61 | 4.65 | 0.5 | 100% | yes |
+| routines | 4.75 | 4.63 | 0.82 | 97.7% | yes |
+| calendar-month | 4.22 | 4.12 | 1.64 | 100% | yes |
+| all-sessions-board | 3.95 | 3.95 | 0.62 | 76.9% | yes |
+| usage | 4.0 | 3.84 | 0.4 | 94.4% | yes |
+| plugins | 3.23 | 3.26 | 0.94 | 94.4% | yes |
 | pull-requests | 2.61 | 2.41 | 2.41 | 3.2% | yes |
 | setup-workspaces | 3.4 | 2.41 | 1.02 | 100% | yes |
-| setup-schedules | 1.63 | 1.83 | 1.93 | 5% | yes |
-| settings-appearance | 12.76 | 12.76 | 1.58 | 92.5% | yes |
-| settings-rulebook | 6.51 | 6.51 | 1.13 | 88.9% | yes |
-| setup-skills | 8.81 | 7.28 | 1.10 | 96.4% | yes |
-| setup-tools | 6.14 | 6.58 | 1.03 | 73.5% | yes |
+| setup-schedules | 1.63 | 1.83 | 1.92 | 5% | yes |
+| settings-appearance | 12.76 | 12.76 | 1.53 | 91.9% | yes |
+| settings-rulebook | 6.51 | 6.51 | 1.13 | 85.7% | yes |
+| setup-skills | 8.81 | 7.28 | 1.09 | 95.8% | yes |
+| setup-tools | 6.14 | 6.58 | 1.04 | 73.5% | yes |
 | settings-about | 1.39 | 1.39 | 0.91 | 86.2% | yes |
-| settings-ai | 3.45 | 3.45 | 0.75 | 89.5% | yes |
+| settings-ai | 3.45 | 3.45 | 0.76 | 88.4% | yes |
 | settings-permissions | 2.23 | 2.23 | 0.75 | 90.6% | yes |
-| settings-diagnostics | 1.92 | 1.92 | 0.66 | 86.4% | yes |
-| settings-updates | 3.3 | 3.29 | 0.65 | 92.9% | yes |
+| settings-diagnostics | 1.92 | 1.92 | 0.67 | 86.4% | yes |
+| settings-updates | 3.3 | 3.29 | 0.67 | 92.9% | yes |
 | settings-phone | 1.88 | 1.88 | 0.38 | 90.9% | yes |
 | settings-general | 1.77 | 1.77 | 0.38 | 90.6% | yes |
 | settings-quick-panel | 1.44 | 1.44 | 0.24 | 86.4% | yes |
@@ -41,6 +41,16 @@ the web has no such sections (Budget is part of "AI & agents", Workspaces is a S
 | setup-packs | 4.42 | 3.16 | 0.16 | 50% | yes |
 
 ## Done in this pass
+
+Setup, Memory (2026-11-18): `Memory.tsx`: the web's tab well (Saved memories, Working style), the workspace picker and "Add memory" in the line beside it (wrapping under the tabs when they do not fit), Suggested, one collapsible section per scope with the web's 44 point rows (one-line text that opens, kind and source as two text nodes, a pencil and the three-dot menu on hover), Settings with its two switch rows; Working style has the guidance line with "Add guidance", the three states (Dismissed folded) and Recent decisions. Rune-only: the search behind a magnifier last in the tab line's group, the right-click menus. Tabs are 38/32 high with 13 point words from a 640 point page, not 42/36 and 16 (`webkit::tabs`).
+
+Setup, Watching (2026-11-18): `Watching.tsx`: the workspace picker and the options menu (Write a watch yourself..., Check all now), the "What should Neko keep an eye on?" card (Use an idea, the field, Suggest from tools, Set up watch; Neko's reply sits inside it), Suggestions, Active and Paused (its Show/Hide). The old header buttons "Suggest watches" and "New watch" are now the card's Suggest from tools and the options menu's first entry.
+
+Usage (2026-11-18): `Usage.tsx`: This Mac (the state line, four Figure lines, memory held by agents, Updated Ns ago and Refresh), Spend (Today, Recorded spend, Last 7 days, Per-task budget, Tasks with a price, the 14 day bar chart with the web's five-tick axis, Costliest tasks), Models (BarList) and Quota (one Figure per meter). `spendOf` is computed once per snapshot in the link layer (`link::spend_report`). The chart is drawn with a Rune shape; the date under every other bar.
+
+Calendar, month (2026-11-18): `Calendar.tsx`, `MonthGrid`: the month as the page title (Week N beside it in day and week), Today / arrows / Day-Week-Month as the web draws them, the sync line when stale or empty, the weekday line, a W<week> label and hairlines between the six weeks, 28 point day numbers, tinted all-day cards, timed and Neko chips (the web's unpadded 24 hour times) and "N more". Day and week keep Rune's grid under the web's header.
+
+Plugins (2026-11-18): Rune's Plugins view is the web's **Customisations** page, so the pair now compares it with `#/customisations` (it compared it with `#/tools`, the Tools & skills page, which Setup > Tools already matches). The web page could not render in embed mode (`useInspector must be used inside the app shell`), so `EmbedShell` now holds an `InspectorHost`. Ported: title "Customisations", the reload and "Change Neko" actions, the Pages / Styles Panel with its Go to Folder line, the list rows (switch, Details, Reload, Copy, Remove on hover) or the Empty state with the manifest example, the Roll back line. The Empty state's description is flowed by `webkit::inline_flow` (balanced lines of text nodes, the code in the mono face). Not matched: the one JSX text node that runs across three lines, "and an ES module. ... for you.", which the words measure compares as one box.
 
 All sessions, Tree and Board (2026-11-18): the tree is `work/TreeView.tsx` over a Rust port of `buildTree` (`link/tree_model.rs`, made once per snapshot): 36 point rows (caret, icon, name with model or origin, tools, state label, cost and duration columns), connector lines 29 points a level, the summary line and Expand all. The board is `TaskBoard.tsx`/`BoardCard.tsx`/`NotchCard.tsx`: 208 (empty: 144) wide columns that bleed 6 either side, 32 high headers, 196 wide cards in the web's card colour, the state line with its flex-wrap rule for the age, Done's five and "Show all N". The list's stage tabs lost 2 points each (the web's tab has a 1 point border). Not matched: the Tree page's own header (`Tree.tsx`; Rune has no such route, the layout is inside Tasks), the arrow-key outline navigation, the spinner on a running state label (a still arc), a stage filter's grid of cards (Rune keeps one column), and a wrapped, clipped card age (not drawn; its room is kept).
 
@@ -61,8 +71,7 @@ workspace pickers, 44 point rows and the skills search line. The Setup action bu
 
 ## Not done
 
-Workspaces' expanded rows, Routines as Inbox cards, the All sessions List and Tree tables, Watching and Memory (tabs, groups, settings
-rows), Calendar month, Usage, Plugins. The pixel measure passes a sparse page whose rows are in the wrong place, so read "Words
+The Calendar's Day and Week grids (the web draws the hour grid with its own all-day row), the words-placed measure of the pairs listed under 85% above. The pixel measure passes a sparse page whose rows are in the wrong place, so read "Words
 placed" beside it. In Settings, each page's missing words are the web's screen-reader heading (three text nodes: the title, a colon and the
 section summary), and on About the daemon's address (it is another port in Rune's run).
 

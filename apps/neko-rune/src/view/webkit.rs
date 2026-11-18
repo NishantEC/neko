@@ -27,6 +27,14 @@ pub fn font(t: &Neko, size: f32, weight: f32, line_height: f32) -> TextStyle {
     TextStyle { size, weight, line_height, ..t.ty.row }
 }
 
+/// The web's `font-mono`: the same size and line, in the mono face.
+///
+/// Rune's mono face is 2.6% wider than the browser's `ui-monospace` (0.618 em an advance against 0.602, measured on the manifest
+/// example), so the tracking takes the difference back and a path or a code line is as wide as the web's.
+pub fn mono(style: TextStyle) -> TextStyle {
+    TextStyle { family: rune::Family::Mono, tracking: style.tracking - 0.016 * style.size, ..style }
+}
+
 /// The web's `tabular-nums`: figures of one width.
 pub fn tnum(style: TextStyle) -> TextStyle {
     TextStyle { features: "'tnum' 1", ..style }
@@ -643,4 +651,68 @@ pub fn balanced_width(words: &str, style: TextStyle, max: f32) -> f32 {
         if lines_at(mid) > full + 0.5 { lo = mid } else { hi = mid }
     }
     hi.ceil()
+}
+
+/// [`empty`] whose description is any element (words with an inline code span) and that holds more under it: `extras` between the
+/// description and the button, and the button itself as built by the caller (the web's `EmptyContent`).
+#[allow(clippy::too_many_arguments)]
+pub fn empty_rich(t: &Neko, key: &str, glyph: &'static Icon, title: &str, description: El, extras: Vec<El>, button: Option<El>) -> El {
+    let well = row().size(40.0, 40.0).center().radius(14.0).fill(t.text.base.alpha(0.07)).mb(8.0).child(icon(glyph, 24.0).color(t.text.base).a11y_hidden());
+    let title_style = TextStyle { tracking: -0.45, ..font(t, 18.0, 500.0, 28.0) };
+    let header = col().max_w(384.0).gap(8.0).items_center().child(well).child(text(title.to_owned()).key(format!("{key}-title")).font(title_style).color(t.text.base)).child(description);
+    let mut c = col().key(key.to_owned()).w_full().padding(48.0).gap(16.0).center().items_center().child(header);
+    for e in extras {
+        c = c.child(e);
+    }
+    if let Some(b) = button {
+        c = c.child(b);
+    }
+    c
+}
+
+/// Words with an inline code span, laid out the way a browser flows the JSX's text nodes: balanced (`text-balance`) lines of at most
+/// `max_w`, each centred, every node a text of its own on each line it touches (the code in the mono face, a point lower as a
+/// baseline puts it). `nodes` are (words, is_code); spaces stay where the JSX has them.
+pub fn inline_flow(t: &Neko, key: &str, nodes: &[(&str, bool)], style: TextStyle, code_style: TextStyle, max_w: f32) -> El {
+    let plain: String = nodes.iter().map(|n| n.0).collect();
+    let width = balanced_width(&plain, style, max_w);
+    let style_of = |code: bool| if code { code_style } else { style };
+    // Each word keeps the space after it; a line breaks before the word that no longer fits (its own trailing space hangs).
+    let mut lines: Vec<Vec<(usize, String)>> = vec![Vec::new()];
+    let mut used = 0.0f32;
+    for (n, (words, code)) in nodes.iter().enumerate() {
+        for word in words.split_inclusive(' ') {
+            let w = rune::text::measure(word.trim_end(), &[], style_of(*code), None).0;
+            let full = rune::text::measure(word, &[], style_of(*code), None).0;
+            if used + w > width + 0.5 && !lines.last().is_some_and(Vec::is_empty) {
+                if let Some(last) = lines.last_mut().and_then(|l| l.last_mut()) {
+                    last.1 = last.1.trim_end().to_owned();
+                }
+                lines.push(Vec::new());
+                used = 0.0;
+            }
+            if used == 0.0 && word.trim().is_empty() {
+                continue;
+            }
+            if let Some(line) = lines.last_mut() {
+                match line.last_mut() {
+                    Some((m, run)) if *m == n => run.push_str(word),
+                    _ => line.push((n, word.to_owned())),
+                }
+            }
+            used += full;
+        }
+    }
+    let mut c = col().key(key.to_owned()).items_center();
+    for (i, line) in lines.into_iter().enumerate() {
+        let last = line.len().saturating_sub(1);
+        let runs = line.into_iter().enumerate().map(|(j, (n, run))| {
+            let code = nodes[n].1;
+            let run = if j == last { run.trim_end().to_owned() } else { run };
+            let e = text(run).font(style_of(code)).color(t.text.muted).a11y_hidden();
+            if code { e.mt(3.0) } else { e }
+        });
+        c = c.child(row().key(format!("{key}-line-{i}")).center_y().children(runs));
+    }
+    c
 }

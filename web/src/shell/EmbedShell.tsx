@@ -1,7 +1,7 @@
 // Embed mode's whole shell (`?embed=1`, shell/embed.ts): the routed content and nothing around it. No
 // tab strip, rail, sidebar, status bar, ⌘K or onboarding: the Rune client that holds this page in a
 // web view has its own. What stays is what the content itself needs: tooltips, the right-click
-// menu, confirmations and toasts.
+// menu, the inspector panel (Customisations opens its details in it), confirmations and toasts.
 //
 // It also leaves out what only a person's own window should do: it does not follow an agent's
 // ShowArtifact / OpenTab (the Rune client obeys those itself) and it does not report itself to
@@ -15,6 +15,7 @@ import { useRoute } from "@/router";
 import { usePlugins } from "@/plugins";
 import { ContextMenuHost } from "@/shell/context-menu";
 import { ConfirmHost } from "@/shell/confirm";
+import { InspectorHost } from "@/shell/inspector";
 import { Outlet } from "@/shell/AppShell";
 import { ArtifactEmbed } from "@/canvas/ArtifactEmbed";
 import { useReportPluginPages } from "@/shell/pluginPages";
@@ -54,9 +55,11 @@ export function EmbedShell() {
   return (
     <TooltipProvider>
       <ContextMenuHost>
+        <InspectorHost>
         <div data-slot="embed" data-route={route} className="relative isolate flex h-svh min-h-0 flex-col overflow-hidden">
           {artifact ? <ArtifactEmbed id={artifact.id} version={artifact.version} /> : route === "artifact" ? <ArtifactEmbed id={null} version={null} /> : <PluginWait route={route} />}
         </div>
+        </InspectorHost>
         <ConfirmHost />
         <Toaster />
       </ContextMenuHost>
