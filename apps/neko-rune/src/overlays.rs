@@ -1,5 +1,5 @@
-//! P4, the overlays (docs/knowledge/rune-overlays.md): the activity pill (`presence.rs`), wired to the window here. (The launcher panel and
-//! the stop-all key follow in the next commit.)
+//! P4, the overlays (docs/knowledge/rune-overlays.md): the activity pill (`presence.rs`), the launcher panel (`launcher.rs`) and the stop-all
+//! key, wired to the window here.
 //!
 //! **The gate.** Until P5 the Swift app is the default client and owns the summon hotkey, ⌘⇧Esc and its own pill, so all three are OFF here
 //! unless this client is started with `--overlays` or `NEKO_RUNE_OVERLAYS=1`. Off, nothing is created and no shortcut is registered
@@ -9,18 +9,26 @@
 //! window for the launcher, and two `register_shortcut` calls (the daemon's summon combo, which follows `GetHotkey`, and ⌘⇧Esc). A shortcut
 //! that cannot be registered (the Swift app holds it) is logged to stderr and the client carries on.
 
+use std::cell::RefCell;
+use std::sync::Arc;
 use std::time::Duration;
 
-use rune::{Align, AppHandle, DisplayTarget, KeyPolicy, OverlayHandle, OverlayInput, OverlayLevel, OverlayOptions, OverlaySpec, ScreenEdge, Tx};
+use neko_protocol::{HotkeyCombo, Modifier};
+use rune::{Align, AppHandle, DisplayTarget, KeyPolicy, OverlayHandle, OverlayInput, OverlayLevel, OverlayOptions, OverlayPlacement, OverlaySpec, ScreenEdge, Shortcut, ShortcutId, Tx, WindowOptions, WindowSpec};
 
 use crate::app::App;
+use crate::launcher::{self, Launcher, Presentation};
 use crate::presence::{self, Facts, Pill, PresenceState, Step, Tracker};
+use crate::theme::Hex;
 
 /// The command-line flag and the environment variable that turn the overlays on.
 pub const FLAG: &str = "--overlays";
 pub const ENV: &str = "NEKO_RUNE_OVERLAYS";
 /// How often the pill reads the workbench (it reads the summary's tasks, so not every frame).
 const LOOK_EVERY_MS: i64 = 250;
+/// ⌘⇧Esc, the stop-all key (`StopAllWork.shortcutLabel`, registered by `PaletteController` with Carbon).
+pub const STOP_ACCELERATOR: &str = "cmd+shift+escape";
+
 /// Whether the overlays are on: the flag among the arguments, or the variable set to `1`.
 pub fn gate(args: &[String], env: Option<&str>) -> bool {
     args.iter().any(|a| a == FLAG) || env == Some("1")
@@ -30,15 +38,18 @@ pub fn gate(args: &[String], env: Option<&str>) -> bool {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Plan {
     pub pill: bool,
+    pub launcher: bool,
+    pub summon_shortcut: bool,
+    pub stop_shortcut: bool,
 }
 
 pub fn plan(on: bool) -> Plan {
-    Plan { pill: on }
+    Plan { pill: on, launcher: on, summon_shortcut: on, stop_shortcut: on }
 }
 
 impl Plan {
     pub fn any(&self) -> bool {
-        self.pill
+        self.pill || self.launcher || self.summon_shortcut || self.stop_shortcut
     }
 }
 
@@ -47,9 +58,11 @@ impl Plan {
 pub struct Installed {
     pub plan: Plan,
     pub pill: Option<OverlayHandle<Pill>>,
+    pub launcher: Option<AppHandle<Launcher>>,
+    pub presentation: Arc<Presentation>,
 }
 
-/// Creates what the plan asks for on the app builder (nothing opens until it runs): the pill's overlay.
+/// Creates what the plan asks for on the app builder (nothing opens until it runs): the pill's overlay and the launcher's window.
 pub fn install(app: &mut rune::App<App>, plan: Plan) -> Installed {
     let mut out = Installed { plan, ..Installed::default() };
     let main = app.handle();
@@ -64,7 +77,43 @@ pub fn install(app: &mut rune::App<App>, plan: Plan) -> Installed {
         let options = OverlayOptions { display: DisplayTarget::Primary, level: OverlayLevel::Status, keys: KeyPolicy::None, input: OverlayInput::Regions, prewarm: true, ..OverlayOptions::default() };
         out.pill = Some(app.overlay(spec.options(options).release_gpu_when_hidden(), Pill::new(Some(main.clone()))));
     }
+    if plan.launcher {
+        let presentation = out.presentation.clone();
+        let launcher_app = rune::App::new(rune::AppSpec {
+            families: (crate::theme::FONT_SANS, crate::theme::FONT_MONO),
+            on_key: Some(|l: &mut Launcher, ev, _| l.key(ev)),
+            ..rune::AppSpec::new("Neko launcher", launcher::WINDOW, || unreachable!("the launcher is built by init"), launcher::view)
+        })
+        .windowless()
+        .keep_running();
+        let me = launcher_app.handle();
+        let (for_state, for_window) = (me.clone(), me.clone());
+        let launcher_app = launcher_app.init(move || {
+            let mut l = Launcher::new(presentation, Some(main));
+            l.me = Some(for_state);
+            l
+        }).on_focus(|l: &mut Launcher, focused, _| l.focus_changed(focused));
+        app.window(WindowSpec::from_app("launcher", launcher_app).configured_options(WindowOptions::launcher_panel()));
+        out.launcher = Some(for_window);
+    }
     out
+}
+
+/// A shortcut as Rune parses it: `Cmd`/`Alt`/`Ctrl`/`Shift` and the key as the daemon names it (`Space`, `KeyK`, `Digit1`).
+pub fn accelerator(combo: &HotkeyCombo) -> String {
+    let mut parts: Vec<String> = combo
+        .modifiers
+        .iter()
+        .map(|m| match m {
+            Modifier::Cmd => "cmd",
+            Modifier::Alt => "alt",
+            Modifier::Ctrl => "ctrl",
+            Modifier::Shift => "shift",
+        })
+        .map(str::to_owned)
+        .collect();
+    parts.push(combo.key.clone());
+    parts.join("+")
 }
 
 /// The screen's room around its usable area, in points: the menu bar on top, the Dock at the bottom or the right.
@@ -113,14 +162,24 @@ pub fn insets(_under_pointer: bool) -> Option<Insets> {
     None
 }
 
-/// The overlays as the window holds them: the handles and the pill's tracker.
+/// The overlays as the window holds them: the handles, the shortcuts it registered, the pill's tracker.
 #[derive(Default)]
 pub struct Overlays {
     pub plan: Plan,
     pub pill: Option<OverlayHandle<Pill>>,
+    pub launcher: Option<AppHandle<Launcher>>,
+    pub presentation: Arc<Presentation>,
     pub main: Option<AppHandle<App>>,
+    /// The summon combo the daemon last said, the accelerator registered for it and its registration.
+    pub combo: Option<HotkeyCombo>,
+    pub summon: Option<(String, ShortcutId)>,
+    pub stop: Option<ShortcutId>,
+    /// The window's theme as the last frame painted it, for the launcher (it has no `App`).
+    pub theme: RefCell<Option<(bool, Hex)>>,
     pub presence: Tracker,
     last_look: i64,
+    /// What went wrong registering a shortcut, in words (also printed to stderr when it happened).
+    pub failures: Vec<String>,
 }
 
 impl Overlays {
@@ -129,11 +188,15 @@ impl Overlays {
         Overlays { presence: Tracker::with_enabled(presence_on), ..Overlays::default() }
     }
 
-    /// Takes what [`install`] made.
+    /// Takes what [`install`] made and registers the stop-all key (the summon key waits for the daemon's combo).
     pub fn attach(&mut self, installed: Installed, main: AppHandle<App>) {
         self.plan = installed.plan;
         self.pill = installed.pill;
+        self.launcher = installed.launcher;
+        self.presentation = installed.presentation;
         self.main = Some(main);
+        self.register_stop();
+        self.register_summon();
         self.demo();
     }
 
@@ -154,6 +217,59 @@ impl Overlays {
                 app.overlays.apply(Step::Show(state));
             });
         });
+    }
+
+    fn fail(&mut self, words: String) {
+        eprintln!("neko-rune: {words}");
+        self.failures.push(words);
+    }
+
+    fn register_stop(&mut self) {
+        let (true, Some(main), None) = (self.plan.stop_shortcut, self.main.clone(), self.stop) else { return };
+        let shortcut: Shortcut = match STOP_ACCELERATOR.parse() {
+            Ok(s) => s,
+            Err(e) => return self.fail(format!("the stop-all shortcut is not valid: {e}")),
+        };
+        match main.register_shortcut(shortcut, |app: &mut App, tx: &mut Tx| {
+            app.stop_all_key();
+            tx.instant();
+        }) {
+            Ok(id) => {
+                eprintln!("neko-rune: ⌘⇧Esc (stop all work) registered");
+                self.stop = Some(id);
+            }
+            Err(e) => self.fail(format!("⌘⇧Esc (stop all work) was not registered: {e}; another app holds it (the Swift Neko, while it runs)")),
+        }
+    }
+
+    /// The daemon's summon combo: registers it, or moves the registration. A refusal keeps the old one and is logged.
+    pub fn set_combo(&mut self, combo: HotkeyCombo) {
+        self.combo = Some(combo);
+        self.register_summon();
+    }
+
+    fn register_summon(&mut self) {
+        let (true, Some(main), Some(combo)) = (self.plan.summon_shortcut, self.main.clone(), self.combo.clone()) else { return };
+        let words = accelerator(&combo);
+        if self.summon.as_ref().is_some_and(|(have, _)| *have == words) {
+            return;
+        }
+        let shortcut: Shortcut = match words.parse() {
+            Ok(s) => s,
+            Err(e) => return self.fail(format!("the summon shortcut {words} is not valid here: {e}")),
+        };
+        match main.register_shortcut(shortcut, |app: &mut App, tx: &mut Tx| {
+            app.summon_launcher();
+            tx.instant();
+        }) {
+            Ok(id) => {
+                eprintln!("neko-rune: summon shortcut {words} registered");
+                if let Some((_, old)) = self.summon.replace((words, id)) {
+                    let _ = main.unregister_shortcut(old);
+                }
+            }
+            Err(e) => self.fail(format!("the summon shortcut {words} was not registered: {e}; another app holds it (the Swift Neko, while it runs), so the old one stays")),
+        }
     }
 
     /// Does what the tracker decided: shows the pill saying this, or hides it.
@@ -217,6 +333,44 @@ impl App {
             crate::app::write_presence(on);
         }
     }
+
+    /// The summon shortcut: shows the launcher on the screen under the pointer with a fresh copy of the palette's rows, or hides it.
+    pub fn summon_launcher(&mut self) {
+        let Some(launcher) = self.overlays.launcher.clone() else { return };
+        let Some(token) = self.overlays.presentation.toggle() else {
+            launcher.hide();
+            return;
+        };
+        let items = self.palette_all();
+        let theme = *self.overlays.theme.borrow();
+        launcher.update(move |l, _| l.present(items, theme, token));
+        let top = insets(true).map_or(launcher::top_margin(0.0, 900.0), |i| launcher::top_margin(i.top, i.visible_height));
+        launcher.place(DisplayTarget::UnderPointer, OverlayPlacement::Edge { edge: ScreenEdge::Top, margin: top, align: Align::Center, inset: 0.0 });
+        launcher.open();
+    }
+
+    /// ⌘⇧Esc from anywhere (`StopAllWork`): the same confirmation as the window's own (`ask_stop_all`), with the window brought forward so
+    /// it can be answered. Nothing running: nothing opens (Swift beeps).
+    ///
+    /// Swift's `StopAllWork.run` stops at once with no question; the web asks (`stopAllWork` in `shell/actions.ts`), and this client may
+    /// build a destructive request only inside a `confirm(` dialog (`tests/allow_list.rs`), so it asks, like the web.
+    pub fn stop_all_key(&mut self) {
+        let (tasks, replying) = self.running_agents();
+        if tasks == 0 && !replying {
+            return;
+        }
+        self.ask_stop_all();
+        if let Some(main) = &self.overlays.main {
+            main.open();
+        }
+    }
+
+    /// Remembers the theme this frame painted, for the launcher.
+    pub fn remember_theme(&self, t: &crate::theme::Neko) {
+        if self.overlays.plan.launcher {
+            *self.overlays.theme.borrow_mut() = Some((t.dark, t.hex));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -240,25 +394,50 @@ mod tests {
     fn off_makes_nothing() {
         assert_eq!(plan(false), Plan::default());
         assert!(!plan(false).any());
-        assert!(plan(true).pill);
+        assert!(plan(true).pill && plan(true).launcher && plan(true).summon_shortcut && plan(true).stop_shortcut);
     }
 
     #[test]
-    fn install_with_the_gate_off_creates_no_overlay() {
+    fn install_with_the_gate_off_creates_no_overlay_and_no_window() {
         let mut app = rune::App::new(rune::AppSpec::new("t", (100.0, 100.0), App::headless, crate::view::view));
         let installed = install(&mut app, plan(false));
-        assert!(installed.pill.is_none(), "no overlay");
+        assert!(installed.pill.is_none() && installed.launcher.is_none(), "no overlay, no launcher window");
         assert_eq!(installed.plan, Plan::default());
         let mut o = Overlays::default();
         o.attach(installed, app.handle());
-        assert!(o.pill.is_none() && !o.plan.any());
+        assert!(o.stop.is_none() && o.summon.is_none(), "no shortcut was registered");
+        o.set_combo(HotkeyCombo::new(vec![Modifier::Alt], "Space".to_owned()));
+        assert!(o.summon.is_none() && o.failures.is_empty(), "the summon combo is remembered and never registered");
     }
 
     #[test]
-    fn install_with_the_gate_on_makes_the_overlay() {
+    fn install_with_the_gate_on_makes_the_overlay_and_the_launcher_and_a_refused_shortcut_is_logged_not_fatal() {
         let mut app = rune::App::new(rune::AppSpec::new("t", (100.0, 100.0), App::headless, crate::view::view));
         let installed = install(&mut app, plan(true));
-        assert!(installed.pill.is_some());
+        assert!(installed.pill.is_some() && installed.launcher.is_some());
+        let mut o = Overlays::default();
+        // Nothing is running here, so the host refuses: this is the failure path of a held shortcut.
+        o.attach(installed, app.handle());
+        o.set_combo(HotkeyCombo::new(vec![Modifier::Alt], "Space".to_owned()));
+        assert!(o.stop.is_none() && o.summon.is_none());
+        assert_eq!(o.failures.len(), 2, "{:?}", o.failures);
+        assert!(o.failures[0].contains("⌘⇧Esc") && o.failures[1].contains("summon"));
+    }
+
+    #[test]
+    fn the_daemons_combo_parses_as_a_rune_shortcut() {
+        for (mods, key, want) in [
+            (vec![Modifier::Alt], "Space", "alt+space"),
+            (vec![Modifier::Cmd, Modifier::Shift], "KeyK", "shift+super+k"),
+            (vec![Modifier::Ctrl], "Digit1", "ctrl+1"),
+            (vec![Modifier::Cmd], "Backquote", "super+backquote"),
+            (vec![Modifier::Alt], "ArrowUp", "alt+up"),
+        ] {
+            let combo = HotkeyCombo::new(mods, key.to_owned());
+            let parsed: Shortcut = accelerator(&combo).parse().unwrap_or_else(|e| panic!("{combo:?}: {e}"));
+            assert_eq!(parsed.to_string(), want);
+        }
+        assert_eq!(STOP_ACCELERATOR.parse::<Shortcut>().unwrap().to_string(), "shift+super+escape");
     }
 
     #[test]

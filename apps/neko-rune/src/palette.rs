@@ -62,6 +62,15 @@ pub enum Do {
     Plugin(neko_protocol::PluginPage),
 }
 
+impl Do {
+    /// Whether running this row needs the main window in front: it opens a session, a page or a dialog. The others (a mode, a theme, an
+    /// approval, the sidebar, a link that opens the browser) happen without taking the window from what the person was doing; the launcher
+    /// panel (`launcher.rs`) brings the window forward only for these.
+    pub fn wants_window(&self) -> bool {
+        matches!(self, Do::OpenSession(_) | Do::GoTo(_) | Do::Home | Do::Task(..) | Do::StopAll | Do::Shortcuts | Do::Plugin(_))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Item {
     pub section: Section,
@@ -77,6 +86,28 @@ pub struct Item {
 
 fn item(section: Section, title: impl Into<String>, icon: &'static Icon, run: Do) -> Item {
     Item { section, title: title.into(), hint: None, right: None, icon, keywords: &[], run }
+}
+
+/// The rows `words` leave of `all` (the palette's own filter, also the launcher panel's: it holds a copy of `palette_all` and no window state).
+pub fn narrow(all: &[Item], words: &str) -> Vec<Item> {
+    let q = words.trim();
+    let mut out = Vec::new();
+    for section in Section::ALL {
+        let rows: Vec<&Item> = all.iter().filter(|i| i.section == section).collect();
+        if q.is_empty() {
+            let keep = if section == Section::Sessions { RECENT } else { usize::MAX };
+            out.extend(rows.into_iter().take(keep).cloned());
+            continue;
+        }
+        let hay: Vec<String> = rows.iter().map(|i| format!("{} {} {}", i.title, i.hint.as_deref().unwrap_or(""), i.keywords.join(" "))).collect();
+        let refs: Vec<&str> = hay.iter().map(String::as_str).collect();
+        let mut matcher = frizbee::Matcher::new(q, &frizbee::Config::default());
+        let mut found = matcher.match_list(&refs);
+        found.sort_by(|a, b| b.score.cmp(&a.score).then(a.index.cmp(&b.index)));
+        let keep = if section == Section::Sessions { MATCHES } else { usize::MAX };
+        out.extend(found.into_iter().take(keep).map(|m| rows[m.index as usize].clone()));
+    }
+    out
 }
 
 impl App {
@@ -173,25 +204,7 @@ impl App {
     /// What the palette shows now: with no words, the latest sessions and everything else; with words, the rows that match, best
     /// first inside their section. Sections keep their order.
     pub fn palette_items(&self) -> Vec<Item> {
-        let all = self.palette_all();
-        let q = self.palette_query.text.trim();
-        let mut out = Vec::new();
-        for section in Section::ALL {
-            let rows: Vec<&Item> = all.iter().filter(|i| i.section == section).collect();
-            if q.is_empty() {
-                let keep = if section == Section::Sessions { RECENT } else { usize::MAX };
-                out.extend(rows.into_iter().take(keep).cloned());
-                continue;
-            }
-            let hay: Vec<String> = rows.iter().map(|i| format!("{} {} {}", i.title, i.hint.as_deref().unwrap_or(""), i.keywords.join(" "))).collect();
-            let refs: Vec<&str> = hay.iter().map(String::as_str).collect();
-            let mut matcher = frizbee::Matcher::new(q, &frizbee::Config::default());
-            let mut found = matcher.match_list(&refs);
-            found.sort_by(|a, b| b.score.cmp(&a.score).then(a.index.cmp(&b.index)));
-            let keep = if section == Section::Sessions { MATCHES } else { usize::MAX };
-            out.extend(found.into_iter().take(keep).map(|m| rows[m.index as usize].clone()));
-        }
-        out
+        narrow(&self.palette_all(), self.palette_query.text.trim())
     }
 
     /// Runs a row and closes the palette.

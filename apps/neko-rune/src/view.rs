@@ -27,7 +27,7 @@ mod more;
 mod onboarding;
 mod plugins;
 mod neko;
-mod palette;
+pub mod palette;
 mod prs;
 mod routines;
 mod runtime;
@@ -89,6 +89,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     crate::luau::host::set_theme(t.clone());
     crate::luau::nodes::mirror_inputs(&s.luau.inputs);
     s.reduce_motion.set(cx.system_reduced_motion());
+    s.remember_theme(&t);
     s.browser.scale.set(cx.env().scale);
     let mut layer = Vec::new();
     let layout = &s.layout;

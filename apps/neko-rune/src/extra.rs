@@ -208,6 +208,10 @@ impl App {
         self.call(Call::Appearance);
         self.extra_call(ExtraCall::Themes);
         self.extra_call(ExtraCall::Onboarding);
+        // The launcher (only with `--overlays`) follows the daemon's summon shortcut.
+        if self.overlays.plan.summon_shortcut {
+            self.extra_call(ExtraCall::Hotkey);
+        }
     }
 
     /// Settings opens or polls: everything its extra rows show.
@@ -456,6 +460,7 @@ impl App {
                     self.extra.hotkey_say = None;
                 }
                 let changed = self.extra.hotkey.as_ref() != Some(&config);
+                self.overlays.set_combo(config.combo.clone());
                 self.extra.hotkey = Some(config);
                 changed || self.extra.hotkey_say.is_some()
             }

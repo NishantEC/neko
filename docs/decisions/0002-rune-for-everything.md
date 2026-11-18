@@ -105,8 +105,11 @@ registration. Slot (a) needs that registration added on Neko's side before plugi
 3. **P3, the context panel and plugins** (P3a built 2026-11-16, see [the knowledge note](../knowledge/rune-p3a-the-context-panel.md): the panel, Diff, Files, Terminal, Canvas, the viewer registry and the native viewers, on the wgpu backend; Browser (live) built 2026-11-18, see [its note](../knowledge/rune-live-browser.md); Screen (live) and Luau plugins are still to do; the web view, plugin pages, layout pressure and the durable artifact link are P3b, built 2026-11-16, see [its note](../knowledge/rune-p3b-the-web-panel.md)). Diff, Files, Terminal, Browser and Screen (live), Canvas;
    an embedded web view for HTML artifacts, JS plugins and Excalidraw; native 3D, PDF, image and
    CSV viewers; Luau native plugins and the four slots above.
-4. **P4, overlays.** The quick panel and ⌘K palette (`frizbee`), the activity capsule, the agent
-   pointer, notifications, the menu bar item.
+4. **P4, overlays (built 2026-11-18, see [the knowledge note](../knowledge/rune-overlays.md)).** The activity pill, the launcher
+   panel (⌘K palette's content in a `launcher_panel()` window on the daemon's summon shortcut) and the stop-all key ⌘⇧Esc, all behind
+   `--overlays` (or `NEKO_RUNE_OVERLAYS=1`) until P5, because the Swift app still owns the summon hotkey, ⌘⇧Esc and its own pill. P5
+   flips the default and retires the Swift ones. The agent pointer is **blocked**: nothing in Neko reports computer-use coordinates.
+   The notifications and the menu bar item are still to do.
 5. **P5, switch the default and ship.** The Rune app becomes the default; the web UI and the Swift
    shell shrink to what is left; the installer ships it. Not before every screen has reached
    parity.

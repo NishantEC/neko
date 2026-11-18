@@ -24,6 +24,7 @@ pub mod groups;
 pub mod icons;
 pub mod icons_phosphor;
 pub mod lab;
+pub mod launcher;
 pub mod luau;
 pub mod motion;
 pub mod layout;

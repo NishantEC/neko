@@ -338,7 +338,8 @@ fn the_copied_data_keeps_the_windows_shape() {
 
 // ---- the P4 overlays (docs/knowledge/rune-overlays.md) ----------------------------------------------------------------------------
 //
-// The pill is a window of its own with its own state, so it is crawled on its own: every pill state compact and widened. Rules: everything stays inside the overlay's window
+// The pill and the launcher are windows of their own with their own state, so they are crawled on their own: every pill state compact and
+// widened, and the launcher with an empty query, with words, and with nothing matching. Rules: everything stays inside the overlay's window
 // (c), no text is cut off (e), and no panic.
 
 fn overlay_crawl<S: 'static>(rt: &Runtime<S>, label: &str) -> Vec<String> {
@@ -384,6 +385,19 @@ fn the_overlays_keep_their_shape() {
             settle(&mut rt);
             bad.extend(overlay_crawl(&rt, &format!("pill:{activity:?}:{}", if expanded { "widened" } else { "compact" })));
         }
+    }
+    let mut app = App::headless();
+    let (_, scene) = SCENES.iter().find(|(n, _)| *n == "live").unwrap();
+    scene(&mut app);
+    let rows = app.palette_all();
+    for (name, words) in [("empty", ""), ("words", "set"), ("nothing", "zzzzqq")] {
+        let mut l = neko_rune::launcher::Launcher::new(std::sync::Arc::new(neko_rune::launcher::Presentation::default()), None);
+        l.present(rows.clone(), None, 1);
+        l.query.replace_text(words);
+        let mut rt = Runtime::new(l, neko_rune::launcher::view, neko_rune::launcher::WINDOW, Env { system_dark: true, scale: 1.0 });
+        rt.frame(0.0);
+        settle(&mut rt);
+        bad.extend(overlay_crawl(&rt, &format!("launcher:{name}")));
     }
     assert!(bad.is_empty(), "{} structure failures in the overlays:\n{}", bad.len(), bad.join("\n"));
 }
