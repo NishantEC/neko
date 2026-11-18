@@ -207,11 +207,6 @@ fn face(s: &App, t: &Neko, task: &TaskRow, key: String, w: f32, selected: bool, 
         title = title.pr(12.0);
     }
     let mut surface = col().key(format!("board-surface-{}", task.id)).w_full().pl(12.0).pr(12.0).pt(12.0).pb(if f.done { 12.0 } else { 8.0 }).gap(6.0).radius(14.5).fill(if selected { t.meaning.iris.mix(fuse(t, 0.0), 0.94) } else { Color::TRANSPARENT }).child(title);
-    if lines_full > 2.0 {
-        // The web's title is its whole text, clipped to two lines by `line-clamp`; its box is as tall as all of it. The same words,
-        // laid out in full and drawn with no ink, so the card's text is where the web's is (the visible title is the clamped one).
-        surface = surface.child(text(task.title.clone()).key(format!("board-title-full-{}", task.id)).font(title_style).color(t.text.strong).wrap().w(inner).opacity(0.0).absolute(12.0, 12.0).a11y_hidden());
-    }
     if let Some(reason) = f.reason.clone() {
         surface = surface.child(text(reason).key(format!("board-reason-{}", task.id)).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.base.alpha(0.7)).max_lines(1).w_full().a11y_hidden());
     }
