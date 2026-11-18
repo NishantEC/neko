@@ -525,7 +525,7 @@ fn daemon_workspaces_are_created_and_edited_through_the_dialog() {
     fill(&mut rt, "dlg:text", "Keep it small and tested.");
     click(&mut rt, "dlg-ws-save");
     assert_eq!(data(&rt).workspace(&made.id).map(|w| w.instructions.as_str()), Some("Keep it small and tested."));
-    click(&mut rt, &format!("ws-{}", made.id));
+    // Every workspace shows expanded, so its folder is already on the page.
     assert!(rt.find(&format!("ws-details-{}", made.id)).is_some() && has_text(&rt, &kept[0]));
     // Sync now with nothing to wake says so beside the row.
     click(&mut rt, &format!("ws-sync-{}", made.id));

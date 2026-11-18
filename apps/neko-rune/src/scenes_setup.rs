@@ -162,6 +162,7 @@ pub fn demo_setup() -> SetupData {
         },
         schedules: vec![schedule("s1", "w1", "Morning brief", "Summarise what changed overnight and what needs me today.", "FREQ=DAILY;BYHOUR=8;BYMINUTE=30", true), schedule("s2", "w1", "Weekly review", "Look back over the week and propose three priorities.", "FREQ=WEEKLY;BYDAY=FR;BYHOUR=16;BYMINUTE=0", false), schedule("s3", "w2", "Link check", "Find broken links in the published pages.", "FREQ=HOURLY;INTERVAL=6", true)],
         plan_first: true,
+        open_tasks: [("w1".to_owned(), 3usize)].into_iter().collect(),
     }
 }
 
@@ -183,7 +184,7 @@ pub fn workspaces(s: &mut App) {
 
 pub fn workspaces_open(s: &mut App) {
     base(s, SetupSection::Workspaces);
-    s.toggle_workspace("w1");
+    s.toggle_ws_line("w1/Routines");
 }
 
 pub fn workspace_dialog(s: &mut App) {

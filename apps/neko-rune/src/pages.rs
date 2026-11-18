@@ -284,7 +284,10 @@ pub struct Pages {
     pub section: Section,
     /// The select whose list is open, by key.
     pub open_select: Option<String>,
-    pub ws_open: HashSet<String>,
+    /// A workspace's lines are open unless the person folded them (by workspace id).
+    pub ws_open: HashMap<String, bool>,
+    /// The detail lines of a workspace that are open, and the lists shown in full (`<workspace id>/<line>`).
+    pub ws_lines: HashSet<String>,
     /// A refusal shown next to the control it belongs to, by control key.
     pub notes: HashMap<String, String>,
     /// When the open page last asked, by the app's clock.
@@ -320,7 +323,8 @@ impl Default for Pages {
             plugins: None,
             section: Section::General,
             open_select: None,
-            ws_open: HashSet::new(),
+            ws_open: HashMap::new(),
+            ws_lines: HashSet::new(),
             notes: HashMap::new(),
             asked_ms: i64::MIN / 2,
             routines_error: None,

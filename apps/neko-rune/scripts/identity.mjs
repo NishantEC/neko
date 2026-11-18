@@ -142,12 +142,14 @@ try {
       const runeTexts = JSON.parse(fs.readFileSync(`${OUT}/pairs/${pair.name}-rune.tree.json`, "utf8")).elements.filter((e) => (e.role === "text" || e.role === "heading") && e.text?.trim());
       let placed = 0;
       const used = new Set();
-      for (const w of webTexts) {
+      // Only the words the picture shows: a long page's text below the window's bottom edge is in neither screenshot.
+      const visibleTexts = webTexts.filter((w) => w.y < rh);
+      for (const w of visibleTexts) {
         const i = runeTexts.findIndex((e, k) => !used.has(k) && e.text.replace(/\s+/g, " ").trim() === w.text && Math.abs(e.rect[0] - r.rect[0] - w.x) <= 2 && Math.abs(e.rect[1] + e.rect[3] / 2 - r.rect[1] - w.y) <= 2.5);
         if (i >= 0) { used.add(i); placed++; }
       }
-      const placedPct = webTexts.length ? Math.round((1000 * placed) / webTexts.length) / 10 : 100;
-      Object.assign(row, { placed: placedPct, words: webTexts.length, pct: Math.round((10000 * n) / (W * H)) / 100, size: `${Math.round(rw)}x${Math.round(rh)}`, masks: r.masks.length, pair: pairPath });
+      const placedPct = visibleTexts.length ? Math.round((1000 * placed) / visibleTexts.length) / 10 : 100;
+      Object.assign(row, { placed: placedPct, words: visibleTexts.length, pct: Math.round((10000 * n) / (W * H)) / 100, size: `${Math.round(rw)}x${Math.round(rh)}`, masks: r.masks.length, pair: pairPath });
     } catch (e) {
       row.error = String(e.message ?? e).slice(0, 200);
     }

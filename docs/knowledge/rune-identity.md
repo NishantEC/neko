@@ -66,6 +66,10 @@ heading (title, ":" and summary, three text nodes with no box) and, on About, th
 enough: Rune's `.disabled()` does not stop a press, so a gated button also gets `webkit::gated`. `identity-harness.sh start` used to leave a
 subshell holding the caller's pipe open (so `identity.sh` hung); it now backgrounds one command.
 
+### Setup, Workspaces as the web (2026-11-18)
+
+`setup/workspaces.rs` is `Workspaces.tsx`: `webkit::panel` of workspaces 2 apart; a head line 40 high (caret 11, name 13.5, "N open" and "N of M routines on" 12.5, `Said` glyph + "N need you", mono folder 12 that hover swaps for the two 28 point actions) and `Line`s (label 128 wide, value, meta; a line with more opens it under itself indented 159). The web's JSX makes separate text nodes of `{n} need{s} you`, so Rune emits one `text` per node (`nodes`), or "words placed" cannot match them. Every workspace is open until folded (`App::workspace_open`, `pages.ws_open` is id to bool); open lines and "Show N more" lists are `pages.ws_lines`. `SetupData::open_tasks` feeds "N open". The Rune-only things: the right-click menu (Open folder ...), the notes under a head, Sync now stays pressable with no active watch (it says why). `identity.mjs` counts only the words whose web position is inside the window.
+
 ### What still differs (see `docs/design/rune/identity-report.md`)
 
 Pages whose web layout is a different structure, not a different measure: Workspaces (every workspace open with its

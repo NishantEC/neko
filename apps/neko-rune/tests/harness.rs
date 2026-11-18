@@ -573,8 +573,9 @@ fn calendar_usage_workspaces_and_plugins_read_what_the_daemon_has() {
     let first = rt.state.summary.as_ref().and_then(|m| m.setup.workspaces.first()).map(|w| w.id.clone());
     if let Some(first) = first {
         assert!(rt.find(&format!("ws-{first}")).is_some(), "a line for each workspace");
+        assert!(rt.find(&format!("ws-details-{first}")).is_some(), "a workspace shows expanded, with its details");
         click(&mut rt, &format!("ws-{first}"));
-        assert!(rt.find(&format!("ws-details-{first}")).is_some(), "a workspace opens to its details");
+        assert!(rt.find(&format!("ws-details-{first}")).is_none(), "and folds when pressed");
     }
     open_page(&mut rt, FullView::Plugins);
     assert!(rt.find("full-plugins").is_some());

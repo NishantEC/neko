@@ -325,21 +325,35 @@ fn usage_draws_the_week_and_each_quota_with_a_bar_that_changes_colour() {
 }
 
 #[test]
-fn workspaces_are_one_line_each_and_open_to_their_details_and_stay_open() {
+fn workspaces_show_expanded_as_the_web_with_its_lines_in_order_and_fold_when_pressed() {
     let mut rt = runtime("setup-workspaces");
-    assert!(rt.find("ws-w1").is_some() && rt.find("ws-w2").is_some() && rt.find("ws-details-w1").is_none());
-    assert_eq!(text_of(&rt, "page-count").as_deref(), Some("2"));
-    click(&mut rt, "ws-w1");
-    assert!(rt.find("ws-details-w1").is_some());
+    assert!(rt.find("ws-w1").is_some() && rt.find("ws-w2").is_some() && rt.find("ws-details-w1").is_some() && rt.find("ws-details-w2").is_some(), "every workspace is expanded");
+    assert!(rt.find("page-count").is_none(), "the web's page title has no count");
     let t = texts(&rt);
-    assert!(t.contains(&"/work/neko".to_owned()) && t.contains(&"/work/neko-web".to_owned()), "its folders: {t:?}");
-    assert!(t.iter().any(|x| x.contains("Small pull requests")), "its instructions: {t:?}");
-    // Away and back, it is still open.
+    assert!(t.contains(&"/work/neko, /work/neko-web".to_owned()), "its folders on one line: {t:?}");
+    assert!(t.iter().any(|x| x.starts_with("Small pull requests")), "its instructions' first line: {t:?}");
+    // The web's lines of a workspace, in the web's order: Routines, Setup notes, Folders, Connections, Watching, Tools in Neko, Standing orders, Instructions.
+    let y = |rt: &Runtime<App>, key: &str| rect(rt, key)[1];
+    let order = ["ws-line-routines-w1", "ws-line-folders-w1", "ws-line-servers-w1", "ws-line-watching-w1", "ws-line-tools-w1", "ws-line-orders-w1", "ws-line-instructions-w1"];
+    for pair in order.windows(2) {
+        assert!(y(&rt, pair[0]) < y(&rt, pair[1]), "{} above {}", pair[0], pair[1]);
+    }
+    assert!(y(&rt, "ws-problems-w2") < y(&rt, "ws-line-folders-w2"), "Setup notes sit between Routines and Folders");
+    for label in ["Routines", "Folders", "Connections", "Watching", "Tools in Neko", "Standing orders", "Instructions", "Inbox", "Edit in Inbox"] {
+        assert!(t.contains(&label.to_owned()), "{label}: {t:?}");
+    }
+    assert!(t.contains(&"3".to_owned()) && t.contains(&" open".to_owned()), "the open count is two text nodes: {t:?}");
+    // A line with more opens it under itself; a workspace folds when pressed and stays folded away and back.
+    assert!(rt.find("ws-routine-summary-w1").is_none());
+    click(&mut rt, "ws-line-routines-w1-head");
+    assert!(rt.find("ws-routine-summary-w1").is_some());
+    click(&mut rt, "ws-w1");
+    assert!(rt.find("ws-details-w1").is_none() && rt.find("ws-details-w2").is_some());
     rt.update(|s, _| s.open_view(FullView::Calendar));
     settle(&mut rt);
     rt.update(|s, _| s.open_view(FullView::Setup));
     settle(&mut rt);
-    assert!(rt.find("ws-details-w1").is_some(), "what was open is remembered");
+    assert!(rt.find("ws-details-w1").is_none(), "what was folded is remembered");
 }
 
 #[test]

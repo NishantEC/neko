@@ -41,6 +41,17 @@ pub struct SetupData {
     pub profiles: AgentProfiles,
     pub schedules: Vec<Schedule>,
     pub plan_first: bool,
+    /// Each workspace's tasks that are not completed or cancelled (the web's "N open" on a workspace line).
+    pub open_tasks: BTreeMap<String, usize>,
+}
+
+fn open_tasks(snapshot: &Snapshot) -> BTreeMap<String, usize> {
+    use neko_protocol::workbench::TaskStatus;
+    let mut out = BTreeMap::new();
+    for t in snapshot.tasks.iter().filter(|t| !matches!(t.status, TaskStatus::Completed | TaskStatus::Cancelled)) {
+        *out.entry(t.workspace_id.clone()).or_insert(0) += 1;
+    }
+    out
 }
 
 impl SetupData {
@@ -65,6 +76,7 @@ impl SetupData {
             profiles: snapshot.agent_profiles.clone(),
             schedules: snapshot.schedules.clone(),
             plan_first: snapshot.plan_first,
+            open_tasks: open_tasks(snapshot),
         }
     }
 

@@ -666,8 +666,19 @@ impl App {
 
     /// Opens or folds a workspace's details; what was open is remembered.
     pub fn toggle_workspace(&mut self, id: &str) {
-        if !self.pages.ws_open.remove(id) {
-            self.pages.ws_open.insert(id.to_owned());
+        let open = self.workspace_open(id);
+        self.pages.ws_open.insert(id.to_owned(), !open);
+    }
+
+    /// Every workspace shows expanded until the person folds it.
+    pub fn workspace_open(&self, id: &str) -> bool {
+        self.pages.ws_open.get(id).copied().unwrap_or(true)
+    }
+
+    /// Opens or folds one detail line of a workspace (or a list's "Show N more"), by `<workspace id>/<line>`.
+    pub fn toggle_ws_line(&mut self, key: &str) {
+        if !self.pages.ws_lines.remove(key) {
+            self.pages.ws_lines.insert(key.to_owned());
         }
     }
 

@@ -23,7 +23,7 @@ the web has no such sections (Budget is part of "AI & agents", Workspaces is a S
 | usage | 4.0 | 3.84 | 3.88 | 0% | no |
 | plugins | 3.23 | 3.26 | 3.26 | 0% | no |
 | pull-requests | 2.61 | 2.41 | 2.41 | 3.2% | yes |
-| setup-workspaces | 3.4 | 2.41 | 2.24 | 2.2% | yes |
+| setup-workspaces | 3.4 | 2.41 | 1.02 | 100% | yes |
 | setup-schedules | 1.63 | 1.83 | 1.93 | 5% | yes |
 | settings-appearance | 12.76 | 12.76 | 1.58 | 92.5% | yes |
 | settings-rulebook | 6.51 | 6.51 | 1.13 | 88.9% | yes |
@@ -41,6 +41,8 @@ the web has no such sections (Budget is part of "AI & agents", Workspaces is a S
 | setup-packs | 4.42 | 3.16 | 0.16 | 50% | yes |
 
 ## Done in this pass
+
+Setup, Workspaces (2026-11-18): every workspace shows expanded as on the web (`pages/setup/Workspaces.tsx`): the 40 point head line (caret, name, "N open", "N of M routines on"; at the right what needs you and the folder, with Sync now and Edit over the folder on hover) and its detail lines in the web's order (Routines, Setup notes, Folders, Connections, Watching, Tools in Neko, Standing orders, Instructions), each a 28 point line that opens its list under itself, then the empty facets as quiet "+ Add ..." links. The words-placed measure now counts only the words inside the window (a long page's text below the fold is in neither picture).
 
 Settings rows (2026-11-18): every row is the web kit's `setting_row` (title, the web's description under it, no tooltip) under the
 web's group headings (`<Section title>`), page by page from `General.tsx`, `Ai.tsx`, `Phone.tsx`, `Rulebook.tsx` and `System.tsx`, with the web's
