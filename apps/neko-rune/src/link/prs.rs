@@ -80,6 +80,12 @@ pub struct PrRow {
     pub merging: bool,
     /// How many times a failure was handed back to the agent.
     pub follow_ups: u32,
+    /// The branch it merges into ("main" until GitHub says otherwise): the web's `base`.
+    #[serde(default)]
+    pub base: String,
+    /// The base branch's own checks fail too, so a failure here may not be this pull request's.
+    #[serde(default)]
+    pub base_failing: bool,
 }
 
 impl PrRow {
@@ -91,20 +97,32 @@ impl PrRow {
         matches!(self.verdict, Verdict::Ready | Verdict::Close | Verdict::NeedsYou) || matches!(self.checks, Checks::Failing(_)) || self.review == "REVIEW_REQUIRED"
     }
 
-    /// The problems a row's second line names (failing checks, conflicts, behind main).
-    pub fn problems(&self) -> Vec<String> {
+    /// The problems a row's second line names, as the web words them (`pullRequestRow`): failing checks (with the names, and "also
+    /// failing on" the base), conflicts with the base, behind the base. The last is the one the web does not colour.
+    pub fn problems(&self) -> Vec<(ProblemKind, String)> {
+        let base = if self.base.is_empty() { "main" } else { self.base.as_str() };
         let mut out = Vec::new();
         if let Checks::Failing(names) = &self.checks {
-            out.push(if names.is_empty() { "Checks failing".to_owned() } else { format!("Checks failing: {}", names.join(", ")) });
+            let named = if names.is_empty() { String::new() } else { format!(": {}", names.join(", ")) };
+            let also = if self.base_failing { format!(" (also failing on {base})") } else { String::new() };
+            out.push((ProblemKind::Checks, format!("Checks failing{named}{also}")));
         }
         if self.conflicts {
-            out.push("Conflicts with the base".to_owned());
+            out.push((ProblemKind::Conflicts, format!("Conflicts with {base}")));
         }
         if self.behind {
-            out.push("Behind the base".to_owned());
+            out.push((ProblemKind::Behind, format!("Behind {base}")));
         }
         out
     }
+}
+
+/// What a problem on a row is, which says how it is coloured.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProblemKind {
+    Checks,
+    Conflicts,
+    Behind,
 }
 
 /// "#101" from the pull request's address.
@@ -114,12 +132,6 @@ pub fn number_of(url: &str) -> String {
 
 fn basename(path: &str) -> String {
     path.trim_end_matches('/').rsplit('/').next().unwrap_or(path).to_owned()
-}
-
-/// The newest line a stopped task left that is not a person's or Neko's own: why it stopped, short.
-fn stop_reason(task: &Task) -> Option<String> {
-    let line = task.events.iter().rev().find(|e| !matches!(e.role.as_str(), "user" | "note" | "host" | "neko")).map(|e| e.message.trim().to_owned()).filter(|l| !l.is_empty())?;
-    Some(if line.chars().count() > 160 { format!("{}…", line.chars().take(159).collect::<String>()) } else { line })
 }
 
 /// The row of one task, or None when it has no pull request.
@@ -157,7 +169,7 @@ pub fn row_of(task: &Task, snapshot: &Snapshot, author: String) -> Option<PrRow>
         reason = Some("Its task was cancelled here, but the pull request is still open.".to_owned());
         Verdict::Close
     } else if matches!(task.status, TaskStatus::AwaitingApproval | TaskStatus::Failed) {
-        reason = if task.status == TaskStatus::Failed { stop_reason(task) } else { Some("It waits on your answer.".to_owned()) };
+        reason = if task.status == TaskStatus::Failed { Some(crate::work::stop_reason(task)) } else { crate::work::waiting_reason(task) };
         Verdict::NeedsYou
     } else {
         Verdict::Ready
@@ -181,6 +193,8 @@ pub fn row_of(task: &Task, snapshot: &Snapshot, author: String) -> Option<PrRow>
         author,
         merging: pr.merge_when_ready,
         follow_ups: pr.follow_up.count,
+        base: if status.base.is_empty() { "main".to_owned() } else { status.base.clone() },
+        base_failing: status.base_failing,
     })
 }
 
@@ -250,7 +264,7 @@ mod tests {
     fn checks_and_problems_are_read_from_the_status() {
         let row = one(task("t1", "Completed", pr("OPEN", "failing", serde_json::json!({"failing": ["Lint", "Unit"], "merge_state": "DIRTY"}))));
         assert_eq!(row.checks, Checks::Failing(vec!["Lint".into(), "Unit".into()]));
-        assert_eq!(row.problems(), ["Checks failing: Lint, Unit", "Conflicts with the base"]);
+        assert_eq!(row.problems().into_iter().map(|(_, w)| w).collect::<Vec<_>>(), ["Checks failing: Lint, Unit", "Conflicts with main"]);
         assert_eq!((row.number.as_str(), row.repository.as_str()), ("#101", "acme-api"));
     }
 

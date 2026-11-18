@@ -82,6 +82,8 @@ fn pr(id: &str, number: u32, repo: &str, verdict: Verdict, checks: Checks, ago: 
         author: author.into(),
         merging: verdict == Verdict::Merging,
         follow_ups: 0,
+        base: "main".into(),
+        base_failing: false,
     }
 }
 
@@ -100,6 +102,8 @@ fn pull_requests() -> Vec<PrRow> {
     rows[2].conflicts = true;
     rows[3].reason = Some("It waits on your answer.".into());
     rows[0].review = "REVIEW_REQUIRED".into();
+    rows[0].behind = true;
+    rows[3].follow_ups = 2;
     rows
 }
 

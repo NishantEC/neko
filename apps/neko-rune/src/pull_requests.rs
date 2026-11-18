@@ -108,6 +108,8 @@ mod tests {
             author: "Claude".into(),
             merging: verdict == Verdict::Merging,
             follow_ups: 0,
+            base: "main".into(),
+            base_failing: false,
         }
     }
 

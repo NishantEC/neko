@@ -343,18 +343,20 @@ fn the_groups_are_the_webs_and_each_folds() {
 }
 
 #[test]
-fn merge_when_ready_is_a_switch_that_sends_set_merge_when_ready() {
+fn merge_and_cancel_merge_are_the_webs_row_actions_that_send_set_merge_when_ready() {
     let mut rt = runtime(scene("bb-prs"));
+    // The web's `RowAction`s: Merge on a ready row, Cancel merge on one already merging (the same key, one toggle).
+    assert!(rt.find("pr-merge-t2").is_some() && rt.find("pr-glyph-t2").is_some(), "a ready row's glyph is a button too");
     click(&mut rt, "pr-merge-t2");
     assert_eq!(rt.state.outbox, vec![Call::SetMergeWhenReady { task_id: "t2".into(), enabled: true }]);
     rt.state.outbox.clear();
-    // A pull request already merging when ready: the switch is on and turns it off.
+    // A pull request already merging when ready: Cancel merge takes it back.
     click(&mut rt, "pr-merge-t7");
     assert_eq!(rt.state.outbox, vec![Call::SetMergeWhenReady { task_id: "t7".into(), enabled: false }]);
     // The same through the right-click menu.
     rt.state.outbox.clear();
     right_click(&mut rt, "pr-row-t3");
-    click_last_text(&mut rt, "Merge when ready");
+    click_last_text(&mut rt, "Merge");
     assert_eq!(rt.state.outbox, vec![Call::SetMergeWhenReady { task_id: "t3".into(), enabled: true }]);
 }
 
@@ -397,11 +399,14 @@ fn merge_all_ready_lists_the_pull_requests_and_merges_each_when_confirmed() {
 #[test]
 fn check_github_review_and_merge_without_review_are_in_the_header() {
     let mut rt = runtime(scene("bb-prs"));
-    click(&mut rt, "pr-check");
+    // The web has no Check GitHub button: it is the menu's "Check GitHub now".
+    assert!(!has_key(&rt, "pr-check"));
+    click(&mut rt, "pr-more");
+    click_last_text(&mut rt, "Check GitHub now");
     assert_eq!(rt.state.outbox, vec![Call::CheckPullRequests]);
     rt.state.outbox.clear();
     click(&mut rt, "pr-more");
-    click_last_text(&mut rt, "Review pull requests");
+    click_last_text(&mut rt, "Re-check all");
     assert!(rt.state.outbox.is_empty() && has_key(&rt, "ask-yes"), "re-checking every one asks first");
     click(&mut rt, "ask-yes");
     assert_eq!(rt.state.outbox, vec![Call::ReviewPullRequests { workspace_id: None }]);
@@ -419,10 +424,26 @@ fn check_github_review_and_merge_without_review_are_in_the_header() {
 }
 
 #[test]
+fn the_page_is_the_webs_work_header_and_rows_with_their_note_line() {
+    let rt = runtime(scene("bb-prs"));
+    assert_eq!(texts_of(&rt, "page-count"), "2 ready · 1 to close · 1 need you", "pullRequestSubtitle");
+    assert!(has_text(&rt, "Merge ") && has_text(&rt, " ready"), "Merge N ready, a text node per part");
+    assert!(!has_text(&rt, "Merge all ready"), "the web's words");
+    // A row without notes is 8 + 21.9 + 8 high; one with a note line is 20.3 taller.
+    let h = |key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no {key}")).rect[3];
+    assert!((h("pr-row-t3") - 37.94).abs() < 0.1, "{}", h("pr-row-t3"));
+    assert!((h("pr-row-t2") - 60.25).abs() < 0.1, "behind main adds the note line: {}", h("pr-row-t2"));
+    assert!(has_text(&rt, "Behind main"), "problems are worded with the base");
+    assert!(has_text(&rt, "Checks failing: Lint, Unit") && has_text(&rt, "Conflicts with main"));
+    assert!(has_text(&rt, "Handed back ") && has_text(&rt, " of ") && has_text(&rt, "2") && has_text(&rt, "4"), "Handed back N of 4 in its text nodes");
+}
+
+#[test]
 fn a_row_opens_its_task_and_the_pull_request() {
     let mut rt = runtime(scene("bb-prs"));
-    click(&mut rt, "pr-task-t2");
-    assert_eq!(rt.state.selected.as_deref(), Some("t2"));
+    // The web shows "Open task" as a row action on the rows that cannot be merged (t5 needs a call).
+    click(&mut rt, "pr-task-t5");
+    assert_eq!(rt.state.selected.as_deref(), Some("t5"));
 }
 
 // ------------------------------------------------------------------------------------------------ 5. details
