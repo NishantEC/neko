@@ -54,9 +54,20 @@ apart) and 32 between the header and what follows; `Row` is 44 high (py 8 around
 description 12.5 12 apart); a group heading is 28 high, 12.5/500, 32 above and 6 below; the page's action is `Button` at `h-9 rounded-full
 px-3.5 text-sm font-medium` with a plus (`view::page_button`).
 
+### Settings rows use the web kit (2026-11-18)
+
+Every Settings row is `webkit::setting_row` (the title, the web's own description under it, no tooltip), grouped under the web's `<Section
+title>` headings (`Item::group`; the page folds rows with the same group into one `webkit::section` + `panel`, 32 apart), copied word for
+word from `General/Ai/Phone/Rulebook/System.tsx`. The web's pill select, input, status badge, panel footer, Kbd, Skeleton, ghost and
+danger buttons are in `view/webkit.rs`; the AI page is `view/settings_ai.rs`, the This Mac pages `view/settings_system.rs`. Rune-only rows sit
+last in their group (Calendar, Reminders and Screen Recording access in a trailing group, so the web's groups keep their place). All ten
+Settings pairs are at or under 2.5% with at least 85% of the words placed; a page's unplaceable words are the web's screen-reader
+heading (title, ":" and summary, three text nodes with no box) and, on About, the daemon's own address. A button's disabled look is not
+enough: Rune's `.disabled()` does not stop a press, so a gated button also gets `webkit::gated`. `identity-harness.sh start` used to leave a
+subshell holding the caller's pipe open (so `identity.sh` hung); it now backgrounds one command.
+
 ### What still differs (see `docs/design/rune/identity-report.md`)
 
-Pages whose web layout is a different structure, not a different measure: Settings (breadcrumb, group headings in the rail, a description
-under every row), Workspaces (every workspace open with its Routines/Folders/Watching/Tools rows), the Setup pages' workspace scope picker
-(Rune keeps it in the sessions column, an addition), Tasks/board/tree, Calendar, Routines (the web's Inbox page), Usage and Plugins. Each is
-a port of the web page, not a tweak.
+Pages whose web layout is a different structure, not a different measure: Workspaces (every workspace open with its
+Routines/Folders/Watching/Tools rows), the Setup pages' workspace scope picker (Rune keeps it in the sessions column, an addition),
+Tasks/board/tree, Calendar, Routines (the web's Inbox page), Usage and Plugins. Each is a port of the web page, not a tweak.

@@ -3,7 +3,7 @@
 //! switches, selects and text fields. The pages compose these and draw no chrome of their own.
 
 use rune::{El, ScrollSpec, TextEdit, col, el, row, text};
-use rune_kit::{Select, TextArea, TextInput};
+use rune_kit::{Select, TextArea};
 
 use super::{COLUMN, band};
 use crate::app::App;
@@ -152,20 +152,6 @@ pub fn edit_of<'a>(s: &'a App, key: &str) -> &'a TextEdit {
 /// The accessor a text field edits through: the page's field with this key.
 pub fn editing(key: String) -> impl for<'a> Fn(&'a mut App) -> &'a mut TextEdit + 'static {
     move |s: &mut App| s.pages.field(&key)
-}
-
-/// A one-line text field.
-pub fn input(s: &App, t: &Neko, key: &str, label: &str, placeholder: &str, width: f32, submit: impl Fn(&mut App) + 'static) -> El {
-    TextInput::new(edit_of(s, key))
-        .label(label)
-        .placeholder(placeholder)
-        .width(Some(width))
-        .on_edit(editing(key.to_owned()))
-        .on_submit(move |s: &mut App, _| submit(s))
-        .build(&t.kit)
-        .key(key.to_owned())
-        .shrink()
-        .max_w(320.0)
 }
 
 /// A multi-line text field of a few rows.

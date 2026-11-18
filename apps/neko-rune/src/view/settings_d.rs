@@ -4,10 +4,9 @@
 //! `pages/setup/settings/{Appearance,General,Ai,Rulebook,System}.tsx`; the state and the requests are `extra.rs`.
 
 use rune::{El, TextStyle, col, el, icon, row, text};
-use rune_kit::TextInput;
 
 use super::settings::{Item, item};
-use super::ui::{edit_of, editing, note, switch, switch_when, with_menu};
+use super::ui::{note, switch, switch_when, with_menu};
 use super::webkit::{self, button, setting_row, setting_row_stacked};
 use super::quiet_button;
 use crate::app::App;
@@ -23,17 +22,6 @@ fn with_note(s: &App, t: &Neko, key: &str, r: El) -> El {
         Some(n) => col().w_full().child(r).child(n),
         None => r,
     }
-}
-
-fn kit_mono(t: &Neko) -> rune_kit::Kit {
-    let mut kit = t.kit.clone();
-    kit.ty.ui = TextStyle { family: rune::Family::Mono, size: t.ty.mono.size, ..kit.ty.ui };
-    kit
-}
-
-/// A one-line text field in the mono face (a path, an id, an address).
-fn mono_input(s: &App, t: &Neko, key: &str, label: &str, placeholder: &str, width: f32, submit: impl Fn(&mut App) + 'static) -> El {
-    TextInput::new(edit_of(s, key)).label(label).placeholder(placeholder).width(Some(width)).on_edit(editing(key.to_owned())).on_submit(move |s: &mut App, _| submit(s)).build(&kit_mono(t)).key(key.to_owned()).shrink().max_w(360.0)
 }
 
 fn word(t: &Neko, key: &str, words: &str, ink: rune::Color) -> El {
@@ -254,89 +242,6 @@ pub(super) fn rulebook(s: &App, t: &Neko, out: &mut Vec<Item>) {
     }
     let badge = webkit::status(t, "rulebook-status", if custom { Tone::Success } else { Tone::Neutral }, if custom { "Using your own rules" } else { "Using Neko’s default rules" });
     out.push(item(Section::Rulebook, "", "rulebook", "Rulebook", help, webkit::section(t, "group-rulebook", "Rulebook", None, Some(badge), body)));
-}
-
-// ---- Quick panel --------------------------------------------------------------------------------
-
-pub(super) fn quick_panel(s: &App, t: &Neko, out: &mut Vec<Item>) {
-    let help = "Folders searched by the quick panel.";
-    let mut list = col().key("set-folders").w_full().gap(1.0);
-    match &s.extra.folders {
-        None => list = list.child(word(t, "folders-loading", "Reading the folders…", t.text.muted).px(6.0).py(8.0)),
-        Some(f) if f.is_empty() => list = list.child(word(t, "folders-none", "No folders added", t.text.muted).px(6.0).py(8.0)),
-        Some(f) => {
-            for (i, folder) in f.iter().enumerate() {
-                let id = folder.id.clone();
-                list = list.child(
-                    row()
-                        .key(format!("folder-{i}"))
-                        .w_full()
-                        .h(32.0)
-                        .px(8.0)
-                        .gap(10.0)
-                        .center_y()
-                        .radius(t.radius.row)
-                        .hover(t.surface.hover)
-                        .child(icon(&icons::FOLDER, 16.0).color(t.text.muted).a11y_hidden())
-                        .child(text(folder.title.clone()).font(t.ty.mono_meta).color(t.text.base).truncate().grow(1.0).min_w(0.0))
-                        .child(quiet_button("Remove", &format!("folder-remove-{i}"), t, move |s: &mut App| s.remove_folder(&id)).label(format!("Remove {} from search", folder.title))),
-                );
-            }
-        }
-    }
-    out.push(item(Section::QuickPanel, "Included folders", "folders", "Included folders", help, with_note(s, t, "setting:folders", list)));
-    let typed = !s.pages.text("folder-path").trim().is_empty();
-    let help = "An absolute path on this Mac. The daemon checks that it is a folder.";
-    let control = row().gap(6.0).center_y().shrink().child(mono_input(s, t, "folder-path", "Folder path", "/Users/you/Documents", 260.0, |s: &mut App| s.add_folder())).child(if typed { quiet_button("Add folder", "folder-add", t, |s: &mut App| s.add_folder()) } else { quiet_button("Add folder", "folder-add", t, |_| {}).disabled(true) });
-    out.push(item(Section::QuickPanel, "Included folders", "add-folder", "Add a folder", help, setting_row(t, "set-add-folder", "Add a folder", Some(help), control)));
-}
-
-// ---- This Mac: permissions, diagnostics, updates -------------------------------------------------
-
-pub(super) fn clipboard(s: &App, t: &Neko, out: &mut Vec<Item>) {
-    let help = "Saves what you copy, only on this Mac. Turning it off stops new capture; existing history stays until you clear it.";
-    let control = match s.extra.clipboard {
-        Some(on) => switch(t, "set-clipboard-switch", "Clipboard history", on, move |s: &mut App| s.set_clipboard(!on)),
-        None => switch_when(t, "set-clipboard-switch", "Clipboard history", false, false, |_| {}),
-    };
-    out.push(item(Section::Permissions, "What Neko can access", "clipboard-history", "Clipboard history", help, with_note(s, t, "setting:clipboard", setting_row(t, "set-clipboard", "Clipboard history", Some(help), control))));
-}
-
-pub(super) fn diagnostics(s: &App, t: &Neko, out: &mut Vec<Item>) {
-    let help = "Times each runtime and shows which installs Neko uses.";
-    let button = if s.extra.diag_running { quiet_button("Running…", "diag-run", t, |_| {}).disabled(true) } else { quiet_button("Run checks", "diag-run", t, |s: &mut App| s.run_diagnostics()) };
-    let mut r = col().key("diag-checks").w_full().child(setting_row(t, "set-diag-run", "Run checks", Some(help), button));
-    match &s.extra.diag {
-        None if !s.extra.diag_running => r = r.child(word(t, "diag-none", "Run a check to see connection and runtime details.", t.text.muted).px(6.0).py(6.0)),
-        None => {}
-        Some((ms, checks)) => {
-            r = r.child(setting_row(t, "diag-roundtrip", "Neko window ↔ daemon", None, text(format!("{ms} ms")).key("diag-roundtrip-ms").font(t.ty.mono_meta).color(t.text.muted)));
-            for (i, c) in checks.iter().enumerate() {
-                let (glyph, ink) = if c.ok { (&icons::CHECK_LINE, t.meaning.mint) } else { (&icons::CROSS, t.meaning.coral) };
-                let mut line = row().key(format!("diag-check-{i}")).w_full().min_h(32.0).px(6.0).py(4.0).gap(10.0).center_y().radius(t.radius.row).hover(t.surface.hover);
-                line = line.child(icon(glyph, 16.0).color(ink).a11y_hidden()).child(col().grow(1.0).min_w(0.0).child(text(c.name.clone()).key(format!("diag-check-{i}-name")).font(t.ty.row).color(t.text.base)).child(text(c.detail.clone()).font(t.ty.meta).color(t.text.muted).wrap().min_w(0.0)));
-                if c.millis > 0 {
-                    line = line.child(text(format!("{} ms", c.millis)).font(t.ty.mono_meta).color(t.text.muted));
-                }
-                r = r.child(line);
-            }
-        }
-    }
-    out.push(item(Section::Diagnostics, "Diagnostics", "diagnostics", "Run diagnostics", help, with_note(s, t, "setting:diagnostics", r)));
-}
-
-pub(super) fn updates(s: &App, t: &Neko, out: &mut Vec<Item>) {
-    let Some(u) = s.summary.as_ref().and_then(|m| m.settings.self_update.clone()) else { return };
-    let dirty = s.pages.edited("update-source", false);
-    let help = "owner/name or a github.com address. Empty follows Neko’s own repository.";
-    let _ = &u;
-    let mut control = row().gap(6.0).center_y().shrink().child(mono_input(s, t, "update-source", "Updates come from", "owner/name", 260.0, |s: &mut App| s.save_update_source()));
-    if dirty {
-        control = control.child(quiet_button("Save", "update-source-save", t, |s: &mut App| s.save_update_source()));
-    }
-    out.push(item(Section::Updates, "Neko updates", "update-source", "Updates come from", help, with_note(s, t, "setting:update-source", setting_row(t, "set-update-source", "Updates come from", Some(help), control))));
-    let help = "Back to the build it replaced, or the one the app shipped with.";
-    out.push(item(Section::Updates, "Neko updates", "roll-back-web", "Roll back the web UI", help, with_note(s, t, "setting:updates-roll", setting_row(t, "set-roll-back", "Roll back the web UI", Some(help), quiet_button("Roll back", "roll-back-web", t, |s: &mut App| s.ask_roll_back_web())))));
 }
 
 // ---- the unsaved-rulebook question --------------------------------------------------------------

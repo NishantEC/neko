@@ -48,7 +48,6 @@ pub fn panel(rows: Vec<El>) -> El {
 
 /// A tone for [`status`] (`setup/lib.ts` `Tone`).
 #[derive(Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum Tone {
     Neutral,
     Success,
@@ -58,13 +57,58 @@ pub enum Tone {
 
 /// `Status` (`kit.tsx`, `ui/status-badge.tsx`): 23 high, 7 at the sides, radius 10, a 6 point dot and 11 point medium words.
 pub fn status(t: &Neko, key: &str, tone: Tone, words: &str) -> El {
+    status_keyed(t, key, &format!("{key}-words"), tone, words)
+}
+
+/// [`status`] with a key for its words too.
+pub fn status_keyed(t: &Neko, key: &str, text_key: &str, tone: Tone, words: &str) -> El {
     let (dot, wash, ink) = match tone {
         Tone::Neutral => (t.text.muted.alpha(0.6), t.text.base.alpha(0.06), t.text.muted),
         Tone::Success => (t.meaning.mint, t.meaning.mint.alpha(0.1), t.meaning.mint),
         Tone::Warning => (t.meaning.amber, t.meaning.amber.alpha(0.1), t.meaning.amber),
         Tone::Error => (t.meaning.coral, t.meaning.coral.alpha(0.1), t.meaning.coral),
     };
-    row().key(key.to_owned()).h(23.0).px(7.0).gap(6.0).center_y().radius(10.0).fill(wash).child(el().size(6.0, 6.0).radius(3.0).fill(dot).a11y_hidden()).child(text(words.to_owned()).font(font(t, 11.0, 500.0, 17.0)).color(ink))
+    row().key(key.to_owned()).h(23.0).px(7.0).gap(6.0).center_y().radius(10.0).fill(wash).child(el().size(6.0, 6.0).radius(3.0).fill(dot).a11y_hidden()).child(text(words.to_owned()).key(text_key.to_owned()).font(font(t, 11.0, 500.0, 17.0)).color(ink))
+}
+
+/// [`status`] whose words are separate text nodes that run on ("App " then "9acc5352"): one line, the way the web's inline text is.
+pub fn status_nodes(t: &Neko, key: &str, tone: Tone, nodes: &[&str]) -> El {
+    let (dot, wash, ink) = match tone {
+        Tone::Neutral => (t.text.muted.alpha(0.6), t.text.base.alpha(0.06), t.text.muted),
+        Tone::Success => (t.meaning.mint, t.meaning.mint.alpha(0.1), t.meaning.mint),
+        Tone::Warning => (t.meaning.amber, t.meaning.amber.alpha(0.1), t.meaning.amber),
+        Tone::Error => (t.meaning.coral, t.meaning.coral.alpha(0.1), t.meaning.coral),
+    };
+    let last = nodes.len().saturating_sub(1);
+    let words = row().children(nodes.iter().enumerate().map(|(i, n)| {
+        let node = text((*n).to_owned()).font(font(t, 11.0, 500.0, 17.0)).color(ink);
+        if i < last { node.mr(3.0) } else { node }
+    }));
+    row().key(key.to_owned()).h(23.0).px(7.0).gap(6.0).center_y().radius(10.0).fill(wash).child(el().size(6.0, 6.0).radius(3.0).fill(dot).a11y_hidden()).child(words)
+}
+
+/// A small quiet action that fits inside a 28 point line (12.5 point words, 24 high).
+pub fn link_button(t: &Neko, key: &str, label: &str, on_press: impl Fn(&mut App) + 'static) -> El {
+    row().key(key.to_owned()).role("button").label(label).focusable(true).h(24.0).px(8.0).center().radius(6.0).hover(t.text.base.alpha(0.06)).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(on_press).child(text(label.to_owned()).font(font(t, 12.5, 500.0, 20.3125)).color(t.text.muted).a11y_hidden())
+}
+
+/// `Row` (`kit.tsx`): 44 high (8 above and below a 28 line), 12 at the sides, radius 10; the title, a dim line after it that gives way,
+/// the trailing things at the right, and anything under it (`mt-1.5 ps-8`).
+pub fn info_row(t: &Neko, key: &str, title: El, description: Option<El>, leading: Option<El>, trailing: Vec<El>, below: Option<El>) -> El {
+    let mut line = row().w_full().min_h(28.0).gap(12.0).center_y();
+    if let Some(l) = leading {
+        line = line.child(l.a11y_hidden());
+    }
+    line = line.child(title.shrink());
+    line = line.child(description.unwrap_or_else(|| el().grow(1.0)));
+    if !trailing.is_empty() {
+        line = line.child(row().gap(8.0).center_y().children(trailing));
+    }
+    let mut r = col().key(key.to_owned()).w_full().px(12.0).py(8.0).radius(10.0).hover(t.text.base.alpha(0.03)).child(line);
+    if let Some(b) = below {
+        r = r.child(col().w_full().mt(6.0).pl(32.0).child(b));
+    }
+    r
 }
 
 /// `PanelFooter`: a quiet line at the left and the actions at the right (under them when they do not fit); 12 at the sides, 4 above
@@ -229,6 +273,28 @@ pub fn ghost_button_after(t: &Neko, key: &str, label: &str, glyph: &'static Icon
         .gap(6.0)
         .center()
         .radius(14.0)
+        .hover(Color::WHITE.alpha(0.05))
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
+        .on_press(on_press)
+        .child(text(label.to_owned()).font(font(t, size, 500.0, lh)).color(t.text.base).a11y_hidden())
+        .child(icon(glyph, glyph_size).color(t.text.base.alpha(0.8)).a11y_hidden())
+}
+
+/// The outline button with its icon after the words ("Open commits on GitHub" and its arrow).
+pub fn button_after(t: &Neko, key: &str, label: &str, glyph: &'static Icon, on_press: impl Fn(&mut App) + 'static) -> El {
+    let big = page_width() < 640.0;
+    let (size, lh, glyph_size) = if big { (16.0, 24.0, 18.0) } else { (14.0, 20.0, 16.0) };
+    row()
+        .key(key.to_owned())
+        .role("button")
+        .label(label)
+        .focusable(true)
+        .h(36.0)
+        .px(14.0)
+        .gap(6.0)
+        .center()
+        .radius(18.0)
+        .fill(t.text.base.alpha(0.065))
         .hover(Color::WHITE.alpha(0.05))
         .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(on_press)

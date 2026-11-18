@@ -163,6 +163,9 @@ pub struct SettingsView {
     /// What Home chat last ran on, and why.
     #[serde(default)]
     pub home_last: Option<LastRun>,
+    /// How many tool connections there are, switched on or not (About, "This Mac").
+    #[serde(default)]
+    pub connections: usize,
 }
 
 /// How far back the client keeps priced runs (the Usage chart shows seven days).
@@ -461,6 +464,7 @@ impl Summary {
                 rulebook: snapshot.rulebook.clone().unwrap_or_default(),
                 rulebook_default: snapshot.rulebook_default.clone(),
                 model_runs: snapshot.runtime_selections.iter().map(|r| (r.runtime.model.clone(), r.runtime.reasoning_effort.clone())).collect(),
+                connections: snapshot.mcp.connections.len(),
                 home_last: {
                     let profile = if snapshot.agent_profiles.active_profile_id.is_empty() { "default" } else { snapshot.agent_profiles.active_profile_id.as_str() };
                     let conversation = format!("home:{profile}:*");

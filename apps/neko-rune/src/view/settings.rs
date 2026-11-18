@@ -8,16 +8,15 @@
 use neko_protocol::agent_models::{CatalogModel, ModelAccess};
 use neko_protocol::calendar::CalendarAccess;
 use neko_protocol::phone::RemindersAccess;
-use rune::{El, ScrollSpec, col, el, icon, row, text};
+use rune::{El, ScrollSpec, col, el, row, text};
 use rune_kit::TextInput;
 
 use super::ui::{edit_of, editing, note, switch};
 use super::webkit::{self, setting_row};
-use super::{Frame, band, primary_button, quiet_button};
+use super::{Frame, band};
 use crate::app::App;
 use crate::icons;
-use crate::pages::{Section, ago};
-use crate::permissions::{Access, Pane};
+use crate::pages::Section;
 use crate::theme::Neko;
 
 /// One row of a section, with the words search matches against.
@@ -184,16 +183,8 @@ fn items(s: &App, t: &Neko, layer: &mut Vec<El>) -> Vec<Item> {
     appearance(s, t, &mut out);
     super::settings_d::appearance(s, t, layer, &mut out);
     super::settings_d::rulebook(s, t, &mut out);
-    super::settings_d::quick_panel(s, t, &mut out);
     phone(s, t, layer, &mut out);
-    updates(s, t, &mut out);
-    super::settings_d::updates(s, t, &mut out);
-    workspaces(s, t, &mut out);
-    super::settings_d::clipboard(s, t, &mut out);
-    permissions(s, t, &mut out);
-    diagnostics(s, t, &mut out);
-    super::settings_d::diagnostics(s, t, &mut out);
-    about(s, t, &mut out);
+    super::settings_system::all(s, t, &mut out);
     out
 }
 
@@ -328,86 +319,8 @@ fn phone(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     out.push(item(Section::Phone, "", "phone-status", "Status", "", webkit::section(t, "group-status", "Status", None, None, lines)));
 }
 
-fn short(commit: &Option<String>) -> String {
+pub(super) fn short(commit: &Option<String>) -> String {
     commit.as_deref().map_or("unknown".to_owned(), |c| c.chars().take(7).collect())
-}
-
-fn updates(s: &App, t: &Neko, out: &mut Vec<Item>) {
-    let Some(u) = s.summary.as_ref().and_then(|m| m.settings.self_update.clone()) else { return };
-    let last = if u.check.at_ms == 0 {
-        "Never".to_owned()
-    } else if u.check.error.is_empty() {
-        ago(s.now_ms, u.check.at_ms)
-    } else {
-        format!("{} · {}", ago(s.now_ms, u.check.at_ms), u.check.error)
-    };
-    let busy = u.requested || u.installing.is_some();
-    let help = "Looks at the published repository now and applies everything new.";
-    out.push(item(
-        Section::Updates,
-        "Neko updates",
-        "update-check",
-        "Last check",
-        help,
-        with_note(
-            s,
-            t,
-            "setting:updates",
-            setting_row(t, "set-update-check", "Last check", Some(help), row().gap(10.0).center_y().child(value(t, "set-update-last", &last)).child(if busy { quiet_button("Updating", "update-now", t, |_| {}).disabled(true) } else { quiet_button("Update now", "update-now", t, |s: &mut App| s.call(crate::link::Call::UpdateNow)) })),
-        ),
-    ));
-    if !u.status.is_empty() {
-        out.push(item(Section::Updates, "Neko updates", "update-status", "Status", "", setting_row(t, "set-update-status", "Status", None, value(t, "set-update-status-value", &u.status))));
-    }
-    if u.pending.is_some() {
-        out.push(item(
-            Section::Updates,
-            "Neko updates",
-            "pending-update",
-            "Apply update",
-            "An update waits for your click: it touches safety-critical code, or its automatic update is off.",
-            setting_row(t, "set-pending", "An update is waiting", Some("It touches safety-critical code, or its automatic update is off."), primary_button("Apply update", "update-apply", t, |s: &mut App| s.call(crate::link::Call::ApplyUpdate))),
-        ));
-    }
-    out.push(item(Section::Updates, "Neko updates", "update-version", "Version in use", "", setting_row(t, "set-version", "Version in use", None, value(t, "set-version-value", &format!("app {} · web {}", short(&u.native_commit), short(&u.web_commit))))));
-    let (ui, native) = (u.auto_ui, u.auto_native);
-    out.push(item(Section::Updates, "Neko updates", "auto-update-ui", "Update the web UI automatically", "Rebuilds and swaps in the web UI after a change lands.", setting_row(t, "set-auto-ui", "Update the web UI automatically", Some("Rebuilds and swaps in the web UI after a change lands."), switch(t, "set-auto-ui-switch", "Update the web UI automatically", ui, move |s: &mut App| s.call(crate::link::Call::SetSelfUpdate { auto_ui: !ui, auto_native: native })))));
-    out.push(item(Section::Updates, "Neko updates", "auto-update-app", "Reinstall the app automatically", "Reinstalls the app once Neko is idle and the Mac is fine to build.", setting_row(t, "set-auto-native", "Reinstall the app automatically", Some("Reinstalls the app once Neko is idle and the Mac is fine to build."), switch(t, "set-auto-native-switch", "Reinstall the app automatically", native, move |s: &mut App| s.call(crate::link::Call::SetSelfUpdate { auto_ui: ui, auto_native: !native })))));
-    let dirty = s.pages.edited("dev-checkout", false);
-    let mut control = row().gap(6.0).center_y().shrink().child(super::ui::input(s, t, "dev-checkout", "Development checkout", "Not set", 260.0, |s: &mut App| s.save_dev_checkout()));
-    if dirty {
-        control = control.child(quiet_button("Save", "dev-checkout-save", t, |s: &mut App| s.save_dev_checkout()));
-    }
-    let help = "The folder where Neko’s own tasks change Neko. A task that lands there is pushed to the published main.";
-    out.push(item(Section::Updates, "Neko updates", "dev-checkout", "Development checkout", help, with_note(s, t, "setting:dev-checkout", setting_row(t, "set-dev-checkout", "Development checkout", Some(help), control))));
-}
-
-fn workspaces(s: &App, t: &Neko, out: &mut Vec<Item>) {
-    let list = s.summary.as_ref().map(|m| m.settings.workspaces.clone()).unwrap_or_default();
-    if list.is_empty() {
-        out.push(item(Section::Workspaces, "", "workspaces-none", "Workspaces", "", text("No workspaces yet").key("workspaces-none").font(t.ty.meta).color(t.text.muted).px(6.0).py(8.0)));
-    }
-    for (i, w) in list.iter().enumerate() {
-        let n = w.folders.len().max(usize::from(!w.repository.is_empty()));
-        let words = format!("{n} {}", if n == 1 { "folder" } else { "folders" });
-        let id = format!("workspace-{i}");
-        out.push(item(Section::Workspaces, "", id.clone(), &w.name, &w.repository, setting_row(t, &format!("set-{id}"), &w.name, Some(&w.repository), value(t, &format!("set-{id}-value"), &words))));
-    }
-}
-
-fn about(s: &App, t: &Neko, out: &mut Vec<Item>) {
-    let u = s.summary.as_ref().and_then(|m| m.settings.self_update.clone());
-    let version = u.as_ref().map_or("unknown".to_owned(), |u| format!("app {} · web {}", short(&u.native_commit), short(&u.web_commit)));
-    out.push(item(Section::About, "About", "about-version", "Version", "", setting_row(t, "set-about-version", "Version", None, value(t, "set-about-version-value", &version))));
-    out.push(item(Section::About, "About", "about-link", "Connection to Neko", "", setting_row(t, "set-about-link", "Connection to Neko", None, value(t, "set-about-link-value", &crate::app::status_line(&s.link, s.summary.as_ref())))));
-    out.push(item(
-        Section::About,
-        "About",
-        "about-web",
-        "The web UI",
-        "The web UI stays the default while this app reaches parity.",
-        setting_row(t, "set-about-web", "The web UI", Some("The web UI stays the default while this app reaches parity."), row().gap(8.0).center_y().child(icon(&icons::EXTERNAL, 14.0).color(t.text.muted).a11y_hidden()).child(quiet_button("Open the web UI", "about-open-web", t, |s: &mut App| s.open_in_web(None)))),
-    ));
 }
 
 /// Appearance, Mode: System, Light or Dark. It is the daemon's setting (the web UI's own), so the window and every browser agree.
@@ -430,66 +343,4 @@ fn appearance(s: &App, t: &Neko, out: &mut Vec<Item>) {
     let help = "System follows macOS. The choice is kept by Neko, so the web UI and this window agree.";
     let line = setting_row(t, "set-appearance", "Mode", Some(&format!("Showing {shown} ({}).", if dark_now { "dark" } else { "light" })), modes);
     out.push(item(Section::Appearance, "Appearance", "appearance-mode", "Theme Mode", help, with_note(s, t, "setting:appearance", line)));
-}
-
-/// Permissions: each kind of access with its status and a button that opens its pane of System Settings. Accessibility,
-/// Full Disk Access and Screen Recording are this process's own (asked of macOS, never prompting); Calendar and Reminders
-/// are what the daemon already reports.
-fn permissions(s: &App, t: &Neko, out: &mut Vec<Item>) {
-    let local = s.pages.access.unwrap_or_default();
-    let calendar = match s.pages.calendar.as_ref().map(|c| c.status.access) {
-        Some(CalendarAccess::Granted) => Access::Granted,
-        Some(CalendarAccess::Denied) => Access::Denied,
-        _ => Access::Unknown,
-    };
-    let reminders = match s.pages.phone.as_ref().map(|p| p.status.reminders_access) {
-        Some(RemindersAccess::Granted) => Access::Granted,
-        Some(RemindersAccess::Denied) => Access::Denied,
-        _ => Access::Unknown,
-    };
-    let rows: [(&str, &str, Access, Pane, &str); 5] = [
-        ("accessibility", "Accessibility", local.accessibility, Pane::Accessibility, "Lets Neko paste for you and read the text you have selected."),
-        ("full-disk", "Full Disk Access", local.full_disk, Pane::FullDisk, "Allows access to protected folders, including Documents, Desktop and iCloud Drive."),
-        ("calendar", "Calendar", calendar, Pane::Calendars, "Shows your meetings beside Neko’s dated work."),
-        ("reminders", "Reminders", reminders, Pane::Reminders, "A reminder in the Neko list for each thing that needs you."),
-        ("screen-recording", "Screen Recording", local.screen_recording, Pane::ScreenRecording, "Only for agents you let see the screen."),
-    ];
-    for (id, label, access, pane, help) in rows {
-        let ink = match access {
-            Access::Granted => t.meaning.mint,
-            Access::Denied => t.meaning.amber,
-            Access::Unknown => t.text.muted,
-        };
-        let control = row()
-            .gap(10.0)
-            .center_y()
-            .child(text(access.words()).key(format!("perm-{id}-state")).font(t.ty.meta).color(ink))
-            .child(quiet_button("Open System Settings", &format!("perm-{id}-open"), t, move |s: &mut App| {
-                if (s.opener)(pane.url()).is_err() {
-                    s.notice = Some("Couldn’t open System Settings.".to_owned());
-                }
-            }));
-        out.push(item(Section::Permissions, "What Neko can access", format!("perm-{id}"), label, help, setting_row(t, &format!("set-perm-{id}"), label, Some(help), control)));
-    }
-}
-
-/// Diagnostics: the versions in use, the data folder, whether the daemon answers, and one button that copies it all.
-fn diagnostics(s: &App, t: &Neko, out: &mut Vec<Item>) {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let data = crate::terminal::tilde(&neko_protocol::support_dir().to_string_lossy(), &home);
-    let pin = include_str!("../../RUNE_REV").lines().next().unwrap_or("").chars().take(9).collect::<String>();
-    let app = format!("Neko for Rune {} · Rune {pin}", env!("CARGO_PKG_VERSION"));
-    let u = s.summary.as_ref().and_then(|m| m.settings.self_update.clone());
-    let neko = u.as_ref().map_or("unknown".to_owned(), |u| format!("app {} · web {}", short(&u.native_commit), short(&u.web_commit)));
-    let daemon = crate::app::status_line(&s.link, s.summary.as_ref());
-    let rows = [("app", "This app", app), ("neko", "Neko", neko), ("data", "Data folder", data), ("daemon", "Daemon", daemon)];
-    for (id, label, words) in &rows {
-        out.push(item(Section::Diagnostics, "Diagnostics", format!("diag-{id}"), label, words, setting_row(t, &format!("set-diag-{id}"), label, None, value(t, &format!("diag-{id}-value"), words))));
-    }
-    let report: String = rows.iter().map(|(_, label, words)| format!("{label}: {words}")).collect::<Vec<_>>().join("\n");
-    let button = quiet_button("Copy diagnostics", "diag-copy", t, |_: &mut App| {}).on_press_tx(move |s: &mut App, tx: &mut rune::Tx| {
-        tx.copy(report.clone());
-        s.show_toast("Copied the diagnostics");
-    });
-    out.push(item(Section::Diagnostics, "Diagnostics", "diag-copy", "Copy diagnostics", "Versions, the data folder and the daemon's state, as text to paste into a report.", setting_row(t, "set-diag-copy", "Copy diagnostics", Some("Versions, the data folder and the daemon's state, as text to paste into a report."), button)));
 }

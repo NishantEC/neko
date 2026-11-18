@@ -1116,9 +1116,10 @@ fn batch_d_the_rulebook_the_update_source_and_the_model_check_go_to_the_daemon()
     // The update source: a github address is kept as owner/name.
     rt.update(|s, _| s.pages.section = neko_rune::pages::Section::Updates);
     settle(&mut rt);
+    click_in_page(&mut rt, "update-source-edit");
     rt.update(|s, _| s.pages.set_field("update-source", "https://github.com/acme/neko-fork.git"));
     settle(&mut rt);
-    click(&mut rt, "update-source-save");
+    click_in_page(&mut rt, "update-source-save");
     assert_eq!(rt.state.summary.as_ref().unwrap().settings.self_update.as_ref().map(|u| u.source.clone()).as_deref(), Some("acme/neko-fork"));
     // The model check: one real prompt through the runner; the harness has no agents, so the answer is the daemon's own words, shown.
     rt.update(|s, _| s.check_model());

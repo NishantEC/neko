@@ -293,6 +293,9 @@ fn diagnostics_run_ping_then_the_checks_and_show_a_mint_check_or_a_coral_cross()
 #[test]
 fn the_update_source_is_validated_as_owner_name_and_roll_back_is_confirmed() {
     let mut rt = runtime("bd-updates");
+    // The web shows where updates come from as a line; "Change…" opens the field.
+    assert!(rt.find("update-source").is_none() && rt.find("set-update-source-value").is_some());
+    click(&mut rt, "update-source-edit");
     rt.update(|s, _| s.pages.set_field("update-source", "not a repo"));
     settle(&mut rt);
     click(&mut rt, "update-source-save");

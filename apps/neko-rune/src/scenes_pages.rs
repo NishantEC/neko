@@ -185,6 +185,7 @@ pub fn settings_view() -> SettingsView {
         rulebook: String::new(),
         rulebook_default: "Be careful with other people's files.\nPrefer small, reviewable changes.\nRun the tests before saying a task is done.".into(),
         model_runs: [("gpt-a", Some("high")), ("gpt-a", Some("high")), ("gpt-a", None), ("claude-x", Some("medium")), ("", None)].iter().map(|(m, e)| ((*m).to_owned(), e.map(str::to_owned))).collect(),
+        connections: 3,
         home_last: Some(crate::link::LastRun { model: "gpt-a".into(), effort: Some("high".into()), automatic: true, reason: "Picked the model that fits a small question.".into() }),
     }
 }

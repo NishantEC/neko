@@ -193,9 +193,9 @@ fn settings_sections_search_and_read_only_rows() {
         go_section(&mut rt, section);
         assert!(rt.find(row).is_some(), "{section}: {row}");
     }
-    // "Updates come from" is a field (owner/name) with the roll-back beside it, as in the web's Neko updates.
+    // "Updates come from" is a line with the source (a field opens from "Change…"), and the roll-back is a row below, as in the web's Neko updates.
     go_section(&mut rt, "updates");
-    assert!(rt.find("update-source").is_some() && rt.find("roll-back-web").is_some());
+    assert!(rt.find("set-update-source-value").is_some() && rt.find("update-source-edit").is_some() && rt.find("roll-back-web").is_some());
     // The rulebook and the quick panel's folders are edited here, not linked to the web UI.
     go_section(&mut rt, "rulebook");
     assert!(rt.find("rulebook").is_some() && rt.find("rulebook-open-web").is_none());
@@ -292,6 +292,23 @@ fn phone_is_the_webs_one_line_rows_in_four_groups_and_a_status_block() {
         s.save_digest_time();
     });
     assert!(rt.state.outbox.is_empty() && rt.state.pages.notes.contains_key("setting:phone:digest"));
+}
+
+#[test]
+fn the_this_mac_pages_are_the_webs_groups_with_the_extra_rows_last() {
+    let mut rt = runtime("settings");
+    go_section(&mut rt, "permissions");
+    for key in ["group-what-neko-can-access", "group-workspace-folders", "group-agent-access", "group-more-access"] {
+        assert!(rt.find(key).is_some(), "{key}");
+    }
+    // The web's three rows come first; Calendar, Reminders and Screen Recording follow the page in a group of their own.
+    let y = |rt: &Runtime<App>, key: &str| rect(rt, key)[1];
+    assert!(y(&rt, "set-clipboard") < y(&rt, "set-perm-full-disk") && y(&rt, "set-perm-accessibility") < y(&rt, "group-workspace-folders") && y(&rt, "group-agent-access") < y(&rt, "group-more-access"));
+    go_section(&mut rt, "diagnostics");
+    assert!(rt.find("group-diagnostics").is_some() && rt.find("diag-run").is_some() && rt.find("diag-copy").is_some());
+    assert!(y(&rt, "set-diag-run") < y(&rt, "set-diag-app"), "the web's row comes before the app's own lines");
+    go_section(&mut rt, "about");
+    assert!(rt.find("group-about").is_some() && rt.find("about-commits").is_some() && rt.find("set-about-by-hand").is_some());
 }
 
 #[test]
@@ -425,7 +442,9 @@ fn settings_at_a_narrow_width_narrows_the_rail_and_keeps_inputs_inside() {
     let rt = runtime_at((960.0, 700.0), "settings-narrow");
     // Under the web's 900 point breakpoint the sections are a strip under the search box, across the page.
     assert_eq!(rect(&rt, "settings-rail")[2], rect(&rt, "session-region")[2]);
-    assert!(rect(&rt, "dev-checkout")[2] <= 320.5, "inputs stop at 320");
+    // The web's fields take the row's width; narrow, they stay inside the page.
+    let (field, region) = (rect(&rt, "dev-checkout"), rect(&rt, "session-region"));
+    assert!(field[0] >= region[0] && field[0] + field[2] <= region[0] + region[2], "the field stays inside the page: {field:?} in {region:?}");
     let wide = runtime_at((1600.0, 900.0), "settings");
     assert_eq!(rect(&wide, "settings-rail")[2], 241.0);
 }
