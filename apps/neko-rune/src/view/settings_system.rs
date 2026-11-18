@@ -228,6 +228,12 @@ fn sha8(commit: &Option<String>) -> String {
 
 fn updates(s: &App, t: &Neko, out: &mut Vec<Item>) {
     const G: &str = "Neko updates";
+    // `--app` while the Swift app runs: it keeps the menu bar, notifications and hotkeys (`shell/mod.rs`); read-only, and it goes when Rune takes them over.
+    if s.shell.duties.swift_holds {
+        let words = crate::shell::SWIFT_ROW_WORDS;
+        let title = text(crate::shell::SWIFT_ROW_TITLE.to_owned()).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().min_w(0.0);
+        out.push(item(Section::Updates, G, "swift-app", crate::shell::SWIFT_ROW_TITLE, words, info_row(t, "set-swift-app", title, Some(dim(t, "set-swift-app-words", words)), None, Vec::new(), None)));
+    }
     let Some(u) = s.summary.as_ref().and_then(|m| m.settings.self_update.clone()) else { return };
     let busy = u.requested || u.installing.is_some();
     let title = |words: &str| text(words.to_owned()).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().min_w(0.0);

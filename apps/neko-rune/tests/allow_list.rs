@@ -516,7 +516,8 @@ fn the_panel_reads_files_only_through_the_confined_readers() {
         let code = production(&text);
         // `permissions.rs` lists one folder macOS protects (Safari's) only to learn whether Full Disk Access is given; it reads no names.
         // `scenes.rs` reads one JSON summary a headless snapshot run is pointed at (`NEKO_RUNE_SUMMARY`).
-        let allowed = path.ends_with("readers.rs") || path.ends_with("web_link.rs") || path.ends_with("attachments.rs") || path.ends_with("scenes.rs") || path.ends_with("permissions.rs");
+        // `shell/daemon.rs` (Rune as the Mac app, `--app`) asks whether the sibling `neko-daemon` is an executable file before it starts it.
+        let allowed = path.ends_with("readers.rs") || path.ends_with("web_link.rs") || path.ends_with("attachments.rs") || path.ends_with("scenes.rs") || path.ends_with("permissions.rs") || path.ends_with("shell/daemon.rs");
         for opener in ["File::open", "fs::read(", "fs::read_to_string", "read_dir", "fs::metadata", "canonicalize", "File::create"] {
             assert!(allowed || !code.contains(opener), "{} opens files with `{opener}` outside the confined readers", path.display());
         }

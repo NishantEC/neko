@@ -151,6 +151,8 @@ pub struct App {
     pub reduce_motion: std::cell::Cell<bool>,
     /// The P4 overlays (the pill, the launcher, the stop-all key): empty unless `--overlays` (`overlays.rs`).
     pub overlays: crate::overlays::Overlays,
+    /// Rune as the Mac app (`--app`, `shell/mod.rs`): the flag, the Swift-running guard and the duties held.
+    pub shell: crate::shell::Shell,
     /// The web view of the context panel and of a plugin's page (P3b).
     pub web_view: crate::web_panel::WebHost,
     /// What the plugins registered as pages (`PluginPages`), for "More"; None until asked.
@@ -350,6 +352,7 @@ impl Default for App {
             more_open: false,
             reduce_motion: std::cell::Cell::new(false),
             overlays: Default::default(),
+            shell: Default::default(),
             toasts: Vec::new(),
             toast_counter: 0,
             dialog: None,

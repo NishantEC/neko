@@ -180,12 +180,26 @@ pub struct Overlays {
     last_look: i64,
     /// What went wrong registering a shortcut, in words (also printed to stderr when it happened).
     pub failures: Vec<String>,
+    /// What [`install`] made, kept until the duties say to attach it (`--app` mode while the Swift app runs holds it back: `shell/mod.rs`).
+    pending: Option<(Installed, AppHandle<App>)>,
 }
 
 impl Overlays {
     /// Nothing made yet; `presence_on` is the pill's saved preference.
     pub fn new(presence_on: bool) -> Overlays {
         Overlays { presence: Tracker::with_enabled(presence_on), ..Overlays::default() }
+    }
+
+    /// Keeps what [`install`] made until [`Overlays::attach_pending`] (the shell's duties decide when).
+    pub fn stash(&mut self, installed: Installed, main: AppHandle<App>) {
+        self.pending = Some((installed, main));
+    }
+
+    /// Attaches what was stashed, once. True when something was attached.
+    pub fn attach_pending(&mut self) -> bool {
+        let Some((installed, main)) = self.pending.take() else { return false };
+        self.attach(installed, main);
+        true
     }
 
     /// Takes what [`install`] made and registers the stop-all key (the summon key waits for the daemon's combo).
@@ -422,6 +436,19 @@ mod tests {
         assert!(o.stop.is_none() && o.summon.is_none());
         assert_eq!(o.failures.len(), 2, "{:?}", o.failures);
         assert!(o.failures[0].contains("⌘⇧Esc") && o.failures[1].contains("summon"));
+    }
+
+    #[test]
+    fn stashed_overlays_attach_only_when_the_duties_say_so_and_only_once() {
+        let mut app = rune::App::new(rune::AppSpec::new("t", (100.0, 100.0), App::headless, crate::view::view));
+        let installed = install(&mut app, plan(true));
+        let mut o = Overlays::default();
+        assert!(!o.attach_pending(), "nothing stashed yet");
+        o.stash(installed, app.handle());
+        assert!(o.pill.is_none() && !o.plan.any(), "stashed is not attached: no shortcut, no pill, no settings row (the Swift app may hold them)");
+        assert!(o.attach_pending());
+        assert!(o.plan.any() && o.pill.is_some());
+        assert!(!o.attach_pending(), "attached once");
     }
 
     #[test]

@@ -42,6 +42,7 @@ pub mod panel;
 pub mod plugin_manage;
 pub mod samples;
 pub mod scope;
+pub mod shell;
 pub mod scenes;
 pub mod readers;
 pub mod report;
@@ -200,8 +201,18 @@ fn init() -> App {
         // The last run's widths (read once, before the first frame); the window then keeps them.
         let saved = app::load_layout();
         let layout = saved.map(layout::Layout::restored).unwrap_or_default();
-        App { pending_route: FIRST_ROUTE.with(|r| r.borrow_mut().take()), linked: !has("nolink"), dock: dock::set_badge, workspace_scope: app::load_scope(), all: all_sessions::AllState { layout: app::load_all_layout().unwrap_or_default(), ..Default::default() }, layout, layout_written: saved, layout_seen: saved, persist_layout: true, overlays: overlays::Overlays::new(app::load_presence()), web_view: web_panel::WebHost::windowed(), luau: luau::Luau { persist: true, hidden: App::luau_load_hidden(), ..Default::default() }, ..App::default() }
+        App { pending_route: FIRST_ROUTE.with(|r| r.borrow_mut().take()), linked: !has("nolink"), dock: dock::set_badge, workspace_scope: app::load_scope(), all: all_sessions::AllState { layout: app::load_all_layout().unwrap_or_default(), ..Default::default() }, layout, layout_written: saved, layout_seen: saved, persist_layout: true, overlays: overlays::Overlays::new(app::load_presence()), shell: shell::Shell::new(app_flag(), legacy_overlays(), socket_path()), web_view: web_panel::WebHost::windowed(), luau: luau::Luau { persist: true, hidden: App::luau_load_hidden(), ..Default::default() }, ..App::default() }
     }
+}
+
+/// `--app` or `NEKO_RUNE_APP=1`: Rune acts as the Mac app (`shell/mod.rs`).
+fn app_flag() -> bool {
+    shell::gate(rune::extra_args(), std::env::var(shell::ENV).ok().as_deref())
+}
+
+/// `--overlays` or `NEKO_RUNE_OVERLAYS=1`, without `--app`: the P4 overlays alone.
+fn legacy_overlays() -> bool {
+    overlays::gate(rune::extra_args(), std::env::var(overlays::ENV).ok().as_deref())
 }
 
 /// The daemon's socket: `socket=PATH`, else `NEKO_SOCKET`, else the one the daemon uses
@@ -346,7 +357,8 @@ pub fn run() {
         .on_window(web_panel::remember_window);
     let handle = app.handle();
     // The overlays (P4) are off unless asked for: with the gate off nothing is created and no shortcut is registered (`overlays.rs`).
-    let plan = overlays::plan(overlays::gate(rune::extra_args(), std::env::var(overlays::ENV).ok().as_deref()));
+    // `--app` implies `--overlays`: they are made at build time and attached once Rune holds the duties (the Swift app may run first).
+    let plan = overlays::plan(legacy_overlays() || app_flag());
     let mut installed = Some(overlays::install(&mut app, plan));
     let mut started = false;
     app.on_ready(move |_| {
@@ -366,13 +378,25 @@ pub fn run() {
         if has("nolink") {
             return;
         }
-        // The overlays: the window keeps their handles and registers the stop-all key (the summon key follows the daemon's answer).
-        if let Some(made) = installed.take().filter(|i| i.plan.any()) {
-            let main = handle.clone();
-            handle.update_if(move |s, _| {
-                s.overlays.attach(made, main);
-                false
-            });
+        // The overlays: the window keeps their handles; they attach (the stop-all key registers, the summon key follows the daemon's
+        // answer) when the duties say so: at once for `--overlays`, in `--app` mode when the Swift app is not running (`shell/mod.rs`).
+        let made = installed.take().filter(|i| i.plan.any());
+        // `--app`: asks whether the Swift app runs before anything starts, then keeps asking.
+        let swift = app_flag().then(shell::swift_app_running);
+        let main = handle.clone();
+        handle.update_if(move |s, _| {
+            if let Some(made) = made {
+                s.overlays.stash(made, main);
+            }
+            if let Some(running) = swift {
+                s.set_swift_running(running);
+            } else {
+                s.start_duties();
+            }
+            false
+        });
+        if let Some(running) = swift {
+            shell::spawn_guard(handle.clone(), running);
         }
         // The window and the link thread share which task is open.
         let wanted = link::Wanted::default();
