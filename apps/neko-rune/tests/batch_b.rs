@@ -255,16 +255,16 @@ fn a_waiting_cards_one_action_is_on_hover_and_in_the_right_click_menu() {
 // ------------------------------------------------------------------------------------------------ 3. the tree
 
 #[test]
-fn the_tree_indents_twenty_points_a_level_and_a_chevron_folds_it() {
+fn the_tree_indents_29_points_a_level_and_a_caret_folds_it() {
     let mut rt = runtime(scene("bb-tree"));
     let left = |rt: &Runtime<App>, key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).map(|e| e.rect[0]).unwrap_or_else(|| panic!("no {key}"));
     // t6 starts t9 and t11; t11 starts t13.
     let (p, c, g) = (left(&rt, "tree-fold-t6"), left(&rt, "tree-fold-t11"), left(&rt, "tree-lead-t13"));
-    assert!((c - p - 20.0).abs() < 0.6, "a child is one level (20) in: {p} {c}");
-    assert!(g > c, "a grandchild is deeper: {c} {g}");
+    assert!((c - p - 29.0).abs() < 0.6, "a child is one level (13 for the rail and 16 for the step) in: {p} {c}");
+    assert!((g - c - 29.0).abs() < 0.6, "a grandchild is one more: {c} {g}");
     assert!(has_key(&rt, "tree-row-t9") && has_key(&rt, "tree-row-t11") && has_key(&rt, "tree-row-t13"));
     click(&mut rt, "tree-fold-t6");
-    assert!(rt.state.all.tree_folded.contains("t6"));
+    assert_eq!(rt.state.all.tree_open.get("t6"), Some(&false));
     for gone in ["tree-row-t9", "tree-row-t11", "tree-row-t12", "tree-row-t13"] {
         assert!(!has_key(&rt, gone), "{gone} is under a folded row");
     }
@@ -274,6 +274,22 @@ fn the_tree_indents_twenty_points_a_level_and_a_chevron_folds_it() {
     // A row opens its session.
     click(&mut rt, "tree-row-t9");
     assert_eq!(rt.state.selected.as_deref(), Some("t9"));
+}
+
+#[test]
+fn the_tree_is_the_webs_tasks_header_then_the_summary_line_then_neko_and_what_it_looks_after() {
+    let mut rt = runtime(scene("bb-tree"));
+    let y = |key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).map(|e| e.rect[1]).unwrap_or_else(|| panic!("no {key}"));
+    assert!(y("all-title") < y("all-stage-tabs") && y("all-stage-tabs") <= y("all-layout"), "title, then the stage tabs and the layout switch");
+    assert!(y("all-layout") < y("tree-summary"), "the summary line comes under the toolbar");
+    assert!(y("tree-summary") < y("tree-title-neko") && y("tree-title-neko") < y("tree-title-t6"), "Neko first, then its tasks");
+    assert!(has_text(&rt, "Chief of staff") && has_text(&rt, "Collapse all"), "Neko's own line and the page's one button");
+    let row = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("tree-node-neko")).expect("Neko's row");
+    assert_eq!(row.rect[3], 36.0, "the web's 36 point row");
+    let summary = texts_of(&rt, "tree-summary");
+    assert!(summary.starts_with("22 tasks · 0 running · $0.00 reported"), "{summary}");
+    click(&mut rt, "tree-fold-all");
+    assert!(has_text(&rt, "Expand all") && !has_key(&rt, "tree-row-t9"), "Collapse all folds everything but Neko");
 }
 
 #[test]

@@ -139,13 +139,15 @@ pub fn board_refused(s: &mut App) {
     s.all.carry = Some(Carry { id: "t6".into(), from: Stage::Running, over: Some(Stage::NeedsYou), grab: (40.0, 18.0), at: (360.0, 330.0), moved: true });
 }
 
+/// The tree with every node open (nothing in the demo data is running, so the web would show it folded to Neko's own line).
 pub fn tree(s: &mut App) {
     all_sessions(s, Layout::Tree);
+    s.tree_set_all(true);
 }
 
 /// The tree with one parent folded.
 pub fn tree_folded(s: &mut App) {
-    all_sessions(s, Layout::Tree);
+    tree(s);
     s.tree_toggle("t6");
 }
 

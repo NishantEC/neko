@@ -399,6 +399,35 @@ impl TreeInput {
     }
 }
 
+impl TreeInput {
+    /// The tree's input from rows alone (no events, so no runs): for a summary that was not made from a snapshot (the demo scenes).
+    pub fn from_rows(tasks: &[super::model::TaskRow], meta: &BTreeMap<String, super::model::TaskMeta>, parents: &BTreeMap<String, String>) -> TreeInput {
+        TreeInput {
+            tasks: tasks
+                .iter()
+                .map(|t| {
+                    let m = meta.get(&t.id).cloned().unwrap_or_default();
+                    TreeTask {
+                        id: t.id.clone(),
+                        workspace_id: m.workspace_id,
+                        status: t.status,
+                        title: t.title.clone(),
+                        display_title: None,
+                        created_ms: m.created_at_ms,
+                        updated_ms: t.updated_at_ms,
+                        repo: t.line.repo.clone(),
+                        pr: t.line.pr.clone(),
+                        source: t.line.source.clone(),
+                        runs: Vec::new(),
+                    }
+                })
+                .collect(),
+            parent_of: parents.clone(),
+            ..TreeInput::default()
+        }
+    }
+}
+
 /// The web's `Filters`.
 #[derive(Clone, Debug, Default)]
 pub struct Filters {
@@ -496,7 +525,7 @@ fn task_order(a: &TreeTask, b: &TreeTask) -> std::cmp::Ordering {
 }
 
 fn sum(values: impl Iterator<Item = f64>) -> f64 {
-    values.sum()
+    values.fold(0.0, |a, b| a + b)
 }
 
 /// The web's `buildTree`: the tree for `tasks` (already filtered to what the page shows).

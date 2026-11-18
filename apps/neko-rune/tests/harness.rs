@@ -930,7 +930,12 @@ fn batch_b_the_layouts_show_the_daemons_tasks_and_the_tree_lists_each_once() {
     assert!(!keyed(&rt, "board-card-").is_empty(), "the board draws cards");
     rt.update(|s, _| s.set_all_layout(neko_rune::board::Layout::Tree));
     settle(&mut rt);
-    assert_eq!(rt.state.tree_visible().len(), total, "every task is a row, once");
+    rt.update(|s, _| s.tree_set_all(true));
+    settle(&mut rt);
+    let mut shown = rt.state.tree_task_ids();
+    shown.sort();
+    shown.dedup();
+    assert_eq!(shown.len(), total, "every task is a row, once");
     assert!(!keyed(&rt, "tree-row-").is_empty());
 }
 

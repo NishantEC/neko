@@ -59,7 +59,7 @@ fn stage_tabs(s: &App, t: &Neko, counts: &[usize; 5], total: usize) -> El {
                 .checked(open)
                 .focusable(true)
                 .h(28.0)
-                .px(8.0)
+                .px(9.0)
                 .gap(6.0)
                 .center_y()
                 .radius(10.0)
@@ -130,7 +130,6 @@ fn header(s: &App, t: &Neko, layer: &mut Vec<El>, rows: &[&crate::link::TaskRow]
             s.ask_clear_finished();
         }))
         .build(&t.kit, layer);
-    webkit::set_page_width(834.0);
     let new_task = webkit::button(t, "all-new-task", "New task", Some(&icons::PLUS), true, false, |s: &mut App| s.open_new());
     let head = row().w_full().min_h(36.0).gap(10.0).center_y().child(title).child(el().grow(1.0).min_w(0.0)).child(row().gap(6.0).center_y().child(menu).child(new_task));
     // The Rune-only workspace filter sits last in the toolbar's second line.
@@ -252,7 +251,8 @@ fn list_body(s: &App, t: &Neko, layer: &mut Vec<El>, rows: &[&crate::link::TaskR
     col().key("all-scroll").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(list)
 }
 
-pub fn page(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
+pub fn page(s: &App, t: &Neko, layer: &mut Vec<El>, region_w: f32) -> El {
+    webkit::set_page_width(region_w);
     let rows = s.all_rows();
     let layout = s.all_layout();
     let body = match layout {

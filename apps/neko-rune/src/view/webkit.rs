@@ -421,3 +421,26 @@ pub fn toggle(t: &Neko, key: &str, label: &str, on: bool, f: impl Fn(&mut App) +
     let r = row().key(key.to_owned()).role("switch").label(label.to_owned()).checked(on).focusable(true).size(36.0, 22.0).px(2.0).center_y().radius(11.0).fill(track).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(f).child(el().size(18.0, 18.0).radius(9.0).fill(thumb).a11y_hidden());
     if on { r.justify_end() } else { r.justify_start() }
 }
+
+/// An empty page's one button: its key, its words and what it does.
+pub type EmptyButton<'a> = (&'a str, &'a str, Box<dyn Fn(&mut App)>);
+
+/// `Empty` (`ui/empty.tsx`): centred in what is left of the page, 48 round it and 16 between its parts; a 40 point icon well (radius
+/// 14, the foreground at 7%) with a 24 point icon, 8 below it, the title (18 medium), the description (14 on a 22.75 line, muted, at
+/// most 384 wide) and, when there is one, a button.
+pub fn empty(t: &Neko, key: &str, glyph: &'static Icon, title: &str, description: &str, button: Option<EmptyButton>) -> El {
+    let well = row().size(40.0, 40.0).center().radius(14.0).fill(t.text.base.alpha(0.07)).mb(8.0).child(icon(glyph, 24.0).color(t.text.base).a11y_hidden());
+    let header = col().max_w(384.0).gap(8.0).items_center().child(well).child(text(title.to_owned()).key(format!("{key}-title")).font(font(t, 18.0, 500.0, 28.0)).color(t.text.base).wrap()).child(
+        text(description.to_owned()).key(format!("{key}-description")).font(font(t, 14.0, 400.0, 22.75)).color(t.text.muted).wrap(),
+    );
+    let mut c = col().key(key.to_owned()).w_full().grow(1.0).min_h(0.0).padding(48.0).gap(16.0).center().items_center().child(header);
+    if let Some((k, label, press)) = button {
+        c = c.child(button_after_none(t, k, label, press));
+    }
+    c
+}
+
+/// The outline button without an icon (`Button variant="outline"`).
+fn button_after_none(t: &Neko, key: &str, label: &str, on_press: Box<dyn Fn(&mut App)>) -> El {
+    button(t, key, label, None, false, false, move |s: &mut App| on_press(s))
+}

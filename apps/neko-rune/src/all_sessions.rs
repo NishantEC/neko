@@ -69,8 +69,10 @@ pub struct AllState {
     pub carry: Option<crate::board::Carry>,
     /// The press that ends a carry is not a click on the card.
     pub suppress_press: bool,
-    /// Tasks of the tree whose children are folded.
-    pub tree_folded: std::collections::HashSet<String>,
+    /// The tree nodes the person opened or closed, by node id; the rest follow `expands_by_default` (the web's `overrides`).
+    pub tree_open: std::collections::HashMap<String, bool>,
+    /// The tree under the filters now, with what it was made for: rebuilt only when the snapshot or a filter changes.
+    pub tree_cache: std::cell::RefCell<Option<(String, std::rc::Rc<crate::link::tree_model::AgentTree>)>>,
     /// The list's stage groups the person folded, by title.
     pub folded: std::collections::HashSet<String>,
 }
@@ -89,7 +91,8 @@ impl Default for AllState {
             stage: None,
             carry: None,
             suppress_press: false,
-            tree_folded: std::collections::HashSet::new(),
+            tree_open: std::collections::HashMap::new(),
+            tree_cache: std::cell::RefCell::new(None),
             folded: std::collections::HashSet::new(),
         }
     }
@@ -115,7 +118,7 @@ impl App {
     /// The tasks J and K walk, in the order the layout shows them: the list's and the board's rows, or the tree's open rows.
     pub fn nav_ids(&self) -> Vec<String> {
         match self.all.layout {
-            crate::board::Layout::Tree => self.tree_visible().into_iter().map(|r| r.id).collect(),
+            crate::board::Layout::Tree => self.tree_task_ids(),
             _ => self.all_rows().into_iter().map(|t| t.id.clone()).collect(),
         }
     }

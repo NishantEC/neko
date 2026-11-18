@@ -17,6 +17,10 @@ const context = await browser.newContext({ viewport: { width: +w, height: +h }, 
 try {
   const page = await context.newPage();
   const port = process.env.PORT ?? "4771";
+  for (const [k, v] of Object.entries(JSON.parse(process.env.STORAGE ?? "{}"))) {
+    await page.goto(`http://127.0.0.1:${port}/?token=${token}`, { waitUntil: "load" });
+    await page.evaluate(([a, b]) => localStorage.setItem(a, b), [k, v]);
+  }
   await page.goto(`http://127.0.0.1:${port}/?token=${token}#/${route}${route.includes("?") ? "&" : "?"}embed=1&theme=${theme}`, { waitUntil: "load" });
   await page.reload({ waitUntil: "load" });
   await page.waitForTimeout(3000);

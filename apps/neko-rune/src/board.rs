@@ -8,15 +8,32 @@
 //!   and a chevron folds it.
 //! * The chosen layout is kept in Rune's preferences (`app.rs`).
 
-use std::collections::HashSet;
+use std::rc::Rc;
 
 use neko_protocol::workbench::TaskStatus;
 use rune::Phase;
 
 use crate::all_sessions::Stage;
 use crate::app::App;
+use crate::link::tree_model::{AgentNode, AgentTree, Filters, NodeKind, TreeInput, tree_for, visible_order};
 use crate::link::{Call, TaskRow, Wait};
 use crate::status::status_label;
+
+/// The agent tree: the summary's own, or one built for the filters now.
+pub enum TreeRef<'a> {
+    Borrowed(&'a AgentTree),
+    Shared(Rc<AgentTree>),
+}
+
+impl std::ops::Deref for TreeRef<'_> {
+    type Target = AgentTree;
+    fn deref(&self) -> &AgentTree {
+        match self {
+            TreeRef::Borrowed(t) => t,
+            TreeRef::Shared(t) => t,
+        }
+    }
+}
 
 /// The three ways All sessions lays its tasks out.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -197,76 +214,6 @@ pub fn card_words(task: &TaskRow) -> (&'static str, Option<CardAction>) {
     }
 }
 
-// ------------------------------------------------------------------------------------------------ the tree
-
-/// One visible row of the tree.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TreeRow {
-    pub id: String,
-    pub depth: usize,
-    /// How many tasks it started (shown or not).
-    pub children: usize,
-    pub folded: bool,
-}
-
-/// The web's `taskOrder`: running first, then those waiting on you, review, queued, done; newest first inside each.
-fn order_key(row: &TaskRow) -> (usize, i64) {
-    let rank = match Stage::of(row.status) {
-        Stage::Running => 0,
-        Stage::NeedsYou => 1,
-        Stage::Review => 2,
-        Stage::UpNext => 3,
-        Stage::Done => 4,
-    };
-    (rank, -row.updated_at_ms)
-}
-
-/// The tree of `rows` (already filtered): a task whose parent is not among them is a root. Children follow their parent
-/// unless it is folded.
-pub fn tree_rows(rows: &[&TaskRow], parents: &std::collections::BTreeMap<String, String>, folded: &HashSet<String>) -> Vec<TreeRow> {
-    use std::collections::HashMap;
-    let shown: HashSet<&str> = rows.iter().map(|r| r.id.as_str()).collect();
-    // Each shown task's parent, when that is shown too.
-    let parent_of: HashMap<&str, &str> = rows.iter().filter_map(|r| parents.get(&r.id).filter(|p| shown.contains(p.as_str()) && **p != r.id).map(|p| (r.id.as_str(), p.as_str()))).collect();
-    let mut by_order: Vec<&TaskRow> = rows.to_vec();
-    by_order.sort_by_key(|r| order_key(r));
-    let mut out = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-    fn walk(id: &str, depth: usize, by_order: &[&TaskRow], parent_of: &HashMap<&str, &str>, folded: &HashSet<String>, seen: &mut HashSet<String>, out: &mut Vec<TreeRow>) {
-        if !seen.insert(id.to_owned()) {
-            return;
-        }
-        let kids: Vec<&str> = by_order.iter().filter(|r| parent_of.get(r.id.as_str()).is_some_and(|p| *p == id)).map(|r| r.id.as_str()).collect();
-        let is_folded = folded.contains(id) && !kids.is_empty();
-        out.push(TreeRow { id: id.to_owned(), depth, children: kids.len(), folded: is_folded });
-        if !is_folded {
-            for kid in kids {
-                walk(kid, depth + 1, by_order, parent_of, folded, seen, out);
-            }
-        } else {
-            // What a folded row hides is not lost: it must not come back as a root below.
-            let mut hidden = kids;
-            while let Some(h) = hidden.pop() {
-                if seen.insert(h.to_owned()) {
-                    hidden.extend(by_order.iter().filter(|r| parent_of.get(r.id.as_str()).is_some_and(|p| *p == h)).map(|r| r.id.as_str()));
-                }
-            }
-        }
-    }
-    for r in &by_order {
-        if !parent_of.contains_key(r.id.as_str()) {
-            walk(&r.id, 0, &by_order, &parent_of, folded, &mut seen, &mut out);
-        }
-    }
-    // A loop of parents (a starts b starts a) has no root: whatever is left is shown at the top rather than lost.
-    for r in &by_order {
-        if !seen.contains(&r.id) {
-            walk(&r.id, 0, &by_order, &parent_of, folded, &mut seen, &mut out);
-        }
-    }
-    out
-}
-
 // ------------------------------------------------------------------------------------------------ what the view keeps
 
 /// A card being carried.
@@ -389,18 +336,73 @@ impl App {
         }
     }
 
-    /// Folds or unfolds a row of the tree.
-    pub fn tree_toggle(&mut self, id: &str) {
-        if !self.all.tree_folded.remove(id) {
-            self.all.tree_folded.insert(id.to_owned());
-        }
+    /// The filters the Tree page is asked under (`Tasks.tsx`: the stage tab, the search, the workspace and failed-and-cancelled).
+    fn tree_filters(&self) -> Filters {
+        Filters { workspace: self.all.workspace.clone().unwrap_or_default(), stage: self.all.stage, search: self.all.search.text.clone(), include_stopped: self.all.include_stopped }
     }
 
-    /// The rows of the tree under the filters now.
-    pub fn tree_visible(&self) -> Vec<TreeRow> {
-        let Some(summary) = self.summary.as_ref() else { return Vec::new() };
-        let rows = self.all_rows();
-        tree_rows(&rows, &summary.parents, &self.all.tree_folded)
+    /// The agent tree under the filters now. The unfiltered one is the summary's own (built once per snapshot); another is built from
+    /// the summary's `TreeInput` when the snapshot or a filter changes, and kept until then.
+    pub fn agent_tree(&self) -> TreeRef<'_> {
+        let Some(summary) = self.summary.as_ref() else { return TreeRef::Shared(Rc::new(AgentTree::default())) };
+        let f = self.tree_filters();
+        let has_input = !summary.tree_input.tasks.is_empty();
+        if has_input && f.workspace.is_empty() && f.stage.is_none() && f.search.is_empty() && f.include_stopped {
+            return TreeRef::Borrowed(&summary.tree);
+        }
+        let key = format!("{}|{}|{:?}|{}|{}|{}|{}|{}", summary.digest, f.workspace, f.stage, f.search, f.include_stopped, summary.tasks.len(), summary.parents.len(), has_input);
+        if let Some((k, tree)) = self.all.tree_cache.borrow().as_ref()
+            && *k == key
+        {
+            return TreeRef::Shared(tree.clone());
+        }
+        let tree = if has_input {
+            tree_for(&summary.tree_input, &f, self.now_ms)
+        } else {
+            tree_for(&TreeInput::from_rows(&summary.tasks, &summary.meta, &summary.parents), &f, self.now_ms)
+        };
+        let tree = Rc::new(tree);
+        *self.all.tree_cache.borrow_mut() = Some((key, tree.clone()));
+        TreeRef::Shared(tree)
+    }
+
+    /// Whether the tree shows what is under `node` (the web's `isExpanded`).
+    pub fn tree_open(&self, node: &AgentNode) -> bool {
+        self.all.tree_open.get(&node.id).copied().unwrap_or_else(|| node.expands_by_default())
+    }
+
+    /// Folds or unfolds a node of the tree.
+    pub fn tree_toggle(&mut self, id: &str) {
+        let tree = self.agent_tree();
+        let Some(node) = std::iter::once(&tree.root).chain(tree.root.descendants()).find(|n| n.id == id).filter(|n| !n.children.is_empty()) else { return };
+        let open = !self.tree_open(node);
+        drop(tree);
+        self.all.tree_open.insert(id.to_owned(), open);
+    }
+
+    /// Expand all / Collapse all.
+    pub fn tree_set_all(&mut self, open: bool) {
+        let tree = self.agent_tree();
+        let ids: Vec<String> = tree.root.descendants().into_iter().filter(|n| !n.children.is_empty()).map(|n| n.id.clone()).collect();
+        drop(tree);
+        self.all.tree_open = ids.into_iter().map(|id| (id, open)).collect();
+    }
+
+    /// The tasks the tree shows, top to bottom (what J and K walk).
+    pub fn tree_task_ids(&self) -> Vec<String> {
+        let tree = self.agent_tree();
+        let mut order = Vec::new();
+        visible_order(&tree.root, &|n| self.tree_open(n), &mut order);
+        order.into_iter().filter(|n| n.kind == NodeKind::Task).filter_map(|n| n.task_id.clone()).collect()
+    }
+
+    /// "Clear filters": every filter off, failed and cancelled shown again.
+    pub fn clear_all_filters(&mut self) {
+        self.all.search = rune::TextEdit::new("");
+        self.all.stage = None;
+        self.all.workspace = None;
+        self.all.include_stopped = true;
+        self.all.cursor = 0;
     }
 
     /// The words the card's state line gives a task: "Needs approval", "Ready to review"…
@@ -414,7 +416,6 @@ impl App {
 mod tests {
     use super::*;
     use crate::link::{Summary, TaskMeta};
-    use std::collections::BTreeMap;
     use TaskStatus::*;
 
     fn row(id: &str, status: TaskStatus, at: i64) -> TaskRow {
@@ -553,23 +554,38 @@ mod tests {
 
     #[test]
     fn the_tree_puts_children_under_their_parent_and_folds() {
-        let rows = [row("p", Building, 5), row("c1", Queued, 4), row("c2", Building, 3), row("g", Queued, 2), row("solo", Completed, 1)];
-        let refs: Vec<&TaskRow> = rows.iter().collect();
-        let parents: BTreeMap<String, String> = [("c1", "p"), ("c2", "p"), ("g", "c2")].into_iter().map(|(a, b)| (a.to_owned(), b.to_owned())).collect();
-        let open = tree_rows(&refs, &parents, &HashSet::new());
-        let flat: Vec<(String, usize)> = open.iter().map(|r| (r.id.clone(), r.depth)).collect();
+        let mut app = App::headless();
+        let rows = vec![row("p", Building, 5), row("c1", Queued, 4), row("c2", Building, 3), row("g", Queued, 2), row("solo", Completed, 1)];
+        let mut summary = Summary { tasks: rows, ..Summary::default() };
+        summary.parents = [("c1", "p"), ("c2", "p"), ("g", "c2")].into_iter().map(|(a, b)| (a.to_owned(), b.to_owned())).collect();
+        app.summary = Some(summary);
+        app.all.include_stopped = true;
+        let tree = app.agent_tree();
+        let ids = |n: &AgentNode| n.children.iter().map(|c| c.id.clone()).collect::<Vec<_>>();
         // Running first (p), its children running first (c2 with g under it, then c1), then the done one.
-        assert_eq!(flat, [("p".into(), 0), ("c2".into(), 1), ("g".into(), 2), ("c1".into(), 1), ("solo".into(), 0)]);
-        assert_eq!(open[0].children, 2);
-        let folded = tree_rows(&refs, &parents, &["p".to_owned()].into_iter().collect());
-        assert_eq!(folded.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["p", "solo"]);
-        assert!(folded[0].folded);
-        // A child whose parent is filtered out is a root; a cycle cannot loop.
-        let some: Vec<&TaskRow> = rows.iter().filter(|r| r.id != "p").collect();
-        assert_eq!(tree_rows(&some, &parents, &HashSet::new()).iter().filter(|r| r.depth == 0).count(), 3);
-        let cycle: BTreeMap<String, String> = [("a", "b"), ("b", "a")].into_iter().map(|(a, b)| (a.to_owned(), b.to_owned())).collect();
-        let pair = [row("a", Queued, 1), row("b", Queued, 2)];
-        let pair_refs: Vec<&TaskRow> = pair.iter().collect();
-        assert_eq!(tree_rows(&pair_refs, &cycle, &HashSet::new()).len(), 2, "both are shown, once");
+        assert_eq!(ids(&tree.root), ["p", "solo"]);
+        assert_eq!(ids(&tree.root.children[0]), ["c2", "c1"]);
+        assert_eq!(ids(&tree.root.children[0].children[0]), ["g"]);
+        drop(tree);
+        // Nothing runs, so only Neko is open: the J and K walk is the top level until a node is opened.
+        assert_eq!(app.tree_task_ids(), ["p", "solo"]);
+        app.tree_toggle("p");
+        assert_eq!(app.tree_task_ids(), ["p", "c2", "c1", "solo"], "opening p shows its children, c2 still closed");
+        app.tree_set_all(true);
+        assert_eq!(app.tree_task_ids(), ["p", "c2", "g", "c1", "solo"]);
+        app.tree_toggle("p");
+        assert_eq!(app.tree_task_ids(), ["p", "solo"], "folding p hides everything under it");
+        // A child whose parent is filtered out is a root.
+        app.all.search = rune::TextEdit::new("c");
+        let tree = app.agent_tree();
+        assert!(tree.root.children.iter().any(|c| c.id == "c2") && tree.root.children.iter().any(|c| c.id == "c1"));
+        drop(tree);
+        // A loop of parents (a starts b starts a) has no top; like the web, neither is drawn.
+        app.all.search = rune::TextEdit::new("");
+        let pair = vec![row("a", Queued, 1), row("b", Queued, 2)];
+        let mut cyc = Summary { tasks: pair, digest: "cycle".into(), ..Summary::default() };
+        cyc.parents = [("a", "b"), ("b", "a")].into_iter().map(|(a, b)| (a.to_owned(), b.to_owned())).collect();
+        app.summary = Some(cyc);
+        assert!(app.agent_tree().root.children.is_empty());
     }
 }
