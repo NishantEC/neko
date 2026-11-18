@@ -14,14 +14,15 @@ use crate::icons;
 use crate::link::SetupAction;
 use crate::theme::Neko;
 use crate::view::ui::{MenuEntry, note, pick, switch_when, with_menu};
-use crate::view::{page_button, primary_button, quiet_button};
+use crate::view::{primary_button, quiet_button};
 
 pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     let Some(data) = s.setup_data() else { return Page::quiet(t, "tools-none", "Looking for your connections…") };
     if let Some(c) = s.setup.connection.as_deref().and_then(|id| data.connection(id)) {
         return detail(s, t, layer, c);
     }
-    let add = page_button("Add connection", "tools-add", t, |s: &mut App| s.open_add_connection(super::state::AddTab::Browse));
+    // `<Button size="sm"><Plus /> Add connection</Button>` (its menu is the Add connection dialog's three tabs here).
+    let add = crate::view::webkit::button(t, "tools-add", "Add connection", Some(&icons::PLUS), true, false, |s: &mut App| s.open_add_connection(super::state::AddTab::Browse));
     let mut content = col().w_full().gap(24.0);
     if let Some(n) = note(s, t, "setup:page") {
         content = content.child(n);
@@ -29,8 +30,8 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     let sorted = words::sort_connections(&data.connections);
     let broken: Vec<&&McpConnection> = sorted.iter().filter(|c| words::conn_status(c).broken()).collect();
     if !broken.is_empty() {
-        let line = if broken.len() == 1 { format!("{} needs attention.", broken[0].label) } else { format!("{} connections need attention.", broken.len()) };
-        let banner = row().key("tools-attention").w_full().gap(10.0).child(icon(&icons::INFO, 16.0).color(t.meaning.amber).mt(3.0).a11y_hidden()).child(text(format!("{line} Agents and watches that use them can’t run until they’re reconnected.")).font(crate::view::webkit::font(t, 13.0, 400.0, 21.125)).color(t.meaning.amber).wrap().grow(1.0).min_w(0.0));
+        let first = if broken.len() == 1 { format!("{} needs attention.", broken[0].label) } else { format!("{} connections need attention.", broken.len()) };
+        let banner = row().key("tools-attention").w_full().gap(10.0).child(icon(&icons::INFO, 16.0).color(t.meaning.amber).mt(3.0).a11y_hidden()).child(attention_text(t, &first, " Agents and watches that use them can’t run until they’re reconnected.", crate::view::webkit::content_width() - 26.0));
         content = content.child(banner);
     }
     if sorted.is_empty() {
@@ -44,6 +45,37 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
         content = content.child(crate::view::webkit::section(t, "tools-connections", "Connections", Some(&count), None, list));
     }
     kit::tools_page(s, t, layer, false, Some(add), content)
+}
+
+/// The banner's words as the browser flows the web's two JSX text nodes (the count or name, then the fixed sentence): one line of
+/// `width`, the second node carrying on after the first and wrapping to the line start, each node (and each of its lines) a text.
+fn attention_text(t: &Neko, first: &str, rest: &str, width: f32) -> El {
+    let style = crate::view::webkit::font(t, 13.0, 400.0, 21.125);
+    let width_of = |w: &str| rune::text::measure(w, &[], style, None).0;
+    let mut lines: Vec<String> = vec![String::new()];
+    let mut used = width_of(first);
+    for word in rest.split_inclusive(' ') {
+        let line = lines.last_mut().expect("a line");
+        if used + width_of(word.trim_end()) > width + 0.5 && !line.trim().is_empty() {
+            if let Some(l) = lines.last_mut() {
+                *l = l.trim_end().to_owned();
+            }
+            lines.push(String::new());
+            used = 0.0;
+        }
+        if used == 0.0 && word.trim().is_empty() {
+            continue;
+        }
+        lines.last_mut().expect("a line").push_str(word);
+        used += width_of(word);
+    }
+    let mut c = col().grow(1.0).min_w(0.0);
+    let ink = t.meaning.amber;
+    for (i, line) in lines.into_iter().enumerate() {
+        let node = text(line.trim_end().to_owned()).font(style).color(ink).wrap();
+        c = c.child(if i == 0 { row().child(text(first.to_owned()).font(style).color(ink)).child(node) } else { row().child(node) });
+    }
+    c
 }
 
 fn status_ink(t: &Neko, c: Conn) -> rune::Color {

@@ -30,23 +30,18 @@ pub fn tools_page(s: &App, t: &Neko, layer: &mut Vec<El>, skills: bool, action: 
         names.extend(data.workspaces.iter().map(|w| w.name.clone()));
         let by: Vec<(String, String)> = data.workspaces.iter().map(|w| (w.name.clone(), w.id.clone())).collect();
         let current = s.scope_name();
-        let big = super::super::webkit::page_width() < 640.0;
-        let trigger = crate::view::ui::pick(s, t, layer, "setup-scope", "Show for", &names, &current, 176.0, move |s: &mut App, chosen: &str| s.set_scope(by.iter().find(|(n, _)| n == chosen).map(|(_, id)| id.clone())))
-            .h(36.0)
-            .radius(18.0)
-            .fill(t.text.base.alpha(0.05));
-        let _ = big;
-        tools = tools.child(trigger);
+        // `ScopePicker`: the web's 176 wide pill (16 point words under 640).
+        tools = tools.child(super::super::webkit::pick(s, t, layer, "setup-scope", "Show tools for", &names, &current, move |s: &mut App, chosen: &str| s.set_scope(by.iter().find(|(n, _)| n == chosen).map(|(_, id)| id.clone()))));
     }
     if skills && let Some(data) = s.setup_data().filter(|d| d.workspaces.len() > 1) {
         let names: Vec<String> = data.workspaces.iter().map(|w| w.name.clone()).collect();
         let by: Vec<(String, String)> = data.workspaces.iter().map(|w| (w.name.clone(), w.id.clone())).collect();
         let current = data.workspace_name(&s.skills_workspace());
-        tools = tools.child(crate::view::ui::pick(s, t, layer, "skills-workspace", "Workspace for skills", &names, &current, 176.0, move |s: &mut App, chosen: &str| {
+        tools = tools.child(super::super::webkit::pick(s, t, layer, "skills-workspace", "Workspace for skills", &names, &current, move |s: &mut App, chosen: &str| {
             if let Some((_, id)) = by.iter().find(|(n, _)| n == chosen) {
                 s.setup.skills_workspace = Some(id.clone());
             }
-        }).h(36.0).radius(18.0).fill(t.text.base.alpha(0.05)));
+        }));
     }
     if let Some(a) = action {
         tools = tools.child(a);
@@ -77,8 +72,9 @@ pub fn web_row(t: &Neko, key: String, label: String, leading: Option<El>, title:
     }
     r = r.child(text(title.to_owned()).font(super::super::webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().max_w(280.0).a11y_hidden());
     r = r.child(text(description.to_owned()).font(super::super::webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden());
-    for e in trailing {
-        r = r.child(e);
+    // The web's trailing group is one `flex shrink-0 gap-2` (8, not the row's 12).
+    if !trailing.is_empty() {
+        r = r.child(row().gap(8.0).center_y().children(trailing));
     }
     r
 }

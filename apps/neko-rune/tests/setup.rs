@@ -425,6 +425,19 @@ fn schedules_are_the_webs_page_a_picker_then_a_section_per_workspace() {
 }
 
 #[test]
+fn tools_is_the_webs_page_the_banner_in_two_texts_and_the_rows_trailing_words_8_apart() {
+    let rt = scene("setup-tools");
+    let rect = |key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no {key}")).rect;
+    // The attention banner is two JSX text nodes (the name, then the fixed sentence), the second flowing on after the first.
+    assert!(has_text(&rt, "2 connections need attention."), "{:?}", texts(&rt));
+    assert!(texts(&rt).iter().any(|t| t.trim_start().starts_with("Agents and watches that use them")) && has_text(&rt, "reconnected."), "the sentence carries on after the count and wraps: {:?}", texts(&rt));
+    // `flex shrink-0 gap-2`: a row's tool count and its status are 8 apart, the status at the row's end.
+    let (tools, status) = (rect("conn-tools-c1"), rect("conn-status-c1"));
+    assert!((status[0] - (tools[0] + tools[2]) - 8.0).abs() < 0.6, "{tools:?} {status:?}");
+    assert!(rt.find("pick-setup-scope").is_some(), "the web's ScopePicker");
+}
+
+#[test]
 fn an_empty_list_is_one_quiet_line_and_one_action() {
     for (section, key) in [
         (SetupSection::Workspaces, "ws-none"),

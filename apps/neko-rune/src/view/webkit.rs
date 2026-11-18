@@ -22,6 +22,19 @@ pub fn page_width() -> f32 {
     PAGE_W.with(|c| c.get())
 }
 
+thread_local! {
+    /// The width of the column a Setup page's content sits in (the viewport less the page's own sides), for text that flows by hand.
+    static CONTENT_W: std::cell::Cell<f32> = const { std::cell::Cell::new(578.0) };
+}
+
+pub fn set_content_width(w: f32) {
+    CONTENT_W.with(|c| c.set(w));
+}
+
+pub fn content_width() -> f32 {
+    CONTENT_W.with(|c| c.get())
+}
+
 /// The web's text at a size: Inter, the given weight, the line height the browser measured.
 pub fn font(t: &Neko, size: f32, weight: f32, line_height: f32) -> TextStyle {
     TextStyle { size, weight, line_height, ..t.ty.row }
