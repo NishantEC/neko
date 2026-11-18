@@ -9,6 +9,7 @@ use std::collections::HashSet;
 
 use neko_protocol::agent_profiles::AgentProfile;
 use neko_protocol::mcp_host::{Responsibility, ServerConfig};
+use neko_protocol::improve::ImproveReply;
 use neko_protocol::packs::{PackListing, PackPreview};
 use neko_protocol::scheduled_plans::Schedule;
 use neko_protocol::workbench::{MemoryEntry, MemoryKind, MemoryOptions, Workspace};
@@ -21,6 +22,7 @@ use crate::views::FullView;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SetupSection {
     Packs,
+    Improvements,
     Workspaces,
     Watching,
     Tools,
@@ -32,11 +34,12 @@ pub enum SetupSection {
 
 impl SetupSection {
     /// The rail's order.
-    pub const ALL: [SetupSection; 8] = [SetupSection::Packs, SetupSection::Workspaces, SetupSection::Watching, SetupSection::Tools, SetupSection::Skills, SetupSection::Memory, SetupSection::Profiles, SetupSection::Schedules];
+    pub const ALL: [SetupSection; 9] = [SetupSection::Packs, SetupSection::Improvements, SetupSection::Workspaces, SetupSection::Watching, SetupSection::Tools, SetupSection::Skills, SetupSection::Memory, SetupSection::Profiles, SetupSection::Schedules];
 
     pub fn title(self) -> &'static str {
         match self {
             SetupSection::Packs => "Packs",
+            SetupSection::Improvements => "Improvements",
             SetupSection::Workspaces => "Workspaces",
             SetupSection::Watching => "Watching",
             SetupSection::Tools => "Tools",
@@ -50,6 +53,7 @@ impl SetupSection {
     pub fn key(self) -> &'static str {
         match self {
             SetupSection::Packs => "packs",
+            SetupSection::Improvements => "improvements",
             SetupSection::Workspaces => "workspaces",
             SetupSection::Watching => "watching",
             SetupSection::Tools => "tools",
@@ -127,6 +131,8 @@ pub enum Dialog {
     /// the preview of what it would add (the person's approval is the Install button; its environment values are the
     /// masked fields `pack:env:<NAME>`).
     Pack { tab: PackTab, preview: Option<Box<PackPreview>>, intent: PackIntent },
+    /// One suggestion's detail (the web's `ImproveDetail` dialog); `evidence` scrolls it to its Evidence heading when it opens.
+    Improve { id: String, evidence: bool },
     Confirm(Confirm),
 }
 
@@ -174,6 +180,13 @@ pub struct SetupState {
     pub pack: Option<String>,
     /// Packs a check or an update is running for (their buttons are off until it answers).
     pub pack_busy: HashSet<String>,
+    /// The suggestions and whether Neko looks for patterns, as the daemon last said (None until it answers). Not in the workbench:
+    /// asked for on open, after each action and slowly.
+    pub improve: Option<ImproveReply>,
+    /// The one line the last Improvements command answered with (`ImproveReply::note`).
+    pub improve_note: Option<String>,
+    /// The suggestion a request is out for (its buttons are off until it answers), or "enable".
+    pub improve_busy: Option<String>,
 }
 
 impl Default for SetupState {
@@ -196,6 +209,9 @@ impl Default for SetupState {
             packs: None,
             pack: None,
             pack_busy: HashSet::new(),
+            improve: None,
+            improve_note: None,
+            improve_busy: None,
         }
     }
 }
@@ -255,6 +271,9 @@ impl App {
         }
         if let SetupAction::PackHealth { name } | SetupAction::PackCleanUp { name } = call {
             self.setup.pack_busy.remove(name);
+        }
+        if matches!(call, SetupAction::ImproveApply { .. } | SetupAction::ImproveReject { .. } | SetupAction::ImproveUndo { .. } | SetupAction::ImproveEnable) {
+            self.setup.improve_busy = None;
         }
     }
 
@@ -1230,5 +1249,96 @@ impl App {
             coral: true,
             calls: vec![SetupAction::PackRemove { name: pack.info.name }],
         }));
+    }
+}
+
+
+/// Improvements: what Neko suggests after it notices the same trouble again (`neko_protocol::improve`). The daemon applies and undoes;
+/// this only asks, and every answer is the whole listing.
+impl App {
+    pub fn improvements(&self) -> Option<&ImproveReply> {
+        self.setup.improve.as_ref()
+    }
+
+    pub fn improve_open(&mut self, id: &str, evidence: bool) {
+        self.pages.notes.retain(|k, _| !k.starts_with("setup:"));
+        self.setup.dialog = Some(Dialog::Improve { id: id.to_owned(), evidence });
+    }
+
+    /// Whether a request of this page is out: a second press waits for the first.
+    pub fn improve_is_busy(&self, id: &str) -> bool {
+        self.setup.improve_busy.as_deref() == Some(id)
+    }
+
+    fn improve_begin(&mut self, id: &str) -> bool {
+        if self.setup.improve_busy.is_some() {
+            return false;
+        }
+        self.setup.improve_busy = Some(id.to_owned());
+        self.pages.notes.remove(&format!("setup:improve:{id}"));
+        true
+    }
+
+    /// "Apply": a pack suggestion answers with the source to preview (nothing installs), a skill change waits in Skills.
+    pub fn improve_apply(&mut self, id: &str) {
+        if self.improve_begin(id) {
+            self.setup_call(SetupAction::ImproveApply { id: id.to_owned() });
+        }
+    }
+
+    /// "Reject": it never asks.
+    pub fn improve_reject(&mut self, id: &str) {
+        if self.improve_begin(id) {
+            self.setup_call(SetupAction::ImproveReject { id: id.to_owned() });
+        }
+    }
+
+    /// "Undo": it asks first only when the daemon says the change is hard to take back (`undo_confirms`).
+    pub fn improve_undo(&mut self, id: &str) {
+        let Some(item) = self.improvements().and_then(|r| r.proposals.iter().find(|p| p.id == id)).cloned() else { return };
+        if self.setup.improve_busy.is_some() {
+            return;
+        }
+        if item.undo_confirms {
+            self.setup.dialog = Some(Dialog::Confirm(Confirm { title: format!("Undo “{}”?", item.title), description: words::undo_words(item.kind).to_owned(), button: "Undo".to_owned(), coral: true, calls: vec![SetupAction::ImproveUndo { id: item.id }] }));
+        } else if self.improve_begin(id) {
+            self.setup_call(SetupAction::ImproveUndo { id: id.to_owned() });
+        }
+    }
+
+    pub fn improve_enable(&mut self) {
+        if self.improve_begin("enable") {
+            self.setup_call(SetupAction::ImproveEnable);
+        }
+    }
+
+    /// The daemon answered with the listing (to a list, an apply, a reject, an undo or the switch). A pack suggestion that was applied
+    /// opens that pack's preview on the Packs page.
+    pub fn improve_arrived(&mut self, call: &SetupAction, reply: ImproveReply) -> bool {
+        let changed = self.setup.improve.as_ref() != Some(&reply);
+        let open_pack = reply.open_pack.clone().filter(|_| matches!(call, SetupAction::ImproveApply { .. }));
+        if !call.reads() {
+            self.setup.improve_note = reply.note.clone();
+        }
+        if let Some(Dialog::Improve { id, .. }) = &self.setup.dialog
+            && !reply.proposals.iter().any(|p| &p.id == id)
+        {
+            self.setup.dialog = None;
+        }
+        self.setup.improve = Some(reply);
+        if !matches!(call, SetupAction::ImproveList) {
+            self.setup.improve_busy = None;
+        }
+        self.pages.notes.remove(&call.key());
+        if !call.reads() {
+            self.setup_applied(call);
+        }
+        if let Some(source) = open_pack {
+            // The pack's preview opens on the Packs page; the person installs it there.
+            self.setup.dialog = None;
+            self.open_setup(SetupSection::Packs);
+            self.pack_look(PackIntent::Install, source);
+        }
+        changed || !call.reads()
     }
 }

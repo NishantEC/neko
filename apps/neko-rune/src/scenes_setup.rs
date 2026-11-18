@@ -5,6 +5,7 @@
 
 use neko_protocol::agent_profiles::{AgentProfile, AgentProfiles, ProfileReadGrant, WorkspaceAssignment};
 use neko_protocol::decision_context::{DecisionRecord, PreferenceApplicability, PreferenceState, WorkingPreference};
+use neko_protocol::improve::{ImproveEvent, ImproveKind, ImproveReply, ImproveState, Improvement};
 use neko_protocol::mcp_host::{McpConnection, McpTool, Responsibility, ServerConfig, SourceLink, ToolGrant};
 use neko_protocol::packs::{CatalogEntry, InstalledPack, PackContents, PackHealth, PackInfo, PackListing, PackPreview, PackOrphan, PackRequirement, PackStatus, PluginPower, RoutineText};
 use neko_protocol::scheduled_plans::Schedule;
@@ -387,4 +388,75 @@ pub fn pack_changed(s: &mut App) {
 pub fn pack_remove(s: &mut App) {
     packs_base(s);
     s.confirm_remove_pack("demo-feed");
+}
+
+// ---- improvements (made-up: nothing here names a real person, company or ticket)
+
+#[allow(clippy::too_many_arguments)]
+fn suggestion(id: &str, kind: ImproveKind, state: ImproveState, title: &str, why: &str, change: &str, ago: i64, can_undo: bool, undo_confirms: bool) -> Improvement {
+    Improvement {
+        id: id.into(),
+        signal_key: format!("correction:{id}"),
+        kind,
+        title: title.into(),
+        why: why.into(),
+        change: change.into(),
+        default_label: String::new(),
+        target: String::new(),
+        workspace_id: "w1".into(),
+        evidence: "Asha corrected the same step in 3 reviews of Acme tickets (ENG-123 among them).\nThe agent skipped it each time.".into(),
+        diff: String::new(),
+        state,
+        created_ms: DEMO_NOW - ago,
+        applied_ms: matches!(state, ImproveState::Applied | ImproveState::Helped | ImproveState::DidntHelp).then_some(DEMO_NOW - ago + HOUR),
+        resolved_ms: None,
+        before: 3,
+        after: if state == ImproveState::DidntHelp { 2 } else { 0 },
+        inbox_seq: None,
+        undo_seq: None,
+        history: Vec::new(),
+        can_undo,
+        undo_confirms,
+        task_id: None,
+    }
+}
+
+fn improvements_listing(enabled: bool) -> ImproveReply {
+    let mut open = suggestion("i1", ImproveKind::SkillPatch, ImproveState::Open, "Check the ENG-123 link before replying", "Asha asked for the ticket link in the first line of a reply three times.", "", DAY, false, false);
+    open.target = "reviewer".into();
+    open.default_label = "Improve the reviewer skill".into();
+    open.diff = "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -1,3 +1,4 @@\n Review the change.\n+Put the ticket link in the first line.\n-Skip the link.\n Keep it short.".into();
+    let applied = suggestion("i2", ImproveKind::StandingOrder, ImproveState::Applied, "Say which branch a pull request targets", "Acme reviews asked for the base branch in every description.", "Name the base branch in each pull request description.", DAY, true, false);
+    let rejected = suggestion("i3", ImproveKind::NewSkill, ImproveState::Rejected, "A skill for release notes", "Asha wrote release notes by hand twice this week.", "A new release-notes skill.", 5 * DAY, false, false);
+    let mut helped = suggestion("i4", ImproveKind::InstallPack, ImproveState::Helped, "Install the issue tracker pack", "The agent asked for a tracker tool six times.", "", 12 * DAY, true, true);
+    helped.target = "issue-tracker".into();
+    helped.history = vec![ImproveEvent { at_ms: DEMO_NOW - 12 * DAY, text: "Suggested.".into() }, ImproveEvent { at_ms: DEMO_NOW - 11 * DAY, text: "Applied: the pack's preview was opened.".into() }, ImproveEvent { at_ms: DEMO_NOW - 4 * DAY, text: "The trouble stopped: it helped.".into() }];
+    let bad = suggestion("i5", ImproveKind::CodeTask, ImproveState::DidntHelp, "Retry the flaky test setup", "The same setup failure came back in 4 Acme runs.", "Retry the fixture setup once before failing.", 12 * DAY, true, true);
+    let sent = suggestion("i6", ImproveKind::NewSkill, ImproveState::Sent, "A skill for ENG-123 style tickets", "Asha filed three similar tickets.", "A new skill for ticket triage.", 2 * HOUR, false, false);
+    ImproveReply { enabled, dev_checkout: true, proposals: vec![open, applied, rejected, helped, bad, sent], open_pack: None, note: None }
+}
+
+pub fn improvements(s: &mut App) {
+    base(s, SetupSection::Improvements);
+    s.setup.improve = Some(improvements_listing(true));
+}
+
+pub fn improvements_off(s: &mut App) {
+    base(s, SetupSection::Improvements);
+    s.setup.improve = Some(improvements_listing(false));
+}
+
+pub fn improvements_empty(s: &mut App) {
+    base(s, SetupSection::Improvements);
+    s.setup.improve = Some(ImproveReply { enabled: true, dev_checkout: false, proposals: Vec::new(), open_pack: None, note: None });
+}
+
+pub fn improvement_detail(s: &mut App) {
+    improvements(s);
+    s.improve_open("i1", false);
+}
+
+pub fn improvement_detail_pack(s: &mut App) {
+    improvements(s);
+    s.improve_open("i4", true);
 }

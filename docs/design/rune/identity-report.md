@@ -9,7 +9,7 @@ pixels (pixelmatch, threshold 0.1, anti-aliasing ignored). "First run" is the or
 after Gate 1 (structure fixes); "After" is the last run of this pass. The settings-budget and settings-workspaces pairs are dropped:
 the web has no such sections (Budget is part of "AI & agents", Workspaces is a Setup page).
 
-**26 of 26 pairs pass the 2.5% pixel measure (the last full run, 2026-11-18, after Memory, Watching, Usage, Calendar month and Plugins were ported). The words-placed measure is at least 85% for the five pages of the last pass (Memory 100%, Watching 100%, Usage 94.4%, Calendar month 100%, Plugins 94.4%) and for every Settings pair. Under 85% and not part of that pass: all-sessions-board (76.9%, was 90.1% on an older copy of the data), setup-tools (73.5%), setup-packs (50%), pull-requests (3.2%) and setup-schedules (5%); their pixel numbers are under 2.5%, their text is where the web puts it only in part.**
+**27 of 27 pairs pass the 2.5% pixel measure (the last full run, 2026-11-18, after Pull requests, Schedules, Packs, Tools and the new Improvements page were ported). The words-placed measure is at least 85% for every pair but one: all-sessions-board (76.9%, accepted: an invisible twin title that lifted it was removed on purpose, and nothing like it is to be added). Pull requests, Schedules, Packs, Tools and Improvements are 100%, 100%, 100%, 98% and 100%.**
 
 | Pair | First run | Baseline at 1440 | After | Words placed | Pass |
 | --- | ---: | ---: | ---: | ---: | :---: |
@@ -22,13 +22,13 @@ the web has no such sections (Budget is part of "AI & agents", Workspaces is a S
 | all-sessions-board | 3.95 | 3.95 | 0.62 | 76.9% | yes |
 | usage | 4.0 | 3.84 | 0.4 | 94.4% | yes |
 | plugins | 3.23 | 3.26 | 0.94 | 94.4% | yes |
-| pull-requests | 2.61 | 2.41 | 2.41 | 3.2% | yes |
+| pull-requests | 2.61 | 2.41 | 0.47 | 100% | yes |
 | setup-workspaces | 3.4 | 2.41 | 1.02 | 100% | yes |
-| setup-schedules | 1.63 | 1.83 | 1.92 | 5% | yes |
+| setup-schedules | 1.63 | 1.83 | 1.09 | 100% | yes |
 | settings-appearance | 12.76 | 12.76 | 1.53 | 91.9% | yes |
 | settings-rulebook | 6.51 | 6.51 | 1.13 | 85.7% | yes |
 | setup-skills | 8.81 | 7.28 | 1.09 | 95.8% | yes |
-| setup-tools | 6.14 | 6.58 | 1.04 | 73.5% | yes |
+| setup-tools | 6.14 | 6.58 | 0.81 | 98% | yes |
 | settings-about | 1.39 | 1.39 | 0.91 | 86.2% | yes |
 | settings-ai | 3.45 | 3.45 | 0.76 | 88.4% | yes |
 | settings-permissions | 2.23 | 2.23 | 0.75 | 90.6% | yes |
@@ -38,9 +38,12 @@ the web has no such sections (Budget is part of "AI & agents", Workspaces is a S
 | settings-general | 1.77 | 1.77 | 0.38 | 90.6% | yes |
 | settings-quick-panel | 1.44 | 1.44 | 0.24 | 86.4% | yes |
 | setup-profiles | 1.13 | 0.29 | 0.18 | 100% | yes |
-| setup-packs | 4.42 | 3.16 | 0.16 | 50% | yes |
+| setup-packs | 4.42 | 3.16 | 0.06 | 100% | yes |
+| setup-improvements | n/a (new page) | n/a | 0.18 | 100% | yes |
 
 ## Done in this pass
+
+Pull requests, Schedules, Packs, Tools, Improvements (2026-11-18): `PullRequests.tsx` (the work header with "Merge N ready" and its menu, groups and rows with the note line, the 72 point age column, hover actions over the row's end), `Schedules.tsx` (picker, a section per workspace with its "New", rows with two-node recurrence text and the three-dot menu), `Packs.tsx` (Add pack with its plus, Installed, 48 point rows, outline Review/Update buttons), `Tools.tsx` (the picker pill, Add connection button, the banner in two text nodes, trailing words 8 apart) and the new Improvements page (`Improvements.tsx`, `ImproveDetail.tsx`; list, off state, empty state, detail dialog, the `Improve` requests). Not matched: Tools' attention sentence (one JSX text node over two lines, compared as one box; 98%); Improvements' "Open evidence" does not scroll the detail to its heading. Rows of Schedules, Packs and Improvements were compared with placeholder data made in the isolated harness copy (the copied data has no schedule and no pack), never in the live data. Rune-only controls: Schedules' header "New schedule", the Working… text on a busy pack row, a pull request row's press and right-click menu.
 
 Setup, Memory (2026-11-18): `Memory.tsx`: the web's tab well (Saved memories, Working style), the workspace picker and "Add memory" in the line beside it (wrapping under the tabs when they do not fit), Suggested, one collapsible section per scope with the web's 44 point rows (one-line text that opens, kind and source as two text nodes, a pencil and the three-dot menu on hover), Settings with its two switch rows; Working style has the guidance line with "Add guidance", the three states (Dismissed folded) and Recent decisions. Rune-only: the search behind a magnifier last in the tab line's group, the right-click menus. Tabs are 38/32 high with 13 point words from a 640 point page, not 42/36 and 16 (`webkit::tabs`).
 
@@ -71,7 +74,7 @@ workspace pickers, 44 point rows and the skills search line. The Setup action bu
 
 ## Not done
 
-The Calendar's Day and Week grids (the web draws the hour grid with its own all-day row), the words-placed measure of the pairs listed under 85% above. The pixel measure passes a sparse page whose rows are in the wrong place, so read "Words
+The Calendar's Day and Week grids (the web draws the hour grid with its own all-day row), the Board's words-placed measure (accepted). The pixel measure passes a sparse page whose rows are in the wrong place, so read "Words
 placed" beside it. In Settings, each page's missing words are the web's screen-reader heading (three text nodes: the title, a colon and the
 section summary), and on About the daemon's address (it is another port in Rune's run).
 

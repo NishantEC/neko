@@ -598,9 +598,10 @@ pub fn ghost_xs_button(t: &Neko, key: &str, label: &str, glyph: Option<&'static 
     r.child(text(label.to_owned()).font(font(t, size, 500.0, lh)).color(t.text.base).a11y_hidden())
 }
 
-/// `Button variant="outline" size="xs"`: the ghost xs button on the popover fill (`dark:bg-input/32`) with the input border, 32 high.
+/// `Button variant="outline" size="xs"`: the ghost xs button on the popover fill (`dark:bg-input/32`) with the input border, 32 high
+/// (11 at the sides: the border and 10).
 pub fn outline_xs_button(t: &Neko, key: &str, label: &str, help: &str, on_press: impl Fn(&mut App) + 'static) -> El {
-    ghost_xs_button(t, key, label, None, help, on_press).fill(t.text.base.alpha(0.06)).border(1.0, t.surface.field_border).px(10.0)
+    ghost_xs_button(t, key, label, None, help, on_press).fill(t.text.base.alpha(0.06)).border(1.0, t.surface.field_border)
 }
 
 /// The web's `Textarea` with no fill or border of its own (`!border-0 !bg-transparent px-1`): 4 at the sides, 10 above and below,
@@ -686,6 +687,14 @@ pub fn empty_rich(t: &Neko, key: &str, glyph: &'static Icon, title: &str, descri
         c = c.child(b);
     }
     c
+}
+
+/// `EmptyBlock` with only a title (no description): the well, then the title (`px-6 py-12`).
+pub fn empty_titled(t: &Neko, key: &str, glyph: &'static Icon, title: &str) -> El {
+    let well = row().size(40.0, 40.0).center().radius(14.0).fill(t.text.base.alpha(0.07)).mb(8.0).child(icon(glyph, 24.0).color(t.text.base).a11y_hidden());
+    let title_style = TextStyle { tracking: -0.45, ..font(t, 18.0, 500.0, 28.0) };
+    let header = col().max_w(384.0).gap(8.0).items_center().child(well).child(text(title.to_owned()).key(format!("{key}-title")).font(title_style).color(t.text.base));
+    col().key(key.to_owned()).w_full().px(24.0).py(48.0).gap(16.0).center().items_center().child(header)
 }
 
 /// Words with an inline code span, laid out the way a browser flows the JSX's text nodes: balanced (`text-balance`) lines of at most

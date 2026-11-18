@@ -524,6 +524,55 @@ pub fn pack_glyph(status: neko_protocol::packs::PackStatus) -> StatusKind {
     }
 }
 
+/// `IMPROVE_KIND_LABELS` (`web/src/setup/improve.ts`): the words beside a title.
+pub fn improve_kind_label(kind: neko_protocol::improve::ImproveKind) -> &'static str {
+    kind.label()
+}
+
+/// `IMPROVE_STATE_WORDS`: the glyph's name for assistive tech, and the detail's first words.
+pub fn improve_state_words(state: neko_protocol::improve::ImproveState) -> &'static str {
+    use neko_protocol::improve::ImproveState::*;
+    match state {
+        Open => "Open",
+        Sent => "Waiting in Skills",
+        Applied => "Applied",
+        Helped => "Helped",
+        DidntHelp => "Didn’t help",
+        Rejected => "Rejected",
+    }
+}
+
+/// `improveStateWord`: the muted word after the title; an open suggestion needs none.
+pub fn improve_state_word(state: neko_protocol::improve::ImproveState) -> Option<&'static str> {
+    (state != neko_protocol::improve::ImproveState::Open).then(|| improve_state_words(state))
+}
+
+/// `improveGlyph`: amber half circle for waiting, mint check, coral cross, faint cross for rejected.
+pub fn improve_glyph(state: neko_protocol::improve::ImproveState) -> StatusKind {
+    use neko_protocol::improve::ImproveState::*;
+    match state {
+        Open | Sent => StatusKind::InProgress,
+        Applied | Helped => StatusKind::Done,
+        DidntHelp => StatusKind::Failed,
+        Rejected => StatusKind::Cancelled,
+    }
+}
+
+/// `improveCounts`: "Fired 3 times in the 7 days before, 0 since." Only once applied.
+pub fn improve_counts(before: u32, after: u32, applied_ms: Option<i64>) -> Option<String> {
+    applied_ms.filter(|m| *m != 0).map(|_| format!("Fired {} in the 7 days before, {after} since.", if before == 1 { "1 time".to_owned() } else { format!("{before} times") }))
+}
+
+/// `undoWords`: what the confirmation says before an undo that is not trivially reversible.
+pub fn undo_words(kind: neko_protocol::improve::ImproveKind) -> &'static str {
+    use neko_protocol::improve::ImproveKind::*;
+    match kind {
+        InstallPack => "The pack is removed, with its connections, skills, plugin and routines. A copy is kept in the cleanup archive.",
+        CodeTask => "The task’s changes are rolled back from its checkpoints, or, once pushed, a task is created to revert them.",
+        _ => "The change is reversed.",
+    }
+}
+
 pub fn pack_status_label(status: neko_protocol::packs::PackStatus) -> &'static str {
     use neko_protocol::packs::PackStatus;
     match status {
@@ -615,6 +664,22 @@ mod tests {
         assert_eq!(watch_title(&w), "New issues");
         w.name = Some("Sentry errors".into());
         assert_eq!(watch_title(&w), "Sentry errors");
+    }
+
+    #[test]
+    fn the_improvement_words_are_the_webs() {
+        use neko_protocol::improve::{ImproveKind, ImproveState};
+        assert_eq!(improve_kind_label(ImproveKind::InstallPack), "Install a pack");
+        assert_eq!(improve_kind_label(ImproveKind::CodeTask), "Change Neko");
+        assert_eq!(improve_state_word(ImproveState::Open), None);
+        assert_eq!(improve_state_word(ImproveState::Sent), Some("Waiting in Skills"));
+        assert_eq!(improve_state_word(ImproveState::DidntHelp), Some("Didn’t help"));
+        assert_eq!(improve_glyph(ImproveState::Rejected), StatusKind::Cancelled);
+        assert_eq!(improve_counts(3, 0, Some(5)).as_deref(), Some("Fired 3 times in the 7 days before, 0 since."));
+        assert_eq!(improve_counts(1, 0, Some(5)).as_deref(), Some("Fired 1 time in the 7 days before, 0 since."));
+        assert_eq!(improve_counts(3, 0, None), None, "only once applied");
+        assert!(undo_words(ImproveKind::InstallPack).starts_with("The pack is removed"));
+        assert_eq!(undo_words(ImproveKind::StandingOrder), "The change is reversed.");
     }
 
     #[test]

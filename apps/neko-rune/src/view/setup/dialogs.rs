@@ -33,6 +33,7 @@ pub fn mount(s: &App, t: &Neko, layer: &mut Vec<El>, win_h: f32) {
         Dialog::Preference { id, .. } => preference(s, t, layer, win_h, id.as_deref()),
         Dialog::Correct { .. } => correct(s, t, layer, win_h),
         Dialog::Pack { tab, preview, intent } => super::pack_dialog::pack(s, t, layer, win_h, tab, preview.as_deref(), &intent),
+        Dialog::Improve { id, evidence } => super::improvements::detail(s, t, layer, win_h, &id, evidence),
         Dialog::Confirm(c) => confirm(s, t, layer, win_h, &c),
     }
     layer.extend(popups);

@@ -79,6 +79,14 @@
   "web": "packs"
  },
  {
+  "name": "setup-improvements",
+  "rune": {
+   "NEKO_RUNE_VIEW": "setup",
+   "NEKO_RUNE_SETUP": "improvements"
+  },
+  "web": "improvements"
+ },
+ {
   "name": "setup-workspaces",
   "rune": {
    "NEKO_RUNE_VIEW": "setup",

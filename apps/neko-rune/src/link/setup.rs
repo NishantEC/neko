@@ -1,4 +1,4 @@
-//! The Setup pages' data and requests (Packs, Workspaces, Watching, Tools, Skills, Memory, Profiles,
+//! The Setup pages' data and requests (Packs, Improvements, Workspaces, Watching, Tools, Skills, Memory, Profiles,
 //! Schedules). [`SetupData`] is what the client keeps of the workbench for them; [`SetupAction`] is one
 //! request each of the web UI's setup pages sends (`pages/setup/*.tsx`), with the same fields, so a
 //! click here and a click there do the same thing. The daemon stays the only writer: every request
@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 use neko_protocol::agent_profiles::{AgentProfile, AgentProfiles, ProfileCommand};
 use neko_protocol::decision_context::{DecisionContextCommand, DecisionRecord, PreferenceApplicability, PreferenceState, WorkingPreference};
+use neko_protocol::improve::ImproveCommand;
 use neko_protocol::mcp_host::{McpCommand, McpConnection, Responsibility, ServerConfig, ToolGrant};
 use neko_protocol::packs::PackCommand;
 use neko_protocol::scheduled_plans::{Schedule, ScheduleCommand};
@@ -202,6 +203,17 @@ pub enum SetupAction {
     PackApprove { name: String, digest: String },
     /// Deletes what a failed update or removal left behind.
     PackCleanUp { name: String },
+    // Improvements (`pages/setup/Improvements.tsx`). Every answer is the whole `ImproveReply` (`Reply::Improve`), which replaces what is shown.
+    /// The suggestions, newest first, and whether Neko is looking for patterns at all.
+    ImproveList,
+    /// Applies a suggestion by its kind: a pack answers with the source whose preview opens (nothing installs), a skill change waits in Skills.
+    ImproveApply { id: String },
+    /// Rejects a suggestion. It never asks.
+    ImproveReject { id: String },
+    /// Reverses an applied one. Only built inside `state.rs`: it asks first when the daemon says the change is hard to take back.
+    ImproveUndo { id: String },
+    /// "Turn on suggestions": the page's one switch while Neko is not looking for patterns.
+    ImproveEnable,
 }
 
 impl SetupAction {
@@ -226,7 +238,8 @@ impl SetupAction {
             ReadGrant { reader, .. } => row(reader),
             PackRemove { name } | PackHealth { name } | PackCleanUp { name } | PackUpdate { name, digest: None } => format!("setup:pack:{name}"),
             PackPreview { .. } | PackInstall { .. } | PackApprove { .. } | PackUpdate { digest: Some(_), .. } => "setup:form".to_owned(),
-            PackList => "setup:page".to_owned(),
+            PackList | ImproveList | ImproveEnable => "setup:page".to_owned(),
+            ImproveApply { id } | ImproveReject { id } | ImproveUndo { id } => format!("setup:improve:{id}"),
             SaveWorkspace { .. } | AddConnection { .. } | SaveWatch(_) | SaveMemory(_) | SavePreference { .. } | SaveProfile(_) | SaveSchedule(_) => "setup:form".to_owned(),
             Discover { .. } | AskIn { .. } | SkillsRefresh | SkillPreview { .. } | SkillCurator { .. } | SetMemoryOptions(_) => "setup:page".to_owned(),
         }
@@ -295,12 +308,17 @@ impl SetupAction {
             PackHealth { name } => Request::Packs(PackCommand::Health { name }),
             PackApprove { name, digest } => Request::Packs(PackCommand::Approve { name, digest }),
             PackCleanUp { name } => Request::Packs(PackCommand::CleanUp { name }),
+            ImproveList => Request::Improve(ImproveCommand::List),
+            ImproveApply { id } => Request::Improve(ImproveCommand::Apply { id }),
+            ImproveReject { id } => Request::Improve(ImproveCommand::Reject { id }),
+            ImproveUndo { id } => Request::Improve(ImproveCommand::Undo { id }),
+            ImproveEnable => Request::Improve(ImproveCommand::SetEnabled { enabled: true }),
         }
     }
 
     /// Whether this only fetches (a refusal of it stays quiet while the page has older data).
     pub fn reads(&self) -> bool {
-        matches!(self, SetupAction::PackList)
+        matches!(self, SetupAction::PackList | SetupAction::ImproveList)
     }
 }
 
@@ -319,6 +337,15 @@ mod tests {
         let save = &body["Workbench"]["SaveWorkspaceWithFolders"];
         assert_eq!(save["workspace"]["name"], "acme");
         assert_eq!(save["folders"], serde_json::json!(["/a", "/b"]));
+    }
+
+    #[test]
+    fn improvements_send_the_webs_improve_commands() {
+        assert_eq!(json(&SetupAction::ImproveList), serde_json::json!({"Improve": "List"}));
+        assert_eq!(json(&SetupAction::ImproveApply { id: "i1".into() }), serde_json::json!({"Improve": {"Apply": {"id": "i1"}}}));
+        assert_eq!(json(&SetupAction::ImproveReject { id: "i1".into() }), serde_json::json!({"Improve": {"Reject": {"id": "i1"}}}));
+        assert_eq!(json(&SetupAction::ImproveUndo { id: "i1".into() }), serde_json::json!({"Improve": {"Undo": {"id": "i1"}}}));
+        assert_eq!(json(&SetupAction::ImproveEnable), serde_json::json!({"Improve": {"SetEnabled": {"enabled": true}}}));
     }
 
     #[test]

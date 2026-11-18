@@ -460,6 +460,10 @@ impl App {
                 if self.setup.section == crate::view::setup::SetupSection::Packs {
                     self.setup_call(crate::link::SetupAction::PackList);
                 }
+                // Improvements are the daemon's own listing too, asked for the same way.
+                if self.setup.section == crate::view::setup::SetupSection::Improvements {
+                    self.setup_call(crate::link::SetupAction::ImproveList);
+                }
             }
             FullView::Calendar => self.ask_calendar(),
             FullView::Usage => {
@@ -888,6 +892,10 @@ impl App {
                 Call::Setup(action) => Some(self.packs_arrived(action, listing.clone())),
                 _ => Some(false),
             },
+            Reply::Improve(reply) => match call {
+                Call::Setup(action) => Some(self.improve_arrived(action, (**reply).clone())),
+                _ => Some(false),
+            },
             Reply::PackPreview(preview) => match call {
                 Call::Setup(action) => Some(self.pack_previewed(action, preview.clone())),
                 _ => Some(false),
@@ -930,7 +938,7 @@ impl App {
             Call::Appearance => self.pages.appearance.is_some(),
             Call::Quota => self.pages.quota.is_some(),
             Call::Plugins => self.pages.plugins.is_some(),
-            Call::Setup(action) if action.reads() => self.setup.packs.is_some(),
+            Call::Setup(action) if action.reads() => if matches!(**action, crate::link::SetupAction::ImproveList) { self.setup.improve.is_some() } else { self.setup.packs.is_some() },
             _ => false,
         }
     }

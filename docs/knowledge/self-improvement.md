@@ -4,8 +4,12 @@ Neko notices trouble that repeats, asks the cheapest model for one fix, hands it
 with a default, applies it only on their click, then watches whether it helped and offers Undo if not.
 Code: `crates/neko-core/src/improve.rs` (+ `improve/signals.rs`, `prompt.rs`, `apply.rs`), `skills/revise.rs`,
 `crates/neko-daemon/src/improve.rs`, `crates/neko-protocol/src/improve.rs`, web `web/src/setup/improve.ts`,
-`web/src/pages/setup/Improvements.tsx`, verify area `scripts/verify/improve.mjs`. **Rune does not have the section yet**
-(owner, 2026-11-17: the Rune identity pass ports it from the web page; the protocol needs nothing more).
+`web/src/pages/setup/Improvements.tsx`, verify area `scripts/verify/improve.mjs`. **Rune has the section too** (2026-11-18): Setup → Improvements,
+second in the rail after Packs as in the web's Setup nav; the page is `apps/neko-rune/src/view/setup/improvements.rs` (its detail dialog is
+`improvements::detail`), the requests are `SetupAction::Improve*` in `apps/neko-rune/src/link/setup.rs` (the same `Request::Improve` commands the
+web sends, answered with the whole listing as `Reply::Improve`), its state and the apply/reject/undo flow `improve_*` in `view/setup/state.rs`,
+its words `words::improve_*`, and its tests `apps/neko-rune/tests/improvements.rs` (scenes `setup-improvements*` in `scenes_setup.rs`).
+Applying a pack suggestion opens that pack's preview on Packs (nothing installs); Undo asks first only when the daemon says `undo_confirms`.
 
 ### Signals (own rows, never the snapshot)
 
@@ -86,5 +90,5 @@ Tests never call a model.
 
 ### Not done
 
-Rune section (see top). Chat turns are scanned as plain text, so a reply that merely discusses a missing tool can count
+Chat turns are scanned as plain text, so a reply that merely discusses a missing tool can count
 as a sighting. Improvement history is capped at 200 rows.

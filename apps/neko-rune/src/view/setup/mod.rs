@@ -1,5 +1,5 @@
 //! Setup: one full view with a section rail at the left (200 wide, the same component as Settings' rail) in
-//! this order: Packs, Workspaces, Watching, Tools, Skills, Memory, Profiles, Schedules. Each section is the web's
+//! this order: Packs, Improvements, Workspaces, Watching, Tools, Skills, Memory, Profiles, Schedules. Each section is the web's
 //! page of the same name made native (`web/src/pages/setup/*`): the same requests and the same states,
 //! on Rune's page conventions (a 20 point header with a count, an 880 column, 32 point rows whose actions
 //! show on hover and are all in the right-click menu, one quiet line and one action for an empty list).
@@ -9,6 +9,7 @@
 
 mod dialogs;
 pub(crate) mod kit;
+mod improvements;
 mod memory;
 mod pack_dialog;
 mod packs;
@@ -60,6 +61,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     super::webkit::set_content_width(frame.region_w - rail_w - 2.0 * if frame.region_w < 760.0 { 16.0 } else { 28.0 });
     let page = match section {
         SetupSection::Packs => packs::view(s, t, layer),
+        SetupSection::Improvements => improvements::view(s, t, layer),
         SetupSection::Workspaces => workspaces::view(s, t, layer),
         SetupSection::Watching => watching::view(s, t, layer),
         SetupSection::Tools => tools::view(s, t, layer),

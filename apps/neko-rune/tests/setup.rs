@@ -84,10 +84,11 @@ fn sent(rt: &Runtime<App>) -> Vec<SetupAction> {
 // ---- over made-up data
 
 #[test]
-fn the_rail_lists_the_eight_sections_in_order_and_each_opens_its_own_page() {
+fn the_rail_lists_the_nine_sections_in_order_and_each_opens_its_own_page() {
     let mut rt = scene_in("setup-workspaces", (1800.0, 900.0));
     let order: Vec<&str> = SetupSection::ALL.iter().map(|s| s.title()).collect();
-    assert_eq!(order, ["Packs", "Workspaces", "Watching", "Tools", "Skills", "Memory", "Profiles", "Schedules"]);
+    // Improvements follows Packs, as in the web's Setup nav (packs, improvements, profiles, tools, usage).
+    assert_eq!(order, ["Packs", "Improvements", "Workspaces", "Watching", "Tools", "Skills", "Memory", "Profiles", "Schedules"]);
     let rail = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("setup-rail")).expect("the rail").rect;
     assert_eq!(rail[2], 200.0, "the rail is 200 wide, as Settings' is");
     let mut ys = Vec::new();

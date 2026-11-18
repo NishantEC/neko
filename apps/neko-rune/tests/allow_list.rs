@@ -48,7 +48,7 @@ fn bare(code: &str, needle: &str) -> usize {
         .count()
 }
 
-const PREFIXES: [&str; 12] = ["Request::", "Command::", "CrewCommand::", "CheckpointCommand::", "GoalCommand::", "McpCommand::", "SkillCommand::", "ProfileCommand::", "ScheduleCommand::", "ImportCommand::", "DecisionContextCommand::", "PackCommand::"];
+const PREFIXES: [&str; 13] = ["Request::", "Command::", "CrewCommand::", "CheckpointCommand::", "GoalCommand::", "McpCommand::", "SkillCommand::", "ProfileCommand::", "ScheduleCommand::", "ImportCommand::", "DecisionContextCommand::", "PackCommand::", "ImproveCommand::"];
 
 /// Every `Prefix::Name` the code names, as the daemon's request paths.
 fn named(code: &str) -> BTreeSet<String> {
@@ -153,7 +153,7 @@ const ENVELOPES: &[&str] = &["Workbench", "Crew", "Goals", "Checkpoints"];
 
 /// The sub-commands carried inside an envelope: checked by their name appearing in the web's sources.
 /// The Setup pages' sub-commands (`mcp("Wake", ...)`, `skillsCmd("Refresh")`, `schedulesCmd("Save", ...)` in `web/src/setup/lib.ts`) are carried the same way.
-const SUBCOMMAND_PREFIXES: [&str; 10] = ["CrewCommand", "GoalCommand", "CheckpointCommand", "McpCommand", "SkillCommand", "ProfileCommand", "ScheduleCommand", "ImportCommand", "DecisionContextCommand", "PackCommand"];
+const SUBCOMMAND_PREFIXES: [&str; 11] = ["CrewCommand", "GoalCommand", "CheckpointCommand", "McpCommand", "SkillCommand", "ProfileCommand", "ScheduleCommand", "ImportCommand", "DecisionContextCommand", "PackCommand", "ImproveCommand"];
 
 /// Requests that destroy, publish or restart something, with the `Call` that carries each. A `Call` is only built
 /// inside a `confirm(` (see `destructive_requests_are_only_sent_from_a_confirm_dialog`).
@@ -316,6 +316,22 @@ fn the_packs_requests_are_exactly_the_protocols() {
 }
 
 #[test]
+fn the_improve_requests_are_exactly_the_protocols_and_the_webs() {
+    // Rune names every `ImproveCommand` the protocol has (the page sends List, Apply, Reject, Undo and SetEnabled; the Settings switch
+    // sends SetEnabled too) and `Request::Improve`, and each sub-command is one the web's sources send as a key.
+    let used = sent();
+    let improve: BTreeSet<&str> = used.iter().filter_map(|s| s.strip_prefix("ImproveCommand::")).collect();
+    let protocol = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/neko-protocol/src/improve.rs")).unwrap();
+    let enum_text = protocol.split("pub enum ImproveCommand {").nth(1).unwrap().split("\n}\n").next().unwrap();
+    let variants: BTreeSet<&str> = enum_text.lines().filter(|l| l.starts_with("    ") && !l.starts_with("     ") && !l.trim_start().starts_with("//")).filter_map(|l| l.trim().split(|c: char| !c.is_alphanumeric()).next()).filter(|v| v.chars().next().is_some_and(char::is_uppercase)).collect();
+    assert_eq!(improve, variants, "the page sends what the protocol has");
+    assert!(used.contains("Request::Improve"));
+    for name in &improve {
+        assert!(web_mentions(name), "the web's sources do not send Improve `{name}`");
+    }
+}
+
+#[test]
 fn every_extra_is_still_sent_and_none_is_a_web_send() {
     let web = web_sends();
     let used = sent();
@@ -360,7 +376,7 @@ fn destructive_requests_are_only_sent_from_a_confirm_dialog() {
 fn setup_destroying_requests_are_only_sent_from_a_confirmation() {
     // A delete, a forget, a dismissed suggestion and a pause that revokes grants are built in `state.rs`'s `confirm_*`
     // functions (the coral button's dialog) and nowhere else: no view file builds one for a button to send directly.
-    let destroying = ["SetupAction::RemoveWatch", "SetupAction::RemoveSchedule", "SetupAction::ForgetMemory", "SetupAction::ForgetPreference", "SetupAction::PackRemove"];
+    let destroying = ["SetupAction::RemoveWatch", "SetupAction::RemoveSchedule", "SetupAction::ForgetMemory", "SetupAction::ForgetPreference", "SetupAction::PackRemove", "SetupAction::ImproveUndo"];
     let mut built_in_state = 0;
     for (path, text) in crate_sources() {
         let name = path.to_string_lossy().into_owned();
@@ -377,7 +393,7 @@ fn setup_destroying_requests_are_only_sent_from_a_confirmation() {
             }
         }
     }
-    assert!(built_in_state >= 5, "the confirmations build the destroying requests ({built_in_state})");
+    assert!(built_in_state >= 6, "the confirmations build the destroying requests ({built_in_state})");
 }
 
 

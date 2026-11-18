@@ -134,6 +134,8 @@ pub enum Reply {
     Packs(neko_protocol::packs::PackListing),
     /// What installing a source would add.
     PackPreview(neko_protocol::packs::PackPreview),
+    /// The suggestions and whether Neko looks for patterns (the answer to every Improvements request).
+    Improve(Box<neko_protocol::improve::ImproveReply>),
     Answered(String),
     /// Done, and nothing to apply.
     Done,
@@ -265,6 +267,7 @@ pub fn make(socket: &Path, call: &Call, open: Option<&str>) -> Reply {
         Response::PluginStatus { plugins } => Reply::Plugins(plugins),
         Response::Packs(listing) => Reply::Packs(listing),
         Response::PackPreview(preview) => Reply::PackPreview(preview),
+        Response::Improve(reply) => Reply::Improve(Box::new(reply)),
         Response::SearchResults { items, .. } => Reply::Quota(quota_rows(&items)),
         Response::NeedsYouAnswered { summary } => Reply::Answered(summary),
         Response::Error { message } => Reply::Refused(message),
