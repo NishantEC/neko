@@ -13,6 +13,7 @@ pub mod artifact_actions;
 pub mod art_gpu;
 pub mod attachments;
 pub mod board;
+pub mod browser;
 pub mod clock;
 pub mod compose;
 pub mod connection;

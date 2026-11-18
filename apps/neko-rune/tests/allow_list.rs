@@ -421,12 +421,41 @@ fn http_goes_only_to_the_paths_the_web_uses() {
     for path in &paths {
         assert!(web_sources().iter().any(|(_, t)| t.contains(path.trim_end_matches('/'))), "{path} is not a path the web UI uses");
     }
-    // No other file opens a socket to the web port.
+    // No other file opens a socket to the web port. (`src/browser/` opens sockets too, to a Chrome on this Mac and never to
+    // the daemon: see the next test.)
     for (path, text) in crate_sources() {
-        if !path.ends_with("http.rs") {
+        let browser = path.components().any(|c| c.as_os_str() == "browser");
+        if !path.ends_with("http.rs") && !browser {
             assert!(!production(&text).contains("TcpStream"), "{} speaks TCP outside link/http.rs", path.display());
         }
     }
+}
+
+/// The live Browser tab talks to Chrome (`src/browser/`), not to the daemon: it is the only other code that opens a socket, it
+/// reaches only a loopback address it parsed (`discover::loopback_url`), it knows nothing of the daemon's requests or web paths, and
+/// the only CDP methods it sends are the seven of `cdp::CDP_METHODS`.
+#[test]
+fn the_browser_module_talks_to_chrome_on_the_loopback_and_never_to_the_daemon() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/browser");
+    let mut methods = BTreeSet::new();
+    for entry in fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        let text = fs::read_to_string(&path).unwrap();
+        let code = production(&text);
+        for forbidden in ["/api/", "neko_protocol", "crate::link", "Call::", "WEB_SENDS", "socket_path", "support_dir", "https://", "wss://", "std::fs", "File::create", "fs::write"] {
+            assert!(!code.contains(forbidden), "{} mentions `{forbidden}`: the browser module touches Chrome only, and writes nothing", path.display());
+        }
+        if code.contains("TcpStream::connect") {
+            assert!(code.contains("loopback_url"), "{} connects without parsing the address as a loopback one", path.display());
+        }
+        // Every method named at a send is a string literal on the allow-list (the call sites of `self.send(`).
+        for (at, _) in code.match_indices("self.send(\"") {
+            let method: String = code[at + 11..].chars().take_while(|c| *c != '"').collect();
+            methods.insert(method);
+        }
+    }
+    let allowed: BTreeSet<String> = neko_rune::browser::cdp::CDP_METHODS.map(str::to_owned).into();
+    assert!(!methods.is_empty() && methods.is_subset(&allowed), "a send names a method that is not on the allow-list: {methods:?}");
 }
 
 #[test]

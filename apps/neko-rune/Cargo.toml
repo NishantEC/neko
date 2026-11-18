@@ -63,6 +63,10 @@ bytemuck = { version = "1.25", features = ["derive"] }
 wry = { version = "0.57", default-features = false, features = ["os-webview"] }
 # Addresses are parsed, never string-matched, by the web view's navigation lock (`src/web_panel.rs`).
 url = "2"
+# The live Browser tab (`src/browser/`): one websocket to a Chrome on this Mac, ws:// to loopback only, so no TLS feature and no
+# async runtime (MIT or Apache-2.0). `base64` (already in the tree, 0.22) decodes the screencast's JPEG frames.
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+base64 = "0.22"
 
 # The Dock badge (`src/dock.rs`): NSApp.dockTile through objc2, the versions Rune already builds (no new crate in the tree).
 [target.'cfg(target_os = "macos")'.dependencies]
