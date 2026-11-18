@@ -131,7 +131,8 @@ fn every_destructive_action_asks_first_and_sends_only_when_confirmed() {
     // (scene, the button that starts it, what the confirmation says, the request after "yes")
     #[allow(clippy::type_complexity)]
     let cases: [(&str, &[&str], &str, &str, fn(&SetupAction) -> bool); 5] = [
-        ("setup-watching", &[], "watch-delete-r1", "Delete watch", |c| matches!(c, SetupAction::RemoveWatch { id } if id == "r1")),
+        // The row menu: Check now, Rename…, Edit, a separator, Delete watch….
+        ("setup-watching", &["watch-more-r1"], "watch-more-r1-menu-item4", "Delete watch", |c| matches!(c, SetupAction::RemoveWatch { id } if id == "r1")),
         ("setup-schedules", &[], "schedule-delete-s2", "Delete schedule", |c| matches!(c, SetupAction::RemoveSchedule { id } if id == "s2")),
         // The web's row menu (the three dots): Edit, a separator, then Forget memory.
         ("setup-memory", &["memory-more-m1"], "memory-more-m1-menu-item2", "Forget memory", |c| matches!(c, SetupAction::ForgetMemory { id } if id == "m1")),
@@ -163,6 +164,7 @@ fn every_destructive_action_asks_first_and_sends_only_when_confirmed() {
 fn a_watch_is_turned_on_only_after_it_says_what_that_allows_and_then_checks_at_once() {
     let mut rt = scene("setup-watching");
     // r2 is paused and its tool is signed out: turning it on goes to Tools instead of asking.
+    click(&mut rt, "watch-paused-toggle");
     click(&mut rt, "watch-switch-r2");
     assert_eq!(rt.state.setup.section, SetupSection::Tools, "access first");
     assert!(sent(&rt).is_empty());
@@ -330,6 +332,15 @@ fn memory_adds_edits_and_filters_and_guidance_is_kept_or_dismissed() {
     click(&mut rt, "mem-tab-memories");
     click(&mut rt, "mem-switch-learning");
     assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::SetMemoryOptions(o) if !o.learning && o.use_memory)));
+}
+
+#[test]
+fn watching_has_the_webs_card_and_section_titles_in_order() {
+    let rt = scene("setup-watching");
+    assert!(rt.find("page-count").is_none() && rt.find("watch-card").is_some(), "the web's header is the title alone, then the card");
+    let ys: Vec<f32> = ["What should Neko keep an eye on?", "Suggestions", "Active", "Paused"].iter().map(|w| y_of(&rt, w)).collect();
+    assert!(ys.windows(2).all(|w| w[0] < w[1]), "Watching: the card, Suggestions, Active, Paused: {ys:?}");
+    assert!(has_text(&rt, "Suggest from tools") && has_text(&rt, "Set up watch"));
 }
 
 /// The y of the first text that is exactly `words`.
@@ -590,7 +601,9 @@ fn daemon_connections_and_watches_are_added_edited_renamed_and_deleted_with_a_co
     // Watching: a watch over that connection, saved paused.
     go(&mut rt, SetupSection::Watching);
     let ws = data(&rt).workspaces[0].id.clone();
-    click(&mut rt, "watch-new");
+    // "Write a watch yourself…" is the first entry of the page's options menu.
+    click(&mut rt, "watch-options");
+    click(&mut rt, "watch-options-menu-item0");
     fill(&mut rt, "dlg:text", "New issues assigned to me");
     click(&mut rt, &format!("dlg-watch-tool-{}", conn.id));
     click(&mut rt, "dlg-watch-save");
@@ -598,7 +611,9 @@ fn daemon_connections_and_watches_are_added_edited_renamed_and_deleted_with_a_co
     let watch = data(&rt).watches.iter().find(|w| w.instruction == "New issues assigned to me").cloned().expect("the new watch");
     assert_eq!((watch.workspace_id.as_str(), watch.enabled, watch.connection_ids.clone()), (ws.as_str(), false, vec![conn.id.clone()]));
     // Edit its instruction; rename it; the title follows.
-    click(&mut rt, &format!("watch-edit-{}", watch.id));
+    click(&mut rt, "watch-paused-toggle");
+    click(&mut rt, &format!("watch-more-{}", watch.id));
+    click(&mut rt, &format!("watch-more-{}-menu-item2", watch.id));
     fill(&mut rt, "dlg:text", "New issues assigned to me, and anything blocked");
     click(&mut rt, "dlg-watch-save");
     assert_eq!(data(&rt).watch(&watch.id).map(|w| w.instruction.as_str()), Some("New issues assigned to me, and anything blocked"));
@@ -616,7 +631,8 @@ fn daemon_connections_and_watches_are_added_edited_renamed_and_deleted_with_a_co
     assert_eq!(rt.state.setup.section, SetupSection::Tools);
     go(&mut rt, SetupSection::Watching);
     // Delete asks first; yes removes it.
-    click(&mut rt, &format!("watch-delete-{}", watch.id));
+    click(&mut rt, &format!("watch-more-{}", watch.id));
+    click(&mut rt, &format!("watch-more-{}-menu-item4", watch.id));
     assert!(rt.find("confirm-yes").is_some() && data(&rt).watch(&watch.id).is_some(), "nothing is deleted before the yes");
     click(&mut rt, "confirm-yes");
     assert!(rt.state.setup.dialog.is_none() && data(&rt).watch(&watch.id).is_none(), "{:?}", rt.state.pages.notes);

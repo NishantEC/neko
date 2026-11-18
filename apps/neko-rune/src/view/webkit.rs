@@ -518,17 +518,19 @@ pub fn row_action(t: &Neko, key: &str, label: &str, glyph: &'static Icon, on_pre
     row().key(key.to_owned()).role("button").label(label.to_owned()).help(label.to_owned()).focusable(true).size(28.0, 28.0).center().radius(10.0).hover(t.text.base.alpha(0.07)).focus_ring(2.0, 2.0, t.kit.c.border_focus).group_opacity(0.0, 1.0).on_press(on_press).child(icon(glyph, 15.0).color(t.text.muted).a11y_hidden())
 }
 
-/// One entry of [`more_menu`]: its words, its icon, whether it is the destructive one, and what it does. `None` is a separator.
-pub type MoreEntry = Option<(String, &'static Icon, bool, std::rc::Rc<dyn Fn(&mut App)>)>;
+/// One entry of [`more_menu`]: its words, its icon, whether it is the destructive one, whether it can be used, and what it does.
+/// `None` is a separator.
+pub type MoreEntry = Option<(String, &'static Icon, bool, bool, std::rc::Rc<dyn Fn(&mut App)>)>;
 
-/// The web's row menu (`Button variant="ghost" size="icon-sm"` with the three dots and a `DropdownMenu`): a 36 point round trigger
-/// among a row's actions. `flag` is the fold flag that says it is open.
-pub fn more_menu(s: &App, t: &Neko, layer: &mut Vec<El>, key: &str, label: &str, entries: Vec<MoreEntry>) -> El {
+/// The web's row menu (`Button variant="ghost" size="icon-sm"` with the three dots and a `DropdownMenu`): a 36 point round trigger.
+/// In a row's actions it shows with the row's hover (`always` false); on a page it is always there. The fold flag `more:<key>` says
+/// it is open.
+pub fn more_menu(s: &App, t: &Neko, layer: &mut Vec<El>, key: &str, label: &str, always: bool, entries: Vec<MoreEntry>) -> El {
     let flag = format!("more:{key}");
     let open = s.row_open(&flag);
     let toggle = flag.clone();
     let mut trigger = row().key(key.to_owned()).role("button").label(label.to_owned()).help(label.to_owned()).focusable(true).size(36.0, 36.0).center().radius(18.0).hover(t.text.base.alpha(0.07)).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(move |s: &mut App| s.toggle_row(&toggle)).child(icon(&crate::icons_phosphor::DOTS_THREE_BOLD, 16.0).color(t.text.base).a11y_hidden());
-    if !open {
+    if !open && !always {
         trigger = trigger.group_opacity(0.0, 1.0);
     }
     let close = flag.clone();
@@ -540,9 +542,9 @@ pub fn more_menu(s: &App, t: &Neko, layer: &mut Vec<El>, key: &str, label: &str,
     for e in entries {
         match e {
             None => menu = menu.separator(),
-            Some((words, glyph, danger, act)) => {
+            Some((words, glyph, danger, enabled, act)) => {
                 let close = flag.clone();
-                menu = menu.item(rune_kit::MenuItem::new(words).icon(glyph).danger(danger).on_select(move |s: &mut App| {
+                menu = menu.item(rune_kit::MenuItem::new(words).icon(glyph).danger(danger).disabled(!enabled).on_select(move |s: &mut App| {
                     if s.row_open(&close) {
                         s.toggle_row(&close);
                     }
@@ -552,4 +554,25 @@ pub fn more_menu(s: &App, t: &Neko, layer: &mut Vec<El>, key: &str, label: &str,
         }
     }
     menu.build(&t.kit, layer)
+}
+
+/// `Button variant="ghost" size="xs"`: 32 high, 11 at the sides (the border and 10), a pill; 14 point words under 640 and 12 from there,
+/// the icon 16 or 14 pulled 2 points in at both ends.
+pub fn ghost_xs_button(t: &Neko, key: &str, label: &str, glyph: Option<&'static Icon>, help: &str, on_press: impl Fn(&mut App) + 'static) -> El {
+    let big = page_width() < 640.0;
+    let (size, lh, glyph_size) = if big { (14.0, 20.0, 16.0) } else { (12.0, 16.0, 14.0) };
+    let mut r = row().key(key.to_owned()).role("button").label(label).help(help.to_owned()).focusable(true).h(32.0).px(11.0).gap(4.0).center().radius(16.0).hover(t.text.base.alpha(0.06)).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(on_press);
+    if let Some(g) = glyph {
+        r = r.child(icon(g, glyph_size).color(t.text.base.alpha(0.8)).mx(-2.0).a11y_hidden());
+    }
+    r.child(text(label.to_owned()).font(font(t, size, 500.0, lh)).color(t.text.base).a11y_hidden())
+}
+
+/// The web's `Textarea` with no fill or border of its own (`!border-0 !bg-transparent px-1`): 4 at the sides, 10 above and below,
+/// 48 high at least, one line growing with the text; 16 point words under 640 and 13 from there.
+pub fn bare_text_area(s: &App, t: &Neko, key: &str, label: &str, placeholder: &str) -> El {
+    let big = page_width() < 640.0;
+    let style = if big { font(t, 16.0, 400.0, 24.0) } else { font(t, 13.0, 400.0, 19.5) };
+    let field = rune::text_input(super::ui::edit_of(s, key), style).key("input").w_full().color(t.text.base).placeholder(placeholder.to_owned(), t.text.muted).caret(t.text.base, t.kit.selection()).label(label.to_owned()).on_edit(super::ui::editing(key.to_owned()));
+    col().key(key.to_owned()).role("textbox").w_full().min_h(48.0).px(4.0).py(10.0).radius(18.0).child(rune::auto_grow(field, 1, 10_000))
 }

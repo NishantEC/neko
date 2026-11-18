@@ -211,6 +211,29 @@ pub fn watch_glyph(tone: Tone) -> StatusKind {
     }
 }
 
+/// What a watch over this tool could say (the web's `watchIdea`).
+pub fn watch_idea(label: &str) -> String {
+    let l = label.to_lowercase();
+    let has = |w: &str| l.contains(w);
+    if has("linear") {
+        "New Linear issues assigned to me, and anything of mine that becomes blocked".to_owned()
+    } else if has("sentry") {
+        "New or spiking Sentry errors in my projects".to_owned()
+    } else if has("github") {
+        "Pull requests waiting on my review, and failing checks on my own PRs".to_owned()
+    } else if has("slack") {
+        "Slack messages that mention me or are waiting on my reply".to_owned()
+    } else if has("gmail") || has("mail") {
+        "Emails that need a reply from me today".to_owned()
+    } else if has("calendar") {
+        "Meetings today that need preparation".to_owned()
+    } else if has("notion") {
+        "Notion pages assigned to me or recently changed in my projects".to_owned()
+    } else {
+        format!("Anything new in {label} that needs my attention")
+    }
+}
+
 pub const WATCH_SUGGEST_PROMPT: &str = "Look at the tools connected to this workspace and suggest up to three things you should keep an eye on for me. Only suggest what those tools can actually check.";
 
 /// "3 minutes ago", "in 2 hours", "yesterday", "Never" (the web's `relativeTime`, in the same words).

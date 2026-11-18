@@ -553,6 +553,18 @@ impl App {
         self.setup_call(SetupAction::AskIn { text: words::WATCH_SUGGEST_PROMPT.to_owned(), workspace_id: workspace.to_owned() });
     }
 
+    /// "Set up watch" (`Watching.tsx`): asks Neko, in a workspace, to set up the watch the person described.
+    pub fn ask_watch(&mut self, described: &str, workspace: &str) {
+        let described = described.trim();
+        if described.is_empty() || workspace.is_empty() {
+            return;
+        }
+        self.setup.asked = Some((self.now_ms, workspace.to_owned()));
+        self.setup.dismissed_reply = false;
+        self.setup_call(SetupAction::AskIn { text: format!("Keep an eye on this for me: {described}"), workspace_id: workspace.to_owned() });
+        self.pages.set_field("watch:ask", "");
+    }
+
     /// Neko's newest reply to the suggestion, in the workspace asked.
     pub fn suggestion_reply(&self) -> Option<(bool, String)> {
         let (at, workspace) = self.setup.asked.as_ref()?;

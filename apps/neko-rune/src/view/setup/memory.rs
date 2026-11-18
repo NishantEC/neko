@@ -148,10 +148,11 @@ fn memory_row(s: &App, t: &Neko, layer: &mut Vec<El>, data: &crate::link::SetupD
         layer,
         &format!("memory-more-{id}"),
         "Memory actions",
+        false,
         vec![
-            Some(("Edit".to_owned(), &icons::PENCIL, false, std::rc::Rc::new(move |s: &mut App| s.open_memory_dialog(Some(&g))) as std::rc::Rc<dyn Fn(&mut App)>)),
+            Some(("Edit".to_owned(), &icons::PENCIL, false, true, std::rc::Rc::new(move |s: &mut App| s.open_memory_dialog(Some(&g))) as std::rc::Rc<dyn Fn(&mut App)>)),
             None,
-            Some(("Forget memory…".to_owned(), &icons::TRASH, true, std::rc::Rc::new(move |s: &mut App| s.confirm_forget_memory(&f)))),
+            Some(("Forget memory…".to_owned(), &icons::TRASH, true, true, std::rc::Rc::new(move |s: &mut App| s.confirm_forget_memory(&f)))),
         ],
     );
     let line = vec![
