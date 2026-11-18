@@ -8,14 +8,16 @@ use neko_protocol::packs::{InstalledPack, PackInfo, PackStatus};
 use rune::{El, col, icon, row, text};
 
 use super::Page;
-use super::kit::{self, action, details_block, empty, glyph, list_row};
+use super::kit::{self, details_block, glyph};
 use super::state::SetupSection;
 use super::words;
 use crate::app::App;
 use crate::icons;
+use crate::icons_phosphor as ph;
 use crate::theme::Neko;
 use crate::view::ui::{MenuEntry, note, with_menu};
-use crate::view::{page_button, primary_button, quiet_button};
+use crate::view::webkit;
+use crate::view::{primary_button, quiet_button};
 use crate::views::FullView;
 
 pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
@@ -29,17 +31,20 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     if let Some(p) = s.setup.pack.as_deref().and_then(|name| listing.installed.iter().find(|p| p.info.name == name)) {
         return detail(s, t, layer, p);
     }
-    let add = page_button("Add pack", "packs-add", t, |s: &mut App| s.open_pack_dialog());
-    let mut body = col().w_full().gap(2.0);
+    // `<Button size="sm"><Plus /> Add pack</Button>`: the primary button with its plus.
+    let add = webkit::button(t, "packs-add", "Add pack", Some(&icons::PLUS), true, false, |s: &mut App| s.open_pack_dialog());
+    let mut body = col().w_full().gap(32.0);
     if let Some(n) = note(s, t, "setup:page") {
         body = body.child(n);
     }
-    if listing.installed.is_empty() {
-        body = body.child(empty(t, "packs-empty", "No packs installed.", Some(("Add pack", Box::new(|s: &mut App| s.open_pack_dialog())))));
-    }
-    for p in &listing.installed {
-        body = body.child(pack_row(s, t, layer, p));
-    }
+    // The "Installed" section: a faint count when there are packs, then the panel of rows or "No packs installed.".
+    let count = (!listing.installed.is_empty()).then(|| listing.installed.len().to_string());
+    let inner = if listing.installed.is_empty() {
+        text("No packs installed.".to_owned()).key("packs-empty").font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted)
+    } else {
+        webkit::panel(listing.installed.iter().map(|p| pack_row(s, t, layer, p)).collect())
+    };
+    body = body.child(webkit::section(t, "packs-installed", "Installed", count.as_deref(), None, inner));
     Page { count: (!listing.installed.is_empty()).then_some(listing.installed.len()), trailing: vec![add], body, title: None, back: None }
 }
 
@@ -47,56 +52,82 @@ fn update_label(version: &str) -> String {
     format!("Update to {version}")
 }
 
+/// One pack as the web's `PackRow`: the health glyph, a button (title, version, where it came from), Review and Update as small
+/// outline buttons when they apply, the row's actions (Check health and the three-dot menu).
 fn pack_row(s: &App, t: &Neko, layer: &mut Vec<El>, p: &InstalledPack) -> El {
     let name = p.info.name.clone();
     let status = words::pack_status_label(p.status);
     let source = words::pack_source_label(&p.source);
     let busy = s.setup.pack_busy.contains(&name);
     let open = name.clone();
-    let mut line = list_row(t, format!("pack-{name}"), format!("{}, version {}, {status}, {source}", p.info.title, p.info.version), None)
+    let small = webkit::font(t, 12.5, 400.0, 20.3125);
+    let button = row()
+        .key(format!("pack-{name}"))
+        .role("button")
+        .label(format!("{}, version {}, {status}, {source}", p.info.title, p.info.version))
+        .focusable(true)
+        .grow(1.0)
+        .shrink()
+        .min_w(0.0)
+        .gap(12.0)
+        .center_y()
+        .radius(10.0)
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(move |s: &mut App| s.open_pack(&open))
-        .child(glyph(t, words::pack_glyph(p.status), status))
-        .child(text(p.info.title.clone()).font(t.ty.row).color(t.text.base).truncate().min_w(0.0).max_w(240.0).a11y_hidden())
-        .child(text(p.info.version.clone()).key(format!("pack-version-{name}")).font(t.ty.meta).color(t.text.faint).a11y_hidden())
-        .child(text(source).key(format!("pack-source-{name}")).font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0).help(p.source.clone()).a11y_hidden());
-    if busy {
-        line = line.child(text("Working…".to_owned()).key(format!("pack-busy-{name}")).font(t.ty.meta).color(t.text.faint).a11y_hidden());
-    }
+        .child(text(p.info.title.clone()).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().min_w(0.0).a11y_hidden())
+        .child(text(p.info.version.clone()).key(format!("pack-version-{name}")).font(webkit::tnum(small)).color(t.text.muted.alpha(0.6)).a11y_hidden())
+        .child(text(source).key(format!("pack-source-{name}")).font(small).color(t.text.muted).truncate().grow(1.0).shrink().min_w(0.0).help(p.source.clone()).a11y_hidden());
     let changed = p.status == PackStatus::Changed;
+    let mut line = vec![glyph(t, words::pack_glyph(p.status), status), button];
+    if busy {
+        // Rune-only: the row says it is working while a request of its own is out.
+        line.push(text("Working…".to_owned()).key(format!("pack-busy-{name}")).font(small).color(t.text.faint).a11y_hidden());
+    }
     if changed {
         let rv = name.clone();
-        line = line.child(action(t, format!("pack-review-{name}"), &format!("Review {}", p.info.title), &icons::EYE, move |s: &mut App| s.review_pack(&rv)));
+        line.push(webkit::outline_xs_button(t, &format!("pack-review-{name}"), "Review", &format!("Review {}", p.info.title), webkit::gated(!busy, move |s: &mut App| s.review_pack(&rv))));
     }
-    let check = name.clone();
-    line = line.child(action(t, format!("pack-health-{name}"), &format!("Check health of {}", p.info.title), &icons::CHECKLIST, move |s: &mut App| s.check_pack(&check)));
     if let Some(version) = &p.update_available {
         let up = name.clone();
-        line = line.child(action(t, format!("pack-update-{name}"), &update_label(version), &icons::ARROW_UP, move |s: &mut App| s.update_pack(&up)));
+        line.push(webkit::outline_xs_button(t, &format!("pack-update-{name}"), &update_label(version), &format!("Update {} to {version}", p.info.title), webkit::gated(!busy, move |s: &mut App| s.update_pack(&up))));
     }
-    let rm = name.clone();
-    line = line.child(action(t, format!("pack-remove-{name}"), &format!("Remove {}", p.info.title), &icons::TRASH, move |s: &mut App| s.confirm_remove_pack(&rm)));
+    let check = name.clone();
+    let check_action = webkit::row_action(t, &format!("pack-health-{name}"), &format!("Check health of {}", p.info.title), &ph::ARROWS_CLOCKWISE, move |s: &mut App| s.check_pack(&check));
+    let mut entries: Vec<webkit::MoreEntry> = Vec::new();
+    let (c, rv, up, rm) = (name.clone(), name.clone(), name.clone(), name.clone());
+    entries.push(Some(("Check health".to_owned(), &ph::ARROWS_CLOCKWISE, false, !busy, std::rc::Rc::new(move |s: &mut App| s.check_pack(&c)) as std::rc::Rc<dyn Fn(&mut App)>)));
+    if changed {
+        entries.push(Some(("Review…".to_owned(), &ph::EYE_REGULAR, false, !busy, std::rc::Rc::new(move |s: &mut App| s.review_pack(&rv)))));
+    }
+    if let Some(version) = &p.update_available {
+        entries.push(Some((update_label(version), &ph::ARROW_UP_REGULAR, false, !busy, std::rc::Rc::new(move |s: &mut App| s.update_pack(&up)))));
+    }
+    entries.push(None);
+    entries.push(Some(("Remove…".to_owned(), &ph::TRASH_REGULAR, true, !busy, std::rc::Rc::new(move |s: &mut App| s.confirm_remove_pack(&rm)))));
+    let more = webkit::more_menu(s, t, layer, &format!("pack-more-{name}"), &format!("Actions for {}", p.info.title), false, entries);
+    line.push(webkit::row_actions(vec![check_action, more]));
 
     // Everything the row does is also in its right-click menu.
-    let mut entries: Vec<MenuEntry> = Vec::new();
+    let mut menu: Vec<MenuEntry> = Vec::new();
     let o = name.clone();
-    entries.push(("Open".to_owned(), std::rc::Rc::new(move |s: &mut App| s.open_pack(&o))));
+    menu.push(("Open".to_owned(), std::rc::Rc::new(move |s: &mut App| s.open_pack(&o))));
     if changed {
         let rv = name.clone();
-        entries.push(("Review…".to_owned(), std::rc::Rc::new(move |s: &mut App| s.review_pack(&rv))));
+        menu.push(("Review…".to_owned(), std::rc::Rc::new(move |s: &mut App| s.review_pack(&rv))));
     }
     let c = name.clone();
-    entries.push(("Check health".to_owned(), std::rc::Rc::new(move |s: &mut App| s.check_pack(&c))));
+    menu.push(("Check health".to_owned(), std::rc::Rc::new(move |s: &mut App| s.check_pack(&c))));
     if let Some(version) = &p.update_available {
         let u = name.clone();
-        entries.push((update_label(version), std::rc::Rc::new(move |s: &mut App| s.update_pack(&u))));
+        menu.push((update_label(version), std::rc::Rc::new(move |s: &mut App| s.update_pack(&u))));
     }
     let r = name.clone();
-    entries.push(("Remove…".to_owned(), std::rc::Rc::new(move |s: &mut App| s.confirm_remove_pack(&r))));
-    let mut out = col().key(format!("pack-block-{name}")).w_full().child(with_menu(s, t, layer, &format!("pack:{name}"), line, entries));
+    menu.push(("Remove…".to_owned(), std::rc::Rc::new(move |s: &mut App| s.confirm_remove_pack(&r))));
+    let mut below: Vec<El> = Vec::new();
     if let Some(n) = note(s, t, &format!("setup:pack:{name}")) {
-        out = out.child(n);
+        below.push(n);
     }
-    out
+    with_menu(s, t, layer, &format!("pack:{name}"), webkit::item_row(t, &format!("pack-block-{name}"), line, below), menu)
 }
 
 /// A copy button: puts `value` on the clipboard and says so.

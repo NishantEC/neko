@@ -585,6 +585,11 @@ pub fn ghost_xs_button(t: &Neko, key: &str, label: &str, glyph: Option<&'static 
     r.child(text(label.to_owned()).font(font(t, size, 500.0, lh)).color(t.text.base).a11y_hidden())
 }
 
+/// `Button variant="outline" size="xs"`: the ghost xs button on the popover fill (`dark:bg-input/32`) with the input border, 32 high.
+pub fn outline_xs_button(t: &Neko, key: &str, label: &str, help: &str, on_press: impl Fn(&mut App) + 'static) -> El {
+    ghost_xs_button(t, key, label, None, help, on_press).fill(t.text.base.alpha(0.06)).border(1.0, t.surface.field_border).px(10.0)
+}
+
 /// The web's `Textarea` with no fill or border of its own (`!border-0 !bg-transparent px-1`): 4 at the sides, 10 above and below,
 /// 48 high at least, one line growing with the text; 16 point words under 640 and 13 from there.
 pub fn bare_text_area(s: &App, t: &Neko, key: &str, label: &str, placeholder: &str) -> El {

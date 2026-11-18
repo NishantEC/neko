@@ -83,9 +83,10 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     if let Some(back) = page.back {
         head = head.child(back);
     }
-    head = head.child(text(title).key("title").font(t.ty.title).color(t.text.base).truncate().min_w(0.0).role("heading"));
+    head = head.child(text(title).key("title").font(rune::TextStyle { tracking: -0.41, ..t.ty.title }).color(t.text.base).truncate().min_w(0.0).role("heading"));
     if let Some(n) = page.count {
-        head = head.child(text(n.to_string()).key("page-count").font(rune::TextStyle { weight: 400.0, ..t.ty.brand }).color(t.text.muted));
+        // `PageHeader`'s count: 14 regular, tabular figures, on the title's baseline.
+        head = head.child(text(n.to_string()).key("page-count").font(super::webkit::tnum(super::webkit::font(t, 14.0, 400.0, 22.75))).color(t.text.muted).mt(4.4));
     }
     head = head.child(kit::fill());
     for e in page.trailing {

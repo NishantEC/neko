@@ -114,12 +114,25 @@ fn the_list_has_a_row_per_pack_with_its_glyph_version_and_source() {
     assert_eq!(text_of(&rt, "pack-source-demo-board").as_deref(), Some("/work/packs/demo-board"));
     // Check health on every row; Update only where a newer version is known; Review only where the files changed.
     for name in ["demo-notes", "demo-board", "demo-feed", "demo-sketch"] {
-        assert!(rt.find(&format!("pack-health-{name}")).is_some() && rt.find(&format!("pack-remove-{name}")).is_some(), "{name}");
+        assert!(rt.find(&format!("pack-health-{name}")).is_some() && rt.find(&format!("pack-more-{name}")).is_some(), "{name}: Remove… is in the row's three-dot menu, as on the web");
     }
     assert!(rt.find("pack-update-demo-notes").is_some());
     assert_eq!(label_of(&rt, "pack-update-demo-notes").as_deref(), Some("Update to 1.3.0"));
     assert!(rt.find("pack-update-demo-board").is_none() && rt.find("pack-update-demo-feed").is_none());
     assert!(rt.find("pack-review-demo-sketch").is_some() && rt.find("pack-review-demo-notes").is_none());
+}
+
+#[test]
+fn the_list_is_the_webs_installed_section_with_its_48_point_rows() {
+    let rt = scene("setup-packs");
+    let rect = |key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no {key}")).rect;
+    assert!(rt.find("packs-installed").is_some() && has_text(&rt, "Installed"), "the web's Section");
+    let (a, b) = (rect("pack-block-demo-notes"), rect("pack-block-demo-board"));
+    assert!((a[3] - 48.0).abs() < 0.1 && (b[1] - (a[1] + a[3])).abs() < 0.1, "rows of 48, one under the other: {a:?} {b:?}");
+    // Review and Update are small outline buttons in the row, before the actions, as on the web.
+    let (update, health) = (rect("pack-update-demo-notes"), rect("pack-health-demo-notes"));
+    assert!(update[0] + update[2] <= health[0], "Update to 1.3.0 comes before the row's actions");
+    assert!(rt.find("pack-delete-demo-notes").is_none());
 }
 
 #[test]
@@ -296,13 +309,16 @@ fn an_update_that_changes_nothing_of_power_is_a_plain_confirm() {
 #[test]
 fn remove_asks_first_cancel_sends_nothing_and_yes_sends_exactly_remove() {
     let mut rt = scene("setup-packs");
-    click(&mut rt, "pack-remove-demo-feed");
+    // The web's row menu: Check health, a separator, then Remove….
+    click(&mut rt, "pack-more-demo-feed");
+    click(&mut rt, "pack-more-demo-feed-menu-item2");
     assert!(rt.find("confirm-yes").is_some());
     assert!(sent(&rt).is_empty(), "nothing is sent before the yes: {:?}", sent(&rt));
     assert!(has_text(&rt, "Remove pack") && has_text(&rt, "Remove “Demo feed”?"));
     click(&mut rt, "confirm-no");
     assert!(rt.find("confirm-yes").is_none() && sent(&rt).is_empty(), "Cancel sends nothing");
-    click(&mut rt, "pack-remove-demo-feed");
+    click(&mut rt, "pack-more-demo-feed");
+    click(&mut rt, "pack-more-demo-feed-menu-item2");
     click(&mut rt, "confirm-yes");
     let remove = SetupAction::PackRemove { name: "demo-feed".into() };
     assert_eq!(sent(&rt), vec![remove.clone()]);
