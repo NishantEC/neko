@@ -46,4 +46,8 @@ pub struct QuotaRow {
     pub used: f32,
     /// "62% left", "resets 14:00": the meter's own stat words.
     pub words: Vec<String>,
+    /// The web's `Figure` of it: the first stat's value and label, and the rest as one muted line.
+    pub value: String,
+    pub unit: String,
+    pub detail: String,
 }

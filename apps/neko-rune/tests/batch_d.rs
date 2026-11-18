@@ -332,7 +332,8 @@ fn usage_shows_machine_health_as_figure_lines_and_colours_only_what_needs_the_pe
     for k in ["machine-state-title", "machine-0-value", "machine-1-value", "machine-2-value", "machine-3-value"] {
         assert!(rt.find(k).is_some(), "{k}");
     }
-    assert!(has_text(&rt, "Mac OK · load 9") && has_text(&rt, "9.2 of 14 cores") && has_text(&rt, "24 GB"), "{:?}", texts(&rt));
+    // The value and its unit are two texts, as the web's `Figure` has them.
+    assert!(has_text(&rt, "Mac OK · load 9") && has_text(&rt, "9.2") && has_text(&rt, "of 14 cores") && has_text(&rt, "24") && has_text(&rt, "GB"), "{:?}", texts(&rt));
     assert!(rt.find("model-0").is_some() && has_text(&rt, "gpt-a · high") && has_text(&rt, "2 runs"), "the Models section");
     let hold = runtime("bd-usage-hold");
     assert!(has_text(&hold, "New work is on hold") && has_text(&hold, "Free disk is under 15 GB."));

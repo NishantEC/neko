@@ -298,7 +298,19 @@ pub fn quota_rows(items: &[neko_protocol::SearchItem]) -> Vec<QuotaRow> {
             if let Some(sub) = i.subtitle.as_ref().filter(|s| !s.is_empty()) {
                 words.push(sub.clone());
             }
-            Some(QuotaRow { label, used: meter.fraction.clamp(0.0, 1.0), words })
+            // `Usage.tsx`: the first stat is the figure, the rest (and the subtitle) its muted line, with "N% used" first from 70%.
+            let used = meter.fraction.clamp(0.0, 1.0);
+            let first = meter.stats.first();
+            let mut detail: Vec<String> = Vec::new();
+            if used >= 0.7 {
+                detail.push(format!("{}% used", (used * 100.0).round() as i64));
+            }
+            if let Some(sub) = i.subtitle.as_ref().filter(|s| !s.is_empty()) {
+                detail.push(sub.clone());
+            }
+            detail.extend(meter.stats.iter().skip(1).map(|s| format!("{} {}", s.value, s.label)));
+            let value = first.map(|s| s.value.clone()).filter(|v| !v.is_empty()).unwrap_or_else(|| format!("{}%", (used * 100.0).round() as i64));
+            Some(QuotaRow { label, used, words, value, unit: first.map(|s| s.label.clone()).unwrap_or_default(), detail: detail.join(" · ") })
         })
         .collect()
 }

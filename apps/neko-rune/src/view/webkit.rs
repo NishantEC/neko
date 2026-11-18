@@ -433,8 +433,17 @@ pub type EmptyButton<'a> = (&'a str, &'a str, Box<dyn Fn(&mut App)>);
 /// most 384 wide) and, when there is one, a button.
 pub fn empty(t: &Neko, key: &str, glyph: &'static Icon, title: &str, description: &str, button: Option<EmptyButton>) -> El {
     let well = row().size(40.0, 40.0).center().radius(14.0).fill(t.text.base.alpha(0.07)).mb(8.0).child(icon(glyph, 24.0).color(t.text.base).a11y_hidden());
-    let header = col().max_w(384.0).gap(8.0).items_center().child(well).child(text(title.to_owned()).key(format!("{key}-title")).font(font(t, 18.0, 500.0, 28.0)).color(t.text.base).wrap()).child(
-        text(description.to_owned()).key(format!("{key}-description")).font(font(t, 14.0, 400.0, 22.75)).color(t.text.muted).wrap(),
+    // `text-balance`: the description's lines come out about as long as each other, centred.
+    let style = font(t, 14.0, 400.0, 22.75);
+    let width = balanced_width(description, style, 384.0);
+    let header = col().max_w(384.0).gap(8.0).items_center().child(well).child({
+        // `tracking-tight`: -0.025em.
+        let title_style = TextStyle { tracking: -0.45, ..font(t, 18.0, 500.0, 28.0) };
+        let line = text(title.to_owned()).key(format!("{key}-title")).font(title_style).color(t.text.base);
+        // One line sits in its own width (the web centres the text, the box hugs it); a longer one wraps.
+        if rune::text::measure(title, &[], title_style, None).0 <= 384.0 { line } else { line.wrap().align(rune::Align::Center) }
+    }).child(
+        text(description.to_owned()).key(format!("{key}-description")).font(style).color(t.text.muted).wrap().align(rune::Align::Center).w(width),
     );
     let mut c = col().key(key.to_owned()).w_full().grow(1.0).min_h(0.0).padding(48.0).gap(16.0).center().items_center().child(header);
     if let Some((k, label, press)) = button {
@@ -575,4 +584,63 @@ pub fn bare_text_area(s: &App, t: &Neko, key: &str, label: &str, placeholder: &s
     let style = if big { font(t, 16.0, 400.0, 24.0) } else { font(t, 13.0, 400.0, 19.5) };
     let field = rune::text_input(super::ui::edit_of(s, key), style).key("input").w_full().color(t.text.base).placeholder(placeholder.to_owned(), t.text.muted).caret(t.text.base, t.kit.selection()).label(label.to_owned()).on_edit(super::ui::editing(key.to_owned()));
     col().key(key.to_owned()).role("textbox").w_full().min_h(48.0).px(4.0).py(10.0).radius(18.0).child(rune::auto_grow(field, 1, 10_000))
+}
+
+/// `Figure` (`setup/kit.tsx`): one calm line, 36 high at least (8 above and below), 12 at the sides; the label 160 wide and cut off,
+/// the value in 13.5 point figures (coloured only when it needs the person) with an optional unit 4 after it, then a muted detail.
+#[allow(clippy::too_many_arguments)]
+pub fn figure(t: &Neko, key: &str, label: &str, value: &str, unit: Option<&str>, detail: Option<&str>, ink: Option<Color>, help: Option<&str>) -> El {
+    let big = font(t, 13.5, 400.0, 21.9375);
+    let small = font(t, 12.5, 400.0, 20.3125);
+    let mut value_box = row().gap(4.0).child(text(value.to_owned()).key(format!("{key}-value")).font(tnum(big)).color(ink.unwrap_or(t.text.base)).a11y_hidden());
+    if let Some(u) = unit.filter(|u| !u.is_empty()) {
+        value_box = value_box.child(text(u.to_owned()).font(small).color(t.text.muted).a11y_hidden());
+    }
+    let mut r = row().key(key.to_owned()).w_full().min_h(36.0).px(12.0).py(8.0).gap(12.0).center_y().radius(10.0).hover(t.text.base.alpha(0.03)).child(text(label.to_owned()).font(big).color(t.text.base).truncate().w(160.0).a11y_hidden()).child(value_box);
+    if let Some(d) = detail.filter(|d| !d.is_empty()) {
+        r = r.child(text(d.to_owned()).key(format!("{key}-detail")).font(small).color(t.text.muted).truncate().grow(1.0).shrink().min_w(0.0).a11y_hidden());
+    }
+    if let Some(h) = help {
+        r = r.help(h.to_owned());
+    }
+    r
+}
+
+/// `h3` of `GROUP_HEADING` after a panel (`mt-4`): 12.5 medium muted words, then an optional faint note after them.
+pub fn group_heading(t: &Neko, key: &str, title: &str, note: Option<&str>) -> El {
+    let style = font(t, 12.5, 500.0, 20.3125);
+    let mut r = row().key(key.to_owned()).w_full().mt(16.0).child(text(title.to_owned()).font(style).color(t.text.muted));
+    if let Some(n) = note {
+        r = r.child(text(n.to_owned()).font(tnum(style)).color(t.text.muted.alpha(0.7)).ml(3.4));
+    }
+    r
+}
+
+/// `BarList` (`setup/kit.tsx`): ranked bars, each a name, a mono value and a 6 point track, in 12 of padding and 16 between.
+pub fn bar_list(t: &Neko, key: &str, items: &[(String, usize, String)]) -> El {
+    let max = items.iter().map(|i| i.1).max().unwrap_or(1).max(1) as f32;
+    let body = font(t, 13.0, 400.0, 21.125);
+    let mono = TextStyle { family: rune::Family::Mono, ..body };
+    let mut c = col().key(key.to_owned()).w_full().px(12.0).py(12.0).gap(16.0);
+    for (i, (name, n, words)) in items.iter().enumerate() {
+        let line = row().w_full().gap(16.0).justify_between().child(text(name.clone()).key(format!("{key}-name-{i}")).font(body).color(t.text.base.alpha(0.9)).truncate().min_w(0.0).shrink().a11y_hidden()).child(text(words.clone()).key(format!("{key}-words-{i}")).font(tnum(mono)).color(t.text.muted).a11y_hidden());
+        let track = row().w_full().h(6.0).radius(3.0).fill(t.text.base.alpha(0.1)).child(el().key(format!("{key}-fill-{i}")).h(6.0).w_frac(*n as f32 / max).radius(3.0).fill(t.text.base.alpha(0.6)));
+        c = c.child(col().key(format!("{key}-{i}")).w_full().gap(6.0).child(line).child(track));
+    }
+    c
+}
+
+/// `text-wrap: balance`: the narrowest width, at most `max`, at which the words still take the lines they take at `max`.
+pub fn balanced_width(words: &str, style: TextStyle, max: f32) -> f32 {
+    let lines_at = |w: f32| rune::text::measure(words, &[], style, Some(w)).1;
+    let full = lines_at(max);
+    if full <= style.line_height * 1.5 {
+        return rune::text::measure(words, &[], style, Some(max)).0.min(max);
+    }
+    let (mut lo, mut hi) = (max * 0.4, max);
+    for _ in 0..12 {
+        let mid = (lo + hi) / 2.0;
+        if lines_at(mid) > full + 0.5 { lo = mid } else { hi = mid }
+    }
+    hi.ceil()
 }

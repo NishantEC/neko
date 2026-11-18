@@ -315,7 +315,7 @@ fn full_view(s: &App, view: FullView, t: &Neko, layer: &mut Vec<El>, frame: Fram
         FullView::Calendar => super::calendar::view(s, t, layer),
         FullView::Routines => super::routines::view(s, t, layer),
         FullView::Settings => super::settings::view(s, t, layer, frame),
-        FullView::Usage => super::more::usage(s, t),
+        FullView::Usage => super::more::usage(s, t, frame.region_w),
         FullView::Setup => super::setup::view(s, t, layer, frame),
         FullView::Plugins => super::plugins::view(s, t, layer),
         FullView::PullRequests => super::prs::page(s, t, layer),

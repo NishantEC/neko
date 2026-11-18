@@ -121,9 +121,9 @@ pub fn phone_data() -> PhoneData {
 
 pub fn quota_rows() -> Vec<QuotaRow> {
     vec![
-        QuotaRow { label: "Claude Code · 5-hour window".into(), used: 0.62, words: vec!["38% left".into(), "resets 14:00".into()] },
-        QuotaRow { label: "Codex · weekly".into(), used: 0.84, words: vec!["16% left".into(), "resets Fri".into()] },
-        QuotaRow { label: "Grok · monthly".into(), used: 0.97, words: vec!["3% left".into(), "resets 1 Dec".into()] },
+        QuotaRow { label: "Claude Code · 5-hour window".into(), used: 0.62, words: vec!["38% left".into(), "resets 14:00".into()], value: "38%".into(), unit: "left".into(), detail: "resets 14:00".into() },
+        QuotaRow { label: "Codex · weekly".into(), used: 0.84, words: vec!["16% left".into(), "resets Fri".into()], value: "16%".into(), unit: "left".into(), detail: "84% used · resets Fri".into() },
+        QuotaRow { label: "Grok · monthly".into(), used: 0.97, words: vec!["3% left".into(), "resets 1 Dec".into()], value: "3%".into(), unit: "left".into(), detail: "97% used · resets 1 Dec".into() },
     ]
 }
 
@@ -185,6 +185,19 @@ pub fn settings_view() -> SettingsView {
         rulebook: String::new(),
         rulebook_default: "Be careful with other people's files.\nPrefer small, reviewable changes.\nRun the tests before saying a task is done.".into(),
         model_runs: [("gpt-a", Some("high")), ("gpt-a", Some("high")), ("gpt-a", None), ("claude-x", Some("medium")), ("", None)].iter().map(|(m, e)| ((*m).to_owned(), e.map(str::to_owned))).collect(),
+        spend: crate::link::SpendReport {
+            total: crate::link::tree_model::Usd(14.37),
+            runs: 12,
+            tokens_in: 2_300,
+            tokens_out: 480_000,
+            tasks: vec![
+                crate::link::SpendTask { title: "Add a frosted glass theme option".into(), cost: crate::link::tree_model::Usd(9.10), runs: 4 },
+                crate::link::SpendTask { title: "Fix users unable to join studio sessions".into(), cost: crate::link::tree_model::Usd(4.08), runs: 5 },
+                crate::link::SpendTask { title: "Triage interrupted message stream errors".into(), cost: crate::link::tree_model::Usd(1.19), runs: 3 },
+            ],
+            priced_tasks: 3,
+            tasks_total: 6,
+        },
         connections: 3,
         home_last: Some(crate::link::LastRun { model: "gpt-a".into(), effort: Some("high".into()), automatic: true, reason: "Picked the model that fits a small question.".into() }),
     }

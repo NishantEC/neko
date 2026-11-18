@@ -567,7 +567,8 @@ fn calendar_usage_workspaces_and_plugins_read_what_the_daemon_has() {
     click(&mut rt, "cal-next");
     click(&mut rt, "cal-today");
     open_page(&mut rt, FullView::Usage);
-    assert!(rt.find("usage-today").is_some() && rt.state.pages.routines.is_some());
+    // Like the web, "Today" shows only with spend or a ceiling; a fresh folder has neither, so the budget figure is the one always there.
+    assert!(rt.find("usage-budget").is_some() && rt.state.pages.routines.is_some());
     assert!(rt.find("quota").is_some());
     open_page(&mut rt, FullView::Setup);
     let first = rt.state.summary.as_ref().and_then(|m| m.setup.workspaces.first()).map(|w| w.id.clone());

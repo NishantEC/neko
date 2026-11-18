@@ -234,6 +234,9 @@ pub struct SettingsView {
     /// The model and reasoning effort of each recent run (the web's Usage page, "Models").
     #[serde(default)]
     pub model_runs: Vec<(String, Option<String>)>,
+    /// What every priced run has cost, in total and by task (the web's `spendOf`).
+    #[serde(default)]
+    pub spend: SpendReport,
     /// What Home chat last ran on, and why.
     #[serde(default)]
     pub home_last: Option<LastRun>,
@@ -242,8 +245,60 @@ pub struct SettingsView {
     pub connections: usize,
 }
 
-/// How far back the client keeps priced runs (the Usage chart shows seven days).
-pub const USAGE_DAYS: i64 = 8;
+/// How far back the client keeps priced runs (the Usage chart shows fourteen days; one more for the day boundary).
+pub const USAGE_DAYS: i64 = 15;
+
+/// One task's priced runs (the web's "Costliest tasks").
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SpendTask {
+    pub title: String,
+    pub cost: super::tree_model::Usd,
+    pub runs: usize,
+}
+
+/// What agents reported (the `USAGE` events on every task), as `spendOf` in `Usage.tsx` adds it up.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SpendReport {
+    pub total: super::tree_model::Usd,
+    pub runs: usize,
+    pub tokens_in: u64,
+    pub tokens_out: u64,
+    /// The five that cost most, costliest first.
+    pub tasks: Vec<SpendTask>,
+    /// How many tasks have a price.
+    pub priced_tasks: usize,
+    /// How many tasks the workbench holds.
+    pub tasks_total: usize,
+}
+
+/// The web's `spendOf`: every `USAGE` event of every task, added up in total and per task.
+pub fn spend_report(snapshot: &Snapshot) -> SpendReport {
+    let mut report = SpendReport { tasks_total: snapshot.tasks.len(), ..SpendReport::default() };
+    let mut total = 0.0f64;
+    let mut priced: Vec<SpendTask> = Vec::new();
+    for task in &snapshot.tasks {
+        let (mut cost, mut runs) = (0.0f64, 0usize);
+        for event in &task.events {
+            let Some(body) = event.message.strip_prefix("USAGE ") else { continue };
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else { continue };
+            cost += value["cost_usd"].as_f64().filter(|c| c.is_finite()).unwrap_or(0.0);
+            runs += 1;
+            report.tokens_in += value["input_tokens"].as_f64().unwrap_or(0.0).max(0.0) as u64;
+            report.tokens_out += value["output_tokens"].as_f64().unwrap_or(0.0).max(0.0) as u64;
+        }
+        if runs > 0 {
+            priced.push(SpendTask { title: task.display_title.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| task.title.clone()), cost: super::tree_model::Usd(cost), runs });
+        }
+        total += cost;
+        report.runs += runs;
+    }
+    priced.sort_by(|a, b| b.cost.0.partial_cmp(&a.cost.0).unwrap_or(std::cmp::Ordering::Equal));
+    report.priced_tasks = priced.len();
+    priced.truncate(5);
+    report.tasks = priced;
+    report.total = super::tree_model::Usd(total);
+    report
+}
 
 /// The open task in full: its events, plan and result, and what the daemon knows around it.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -544,6 +599,7 @@ impl Summary {
                 rulebook: snapshot.rulebook.clone().unwrap_or_default(),
                 rulebook_default: snapshot.rulebook_default.clone(),
                 model_runs: snapshot.runtime_selections.iter().map(|r| (r.runtime.model.clone(), r.runtime.reasoning_effort.clone())).collect(),
+                spend: spend_report(snapshot),
                 connections: snapshot.mcp.connections.len(),
                 home_last: {
                     let profile = if snapshot.agent_profiles.active_profile_id.is_empty() { "default" } else { snapshot.agent_profiles.active_profile_id.as_str() };

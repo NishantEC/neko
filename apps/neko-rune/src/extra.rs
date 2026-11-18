@@ -57,6 +57,8 @@ pub struct ExtraState {
     pub machine: Option<(MachineHealth, i64)>,
     /// The daemon answered the machine request with no reading yet (it samples every 15 seconds while it runs).
     pub machine_empty: bool,
+    /// When the daemon last answered the machine request, by the app's clock (the web's `fetchedAt`; 0 before the first answer).
+    pub machine_fetched: i64,
     pub folders: Option<Vec<ProviderRow>>,
     pub login: Option<bool>,
     /// Where the rulebook guard is sending the person if they discard.
@@ -502,6 +504,7 @@ impl App {
             }
             ExtraAnswer::Machine(health) => {
                 let at = self.now_ms;
+                self.extra.machine_fetched = at;
                 self.extra.machine_empty = health.is_none() && self.extra.machine.is_none();
                 // Held: an unchanged reading does not replace the one on screen (the web compares `at_ms`).
                 let same = matches!((&self.extra.machine, &health), (Some((old, _)), Some(new)) if old.at_ms == new.at_ms);

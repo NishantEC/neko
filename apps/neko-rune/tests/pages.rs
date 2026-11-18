@@ -315,16 +315,24 @@ fn the_this_mac_pages_are_the_webs_groups_with_the_extra_rows_last() {
 }
 
 #[test]
-fn usage_draws_the_week_and_each_quota_with_a_bar_that_changes_colour() {
+fn usage_is_the_webs_sections_with_the_week_as_bars_and_each_quota_as_a_figure() {
     let rt = runtime("usage");
     assert!(rt.find("usage-today").is_some() && text_of(&rt, "usage-today-value").is_some_and(|v| v.starts_with('$')));
+    // The web's four sections in its order, under its title.
+    assert!(text_of(&rt, "title").as_deref() == Some("Usage & machine"));
+    let ys: Vec<f32> = ["machine", "spend", "models", "quota"].iter().map(|k| rect(&rt, k)[1]).collect();
+    assert!(ys.windows(2).all(|w| w[0] < w[1]), "This Mac, Spend, Models, Quota in order: {ys:?}");
+    // The chart is 176 high (recharts, `h-44`), the figures and the five costliest tasks are the web's rows.
     let chart = rect(&rt, "usage-line");
-    assert_eq!(chart[3], 160.0, "160 points tall");
+    assert_eq!(chart[3], 176.0, "176 points tall");
+    for key in ["usage-budget", "usage-recorded", "usage-week", "usage-priced", "usage-task-row-0"] {
+        assert!(rt.find(key).is_some(), "{key}");
+    }
+    // A quota is a figure: its first stat as the value with its label as the unit, the rest as the muted line.
     assert!(rt.find("quota-0").is_some() && rt.find("quota-2").is_some());
-    // 62% used is a partial bar; the fill is as wide as the share used.
-    let fill = |i: usize| rect(&rt, &format!("quota-fill-{i}"))[2];
-    assert!((fill(0) - 160.0 * 0.62).abs() < 1.0 && (fill(1) - 160.0 * 0.84).abs() < 1.0 && (fill(2) - 160.0 * 0.97).abs() < 1.0);
-    assert!(texts(&rt).iter().any(|t| t == "38% left · resets 14:00"));
+    assert_eq!(text_of(&rt, "quota-0-value").as_deref(), Some("38%"));
+    assert!(texts(&rt).iter().any(|t| t == "left") && texts(&rt).iter().any(|t| t == "resets 14:00"));
+    assert_eq!(text_of(&rt, "quota-2-detail").as_deref(), Some("97% used · resets 1 Dec"), "from 70% used the line says so first");
 }
 
 #[test]

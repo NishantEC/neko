@@ -4,123 +4,279 @@
 //! Ported from `pages/setup/Usage.tsx`, `pages/setup/Workspaces.tsx` and the plugin status the web
 //! reports to the daemon; the same requests, no writes.
 
-use rune::{Color, El, Shape, canvas, col, el, row, text};
+use rune::{Color, El, Path, Shape, canvas, col, el, icon, row, text};
 
 use neko_protocol::workbench::MachineHealth;
 
-use super::ui::{group, page, quiet_line};
+use super::ui::page;
+use super::webkit;
 use crate::app::App;
+use crate::clock;
+use crate::icons_phosphor;
 use crate::theme::Neko;
 
 const DAY_MS: i64 = 86_400_000;
-const CHART_H: f32 = 160.0;
+/// The chart's height (`h-44`): 8 above the plot, the plot 138 high, then the axis labels.
+const CHART_H: f32 = 176.0;
 
-/// Spend per day for the last seven days, oldest first, in US dollars: day `6` is the last 24 hours.
-pub fn spend_by_day(usage: &[(i64, u64)], now_ms: i64) -> [f64; 7] {
-    let mut days = [0.0; 7];
-    for &(at, micro) in usage {
-        let age = now_ms - at;
-        if (0..7 * DAY_MS).contains(&age) {
-            days[6 - (age / DAY_MS) as usize] += micro as f64 / 1_000_000.0;
-        }
-    }
-    days
+/// JavaScript's `toFixed`: the same digits, except that an exact tie (0.125 to two places) rounds up, where Rust rounds to even.
+fn fixed(n: f64, places: i32) -> String {
+    let scale = 10f64.powi(places);
+    let scaled = n * scale;
+    if scaled.fract() == 0.5 { format!("{:.*}", places as usize, (scaled.floor() + 1.0) / scale) } else { format!("{:.*}", places as usize, n) }
 }
 
 fn usd(n: f64) -> String {
-    if n >= 100.0 { format!("${n:.0}") } else { format!("${n:.2}") }
+    if n >= 100.0 { format!("${}", fixed(n, 0)) } else { format!("${}", fixed(n, 2)) }
 }
 
-/// The bar's colour: Iris, amber past 80% used, coral past 95%.
-pub fn bar_color(t: &Neko, used: f32) -> Color {
-    if used >= 0.95 {
-        t.meaning.coral
-    } else if used >= 0.8 {
-        t.meaning.amber
+/// A quota's value colour (`Usage.tsx`): quiet, amber from 70% used, coral from 90%; colour only beside words that say why.
+pub fn quota_ink(t: &Neko, used: f32) -> Option<Color> {
+    if used >= 0.9 {
+        Some(t.meaning.coral)
+    } else if used >= 0.7 {
+        Some(t.meaning.amber)
     } else {
-        t.meaning.iris
+        None
     }
 }
 
-/// A figure as one line: label, value, muted detail (DESIGN.md §8 rule 12).
-fn figure(t: &Neko, key: &str, label: &str, value: &str, detail: &str) -> El {
-    row()
-        .key(key.to_owned())
+/// The Usage page (`Usage.tsx`, "Usage & machine"): This Mac, Spend, Models and Quota, each a `Section` of the web's figures.
+pub fn usage(s: &App, t: &Neko, region_w: f32) -> El {
+    webkit::set_page_width(region_w);
+    // The column's inside: the window up to the page's 880, less the 28 of padding at either side.
+    let inner = region_w.min(super::COLUMN) - 56.0;
+    let body = col().key("usage-body").w_full().gap(32.0).child(this_mac(s, t)).child(spend(s, t, inner)).child(models(s, t)).child(quota(s, t));
+    page(t, "usage", "Usage & machine", None, Vec::new(), body)
+}
+
+fn this_mac(s: &App, t: &Neko) -> El {
+    let fetched = s.extra.machine_fetched;
+    let updated = if fetched > 0 { format!("Updated {}s ago", ((s.now_ms - fetched) as f64 / 1000.0).round().max(0.0) as i64) } else { "Reading…".to_owned() };
+    let big = webkit::page_width() < 640.0;
+    let refresh = row().key("machine-refresh").role("button").label("Refresh the machine reading").help("Refresh").focusable(true).size(36.0, 36.0).center().radius(18.0).hover(t.text.base.alpha(0.07)).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(|s: &mut App| s.extra_ask_machine()).child(icon(&icons_phosphor::ARROWS_CLOCKWISE, if big { 18.0 } else { 16.0 }).color(t.text.base).a11y_hidden());
+    let actions = row().gap(6.0).center_y().child(text(updated).key("machine-updated").font(webkit::tnum(webkit::font(t, 12.0, 400.0, 19.5))).color(t.text.muted.alpha(0.7))).child(refresh);
+    let body = match s.extra.machine.as_ref() {
+        None if s.extra.machine_empty => webkit::empty(t, "machine-empty", &icons_phosphor::GAUGE_REGULAR, "No reading yet", "The daemon hasn’t sampled the machine. It does so every 15 seconds while it runs.", None),
+        None => loading_rows(t, "machine-loading", 4),
+        Some((h, _)) => machine_body(s, t, h),
+    };
+    webkit::section(t, "machine", "This Mac", None, Some(actions), body)
+}
+
+/// `LoadingRows`: a skeleton line per row while the daemon has not answered.
+fn loading_rows(t: &Neko, key: &str, rows: usize) -> El {
+    let list: Vec<El> = (0..rows).map(|i| row().w_full().px(12.0).py(10.0).gap(12.0).center_y().child(webkit::skeleton(t, &format!("{key}-dot-{i}"), 14.0, 14.0).radius(7.0)).child(el().h(16.0).w_frac((32 + (i * 17) % 36) as f32 / 100.0).radius(6.0).fill(t.text.base.alpha(0.06)))).collect();
+    col().key(key.to_owned()).mx(-12.0).children(list)
+}
+
+fn tone_ink(t: &Neko, level: u8) -> Option<Color> {
+    match level {
+        2 => Some(t.meaning.coral),
+        1 => Some(t.meaning.amber),
+        _ => None,
+    }
+}
+
+/// The machine reading: the state line, the four figures, and what each kind of agent holds.
+fn machine_body(s: &App, t: &Neko, h: &MachineHealth) -> El {
+    let state = machine_state(h);
+    let slowed = if h.slowed > 0 { format!(" Slowed {} build and test {}; nothing was stopped.", h.slowed, if h.slowed == 1 { "process" } else { "processes" }) } else { String::new() };
+    let line = row()
+        .key("machine-state")
         .w_full()
-        .min_h(32.0)
-        .px(6.0)
-        .gap(10.0)
+        .gaps(4.0, 12.0)
+        .flex_wrap()
         .center_y()
-        .child(text(label.to_owned()).font(t.ty.row).color(t.text.muted))
-        .child(text(value.to_owned()).key(format!("{key}-value")).font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(t.text.base))
-        .child(text(detail.to_owned()).font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0))
-}
-
-/// The seven-day line: 1.5 point Iris on three faint gridlines, with the amounts at the left.
-fn chart(t: &Neko, days: &[f64; 7]) -> El {
-    let top = days.iter().cloned().fold(0.0f64, f64::max);
-    // A round top for the axis so the gridlines read as 0, half and full.
-    let ceiling = if top <= 0.0 { 1.0 } else { nice(top) };
-    const W: f32 = 700.0;
-    let y = |v: f64| CHART_H - 6.0 - (v / ceiling) as f32 * (CHART_H - 12.0);
-    let x = |i: usize| 8.0 + i as f32 * (W - 16.0) / 6.0;
-    let grid = t.text.faint.alpha(0.35);
-    let mut shape = Shape::new().view_box(W, CHART_H);
-    for tick in [0.0, 0.5, 1.0] {
-        let gy = y(ceiling * tick);
-        shape = shape.line([0.0, gy], [W, gy], 1.0, rune::LineCap::Butt, grid);
-    }
-    let points: Vec<[f32; 2]> = days.iter().enumerate().map(|(i, v)| [x(i), y(*v)]).collect();
-    shape = shape.stroke(points, 1.5, t.meaning.iris);
-    let axis = col().w(44.0).h(CHART_H).child(
-        el().w_full().h(CHART_H).child(
-            col()
-                .w_full()
-                .h(CHART_H)
-                .justify_between()
-                .child(text(usd(ceiling)).font(t.ty.id).color(t.text.faint))
-                .child(text(usd(ceiling / 2.0)).font(t.ty.id).color(t.text.faint))
-                .child(text(usd(0.0)).font(t.ty.id).color(t.text.faint)),
-        ),
-    );
-    let mut labels = row().w_full().px(8.0).pl(52.0);
-    for (i, _) in days.iter().enumerate() {
-        let word = if i == 6 { "today".to_owned() } else { format!("{}d", 6 - i) };
-        labels = labels.child(row().grow(1.0).min_w(0.0).justify_center().child(text(word).font(t.ty.id).color(t.text.faint)));
-    }
-    col().key("usage-chart").w_full().gap(4.0).child(row().w_full().gap(8.0).child(axis).child(canvas(shape).key("usage-line").grow(1.0).h(CHART_H))).child(labels)
-}
-
-/// A round number at or above `v`: 1, 2, 5 times a power of ten.
-pub fn nice(v: f64) -> f64 {
-    let p = 10f64.powf(v.log10().floor());
-    [1.0, 2.0, 5.0, 10.0].iter().map(|m| m * p).find(|c| *c >= v).unwrap_or(10.0 * p)
-}
-
-pub fn usage(s: &App, t: &Neko) -> El {
-    let usage = s.summary.as_ref().map(|m| m.settings.usage.clone()).unwrap_or_default();
-    let ceiling = s.summary.as_ref().and_then(|m| m.settings.daily_budget_cents);
-    let spend = s.pages.routines.as_ref().map(|d| d.spend_today);
-    let today = match &spend {
-        Some(sp) => sp.tasks_usd + sp.routines_usd,
-        None => usage.iter().filter(|(at, _)| s.now_ms - at < DAY_MS).map(|(_, m)| *m as f64 / 1_000_000.0).sum(),
-    };
-    let ceiling = spend.and_then(|sp| sp.ceiling_cents).or(ceiling);
-    let detail = match (ceiling, spend.is_some_and(|sp| sp.held)) {
-        (Some(c), true) => format!("Ceiling of {} reached: new goal turns and routine runs wait until tomorrow.", usd(c as f64 / 100.0)),
-        (Some(c), false) => format!("of a {} daily ceiling", usd(c as f64 / 100.0)),
-        (None, _) => "No daily ceiling. Set one in Settings.".to_owned(),
-    };
-    let mut body = col().w_full().gap(18.0).child(machine(s, t)).child(figure(t, "usage-today", "Today", &usd(today), &detail));
-    let days = spend_by_day(&usage, s.now_ms);
-    body = if usage.is_empty() {
-        body.child(quiet_line(t, "usage-none", "No priced runs yet"))
+        .child(text(state.title.clone()).key("machine-state-title").font(webkit::font(t, 13.5, 400.0, 21.9375)).color(tone_ink(t, state.level).unwrap_or(t.text.base)).a11y_hidden())
+        .child(text(format!("{}{slowed}", state.detail)).key("machine-state-detail").font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).wrap().min_w(0.0).shrink().a11y_hidden())
+        .child(el().grow(1.0).min_w(0.0))
+        .child(text(format!("read {}", webkit::relative_time(s.now_ms, h.at_ms))).font(webkit::tnum(webkit::font(t, 12.0, 400.0, 19.5))).color(t.text.muted.alpha(0.7)).a11y_hidden());
+    let figures: Vec<El> = machine_figures(h).into_iter().enumerate().map(|(i, (label, value, unit, detail, level))| webkit::figure(t, &format!("machine-{i}"), label, &value, unit.as_deref(), Some(&detail), tone_ink(t, level), None)).collect();
+    let mut c = col().w_full().gap(6.0).child(line).child(webkit::panel(figures)).child(webkit::group_heading(t, "machine-agents-head", "Memory held by agents", None));
+    if h.agents.is_empty() {
+        c = c.child(text("No agent processes are running right now.".to_owned()).key("machine-agents-none").font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted).wrap().min_w(0.0));
     } else {
-        body.child(col().w_full().gap(6.0).child(group(t, "Last 7 days")).child(chart(t, &days)))
+        let rows: Vec<El> = h
+            .agents
+            .iter()
+            .take(6)
+            .enumerate()
+            .map(|(i, a)| {
+                let size = if a.mb >= 1024 { format!("{:.1} GB", a.mb as f64 / 1024.0) } else { format!("{} MB", a.mb) };
+                webkit::figure(t, &format!("machine-agent-{i}"), &a.name, &size, None, Some(&format!("{} {}", a.processes, if a.processes == 1 { "process" } else { "processes" })), None, None)
+            })
+            .collect();
+        c = c.child(webkit::panel(rows));
+    }
+    c
+}
+
+/// `usd` (`Usage.tsx`): two decimals, none from a hundred.
+fn usd_text(n: f64) -> String {
+    usd(n)
+}
+
+/// `compact` (`Usage.tsx`): 1.2k, 3.4M.
+fn compact(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{}M", fixed(n as f64 / 1e6, 1))
+    } else if n >= 1_000 {
+        format!("{}k", fixed(n as f64 / 1e3, 1))
+    } else {
+        n.to_string()
+    }
+}
+
+const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/// The last fourteen days, oldest first: the day as "Nov 5" and what was spent on it, by the wall clock's days (`spendOf`).
+pub fn spend_by_day_14(usage: &[(i64, u64)], now_ms: i64) -> Vec<(String, f64)> {
+    let key = |ms: i64| {
+        let l = clock::local(ms);
+        (l.year, l.month, l.day)
     };
-    body = body.child(models(s, t));
-    body = body.child(quota(s, t));
-    page(t, "usage", "Usage", None, Vec::new(), body)
+    let mut days: Vec<((i32, u32, u32), String, f64)> = (0..14).rev().map(|i| (key(now_ms - i * DAY_MS), String::new(), 0.0)).collect();
+    for d in &mut days {
+        d.1 = format!("{} {}", MONTHS[d.0.1 as usize - 1], d.0.2);
+    }
+    for &(at, micro) in usage {
+        if let Some(d) = days.iter_mut().find(|d| d.0 == key(at)) {
+            d.2 += micro as f64 / 1_000_000.0;
+        }
+    }
+    days.into_iter().map(|(_, label, cost)| (label, (cost * 100.0).round() / 100.0)).collect()
+}
+
+/// Recharts' five ticks for a value axis from 0 to the largest bar: `getNiceTickValues` with a step that is a multiple of 5% of a
+/// power of ten.
+pub fn chart_ticks(max: f64) -> [f64; 5] {
+    let rough = if max > 0.0 { max / 4.0 } else { 0.25 };
+    let digits = rough.log10().floor() + 1.0;
+    let scale_base = 10f64.powf(digits);
+    let ratio = rough / scale_base;
+    let scale = if digits != 1.0 { 0.05 } else { 0.1 };
+    let step = (ratio / scale - 1e-9).ceil() * scale * scale_base;
+    let mut out = [0.0; 5];
+    for (i, v) in out.iter_mut().enumerate() {
+        *v = (i as f64 * step * 1e6).round() / 1e6;
+    }
+    out
+}
+
+/// A bar with its top corners rounded (`radius={[4, 4, 0, 0]}`).
+fn bar_path(x: f32, y: f32, w: f32, h: f32) -> Path {
+    let r = 4.0f32.min(h).min(w / 2.0);
+    let k = 0.5523 * r;
+    Path::new().move_to([x, y + h]).line_to([x, y + r]).cubic_to([x, y + r - k], [x + r - k, y], [x + r, y]).line_to([x + w - r, y]).cubic_to([x + w - r + k, y], [x + w, y + r - k], [x + w, y + r]).line_to([x + w, y + h]).close()
+}
+
+/// `Per day`: the bar chart (`recharts`, 176 high): a 44 wide axis of dollars, five faint gridlines over a plot 138 high, fourteen bars
+/// in 80% of their band and a date under every other bar.
+fn chart(t: &Neko, w: f32, days: &[(String, f64)]) -> El {
+    let (left, right, top, plot_h) = (44.0f32, 4.0f32, 8.0f32, 138.0f32);
+    let plot_w = w - left - right;
+    let max = days.iter().map(|d| d.1).fold(0.0f64, f64::max);
+    let ticks = chart_ticks(max);
+    let ceiling = ticks[4].max(1e-9);
+    let y_of = |v: f64| top + plot_h * (1.0 - (v / ceiling) as f32);
+    let band = plot_w / days.len() as f32;
+    let mut shape = Shape::new().view_box(w, CHART_H);
+    for v in ticks {
+        let y = y_of(v);
+        shape = shape.line([left, y], [left + plot_w, y], 1.0, rune::LineCap::Butt, Color::WHITE.alpha(0.0353));
+    }
+    for (i, (_, cost)) in days.iter().enumerate() {
+        if *cost <= 0.0 {
+            continue;
+        }
+        let y = y_of(*cost);
+        let bw = (band * 0.8).floor();
+        shape = shape.fill_path(&bar_path(left + i as f32 * band + band * 0.1, y, bw, top + plot_h - y), t.meaning.iris);
+    }
+    let style = webkit::font(t, 12.0, 400.0, 15.0);
+    let mut c = el().key("usage-chart").w(w).h(CHART_H).child(canvas(shape).key("usage-line").pin(Some(0.0), Some(0.0), None, None).w(w).h(CHART_H));
+    for v in ticks {
+        let words = format!("${}", format_tick(v));
+        let width = rune::text::measure(&words, &[], style, None).0;
+        c = c.child(text(words).font(style).color(t.text.muted).a11y_hidden().pin(Some(36.0 - width), Some(y_of(v) - 7.75), None, None));
+    }
+    for (i, (label, _)) in days.iter().enumerate().step_by(2) {
+        let width = rune::text::measure(label, &[], style, None).0;
+        c = c.child(text(label.clone()).font(style).color(t.text.muted).a11y_hidden().pin(Some(left + (i as f32 + 0.5) * band - width / 2.0), Some(156.52), None, None));
+    }
+    c
+}
+
+/// A number the way JavaScript prints it in `$${v}`: no trailing zeros.
+fn format_tick(v: f64) -> String {
+    let s = format!("{v:.4}");
+    s.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+fn spend(s: &App, t: &Neko, inner: f32) -> El {
+    let settings = s.summary.as_ref().map(|m| &m.settings);
+    let report = settings.map(|m| m.spend.clone()).unwrap_or_default();
+    let usage = settings.map(|m| m.usage.clone()).unwrap_or_default();
+    // (`+ 0.0`: an empty float sum is negative zero, which prints as "$-0.00".)
+    let week: f64 = usage.iter().filter(|(at, _)| (0..=7 * DAY_MS).contains(&(s.now_ms - at))).map(|(_, m)| *m as f64 / 1e6).sum::<f64>() + 0.0;
+    let has_data = report.runs > 0;
+    let budget = settings.and_then(|m| m.task_budget_cents).map(|c| c as f64 / 100.0);
+    let top = report.tasks.first();
+    let share = match (budget, top) {
+        (Some(b), Some(top)) if b > 0.0 => top.cost.0 / b,
+        _ => 0.0,
+    };
+    let mut figures: Vec<El> = Vec::new();
+    if let Some(today) = s.pages.routines.as_ref().map(|d| d.spend_today) {
+        let total = today.tasks_usd + today.routines_usd;
+        let ceiling = today.ceiling_cents.map(|c| c as f64 / 100.0);
+        if total > 0.0 || ceiling.is_some() {
+            let ink = if today.held { Some(t.meaning.coral) } else if ceiling.is_some_and(|c| total >= c * 0.8) { Some(t.meaning.amber) } else { None };
+            let lead = match ceiling {
+                None => "No daily ceiling. Set one in Settings → AI & agents.".to_owned(),
+                Some(c) if today.held => format!("Ceiling of {} reached: new goal turns and routine runs wait until tomorrow.", usd_text(c)),
+                Some(c) => format!("of a {} daily ceiling", usd_text(c)),
+            };
+            let detail = format!("{lead}{}", if today.routines_usd > 0.0 { format!(" · {} from routines", usd_text(today.routines_usd)) } else { String::new() });
+            figures.push(webkit::figure(t, "usage-today", "Today", &usd_text(total), None, Some(&detail), ink, None));
+        }
+    }
+    if has_data {
+        figures.push(webkit::figure(t, "usage-recorded", "Recorded spend", &usd_text(report.total.0), None, Some(&format!("{} priced {} · {} in · {} out", report.runs, if report.runs == 1 { "run" } else { "runs" }, compact(report.tokens_in), compact(report.tokens_out))), None, None));
+        figures.push(webkit::figure(t, "usage-week", "Last 7 days", &usd_text(week), None, Some(if week > 0.0 { "Across every task" } else { "Nothing priced this week" }), None, None));
+    }
+    let ink = if share >= 1.0 { Some(t.meaning.coral) } else if share >= 0.8 { Some(t.meaning.amber) } else { None };
+    let budget_detail = match (budget, top) {
+        (None, _) => "No limit set. Change it in Settings → AI & agents.".to_owned(),
+        (Some(_), Some(top)) => format!("Costliest task so far: {}{}", usd_text(top.cost.0), if share >= 0.8 { format!(" ({}% of the budget)", (share * 100.0).round() as i64) } else { String::new() }),
+        (Some(_), None) => "No priced task yet".to_owned(),
+    };
+    figures.push(webkit::figure(t, "usage-budget", "Per-task budget", &budget.map_or("None".to_owned(), usd_text), None, Some(&budget_detail), ink, None));
+    if has_data {
+        figures.push(webkit::figure(t, "usage-priced", "Tasks with a price", &report.priced_tasks.to_string(), None, Some(&format!("of {} in history", report.tasks_total)), None, None));
+    }
+    let mut c = col().w_full().gap(6.0).child(webkit::panel(figures).key("spend-figures"));
+    if has_data {
+        let days = spend_by_day_14(&usage, s.now_ms);
+        c = c.child(webkit::group_heading(t, "usage-days-head", "Per day", Some("last 14 days, USD"))).child(chart(t, inner, &days)).child(webkit::group_heading(t, "usage-tasks-head", "Costliest tasks", None));
+        let rows: Vec<El> = report
+            .tasks
+            .iter()
+            .enumerate()
+            .map(|(i, task)| {
+                let title = text(task.title.clone()).key(format!("usage-task-{i}")).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().a11y_hidden();
+                let runs = text(format!("{} {}", task.runs, if task.runs == 1 { "run" } else { "runs" })).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden();
+                let cost = text(usd_text(task.cost.0)).key(format!("usage-task-{i}-cost")).font(webkit::tnum(webkit::font(t, 12.5, 400.0, 20.3125))).color(t.text.base).a11y_hidden();
+                webkit::info_row(t, &format!("usage-task-row-{i}"), title, Some(runs), None, vec![cost], None)
+            })
+            .collect();
+        c = c.child(webkit::panel(rows).key("spend-tasks"));
+    } else {
+        c = c.child(text("No priced runs yet. When an agent that reports its cost finishes a run, its spend shows up here.".to_owned()).key("usage-none").font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted).wrap().min_w(0.0));
+    }
+    let title = "Spend";
+    webkit::section(t, "spend", title, None, None, c).help("Read from the cost each Claude Code and OpenCode run reports. Codex subscriptions don’t report a price, so their runs aren’t counted here.")
 }
 
 /// What the machine reading says to the person, in the web's words (`machineState` in Usage.tsx): a tone and a line, with a detail.
@@ -149,7 +305,8 @@ pub fn machine_state(h: &MachineHealth) -> MachineState {
 }
 
 /// One figure of the reading: its words, and how loudly it speaks (0 quiet, 1 amber, 2 coral): colour only when it needs the person.
-pub fn machine_figures(h: &MachineHealth) -> Vec<(&'static str, String, String, u8)> {
+/// (label, value, unit, detail, level).
+pub fn machine_figures(h: &MachineHealth) -> Vec<(&'static str, String, Option<String>, String, u8)> {
     let cores = h.cores.max(1) as f64;
     let per_core = h.load / cores;
     let pressure = if h.pressure.is_empty() { "normal".to_owned() } else { h.pressure.clone() };
@@ -157,13 +314,15 @@ pub fn machine_figures(h: &MachineHealth) -> Vec<(&'static str, String, String, 
     vec![
         (
             "Load",
-            format!("{:.1} of {} cores", h.load, h.cores.max(1)),
+            format!("{:.1}", h.load),
+            Some(format!("of {} cores", h.cores.max(1))),
             if h.load >= 20.0 { "No new agents start above a load of 20.".to_owned() } else if per_core >= 0.85 { format!("Busy: {per_core:.2} per core") } else { format!("{per_core:.2} per core") },
             if h.load >= 20.0 { 2 } else if per_core >= 0.85 { 1 } else { 0 },
         ),
         (
             "Memory pressure",
             pressure_cap,
+            None,
             format!("{:.1} GB compressed · swap {:.1} of {:.1} GB", h.compressed_gb, h.swap_used_gb, h.swap_total_gb),
             match pressure.as_str() {
                 "critical" => 2,
@@ -173,71 +332,19 @@ pub fn machine_figures(h: &MachineHealth) -> Vec<(&'static str, String, String, 
         ),
         (
             "Free disk",
-            format!("{:.0} GB", h.free_disk_gb),
+            format!("{:.0}", h.free_disk_gb),
+            Some("GB".to_owned()),
             if h.free_disk_gb < 15.0 { "Under 15 GB: nothing new starts.".to_owned() } else { "Neko holds new work under 15 GB.".to_owned() },
             if h.free_disk_gb < 15.0 { 2 } else if h.free_disk_gb < 30.0 { 1 } else { 0 },
         ),
         (
             "Cooling",
             if h.kernel_task_cpu >= 50.0 { "Throttling".to_owned() } else { "Normal".to_owned() },
+            None,
             if h.kernel_task_cpu >= 50.0 { format!("macOS is throttling (kernel_task {:.0}%)", h.kernel_task_cpu) } else { format!("kernel_task {:.0}%", h.kernel_task_cpu) },
             if h.kernel_task_cpu >= 50.0 { 1 } else { 0 },
         ),
     ]
-}
-
-fn tone(t: &Neko, level: u8) -> rune::Color {
-    match level {
-        2 => t.meaning.coral,
-        1 => t.meaning.amber,
-        _ => t.text.base,
-    }
-}
-
-/// "Machine health": the hold or cap on new work, then load, memory, disk and cooling as one-line figures (DESIGN.md §8 rule 12).
-fn machine(s: &App, t: &Neko) -> El {
-    let mut c = col().key("machine").w_full().gap(2.0).child(group(t, "Machine health"));
-    let Some((h, read_at)) = s.extra.machine.as_ref() else {
-        let line = if s.extra.machine_empty { "No reading yet. The daemon samples the machine every 15 seconds while it runs." } else { s.pages.notes.get("page:machine").map_or("Reading the machine…", String::as_str) };
-        return c.child(quiet_line(t, "machine-loading", line));
-    };
-    let state = machine_state(h);
-    c = c.child(
-        row()
-            .key("machine-state")
-            .w_full()
-            .min_h(32.0)
-            .px(6.0)
-            .gap(10.0)
-            .center_y()
-            .child(text(state.title.clone()).key("machine-state-title").font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(tone(t, state.level)))
-            .child(text(format!("{}{}", state.detail, if h.slowed > 0 { format!(" Slowed {} build and test {}; nothing was stopped.", h.slowed, if h.slowed == 1 { "process" } else { "processes" }) } else { String::new() })).font(t.ty.meta).color(t.text.muted).wrap().grow(1.0).min_w(0.0))
-            .child(text(format!("read {}", crate::pages::ago(s.now_ms, *read_at))).font(t.ty.id).color(t.text.faint)),
-    );
-    for (i, (label, value, detail, level)) in machine_figures(h).into_iter().enumerate() {
-        c = c.child(
-            row()
-                .key(format!("machine-{i}"))
-                .w_full()
-                .min_h(32.0)
-                .px(6.0)
-                .gap(10.0)
-                .center_y()
-                .child(text(label).font(t.ty.row).color(t.text.muted))
-                .child(text(value).key(format!("machine-{i}-value")).font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(tone(t, level)))
-                .child(text(detail).font(t.ty.meta).color(t.text.muted).truncate().grow(1.0).min_w(0.0)),
-        );
-    }
-    if !h.agents.is_empty() {
-        c = c.child(group(t, "Memory held by agents").pt(8.0));
-        for (i, a) in h.agents.iter().take(6).enumerate() {
-            let size = if a.mb >= 1024 { format!("{:.1} GB", a.mb as f64 / 1024.0) } else { format!("{} MB", a.mb) };
-            c = c.child(figure(t, &format!("machine-agent-{i}"), &a.name, &size, &format!("{} {}", a.processes, if a.processes == 1 { "process" } else { "processes" })));
-        }
-    } else {
-        c = c.child(quiet_line(t, "machine-agents-none", "No agent processes are running right now."));
-    }
-    c
 }
 
 /// Runs by model, from the last runs the workbench kept (the web's `ModelSection`): at most six, most used first.
@@ -261,48 +368,38 @@ fn models(s: &App, t: &Neko) -> El {
     if counts.is_empty() {
         return el().h(0.0);
     }
-    let top = counts.first().map_or(1, |c| c.1).max(1) as f32;
-    let mut c = col().key("models").w_full().gap(2.0).child(row().w_full().gap(8.0).child(group(t, "Models")).child(text(format!("last {} runs", runs.len())).font(t.ty.id).color(t.text.faint)));
-    for (i, (name, n)) in counts.iter().enumerate() {
-        let bar = row().w(160.0).h(4.0).radius(2.0).fill(t.surface.active).child(el().key(format!("model-fill-{i}")).w(160.0 * *n as f32 / top).h(4.0).radius(2.0).fill(t.meaning.iris));
-        c = c.child(row().key(format!("model-{i}")).w_full().min_h(32.0).px(6.0).gap(12.0).center_y().radius(t.radius.row).hover(t.surface.hover).child(text(name.clone()).key(format!("model-{i}-name")).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0)).child(bar).child(text(format!("{n} {}", if *n == 1 { "run" } else { "runs" })).key(format!("model-{i}-runs")).font(t.ty.meta).color(t.text.muted)));
-    }
-    c
+    let items: Vec<(String, usize, String)> = counts.iter().map(|(name, n)| (name.clone(), *n, format!("{n} {}", if *n == 1 { "run" } else { "runs" }))).collect();
+    webkit::section(t, "models", "Models", Some(&format!("last {} runs", runs.len())), None, webkit::panel(vec![webkit::bar_list(t, "model", &items)]))
 }
 
+/// "Quota": what each vendor has left, one `Figure` each; or one line that says why there is none, with "Check again".
 fn quota(s: &App, t: &Neko) -> El {
-    let mut c = col().key("quota").w_full().gap(2.0).child(group(t, "Quota"));
-    match &s.pages.quota {
-        None => c = c.child(quiet_line(t, "quota-loading", s.pages.notes.get("page:quota").map_or("Reading what each vendor has left…", String::as_str))),
-        Some(rows) if rows.is_empty() => c = c.child(quiet_line(t, "quota-none", "No vendor is signed in, or none has a metered window.")),
+    let body = match &s.pages.quota {
+        None if s.pages.notes.contains_key("page:quota") => quota_none(t, "This daemon doesn’t report vendor quota."),
+        None => loading_rows(t, "quota-loading", 2),
+        Some(rows) if rows.is_empty() => quota_none(t, "No vendor is signed in, or none has a metered window."),
         Some(rows) => {
-            for (i, r) in rows.iter().enumerate() {
-                let color = bar_color(t, r.used);
-                let words = if r.words.is_empty() { format!("{:.0}% used", r.used * 100.0) } else { r.words.join(" · ") };
-                let bar = row()
-                    .w(160.0)
-                    .h(4.0)
-                    .radius(2.0)
-                    .fill(t.surface.active)
-                    .child(el().key(format!("quota-fill-{i}")).w(160.0 * r.used.clamp(0.0, 1.0)).h(4.0).radius(2.0).fill(color));
-                c = c.child(
-                    row()
-                        .key(format!("quota-{i}"))
-                        .w_full()
-                        .min_h(32.0)
-                        .px(6.0)
-                        .gap(12.0)
-                        .center_y()
-                        .radius(t.radius.row)
-                        .hover(t.surface.hover)
-                        .child(text(r.label.clone()).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0))
-                        .child(bar)
-                        .child(text(words).key(format!("quota-words-{i}")).font(t.ty.meta).color(t.text.muted).truncate().min_w(0.0).max_w(200.0)),
-                );
-            }
+            let figures: Vec<El> = rows
+                .iter()
+                .enumerate()
+                .map(|(i, r)| {
+                    let ink = quota_ink(t, r.used);
+                    webkit::figure(t, &format!("quota-{i}"), &r.label, &r.value, Some(&r.unit), Some(&r.detail), ink, Some(&r.detail))
+                })
+                .collect();
+            webkit::panel(figures).key("quota-figures")
         }
-    }
-    c
+    };
+    webkit::section(t, "quota", "Quota", None, None, body).help("What each signed-in vendor has left, read from its own API.")
+}
+
+fn quota_none(t: &Neko, words: &str) -> El {
+    let again = row().key("quota-again").role("button").label("Check again").focusable(true).h(20.3125).gap(4.0).center_y().radius(10.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(|s: &mut App| {
+        s.pages.quota = None;
+        s.pages.notes.remove("page:quota");
+        s.call(crate::link::Call::Quota);
+    }).child(icon(&icons_phosphor::ARROWS_CLOCKWISE, 12.0).color(t.text.muted).a11y_hidden()).child(text("Check again".to_owned()).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).a11y_hidden());
+    row().key("quota-none").w_full().gaps(0.0, 12.0).flex_wrap().center_y().child(text(words.to_owned()).font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted).wrap().min_w(0.0).shrink().a11y_hidden()).child(again)
 }
 
 #[cfg(test)]
@@ -310,31 +407,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn spend_lands_in_the_day_it_was_made_oldest_first() {
-        let now = 10 * DAY_MS;
-        let usage = [(now - 1000, 2_000_000u64), (now - DAY_MS - 5, 1_500_000), (now - 6 * DAY_MS - 1, 500_000), (now - 7 * DAY_MS - 1, 9_000_000), (now + 5, 1)];
-        let d = spend_by_day(&usage, now);
-        assert_eq!(d[6], 2.0);
-        assert_eq!(d[5], 1.5);
-        assert_eq!(d[0], 0.5);
-        assert_eq!(d.iter().sum::<f64>(), 4.0, "a run older than a week or in the future is not drawn");
+    fn the_per_day_axis_has_rechartss_five_ticks() {
+        assert_eq!(chart_ticks(3.9), [0.0, 1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(chart_ticks(0.0), [0.0, 0.25, 0.5, 0.75, 1.0]);
+        assert_eq!(chart_ticks(2.2), [0.0, 0.55, 1.1, 1.65, 2.2]);
+        assert_eq!(format_tick(1.65), "1.65");
+        assert_eq!(format_tick(2.0), "2");
+        assert_eq!(compact(2_900), "2.9k");
+        assert_eq!(compact(648_400), "648.4k");
+        assert_eq!(compact(1_250_000), "1.3M");
+        assert_eq!(compact(12), "12");
+        assert_eq!(usd(0.125), "$0.13");
+        assert_eq!(usd(13.3), "$13.30");
+        assert_eq!(usd(154.4), "$154");
     }
 
     #[test]
-    fn the_axis_tops_at_a_round_number() {
-        assert_eq!(nice(0.83), 1.0);
-        assert_eq!(nice(1.2), 2.0);
-        assert_eq!(nice(3.7), 5.0);
-        assert_eq!(nice(5.0), 5.0);
-        assert_eq!(nice(12.0), 20.0);
+    fn the_fortnight_runs_oldest_first_and_a_run_lands_on_its_own_day() {
+        let now = 40 * DAY_MS + 12 * 3_600_000;
+        let days = spend_by_day_14(&[(now - 500, 3_000_000), (now - 13 * DAY_MS, 1_000_000), (now - 14 * DAY_MS - 1000, 9_000_000)], now);
+        assert_eq!(days.len(), 14);
+        assert_eq!(days[13].1, 3.0);
+        assert_eq!(days[0].1, 1.0);
+        assert_eq!(days.iter().map(|d| d.1).sum::<f64>(), 4.0, "a run older than fourteen days is not drawn");
     }
 
     #[test]
-    fn the_quota_bar_turns_amber_at_80_and_coral_at_95() {
+    fn the_quota_value_turns_amber_at_70_and_coral_at_90() {
         let t = crate::theme::theme(true);
-        assert_eq!(bar_color(&t, 0.5), t.meaning.iris);
-        assert_eq!(bar_color(&t, 0.8), t.meaning.amber);
-        assert_eq!(bar_color(&t, 0.949), t.meaning.amber);
-        assert_eq!(bar_color(&t, 0.95), t.meaning.coral);
+        assert_eq!(quota_ink(&t, 0.5), None);
+        assert_eq!(quota_ink(&t, 0.7), Some(t.meaning.amber));
+        assert_eq!(quota_ink(&t, 0.899), Some(t.meaning.amber));
+        assert_eq!(quota_ink(&t, 0.9), Some(t.meaning.coral));
     }
 }
