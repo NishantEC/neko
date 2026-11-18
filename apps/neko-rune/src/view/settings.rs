@@ -141,7 +141,7 @@ fn rail(s: &App, t: &Neko, wide: bool) -> El {
     let searching = !s.pages.text("settings:search").trim().is_empty();
     let mut field = TextInput::new(edit_of(s, "settings:search")).label("Find a setting").placeholder("Find a setting").width(None).leading_icon(&icons::SEARCH).on_edit(editing("settings:search".to_owned()));
     // The ⌘F hint hides while the field has text (the clear button takes its place), so the two never share the corner.
-    field = if searching { field.clear_button() } else { field.trailing(text("⌘ F").key("settings-search-hint").font(t.ty.hint).color(t.text.muted).a11y_hidden()) };
+    field = if searching { field.clear_button() } else { field.trailing(row().key("settings-search-hint").h(20.0).px(4.0).gap(4.0).center_y().child(text("⌘".to_owned()).font(webkit::font(t, 12.0, 500.0, 16.0)).color(t.text.muted)).child(text("F".to_owned()).font(webkit::font(t, 12.0, 500.0, 16.0)).color(t.text.muted)).a11y_hidden()) };
     let search = field.build(&t.kit).key("settings-search").w_full().h(40.0).radius(24.0).fill(t.text.base.alpha(0.05));
     let pill = |section: Section| {
         let active = !searching && s.pages.section == section;

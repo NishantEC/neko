@@ -213,7 +213,7 @@
    "NEKO_RUNE_VIEW": "settings",
    "NEKO_RUNE_SECTION": "quick-panel"
   },
-  "web": "settings?section=quick-panel",
+  "web": "settings?section=search",
   "region": "session-region",
   "crop": [
    0,

@@ -4,12 +4,12 @@
 //! `pages/setup/settings/{Appearance,General,Ai,Rulebook,System}.tsx`; the state and the requests are `extra.rs`.
 
 use rune::{El, TextStyle, col, el, icon, row, text};
-use rune_kit::{TextArea, TextInput};
+use rune_kit::TextInput;
 
 use super::settings::{Item, item};
 use super::ui::{edit_of, editing, note, switch, switch_when, with_menu};
-use super::webkit::{self, button, setting_row};
-use super::{primary_button, quiet_button};
+use super::webkit::{self, button, setting_row, setting_row_stacked};
+use super::quiet_button;
 use crate::app::App;
 use crate::extra::combo_keys;
 use crate::icons;
@@ -221,34 +221,39 @@ pub(super) fn appearance(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<I
 // ---- Rulebook -----------------------------------------------------------------------------------
 
 pub(super) fn rulebook(s: &App, t: &Neko, out: &mut Vec<Item>) {
+    use super::webkit::{self, Tone, button, ghost_button, panel, panel_footer_with};
     let custom = s.summary.as_ref().is_some_and(|m| !m.settings.rulebook.is_empty());
     let dirty = s.rulebook_dirty();
     let help = "Changes apply to the next agent that starts; agents already running keep the rules they started with.";
-    let status = if custom { "Using your own rules" } else { "Using Neko’s default rules" };
-    let area = TextArea::new(edit_of(s, "rulebook")).label("Rulebook").placeholder("The rules Neko and every agent it hands work to follow.").rows(18).on_edit(editing("rulebook".to_owned())).build(&kit_mono(t)).key("rulebook").w_full().min_w(0.0);
-    let mut buttons = row().gap(8.0).center_y().flex_wrap();
+    // The page is `Rulebook.tsx`: a "Rulebook" section whose action is the status, one stacked row holding the editor, the footer
+    // ("Saved · ⌘S saves" and the buttons) and the built-in default under a collapsed button.
+    let area = webkit::text_area(s, t, "rulebook", "Rulebook", "The rules Neko and every agent it hands work to follow.", 384.0);
+    let editor = setting_row_stacked(t, "set-rulebook", "Rulebook", Some(help), area);
+    let plain = webkit::font(t, 12.0, 400.0, 16.0);
+    // "Saved · " is one run of text in the web (the spaces are real ones), then the key, then " saves".
+    let run = row().child(text((if dirty { "Unsaved changes" } else { "Saved" }).to_owned()).key("rulebook-state").font(plain).color(if dirty { t.meaning.amber } else { t.text.muted })).child(text("·".to_owned()).font(plain).color(t.text.muted).mr(3.3));
+    let left = row().gap(8.0).center_y().child(run).child(webkit::kbd(t, "rulebook-kbd", "⌘S")).child(text("saves".to_owned()).font(plain).color(t.text.muted));
+    let mut buttons = Vec::new();
     if dirty {
-        buttons = buttons.child(quiet_button("Revert changes", "rulebook-revert", t, |s: &mut App| s.revert_rulebook()));
+        buttons.push(ghost_button(t, "rulebook-revert", "Revert changes", Some(&icons::UNDO), |s: &mut App| s.revert_rulebook()));
     }
     if custom {
-        buttons = buttons.child(quiet_button("Restore default", "rulebook-restore", t, |s: &mut App| s.ask_restore_rulebook()));
+        buttons.push(button(t, "rulebook-restore", "Restore default", None, false, false, |s: &mut App| s.ask_restore_rulebook()));
     }
-    buttons = buttons.child(if dirty { primary_button("Save rulebook", "rulebook-save", t, |s: &mut App| s.save_rulebook()) } else { primary_button("Save rulebook", "rulebook-save", t, |_| {}).disabled(true).opacity(0.4) });
-    let mut r = col()
-        .key("set-rulebook")
-        .w_full()
-        .gap(8.0)
-        .child(row().w_full().px(6.0).gap(8.0).center_y().child(text(help).font(t.ty.meta).color(t.text.muted).wrap().grow(1.0).min_w(0.0)).child(text(status).key("rulebook-status").font(t.ty.id).color(if custom { t.meaning.mint } else { t.text.muted })))
-        .child(area)
-        .child(row().w_full().px(6.0).gap(8.0).center_y().flex_wrap().child(text(if dirty { "Unsaved changes · ⌘S saves" } else { "Saved · ⌘S saves" }).key("rulebook-state").font(t.ty.id).color(if dirty { t.meaning.amber } else { t.text.faint })).child(el().grow(1.0)).child(buttons));
+    let save = button(t, "rulebook-save", "Save rulebook", None, true, false, webkit::gated(dirty, |s: &mut App| s.save_rulebook()));
+    buttons.push(if dirty { save } else { save.disabled(true).opacity(0.5) });
+    let body_panel = panel(vec![with_note(s, t, "setting:rulebook", editor), panel_footer_with("rulebook-footer", left, buttons)]);
     let open = s.open("rulebook:default");
-    r = r.child(row().child(quiet_button(if open { "Hide Neko’s built-in default" } else { "View Neko’s built-in default" }, "rulebook-default-toggle", t, |s: &mut App| s.toggle("rulebook:default"))));
+    let toggle = webkit::ghost_button_after(t, "rulebook-default-toggle", "View Neko’s built-in default", &icons::CHEVRON_DOWN, |s: &mut App| s.toggle("rulebook:default")).ml(-8.0);
+    let mut body = col().w_full().gap(6.0).child(body_panel).child(row().child(toggle));
     if open {
         let built_in = s.summary.as_ref().map_or("", |m| m.settings.rulebook_default.as_str());
         let words = if built_in.is_empty() { "The daemon didn’t send the built-in default." } else { built_in };
-        r = r.child(text(words.to_owned()).key("rulebook-default").font(t.ty.mono).color(t.text.muted).wrap().w_full().px(12.0).py(10.0).radius(t.radius.row).fill(t.surface.hover));
+        let pre = text(words.to_owned()).key("rulebook-default").font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.base.alpha(0.85)).wrap().min_w(0.0);
+        body = body.child(col().w_full().max_h(384.0).mt(2.0).padding(16.0).radius(12.0).border(1.0, t.surface.border).fill(t.text.base.alpha(0.03)).scroll(rune::ScrollSpec { stick_bottom: false }).child(pre));
     }
-    out.push(item(Section::Rulebook, "Rulebook", "rulebook", "Rulebook", help, with_note(s, t, "setting:rulebook", r)));
+    let badge = webkit::status(t, "rulebook-status", if custom { Tone::Success } else { Tone::Neutral }, if custom { "Using your own rules" } else { "Using Neko’s default rules" });
+    out.push(item(Section::Rulebook, "", "rulebook", "Rulebook", help, webkit::section(t, "group-rulebook", "Rulebook", None, Some(badge), body)));
 }
 
 // ---- Quick panel --------------------------------------------------------------------------------

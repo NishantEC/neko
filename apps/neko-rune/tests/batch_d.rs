@@ -234,6 +234,18 @@ fn discarding_goes_where_the_person_was_going() {
 }
 
 #[test]
+fn the_rulebook_page_is_the_webs_one_section_with_a_status_a_footer_and_a_collapsed_default() {
+    let mut rt = runtime("bd-rulebook");
+    for key in ["group-rulebook", "rulebook-status", "rulebook-footer", "rulebook-kbd", "rulebook-save", "rulebook-default-toggle", "rulebook"] {
+        assert!(rt.find(key).is_some(), "{key}: {:?}", keys(&rt));
+    }
+    assert!(has_text(&rt, "Changes apply to the next agent that starts; agents already running keep the rules they started with."), "the description is words under the title");
+    assert!(rt.find("rulebook-default").is_none(), "the built-in default starts collapsed");
+    click(&mut rt, "rulebook-default-toggle");
+    assert!(rt.find("rulebook-default").is_some());
+}
+
+#[test]
 fn restoring_the_default_rulebook_asks_and_sends_empty_text() {
     let mut rt = runtime("bd-rulebook");
     rt.update(|s, _| {

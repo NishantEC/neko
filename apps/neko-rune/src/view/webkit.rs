@@ -72,7 +72,12 @@ pub fn status(t: &Neko, key: &str, tone: Tone, words: &str) -> El {
 pub fn panel_footer(t: &Neko, key: &str, notes: &[String], buttons: Vec<El>) -> El {
     // Each `{...}` of the web's JSX is a text node of its own, 4 apart (a space): they flow and wrap as one line.
     let line = row().min_w(0.0).gaps(0.0, 4.0).flex_wrap().children(notes.iter().map(|n| text(n.clone()).font(font(t, 12.0, 400.0, 16.0)).color(t.text.muted).wrap().min_w(0.0)));
-    row().key(key.to_owned()).w_full().px(12.0).pt(4.0).pb(20.0).gaps(8.0, 16.0).flex_wrap().center_y().justify_between().child(line).child(row().gap(8.0).center_y().children(buttons))
+    panel_footer_with(key, line, buttons)
+}
+
+/// [`panel_footer`] with a left side of its own (the Rulebook's "Saved · ⌘S saves").
+pub fn panel_footer_with(key: &str, left: El, buttons: Vec<El>) -> El {
+    row().key(key.to_owned()).w_full().px(12.0).pt(4.0).pb(20.0).gaps(8.0, 16.0).flex_wrap().center_y().justify_between().child(left).child(row().gap(8.0).center_y().children(buttons))
 }
 
 /// The web's `Input` in a settings row: 40 high, a pill, the foreground at 5%, 14 at the sides; `mono` is `font-mono`.
@@ -94,6 +99,33 @@ pub fn input(s: &App, t: &Neko, key: &str, label: &str, placeholder: &str, width
         .h(40.0)
         .radius(24.0)
         .fill(t.text.base.alpha(0.05))
+}
+
+/// The web's `Textarea` for a document (`ui/textarea.tsx`, the Rulebook): 13 point words on a 21.45 line, 10 above and 12 at the
+/// sides inside a 1 point border, radius 18, the foreground at 5%, 384 high at least and growing with the text (`field-sizing:
+/// content`). Built from Rune's own text field because the kit's `TextArea` fixes the line at 17.5.
+pub fn text_area(s: &App, t: &Neko, key: &str, label: &str, placeholder: &str, min_h: f32) -> El {
+    let style = font(t, 13.0, 400.0, 21.45);
+    let field = rune::text_input(super::ui::edit_of(s, key), style)
+        .key("input")
+        .w_full()
+        .color(t.text.base)
+        .placeholder(placeholder.to_owned(), t.text.faint)
+        .caret(t.text.base, t.kit.selection())
+        .label(label.to_owned())
+        .on_edit(super::ui::editing(key.to_owned()));
+    let lines = ((min_h - 22.0) / 21.45).ceil() as usize;
+    col()
+        .key(key.to_owned())
+        .role("textbox")
+        .w_full()
+        .min_h(min_h)
+        .px(13.0)
+        .py(11.0)
+        .radius(18.0)
+        .fill(t.text.base.alpha(0.05))
+        .focus_within_ring(2.0, 2.0, t.kit.c.border_focus)
+        .child(rune::auto_grow(field, lines, 10_000))
 }
 
 /// `relativeTime` (`setup/lib.ts`): "just now" under 45 seconds, then `Intl.RelativeTimeFormat` with `numeric: "auto"`.
@@ -181,6 +213,27 @@ pub fn button(t: &Neko, key: &str, label: &str, glyph: Option<&'static Icon>, pr
 /// `Button variant="ghost" size="sm"`: no fill, the same words.
 pub fn ghost_button(t: &Neko, key: &str, label: &str, glyph: Option<&'static Icon>, on_press: impl Fn(&mut App) + 'static) -> El {
     button(t, key, label, glyph, false, false, on_press).fill(Color::TRANSPARENT).radius(14.0)
+}
+
+/// A ghost button whose icon follows its words (the Rulebook's "View Neko’s built-in default" and its caret).
+pub fn ghost_button_after(t: &Neko, key: &str, label: &str, glyph: &'static Icon, on_press: impl Fn(&mut App) + 'static) -> El {
+    let big = page_width() < 640.0;
+    let (size, lh, glyph_size) = if big { (16.0, 24.0, 18.0) } else { (14.0, 20.0, 16.0) };
+    row()
+        .key(key.to_owned())
+        .role("button")
+        .label(label)
+        .focusable(true)
+        .h(36.0)
+        .px(14.0)
+        .gap(6.0)
+        .center()
+        .radius(14.0)
+        .hover(Color::WHITE.alpha(0.05))
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
+        .on_press(on_press)
+        .child(text(label.to_owned()).font(font(t, size, 500.0, lh)).color(t.text.base).a11y_hidden())
+        .child(icon(glyph, glyph_size).color(t.text.base.alpha(0.8)).a11y_hidden())
 }
 
 /// `Button variant="destructive-outline" size="sm"`: coral words on a faint wash with a hairline.
