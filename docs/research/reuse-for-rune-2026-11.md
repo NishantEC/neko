@@ -40,7 +40,7 @@ Three research passes covered the Rune ecosystem, crates for screen content, and
 | Status item (if Rune's macOS tray is missing) | `tray-icon` + `muda` | MIT/Apache | — | small |
 | Calendar and Reminders from Rust | ★ `objc2-event-kit` | Zlib/MIT/Apache | replaces the Swift bridge later | M |
 | Packaging, dmg/msi/deb | ★ `cargo-packager` (`rcodesign` as a CLI only, MPL) | MIT/Apache | build | M |
-| Browser use with a live view | ★ `chromiumoxide` (CDP `Page.startScreencast` → image) | MIT/Apache | daemon + Rune image | M |
+| Browser use with a live view | ~~`chromiumoxide`~~ → `tungstenite` + a 7-method watch-only CDP client (2026-11-18: chromiumoxide compiles the whole protocol; too heavy for what a watch needs) | MIT/Apache | Rune only | S |
 | Computer use, cross-platform | keep Peekaboo (MIT) on macOS; ★ `xcap` + `enigo` + `accessibility-sys`/`uiautomation`/`atspi` | Apache/MIT | daemon | M |
 | Rich clipboard | `arboard` (`clipboard-rs` for watching) | MIT/Apache | — | small |
 | Memory search | ★ `tantivy`, `sqlite-vec` (alpha), `fastembed` | MIT/Apache | daemon | M |
