@@ -17,6 +17,7 @@ pub mod daemon;
 pub mod eventkit;
 pub mod notify;
 pub mod open_in;
+pub mod paste;
 pub mod reminders;
 pub mod schedule;
 pub mod status_item;
@@ -66,13 +67,15 @@ pub struct Duties {
     pub calendar: bool,
     /// Reminders push and replies from EventKit (`reminders.rs`): the one writer of Neko's Reminders list (the Swift app's `PhoneBridge` is the other).
     pub reminders: bool,
+    /// Paste back into the previous app (⌥Return in the launcher) and the previous app's context (⌥Return in Neko's box): `paste.rs`.
+    pub paste: bool,
     /// Rune is in `--app` mode but the Swift app holds the duties: Settings says so.
     pub swift_holds: bool,
 }
 
 impl Duties {
     pub fn any(&self) -> bool {
-        self.daemon || self.status_item || self.app_menu || self.notifications || self.links || self.overlays || self.calendar || self.reminders
+        self.daemon || self.status_item || self.app_menu || self.notifications || self.links || self.overlays || self.calendar || self.reminders || self.paste
     }
 }
 
@@ -82,7 +85,7 @@ pub fn duties(app_flag: bool, swift_running: bool) -> Duties {
     match (app_flag, swift_running) {
         (false, _) => Duties::default(),
         (true, true) => Duties { swift_holds: true, ..Duties::default() },
-        (true, false) => Duties { daemon: true, status_item: true, app_menu: true, notifications: true, links: true, overlays: true, calendar: true, reminders: true, swift_holds: false },
+        (true, false) => Duties { daemon: true, status_item: true, app_menu: true, notifications: true, links: true, overlays: true, calendar: true, reminders: true, paste: true, swift_holds: false },
     }
 }
 
@@ -151,6 +154,9 @@ pub struct Shell {
     pub duties: Duties,
     /// What the background loops read (see [`Switches`]).
     pub switches: Switches,
+    /// The last regular app that was not this one (`paste.rs`); remembered only while Rune holds the paste duty.
+    pub previous: paste::Tracker,
+    previous_started: bool,
     /// The daemon's socket, for the daemon watch and the notifier.
     pub socket: PathBuf,
     daemon_started: bool,
@@ -215,6 +221,7 @@ impl App {
     pub fn release_duties(&mut self, before: Duties) {
         let now = self.shell.duties;
         self.shell.switches.follow(now);
+        self.shell.previous.hold(now.paste);
         if before.status_item && !now.status_item {
             status_item::remove();
         }
@@ -251,6 +258,13 @@ impl App {
         if d.reminders && !self.shell.reminders_started {
             self.shell.reminders_started = true;
             reminders::spawn(self.shell.socket.clone(), self.shell.switches.reminders.clone());
+        }
+        self.shell.previous.hold(d.paste);
+        #[cfg(target_os = "macos")]
+        if d.paste && !self.shell.previous_started {
+            self.shell.previous_started = true;
+            // The observer lives for the process and does nothing while the duty is handed back (`Tracker::hold`).
+            std::mem::forget(paste::native::start(&self.shell.previous));
         }
         if self.shell.wants_overlays() {
             self.overlays.attach_pending();
@@ -367,6 +381,54 @@ impl App {
         Ok(())
     }
 
+    /// ⌥Return in the launcher: paste what is on the clipboard into the app that was in front before Neko (`paste.rs`). Only where Rune is the
+    /// app. The waits are on a thread of their own; a failure comes back as a notice in Swift's words.
+    pub fn paste_back(&mut self) {
+        if !self.shell.duties.paste {
+            return;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let (Some(previous), Some(handle)) = (self.shell.previous.current(), self.shell.handle.clone()) else { return };
+            let _ = std::thread::Builder::new().name("neko-paste".into()).spawn(move || {
+                if let Err(words) = paste::restore_and_paste(Some(previous), &mut paste::native::System, || {}) {
+                    handle.update_if(move |s, tx| {
+                        s.notice = Some(words.to_owned());
+                        tx.instant();
+                        true
+                    });
+                }
+            });
+        }
+    }
+
+    /// What is selected in the previous app, if Accessibility is already allowed (never asks for it).
+    pub fn previous_context(&mut self) -> Option<paste::Snapshot> {
+        if !self.shell.duties.paste {
+            return None;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            paste::read_context(self.shell.previous.current(), &mut paste::native::System)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
+    }
+
+    /// Whether this process is already allowed to use Accessibility (`AXIsProcessTrusted`; no prompt).
+    pub fn accessibility_trusted(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            paste::Front::trusted(&mut paste::native::System)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
     /// "Quick panel": the launcher panel when the overlays are on, else the palette in the window.
     pub fn quick_panel(&mut self) {
         if self.overlays.launcher.is_some() {
@@ -452,7 +514,7 @@ mod tests {
         assert!(!held.any(), "the Swift app holds every duty: {held:?}");
         assert!(held.swift_holds, "and Settings says so");
         let ours = duties(true, false);
-        assert!(ours.daemon && ours.status_item && ours.app_menu && ours.notifications && ours.links && ours.overlays && ours.calendar && ours.reminders);
+        assert!(ours.daemon && ours.status_item && ours.app_menu && ours.notifications && ours.links && ours.overlays && ours.calendar && ours.reminders && ours.paste);
         assert!(!ours.swift_holds);
     }
 
@@ -589,6 +651,57 @@ mod tests {
         app.confirm_uninstall();
         app.ask_yes();
         assert_eq!(app.notice.as_deref(), Some("uninstall data=false"));
+    }
+
+    fn alt_return() -> rune::KeyEvent {
+        rune::KeyEvent { key: rune::Key::Enter, mods: rune::Mods { alt: true, ..rune::Mods::default() } }
+    }
+
+    #[test]
+    fn option_return_in_the_ask_box_does_nothing_where_rune_is_not_the_app() {
+        let mut plain = App::headless();
+        plain.ask.replace_text("hello");
+        assert!(plain.ask_key(&alt_return()));
+        assert!(plain.outbox.is_empty() && plain.notice.is_none(), "no --app: the key is the no-op it was");
+        let mut swift = held_app(true);
+        swift.ask.replace_text("hello");
+        assert!(swift.ask_key(&alt_return()));
+        assert!(swift.outbox.is_empty(), "the Swift app holds the duties: nothing is read from the previous app");
+    }
+
+    #[test]
+    fn option_return_with_no_previous_app_sends_the_plain_draft_and_says_why_in_swifts_words() {
+        let mut app = held_app(false);
+        assert!(app.shell.previous.current().is_none());
+        app.ask.replace_text("hello");
+        assert!(app.ask_key(&alt_return()));
+        assert_eq!(app.outbox, vec![crate::link::Call::Ask { text: "hello".into(), workspace_id: None }], "sent without context");
+        let notice = app.notice.clone().expect("a notice");
+        assert!(notice == paste::NO_PREVIOUS_APP || notice == paste::NO_ACCESSIBILITY, "{notice}");
+    }
+
+    #[test]
+    fn a_message_sent_with_context_clears_the_box_when_the_daemon_takes_it_but_not_if_the_draft_changed() {
+        let mut app = held_app(false);
+        app.ask.replace_text("summarise");
+        let full = "summarise\n\nContext from Notes (nothing was selected).".to_owned();
+        app.compose.context_sent = Some((full.clone(), "summarise".into()));
+        app.ask_taken(&full);
+        assert!(app.ask.text.is_empty(), "taken: the box is done with");
+        app.ask.replace_text("summarise, and more");
+        app.compose.context_sent = Some((full.clone(), "summarise".into()));
+        app.ask_taken(&full);
+        assert_eq!(app.ask.text, "summarise, and more", "the person kept typing: their words stay");
+    }
+
+    #[test]
+    fn paste_back_does_nothing_where_rune_is_not_the_app() {
+        let mut plain = App::headless();
+        plain.paste_back();
+        assert!(plain.notice.is_none() && plain.previous_context().is_none());
+        let mut swift = held_app(true);
+        swift.paste_back();
+        assert!(swift.shell.previous.current().is_none() && !swift.shell.previous.held());
     }
 
     #[test]

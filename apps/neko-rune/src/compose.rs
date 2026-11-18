@@ -315,6 +315,9 @@ pub struct ComposeUi {
     /// HTTP work waiting for the daemon's signed address, and (in a headless run with nowhere to send) what was asked.
     pub waiting: Vec<HttpWork>,
     pub asked: Vec<HttpWork>,
+    /// An ask sent with the previous app's context (⌥Return, `--app`): the full text that went and the draft it was made from, so the box
+    /// is cleared when the daemon takes it (`ask_taken`) although the text that went is longer than the draft.
+    pub context_sent: Option<(String, String)>,
 }
 
 impl Default for ComposeUi {
@@ -336,6 +339,7 @@ impl Default for ComposeUi {
             next_chip: 0,
             waiting: Vec::new(),
             asked: Vec::new(),
+            context_sent: None,
         }
     }
 }
@@ -651,6 +655,9 @@ impl App {
                 }
             } else if !ev.mods.alt {
                 self.ask_neko();
+            } else if self.shell.duties.paste {
+                // ⌥Return: send with the previous app's selection attached (`ComposerView.onSubmitWithContext`); only where Rune is the app.
+                self.ask_neko_with_context();
             }
             return true;
         }
@@ -763,7 +770,16 @@ impl App {
         self.send_ask(true);
     }
 
+    /// ⌥Return: sends with what is selected in the previous app attached, if Accessibility is already allowed (`TodayView.send(withContext:)`).
+    pub fn ask_neko_with_context(&mut self) {
+        self.send_ask_with(false, true);
+    }
+
     fn send_ask(&mut self, interrupt: bool) {
+        self.send_ask_with(interrupt, false);
+    }
+
+    fn send_ask_with(&mut self, interrupt: bool, with_context: bool) {
         let raw = self.ask.text.trim().to_owned();
         if raw.is_empty() && !self.has_payload(Dest::Ask) {
             return;
@@ -779,13 +795,21 @@ impl App {
             self.run_slash(&command);
             return;
         }
-        let payload = self.ask_payload();
+        let draft = self.ask_payload();
+        let mut payload = draft.clone();
+        if with_context {
+            match self.previous_context() {
+                Some(snapshot) => payload = crate::shell::paste::attach(&snapshot, &draft),
+                None => self.notice = Some(crate::shell::paste::no_context_notice(self.accessibility_trusted()).to_owned()),
+            }
+        }
         if let Some(why) = validation_error(&payload) {
             self.compose.error = Some(why);
             return;
         }
         self.compose.error = None;
         if self.work.busy.insert("ask".to_owned()) {
+            self.compose.context_sent = (payload != draft).then(|| (payload.clone(), draft));
             let workspace_id = self.scope().map(str::to_owned);
             self.call(if interrupt { Call::AskNow { text: payload, workspace_id } } else { Call::Ask { text: payload, workspace_id } });
         }
@@ -793,7 +817,8 @@ impl App {
 
     /// A reply to `Ask` was taken: the box and its files are done with.
     pub fn ask_taken(&mut self, text: &str) {
-        if self.ask_payload() == text {
+        let with_context = self.compose.context_sent.take().is_some_and(|(full, draft)| full == text && draft == self.ask_payload());
+        if self.ask_payload() == text || with_context {
             self.ask.clear();
             self.clear_chips(Dest::Ask);
         }

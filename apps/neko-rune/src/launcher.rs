@@ -80,6 +80,8 @@ pub enum Effect {
     Hide,
     /// Run this row in the main window; bring that window forward when `front`.
     Run { run: Do, front: bool },
+    /// ⌥Return: hide, then paste the clipboard into the app that was in front before Neko (`shell/paste.rs`).
+    PasteBack,
 }
 
 pub struct Launcher {
@@ -128,6 +130,14 @@ impl Launcher {
             Effect::Hide => {
                 if let Some(me) = &self.me {
                     me.hide();
+                }
+            }
+            Effect::PasteBack => {
+                if let Some(main) = &self.main {
+                    main.update(|app, tx| {
+                        app.paste_back();
+                        tx.instant();
+                    });
                 }
             }
             Effect::Run { run, front } => {
@@ -189,7 +199,13 @@ impl Launcher {
         self.hide();
     }
 
-    /// Up and Down choose, Return runs, Escape hides. True when the key was the panel's.
+    /// ⌥Return (`Palette.restoreAndPaste`): the panel hides and the paste is the window's to do (it knows the previous app and the duties).
+    pub fn paste_back(&mut self) {
+        self.hide();
+        self.emit(Effect::PasteBack);
+    }
+
+    /// Up and Down choose, Return runs, ⌥Return pastes back, Escape hides. True when the key was the panel's.
     pub fn key(&mut self, ev: &KeyEvent) -> bool {
         let items = self.visible();
         let current = self.index.min(items.len().saturating_sub(1));
@@ -204,6 +220,10 @@ impl Launcher {
             }
             Key::Escape => {
                 self.hide();
+                true
+            }
+            Key::Enter if !self.query.is_composing() && ev.mods.alt => {
+                self.paste_back();
                 true
             }
             Key::Enter if !self.query.is_composing() => {
@@ -334,6 +354,17 @@ mod tests {
         let expected = l.visible()[1].run.clone();
         press(&mut l, Key::Enter);
         assert_eq!(l.log, vec![Effect::Run { run: expected.clone(), front: expected.wants_window() }, Effect::Hide]);
+        assert!(!l.presentation.shown());
+    }
+
+    #[test]
+    fn option_return_hides_the_panel_and_asks_the_window_to_paste_back_without_running_a_row() {
+        let mut l = launcher();
+        let token = l.presentation.toggle().unwrap();
+        l.present(rows(), None, token);
+        let alt = Mods { alt: true, ..Mods::default() };
+        assert!(l.key(&KeyEvent { key: Key::Enter, mods: alt }));
+        assert_eq!(l.log, vec![Effect::Hide, Effect::PasteBack], "hidden first, then the paste; the highlighted row is not run");
         assert!(!l.presentation.shown());
     }
 
