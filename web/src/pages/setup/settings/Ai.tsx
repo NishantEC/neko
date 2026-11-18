@@ -318,7 +318,7 @@ function BudgetPanel({ snapshot }: { snapshot: Json }) {
           <Pick label="Tasks at once" value={String(snapshot.max_running_tickets ?? 0)} onChange={(v) => void limit("SetMaxRunningTickets", v)} options={options([1, 2, 3, 5], snapshot.max_running_tickets, "No limit")} disabled={busy} />
         </SettingRow>
         <SettingRow id="writable-per-repo" title="Writing per repository" description="Each writing task has its own copy of the repository with its own installs and builds. Extra tasks in the same repository wait; planning and questions are not limited.">
-          <Pick label="Writing per repository" value={String(snapshot.max_writable_per_repository ?? 0)} onChange={(v) => void limit("SetMaxWritablePerRepository", v)} options={options([1, 2, 3, 6, 8], snapshot.max_writable_per_repository, "4 (default)")} disabled={busy} />
+          <Pick label="Writing per repository" value={String(snapshot.max_writable_per_repository ?? 0)} onChange={(v) => void limit("SetMaxWritablePerRepository", v)} options={options([1, 2, 3, 6, 8], snapshot.max_writable_per_repository, "2 (default)")} disabled={busy} />
         </SettingRow>
       </div>
       {error ? <div className="px-3 py-2"><ErrorNote error={error} title="Couldn’t save" onDismiss={clear} /></div> : null}

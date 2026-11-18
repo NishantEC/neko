@@ -370,8 +370,8 @@ fn budget(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     let running_now = st.max_running.map_or("No limit".to_owned(), |n| n.to_string());
     let help = "Other tasks wait their turn and start as running ones finish. Work already running is not stopped.";
     out.push(item(Section::Ai, G, "tasks-at-once", "Tasks at once", help, with_note(s, t, "setting:max-running", setting_row(t, "set-max-running", "Tasks at once", Some(help), webkit::select(s, t, layer, "set-max-running-pick", "Tasks at once", &running, &running_now, 176.0, |s: &mut App, chosen: &str| s.call(Call::SetMaxRunning { limit: limit_of(chosen) }))))));
-    let writable = limit_options(&[1, 2, 3, 6, 8], "4 (default)", st.max_writable);
-    let writable_now = st.max_writable.map_or("4 (default)".to_owned(), |n| n.to_string());
+    let writable = limit_options(&[1, 2, 3, 6, 8], "2 (default)", st.max_writable);
+    let writable_now = st.max_writable.map_or("2 (default)".to_owned(), |n| n.to_string());
     let help = "Each writing task has its own copy of the repository with its own installs and builds. Extra tasks in the same repository wait; planning and questions are not limited.";
     out.push(item(Section::Ai, G, "writing-per-repository", "Writing per repository", help, with_note(s, t, "setting:max-writable", setting_row(t, "set-max-writable", "Writing per repository", Some(help), webkit::select(s, t, layer, "set-max-writable-pick", "Writing per repository", &writable, &writable_now, 176.0, |s: &mut App, chosen: &str| s.call(Call::SetMaxWritable { limit: limit_of(chosen) }))))));
 }
