@@ -133,7 +133,8 @@ fn every_destructive_action_asks_first_and_sends_only_when_confirmed() {
     let cases: [(&str, &[&str], &str, &str, fn(&SetupAction) -> bool); 5] = [
         // The row menu: Check now, Rename…, Edit, a separator, Delete watch….
         ("setup-watching", &["watch-more-r1"], "watch-more-r1-menu-item4", "Delete watch", |c| matches!(c, SetupAction::RemoveWatch { id } if id == "r1")),
-        ("setup-schedules", &[], "schedule-delete-s2", "Delete schedule", |c| matches!(c, SetupAction::RemoveSchedule { id } if id == "s2")),
+        // The web's row menu: Run now, Edit schedule, a separator, then Delete schedule….
+        ("setup-schedules", &["schedule-more-s2"], "schedule-more-s2-menu-item3", "Delete schedule", |c| matches!(c, SetupAction::RemoveSchedule { id } if id == "s2")),
         // The web's row menu (the three dots): Edit, a separator, then Forget memory.
         ("setup-memory", &["memory-more-m1"], "memory-more-m1-menu-item2", "Forget memory", |c| matches!(c, SetupAction::ForgetMemory { id } if id == "m1")),
         ("setup-memory", &["mem-tab-style"], "preference-forget-g1", "Forget guidance", |c| matches!(c, SetupAction::ForgetPreference { id, .. } if id == "g1")),
@@ -402,6 +403,25 @@ fn schedules_save_paused_enable_and_run_now() {
     assert_eq!(rt.state.pages.text("sch:time"), "08:30");
     click(&mut rt, "dlg-sch-save");
     assert!(matches!(sent(&rt).as_slice(), [SetupAction::SaveSchedule(s)] if s.id == "s1" && !s.enabled && s.rule == "FREQ=DAILY;BYHOUR=8;BYMINUTE=30" && s.anchor_ms != 0), "{:?}", sent(&rt));
+}
+
+#[test]
+fn schedules_are_the_webs_page_a_picker_then_a_section_per_workspace() {
+    let rt = scene("setup-schedules");
+    let y = |key: &str| rt.find(key).map(|p| p.1).unwrap_or_else(|| panic!("no {key}"));
+    assert!(rt.find("page-count").is_none(), "the web's Schedules header has no count");
+    assert!(y("pick-sch-scope") < y("sch-group-new-w1") && y("sch-group-new-w1") < y("schedule-block-s1") && y("schedule-block-s1") < y("schedule-block-s2") && y("schedule-block-s2") < y("sch-group-new-w2"), "picker, then each workspace with its schedules");
+    // A workspace's heading ends in "New"; one row is the web's 48 high, with its three actions and the switch.
+    assert!(rt.find("sch-group-new-w1").is_some() && rt.find("sch-group-new-w2").is_some());
+    let h = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("schedule-block-s2")).expect("the row").rect[3];
+    assert!((h - 48.0).abs() < 0.1, "a closed row is the web's 48 (6, the 36 point menu button, 6): {h}");
+    assert!(rt.find("schedule-details-s1").is_some(), "the scene opens s1: its prompt, recurrence and zone are under it");
+    for key in ["schedule-run-s1", "schedule-edit-s1", "schedule-more-s1", "schedule-switch-s1"] {
+        assert!(rt.find(key).is_some(), "{key}");
+    }
+    assert!(rt.find("schedule-delete-s1").is_none(), "Delete is in the row's menu, as on the web");
+    // The recurrence is the web's two text nodes: the summary, then " · next …" or " · paused".
+    assert!(has_text(&rt, " · paused"), "{:?}", texts(&rt));
 }
 
 #[test]
@@ -755,7 +775,8 @@ fn daemon_schedules_are_saved_paused_enabled_run_and_deleted_with_a_confirm() {
     let tasks = rt.state.summary.as_ref().unwrap().tasks.len();
     click(&mut rt, &format!("schedule-run-{}", s.id));
     assert!(rt.state.summary.as_ref().unwrap().tasks.len() >= tasks, "a read-only plan was queued");
-    click(&mut rt, &format!("schedule-delete-{}", s.id));
+    click(&mut rt, &format!("schedule-more-{}", s.id));
+    click(&mut rt, &format!("schedule-more-{}-menu-item3", s.id));
     assert!(rt.find("confirm-yes").is_some() && data(&rt).schedules.iter().any(|x| x.id == s.id));
     click(&mut rt, "confirm-yes");
     assert!(data(&rt).schedules.iter().all(|x| x.id != s.id), "{:?}", rt.state.pages.notes);
