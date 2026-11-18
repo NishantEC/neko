@@ -70,7 +70,7 @@ mod tests {
 
     fn app() -> App {
         let mut app = App::headless();
-        let row = |id: &str| TaskRow { id: id.into(), key: None, title: id.into(), status: TaskStatus::Building, updated_at_ms: 1, goal: String::new(), wait: Wait::None, progress: None };
+        let row = |id: &str| TaskRow { id: id.into(), key: None, title: id.into(), status: TaskStatus::Building, updated_at_ms: 1, goal: String::new(), wait: Wait::None, progress: None, line: Default::default() };
         let mut summary = Summary { tasks: vec![row("a"), row("b")], workspaces: vec![WorkspaceRow { id: "w1".into(), name: "One".into() }, WorkspaceRow { id: "w2".into(), name: "Two".into() }], ..Summary::default() };
         summary.meta.insert("a".into(), TaskMeta { workspace_id: "w1".into(), ..TaskMeta::default() });
         summary.meta.insert("b".into(), TaskMeta { workspace_id: "w2".into(), ..TaskMeta::default() });

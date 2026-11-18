@@ -14,7 +14,7 @@ the web has no such sections (Budget is part of "AI & agents", Workspaces is a S
 | Pair | First run | Baseline at 1440 | After | Words placed | Pass |
 | --- | ---: | ---: | ---: | ---: | :---: |
 | all-sessions-tree | 7.36 | 7.36 | 7.36 | 0% | no |
-| all-sessions-list | 5.77 | 5.77 | 5.77 | 0% | no |
+| all-sessions-list | 5.77 | 5.77 | 1.42 | 88.2% | yes |
 | setup-memory | 6.08 | 5.07 | 5.07 | 3.8% | no |
 | setup-watching | 4.61 | 4.65 | 4.74 | 4.2% | no |
 | routines | 4.75 | 4.63 | 0.86 | 95.3% | yes |
@@ -41,6 +41,8 @@ the web has no such sections (Budget is part of "AI & agents", Workspaces is a S
 | setup-packs | 4.42 | 3.16 | 0.16 | 50% | yes |
 
 ## Done in this pass
+
+All sessions, List (2026-11-18): the web's Tasks page (`pages/work/Tasks.tsx`, `work/TaskViews.tsx`): title with its count, overflow menu and New task; stage tabs with counts, the search label with its `/` key, the layout switch (icons); stage groups that fold; 40 point rows (glyph, id, title, why it waits, source, PR, folder, runtime avatar, age). Failed and cancelled show by default as on the web. **Tree and Board are not ported**: the web draws the tree from `buildTree` (Neko, watches, tasks, and each task's agent runs with cost and duration, from events, splits and sources) and the board from BoardCard/NotchCard; Rune's `Summary` carries neither, so each needs the daemon data and a model port first (all-sessions-tree 6.51%, all-sessions-board 3.27%, words placed under 6%).
 
 Routines (2026-11-18): the page is the web's Inbox page (`pages/Inbox.tsx`) under its own title "Inbox" (the sessions column still says Routines): "Needs you" cards, "Closed recently" (folded), then one folding section per scope with routine rows, standing orders, setup notes and "What Neko did".
 

@@ -600,7 +600,7 @@ mod tests {
 
     fn app_with(status: TaskStatus, repository: &str, pr: Option<&str>, land: &[&str]) -> App {
         let mut app = App::headless();
-        let row = TaskRow { id: "t".into(), key: None, title: "Fix it".into(), status, updated_at_ms: 0, goal: String::new(), wait: Wait::None, progress: None };
+        let row = TaskRow { id: "t".into(), key: None, title: "Fix it".into(), status, updated_at_ms: 0, goal: String::new(), wait: Wait::None, progress: None, line: Default::default() };
         let mut summary = Summary { tasks: vec![row], land_on_main: land.iter().map(|s| (*s).to_owned()).collect(), ..Summary::default() };
         summary.meta.insert("t".into(), TaskMeta { repository: repository.into(), pull_request: pr.map(str::to_owned), ..TaskMeta::default() });
         app.summary = Some(summary);
@@ -713,7 +713,7 @@ mod tests {
         app.ask_stop_all();
         assert!(app.dialog.is_none() && app.toast_words().contains("Nothing is running."));
         let mut app = app_with(Building, "", None, &[]);
-        let row = |id: &str, status| TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: 0, goal: String::new(), wait: Wait::None, progress: None };
+        let row = |id: &str, status| TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: 0, goal: String::new(), wait: Wait::None, progress: None, line: Default::default() };
         app.summary.as_mut().unwrap().tasks.extend([row("a", Planning), row("b", AwaitingApproval), row("c", ReadyForReview), row("d", Completed)]);
         app.ask_stop_all();
         let ask = app.dialog.clone().unwrap();
@@ -725,7 +725,7 @@ mod tests {
     #[test]
     fn clear_finished_counts_completed_and_cancelled_only_and_stays_in_the_workspace() {
         let mut app = app_with(Completed, "", None, &[]);
-        let row = |id: &str, status| TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: 0, goal: String::new(), wait: Wait::None, progress: None };
+        let row = |id: &str, status| TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: 0, goal: String::new(), wait: Wait::None, progress: None, line: Default::default() };
         app.summary.as_mut().unwrap().tasks.extend([row("a", Cancelled), row("b", Failed), row("c", Building)]);
         app.ask_clear_finished();
         let ask = app.dialog.clone().unwrap();

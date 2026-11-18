@@ -188,7 +188,7 @@ mod tests {
     const NOW: i64 = 1_800_000_000_000;
 
     fn row(id: &str, status: TaskStatus, ago_ms: i64) -> TaskRow {
-        TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: NOW - ago_ms, goal: String::new(), wait: Wait::None, progress: None }
+        TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: NOW - ago_ms, goal: String::new(), wait: Wait::None, progress: None, line: Default::default() }
     }
 
     fn waiting(id: &str, status: TaskStatus, wait: Wait, ago_ms: i64) -> TaskRow {

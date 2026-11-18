@@ -168,7 +168,7 @@ mod tests {
     use neko_protocol::workbench::TaskStatus::*;
 
     fn row(id: &str, status: TaskStatus) -> TaskRow {
-        TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: 0, goal: String::new(), wait: Wait::None, progress: None }
+        TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: 0, goal: String::new(), wait: Wait::None, progress: None, line: Default::default() }
     }
 
     fn message(json: serde_json::Value) -> neko_protocol::workbench::ChatMessage {

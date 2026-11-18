@@ -72,6 +72,9 @@ icon_body!(CODEX_GLYPH, "runtime-codex", r#"<path d="M3.5 5L6.5 8L3.5 11M8 11.5H
 icon_body!(OPENCODE_GLYPH, "runtime-opencode", r#"<path d="M5.5 4.5L2.5 8L5.5 11.5M10.5 4.5L13.5 8L10.5 11.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
 icon_body!(POWER, "power", r#"<path d="M8 2.5V7.5M4.9 4.6A5 5 0 1 0 11.1 4.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 icon_body!(ARROW_RIGHT, "arrow-right", r#"<path d="M3 8H12.5M8.5 4L12.5 8L8.5 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(ROWS, "rows", r#"<path d="M2.5 4H13.5M2.5 8H13.5M2.5 12H13.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
+icon_body!(KANBAN, "kanban", r#"<rect x="2.5" y="2.5" width="4.5" height="11" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="2.5" width="4.5" height="6.5" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.5"/>"#);
+icon_body!(TREE, "tree", r#"<circle cx="4" cy="4" r="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="8" r="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12.5" r="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 5.6V8.5C4 10 5 12.5 10.4 12.5M4 8H10.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 icon_body!(ARROW_UP, "arrow-up", r#"<path d="M8 13V3.5M4 7.5L8 3.5L12 7.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
 icon_body!(REFRESH, "refresh", r#"<path d="M13 8A5 5 0 1 1 11.2 4.2M13 2.5V5.2H10.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
 icon_body!(FILE, "file", r#"<path d="M4 2.5H9L12 5.5V13.5H4Z M9 2.5V5.5H12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>"#);
@@ -120,7 +123,7 @@ pub fn ring_arc(fraction: f32) -> &'static Icon {
 /// Every icon of the set, for a name a plugin gives (`icon = "inbox"`): the name without the `neko-` prefix.
 static ALL: &[&Icon] = &[
     &CIRCLE_HALF, &SUN, &MOON, &GLOBE, &PAUSE, &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND, &COLLAPSE, &CANVAS, &DIFF,
-    &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CHECKLIST, &INFO, &CROSS, &DOT, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &ARROW_RIGHT, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO,
+    &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CHECKLIST, &INFO, &CROSS, &DOT, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &ARROW_RIGHT, &ROWS, &KANBAN, &TREE, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO,
     &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &PENCIL, &TRASH, &LOCK, &KEY,
 ];
 
@@ -144,7 +147,7 @@ mod tests {
         let declared = src.lines().filter(|l| l.starts_with("icon_body!(")).count();
         let icons = vec![
             &CIRCLE_HALF, &SUN, &MOON, &GLOBE, &PAUSE, &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND,
-            &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &ARROW_RIGHT, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO, &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &CHECKLIST, &INFO, &PENCIL, &TRASH, &KEY, &LOCK,
+            &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &ARROW_RIGHT, &ROWS, &KANBAN, &TREE, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO, &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &CHECKLIST, &INFO, &PENCIL, &TRASH, &KEY, &LOCK,
         ];
         // The two filled ones (MORE's dots count as line icons here: they carry no stroke) are `icon_body!` lines too.
         assert_eq!(icons.len() + 1, declared, "a declared icon is missing from this list (the dot is the +1)");

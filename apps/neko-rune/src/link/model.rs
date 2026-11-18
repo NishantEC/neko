@@ -24,6 +24,62 @@ pub struct TaskRow {
     /// How far along it is, as (done, of): a goal's turns used of its cap, else the plan's ticked steps of its steps.
     #[serde(default)]
     pub progress: Option<(u32, u32)>,
+    /// What the All sessions list says on the row (`ListRow`).
+    #[serde(default)]
+    pub line: TaskLine,
+}
+
+/// The words of a task's line in the web's list: its short id, why it waits, where it came from.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TaskLine {
+    /// `NEK-` and the first four characters of the id.
+    pub short_id: String,
+    /// `blockedNote`: why a task that is blocked on you is blocked.
+    pub note: String,
+    /// The folder the task works in (the repository's name).
+    pub repo: String,
+    /// `#123` of its pull request.
+    pub pr: String,
+    /// "Linear · ENG-12": the source it was filed from.
+    pub source: String,
+    /// The runtime's two letters when it is not the default one.
+    pub runtime: String,
+}
+
+fn task_line(snapshot: &Snapshot, t: &Task) -> TaskLine {
+    let note = match t.status {
+        TaskStatus::Failed => crate::work::stop_reason(t),
+        TaskStatus::AwaitingApproval => crate::work::waiting_reason(t).unwrap_or_default(),
+        _ => String::new(),
+    };
+    let base = |p: &str| p.trim_end_matches('/').rsplit('/').next().unwrap_or(p).to_owned();
+    let repo = snapshot.task_roots.get(&t.id).filter(|r| !r.is_empty()).map(|r| base(r)).unwrap_or_default();
+    let pr = t.pull_request.as_ref().and_then(|p| p.url.split('/').rfind(|x| !x.is_empty()).map(|n| format!("#{n}"))).unwrap_or_default();
+    let source = snapshot.mcp.sources.iter().find(|s| s.task_id.as_deref() == Some(t.id.as_str())).map(|observed| {
+        let label = snapshot.mcp.connections.iter().find(|c| c.id == observed.connection_id).map(|c| c.label.clone()).unwrap_or_default();
+        let lower = label.to_lowercase();
+        let name = ["sentry", "linear", "github", "jira", "slack", "notion", "figma", "paper"].iter().find(|k| lower.contains(**k)).map_or(label.clone(), |k| k[..1].to_uppercase() + &k[1..]);
+        let id = observed.external_id.as_str();
+        let title = t.display_title.clone().unwrap_or_else(|| t.title.clone());
+        let useful = !id.is_empty() && id.len() <= 12 && !title.contains(id);
+        [Some(name).filter(|n| !n.is_empty()), useful.then(|| id.to_owned())].into_iter().flatten().collect::<Vec<_>>().join(" · ")
+    }).unwrap_or_default();
+    let conversation = format!("task:{}", t.id);
+    let latest = snapshot.runtime_selections.iter().filter(|s| s.conversation_id == conversation).max_by_key(|s| s.selected_at_ms);
+    let provider_of = |p: &str| if p.is_empty() { "codex".to_owned() } else { p.to_owned() };
+    let default = provider_of(&snapshot.agent_runtime.provider);
+    let provider = latest.map_or(default.clone(), |s| provider_of(&s.runtime.provider));
+    let runtime = if provider == default {
+        String::new()
+    } else {
+        match provider.as_str() {
+            "claude" => "Cl".to_owned(),
+            "opencode" => "Oc".to_owned(),
+            "codex" => "Cx".to_owned(),
+            other => other.chars().take(2).collect::<String>(),
+        }
+    };
+    TaskLine { short_id: format!("NEK-{}", t.id.chars().take(4).collect::<String>().to_uppercase()), note, repo, pr, source, runtime }
 }
 
 /// Why a task is waiting on the person, as the sessions column's reason icon says (polish spec §1).
@@ -507,6 +563,7 @@ impl Summary {
                     goal: first_line(&t.goal),
                     wait: wait_of(t, &snapshot.goals),
                     progress: progress_of(t, &snapshot.goals),
+                    line: task_line(snapshot, t),
                 })
                 .collect(),
             workspaces: snapshot.workspaces.iter().map(|w| WorkspaceRow { id: w.id.clone(), name: w.name.clone() }).collect(),

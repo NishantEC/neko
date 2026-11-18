@@ -418,7 +418,7 @@ mod tests {
     use TaskStatus::*;
 
     fn row(id: &str, status: TaskStatus, at: i64) -> TaskRow {
-        TaskRow { id: id.into(), key: None, title: format!("Task {id}"), status, updated_at_ms: at, goal: String::new(), wait: Wait::None, progress: None }
+        TaskRow { id: id.into(), key: None, title: format!("Task {id}"), status, updated_at_ms: at, goal: String::new(), wait: Wait::None, progress: None, line: Default::default() }
     }
 
     #[test]

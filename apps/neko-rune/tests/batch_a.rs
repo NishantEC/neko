@@ -277,7 +277,7 @@ fn view_all_opens_all_sessions_with_search_a_workspace_filter_and_j_k() {
     let mut rt = runtime(scene("live"));
     rt.update(|s, _| s.open_all_sessions());
     settle(&mut rt);
-    assert!(has_text(&rt, "All sessions"));
+    assert!(has_text(&rt, "Tasks"), "the web's title");
     assert!(has_key(&rt, "all-search") && has_key(&rt, "all-workspace") && has_key(&rt, "all-more"));
     // `/` focuses the search; typing narrows the rows.
     press(&mut rt, Key::Text("/".into()), Mods::default());
@@ -308,10 +308,15 @@ fn all_sessions_groups_by_stage_hides_failed_and_cancelled_until_asked_and_clear
     settle(&mut rt);
     let stages: Vec<&str> = ["Needs you", "Ready to review", "Running", "Up next", "Done"].into_iter().filter(|s| has_text(&rt, s)).collect();
     assert!(!stages.is_empty(), "rows are under stage headings: {:?}", texts(&rt));
-    let shown_failed = rt.state.all_rows().iter().any(|t| matches!(t.status, TaskStatus::Failed | TaskStatus::Cancelled));
-    assert!(!shown_failed, "failed and cancelled are hidden by default");
+    // As the web, failed and cancelled tasks show by default; the overflow menu hides them.
+    assert!(rt.state.all.include_stopped, "failed and cancelled are shown by default");
     click(&mut rt, "all-more");
     assert!(has_text(&rt, "Clear finished") && has_text(&rt, "Show failed and cancelled"));
+    click_text(&mut rt, "Show failed and cancelled");
+    assert!(!rt.state.all.include_stopped);
+    let shown_failed = rt.state.all_rows().iter().any(|t| matches!(t.status, TaskStatus::Failed | TaskStatus::Cancelled));
+    assert!(!shown_failed, "unchecked, they are hidden");
+    click(&mut rt, "all-more");
     click_text(&mut rt, "Show failed and cancelled");
     assert!(rt.state.all.include_stopped);
     click(&mut rt, "all-more");

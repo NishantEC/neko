@@ -44,14 +44,6 @@ fn click(rt: &mut Runtime<App>, key: &str) {
     settle(rt);
 }
 
-fn click_text(rt: &mut Runtime<App>, label: &str) {
-    let r = rt.elements().into_iter().find(|e| e.text.as_deref() == Some(label)).unwrap_or_else(|| panic!("no text {label}: {:?}", texts(rt))).rect;
-    let (x, y) = (r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
-    rt.pointer_down(x, y);
-    rt.pointer_up(x, y);
-    settle(rt);
-}
-
 /// Clicks the last element with these words: a menu item is drawn after the page it opened over.
 fn click_last_text(rt: &mut Runtime<App>, label: &str) {
     let r = rt.elements().into_iter().rev().find(|e| e.text.as_deref() == Some(label)).unwrap_or_else(|| panic!("no text {label}: {:?}", texts(rt))).rect;
@@ -123,14 +115,14 @@ fn the_header_switch_chooses_list_board_or_tree_and_the_choice_is_kept() {
     });
     settle(&mut rt);
     assert!(has_key(&rt, "all-list") && !has_key(&rt, "board"), "the list");
-    click_text(&mut rt, "Board");
+    click(&mut rt, "all-layout-board");
     assert_eq!(rt.state.all_layout(), Layout::Board);
     assert!(rt.state.all.layout_dirty, "the choice is to be written");
     assert!(has_key(&rt, "board") && has_key(&rt, "board-col-Needs you") && has_key(&rt, "board-col-Done"), "one column per stage");
-    click_text(&mut rt, "Tree");
+    click(&mut rt, "all-layout-tree");
     assert_eq!(rt.state.all_layout(), Layout::Tree);
     assert!(has_key(&rt, "tree"));
-    click_text(&mut rt, "List");
+    click(&mut rt, "all-layout-list");
     assert!(has_key(&rt, "all-list"));
 }
 
@@ -511,4 +503,21 @@ fn a_command_chosen_in_the_session_composer_runs_and_a_plain_message_still_sends
     rt.update(|s, _| s.composer.replace_text("fix the path /src/lib"));
     settle(&mut rt);
     assert!(!has_key(&rt, "reply-popover"));
+}
+
+#[test]
+fn the_list_is_the_webs_tasks_header_stage_tabs_and_stage_groups_in_order() {
+    let mut rt = runtime(scene("bb-board"));
+    rt.update(|s, _| {
+        s.set_all_layout(Layout::List);
+        s.all.layout_dirty = false;
+    });
+    settle(&mut rt);
+    let y = |key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).map(|e| e.rect[1]).unwrap_or_else(|| panic!("no {key}"));
+    assert!(has_key(&rt, "all-title") && has_key(&rt, "all-new-task") && has_key(&rt, "all-stage-tabs") && has_key(&rt, "all-search-label") && has_key(&rt, "all-layout"));
+    assert!(y("all-title") < y("all-stage-tabs") && y("all-stage-tabs") <= y("all-layout"), "title, then the stage tabs, then the layout switch");
+    let groups: Vec<f32> = ["Needs you", "Ready to review", "Running", "Up next", "Done"].iter().filter_map(|t| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("all-stage-{t}"))).map(|e| e.rect[1])).collect();
+    assert!(groups.len() >= 2 && groups.windows(2).all(|w| w[0] < w[1]), "stage groups in the web's order: {groups:?}");
+    let row = rt.elements().into_iter().find(|e| e.key.as_deref().is_some_and(|k| k.starts_with("all-line-"))).expect("a task line");
+    assert_eq!(row.rect[3], 40.0, "the web's 40 point row");
 }

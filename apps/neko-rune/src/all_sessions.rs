@@ -71,6 +71,8 @@ pub struct AllState {
     pub suppress_press: bool,
     /// Tasks of the tree whose children are folded.
     pub tree_folded: std::collections::HashSet<String>,
+    /// The list's stage groups the person folded, by title.
+    pub folded: std::collections::HashSet<String>,
 }
 
 impl Default for AllState {
@@ -79,7 +81,7 @@ impl Default for AllState {
             search: TextEdit::new(""),
             cursor: 0,
             cursor_shown: false,
-            include_stopped: false,
+            include_stopped: true,
             workspace: None,
             menu_open: false,
             layout: crate::board::Layout::List,
@@ -88,6 +90,7 @@ impl Default for AllState {
             carry: None,
             suppress_press: false,
             tree_folded: std::collections::HashSet::new(),
+            folded: std::collections::HashSet::new(),
         }
     }
 }
@@ -172,7 +175,7 @@ mod tests {
     use TaskStatus::*;
 
     fn row(id: &str, title: &str, status: TaskStatus, at: i64) -> TaskRow {
-        TaskRow { id: id.into(), key: None, title: title.into(), status, updated_at_ms: at, goal: String::new(), wait: Wait::None, progress: None }
+        TaskRow { id: id.into(), key: None, title: title.into(), status, updated_at_ms: at, goal: String::new(), wait: Wait::None, progress: None, line: Default::default() }
     }
 
     fn app() -> App {
@@ -195,10 +198,12 @@ mod tests {
     #[test]
     fn rows_are_in_stage_order_newest_first_and_failed_and_cancelled_wait_to_be_asked_for() {
         let mut app = app();
-        // Needs you (f), Ready to review (e), Running (a), Up next (g), Done (b); the failed and cancelled are hidden.
-        assert_eq!(ids(&app), ["f", "e", "a", "g", "b"]);
+        // As the web, the failed and cancelled show until the overflow menu hides them: failed joins Needs you (newest first), cancelled joins Done.
         app.all.include_stopped = true;
-        assert_eq!(ids(&app), ["c", "f", "e", "a", "g", "b", "d"], "failed joins Needs you (newest first), cancelled joins Done");
+        assert_eq!(ids(&app), ["c", "f", "e", "a", "g", "b", "d"]);
+        // Needs you (f), Ready to review (e), Running (a), Up next (g), Done (b); the failed and cancelled are hidden.
+        app.all.include_stopped = false;
+        assert_eq!(ids(&app), ["f", "e", "a", "g", "b"]);
     }
 
     #[test]

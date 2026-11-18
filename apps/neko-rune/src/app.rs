@@ -797,7 +797,7 @@ mod tests {
     use neko_protocol::workbench::TaskStatus;
 
     fn row(id: &str, status: TaskStatus, ago_ms: i64) -> TaskRow {
-        TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: DEMO_NOW - ago_ms, goal: String::new(), wait: Wait::None, progress: None }
+        TaskRow { id: id.into(), key: None, title: id.into(), status, updated_at_ms: DEMO_NOW - ago_ms, goal: String::new(), wait: Wait::None, progress: None, line: Default::default() }
     }
 
     fn summary(rows: Vec<TaskRow>) -> Summary {
