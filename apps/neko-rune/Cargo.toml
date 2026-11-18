@@ -73,8 +73,12 @@ base64 = "0.22"
 # The Dock badge (`src/dock.rs`): NSApp.dockTile through objc2, the versions Rune already builds (no new crate in the tree).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSDockTile", "NSResponder", "NSScreen", "NSEvent", "NSRunningApplication", "libc", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSMenu", "NSMenuItem", "NSImage", "NSImageRep", "NSButton", "NSControl", "NSCell", "NSView", "objc2-core-foundation"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSGeometry", "NSArray", "NSData", "NSObject", "NSFileManager", "NSURL", "NSError", "NSBundle"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSDockTile", "NSResponder", "NSScreen", "NSEvent", "NSRunningApplication", "libc", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSMenu", "NSMenuItem", "NSImage", "NSImageRep", "NSButton", "NSControl", "NSCell", "NSView", "objc2-core-foundation", "NSColor", "NSColorSpace"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSGeometry", "NSArray", "NSData", "NSObject", "NSFileManager", "NSURL", "NSError", "NSBundle", "NSDate", "NSPredicate", "NSNotification", "NSOperation", "NSRange", "NSRegularExpression", "NSTextCheckingResult", "NSValue", "NSCalendar", "NSTimeZone", "NSDictionary"] }
+# Calendar and Reminders in `--app` mode (`src/shell/calendar.rs`, `reminders.rs`): EventKit through objc2, the same family and version as the crates above
+# (Zlib OR Apache-2.0 OR MIT). Only what the two bridges call; the usage descriptions come with the bundle (P5b).
+objc2-event-kit = { version = "0.3", default-features = false, features = ["std", "block2", "bitflags", "EKAlarm", "EKCalendar", "EKCalendarItem", "EKEvent", "EKEventStore", "EKObject", "EKReminder", "EKSource", "EKTypes", "objc2-app-kit"] }
+block2 = "0.6"
 
 [dev-dependencies]
 png = "0.17"

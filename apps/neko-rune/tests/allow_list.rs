@@ -147,6 +147,11 @@ const RUNE_EXTRAS: &[&str] = &[
     "PackUi",
     // Rune as the Mac app (`src/shell/notify.rs`, `--app`): the routine notifier polls for needs-you items, as the Swift app's `RoutineNotifier.swift` does.
     "RoutineNotifications",
+    // Rune as the Mac app, Calendar and Reminders from EventKit (`src/shell/calendar.rs`, `reminders.rs`, `--app`): what the Swift app's EventKit
+    // bridges send. `SetCalendarEvents` is `CalendarBridge.swift`'s (the window of events), `CalendarStatus` its switch check;
+    // `PhoneRemindersSync` and `PhoneRemindersDone` are `PhoneBridge.swift`'s (what the Neko list holds, what was done with the plan).
+    "SetCalendarEvents",
+    "CalendarStatus",
 ];
 
 /// The envelopes: the web sends `Crew`, `Goals` and `Checkpoints` with the sub-command in the payload, and
