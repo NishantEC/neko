@@ -145,6 +145,8 @@ const RUNE_EXTRAS: &[&str] = &[
     // Luau plugins (`src/luau/`): the files of a healthy, unchanged pack, which Rune runs in a sandbox. The daemon refuses a pack that is
     // not Healthy or whose files differ from what the person approved; Rune never reads a pack folder itself.
     "PackUi",
+    // Rune as the Mac app (`src/shell/notify.rs`, `--app`): the routine notifier polls for needs-you items, as the Swift app's `RoutineNotifier.swift` does.
+    "RoutineNotifications",
 ];
 
 /// The envelopes: the web sends `Crew`, `Goals` and `Checkpoints` with the sub-command in the payload, and
@@ -363,7 +365,12 @@ fn destructive_requests_are_only_sent_from_a_confirm_dialog() {
                     continue;
                 }
                 built += 1;
-                let before = &code[at.saturating_sub(900)..at];
+                // 900 bytes back, from a character boundary (the comments and words around a confirm hold curly quotes).
+                let mut from = at.saturating_sub(900);
+                while !code.is_char_boundary(from) {
+                    from += 1;
+                }
+                let before = &code[from..at];
                 assert!(before.contains("self.confirm(Ask {") || before.contains("confirm(Ask {"), "{}: `{call}` is built outside a confirm dialog", path.display());
                 assert!(confirm_only.iter().any(|f| path.ends_with(f)), "{}: `{call}` belongs in task_actions.rs (the one place that confirms)", path.display());
             }
@@ -503,7 +510,7 @@ fn only_the_app_state_touches_rune_prefs_and_only_to_keep_the_layout() {
     let app = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs")).unwrap();
     let code = production(&app);
     assert!(code.contains("PREFS_ID") && !code.contains("support_dir") && !code.contains("neko_protocol::socket_path"), "the layout goes to Rune's store, not the daemon's folder");
-    assert_eq!(code.matches("prefs::Prefs::open").count(), 12, "at startup one read of the layout, of the workspace scope, of the All sessions layout, of the hidden Luau cards, of the activity pill's preference and of the Open-in choice, each written on a thread when it changes");
+    assert_eq!(code.matches("prefs::Prefs::open").count(), 14, "at startup one read of the layout, of the workspace scope, of the All sessions layout, of the hidden Luau cards, of the activity pill's preference, of the Open-in choice and of the notifier's place (`notify-seq`), each written on a thread when it changes");
 }
 
 #[test]

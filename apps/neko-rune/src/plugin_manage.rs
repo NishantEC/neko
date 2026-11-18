@@ -141,6 +141,7 @@ impl App {
             field: Some(AskField { label: "What should change?".to_owned(), placeholder: "A page that lists my open pull requests by stage…".to_owned() }),
             list: Vec::new(),
             more: Vec::new(),
+            toggle: None,
         });
     }
 

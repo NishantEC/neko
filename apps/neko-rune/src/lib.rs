@@ -356,9 +356,21 @@ pub fn run() {
         .titlebar(rune::Titlebar::new(view::BAND).traffic_lights(view::TRAFFIC_LIGHTS.0, view::TRAFFIC_LIGHTS.1))
         .on_focus(|s: &mut App, focused: bool, _| s.set_focused(focused))
         // The web view (P3b) is built on the window's own handle, when first needed.
-        .on_window(web_panel::remember_window);
+        .on_window(web_panel::remember_window)
+        // macOS hands `neko://<route>` links to the app (its bundle must declare the scheme: `CFBundleURLTypes`, P5b).
+        .on_open_url(|s: &mut App, url: &str, tx: &mut rune::Tx| {
+            if let Err(why) = s.open_url_link(url) {
+                eprintln!("neko-rune: ignoring a neko:// link: {why}");
+            }
+            tx.instant();
+        });
     // `--app` while Rune holds the duties: closing the window leaves it running in the menu bar (Swift's app does the same); Quit is in the menu.
-    if app_flag() && !shell::swift_app_running() {
+    // A start at login opens no window (and no browser); "Open Neko in: Browser" opens the browser instead of the window (`shell/open_in.rs`).
+    let holds = app_flag() && !shell::swift_app_running();
+    let startup = shell::open_in::startup(holds, app::load_open_in(), shell::open_in::launched_at_login(|k| std::env::var(k).ok()));
+    if !startup.window {
+        app = app.windowless();
+    } else if holds {
         app = app.keep_running();
     }
     let handle = app.handle();
@@ -367,7 +379,8 @@ pub fn run() {
     let plan = overlays::plan(legacy_overlays() || app_flag());
     let mut installed = Some(overlays::install(&mut app, plan));
     let mut started = false;
-    app.on_ready(move |_| {
+    // What a start does once there is a window (or at once, with none: `windowless` never reaches `on_ready`).
+    let start = std::rc::Rc::new(std::cell::RefCell::new(move || {
         if std::mem::replace(&mut started, true) {
             return;
         }
@@ -391,8 +404,12 @@ pub fn run() {
         let swift = app_flag().then(shell::swift_app_running);
         let main = handle.clone();
         let for_shell = handle.clone();
+        let browser_start = startup.browser;
         handle.update_if(move |s, _| {
             s.shell.handle = Some(for_shell);
+            if browser_start {
+                s.shell.browser_start_until = Some((s.clock)() + 15_000);
+            }
             if let Some(made) = made {
                 s.overlays.stash(made, main);
             }
@@ -443,6 +460,10 @@ pub fn run() {
             false
         });
         connection::spawn(thread_handle, socket, neko_protocol::support_dir(), wanted);
-    })
-    .run();
+    }));
+    if !startup.window {
+        (start.borrow_mut())();
+    }
+    let again = start.clone();
+    app.on_ready(move |_| (again.borrow_mut())()).run();
 }

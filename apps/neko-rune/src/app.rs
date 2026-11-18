@@ -308,6 +308,16 @@ pub fn write_open_in(key: &'static str) {
     });
 }
 
+/// Where the routine notifier stood at its last poll (Swift: UserDefaults `neko.routineNotificationSeq`); None before the first.
+pub fn load_notify_seq() -> Option<u64> {
+    rune::prefs::Prefs::open(PREFS_ID).get::<u64>("notify-seq")
+}
+
+/// Remembers where the routine notifier stands (called on the notifier's own thread).
+pub fn write_notify_seq(latest: u64) {
+    let _ = rune::prefs::Prefs::open(PREFS_ID).set("notify-seq", &latest);
+}
+
 /// Writes the pill's preference on its own thread.
 pub fn write_presence(on: bool) {
     let _ = std::thread::Builder::new().name("neko-presence".into()).spawn(move || {

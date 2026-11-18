@@ -55,6 +55,10 @@ pub fn mount(s: &App, t: &Neko, layer: &mut Vec<El>) {
         }
         body = body.child(col().key("ask-list-scroll").w_full().max_h(180.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: false }).child(list));
     }
+    if let Some(label) = &ask.toggle {
+        let on = s.shell.ask_toggled;
+        body = body.child(rune_kit::Checkbox::new(on).label(label.clone()).on_toggle(|s: &mut App| s.shell.ask_toggled = !s.shell.ask_toggled).build(&t.kit).key("ask-toggle".to_owned()));
+    }
     if let Some(field) = &ask.field {
         body = body.child(col().w_full().gap(6.0).child(text(field.label.clone()).font(t.ty.meta).color(t.text.muted)).child(super::ui::area(s, t, ASK_FIELD, &field.label, &field.placeholder, 4)));
     }

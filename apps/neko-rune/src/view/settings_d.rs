@@ -65,6 +65,17 @@ pub(super) fn general(s: &App, t: &Neko, out: &mut Vec<Item>) {
     };
     out.push(item(Section::General, "Summon & startup", "launch-at-login", "Launch at login", help, with_note(s, t, "setting:launch-at-login", setting_row(t, "set-login", "Launch at login", Some(help), control))));
 
+    // `--app`: where "Open Neko" goes (Swift's status menu has the same picker; Rune's default is its own window).
+    if s.shell.app_flag {
+        use crate::shell::open_in::OpenIn;
+        let help = "Where Open Neko in the menu bar goes. A start at login stays quiet either way.";
+        let mut choices = row().role("radiogroup").label("Open Neko in").gap(6.0);
+        for choice in OpenIn::ALL {
+            choices = choices.child(button(t, &format!("set-open-in-{}", choice.key()), choice.title(), None, false, s.shell.open_in == choice, move |s: &mut App| s.set_open_in(choice)).role("radio").checked(s.shell.open_in == choice));
+        }
+        out.push(item(Section::General, "Summon & startup", "open-neko-in", "Open Neko in", help, setting_row(t, "set-open-in", "Open Neko in", Some(help), choices)));
+    }
+
     // The activity pill (P4, `--overlays`): Swift's "Show activity while Neko works" preference, kept by this client. Only a client that runs the pill shows it.
     if s.overlays.plan.pill {
         let help = "A small status in the corner. Click it to return to Neko.";

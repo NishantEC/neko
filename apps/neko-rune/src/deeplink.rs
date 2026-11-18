@@ -2,7 +2,8 @@
 //! `tasks?task=<id>`, `setup/tools`, `pull-requests`, `settings`, an artifact, a plugin page). With no window running the route opens
 //! in the one this launch starts. The route is carried over a Unix socket in the person's own cache folder (mode 0600, the peer must be
 //! the same user): Rune's `single_instance` and `on_open_url` forward only on Windows and Linux, and macOS hands links to a bundled app
-//! through its URL scheme, which waits for the bundle (phase P5), so `neko://` is not registered yet. "Copy link" still gives the web URL.
+//! through its URL scheme: `App::on_open_url` routes `neko://<route>` through the same router ([`neko_route`], `--app` mode), and the
+//! bundle's `CFBundleURLTypes` entry that registers the scheme waits for P5b, so `neko://` is not registered yet. "Copy link" still gives the web URL.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -49,6 +50,22 @@ pub fn clean_route(route: &str) -> Option<String> {
         }
     }
     Some(route.to_owned())
+}
+
+/// The routes a `neko://` link may open: the heads of `App::open_route` (the web's pages, a task, an artifact, Setup and Settings).
+/// Anything else, including a plugin's page, is ignored: a link comes from outside the app.
+pub const KNOWN_ROUTES: [&str; 11] = ["home", "tasks", "artifact", "setup", "settings", "inbox", "calendar", "usage", "tools", "prs", "pull-requests"];
+
+/// The route a `neko://<route>` link names (`neko://tasks?task=t1`, `neko://inbox`), or why it is not one this client opens.
+pub fn neko_route(url: &str) -> Result<String, String> {
+    let url = url.trim();
+    let rest = match url.get(..7) {
+        Some(scheme) if scheme.eq_ignore_ascii_case("neko://") => &url[7..],
+        _ => return Err("not a neko:// link".to_owned()),
+    };
+    let route = clean_route(rest).ok_or_else(|| "that is not a route in Neko".to_owned())?;
+    let head = route.split(['?', '/']).next().unwrap_or_default();
+    if KNOWN_ROUTES.contains(&head) { Ok(route) } else { Err(format!("`{head}` is not a route this app opens")) }
 }
 
 /// Where the running window listens: `NEKO_RUNE_OPEN_SOCKET`, else `~/Library/Caches/neko/rune-open.sock`.
@@ -180,6 +197,27 @@ mod tests {
             // `https://example.com` has `//`, `javascript:alert(1)` has parentheses.
             assert_eq!(clean_route(bad), None, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn a_neko_link_opens_only_a_known_route() {
+        assert_eq!(neko_route("neko://inbox").as_deref(), Ok("inbox"));
+        assert_eq!(neko_route("neko://tasks?task=t1&view=full").as_deref(), Ok("tasks?task=t1&view=full"));
+        assert_eq!(neko_route("NEKO://settings").as_deref(), Ok("settings"));
+        assert_eq!(neko_route("  neko://artifact?id=a1&v=2 ").as_deref(), Ok("artifact?id=a1&v=2"));
+        assert_eq!(neko_route("neko://setup/tools").as_deref(), Ok("setup/tools"));
+        for head in KNOWN_ROUTES {
+            assert_eq!(neko_route(&format!("neko://{head}")).as_deref(), Ok(head), "{head}");
+        }
+        // Unknown routes, other schemes and anything unclean are ignored.
+        assert!(neko_route("neko://launch-missiles").is_err());
+        assert!(neko_route("neko://my-plugin:board").is_err(), "a plugin's page is not opened from outside");
+        assert!(neko_route("neko://").is_err());
+        assert!(neko_route("https://example.com").is_err());
+        assert!(neko_route("neko:tasks").is_err());
+        assert!(neko_route("neko://../etc/passwd").is_err());
+        assert!(neko_route("neko://tasks//x").is_err());
+        assert!(neko_route("neko://settings;rm").is_err());
     }
 
     #[test]

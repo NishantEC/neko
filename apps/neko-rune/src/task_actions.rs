@@ -31,6 +31,8 @@ pub struct Ask {
     pub list: Vec<String>,
     /// Calls that go out with `call` when the answer is yes (merging several at once).
     pub more: Vec<Call>,
+    /// A checkbox under the question (Uninstall's "also move Neko’s data to the Trash"); its state is `shell.ask_toggled`.
+    pub toggle: Option<String>,
 }
 
 /// The text box of a dialog that asks for words (`Ask::field`).
@@ -178,6 +180,7 @@ impl App {
 
     /// Asks in a dialog; the call goes out only when the person says yes.
     pub fn confirm(&mut self, ask: Ask) {
+        self.shell.ask_toggled = false;
         self.dialog = Some(ask);
     }
 
@@ -187,6 +190,19 @@ impl App {
             return;
         }
         if let Some(ask) = self.dialog.take() {
+            // Uninstall is local: it stops the work itself (`link::shell::cancel_all_work`), then trashes the app (`shell/uninstall.rs`).
+            if ask.title == crate::shell::uninstall::TITLE {
+                let include_data = std::mem::take(&mut self.shell.ask_toggled);
+                self.run_uninstall(include_data);
+                return;
+            }
+            // The report of a partly failed uninstall: the app is gone either way, so it quits.
+            if ask.title == crate::shell::uninstall::PARTLY_TITLE {
+                if let Some(h) = &self.shell.handle {
+                    h.quit();
+                }
+                return;
+            }
             let mut call = ask.call;
             if ask.field.is_some() {
                 // The words of the dialog's box go with the call (a closed pull request's comment).
@@ -204,6 +220,7 @@ impl App {
     }
 
     pub fn ask_no(&mut self) {
+        self.shell.ask_toggled = false;
         if self.dialog.as_ref().is_some_and(|a| a.field.is_some()) {
             self.pages.set_field(ASK_FIELD, "");
         }
@@ -232,6 +249,7 @@ impl App {
                 field: None,
                 list: Vec::new(),
                 more: Vec::new(),
+                toggle: None,
             }),
             Act::Publish => {
                 self.call(Call::Publish { task_id });
@@ -264,6 +282,7 @@ impl App {
                 field: None,
                 list: Vec::new(),
                 more: Vec::new(),
+                toggle: None,
             }),
             Act::Cancel => self.confirm(Ask {
                 title: format!("Cancel “{title}”?"),
@@ -276,6 +295,7 @@ impl App {
                 field: None,
                 list: Vec::new(),
                 more: Vec::new(),
+                toggle: None,
             }),
             Act::Delete => self.confirm(Ask {
                 title: "Delete this task?".into(),
@@ -288,6 +308,7 @@ impl App {
                 field: None,
                 list: Vec::new(),
                 more: Vec::new(),
+                toggle: None,
             }),
         }
     }
@@ -350,6 +371,36 @@ impl App {
             field: None,
             list: Vec::new(),
             more: Vec::new(),
+            toggle: None,
+        });
+    }
+
+    /// "Uninstall Neko…" (`Uninstaller.confirmAndRun`): Swift's words and its checkbox, a coral button. Yes stops all work, then moves the app
+    /// (and, if ticked, Neko's data) to the Trash and quits (`run_uninstall`).
+    pub fn ask_uninstall(&mut self) {
+        use crate::shell::uninstall as u;
+        if !u::available() {
+            self.show_toast(u::UNAVAILABLE);
+            return;
+        }
+        self.confirm_uninstall();
+    }
+
+    /// The question itself (Swift's alert), asked whether or not this is an installed app (`ask_uninstall` checks that).
+    pub fn confirm_uninstall(&mut self) {
+        use crate::shell::uninstall as u;
+        self.confirm(Ask {
+            title: u::TITLE.to_owned(),
+            detail: u::DETAIL.to_owned(),
+            ok: u::OK.to_owned(),
+            cancel: u::CANCEL.to_owned(),
+            destructive: true,
+            call: Call::StopAll,
+            done: String::new(),
+            field: None,
+            list: Vec::new(),
+            more: Vec::new(),
+            toggle: Some(u::DATA_CHECKBOX.to_owned()),
         });
     }
 
@@ -373,6 +424,7 @@ impl App {
             field: None,
             list: Vec::new(),
             more: Vec::new(),
+            toggle: None,
         });
     }
 }
@@ -392,6 +444,7 @@ impl App {
             field: None,
             list: Vec::new(),
             more: Vec::new(),
+            toggle: None,
         });
     }
 
@@ -411,6 +464,7 @@ impl App {
             field: Some(AskField { label: "Why (posted as a comment)".into(), placeholder: "Why is it being closed?".into() }),
             list: Vec::new(),
             more: Vec::new(),
+            toggle: None,
         });
     }
 
@@ -437,6 +491,7 @@ impl App {
             field: None,
             list,
             more,
+            toggle: None,
         });
     }
 
@@ -459,6 +514,7 @@ impl App {
             field: None,
             list: Vec::new(),
             more: Vec::new(),
+            toggle: None,
         });
     }
 
@@ -483,6 +539,7 @@ impl App {
             field: None,
             list: Vec::new(),
             more: Vec::new(),
+            toggle: None,
         });
     }
 }
@@ -503,6 +560,7 @@ impl App {
             field: None,
             list: Vec::new(),
             more: Vec::new(),
+            toggle: None,
         });
     }
 
@@ -519,6 +577,7 @@ impl App {
             field: None,
             list: Vec::new(),
             more: Vec::new(),
+            toggle: None,
         });
     }
 
@@ -537,6 +596,7 @@ impl App {
             field: None,
             list: Vec::new(),
             more: Vec::new(),
+            toggle: None,
         });
     }
 
@@ -554,6 +614,7 @@ impl App {
             field: None,
             list: Vec::new(),
             more: Vec::new(),
+            toggle: None,
         });
     }
 
@@ -572,6 +633,7 @@ impl App {
             field: Some(AskField { label: "What should it look like?".into(), placeholder: "A dark theme in deep teal with a soft gold accent…".into() }),
             list: Vec::new(),
             more: Vec::new(),
+            toggle: None,
         });
     }
 
@@ -588,6 +650,7 @@ impl App {
             field: None,
             list: Vec::new(),
             more: Vec::new(),
+            toggle: None,
         });
     }
 }
