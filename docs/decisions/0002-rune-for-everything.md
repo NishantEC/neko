@@ -110,7 +110,7 @@ registration. Slot (a) needs that registration added on Neko's side before plugi
    `--overlays` (or `NEKO_RUNE_OVERLAYS=1`) until P5, because the Swift app still owns the summon hotkey, ⌘⇧Esc and its own pill. P5
    flips the default and retires the Swift ones. The agent pointer is **blocked**: nothing in Neko reports computer-use coordinates.
    The notifications and the menu bar item are P5a (below).
-5. **P5, switch the default and ship.** P5a-1 built 2026-11-19, see [the knowledge note](../knowledge/rune-as-the-app.md): `--app` makes Rune do the Swift app's duties (daemon watch, menu bar item, app menu, routine notifications, `neko://` links, uninstaller, Open Neko in), held back by a guard while the Swift app runs; P5a-2 retires the Swift pill and keys, P5b is the bundle and the installer. The Rune app becomes the default; the web UI and the Swift
+5. **P5, switch the default and ship.** P5a-1 built 2026-11-19, see [the knowledge note](../knowledge/rune-as-the-app.md): `--app` makes Rune do the Swift app's duties (daemon watch, menu bar item, app menu, routine notifications, `neko://` links, uninstaller, Open Neko in), held back by a guard while the Swift app runs; P5a-2 (2026-11-19) adds the two-way guard, Calendar, Reminders and paste back, and P5b is the bundle and the installer (with the retirement of the Swift pill and keys). The Rune app becomes the default; the web UI and the Swift
    shell shrink to what is left; the installer ships it. Not before every screen has reached
    parity.
 
