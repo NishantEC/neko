@@ -9,17 +9,17 @@ pixels (pixelmatch, threshold 0.1, anti-aliasing ignored). "First run" is the or
 after Gate 1 (structure fixes); "After" is the last run of this pass. The settings-budget and settings-workspaces pairs are dropped:
 the web has no such sections (Budget is part of "AI & agents", Workspaces is a Setup page).
 
-**17 of 26 pairs pass; all ten Settings pairs pass, with at least 85% of the words placed. The goal for the other pages (every pair at or under 2.5%) is NOT met.**
+**21 of 26 pairs pass; all ten Settings pairs pass, with at least 85% of the words placed. The goal for the other pages (every pair at or under 2.5%) is NOT met.**
 
 | Pair | First run | Baseline at 1440 | After | Words placed | Pass |
 | --- | ---: | ---: | ---: | ---: | :---: |
-| all-sessions-tree | 7.36 | 7.36 | 7.36 | 0% | no |
-| all-sessions-list | 5.77 | 5.77 | 1.42 | 88.2% | yes |
+| all-sessions-tree | 7.36 | 7.36 | 1.02 | 99% | yes |
+| all-sessions-list | 5.77 | 5.77 | 1.34 | 98.9% | yes |
 | setup-memory | 6.08 | 5.07 | 5.07 | 3.8% | no |
 | setup-watching | 4.61 | 4.65 | 4.74 | 4.2% | no |
 | routines | 4.75 | 4.63 | 0.86 | 95.3% | yes |
 | calendar-month | 4.22 | 4.12 | 4.12 | 1.1% | no |
-| all-sessions-board | 3.95 | 3.95 | 3.95 | 0% | no |
+| all-sessions-board | 3.95 | 3.95 | 0.63 | 90.1% | yes |
 | usage | 4.0 | 3.84 | 3.88 | 0% | no |
 | plugins | 3.23 | 3.26 | 3.26 | 0% | no |
 | pull-requests | 2.61 | 2.41 | 2.41 | 3.2% | yes |
@@ -41,6 +41,8 @@ the web has no such sections (Budget is part of "AI & agents", Workspaces is a S
 | setup-packs | 4.42 | 3.16 | 0.16 | 50% | yes |
 
 ## Done in this pass
+
+All sessions, Tree and Board (2026-11-18): the tree is `work/TreeView.tsx` over a Rust port of `buildTree` (`link/tree_model.rs`, made once per snapshot): 36 point rows (caret, icon, name with model or origin, tools, state label, cost and duration columns), connector lines 29 points a level, the summary line and Expand all. The board is `TaskBoard.tsx`/`BoardCard.tsx`/`NotchCard.tsx`: 208 (empty: 144) wide columns that bleed 6 either side, 32 high headers, 196 wide cards in the web's card colour, the state line with its flex-wrap rule for the age, Done's five and "Show all N". The list's stage tabs lost 2 points each (the web's tab has a 1 point border). Not matched: the Tree page's own header (`Tree.tsx`; Rune has no such route, the layout is inside Tasks), the arrow-key outline navigation, the spinner on a running state label (a still arc), a stage filter's grid of cards (Rune keeps one column), and a wrapped, clipped card age (not drawn; its room is kept).
 
 All sessions, List (2026-11-18): the web's Tasks page (`pages/work/Tasks.tsx`, `work/TaskViews.tsx`): title with its count, overflow menu and New task; stage tabs with counts, the search label with its `/` key, the layout switch (icons); stage groups that fold; 40 point rows (glyph, id, title, why it waits, source, PR, folder, runtime avatar, age). Failed and cancelled show by default as on the web. **Tree and Board are not ported**: the web draws the tree from `buildTree` (Neko, watches, tasks, and each task's agent runs with cost and duration, from events, splits and sources) and the board from BoardCard/NotchCard; Rune's `Summary` carries neither, so each needs the daemon data and a model port first (all-sessions-tree 6.51%, all-sessions-board 3.27%, words placed under 6%).
 

@@ -73,6 +73,10 @@ pub struct AllState {
     pub tree_open: std::collections::HashMap<String, bool>,
     /// The tree under the filters now, with what it was made for: rebuilt only when the snapshot or a filter changes.
     pub tree_cache: std::cell::RefCell<Option<(String, std::rc::Rc<crate::link::tree_model::AgentTree>)>>,
+    /// "Show all N" in the Done column.
+    pub done_all: bool,
+    /// The column whose "options" menu is open.
+    pub board_menu: Option<Stage>,
     /// The list's stage groups the person folded, by title.
     pub folded: std::collections::HashSet<String>,
 }
@@ -94,6 +98,8 @@ impl Default for AllState {
             tree_open: std::collections::HashMap::new(),
             tree_cache: std::cell::RefCell::new(None),
             folded: std::collections::HashSet::new(),
+            done_all: false,
+            board_menu: None,
         }
     }
 }

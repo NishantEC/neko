@@ -134,6 +134,16 @@ fn the_board_has_a_column_per_stage_with_the_webs_empty_lines_and_filters() {
     }
     let counts: Vec<String> = ["Needs you", "Ready to review", "Running", "Up next", "Done"].iter().map(|t| texts_of(&rt, &format!("board-count-{t}"))).collect();
     assert_eq!(counts, ["3", "3", "5", "4", "7"], "failed joins Needs you, cancelled joins Done (the filter asks for them)");
+    // The web's column titles, left to right, each 208 wide and touching the next (the columns bleed 6 either side of the 12 point gap).
+    let x = |title: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("board-col-{title}"))).map(|e| e.rect).unwrap_or_else(|| panic!("no column {title}"));
+    let order = ["Needs you", "Ready to review", "Running", "Up next", "Done"];
+    for pair in order.windows(2) {
+        let (a, b) = (x(pair[0]), x(pair[1]));
+        assert!((a[0] + a[2] - b[0]).abs() < 0.6 && a[0] < b[0], "{} then {}: {a:?} {b:?}", pair[0], pair[1]);
+    }
+    assert_eq!(x("Needs you")[2], 208.0, "a column with cards is 208 wide");
+    let card = rt.elements().into_iter().find(|e| e.key.as_deref().is_some_and(|k| k.starts_with("board-card-"))).expect("a card");
+    assert_eq!(card.rect[2], 196.0, "the web's 196 point card");
     // A stage filter narrows to one column; an empty one says so.
     rt.update(|s, _| s.all.stage = Some(neko_rune::all_sessions::Stage::Running));
     settle(&mut rt);
@@ -156,7 +166,7 @@ fn texts_of(rt: &Runtime<App>, key: &str) -> String {
 fn an_allowed_drag_sends_exactly_the_request_the_web_sends() {
     let mut rt = runtime(board);
     // A stopped task (Needs you) carried two columns right, to Running: `StartTask`.
-    let (x, y) = hold(&mut rt, "board-card-t5", 2.0 * 292.0);
+    let (x, y) = hold(&mut rt, "board-card-t5", 2.0 * 208.0);
     assert!(has_key(&rt, "board-ghost"), "the carried card floats under the pointer");
     assert!(has_key(&rt, "board-slot-Running"), "the column says what the drop does");
     assert!(rt.state.outbox.is_empty(), "nothing is sent until it is dropped");
@@ -166,7 +176,7 @@ fn an_allowed_drag_sends_exactly_the_request_the_web_sends() {
     assert!(!has_key(&rt, "board-ghost"));
     rt.state.outbox.clear();
     // A task ready for review, two columns right to Done: `CompleteTask`.
-    carry(&mut rt, "board-card-t3", 3.0 * 292.0);
+    carry(&mut rt, "board-card-t3", 3.0 * 208.0);
     assert_eq!(rt.state.outbox, vec![Call::Complete { task_id: "t3".into() }], "{:?}", rt.state.outbox);
 }
 
@@ -174,7 +184,7 @@ fn an_allowed_drag_sends_exactly_the_request_the_web_sends() {
 fn a_refused_drag_sends_nothing_and_says_why_and_the_column_does_not_light_up() {
     let mut rt = runtime(board);
     // A running task carried two columns left, to Needs you: the web does not allow it.
-    let (x, y) = hold(&mut rt, "board-card-t6", -2.0 * 292.0);
+    let (x, y) = hold(&mut rt, "board-card-t6", -2.0 * 208.0);
     assert!(has_key(&rt, "board-ghost"));
     assert!(!has_key(&rt, "board-slot-Needs you"), "a refused column shows no drop slot");
     assert!(rt.state.all.carry.as_ref().is_some_and(|c| c.over == Some(neko_rune::all_sessions::Stage::NeedsYou)));
@@ -188,7 +198,7 @@ fn a_refused_drag_sends_nothing_and_says_why_and_the_column_does_not_light_up() 
 #[test]
 fn a_drag_that_is_cancelled_or_barely_moves_sends_nothing_and_a_click_opens_the_task() {
     let mut rt = runtime(board);
-    hold(&mut rt, "board-card-t5", 2.0 * 292.0);
+    hold(&mut rt, "board-card-t5", 2.0 * 208.0);
     press(&mut rt, Key::Escape);
     assert!(rt.state.outbox.iter().all(|c| c.reads()) && !has_key(&rt, "board-ghost"), "Esc or a lost pointer puts it back: {:?}", rt.state.outbox);
     // A press without travel is a click: it opens the session.
@@ -202,7 +212,7 @@ fn a_drag_that_is_cancelled_or_barely_moves_sends_nothing_and_a_click_opens_the_
 fn a_drop_past_the_board_moves_nothing() {
     let mut rt = runtime(board);
     // A task ready for review carried off the right of the columns (onto the window's edge): no column, no request.
-    carry(&mut rt, "board-card-t3", 5.0 * 292.0);
+    carry(&mut rt, "board-card-t3", 5.0 * 208.0);
     assert!(rt.state.outbox.iter().all(|c| c.reads()) && rt.state.dialog.is_none(), "{:?}", rt.state.outbox);
 }
 
@@ -226,12 +236,12 @@ fn the_two_slash_popovers_do_not_share_their_state() {
 #[test]
 fn a_running_task_dropped_on_done_asks_before_it_cancels() {
     let mut rt = runtime(board);
-    carry(&mut rt, "board-card-t6", 2.0 * 292.0);
+    carry(&mut rt, "board-card-t6", 2.0 * 208.0);
     assert!(rt.state.outbox.is_empty(), "the request waits for the dialog: {:?}", rt.state.outbox);
     assert!(has_key(&rt, "ask-yes") && has_text(&rt, "Cancel “Rework the export batching”?"), "{:?}", texts(&rt));
     click(&mut rt, "ask-no");
     assert!(rt.state.outbox.is_empty());
-    carry(&mut rt, "board-card-t6", 2.0 * 292.0);
+    carry(&mut rt, "board-card-t6", 2.0 * 208.0);
     click(&mut rt, "ask-yes");
     assert_eq!(rt.state.outbox, vec![Call::Stop { task_id: "t6".into() }]);
 }

@@ -41,7 +41,7 @@ mod settings_system;
 mod tree;
 mod turn;
 mod ui;
-mod webkit;
+pub mod webkit;
 mod work;
 
 pub use calendar::is_meeting;

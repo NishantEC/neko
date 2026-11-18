@@ -51,7 +51,7 @@ pub fn demo_summary() -> Summary {
                 status,
                 updated_at_ms: DEMO_NOW - ago_min * 60_000,
                 goal: goals[(at + i) % goals.len()].to_owned(),
-                line: crate::link::TaskLine { short_id: format!("NEK-{:04X}", 0x1BB3 + at), note: if matches!(status, AwaitingApproval | Failed) { "Needs your input: which branch?".to_owned() } else { String::new() }, ..Default::default() },
+                line: crate::link::TaskLine { short_id: format!("NEK-{:04X}", 0x1BB3 + at), note: if matches!(status, Failed) || (status == AwaitingApproval && i % 2 != 0) { "Needs your input: which branch?".to_owned() } else { String::new() }, ..Default::default() },
                 wait: match status {
                     AwaitingApproval if i % 2 == 0 => Wait::Plan,
                     AwaitingApproval => Wait::Question,

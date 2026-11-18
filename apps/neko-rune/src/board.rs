@@ -16,7 +16,7 @@ use rune::Phase;
 use crate::all_sessions::Stage;
 use crate::app::App;
 use crate::link::tree_model::{AgentNode, AgentTree, Filters, NodeKind, TreeInput, tree_for, visible_order};
-use crate::link::{Call, TaskRow, Wait};
+use crate::link::{Call, TaskRow};
 use crate::status::status_label;
 
 /// The agent tree: the summary's own, or one built for the filters now.
@@ -56,10 +56,20 @@ impl Layout {
     }
 }
 
-/// A column's width, the gap between columns, and so how far one column is from the next.
-pub const COLUMN_W: f32 = 280.0;
-pub const COLUMN_GAP: f32 = 12.0;
-pub const PITCH: f32 = COLUMN_W + COLUMN_GAP;
+/// A column's width (`TaskBoard.tsx`): at least 208, and a column with nothing in it a slim 144; alone, the page's width. The columns bleed
+/// 6 points either side (`-mx-1.5`) and sit on the 12 point gap, so each starts where the last ended.
+pub fn column_width(empty: bool, solo: bool) -> f32 {
+    if solo {
+        (crate::view::webkit::page_width() - 44.0).max(208.0)
+    } else if empty {
+        144.0
+    } else {
+        208.0
+    }
+}
+
+/// Where a card's left edge is inside its column: the column's 6 (the list's own 4 is taken back by its `-mx-1`).
+const CARD_INSET: f32 = 6.0;
 /// The pointer must travel this far from the press before a card is carried (the web's `distance: 6`).
 pub const DRAG_SLOP: f32 = 6.0;
 /// The tree's indent per level.
@@ -206,7 +216,8 @@ impl CardAction {
 pub fn card_words(task: &TaskRow) -> (&'static str, Option<CardAction>) {
     match task.status {
         TaskStatus::Failed => ("Stopped", Some(CardAction::StartAgain)),
-        TaskStatus::AwaitingApproval if task.wait == Wait::Question => ("Asks you", Some(CardAction::Answer)),
+        // `waitingReason` is the planner's question (or "Nothing to build"): the row's note carries it.
+        TaskStatus::AwaitingApproval if !task.line.note.is_empty() => ("Asks you", Some(CardAction::Answer)),
         TaskStatus::AwaitingApproval => ("Needs approval", Some(CardAction::Approve)),
         TaskStatus::ReadyForReview => ("Ready to review", None),
         TaskStatus::Queued => ("Up next", None),
@@ -262,10 +273,19 @@ impl App {
     /// None when the pointer is past the first or last column: a drop there is no drop (the web's "dropped outside a column").
     pub fn column_under(&self, from: Stage, grab_x: f32, dx: f32) -> Option<Stage> {
         let stages = self.board_stages();
+        let solo = stages.len() == 1;
+        let widths: Vec<f32> = stages.iter().map(|s| column_width(self.board_column(*s).is_empty(), solo)).collect();
         let home = stages.iter().position(|s| *s == from)?;
-        let at = ((grab_x + dx) / PITCH).floor() as i32;
-        let to = home as i32 + at;
-        (0..stages.len() as i32).contains(&to).then(|| stages[to as usize])
+        // Where the pointer is, measured from the left edge of the column the card was taken from.
+        let x = CARD_INSET + grab_x + dx;
+        let mut edge = -widths[..home].iter().sum::<f32>();
+        for (i, w) in widths.iter().enumerate() {
+            if x >= edge && x < edge + w {
+                return Some(stages[i]);
+            }
+            edge += w;
+        }
+        None
     }
 
     /// A card's pointer gesture (Rune's `on_drag`): Down picks it up, Move carries it, Up drops it unless it was cancelled.
@@ -415,7 +435,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::link::{Summary, TaskMeta};
+    use crate::link::{Summary, TaskMeta, Wait};
     use TaskStatus::*;
 
     fn row(id: &str, status: TaskStatus, at: i64) -> TaskRow {
@@ -450,7 +470,7 @@ mod tests {
     fn a_card_says_where_its_task_stands_and_offers_one_action() {
         let mut r = row("a", AwaitingApproval, 1);
         assert_eq!(card_words(&r), ("Needs approval", Some(CardAction::Approve)));
-        r.wait = Wait::Question;
+        r.line.note = "Needs your input: which file?".into();
         assert_eq!(card_words(&r), ("Asks you", Some(CardAction::Answer)));
         assert_eq!(card_words(&row("b", Failed, 1)), ("Stopped", Some(CardAction::StartAgain)));
         assert_eq!(card_words(&row("c", ReadyForReview, 1)), ("Ready to review", None));
@@ -474,17 +494,17 @@ mod tests {
     #[test]
     fn the_column_under_the_pointer_follows_how_far_it_travelled() {
         let app = app();
-        // Taken 40 in on a card of the Running column (third): 292 right is the next column.
+        // Taken 40 in on a card of the Running column (third, 208 wide); Up next has nothing in it and is 144 wide, Done is 208.
         assert_eq!(app.column_under(Stage::Running, 40.0, 0.0), Some(Stage::Running));
-        assert_eq!(app.column_under(Stage::Running, 40.0, 292.0), Some(Stage::UpNext));
-        assert_eq!(app.column_under(Stage::Running, 40.0, 292.0 * 2.0), Some(Stage::Done));
+        assert_eq!(app.column_under(Stage::Running, 40.0, 170.0), Some(Stage::UpNext), "the next column starts 208 from the home column's edge");
+        assert_eq!(app.column_under(Stage::Running, 40.0, 320.0), Some(Stage::Done), "after the 144 point empty one");
         assert_eq!(app.column_under(Stage::Running, 40.0, 5000.0), None, "past the last column is no column");
-        assert_eq!(app.column_under(Stage::Running, 40.0, -292.0 * 2.0), Some(Stage::NeedsYou));
+        assert_eq!(app.column_under(Stage::Running, 40.0, -300.0), Some(Stage::NeedsYou));
         assert_eq!(app.column_under(Stage::Running, 40.0, -5000.0), None);
         // With a stage filter there is one column and nothing to move to.
         let mut app = app;
         app.all.stage = Some(Stage::Running);
-        assert_eq!(app.column_under(Stage::Running, 40.0, 292.0), None, "one column, nothing to move to");
+        assert_eq!(app.column_under(Stage::Running, 40.0, 170.0).filter(|s| *s != Stage::Running), None, "one column, nothing else to move to");
     }
 
     #[test]
@@ -509,19 +529,19 @@ mod tests {
         // (no travel at all: a click, nothing sent)
         assert!(app.outbox.is_empty());
         // From Needs you, two columns right is Running.
-        carry(&mut app, "fail", 292.0 * 2.0, false);
+        carry(&mut app, "fail", 2.0 * 208.0, false);
         assert_eq!(app.outbox, vec![Call::Start { task_id: "fail".into() }]);
         app.outbox.clear();
         // A task ready for review dropped on Done is marked done.
-        carry(&mut app, "rev", 292.0 * 3.0, false);
+        carry(&mut app, "rev", 3.0 * 208.0 + 70.0, false);
         assert_eq!(app.outbox, vec![Call::Complete { task_id: "rev".into() }]);
         app.outbox.clear();
         // A running task dropped on Needs you is refused: nothing is sent, and the reason is said.
-        carry(&mut app, "run", -292.0 * 2.0, false);
+        carry(&mut app, "run", -2.0 * 208.0, false);
         assert!(app.outbox.is_empty());
         assert!(app.toast_words().contains("can’t go back to waiting"), "{}", app.toast_words());
         // A cancelled carry sends nothing either.
-        carry(&mut app, "fail", 292.0 * 2.0, true);
+        carry(&mut app, "fail", 2.0 * 208.0, true);
         assert!(app.outbox.is_empty());
         // Dropped where it started: nothing.
         carry(&mut app, "run", 20.0, false);
@@ -531,7 +551,7 @@ mod tests {
     #[test]
     fn a_running_task_dropped_on_done_asks_before_it_cancels() {
         let mut app = app();
-        carry(&mut app, "run", 292.0 * 2.0, false);
+        carry(&mut app, "run", 2.0 * 208.0 - 30.0, false);
         assert!(app.outbox.is_empty(), "the request waits for the dialog");
         let ask = app.dialog.clone().expect("a dialog is open");
         assert_eq!(ask.call, Call::Stop { task_id: "run".into() });
@@ -543,7 +563,7 @@ mod tests {
     #[test]
     fn a_carry_that_ends_is_not_a_click() {
         let mut app = app();
-        carry(&mut app, "run", 292.0 * 2.0, false);
+        carry(&mut app, "run", 2.0 * 208.0 - 30.0, false);
         assert!(app.all.suppress_press, "the press that follows the release is swallowed");
         // The next press starts clean.
         app.board_drag("run", Phase::Down, (10.0, 10.0), (0.0, 0.0), [0.0, 0.0], false);

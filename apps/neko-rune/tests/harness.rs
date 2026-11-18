@@ -904,7 +904,7 @@ fn batch_b_a_board_drag_starts_a_stopped_task_through_the_daemon_and_a_refused_o
     // Refused first: a task being built, carried to Needs you, is not moved, and the daemon is not asked.
     let building = id_of(&rt, "Rework the export batching");
     let before: Vec<_> = rt.state.summary.as_ref().unwrap().tasks.iter().map(|t| (t.id.clone(), t.status)).collect();
-    carry_card(&mut rt, &format!("board-card-{building}"), -2.0 * 292.0);
+    carry_card(&mut rt, &format!("board-card-{building}"), -2.0 * 208.0);
     assert_eq!(status_of(&rt, &building), TaskStatus::Building);
     let after: Vec<_> = rt.state.summary.as_ref().unwrap().tasks.iter().map(|t| (t.id.clone(), t.status)).collect();
     assert_eq!(before, after, "nothing changed");
@@ -915,7 +915,7 @@ fn batch_b_a_board_drag_starts_a_stopped_task_through_the_daemon_and_a_refused_o
     // Narrowed by the search so its card is the one in view (Needs you holds ten cards, which scroll).
     rt.update(|s, _| s.all.search.replace_text("nightly export"));
     settle(&mut rt);
-    carry_card(&mut rt, &format!("board-card-{stopped}"), 2.0 * 292.0);
+    carry_card(&mut rt, &format!("board-card-{stopped}"), 2.0 * 208.0);
     assert_ne!(status_of(&rt, &stopped), TaskStatus::Failed, "the daemon started it");
     assert!(rt.find(&format!("board-card-{stopped}")).is_some(), "it is still on the board, in its new column");
 }
