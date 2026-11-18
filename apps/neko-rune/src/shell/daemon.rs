@@ -12,6 +12,8 @@
 //! The decisions are in [`Supervisor`] over the [`Io`] trait, so they are tested without a process or a socket; [`spawn_watch`] is the thread.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::link::shell::Ping;
@@ -187,20 +189,36 @@ impl Io for Real {
     }
 }
 
-/// Starts the watch on a thread of its own. It runs for the life of the process (the takeover is one way).
-pub fn spawn_watch(socket: PathBuf) {
+/// One turn of the watch. `active` is whether Rune holds the daemon duty right now (the Swift app may have taken it back). Inactive: nothing is
+/// asked and nothing is started, and the daemon this watch started is left running. The first active turn after that (and the very first) is a
+/// `start` (ask, start none that answers), later ones a `look`. None while inactive.
+pub fn watch_step(active: bool, was_active: &mut bool, supervisor: &mut Supervisor, io: &mut impl Io) -> Option<(Did, Duration)> {
+    if !active {
+        *was_active = false;
+        return None;
+    }
+    let step = if *was_active { supervisor.look(io) } else { supervisor.start(io) };
+    *was_active = true;
+    Some(step)
+}
+
+/// Starts the watch on a thread of its own. It runs for the life of the process; `active` says whether Rune holds the duty now.
+pub fn spawn_watch(socket: PathBuf, active: Arc<AtomicBool>) {
     let _ = std::thread::Builder::new().name("neko-daemon-watch".into()).spawn(move || {
         let mut io = Real { socket, child: None };
         let mut supervisor = Supervisor::default();
-        let (did, mut delay) = supervisor.start(&mut io);
-        log(did);
+        let mut was_active = false;
         loop {
+            let delay = match watch_step(active.load(Ordering::SeqCst), &mut was_active, &mut supervisor, &mut io) {
+                Some((did, next)) => {
+                    if did != Did::Healthy {
+                        log(did);
+                    }
+                    next
+                }
+                None => HEALTHY_EVERY,
+            };
             std::thread::sleep(delay);
-            let (did, next) = supervisor.look(&mut io);
-            if did != Did::Healthy {
-                log(did);
-            }
-            delay = next;
         }
     });
 }
@@ -259,6 +277,29 @@ mod tests {
         b.recovered();
         assert_eq!(b.failures(), 0);
         assert_eq!(b.failed().as_secs(), 2);
+    }
+
+    #[test]
+    fn a_watch_handed_back_asks_nothing_and_starts_nothing_until_it_holds_the_duty_again() {
+        let mut io = Fake::new(&[Ping::Down]);
+        let mut s = Supervisor::default();
+        let mut was = false;
+        let first = watch_step(true, &mut was, &mut s, &mut io).expect("active: a first look");
+        assert_eq!(first.0, Did::Launched);
+        assert_eq!(io.spawned, 1);
+        // The Swift app started: the duty is handed back. Nothing is asked, nothing is started, the child is left alone.
+        let asked = io.asked;
+        for _ in 0..4 {
+            assert!(watch_step(false, &mut was, &mut s, &mut io).is_none());
+        }
+        assert_eq!((io.asked, io.spawned), (asked, 1), "no ping, no spawn while handed back");
+        assert!(io.child, "the daemon it started is never killed");
+        // It quit: the duty is Rune's again, and the first look asks before it starts anything.
+        io.pings = vec![Ping::Pong];
+        io.asked = 0;
+        let back = watch_step(true, &mut was, &mut s, &mut io).expect("active again");
+        assert_eq!(back, (Did::Healthy, HEALTHY_EVERY));
+        assert_eq!(io.spawned, 1, "a daemon that answers is not started over");
     }
 
     #[test]

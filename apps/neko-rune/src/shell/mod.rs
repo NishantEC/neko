@@ -7,7 +7,9 @@
 //! **The Swift-running guard.** Two apps must never hold the same duty (two menu bar icons, two daemons being started, two banners per
 //! item, two pills in one corner). In `--app` mode Rune therefore asks every 10 s whether the Swift app (bundle id [`SWIFT_BUNDLE_ID`],
 //! not this process) is running; while it is, [`duties`] gives Rune none of them and Settings, Neko updates, says so. When the Swift app
-//! quits, Rune takes the duties over without a restart. The takeover is one way: once Rune holds the duties it keeps them for this run.
+//! quits, Rune takes the duties over without a restart, and when the Swift app starts again later Rune hands every duty back (the menu bar
+//! item and the application menu are removed, the hotkeys unregistered, the overlays hidden, the daemon watch and the notification, Calendar
+//! and Reminders loops go quiet; the daemon is never stopped) and Settings shows the read-only row again. The guard goes both ways.
 
 pub mod app_menu;
 pub mod daemon;
@@ -17,6 +19,8 @@ pub mod status_item;
 pub mod uninstall;
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use rune::{AppHandle, Tx};
@@ -104,6 +108,24 @@ pub const GUARD_LOG: &str = "neko-rune: --app: the Swift Neko app is running, so
 /// And when it quits.
 pub const TAKEOVER_LOG: &str = "neko-rune: --app: the Swift Neko app has quit; Rune takes over the menu bar, notifications, hotkeys and the daemon watch";
 
+/// The Swift app started while Rune held the duties.
+pub const HANDBACK_LOG: &str = "neko-rune: --app: the Swift Neko app has started; Rune hands back the menu bar, notifications, hotkeys and the daemon watch (the daemon keeps running)";
+
+/// What the background loops read: whether Rune holds their duty right now. One flag per loop; the threads stay, they only go quiet.
+#[derive(Clone, Debug, Default)]
+pub struct Switches {
+    pub daemon: Arc<AtomicBool>,
+    pub notifications: Arc<AtomicBool>,
+}
+
+impl Switches {
+    /// Makes the flags say what the duties say.
+    pub fn follow(&self, d: Duties) {
+        self.daemon.store(d.daemon, Ordering::SeqCst);
+        self.notifications.store(d.notifications, Ordering::SeqCst);
+    }
+}
+
 /// What the window keeps of the Mac-app mode.
 #[derive(Default)]
 pub struct Shell {
@@ -113,8 +135,10 @@ pub struct Shell {
     pub overlays_flag: bool,
     /// The last answer of the guard; None until it has asked.
     pub swift_running: Option<bool>,
-    /// What is held now. Once held, kept for the run (the takeover is one way).
+    /// What is held now: it follows the guard both ways.
     pub duties: Duties,
+    /// What the background loops read (see [`Switches`]).
+    pub switches: Switches,
     /// The daemon's socket, for the daemon watch and the notifier.
     pub socket: PathBuf,
     daemon_started: bool,
@@ -143,22 +167,20 @@ impl Shell {
         self.overlays_flag || self.duties.overlays
     }
 
-    /// Takes the guard's answer; true when the duties changed.
+    /// Takes the guard's answer; true when the duties changed. Both ways: the Swift app starting takes every duty away, its quitting gives
+    /// them back.
     pub fn observe_swift(&mut self, running: bool) -> bool {
         let before = self.duties;
-        if self.swift_running != Some(running) && self.app_flag {
-            if running && !self.duties.any() {
-                eprintln!("{GUARD_LOG}");
-            } else if self.swift_running == Some(true) {
+        let previous = self.swift_running;
+        if self.app_flag && previous != Some(running) {
+            if running {
+                eprintln!("{}", if before.any() { HANDBACK_LOG } else { GUARD_LOG });
+            } else if previous == Some(true) {
                 eprintln!("{TAKEOVER_LOG}");
             }
         }
         self.swift_running = Some(running);
-        let now = duties(self.app_flag, running);
-        // Once Rune holds the duties it keeps them: the Swift app starting later does not take them back.
-        if now.any() || !self.duties.any() {
-            self.duties = now;
-        }
+        self.duties = duties(self.app_flag, running);
         before != self.duties
     }
 }
@@ -166,24 +188,47 @@ impl Shell {
 impl App {
     /// The guard answered (or answered again): starts what Rune now holds. True when something on screen changed (the Settings row).
     pub fn set_swift_running(&mut self, running: bool) -> bool {
+        let before = self.shell.duties;
         let changed = self.shell.observe_swift(running);
+        self.release_duties(before);
         self.start_duties();
         changed
     }
 
-    /// Starts each duty once, the first time Rune holds it.
+    /// Lets go of what Rune held in `before` and no longer holds: the Swift app is running again. The loops go quiet through
+    /// [`Switches`]; the menu bar item and the application menu are removed, the overlays and their keys detached. Nothing is quit and the
+    /// daemon is left running.
+    pub fn release_duties(&mut self, before: Duties) {
+        let now = self.shell.duties;
+        self.shell.switches.follow(now);
+        if before.status_item && !now.status_item {
+            status_item::remove();
+        }
+        if before.app_menu && !now.app_menu {
+            if let Some(handle) = &self.shell.handle {
+                let _ = handle.set_menu(Vec::<rune::MenuItem<App>>::new());
+            }
+            self.shell.app_menu_shown = None;
+        }
+        if before.overlays && !self.shell.wants_overlays() {
+            self.overlays.detach();
+        }
+    }
+
+    /// Starts each duty once, the first time Rune holds it (its thread then stays for the run and follows [`Switches`]).
     pub fn start_duties(&mut self) {
         let d = self.shell.duties;
+        self.shell.switches.follow(d);
         if d.daemon && !self.shell.daemon_started {
             self.shell.daemon_started = true;
-            daemon::spawn_watch(self.shell.socket.clone());
+            daemon::spawn_watch(self.shell.socket.clone(), self.shell.switches.daemon.clone());
         }
         if d.notifications
             && !self.shell.notify_started
             && let Some(handle) = self.shell.handle.clone()
         {
             self.shell.notify_started = true;
-            notify::spawn(handle, self.shell.socket.clone());
+            notify::spawn(handle, self.shell.socket.clone(), self.shell.switches.notifications.clone());
         }
         if self.shell.wants_overlays() {
             self.overlays.attach_pending();
@@ -400,7 +445,7 @@ mod tests {
     }
 
     #[test]
-    fn takeover_happens_when_the_swift_app_quits_and_is_kept_when_it_comes_back() {
+    fn the_guard_goes_both_ways_takeover_when_swift_quits_and_hand_back_when_it_starts() {
         let mut s = Shell::new(true, false, PathBuf::from("/tmp/none.sock"));
         assert!(s.observe_swift(true), "first answer: the row appears");
         assert!(s.duties.swift_holds && !s.duties.any());
@@ -408,8 +453,42 @@ mod tests {
         assert!(!s.observe_swift(true), "the same answer changes nothing");
         assert!(s.observe_swift(false), "the Swift app quit: Rune takes over");
         assert!(s.duties.daemon && s.duties.status_item && s.wants_overlays() && !s.duties.swift_holds);
-        assert!(!s.observe_swift(true), "Swift launching again does not take the duties back");
-        assert!(s.duties.daemon && !s.duties.swift_holds);
+        assert!(!s.observe_swift(false), "the same answer changes nothing");
+        assert!(s.observe_swift(true), "the Swift app started again: Rune hands every duty back");
+        assert!(!s.duties.any() && !s.wants_overlays(), "{:?}", s.duties);
+        assert!(s.duties.swift_holds, "and the read-only row is back");
+        assert!(s.observe_swift(false), "and takes them again when it quits");
+        assert!(s.duties.any() && !s.duties.swift_holds);
+    }
+
+    #[test]
+    fn every_hand_back_transition_by_flag_and_swift() {
+        // (flag, swift before, swift after) -> (held before, held after, row after)
+        for (flag, from, to, held_before, held_after, row) in [
+            (true, false, true, true, false, true),
+            (true, true, false, false, true, false),
+            (true, true, true, false, false, true),
+            (true, false, false, true, true, false),
+            (false, false, true, false, false, false),
+            (false, true, false, false, false, false),
+        ] {
+            assert_eq!(duties(flag, from).any(), held_before, "{flag} {from}");
+            let after = duties(flag, to);
+            assert_eq!((after.any(), after.swift_holds), (held_after, row), "{flag} {from} -> {to}");
+        }
+    }
+
+    #[test]
+    fn the_loops_follow_the_duties_through_a_hand_back_and_a_takeover() {
+        let mut app = held_app(false);
+        app.shell.switches.follow(app.shell.duties);
+        assert!(app.shell.switches.daemon.load(Ordering::SeqCst) && app.shell.switches.notifications.load(Ordering::SeqCst));
+        assert!(app.set_swift_running(true), "the Settings row appears");
+        assert!(!app.shell.switches.daemon.load(Ordering::SeqCst) && !app.shell.switches.notifications.load(Ordering::SeqCst), "the loops go quiet");
+        assert!(!app.shell.duties.any() && app.shell.duties.swift_holds);
+        assert!(app.set_swift_running(false), "the Swift app quit");
+        assert!(app.shell.switches.daemon.load(Ordering::SeqCst) && app.shell.switches.notifications.load(Ordering::SeqCst), "and they wake again");
+        assert!(app.shell.app_menu_shown.is_none(), "the application menu is set again by the next poll");
     }
 
     #[test]

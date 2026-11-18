@@ -202,6 +202,33 @@ impl Overlays {
         true
     }
 
+    /// Hands the overlays back (the Swift app started and holds them): unregisters both shortcuts, hides the pill and the launcher and
+    /// keeps what [`install`] made stashed again, so [`Overlays::attach_pending`] can take it up once more. The daemon's combo is kept, so
+    /// the summon key is registered again at that time. Nothing is closed for good: the window and the overlays stay built.
+    pub fn detach(&mut self) -> bool {
+        let Some(main) = self.main.clone() else { return false };
+        if !self.plan.any() {
+            return false;
+        }
+        if let Some(id) = self.stop.take() {
+            let _ = main.unregister_shortcut(id);
+        }
+        if let Some((_, id)) = self.summon.take() {
+            let _ = main.unregister_shortcut(id);
+        }
+        self.apply(Step::Hide);
+        self.presence = Tracker::with_enabled(self.presence.enabled);
+        if let Some(launcher) = &self.launcher {
+            self.presentation.advance();
+            self.presentation.set_shown(false);
+            launcher.hide();
+        }
+        let installed = Installed { plan: self.plan, pill: self.pill.take(), launcher: self.launcher.take(), presentation: self.presentation.clone() };
+        self.plan = Plan::default();
+        self.pending = Some((installed, main));
+        true
+    }
+
     /// Takes what [`install`] made and registers the stop-all key (the summon key waits for the daemon's combo).
     pub fn attach(&mut self, installed: Installed, main: AppHandle<App>) {
         self.plan = installed.plan;
@@ -449,6 +476,25 @@ mod tests {
         assert!(o.attach_pending());
         assert!(o.plan.any() && o.pill.is_some());
         assert!(!o.attach_pending(), "attached once");
+    }
+
+    #[test]
+    fn detached_overlays_hold_nothing_and_attach_again_when_handed_back() {
+        let mut app = rune::App::new(rune::AppSpec::new("t", (100.0, 100.0), App::headless, crate::view::view));
+        let installed = install(&mut app, plan(true));
+        let mut o = Overlays::default();
+        assert!(!o.detach(), "nothing attached: nothing to hand back");
+        o.attach(installed, app.handle());
+        o.set_combo(HotkeyCombo::new(vec![Modifier::Alt], "Space".to_owned()));
+        assert!(o.plan.any() && o.pill.is_some() && o.launcher.is_some());
+        assert!(o.detach());
+        assert!(!o.plan.any() && o.pill.is_none() && o.launcher.is_none(), "no pill, no launcher, no gate");
+        assert!(o.stop.is_none() && o.summon.is_none(), "no shortcut is held");
+        assert!(o.combo.is_some(), "the daemon's combo is remembered for the way back");
+        assert!(!o.presentation.shown());
+        assert!(!o.detach(), "handed back once");
+        assert!(o.attach_pending(), "the Swift app quit: the same overlays come back");
+        assert!(o.plan.any() && o.pill.is_some() && o.launcher.is_some());
     }
 
     #[test]

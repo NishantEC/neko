@@ -284,6 +284,17 @@ mod native {
     }
 
     /// Makes the item on first call; afterwards brings the icon and the menu to what the model says.
+    /// Removes the item from the status bar and drops it, its menu and its target.
+    pub fn remove() -> bool {
+        NATIVE.with(|cell| match cell.borrow_mut().take() {
+            Some(n) => {
+                NSStatusBar::systemStatusBar().removeStatusItem(&n.item);
+                true
+            }
+            None => false,
+        })
+    }
+
     pub fn sync(handle: &AppHandle<App>, state: IconState, entries: &[Entry]) {
         let Some(mtm) = MainThreadMarker::new() else { return };
         NATIVE.with(|cell| {
@@ -324,6 +335,15 @@ mod native {
 #[cfg(target_os = "macos")]
 pub fn sync(handle: &rune::AppHandle<crate::app::App>, state: IconState, entries: &[Entry]) {
     native::sync(handle, state, entries);
+}
+/// Takes the item out of the menu bar (the Swift app holds it now). A later `sync` makes a new one. True when there was one.
+#[cfg(target_os = "macos")]
+pub fn remove() -> bool {
+    native::remove()
+}
+#[cfg(not(target_os = "macos"))]
+pub fn remove() -> bool {
+    false
 }
 
 #[cfg(not(target_os = "macos"))]

@@ -12,6 +12,8 @@
 //! The decisions are in [`Poller`] with the daemon and the store passed in, so they are tested without either.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use neko_protocol::routines::RoutineNotice;
@@ -66,13 +68,26 @@ impl Poller {
     }
 }
 
+impl Poller {
+    /// One turn of the loop. `active` is whether Rune holds the notification duty now. Handed back (the Swift app posts them again), it asks
+    /// nothing and posts nothing, and forgets where it stood: when the duty comes back the first poll only records where the list stands, so
+    /// what the Swift app already showed is never shown twice.
+    pub fn turn(&mut self, active: bool, fetch: impl FnOnce(u64) -> Option<Notices>, save: impl FnOnce(u64)) -> Vec<Post> {
+        if !active {
+            self.known = None;
+            return Vec::new();
+        }
+        self.poll(fetch, save)
+    }
+}
+
 /// Where a click on a notification goes: the route it carries (a known one), else the Inbox.
 pub fn click_target(route: Option<&str>) -> String {
     route.and_then(crate::deeplink::clean_route).unwrap_or_else(|| INBOX_ROUTE.to_owned())
 }
 
 /// Starts the notifier: the click handler, and a thread that polls. Does nothing outside an installed app.
-pub fn spawn(handle: AppHandle<App>, socket: PathBuf) {
+pub fn spawn(handle: AppHandle<App>, socket: PathBuf, active: Arc<AtomicBool>) {
     if !rune_notify::available() {
         eprintln!("neko-rune: --app: not an installed app bundle, so routine notifications are off");
         return;
@@ -91,7 +106,7 @@ pub fn spawn(handle: AppHandle<App>, socket: PathBuf) {
     let _ = std::thread::Builder::new().name("neko-notify".into()).spawn(move || {
         let mut poller = Poller::new(crate::app::load_notify_seq());
         loop {
-            for post in poller.poll(|after| routine_notifications(&socket, after), crate::app::write_notify_seq) {
+            for post in poller.turn(active.load(Ordering::SeqCst), |after| routine_notifications(&socket, after), crate::app::write_notify_seq) {
                 rune_notify::post(&rune_notify::Notification::new(post.id, post.title).body(post.body).info("route", INBOX_ROUTE));
             }
             std::thread::sleep(POLL_EVERY);
@@ -164,6 +179,19 @@ mod tests {
         assert!(out.is_empty());
         assert_eq!(saved, [2], "a new data folder: the place moves down");
         poller.poll(|after| { assert_eq!(after, 2); None }, |_| {});
+    }
+
+    #[test]
+    fn handed_back_the_poller_is_silent_and_on_return_only_records_where_the_list_stands() {
+        let mut poller = Poller::new(Some(3));
+        let out = poller.turn(false, |_| panic!("asks nothing while handed back"), |_| panic!("saves nothing while handed back"));
+        assert!(out.is_empty());
+        let mut saved = None;
+        let out = poller.turn(true, |after| { assert_eq!(after, 0); Some(Notices { items: many(4), latest: 7 }) }, |l| saved = Some(l));
+        assert!(out.is_empty(), "what the Swift app showed meanwhile is not shown again");
+        assert_eq!(saved, Some(7));
+        let out = poller.turn(true, |after| { assert_eq!(after, 7); Some(Notices { items: many(1), latest: 8 }) }, |_| {});
+        assert_eq!(out.len(), 1);
     }
 
     #[test]
