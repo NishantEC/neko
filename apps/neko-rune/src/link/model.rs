@@ -46,24 +46,42 @@ pub struct TaskLine {
     pub runtime: String,
 }
 
+/// The web's `repositoryOf`: the name of the folder the task works in.
+pub(super) fn repo_of(snapshot: &Snapshot, t: &Task) -> String {
+    let base = |p: &str| p.trim_end_matches('/').rsplit('/').next().unwrap_or(p).to_owned();
+    snapshot.task_roots.get(&t.id).filter(|r| !r.is_empty()).map(|r| base(r)).unwrap_or_default()
+}
+
+/// The web's `pullRequestNumber`: `#123`.
+pub(super) fn pr_of(t: &Task) -> String {
+    t.pull_request.as_ref().and_then(|p| p.url.split('/').rfind(|x| !x.is_empty()).map(|n| format!("#{n}"))).unwrap_or_default()
+}
+
+/// The web's `sourceName`: a known tool's own spelling, else the connection's label.
+pub(super) fn source_name(label: &str) -> String {
+    let lower = label.to_lowercase();
+    ["sentry", "linear", "github", "jira", "slack", "notion", "figma", "paper"].iter().find(|k| lower.contains(**k)).map_or(label.to_owned(), |k| k[..1].to_uppercase() + &k[1..])
+}
+
+/// The web's `sourceOf`: "Linear · ENG-12" when a watch filed the task from a source.
+pub(super) fn source_of(snapshot: &Snapshot, t: &Task) -> String {
+    snapshot.mcp.sources.iter().find(|s| s.task_id.as_deref() == Some(t.id.as_str())).map(|observed| {
+        let label = snapshot.mcp.connections.iter().find(|c| c.id == observed.connection_id).map(|c| c.label.clone()).unwrap_or_default();
+        let name = source_name(&label);
+        let id = observed.external_id.as_str();
+        let title = t.display_title.clone().unwrap_or_else(|| t.title.clone());
+        let useful = !id.is_empty() && id.len() <= 12 && !title.contains(id);
+        [Some(name).filter(|n| !n.is_empty()), useful.then(|| id.to_owned())].into_iter().flatten().collect::<Vec<_>>().join(" · ")
+    }).unwrap_or_default()
+}
+
 fn task_line(snapshot: &Snapshot, t: &Task) -> TaskLine {
     let note = match t.status {
         TaskStatus::Failed => crate::work::stop_reason(t),
         TaskStatus::AwaitingApproval => crate::work::waiting_reason(t).unwrap_or_default(),
         _ => String::new(),
     };
-    let base = |p: &str| p.trim_end_matches('/').rsplit('/').next().unwrap_or(p).to_owned();
-    let repo = snapshot.task_roots.get(&t.id).filter(|r| !r.is_empty()).map(|r| base(r)).unwrap_or_default();
-    let pr = t.pull_request.as_ref().and_then(|p| p.url.split('/').rfind(|x| !x.is_empty()).map(|n| format!("#{n}"))).unwrap_or_default();
-    let source = snapshot.mcp.sources.iter().find(|s| s.task_id.as_deref() == Some(t.id.as_str())).map(|observed| {
-        let label = snapshot.mcp.connections.iter().find(|c| c.id == observed.connection_id).map(|c| c.label.clone()).unwrap_or_default();
-        let lower = label.to_lowercase();
-        let name = ["sentry", "linear", "github", "jira", "slack", "notion", "figma", "paper"].iter().find(|k| lower.contains(**k)).map_or(label.clone(), |k| k[..1].to_uppercase() + &k[1..]);
-        let id = observed.external_id.as_str();
-        let title = t.display_title.clone().unwrap_or_else(|| t.title.clone());
-        let useful = !id.is_empty() && id.len() <= 12 && !title.contains(id);
-        [Some(name).filter(|n| !n.is_empty()), useful.then(|| id.to_owned())].into_iter().flatten().collect::<Vec<_>>().join(" · ")
-    }).unwrap_or_default();
+    let (repo, pr, source) = (repo_of(snapshot, t), pr_of(t), source_of(snapshot, t));
     let conversation = format!("task:{}", t.id);
     let latest = snapshot.runtime_selections.iter().filter(|s| s.conversation_id == conversation).max_by_key(|s| s.selected_at_ms);
     let provider_of = |p: &str| if p.is_empty() { "codex".to_owned() } else { p.to_owned() };
@@ -465,6 +483,11 @@ pub struct Summary {
     /// Who started whom: a task made by a split, or proposed by another task, by its parent's id (the Tree layout).
     #[serde(default)]
     pub parents: std::collections::BTreeMap<String, String>,
+    /// What the agent tree reads (`tree_model`), and the tree built from it for every task and workspace.
+    #[serde(default)]
+    pub tree_input: super::tree_model::TreeInput,
+    #[serde(default)]
+    pub tree: super::tree_model::AgentTree,
 }
 
 /// How many of Neko's messages the client keeps (a long reply is ~8 MB of layout; DESIGN: bounded). The column
@@ -501,6 +524,7 @@ impl Summary {
     pub fn from_snapshot_for(snapshot: &Snapshot, open: Option<&str>) -> Summary {
         let skip = snapshot.conversation.len().saturating_sub(CHAT_KEPT);
         let now = neko_protocol_now_ms();
+        let (tree_input, tree) = super::tree_model::TreeInput::from_snapshot(snapshot, now);
         Summary {
             settings: SettingsView {
                 runtime: snapshot.agent_runtime.clone(),
@@ -531,6 +555,8 @@ impl Summary {
             pull_requests: super::prs::rows(snapshot, |t| author_of(snapshot, &t.id)),
             merge_without_review: snapshot.merge_without_review.iter().cloned().collect(),
             parents: parents_of(snapshot),
+            tree_input,
+            tree,
             digest: snapshot.digest.clone(),
             meta: snapshot
                 .tasks

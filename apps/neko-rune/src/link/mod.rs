@@ -24,6 +24,7 @@ mod pages;
 mod prs;
 mod reply;
 mod setup;
+pub mod tree_model;
 mod unix;
 pub mod write;
 
