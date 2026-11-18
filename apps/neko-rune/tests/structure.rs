@@ -43,7 +43,7 @@ fn overlap(a: Rect, b: Rect) -> bool {
     a[0] < right(b) - 1.5 && b[0] < right(a) - 1.5 && a[1] < bottom(b) - 1.5 && b[1] < bottom(a) - 1.5
 }
 
-fn settle(rt: &mut Runtime<App>) {
+fn settle<S: 'static>(rt: &mut Runtime<S>) {
     for _ in 0..30 {
         rt.frame(1.0 / 60.0);
     }
@@ -334,4 +334,56 @@ fn the_copied_data_keeps_the_windows_shape() {
     bad.sort();
     bad.dedup();
     assert!(bad.is_empty(), "{} structure failures on the copied data:\n{}", bad.len(), bad.join("\n"));
+}
+
+// ---- the P4 overlays (docs/knowledge/rune-overlays.md) ----------------------------------------------------------------------------
+//
+// The pill is a window of its own with its own state, so it is crawled on its own: every pill state compact and widened. Rules: everything stays inside the overlay's window
+// (c), no text is cut off (e), and no panic.
+
+fn overlay_crawl<S: 'static>(rt: &Runtime<S>, label: &str) -> Vec<String> {
+    let mut bad = Vec::new();
+    let (vw, vh) = rt.viewport;
+    let window: Rect = [0.0, 0.0, vw, vh];
+    for e in rt.elements() {
+        // What a scroll clips away entirely has no visible part and is not on screen.
+        if e.exiting || !has_area(e.rect) || !has_area(e.visible) {
+            continue;
+        }
+        // The glow is a shadow of the capsule, drawn outside it by design; the rest stays in the window.
+        if !inside(e.visible, window) && !e.key.as_deref().is_some_and(|k| k == "pill-glow") {
+            bad.push(format!("{label}: (c) {:?} {:?} extends outside the {vw}x{vh} window", e.key, e.visible));
+        }
+        if e.role == "text" && e.text.as_deref().is_some_and(|t| !t.trim().is_empty()) && (e.visible[0] > e.rect[0] + 1.0 || right(e.visible) < right(e.rect) - 1.0) {
+            bad.push(format!("{label}: (e) text {:?} is cut off ({:?} shows {:?})", e.text.as_deref().unwrap_or("").chars().take(40).collect::<String>(), e.rect, e.visible));
+        }
+    }
+    bad
+}
+
+#[test]
+fn the_overlays_keep_their_shape() {
+    use neko_rune::presence::{Activity, Pill, PresenceState};
+    let mut bad = Vec::new();
+    // The longest label the pill can carry: a status, a 40 character title and "+99 more".
+    let long = format!("Checking the result: {} +99 more", "W".repeat(40));
+    for (activity, label) in [
+        (Activity::Thinking, "Making a plan: Fix the login redirect"),
+        (Activity::Creating, "Preparing a fix: Fix the login redirect +2 more"),
+        (Activity::Debugging, long.as_str()),
+        (Activity::NeedsYou, "Neko needs your OK for a tool"),
+        (Activity::Ready, "Ready to review: Fix the login redirect"),
+        (Activity::Failed, "Needs attention: Fix the login redirect"),
+    ] {
+        for expanded in [false, true] {
+            let mut pill = Pill::new(None);
+            pill.state = Some(PresenceState { activity, label: label.to_owned(), lingers: false, task: None });
+            pill.force_expanded = expanded;
+            let mut rt = Runtime::new(pill, neko_rune::presence::view, neko_rune::presence::WINDOW, Env { system_dark: false, scale: 1.0 });
+            rt.frame(0.0);
+            settle(&mut rt);
+            bad.extend(overlay_crawl(&rt, &format!("pill:{activity:?}:{}", if expanded { "widened" } else { "compact" })));
+        }
+    }
+    assert!(bad.is_empty(), "{} structure failures in the overlays:\n{}", bad.len(), bad.join("\n"));
 }

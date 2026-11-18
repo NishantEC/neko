@@ -31,9 +31,11 @@ pub mod link;
 pub mod new_session;
 pub mod pages;
 pub mod onboarding;
+pub mod overlays;
 pub mod palette;
 pub mod permissions;
 pub mod plan;
+pub mod presence;
 pub mod pull_requests;
 pub mod panel;
 pub mod plugin_manage;
@@ -197,7 +199,7 @@ fn init() -> App {
         // The last run's widths (read once, before the first frame); the window then keeps them.
         let saved = app::load_layout();
         let layout = saved.map(layout::Layout::restored).unwrap_or_default();
-        App { pending_route: FIRST_ROUTE.with(|r| r.borrow_mut().take()), linked: !has("nolink"), dock: dock::set_badge, workspace_scope: app::load_scope(), all: all_sessions::AllState { layout: app::load_all_layout().unwrap_or_default(), ..Default::default() }, layout, layout_written: saved, layout_seen: saved, persist_layout: true, web_view: web_panel::WebHost::windowed(), luau: luau::Luau { persist: true, hidden: App::luau_load_hidden(), ..Default::default() }, ..App::default() }
+        App { pending_route: FIRST_ROUTE.with(|r| r.borrow_mut().take()), linked: !has("nolink"), dock: dock::set_badge, workspace_scope: app::load_scope(), all: all_sessions::AllState { layout: app::load_all_layout().unwrap_or_default(), ..Default::default() }, layout, layout_written: saved, layout_seen: saved, persist_layout: true, overlays: overlays::Overlays::new(app::load_presence()), web_view: web_panel::WebHost::windowed(), luau: luau::Luau { persist: true, hidden: App::luau_load_hidden(), ..Default::default() }, ..App::default() }
     }
 }
 
@@ -315,6 +317,8 @@ pub fn run() {
             let toast = s.tick_toast(t, tx);
             s.tick_compose(t, tx);
             s.tick_dock();
+            // The activity pill (only with `--overlays`): what Neko is doing, and when an outcome's time is up.
+            s.tick_presence(tx);
             // Luau plugins: asks for the packs' panels when due, runs what is due in each, applies what they asked of the window.
             let luau = s.luau_tick(t, tx);
             // The Browser tab: tells its thread whether to watch, shows the newest frame.
@@ -332,7 +336,7 @@ pub fn run() {
         }),
         ..rune::AppSpec::new("Neko (Rune)", (1360.0, 840.0), init, view::view)
     };
-    let app = rune::App::new(spec)
+    let mut app = rune::App::new(spec)
         .gpu_backend(rune::GpuBackend::Wgpu)
         .compositor(viewers::model3d_gpu::Viewer3d::default())
         .titlebar(rune::Titlebar::new(view::BAND).traffic_lights(view::TRAFFIC_LIGHTS.0, view::TRAFFIC_LIGHTS.1))
@@ -340,6 +344,9 @@ pub fn run() {
         // The web view (P3b) is built on the window's own handle, when first needed.
         .on_window(web_panel::remember_window);
     let handle = app.handle();
+    // The overlays (P4) are off unless asked for: with the gate off nothing is created and no shortcut is registered (`overlays.rs`).
+    let plan = overlays::plan(overlays::gate(rune::extra_args(), std::env::var(overlays::ENV).ok().as_deref()));
+    let mut installed = Some(overlays::install(&mut app, plan));
     let mut started = false;
     app.on_ready(move |_| {
         if std::mem::replace(&mut started, true) {
@@ -357,6 +364,14 @@ pub fn run() {
         });
         if has("nolink") {
             return;
+        }
+        // The overlays: the window keeps their handles and registers the stop-all key (the summon key follows the daemon's answer).
+        if let Some(made) = installed.take().filter(|i| i.plan.any()) {
+            let main = handle.clone();
+            handle.update_if(move |s, _| {
+                s.overlays.attach(made, main);
+                false
+            });
         }
         // The window and the link thread share which task is open.
         let wanted = link::Wanted::default();

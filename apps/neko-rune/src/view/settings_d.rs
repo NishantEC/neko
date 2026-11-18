@@ -64,6 +64,13 @@ pub(super) fn general(s: &App, t: &Neko, out: &mut Vec<Item>) {
         None => switch_when(t, "set-login-switch", "Launch at login", false, false, |_| {}),
     };
     out.push(item(Section::General, "Summon & startup", "launch-at-login", "Launch at login", help, with_note(s, t, "setting:launch-at-login", setting_row(t, "set-login", "Launch at login", Some(help), control))));
+
+    // The activity pill (P4, `--overlays`): Swift's "Show activity while Neko works" preference, kept by this client. Only a client that runs the pill shows it.
+    if s.overlays.plan.pill {
+        let help = "A small status in the corner. Click it to return to Neko.";
+        let on = s.overlays.presence.enabled;
+        out.push(item(Section::General, "Summon & startup", "activity-pill", "Show activity while Neko works", help, setting_row(t, "set-pill", "Show activity while Neko works", Some(help), switch(t, "set-pill-switch", "Show activity while Neko works", on, move |s: &mut App| s.set_presence(!on)))));
+    }
 }
 
 // ---- Appearance ---------------------------------------------------------------------------------

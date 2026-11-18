@@ -149,6 +149,8 @@ pub struct App {
     pub workspace_scope: Option<String>,
     /// The system's Reduce Motion, as the last build saw it (Home's art stops under it).
     pub reduce_motion: std::cell::Cell<bool>,
+    /// The P4 overlays (the pill, the launcher, the stop-all key): empty unless `--overlays` (`overlays.rs`).
+    pub overlays: crate::overlays::Overlays,
     /// The web view of the context panel and of a plugin's page (P3b).
     pub web_view: crate::web_panel::WebHost,
     /// What the plugins registered as pages (`PluginPages`), for "More"; None until asked.
@@ -287,6 +289,18 @@ fn write_all_layout(layout: crate::board::Layout) {
     });
 }
 
+/// The activity pill's on/off (Swift: UserDefaults `neko.presence.enabled`, default on), kept in this client's own saved state.
+pub fn load_presence() -> bool {
+    rune::prefs::Prefs::open(PREFS_ID).get::<bool>("presence").unwrap_or(true)
+}
+
+/// Writes the pill's preference on its own thread.
+pub fn write_presence(on: bool) {
+    let _ = std::thread::Builder::new().name("neko-presence".into()).spawn(move || {
+        let _ = rune::prefs::Prefs::open(PREFS_ID).set("presence", &on);
+    });
+}
+
 /// Writes the scope on its own thread.
 fn write_scope(id: Option<String>) {
     let _ = std::thread::Builder::new().name("neko-scope".into()).spawn(move || {
@@ -335,6 +349,7 @@ impl Default for App {
             session_menu: false,
             more_open: false,
             reduce_motion: std::cell::Cell::new(false),
+            overlays: Default::default(),
             toasts: Vec::new(),
             toast_counter: 0,
             dialog: None,
