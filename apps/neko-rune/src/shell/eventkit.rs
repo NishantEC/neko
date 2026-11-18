@@ -129,6 +129,15 @@ mod tests {
         assert_eq!((Access::Granted.reminders(), Access::NotAsked.reminders(), Access::Denied.reminders()), (RemindersAccess::Granted, RemindersAccess::NotAsked, RemindersAccess::Denied));
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn this_test_process_is_not_an_app_bundle_so_eventkit_would_be_skipped() {
+        // The real `NSBundle.mainBundle` of the test binary: a folder under `target/`, not an `.app`. Nothing of EventKit is called.
+        for key in [CALENDAR_USAGE_KEY, REMINDERS_USAGE_KEY] {
+            assert_eq!(native::bundle_check(key), Err("not an installed app bundle".to_owned()));
+        }
+    }
+
     #[test]
     fn eventkit_is_touched_only_from_an_app_bundle_with_the_usage_string() {
         let key = CALENDAR_USAGE_KEY;

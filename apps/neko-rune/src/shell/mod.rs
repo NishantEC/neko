@@ -109,9 +109,16 @@ pub fn running_with_bundle_id(_id: &str) -> Vec<i32> {
     Vec::new()
 }
 
+/// The bundle id the real guard looks for: the Swift app's, unless `NEKO_RUNE_SWIFT_BUNDLE_ID` says otherwise (a development run that must not
+/// meet the installed Swift app, such as a check of what an unbundled `--app` run logs).
+pub fn swift_bundle_id() -> String {
+    std::env::var("NEKO_RUNE_SWIFT_BUNDLE_ID").ok().filter(|id| !id.is_empty()).unwrap_or_else(|| SWIFT_BUNDLE_ID.to_owned())
+}
+
 /// The real check: the Swift app, as the system lists it.
 pub fn swift_app_running() -> bool {
-    swift_running(running_with_bundle_id, std::process::id() as i32)
+    let id = swift_bundle_id();
+    swift_running(|_| running_with_bundle_id(&id), std::process::id() as i32)
 }
 
 /// What a start in `--app` mode says on stderr, once, when the Swift app holds the duties.
