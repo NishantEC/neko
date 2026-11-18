@@ -252,9 +252,10 @@ pub fn button(t: &Neko, key: &str, label: &str, glyph: Option<&'static Icon>, pr
     let (size, lh, glyph_size) = if big { (16.0, 24.0, 18.0) } else { (14.0, 20.0, 16.0) };
     let ink = if primary { Color::WHITE } else { t.text.base };
     let fill = if primary { t.meaning.iris } else if selected { t.text.base.alpha(0.1) } else { t.text.base.alpha(0.065) };
-    let mut r = row().key(key.to_owned()).role("button").label(label).focusable(true).h(36.0).px(14.0).gap(6.0).center().radius(18.0).fill(fill).hover(Color::WHITE.alpha(if primary { 0.14 } else { 0.05 })).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(on_press);
+    // With an icon the web's box is the 1 point border and 14 of padding each side, the icon pulled 2 points in at both ends (`[&_svg]:-mx-0.5`).
+    let mut r = row().key(key.to_owned()).role("button").label(label).focusable(true).h(36.0).px(if glyph.is_some() { 15.0 } else { 14.0 }).gap(6.0).center().radius(18.0).fill(fill).hover(Color::WHITE.alpha(if primary { 0.14 } else { 0.05 })).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(on_press);
     if let Some(g) = glyph {
-        r = r.child(icon(g, glyph_size).color(ink.alpha(0.8)).a11y_hidden());
+        r = r.child(icon(g, glyph_size).color(ink.alpha(0.8)).mx(-2.0).a11y_hidden());
     }
     r.child(text(label.to_owned()).font(font(t, size, 500.0, lh)).color(ink).a11y_hidden())
 }
@@ -368,8 +369,10 @@ pub fn select(s: &App, t: &Neko, layer: &mut Vec<El>, key: &str, label: &str, op
 pub type Tab = (String, String, bool, Box<dyn Fn(&mut App)>);
 
 pub fn tabs(t: &Neko, tabs: Vec<Tab>) -> El {
-    let (size, lh) = if page_width() < 640.0 { (16.0, 24.0) } else { (14.0, 20.0) };
-    let mut well = row().key("tabs").role("tablist").h(42.0).padding(3.0).gap(2.0).center_y().radius(10.0).fill(t.text.base.alpha(0.06));
+    // Under 640 the web's `sm:` sizes are off: a 42 high well of 36 high tabs in 16 point words; from 640, 38 and 32 in 13 point words.
+    let big = page_width() < 640.0;
+    let (size, lh, well_h, tab_h) = if big { (16.0, 24.0, 42.0, 36.0) } else { (13.0, 19.5, 38.0, 32.0) };
+    let mut well = row().key("tabs").role("tablist").h(well_h).padding(3.0).gap(2.0).center_y().radius(10.0).fill(t.text.base.alpha(0.06));
     for (key, label, open, press) in tabs {
         well = well.child(
             row()
@@ -378,7 +381,7 @@ pub fn tabs(t: &Neko, tabs: Vec<Tab>) -> El {
                 .label(label.clone())
                 .checked(open)
                 .focusable(true)
-                .h(36.0)
+                .h(tab_h)
                 .px(10.0)
                 .center()
                 .radius(7.0)
@@ -443,4 +446,110 @@ pub fn empty(t: &Neko, key: &str, glyph: &'static Icon, title: &str, description
 /// The outline button without an icon (`Button variant="outline"`).
 fn button_after_none(t: &Neko, key: &str, label: &str, on_press: Box<dyn Fn(&mut App)>) -> El {
     button(t, key, label, None, false, false, move |s: &mut App| on_press(s))
+}
+
+/// `Pick` (`setup/kit.tsx`) on a Setup page: the select trigger 176 wide at least and 36 high, a pill on the foreground at 5%, 14
+/// at the sides; 16 point words under 640 and 13 from there.
+#[allow(clippy::too_many_arguments)]
+pub fn pick(s: &App, t: &Neko, layer: &mut Vec<El>, key: &str, label: &str, options: &[String], current: &str, choose: impl Fn(&mut App, &str) + Clone + 'static) -> El {
+    let big = page_width() < 640.0;
+    let mut kit = t.kit.clone();
+    kit.ty.ui_medium = if big { font(t, 16.0, 400.0, 24.0) } else { font(t, 13.0, 400.0, 19.5) };
+    let (open_key, close_key) = (key.to_owned(), key.to_owned());
+    Select::new(key, options)
+        .current(Some(current))
+        .label(label)
+        .width(176.0)
+        .open(s.pages.open_select.as_deref() == Some(key))
+        .on_toggle(move |s: &mut App| s.toggle_select(&open_key))
+        .on_close(move |s: &mut App| {
+            if s.pages.open_select.as_deref() == Some(close_key.as_str()) {
+                s.pages.open_select = None;
+            }
+        })
+        .on_choose(move |s: &mut App, chosen: &str, _| {
+            s.pages.open_select = None;
+            choose(s, chosen);
+        })
+        .build(&kit, layer)
+        .key(format!("pick-{key}"))
+        .w(176.0)
+        .h(36.0)
+        .pl(14.0)
+        .pr(14.0)
+        .py(0.0)
+        .gap(6.0)
+        .radius(24.0)
+        .fill(t.text.base.alpha(0.05))
+        .justify_between()
+}
+
+/// The words of a list row's secondary text (`text-[12.5px] text-muted-foreground/70`).
+pub fn faint(t: &Neko, words: &str) -> El {
+    text(words.to_owned()).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted.alpha(0.7)).a11y_hidden()
+}
+
+/// [`faint`] words that are several text nodes of the web's JSX (`{kind}{" · source"}`): one line, each node a text of its own, so the
+/// measure finds each where the browser puts it.
+pub fn faint_nodes(t: &Neko, nodes: &[String]) -> El {
+    row().children(nodes.iter().map(|n| text(n.clone()).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted.alpha(0.7)).a11y_hidden()))
+}
+
+/// A setup list row of the web's pages (`ROW` in `Memory.tsx`, `Watching.tsx`): 6 above and below a line 32 high (taller when
+/// something in it is), 12 at the sides, radius 10, a faint wash on hover; the row's own children go in `line`, 12 apart.
+pub fn item_row(t: &Neko, key: &str, line: Vec<El>, below: Vec<El>) -> El {
+    col().key(key.to_owned()).w_full().px(12.0).py(6.0).gap(4.0).radius(10.0).hover_group().hover(t.text.base.alpha(0.03)).child(row().w_full().min_h(32.0).gap(12.0).center_y().children(line)).children(below)
+}
+
+/// `OneLine` (`Memory.tsx`): the row's words as a button, one line cut off with an ellipsis, or all of them when `open`.
+pub fn one_line(t: &Neko, key: &str, words: &str, open: bool, on_press: impl Fn(&mut App) + 'static) -> El {
+    let style = font(t, 13.5, 400.0, 21.9375);
+    let label = if open { text(words.to_owned()).font(style).color(t.text.base).wrap().min_w(0.0).shrink() } else { text(words.to_owned()).font(style).color(t.text.base).truncate().min_w(0.0).shrink() };
+    row().key(key.to_owned()).role("button").label(words.to_owned()).expanded(open).focusable(true).grow(1.0).shrink().min_w(0.0).radius(10.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(on_press).child(label.a11y_hidden())
+}
+
+/// `RowActions` (`kit.tsx`): the icon buttons at a row's end, there while the row is hovered or holds focus; they keep their room.
+pub fn row_actions(children: Vec<El>) -> El {
+    row().key("row-actions").gap(2.0).center_y().children(children)
+}
+
+/// `RowAction`: a 28 point icon button of a row's actions (shows on the row's hover).
+pub fn row_action(t: &Neko, key: &str, label: &str, glyph: &'static Icon, on_press: impl Fn(&mut App) + 'static) -> El {
+    row().key(key.to_owned()).role("button").label(label.to_owned()).help(label.to_owned()).focusable(true).size(28.0, 28.0).center().radius(10.0).hover(t.text.base.alpha(0.07)).focus_ring(2.0, 2.0, t.kit.c.border_focus).group_opacity(0.0, 1.0).on_press(on_press).child(icon(glyph, 15.0).color(t.text.muted).a11y_hidden())
+}
+
+/// One entry of [`more_menu`]: its words, its icon, whether it is the destructive one, and what it does. `None` is a separator.
+pub type MoreEntry = Option<(String, &'static Icon, bool, std::rc::Rc<dyn Fn(&mut App)>)>;
+
+/// The web's row menu (`Button variant="ghost" size="icon-sm"` with the three dots and a `DropdownMenu`): a 36 point round trigger
+/// among a row's actions. `flag` is the fold flag that says it is open.
+pub fn more_menu(s: &App, t: &Neko, layer: &mut Vec<El>, key: &str, label: &str, entries: Vec<MoreEntry>) -> El {
+    let flag = format!("more:{key}");
+    let open = s.row_open(&flag);
+    let toggle = flag.clone();
+    let mut trigger = row().key(key.to_owned()).role("button").label(label.to_owned()).help(label.to_owned()).focusable(true).size(36.0, 36.0).center().radius(18.0).hover(t.text.base.alpha(0.07)).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(move |s: &mut App| s.toggle_row(&toggle)).child(icon(&crate::icons_phosphor::DOTS_THREE_BOLD, 16.0).color(t.text.base).a11y_hidden());
+    if !open {
+        trigger = trigger.group_opacity(0.0, 1.0);
+    }
+    let close = flag.clone();
+    let mut menu = rune_kit::Menu::new(format!("{key}-menu")).trigger(trigger).open(open).placement(rune_kit::Placement::BottomEnd).min_width(180.0).on_close(move |s: &mut App| {
+        if s.row_open(&close) {
+            s.toggle_row(&close);
+        }
+    });
+    for e in entries {
+        match e {
+            None => menu = menu.separator(),
+            Some((words, glyph, danger, act)) => {
+                let close = flag.clone();
+                menu = menu.item(rune_kit::MenuItem::new(words).icon(glyph).danger(danger).on_select(move |s: &mut App| {
+                    if s.row_open(&close) {
+                        s.toggle_row(&close);
+                    }
+                    act(s);
+                }));
+            }
+        }
+    }
+    menu.build(&t.kit, layer)
 }

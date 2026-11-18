@@ -130,15 +130,19 @@ fn a_status_glyph_says_connected_needs_sign_in_or_failed() {
 fn every_destructive_action_asks_first_and_sends_only_when_confirmed() {
     // (scene, the button that starts it, what the confirmation says, the request after "yes")
     #[allow(clippy::type_complexity)]
-    let cases: [(&str, &str, &str, fn(&SetupAction) -> bool); 5] = [
-        ("setup-watching", "watch-delete-r1", "Delete watch", |c| matches!(c, SetupAction::RemoveWatch { id } if id == "r1")),
-        ("setup-schedules", "schedule-delete-s2", "Delete schedule", |c| matches!(c, SetupAction::RemoveSchedule { id } if id == "s2")),
-        ("setup-memory", "memory-forget-m1", "Forget memory", |c| matches!(c, SetupAction::ForgetMemory { id } if id == "m1")),
-        ("setup-memory", "preference-forget-g1", "Forget guidance", |c| matches!(c, SetupAction::ForgetPreference { id, .. } if id == "g1")),
-        ("setup-tools", "conn-switch-c1", "Pause & revoke access", |c| matches!(c, SetupAction::SetEnabled { id, enabled: false } if id == "c1")),
+    let cases: [(&str, &[&str], &str, &str, fn(&SetupAction) -> bool); 5] = [
+        ("setup-watching", &[], "watch-delete-r1", "Delete watch", |c| matches!(c, SetupAction::RemoveWatch { id } if id == "r1")),
+        ("setup-schedules", &[], "schedule-delete-s2", "Delete schedule", |c| matches!(c, SetupAction::RemoveSchedule { id } if id == "s2")),
+        // The web's row menu (the three dots): Edit, a separator, then Forget memory.
+        ("setup-memory", &["memory-more-m1"], "memory-more-m1-menu-item2", "Forget memory", |c| matches!(c, SetupAction::ForgetMemory { id } if id == "m1")),
+        ("setup-memory", &["mem-tab-style"], "preference-forget-g1", "Forget guidance", |c| matches!(c, SetupAction::ForgetPreference { id, .. } if id == "g1")),
+        ("setup-tools", &[], "conn-switch-c1", "Pause & revoke access", |c| matches!(c, SetupAction::SetEnabled { id, enabled: false } if id == "c1")),
     ];
-    for (name, start, button, is_it) in cases {
+    for (name, before, start, button, is_it) in cases {
         let mut rt = scene(name);
+        for key in before {
+            click(&mut rt, key);
+        }
         click(&mut rt, start);
         assert!(rt.find("confirm-yes").is_some(), "{name}: {start} asks first");
         assert!(sent(&rt).is_empty(), "{name}: nothing is sent before the person says yes: {:?}", sent(&rt));
@@ -146,6 +150,9 @@ fn every_destructive_action_asks_first_and_sends_only_when_confirmed() {
         // Cancel keeps everything.
         click(&mut rt, "confirm-no");
         assert!(rt.find("confirm-yes").is_none() && sent(&rt).is_empty(), "{name}: Cancel sends nothing");
+        for key in before {
+            click(&mut rt, key);
+        }
         click(&mut rt, start);
         click(&mut rt, "confirm-yes");
         assert!(sent(&rt).iter().any(is_it), "{name}: yes sends the request: {:?}", sent(&rt));
@@ -300,13 +307,16 @@ fn memory_adds_edits_and_filters_and_guidance_is_kept_or_dismissed() {
     click(&mut rt, "dlg-mem-save");
     assert!(matches!(sent(&rt).as_slice(), [SetupAction::SaveMemory(m)] if m.id == "m3" && m.workspace_id.as_deref() == Some("w1") && m.text == "Run the check script before every push."), "{:?}", sent(&rt));
     answered(&mut rt);
-    // Search narrows the list.
+    // Search (Rune's own, behind the magnifier) narrows the list.
+    click(&mut rt, "mem-search-toggle");
     fill(&mut rt, "mem:search", "retries");
     assert!(rt.find("memory-m4").is_some() && rt.find("memory-m1").is_none());
     fill(&mut rt, "mem:search", "");
     rt.state.outbox.clear();
     click(&mut rt, "memory-keep-mp1");
     assert!(matches!(sent(&rt).as_slice(), [SetupAction::DecideMemory { id, accept: true }] if id == "mp1"));
+    // Guidance is on the Working style tab.
+    click(&mut rt, "mem-tab-style");
     click(&mut rt, "preference-keep-g1");
     assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::KeepPreference { id, version: 2, .. } if id == "g1")));
     // The page is taller now (the web's 44 point rows): the switches are under the list, so scroll to them first.
@@ -317,8 +327,29 @@ fn memory_adds_edits_and_filters_and_guidance_is_kept_or_dismissed() {
         rt.wheel(800.0, 500.0, -400.0);
         settle(&mut rt);
     }
+    click(&mut rt, "mem-tab-memories");
     click(&mut rt, "mem-switch-learning");
     assert!(sent(&rt).iter().any(|c| matches!(c, SetupAction::SetMemoryOptions(o) if !o.learning && o.use_memory)));
+}
+
+/// The y of the first text that is exactly `words`.
+fn y_of(rt: &Runtime<App>, words: &str) -> f32 {
+    rt.elements().into_iter().find(|e| e.text.as_deref() == Some(words)).unwrap_or_else(|| panic!("no text {words:?}: {:?}", texts(rt))).rect[1]
+}
+
+#[test]
+fn memory_has_the_webs_tabs_and_section_titles_in_order() {
+    let mut rt = scene("setup-memory");
+    // The web's header has no count; its tab list is Saved memories, Working style.
+    assert!(rt.find("page-count").is_none(), "Memory's header is the title alone");
+    assert!(y_of(&rt, "Saved memories") < y_of(&rt, "Suggested") || y_of(&rt, "Saved memories") < 200.0);
+    let ys: Vec<f32> = ["Suggested", "Everywhere", "Settings", "Suggest new memories", "Use saved memory"].iter().map(|w| y_of(&rt, w)).collect();
+    assert!(ys.windows(2).all(|w| w[0] < w[1]), "Saved memories: Suggested, the scopes, then Settings: {ys:?}");
+    // Working style: the guidance line, the three states, then the recent decisions.
+    click(&mut rt, "mem-tab-style");
+    let ys: Vec<f32> = ["Needs your confirmation", "Confirmed", "Recent decisions"].iter().filter_map(|w| rt.elements().into_iter().find(|e| e.text.as_deref() == Some(*w)).map(|e| e.rect[1])).collect();
+    assert!(ys.len() >= 2 && ys.windows(2).all(|w| w[0] < w[1]), "Working style sections in order: {ys:?}");
+    assert!(has_text(&rt, "Add guidance"));
 }
 
 #[test]
@@ -641,13 +672,16 @@ fn daemon_memories_are_added_edited_and_forgotten_with_a_confirm() {
     assert_eq!(data(&rt).memory_options.map(|o| o.learning), Some(false));
     click(&mut rt, "mem-switch-learning");
     // Guidance is saved as a suggestion until kept.
+    click(&mut rt, "mem-tab-style");
     click(&mut rt, "mem-add-guidance");
     fill(&mut rt, "dlg:text", "Prefer the smallest fix that passes.");
     fill(&mut rt, "dlg:name", "failing test, flaky test");
     click(&mut rt, "dlg-pref-save");
     assert!(data(&rt).preferences.iter().any(|p| p.instruction.starts_with("Prefer the smallest") && p.state == neko_protocol::decision_context::PreferenceState::Proposed), "{:?} {:?}", data(&rt).preferences, rt.state.pages.notes);
     // Forget asks first.
-    click(&mut rt, &format!("memory-forget-{}", m.id));
+    click(&mut rt, "mem-tab-memories");
+    click(&mut rt, &format!("memory-more-{}", m.id));
+    click(&mut rt, &format!("memory-more-{}-menu-item2", m.id));
     assert!(rt.find("confirm-yes").is_some() && data(&rt).memory.iter().any(|x| x.id == m.id));
     click(&mut rt, "confirm-yes");
     assert!(data(&rt).memory.iter().all(|x| x.id != m.id), "{:?}", rt.state.pages.notes);
