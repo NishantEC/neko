@@ -7,6 +7,7 @@
 use std::path::Path;
 
 use neko_protocol::calendar::{CalendarAccess, CalendarEvent};
+use neko_protocol::phone::{ReminderCreated, ReminderNote, ReminderPlan, RemindersAccess};
 use neko_protocol::routines::RoutineNotice;
 use neko_protocol::workbench::Command;
 use neko_protocol::{Request, Response};
@@ -64,4 +65,18 @@ pub fn calendar_enabled(socket: &Path) -> Option<bool> {
 /// `SetCalendarEvents` (`CalendarPayload.request`): the events, where they came from and whether access was granted. True when the daemon answered.
 pub fn set_calendar_events(socket: &Path, events: Vec<CalendarEvent>, source: &str, access: CalendarAccess) -> bool {
     ask(socket, Request::SetCalendarEvents { events, source: source.to_owned(), access }).is_ok()
+}
+
+/// `PhoneRemindersSync` (`PhonePayload.syncRequest`): what Neko's Reminders list holds, answered with the plan. None when the daemon did not
+/// answer with one (`PhonePayload.plan` is empty then).
+pub fn phone_sync(socket: &Path, access: RemindersAccess, present: Vec<String>, completed: Vec<String>, notes: Vec<ReminderNote>) -> Option<ReminderPlan> {
+    match ask(socket, Request::PhoneRemindersSync { access, present, completed, notes }) {
+        Ok(Response::PhonePlan(plan)) => Some(plan),
+        _ => None,
+    }
+}
+
+/// `PhoneRemindersDone` (`PhonePayload.doneRequest`): what was done with the last plan. True when the daemon answered.
+pub fn phone_done(socket: &Path, created: Vec<ReminderCreated>, deleted: Vec<String>, finished: Vec<String>) -> bool {
+    ask(socket, Request::PhoneRemindersDone { created, deleted, finished }).is_ok()
 }

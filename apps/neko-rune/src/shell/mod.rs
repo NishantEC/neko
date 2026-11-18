@@ -17,6 +17,7 @@ pub mod daemon;
 pub mod eventkit;
 pub mod notify;
 pub mod open_in;
+pub mod reminders;
 pub mod schedule;
 pub mod status_item;
 pub mod uninstall;
@@ -63,13 +64,15 @@ pub struct Duties {
     pub overlays: bool,
     /// Calendar from EventKit (`calendar.rs`): the one writer of `SetCalendarEvents` (the Swift app's `CalendarBridge` is the other).
     pub calendar: bool,
+    /// Reminders push and replies from EventKit (`reminders.rs`): the one writer of Neko's Reminders list (the Swift app's `PhoneBridge` is the other).
+    pub reminders: bool,
     /// Rune is in `--app` mode but the Swift app holds the duties: Settings says so.
     pub swift_holds: bool,
 }
 
 impl Duties {
     pub fn any(&self) -> bool {
-        self.daemon || self.status_item || self.app_menu || self.notifications || self.links || self.overlays || self.calendar
+        self.daemon || self.status_item || self.app_menu || self.notifications || self.links || self.overlays || self.calendar || self.reminders
     }
 }
 
@@ -79,7 +82,7 @@ pub fn duties(app_flag: bool, swift_running: bool) -> Duties {
     match (app_flag, swift_running) {
         (false, _) => Duties::default(),
         (true, true) => Duties { swift_holds: true, ..Duties::default() },
-        (true, false) => Duties { daemon: true, status_item: true, app_menu: true, notifications: true, links: true, overlays: true, calendar: true, swift_holds: false },
+        (true, false) => Duties { daemon: true, status_item: true, app_menu: true, notifications: true, links: true, overlays: true, calendar: true, reminders: true, swift_holds: false },
     }
 }
 
@@ -122,6 +125,7 @@ pub struct Switches {
     pub daemon: Arc<AtomicBool>,
     pub notifications: Arc<AtomicBool>,
     pub calendar: Arc<AtomicBool>,
+    pub reminders: Arc<AtomicBool>,
 }
 
 impl Switches {
@@ -130,6 +134,7 @@ impl Switches {
         self.daemon.store(d.daemon, Ordering::SeqCst);
         self.notifications.store(d.notifications, Ordering::SeqCst);
         self.calendar.store(d.calendar, Ordering::SeqCst);
+        self.reminders.store(d.reminders, Ordering::SeqCst);
     }
 }
 
@@ -151,6 +156,7 @@ pub struct Shell {
     daemon_started: bool,
     notify_started: bool,
     calendar_started: bool,
+    reminders_started: bool,
     /// The Open-in checkbox of a confirmation that has one (Uninstall's "also move my data").
     pub ask_toggled: bool,
     /// What a confirmed uninstall runs (`None`: the real one). Tests put a recorder here; nothing else does.
@@ -241,6 +247,10 @@ impl App {
         if d.calendar && !self.shell.calendar_started {
             self.shell.calendar_started = true;
             calendar::spawn(self.shell.socket.clone(), self.shell.switches.calendar.clone());
+        }
+        if d.reminders && !self.shell.reminders_started {
+            self.shell.reminders_started = true;
+            reminders::spawn(self.shell.socket.clone(), self.shell.switches.reminders.clone());
         }
         if self.shell.wants_overlays() {
             self.overlays.attach_pending();
@@ -442,7 +452,7 @@ mod tests {
         assert!(!held.any(), "the Swift app holds every duty: {held:?}");
         assert!(held.swift_holds, "and Settings says so");
         let ours = duties(true, false);
-        assert!(ours.daemon && ours.status_item && ours.app_menu && ours.notifications && ours.links && ours.overlays && ours.calendar);
+        assert!(ours.daemon && ours.status_item && ours.app_menu && ours.notifications && ours.links && ours.overlays && ours.calendar && ours.reminders);
         assert!(!ours.swift_holds);
     }
 
@@ -494,12 +504,12 @@ mod tests {
     fn the_loops_follow_the_duties_through_a_hand_back_and_a_takeover() {
         let mut app = held_app(false);
         app.shell.switches.follow(app.shell.duties);
-        assert!(app.shell.switches.daemon.load(Ordering::SeqCst) && app.shell.switches.notifications.load(Ordering::SeqCst) && app.shell.switches.calendar.load(Ordering::SeqCst));
+        assert!(app.shell.switches.daemon.load(Ordering::SeqCst) && app.shell.switches.notifications.load(Ordering::SeqCst) && app.shell.switches.calendar.load(Ordering::SeqCst) && app.shell.switches.reminders.load(Ordering::SeqCst));
         assert!(app.set_swift_running(true), "the Settings row appears");
-        assert!(!app.shell.switches.daemon.load(Ordering::SeqCst) && !app.shell.switches.notifications.load(Ordering::SeqCst) && !app.shell.switches.calendar.load(Ordering::SeqCst), "the loops go quiet");
+        assert!(!app.shell.switches.daemon.load(Ordering::SeqCst) && !app.shell.switches.notifications.load(Ordering::SeqCst) && !app.shell.switches.calendar.load(Ordering::SeqCst) && !app.shell.switches.reminders.load(Ordering::SeqCst), "the loops go quiet");
         assert!(!app.shell.duties.any() && app.shell.duties.swift_holds);
         assert!(app.set_swift_running(false), "the Swift app quit");
-        assert!(app.shell.switches.daemon.load(Ordering::SeqCst) && app.shell.switches.notifications.load(Ordering::SeqCst) && app.shell.switches.calendar.load(Ordering::SeqCst), "and they wake again");
+        assert!(app.shell.switches.daemon.load(Ordering::SeqCst) && app.shell.switches.notifications.load(Ordering::SeqCst) && app.shell.switches.calendar.load(Ordering::SeqCst) && app.shell.switches.reminders.load(Ordering::SeqCst), "and they wake again");
         assert!(app.shell.app_menu_shown.is_none(), "the application menu is set again by the next poll");
     }
 

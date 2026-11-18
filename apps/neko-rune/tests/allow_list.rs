@@ -152,6 +152,8 @@ const RUNE_EXTRAS: &[&str] = &[
     // `PhoneRemindersSync` and `PhoneRemindersDone` are `PhoneBridge.swift`'s (what the Neko list holds, what was done with the plan).
     "SetCalendarEvents",
     "CalendarStatus",
+    "PhoneRemindersSync",
+    "PhoneRemindersDone",
 ];
 
 /// The envelopes: the web sends `Crew`, `Goals` and `Checkpoints` with the sub-command in the payload, and
