@@ -479,6 +479,9 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
+    /// One `sync` the daemon saw, as the fake records it.
+    type Seen = (RemindersAccess, Vec<String>, Vec<String>, Vec<ReminderNote>);
+
     /// The Reminders list as a person's phone would see it, and what was done to it.
     #[derive(Default)]
     struct World {
@@ -494,7 +497,7 @@ mod tests {
         commits: usize,
         fail_create: bool,
         /// Each `sync` the daemon saw, and the plans it answers with, in order (the last one repeats).
-        seen: Vec<(RemindersAccess, Vec<String>, Vec<String>, Vec<ReminderNote>)>,
+        seen: Vec<Seen>,
         plans: Vec<Option<ReminderPlan>>,
         done: Vec<(Vec<ReminderCreated>, Vec<String>, Vec<String>)>,
         /// What the person does on their phone between cycles is done by editing `list` directly.

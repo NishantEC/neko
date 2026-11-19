@@ -212,7 +212,7 @@ pub const BUILTIN_THEMES: &[BuiltinTheme] = &[
 pub const DEFAULT_THEME_ID: &str = "neutral";
 
 pub fn builtin_theme(id: &str) -> Option<&'static BuiltinTheme> {
-    { BUILTIN_THEMES.iter().find(|t| t.id == id) }
+    BUILTIN_THEMES.iter().find(|t| t.id == id)
 }
 
 /// A row's icon slot content. Closed by design, unlike `SearchItem::kind`
