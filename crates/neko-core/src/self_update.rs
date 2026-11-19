@@ -9,7 +9,7 @@
 //! See `docs/knowledge/neko-updates-itself.md` for the design and why the
 //! daemon hands its own replacement to a detached script.
 
-use neko_protocol::workbench::{SelfUpdate, UpdatePlan};
+use neko_protocol::workbench::{AppShell, SelfUpdate, UpdatePlan};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -57,6 +57,7 @@ pub const SENSITIVE: &[&str] = &[
     "scripts/self-update.sh",
     "scripts/install-native.sh",
     "scripts/build-native.sh",
+    "scripts/lib/",
     "scripts/check.sh",
     // Patched dependencies.
     "patches/",
@@ -263,6 +264,45 @@ impl Source {
                 .unwrap_or_else(|| data_dir.join("source")),
         }
     }
+}
+
+/// Where the choice of Mac app lives: `<data dir>/app-shell`.
+pub fn app_shell_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("app-shell")
+}
+
+/// Which Mac app to build and install: `NEKO_SHELL` (`swift` or `rune`) for one
+/// run, else the word in `<data dir>/app-shell`, else Swift. A missing file,
+/// an empty one or any other word is Swift; an `NEKO_SHELL` that is not one of
+/// the two words is ignored. The one reader in Rust; `scripts/lib/shell.sh`
+/// (`neko_app_shell`) is the same rule in bash.
+pub fn app_shell(data_dir: &Path) -> AppShell {
+    let env = std::env::var("NEKO_SHELL").ok();
+    app_shell_from(env.as_deref(), data_dir)
+}
+
+/// `app_shell` with the environment's value handed in (so tests need not set it).
+pub fn app_shell_from(env: Option<&str>, data_dir: &Path) -> AppShell {
+    if let Some(shell) = env.and_then(AppShell::parse) {
+        return shell;
+    }
+    // A short read: the file is one word, and a runaway file is not worth reading whole.
+    let word = fs::File::open(app_shell_path(data_dir)).ok().and_then(|mut file| {
+        use std::io::Read;
+        let mut buffer = [0u8; 64];
+        let n = file.read(&mut buffer).ok()?;
+        Some(String::from_utf8_lossy(&buffer[..n]).into_owned())
+    });
+    word.as_deref().and_then(AppShell::parse).unwrap_or_default()
+}
+
+/// Writes the choice (atomically: a temp file, then a rename).
+pub fn set_app_shell(data_dir: &Path, shell: AppShell) -> Result<(), String> {
+    fs::create_dir_all(data_dir).map_err(|e| e.to_string())?;
+    let path = app_shell_path(data_dir);
+    let temporary = path.with_extension("tmp");
+    fs::write(&temporary, format!("{}\n", shell.word())).map_err(|e| e.to_string())?;
+    fs::rename(&temporary, &path).map_err(|e| e.to_string())
 }
 
 /// Cargo's build output for updates: the user's cache folder, not the data
@@ -843,6 +883,59 @@ mod tests {
         let result = take_result(dir.path()).unwrap();
         assert_eq!((result.status.as_str(), result.reason.as_str()), ("rolled_back", "health check failed"));
         assert_eq!(take_result(dir.path()), None, "read once");
+    }
+
+    #[test]
+    fn the_app_shell_is_a_word_in_a_file_with_an_environment_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        // Missing: Swift, the default.
+        assert_eq!(app_shell_from(None, data), AppShell::Swift);
+        // Each word, with spaces, a newline and any case around it.
+        for (text, expected) in [("swift", AppShell::Swift), ("rune\n", AppShell::Rune), ("  Rune  \n", AppShell::Rune), ("SWIFT", AppShell::Swift)] {
+            fs::write(app_shell_path(data), text).unwrap();
+            assert_eq!(app_shell_from(None, data), expected, "{text:?}");
+        }
+        // Junk, empty and a runaway file are Swift.
+        for text in ["", "\n", "ruby", "rune swift", "run"] {
+            fs::write(app_shell_path(data), text).unwrap();
+            assert_eq!(app_shell_from(None, data), AppShell::Swift, "{text:?}");
+        }
+        fs::write(app_shell_path(data), "x".repeat(10_000)).unwrap();
+        assert_eq!(app_shell_from(None, data), AppShell::Swift);
+        // The environment wins for one run when it is one of the two words; junk there is ignored.
+        fs::write(app_shell_path(data), "swift").unwrap();
+        assert_eq!(app_shell_from(Some("rune"), data), AppShell::Rune);
+        fs::write(app_shell_path(data), "rune").unwrap();
+        assert_eq!(app_shell_from(Some("swift"), data), AppShell::Swift);
+        assert_eq!(app_shell_from(Some("nonsense"), data), AppShell::Rune);
+        assert_eq!(app_shell_from(Some(""), data), AppShell::Rune);
+        // Writing it is a round trip, and leaves no temporary file.
+        let fresh = dir.path().join("fresh");
+        set_app_shell(&fresh, AppShell::Rune).unwrap();
+        assert_eq!(app_shell_from(None, &fresh), AppShell::Rune);
+        set_app_shell(&fresh, AppShell::Swift).unwrap();
+        assert_eq!(app_shell_from(None, &fresh), AppShell::Swift);
+        assert_eq!(fs::read_dir(&fresh).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn the_bash_reader_follows_the_same_rule() {
+        // scripts/lib/shell.sh is the twin of `app_shell`; both are checked on the same inputs.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let dir = tempfile::tempdir().unwrap();
+        let ask = |env: Option<&str>| -> String {
+            let mut command = Command::new("/bin/bash");
+            command.arg("-c").arg(format!(". '{}/scripts/lib/shell.sh'; neko_app_shell '{}'", root.display(), dir.path().display()))
+                .env_remove("NEKO_SHELL").env_remove("NEKO_DATA_DIR");
+            if let Some(value) = env { command.env("NEKO_SHELL", value); }
+            String::from_utf8(command.output().unwrap().stdout).unwrap().trim().to_owned()
+        };
+        assert_eq!(ask(None), "swift");
+        for (text, env) in [("rune\n", None), ("  Swift ", None), ("junk", None), ("", None), ("swift", Some("rune")), ("rune", Some("swift")), ("rune", Some("nonsense")), ("swift", Some("Rune"))] {
+            fs::write(app_shell_path(dir.path()), text).unwrap();
+            assert_eq!(ask(env), app_shell_from(env, dir.path()).word(), "file {text:?} env {env:?}");
+        }
     }
 
     fn run(dir: &Path, args: &[&str]) -> String {

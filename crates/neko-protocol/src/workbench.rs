@@ -499,6 +499,32 @@ pub struct Snapshot {
 
 fn yes() -> bool { true }
 
+/// Which Mac app Neko installs: the Swift app (the default) or the Rune app.
+/// Chosen in Settings, Neko updates; stored as the word in `<data dir>/app-shell`
+/// (`neko_core::self_update::app_shell`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AppShell {
+    #[default]
+    Swift,
+    Rune,
+}
+
+impl AppShell {
+    /// The word in the `app-shell` file and in `NEKO_SHELL`.
+    pub fn word(self) -> &'static str {
+        match self { AppShell::Swift => "swift", AppShell::Rune => "rune" }
+    }
+
+    /// `swift` or `rune`, in any case with spaces around; anything else is `None`.
+    pub fn parse(text: &str) -> Option<AppShell> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "swift" => Some(AppShell::Swift),
+            "rune" => Some(AppShell::Rune),
+            _ => None,
+        }
+    }
+}
+
 /// The use copy keeping itself current: what is live, what is waiting and
 /// why, and whether it may update on its own. See
 /// `docs/knowledge/neko-updates-itself.md`.

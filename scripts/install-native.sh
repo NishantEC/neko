@@ -1,7 +1,11 @@
 #!/bin/bash
-# Install the SwiftUI/AppKit client. Default: preserve all Neko user state.
+# Install the Mac app: the SwiftUI/AppKit client by default, or the Rune client
+# when `<data dir>/app-shell` says `rune` (or NEKO_SHELL=rune for one run; see
+# scripts/lib/shell.sh). Default: preserve all Neko user state.
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+. "$repo_root/scripts/lib/shell.sh"
+app_shell="$(neko_app_shell)"
 application='/Applications/Neko.app'
 data_directory="$HOME/Library/Application Support/neko"
 # Where scripts/build-native.sh puts the bundle: $CARGO_TARGET_DIR (the updater's
@@ -9,7 +13,9 @@ data_directory="$HOME/Library/Application Support/neko"
 target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
 case "$target_dir" in /*) ;; *) target_dir="$repo_root/$target_dir" ;; esac
 bundle="$target_dir/native/Neko.app"
+if [[ "$app_shell" == rune ]]; then bundle="$target_dir/native-rune/Neko.app"; fi
 dry_run=0
+build_only=0
 clean_data=0
 # Successful installs keep this many app backups (including the new one).
 keep_backups=3
@@ -21,7 +27,8 @@ for option in "$@"; do
     --clean-data) clean_data=1 ;;
     --skip-build) skip_build=1 ;;
     --skip-checks) skip_checks=1 ;;
-    --help) printf '%s\n' 'Usage: bash scripts/install-native.sh [--dry-run] [--skip-build] [--skip-checks] [--clean-data]' 'Default preserves data and credentials, and runs scripts/check.sh before building. --clean-data moves only Neko data to a recoverable backup.'; exit 0 ;;
+    --build-only) build_only=1 ;;
+    --help) printf '%s\n' 'Usage: bash scripts/install-native.sh [--dry-run] [--build-only] [--skip-build] [--skip-checks] [--clean-data]' 'Default preserves data and credentials, and runs scripts/check.sh before building. --build-only builds and validates the bundle, then stops before anything is staged or stopped. --clean-data moves only Neko data to a recoverable backup.'; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$option" >&2; exit 2 ;;
   esac
 done
@@ -53,13 +60,19 @@ validate_bundle() {
   [[ -x "$candidate/Contents/MacOS/neko" && -x "$candidate/Contents/MacOS/neko-daemon" ]]
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$candidate/Contents/Info.plist")" == dev.neko.launcher ]]
   /usr/bin/codesign --verify --deep --strict "$candidate"
-  # Reject a validly signed legacy GPUI bundle accidentally used as input.
-  /usr/bin/otool -L "$candidate/Contents/MacOS/neko" | /usr/bin/grep -q '/SwiftUI.framework/'
+  if [[ "$app_shell" == rune ]]; then
+    # The Rune client knows what a whole bundle needs (the daemon beside it, the web UI, the usage strings).
+    [[ "$("$candidate/Contents/MacOS/neko" --check-bundle 2>&1)" == ok ]]
+  else
+    # Reject a validly signed legacy GPUI bundle accidentally used as input.
+    /usr/bin/otool -L "$candidate/Contents/MacOS/neko" | /usr/bin/grep -q '/SwiftUI.framework/'
+  fi
 }
 if (( dry_run )); then
   printf 'Dry run: no build, process signals, file moves, or installation.\n'
   printf 'Source: %s\nTarget: %s\n' "$bundle" "$application"
   if (( skip_build )); then validate_bundle "$bundle"; printf 'Existing signed native source bundle verified.\n'
+  elif [[ "$app_shell" == rune ]]; then printf 'Would run scripts/check.sh (Rust and the Rune client)%s, then scripts/build-rune-app.sh, and verify the resulting signed Rune bundle.\n' "$( (( skip_checks )) && printf ' (skipped)' )"
   else printf 'Would run scripts/check.sh%s, then scripts/build-native.sh, and verify the resulting signed SwiftUI bundle.\n' "$( (( skip_checks )) && printf ' (skipped)' )"; fi
   printf 'Would stop only installed Neko executables, including installer backups; matching PIDs:\n'
   installed_pids
@@ -71,9 +84,23 @@ if (( dry_run )); then
   exit 0
 fi
 # Nothing untested reaches /Applications: the gate runs before the build.
-if (( ! skip_build && ! skip_checks )); then "$repo_root/scripts/check.sh" || { printf 'Checks failed; nothing was installed. Re-run with --skip-checks to override.\n' >&2; exit 1; }; fi
-if (( ! skip_build )); then NEKO_NATIVE_PREVIEW=0 bash "$repo_root/scripts/build-native.sh"; fi
+if (( ! skip_build && ! skip_checks )); then
+  if [[ "$app_shell" == rune ]]; then
+    # The daemon's Rust gate, and the Rune client's own gate in place of the Swift tests.
+    "$repo_root/scripts/check.sh" --no-swift --rune || { printf 'Checks failed; nothing was installed. Re-run with --skip-checks to override.\n' >&2; exit 1; }
+  else
+    "$repo_root/scripts/check.sh" || { printf 'Checks failed; nothing was installed. Re-run with --skip-checks to override.\n' >&2; exit 1; }
+  fi
+fi
+if (( ! skip_build )); then
+  if [[ "$app_shell" == rune ]]; then bash "$repo_root/scripts/build-rune-app.sh"
+  else NEKO_NATIVE_PREVIEW=0 bash "$repo_root/scripts/build-native.sh"; fi
+fi
 validate_bundle "$bundle" || { printf 'Native bundle validation failed; installation untouched.\n' >&2; exit 1; }
+if (( build_only )); then
+  printf 'Build only (%s app): %s is built and valid. Nothing was staged, stopped or installed.\n' "$app_shell" "$bundle"
+  exit 0
+fi
 [[ -w /Applications ]] || { printf '/Applications is not writable; no installation changes made.\n' >&2; exit 1; }
 backup_root="$(mktemp -d /Applications/.neko-native-backup.XXXXXX)"
 staged="$backup_root/new-Neko.app"
@@ -124,5 +151,6 @@ done
 "$launch_services" -f "$application"
 prune_backups /Applications "$keep_backups"
 printf 'Installed native /Applications/Neko.app. Previous bundle backup: %s (keeping the newest %s)\n' "$backup_root" "$keep_backups"
+if [[ "$app_shell" == rune ]]; then printf 'The Rune app was installed (choose Swift in Settings, Neko updates, to go back; the previous app is the backup above).\n'; fi
 if [[ -n "$data_backup" ]]; then printf 'Previous Neko data backup: %s/neko\n' "$data_backup"; fi
 printf 'Credentials and preferences preserved. Launch /Applications/Neko.app when ready.\n'
