@@ -66,6 +66,14 @@ pub struct Controller {
     waking: Mutex<()>,
 }
 
+/// `SetAppShell`: writes the choice of Mac app to `<data dir>/app-shell`, then asks for the reinstall that
+/// "Update now" asks for (the updater sees that the installed app is not the chosen one). The file is written
+/// first, so a refusal to write leaves nothing requested; choosing the app that is already chosen is harmless.
+pub(crate) fn set_app_shell(db: &Db, data_dir: &std::path::Path, shell: AppShell) -> Result<Snapshot, String> {
+    neko_core::self_update::set_app_shell(data_dir, shell).map_err(|e| format!("Couldn't save the choice of Mac app: {e}"))?;
+    store::apply(db, Command::SetAppShell { shell })
+}
+
 fn record_host_failure(db: &Db, snapshot: &Snapshot, id: &str) -> Result<(), String> {
     // A failure may precede a model run or discard its stale output.
     let mut host_context = snapshot.clone();
@@ -306,6 +314,11 @@ impl Controller {
             }
             Command::SendMessage { text, workspace_id } => self.send_message(text, workspace_id, false),
             Command::InterruptAndSendMessage { text, workspace_id } => self.send_message(text, workspace_id, true),
+            Command::SetAppShell { shell } => {
+                let result = set_app_shell(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &neko_protocol::support_dir(), shell);
+                crate::self_update::wake();
+                result
+            }
             command @ (Command::UpdateNekoNow | Command::ApplyPendingUpdate | Command::RollBackWebUi | Command::SetSelfUpdate { .. } | Command::SetUpdateSource { .. } | Command::SetDevCheckout { .. }) => {
                 let result = store::apply(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), command);
                 crate::self_update::wake();

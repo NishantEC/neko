@@ -166,3 +166,11 @@ unchanged throughout. Tests never fetch from GitHub.
 `NEKO_WEB_SELF_UPDATE=1` runs the real thread). The install, relaunch and
 rollback were never run for real here (they replace `/Applications/Neko.app`);
 only the script's refusal path was exercised.
+
+### Choosing the Mac app (2026-11-19)
+
+Settings, System, Neko updates has a "Mac app" row, Swift (the default) or Rune. The choice is the file `<data>/app-shell`;
+`SetAppShell` writes it and asks for the same reinstall as Update now, and the updater reinstalls even a commit that is
+already installed because the installed bundle (`NekoShell` in its Info.plist, none = Swift) is not the chosen app.
+`install-native.sh` builds the chosen one. Details, rollback and the Rune-only rules (`apps/neko-rune/**` counts as a
+native change only while Rune is chosen) are in `rune-as-the-app.md`.

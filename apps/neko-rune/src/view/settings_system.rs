@@ -21,11 +21,11 @@ use crate::theme::Neko;
 const PROJECT_REPOSITORY: &str = "https://github.com/NishantEC/neko"; // privacy-ok: the project's own public repository
 const DEFAULT_SOURCE: &str = "NishantEC/neko"; // privacy-ok: the project's own public repository
 
-pub(super) fn all(s: &App, t: &Neko, out: &mut Vec<Item>) {
+pub(super) fn all(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     quick_panel(s, t, out);
     permissions(s, t, out);
     diagnostics(s, t, out);
-    updates(s, t, out);
+    updates(s, t, layer, out);
     about(s, t, out);
 }
 
@@ -226,7 +226,7 @@ fn sha8(commit: &Option<String>) -> String {
     commit.as_deref().map_or("unknown".to_owned(), |c| c.chars().take(8).collect())
 }
 
-fn updates(s: &App, t: &Neko, out: &mut Vec<Item>) {
+fn updates(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     const G: &str = "Neko updates";
     // `--app` while the Swift app runs: it keeps the menu bar, notifications and hotkeys (`shell/mod.rs`); read-only, and it goes when Rune takes them over.
     if s.shell.duties.swift_holds {
@@ -281,6 +281,22 @@ fn updates(s: &App, t: &Neko, out: &mut Vec<Item>) {
         out.push(item(Section::Updates, G, "update-failure", if rolled { "Rolled back" } else { "Failed" }, &r.summary, info_row(t, "set-update-failure", title(if rolled { "Rolled back" } else { "Failed" }), Some(dim(t, "set-update-failure-words", &r.summary)), None, vec![badge, when], None)));
     } else {
         out.push(item(Section::Updates, G, "update-pending", "Pending", "Nothing waiting or failed.", info_row(t, "set-update-pending", title("Pending"), Some(dim(t, "set-update-pending-words", "Nothing waiting or failed.")), None, Vec::new(), None)));
+    }
+
+    // Which Mac app: the web's select, its words and its confirmation (`ask_set_app_shell`); Cancel changes nothing.
+    {
+        use neko_protocol::workbench::AppShell;
+        let help = "Swift is the current app. Rune is the new one built in Rust; switching rebuilds and reinstalls Neko, and the previous app is kept as a backup.";
+        let current = u.app_shell;
+        let now = if current == AppShell::Rune { "Rune" } else { "Swift" };
+        let options = ["Swift".to_owned(), "Rune".to_owned()];
+        let control = dim_if(!busy, webkit::select(s, t, layer, "set-app-shell-pick", "Mac app", &options, now, 112.0, move |s: &mut App, chosen: &str| {
+            let shell = if chosen == "Rune" { AppShell::Rune } else { AppShell::Swift };
+            if shell != current {
+                s.ask_set_app_shell(shell);
+            }
+        }));
+        out.push(item(Section::Updates, G, "app-shell", "Mac app", help, setting_row(t, "set-app-shell", "Mac app", Some(help), control)));
     }
 
     // The two switches.

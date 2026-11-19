@@ -184,7 +184,7 @@ fn items(s: &App, t: &Neko, layer: &mut Vec<El>) -> Vec<Item> {
     super::settings_d::appearance(s, t, layer, &mut out);
     super::settings_d::rulebook(s, t, &mut out);
     phone(s, t, layer, &mut out);
-    super::settings_system::all(s, t, &mut out);
+    super::settings_system::all(s, t, layer, &mut out);
     out
 }
 

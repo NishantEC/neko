@@ -1378,6 +1378,12 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             snapshot.self_update.requested = true;
             snapshot.self_update.status = "Checking for changes to apply…".into();
         }
+        // The daemon has written the choice (`crate::self_update::set_app_shell`); this is the same click as
+        // "Update now", and the updater reinstalls because the installed app is not the chosen one.
+        Command::SetAppShell { shell } => {
+            snapshot.self_update.requested = true;
+            snapshot.self_update.status = format!("Switching the Mac app to {}…", match shell { neko_protocol::workbench::AppShell::Swift => "Swift", neko_protocol::workbench::AppShell::Rune => "Rune" });
+        }
         Command::RollBackWebUi => {
             snapshot.self_update.roll_back_web = true;
             snapshot.self_update.status = "Rolling back the web UI…".into();

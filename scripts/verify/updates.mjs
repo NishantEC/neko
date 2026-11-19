@@ -41,6 +41,22 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   }
   check(true, "both auto-update switches toggle and revert");
 
+  // The Mac app row: Swift unless the person chose otherwise. Picking Rune asks first; Cancel changes nothing
+  // (this check never confirms: confirming rebuilds and reinstalls Neko).
+  check(text.includes("Mac app") && text.includes("Swift is the current app. Rune is the new one built in Rust"), "the Mac app row explains the switch");
+  const macApp = section.getByRole("combobox", { name: "Mac app" });
+  check((await macApp.innerText()).includes("Swift"), "the Mac app is Swift by default");
+  await macApp.click();
+  await page.getByRole("option", { name: "Rune", exact: true }).click();
+  const switchDialog = page.getByRole("alertdialog");
+  await switchDialog.waitFor();
+  const switchText = await switchDialog.innerText();
+  check(switchText.includes("Switch the Mac app to Rune?") && switchText.includes("Neko rebuilds and reinstalls itself. This takes a few minutes and Neko restarts."), "switching asks first, in plain words");
+  await shot("updates-switch-confirm");
+  await switchDialog.getByRole("button", { name: "Cancel" }).click();
+  await switchDialog.waitFor({ state: "detached" });
+  check((await macApp.innerText()).includes("Swift") && !(await section.innerText()).includes("Switching the Mac app"), "Cancel leaves the Mac app as it was");
+
   // Search finds it.
   await page.keyboard.press("Meta+f");
   await page.getByLabel("Find a setting").fill("rollback");

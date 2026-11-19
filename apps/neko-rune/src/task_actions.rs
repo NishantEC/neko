@@ -581,6 +581,27 @@ impl App {
         });
     }
 
+    /// "Mac app" (Settings, Neko updates): the web's words. Yes writes the choice and starts the reinstall (Neko restarts).
+    pub fn ask_set_app_shell(&mut self, shell: neko_protocol::workbench::AppShell) {
+        let to = match shell {
+            neko_protocol::workbench::AppShell::Swift => "Swift",
+            neko_protocol::workbench::AppShell::Rune => "Rune",
+        };
+        self.confirm(Ask {
+            title: format!("Switch the Mac app to {to}?"),
+            detail: "Neko rebuilds and reinstalls itself. This takes a few minutes and Neko restarts.".into(),
+            ok: "Switch".into(),
+            cancel: "Cancel".into(),
+            destructive: false,
+            call: Call::SwitchMacApp { shell },
+            done: format!("Switching the Mac app to {to}. Neko restarts when it is ready."),
+            field: None,
+            list: Vec::new(),
+            more: Vec::new(),
+            toggle: None,
+        });
+    }
+
     /// Remove one of the person's theme files (the web's `ConfirmDialog` in Appearance).
     pub fn ask_remove_theme(&mut self, id: &str) {
         let Some(theme) = self.theme_entries().into_iter().find(|t| t.id == id && t.file.is_some()) else { return };

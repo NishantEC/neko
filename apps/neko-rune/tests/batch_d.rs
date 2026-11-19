@@ -316,6 +316,52 @@ fn the_update_source_is_validated_as_owner_name_and_roll_back_is_confirmed() {
 }
 
 #[test]
+fn the_mac_app_row_asks_before_switching_and_says_what_happens() {
+    use neko_protocol::workbench::AppShell;
+    let mut rt = runtime("bd-updates");
+    // The web's row: Swift unless the daemon says Rune; the web's words.
+    assert!(has_text(&rt, "Mac app") && has_text(&rt, "Swift is the current app. Rune is the new one built in Rust; switching rebuilds and reinstalls Neko, and the previous app is kept as a backup."), "{:?}", keys(&rt));
+    rt.state.outbox.clear();
+    click(&mut rt, "pick-set-app-shell-pick");
+    assert_eq!(rt.state.pages.open_select.as_deref(), Some("set-app-shell-pick"));
+    click(&mut rt, "option0");
+    assert!(rt.state.dialog.is_none() && rt.state.outbox.is_empty(), "choosing Swift while Swift is the app asks nothing");
+    click(&mut rt, "pick-set-app-shell-pick");
+    click(&mut rt, "option1");
+    // Picking Rune asks first; nothing is sent before yes, and No changes nothing.
+    assert!(has_text(&rt, "Switch the Mac app to Rune?") && has_text(&rt, "Neko rebuilds and reinstalls itself. This takes a few minutes and Neko restarts."));
+    assert!(rt.state.outbox.is_empty());
+    click(&mut rt, "ask-no");
+    assert!(rt.state.outbox.is_empty());
+    rt.update(|s, _| s.ask_set_app_shell(AppShell::Rune));
+    settle(&mut rt);
+    // Yes sends the request the web sends.
+    assert!(rt.state.dialog.is_some(), "dialog before yes (Rune)");
+    click(&mut rt, "ask-yes");
+    assert!(matches!(rt.state.outbox.as_slice(), [Call::SwitchMacApp { shell: AppShell::Rune }]), "{:?}", rt.state.outbox);
+    // With Rune the chosen app, the row says so and picking Swift asks, naming the app it goes to.
+    rt.state.outbox.clear();
+    rt.update(|s, _| {
+        if let Some(u) = s.summary.as_mut().and_then(|m| m.settings.self_update.as_mut()) {
+            u.app_shell = AppShell::Rune;
+        }
+    });
+    settle(&mut rt);
+    click(&mut rt, "pick-set-app-shell-pick");
+    click(&mut rt, "option1");
+    assert!(rt.state.dialog.is_none(), "choosing Rune while Rune is the app asks nothing");
+    click(&mut rt, "pick-set-app-shell-pick");
+    click(&mut rt, "option0");
+    assert!(has_text(&rt, "Switch the Mac app to Swift?"), "no dialog after choosing Swift");
+    assert!(rt.state.dialog.is_some(), "dialog state");
+    click(&mut rt, "ask-yes");
+    assert!(matches!(rt.state.outbox.as_slice(), [Call::SwitchMacApp { shell: AppShell::Swift }]));
+    // On the wire it is the daemon's `SetAppShell` command.
+    let wire = serde_json::to_value(Call::SwitchMacApp { shell: AppShell::Rune }.wire()).unwrap();
+    assert_eq!(wire["Workbench"]["SetAppShell"]["shell"], "Rune");
+}
+
+#[test]
 fn general_offers_the_first_run_setup_again_and_launch_at_login_is_the_webs_preference() {
     let mut rt = runtime("bd-general");
     click(&mut rt, "set-login-switch");

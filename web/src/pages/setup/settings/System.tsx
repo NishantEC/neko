@@ -10,7 +10,7 @@ import { ArrowCounterClockwise, ArrowSquareOut, ArrowsClockwise, CheckCircle, Fo
 import { Panel } from "@/setup/kit";
 import { confirm } from "@/shell/confirm";
 import { useWorkbench } from "@/useStore";
-import { ErrorNote, Row, Section, SettingRow, Status, Toggle } from "@/setup/kit";
+import { ErrorNote, Pick, Row, Section, SettingRow, Status, Toggle } from "@/setup/kit";
 import { activate, arr, foldersOf, num, providerRows, rec, relativeTime, str, useLoad, useNow, useRun, workspacesOf } from "@/setup/lib";
 const PROJECT_REPOSITORY = "https://github.com/NishantEC/neko"; // privacy-ok: the project's own public repository
 
@@ -206,6 +206,16 @@ export function UpdatesSection() {
   const update = u.last_update ? rec(u.last_update) : null;
   // The newest thing that went wrong, when it is newer than the last success.
   const trouble = [failure, rollback].filter((r): r is Record<string, any> => !!r && num(r.at_ms) > num(update?.at_ms)).sort((x, y) => num(y.at_ms) - num(x.at_ms))[0] ?? null;
+  // Which Mac app is chosen: the daemon says `Rune`; anything else (or nothing) is Swift.
+  const appShell = u.app_shell === "Rune" ? "Rune" : "Swift";
+  const switchApp = (to: string) => {
+    if (to === appShell || (to !== "Swift" && to !== "Rune")) return;
+    void confirm({
+      title: `Switch the Mac app to ${to}?`,
+      description: "Neko rebuilds and reinstalls itself. This takes a few minutes and Neko restarts.",
+      action: "Switch",
+    }).then((ok) => ok && run(() => command("SetAppShell", { shell: to })));
+  };
   const setAuto = (ui: boolean, native: boolean) => void run(() => command("SetSelfUpdate", { auto_ui: ui, auto_native: native }));
   return (
     <div className="flex flex-col gap-8">
@@ -247,6 +257,16 @@ export function UpdatesSection() {
             ) : (
               <Row id="setting-update-pending" title="Pending" description="Nothing waiting or failed." />
             )}
+            <SettingRow id="app-shell" title="Mac app" description="Swift is the current app. Rune is the new one built in Rust; switching rebuilds and reinstalls Neko, and the previous app is kept as a backup.">
+              <Pick
+                label="Mac app"
+                value={appShell}
+                onChange={switchApp}
+                options={[{ value: "Swift", label: "Swift" }, { value: "Rune", label: "Rune" }]}
+                disabled={busy || !!u.requested || !!u.installing}
+                className="min-w-28"
+              />
+            </SettingRow>
             <SettingRow id="auto-update-ui" title="Update the web UI automatically" description="Builds the published web UI, checks it and swaps it in.">
               <Toggle checked={autoUi} label="Update the web UI automatically" disabled={busy} onChange={(v) => setAuto(v, autoNative)} />
             </SettingRow>

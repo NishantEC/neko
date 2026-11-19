@@ -3052,6 +3052,8 @@ fn wait_for_change(state: &AppState, digest: String, wait_ms: u64, web: bool) ->
 fn with_digest(mut snapshot: neko_protocol::workbench::Snapshot, web: bool) -> neko_protocol::workbench::Snapshot {
     use std::hash::{Hash, Hasher};
     if web { for message in &mut snapshot.conversation { message.parts.clear(); } }
+    // The choice of Mac app lives in a file, not the snapshot: say what it is now.
+    snapshot.self_update.app_shell = neko_core::self_update::app_shell(&neko_protocol::support_dir());
     let (heartbeat, machine) = (snapshot.heartbeat_ms, snapshot.machine.take());
     snapshot.heartbeat_ms = 0;
     snapshot.digest.clear();

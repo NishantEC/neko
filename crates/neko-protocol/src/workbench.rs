@@ -510,6 +510,10 @@ pub enum AppShell {
 }
 
 impl AppShell {
+    pub fn is_swift(&self) -> bool {
+        *self == AppShell::Swift
+    }
+
     /// The word in the `app-shell` file and in `NEKO_SHELL`.
     pub fn word(self) -> &'static str {
         match self { AppShell::Swift => "swift", AppShell::Rune => "rune" }
@@ -590,6 +594,11 @@ pub struct SelfUpdate {
     pub last_failure: Option<UpdateRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_rollback: Option<UpdateRecord>,
+    /// The Mac app the person chose (`<data dir>/app-shell`; `NEKO_SHELL` for
+    /// one run). Filled in by the daemon each time it answers, never stored;
+    /// absent (Swift) in the snapshot row.
+    #[serde(default, skip_serializing_if = "AppShell::is_swift")]
+    pub app_shell: AppShell,
 }
 
 impl Default for SelfUpdate {
@@ -598,7 +607,7 @@ impl Default for SelfUpdate {
             auto_ui: true, auto_native: true, checkout: None, source: String::new(), dev_checkout: None,
             check: UpdateCheck::default(), applied_through: None, web_commit: None,
             native_commit: None, queued: None, pending: None, installing: None, requested: false, roll_back_web: false,
-            status: String::new(), last_update: None, last_failure: None, last_rollback: None,
+            status: String::new(), last_update: None, last_failure: None, last_rollback: None, app_shell: AppShell::Swift,
         }
     }
 }
@@ -1145,6 +1154,13 @@ pub enum Command {
     /// Look at the published repository now and apply everything new on its
     /// `main` (this click is the approval for a switched-off part).
     UpdateNekoNow,
+    /// Choose the Mac app: the Swift one (the default) or the Rune one. The
+    /// daemon writes `<data dir>/app-shell` and starts the same reinstall
+    /// `UpdateNekoNow` starts, from the updater's clone, which builds and
+    /// installs the chosen app (the previous one is kept as a backup).
+    SetAppShell {
+        shell: AppShell,
+    },
     /// Apply the update that waits for the owner's click.
     ApplyPendingUpdate,
     /// Go back to the previous web UI build (kept as `web-live.prev` after

@@ -164,6 +164,8 @@ pub enum Call {
     SetStartWithoutApproval { enabled: bool },
     SetSelfUpdate { auto_ui: bool, auto_native: bool },
     UpdateNow,
+    /// Settings, Neko updates, "Mac app": the other app is built and installed (only built inside the confirmation, `task_actions.rs`).
+    SwitchMacApp { shell: neko_protocol::workbench::AppShell },
     ApplyUpdate,
     SetDevCheckout { path: String },
     /// Saves the mode (`system`, `light`, `dark`): what the web's Appearance page sets.
@@ -223,7 +225,7 @@ impl Call {
         match self {
             Call::WipeTasks => Some("setting:start-over"),
             Call::DropTheme { .. } => Some("setting:themes"),
-            Call::PreviousWebBuild => Some("setting:updates"),
+            Call::PreviousWebBuild | Call::SwitchMacApp { .. } => Some("setting:updates"),
             Call::RemovePlugin { .. } => Some("page:plugins"),
             _ => None,
         }
@@ -343,6 +345,7 @@ impl Call {
             Call::SetStartWithoutApproval { enabled } => Request::Workbench(Command::SetStartWithoutApproval { enabled }),
             Call::SetSelfUpdate { auto_ui, auto_native } => Request::Workbench(Command::SetSelfUpdate { auto_ui, auto_native }),
             Call::UpdateNow => Request::Workbench(Command::UpdateNekoNow),
+            Call::SwitchMacApp { shell } => Request::Workbench(Command::SetAppShell { shell }),
             Call::ApplyUpdate => Request::Workbench(Command::ApplyPendingUpdate),
             Call::SetDevCheckout { path } => Request::Workbench(Command::SetDevCheckout { path }),
             Call::Setup(call) => call.wire(),

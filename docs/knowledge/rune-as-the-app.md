@@ -136,9 +136,29 @@ Checked on 2026-11-19 without installing anything: `install-native.sh --build-on
 with `NEKO_SHELL=rune` the bundle built (138 MB), `--check-bundle` printed `ok`, and running its executable while the Swift app ran printed the guard line and started no daemon, menu item or hotkey (the Swift app was
 never touched). Not done live: a real install, a login start of the Rune bundle, a `neko://` link from the system, EventKit and notifications from the bundle (the usage strings are there and `--check-bundle` verifies them).
 
+### P5b-2: the switch (2026-11-19)
+
+**Settings, System, "Neko updates", row "Mac app"** (web `System.tsx`, Rune `view/settings_system.rs`, same words): a select, Swift or Rune; the description is "Swift is the current app. Rune is the new one built in Rust; switching rebuilds and
+reinstalls Neko, and the previous app is kept as a backup."; a change asks first (`confirm`, "Switch the Mac app to Rune?" / "…to Swift?", "Neko rebuilds and reinstalls itself. This takes a few minutes and Neko restarts.", button "Switch";
+Rune's is `ask_set_app_shell`, built only inside that confirmation, and listed with the requests that restart something in `tests/allow_list.rs`). The row is disabled while an update is requested or installing. **Default stays Swift.**
+
+**The request** is `Command::SetAppShell { shell: AppShell }` (`AppShell::{Swift, Rune}`, in `neko-protocol`). The daemon (`workbench::set_app_shell`) writes `<data dir>/app-shell` first (a failed write is an error and
+requests nothing), then `store::apply` sets `self_update.requested` as `UpdateNekoNow` does and the updater thread is woken. **The current choice is in the existing update-status reply**: `Snapshot.self_update.app_shell`, filled in
+by `with_digest` from `app_shell()` on every answer, never stored (and left out of the JSON while it is Swift, so older readers see no change).
+
+**Why the reinstall happens when the commit is already installed.** The updater compares the choice with the installed bundle's own `NekoShell` key (`core::bundle_shell`; no key means Swift). When they differ it is a reinstall whatever the paths
+say (`decide_for(.., reinstall = true)`; "installed by hand" and "up to date" no longer apply; a retargeted plan keeps it), then `self-update.sh` runs the same `install-native.sh`, which reads the file. There is no extra flag to lose: if the
+network is down or the Mac is busy the difference is still there on the next tick. A failed install is recorded as a failure for that commit and is **not retried** until `main` moves or the person chooses again (a test pins it).
+A choice made by writing the file by hand is also followed on the next tick, as it should be: the file is the choice.
+
+**Rollback = choose Swift** (it rebuilds the Swift app from the same commit), or, if the new app is unhealthy, `self-update.sh` restores the previous app, exactly as for any update. The previous app stays as `/Applications/.neko-native-backup.*`.
+
+Verified: the daemon's tests (request round trip into a temp data folder, a switch reinstalling the installed commit and not looping, a failed switch not retried), `scripts/verify/updates.mjs` for the web row and its confirm (Cancel
+only: a real confirm would rebuild Neko), `tests/batch_d.rs` for the Rune row and confirm. Never done live: pressing Switch.
+
 ### Not done here
 
-- **P5b-2:** the switch in Settings (see below once built), and retiring the Swift pill and keys.
+- Retiring the Swift pill and keys, and making Rune the default (the owner's call after living with it).
 - The Accessibility and notification entitlements: an unsandboxed, non-hardened app needs none, so none are added; a notarized build would.
 
 - Not seen live: a notification posting, `neko://` from the system, the browser branch of Open Neko in, the real Trash, EventKit (any call), a posted ⌘V, an Accessibility read, the hand-back with a real Swift app starting.

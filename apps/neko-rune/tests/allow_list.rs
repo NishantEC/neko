@@ -175,6 +175,8 @@ const DESTRUCTIVE: &[(&str, &str)] = &[
     ("CancelAllWork", "Call::StopAll"),
     ("RetryTask", "Call::Retry"),
     ("RollBackWebUi", "Call::PreviousWebBuild"),
+    // Restarts Neko as another app: the confirmation says so, as the web's does.
+    ("SetAppShell", "Call::SwitchMacApp"),
     ("DELETE /api/plugins/<id>", "Call::RemovePlugin"),
     ("ClearFinishedTasks", "Call::ClearFinished"),
 ];

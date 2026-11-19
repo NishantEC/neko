@@ -831,6 +831,101 @@ mod tests {
     }
 
     #[test]
+    fn choosing_the_other_mac_app_reinstalls_the_commit_that_is_already_installed() {
+        let rig = Rig::new();
+        let base = run(&rig.publisher, &["rev-parse", "HEAD"]);
+        let swift = Hooks { installed_shell: swift_installed, ..HOOKS };
+        let rune = Hooks { installed_shell: rune_installed, ..HOOKS };
+        let choose = |shell: AppShell| {
+            crate::workbench::set_app_shell(&rig.state.db.lock().unwrap(), &rig.data, shell).unwrap();
+        };
+        let finish = |hooks: &Hooks, commit: &str| {
+            std::fs::create_dir_all(rig.data.join("self-update")).unwrap();
+            std::fs::write(core::result_path(&rig.data), format!(r#"{{"commit":"{commit}","status":"updated","reason":""}}"#)).unwrap();
+            rig.tick_with_hooks(Some(commit), hooks);
+        };
+        rig.tick_with_hooks(Some(&base), &swift);
+        assert!(rig.installs().is_empty());
+
+        // Choosing what is already installed asks nothing of the installer.
+        choose(AppShell::Swift);
+        rig.tick_with_hooks(Some(&base), &swift);
+        assert!(rig.installs().is_empty());
+        assert_eq!(rig.snapshot().self_update.status, "Neko is up to date.");
+
+        // Swift is installed and Rune is chosen: the same commit is installed again, as the new app.
+        choose(AppShell::Rune);
+        rig.tick_with_hooks(Some(&base), &swift);
+        assert_eq!(rig.installs(), vec![format!("{base} sensitive=0")]);
+        assert_eq!(rig.snapshot().self_update.installing.as_ref().map(|p| p.native), Some(true));
+        finish(&rune, &base);
+        assert!(rig.snapshot().self_update.installing.is_none());
+        // Now that the installed app is the chosen one, nothing more happens.
+        rig.age_check();
+        rig.tick_with_hooks(Some(&base), &rune);
+        assert_eq!(rig.installs().len(), 1);
+
+        // Back to Swift reinstalls once more.
+        choose(AppShell::Swift);
+        rig.tick_with_hooks(Some(&base), &rune);
+        assert_eq!(rig.installs().len(), 2);
+        finish(&swift, &base);
+        rig.age_check();
+        rig.tick_with_hooks(Some(&base), &swift);
+        assert_eq!(rig.installs().len(), 2);
+    }
+
+    #[test]
+    fn a_failed_switch_is_not_retried_until_main_moves_or_it_is_asked_again() {
+        let rig = Rig::new();
+        let base = run(&rig.publisher, &["rev-parse", "HEAD"]);
+        let swift = Hooks { installed_shell: swift_installed, ..HOOKS };
+        rig.tick_with_hooks(Some(&base), &swift);
+        crate::workbench::set_app_shell(&rig.state.db.lock().unwrap(), &rig.data, AppShell::Rune).unwrap();
+        rig.tick_with_hooks(Some(&base), &swift);
+        assert_eq!(rig.installs().len(), 1);
+        // The installer failed: Swift is still installed, Rune still chosen.
+        std::fs::create_dir_all(rig.data.join("self-update")).unwrap();
+        std::fs::write(core::result_path(&rig.data), format!(r#"{{"commit":"{base}","status":"failed","reason":"the build failed"}}"#)).unwrap();
+        rig.tick_with_hooks(Some(&base), &swift);
+        rig.age_check();
+        rig.tick_with_hooks(Some(&base), &swift);
+        assert_eq!(rig.installs().len(), 1, "no retry loop");
+        // Asking again (choosing it again) tries again.
+        crate::workbench::set_app_shell(&rig.state.db.lock().unwrap(), &rig.data, AppShell::Rune).unwrap();
+        rig.tick_with_hooks(Some(&base), &swift);
+        assert_eq!(rig.installs().len(), 2);
+    }
+
+    #[test]
+    fn the_choice_of_mac_app_is_a_file_a_request_and_a_word_in_the_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open_in_memory().unwrap();
+        // The request writes the file and asks for the reinstall, the same click as "Update now".
+        let snapshot = crate::workbench::set_app_shell(&db, dir.path(), AppShell::Rune).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join("app-shell")).unwrap().trim(), "rune");
+        assert!(snapshot.self_update.requested);
+        assert!(snapshot.self_update.status.contains("Rune"), "{}", snapshot.self_update.status);
+        crate::workbench::set_app_shell(&db, dir.path(), AppShell::Swift).unwrap();
+        assert_eq!(core::app_shell_from(None, dir.path()), AppShell::Swift);
+        // A folder that cannot be written is an error and requests nothing.
+        let blocked = dir.path().join("a-file");
+        std::fs::write(&blocked, "x").unwrap();
+        let fresh = Db::open_in_memory().unwrap();
+        let error = crate::workbench::set_app_shell(&fresh, &blocked, AppShell::Rune).unwrap_err();
+        assert!(error.contains("Couldn't save"), "{error}");
+        assert!(!store::load(&fresh).unwrap().self_update.requested);
+        // On the wire: the request, and the answer (Swift is left out, Rune is said).
+        let request: Command = serde_json::from_str(r#"{"SetAppShell":{"shell":"Rune"}}"#).unwrap();
+        assert!(matches!(request, Command::SetAppShell { shell: AppShell::Rune }));
+        assert!(!serde_json::to_string(&Snapshot::default().self_update).unwrap().contains("app_shell"));
+        let mut update = Snapshot::default().self_update;
+        update.app_shell = AppShell::Rune;
+        assert!(serde_json::to_string(&update).unwrap().contains(r#""app_shell":"Rune""#));
+        assert_eq!(serde_json::from_str::<neko_protocol::workbench::SelfUpdate>("{}").unwrap().app_shell, AppShell::Swift);
+    }
+
+    #[test]
     fn a_dirty_clone_is_reset_and_a_waiting_update_follows_the_newest_commit() {
         let rig = Rig::new();
         let base = run(&rig.publisher, &["rev-parse", "HEAD"]);
