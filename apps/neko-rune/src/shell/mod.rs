@@ -12,6 +12,7 @@
 //! and Reminders loops go quiet; the daemon is never stopped) and Settings shows the read-only row again. The guard goes both ways.
 
 pub mod app_menu;
+pub mod bundle;
 pub mod calendar;
 pub mod daemon;
 pub mod eventkit;

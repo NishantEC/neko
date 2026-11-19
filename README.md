@@ -289,7 +289,14 @@ installation; macOS app launches use one Neko instance. User data, Keychain
 credentials, and preferences remain intact. Set
 `NEKO_CODESIGN_IDENTITY` to a stable Apple Development identity if desired;
 otherwise the build uses ad-hoc signing. Use `--skip-build` to install an
-already-built, verified native bundle.
+already-built, verified native bundle. `--build-only` builds and verifies the bundle and
+stops before anything is installed.
+
+The Mac app is the Swift one unless the choice file `<data dir>/app-shell`
+says `rune` (or `NEKO_SHELL=rune` for one run): then the installer builds the Rune
+client (`apps/neko-rune`, Rust) as the same `Neko.app` with
+`scripts/build-rune-app.sh` and installs that instead, with the same bundle id,
+signing and backups.
 
 `--clean-data` explicitly moves the Neko data directory into a recoverable
 sibling backup; it does not delete credentials or preferences. The installer

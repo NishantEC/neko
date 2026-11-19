@@ -56,7 +56,9 @@ and otherwise every 10 s. State is `Snapshot::self_update`.
    the development checkout) is newer, not older, and is left alone. No installed app (a development run): the tip is the start.
 3. **Decide** (`decide`): docs-only (`.md`) ranges do nothing; web-only ranges
    rebuild the UI; anything under `crates/ native/ scripts/ patches/` or the
-   Cargo files reinstalls. **Updates apply automatically by default, `SENSITIVE`
+   Cargo files reinstalls (and, while the Mac app is set to Rune
+   (`<data>/app-shell`, see `rune-as-the-app.md`), `apps/neko-rune/` too; with Swift,
+   `apps/` is ignored, as it always was; `classify_for` takes the choice). **Updates apply automatically by default, `SENSITIVE`
    paths included**: the source is the published `main`. The list stays, as
    information (the plan names those paths and the Settings row shows them).
    Settings → Neko updates keeps the two switches; with one off, a plan that

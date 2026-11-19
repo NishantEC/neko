@@ -23,7 +23,7 @@
 
 use neko_core::self_update::{self as core, Decision, IdleInputs, Source};
 use neko_core::workbench as store;
-use neko_protocol::workbench::{ChatAction, ChatActionStatus, Snapshot, UpdateCheck, UpdatePlan, UpdateRecord};
+use neko_protocol::workbench::{AppShell, ChatAction, ChatActionStatus, Snapshot, UpdateCheck, UpdatePlan, UpdateRecord};
 use neko_protocol::Event;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
@@ -121,11 +121,13 @@ struct Hooks {
     launch: fn(&Path, &Path, &UpdatePlan) -> Result<(), String>,
     /// `machine-ok`'s WAIT reason, if it says wait.
     machine_wait: fn() -> Option<String>,
+    /// Which Mac app the running bundle is (`None` outside an installed app).
+    installed_shell: fn() -> Option<AppShell>,
 }
 
 impl Hooks {
     fn real() -> Hooks {
-        Hooks { build_web: core::build_web, launch: spawn_installer, machine_wait: core::machine_wait }
+        Hooks { build_web: core::build_web, launch: spawn_installer, machine_wait: core::machine_wait, installed_shell: core::bundle_shell }
     }
 }
 
@@ -278,8 +280,16 @@ fn tick_with(state: &Arc<AppState>, data: &Path, bundle: Option<String>, source:
         crate::server::broadcast_event(state, &Event::WebUpdated { commit });
     }
 
-    plan(state, clone, &head, applied.as_deref(), bundle.as_deref())?;
+    plan(state, clone, data, &head, applied.as_deref(), bundle.as_deref(), hooks)?;
     apply(state, clone, data, bundle.as_deref(), hooks)
+}
+
+/// The Mac app chosen (`<data>/app-shell`), and whether the installed bundle is
+/// the other one, which means the app must be reinstalled even when the commit
+/// is the one already installed (that is what switching is).
+fn shell_state(data: &Path, hooks: &Hooks) -> (AppShell, bool) {
+    let chosen = core::app_shell(data);
+    (chosen, (hooks.installed_shell)().is_some_and(|installed| installed != chosen))
 }
 
 /// Looks at the published repository when it is time (every 10 minutes, at
@@ -328,7 +338,7 @@ fn refresh(state: &Arc<AppState>, source: &Source, hooks: &Hooks) -> Result<(), 
 }
 
 /// Turns new published commits into a queued or pending update.
-fn plan(state: &Arc<AppState>, clone: &Path, head: &str, applied: Option<&str>, bundle: Option<&str>) -> Result<(), String> {
+fn plan(state: &Arc<AppState>, clone: &Path, data: &Path, head: &str, applied: Option<&str>, bundle: Option<&str>, hooks: &Hooks) -> Result<(), String> {
     let snapshot = store::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
     let su = &snapshot.self_update;
     if su.queued.is_some() {
@@ -355,14 +365,15 @@ fn plan(state: &Arc<AppState>, clone: &Path, head: &str, applied: Option<&str>, 
         Some(b) if (requested || app_behind) && b != head && core::is_ancestor(clone, b, head) => Some(b.to_owned()),
         _ => applied.map(str::to_owned),
     };
-    if from.as_deref() == Some(head) {
+    let (shell, reinstall) = shell_state(data, hooks);
+    if from.as_deref() == Some(head) && !reinstall {
         if requested {
             with_snapshot(state, |s| { s.self_update.requested = false; s.self_update.status = "Neko is up to date.".into(); })?;
         }
         return Ok(());
     }
     let paths = core::paths_between(clone, from.as_deref(), head)?;
-    let decision = core::decide(from.as_deref(), head, &paths, None, requested, su, store::now_ms());
+    let decision = core::decide_for(shell, reinstall, from.as_deref(), head, &paths, None, requested, su, store::now_ms());
     match decision {
         Decision::Nothing => {
             with_snapshot(state, |s| {
@@ -400,6 +411,7 @@ fn apply(state: &Arc<AppState>, clone: &Path, data: &Path, bundle: Option<&str>,
     // The clone moves to `origin/main` whenever it is checked; an update that
     // waited (the Mac was busy, a task was running) is retargeted to the
     // newest published commit instead of waiting for a commit that is gone.
+    let (shell, reinstall) = shell_state(data, hooks);
     let mut head = core::head(clone)?;
     if core::dirty(clone, None) {
         // Nobody else writes in the clone, so this is leftover build output.
@@ -408,11 +420,11 @@ fn apply(state: &Arc<AppState>, clone: &Path, data: &Path, bundle: Option<&str>,
     if head != queued.to {
         let from = queued.from.clone().filter(|f| core::resolve_commit(clone, f).is_some());
         let paths = core::paths_between(clone, from.as_deref(), &head)?;
-        let class = core::classify(&paths);
+        let class = core::classify_for(&paths, shell);
         queued.to = head.clone();
         queued.from = from;
         queued.web = class.web;
-        queued.native = class.native;
+        queued.native = class.native || reinstall;
         queued.sensitive = class.sensitive;
         with_snapshot(state, |s| s.self_update.queued = Some(queued.clone()))?;
     }
@@ -459,8 +471,8 @@ fn apply(state: &Arc<AppState>, clone: &Path, data: &Path, bundle: Option<&str>,
         match bundle {
             // Not an installed app (a development run): nothing to reinstall.
             None => queued.native = false,
-            // Already installed by hand.
-            Some(b) if b == queued.to => queued.native = false,
+            // Already installed by hand (and it is the Mac app that was chosen).
+            Some(b) if b == queued.to && !reinstall => queued.native = false,
             Some(_) => {
                 let (workers, publishing, chat_running) = state.workbench.busy();
                 let inputs = IdleInputs {
@@ -594,6 +606,9 @@ mod tests {
     }
 
     fn calm() -> Option<String> { None }
+    fn no_shell() -> Option<AppShell> { None }
+    fn swift_installed() -> Option<AppShell> { Some(AppShell::Swift) }
+    fn rune_installed() -> Option<AppShell> { Some(AppShell::Rune) }
 
     /// `machine-ok` saying WAIT while a test holds the flag.
     static WAIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -601,7 +616,7 @@ mod tests {
         WAIT.load(std::sync::atomic::Ordering::SeqCst).then(|| "load 18".to_owned())
     }
 
-    const HOOKS: Hooks = Hooks { build_web: stub_build, launch: stub_launch, machine_wait: calm };
+    const HOOKS: Hooks = Hooks { build_web: stub_build, launch: stub_launch, machine_wait: calm, installed_shell: no_shell };
 
     /// A local bare "public" repository, a working copy that publishes to it,
     /// a development checkout cloned from it, and a data folder.
@@ -659,7 +674,11 @@ mod tests {
         }
 
         fn tick(&self, bundle: Option<&str>) {
-            tick_with(&self.state, &self.data, bundle.map(str::to_owned), &self.source, &HOOKS).unwrap();
+            self.tick_with_hooks(bundle, &HOOKS);
+        }
+
+        fn tick_with_hooks(&self, bundle: Option<&str>, hooks: &Hooks) {
+            tick_with(&self.state, &self.data, bundle.map(str::to_owned), &self.source, hooks).unwrap();
         }
 
         fn snapshot(&self) -> Snapshot {
@@ -775,6 +794,40 @@ mod tests {
         assert_eq!(run(&rig.source.dir, &["rev-list", "--count", "HEAD"]), run(&rig.publisher, &["rev-list", "--count", "HEAD"]));
         // The development checkout is exactly as it was.
         assert_eq!(rig.dev_state(), dev_before);
+    }
+
+    #[test]
+    fn the_rune_client_reinstalls_the_app_only_when_the_mac_app_is_rune() {
+        // Swift (no choice made): a push that only touches apps/neko-rune changes nothing that runs.
+        let swift = Rig::new();
+        let base = run(&swift.publisher, &["rev-parse", "HEAD"]);
+        let hooks = Hooks { installed_shell: swift_installed, ..HOOKS };
+        swift.tick_with_hooks(Some(&base), &hooks);
+        let rune_only = swift.publish("apps/neko-rune/src/view.rs", "// v");
+        swift.age_check();
+        swift.tick_with_hooks(Some(&base), &hooks);
+        assert!(swift.installs().is_empty(), "the Rune client is not part of the Swift app");
+        assert_eq!(swift.snapshot().self_update.applied_through.as_deref(), Some(rune_only.as_str()));
+
+        // Rune chosen and installed: the same push is a native change and reinstalls.
+        let rune = Rig::new();
+        let base = run(&rune.publisher, &["rev-parse", "HEAD"]);
+        neko_core::self_update::set_app_shell(&rune.data, AppShell::Rune).unwrap();
+        let hooks = Hooks { installed_shell: rune_installed, ..HOOKS };
+        rune.tick_with_hooks(Some(&base), &hooks);
+        assert!(rune.installs().is_empty(), "nothing new, nothing to install");
+        let touched = rune.publish("apps/neko-rune/src/view.rs", "// v");
+        rune.age_check();
+        rune.tick_with_hooks(Some(&base), &hooks);
+        assert_eq!(rune.installs(), vec![format!("{touched} sensitive=0")]);
+        // A docs-only change in that folder still does nothing.
+        std::fs::create_dir_all(rune.data.join("self-update")).unwrap();
+        std::fs::write(core::result_path(&rune.data), format!(r#"{{"commit":"{touched}","status":"updated","reason":""}}"#)).unwrap();
+        rune.tick_with_hooks(Some(&touched), &hooks);
+        rune.publish("apps/neko-rune/README.md", "words");
+        rune.age_check();
+        rune.tick_with_hooks(Some(&touched), &hooks);
+        assert_eq!(rune.installs().len(), 1);
     }
 
     #[test]

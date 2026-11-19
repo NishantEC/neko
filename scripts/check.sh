@@ -5,6 +5,8 @@
 #   scripts/check.sh --quick   compile only (the pre-commit hook)
 #   scripts/check.sh --rune    also the Rune client (apps/neko-rune), even on a cold cache
 #   scripts/check.sh --no-rune never the Rune client
+#   scripts/check.sh --no-swift  skip the Swift client's build and tests (install-native.sh passes it,
+#                                with --rune, when the Mac app is Rune)
 #
 # The Rune client is its own Cargo workspace (apps/neko-rune, docs/decisions/0002). Its check is
 # about 25 s with a warm cache and about 3 minutes cold (Rune and wgpu compile once), so a full
@@ -21,12 +23,14 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 mode=full
 rune=auto
+swift=yes
 for option in "$@"; do
   case "$option" in
     --quick) mode=quick ;;
     --rune) rune=yes ;;
     --no-rune) rune=no ;;
-    --help) sed -n '2,12p' "$0"; exit 0 ;;
+    --no-swift) swift=no ;;
+    --help) sed -n '2,14p' "$0"; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$option" >&2; exit 2 ;;
   esac
 done
@@ -62,11 +66,11 @@ deny_lints=(-D clippy::dbg_macro -D clippy::todo -D clippy::unimplemented -D cli
 printf 'neko check (%s)\n' "$mode"
 if [[ "$mode" == quick ]]; then
   step rust-check cargo check --workspace --all-targets --quiet
-  step swift-build swift build --package-path native/NekoKit --quiet
+  [[ "$swift" == yes ]] && step swift-build swift build --package-path native/NekoKit --quiet
 else
   step rust-clippy cargo clippy --workspace --all-targets --quiet -- "${deny_lints[@]}"
   step rust-test cargo test --workspace --quiet
-  step swift-test swift test --package-path native/NekoKit --quiet
+  [[ "$swift" == yes ]] && step swift-test swift test --package-path native/NekoKit --quiet
 fi
 # The optional GPUI client is its own workspace and needs the patched fork;
 # it is checked only on a Mac that has run scripts/setup-gpui-patch.sh.

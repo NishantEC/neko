@@ -205,9 +205,9 @@ fn init() -> App {
     }
 }
 
-/// `--app` or `NEKO_RUNE_APP=1`: Rune acts as the Mac app (`shell/mod.rs`).
+/// `--app` or `NEKO_RUNE_APP=1`, or a run from inside the installed `Neko.app` (`shell/bundle.rs`): Rune acts as the Mac app (`shell/mod.rs`).
 fn app_flag() -> bool {
-    shell::gate(rune::extra_args(), std::env::var(shell::ENV).ok().as_deref())
+    shell::gate(rune::extra_args(), std::env::var(shell::ENV).ok().as_deref()) || shell::bundle::running_bundled()
 }
 
 /// `--overlays` or `NEKO_RUNE_OVERLAYS=1`, without `--app`: the P4 overlays alone.
@@ -291,6 +291,13 @@ pub fn on_key(s: &mut App, ev: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
 
 /// Opens the window and, unless `nolink`, starts the read-only link to the running daemon.
 pub fn run() {
+    // `neko --check-bundle`: whether the installed bundle is whole (the daemon beside it, the web UI, the usage strings). No window.
+    if let Ok(exe) = std::env::current_exe() {
+        let raw: Vec<String> = std::env::args().skip(1).collect();
+        if let Some(code) = shell::bundle::check_if_asked(&raw, &exe) {
+            std::process::exit(code);
+        }
+    }
     // `neko-rune --open <route>`: hand the route to the window that is running and exit. With none running this launch opens it.
     let mut first_route = None;
     if !headless_run() {

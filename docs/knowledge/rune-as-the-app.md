@@ -100,10 +100,46 @@ or no Accessibility the draft is sent without context and a notice says why, in 
 reaches this only after activating a clipboard row, where the daemon's `Activate` has already put the text on the pasteboard; **Rune's palette has no clipboard rows**, so its ⌥Return pastes
 what is on the clipboard now, and nothing is restored afterwards (Swift does not either). Not seen live: a real ⌘V into another app, a real Accessibility read, a prompt.
 
+### P5b-1: the bundle, the installer and the choice of Mac app (2026-11-19)
+
+**One choice, read in one place per language.** `<data dir>/app-shell` holds `swift` or `rune`; a missing file, an empty one or any other word is `swift`;
+`NEKO_SHELL=swift|rune` overrides it for one run (a value that is neither word is ignored). Rust: `neko_core::self_update::app_shell` (next to the other
+data-dir helpers); bash: `neko_app_shell` in `scripts/lib/shell.sh`; a test runs both on the same inputs. **Swift stays the default**: nothing switches unless the person chooses.
+
+**The build** (`scripts/build-rune-app.sh`, called by `install-native.sh` when the shell is `rune`): the daemon is built exactly as `build-native.sh` builds it (the daemon's
+`$CARGO_TARGET_DIR`), Rune only in `$HOME/Library/Caches/neko/rune-target` with `CARGO_INCREMENTAL=0` (a release build is ~5 GB there, so check the disk first), and the bundle is
+`$CARGO_TARGET_DIR/native-rune/Neko.app` with the Swift bundle's layout: `Contents/MacOS/neko` is the Rune binary, `neko-daemon` beside it, `Resources/web` and `neko.icns`, `Info.plist` from
+`scripts/Neko-Info.plist` (so the Calendar and Reminders usage strings are there) plus `CFBundleURLTypes` (scheme `neko`, name `dev.neko.launcher`), `NekoGitCommit`, `NekoSourcePath` and
+`NekoShell = rune` (which app this bundle is; the Swift bundle has no such key, which means Swift). There is no Metal shader; that was the Swift Design lab's.
+
+**Signing and permissions.** The signing logic moved verbatim into `scripts/lib/sign.sh` and both builds call it, so the Rune bundle gets the same identity choice (`NEKO_CODESIGN_IDENTITY`, else
+the certificate that signed `/Applications/Neko.app`, else the first Apple Development one, else ad-hoc), the same bundle id `dev.neko.launcher` and the same daemon identifier
+(`dev.neko.launcher.daemon`). Checked: the Swift and Rune bundles have the same authority, team and **designated requirement** (`identifier "dev.neko.launcher" and … leaf[subject.CN] = …`), which is
+what macOS keys Accessibility, Calendar, Reminders and notification grants on. So with the same certificate the grants carry over in both directions. With ad-hoc signing every build is a new app
+to macOS, as it has always been.
+
+**Bundled means `--app`.** A run from inside a `.app` whose Info.plist bundle id is `dev.neko.launcher` (`shell::bundle::is_neko_bundle`, from the executable's own path) is `--app` mode without the
+flag. `neko --check-bundle` (`shell/bundle.rs`; no window, answers before anything else starts) prints `ok` and exits 0 when the sibling `neko-daemon` is an executable file, `Resources/web/index.html`
+exists, the bundle id is right and both usage strings are non-empty; otherwise it prints each missing thing on a line and exits 1. The installer runs it on the built bundle, the staged copy and the
+installed one in place of the Swift bundle's `otool` (SwiftUI) check; `codesign --verify --deep --strict` runs for both.
+
+**The installer.** `install-native.sh` reads the choice once. `swift` is exactly the path it always was (same checks, bundle, signing, output). `rune`: `scripts/check.sh --no-swift --rune` (the daemon's Rust
+gate and `apps/neko-rune/scripts/check.sh` in place of the Swift tests; `--skip-checks` skips them), `build-rune-app.sh`, then the same staging, three backups, process stop, swap and `lsregister`.
+`--build-only` builds and validates the bundle and stops before anything is staged or stopped (it is how this was verified without installing). `self-update.sh` needed no change: it stops
+`/Applications/Neko.app/Contents/MacOS/neko{,-daemon}`, which are the same names in both bundles, and reads `NekoGitCommit` back. **Rollback is the installer's own**: the previous app (Swift) is the
+newest `.neko-native-backup.*`, restored if the new one is unhealthy; and choosing Swift again rebuilds the Swift app.
+
+**What the updater counts as a native change** depends on the choice (`classify_for`): with `rune`, a range that changes `apps/neko-rune/**` (not its `.md` files) reinstalls the app; with `swift`, `apps/**` is
+ignored exactly as before. `scripts/lib/` and `scripts/build-rune-app.sh` are on the sensitive list with the other scripts the updater runs.
+
+Checked on 2026-11-19 without installing anything: `install-native.sh --build-only` with `swift` gave a bundle identical to the one `build-native.sh` made before the change (same files, same Info.plist, same signing);
+with `NEKO_SHELL=rune` the bundle built (138 MB), `--check-bundle` printed `ok`, and running its executable while the Swift app ran printed the guard line and started no daemon, menu item or hotkey (the Swift app was
+never touched). Not done live: a real install, a login start of the Rune bundle, a `neko://` link from the system, EventKit and notifications from the bundle (the usage strings are there and `--check-bundle` verifies them).
+
 ### Not done here
 
-- **P5b:** the bundle (an `.app` with `CFBundleURLTypes` for `neko://`, the usage strings `NSCalendarsFullAccessUsageDescription` and `NSRemindersFullAccessUsageDescription` that Calendar and Reminders wait for,
-  the Accessibility and notification entitlements, signing), a Rune bundle that carries the daemon next to it, the login item that detects a login start from the launch Apple event, the installer, and
-  the switch that makes Rune the default and retires the Swift app. Until then notifications, Calendar, Reminders and Uninstall are inert in a development run (no `.app`).
+- **P5b-2:** the switch in Settings (see below once built), and retiring the Swift pill and keys.
+- The Accessibility and notification entitlements: an unsandboxed, non-hardened app needs none, so none are added; a notarized build would.
+
 - Not seen live: a notification posting, `neko://` from the system, the browser branch of Open Neko in, the real Trash, EventKit (any call), a posted ⌘V, an Accessibility read, the hand-back with a real Swift app starting.
 - Clipboard-history rows in the launcher (the half of paste back that restores the pasteboard).

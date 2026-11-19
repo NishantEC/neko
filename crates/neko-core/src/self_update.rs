@@ -57,6 +57,7 @@ pub const SENSITIVE: &[&str] = &[
     "scripts/self-update.sh",
     "scripts/install-native.sh",
     "scripts/build-native.sh",
+    "scripts/build-rune-app.sh",
     "scripts/lib/",
     "scripts/check.sh",
     // Patched dependencies.
@@ -83,12 +84,20 @@ fn is_doc(path: &str) -> bool {
     path.ends_with(".md")
 }
 
+/// Sorts changed paths into web, native and safety-critical for the Swift
+/// app, the default: see [`classify_for`].
+pub fn classify(paths: &[String]) -> Classification {
+    classify_for(paths, AppShell::Swift)
+}
+
 /// Sorts changed paths into web, native and safety-critical. Documentation
 /// changes nothing that runs. So does anything outside the lists below: in
-/// particular `apps/` (the Rune client, `apps/neko-rune`, its own Cargo
-/// workspace that the installer does not build) and `experiments/` (spikes)
-/// never trigger a web rebuild or a reinstall. A test pins that.
-pub fn classify(paths: &[String]) -> Classification {
+/// particular `experiments/` (spikes) never triggers a web rebuild or a
+/// reinstall, and neither does `apps/` while the Mac app is Swift (the
+/// installer does not build the Rune client then). When the Mac app is Rune,
+/// `apps/neko-rune/` is part of what is installed, so a range that changes it
+/// counts as a native change. A test pins both.
+pub fn classify_for(paths: &[String], shell: AppShell) -> Classification {
     let mut out = Classification::default();
     for path in paths {
         let path = path.trim();
@@ -99,6 +108,9 @@ pub fn classify(paths: &[String]) -> Classification {
         if ["crates/", "native/", "scripts/", "patches/"].iter().any(|p| path.starts_with(p))
             || matches!(path, "Cargo.toml" | "Cargo.lock")
         {
+            out.native = true;
+        }
+        if shell == AppShell::Rune && path.starts_with("apps/neko-rune/") {
             out.native = true;
         }
     }
@@ -122,7 +134,16 @@ pub enum Decision {
 /// it lets switched-off parts through. Safety-critical paths are named in the
 /// plan but do not hold it back: the source is the published `main`.
 pub fn decide(from: Option<&str>, to: &str, paths: &[String], task_id: Option<String>, approved: bool, settings: &SelfUpdate, now_ms: i64) -> Decision {
-    let class = classify(paths);
+    decide_for(AppShell::Swift, false, from, to, paths, task_id, approved, settings, now_ms)
+}
+
+/// [`decide`] for the Mac app the person chose. `reinstall`: the installed
+/// app is the other one (a switch was asked for), so the app is reinstalled
+/// whatever the paths are.
+#[allow(clippy::too_many_arguments)]
+pub fn decide_for(shell: AppShell, reinstall: bool, from: Option<&str>, to: &str, paths: &[String], task_id: Option<String>, approved: bool, settings: &SelfUpdate, now_ms: i64) -> Decision {
+    let mut class = classify_for(paths, shell);
+    class.native |= reinstall;
     if !class.web && !class.native {
         return Decision::Nothing;
     }
@@ -303,6 +324,24 @@ pub fn set_app_shell(data_dir: &Path, shell: AppShell) -> Result<(), String> {
     let temporary = path.with_extension("tmp");
     fs::write(&temporary, format!("{}\n", shell.word())).map_err(|e| e.to_string())?;
     fs::rename(&temporary, &path).map_err(|e| e.to_string())
+}
+
+/// The Mac app the running bundle is: `NekoShell` in its `Info.plist`
+/// (`scripts/build-rune-app.sh` stamps `rune`; the Swift bundle has no such
+/// key). `None` outside an installed app, where there is nothing to compare.
+pub fn bundle_shell() -> Option<AppShell> {
+    let exe = std::env::current_exe().ok()?;
+    let text = fs::read_to_string(exe.parent()?.parent()?.join("Info.plist")).ok()?;
+    Some(plist_shell(&text))
+}
+
+/// `NekoShell` of an Info.plist's text; Swift when the key is absent or unknown.
+pub fn plist_shell(plist: &str) -> AppShell {
+    const KEY: &str = "<key>NekoShell</key>";
+    let Some(at) = plist.find(KEY) else { return AppShell::Swift };
+    let Some(value) = plist[at + KEY.len()..].trim_start().strip_prefix("<string>") else { return AppShell::Swift };
+    let Some(end) = value.find("</string>") else { return AppShell::Swift };
+    AppShell::parse(&value[..end]).unwrap_or_default()
 }
 
 /// Cargo's build output for updates: the user's cache folder, not the data
@@ -756,6 +795,44 @@ mod tests {
         // Its own lockfile is not the daemon's: only the root files count.
         assert!(!classify(&paths(&["apps/neko-rune/Cargo.lock"])).native);
         assert!(classify(&paths(&["Cargo.lock"])).native);
+    }
+
+    #[test]
+    fn the_rune_client_is_part_of_the_app_only_when_the_mac_app_is_rune() {
+        let touched = paths(&["apps/neko-rune/src/view.rs", "apps/neko-rune/Cargo.lock", "apps/neko-rune/RUNE_REV"]);
+        // Swift: as ever, nothing to reinstall.
+        assert_eq!(classify_for(&touched, AppShell::Swift), Classification::default());
+        assert_eq!(decide_for(AppShell::Swift, false, None, "abc", &touched, None, false, &SelfUpdate::default(), 0), Decision::Nothing);
+        // Rune: a native change (and not a web one).
+        let class = classify_for(&touched, AppShell::Rune);
+        assert!(class.native && !class.web);
+        match decide_for(AppShell::Rune, false, None, "abc", &touched, None, false, &SelfUpdate::default(), 0) {
+            Decision::Queue(plan) => assert!(plan.native && !plan.web),
+            other => panic!("{other:?}"),
+        }
+        // With auto-update of the app off it waits for the click, like any native change.
+        let off = SelfUpdate { auto_native: false, ..SelfUpdate::default() };
+        assert!(matches!(decide_for(AppShell::Rune, false, None, "abc", &touched, None, false, &off, 0), Decision::Pending(_)));
+        // Documents in the folder, the daemon's root files and the other folders keep their meaning.
+        assert_eq!(classify_for(&paths(&["apps/neko-rune/README.md", "apps/neko-rune/patches/README.md"]), AppShell::Rune), Classification::default());
+        assert_eq!(classify_for(&paths(&["experiments/rune/chat/src/main.rs", "apps/other/x.rs"]), AppShell::Rune), Classification::default());
+        assert!(classify_for(&paths(&["Cargo.lock"]), AppShell::Rune).native);
+        // The default `classify` is the Swift rule.
+        assert_eq!(classify(&touched), Classification::default());
+        // A switch reinstalls the app even when no path says so.
+        match decide_for(AppShell::Rune, true, Some("a"), "a", &[], None, true, &SelfUpdate::default(), 0) {
+            Decision::Queue(plan) => assert!(plan.native),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(decide_for(AppShell::Rune, false, Some("a"), "a", &[], None, true, &SelfUpdate::default(), 0), Decision::Nothing);
+    }
+
+    #[test]
+    fn the_bundle_says_which_mac_app_it_is() {
+        assert_eq!(plist_shell("<dict><key>NekoGitCommit</key><string>9acc5352f3</string></dict>"), AppShell::Swift);
+        assert_eq!(plist_shell("<dict><key>NekoShell</key>\n<string>rune</string></dict>"), AppShell::Rune);
+        assert_eq!(plist_shell("<dict><key>NekoShell</key><string>gibberish</string></dict>"), AppShell::Swift);
+        assert_eq!(plist_shell("<dict><key>NekoShell</key><true/><key>X</key><string>rune</string></dict>"), AppShell::Swift);
     }
 
     #[test]
