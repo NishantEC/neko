@@ -95,8 +95,9 @@ pub const FONT_MONO: &str = "ui-monospace, \"SF Mono\", \"JetBrains Mono\", Menl
 /// How much lighter than the window the sidebar is painted (polish spec §4), in HSL lightness.
 const SIDEBAR_LIFT: f32 = 0.02;
 
-/// Share of the muted grey that is left in the faint grey (the web's `muted-foreground/70`).
-const FAINT_SHARE: f32 = 0.7;
+/// Share of the muted grey that is left in the faint grey. The web's `muted-foreground/70` is 0.70; 0.72 is the smallest step that keeps the
+/// faint grey at 3.0:1 on both windows now that the muted greys are #838383 and #686868.
+const FAINT_SHARE: f32 = 0.72;
 
 /// Surfaces. Every page sits on `window`; a card is a step off it (light) or the same
 /// near-black (dark), never ringed with a border (DESIGN.md §8 rule 10).
@@ -419,8 +420,7 @@ mod tests {
             let (base, muted, faint) = (contrast(t.text.base, bg), contrast(t.text.muted, bg), contrast(t.text.faint, bg));
             assert!(base >= 7.0, "base {base:.2} dark={dark}");
             assert!(muted >= 4.5, "muted {muted:.2} dark={dark}");
-            // The spec's dark muted grey (#838383) at 70% over #161616 is 2.98:1; the faint grey only marks ids.
-            assert!(faint >= 2.9, "faint {faint:.2} dark={dark}");
+            assert!(faint >= 3.0, "faint {faint:.2} dark={dark}");
             assert!(base > muted && muted > faint, "three greys, in order");
         }
     }
@@ -556,8 +556,8 @@ mod tests {
             // --border is a colour at an alpha, painted as that.
             let (b, a) = rgba(&css["border"]);
             assert_eq!(t.surface.border.hex(), c(&b).alpha(a).hex());
-            // The faint grey is `muted-foreground/70` laid on the background, as the web writes it.
-            assert_eq!(t.text.faint.hex(), mix_srgb(c(&css["background"]), c(&css["muted-foreground"]), 0.7).hex());
+            // The faint grey is the muted grey laid on the background at FAINT_SHARE.
+            assert_eq!(t.text.faint.hex(), mix_srgb(c(&css["background"]), c(&css["muted-foreground"]), FAINT_SHARE).hex());
         }
     }
 
