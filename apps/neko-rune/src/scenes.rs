@@ -355,6 +355,26 @@ pub const SCENES: &[Scene] = &[
         s.account.name = "Ada Lovelace".into();
         s.open_new();
     }),
+    // Home's glass in its other states: opaque (Reduce Transparency), a request typed (the words' contrast over the glass), and the card's
+    // backing left out so a capture shows the raw art under it (a test probe, `tests/glass.rs`).
+    ("home-opaque", |s| {
+        live(s);
+        s.account.name = "Ada Lovelace".into();
+        s.open_new();
+        s.opaque_glass = true;
+    }),
+    ("home-typed", |s| {
+        live(s);
+        s.account.name = "Ada Lovelace".into();
+        s.open_new();
+        s.new_request.replace_text("Add a retry to the sync job and cover it with a test".to_owned());
+    }),
+    ("home-art-probe", |s| {
+        live(s);
+        s.account.name = "Ada Lovelace".into();
+        s.open_new();
+        s.glass_probe = true;
+    }),
     // The sessions column folded: a session's header carries "Show sidebar" after the traffic lights, and Home floats the same button over the art.
     ("sessions-collapsed", |s| {
         live(s);

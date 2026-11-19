@@ -8,11 +8,12 @@
 use rune::{Color, El, Key, KeyEvent, col, el, icon, row, text};
 use rune_kit::{Menu, MenuItem, Placement};
 
-use super::card_band;
+use super::home_band;
 use crate::account;
 use crate::app::App;
 use crate::art;
 use crate::clock;
+use crate::glass;
 use crate::groups::Group;
 use crate::icons;
 use crate::new_session::{MAX_REQUEST, Mode, NewMenu, RUNTIMES};
@@ -107,10 +108,10 @@ fn status_line(s: &App, t: &Neko) -> El {
             .focus_ring(2.0, 2.0, t.surface.ring)
             .on_press(move |s: &mut App| s.set_filter(group))
             .child(el().size(6.0, 6.0).fill(dot).a11y_hidden())
-            .child(text(words).font(t.ty.row).color(t.text.muted).a11y_hidden())
+            .child(glass::shadowed(t, text(words.clone()).font(t.ty.row), text(words).font(t.ty.row).color(t.text.muted).a11y_hidden()))
     };
     if running == 0 && needs == 0 {
-        return line.child(text("Nothing running").key("home-status-none").font(t.ty.row).color(t.text.muted));
+        return line.child(glass::shadowed(t, text("Nothing running").font(t.ty.row), text("Nothing running").key("home-status-none").font(t.ty.row).color(t.text.muted)));
     }
     if running > 0 {
         line = line.child(part("home-running", t.meaning.iris, format!("{running} running"), Group::Running, s.filter == Some(Group::Running)));
@@ -214,7 +215,7 @@ fn composer(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     let send = super::composer::send(t, "new-start", "Send", "Send (⌘↩)", can_send, true, |s: &mut App| s.submit_new());
     let attach = super::composer::attach(t, "new-attach", crate::compose::Dest::New);
 
-    let mut card = super::composer::card(t, "home-composer", request, vec![attach, ws_menu.build(k, layer), rt_menu.build(k, layer)], vec![segmented, model_menu.build(k, layer)], send);
+    let mut card = super::composer::card_on(t, "home-composer", Some((s.glass_mode(), s.glass_probe)), request, vec![attach, ws_menu.build(k, layer), rt_menu.build(k, layer)], vec![segmented, model_menu.build(k, layer)], send);
     let used = s.new_request.text.len();
     if let Some(e) = &f.error {
         card = card.child(text(e.clone()).key("new-error").font(t.ty.meta).color(t.meaning.amber).wrap().live_region(rune::LiveRegion::Polite));
@@ -232,7 +233,9 @@ pub fn home(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     let hour = clock::local(s.now_ms).hour;
     let name = s.account.first_name().to_owned();
     let words = if name.is_empty() { account::greeting(hour).to_owned() } else { format!("{}, {name}", account::greeting(hour)) };
-    let greeting = row().key("home-greeting").gap(12.0).center_y().child(icon(&icons::NEKO_MARK, 28.0).color(t.text.base).a11y_hidden()).child(text(words).key("home-title").font(t.ty.greeting).color(t.text.strong).role("heading"));
+    // The words are crisp over the art, each with a soft shadow for legibility (`glass::shadowed`).
+    let title = glass::shadowed(t, text(words.clone()).font(t.ty.greeting), text(words).key("home-title").font(t.ty.greeting).color(t.text.strong).role("heading"));
+    let greeting = row().key("home-greeting").gap(12.0).center_y().child(icon(&icons::NEKO_MARK, 28.0).color(t.text.base).a11y_hidden()).child(title);
     let content = col().w_full().max_w(COLUMN_MAX).items_start().gap(24.0).child(col().gap(10.0).child(greeting).child(status_line(s, t))).child(composer(s, t, layer));
     // The art, then the scrim over it, then the column: painted in that order.
     let scrim = el().key("home-scrim").absolute(0.0, 0.0).w_full().h_full().radial_gradient([0.5, CENTRE], SCRIM_RADIUS, [(0.0, t.surface.window.alpha(SCRIM_ALPHA)), (1.0, t.surface.window.alpha(0.0))]).a11y_hidden();
@@ -244,6 +247,6 @@ pub fn home(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         .clip_rounded(t.radius.window)
         .child(art::slot(s, t).absolute(0.0, 0.0).w_full().h_full().key("home-art").a11y_hidden())
         .child(scrim)
-        .child(card_band(t))
+        .child(home_band(t, (s.glass_mode(), s.glass_probe)))
         .child(col().w_full().grow(1.0).min_h(0.0).px(24.0).items_center().child(el().grow(ABOVE)).child(content).child(el().grow(10.0 - ABOVE)))
 }

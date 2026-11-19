@@ -415,6 +415,9 @@ pub struct Viewer3d {
     /// GPU milliseconds per frame of the art at 2560x1600 (`NEKO_RUNE_ART_BENCH=1`).
     art_bench: Option<Vec<f64>>,
     art_floor: Vec<f64>,
+    /// Frames of the art drawn so far, and the whole frame's cost with the glass (`NEKO_RUNE_ART_BENCH=1`, taken on the first).
+    art_frames: u32,
+    frame_bench: Vec<f64>,
 }
 
 impl Viewer3d {
@@ -455,8 +458,14 @@ impl Viewer3d {
         if let Some((rect, _)) = f.rt.presented(art::SLOT_KEY) {
             gpu.prepare(device, queue, f.encoder, ((rect[2] * scale).round() as u32, (rect[3] * scale).round() as u32), &look);
         }
+        // The glass over the art blurs the window's own target, which must be copyable: say so, so Home draws the opaque card if not.
+        f.rt.state.backdrop_ok.set(f.target.texture().usage().contains(wgpu::TextureUsages::COPY_SRC));
         f.ui.prepare(f.device, f.queue, &mut f.rt.text.atlas, &f.rt.instances, f.size);
         let clear = f.rt.clear_color();
+        self.art_frames += 1;
+        if self.art_frames == 1 && std::env::var_os("NEKO_RUNE_ART_BENCH").is_some() {
+            self.frame_bench = frame_bench(f, gpu, &look);
+        }
         f.ui.draw_with(f.encoder, f.target, clear, &mut |pass, site| {
             if site.mark == art::MARK {
                 gpu.draw(device, queue, pass, site, &look);
@@ -546,6 +555,54 @@ impl Compositor<App> for Viewer3d {
             lines.push(stat("home art GPU at 2560x1600", bench));
             lines.push(stat("empty pass GPU at 2560x1600", &self.art_floor));
         }
+        if !self.frame_bench.is_empty() {
+            lines.push(stat("home whole frame (art, glass, words), wall ms per frame", &self.frame_bench));
+        }
         Some(lines.join("\n"))
     }
+}
+
+/// What the whole Home frame costs at the window's size: the art's scene pass and everything the window draws (the art's blit,
+/// the glass's blur, the words), encoded and submitted as the window does, twelve frames to a batch and waited for at the end
+/// of each, so the time per frame is the GPU's (it is the slower side at 2560x1600). Wall milliseconds per frame, 20 batches
+/// after 4 of warm-up. Compare a run with `NEKO_RUNE_REDUCE_TRANSPARENCY=1` (the opaque card, no blur) to read the glass's share.
+fn frame_bench(f: &mut Frame<'_, App>, gpu: &mut HomeArt, look: &crate::art_gpu::Look) -> Vec<f64> {
+    const BATCH: u32 = 12;
+    let (device, queue) = (f.device, f.queue);
+    let scale = f.rt.env.scale;
+    let Some((rect, _)) = f.rt.presented(art::SLOT_KEY) else { return Vec::new() };
+    let slot = ((rect[2] * scale).round() as u32, (rect[3] * scale).round() as u32);
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("home frame bench"),
+        size: wgpu::Extent3d { width: f.size.0, height: f.size.1, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: f.ui.format(),
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = target.create_view(&Default::default());
+    let clear = f.rt.clear_color();
+    f.ui.prepare(device, queue, &mut f.rt.text.atlas, &f.rt.instances, f.size);
+    let mut out = Vec::new();
+    for batch in 0..24 {
+        let started = Instant::now();
+        for i in 0..BATCH {
+            let look = crate::art_gpu::Look { time: look.time + (batch * BATCH + i) as f32 / 60.0, ..*look };
+            let mut encoder = device.create_command_encoder(&Default::default());
+            gpu.prepare(device, queue, &mut encoder, slot, &look);
+            f.ui.draw_with(&mut encoder, &view, clear, &mut |pass, site| {
+                if site.mark == art::MARK {
+                    gpu.draw(device, queue, pass, site, &look);
+                }
+            });
+            queue.submit(Some(encoder.finish()));
+        }
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        if batch >= 4 {
+            out.push(started.elapsed().as_secs_f64() * 1e3 / f64::from(BATCH));
+        }
+    }
+    out
 }

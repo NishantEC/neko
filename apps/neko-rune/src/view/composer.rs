@@ -18,6 +18,13 @@ pub const MIN_LINES: usize = 3;
 
 /// The card: `field` (a text area built without a fill), then the bar. `key` names it.
 pub fn card(t: &Neko, key: &str, field: El, left: Vec<El>, right: Vec<El>, send: El) -> El {
+    card_on(t, key, None, field, left, right, send)
+}
+
+/// [`card`], optionally on glass (Home): the card has no fill or border of its own then; its first child is the glass
+/// backing (a blur of what is behind, the tint, the border and the top highlight) and the text and controls draw above it.
+/// `glass` is how the backing is made, and `probe` leaves it out (a test hook that shows the raw art).
+pub fn card_on(t: &Neko, key: &str, glass: Option<(crate::glass::Mode, bool)>, field: El, left: Vec<El>, right: Vec<El>, send: El) -> El {
     let mut bar = row().key(format!("{key}-bar")).w_full().min_w(0.0).gap(4.0).center_y().flex_wrap();
     for e in left {
         bar = bar.child(e);
@@ -26,7 +33,15 @@ pub fn card(t: &Neko, key: &str, field: El, left: Vec<El>, right: Vec<El>, send:
     for e in right {
         bar = bar.child(e);
     }
-    col().key(key.to_owned()).w_full().padding(16.0).gap(12.0).radius(RADIUS).fill(t.text.base.alpha(0.04)).border(1.0, t.surface.field_border).child(field).child(bar.child(send))
+    let card = col().key(key.to_owned()).w_full().padding(16.0).gap(12.0).radius(RADIUS);
+    match glass {
+        None => card.fill(t.text.base.alpha(0.04)).border(1.0, t.surface.field_border).child(field).child(bar.child(send)),
+        Some((_, true)) => card.child(field).child(bar.child(send)),
+        Some((mode, false)) => {
+            let layer = if mode == crate::glass::Mode::Blur { crate::glass::CARD_GLASS } else { crate::glass::CARD_OPAQUE };
+            card.child(crate::glass::backing(t, mode, RADIUS, layer, true)).child(field).child(bar.child(send))
+        }
+    }
 }
 
 /// A 32 point square icon button (the "+" attach).

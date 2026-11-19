@@ -20,6 +20,7 @@ pub mod connection;
 pub mod deeplink;
 pub mod dock;
 pub mod extra;
+pub mod glass;
 pub mod groups;
 pub mod icons;
 pub mod icons_phosphor;

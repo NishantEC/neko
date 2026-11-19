@@ -227,17 +227,24 @@ fn band(t: &Neko) -> El {
 
 /// [`band`] with its own side padding (the session's title line is 20).
 fn band_px(t: &Neko, px: f32) -> El {
+    band_with(t, px, None)
+}
+
+/// The header row, and with it the button that unfolds the sessions column when it is folded. On Home the button is
+/// glass (`glass`: how it is made, `None` elsewhere), because it floats over the art with no header bar behind it.
+fn band_with(t: &Neko, px: f32, glass: Option<(crate::glass::Mode, bool)>) -> El {
     let mut row = row().h(HEADER_H + 4.0).pt(4.0).w_full().px(px).gap(BAND_GAP).center_y().window_drag();
     if SIDEBAR_FOLDED.with(std::cell::Cell::get) {
         // The row's own padding and gap are in the way: the spacer makes the button's left edge land on 80.
-        row = row.child(el().w(SHOW_SIDEBAR_X - REGION_LEFT - px - BAND_GAP).h(1.0).a11y_hidden()).child(show_sidebar_button(t));
+        row = row.child(el().w(SHOW_SIDEBAR_X - REGION_LEFT - px - BAND_GAP).h(1.0).a11y_hidden()).child(show_sidebar_button(t, glass));
     }
     row
 }
 
 /// "Show sidebar": a 28 point quiet icon button (radius 8, the foreground at 4% under the pointer) with the sidebar glyph.
-fn show_sidebar_button(t: &Neko) -> El {
-    row()
+/// On Home it sits on the same glass as the composer (`glass`: its mode, and whether the backing is left out for a probe).
+fn show_sidebar_button(t: &Neko, glass: Option<(crate::glass::Mode, bool)>) -> El {
+    let button = row()
         .key("sidebar-show")
         .role("button")
         .label("Show sidebar")
@@ -245,11 +252,18 @@ fn show_sidebar_button(t: &Neko) -> El {
         .focusable(true)
         .size(28.0, 28.0)
         .center()
-        .radius(8.0)
+        .radius(crate::glass::BUTTON_RADIUS)
         .hover(t.surface.hover)
         .focus_ring(2.0, 2.0, t.surface.ring)
-        .on_press(|s: &mut App| s.layout.sessions.set_open(true))
-        .child(icon(&crate::icons::SIDEBAR_LEFT, 16.0).color(t.text.muted).a11y_hidden())
+        .on_press(|s: &mut App| s.layout.sessions.set_open(true));
+    let button = match glass {
+        Some((mode, false)) => {
+            let key = if mode == crate::glass::Mode::Blur { crate::glass::BUTTON_GLASS } else { crate::glass::BUTTON_OPAQUE };
+            button.child(crate::glass::backing(t, mode, crate::glass::BUTTON_RADIUS, key, false))
+        }
+        _ => button,
+    };
+    button.child(icon(&crate::icons::SIDEBAR_LEFT, 16.0).color(t.text.muted).a11y_hidden())
 }
 
 /// The row across the top of the Neko column, which is not a card: 32 high at 12 from the window's top (the sidebar
@@ -259,9 +273,9 @@ fn flat_band(t: &Neko) -> El {
     row().h(BAND).pt(12.0).w_full().px(12.0).gap(8.0).center_y().window_drag()
 }
 
-/// Home's header row: the same as the session's, over the art.
-fn card_band(t: &Neko) -> El {
-    band(t)
+/// Home's header row: the same as the session's, over the art, with the "Show sidebar" button on glass.
+fn home_band(t: &Neko, glass: (crate::glass::Mode, bool)) -> El {
+    band_with(t, 12.0, Some(glass))
 }
 
 /// A small icon button: 28 points, the ink muted, a soft fill under the pointer.

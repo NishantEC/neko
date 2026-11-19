@@ -90,7 +90,8 @@ Top to bottom:
 - Centred column, max width 680, vertically centred slightly above the middle (40% from the top).
 - **Greeting:** "Good evening, {first name}" (morning before 12, afternoon before 18, evening after). 34 semibold, Neko mark (28) to its left.
 - **Status line** under it, 13.5: an Iris square (6) with "3 running", then an Amber square (6) with "3 need you". Each part is clickable and filters the sessions list. It shows "Nothing running" when both are 0.
-- **Composer card** 24 below: radius 16, fill at foreground 4% over the art, 1 px border at foreground 10%, padding 16.
+- **Composer card** 24 below: **frosted glass over the art** (2026-11-19), radius 16, padding 16. Behind it, inside its rect and clipped to its radius, a **backdrop blur of the art, sigma 20 logical px** (scaled by the window scale); over the blur a tint of the theme's background colour (**55% alpha in dark, 60% in light**); a 1 px border at foreground 10%; a 1 px inner top highlight at foreground 6%. The text and controls inside draw above the glass at full opacity (no blur, no dither). **Fallback:** under Reduce Transparency, or when the window's target cannot be copied, the card is opaque: the background colour with foreground 4% on it, the same border. Only Home uses glass; session views, pages and the Neko column are unchanged. The floating "Show sidebar" button on Home (when the sessions column is folded, §0) sits on the same glass at radius 8.
+- **Greeting and status line** stay crisp over the art (no glass of their own), each with a soft shadow for legibility: black at 35% alpha in dark, white at 50% in light, blur 8, offset 0,1. The radial scrim (§3) stays.
   - **Text area:** min 3 lines, grows to 12. Placeholder "Describe a task for {workspace}".
   - **Bottom bar,** left to right: a "+" attach button (32 square); workspace select (folder icon, workspace name, branch in muted, chevron); runtime select (Claude / Codex / OpenCode, each with a small logo-less glyph and name). On the right: a **Plan / Build** segmented control (Plan = planning first, Build = start building), a model select ("Auto" by default), and a send button (32 square, radius 10, filled Iris when text is present, else foreground 10%).
   - ⌘↩ sends. Sending creates the session and selects it.
@@ -106,7 +107,7 @@ A full-bleed background behind Home only, drawn as a GPU shader through Rune's e
   - It pauses when the window is inactive or Home is hidden.
 - **Light theme:** the same scene as dawn. Pale sky, Iris at 35% strength, and a darker cat silhouette.
 - **Legibility:** behind the greeting and composer, a radial scrim at background 70% (radius 520) keeps the text at AA contrast.
-- **Budget:** at most 1.0 ms GPU per frame at 2560×1600, measured.
+- **Budget:** at most 1.0 ms GPU per frame at 2560×1600, measured, **the art and the composer's glass together** (the glass added about 0.1 ms to the art's 0.8; numbers in `docs/knowledge/rune-polish.md`). The art pauses when the window is inactive or Home is hidden, and then nothing re-blurs.
 - **Sessions:** the art never appears behind sessions, only on Home.
 
 ## 4. Everything else, made consistent

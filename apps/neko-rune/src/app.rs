@@ -149,6 +149,12 @@ pub struct App {
     pub workspace_scope: Option<String>,
     /// The system's Reduce Motion, as the last build saw it (Home's art stops under it).
     pub reduce_motion: std::cell::Cell<bool>,
+    /// Home's glass is opaque whatever the system says (a scene, a check): `glass.rs`.
+    pub opaque_glass: bool,
+    /// Test hook: Home's glass backings are left out, so a capture shows the raw art under the card.
+    pub glass_probe: bool,
+    /// Whether the window's target can be copied, which the backdrop blur needs (the compositor sets it each frame; true until it says no).
+    pub backdrop_ok: std::cell::Cell<bool>,
     /// The P4 overlays (the pill, the launcher, the stop-all key): empty unless `--overlays` (`overlays.rs`).
     pub overlays: crate::overlays::Overlays,
     /// Rune as the Mac app (`--app`, `shell/mod.rs`): the flag, the Swift-running guard and the duties held.
@@ -252,6 +258,13 @@ pub struct App {
     pub window_size: std::cell::Cell<Option<[u32; 2]>>,
     /// The Browser tab's live view of a Chrome on this Mac (`src/browser/`).
     pub browser: crate::browser::BrowserTab,
+}
+
+impl App {
+    /// How Home's glass is made now: a blur under a tint, or the opaque card (Reduce Transparency, or a target that cannot be copied).
+    pub fn glass_mode(&self) -> crate::glass::Mode {
+        crate::glass::Mode::pick(self.opaque_glass || crate::glass::system_reduce_transparency(), self.backdrop_ok.get())
+    }
 }
 
 /// Where the window's own settings are kept (Rune's `prefs` store).
@@ -373,6 +386,9 @@ impl Default for App {
             session_menu: false,
             more_open: false,
             reduce_motion: std::cell::Cell::new(false),
+            opaque_glass: false,
+            glass_probe: false,
+            backdrop_ok: std::cell::Cell::new(true),
             overlays: Default::default(),
             shell: Default::default(),
             toasts: Vec::new(),

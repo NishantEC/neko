@@ -87,6 +87,52 @@ warm-up): 0.32 to 0.78 ms mean, 0.14 to 0.65 ms median across runs on a quiet an
 of it is writing 4 megapixels of noise, not arithmetic (removing the sea or the sky changed nothing). `tests/art.rs` asserts the
 median is at most 1.0 ms.
 
+### The Home composer is frosted glass (2026-11-19, `glass.rs`, `view/composer.rs` `card_on`, `tests/glass.rs`)
+
+The owner's screenshot showed the card as a flat translucent box over the dither; they asked for real glass with crisp words on top.
+The card (`home-composer`) has no fill or border of its own now. Its first child is the **backing** (`glass::backing`, key
+`composer-glass`): an element pinned to the card's four edges with radius 16, `El::backdrop_blur(20.0)` (Rune's own in-window
+backdrop blur, `rune/src/render/backdrop_blur.rs`: at that element in painter order it copies what the window has drawn so far, the art's
+effect slot and the scrim included, blurs it at half resolution inside the rect plus the blur's reach and composites it inside the
+rounded corners; sigma is in points, so Rune scales it by the window scale), the window colour at 55% (dark) or 60% (light) as the
+fill, the 1 px border at foreground 10% and a 1 px highlight child (`composer-glass-highlight`) along the top edge at foreground 6%. The field and
+the bar come after it in the same column, so the words and controls draw above the glass at full strength. We used Rune's element path
+rather than `rune-fx`'s `FxRenderer::blur_backdrop`: that one needs a hook at an `effect_backdrop` slot and our own pass handling, and
+the element path already does the clip, tint, border and ordering. The floating "Show sidebar" button on Home is the same backing at radius 8
+(`sidebar-show-glass`, no highlight). At most four elements blur per frame (`MAX_BACKDROP_BLURS`); Home uses two.
+
+**Words.** Rune has no text shadow, so `glass::shadowed` draws the same text twice: first a copy in black 35% (dark) or white 50%
+(light), `blur(4.0)` (CSS blur 8 is sigma 4), pinned one point lower and hidden from accessibility, then the words. The greeting and both
+status parts use it; the scrim is unchanged.
+
+**Fallbacks.** `App::glass_mode` is Opaque when `glass::system_reduce_transparency()` (NSWorkspace's
+`accessibilityDisplayShouldReduceTransparency`, read each Home build; `NEKO_RUNE_REDUCE_TRANSPARENCY=1` stands for it in checks, as Rune's
+`RUNE_INCREASE_CONTRAST` does; the scene `home-opaque` sets `App::opaque_glass`) or when `App::backdrop_ok` is false. The compositor sets
+that cell each frame from whether the window's target has `COPY_SRC` (`render_art`), so a device that cannot copy its target shows the
+opaque card one frame after it first draws. The opaque backing (`composer-opaque`, `sidebar-show-opaque`) is the window colour with the
+foreground at 4% laid on it, opaque, with the same border.
+
+**Static art.** Rune blurs on each frame it draws and has no way to hold a blur result across frames, so under Reduce Motion (or an
+inactive window) the art's clock stands still and no frame is asked for, but a frame that something else asks for (the caret, a hover)
+re-runs the blur at that frame's cost. A literal "compute once" would need a cache layer, which would hide the art from the blur (a
+cached subtree's backdrop is only what that layer has drawn). Not done; the cost is the figure below, once per such frame.
+
+**Budget, measured** (release build, 2560x1600, `NEKO_RUNE_ART_BENCH=1`, the Mac under other agents' load, so the art alone drifted
+between runs): the isolated art bench (scene pass plus blit) 0.78 to 0.99 ms median over six runs. `viewers/model3d_gpu.rs` `frame_bench`
+now also times the whole Home frame (art scene pass, blit, glass, every word) encoded and submitted 12 to a batch and waited for, wall
+ms per frame, so it is GPU-bound at this size: 1.37 / 1.69 / 1.76 ms with the glass against 1.40 / 1.58 / 1.57 ms with the opaque card
+(`NEKO_RUNE_REDUCE_TRANSPARENCY=1`), three paired runs. **The glass adds about 0.1 ms (-0.03, +0.11, +0.20), so art + glass is about
+0.9 ms median on a quiet Mac and can touch 1.1 ms when the GPU is busy with other clients**; the art alone does the same (`tests/art.rs`
+asserts its median at most 1.0). The whole-frame figure is not the budget (it counts the sidebar and the Neko column too); only the
+glass-minus-opaque difference is read from it. A debug build's number is the CPU's, not the GPU's.
+
+**Tests** (`tests/glass.rs`): scene `home` has `composer-glass` (radius 16, tint 0.55 / 0.60, the highlight) with the request field,
+Send and Plan/Build after it in paint order; the Home button is glass and the session one is not; `home-opaque` is flat and the
+expected colour in both themes; a capture of the real binary against `home-art-probe` (the same scene with the backings left out, a test
+hook `App::glass_probe`) shows the card's pixels differ from the raw art, its fine detail is under half (0.009 against 11.4 dark, 0.001
+against 2.5 light), and the art outside the card is untouched; typed words keep 13.0:1 (dark) and 14.4:1 (light) against the glass; the
+setting env var draws the card flat.
+
 ### The P3b review's open item, fixed
 
 The web panel opens the person's browser for another website **only within 1 s of a trusted click or keypress in the view**

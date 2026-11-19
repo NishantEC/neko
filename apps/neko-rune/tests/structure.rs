@@ -59,8 +59,8 @@ fn runtime(app: App, size: (f32, f32), dark: bool) -> Runtime<App> {
 
 /// Keys that are overlays or deliberate layers over their siblings: they sit on top by design.
 fn overlay_key(key: &str) -> bool {
-    // Hover overlays (a board card's action slot, a pull request row's actions over its end) and the Calendar's "now" line lie over their siblings by design.
-    ["badge", "grip-", "scrim", "art", "hairline", "ring", "caret", "toast", "tip", "board-action-slot", "cal-now", "hover-actions", "pr-actions-"].iter().any(|p| key.starts_with(p))
+    // A soft text shadow (`glass::shadowed`) is the words' own copy, one point lower, by design. Hover overlays (a board card's action slot, a pull request row's actions over its end) and the Calendar's "now" line lie over their siblings by design.
+    ["badge", "grip-", "scrim", "art", "hairline", "ring", "caret", "toast", "tip", "board-action-slot", "cal-now", "hover-actions", "pr-actions-", "glass-shade"].iter().any(|p| key.starts_with(p))
 }
 
 /// What is wrong with the window as drawn now (empty when nothing). `label` names the state in each line.
