@@ -161,7 +161,7 @@ export function PhoneSection() {
                 <Button variant="ghost" size="sm" disabled={busy} onClick={() => void save({ ntfy_topic: "" })}>New topic</Button>
               </SettingRow>
               <SettingRow id="phone-ntfy-link" title="Subscribe">
-                <a className="select-text break-all font-mono text-[12.5px] text-primary hover:underline" href={status.subscribe_link} data-slot="phone-link">{status.subscribe_link}</a>
+                <a className="select-text break-all font-mono text-[12.5px] text-iris hover:underline" href={status.subscribe_link} data-slot="phone-link">{status.subscribe_link}</a>
                 <CopyButton text={status.subscribe_link} label="Copy subscribe link" />
               </SettingRow>
               <SettingRow id="phone-ntfy-titles" title="Send titles only">

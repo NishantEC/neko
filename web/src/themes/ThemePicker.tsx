@@ -89,13 +89,13 @@ export function ThemePicker({
               className={cn(
                 "flex w-full flex-col gap-2 rounded-xl border bg-card p-2 text-left outline-none transition-colors",
                 "hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
-                checked ? "border-primary ring-1 ring-primary" : "border-border",
+                checked ? "border-iris ring-1 ring-iris" : "border-border",
               )}
             >
               <ThemeSwatch theme={theme} />
               <span className="flex min-w-0 items-center gap-1.5 px-0.5">
                 <span className="truncate text-[13px] font-medium text-strong">{theme.name}</span>
-                {checked ? <Check size={14} weight="bold" className="ms-auto shrink-0 text-primary" aria-label="Selected" /> : null}
+                {checked ? <Check size={14} weight="bold" className="ms-auto shrink-0 text-iris" aria-label="Selected" /> : null}
               </span>
               <span className="flex min-h-5 flex-wrap items-center gap-1 px-0.5">
                 {theme.family ? <span className="text-[11.5px] text-muted-foreground">{theme.family}</span> : null}

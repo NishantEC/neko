@@ -64,7 +64,7 @@ export function ArtifactCard({ card }: { card: ArtifactCardData }) {
       // opens the canvas; the tab button appears on hover and is in the menu.
       className={cn(
         "group/row not-prose my-2 -mx-2 flex min-h-10 items-center gap-2.5 rounded-[10px] px-2 transition-colors hover:bg-foreground/[0.04]",
-        open && "bg-primary/[0.06]",
+        open && "bg-iris/[0.06]",
       )}
     >
       <button
@@ -73,7 +73,7 @@ export function ArtifactCard({ card }: { card: ArtifactCardData }) {
         onClick={() => openCanvas(id, version)}
         className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
       >
-        <FrameCorners aria-hidden size={16} className={cn("shrink-0", open ? "text-primary" : "text-muted-foreground")} />
+        <FrameCorners aria-hidden size={16} className={cn("shrink-0", open ? "text-iris" : "text-muted-foreground")} />
         <span className="min-w-0 truncate text-[13.5px] text-foreground">{title}</span>
         <span className="shrink-0 text-[12.5px] tabular-nums text-muted-foreground/80">
           v{card.version ?? 1} · {(card.kind ?? "file").toUpperCase()}

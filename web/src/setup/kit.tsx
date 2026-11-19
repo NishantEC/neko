@@ -3,6 +3,9 @@
 // footer strip follow ui-kit' settings layout (apps/spa/src/pages/Settings/
 // settings.ui.tsx @da20dfaeb), kept on Neko's props so the pages are unchanged.
 // Also: instrument wells, empty/loading/error states and a confirm.
+//
+// Design system 2026-11 (4.5): a Panel is the grouped slab (radius 20, one fill, no border, no shadow), its rows divided by hairlines inset 22 px
+// (styles/sky-materials.css `.sky-group`); a SettingRow is 66 px (padding 15 x 22, gap 20); a Section head is a 20/600 heading.
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/ui/lib/utils";
 import { Button } from "@/ui/button";
@@ -42,8 +45,8 @@ export function SetupPage({
   width?: string;
 }) {
   return (
-    <PageContainer data-slot="setup-page" className={cn("flex flex-col gap-8", width)}>
-      <div className="flex min-h-9 flex-wrap items-center justify-between gap-4">
+    <PageContainer data-slot="setup-page" className={cn("flex flex-col gap-7", width)}>
+      <div className="flex min-h-10 flex-wrap items-center justify-between gap-4">
         <PageHeader title={title} count={count} />
         {actions ? <div className="flex flex-wrap items-center gap-1.5">{actions}</div> : null}
       </div>
@@ -55,6 +58,9 @@ export function SetupPage({
 
 /** The quiet group heading every list shares (DESIGN.md §8): small, muted, a faint count. */
 export const GROUP_HEADING = "text-[12.5px] font-medium text-muted-foreground";
+
+/** A section's own heading (design system 2026-11, 4.5): 20/600, -0.015em, the strong colour. */
+const SECTION_HEADING = "text-[20px] font-semibold leading-[1.2] tracking-[-0.015em] text-strong";
 
 /**
  * A group on a page: a small, quiet heading with an optional faint count and
@@ -79,21 +85,21 @@ export function Section({
   const label = (
     <>
       <span className="text-balance">{title}</span>
-      {count !== undefined && count !== null && count !== "" ? <span className="tabular-nums text-muted-foreground/70">{count}</span> : null}
+      {count !== undefined && count !== null && count !== "" ? <span className="text-[14px] font-normal tabular-nums text-muted-foreground">{count}</span> : null}
     </>
   );
   return (
-    <section id={id} data-slot="setup-section" data-open={shown || undefined} className={cn("flex flex-col gap-1.5", className)}>
-      <div className="flex min-h-7 items-center justify-between gap-4">
-        <h2 className={cn(GROUP_HEADING, "min-w-0")}>
+    <section id={id} data-slot="setup-section" data-open={shown || undefined} className={cn("flex flex-col gap-3.5", className)}>
+      <div className="flex min-h-7 items-center justify-between gap-2.5 px-1">
+        <h2 className={cn(SECTION_HEADING, "min-w-0")}>
           {collapsible ? (
             <button
               type="button"
               aria-expanded={open}
               onClick={() => setOpen(!open)}
-              className="-ms-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+              className="-ms-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 outline-none transition-colors duration-150 hover:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"
             >
-              <CaretDown aria-hidden size={11} weight="bold" className={cn("transition-transform duration-150", !open && "-rotate-90")} />
+              <CaretDown aria-hidden size={14} className={cn("text-muted-foreground transition-transform duration-200", !open && "-rotate-90")} />
               {label}
             </button>
           ) : (
@@ -108,13 +114,12 @@ export function Section({
 }
 
 /**
- * A list's frame. No card, no border, no dividers (DESIGN.md §8): rows are
- * separated by space and light up on hover. It bleeds 12px either side so a
- * row's text lines up with the heading above while its hover wash has room.
+ * A group's frame: the grouped slab of the design system (2026-11, 4.5). One fill, radius 20, no border and no shadow; its rows are divided by
+ * hairlines that stop 22 px short of the edges and light up on hover.
  */
 export function Panel({ children, className, ...rest }: React.ComponentProps<"div">) {
   return (
-    <div data-slot="setup-panel" {...rest} className={cn("-mx-3 flex flex-col", className)}>
+    <div data-slot="setup-panel" {...rest} className={cn("sky-group flex flex-col", className)}>
       {children}
     </div>
   );
@@ -125,7 +130,7 @@ export function PanelFooter({ children, className }: { children: ReactNode; clas
   return (
     <div
       data-slot="setup-panel-footer"
-      className={cn("flex min-h-10 flex-wrap items-center justify-end gap-x-4 gap-y-2 px-3 pt-2 text-[13px] text-muted-foreground", className)}
+      className={cn("flex min-h-10 flex-wrap items-center justify-end gap-x-4 gap-y-2 px-[22px] pb-3 pt-2 text-[13px] text-muted-foreground", className)}
     >
       {children}
     </div>
@@ -151,8 +156,8 @@ export function Row({
     <>
       {leading ? <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">{leading}</span> : null}
       <span className="flex min-w-0 flex-1 items-baseline gap-3 text-start">
-        <span className="min-w-0 shrink-0 truncate text-[13.5px] text-foreground">{title}</span>
-        {description ? <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">{description}</span> : null}
+        <span className="min-w-0 shrink-0 truncate text-sm font-medium text-foreground">{title}</span>
+        {description ? <span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">{description}</span> : null}
       </span>
     </>
   );
@@ -161,7 +166,7 @@ export function Row({
       id={id}
       data-slot="setup-row"
       data-highlighted={highlighted ? "" : undefined}
-      className={cn("group/row rounded-[10px] px-3 py-2 transition-colors hover:bg-foreground/[0.03] data-[highlighted]:bg-primary/10", className)}
+      className={cn("group/row px-[22px] py-3 transition-colors duration-150 hover:bg-foreground/[0.04] data-[highlighted]:bg-iris/10", className)}
     >
       <div className="flex min-h-7 items-center gap-3">
         {onClick ? (
@@ -169,14 +174,14 @@ export function Row({
             type="button"
             onClick={onClick}
             aria-label={label}
-            className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-start outline-none focus-visible:outline-2 focus-visible:outline-ring"
           >
             {head}
           </button>
         ) : (
           <div className="flex min-w-0 flex-1 items-center gap-3">{head}</div>
         )}
-        {trailing ? <div className="flex shrink-0 items-center gap-2 text-[12.5px] text-muted-foreground">{trailing}</div> : null}
+        {trailing ? <div className="flex shrink-0 items-center gap-2 text-[12.5px] tabular-nums text-muted-foreground">{trailing}</div> : null}
       </div>
       {children ? <div className="mt-1.5 ps-8 text-[13px] text-muted-foreground">{children}</div> : null}
     </div>
@@ -205,15 +210,15 @@ export function SettingRow({
       data-setting={id}
       data-highlighted={highlighted ? "" : undefined}
       className={cn(
-        "flex min-h-12 scroll-mt-24 rounded-[10px] px-3 py-2.5 transition-colors duration-500 data-[highlighted]:bg-primary/10",
-        stacked ? "flex-col gap-2" : "flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4",
+        "flex min-h-[66px] scroll-mt-24 px-[22px] py-[15px] transition-colors duration-500 data-[highlighted]:bg-iris/10",
+        stacked ? "flex-col gap-3" : "flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-5",
       )}
     >
       <div className="min-w-0">
-        <div className="text-[13.5px] text-foreground">{title}</div>
-        {description ? <div className="mt-0.5 max-w-prose text-pretty text-[12.5px] text-muted-foreground">{description}</div> : null}
+        <div className="text-sm font-medium leading-[1.35] text-foreground">{title}</div>
+        {description ? <div className="mt-px max-w-prose text-pretty text-[13px] leading-[1.4] text-muted-foreground">{description}</div> : null}
       </div>
-      <div className={cn("flex min-w-0 flex-wrap items-center gap-2", stacked ? "w-full" : "sm:shrink-0 sm:justify-end")}>{children}</div>
+      <div className={cn("flex min-w-0 flex-wrap items-center gap-3", stacked ? "w-full" : "sm:shrink-0 sm:justify-end")}>{children}</div>
     </div>
   );
 }

@@ -32,7 +32,7 @@ import { useWorkbench } from "@/useStore";
 const STAGE_DOT: Record<string, string> = {
   needsYou: "bg-warning",
   review: "bg-info",
-  running: "bg-primary animate-pulse",
+  running: "bg-iris animate-pulse",
   upNext: "bg-muted-foreground/60",
   done: "bg-success",
 };

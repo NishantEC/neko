@@ -101,7 +101,7 @@ export function UserTimelineRow({
   return (
     <div data-slot="user-turn" className={cn("group flex flex-col items-end gap-1", className)}>
       {label ? <p className="me-1 text-2xs text-muted-foreground/70">{label}</p> : null}
-      <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+      <div className="relative max-w-[80%] rounded-[14px] bg-message px-4 py-3 text-message-foreground">
         <MessageAuthorHeading>You</MessageAuthorHeading>
         {files.length > 0 ? (
           <div className={cn("flex flex-col gap-1", body && "mb-2")} data-slot="message-files">

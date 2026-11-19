@@ -338,8 +338,8 @@ fn light_and_dark_follow_the_system() {
     let fill = |rt: &Runtime<App>, key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).map(|e| e.fill.hex()).unwrap();
     let (dark, light) = (runtime(true, |_| {}), runtime(false, |_| {}));
     // The window is the sidebar: the background plus 2% lightness (polish spec §4).
-    assert_eq!(fill(&dark, "window"), "#141414ff");
+    assert_eq!(fill(&dark, "window"), "#1b1b1bff");
     assert_eq!(fill(&light, "window"), "#ffffffff");
-    assert_eq!(fill(&dark, "session-region"), "#0f0f0fff");
-    assert_eq!(fill(&light, "session-region"), "#fafafaff");
+    assert_eq!(fill(&dark, "session-region"), "#161616ff");
+    assert_eq!(fill(&light, "session-region"), "#ffffffff");
 }

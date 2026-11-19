@@ -152,7 +152,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   await page.reload({ waitUntil: "load" });
   await sleep(500);
   const firstLight = await page.evaluate(() => window.__firstPaint);
-  check(firstLight?.theme === "neutral-light" && /\blight\b/.test(firstLight.cls) && firstLight.bg === "#fafafa", `...and a light Mac paints the light theme first (${JSON.stringify(firstLight)})`);
+  check(firstLight?.theme === "neutral-light" && /\blight\b/.test(firstLight.cls) && firstLight.bg === "#ffffff", `...and a light Mac paints the light theme first (${JSON.stringify(firstLight)})`);
   await page.emulateMedia({ colorScheme: "dark" });
   await waitTheme("ocean");
 

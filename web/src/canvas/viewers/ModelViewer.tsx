@@ -321,7 +321,7 @@ export default function ModelViewer(props: ViewerProps) {
       const s = sceneRef.current;
       if (!s) return;
       const buffer = await readBytes({ url, text });
-      const object = await loadModel(buffer, kind, cssColor("--primary", "#8899aa"));
+      const object = await loadModel(buffer, kind, cssColor("--iris", "#8899aa"));
       if (!live || s.disposed) { disposeObject(object); return; }
       if (s.model) { s.scene.remove(s.model); disposeObject(s.model); }
       s.model = object;

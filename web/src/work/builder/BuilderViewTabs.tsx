@@ -156,7 +156,7 @@ export function BuilderViewTabs<V extends string>({
                     "relative z-10 flex items-center justify-center text-sm font-medium",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
                     isActive
-                      ? "h-10 self-end rounded-t-[14px] px-4 pb-2 text-primary"
+                      ? "h-10 self-end rounded-t-[14px] px-4 pb-2 text-iris"
                       : "mb-1 h-9 rounded-lg px-2 pb-1 text-foreground/50 transition-colors duration-150 hover:bg-foreground/[0.06] hover:text-foreground",
                   )}
                 >
@@ -188,7 +188,7 @@ export function BuilderViewTabs<V extends string>({
                       title={tab.badgeLabel}
                       className={cn(
                         "ml-1.5 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold",
-                        isActive ? "bg-primary/15 text-primary" : "bg-foreground/10 text-foreground/60",
+                        isActive ? "bg-iris/15 text-iris" : "bg-foreground/10 text-foreground/60",
                       )}
                     >
                       {tab.badgeCount}

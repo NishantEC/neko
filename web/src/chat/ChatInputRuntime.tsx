@@ -546,7 +546,7 @@ export function RuntimePicker({ conversationId, openRequest }: { conversationId:
         title="Model, effort and speed for this conversation. Changes apply to the next turn or worker."
         className="flex h-8 max-w-[260px] items-center gap-2 rounded-full border border-border bg-card px-3 text-[12.5px] font-medium text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-accent"
       >
-        <span aria-hidden className="size-2.5 shrink-0 rounded-full bg-gradient-to-br from-primary/70 to-primary/20 ring-1 ring-primary/30" />
+        <span aria-hidden className="size-2.5 shrink-0 rounded-full bg-gradient-to-br from-iris/70 to-iris/20 ring-1 ring-iris/30" />
         {selection.saving ? <CircleNotch className="size-3.5 animate-spin" aria-label="Checking settings" /> : null}
         {requestsExtraSpeed(selection.saved) ? <Lightning weight="fill" className="size-3.5" aria-hidden /> : null}
         <span className="truncate">{label}</span>

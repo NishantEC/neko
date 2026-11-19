@@ -232,7 +232,7 @@ export function ChatInput({
                   data-chat-composer-surface="true"
                   className={cn(
                     "rounded-3xl transition-[background-color] duration-200",
-                    dragging ? "bg-accent/45 ring-1 ring-inset ring-primary/70" : null,
+                    dragging ? "bg-accent/45 ring-1 ring-inset ring-iris/70" : null,
                   )}
                 >
                   <div data-chat-composer-body="true" className="relative px-3 pt-3.5 pb-2 sm:px-4 sm:pt-4">

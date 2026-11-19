@@ -4,15 +4,14 @@
  * row and pill sizes, the pebble (secondary) and well (input) materials, status
  * pills, segmented controls, and the radii of dialogs and menus.
  *
- * Adapted for Neko (see web/src/ui/NOTICE.md):
- * - Colours come from Neko's tokens. The pebble, ink and well were raw hex
- *   gradients; here they are flat mixes of --foreground into --card/--background,
- *   and the status/LED greens and ambers are --success / --warning.
- * - Not taken (decorative): the sky scene, its gradient and grain, the glass
- *   backdrop blur, the tinted sidebar gradient, swatches, the builder-shell hues,
- *   rocket-publish, and the composer overrides (the chat composer is its own area).
- * - `data-variant="default"` buttons keep Neko's blue --primary (Send, Approve)
- *   instead of becoming pebbles; outline and secondary become pebbles as upstream.
+ * Design system 2026-11 (docs/design/system-2026-11.md, section 2.2 and 9.1): the pebble and the
+ * ink are gradients again, 4 to 8 percent apart, with a 1 px lit top edge; the well is a fill
+ * with an inner shadow; a settings group is a slab; the sidebar panel is tinted glass. The literal
+ * values below are the spec's, for the two Neko themes (`neutral`, `neutral-light`); any other theme gets
+ * the same materials built from its own tokens (the first block of each pair), so a theme keeps its palette.
+ * - Not taken (decorative): the sky scene, its gradient and grain, swatches, the builder-shell hues,
+ *   rocket-publish.
+ * - `data-variant="default"` buttons are the ink: the one primary action. Outline and secondary are pebbles.
  */
 
 .sky {
@@ -25,21 +24,109 @@
   isolation: isolate;
 }
 
+/* ------------------------------------------------------------ materials */
+/* Generic: built from the theme's own tokens. */
 .sky {
-  --sky-well: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --sky-well: color-mix(in oklab, var(--foreground) 4.5%, transparent);
   --sky-well-inset: inset 0 1px 2px rgba(0, 0, 0, 0.08);
   --sky-drop: 0 24px 60px -18px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.05);
-  --sky-headline: var(--foreground);
+  --sky-headline: var(--strong);
+  --sky-pebble-top: color-mix(in oklab, var(--foreground) 2.5%, var(--card));
+  --sky-pebble-bottom: color-mix(in oklab, var(--foreground) 7%, var(--card));
+  --sky-pebble-fg: var(--foreground);
+  --sky-pebble-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --sky-ink-top: color-mix(in oklab, var(--primary) 86%, white);
+  --sky-ink-bottom: color-mix(in oklab, var(--primary) 72%, black);
+  --sky-ink-fg: var(--primary-foreground);
+  --sky-ink-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+  --sky-group: color-mix(in oklab, var(--foreground) 3%, var(--card));
+  --sky-group-hover: color-mix(in oklab, var(--foreground) 6%, var(--card));
+  --sky-divider: rgba(0, 0, 0, 0.06);
+  --sky-glass: linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.36));
+  --sky-glass-blur: blur(26px) saturate(1.8);
+  --sky-sidebar-panel: color-mix(in oklab, var(--sidebar), var(--foreground) 3%);
+  --sky-icon: color-mix(in oklab, var(--foreground) 46%, transparent);
 }
 
 .dark .sky {
+  --sky-well: color-mix(in oklab, var(--foreground) 5%, transparent);
   --sky-well-inset: inset 0 1px 2px rgba(0, 0, 0, 0.35);
   --sky-drop: 0 24px 60px -18px rgba(0, 0, 0, 0.65), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --sky-pebble-top: color-mix(in oklab, var(--foreground) 9%, var(--background));
+  --sky-pebble-bottom: color-mix(in oklab, var(--foreground) 6%, var(--background));
+  --sky-pebble-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --sky-ink-top: color-mix(in oklab, var(--primary) 40%, white);
+  --sky-ink-bottom: color-mix(in oklab, var(--primary) 96%, black);
+  --sky-ink-shadow: inset 0 1px 0 #ffffff, inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+  --sky-divider: rgba(255, 255, 255, 0.07);
+  --sky-glass: linear-gradient(180deg, color-mix(in oklab, var(--card) 80%, transparent), color-mix(in oklab, var(--card) 60%, transparent));
+  --sky-group: color-mix(in oklab, var(--foreground) 4%, var(--card));
+  --sky-group-hover: color-mix(in oklab, var(--foreground) 8%, var(--card));
+  --sky-icon: color-mix(in oklab, var(--foreground) 42%, transparent);
+}
+
+/* The two Neko themes: the spec's literals (2.2). */
+html[data-neko-theme="neutral-light"] .sky {
+  --sky-well: rgba(0, 0, 0, 0.045);
+  --sky-pebble-top: #f7f7f8;
+  --sky-pebble-bottom: #ebebed;
+  --sky-pebble-fg: #171717;
+  --sky-pebble-shadow: inset 0 1px 0 #ffffff;
+  --sky-ink-top: #3d3d3d;
+  --sky-ink-bottom: #1c1c1c;
+  --sky-ink-fg: #fafafa;
+  --sky-group: #f6f7f9;
+  --sky-group-hover: #eff1f4;
+  --sky-headline: #171717;
+  --sky-sidebar-panel: linear-gradient(180deg, rgba(232, 240, 255, 0.75), rgba(244, 247, 255, 0.6));
+  --sky-icon: rgba(27, 27, 29, 0.46);
+}
+
+html[data-neko-theme="neutral"] .sky {
+  --sky-well: rgba(255, 255, 255, 0.05);
+  --sky-pebble-top: #232326;
+  --sky-pebble-bottom: #1d1d20;
+  --sky-pebble-fg: #fafafa;
+  --sky-ink-top: #ffffff;
+  --sky-ink-bottom: #ececec;
+  --sky-ink-fg: #171717;
+  --sky-group: #222224;
+  --sky-group-hover: #2b2b2d;
+  --sky-headline: #ffffff;
+  --sky-glass: linear-gradient(180deg, oklch(20.5% 0 0 / 0.55), oklch(20.5% 0 0 / 0.38));
+  --sky-sidebar-panel: linear-gradient(180deg, rgb(38 38 42 / 0.72), rgb(24 24 27 / 0.66) 55%, rgb(18 18 20 / 0.6));
+  --sky-icon: rgba(242, 242, 243, 0.42);
+}
+
+.sky {
+  --sky-pebble: linear-gradient(180deg, var(--sky-pebble-top), var(--sky-pebble-bottom));
+  --sky-pebble-solid: var(--sky-pebble-bottom);
+  --sky-ink: linear-gradient(180deg, var(--sky-ink-top), var(--sky-ink-bottom));
 }
 
 .sky [data-slot="sidebar-container"] [data-slot="sidebar-inner"] {
-  background: var(--sidebar);
+  background: var(--sky-sidebar-panel);
+  -webkit-backdrop-filter: var(--sky-glass-blur);
+  backdrop-filter: var(--sky-glass-blur);
   box-shadow: var(--sky-drop);
+}
+
+/* A glass surface (the composer, a floating strip): never inside a scroller. */
+.sky .sky-glass {
+  background: var(--sky-glass);
+  -webkit-backdrop-filter: var(--sky-glass-blur);
+  backdrop-filter: var(--sky-glass-blur);
+}
+
+/* A grouped slab (section 4.5): one fill, no border, no shadow; rows divided by hairlines inset 22 px. */
+.sky .sky-group {
+  background: var(--sky-group);
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.sky .sky-group-hover:hover {
+  background: var(--sky-group-hover);
 }
 
 .sky .sky-well {
@@ -77,21 +164,6 @@
 
 .sky .sky-headline {
   color: var(--sky-headline);
-}
-
-.sky {
-  --sky-pebble: color-mix(in oklab, var(--foreground) 6%, var(--card));
-  --sky-pebble-fg: var(--foreground);
-  --sky-ink: var(--foreground);
-  --sky-ink-fg: var(--background);
-  --sky-ink-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 0 0 1px rgba(0, 0, 0, 0.5);
-  --sky-pebble-shadow: inset 0 1px 0 #ffffff;
-}
-
-.dark .sky {
-  --sky-pebble: color-mix(in oklab, var(--foreground) 9%, var(--background));
-  --sky-ink-shadow: inset 0 1px 0 #ffffff, inset 0 0 0 1px rgba(255, 255, 255, 0.4);
-  --sky-pebble-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
 .sky .sky-pebble {
@@ -281,7 +353,8 @@
   position: fixed;
   border: 0;
   border-radius: 0 22px 22px 0;
-  background: var(--sidebar);
+  background: var(--sky-sidebar-panel);
+  background-color: var(--sidebar);
   box-shadow: var(--sky-drop);
 }
 
@@ -366,7 +439,7 @@
   corner-shape: squircle;
 }
 
-/* Neko: `default` is left out of this list so it keeps --primary. */
+/* Pebble: outline, secondary, and a bare button. No border, and no colour change on hover (4.1). */
 .sky
   :is(:is(button, a)[data-variant][data-size], [data-slot="alert-dialog-cancel"]):is(
     [data-variant="outline"],
@@ -379,12 +452,38 @@
   box-shadow: var(--sky-pebble-shadow);
 }
 
+/* Ink: the primary action, used sparingly. */
+.sky :is(:is(button, a)[data-variant][data-size], [data-slot="alert-dialog-action"])[data-variant="default"] {
+  border-color: transparent;
+  color: var(--sky-ink-fg);
+  background: var(--sky-ink);
+  box-shadow: var(--sky-ink-shadow);
+}
+
+.sky :is(:is(button, a)[data-variant="default"][data-size], [data-slot="alert-dialog-action"]) :is(svg, [data-slot="button-loading-indicator"]) {
+  color: inherit;
+}
+
+/* Destructive: red fill, white text, a lit top edge and a soft red shadow; the quiet form is a pebble with red text. */
+.sky :is(button, a)[data-variant="destructive"][data-size] {
+  border-color: transparent;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16), 0 1px 3px color-mix(in oklab, var(--destructive) 24%, transparent);
+}
+
+.sky :is(button, a)[data-variant="destructive-outline"][data-size] {
+  border-color: transparent;
+  color: var(--destructive-foreground);
+  background: var(--sky-pebble);
+  box-shadow: var(--sky-pebble-shadow);
+}
+
 .sky
   :is(:is(button, a)[data-variant][data-size], [data-slot="alert-dialog-cancel"]):is(
     [data-variant="outline"],
     [data-variant="secondary"],
     :not([data-variant])
-  )::before {
+  )::before,
+.sky :is(button, a)[data-variant="destructive-outline"]::before {
   display: none;
 }
 
@@ -393,30 +492,45 @@
     [data-variant="default"],
     [data-variant="outline"],
     [data-variant="secondary"],
+    [data-variant="destructive"],
+    [data-variant="destructive-outline"],
     :not([data-variant])
   ) {
   border-radius: var(--sky-control-radius);
+  transition: transform 100ms var(--ease-out), opacity var(--motion-quick) var(--ease-out);
+}
+
+/* One focus ring: the outline below. The utility ring the primitive carries would draw a second one. */
+.sky :is(button, a)[data-variant]:focus-visible {
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
+}
+
+/* Pressed: scale .97 for 100 ms. */
+.sky :is(:is(button, a)[data-variant][data-size], [data-slot="alert-dialog-cancel"], [data-slot="alert-dialog-action"]):active:not(:disabled) {
+  transform: scale(var(--motion-scale-anchored));
+}
+
+/* Ghost: transparent; hover foreground 4%. */
+.sky :is(button, a)[data-variant="ghost"][data-size]:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--foreground) 4%, transparent);
 }
 
 .sky
-  :is(:is(button, a)[data-variant][data-size], [data-slot="alert-dialog-cancel"], [data-slot="alert-dialog-action"]):is(
-    [data-variant="default"],
-    [data-variant="outline"],
-    [data-variant="secondary"],
-    :not([data-variant])
-  ):focus-visible {
+  :is(:is(button, a)[data-variant][data-size], [data-slot="alert-dialog-cancel"], [data-slot="alert-dialog-action"]):focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
 
 .sky
-  :is(:is(button, a)[data-variant][data-size], [data-slot="alert-dialog-cancel"], [data-slot="alert-dialog-action"]):is(
-    [data-variant="default"],
-    [data-variant="outline"],
-    [data-variant="secondary"],
-    :not([data-variant])
-  ):disabled {
+  :is(:is(button, a)[data-variant][data-size], [data-slot="alert-dialog-cancel"], [data-slot="alert-dialog-action"]):disabled {
   opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sky :is(:is(button, a)[data-variant][data-size], [data-slot="alert-dialog-cancel"], [data-slot="alert-dialog-action"]):active {
+    transform: none;
+  }
 }
 
 .sky :is(button, a)[data-variant]:is([data-size="default"], [data-size="lg"]) {
@@ -515,7 +629,15 @@
   border-radius: 24px 0 0 24px;
 }
 
-.sky :is([data-slot="popover-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"]) {
+.sky
+  :is(
+    [data-slot="popover-content"],
+    [data-slot="dropdown-menu-content"],
+    [data-slot="dropdown-menu-sub-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="context-menu-sub-content"],
+    [data-slot="select-content"]
+  ) {
   border-radius: 16px;
 }
 
@@ -529,8 +651,81 @@
     [data-slot="alert-dialog-content"],
     [data-slot="popover-content"],
     [data-slot="dropdown-menu-content"],
-    [data-slot="dropdown-menu-sub-content"]
+    [data-slot="dropdown-menu-sub-content"],
+    [data-slot="context-menu-content"],
+    [data-slot="context-menu-sub-content"],
+    [data-slot="select-content"]
   ) {
   border-color: transparent;
   box-shadow: var(--sky-drop);
+}
+
+/* ------------------------------------------------------------ switch, pebble fill (4.3, 4.4) */
+.sky .sky-pebble-fill {
+  background: var(--sky-pebble);
+  box-shadow: var(--sky-pebble-shadow);
+}
+
+/* Off: the well and a white thumb (a grey one in dark). On: the ink fill (the pebble's text colour), a thumb the colour of the page, no shadow. */
+.sky .sky-switch {
+  background: var(--sky-well);
+  box-shadow: var(--sky-well-inset);
+}
+
+.sky .sky-switch[data-checked] {
+  background: var(--sky-pebble-fg);
+  box-shadow: none;
+}
+
+.sky .sky-switch .sky-switch-thumb {
+  background: #ffffff;
+}
+
+.dark .sky .sky-switch .sky-switch-thumb[data-unchecked] {
+  background: #6b6b73;
+}
+
+.sky .sky-switch[data-checked] .sky-switch-thumb {
+  background: #ffffff;
+}
+
+.dark .sky .sky-switch[data-checked] .sky-switch-thumb {
+  background: #141416;
+}
+
+/* Rows of a slab are divided by hairlines inset 22 px, drawn on the row's top edge (4.5); a dialog's slab would use 20. */
+.sky .sky-group :is([data-slot="setting-row"], [data-slot="setup-row"]) {
+  position: relative;
+}
+
+.sky .sky-group :is([data-slot="setting-row"], [data-slot="setup-row"]) + :is([data-slot="setting-row"], [data-slot="setup-row"])::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  inset-inline: 22px;
+  height: 1px;
+  background: var(--sky-divider);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------ composer (4.9) */
+/* Radius 28, glass fill (blur 26, saturate 1.8), the drop shadow, no border; focus adds nothing. A composer with a context strip keeps its clipped shape. */
+.sky [data-slot="composer-shell"]:not([data-with-context])::before {
+  border-radius: 28px;
+  background: var(--sky-glass);
+  -webkit-backdrop-filter: var(--sky-glass-blur);
+  backdrop-filter: var(--sky-glass-blur);
+}
+
+.sky [data-slot="composer-shell"]:not([data-with-context]) :is([data-slot="composer-host"], [data-chat-composer-main-surface], [data-chat-composer-surface]) {
+  border-radius: 28px;
+}
+
+.sky [data-slot="composer-shell"]:not([data-with-context]) [data-slot="composer-host"] {
+  box-shadow: var(--sky-drop);
+}
+
+.sky [data-slot="composer-shell"]:not([data-with-context]) :is([data-slot="composer-host"], [data-chat-composer-main-surface])::after {
+  border-color: transparent;
+  box-shadow: none;
 }

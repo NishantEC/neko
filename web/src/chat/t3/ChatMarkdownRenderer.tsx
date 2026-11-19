@@ -47,7 +47,7 @@ function components(isStreaming: boolean): Components {
         <a
           {...props}
           href={href}
-          className={cn(className, reference ? "font-medium text-primary no-underline underline-offset-2 hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring" : undefined)}
+          className={cn(className, reference ? "font-medium text-iris no-underline underline-offset-2 hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring" : undefined)}
           {...(external ? { target: "_blank", rel: "noreferrer" } : {})}
         />
       );

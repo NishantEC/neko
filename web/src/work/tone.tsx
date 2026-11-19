@@ -11,7 +11,7 @@ export type Tone = "attention" | "review" | "running" | "done" | "failed" | "neu
 export const TONE_TEXT: Record<Tone, string> = {
   attention: "text-warning-foreground",
   review: "text-info-foreground",
-  running: "text-primary",
+  running: "text-iris",
   done: "text-success-foreground",
   failed: "text-destructive-foreground",
   neutral: "text-muted-foreground",
@@ -20,7 +20,7 @@ export const TONE_TEXT: Record<Tone, string> = {
 export const TONE_BG: Record<Tone, string> = {
   attention: "bg-warning/12",
   review: "bg-info/12",
-  running: "bg-primary/12",
+  running: "bg-iris/12",
   done: "bg-success/12",
   failed: "bg-destructive/12",
   neutral: "bg-foreground/[0.06]",
@@ -29,7 +29,7 @@ export const TONE_BG: Record<Tone, string> = {
 export const TONE_DOT: Record<Tone, string> = {
   attention: "bg-warning",
   review: "bg-info",
-  running: "bg-primary",
+  running: "bg-iris",
   done: "bg-success",
   failed: "bg-destructive",
   neutral: "bg-muted-foreground/60",

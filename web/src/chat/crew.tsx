@@ -70,7 +70,7 @@ function TaskRef({ task, className }: { task: Json; className?: string }) {
       href={taskHref(String(task.id))}
       data-reference="task"
       title={`${shortId(task)}: ${taskTitle(task)}`}
-      className={cn("inline-flex min-w-0 items-center gap-1 rounded-sm font-medium text-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring", className)}
+      className={cn("inline-flex min-w-0 items-center gap-1 rounded-sm font-medium text-iris outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring", className)}
     >
       <StatusGlyph status={statusOf(task.status)} label={statusLabel(task.status)} size={12} />
       <span className="shrink-0 tabular-nums">{shortId(task)}</span>

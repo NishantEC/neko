@@ -56,8 +56,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           data-slot="send"
           data-mode={isQueuing ? "queue" : "send"}
           className={cn(
-            "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
-            "bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover",
+            "sky-ink relative isolate flex size-9 items-center justify-center overflow-hidden rounded-full transition-[transform,opacity] duration-100 enabled:cursor-pointer disabled:pointer-events-none disabled:opacity-55 [&_svg]:pointer-events-none",
           )}
           disabled={disabled || isSendBusy || !hasSendableContent}
           aria-label={submitLabel}

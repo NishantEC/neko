@@ -62,7 +62,7 @@ function Choices({ value }: { value: Json }) {
               onClick={() => setSelected(index)}
               className={cn("flex items-start gap-2.5 rounded-lg px-2.5 py-2 text-start outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60", on && "bg-accent")}
             >
-              <span aria-hidden className={cn("mt-0.5 shrink-0", on ? "text-primary" : "text-muted-foreground")}>{on ? <CheckCircle weight="fill" size={18} /> : <Circle size={18} />}</span>
+              <span aria-hidden className={cn("mt-0.5 shrink-0", on ? "text-iris" : "text-muted-foreground")}>{on ? <CheckCircle weight="fill" size={18} /> : <Circle size={18} />}</span>
               <span className="flex min-w-0 flex-col gap-0.5">
                 <span>{str(option.label)}</span>
                 {str(option.detail) ? <span className="text-[13px] text-muted-foreground">{str(option.detail)}</span> : null}
@@ -166,7 +166,7 @@ function Chart({ value }: { value: Json }) {
           <div key={index} className="flex items-center gap-2.5">
             <span className="w-28 shrink-0 truncate text-end text-[12.5px] text-muted-foreground">{str(bar.label)}</span>
             <span className="h-3 flex-1 overflow-hidden rounded-sm bg-foreground/[0.06]">
-              <span className={cn("block h-full rounded-sm", bar.highlight ? "bg-warning" : "bg-primary/85")} style={{ width: `${Math.max(1, ((bar.value as number) / peak) * 100)}%` }} />
+              <span className={cn("block h-full rounded-sm", bar.highlight ? "bg-warning" : "bg-iris/85")} style={{ width: `${Math.max(1, ((bar.value as number) / peak) * 100)}%` }} />
             </span>
             <span className={cn("w-16 shrink-0 text-[12.5px] tabular-nums", bar.highlight ? "text-warning-foreground" : "text-foreground/75")}>{Number.isInteger(bar.value) ? (bar.value as number).toLocaleString() : (bar.value as number).toFixed(1)}{unit}</span>
           </div>

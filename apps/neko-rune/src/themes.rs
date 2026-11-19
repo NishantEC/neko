@@ -135,7 +135,7 @@ pub struct Resolved {
     pub info: String,
     pub border: String,
     pub code: String,
-    /// The border's opacity (`--border`): 0.07 in dark, 0.08 in light, 0.14 with a backdrop.
+    /// The border's opacity (`--border`): 0.06 in dark, 0.08 in light, 0.14 with a backdrop.
     pub border_alpha: f32,
     /// What the web's contrast rule measures besides the text greys (`contrastPairs` in `derive.js`).
     pub sidebar_foreground: String,
@@ -199,10 +199,11 @@ pub fn resolve(theme: &Value) -> Option<Resolved> {
     let muted = get("mutedForeground").unwrap_or_else(|| ensure(&mix(&fg, &bg, 0.38), &[&eff[0], &eff[1], &eff[2]], 4.5));
     let primary_foreground = get("primaryForeground").unwrap_or_else(|| best_on(&primary, &[&bg, white, black]));
     let all = [eff[0].as_str(), eff[1].as_str(), eff[2].as_str(), eff[3].as_str()];
-    let bubble = get("bubble").unwrap_or_else(|| if dark { mix(&bg, &primary, 0.35) } else { mix(white, &primary, 0.14) });
-    let bubble_foreground = get("bubbleForeground").unwrap_or_else(|| best_on(&bubble, &[&strong, white, black]));
+    // The user's message is a neutral pebble: the foreground at 4% over the page (design system 2026-11); a theme's own bubble keys are ignored.
+    let bubble = mix(&bg, &fg, 0.04);
+    let bubble_foreground = fg.clone();
     let status_foregrounds = [&destructive, &success, &warning, &info].map(|c| ensure(c, &all, 4.5));
-    let sidebar_foreground = ensure(&mix(&fg, &sidebar, 0.25), &[&eff[3]], 4.5);
+    let sidebar_foreground = ensure(&mix(&fg, &sidebar, 0.36), &[&eff[3]], 4.5);
     Some(Resolved {
         sidebar_foreground,
         bubble,
@@ -210,9 +211,9 @@ pub fn resolve(theme: &Value) -> Option<Resolved> {
         status_foregrounds,
         effective: eff.clone(),
         dark,
-        code: mix(&bg, &fg, 0.04),
+        code: card.clone(),
         border: get("border").unwrap_or_else(|| fg.clone()),
-        border_alpha: if backdrop.is_some() { 0.14 } else if dark { 0.07 } else { 0.08 },
+        border_alpha: if backdrop.is_some() { 0.14 } else if dark { 0.06 } else { 0.08 },
         strong,
         muted,
         primary_foreground,
@@ -407,7 +408,7 @@ mod tests {
             let c = &t.colors;
             // A frosted theme's surfaces are translucent in the web; the solid colours behind them are what Rune paints.
             let frosted = css["background"].starts_with("rgba");
-            let pairs = [("foreground", &c.foreground), ("strong", &c.strong), ("primary", &c.primary), ("muted-foreground", &c.muted), ("destructive", &c.destructive), ("success", &c.success), ("warning", &c.warning), ("info", &c.info)];
+            let pairs = [("foreground", &c.foreground), ("strong", &c.strong), ("iris", &c.primary), ("muted-foreground", &c.muted), ("destructive", &c.destructive), ("success", &c.success), ("warning", &c.warning), ("info", &c.info)];
             for (name, ours) in pairs {
                 assert_eq!(&css[name], ours, "{}: --{name}", t.id);
             }
@@ -416,7 +417,7 @@ mod tests {
                     assert_eq!(&css[name], ours, "{}: --{name}", t.id);
                 }
             }
-            for (name, ours) in [("sidebar-foreground", &c.sidebar_foreground), ("bubble", &c.bubble), ("bubble-foreground", &c.bubble_foreground), ("destructive-foreground", &c.status_foregrounds[0]), ("success-foreground", &c.status_foregrounds[1]), ("warning-foreground", &c.status_foregrounds[2]), ("info-foreground", &c.status_foregrounds[3])] {
+            for (name, ours) in [("sidebar-foreground", &c.sidebar_foreground), ("bubble-foreground", &c.bubble_foreground), ("destructive-foreground", &c.status_foregrounds[0]), ("success-foreground", &c.status_foregrounds[1]), ("warning-foreground", &c.status_foregrounds[2]), ("info-foreground", &c.status_foregrounds[3])] {
                 assert_eq!(&css[name], ours, "{}: --{name}", t.id);
             }
             let (edge, alpha) = rgba(&css["border"]);

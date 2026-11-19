@@ -86,7 +86,7 @@ function NeedsYouCount() {
   const { waitingOnYou } = useShellStatus();
   if (waitingOnYou <= 0) return null;
   return (
-    <span data-slot="state-chip" data-tone="amber" aria-label={`${waitingOnYou} waiting on you`} className="ms-auto shrink-0 text-xs font-medium tabular-nums text-warning-foreground">
+    <span data-slot="state-chip" data-tone="amber" aria-label={`${waitingOnYou} waiting on you`} className="ms-auto shrink-0 text-[12.5px] tabular-nums text-warning-foreground">
       {waitingOnYou}
     </span>
   );
@@ -98,13 +98,13 @@ function NeedsYouCount() {
 
 function WorkspaceAvatar({ name }: { name: string }) {
   return (
-    <span aria-hidden className="sky-pebble flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold">
+    <span aria-hidden className="sky-pebble flex size-5 shrink-0 items-center justify-center rounded-full text-[11.5px] font-semibold">
       {name.trim().charAt(0).toUpperCase() || "N"}
     </span>
   );
 }
 
-const MENU_ROW = "flex h-8 cursor-pointer items-center gap-2.5 rounded-md px-2 text-sm";
+const MENU_ROW = "flex min-h-9 cursor-pointer items-center gap-2.5 rounded-[14px] px-2.5 text-[13px]";
 
 function WorkspaceSwitcher() {
   const { id, current, workspaces, select } = useSelectedWorkspace();
@@ -115,7 +115,7 @@ function WorkspaceSwitcher() {
         data-slot="workspace-switcher"
         aria-label={`Workspace: ${name}`}
         className={cn(
-          "flex h-8 w-full min-w-0 items-center gap-1 rounded-[12px] px-1 text-start text-sm font-medium text-foreground transition-colors duration-150",
+          "flex h-9 w-full min-w-0 items-center gap-1 rounded-full px-2.5 text-start text-sm font-medium text-foreground transition-colors duration-150",
           "hover:bg-foreground/[0.04] data-[popup-open]:bg-foreground/[0.06]",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
         )}
@@ -158,14 +158,14 @@ function SearchItem() {
       onClick={openPalette}
       aria-label="Open the command palette"
       className={cn(
-        "sky-control group/nav relative flex w-full items-center gap-3 text-sm text-foreground/65 transition-colors duration-150 hover:bg-foreground/[0.04] hover:text-foreground",
+        "sky-row group/nav relative flex w-full items-center gap-3 text-sm text-foreground/75 transition-colors duration-150 hover:bg-foreground/[0.04] hover:text-foreground",
         "px-3 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-2",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
       )}
     >
-      <MagnifyingGlass size={16} className="relative z-10 shrink-0" />
-      <span className="min-w-0 flex-1 truncate text-start font-medium group-data-[collapsible=icon]:hidden">Search</span>
-      <Kbd className="bg-transparent group-data-[collapsible=icon]:hidden"><CommandIcon size={11} />K</Kbd>
+      <MagnifyingGlass size={18} className="relative z-10 shrink-0" />
+      <span className="min-w-0 flex-1 truncate text-start group-data-[collapsible=icon]:hidden">Search</span>
+      <Kbd className="bg-transparent opacity-55 group-data-[collapsible=icon]:hidden"><CommandIcon size={11} />K</Kbd>
     </button>
   );
   if (state !== "collapsed") return button;
@@ -192,14 +192,14 @@ function MorePages({ pages, route, row }: { pages: PageDef[]; route: string; row
       data-slot="more-pages"
       aria-label="More pages"
       className={cn(
-        "sky-control group/nav relative flex w-full items-center gap-3 text-sm transition-colors duration-150 hover:bg-foreground/[0.04] hover:text-foreground",
+        "sky-row group/nav relative flex w-full items-center gap-3 text-sm transition-colors duration-150 hover:bg-foreground/[0.04] hover:text-foreground",
         "px-3 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-2",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 data-[popup-open]:bg-foreground/[0.06]",
-        here ? "text-foreground" : "text-foreground/65",
+        here ? "text-foreground" : "text-foreground/75",
       )}
     >
-      <DotsThree size={16} weight="bold" className="relative z-10 shrink-0" />
-      <span className="min-w-0 flex-1 truncate text-start font-medium group-data-[collapsible=icon]:hidden">More</span>
+      <DotsThree size={19} weight="bold" className="relative z-10 shrink-0" />
+      <span className="min-w-0 flex-1 truncate text-start group-data-[collapsible=icon]:hidden">More</span>
     </PopoverTrigger>
   );
   return (
@@ -210,8 +210,8 @@ function MorePages({ pages, route, row }: { pages: PageDef[]; route: string; row
           <TooltipContent side="right">More pages</TooltipContent>
         </Tooltip>
       ) : trigger}
-      <PopoverContent data-slot="more-pages-menu" side="right" align="start" sideOffset={10} className="sky w-56 gap-0.5 p-1.5">
-        <nav aria-label="More pages" data-slot="sidebar-more" className="flex flex-col gap-0.5">{pages.map((p) => row(p))}</nav>
+      <PopoverContent data-slot="more-pages-menu" side="right" align="start" sideOffset={10} className="sky w-56 gap-1 p-1.5">
+        <nav aria-label="More pages" data-slot="sidebar-more" className="flex flex-col gap-1">{pages.map((p) => row(p))}</nav>
       </PopoverContent>
     </Popover>
   );
@@ -282,18 +282,18 @@ export function AppSidebar({ route }: { route: string }) {
             <a
               href={hrefFor(HOME)}
               title="Neko"
-              className="sky-pebble flex size-7 shrink-0 items-center justify-center rounded-[9px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+              className="sky-pebble flex size-7 shrink-0 items-center justify-center rounded-[10px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >
               <Mark className="size-3.5" />
               <span className="sr-only">Neko</span>
             </a>
-            <span aria-hidden className="text-lg font-light text-muted-foreground/40 group-data-[collapsible=icon]:hidden">
+            <span aria-hidden className="text-lg font-normal text-muted-foreground/40 group-data-[collapsible=icon]:hidden">
               /
             </span>
             <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
               <WorkspaceSwitcher />
             </div>
-            <SidebarTrigger className="size-7 shrink-0 text-muted-foreground hover:text-foreground" />
+            <SidebarTrigger className="size-8 shrink-0 text-muted-foreground hover:text-foreground" />
           </div>
           <SearchItem />
         </SidebarHeader>
@@ -319,7 +319,7 @@ export function AppSidebar({ route }: { route: string }) {
         </NavContent>
 
         <SidebarFooter className="px-0 pb-2 pt-1 gap-0">
-          <div className="flex flex-col gap-2 px-2">
+          <div className="flex flex-col gap-2 px-3">
             <SidebarStatus />
           </div>
         </SidebarFooter>

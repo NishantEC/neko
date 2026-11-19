@@ -172,13 +172,13 @@ function SettingsBody() {
       <div className="flex min-h-0 flex-1 flex-col min-[900px]:flex-row">
         <aside
           data-slot="settings-rail"
-          className="flex shrink-0 flex-col gap-3 border-b border-border px-4 pt-3 pb-2 min-[900px]:w-60 min-[900px]:gap-4 min-[900px]:overflow-y-auto min-[900px]:border-e min-[900px]:border-b-0 min-[900px]:px-3 min-[900px]:pt-6 min-[900px]:pb-6"
+          className="flex shrink-0 flex-col gap-3 px-4 pt-3 pb-2 min-[900px]:w-[248px] min-[900px]:gap-4 min-[900px]:overflow-y-auto min-[900px]:px-3 min-[900px]:pt-6 min-[900px]:pb-6"
         >
           {searchBox}
           <SettingsRail current={query.trim() ? null : section} sections={sections} onOpen={open} />
         </aside>
         <div data-slot="setup-page" className="settings-surface min-h-0 flex-1 overflow-y-auto">
-          <div className="w-full max-w-[52rem] px-10 pt-6 pb-24">
+          <div className="w-full px-6 pt-8 pb-24 md:px-9">
             <div className="settings-stack flex flex-col">
               {query.trim() ? (
                 <section aria-label="Search results" data-slot="settings-results" className="flex flex-col gap-3">
@@ -242,8 +242,8 @@ function SettingsRail({ current, sections, onOpen }: { current: string | null; s
       className="no-scrollbar -mx-1 flex gap-1 overflow-x-auto px-1 pb-1 min-[900px]:mx-0 min-[900px]:flex-col min-[900px]:gap-4 min-[900px]:overflow-visible min-[900px]:px-0 min-[900px]:pb-0"
     >
       {groups.map((group) => (
-        <div key={group} role="group" aria-label={group} className="contents min-[900px]:flex min-[900px]:flex-col min-[900px]:gap-0.5">
-          <span aria-hidden className="hidden px-3 pb-1 text-xs font-medium text-muted-foreground min-[900px]:block">{group}</span>
+        <div key={group} role="group" aria-label={group} className="contents min-[900px]:flex min-[900px]:flex-col min-[900px]:gap-1">
+          <span aria-hidden className="hidden px-3 pb-1 text-[12.5px] font-normal text-muted-foreground min-[900px]:block">{group}</span>
           {sections.filter((s) => s.group === group).map((entry) => {
             const active = entry.id === current;
             return (
@@ -254,9 +254,9 @@ function SettingsRail({ current, sections, onOpen }: { current: string | null; s
                 onClick={() => onOpen(entry.id)}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "inline-flex h-9 shrink-0 items-center rounded-full px-4 text-start text-[13.5px] outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring/60",
-                  "min-[900px]:w-full min-[900px]:rounded-lg min-[900px]:px-3",
-                  active ? "bg-foreground/[0.07] font-medium text-foreground" : "text-foreground/65 hover:bg-foreground/[0.04] hover:text-foreground",
+                  "inline-flex h-9 shrink-0 items-center rounded-3xl px-4 text-start text-sm outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring/60",
+                  "min-[900px]:w-full min-[900px]:px-3",
+                  active ? "bg-foreground/[0.06] text-foreground" : "text-foreground/75 hover:bg-foreground/[0.04] hover:text-foreground",
                 )}
               >
                 <span className="truncate">{entry.title}</span>

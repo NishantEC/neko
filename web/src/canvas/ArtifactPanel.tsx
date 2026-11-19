@@ -210,7 +210,7 @@ export function ArtifactPanel({
           </Button>
         )}
       </div>
-      {commenting ? <p role="status" className="border-b border-border/70 bg-primary/8 px-3 py-1.5 text-xs text-foreground">Click an element in the design to comment on it. Esc stops.</p> : null}
+      {commenting ? <p role="status" className="border-b border-border/70 bg-iris/8 px-3 py-1.5 text-xs text-foreground">Click an element in the design to comment on it. Esc stops.</p> : null}
       {version?.note ? <p className="border-b border-border/70 px-3 py-1.5 text-xs text-muted-foreground">{version.note}</p> : null}
       <div className="min-h-0 flex-1">
         <ArtifactFrame

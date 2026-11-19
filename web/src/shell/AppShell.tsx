@@ -69,8 +69,8 @@ function Missing({ route }: { route: string }) {
 /** Above an overridden built-in: it says so, and offers the way back. */
 function CustomisedStrip({ id, title, plugin }: { id: string; title: string; plugin?: string }) {
   return (
-    <div data-slot="customised-strip" className="flex shrink-0 items-center gap-3 border-b border-border/60 bg-primary/[0.05] px-6 py-1.5 text-[12.5px] text-muted-foreground">
-      <span className="rounded-full bg-primary/15 px-2 py-px text-[11px] font-medium text-primary">Customised</span>
+    <div data-slot="customised-strip" className="flex shrink-0 items-center gap-3 border-b border-border/60 bg-iris/[0.05] px-6 py-1.5 text-[12.5px] text-muted-foreground">
+      <span className="rounded-full bg-iris/15 px-2 py-px text-[11px] font-medium text-iris">Customised</span>
       <span className="min-w-0 flex-1 truncate">You are using your own version of {title}{plugin ? <> from “{plugin}”</> : null}.</span>
       <Button
         type="button"
@@ -179,9 +179,9 @@ export function AppShell() {
   return (
     <TooltipProvider>
       <ContextMenuHost>
-      <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen} className="sky relative isolate h-svh min-h-0 has-data-[variant=inset]:bg-background">
+      <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen} className="sky relative isolate h-svh min-h-0">
         <AppSidebar route={route} />
-        <SidebarInset className="relative flex h-svh min-h-0 min-w-0 flex-col overflow-hidden md:peer-data-[variant=inset]:m-0 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:shadow-none md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-0">
+        <SidebarInset className="relative flex h-[calc(100svh-1rem)] min-h-0 min-w-0 flex-col overflow-hidden max-md:h-svh">
           <MobileTopBar />
           <TabStrip />
           <InspectorHost>

@@ -6,7 +6,7 @@ import * as React from "react";
 import { cn } from "@/ui/lib/utils";
 
 const itemBase =
-  "group/context-menu-item relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-inset:pl-8 data-highlighted:bg-accent data-highlighted:text-accent-foreground [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0";
+  "group/context-menu-item relative flex min-h-9 cursor-default items-center gap-2 rounded-[14px] px-2.5 py-1.5 text-[13px] outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-inset:pl-8 data-highlighted:bg-accent data-highlighted:text-accent-foreground [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0";
 
 function ContextMenu(props: React.ComponentProps<typeof ContextMenuPrimitive.Root>) {
   return <ContextMenuPrimitive.Root data-slot="context-menu" {...props} />;
@@ -66,7 +66,7 @@ function ContextMenuContent({
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"
           className={cn(
-            "origin-(--transform-origin) min-w-36 overflow-x-hidden overflow-y-auto rounded-md bg-popover p-1 text-popover-foreground smooth-shadow-ring-md outline-none transition-[transform,scale,opacity] data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:scale-95 data-ending-style:opacity-0",
+            "origin-(--transform-origin) min-w-36 overflow-x-hidden overflow-y-auto rounded-2xl bg-popover p-[5px] text-popover-foreground shadow-[var(--sky-drop)] outline-none transition-[transform,scale,opacity] data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:scale-95 data-ending-style:opacity-0",
             className,
           )}
           {...props}
@@ -149,7 +149,7 @@ function ContextMenuSubContent({
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-sub-content"
           className={cn(
-            "origin-(--transform-origin) min-w-32 overflow-hidden rounded-md bg-popover p-1 text-popover-foreground smooth-shadow-ring-lg outline-none transition-[transform,scale,opacity] data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:scale-95 data-ending-style:opacity-0",
+            "origin-(--transform-origin) min-w-32 overflow-hidden rounded-2xl bg-popover p-[5px] text-popover-foreground shadow-[var(--sky-drop)] outline-none transition-[transform,scale,opacity] data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:scale-95 data-ending-style:opacity-0",
             className,
           )}
           {...props}

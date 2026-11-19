@@ -7,8 +7,9 @@
  * this file only spaces the sections and keeps the footer flat.
  * Neko: the selectors name Neko's kit slots (setup-panel-footer).
  */
+/* Design system 2026-11 (5): 28 between a section and the next. */
 .sky .settings-surface .settings-stack {
-  gap: 12px;
+  gap: 28px;
 }
 
 .sky .settings-surface [data-slot="setup-panel-footer"] {

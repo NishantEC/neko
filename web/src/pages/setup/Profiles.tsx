@@ -79,7 +79,7 @@ function ProfilePanel({ snapshot, profile, onEdit }: { snapshot: Json; profile: 
       <div className="flex min-h-8 items-center gap-3">
         <button type="button" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} details for ${str(profile.name)}`} onClick={() => setOpen(!open)} className="flex min-w-0 flex-1 items-baseline gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
           <h3 className="shrink-0 truncate text-[13.5px] font-normal text-foreground">{str(profile.name)}</h3>
-          {active ? <span className="shrink-0 text-[12.5px] text-primary">Default</span> : null}
+          {active ? <span className="shrink-0 text-[12.5px] text-iris">Default</span> : null}
           <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground" title={instructions || undefined}>{instructions || "No special instructions"}</span>
           <span className="shrink-0 text-[12.5px] text-muted-foreground/70">{assigned.length ? `Used in ${assigned.join(", ")}` : null}</span>
         </button>

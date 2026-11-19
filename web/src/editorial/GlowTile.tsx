@@ -51,7 +51,7 @@ export const GlowTile: React.FC<GlowTileProps> = ({
         onClick
           ? cn(
               "cursor-pointer transition-[transform,border-color,box-shadow] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
-              "hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-[0_12px_32px_-16px_rgba(0,0,0,0.35)]",
+              "hover:-translate-y-0.5 hover:border-iris/30 hover:shadow-[0_12px_32px_-16px_rgba(0,0,0,0.35)]",
               "active:translate-y-0 active:scale-[0.995] active:duration-100",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
               "motion-reduce:transform-none motion-reduce:transition-none",

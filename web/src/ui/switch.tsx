@@ -1,4 +1,6 @@
 // from ui-kit packages/ui/src/components/switch.tsx
+// Design system 2026-11 (4.4): the settings switch is 46 x 28 (padding 4, thumb 20, travel 18, 200 ms); `size="sm"` is the base 36 x 22 (thumb 18).
+// Off is the well; on is the ink (the pebble's text colour), no shadow.
 import { Switch as SwitchPrimitive } from "@base-ui/react/switch";
 import type * as React from "react";
 
@@ -16,14 +18,14 @@ function Switch({
       data-slot="switch"
       data-size={size}
       className={cn(
-        "ui-switch ui-round data-checked:bg-primary data-unchecked:bg-input focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 dark:data-unchecked:bg-input/80 shrink-0 rounded-full border border-transparent focus-visible:ring-[3px] aria-invalid:ring-[3px] data-[size=default]:h-[22px] data-[size=default]:w-9 data-[size=default]:p-px data-[size=sm]:h-[14px] data-[size=sm]:w-[24px] peer group/switch relative inline-flex items-center transition-[background-color,box-shadow] duration-150 motion-reduce:transition-none outline-none after:absolute after:-inset-x-3 after:-inset-y-2 data-disabled:cursor-not-allowed data-disabled:opacity-50",
+        "ui-switch ui-round sky-switch shrink-0 rounded-full border border-transparent data-[size=default]:h-7 data-[size=default]:w-[46px] data-[size=default]:p-1 data-[size=sm]:h-[22px] data-[size=sm]:w-9 data-[size=sm]:p-0.5 peer group/switch relative inline-flex items-center transition-[background-color,box-shadow] duration-200 motion-reduce:transition-none outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring aria-invalid:shadow-[0_0_0_2px_color-mix(in_oklab,var(--destructive)_55%,transparent)] after:absolute after:-inset-x-3 after:-inset-y-2 data-disabled:cursor-not-allowed data-disabled:opacity-50",
         className,
       )}
       {...props}
     >
       <SwitchPrimitive.Thumb
         data-slot="switch-thumb"
-        className="ui-switch-thumb ui-round bg-background dark:data-unchecked:bg-foreground dark:data-checked:bg-primary-foreground rounded-full group-data-[size=default]/switch:size-[18px] group-data-[size=sm]/switch:size-3 group-data-[size=default]/switch:data-checked:translate-x-[14px] group-data-[size=sm]/switch:data-checked:translate-x-[calc(100%-2px)] group-data-[size=default]/switch:data-unchecked:translate-x-0 group-data-[size=sm]/switch:data-unchecked:translate-x-0 pointer-events-none block ring-0 transition-[translate] duration-150 motion-reduce:transition-none"
+        className="ui-switch-thumb ui-round sky-switch-thumb rounded-full group-data-[size=default]/switch:size-5 group-data-[size=sm]/switch:size-[18px] group-data-[size=default]/switch:data-checked:translate-x-[18px] group-data-[size=sm]/switch:data-checked:translate-x-3.5 data-unchecked:translate-x-0 pointer-events-none block ring-0 transition-[translate,background-color] duration-200 ease-[var(--ease-out)] motion-reduce:transition-none"
       />
     </SwitchPrimitive.Root>
   );

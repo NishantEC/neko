@@ -9,7 +9,7 @@ export type ChipTone = "attention" | "review" | "running" | "done" | "failed" | 
 const TONES: Record<ChipTone, string> = {
   attention: "bg-warning/12 text-warning-foreground",
   review: "bg-info/12 text-info-foreground",
-  running: "bg-primary/12 text-primary",
+  running: "bg-iris/12 text-iris",
   done: "bg-success/12 text-success-foreground",
   failed: "bg-destructive/12 text-destructive-foreground",
   neutral: "bg-foreground/[0.06] text-foreground/70",

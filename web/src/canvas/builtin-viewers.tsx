@@ -116,7 +116,7 @@ function PageViewer({ artifact, version, url, commenting = false, onPick, onCanc
       onLoad={post}
       data-slot="artifact-frame"
       data-commenting={commenting || undefined}
-      className={cn("block h-full w-full border-0 bg-white", commenting && "ring-2 ring-inset ring-primary")}
+      className={cn("block h-full w-full border-0 bg-white", commenting && "ring-2 ring-inset ring-iris")}
     />
   );
 }

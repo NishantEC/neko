@@ -176,9 +176,9 @@ export function NotchCard(props: NotchCardProps) {
       style={style}
       className={cn(
         "group/card relative flex w-full flex-col rounded-[16px] p-[1.5px] text-start transition-[background-color,box-shadow] duration-150",
-        "[--fuse-base:var(--card)] dark:[--fuse-base:var(--sky-pebble)] [--fuse:var(--fuse-base)] [--frame:var(--fuse)]",
+        "[--fuse-base:var(--card)] dark:[--fuse-base:var(--sky-pebble-solid)] [--fuse:var(--fuse-base)] [--frame:var(--fuse)]",
         !ghost && !lifted && !selected && "hover:[--fuse:color-mix(in_oklab,var(--foreground)_4%,var(--fuse-base))]",
-        selected && "[--frame:var(--primary)] [--fuse:color-mix(in_oklab,var(--primary)_6%,var(--fuse-base))]",
+        selected && "[--frame:var(--iris)] [--fuse:color-mix(in_oklab,var(--iris)_6%,var(--fuse-base))]",
         "bg-[var(--frame)]",
         "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-1 has-[:focus-visible]:ring-offset-background",
         lifted && "shadow-[0_10px_24px_-6px_rgb(0_0_0/0.28)]",

@@ -12,8 +12,6 @@
 @import "tw-animate-css";
 @import "shadow-plugin";
 @import "@fontsource-variable/inter/opsz.css";
-@import "@fontsource-variable/fraunces/opsz.css";
-@import "@fontsource-variable/fraunces/opsz-italic.css";
 @import "./component-surfaces.css";
 @import "./motion.css";
 /* T3 Code's chat tokens, live-activity shimmer and .chat-markdown rules. */
@@ -32,7 +30,7 @@
  * `.light` subtree inside a dark theme correct. */
 .light,
 .light * {
-  --smooth-ring-color: rgba(0, 0, 0, 0.06);
+  --smooth-ring-color: rgba(0, 0, 0, 0.05);
 }
 
 /* Dark variants fire inside any `.dark` ancestor unless a nearer `.light` shadows it. */
@@ -92,7 +90,8 @@ html[data-backdrop] svg[data-status] {
   --font-sans: "Inter Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   --font-display: var(--font-sans);
   --font-body: var(--font-sans);
-  --font-serif: "Fraunces Variable", "Fraunces", Georgia, serif;
+  /* No serif face since the 2026-11 design system (one typeface). The name stays so a plugin written against it still renders, in Inter. */
+  --font-serif: var(--font-sans);
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.76, 0, 0.24, 1);
@@ -140,6 +139,8 @@ html[data-backdrop] svg[data-status] {
   --color-background: var(--background);
   --color-code: var(--code);
   --color-code-foreground: var(--code-foreground);
+  --color-iris: var(--iris);
+  --color-iris-foreground: var(--iris-foreground);
   --color-bubble: var(--bubble);
   --color-bubble-foreground: var(--bubble-foreground);
 
@@ -232,8 +233,17 @@ html[data-backdrop] svg[data-status] {
     @apply bg-background text-foreground;
     font-family: var(--font-body);
     font-size: 14px;
-    line-height: 1.625;
+    line-height: 1.5;
+    font-weight: 400;
     -webkit-font-smoothing: antialiased;
+  }
+  /* Weights are 400, 500 and 600 only (design system 2026-11 section 3): a heading is 600, never the browser's 700. */
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+  }
+  /* Numbers that can change are tabular. */
+  .tabular-nums, [data-slot="page-count"] {
+    font-variant-numeric: tabular-nums;
   }
   input,
   textarea,

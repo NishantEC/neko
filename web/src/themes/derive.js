@@ -135,19 +135,25 @@ export function resolveColors(theme) {
   // An authored colour is used as written (a low-contrast one is reported, never silently changed); a derived one is nudged until it passes.
   const muted = set.mutedForeground ?? ensure(mix(fg, bg, 0.38), [eff.background, eff.card, eff.popover]);
   const primaryForeground = set.primaryForeground ?? bestOn(primary, [bg, white, black]);
-  const bubble = set.bubble ?? (dark ? mix(bg, primary, 0.35) : mix(white, primary, 0.14));
-  const bubbleForeground = set.bubbleForeground ?? bestOn(bubble, [strong, white, black]);
+  // Ink (design system 2026-11, D1): the primary action is the text colour, not a hue. The accent a theme
+  // writes as `primary` stays as Iris (`--iris`), the colour of "now" and links; it is no longer the button.
+  const ink = fg;
+  const inkForeground = bestOn(ink, [dark ? "#262626" : "#fafafa", bg, white, black]);
+  // The user's message is a neutral pebble, the foreground at 4% (never a hue): a theme's own `bubble` keys are read for
+  // compatibility and ignored.
+  const bubble = over(rgbaHex(fg, 0.04), bg);
+  const bubbleForeground = fg;
   return {
-    background: bg, card, popover, sidebar, foreground: fg, strong, primary, primaryForeground, bubble, bubbleForeground,
+    background: bg, card, popover, sidebar, foreground: fg, strong, primary, primaryForeground, ink, inkForeground, bubble, bubbleForeground,
     mutedForeground: muted,
-    sidebarForeground: ensure(mix(fg, sidebar, 0.25), [eff.sidebar]),
+    sidebarForeground: ensure(mix(fg, sidebar, 0.36), [eff.sidebar]),
     destructive, success, warning, info,
     destructiveForeground: ensure(destructive, surfaces),
     successForeground: ensure(success, surfaces),
     warningForeground: ensure(warning, surfaces),
     infoForeground: ensure(info, surfaces),
     border: set.border ?? fg,
-    code: mix(bg, fg, 0.04),
+    code: card,
     codeForeground: fg,
     dark,
   };
@@ -163,7 +169,7 @@ export function deriveVars(theme) {
   const dark = c.dark;
   const wash = (a) => rgba(c.foreground, a);
   const backdrop = theme.backdrop;
-  const hair = backdrop ? 0.14 : dark ? 0.07 : 0.08;
+  const hair = backdrop ? 0.14 : dark ? 0.06 : 0.08;
   const alpha = (name, value) => (backdrop && BACKDROP_ALPHA[name] != null ? rgba(value, BACKDROP_ALPHA[name]) : value);
   const edge = c.border;
   const scrollbar = dark ? "#ffffff" : "#000000";
@@ -175,19 +181,21 @@ export function deriveVars(theme) {
     ["--card-foreground", c.foreground],
     ["--popover", alpha("popover", c.popover)],
     ["--popover-foreground", c.foreground],
-    ["--primary", c.primary],
-    ["--primary-foreground", c.primaryForeground],
-    ["--secondary", wash(dark ? 0.05 : 0.04)],
+    ["--primary", c.ink],
+    ["--primary-foreground", c.inkForeground],
+    ["--iris", c.primary],
+    ["--iris-foreground", c.primaryForeground],
+    ["--secondary", wash(0.04)],
     ["--secondary-foreground", c.foreground],
-    ["--muted", wash(dark ? 0.04 : 0.04)],
+    ["--muted", wash(0.04)],
     ["--muted-foreground", c.mutedForeground],
-    ["--accent", wash(dark ? 0.06 : 0.04)],
+    ["--accent", wash(0.04)],
     ["--accent-foreground", c.strong],
     ["--destructive", c.destructive],
     ["--destructive-foreground", c.destructiveForeground],
     ["--border", rgba(edge, hair)],
     ["--input", rgba(edge, hair + 0.02)],
-    ["--ring", rgba(c.primary, dark ? 0.65 : 0.55)],
+    ["--ring", dark ? "#737373" : "#a1a1a1"],
     ["--info", c.info],
     ["--info-foreground", c.infoForeground],
     ["--success", c.success],
@@ -203,15 +211,15 @@ export function deriveVars(theme) {
     ["--sidebar-foreground", c.sidebarForeground],
     ["--sidebar-primary", c.strong],
     ["--sidebar-primary-foreground", c.background],
-    ["--sidebar-accent", wash(dark ? 0.07 : 0.06)],
+    ["--sidebar-accent", wash(0.04)],
     ["--sidebar-accent-foreground", c.strong],
-    ["--sidebar-border", rgba(edge, backdrop ? hair : dark ? 0.06 : 0.07)],
-    ["--sidebar-ring", rgba(c.primary, dark ? 0.65 : 0.55)],
+    ["--sidebar-border", rgba(edge, backdrop ? hair : dark ? 0.05 : 0.06)],
+    ["--sidebar-ring", dark ? "#737373" : "#a1a1a1"],
     ["--code", alpha("code", c.code)],
     ["--code-foreground", c.codeForeground],
-    ["--bubble", c.bubble],
+    ["--bubble", wash(0.04)],
     ["--bubble-foreground", c.bubbleForeground],
-    ["--panel", rgba(backdrop ? c.card : dark ? mix(c.card, c.background, 0.25) : "#ffffff", backdrop ? 0.42 : dark ? 0.55 : 0.7)],
+    ["--panel", rgba(backdrop ? c.card : dark ? "#171717" : "#ffffff", backdrop ? 0.42 : dark ? 0.55 : 0.7)],
     ["--panel-border", rgba(dark ? "#ffffff" : "#000000", backdrop ? 0.16 : dark ? 0.1 : 0.06)],
     ["--panel-highlight", rgba("#ffffff", backdrop ? 0.1 : dark ? 0.06 : 0.6)],
     ["--glow-violet", rgba(c.primary, dark ? 0.2 : 0.1)],
@@ -221,7 +229,7 @@ export function deriveVars(theme) {
     ["--glow-rose", rgba("#e255c4", dark ? 0.2 : 0.1)],
     ["--scrollbar-thumb", rgba(scrollbar, dark ? 0.16 : 0.18)],
     ["--scrollbar-thumb-hover", rgba(scrollbar, dark ? 0.3 : 0.32)],
-    ["--smooth-ring-color", backdrop ? "rgba(255, 255, 255, 0.16)" : dark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.06)"],
+    ["--smooth-ring-color", backdrop ? "rgba(255, 255, 255, 0.16)" : dark ? "rgba(255, 255, 255, 0.18)" : "rgba(0, 0, 0, 0.05)"],
     ["color-scheme", dark ? "dark" : "light"],
   ];
   if (backdrop) {
@@ -276,8 +284,9 @@ export function contrastPairs(theme) {
   }
   for (const name of ["background", "card", "popover"]) add(`mutedForeground on ${name}`, c.mutedForeground, surfaces[name]);
   add("sidebarForeground on sidebar", c.sidebarForeground, surfaces.sidebar);
-  add("primaryForeground on primary", c.primaryForeground, c.primary);
+  add("irisForeground on iris", c.primaryForeground, c.primary);
   add("bubbleForeground on bubble", c.bubbleForeground, c.bubble);
+  add("primaryForeground on ink", c.inkForeground, c.ink);
   add("codeForeground on code", c.codeForeground, theme.backdrop ? over(rgbaHex(c.code, BACKDROP_ALPHA.code), surfaces.background) : c.code);
   for (const status of ["destructive", "success", "warning", "info"]) {
     add(`${status}-foreground on background`, c[`${status}Foreground`], surfaces.background);
@@ -312,10 +321,11 @@ export function structureFailures(theme) {
     if (r < min) failures.push({ label, ratio: r });
   };
   if (!theme.backdrop) {
-    step("card against background", c.card, c.background, 1.03);
+    // A card that is the page colour on purpose (Neko Light: the grouped slab and the wells carry the steps) is not flat.
+    if (c.card !== c.background) step("card against background", c.card, c.background, 1.03);
     step("sidebar against background", c.sidebar, c.background, 1.02);
   }
-  step("border against card", over(rgbaHex(c.border, theme.backdrop ? 0.14 : c.dark ? 0.07 : 0.08), c.card), c.card, 1.05);
+  step("border against card", over(rgbaHex(c.border, theme.backdrop ? 0.14 : c.dark ? 0.06 : 0.08), c.card), c.card, 1.05);
   return failures;
 }
 

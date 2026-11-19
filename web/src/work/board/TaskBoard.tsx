@@ -95,7 +95,7 @@ function DropSlot({ stage, task, hovered }: { stage: Stage; task: Task; hovered:
       data-drop={ok ? "ok" : "refuse"}
       className={cn(
         "flex min-h-[64px] items-center justify-center rounded-xl border border-dashed px-3 py-3 text-center text-[12.5px] leading-[1.4]",
-        ok ? "border-primary/50 bg-primary/[0.06] text-primary" : "border-foreground/15 text-muted-foreground",
+        ok ? "border-iris/50 bg-iris/[0.06] text-iris" : "border-foreground/15 text-muted-foreground",
         !hovered && "opacity-0",
         "transition-opacity duration-150",
       )}
@@ -125,7 +125,7 @@ function Column({ stage, tasks, active, props, menu, solo }: { stage: Stage; tas
         // no panel: the column is its header and its cards; the 1.5px inset keeps the hover and drop wash off the cards
         "group/col -mx-1.5 flex min-h-0 flex-col rounded-2xl px-1.5 transition-[background-color,box-shadow,opacity] duration-150",
         empty && !solo ? "w-[144px] shrink-0" : "min-w-[208px] flex-1",
-        target && verdict.kind === "move" && (isOver ? "bg-primary/[0.06] ring-1 ring-primary/45" : "ring-1 ring-primary/15"),
+        target && verdict.kind === "move" && (isOver ? "bg-iris/[0.06] ring-1 ring-iris/45" : "ring-1 ring-iris/15"),
         target && verdict.kind === "refuse" && (isOver ? "ring-1 ring-foreground/20" : "opacity-55"),
       )}
     >

@@ -154,7 +154,7 @@ export function DeliveryCard({ task }: { task: Task }) {
   const Icon = url ? GitPullRequest : GitMerge;
   return (
     <Block data-slot="delivery" className="mt-6 flex items-center gap-3">
-      <Icon size={18} className="shrink-0 text-primary" aria-hidden />
+      <Icon size={18} className="shrink-0 text-iris" aria-hidden />
       <div className="min-w-0 flex-1">
         <div className="font-medium text-strong">{url ? `Pull request ${number}` : "Landed on main"}</div>
         <div className="truncate text-[12.5px] text-muted-foreground select-text">{url ? repo : landed.slice(0, 10)}</div>

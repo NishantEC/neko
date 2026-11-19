@@ -1,3 +1,5 @@
+// Design system 2026-11 (4.3): track 40 high, padding 3, gap 2, radius 24, the well; item 34 high, padding 14, radius 21, 14/500, muted until
+// selected; the selected thumb is the pebble and slides in 150 ms.
 // BoardUI's Segmented Control (github.com/BoardUI/boardui, MIT): a recessed track with a
 // raised thumb behind the selected segment that slides between segments. BoardUI builds it
 // on React Aria; Neko's primitives are Base UI, so this is the same look on Base UI's
@@ -42,15 +44,15 @@ export function SegmentedControl({ value, onValueChange, className, children, ..
       data-slot="segmented-control"
       value={[value]}
       onValueChange={(vals) => { const next = vals[0]; if (next && next !== value) onValueChange(next); }}
-      className={cn("relative inline-flex items-center gap-0.5 rounded-[10px] bg-foreground/[0.06] p-1", className)}
+      className={cn("sky-well relative inline-flex h-10 items-center gap-0.5 rounded-3xl p-[3px]", className)}
       {...rest}
     >
       <span
         aria-hidden
         className={cn(
-          "pointer-events-none absolute inset-y-1 start-0 rounded-md bg-card shadow-xs ring-1 ring-foreground/[0.06]",
+          "sky-pebble-fill pointer-events-none absolute inset-y-[3px] start-0 rounded-[21px]",
           "motion-reduce:transition-none",
-          ready && "transition-[transform,width] duration-200 ease-[var(--ease-out)]",
+          ready && "transition-[transform,width] duration-150 ease-[var(--ease-out)]",
         )}
         style={thumb ? { width: thumb.width, transform: `translateX(${thumb.left}px)` } : { opacity: 0 }}
       />
@@ -64,8 +66,8 @@ export function SegmentedControlItem({ className, ...props }: React.ComponentPro
     <Toggle
       data-slot="segmented-control-item"
       className={cn(
-        "relative z-10 inline-flex h-6 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 text-[13px] font-normal text-muted-foreground outline-none transition-colors duration-150",
-        "hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-pressed:font-medium data-pressed:text-strong [&_svg]:size-3.5",
+        "relative z-10 inline-flex h-[34px] cursor-pointer items-center justify-center gap-1.5 rounded-[21px] px-3.5 text-sm font-medium text-muted-foreground outline-none transition-colors duration-150",
+        "hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring data-pressed:text-[var(--sky-pebble-fg)] [&_svg]:size-4",
         className,
       )}
       {...props}

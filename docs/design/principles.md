@@ -49,6 +49,8 @@ content area, not the window chrome. Toolbars keep `.automatic` button styling.
 
 ## 4. Glass is for controls; content is opaque
 
+> Since 2026-11 the design system `docs/design/system-2026-11.md` is the authority for how the web UI looks (glass on the sidebar panel and the composer, pebble and ink controls, no outlines, a floating content panel); where sections 4 to 6 below disagree for the web, that file wins. The native sections stand until phase B.
+
 Liquid Glass (macOS 26) and materials are reserved for floating controls: the
 composer, toasts, the quick panel. Reading surfaces stay opaque on a neutral
 canvas. Every glass surface falls back to an opaque surface with a visible

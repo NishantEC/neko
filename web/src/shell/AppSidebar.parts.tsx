@@ -2,7 +2,9 @@
 // Neko: TanStack's <Link> is a plain hash <a href>, the nav item carries
 // `data-slot="nav-item"` and a right-hand slot (`trailing`, the Tasks count),
 // and a `small` row for the pages you set up once. The active pill is the same
-// motion layout pebble.
+// motion layout fill.
+// Design system 2026-11 (4.6): a nav row is 36 high, a full pill (radius 24), 14 px at weight 400, the icon 19 (regular; filled when active), text at 75% until
+// hovered (fill 4%) or active (full text, fill 6%, sliding on a spring); no raised pill, no shadow.
 import { useSidebar } from "@/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
 import type { Icon } from "@/ui/icons";
@@ -32,7 +34,7 @@ export function NavItem({
   trailing?: ReactNode;
   title?: string;
   className?: string;
-  /** The quieter row for the pages you set up once: 32px, 13px, a 14px icon. */
+  /** The row in the "More pages" menu: the same 36px pill, a 17px icon (the menu size). */
   small?: boolean;
   /** Always shows its label and never a tooltip (rows in the "More pages" menu, which the rail's state does not touch). */
   labelled?: boolean;
@@ -47,10 +49,10 @@ export function NavItem({
       aria-current={active ? "page" : undefined}
       className={cn(
         "group/nav relative flex items-center transition-colors duration-150",
-        small ? "h-8 gap-2.5 rounded-[16px] text-[13px]" : "sky-control gap-3 text-sm",
-        labelled ? "px-2.5" : "px-3 group-data-[collapsible=icon]:px-2 group-data-[collapsible=icon]:justify-center",
+        "sky-row gap-3 text-sm",
+        labelled ? "px-3" : "px-3 group-data-[collapsible=icon]:px-2 group-data-[collapsible=icon]:justify-center",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-        active ? "text-foreground" : cn(small ? "text-foreground/55" : "text-foreground/65", "hover:text-foreground hover:bg-foreground/[0.04]"),
+        active ? "text-foreground" : "text-foreground/75 hover:text-foreground hover:bg-foreground/[0.04]",
         className,
       )}
     >
@@ -59,16 +61,16 @@ export function NavItem({
           aria-hidden
           layoutId={indicatorId}
           transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 480, damping: 40 }}
-          style={{ borderRadius: small ? 16 : 24 }}
-          className="sky-pebble absolute inset-0"
+          style={{ borderRadius: 24 }}
+          className="absolute inset-0 bg-foreground/[0.06]"
         />
       ) : null}
       <ItemIcon
-        size={small ? 14 : 16}
+        size={small ? 17 : 19}
         weight={active ? "fill" : "regular"}
         className="relative z-10 shrink-0 transition-transform duration-150 group-active/nav:scale-90"
       />
-      <span className={cn("relative z-10 min-w-0 flex-1 truncate font-medium", !labelled && "group-data-[collapsible=icon]:hidden")}>{item.label}</span>
+      <span className={cn("relative z-10 min-w-0 flex-1 truncate", !labelled && "group-data-[collapsible=icon]:hidden")}>{item.label}</span>
       {trailing ? <span className={cn("relative z-10 flex shrink-0", !labelled && "group-data-[collapsible=icon]:hidden")}>{trailing}</span> : null}
     </a>
   );

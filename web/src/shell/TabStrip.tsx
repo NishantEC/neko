@@ -119,7 +119,7 @@ function TabItem({
         "group/tab relative flex h-8 min-w-[84px] max-w-[200px] items-center rounded-[10px] text-[13px] transition-colors duration-150",
         tab.pinned || home ? "shrink-0" : "shrink",
         active ? "bg-foreground/[0.07] text-foreground" : "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground",
-        over && "ring-1 ring-primary/60",
+        over && "ring-1 ring-iris/60",
         dragging === tab.id && "opacity-50",
       )}
     >

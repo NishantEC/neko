@@ -88,10 +88,13 @@ frame with no card), `Row`, `RowActions` / `RowAction`, `GlyphButton`
    an overflow (`…`) menu or the right-click menu. No subtitle, no eyebrow,
    no sentence explaining the page, no section intro. Help text belongs in a
    tooltip, an empty state or the place where the choice is made.
-2. **No lines between rows, no cards around lists.** Rows are separated by
-   space and light up on hover (`hover:bg-foreground/[0.03]`, 10px radius).
-   Group headings are small and quiet (12.5px, medium, muted, faint count),
-   and collapsible when a page has several. A hairline is allowed only where
+2. **No outlines, no cards around lists.** Since the design system of
+   2026-11 (`docs/design/system-2026-11.md`) a group is one grouped slab (`Panel`,
+   radius 20, one fill, no border or shadow) whose rows are divided by hairlines
+   inset 22px, and rows light up on hover (`hover:bg-foreground/[0.04]`). Navigation
+   rows are 36px pills. Page and section headings are 20px semibold; the
+   12.5px muted heading stays for sidebar and settings-rail groups, and a group
+   is collapsible when a page has several. A hairline is allowed only where
    two independent scroll areas meet (a split view's rail).
 3. **One line per row**: status glyph, faint id, title, then right-aligned
    quiet meta (scope or repository, relative time). Secondary text (an error,
@@ -110,9 +113,10 @@ frame with no card), `Row`, `RowActions` / `RowAction`, `GlyphButton`
 6. **Tabs fit their title** (84–200px), with one padding for all and a 2px gap;
    the active tab is a soft fill and medium weight, no border or underline.
    The strip has no bottom rule.
-7. **One type scale**: page title 20px semibold; group heading 12.5px medium
-   muted; row title 13.5px regular; meta and secondary 12.5px muted; ids 12px
-   faint tabular. Bold is for the page title only; no bold-label-plus-
+7. **One type scale** (Inter, weights 400, 500 and 600; system-2026-11 section 3):
+   page title and section heading 20px semibold; row title 14px medium over a
+   13px muted hint; body 14px; secondary 12.5px muted; status pills 12px; ids
+   12px faint tabular. Bold is for headings only; no bold-label-plus-
    paragraph blocks inside lists.
 8. **One column**: list and setup pages share the 880px column (the
    `SetupPage` default), so the title and the left edge do not move from tab

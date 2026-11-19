@@ -4,21 +4,19 @@
   "appearance": "light",
   "family": "Neko",
   "colors": {
-    "background": "#fafafa",
+    "background": "#ffffff",
     "card": "#ffffff",
     "popover": "#ffffff",
-    "sidebar": "#f3f3f3",
+    "sidebar": "#fafafa",
     "foreground": "#262626",
-    "strong": "#0d0d0d",
-    "mutedForeground": "#636363",
+    "strong": "#171717",
+    "mutedForeground": "#686868",
     "border": "#000000",
     "primary": "#346bf1",
     "primaryForeground": "#fcfcfc",
     "destructive": "#e6293f",
     "success": "#00af6f",
     "warning": "#e19b1b",
-    "info": "#0083e0",
-    "bubble": "#e9deff",
-    "bubbleForeground": "#241737"
+    "info": "#0083e0"
   }
 }

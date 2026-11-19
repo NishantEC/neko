@@ -22,7 +22,7 @@ function statusPill(status: string): { state?: string; style?: CSSProperties } {
   switch (stageOf(status)) {
     case "needsYou": return { state: "warn" };
     case "review": return { style: { "--tint": "var(--info)" } as CSSProperties };
-    case "running": return { style: { "--tint": "var(--primary)" } as CSSProperties };
+    case "running": return { style: { "--tint": "var(--iris)" } as CSSProperties };
     case "done": return { state: "on" };
     default: return { state: "pending" };
   }

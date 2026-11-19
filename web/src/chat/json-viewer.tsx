@@ -65,7 +65,7 @@ function JsonNode({ name, data, isRoot = false, defaultExpanded = true, level = 
         }}
         className={cn(
           "flex h-6 w-full items-center justify-start gap-1 px-1 py-0 text-xs font-normal hover:bg-muted/50 rounded -ml-4 cursor-pointer group/property sm:h-6",
-          isRoot && "text-primary font-semibold",
+          isRoot && "text-iris font-semibold",
         )}
         onClick={isExpandable ? handleToggle : undefined}
       >
@@ -81,7 +81,7 @@ function JsonNode({ name, data, isRoot = false, defaultExpanded = true, level = 
           <div className="w-4" />
         )}
 
-        <span className="text-primary">{name}</span>
+        <span className="text-iris">{name}</span>
 
         <span className="text-muted-foreground">
           {isExpandable ? (

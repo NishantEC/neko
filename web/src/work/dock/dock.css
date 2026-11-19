@@ -54,7 +54,7 @@
   --dv-activegroup-hiddenpanel-tab-background-color: transparent;
   --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
   --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
-  --dv-activegroup-visiblepanel-tab-color: var(--primary);
+  --dv-activegroup-visiblepanel-tab-color: var(--iris);
   --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
   --dv-inactivegroup-visiblepanel-tab-color: var(--foreground);
   --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-foreground);
@@ -70,7 +70,7 @@
 
   /* the splitter: invisible at rest, primary while it is being dragged */
   --dv-sash-color: transparent;
-  --dv-active-sash-color: color-mix(in srgb, var(--primary) 60%, transparent);
+  --dv-active-sash-color: color-mix(in srgb, var(--iris) 60%, transparent);
   --dv-active-sash-transition-duration: 0.12s;
   --dv-active-sash-transition-delay: 0.15s;
 
@@ -162,7 +162,7 @@
   margin-bottom: 0;
   background: transparent;
   border-radius: var(--dock-tab-radius) var(--dock-tab-radius) 0 0;
-  color: var(--primary);
+  color: var(--iris);
 }
 /* The drag ghost is a clone outside the strip, so it carries its own card and feet. */
 .dv-tab-ghost-drag {

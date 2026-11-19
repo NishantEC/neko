@@ -126,7 +126,7 @@ export function UnseenDot({ className }: { className?: string }) {
       role="img"
       aria-label="Not yet seen"
       title="Finished since you last opened it"
-      className={cn("inline-block size-1.5 shrink-0 rounded-full bg-primary", className)}
+      className={cn("inline-block size-1.5 shrink-0 rounded-full bg-iris", className)}
     />
   );
 }

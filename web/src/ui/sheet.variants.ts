@@ -5,7 +5,7 @@ export type SheetVariant = "floating" | "flush";
 export type SheetSide = "top" | "right" | "bottom" | "left";
 
 const FLOATING_SURFACE =
-  "z-50 flex flex-col gap-0 overflow-hidden rounded-[20px] bg-[color-mix(in_oklab,var(--foreground)_3%,var(--card))] text-sm text-foreground outline-none";
+  "z-50 flex flex-col gap-0 overflow-hidden rounded-3xl bg-[color-mix(in_oklab,var(--foreground)_3%,var(--card))] text-sm text-foreground outline-none";
 
 const FLOATING_SIDES: Record<SheetSide, string> = {
   right:

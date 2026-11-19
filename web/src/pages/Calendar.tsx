@@ -335,12 +335,12 @@ function NekoChip({ item, compact = false }: { item: NekoItem; compact?: boolean
       aria-label={label}
       title={[item.title, item.detail, when].filter(Boolean).join(" · ")}
       className={cn(
-        "flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 text-start text-[12px] text-primary outline-none hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring",
-        !compact && "bg-primary/[0.06]",
+        "flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 text-start text-[12px] text-iris outline-none hover:bg-iris/10 focus-visible:ring-2 focus-visible:ring-ring",
+        !compact && "bg-iris/[0.06]",
       )}
     >
       {item.kind === "Task" && item.status ? <StatusGlyph status={item.status} size={12} className="shrink-0" /> : <Clock aria-hidden className="size-3 shrink-0" />}
-      {when ? <span className="shrink-0 tabular-nums text-primary/70">{when}</span> : null}
+      {when ? <span className="shrink-0 tabular-nums text-iris/70">{when}</span> : null}
       <span className="min-w-0 truncate">{item.title}</span>
     </button>
   );
@@ -351,7 +351,7 @@ function DayNumber({ day, today, onClick, muted = false }: { day: Date; today: b
     <span
       className={cn(
         "inline-flex size-7 items-center justify-center rounded-full text-[13px] tabular-nums",
-        today ? "bg-primary font-semibold text-primary-foreground" : muted ? "text-muted-foreground/60" : "text-foreground",
+        today ? "bg-iris font-semibold text-primary-foreground" : muted ? "text-muted-foreground/60" : "text-foreground",
       )}
     >
       {day.getDate()}
@@ -402,7 +402,7 @@ function TimeGrid({ days, data, now, onPickDay }: { days: Date[]; data: Data; no
           const isToday = sameDay(d, today);
           return (
             <div key={d.getTime()} className="flex items-center gap-1.5 border-s border-border/50 px-2 py-1.5">
-              <span className={cn("text-[12px]", isToday ? "font-medium text-primary" : "text-muted-foreground")}>{weekdayFormat.format(d)}</span>
+              <span className={cn("text-[12px]", isToday ? "font-medium text-iris" : "text-muted-foreground")}>{weekdayFormat.format(d)}</span>
               <DayNumber day={d} today={isToday} onClick={days.length > 1 ? () => onPickDay(d) : undefined} />
             </div>
           );
@@ -478,8 +478,8 @@ function TimeGrid({ days, data, now, onPickDay }: { days: Date[]; data: Data; no
                 ))}
                 {isToday ? (
                   <div aria-hidden className="pointer-events-none absolute inset-x-0 z-10" style={{ top: (nowMinute / 60) * HOUR_PX }}>
-                    <div className="h-0.5 bg-primary" />
-                    <div className="absolute -start-1 -top-[3px] size-2 rounded-full bg-primary" />
+                    <div className="h-0.5 bg-iris" />
+                    <div className="absolute -start-1 -top-[3px] size-2 rounded-full bg-iris" />
                   </div>
                 ) : null}
               </div>

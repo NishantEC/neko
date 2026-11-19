@@ -14,7 +14,7 @@ const PLAIN_STYLE: CSSProperties = { fontWeight: 600 };
 export const EditorialHeading: React.FC<EditorialHeadingProps> = ({ as: Tag = "h1", children, className, style }) => (
   <Tag
     className={cn(
-      "text-foreground tracking-[-0.01em] leading-[1.2]",
+      "text-strong tracking-[-0.015em] leading-[1.2]",
       "[&_em]:not-italic [&_em]:font-[inherit]",
       className,
     )}

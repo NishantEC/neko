@@ -82,7 +82,7 @@ export function BuilderPanelTabs<V extends string>({ tabs, value, collapsed, onC
                     "flex items-center justify-center text-sm font-medium",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
                     isActive
-                      ? "h-10 rounded-t-[14px] pb-2 pl-4 pr-1.5 text-primary"
+                      ? "h-10 rounded-t-[14px] pb-2 pl-4 pr-1.5 text-iris"
                       : "mb-1 h-9 rounded-lg px-2 pb-1 text-foreground/50 transition-colors duration-150 hover:bg-foreground/[0.06] hover:text-foreground",
                   )}
                 >
