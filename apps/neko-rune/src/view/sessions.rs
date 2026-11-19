@@ -57,12 +57,12 @@ fn header(_s: &App, t: &Neko) -> El {
         .window_drag()
         .child(icon(&icons::NEKO_MARK, 16.0).color(t.text.base).a11y_hidden())
         .child(text("Neko").key("sessions-brand").font(t.ty.brand).color(t.text.base).role("heading").grow(1.0))
-        .child(side_button(&icons::SIDEBAR, "Hide the sessions column", "sidebar-fold", t, |s: &mut App| s.layout.sessions.set_open(false)))
+        .child(side_button(&icons::SIDEBAR, "Hide the sessions column", "Hide sidebar ⌘\\", "sidebar-fold", t, |s: &mut App| s.layout.sessions.set_open(false)))
 }
 
 /// A 28 point icon button for the headers: the ink muted, the soft fill under the pointer.
-pub fn side_button(glyph: &'static rune::Icon, label: &str, key: &str, t: &Neko, on_press: impl Fn(&mut App) + 'static) -> El {
-    row().key(key.to_owned()).role("button").label(label).help(label).focusable(true).size(28.0, 28.0).center().radius(t.radius.control).hover(t.surface.hover).focus_ring(2.0, 2.0, t.surface.ring).on_press(on_press).child(icon(glyph, 16.0).color(t.text.muted).a11y_hidden())
+pub fn side_button(glyph: &'static rune::Icon, label: &str, tooltip: &str, key: &str, t: &Neko, on_press: impl Fn(&mut App) + 'static) -> El {
+    row().key(key.to_owned()).role("button").label(label).help(tooltip).focusable(true).size(28.0, 28.0).center().radius(t.radius.control).hover(t.surface.hover).focus_ring(2.0, 2.0, t.surface.ring).on_press(on_press).child(icon(glyph, 16.0).color(t.text.muted).a11y_hidden())
 }
 
 /// The search field: it looks like a field and opens the ⌘K palette when pressed.

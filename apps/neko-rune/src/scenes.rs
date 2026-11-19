@@ -355,6 +355,17 @@ pub const SCENES: &[Scene] = &[
         s.account.name = "Ada Lovelace".into();
         s.open_new();
     }),
+    // The sessions column folded: a session's header carries "Show sidebar" after the traffic lights, and Home floats the same button over the art.
+    ("sessions-collapsed", |s| {
+        live(s);
+        s.layout.sessions.set_open(false);
+    }),
+    ("home-sessions-collapsed", |s| {
+        live(s);
+        s.account.name = "Ada Lovelace".into();
+        s.open_new();
+        s.layout.sessions.set_open(false);
+    }),
     // The Neko column folded to its 44 point strip: the spark at the top, the count of what needs you under it (docs/knowledge/rune-identity.md).
     ("neko-strip", |s| {
         live(s);

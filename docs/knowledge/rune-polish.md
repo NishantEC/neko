@@ -57,6 +57,18 @@ Reason icons are muted and amber only while the row is hovered (an icon over an 
 are at (12, 21): 14 point buttons centred on the 28 point line every header row (sidebar, session, Neko) is centred on; the sidebar
 header's words start at 80. Drag regions are the header rows. The icon set is `icons.rs` only, stroke 1.5, tested.
 
+### A folded sessions column has a way back (2026-11-19, `view.rs`, `tests/sidebar.rs`)
+
+The owner folded the column and found no control to reopen it. `band_px` (the header row of every session-region view, one place) now
+starts with the **"Show sidebar" button** while `SIDEBAR_FOLDED` (a thread-local `view()` sets each frame, because the 14 callers of `band`
+have no `App`) is true: a spacer of `80 - 2 - padding - 8` so the button's left edge is exactly 80 from the window's (2 is the region's margin,
+8 the row's gap), then the 28 point button (`sidebar-show`, glyph `icons::SIDEBAR_LEFT`, tooltip "Show sidebar ⌘\"), so whatever the
+header holds moves right of it; the session title line (padding 20) and the plugin page head use `band_px(t, 20.0)` for that reason. The
+open column's fold button (`sidebar-fold`) now says "Hide sidebar ⌘\". **⌘\** (`lib.rs` `on_key`, listed in `shortcuts.rs` as "Show or hide
+the sessions column") toggles it with the older ⌘B; ⌘\ was not bound to anything, so it is the shortcut used. `layout::Saved` gained
+`sessions_open` (`#[serde(default)]` true, so a file from before keeps the column open). Scenes `sessions-collapsed` and
+`home-sessions-collapsed` go through the structure crawl and the "every scene lays out" test (which lets those two have no `sessions`).
+
 ### Home and its art (`view/home.rs`, `art.rs`, `art_gpu.rs`)
 
 A 680 column about 40% down: the mark and "Good evening, {first name}" at 34, a status line whose parts filter the sessions

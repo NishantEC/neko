@@ -10,7 +10,7 @@ use rune_kit::{Menu, MenuItem, Placement};
 use crate::link::Call;
 
 use super::turn::{self, Where};
-use super::{Frame, TEXT_COLUMN, TEXT_PAD, band, icon_button, placeholder, primary_button, work};
+use super::{Frame, TEXT_COLUMN, TEXT_PAD, band, band_px, icon_button, placeholder, primary_button, work};
 use crate::app::{App, Steer};
 use crate::icons;
 use crate::lab::lab;
@@ -119,7 +119,7 @@ fn badge(t: &Neko, words: &str, tone: Tone) -> El {
 /// panel's toggle. Its fill is the region's own, opaque, so nothing under it ever shows through.
 fn top_line(s: &App, task: &TaskRow, t: &Neko, layer: &mut Vec<El>) -> El {
     let detail = s.detail().filter(|d| d.task.id == task.id);
-    let mut line = band(t).px(20.0).fill(t.surface.window).child(status_glyph(status_of(task.status), t, 14.0, Some(status_label(task.status))));
+    let mut line = band_px(t, 20.0).fill(t.surface.window).child(status_glyph(status_of(task.status), t, 14.0, Some(status_label(task.status))));
     let renaming = s.rename.as_ref().filter(|r| r.id == task.id);
     if let Some(r) = renaming {
         // Enter saves, Esc cancels; leaving the field saves nothing.
@@ -304,7 +304,7 @@ fn empty(s: &App, t: &Neko) -> El {
 fn plugin_page(s: &App, page: &neko_protocol::PluginPage, t: &Neko) -> El {
     // The page's route as the web app spells it: the plugin's own id for the page (`my-plugin:board`).
     s.web_view.set_want(Some(crate::web_panel::Want { route: format!("{}?embed=1", page.id), dark: t.dark }));
-    let head = band(t).px(20.0).child(text(page.title.clone()).key("plugin-page-title").font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(t.text.base).truncate().a11y_hidden().role("heading")).child(text(format!("Plugin: {}", page.plugin)).font(t.ty.meta).color(t.text.faint).truncate().min_w(0.0));
+    let head = band_px(t, 20.0).child(text(page.title.clone()).key("plugin-page-title").font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(t.text.base).truncate().a11y_hidden().role("heading")).child(text(format!("Plugin: {}", page.plugin)).font(t.ty.meta).color(t.text.faint).truncate().min_w(0.0));
     let body = crate::viewers::web::region(col().key("plugin-page-body").w_full().grow(1.0).min_h(0.0).child(crate::viewers::web::slot(t, &crate::viewers::web::line(s))));
     col().key("plugin-page").w_full().h_full().child(head).child(body)
 }

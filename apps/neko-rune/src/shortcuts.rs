@@ -24,6 +24,7 @@ pub const GROUPS: &[Group] = &[
             Row { keys: &["⌘", "N"], label: "New session (Home, cursor in the composer)" },
             Row { keys: &["⌘", "⇧", "Esc"], label: "Stop all work" },
             Row { keys: &["⌘", "B"], label: "Show or hide the sidebar" },
+            Row { keys: &["⌘", "\\"], label: "Show or hide the sessions column" },
             Row { keys: &["⇧", "F10"], label: "Open the right-click menu on what has focus" },
             Row { keys: &["Esc"], label: "Close a menu, dialog or the palette" },
         ],

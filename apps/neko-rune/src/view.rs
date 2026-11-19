@@ -93,6 +93,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     s.browser.scale.set(cx.env().scale);
     let mut layer = Vec::new();
     let layout = &s.layout;
+    SIDEBAR_FOLDED.with(|c| c.set(!layout.sessions.is_open()));
     if let Some([w, h]) = cx.layout_size("window") {
         s.window_size.set(Some([w as u32, h as u32]));
     }
@@ -204,11 +205,51 @@ fn grip(region: Region, t: &Neko) -> El {
         .on_double_press(move |s: &mut App| s.layout.pane_mut(region).reset_width())
 }
 
+/// Where the "Show sidebar" button's left edge sits, from the window's left: just after the traffic lights (polish spec §0).
+pub const SHOW_SIDEBAR_X: f32 = 80.0;
+/// How far the session region's own left edge is from the window's (its 2 point margin).
+const REGION_LEFT: f32 = 2.0;
+/// The gap between the items of a header row.
+const BAND_GAP: f32 = 8.0;
+
+thread_local! {
+    /// Whether the sessions column is folded in the frame being built: the header rows of the session region
+    /// (`band`) read it to make room for, and carry, the button that brings the column back.
+    static SIDEBAR_FOLDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// The row across the top of a card region (the session, the context panel): 32 high, 4 below the card's top edge
 /// (which is 8 below the window's), so its centre is the sidebar header's. The window can be dragged by it.
+/// While the sessions column is folded it starts with the "Show sidebar" button, after the traffic lights.
 fn band(t: &Neko) -> El {
-    let _ = t;
-    row().h(HEADER_H + 4.0).pt(4.0).w_full().px(12.0).gap(8.0).center_y().window_drag()
+    band_px(t, 12.0)
+}
+
+/// [`band`] with its own side padding (the session's title line is 20).
+fn band_px(t: &Neko, px: f32) -> El {
+    let mut row = row().h(HEADER_H + 4.0).pt(4.0).w_full().px(px).gap(BAND_GAP).center_y().window_drag();
+    if SIDEBAR_FOLDED.with(std::cell::Cell::get) {
+        // The row's own padding and gap are in the way: the spacer makes the button's left edge land on 80.
+        row = row.child(el().w(SHOW_SIDEBAR_X - REGION_LEFT - px - BAND_GAP).h(1.0).a11y_hidden()).child(show_sidebar_button(t));
+    }
+    row
+}
+
+/// "Show sidebar": a 28 point quiet icon button (radius 8, the foreground at 4% under the pointer) with the sidebar glyph.
+fn show_sidebar_button(t: &Neko) -> El {
+    row()
+        .key("sidebar-show")
+        .role("button")
+        .label("Show sidebar")
+        .help("Show sidebar ⌘\\")
+        .focusable(true)
+        .size(28.0, 28.0)
+        .center()
+        .radius(8.0)
+        .hover(t.surface.hover)
+        .focus_ring(2.0, 2.0, t.surface.ring)
+        .on_press(|s: &mut App| s.layout.sessions.set_open(true))
+        .child(icon(&crate::icons::SIDEBAR_LEFT, 16.0).color(t.text.muted).a11y_hidden())
 }
 
 /// The row across the top of the Neko column, which is not a card: 32 high at 12 from the window's top (the sidebar
@@ -218,8 +259,7 @@ fn flat_band(t: &Neko) -> El {
     row().h(BAND).pt(12.0).w_full().px(12.0).gap(8.0).center_y().window_drag()
 }
 
-/// The same row for Home and the session, which also carries the button that brings the sessions column back
-/// when it is folded, after the traffic lights (their 80 point inset, as in the sidebar's header).
+/// Home's header row: the same as the session's, over the art.
 fn card_band(t: &Neko) -> El {
     band(t)
 }

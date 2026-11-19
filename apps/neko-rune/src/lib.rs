@@ -254,8 +254,8 @@ pub fn on_key(s: &mut App, ev: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
         s.palette_toggle();
         return true;
     }
-    // ⌘B: the sessions column away and back.
-    if ev.is_command('b') && !ev.mods.shift {
+    // ⌘B and ⌘\: the sessions column away and back (⌘\ is the one the "Show sidebar" button's tooltip names).
+    if (ev.is_command('b') || ev.is_command('\\')) && !ev.mods.shift {
         s.toggle_sidebar();
         return true;
     }

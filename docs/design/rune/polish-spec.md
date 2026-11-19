@@ -42,6 +42,7 @@ The first build looked right on test data and wrong on the owner's real data. Th
 - Place the traffic lights so their centres line up with the sidebar header row's centre, 12 px from the window's left edge.
 - The sidebar header's text starts after the traffic lights: an 80 px left inset on that row only.
 - Dragging the header rows of the sidebar, session view and Neko column moves the window.
+- **A folded sessions column has a way back (2026-11-19).** While it is folded, the session region's header row starts with a **"Show sidebar" button**: 28×28, radius 8, the foreground at 4% under the pointer, a 16 px stroke-1.5 "sidebar-left" glyph (`icons::SIDEBAR_LEFT`), its left edge at x = 80 from the window's left (just after the traffic lights) and centred on their line (y = 28). Tooltip "Show sidebar ⌘\", accessible label "Show sidebar". The header's own content (title, status glyph) moves right of it. The fold button in the sidebar's header keeps its place and its tooltip is "Hide sidebar ⌘\". **⌘\** toggles the column both ways (⌘B, the older binding, still does); the fold is saved with the widths. On Home, which has no header bar, the same button floats at the same spot over the art (§2).
 
 ## 1. Sessions column (sidebar)
 

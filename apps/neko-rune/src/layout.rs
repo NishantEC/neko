@@ -56,6 +56,13 @@ pub struct Saved {
     pub neko: f32,
     pub context_open: bool,
     pub neko_open: bool,
+    /// Whether the sessions column shows. A file written before this field existed has the column open.
+    #[serde(default = "yes")]
+    pub sessions_open: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl Default for Layout {
@@ -73,7 +80,7 @@ impl Default for Layout {
 impl Layout {
     /// What to keep for the next run.
     pub fn saved(&self) -> Saved {
-        Saved { sessions: self.sessions.width(), context: self.context.width(), neko: self.neko.width(), context_open: self.context.is_open(), neko_open: self.neko.is_open() }
+        Saved { sessions: self.sessions.width(), context: self.context.width(), neko: self.neko.width(), context_open: self.context.is_open(), neko_open: self.neko.is_open(), sessions_open: self.sessions.is_open() }
     }
 
     /// The layout the last run left (widths clamp to their ranges).
@@ -84,6 +91,7 @@ impl Layout {
         l.neko.drag_to(saved.neko);
         l.context.set_open(saved.context_open);
         l.neko.set_open(saved.neko_open);
+        l.sessions.set_open(saved.sessions_open);
         l.neko_auto = false;
         l.neko_choice = None;
         l
@@ -304,6 +312,18 @@ mod tests {
         assert!(!back.neko_auto, "a saved layout is the person's choice");
         let json = serde_json::to_string(&l.saved()).unwrap();
         assert_eq!(serde_json::from_str::<Saved>(&json).unwrap(), l.saved());
+    }
+
+    #[test]
+    fn a_folded_sessions_column_stays_folded_and_an_old_file_has_it_open() {
+        let mut l = Layout::default();
+        l.sessions.set_open(false);
+        let back = Layout::restored(l.saved());
+        assert!(!back.sessions.is_open(), "the fold is kept between runs");
+        assert_eq!(back.sessions.width(), 248.0, "and the width it comes back at");
+        // A layout written before the field existed.
+        let old = r#"{"sessions":300.0,"context":420.0,"neko":340.0,"context_open":false,"neko_open":true}"#;
+        assert!(Layout::restored(serde_json::from_str::<Saved>(old).unwrap()).sessions.is_open());
     }
 
     #[test]

@@ -326,7 +326,9 @@ fn every_scene_lays_out_in_both_appearances() {
             let rt = runtime(dark, scene);
             // An expanded panel stands where the session region was.
             let middle = if *name == "p3a-expanded" { "context" } else { "session-region" };
-            assert!(rt.find("sessions").is_some() && rt.find(middle).is_some() && rt.find("neko").is_some(), "{name} dark={dark}");
+            // The scenes that fold the sessions column have none by design (they show "Show sidebar" instead).
+            let folded = name.ends_with("sessions-collapsed");
+            assert!((folded || rt.find("sessions").is_some()) && rt.find(middle).is_some() && rt.find("neko").is_some(), "{name} dark={dark}");
         }
     }
 }
