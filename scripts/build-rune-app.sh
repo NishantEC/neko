@@ -19,7 +19,7 @@ cd "$repo_root"
 # The daemon's Cargo output folder, as build-native.sh has it.
 target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
 case "$target_dir" in /*) ;; *) target_dir="$repo_root/$target_dir" ;; esac
-rune_target="$HOME/Library/Caches/neko/rune-target"
+rune_target="${NEKO_RUNE_TARGET:-$HOME/Library/Caches/neko/rune-target}"
 cargo build --release -p neko-daemon --bin neko-daemon
 # Local fixes to Rune, when there are any, come from a patched checkout (apps/neko-rune/scripts/patched-rune.sh).
 CARGO_TARGET_DIR="$rune_target" "$repo_root/apps/neko-rune/scripts/patched-rune.sh" --ensure

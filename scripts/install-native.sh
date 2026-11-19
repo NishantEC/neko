@@ -13,6 +13,14 @@ data_directory="$HOME/Library/Application Support/neko"
 target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
 case "$target_dir" in /*) ;; *) target_dir="$repo_root/$target_dir" ;; esac
 bundle="$target_dir/native/Neko.app"
+# The Rune client builds in a folder of this install's own (never the development cache, where a
+# rebuild can replace a test binary while these checks run it), and its debug test binaries are
+# removed when the install ends, however it ends (they grow by gigabytes each run).
+if [[ "$app_shell" == rune ]]; then
+  export NEKO_RUNE_TARGET="${NEKO_RUNE_TARGET:-$target_dir/rune}"
+fi
+rune_cleanup() { if [[ "$app_shell" == rune && -n "${NEKO_RUNE_TARGET:-}" ]]; then rm -rf "$NEKO_RUNE_TARGET/debug" || true; fi; }
+trap rune_cleanup EXIT
 if [[ "$app_shell" == rune ]]; then bundle="$target_dir/native-rune/Neko.app"; fi
 dry_run=0
 build_only=0
@@ -128,7 +136,7 @@ rollback() {
     printf 'Installation failed. Recovery files: %s %s\n' "$backup_root" "$data_backup" >&2
   fi
 }
-trap rollback EXIT
+trap 'rollback; rune_cleanup' EXIT
 if (( clean_data )) && [[ -e "$data_directory" ]]; then
   if [[ -S "$data_directory/neko.sock" ]] && [[ -n "$(/usr/sbin/lsof -t "$data_directory/neko.sock" 2>/dev/null || true)" ]]; then
     printf 'Another process holds the Neko data socket; refusing data replacement.\n' >&2; exit 1

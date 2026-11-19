@@ -79,7 +79,9 @@ if [[ -d "$repo_root/.gpui-fork-patched" ]]; then
 fi
 
 # The Rune client: warm cache or asked for, never in the quick (pre-commit) pass.
-rune_cache="$HOME/Library/Caches/neko/rune-target"
+# NEKO_RUNE_TARGET: the installed copy passes its own folder (install-native.sh), so its checks never share
+# test binaries with a development build (a rebuild overwriting a running test binary gets it SIGKILLed).
+rune_cache="${NEKO_RUNE_TARGET:-$HOME/Library/Caches/neko/rune-target}"
 if [[ "$mode" == full && "$rune" != no && -d "$repo_root/apps/neko-rune" ]]; then
   if [[ "$rune" == yes || -d "$rune_cache/debug/deps" ]]; then
     # Always its own cache, whatever target dir the daemon's steps were given.

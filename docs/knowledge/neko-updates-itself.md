@@ -174,3 +174,5 @@ Settings, System, Neko updates has a "Mac app" row, Swift (the default) or Rune.
 already installed because the installed bundle (`NekoShell` in its Info.plist, none = Swift) is not the chosen app.
 `install-native.sh` builds the chosen one. Details, rollback and the Rune-only rules (`apps/neko-rune/**` counts as a
 native change only while Rune is chosen) are in `rune-as-the-app.md`.
+
+**The Rune app builds in its own folder (2026-11-19).** The first self-update after the switch to Rune failed: `structure` was SIGKILLed mid-run because the installed copy's checks and a development build shared `~/Library/Caches/neko/rune-target`, and a rebuild replaced the test binary the installer was running (macOS kills a process whose signed executable changes underneath it). `install-native.sh` now exports `NEKO_RUNE_TARGET=$CARGO_TARGET_DIR/rune` when the shell is `rune`; `scripts/check.sh` and `scripts/build-rune-app.sh` honour it (development keeps `rune-target`), and the install's exit trap deletes that folder's `debug/` (tests leave gigabytes each run; `release/` stays for the next build).
