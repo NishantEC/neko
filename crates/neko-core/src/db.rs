@@ -254,7 +254,24 @@ impl Db {
                 body    TEXT NOT NULL,
                 PRIMARY KEY (task_id, seq)
             ) WITHOUT ROWID;
+            CREATE TABLE IF NOT EXISTS usage_events (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_key        TEXT    NOT NULL UNIQUE,
+                at_ms          INTEGER NOT NULL,
+                provider       TEXT    NOT NULL,
+                model          TEXT    NOT NULL DEFAULT '',
+                input_tokens   INTEGER,
+                output_tokens  INTEGER,
+                cost_micro_usd INTEGER,
+                source         TEXT    NOT NULL CHECK (source IN ('reported','estimated')),
+                duration_ms    INTEGER NOT NULL DEFAULT 0,
+                task_id        TEXT    NOT NULL DEFAULT '',
+                kind           TEXT    NOT NULL DEFAULT 'ticket'
+            );
+            CREATE INDEX IF NOT EXISTS idx_usage_events_at ON usage_events (at_ms);
+            CREATE INDEX IF NOT EXISTS idx_usage_events_task ON usage_events (task_id);
             ",
+
         )
     }
 
@@ -450,6 +467,68 @@ impl Db {
             .borrow_mut()
             .insert(key.to_owned(), value.to_owned());
         Ok(())
+    }
+
+    /// Appends one finished run to the usage ledger; `false` when its `run_key` is already there (nothing
+    /// changes). Nothing `load` reads lives in this table, so unlike a setting it does not bump
+    /// `data_revision` or the `ContentStamp` and wakes no reader.
+    pub fn record_usage_event(&self, event: &crate::usage_ledger::UsageEvent) -> rusqlite::Result<bool> {
+        let changed = self.conn.execute(
+            "INSERT OR IGNORE INTO usage_events (run_key, at_ms, provider, model, input_tokens, output_tokens, cost_micro_usd, source, duration_ms, task_id, kind)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                event.run_key,
+                event.at_ms,
+                event.provider,
+                event.model,
+                event.input_tokens.map(|n| n as i64),
+                event.output_tokens.map(|n| n as i64),
+                event.cost_micro_usd.map(|n| n as i64),
+                event.source.as_str(),
+                event.duration_ms,
+                event.task_id,
+                event.kind,
+            ],
+        )?;
+        Ok(changed > 0)
+    }
+
+    fn usage_events_where(&self, filter: &str, parameter: rusqlite::types::Value) -> rusqlite::Result<Vec<crate::usage_ledger::UsageEvent>> {
+        let mut statement = self.conn.prepare_cached(&format!(
+            "SELECT run_key, at_ms, provider, model, input_tokens, output_tokens, cost_micro_usd, source, duration_ms, task_id, kind
+             FROM usage_events WHERE {filter} ORDER BY at_ms, id"
+        ))?;
+        let rows = statement.query_map([parameter], |row| {
+            Ok(crate::usage_ledger::UsageEvent {
+                run_key: row.get(0)?,
+                at_ms: row.get(1)?,
+                provider: row.get(2)?,
+                model: row.get(3)?,
+                input_tokens: row.get::<_, Option<i64>>(4)?.map(|n| n.max(0) as u64),
+                output_tokens: row.get::<_, Option<i64>>(5)?.map(|n| n.max(0) as u64),
+                cost_micro_usd: row.get::<_, Option<i64>>(6)?.map(|n| n.max(0) as u64),
+                source: crate::usage_ledger::Source::parse(&row.get::<_, String>(7)?),
+                duration_ms: row.get(8)?,
+                task_id: row.get(9)?,
+                kind: row.get(10)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Ledger lines completed at or after `since_ms`, oldest first.
+    pub fn usage_events_since(&self, since_ms: i64) -> rusqlite::Result<Vec<crate::usage_ledger::UsageEvent>> {
+        self.usage_events_where("at_ms >= ?1", since_ms.into())
+    }
+
+    /// Every ledger line of one ticket (or routine id), oldest first.
+    pub fn usage_events_for_task(&self, task_id: &str) -> rusqlite::Result<Vec<crate::usage_ledger::UsageEvent>> {
+        self.usage_events_where("task_id = ?1", task_id.to_owned().into())
+    }
+
+    /// Deletes ledger lines completed before `before_ms`; how many went.
+    pub fn prune_usage_events(&self, before_ms: i64) -> rusqlite::Result<usize> {
+        self.conn.execute("DELETE FROM usage_events WHERE at_ms < ?1", [before_ms])
     }
 
     pub fn record_launch(&self, app_id: &str, at_unix_ms: i64) -> rusqlite::Result<()> {

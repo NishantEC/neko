@@ -121,8 +121,17 @@ impl Controller {
     }
 
     /// Parks up to `PER_PASS` idle tickets. Returns how many were parked.
+    /// Ledger lines older than a year go, at most once a local day.
+    pub(super) fn usage_housekeeping(&self) {
+        let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Err(error) = neko_core::usage_ledger::prune_if_due(&db, store::now_ms()) {
+            eprintln!("usage ledger: {error}");
+        }
+    }
+
     pub(super) fn parking_tick(&self) -> Result<usize, String> {
         self.checkpoint_housekeeping();
+        self.usage_housekeeping();
         // Spilled tool output older than a week (`neko_core::spill`).
         neko_core::spill::cleanup(&neko_core::spill::dir(), std::time::SystemTime::now(), neko_core::spill::KEEP);
         self.parking_pass(&neko_protocol::support_dir().join("task-worktrees"))
@@ -193,6 +202,27 @@ mod tests {
         let out = std::process::Command::new("git").current_dir(dir)
             .args(["-c", "user.name=T", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]).args(args).output().unwrap();
         assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    #[test]
+    fn the_usage_ledger_is_pruned_once_a_day_by_the_parking_tick() {
+        let controller = super::super::tests::controller_with_task(TaskStatus::Failed);
+        let now = store::now_ms();
+        let line = |key: &str, at_ms: i64| neko_core::usage_ledger::UsageEvent {
+            run_key: key.into(), at_ms, provider: "claude".into(), model: String::new(), input_tokens: None, output_tokens: None, cost_micro_usd: None,
+            source: neko_core::usage_ledger::Source::Estimated, duration_ms: 0, task_id: "t".into(), kind: "ticket".into(),
+        };
+        let count = || controller.db.lock().unwrap().usage_events_since(0).unwrap().len();
+        {
+            let db = controller.db.lock().unwrap();
+            db.record_usage_event(&line("old", now - 400 * 86_400_000)).unwrap();
+            db.record_usage_event(&line("new", now)).unwrap();
+        }
+        controller.usage_housekeeping();
+        assert_eq!(count(), 1, "the year-old line went");
+        controller.db.lock().unwrap().record_usage_event(&line("older", now - 500 * 86_400_000)).unwrap();
+        controller.usage_housekeeping();
+        assert_eq!(count(), 2, "a second pass the same day does nothing");
     }
 
     #[test]

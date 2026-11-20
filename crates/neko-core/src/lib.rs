@@ -68,6 +68,7 @@ pub mod routines;
 pub mod runtime_health;
 pub mod spill;
 pub mod spend;
+pub mod usage_ledger;
 pub mod scheduled_plans;
 pub mod scopes;
 pub mod task_seen;

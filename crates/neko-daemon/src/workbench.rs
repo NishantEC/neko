@@ -895,7 +895,11 @@ impl Controller {
         let captured = TaskClaim { task:claim.task.clone(), authority:claim.authority.clone(), read_only_reply:claim.read_only_reply, runtime:Some(selection.runtime) };
         let claim = self.prepare_reply_claim(&captured, cancel, supervision::reply_intent)?;
         self.ensure_task_root(&claim, cancel)?;
-        self.execute_with_worktree(&claim, cancel, native_runner::create_worktree_cancellable)
+        // One usage-ledger line per claim, however it ends (ok, failed or cancelled).
+        let started_ms = store::now_ms();
+        let result = self.execute_with_worktree(&claim, cancel, native_runner::create_worktree_cancellable);
+        neko_core::usage_ledger::record_ticket_run(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &claim.task.id, started_ms, store::now_ms(), claim.runtime.as_ref());
+        result
     }
 
     /// Give a ticket a Git folder before its checkout is created, if it has none.

@@ -1003,6 +1003,12 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, m
         }
     };
     let ok = run.ok;
+    // One usage-ledger line per run an agent made (not a skip, not a quota hold, which return earlier;
+    // not a run that failed before any agent started).
+    if !meta.runtime.is_empty() {
+        let model = if meta.runtime == "claude" { if routine.model.is_empty() { "sonnet" } else { routine.model.as_str() } } else { "" };
+        neko_core::usage_ledger::record_routine_run(&db, &routine.id, &run, &meta.runtime, model);
+    }
     core::push_run(&db, &routine.id, run)?;
     routine_state.running = false;
     routine_state.last_run_ms = Some(finished);
@@ -1729,6 +1735,7 @@ mod tests {
             let runs = core::load_runs(&db, "r").unwrap();
             assert_eq!(runs.len(), 1);
             assert_eq!((runs[0].skipped, runs[0].did[0].as_str(), runs[0].ok), (1, "Skipped: daily cap reached (2/2)", true));
+            assert!(db.usage_events_since(0).unwrap().is_empty(), "a skipped run is not in the usage ledger");
             core::save_state(&db, "r", &RoutineState { running: true, ..saved }).unwrap();
         }
         // The person pressed Run now: it goes ahead (here to the missing-workspace failure, no agent is started).
@@ -1738,6 +1745,7 @@ mod tests {
         assert_eq!(runs.len(), 2);
         assert!(!runs[0].ok && runs[0].skipped == 0 && runs[0].error.as_deref().is_some_and(|e| e.contains("no longer exists")));
         assert_eq!(core::load_state(&db, "r").unwrap().starts_ms.len(), 3, "Run now is counted as a start");
+        assert!(db.usage_events_since(0).unwrap().is_empty(), "no agent ran, so there is nothing to record");
     }
 
     #[test]

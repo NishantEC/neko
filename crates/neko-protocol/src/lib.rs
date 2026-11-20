@@ -20,6 +20,7 @@ pub mod agent_models;
 pub mod decision_context;
 pub mod goals;
 pub mod improve;
+pub mod ledger;
 pub mod mcp_host;
 pub mod packs;
 pub mod routines;
@@ -891,6 +892,16 @@ pub enum Request {
     OpenTab {
         route: String,
     },
+    // F5, the usage ledger.
+    /// The usage ledger by local day and by provider over the last `days` days (1 to 365, clamped).
+    /// Answered with `UsageHistory`.
+    UsageHistory {
+        days: u32,
+    },
+    /// The same range as CSV text, for download. Answered with `UsageCsv`.
+    UsageCsv {
+        days: u32,
+    },
 }
 
 /// A file Neko keeps for the person: a design, a document, a dashboard
@@ -1339,6 +1350,10 @@ pub enum Response {
     /// is open, so nobody saw it).
     Shown {
         pages: usize,
+    },
+    UsageHistory(ledger::LedgerHistory),
+    UsageCsv {
+        csv: String,
     },
     Error {
         message: String,

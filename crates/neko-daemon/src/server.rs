@@ -965,6 +965,21 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         | Request::SetInboxAgeOutDays { .. }
         | Request::SetStandingOrders { .. }
         | Request::RoutineNotifications { .. }) => crate::routines::handle(state, request),
+        // F5, the usage ledger: read-only; the history is computed from the rows on each ask.
+        Request::UsageHistory { days } => {
+            let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            match neko_core::usage_ledger::history_for(&db, neko_core::workbench::now_ms(), days) {
+                Ok(history) => Response::UsageHistory(history),
+                Err(message) => Response::Error { message },
+            }
+        }
+        Request::UsageCsv { days } => {
+            let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            match neko_core::usage_ledger::csv_for(&db, neko_core::workbench::now_ms(), days) {
+                Ok(csv) => Response::UsageCsv { csv },
+                Err(message) => Response::Error { message },
+            }
+        }
         Request::AnswerNeedsYou { seq, text } => crate::inbox_reply::handle(state, seq, text),
         request @ (Request::MorningDigest | Request::MarkDigestRead) => crate::morning_digest::handle(state, request),
         request @ (Request::PhoneSettings
@@ -2026,6 +2041,22 @@ pub(crate) mod tests {
     /// For the phone tests in another module.
     pub(crate) fn test_state_for_phone() -> AppState {
         test_state(Db::open_in_memory().unwrap(), Vec::new())
+    }
+
+    #[test]
+    fn the_usage_history_and_csv_requests_clamp_the_range_and_answer_from_the_ledger() {
+        let state = test_state(Db::open_in_memory().unwrap(), Vec::new());
+        let now = neko_core::workbench::now_ms();
+        state.db.lock().unwrap().record_usage_event(&neko_core::usage_ledger::UsageEvent {
+            run_key: "ticket:t:1".into(), at_ms: now, provider: "claude".into(), model: "sonnet".into(), input_tokens: Some(10), output_tokens: Some(2), cost_micro_usd: Some(2_500_000),
+            source: neko_core::usage_ledger::Source::Reported, duration_ms: 3000, task_id: "t".into(), kind: "ticket".into(),
+        }).unwrap();
+        let Response::UsageHistory(zero) = handle_request_for_test(&state, Request::UsageHistory { days: 0 }) else { panic!("not UsageHistory") };
+        assert_eq!((zero.days.len(), zero.total_runs, zero.days[0].cost_micro_usd), (1, 1, 2_500_000));
+        let Response::UsageHistory(huge) = handle_request_for_test(&state, Request::UsageHistory { days: 9999 }) else { panic!("not UsageHistory") };
+        assert_eq!((huge.days.len(), huge.providers[0].provider.as_str()), (365, "claude"));
+        let Response::UsageCsv { csv } = handle_request_for_test(&state, Request::UsageCsv { days: 30 }) else { panic!("not UsageCsv") };
+        assert!(csv.starts_with("time,provider,model,input_tokens,output_tokens,cost_usd,source,duration_s,task_id,kind\n") && csv.contains(",claude,sonnet,10,2,2.500000,reported,3.0,t,ticket"), "{csv}");
     }
 
     #[test]

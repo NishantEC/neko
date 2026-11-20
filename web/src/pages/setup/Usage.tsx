@@ -6,7 +6,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { onEvent, request, type Json } from "@/api";
 import { Button } from "@/ui/button";
-import { ArrowsClockwise } from "@/ui/icons";
+import { ArrowsClockwise, DownloadSimple } from "@/ui/icons";
+import { SegmentedControl, SegmentedControlItem } from "@/ui/segmented-control";
 import { Panel } from "@/setup/kit";
 import { Bar, BarChart as RechartsBarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/ui/chart";
@@ -248,6 +249,112 @@ function SpendSection({ snapshot, now }: { snapshot: Json; now: number }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// History: the durable usage ledger (one line per finished agent run, kept 365 days).
+// ---------------------------------------------------------------------------
+
+const HISTORY_RANGES = [7, 30, 90, 365] as const;
+
+/** A row's cost in millionths of a dollar, as dollars. */
+const microUsd = (micro: number) => usd(micro / 1_000_000);
+
+function HistorySection() {
+  const [days, setDays] = useState<number>(30);
+  const [history, setHistory] = useState<Json | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setError(null);
+    request({ UsageHistory: { days } }).then(
+      (reply) => { if (alive) setHistory((reply?.UsageHistory as Json) ?? null); },
+      (e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); },
+    );
+    return () => { alive = false; };
+  }, [days]);
+  const rows = arr(history?.days);
+  const providers = arr(history?.providers);
+  const totals = useMemo(() => {
+    const t = { runs: 0, estimated: 0, cost: 0, tokensIn: 0, tokensOut: 0 };
+    for (const d of rows) { t.runs += num(d.runs); t.estimated += num(d.estimated_runs); t.cost += num(d.cost_micro_usd); t.tokensIn += num(d.input_tokens); t.tokensOut += num(d.output_tokens); }
+    return t;
+  }, [rows]);
+  const chart = rows.map((d) => ({ day: new Date(str(d.day) + "T12:00:00").toLocaleDateString("en", { month: "short", day: "numeric" }), runs: num(d.runs), cost: num(d.cost_micro_usd), tokensIn: num(d.input_tokens), tokensOut: num(d.output_tokens) }));
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const reply = await request({ UsageCsv: { days } });
+      const csv = str(reply?.UsageCsv?.csv);
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `neko-usage-${str(rows[0]?.day)}-to-${str(rows[rows.length - 1]?.day)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
+    }
+  };
+  const empty = history != null && num(history.total_runs) === 0;
+  return (
+    <Section
+      title={<span title="One line per finished agent run, kept for 365 days. The live figures above come from the runs themselves; this is the history that outlives them.">History</span>}
+      actions={
+        <>
+          <SegmentedControl value={String(days)} onValueChange={(v) => v && setDays(Number(v))} aria-label="History range">
+            {HISTORY_RANGES.map((n) => <SegmentedControlItem key={n} value={String(n)}>{n} days</SegmentedControlItem>)}
+          </SegmentedControl>
+          <Button variant="outline" size="sm" loading={exporting} disabled={!history || empty} onClick={() => void exportCsv()}><DownloadSimple /> Export CSV</Button>
+        </>
+      }
+    >
+      {error ? <ErrorNote title="Couldn’t read the usage history" error={error} /> : null}
+      {!history && !error ? (
+        <LoadingRows rows={3} />
+      ) : empty ? (
+        <EmptyBlock icon={Gauge} title="No runs recorded yet" description="Neko adds one line here each time an agent run finishes. History starts from the day this version was installed." />
+      ) : history ? (
+        <>
+          <Panel data-slot="history-figures">
+            <Figure label="Runs" value={totals.runs} />
+            <Figure label="Reported cost" value={totals.cost > 0 ? microUsd(totals.cost) : "none reported"} />
+            <Figure label="Tokens in / out" value={`${compact(totals.tokensIn)} / ${compact(totals.tokensOut)}`} />
+            <Figure label="Estimated runs" value={totals.estimated} title="Runs where the provider reported no price or token counts (Codex subscriptions do not). They are counted as runs, never given invented numbers." detail={totals.estimated ? "The provider reported nothing for these" : undefined} />
+          </Panel>
+          <h3 className={cn(GROUP_HEADING, "mt-4")}>Runs per day</h3>
+          <ChartContainer config={{ runs: { label: "Runs", color: "var(--chart-1)" } }} className="aspect-auto h-44 w-full" data-slot="history-chart">
+            <RechartsBarChart accessibilityLayer data={chart} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
+              <CartesianGrid vertical={false} />
+              <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} />
+              <YAxis tickLine={false} axisLine={false} width={32} allowDecimals={false} />
+              <ChartTooltip cursor={false} content={<ChartTooltipContent formatter={(value, _name, item) => {
+                const d = (item as { payload?: (typeof chart)[number] }).payload;
+                return <span>{String(value)} {Number(value) === 1 ? "run" : "runs"}{d ? ` · ${d.cost > 0 ? microUsd(d.cost) : "no price reported"} · ${compact(d.tokensIn)} / ${compact(d.tokensOut)} tokens` : ""}</span>;
+              }} />} />
+              <Bar dataKey="runs" fill="var(--color-runs)" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            </RechartsBarChart>
+          </ChartContainer>
+          {providers.length ? (
+            <>
+              <h3 className={cn(GROUP_HEADING, "mt-4")}>By provider</h3>
+              <Panel data-slot="history-providers">
+                <BarList
+                  label="Runs by provider"
+                  items={providers.map((p) => ({ name: str(p.provider), value: num(p.runs), text: `${num(p.runs)} ${num(p.runs) === 1 ? "run" : "runs"} · ${num(p.cost_micro_usd) > 0 ? microUsd(num(p.cost_micro_usd)) : "no price reported"}` }))}
+                />
+              </Panel>
+            </>
+          ) : null}
+        </>
+      ) : null}
+    </Section>
+  );
+}
+
 function ModelSection({ snapshot }: { snapshot: Json }) {
   const selections = arr(snapshot.runtime_selections);
   const counts = new Map<string, number>();
@@ -362,6 +469,7 @@ function UsageBody({ snapshot }: { snapshot: Json }) {
         )}
       </Section>
       <SpendSection snapshot={snapshot} now={now} />
+      <HistorySection />
       <ModelSection snapshot={snapshot} />
       <QuotaSection />
     </>
