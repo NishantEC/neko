@@ -88,7 +88,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> super::Page {
     let body = if data.workspaces.is_empty() {
         empty_block(t)
     } else {
-        webkit::panel(data.workspaces.iter().map(|w| workspace(s, t, layer, data, &w.id)).collect()).gap(2.0)
+        webkit::panel(t, data.workspaces.iter().map(|w| workspace(s, t, layer, data, &w.id)).collect()).gap(2.0)
     };
     super::Page { count: None, trailing: vec![add], body, title: None, back: None }
 }
@@ -120,11 +120,11 @@ fn said(t: &Neko, key: &str, kind: StatusKind, parts: &[String]) -> El {
 
 /// Words the web's JSX makes of several text nodes (`{n} need{s} you` is "2", " need", " you"): one line, each node its own text.
 fn nodes(t: &Neko, parts: &[String], ink: rune::Color, alpha: f32) -> El {
-    row().children(parts.iter().map(|p| text(p.clone()).font(font(t, 12.5, 400.0, 20.3125)).color(ink.alpha(alpha)).a11y_hidden()))
+    row().children(parts.iter().map(|p| text(p.clone()).font(font(t, 12.5, 400.0, 18.75)).color(ink.alpha(alpha)).a11y_hidden()))
 }
 
 fn quiet_text(t: &Neko, words: &str) -> El {
-    text(words.to_owned()).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).a11y_hidden()
+    text(words.to_owned()).font(font(t, 12.5, 400.0, 18.75)).color(t.text.muted).a11y_hidden()
 }
 
 /// `{n} need{s} you`: the web's text nodes.
@@ -150,12 +150,12 @@ fn workspace(s: &App, t: &Neko, layer: &mut Vec<El>, data: &SetupData, id: &str)
 
     let toggle_id = id.to_owned();
     let mut left = row().grow(1.0).shrink().min_w(0.0).gap(8.0).center_y().child(icon(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 11.0).color(t.text.muted.alpha(0.7)).a11y_hidden());
-    left = left.child(text(w.name.clone()).font(font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().a11y_hidden());
+    left = left.child(text(w.name.clone()).font(font(t, 13.5, 400.0, 20.25)).color(t.text.base).truncate().a11y_hidden());
     if open_tasks > 0 {
         left = left.child(nodes(t, &[open_tasks.to_string(), " open".to_owned()], t.text.muted, 0.7).key(format!("ws-open-count-{id}")));
     }
     if sum.count > 0 {
-        left = left.child(text(format!("{} of {} {} on", sum.enabled, sum.count, if sum.count == 1 { "routine" } else { "routines" })).key(format!("ws-routines-{id}")).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().min_w(0.0).shrink().a11y_hidden());
+        left = left.child(text(format!("{} of {} {} on", sum.enabled, sum.count, if sum.count == 1 { "routine" } else { "routines" })).key(format!("ws-routines-{id}")).font(font(t, 12.5, 400.0, 18.75)).color(t.text.muted).truncate().min_w(0.0).shrink().a11y_hidden());
     }
     let mut right = row().gap(12.0).center_y();
     if sum.needs_you > 0 {
@@ -251,7 +251,7 @@ struct Line<'a> {
 fn line(s: &App, t: &Neko, l: Line) -> El {
     let open = l.more.is_some() && s.pages.ws_lines.contains(&l.state);
     let caret = if l.more.is_some() { icon(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 11.0).color(t.text.muted.alpha(0.7)).a11y_hidden() } else { el().size(11.0, 11.0) };
-    let mut head = row().key(format!("{}-head", l.key)).grow(1.0).shrink().min_w(0.0).gap(8.0).center_y().child(caret).child(text(l.label.to_owned()).font(font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().w(128.0).a11y_hidden()).child(l.value);
+    let mut head = row().key(format!("{}-head", l.key)).grow(1.0).shrink().min_w(0.0).gap(8.0).center_y().child(caret).child(text(l.label.to_owned()).font(font(t, 13.5, 400.0, 20.25)).color(t.text.base).truncate().w(128.0).a11y_hidden()).child(l.value);
     if l.more.is_some() {
         let state = l.state.clone();
         head = head.role("button").label(format!("{}: {} details", l.label, if open { "hide" } else { "show" })).expanded(open).focusable(true).radius(6.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(move |s: &mut App| s.toggle_ws_line(&state));
@@ -269,7 +269,7 @@ fn line(s: &App, t: &Neko, l: Line) -> El {
 
 /// The value of a line: 12.5 muted, cut off with an ellipsis.
 fn value(t: &Neko, key: &str, words: &str) -> El {
-    text(words.replace('\n', " ")).key(key.to_owned()).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().min_w(0.0).shrink().grow(1.0).a11y_hidden()
+    text(words.replace('\n', " ")).key(key.to_owned()).font(font(t, 12.5, 400.0, 18.75)).color(t.text.muted).truncate().min_w(0.0).shrink().grow(1.0).a11y_hidden()
 }
 
 /// `ShortList`: the first five, and a toggle for the rest.
@@ -351,7 +351,7 @@ fn details(s: &App, t: &Neko, data: &SetupData, w: &neko_protocol::workbench::Wo
                 key: format!("ws-problems-{id}"),
                 state: state("Setup notes"),
                 label: "Setup notes",
-                value: text(words).key(format!("ws-problems-{id}-value")).font(font(t, 12.5, 400.0, 20.3125)).color(t.meaning.amber).truncate().min_w(0.0).shrink().grow(1.0).a11y_hidden(),
+                value: text(words).key(format!("ws-problems-{id}-value")).font(font(t, 12.5, 400.0, 18.75)).color(t.meaning.amber).truncate().min_w(0.0).shrink().grow(1.0).a11y_hidden(),
                 meta: Vec::new(),
                 more: Some(Box::new(move || short_list(s, t, &format!("{id}/Setup notes/all"), "notes", notes.iter().map(|p| bullet(t, p)).collect(), col().gap(4.0)))),
             },
@@ -425,7 +425,7 @@ fn details(s: &App, t: &Neko, data: &SetupData, w: &neko_protocol::workbench::Wo
                             names.sort_by_key(|n| n.to_lowercase());
                             names.dedup();
                             let list = short_list(s, t, &format!("{id}/Connections/{label}"), "servers", names.iter().map(|n| text(n.clone()).font(mono(t, 12.0, 19.5)).color(t.text.base.alpha(0.8))).collect(), row().gaps(4.0, 12.0).flex_wrap());
-                            row().key(format!("ws-servers-{id}-{label}")).gap(12.0).child(text(label.clone()).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted.alpha(0.8)).truncate().w(112.0)).child(list)
+                            row().key(format!("ws-servers-{id}-{label}")).gap(12.0).child(text(label.clone()).font(font(t, 12.5, 400.0, 18.75)).color(t.text.muted.alpha(0.8)).truncate().w(112.0)).child(list)
                         })
                         .collect();
                     short_list(s, t, &format!("{id}/Connections/all"), "repositories", items, col().gap(6.0))
@@ -438,7 +438,7 @@ fn details(s: &App, t: &Neko, data: &SetupData, w: &neko_protocol::workbench::Wo
         let key = format!("ws-line-watching-{id}");
         let failing = watches.iter().any(|x| x.failures > 0);
         let last_checked = watches.iter().filter_map(|x| x.last_attempt_ms).max().unwrap_or(0);
-        let state_el = if failing { text("Needs attention".to_owned()).font(font(t, 12.5, 400.0, 20.3125)).color(t.meaning.amber).a11y_hidden() } else { quiet_text(t, &if last_checked > 0 { format!("Synced {}", relative_time(s.now_ms, last_checked)) } else { "Not checked yet".to_owned() }) };
+        let state_el = if failing { text("Needs attention".to_owned()).font(font(t, 12.5, 400.0, 18.75)).color(t.meaning.amber).a11y_hidden() } else { quiet_text(t, &if last_checked > 0 { format!("Synced {}", relative_time(s.now_ms, last_checked)) } else { "Not checked yet".to_owned() }) };
         let words = format!("{active} active{}", if watches.len() > active { format!(" · {} paused or suggested", watches.len() - active) } else { String::new() });
         c = c.child(line(
             s,
@@ -469,7 +469,7 @@ fn details(s: &App, t: &Neko, data: &SetupData, w: &neko_protocol::workbench::Wo
             parts.push(" attention · ".to_owned());
             v = v.child(nodes(t, &parts, t.meaning.amber, 1.0));
         }
-        v = v.child(text(names).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().min_w(0.0).shrink().a11y_hidden());
+        v = v.child(text(names).font(font(t, 12.5, 400.0, 18.75)).color(t.text.muted).truncate().min_w(0.0).shrink().a11y_hidden());
         let mut meta = Vec::new();
         if schedules > 0 {
             meta.push(quiet_text(t, &format!("{schedules} {}", if schedules == 1 { "schedule" } else { "schedules" })));
@@ -486,7 +486,7 @@ fn details(s: &App, t: &Neko, data: &SetupData, w: &neko_protocol::workbench::Wo
                 value: v,
                 meta,
                 more: Some(Box::new(move || {
-                    let items: Vec<El> = list.iter().map(|x| text(x.label.clone()).font(font(t, 12.5, 400.0, 20.3125)).color(if x.enabled && x.error.as_deref().is_some_and(|e| !e.is_empty()) { t.meaning.amber } else { t.text.base.alpha(0.8) })).collect();
+                    let items: Vec<El> = list.iter().map(|x| text(x.label.clone()).font(font(t, 12.5, 400.0, 18.75)).color(if x.enabled && x.error.as_deref().is_some_and(|e| !e.is_empty()) { t.meaning.amber } else { t.text.base.alpha(0.8) })).collect();
                     short_list(s, t, &format!("{id}/Tools in Neko/all"), "tools", items, row().gaps(4.0, 12.0).flex_wrap())
                 })),
             },

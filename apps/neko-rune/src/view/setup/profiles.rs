@@ -25,8 +25,8 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     if profiles.is_empty() {
         body = body.child(empty(t, "profiles-empty", "No profiles. A profile bundles instructions and memories for a kind of work.", Some(("New profile", Box::new(|s: &mut App| s.open_profile_dialog(None))))));
     }
-    for p in profiles {
-        body = body.child(profile_row(s, t, layer, p));
+    if !profiles.is_empty() {
+        body = body.child(crate::view::webkit::panel(t, profiles.iter().map(|p| profile_row(s, t, layer, p)).collect()));
     }
     Page { count: (!profiles.is_empty()).then_some(profiles.len()), trailing: vec![new], body, title: None, back: None }
 }

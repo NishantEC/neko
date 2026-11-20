@@ -113,7 +113,7 @@ fn card_label(s: &App, task: &TaskRow) -> String {
 }
 
 fn small(t: &Neko) -> TextStyle {
-    webkit::font(t, 12.0, 400.0, 19.5)
+    webkit::font(t, 12.0, 400.0, 18.0)
 }
 
 /// The state line of a card that has not finished (`NotchState`): the glyph, the state in words with its age, and the repository.
@@ -178,7 +178,7 @@ fn state_line(s: &App, t: &Neko, task: &TaskRow, f: &Face, inner: f32) -> El {
             .focus_ring(2.0, 2.0, t.kit.c.border_focus)
             .on_press(move |s: &mut App| s.card_act(&id, a))
             .child(icon(action_icon(a), 12.0).color(t.text.base).a11y_hidden())
-            .child(text(a.label()).font(webkit::font(t, 12.0, 500.0, 19.5)).color(t.text.base).a11y_hidden());
+            .child(text(a.label()).font(webkit::font(t, 12.0, 500.0, 18.0)).color(t.text.base).a11y_hidden());
         r = r.child(row().key(format!("board-action-slot-{}", task.id)).pin(None, Some(0.0), Some(0.0), Some(0.0)).center_y().group_opacity(0.0, 1.0).child(button.mr(-4.0)));
     }
     r
@@ -200,15 +200,15 @@ fn face(s: &App, t: &Neko, task: &TaskRow, key: String, w: f32, selected: bool, 
     }
     let unseen = s.unseen.contains(&task.id);
     let inner = w - 3.0 - 24.0;
-    let title_style = webkit::font(t, 14.0, 500.0, 22.75);
+    let title_style = webkit::font(t, 14.0, 500.0, 21.0);
     let lines_full = (measure_h(&task.title, title_style, inner) / 22.0).round().max(1.0);
-    let mut title = text(task.title.clone()).key(format!("board-title-{}", task.id)).font(title_style).color(t.text.strong).max_lines(2).w_full().h(lines_full.min(2.0) * 22.75).a11y_hidden();
+    let mut title = text(task.title.clone()).key(format!("board-title-{}", task.id)).font(title_style).color(t.text.strong).max_lines(2).w_full().h(lines_full.min(2.0) * 21.0).a11y_hidden();
     if unseen {
         title = title.pr(12.0);
     }
     let mut surface = col().key(format!("board-surface-{}", task.id)).w_full().pl(12.0).pr(12.0).pt(12.0).pb(if f.done { 12.0 } else { 8.0 }).gap(6.0).radius(14.5).fill(if selected { t.meaning.iris.mix(fuse(t, 0.0), 0.94) } else { Color::TRANSPARENT }).child(title);
     if let Some(reason) = f.reason.clone() {
-        surface = surface.child(text(reason).key(format!("board-reason-{}", task.id)).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.base.alpha(0.7)).max_lines(1).w_full().a11y_hidden());
+        surface = surface.child(text(reason).key(format!("board-reason-{}", task.id)).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.base.alpha(0.7)).max_lines(1).w_full().a11y_hidden());
     }
     if f.done {
         let line = &task.line;
@@ -311,7 +311,7 @@ fn drop_slot(t: &Neko, words: &str, stage: Stage) -> El {
 
 /// `ColumnHeader`: 32 high, 2 at the sides, the stage's glyph (13), its name, its count, then at the right the menu.
 fn header(s: &App, t: &Neko, layer: &mut Vec<El>, stage: Stage, count: usize, solo: bool) -> El {
-    let style = webkit::font(t, 12.5, 500.0, 20.3125);
+    let style = webkit::font(t, 12.5, 500.0, 18.75);
     let mut head = row()
         .key(format!("board-head-{}", stage.title()))
         .w_full()
@@ -378,7 +378,7 @@ fn column(s: &App, t: &Neko, stage: Stage, cursor_id: Option<&str>, solo: bool, 
                 .hover(t.text.base.alpha(0.04))
                 .focus_ring(2.0, 2.0, t.kit.c.border_focus)
                 .on_press(|s: &mut App| s.all.done_all = !s.all.done_all)
-                .child(text(words).font(webkit::font(t, 12.5, 500.0, 20.3125)).color(t.text.muted).a11y_hidden()),
+                .child(text(words).font(webkit::font(t, 12.5, 500.0, 18.75)).color(t.text.muted).a11y_hidden()),
         );
     }
     if let Some(Decision::Move(m)) = &decision

@@ -26,9 +26,9 @@ fn copy_action(t: &Neko, key: &str, label: &str, value: String, toast: &'static 
 /// `PathRow`: the label (80 wide), the path in mono (12) that gives way, a note, and the copy action on hover; 36 high, 12 at the sides.
 #[allow(clippy::too_many_arguments)]
 fn path_row(t: &Neko, key: &str, label: &str, path: Option<&str>, note: &str, toast: &'static str) -> El {
-    let mut r = row().key(key.to_owned()).w_full().min_h(36.0).px(12.0).py(4.0).gap(12.0).center_y().radius(10.0).hover_group().hover(t.text.base.alpha(0.03)).child(text(label.to_owned()).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).w(80.0)).child(text(path.unwrap_or("…").to_owned()).key(format!("{key}-path")).font(webkit::mono(webkit::font(t, 12.0, 400.0, 19.5))).color(t.text.muted).truncate().grow(1.0).shrink().min_w(0.0).help(path.unwrap_or("").to_owned()));
+    let mut r = row().key(key.to_owned()).w_full().min_h(36.0).px(12.0).py(4.0).gap(12.0).center_y().radius(10.0).hover_group().hover(t.text.base.alpha(0.03)).child(text(label.to_owned()).font(webkit::font(t, 13.5, 400.0, 20.25)).color(t.text.base).w(80.0)).child(text(path.unwrap_or("…").to_owned()).key(format!("{key}-path")).font(webkit::mono(webkit::font(t, 12.0, 400.0, 18.0))).color(t.text.muted).truncate().grow(1.0).shrink().min_w(0.0).help(path.unwrap_or("").to_owned()));
     if !note.is_empty() {
-        r = r.child(text(note.to_owned()).font(webkit::font(t, 12.0, 400.0, 19.5)).color(t.text.muted));
+        r = r.child(text(note.to_owned()).font(webkit::font(t, 12.0, 400.0, 18.0)).color(t.text.muted));
     }
     let action = match path {
         Some(p) => copy_action(t, &format!("{key}-copy"), &format!("Copy the {} path", label.to_lowercase()), p.to_owned(), toast),
@@ -46,20 +46,20 @@ fn plugin_row(s: &App, t: &Neko, layer: &mut Vec<El>, p: &PluginListing) -> El {
     let busy = s.plugin_ui.busy.as_deref() == Some(p.id.as_str());
     let key = format!("plugin-{}", p.id);
     let id = p.id.clone();
-    let small = webkit::font(t, 12.0, 400.0, 19.5);
+    let small = webkit::font(t, 12.0, 400.0, 18.0);
     let mut head = row().w_full().min_h(32.0).gap(12.0).center_y();
     if tone == Tone::Error {
         head = head.child(icon(&icons_phosphor::WARNING_REGULAR, 16.0).color(t.meaning.coral).a11y_hidden());
     }
-    head = head.child(text(label.clone()).key(format!("{key}-title")).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).help(p.id.clone()));
+    head = head.child(text(label.clone()).key(format!("{key}-title")).font(webkit::font(t, 13.5, 400.0, 20.25)).color(t.text.base).help(p.id.clone()));
     if !p.manifest_version.is_empty() {
         head = head.child(row().children([text("v".to_owned()).font(webkit::tnum(small)).color(t.text.muted.alpha(0.7)).a11y_hidden(), text(p.manifest_version.clone()).font(webkit::tnum(small)).color(t.text.muted.alpha(0.7)).a11y_hidden()]));
     }
     if !p.entry.is_empty() {
-        head = head.child(text(p.entry.trim_start_matches(&format!("/plugins/{}/", p.id)).to_owned()).font(webkit::mono(webkit::font(t, 11.5, 400.0, 18.6875))).color(t.text.muted.alpha(0.7)));
+        head = head.child(text(p.entry.trim_start_matches(&format!("/plugins/{}/", p.id)).to_owned()).font(webkit::mono(webkit::font(t, 11.5, 400.0, 17.25))).color(t.text.muted.alpha(0.7)));
     }
-    head = head.child(text(p.description.clone()).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().grow(1.0).shrink().min_w(0.0));
-    head = head.child(text(status).key(format!("{key}-status")).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(match tone {
+    head = head.child(text(p.description.clone()).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted).truncate().grow(1.0).shrink().min_w(0.0));
+    head = head.child(text(status).key(format!("{key}-status")).font(webkit::font(t, 12.5, 400.0, 18.75)).color(match tone {
         Tone::Ok => t.text.muted,
         Tone::Off => t.text.muted.alpha(0.7),
         Tone::Error => t.meaning.coral,
@@ -154,12 +154,12 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, region_w: f32) -> El {
     webkit::set_page_width(region_w);
     let ui = &s.plugin_ui;
     let custom = ui.custom.as_ref();
-    let small = webkit::font(t, 12.0, 400.0, 19.5);
+    let small = webkit::font(t, 12.0, 400.0, 18.0);
     let muted80 = t.text.muted.alpha(0.8);
     // Where things live, and the line under them (`Go to Folder … custom.css …`).
     let note = row().w_full().flex_wrap().px(12.0).pt(4.0).children([
         text("Go to Folder (⇧⌘G) in Finder opens a path. ".to_owned()).font(small).color(muted80).a11y_hidden(),
-        text("custom.css".to_owned()).font(webkit::mono(webkit::font(t, 11.5, 400.0, 18.6875))).color(muted80).a11y_hidden(),
+        text("custom.css".to_owned()).font(webkit::mono(webkit::font(t, 11.5, 400.0, 17.25))).color(muted80).a11y_hidden(),
         text(" applies as you save.".to_owned()).font(small).color(muted80).a11y_hidden(),
     ]);
     let places = col()
@@ -168,10 +168,11 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, region_w: f32) -> El {
         .child(path_row(t, "plugin-folder", "Pages", custom.map(|c| c.plugins_dir.as_str()), "", "Folder path copied"))
         .child(path_row(t, "css-path", "Styles", custom.map(|c| c.css_path.as_str()), custom.map_or("", |c| if c.css_exists { "In use" } else { "Not created yet" }), "File path copied"))
         .child(note);
-    let mut body = col().key("plugins-body").w_full().gap(32.0).child(webkit::panel(vec![places]));
+    let mut body = col().key("plugins-body").w_full().gap(32.0).child(webkit::panel(t, vec![places]));
     let change = |key: &str| {
         // The default `Button` as the web's Empty draws it: 40 high, 16 at the sides, 8 between the icon and the words.
-        row().key(key.to_owned()).role("button").label("Change Neko").focusable(true).h(40.0).px(17.0).gap(8.0).center().radius(20.0).fill(t.meaning.iris).hover(rune::Color::WHITE.alpha(0.14)).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(|s: &mut App| s.ask_change_neko()).child(icon(&icons_phosphor::SPARKLE, 16.0).color(rune::Color::WHITE.alpha(0.8)).mx(-2.0).a11y_hidden()).child(text("Change Neko".to_owned()).font(webkit::font(t, 14.0, 500.0, 20.0)).color(rune::Color::WHITE).a11y_hidden())
+        let r = row().key(key.to_owned()).role("button").label("Change Neko").focusable(true).h(40.0).px(17.0).gap(8.0).center().radius(24.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).press_scale(0.97).on_press(|s: &mut App| s.ask_change_neko());
+        webkit::ink(t, r).child(icon(&icons_phosphor::SPARKLE, 16.0).color(t.mat.ink_fg.alpha(0.8)).mx(-2.0).a11y_hidden()).child(text("Change Neko".to_owned()).font(webkit::font(t, 14.0, 500.0, 20.0)).color(t.mat.ink_fg).a11y_hidden())
     };
     match &ui.listings {
         None => {
@@ -188,20 +189,20 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, region_w: f32) -> El {
                 ),
                 None => {
                     let bars: Vec<El> = [(192.0, 20.0), (0.0, 16.0), (160.0, 20.0), (0.0, 16.0)].iter().enumerate().map(|(i, (w, h))| { let b = el().key(format!("plugins-loading-{i}")).h(*h).radius(6.0).fill(t.text.base.alpha(0.06)); if *w > 0.0 { b.w(*w) } else { b.w_full() } }).collect();
-                    webkit::panel(vec![col().key("plugins-loading").role("status").label("Loading customisations").w_full().px(12.0).py(12.0).gap(16.0).children(bars)])
+                    webkit::panel(t, vec![col().key("plugins-loading").role("status").label("Loading customisations").w_full().px(12.0).py(12.0).gap(16.0).children(bars)])
                 }
             });
         }
         Some(l) if l.is_empty() => {
             let style = webkit::font(t, 14.0, 400.0, 22.75);
-            let code_style = webkit::mono(webkit::font(t, 12.0, 400.0, 19.5));
+            let code_style = webkit::mono(webkit::font(t, 12.0, 400.0, 18.0));
             let description = webkit::inline_flow(t, "plugins-none-description", &[("A page of yours is a folder with a ", false), ("manifest.json", true), (" and an ES module. Give it a built-in page’s id and it replaces that page. Describe what you want and Neko writes it for you.", false)], style, code_style, 384.0);
-            let example = col().key("plugins-example").px(16.0).py(12.0).radius(10.0).fill(t.text.base.alpha(0.03)).child(text(MANIFEST_EXAMPLE.to_owned()).key("plugins-example-text").font(webkit::mono(webkit::font(t, 12.0, 400.0, 19.5))).color(t.text.muted));
+            let example = col().key("plugins-example").px(16.0).py(12.0).radius(10.0).fill(t.text.base.alpha(0.03)).child(text(MANIFEST_EXAMPLE.to_owned()).key("plugins-example-text").font(webkit::mono(webkit::font(t, 12.0, 400.0, 18.0))).color(t.text.muted));
             body = body.child(webkit::empty_rich(t, "plugins-none", &icons_phosphor::SLIDERS_HORIZONTAL, "Nothing customised yet", description, vec![example], Some(change("plugins-none-change"))));
         }
         Some(l) => {
             let rows: Vec<El> = l.iter().map(|p| plugin_row(s, t, layer, p)).collect();
-            body = body.child(webkit::panel(vec![col().key("plugin-list").role("list").w_full().children(rows)]));
+            body = body.child(webkit::panel(t, vec![col().key("plugin-list").role("list").w_full().children(rows)]));
         }
     }
     // The native plugins (Luau) that installed packs ship, with their status (Rune's own, after the web's list).
@@ -214,7 +215,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, region_w: f32) -> El {
     if let Some(detail) = ui.detail.as_deref().and_then(|id| ui.listings.as_ref().and_then(|l| l.iter().find(|p| p.id == id))) {
         body = body.child(details(s, t, detail));
     }
-    let foot_style = webkit::font(t, 12.5, 400.0, 20.3125);
+    let foot_style = webkit::font(t, 12.5, 400.0, 18.75);
     let link_text = "Roll back the web UI in Settings.";
     let link = row()
         .key("plugins-roll-back")

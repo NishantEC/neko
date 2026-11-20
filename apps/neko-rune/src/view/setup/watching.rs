@@ -68,25 +68,25 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     );
     top = top.child(options);
 
-    let mut body = col().key("watch-body").w_full().gap(32.0);
+    let mut body = col().key("watch-body").w_full().gap(28.0);
     if let Some(n) = note(s, t, "setup:page") {
         body = body.child(n);
     }
     body = body.child(top).child(new_watch(s, t, layer, data));
     if !suggested.is_empty() {
         let rows: Vec<El> = suggested.iter().map(|w| suggestion(s, t, layer, data, w)).collect();
-        body = body.child(webkit::section(t, "watch-suggestions", "Suggestions", Some(&suggested.len().to_string()), None, webkit::panel(rows)));
+        body = body.child(webkit::section(t, "watch-suggestions", "Suggestions", Some(&suggested.len().to_string()), None, webkit::panel(t, rows)));
     }
     let active_body = if active.is_empty() {
-        text((if paused.is_empty() { "No active watches. Describe one above, or review a suggestion." } else { "No active watches. Resume a paused one or describe a new one above." }).to_owned()).key("watch-active-empty").font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.muted).wrap().min_w(0.0)
+        text((if paused.is_empty() { "No active watches. Describe one above, or review a suggestion." } else { "No active watches. Resume a paused one or describe a new one above." }).to_owned()).key("watch-active-empty").font(webkit::font(t, 13.5, 400.0, 20.25)).color(t.text.muted).wrap().min_w(0.0)
     } else {
-        webkit::panel(active.iter().map(|w| watch_row(s, t, layer, data, w)).collect())
+        webkit::panel(t, active.iter().map(|w| watch_row(s, t, layer, data, w)).collect())
     };
     body = body.child(webkit::section(t, "watch-active", "Active", Some(&active.len().to_string()), None, active_body));
     if !paused.is_empty() {
         let show = s.row_open(PAUSED_OPEN);
         let toggle = webkit::ghost_xs_button(t, "watch-paused-toggle", if show { "Hide" } else { "Show" }, None, "Paused watches never check. Turn one on to confirm what it may do.", |s: &mut App| s.toggle_row(PAUSED_OPEN));
-        let inner = if show { webkit::panel(paused.iter().map(|w| watch_row(s, t, layer, data, w)).collect()) } else { el() };
+        let inner = if show { webkit::panel(t, paused.iter().map(|w| watch_row(s, t, layer, data, w)).collect()) } else { el() };
         body = body.child(webkit::section(t, "watch-paused", "Paused", Some(&paused.len().to_string()), Some(toggle), inner));
     }
     Page { count: None, trailing: Vec::new(), body, title: None, back: None }
@@ -98,7 +98,7 @@ fn new_watch(s: &App, t: &Neko, layer: &mut Vec<El>, data: &SetupData) -> El {
     let chosen = s.pages.text("watch:target");
     let ws_id = if !scope.is_empty() { scope.to_owned() } else if data.workspaces.iter().any(|w| w.id == chosen) { chosen.to_owned() } else { data.workspaces[0].id.clone() };
     let tools: Vec<&neko_protocol::mcp_host::McpConnection> = data.connections.iter().filter(|c| c.enabled && (c.workspace_id.is_empty() || c.workspace_id == ws_id)).collect();
-    let small = webkit::font(t, 12.5, 400.0, 20.3125);
+    let small = webkit::font(t, 12.5, 400.0, 18.75);
 
     let mut head = row().w_full().gap(12.0).center_y().justify_between().child(row().px(4.0).child(text("What should Neko keep an eye on?".to_owned()).key("watch-ask-label").font(small).color(t.text.muted).a11y_hidden()));
     if !tools.is_empty() {
@@ -149,13 +149,13 @@ fn new_watch(s: &App, t: &Neko, layer: &mut Vec<El>, data: &SetupData) -> El {
     }
     let mut card = col().key("watch-card").w_full().radius(20.0).fill(t.text.base.alpha(0.03)).child(inner);
     if let Some((pending, said)) = s.suggestion_reply().filter(|_| !s.setup.dismissed_reply) {
-        let mut line = row().w_full().gap(8.0).center_y().justify_between().child(text(if pending { "Looking through your tools…" } else { "Neko’s reply" }.to_owned()).key("watch-reply-title").font(webkit::font(t, 13.0, 500.0, 21.125)).color(t.text.base).a11y_hidden());
+        let mut line = row().w_full().gap(8.0).center_y().justify_between().child(text(if pending { "Looking through your tools…" } else { "Neko’s reply" }.to_owned()).key("watch-reply-title").font(webkit::font(t, 13.0, 500.0, 19.5)).color(t.text.base).a11y_hidden());
         if !pending {
             line = line.child(webkit::ghost_xs_button(t, "watch-reply-hide", "Hide reply", None, "Hide reply", |s: &mut App| s.setup.dismissed_reply = true));
         }
         let mut reply = col().key("watch-reply").w_full().px(16.0).pb(16.0).gap(6.0).child(line);
         if !pending {
-            reply = reply.child(text(said).key("watch-reply-text").font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted).wrap().min_w(0.0));
+            reply = reply.child(text(said).key("watch-reply-text").font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.muted).wrap().min_w(0.0));
         }
         card = card.child(reply);
     }
@@ -186,9 +186,9 @@ fn watch_row(s: &App, t: &Neko, layer: &mut Vec<El>, data: &SetupData, w: &Respo
         .radius(10.0)
         .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(move |s: &mut App| s.toggle_row(&format!("watch:{toggle_id}")))
-        .child(text(title.clone()).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().min_w(0.0).shrink().help(w.instruction.clone()).a11y_hidden())
+        .child(text(title.clone()).font(webkit::font(t, 13.5, 400.0, 20.25)).color(t.text.base).truncate().min_w(0.0).shrink().help(w.instruction.clone()).a11y_hidden())
         .child(el().grow(1.0).min_w(0.0))
-        .child(text(status.clone()).key(format!("watch-status-{id}")).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(if tone == Tone::Warning { t.meaning.amber } else { t.text.muted }).a11y_hidden())
+        .child(text(status.clone()).key(format!("watch-status-{id}")).font(webkit::font(t, 12.5, 400.0, 18.75)).color(if tone == Tone::Warning { t.meaning.amber } else { t.text.muted }).a11y_hidden())
         .child(webkit::faint(t, &data.workspace_name(&w.workspace_id)));
     let more = webkit::more_menu(
         s,
@@ -249,7 +249,7 @@ fn watch_row(s: &App, t: &Neko, layer: &mut Vec<El>, data: &SetupData, w: &Respo
 /// The open watch (`text-[13px]`): its instruction, the facts, what is wrong, the last result and the two buttons.
 fn details(s: &App, t: &Neko, data: &SetupData, w: &Responsibility) -> El {
     let id = w.id.as_str();
-    let body = webkit::font(t, 13.0, 400.0, 21.125);
+    let body = webkit::font(t, 13.0, 400.0, 19.5);
     let sources: Vec<String> = w.connection_ids.iter().map(|c| words::connection_label(data, c)).collect();
     let missing = words::ungranted(data, &w.workspace_id, &w.connection_ids);
     let fact = |key: &str, label: &str, value: &str| row().key(key.to_owned()).w_full().gap(16.0).child(text(label.to_owned()).font(body).color(t.text.muted).w(128.0).a11y_hidden()).child(text(value.to_owned()).key(format!("{key}-value")).font(body).color(t.text.base.alpha(0.85)).wrap().grow(1.0).shrink().min_w(0.0).a11y_hidden());
@@ -282,7 +282,7 @@ fn details(s: &App, t: &Neko, data: &SetupData, w: &Responsibility) -> El {
         })));
     }
     if !w.last_result.trim().is_empty() {
-        c = c.child(col().w_full().gap(6.0).child(text("Last check result".to_owned()).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).a11y_hidden()).child(text(w.last_result.clone()).key(format!("watch-d-result-{id}")).font(body).color(t.text.base.alpha(0.85)).wrap().min_w(0.0).padding(12.0).radius(10.0).fill(t.text.base.alpha(0.03))));
+        c = c.child(col().w_full().gap(6.0).child(text("Last check result".to_owned()).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted).a11y_hidden()).child(text(w.last_result.clone()).key(format!("watch-d-result-{id}")).font(body).color(t.text.base.alpha(0.85)).wrap().min_w(0.0).padding(12.0).radius(10.0).fill(t.text.base.alpha(0.03))));
     }
     let (a, b) = (id.to_owned(), id.to_owned());
     let enabled = w.enabled;
@@ -323,8 +323,8 @@ fn suggestion(s: &App, t: &Neko, layer: &mut Vec<El>, data: &SetupData, w: &Resp
     }
     let line = vec![
         lead,
-        text(w.instruction.clone()).key(format!("suggestion-{id}")).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().grow(1.0).shrink().min_w(0.0).help(w.instruction.clone()).a11y_hidden(),
-        text(words_).key(format!("suggestion-sources-{id}")).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(ink).truncate().max_w(0.4 * (webkit::page_width() - 24.0)).a11y_hidden(),
+        text(w.instruction.clone()).key(format!("suggestion-{id}")).font(webkit::font(t, 13.5, 400.0, 20.25)).color(t.text.base).truncate().grow(1.0).shrink().min_w(0.0).help(w.instruction.clone()).a11y_hidden(),
+        text(words_).key(format!("suggestion-sources-{id}")).font(webkit::font(t, 12.5, 400.0, 18.75)).color(ink).truncate().max_w(0.4 * (webkit::page_width() - 24.0)).a11y_hidden(),
         webkit::row_actions(acts),
     ];
     let mut below: Vec<El> = Vec::new();

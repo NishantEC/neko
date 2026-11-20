@@ -31,16 +31,13 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     let broken: Vec<&&McpConnection> = sorted.iter().filter(|c| words::conn_status(c).broken()).collect();
     if !broken.is_empty() {
         let first = if broken.len() == 1 { format!("{} needs attention.", broken[0].label) } else { format!("{} connections need attention.", broken.len()) };
-        let banner = row().key("tools-attention").w_full().gap(10.0).child(icon(&icons::INFO, 16.0).color(t.meaning.amber).mt(3.0).a11y_hidden()).child(attention_text(t, &first, " Agents and watches that use them can’t run until they’re reconnected.", crate::view::webkit::content_width() - 26.0));
+        let banner = row().key("tools-attention").w_full().gap(10.0).child(icon(&icons::INFO, 16.0).color(t.meaning.amber).mt(11.5).a11y_hidden()).child(attention_text(t, &first, " Agents and watches that use them can’t run until they’re reconnected.", crate::view::webkit::content_width() - 26.0));
         content = content.child(banner);
     }
     if sorted.is_empty() {
         content = content.child(empty(t, "tools-empty", "No connections yet. Browse MCP servers, import from this Mac, or add a URL.", Some(("Add connection", Box::new(|s: &mut App| s.open_add_connection(super::state::AddTab::Browse))))));
     } else {
-        let mut list = col().mx(-12.0);
-        for c in sorted {
-            list = list.child(connection_row(s, t, layer, c));
-        }
+        let list = crate::view::webkit::panel_rows(t, sorted.into_iter().map(|c| connection_row(s, t, layer, c)).collect());
         let count = data.connections.len().to_string();
         content = content.child(crate::view::webkit::section(t, "tools-connections", "Connections", Some(&count), None, list));
     }
@@ -50,7 +47,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
 /// The banner's words as the browser flows the web's two JSX text nodes (the count or name, then the fixed sentence): one line of
 /// `width`, the second node carrying on after the first and wrapping to the line start, each node (and each of its lines) a text.
 fn attention_text(t: &Neko, first: &str, rest: &str, width: f32) -> El {
-    let style = crate::view::webkit::font(t, 13.0, 400.0, 21.125);
+    let style = crate::view::webkit::font(t, 13.0, 400.0, 19.5);
     let width_of = |w: &str| rune::text::measure(w, &[], style, None).0;
     let mut lines: Vec<String> = vec![String::new()];
     let mut used = width_of(first);

@@ -87,7 +87,7 @@ fn tone_colors(t: &Neko, tone: Tone) -> (Color, Color) {
 }
 
 const LABEL: fn(&Neko) -> TextStyle = |t| webkit::font(t, 11.5, 500.0, 11.5);
-const TAG: fn(&Neko) -> TextStyle = |t| webkit::font(t, 11.5, 500.0, 18.6875);
+const TAG: fn(&Neko) -> TextStyle = |t| webkit::font(t, 11.5, 500.0, 17.25);
 
 /// `StatusLabel`: 20 high, 6 at the sides, the symbol (a spinner while it runs) 4 before the words.
 fn status_label(t: &Neko, key: &str, node: &AgentNode) -> El {
@@ -130,8 +130,8 @@ fn row_width(depth: usize) -> f32 {
 fn name_cell(s: &App, t: &Neko, node: &AgentNode, depth: usize) -> El {
     let live = node.is_live();
     let sub = node.origin.as_deref().filter(|_| node.subtitle.is_empty()).unwrap_or(&node.subtitle).to_owned();
-    let name_style = webkit::font(t, 13.5, 500.0, 21.9375);
-    let small = webkit::font(t, 12.5, 400.0, 20.3125);
+    let name_style = webkit::font(t, 13.5, 500.0, 20.25);
+    let small = webkit::font(t, 12.5, 400.0, 18.75);
     let room = name_room(t, node, depth, webkit::page_width()).max(0.0);
     let name_w = measure(&node.name, name_style);
     let shown_name = name_w.min(room);
@@ -215,7 +215,7 @@ fn node_row(s: &App, t: &Neko, layer: &mut Vec<El>, node: &AgentNode, parent: Op
         .min_w(0.0)
         .h(36.0)
         .pl(4.0)
-        .pr(8.0)
+        .pr(16.0)
         .gap(10.0)
         .center_y()
         .radius(14.0)

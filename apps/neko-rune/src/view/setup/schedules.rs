@@ -25,7 +25,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
         return Page { count: None, trailing: Vec::new(), body, title: None, back: None };
     }
     let scope = s.setup.scope.as_str();
-    let mut body = col().key("sch-body").w_full().gap(32.0);
+    let mut body = col().key("sch-body").w_full().gap(28.0);
     if let Some(n) = note(s, t, "setup:page") {
         body = body.child(n);
     }
@@ -45,9 +45,9 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
         let id = w.id.clone();
         let new = webkit::ghost_xs_button(t, &format!("sch-group-new-{}", w.id), "New", Some(&ph::PLUS), &format!("New schedule in {}", w.name), move |s: &mut App| s.open_schedule_dialog(None, &id));
         let inner = if list.is_empty() {
-            text("No schedules".to_owned()).key(format!("sch-none-{}", w.id)).font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted)
+            text("No schedules".to_owned()).key(format!("sch-none-{}", w.id)).font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.muted)
         } else {
-            webkit::panel(list.iter().map(|item| schedule_row(s, t, layer, item)).collect())
+            webkit::panel(t, list.iter().map(|item| schedule_row(s, t, layer, item)).collect())
         };
         let count = (!list.is_empty()).then(|| list.len().to_string());
         body = body.child(webkit::section(t, &format!("sch-group-{}", w.id), &w.name, count.as_deref(), Some(new), inner));
@@ -55,7 +55,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     let orphans: Vec<&Schedule> = data.schedules.iter().filter(|x| x.workspace_id.as_deref().is_none_or(|w| data.workspace(w).is_none())).collect();
     if scope.is_empty() && !orphans.is_empty() {
         let rows: Vec<El> = orphans.iter().map(|item| schedule_row(s, t, layer, item)).collect();
-        body = body.child(webkit::section(t, "sch-group-none", "Without a workspace", Some(&orphans.len().to_string()), None, webkit::panel(rows)));
+        body = body.child(webkit::section(t, "sch-group-none", "Without a workspace", Some(&orphans.len().to_string()), None, webkit::panel(t, rows)));
     }
     // Rune-only: the page's own "New schedule" (it makes one in the first workspace), the only control in the header.
     let first = data.workspaces[0].id.clone();
@@ -78,7 +78,7 @@ fn schedule_row(s: &App, t: &Neko, layer: &mut Vec<El>, item: &Schedule) -> El {
         _ => " · paused".to_owned(),
     };
     let when = format!("{rule}{extra}");
-    let small = webkit::font(t, 12.5, 400.0, 20.3125);
+    let small = webkit::font(t, 12.5, 400.0, 18.75);
     let (run, edit, del, sw) = (id.clone(), id.clone(), id.clone(), id.clone());
     let (menu_run, menu_edit, menu_del) = (id.clone(), id.clone(), id.clone());
 
@@ -100,7 +100,7 @@ fn schedule_row(s: &App, t: &Neko, layer: &mut Vec<El>, item: &Schedule) -> El {
         .radius(10.0)
         .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(move |s: &mut App| s.toggle_row(&toggle))
-        .child(text(item.name.clone()).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().min_w(0.0).shrink().a11y_hidden())
+        .child(text(item.name.clone()).font(webkit::font(t, 13.5, 400.0, 20.25)).color(t.text.base).truncate().min_w(0.0).shrink().a11y_hidden())
         .child(text(item.prompt.clone()).font(small).color(t.text.muted).truncate().grow(1.0).shrink().min_w(0.0).help(item.prompt.clone()).a11y_hidden())
         .child(when_nodes);
     let run_now = move |s: &mut App, id: &str| {
@@ -157,13 +157,13 @@ fn schedule_row(s: &App, t: &Neko, layer: &mut Vec<El>, item: &Schedule) -> El {
 
 /// The opened row: the prompt in full (13, at most 70 characters wide), the recurrence and zone, the last run's words, "Last task".
 fn details(s: &App, t: &Neko, item: &Schedule, id: &str) -> El {
-    let body = webkit::font(t, 13.0, 400.0, 21.125);
+    let body = webkit::font(t, 13.0, 400.0, 19.5);
     let max = 70.0 * rune::text::measure("0", &[], body, None).0;
     let mut d = col().key(format!("schedule-details-{id}")).w_full().pl(28.0).pb(4.0).gap(8.0);
     d = d.child(text(item.prompt.clone()).key(format!("schedule-prompt-{id}")).font(body).color(t.text.base.alpha(0.85)).wrap().max_w(max).min_w(0.0));
-    d = d.child(row().key(format!("schedule-rule-{id}")).child(text(words::rule_summary(&item.rule)).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted)).child(text(" · ".to_owned()).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted)).child(text(item.timezone.clone()).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted)));
+    d = d.child(row().key(format!("schedule-rule-{id}")).child(text(words::rule_summary(&item.rule)).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted)).child(text(" · ".to_owned()).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted)).child(text(item.timezone.clone()).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted)));
     if !item.last_result.trim().is_empty() {
-        let line = row().key(format!("schedule-last-{id}")).max_w(max).px(12.0).py(8.0).radius(10.0).fill(t.text.base.alpha(0.03)).gap(6.0).child(text("Last run".to_owned()).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).a11y_hidden()).child(text(item.last_result.clone()).font(body).color(t.text.base.alpha(0.8)).wrap().min_w(0.0).shrink());
+        let line = row().key(format!("schedule-last-{id}")).max_w(max).px(12.0).py(8.0).radius(10.0).fill(t.text.base.alpha(0.03)).gap(6.0).child(text("Last run".to_owned()).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted).a11y_hidden()).child(text(item.last_result.clone()).font(body).color(t.text.base.alpha(0.8)).wrap().min_w(0.0).shrink());
         d = d.child(line);
     }
     if let Some(task) = item.last_task_id.as_deref().filter(|task| s.summary.as_ref().is_some_and(|m| m.task(task).is_some())) {

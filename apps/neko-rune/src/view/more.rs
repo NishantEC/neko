@@ -46,7 +46,7 @@ pub fn usage(s: &App, t: &Neko, region_w: f32) -> El {
     webkit::set_page_width(region_w);
     // The column's inside: the window up to the page's 880, less the 28 of padding at either side.
     let inner = region_w.min(super::COLUMN) - 56.0;
-    let body = col().key("usage-body").w_full().gap(32.0).child(this_mac(s, t)).child(spend(s, t, inner)).child(models(s, t)).child(quota(s, t));
+    let body = col().key("usage-body").w_full().gap(28.0).child(this_mac(s, t)).child(spend(s, t, inner)).child(models(s, t)).child(quota(s, t));
     page(t, "usage", "Usage & machine", None, Vec::new(), body)
 }
 
@@ -55,7 +55,7 @@ fn this_mac(s: &App, t: &Neko) -> El {
     let updated = if fetched > 0 { format!("Updated {}s ago", ((s.now_ms - fetched) as f64 / 1000.0).round().max(0.0) as i64) } else { "Reading…".to_owned() };
     let big = webkit::page_width() < 640.0;
     let refresh = row().key("machine-refresh").role("button").label("Refresh the machine reading").help("Refresh").focusable(true).size(36.0, 36.0).center().radius(18.0).hover(t.text.base.alpha(0.07)).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(|s: &mut App| s.extra_ask_machine()).child(icon(&icons_phosphor::ARROWS_CLOCKWISE, if big { 18.0 } else { 16.0 }).color(t.text.base).a11y_hidden());
-    let actions = row().gap(6.0).center_y().child(text(updated).key("machine-updated").font(webkit::tnum(webkit::font(t, 12.0, 400.0, 19.5))).color(t.text.muted.alpha(0.7))).child(refresh);
+    let actions = row().gap(6.0).center_y().child(text(updated).key("machine-updated").font(webkit::tnum(webkit::font(t, 12.0, 400.0, 18.0))).color(t.text.muted.alpha(0.7))).child(refresh);
     let body = match s.extra.machine.as_ref() {
         None if s.extra.machine_empty => webkit::empty(t, "machine-empty", &icons_phosphor::GAUGE_REGULAR, "No reading yet", "The daemon hasn’t sampled the machine. It does so every 15 seconds while it runs.", None),
         None => loading_rows(t, "machine-loading", 4),
@@ -88,14 +88,14 @@ fn machine_body(s: &App, t: &Neko, h: &MachineHealth) -> El {
         .gaps(4.0, 12.0)
         .flex_wrap()
         .center_y()
-        .child(text(state.title.clone()).key("machine-state-title").font(webkit::font(t, 13.5, 400.0, 21.9375)).color(tone_ink(t, state.level).unwrap_or(t.text.base)).a11y_hidden())
-        .child(text(format!("{}{slowed}", state.detail)).key("machine-state-detail").font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).wrap().min_w(0.0).shrink().a11y_hidden())
+        .child(text(state.title.clone()).key("machine-state-title").font(webkit::font(t, 13.5, 400.0, 20.25)).color(tone_ink(t, state.level).unwrap_or(t.text.base)).a11y_hidden())
+        .child(text(format!("{}{slowed}", state.detail)).key("machine-state-detail").font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted).wrap().min_w(0.0).shrink().a11y_hidden())
         .child(el().grow(1.0).min_w(0.0))
-        .child(text(format!("read {}", webkit::relative_time(s.now_ms, h.at_ms))).font(webkit::tnum(webkit::font(t, 12.0, 400.0, 19.5))).color(t.text.muted.alpha(0.7)).a11y_hidden());
+        .child(text(format!("read {}", webkit::relative_time(s.now_ms, h.at_ms))).font(webkit::tnum(webkit::font(t, 12.0, 400.0, 18.0))).color(t.text.muted.alpha(0.7)).a11y_hidden());
     let figures: Vec<El> = machine_figures(h).into_iter().enumerate().map(|(i, (label, value, unit, detail, level))| webkit::figure(t, &format!("machine-{i}"), label, &value, unit.as_deref(), Some(&detail), tone_ink(t, level), None)).collect();
-    let mut c = col().w_full().gap(6.0).child(line).child(webkit::panel(figures)).child(webkit::group_heading(t, "machine-agents-head", "Memory held by agents", None));
+    let mut c = col().w_full().gap(6.0).child(line).child(webkit::panel(t, figures)).child(webkit::group_heading(t, "machine-agents-head", "Memory held by agents", None));
     if h.agents.is_empty() {
-        c = c.child(text("No agent processes are running right now.".to_owned()).key("machine-agents-none").font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted).wrap().min_w(0.0));
+        c = c.child(text("No agent processes are running right now.".to_owned()).key("machine-agents-none").font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.muted).wrap().min_w(0.0));
     } else {
         let rows: Vec<El> = h
             .agents
@@ -107,7 +107,7 @@ fn machine_body(s: &App, t: &Neko, h: &MachineHealth) -> El {
                 webkit::figure(t, &format!("machine-agent-{i}"), &a.name, &size, None, Some(&format!("{} {}", a.processes, if a.processes == 1 { "process" } else { "processes" })), None, None)
             })
             .collect();
-        c = c.child(webkit::panel(rows));
+        c = c.child(webkit::panel(t, rows));
     }
     c
 }
@@ -256,7 +256,7 @@ fn spend(s: &App, t: &Neko, inner: f32) -> El {
     if has_data {
         figures.push(webkit::figure(t, "usage-priced", "Tasks with a price", &report.priced_tasks.to_string(), None, Some(&format!("of {} in history", report.tasks_total)), None, None));
     }
-    let mut c = col().w_full().gap(6.0).child(webkit::panel(figures).key("spend-figures"));
+    let mut c = col().w_full().gap(14.0).child(webkit::panel(t, figures).key("spend-figures"));
     if has_data {
         let days = spend_by_day_14(&usage, s.now_ms);
         c = c.child(webkit::group_heading(t, "usage-days-head", "Per day", Some("last 14 days, USD"))).child(chart(t, inner, &days)).child(webkit::group_heading(t, "usage-tasks-head", "Costliest tasks", None));
@@ -265,15 +265,15 @@ fn spend(s: &App, t: &Neko, inner: f32) -> El {
             .iter()
             .enumerate()
             .map(|(i, task)| {
-                let title = text(task.title.clone()).key(format!("usage-task-{i}")).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().a11y_hidden();
-                let runs = text(format!("{} {}", task.runs, if task.runs == 1 { "run" } else { "runs" })).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden();
-                let cost = text(usd_text(task.cost.0)).key(format!("usage-task-{i}-cost")).font(webkit::tnum(webkit::font(t, 12.5, 400.0, 20.3125))).color(t.text.base).a11y_hidden();
+                let title = text(task.title.clone()).key(format!("usage-task-{i}")).font(webkit::font(t, 13.5, 400.0, 20.25)).color(t.text.base).truncate().a11y_hidden();
+                let runs = text(format!("{} {}", task.runs, if task.runs == 1 { "run" } else { "runs" })).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden();
+                let cost = text(usd_text(task.cost.0)).key(format!("usage-task-{i}-cost")).font(webkit::tnum(webkit::font(t, 12.5, 400.0, 18.75))).color(t.text.base).a11y_hidden();
                 webkit::info_row(t, &format!("usage-task-row-{i}"), title, Some(runs), None, vec![cost], None)
             })
             .collect();
-        c = c.child(webkit::panel(rows).key("spend-tasks"));
+        c = c.child(webkit::panel(t, rows).key("spend-tasks"));
     } else {
-        c = c.child(text("No priced runs yet. When an agent that reports its cost finishes a run, its spend shows up here.".to_owned()).key("usage-none").font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted).wrap().min_w(0.0));
+        c = c.child(text("No priced runs yet. When an agent that reports its cost finishes a run, its spend shows up here.".to_owned()).key("usage-none").font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.muted).wrap().min_w(0.0));
     }
     let title = "Spend";
     webkit::section(t, "spend", title, None, None, c).help("Read from the cost each Claude Code and OpenCode run reports. Codex subscriptions don’t report a price, so their runs aren’t counted here.")
@@ -369,7 +369,7 @@ fn models(s: &App, t: &Neko) -> El {
         return el().h(0.0);
     }
     let items: Vec<(String, usize, String)> = counts.iter().map(|(name, n)| (name.clone(), *n, format!("{n} {}", if *n == 1 { "run" } else { "runs" }))).collect();
-    webkit::section(t, "models", "Models", Some(&format!("last {} runs", runs.len())), None, webkit::panel(vec![webkit::bar_list(t, "model", &items)]))
+    webkit::section(t, "models", "Models", Some(&format!("last {} runs", runs.len())), None, webkit::panel(t, vec![webkit::bar_list(t, "model", &items)]))
 }
 
 /// "Quota": what each vendor has left, one `Figure` each; or one line that says why there is none, with "Check again".
@@ -387,19 +387,19 @@ fn quota(s: &App, t: &Neko) -> El {
                     webkit::figure(t, &format!("quota-{i}"), &r.label, &r.value, Some(&r.unit), Some(&r.detail), ink, Some(&r.detail))
                 })
                 .collect();
-            webkit::panel(figures).key("quota-figures")
+            webkit::panel(t, figures).key("quota-figures")
         }
     };
     webkit::section(t, "quota", "Quota", None, None, body).help("What each signed-in vendor has left, read from its own API.")
 }
 
 fn quota_none(t: &Neko, words: &str) -> El {
-    let again = row().key("quota-again").role("button").label("Check again").focusable(true).h(20.3125).gap(4.0).center_y().radius(10.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(|s: &mut App| {
+    let again = row().key("quota-again").role("button").label("Check again").focusable(true).h(18.75).gap(4.0).center_y().radius(10.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(|s: &mut App| {
         s.pages.quota = None;
         s.pages.notes.remove("page:quota");
         s.call(crate::link::Call::Quota);
-    }).child(icon(&icons_phosphor::ARROWS_CLOCKWISE, 12.0).color(t.text.muted).a11y_hidden()).child(text("Check again".to_owned()).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).a11y_hidden());
-    row().key("quota-none").w_full().gaps(0.0, 12.0).flex_wrap().center_y().child(text(words.to_owned()).font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted).wrap().min_w(0.0).shrink().a11y_hidden()).child(again)
+    }).child(icon(&icons_phosphor::ARROWS_CLOCKWISE, 12.0).color(t.text.muted).a11y_hidden()).child(text("Check again".to_owned()).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted).a11y_hidden());
+    row().key("quota-none").w_full().gaps(0.0, 12.0).flex_wrap().center_y().child(text(words.to_owned()).font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.muted).wrap().min_w(0.0).shrink().a11y_hidden()).child(again)
 }
 
 #[cfg(test)]

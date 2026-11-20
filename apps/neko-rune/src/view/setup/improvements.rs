@@ -24,12 +24,12 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     if let Some(n) = note(s, t, "setup:page") {
         body = body.child(n);
     }
-    let small = webkit::font(t, 13.0, 400.0, 21.125);
+    let small = webkit::font(t, 13.0, 400.0, 19.5);
     match reply {
         // `LoadingRows`: a panel of three rows, each a round and a bar.
         None => {
             let rows = (0..3).map(|i| row().key(format!("improve-loading-{i}")).w_full().px(12.0).py(10.0).gap(12.0).center_y().child(webkit::skeleton(t, &format!("improve-skeleton-dot-{i}"), 14.0, 14.0).radius(7.0)).child(webkit::skeleton(t, &format!("improve-skeleton-{i}"), 120.0 + (i * 17 % 36) as f32 * 2.0, 16.0))).collect();
-            body = body.child(webkit::panel(rows));
+            body = body.child(webkit::panel(t, rows));
         }
         Some(r) if !r.enabled => {
             // `improve-off`: the one line and its small outline button.
@@ -48,7 +48,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
         }
         if !items.is_empty() {
             let rows: Vec<El> = items.iter().map(|p| improve_row(s, t, layer, p)).collect();
-            body = body.child(webkit::section(t, "improve-suggestions", "Suggestions", Some(&items.len().to_string()), None, webkit::panel(rows)));
+            body = body.child(webkit::section(t, "improve-suggestions", "Suggestions", Some(&items.len().to_string()), None, webkit::panel(t, rows)));
         }
     }
     Page { count: (!items.is_empty()).then_some(items.len()), trailing: Vec::new(), body, title: None, back: None }
@@ -58,12 +58,12 @@ fn improve_row(s: &App, t: &Neko, layer: &mut Vec<El>, p: &Improvement) -> El {
     let id = p.id.clone();
     let open = p.state == ImproveState::Open;
     let busy = s.improve_is_busy(&id);
-    let small = webkit::font(t, 12.5, 400.0, 20.3125);
+    let small = webkit::font(t, 12.5, 400.0, 18.75);
     let kind = words::improve_kind_label(p.kind);
     let state_words = words::improve_state_words(p.state);
     let detail = id.clone();
     // Left: the title (which gives way), what kind, what became of it; right: how old, with at least 12 between (`ms-auto`).
-    let mut left = row().grow(1.0).shrink().min_w(0.0).gap(12.0).center_y().child(text(p.title.clone()).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(if p.state == ImproveState::Rejected { t.text.muted } else { t.text.base }).truncate().min_w(0.0).shrink().a11y_hidden()).child(text(kind.to_owned()).key(format!("improve-kind-{id}")).font(small).color(t.text.muted).a11y_hidden());
+    let mut left = row().grow(1.0).shrink().min_w(0.0).gap(12.0).center_y().child(text(p.title.clone()).font(webkit::font(t, 13.5, 400.0, 20.25)).color(if p.state == ImproveState::Rejected { t.text.muted } else { t.text.base }).truncate().min_w(0.0).shrink().a11y_hidden()).child(text(kind.to_owned()).key(format!("improve-kind-{id}")).font(small).color(t.text.muted).a11y_hidden());
     if let Some(word) = words::improve_state_word(p.state) {
         left = left.child(text(word.to_owned()).key(format!("improve-word-{id}")).font(small).color(t.text.muted).a11y_hidden());
     }
@@ -119,7 +119,7 @@ fn improve_row(s: &App, t: &Neko, layer: &mut Vec<El>, p: &Improvement) -> El {
 
 /// `Heading` (`packs/parts.tsx`): 12.5 medium muted.
 fn heading(t: &Neko, key: &str, words: &str) -> El {
-    text(words.to_owned()).key(key.to_owned()).font(webkit::font(t, 12.5, 500.0, 20.3125)).color(t.text.muted)
+    text(words.to_owned()).key(key.to_owned()).font(webkit::font(t, 12.5, 500.0, 18.75)).color(t.text.muted)
 }
 
 /// `Mono`: a command, path or evidence in the mono face, selectable, on a faint fill.
@@ -149,11 +149,11 @@ fn diff(t: &Neko, text_of: &str) -> El {
 pub fn detail(s: &App, t: &Neko, layer: &mut Vec<El>, win_h: f32, id: &str, evidence: bool) {
     let Some(p) = s.improvements().and_then(|r| r.proposals.iter().find(|p| p.id == id)) else { return };
     let busy = s.improve_is_busy(id);
-    let body13 = webkit::font(t, 13.0, 400.0, 21.125);
+    let body13 = webkit::font(t, 13.0, 400.0, 19.5);
     let mut body = col().key("improve-detail").w_full().gap(20.0);
 
     // The state, kind and age under the title (`DialogDescription`).
-    let small = webkit::font(t, 12.5, 400.0, 20.3125);
+    let small = webkit::font(t, 12.5, 400.0, 18.75);
     body = body.child(row().key("improve-state").gap(6.0).center_y().child(glyph(t, words::improve_glyph(p.state), "")).child(text(words::improve_state_words(p.state).to_owned()).font(small).color(t.text.muted)).child(text(format!(" · {} · {}", words::improve_kind_label(p.kind), words::relative_time(Some(p.created_ms), s.now_ms))).font(small).color(t.text.muted)));
 
     // The buttons, at the right: the default one (named by the daemon) and Reject while open, Undo once applied.
@@ -185,7 +185,7 @@ pub fn detail(s: &App, t: &Neko, layer: &mut Vec<El>, win_h: f32, id: &str, evid
         // "Opens the preview of the " {target in mono} " pack. Nothing installs by itself; …": one text node per part.
         let mut flow = row().flex_wrap().center_y().child(text("Opens the preview of the ".to_owned()).font(body13).color(t.text.base.alpha(0.9)));
         if !p.target.is_empty() {
-            flow = flow.child(text(p.target.clone()).font(webkit::mono(webkit::font(t, 12.5, 400.0, 20.3125))).color(t.text.base.alpha(0.9)));
+            flow = flow.child(text(p.target.clone()).font(webkit::mono(webkit::font(t, 12.5, 400.0, 18.75))).color(t.text.base.alpha(0.9)));
         }
         flow = flow.child(text(" pack. Nothing installs by itself; you read what it would do and install it there.".to_owned()).font(body13).color(t.text.base.alpha(0.9)));
         change = change.child(flow);

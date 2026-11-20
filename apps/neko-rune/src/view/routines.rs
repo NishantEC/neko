@@ -30,7 +30,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         return page(t, "routines", "Inbox", None, Vec::new(), quiet_line(t, "routines-loading", &line));
     };
     let views: Vec<&RoutineView> = data.views.iter().filter(|v| !is_goal_routine(v) && s.scope().is_none_or(|w| v.routine.workspace_id == w)).collect();
-    let mut body = col().w_full().gap(32.0);
+    let mut body = col().w_full().gap(28.0);
     if !data.routines_on {
         body = body.child(
             row()
@@ -83,15 +83,15 @@ fn empty_block(t: &Neko) -> El {
 }
 
 /// A `Panel` of the inbox: no gap, bleeding 12 either side.
-fn panel(rows: Vec<El>) -> El {
-    webkit::panel(rows)
+fn panel(t: &Neko, rows: Vec<El>) -> El {
+    webkit::panel(t, rows)
 }
 
 /// `ShortList`'s "Show N more …" line: 12 at the sides, 4 above and below.
 fn more_line(t: &Neko, flag: &str, all: bool, hidden: usize, noun: &str) -> El {
     let label = if all { "Show fewer".to_owned() } else { format!("Show {hidden} more {noun}") };
     let key = flag.to_owned();
-    row().w_full().mt(2.0).px(12.0).py(4.0).child(row().key(format!("{flag}-more")).role("button").label(label.clone()).expanded(all).focusable(true).radius(6.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(move |s: &mut App| s.toggle_inbox_flag(&key)).child(text(label).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).a11y_hidden()))
+    row().w_full().mt(2.0).px(12.0).py(4.0).child(row().key(format!("{flag}-more")).role("button").label(label.clone()).expanded(all).focusable(true).radius(6.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(move |s: &mut App| s.toggle_inbox_flag(&key)).child(text(label).font(font(t, 12.5, 400.0, 18.75)).color(t.text.muted).a11y_hidden()))
 }
 
 fn needs_you(s: &App, t: &Neko, layer: &mut Vec<El>, open: &[InboxItem], where_of: &dyn Fn(&InboxItem) -> String) -> El {
@@ -107,7 +107,7 @@ fn needs_you(s: &App, t: &Neko, layer: &mut Vec<El>, open: &[InboxItem], where_o
     if open.len() > SHORT {
         rows.push(more_line(t, flag, all, open.len() - SHORT, "items"));
     }
-    let body = if open.is_empty() { text("Nothing needs you right now.").key("needs-none").font(font(t, 13.5, 400.0, 21.9375)).color(t.text.muted) } else { panel(rows) };
+    let body = if open.is_empty() { text("Nothing needs you right now.").key("needs-none").font(font(t, 13.5, 400.0, 20.25)).color(t.text.muted) } else { panel(t, rows) };
     // The web's status line for screen readers: the count, said politely when it changes.
     let body = body.role("status").label(said).live_region(rune::LiveRegion::Polite);
     webkit::section(t, "needs-you", "Needs you", count.as_deref(), None, body)
@@ -136,15 +136,15 @@ fn needs_card(s: &App, t: &Neko, layer: &mut Vec<El>, item: &InboxItem, whence: 
         .on_press(move |s: &mut App| s.mark_item_done(&done_item))
         .child(status_glyph(StatusKind::InProgress, t, 14.0, Some("")).a11y_hidden());
     let mut texts = col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(
-        row().w_full().gap(12.0).center_y().child(text(item.title.clone()).key(format!("needs-title-{seq}")).font(font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().min_w(0.0).shrink().a11y_hidden()).child(el().grow(1.0).min_w(0.0)).child(text(whence.to_owned()).key(format!("needs-where-{seq}")).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().group_opacity(1.0, 0.0).a11y_hidden()),
+        row().w_full().min_h(20.8).gap(12.0).center_y().child(text(item.title.clone()).key(format!("needs-title-{seq}")).font(font(t, 13.5, 400.0, 20.25)).color(t.text.base).truncate().min_w(0.0).shrink().a11y_hidden()).child(text(whence.to_owned()).key(format!("needs-where-{seq}")).font(font(t, 12.5, 400.0, 18.75)).color(t.text.muted).group_opacity(1.0, 0.0).a11y_hidden()),
     );
     if !item.detail.is_empty() {
-        let d = text(item.detail.clone()).key(format!("needs-detail-{seq}")).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).min_w(0.0).max_w(567.8).a11y_hidden();
+        let d = text(item.detail.clone()).key(format!("needs-detail-{seq}")).font(font(t, 12.5, 400.0, 18.75)).color(t.text.muted).min_w(0.0).max_w(567.8).a11y_hidden();
         texts = texts.child(if expanded { d.wrap() } else { d.truncate() });
     }
     if !goal {
         let words = item.default.as_ref().map_or("No default".to_owned(), |d| format!("Default: {d}"));
-        texts = texts.child(text(words).key(format!("needs-default-{seq}")).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted.alpha(0.8)).truncate().min_w(0.0).max_w(567.8).a11y_hidden());
+        texts = texts.child(text(words).key(format!("needs-default-{seq}")).font(font(t, 12.5, 400.0, 18.75)).color(t.text.muted.alpha(0.8)).truncate().min_w(0.0).max_w(567.8).a11y_hidden());
     }
     let press = texts.role("button").label(item.title.clone()).expanded(expanded).focusable(true).radius(6.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(move |s: &mut App| s.toggle_inbox_flag(&flag));
     let mut hover: Vec<super::setup::kit::RowAct> = Vec::new();
@@ -153,7 +153,7 @@ fn needs_card(s: &App, t: &Neko, layer: &mut Vec<El>, item: &InboxItem, whence: 
         let act = a.act.clone();
         hover.push((key, a.label.clone(), glyph_icon, Box::new(move |s: &mut App| s.run_item_action(act.clone()))));
     }
-    let when = text(relative_time(s.now_ms, item.at_ms)).key(format!("needs-when-{seq}")).font(webkit::tnum(font(t, 12.5, 400.0, 20.3125))).color(t.text.muted.alpha(0.7)).a11y_hidden();
+    let when = text(relative_time(s.now_ms, item.at_ms)).key(format!("needs-when-{seq}")).font(webkit::tnum(font(t, 12.5, 400.0, 18.75))).color(t.text.muted.alpha(0.7)).a11y_hidden();
     let end = row().h(20.0).center_y().child(when);
     let mut card = row().key(format!("needs-{seq}")).w_full().px(12.0).py(8.0).gap(12.0).radius(10.0).hover_group().hover(t.text.base.alpha(0.03)).child(row().size(14.0, 20.0).center().child(glyph)).child(press).child(end);
     if !hover.is_empty() {
@@ -200,9 +200,9 @@ fn closed_recently(s: &App, t: &Neko, layer: &mut Vec<El>, closed: &[InboxItem],
                 .radius(10.0)
                 .hover_group()
                 .hover(t.text.base.alpha(0.03))
-                .child(text(item.title.clone()).font(font(t, 13.5, 400.0, 21.9375)).color(t.text.muted).truncate().min_w(0.0).shrink().grow(1.0).help(if item.detail.is_empty() { item.title.clone() } else { item.detail.clone() }).a11y_hidden())
-                .child(text(scope_only).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted.alpha(0.7)).truncate().a11y_hidden())
-                .child(text(format!("{} · {}", if item.reason.is_empty() { "Closed" } else { item.reason.as_str() }, relative_time(s.now_ms, item.closed_ms.unwrap_or(0)))).font(webkit::tnum(font(t, 12.5, 400.0, 20.3125))).color(t.text.muted.alpha(0.7)).a11y_hidden())
+                .child(text(item.title.clone()).font(font(t, 13.5, 400.0, 20.25)).color(t.text.muted).truncate().min_w(0.0).shrink().grow(1.0).help(if item.detail.is_empty() { item.title.clone() } else { item.detail.clone() }).a11y_hidden())
+                .child(text(scope_only).font(font(t, 12.5, 400.0, 18.75)).color(t.text.muted.alpha(0.7)).truncate().a11y_hidden())
+                .child(text(format!("{} · {}", if item.reason.is_empty() { "Closed" } else { item.reason.as_str() }, relative_time(s.now_ms, item.closed_ms.unwrap_or(0)))).font(webkit::tnum(font(t, 12.5, 400.0, 18.75))).color(t.text.muted.alpha(0.7)).a11y_hidden())
                 .child(super::setup::kit::hover_actions(t, vec![(format!("closed-reopen-{seq}"), format!("Reopen “{}”", item.title), &icons::UNDO, Box::new(move |s: &mut App| s.reopen_item(&again)))]));
             let again = item.clone();
             let entries: Vec<MenuEntry> = vec![("Reopen".to_owned(), std::rc::Rc::new(move |s: &mut App| s.reopen_item(&again)))];
@@ -211,7 +211,7 @@ fn closed_recently(s: &App, t: &Neko, layer: &mut Vec<El>, closed: &[InboxItem],
         if closed.len() > SHORT {
             rows.push(more_line(t, all_flag, all, closed.len() - SHORT, "closed items"));
         }
-        panel(rows)
+        panel(t, rows)
     } else {
         el()
     };
@@ -235,14 +235,14 @@ fn scope_section(s: &App, t: &Neko, layer: &mut Vec<El>, data: &crate::link::Rou
     if !sc.problems.is_empty() {
         let mut ul = col().key(format!("routines-notes-{ws}")).w_full().px(12.0).py(6.0).gap(4.0);
         for p in &sc.problems {
-            ul = ul.child(row().gap(8.0).child(text("!").font(font(t, 12.5, 400.0, 20.3125)).color(t.meaning.amber).a11y_hidden()).child(text(p.clone()).font(font(t, 12.5, 400.0, 20.3125)).color(t.meaning.amber).wrap().min_w(0.0)));
+            ul = ul.child(row().gap(8.0).child(text("!").font(font(t, 12.5, 400.0, 18.75)).color(t.meaning.amber).a11y_hidden()).child(text(p.clone()).font(font(t, 12.5, 400.0, 18.75)).color(t.meaning.amber).wrap().min_w(0.0)));
         }
         rows.push(ul);
     }
     if !list.is_empty() {
         rows.push(what_neko_did(s, t, ws, list));
     }
-    let body = if open { panel(rows) } else { el() };
+    let body = if open { panel(t, rows) } else { el() };
     webkit::section_collapsible_keyed(t, &format!("routines-group-{ws}"), &sc.name, None, open, &flag, body)
 }
 
@@ -253,7 +253,7 @@ fn what_neko_did(s: &App, t: &Neko, ws: &str, list: &[&RoutineView]) -> El {
     did.truncate(20);
     let flag = format!("did-all:{ws}");
     let all = s.pages.inbox_flags.contains(&flag);
-    let mut c = col().key(format!("routines-did-{ws}")).w_full().mt(12.0).child(text("What Neko did").font(font(t, 12.5, 500.0, 20.3125)).color(t.text.muted).px(12.0).pb(4.0));
+    let mut c = col().key(format!("routines-did-{ws}")).w_full().mt(12.0).child(text("What Neko did").font(font(t, 12.5, 500.0, 18.75)).color(t.text.muted).px(12.0).pb(4.0));
     if did.is_empty() {
         return c.child(text("Nothing yet.").font(font(t, 13.0, 400.0, 20.0)).color(t.text.muted).px(12.0).py(4.0));
     }
@@ -271,8 +271,8 @@ fn what_neko_did(s: &App, t: &Neko, ws: &str, list: &[&RoutineView]) -> El {
                 .center_y()
                 .radius(10.0)
                 .hover(t.text.base.alpha(0.03))
-                .child(text(line.clone()).font(font(t, 13.0, 400.0, 21.125)).color(t.text.base.alpha(0.9)).truncate().min_w(0.0).shrink().grow(1.0).help(line).a11y_hidden())
-                .child(text(format!("{name} · {}", relative_time(s.now_ms, at))).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted.alpha(0.7)).a11y_hidden()),
+                .child(text(line.clone()).font(font(t, 13.0, 400.0, 19.5)).color(t.text.base.alpha(0.9)).truncate().min_w(0.0).shrink().grow(1.0).help(line).a11y_hidden())
+                .child(text(format!("{name} · {}", relative_time(s.now_ms, at))).font(font(t, 12.5, 400.0, 18.75)).color(t.text.muted.alpha(0.7)).a11y_hidden()),
         );
     }
     if total > SHORT {
@@ -302,8 +302,8 @@ fn standing_orders(s: &App, t: &Neko, data: &crate::link::RoutinesData, sc: &nek
         .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(move |s: &mut App| s.toggle_inbox_flag(&flag))
         .child(icon(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 12.0).color(t.text.muted).a11y_hidden())
-        .child(text("Standing orders").font(font(t, 13.5, 400.0, 21.9375)).color(t.text.base).a11y_hidden())
-        .child(text(first).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().min_w(0.0).shrink().grow(1.0).a11y_hidden());
+        .child(text("Standing orders").font(font(t, 13.5, 400.0, 20.25)).color(t.text.base).a11y_hidden())
+        .child(text(first).font(font(t, 12.5, 400.0, 18.75)).color(t.text.muted).truncate().min_w(0.0).shrink().grow(1.0).a11y_hidden());
     let mut c = col().key(format!("orders-block-{ws}")).w_full().px(12.0).py(6.0).radius(10.0).hover(t.text.base.alpha(0.03)).child(head);
     if open {
         let key = format!("orders:{ws}");
@@ -359,8 +359,8 @@ fn routine_row(s: &App, t: &Neko, layer: &mut Vec<El>, v: &RoutineView) -> El {
             let id = id.clone();
             move |s: &mut App| s.open_routine(&id)
         })
-        .child(text(routine.name.clone()).key(format!("routine-name-{id}")).font(font(t, 13.5, 400.0, 21.9375)).color(t.text.base).a11y_hidden())
-        .child(row().key(format!("routine-status-{id}")).gap(6.0).center_y().child(status_glyph(kind, t, 14.0, Some("")).a11y_hidden()).child(text(word.clone()).font(font(t, 13.0, 400.0, 21.125)).color(ink).a11y_hidden()));
+        .child(text(routine.name.clone()).key(format!("routine-name-{id}")).font(font(t, 13.5, 400.0, 20.25)).color(t.text.base).a11y_hidden())
+        .child(row().key(format!("routine-status-{id}")).gap(6.0).center_y().child(status_glyph(kind, t, 14.0, Some("")).a11y_hidden()).child(text(word.clone()).font(font(t, 13.0, 400.0, 19.5)).color(ink).a11y_hidden()));
     let parts: (usize, usize) = last.map_or((0, 0), |r| (r.needs_you.iter().filter(|i| i.done).count(), r.needs_you.len()));
     if parts.1 > 0 {
         line = line.child(row().key(format!("routine-parts-{id}")).role("img").label(format!("{} of {} done", parts.0, parts.1)).gap(4.0).center_y().child(super::sessions::progress_ring(Some((parts.0 as u32, parts.1 as u32)), t)).child(row().children([parts.0.to_string(), "/".to_owned(), parts.1.to_string()].into_iter().map(|p| text(p).font(webkit::tnum(font(t, 12.0, 400.0, 19.5))).color(t.text.muted).a11y_hidden()))));
@@ -371,7 +371,7 @@ fn routine_row(s: &App, t: &Neko, layer: &mut Vec<El>, v: &RoutineView) -> El {
         row().key(key).role("button").label(label.clone()).help(label).focusable(enabled).size(28.0, 28.0).center().radius(10.0).hover(t.text.base.alpha(0.06)).focus_ring(2.0, 2.0, t.kit.c.border_focus).group_opacity(0.0, 1.0).on_press(webkit::gated(enabled, move |s: &mut App| f(s))).child(icon(glyph, 15.0).color(t.text.muted.alpha(if enabled { 1.0 } else { 0.4 })).a11y_hidden())
     };
     line = line
-        .child(row().grow(1.0).shrink().min_w(0.0).justify_end().child(text(facts).key(format!("routine-facts-{id}")).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().min_w(0.0).shrink().a11y_hidden()))
+        .child(row().grow(1.0).shrink().min_w(0.0).justify_end().child(text(facts).key(format!("routine-facts-{id}")).font(font(t, 12.5, 400.0, 18.75)).color(t.text.muted).truncate().min_w(0.0).shrink().a11y_hidden()))
         .child(row().gap(2.0).center_y().child(act(format!("routine-run-{id}"), format!("Run {} now", routine.name), &icons::PLAY, !busy, Box::new(move |s: &mut App| s.run_routine(&run_id)))).child(act(format!("routine-edit-{id}"), format!("Edit {}", routine.name), &icons::PENCIL, true, Box::new(move |s: &mut App| {
             if s.pages.open_routine.as_deref() != Some(edit_id.as_str()) {
                 s.open_routine(&edit_id);
@@ -397,7 +397,7 @@ fn routine_row(s: &App, t: &Neko, layer: &mut Vec<El>, v: &RoutineView) -> El {
     })));
     let mut out = col().key(format!("routine-block-{id}")).w_full().px(12.0).py(6.0).gap(4.0).radius(10.0).hover_group().hover(t.text.base.alpha(0.03)).child(with_menu(s, t, layer, &format!("routine:{id}"), line, entries));
     if let Some(r) = last.filter(|r| !r.ok) {
-        out = out.child(text(r.error.clone().unwrap_or_default()).key(format!("routine-error-{id}")).font(font(t, 13.0, 400.0, 21.125)).color(t.meaning.coral).wrap().min_w(0.0));
+        out = out.child(text(r.error.clone().unwrap_or_default()).key(format!("routine-error-{id}")).font(font(t, 13.0, 400.0, 19.5)).color(t.meaning.coral).wrap().min_w(0.0));
         if !r.text.is_empty() {
             let flag = format!("reply:{id}");
             let shown = s.pages.inbox_flags.contains(&flag);
@@ -410,11 +410,11 @@ fn routine_row(s: &App, t: &Neko, layer: &mut Vec<El>, v: &RoutineView) -> El {
     if let Some(r) = last {
         let words = if !r.note.is_empty() { Some(r.note.clone()) } else if !r.runtime.is_empty() && r.runtime != "claude" { Some(format!("Last run used {}.", if r.runtime == "codex" { "Codex" } else { r.runtime.as_str() })) } else { None };
         if let Some(w) = words {
-            out = out.child(text(w).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().min_w(0.0));
+            out = out.child(text(w).font(font(t, 12.5, 400.0, 18.75)).color(t.text.muted).truncate().min_w(0.0));
         }
     }
     if let Some(n) = v.state.note.as_ref().filter(|n| !n.is_empty()) {
-        out = out.child(text(n.clone()).font(font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().min_w(0.0));
+        out = out.child(text(n.clone()).font(font(t, 12.5, 400.0, 18.75)).color(t.text.muted).truncate().min_w(0.0));
     }
     out
 }

@@ -58,7 +58,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     // The web's viewport for a Setup page is the content beside the rail.
     let rail_w = if frame.region_w < 760.0 { 150.0 } else { 200.0 };
     super::webkit::set_page_width(frame.region_w - rail_w);
-    super::webkit::set_content_width(frame.region_w - rail_w - 2.0 * if frame.region_w < 760.0 { 16.0 } else { 28.0 });
+    super::webkit::set_content_width(frame.region_w - rail_w - 2.0 * if frame.region_w - rail_w >= 768.0 { 40.0 } else { 24.0 });
     let page = match section {
         SetupSection::Packs => packs::view(s, t, layer),
         SetupSection::Improvements => improvements::view(s, t, layer),
@@ -73,7 +73,10 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     dialogs::mount(s, t, layer, frame.win_h);
     // Under 760 points the rail narrows to 150 and the sides to 16, so the rows keep their room.
     let narrow = frame.region_w < 760.0;
-    let side = if narrow { 16.0 } else { 28.0 };
+    // `PageContainer`: 24 at the sides and 48 above, 40 and 64 from 768 (of the page beside the rail), 96 below.
+    let wide = super::webkit::page_width() >= 768.0;
+    let side = if wide { 40.0 } else { 24.0 };
+    let top = if wide { 64.0 } else { 48.0 };
     let rows: Vec<El> = SetupSection::ALL
         .iter()
         .map(|&sec| {
@@ -83,20 +86,20 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
         })
         .collect();
     let title = page.title.clone().unwrap_or_else(|| section.title().to_owned());
-    let mut head = row().w_full().gap(10.0).center_y().flex_wrap().min_h(36.0);
+    let mut head = row().w_full().gap(10.0).center_y().flex_wrap().min_h(40.0);
     if let Some(back) = page.back {
         head = head.child(back);
     }
-    head = head.child(text(title).key("title").font(rune::TextStyle { tracking: -0.41, ..t.ty.title }).color(t.text.base).truncate().min_w(0.0).role("heading"));
+    head = head.child(text(title).key("title").font(rune::TextStyle { tracking: -0.41, ..super::webkit::font(t, 20.0, 600.0, 30.0) }).color(t.text.strong).truncate().min_w(0.0).role("heading"));
     if let Some(n) = page.count {
         // `PageHeader`'s count: 14 regular, tabular figures, on the title's baseline.
-        head = head.child(text(n.to_string()).key("page-count").font(super::webkit::tnum(super::webkit::font(t, 14.0, 400.0, 22.75))).color(t.text.muted).mt(4.4));
+        head = head.child(text(n.to_string()).key("page-count").font(super::webkit::tnum(super::webkit::font(t, 14.0, 400.0, 21.0))).color(t.text.muted).mt(3.0));
     }
     head = head.child(kit::fill());
     for e in page.trailing {
         head = head.child(e);
     }
-    let column = col().key(format!("full-setup-{}", section.key())).w_full().max_w(super::COLUMN + 2.0 * (side - 32.0)).px(side).pt(24.0).pb(40.0).gap(32.0).child(head).child(page.body);
+    let column = col().key(format!("full-setup-{}", section.key())).w_full().max_w(super::COLUMN).px(side).pt(top).pb(96.0).gap(28.0).child(head).child(page.body);
     // The window's drag band, then the rail and the scrolling column.
     let scroll = col().key("page-scroll").grow(1.0).min_w(0.0).h_full().clip_rounded(0.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(row().w_full().justify_center().child(column));
     col().key("setup").w_full().h_full().child(band(t)).child(row().w_full().grow(1.0).min_h(0.0).child(rail("setup", narrow, None, rows)).child(scroll))

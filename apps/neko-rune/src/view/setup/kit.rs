@@ -51,28 +51,44 @@ pub fn tools_page(s: &App, t: &Neko, layer: &mut Vec<El>, skills: bool, action: 
     super::Page { count: None, trailing: Vec::new(), body, title: Some("Tools & skills".to_owned()), back: None }
 }
 
-/// The web's `Row` (`setup/kit.tsx`): 8 above and below a 28 point line, 12 at the sides, and the hover wash bleeding 12 past the column.
-pub const WEB_ROW_H: f32 = 44.0;
+/// The web's `Row` (`setup/kit.tsx`): 12 above and below a 28 point line, 22 at the sides.
+pub const WEB_ROW_H: f32 = 52.0;
 
 /// A list row: 32 high, 8 of padding, radius 8, hover fill; its hover actions appear on hover or focus.
 pub fn list_row(t: &Neko, key: String, label: String, open: Option<bool>) -> El {
-    let r = row().key(key).role("button").label(label).focusable(true).mx(-12.0).min_h(WEB_ROW_H).px(12.0).gap(12.0).center_y().radius(10.0).hover_group().hover(t.surface.hover).focus_ring(2.0, 2.0, t.surface.ring);
+    let r = row().key(key).role("button").label(label).focusable(true).min_h(44.0).px(12.0).gap(12.0).center_y().radius(10.0).hover_group().hover(t.text.base.alpha(0.03)).focus_ring(2.0, 2.0, t.surface.ring);
     match open {
         Some(open) => r.expanded(open),
         None => r,
     }
 }
 
-/// The web's `Row` (`setup/kit.tsx`): 44 high, 12 at the sides (the hover wash bleeds 12 past the column), an optional 20 point leading
-/// icon, the title (13.5) and the muted description (12.5, cut off) 12 apart, the trailing words at the right (12.5 muted).
+/// The web's `Row` (`setup/kit.tsx`) in a slab: 52 high (12 above and below a line 28 high), 22 at the sides, an optional 20 point leading
+/// icon, the title (14 medium) and the muted description (13, cut off) 12 apart, the trailing words at the right (12.5 muted). The foreground
+/// at 4% under the pointer, to the slab's edges.
 pub fn web_row(t: &Neko, key: String, label: String, leading: Option<El>, title: &str, description: &str, trailing: Vec<El>) -> El {
-    let mut r = row().key(key).role("button").label(label).focusable(true).min_h(WEB_ROW_H).px(12.0).gap(12.0).center_y().radius(10.0).hover_group().hover(t.text.base.alpha(0.03)).focus_ring(2.0, 2.0, t.surface.ring);
+    let mut r = row().key(key).role("button").label(label).focusable(true).min_h(WEB_ROW_H).px(22.0).py(12.0).gap(12.0).center_y().hover_group().hover(t.text.base.alpha(0.04)).focus_ring(2.0, 2.0, t.surface.ring);
     if let Some(l) = leading {
         r = r.child(l.a11y_hidden());
     }
-    r = r.child(text(title.to_owned()).font(super::super::webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().max_w(280.0).a11y_hidden());
-    r = r.child(text(description.to_owned()).font(super::super::webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden());
+    r = r.child(text(title.to_owned()).font(super::super::webkit::font(t, 14.0, 500.0, 20.0)).color(t.text.base).truncate().a11y_hidden());
+    r = r.child(text(description.to_owned()).font(super::super::webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden());
     // The web's trailing group is one `flex shrink-0 gap-2` (8, not the row's 12).
+    if !trailing.is_empty() {
+        r = r.child(row().gap(8.0).center_y().children(trailing));
+    }
+    r
+}
+
+/// A collapsible row of a slab (`Skills`, `Collapsible`): 44 high, 12 at the sides, radius 10, the title (13.5) and the muted description
+/// (12.5, cut off) 12 apart, the trailing words at the right (12.5 muted). These rows keep the old measures in the web.
+pub fn collapsible_row(t: &Neko, key: String, label: String, leading: Option<El>, title: &str, description: &str, trailing: Vec<El>) -> El {
+    let mut r = row().key(key).role("button").label(label).focusable(true).min_h(44.0).px(12.0).gap(12.0).center_y().radius(10.0).hover_group().hover(t.text.base.alpha(0.03)).focus_ring(2.0, 2.0, t.surface.ring);
+    if let Some(l) = leading {
+        r = r.child(l.a11y_hidden());
+    }
+    r = r.child(text(title.to_owned()).font(super::super::webkit::font(t, 13.5, 400.0, 20.25)).color(t.text.base).truncate().max_w(280.0).a11y_hidden());
+    r = r.child(text(description.to_owned()).font(super::super::webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden());
     if !trailing.is_empty() {
         r = r.child(row().gap(8.0).center_y().children(trailing));
     }
@@ -85,7 +101,7 @@ pub type RowAct = (String, String, &'static rune::Icon, Box<dyn Fn(&mut App)>);
 /// The web's `RowActions`: small icon buttons at the row's right, there only while the row is hovered or holds focus. They are
 /// pinned over the row's end, so they never move its words. Every one is also in the row's right-click menu.
 pub fn hover_actions(t: &Neko, acts: Vec<RowAct>) -> El {
-    let mut r = row().key("hover-actions").pin(None, Some(0.0), Some(8.0), Some(0.0)).gap(2.0).center_y().pl(8.0).fill(t.surface.window).group_opacity(0.0, 1.0);
+    let mut r = row().key("hover-actions").pin(None, Some(0.0), Some(14.0), Some(0.0)).gap(2.0).center_y().pl(8.0).fill(t.mat.group).group_opacity(0.0, 1.0);
     for (key, label, glyph, press) in acts {
         r = r.child(row().key(key).role("button").label(label.clone()).help(label).focusable(true).size(28.0, 28.0).center().radius(t.radius.control).hover(t.surface.active).focus_ring(2.0, 2.0, t.surface.ring).on_press(move |s: &mut App| press(s)).child(icon(glyph, 16.0).color(t.text.muted).a11y_hidden()));
     }
@@ -94,7 +110,7 @@ pub fn hover_actions(t: &Neko, acts: Vec<RowAct>) -> El {
 
 /// The words at a row's right: 12.5, muted (or the meaning's colour).
 pub fn trail(t: &Neko, key: &str, words: &str, ink: rune::Color) -> El {
-    text(words.to_owned()).key(key.to_owned()).font(super::super::webkit::font(t, 12.5, 400.0, 20.3125)).color(ink).a11y_hidden()
+    text(words.to_owned()).key(key.to_owned()).font(super::super::webkit::font(t, 12.5, 400.0, 18.75)).color(ink).a11y_hidden()
 }
 
 /// A group heading: 12.5 medium muted with the count right after it, 32 high.

@@ -104,7 +104,7 @@ fn saved(s: &App, t: &Neko, layer: &mut Vec<El>, data: &crate::link::SetupData, 
     }
     if !proposals.is_empty() {
         let rows: Vec<El> = proposals.iter().map(|p| proposal_row(s, t, layer, data, p)).collect();
-        body = body.child(webkit::section(t, "mem-suggested", "Suggested", Some(&proposals.len().to_string()), None, webkit::panel(rows)));
+        body = body.child(webkit::section(t, "mem-suggested", "Suggested", Some(&proposals.len().to_string()), None, webkit::panel(t, rows)));
     }
     if memories.is_empty() {
         if query.is_empty() {
@@ -129,7 +129,7 @@ fn saved(s: &App, t: &Neko, layer: &mut Vec<El>, data: &crate::link::SetupData, 
         for (i, (name, list)) in scopes.iter().enumerate() {
             let rows: Vec<El> = list.iter().map(|m| memory_row(s, t, layer, data, m)).collect();
             let flag = format!("mem-fold:{name}");
-            body = body.child(webkit::section_collapsible(t, &format!("mem-group-{i}"), name, Some(&list.len().to_string()), is_open(s, &flag, true), &flag, webkit::panel(rows)));
+            body = body.child(webkit::section_collapsible(t, &format!("mem-group-{i}"), name, Some(&list.len().to_string()), is_open(s, &flag, true), &flag, webkit::panel(t, rows)));
         }
     }
     body.child(options(s, t))
@@ -213,7 +213,7 @@ fn working_style(s: &App, t: &Neko, layer: &mut Vec<El>, data: &crate::link::Set
         c = c.child(n);
     }
     let intro = if prefs.is_empty() { "No guidance yet. Add some for a recurring situation, or correct a decision below." } else { "Guidance shapes choices within the permissions you already gave." };
-    c = c.child(row().w_full().gap(12.0).center_y().justify_between().child(text(intro.to_owned()).key("mem-style-empty").font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.muted).wrap().min_w(0.0).shrink()).child(webkit::ghost_button(t, "mem-add-guidance", "Add guidance", Some(&icons::PLUS), |s: &mut App| s.open_preference_dialog(None))));
+    c = c.child(row().w_full().gap(12.0).center_y().justify_between().child(text(intro.to_owned()).key("mem-style-empty").font(webkit::font(t, 13.5, 400.0, 20.25)).color(t.text.muted).wrap().min_w(0.0).shrink()).child(webkit::ghost_button(t, "mem-add-guidance", "Add guidance", Some(&icons::PLUS), |s: &mut App| s.open_preference_dialog(None))));
     for (state, title) in [(PreferenceState::Proposed, "Needs your confirmation"), (PreferenceState::Confirmed, "Confirmed"), (PreferenceState::Dismissed, "Dismissed")] {
         let list: Vec<&WorkingPreference> = prefs.iter().copied().filter(|p| p.state == state).collect();
         if list.is_empty() {
@@ -222,12 +222,12 @@ fn working_style(s: &App, t: &Neko, layer: &mut Vec<El>, data: &crate::link::Set
         let flag = format!("pref-fold:{title}");
         let open = is_open(s, &flag, state != PreferenceState::Dismissed);
         let rows: Vec<El> = if open { list.iter().map(|p| preference_row(s, t, layer, data, p)).collect() } else { Vec::new() };
-        c = c.child(webkit::section_collapsible(t, &format!("pref-group-{}", title.to_lowercase().replace(' ', "-")), title, Some(&list.len().to_string()), open, &flag, webkit::panel(rows)));
+        c = c.child(webkit::section_collapsible(t, &format!("pref-group-{}", title.to_lowercase().replace(' ', "-")), title, Some(&list.len().to_string()), open, &flag, webkit::panel(t, rows)));
     }
     if !records.is_empty() {
         let n = records.len().to_string();
         let rows: Vec<El> = records.into_iter().map(|r| decision_row(t, r)).collect();
-        c = c.child(webkit::section(t, "mem-decisions", "Recent decisions", Some(&n), None, webkit::panel(rows)));
+        c = c.child(webkit::section(t, "mem-decisions", "Recent decisions", Some(&n), None, webkit::panel(t, rows)));
     }
     c
 }
@@ -250,7 +250,7 @@ fn preference_row(s: &App, t: &Neko, layer: &mut Vec<El>, data: &crate::link::Se
         line.push(glyph_button(t, &format!("preference-glyph-{id}"), "Keep guidance", move |s: &mut App| s.setup_call(SetupAction::KeepPreference { workspace_id: w2.clone(), id: k2.clone(), version })));
     }
     line.push(webkit::one_line(t, &format!("preference-{id}"), &p.instruction, open, move |s: &mut App| s.toggle_row(&toggle)));
-    line.push(text(applies.clone()).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted.alpha(0.7)).truncate().max_w(0.35 * (webkit::page_width() - 24.0)).help(format!("Applies to: {applies}")).a11y_hidden());
+    line.push(text(applies.clone()).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted.alpha(0.7)).truncate().max_w(0.35 * (webkit::page_width() - 24.0)).help(format!("Applies to: {applies}")).a11y_hidden());
     let mut acts: Vec<El> = Vec::new();
     if !confirmed {
         let (w2, k2) = (ws.clone(), k.clone());
@@ -279,7 +279,7 @@ fn preference_row(s: &App, t: &Neko, layer: &mut Vec<El>, data: &crate::link::Se
     let mut below: Vec<El> = Vec::new();
     if open {
         let except = if p.exceptions.is_empty() { String::new() } else { format!(" · Except: {}", p.exceptions.join(", ")) };
-        below.push(text(format!("Applies to: {applies}{except} · {} · version {}", data.workspace_name(&p.workspace_id), p.version)).key(format!("preference-d-{id}")).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).wrap().min_w(0.0));
+        below.push(text(format!("Applies to: {applies}{except} · {} · version {}", data.workspace_name(&p.workspace_id), p.version)).key(format!("preference-d-{id}")).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted).wrap().min_w(0.0));
     }
     if let Some(n) = note(s, t, &format!("setup:{id}")) {
         below.push(n);
@@ -295,8 +295,8 @@ fn decision_row(t: &Neko, r: &DecisionRecord) -> El {
     };
     let rid = id.clone();
     let mut line = vec![
-        text(words::decision_title(r.action).to_owned()).key(format!("decision-{id}")).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).a11y_hidden(),
-        text(said).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().grow(1.0).shrink().min_w(0.0).a11y_hidden(),
+        text(words::decision_title(r.action).to_owned()).key(format!("decision-{id}")).font(webkit::font(t, 13.5, 400.0, 20.25)).color(t.text.base).a11y_hidden(),
+        text(said).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted).truncate().grow(1.0).shrink().min_w(0.0).a11y_hidden(),
     ];
     if r.delivery_stage == neko_protocol::decision_context::DeliveryStage::LocalAccepted {
         line.push(webkit::faint(t, "Accepted locally"));
@@ -309,13 +309,13 @@ fn decision_row(t: &Neko, r: &DecisionRecord) -> El {
 fn options(s: &App, t: &Neko) -> El {
     let opts = s.setup_data().and_then(|d| d.memory_options).unwrap_or_default();
     let mk = |key: &str, label: &str, help: &str, detail: &str, on: bool, learning: bool| {
-        let title = text(label.to_owned()).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().help(help.to_owned()).a11y_hidden();
-        let description = text(detail.to_owned()).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden();
+        let title = text(label.to_owned()).font(webkit::font(t, 13.5, 400.0, 20.25)).color(t.text.base).truncate().help(help.to_owned()).a11y_hidden();
+        let description = text(detail.to_owned()).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden();
         webkit::info_row(t, &format!("mem-option-{key}"), title, Some(description), None, vec![webkit::toggle(t, &format!("mem-switch-{key}"), label, on, move |s: &mut App| if learning { s.set_memory_options(Some(!on), None) } else { s.set_memory_options(None, Some(!on)) })], None)
     };
     let rows = vec![
         mk("learning", "Suggest new memories", "Propose context from chats and agents. Direct requests to remember something still work when this is off.", "from chats and agents", opts.learning, true),
         mk("use", "Use saved memory", "Include memory in replies and tasks. Turning this off keeps saved memories here.", "in replies and tasks", opts.use_memory, false),
     ];
-    webkit::section(t, "mem-options", "Settings", None, None, webkit::panel(rows))
+    webkit::section(t, "mem-options", "Settings", None, None, webkit::panel(t, rows))
 }

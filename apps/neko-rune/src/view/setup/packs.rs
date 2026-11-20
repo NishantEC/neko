@@ -40,9 +40,9 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> Page {
     // The "Installed" section: a faint count when there are packs, then the panel of rows or "No packs installed.".
     let count = (!listing.installed.is_empty()).then(|| listing.installed.len().to_string());
     let inner = if listing.installed.is_empty() {
-        text("No packs installed.".to_owned()).key("packs-empty").font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted)
+        text("No packs installed.".to_owned()).key("packs-empty").font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.muted)
     } else {
-        webkit::panel(listing.installed.iter().map(|p| pack_row(s, t, layer, p)).collect())
+        webkit::panel(t, listing.installed.iter().map(|p| pack_row(s, t, layer, p)).collect())
     };
     body = body.child(webkit::section(t, "packs-installed", "Installed", count.as_deref(), None, inner));
     Page { count: (!listing.installed.is_empty()).then_some(listing.installed.len()), trailing: vec![add], body, title: None, back: None }
@@ -60,7 +60,7 @@ fn pack_row(s: &App, t: &Neko, layer: &mut Vec<El>, p: &InstalledPack) -> El {
     let source = words::pack_source_label(&p.source);
     let busy = s.setup.pack_busy.contains(&name);
     let open = name.clone();
-    let small = webkit::font(t, 12.5, 400.0, 20.3125);
+    let small = webkit::font(t, 12.5, 400.0, 18.75);
     let button = row()
         .key(format!("pack-{name}"))
         .role("button")
@@ -74,7 +74,7 @@ fn pack_row(s: &App, t: &Neko, layer: &mut Vec<El>, p: &InstalledPack) -> El {
         .radius(10.0)
         .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(move |s: &mut App| s.open_pack(&open))
-        .child(text(p.info.title.clone()).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().min_w(0.0).a11y_hidden())
+        .child(text(p.info.title.clone()).font(webkit::font(t, 13.5, 400.0, 20.25)).color(t.text.base).truncate().min_w(0.0).a11y_hidden())
         .child(text(p.info.version.clone()).key(format!("pack-version-{name}")).font(webkit::tnum(small)).color(t.text.muted.alpha(0.6)).a11y_hidden())
         .child(text(source).key(format!("pack-source-{name}")).font(small).color(t.text.muted).truncate().grow(1.0).shrink().min_w(0.0).help(p.source.clone()).a11y_hidden());
     let changed = p.status == PackStatus::Changed;
@@ -204,7 +204,7 @@ fn detail(s: &App, t: &Neko, layer: &mut Vec<El>, p: &InstalledPack) -> Page {
         .child(icon(&icons::CHEVRON_LEFT, 16.0).color(t.text.muted).a11y_hidden());
     let busy = s.setup.pack_busy.contains(&name);
     let mut body = col().w_full().gap(10.0);
-    let mut actions = row().w_full().gap(8.0).center_y().wrap();
+    let mut actions = row().w_full().gap(8.0).center_y().flex_wrap();
     // A pack that changed on disk runs nothing until the person has read what is there and approved it.
     if p.status == PackStatus::Changed {
         let n = name.clone();

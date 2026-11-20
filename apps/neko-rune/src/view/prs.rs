@@ -37,9 +37,9 @@ fn canmerge(v: Verdict) -> bool {
     matches!(v, Verdict::Ready | Verdict::Close)
 }
 
-/// `text-[12.5px]` with the web's 20.3125 line.
+/// `text-[12.5px]` with the web's 18.75 line.
 fn small(t: &Neko) -> TextStyle {
-    webkit::font(t, 12.5, 400.0, 20.3125)
+    webkit::font(t, 12.5, 400.0, 18.75)
 }
 
 /// The second line of a row (`<p>` of spans, "·" between them): what needs a look, in the web's order.
@@ -108,7 +108,7 @@ fn pr_row(s: &App, t: &Neko, r: &PrRow, layer: &mut Vec<El>) -> El {
     };
 
     // The title and where it lives on one line, 12 apart; the note line under them.
-    let title = text(r.title.clone()).key(format!("pr-title-{}", r.id)).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().shrink().min_w(0.0).a11y_hidden();
+    let title = text(r.title.clone()).key(format!("pr-title-{}", r.id)).font(webkit::font(t, 13.5, 400.0, 20.25)).color(t.text.base).truncate().shrink().min_w(0.0).a11y_hidden();
     let place_text = text(place).key(format!("pr-place-{}", r.id)).font(webkit::tnum(small(t))).color(t.text.muted).a11y_hidden();
     let mut body = col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(row().w_full().min_w(0.0).gap(12.0).center_y().child(title).child(el().grow(1.0).min_w(0.0)).child(place_text));
     if let Some(notes) = notes_line(t, r) {
@@ -210,7 +210,7 @@ fn row_menu(s: &App, t: &Neko, layer: &mut Vec<El>, r: &PrRow, line: El) -> El {
 fn group(s: &App, t: &Neko, layer: &mut Vec<El>, verdict: Verdict, rows: &[&PrRow]) -> El {
     let folded = s.prs.folded.contains(&verdict);
     let title = verdict.title();
-    let style = webkit::font(t, 12.5, 500.0, 20.3125);
+    let style = webkit::font(t, 12.5, 500.0, 18.75);
     let label = row()
         .gap(6.0)
         .center_y()
@@ -232,7 +232,7 @@ fn group(s: &App, t: &Neko, layer: &mut Vec<El>, verdict: Verdict, rows: &[&PrRo
         .child(label);
     let mut c = col().key(format!("pr-section-{title}")).w_full().gap(4.0).child(row().w_full().child(head));
     if !folded {
-        c = c.child(webkit::panel(rows.iter().map(|r| pr_row(s, t, r, layer)).collect()));
+        c = c.child(webkit::panel(t, rows.iter().map(|r| pr_row(s, t, r, layer)).collect()));
     }
     c
 }
@@ -283,11 +283,11 @@ pub fn subtitle(rows: &[&PrRow]) -> String {
 /// The page's own header (`WorkHeader`): the title (20 semibold) and its subtitle 10 apart, the actions at the right 6 apart.
 fn header(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     let ready = s.ready_pull_requests().len();
-    let mut title = row().gap(10.0).center_y().child(text("Pull requests").key("title").font(TextStyle { tracking: -0.41, ..webkit::font(t, 20.0, 600.0, 32.5) }).color(t.text.base).role("heading"));
+    let mut title = row().gap(10.0).center_y().child(text("Pull requests").key("title").font(TextStyle { tracking: -0.41, ..webkit::font(t, 20.0, 600.0, 30.0) }).color(t.text.strong).role("heading"));
     if s.summary.is_some() {
         let rows = s.pr_rows();
         // The count is set on the title's baseline, a little lower than the middle of the line.
-        title = title.child(text(subtitle(&rows)).key("page-count").font(webkit::tnum(webkit::font(t, 14.0, 400.0, 22.75))).color(t.text.muted).mt(4.4));
+        title = title.child(text(subtitle(&rows)).key("page-count").font(webkit::tnum(webkit::font(t, 14.0, 400.0, 21.0))).color(t.text.muted).mt(3.0));
     }
     let mut actions = row().gap(6.0).center_y();
     if ready > 0 {
@@ -333,7 +333,7 @@ pub fn page(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
                 let mut c = col().key("pr-list").w_full();
                 if groups.is_empty() {
                     // `<p className="py-10 text-center text-[13px] text-muted-foreground">`
-                    let style = webkit::font(t, 13.0, 400.0, 21.125);
+                    let style = webkit::font(t, 13.0, 400.0, 19.5);
                     c = c.child(row().key("pr-nothing-open").w_full().py(40.0).justify_center().child(text("Nothing is open. ").font(style).color(t.text.muted)).child(text(hidden.to_string()).font(style).color(t.text.muted)).child(text(" merged or closed.").font(style).color(t.text.muted)));
                 }
                 let mut list = col().key("pr-groups").role("list").label("Pull requests").focus_group().w_full().gap(28.0);
@@ -343,12 +343,13 @@ pub fn page(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
                 c = c.child(list);
                 if !s.prs.show_finished && hidden > 0 {
                     let style = small(t);
-                    c = c.child(row().key("pr-show-finished").role("button").label(format!("Show {hidden} merged and closed")).focusable(true).h(20.3125).mt(24.0).radius(6.0).center_y().focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(|s: &mut App| s.prs.show_finished = true).child(text("Show ").font(style).color(t.text.muted).a11y_hidden()).child(text(hidden.to_string()).font(style).color(t.text.muted).a11y_hidden()).child(text(" merged and closed").font(style).color(t.text.muted).a11y_hidden()));
+                    c = c.child(row().key("pr-show-finished").role("button").label(format!("Show {hidden} merged and closed")).focusable(true).h(18.75).mt(24.0).radius(6.0).center_y().focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(|s: &mut App| s.prs.show_finished = true).child(text("Show ").font(style).color(t.text.muted).a11y_hidden()).child(text(hidden.to_string()).font(style).color(t.text.muted).a11y_hidden()).child(text(" merged and closed").font(style).color(t.text.muted).a11y_hidden()));
                 }
                 c
             }
         }
     };
-    let column = col().key("full-prs").w_full().max_w(880.0).px(28.0).pt(24.0).pb(40.0).gap(16.0).child(header).child(body);
+    let wide = webkit::page_width() >= 768.0;
+    let column = col().key("full-prs").w_full().max_w(880.0).px(if wide { 40.0 } else { 24.0 }).pt(if wide { 64.0 } else { 48.0 }).pb(96.0).gap(16.0).child(header).child(body);
     col().w_full().h_full().child(band(t)).child(ui::scrolled(column))
 }

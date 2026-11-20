@@ -88,13 +88,15 @@ fn search_label(s: &App, t: &Neko) -> El {
     row().key("all-search-label").h(32.0).w(146.0).px(8.0).gap(8.0).center_y().radius(10.0).hover(t.text.base.alpha(0.03)).child(icon(&icons::SEARCH, 14.0).color(t.text.muted).a11y_hidden()).child(field).child(webkit::kbd(t, "all-search-kbd", "/"))
 }
 
-/// The layout switch: three 34 x 24 icon buttons in a 28 high well.
+/// The layout switch (`SegmentedControl`): three 44 x 34 icon buttons in a 40 high well; the open one is a pebble.
 fn layout_switch(s: &App, t: &Neko) -> El {
     let layout = s.all_layout();
-    let mut well = row().key("all-layout").role("tablist").label("Layout").h(28.0).padding(2.0).gap(2.0).center_y().radius(10.0);
+    let mut well = webkit::well(t, row().key("all-layout").role("tablist").label("Layout").h(40.0).px(2.0).gap(2.0).center_y().radius(24.0));
     for (l, glyph) in [(Layout::List, &icons::ROWS), (Layout::Board, &icons::KANBAN), (Layout::Tree, &icons::TREE)] {
         let on = l == layout;
-        well = well.child(row().key(format!("all-layout-{}", l.title().to_lowercase())).role("tab").label(l.title()).checked(on).focusable(true).size(34.0, 24.0).center().radius(10.0).fill(if on { t.text.base.alpha(0.07) } else { Color::TRANSPARENT }).hover(t.text.base.alpha(0.04)).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(move |s: &mut App| s.set_all_layout(l)).child(icon(glyph, 14.0).color(if on { t.text.base } else { t.text.muted }).a11y_hidden()));
+        let tab = row().key(format!("all-layout-{}", l.title().to_lowercase())).role("tab").label(l.title()).checked(on).focusable(true).size(44.0, 34.0).center().radius(21.0).hover(if on { Color::TRANSPARENT } else { t.surface.hover }).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(move |s: &mut App| s.set_all_layout(l));
+        let tab = if on { webkit::pebble(t, tab) } else { tab };
+        well = well.child(tab.child(icon(glyph, 16.0).color(if on { t.mat.pebble_fg } else { t.text.muted }).a11y_hidden()));
     }
     well
 }
@@ -109,7 +111,7 @@ fn header(s: &App, t: &Neko, layer: &mut Vec<El>, rows: &[&crate::link::TaskRow]
     let in_ws = s.summary.as_ref().map_or(0, |m| m.tasks.iter().filter(|x| s.all.workspace.as_deref().is_none_or(|w| m.workspace_of(&x.id) == w)).count());
     let count_text = if rows.len() == in_ws { in_ws.to_string() } else { format!("{} of {in_ws}", rows.len()) };
     let workspace_name = s.all.workspace.as_ref().and_then(|id| s.summary.as_ref().and_then(|m| m.workspaces.iter().find(|w| &w.id == id)).map(|w| w.name.clone()));
-    let mut title = row().gap(10.0).center_y().child(text("Tasks").key("all-title").font(t.ty.title).color(t.text.base).role("heading")).child(text(count_text).key("all-count").font(webkit::tnum(quiet(t, 14.0, 22.75, 400.0))).color(t.text.muted));
+    let mut title = row().gap(10.0).center_y().child(text("Tasks").key("all-title").font(rune::TextStyle { tracking: -0.41, ..webkit::font(t, 20.0, 600.0, 30.0) }).color(t.text.strong).role("heading")).child(text(count_text).key("all-count").font(webkit::tnum(quiet(t, 14.0, 22.75, 400.0))).color(t.text.muted));
     if let Some(name) = workspace_name {
         title = title.child(text(format!("· {name}")).font(quiet(t, 14.0, 22.75, 400.0)).color(t.text.muted));
     }
@@ -161,25 +163,25 @@ fn list_row(s: &App, t: &Neko, layer: &mut Vec<El>, task: &crate::link::TaskRow,
     let mut button = row().key(format!("session-{}", task.id)).role("button").label(format!("{}, {}", task.title, crate::status::status_label(task.status))).checked(selected).focusable(true).grow(1.0).shrink().min_w(0.0).h_full().gap(12.0).center_y().radius(6.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(move |s: &mut App| s.select(&press_id));
     button = button.child(text(line.short_id.clone()).key(format!("all-id-{}", task.id)).font(webkit::tnum(quiet(t, 12.0, 19.5, 400.0))).color(t.text.muted.alpha(0.85)).w(68.0).a11y_hidden());
     // `max-w-[60%] shrink-0 truncate`: the box is the text's width, at most 60% of the line's button.
-    let title_style = quiet(t, 13.5, 21.9375, 400.0);
+    let title_style = quiet(t, 13.5, 20.25, 400.0);
     let title_w = rune::text::measure(&task.title, &[], title_style, None).0.min(0.6 * (webkit::page_width() - 170.0));
     button = button.child(text(task.title.clone()).key(format!("all-title-{}", task.id)).font(title_style).color(t.text.base).truncate().w(title_w).a11y_hidden());
-    button = button.child(row().grow(1.0).shrink().min_w(0.0).center_y().child(text(line.note.clone()).font(quiet(t, 12.5, 20.3125, 400.0)).color(t.text.muted).truncate().min_w(0.0).shrink().a11y_hidden()));
+    button = button.child(row().grow(1.0).shrink().min_w(0.0).center_y().child(text(line.note.clone()).font(quiet(t, 12.5, 18.75, 400.0)).color(t.text.muted).truncate().min_w(0.0).shrink().a11y_hidden()));
     // `@4xl:inline`: the source shows only when the list is 896 wide.
     if !line.source.is_empty() && webkit::page_width() - 32.0 >= 896.0 {
-        button = button.child(text(line.source.clone()).font(quiet(t, 12.5, 20.3125, 400.0)).color(t.text.muted.alpha(0.8)).truncate().max_w(176.0).a11y_hidden());
+        button = button.child(text(line.source.clone()).font(quiet(t, 12.5, 18.75, 400.0)).color(t.text.muted.alpha(0.8)).truncate().max_w(176.0).a11y_hidden());
     }
     if !line.pr.is_empty() {
-        button = button.child(row().gap(4.0).center_y().child(icon(&icons::PULL_REQUEST, 12.0).color(t.text.muted.alpha(0.8)).a11y_hidden()).child(text(line.pr.clone()).font(webkit::tnum(quiet(t, 12.5, 20.3125, 400.0))).color(t.text.muted.alpha(0.8)).a11y_hidden()));
+        button = button.child(row().gap(4.0).center_y().child(icon(&icons::PULL_REQUEST, 12.0).color(t.text.muted.alpha(0.8)).a11y_hidden()).child(text(line.pr.clone()).font(webkit::tnum(quiet(t, 12.5, 18.75, 400.0))).color(t.text.muted.alpha(0.8)).a11y_hidden()));
     }
     if !where_.is_empty() {
-        button = button.child(text(where_).key(format!("all-where-{}", task.id)).font(quiet(t, 12.5, 20.3125, 400.0)).color(t.text.muted.alpha(0.8)).truncate().max_w(144.0).a11y_hidden());
+        button = button.child(text(where_).key(format!("all-where-{}", task.id)).font(quiet(t, 12.5, 18.75, 400.0)).color(t.text.muted.alpha(0.8)).truncate().max_w(144.0).a11y_hidden());
     }
     if !line.runtime.is_empty() {
         button = button.child(row().key(format!("all-runtime-{}", task.id)).role("img").label(line.runtime.clone()).size(20.0, 20.0).center().radius(10.0).fill(t.text.base.alpha(0.08)).child(text(line.runtime.clone()).font(quiet(t, 9.0, 14.625, 600.0)).color(t.text.base.alpha(0.7)).a11y_hidden()));
     }
     let when = relative(s.now_ms, task.updated_at_ms);
-    let end = row().w(76.0).h_full().center_y().justify_end().child(text(when).key(format!("all-when-{}", task.id)).font(webkit::tnum(quiet(t, 12.5, 20.3125, 400.0))).color(t.text.muted.alpha(0.7)).group_opacity(1.0, 0.0).a11y_hidden());
+    let end = row().w(76.0).h_full().center_y().justify_end().child(text(when).key(format!("all-when-{}", task.id)).font(webkit::tnum(quiet(t, 12.5, 18.75, 400.0))).color(t.text.muted.alpha(0.7)).group_opacity(1.0, 0.0).a11y_hidden());
     let kind = crate::status::status_of(task.status);
     let r = row().key(format!("all-line-{}", task.id)).w_full().h(40.0).px(12.0).gap(12.0).center_y().radius(10.0).hover_group().fill(if on { t.text.base.alpha(0.06) } else { Color::TRANSPARENT }).hover(t.text.base.alpha(if on { 0.06 } else { 0.03 })).child(crate::status::status_glyph(kind, t, 14.0, Some(""))).child(button).child(end).on_secondary_press({
         let id = id.clone();
@@ -234,8 +236,8 @@ fn list_body(s: &App, t: &Neko, layer: &mut Vec<El>, rows: &[&crate::link::TaskR
                                 }
                             })
                             .child(icon(if folded { &icons::CHEVRON_RIGHT } else { &icons::CHEVRON_DOWN }, 10.0).color(t.text.muted).a11y_hidden())
-                            .child(text(title).font(quiet(t, 12.5, 20.3125, 500.0)).color(t.text.muted).a11y_hidden())
-                            .child(text(group.len().to_string()).key(format!("all-stage-count-{title}")).font(webkit::tnum(quiet(t, 12.5, 20.3125, 500.0))).color(t.text.muted.alpha(0.7)).a11y_hidden()),
+                            .child(text(title).font(quiet(t, 12.5, 18.75, 500.0)).color(t.text.muted).a11y_hidden())
+                            .child(text(group.len().to_string()).key(format!("all-stage-count-{title}")).font(webkit::tnum(quiet(t, 12.5, 18.75, 500.0))).color(t.text.muted.alpha(0.7)).a11y_hidden()),
                     ),
                 );
                 first = false;
