@@ -387,6 +387,12 @@ fn a_held_machine_postpones_checks_and_new_turns() {
     end_turn(&db, TaskStatus::ReadyForReview, "x", None);
     tick(&db, &env).unwrap();
     assert_eq!((env.checked.load(Ordering::SeqCst), goal(&db, &id).status), (0, GoalStatus::Running));
+    tick(&db, &env).unwrap();
+    let subject = goal(&db, &id).subject();
+    let journal = core::log(&db.lock().unwrap(), &subject).unwrap().journal;
+    let held: Vec<_> = journal.iter().filter(|e| e.note.starts_with("Held: ")).collect();
+    assert_eq!(held.len(), 1, "the judge's start was held: one line in the journal, not one per tick");
+    assert_eq!(env.judged.load(Ordering::SeqCst), 0, "the judge was not called while held");
     env.held.store(false, Ordering::SeqCst);
     env.say("DONE");
     tick(&db, &env).unwrap();

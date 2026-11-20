@@ -80,7 +80,7 @@ pub(crate) fn plan<Tz: chrono::TimeZone>(routine: &Routine, state: &RoutineState
     }
 }
 
-/// The spend ceiling's gate: whether new goal turns and routine runs wait.
+/// The spend ceiling's gate: whether new agent starts wait (every kind: `admission::may_start`).
 /// Off (no ceiling) costs a cached snapshot read. When today's reported spend has
 /// reached the ceiling, raises one Inbox item for the day that offers raising it, and
 /// closes it again once the ceiling is raised or the day turns.
@@ -104,7 +104,7 @@ pub(crate) fn spend_held(db: &neko_core::Db, now_ms: i64) -> bool {
         }
         let ceiling = f64::from(today.ceiling_cents.unwrap_or(0)) / 100.0;
         let detail = format!(
-            "Today's reported spend is ${:.2} of the ${ceiling:.2} daily ceiling. New goal turns and routine runs are paused; work already running finishes. Raise the ceiling in Settings, AI and agents, Budget, or leave it: it resets at midnight.",
+            "Today's reported spend is ${:.2} of the ${ceiling:.2} daily ceiling. New tasks, goal turns, routine runs, watch checks and cat turns are paused; work already running finishes. Raise the ceiling in Settings, AI and agents, Budget, or leave it: it resets at midnight.",
             today.total_usd()
         );
         let raise = f64::from(neko_core::spend::raise_to_cents(today.ceiling_cents.unwrap_or(0))) / 100.0;

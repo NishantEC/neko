@@ -12,6 +12,7 @@
 use super::*;
 use neko_core::goals as core;
 use neko_protocol::goals::*;
+use super::admission::{may_start, HoldReason, Start, StartKind, Verdict, HELD};
 
 /// The goal tick.
 const TICK: Duration = Duration::from_secs(3);
@@ -36,6 +37,10 @@ pub(super) trait Env: Sync {
     fn judge(&self, prompt: &str) -> Result<String, String>;
     /// The machine steward says hold new work.
     fn machine_held(&self) -> bool;
+    /// The one gate (`admission::may_start`) for a start in `workspace`. Fakes only know the steward.
+    fn may_start(&self, _kind: StartKind, _workspace: &str) -> Verdict {
+        if self.machine_held() { Verdict::Hold(HoldReason::Machine("the machine is busy".into())) } else { Verdict::Admit }
+    }
     /// `OPEN`, `MERGED` or `CLOSED`.
     fn pr_state(&self, pr: &str) -> Option<String>;
     fn pid_alive(&self, pid: u32) -> bool;
@@ -69,6 +74,7 @@ pub(super) fn artifact_since(directory: &std::path::Path, relative: &str, since_
 
 pub(super) struct Real {
     pub db: Arc<Mutex<Db>>,
+    pub controller: Arc<Controller>,
 }
 
 impl Env for Real {
@@ -103,6 +109,12 @@ impl Env for Real {
 
     fn machine_held(&self) -> bool {
         neko_core::machine::latest().is_some_and(|health| health.holding.is_some())
+    }
+
+    fn may_start(&self, kind: StartKind, workspace: &str) -> Verdict {
+        // Count before taking the database lock: the scheduler takes them the other way round.
+        let running = self.controller.running_agents();
+        may_start(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), Start::new(kind, Some(workspace)).running(running))
     }
 
     fn pr_state(&self, pr: &str) -> Option<String> {
@@ -592,12 +604,8 @@ fn running(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: Goal) -> Result<(), String>
             })?;
             return Ok(());
         }
-        // A wait ended, an answer came, or the person resumed: the next turn is due.
-        if env.machine_held() {
-            return Ok(());
-        }
-        // The daily spend ceiling: no new turn today (one Inbox item asks to raise it).
-        if crate::routine_care::spend_held(&*db.lock().map_err(|_| "Goal storage unavailable")?, env.now_ms()) {
+        // A wait ended, an answer came, or the person resumed: the next turn is due, if the gate lets it start.
+        if hold_goal(db, env, &goal, StartKind::GoalTurn)? {
             return Ok(());
         }
         let (still, now) = (move |g: &Goal| g.status == GoalStatus::Running && g.turns == turn && !g.in_turn, env.now_ms());
@@ -632,6 +640,19 @@ fn running(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: Goal) -> Result<(), String>
         TaskStatus::ReadyForReview | TaskStatus::Completed => evaluate(db, env, &goal, &snapshot, task, None),
         TaskStatus::Failed => failed_turn(db, env, &goal, &snapshot, task),
     }
+}
+
+/// Asks the gate for a start of `goal`'s. When held, puts one `Held: <reason>` line in its journal
+/// (not another while the latest line already is one) and returns true: the goal stays as it is
+/// and its next tick asks again.
+fn hold_goal(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: &Goal, kind: StartKind) -> Result<bool, String> {
+    let Some(line) = env.may_start(kind, &goal.workspace_id).line() else { return Ok(false) };
+    let guard = db.lock().map_err(|_| "Goal storage unavailable")?;
+    let noted = core::log(&guard, &goal.subject())?.journal.last().is_some_and(|e| e.note.starts_with(HELD));
+    if !noted {
+        core::push_journal(&guard, &goal.subject(), JournalEntry { at_ms: env.now_ms(), turn: goal.turns, note: line, ..Default::default() })?;
+    }
+    Ok(true)
 }
 
 fn task_cost_cents(task: &Task) -> f64 {
@@ -757,8 +778,8 @@ pub(crate) fn block_for_test(db: &Db, goal: &mut Goal, question: &str, default_a
 
 /// A turn ended: check, judge, rule.
 fn evaluate(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: &Goal, snapshot: &Snapshot, task: &Task, error: Option<String>) -> Result<(), String> {
-    // The check can be heavy; a held machine waits for the next tick.
-    if env.machine_held() {
+    // The check can be heavy and the judge is a model call; a held start waits for the next tick.
+    if hold_goal(db, env, goal, StartKind::Judge)? {
         return Ok(());
     }
     // A parked folder comes back (at the same path) before its check runs there.
@@ -1029,7 +1050,7 @@ fn waiting(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: Goal) -> Result<(), String>
 
 fn held(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: Goal) -> Result<(), String> {
     let now = env.now_ms();
-    if goal.hold_until_ms.is_some_and(|at| now < at) || env.machine_held() {
+    if goal.hold_until_ms.is_some_and(|at| now < at) || hold_goal(db, env, &goal, StartKind::GoalTurn)? {
         return Ok(());
     }
     commit(db, &goal.id, |g| g.status == GoalStatus::Held, |db, g| {
@@ -1311,7 +1332,7 @@ impl Controller {
             Ok(n) => eprintln!("neko goals: resumed {n} from their journals"),
             Err(error) => eprintln!("neko goals: cannot resume: {error}"),
         }
-        let env = Arc::new(Real { db: self.db.clone() });
+        let env = Arc::new(Real { db: self.db.clone(), controller: self.clone() });
         let db = self.db.clone();
         std::thread::Builder::new()
             .name("neko-goals".into())

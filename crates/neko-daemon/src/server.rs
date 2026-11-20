@@ -1050,7 +1050,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             Err(message) => Response::Error { message },
         },
         Request::CheckAgentModel { runtime, save } => {
-            let check = neko_core::agent_catalog::check(&runtime);
+            let check = state.workbench.check_model(&runtime);
             if check.ok && save {
                 if let Err(message) = state.workbench.command(
                     neko_protocol::workbench::Command::SetAgentRuntime { runtime },

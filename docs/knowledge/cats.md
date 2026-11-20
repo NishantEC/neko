@@ -174,3 +174,5 @@ Everything already stored is moved, and every move is safe to repeat:
   `<data>/cats/<id>/`; `CREW.md` becomes `TASK_RULES.md` and `DIGEST.md` becomes `BRIEFING.md`, their `.prev` copies with them. It never overwrites and never deletes: a file whose new name is
   taken, a link and a clashing file stay where they are (one log line each, `cats: ...`), and the old folder is removed only if the move emptied it. A file that is exactly its old seed
   (`# Crew rules`, `# Digest`) takes the new heading; anything the person or the cat wrote is moved as it was.
+
+**Admission (2026-11-21).** The cat tick no longer checks the steward and the ceiling itself: it asks `admission::may_start(CatTurn, ..)` (person-written turns skip quiet hours only) and a held turn leaves one `Held:` Event line in the thread. See `docs/knowledge/admission-gate.md`.

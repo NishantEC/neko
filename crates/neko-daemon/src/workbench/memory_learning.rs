@@ -61,6 +61,17 @@ impl Controller {
         // Retain ownership in memory if even the retry write fails. Subsequent
         // ticks back off and retry that write before attempting another claim.
         self.recover_owned_attempt(owned)?;
+        // The one gate, asked only when a job is waiting. A held job stays queued (nothing is
+        // claimed, so no attempt is spent) and the next tick asks again.
+        let running = self.running_agents();
+        {
+            let db = self.db.lock().map_err(|_| "Learning storage unavailable")?;
+            if learning::waiting(&db)?
+                && !admission::admit_background(&db, "memory learning", admission::Start::new(admission::StartKind::SmallModel, None).running(running))
+            {
+                return Ok(());
+            }
+        }
         let (job, snapshot, authority) = {
             let db = self.db.lock().map_err(|_| "Learning storage unavailable")?;
             let snapshot = store::load(&db)?;

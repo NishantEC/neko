@@ -28,7 +28,7 @@ mod review_repair;
 #[path = "workbench/publish.rs"]
 mod publish;
 #[path = "workbench/admission.rs"]
-mod admission;
+pub(crate) mod admission;
 #[path = "workbench/runtime_settings.rs"]
 mod runtime_settings;
 #[path = "workbench/display_names.rs"]
@@ -131,13 +131,24 @@ impl Controller {
         format!("{}{}", neko_core::rulebook::text(snapshot), neko_core::cat_files::task_rules_section(&self.cat_root(), task.cat_id.as_deref(), &name))
     }
 
+    /// The person asked whether a model answers: one small model call, through the one gate (a held
+    /// check says why instead of guessing, and is not remembered as a failure).
+    pub fn check_model(&self, runtime: &AgentRuntime) -> neko_protocol::agent_models::ModelCheck {
+        let running = self.running_agents();
+        let verdict = admission::may_start(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), admission::Start::new(admission::StartKind::SmallModel, None).by_person(true).running(running));
+        match verdict.line() {
+            Some(message) => neko_protocol::agent_models::ModelCheck { runtime: runtime.clone(), ok: false, unavailable: false, message },
+            None => neko_core::agent_catalog::check(runtime),
+        }
+    }
+
     pub fn command(&self, command: Command) -> Result<Snapshot, String> {
         match command {
             Command::SetConversationRuntime { conversation_id, preferences } => self.set_conversation_runtime(
                 conversation_id, preferences, |before, preferences| {
                     let catalog = neko_core::agent_catalog::catalog(false);
                     let runtime = neko_core::runtime_selection::preview(&catalog, preferences, &before.agent_runtime)?;
-                    let check = neko_core::agent_catalog::check(&runtime);
+                    let check = self.check_model(&runtime);
                     if check.ok { Ok(()) } else { Err(check.message) }
                 },
             ),
@@ -626,6 +637,8 @@ impl Controller {
     }
 
     pub fn start(self: &Arc<Self>) {
+        let counted = Arc::downgrade(self);
+        admission::register_running(move || counted.upgrade().map_or(0, |controller| controller.running_agents()));
         let recovery = (|| {
             let db = self.db.lock().map_err(|_| "Task storage unavailable")?;
             db.atomic(|| {
@@ -802,20 +815,32 @@ impl Controller {
             // a worktree with its own installs and builds); the rest wait.
             let running: Vec<&str> = active.iter().map(|a| a.task_id.as_str()).collect();
             let mut positions = admission::cap_writable_per_repository(&snapshot, &running, positions);
+            // The one gate (steward holding and cap, the daily spend ceiling): a
+            // held task stays queued, with one "Held:" line, and starts on a
+            // later tick. Asked before pacing so a hold does not use up tokens.
+            let others = self.others_running();
+            let mut allowed = 0;
+            let mut held = None;
+            for &index in &positions {
+                let workspace = snapshot.tasks[index].workspace_id.clone();
+                let verdict = admission::may_start(&db, admission::Start::new(admission::StartKind::Task, Some(&workspace)).running(active.len() + others + allowed));
+                if !verdict.admitted() {
+                    held = Some(verdict);
+                    break;
+                }
+                allowed += 1;
+            }
+            if let Some(line) = held.as_ref().and_then(admission::Verdict::line) {
+                for &index in &positions[allowed..] {
+                    admission::note_held_on_task(&mut snapshot.tasks[index], &line);
+                }
+                positions.truncate(allowed);
+            }
             // Scheduler tests share one process and the machine's real load,
             // so pacing would make them order- and load-dependent; it has its
             // own tests in `admission`.
             if !positions.is_empty() && !cfg!(test) {
                 positions.truncate(admission::admit(positions.len(), admission::load_average(), std::time::Instant::now()));
-            }
-            // The Mac's own limits: hold everything (disk, memory, load, night
-            // load) or cap how many run at once (night, memory warning).
-            if let Some(health) = neko_core::machine::latest() {
-                if health.holding.is_some() {
-                    positions.clear();
-                } else if let Some(cap) = health.cap {
-                    positions.truncate((cap as usize).saturating_sub(active.len()));
-                }
             }
             // An optional cap the user sets ("one ticket at a time"); waiting
             // tickets keep their place and start as running ones finish.
@@ -3344,6 +3369,45 @@ mod tests {
         let persisted = store::load(&db).unwrap();
         assert_eq!(persisted.tasks[0].events.len(), events);
         assert_eq!(persisted.tasks[0].result, "done");
+    }
+
+    #[test]
+    fn a_task_over_the_daily_ceiling_stays_queued_with_one_held_line_and_starts_when_the_ceiling_is_lifted() {
+        let controller = Arc::new(controller_with_task(TaskStatus::Queued));
+        let now = store::now_ms();
+        {
+            let db = controller.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            state.daily_budget_cents = Some(100);
+            store::save(&db, &state).unwrap();
+            neko_core::usage_ledger::record_cat_turn(&db, "c", now - 5_000, now - 4_000, "claude", "sonnet", 2_000_000);
+        }
+        let (started, receiver) = std::sync::mpsc::channel();
+        let tick = |controller: &Arc<Controller>| {
+            let started = started.clone();
+            controller.tick_with(move |_, claim, _| {
+                started.send(claim.task.id.clone()).unwrap();
+                Ok(())
+            }).unwrap();
+        };
+        for _ in 0..3 {
+            tick(&controller);
+        }
+        assert!(receiver.recv_timeout(Duration::from_millis(200)).is_err(), "no worker starts over the ceiling");
+        let task = controller.command(Command::Snapshot).unwrap().tasks.remove(0);
+        assert_eq!(task.status, TaskStatus::Queued, "held is not failed");
+        let held: Vec<_> = task.events.iter().filter(|e| e.role == admission::HELD_ROLE).collect();
+        assert_eq!(held.len(), 1, "one line however many ticks it waited");
+        assert_eq!(held[0].message, "Held: today's spend has reached the daily ceiling");
+        // Lift the ceiling: the same task starts on the next tick.
+        {
+            let db = controller.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            state.daily_budget_cents = None;
+            store::save(&db, &state).unwrap();
+        }
+        tick(&controller);
+        assert_eq!(receiver.recv_timeout(Duration::from_secs(2)).unwrap(), "t");
     }
 
     #[test]

@@ -236,6 +236,31 @@ impl RunAuthority {
     }
 }
 impl Controller {
+    /// Whether a due watch may wake an agent now. Nothing due: yes (nothing to ask). Held: puts
+    /// `Held: <reason>` at the top of each due watch's last result, once, and leaves its due time alone.
+    fn watch_may_wake(&self, now: i64, health: Option<&neko_protocol::workbench::MachineHealth>) -> Result<bool, String> {
+        let running = self.running_agents();
+        let db = self.db.lock().map_err(|_| "Workspace storage unavailable")?;
+        let mut state = store::load(&db)?;
+        let due: Vec<usize> = state.mcp.responsibilities.iter().enumerate().filter(|(_, r)| r.enabled && r.next_due_ms <= now).map(|(i, _)| i).collect();
+        let Some(&first) = due.first() else { return Ok(true) };
+        let workspace = state.mcp.responsibilities[first].workspace_id.clone();
+        let Some(line) = admission::may_start(&db, admission::Start::new(admission::StartKind::WatchWake, Some(&workspace)).running(running).at(now).with_health(health)).line() else {
+            return Ok(true);
+        };
+        let mut changed = false;
+        for index in due {
+            let r = &mut state.mcp.responsibilities[index];
+            if !r.last_result.starts_with(admission::HELD) {
+                r.last_result = format!("{line}\n{}", r.last_result);
+                changed = true;
+            }
+        }
+        if changed {
+            store::save(&db, &state)?;
+        }
+        Ok(false)
+    }
     fn claim_due(&self, now: i64) -> Result<Option<WakeClaim>, String> {
         let db = self
             .db
@@ -257,7 +282,8 @@ impl Controller {
             return Ok(None);
         };
         let r = &mut state.mcp.responsibilities[index];
-        let previous_result = r.last_result.clone();
+        // A "Held:" line is not a result: what the watch last found is under it.
+        let previous_result = admission::without_held(&r.last_result).to_owned();
         r.last_attempt_ms = Some(now);
         // Commit a future due time before any process launch. Restart does not
         // replay missed intervals or immediately duplicate an interrupted wake.
@@ -353,9 +379,18 @@ impl Controller {
         store::save(&db, &state)
     }
     pub(super) fn responsibility_tick(&self) -> Result<(), String> {
+        self.responsibility_tick_with(neko_core::machine::latest())
+    }
+    /// One tick, with the machine steward's reading given (tests pass their own).
+    fn responsibility_tick_with(&self, health: Option<neko_protocol::workbench::MachineHealth>) -> Result<(), String> {
         let Ok(_slot) = self.waking.try_lock() else {
             return Ok(());
         };
+        // The one gate, before anything is claimed: a held wake keeps its due time and is asked
+        // about again on the next tick, with one "Held:" line on the watch.
+        if !self.watch_may_wake(store::now_ms(), health.as_ref())? {
+            return Ok(());
+        }
         let Some(claim) = self.claim_due(store::now_ms())? else {
             return Ok(());
         };
@@ -576,6 +611,8 @@ mod tests {
     use super::*;
     fn configured() -> Controller {
         let controller = super::super::tests::controller_with_task(TaskStatus::Completed);
+        // Quiet hours hold unattended wakes; these tests run at any hour (`admission` tests the rule itself).
+        neko_core::phone::save_settings(&controller.db.lock().unwrap(), neko_protocol::phone::PhoneSettings { quiet_enabled: false, ..Default::default() }).unwrap();
         let db = controller
             .db
             .lock()
@@ -629,6 +666,53 @@ mod tests {
         store::save(&db, &state).unwrap();
         drop(db);
         controller
+    }
+    #[test]
+    fn a_held_watch_wake_keeps_its_due_time_shows_one_held_line_and_starts_once_the_hold_clears() {
+        let controller = configured();
+        {
+            let db = controller.db.lock().unwrap();
+            neko_core::phone::save_settings(&db, neko_protocol::phone::PhoneSettings { quiet_enabled: false, ..Default::default() }).unwrap();
+            let mut state = store::load(&db).unwrap();
+            state.mcp.responsibilities[0].last_result = "Found two bugs".into();
+            store::save(&db, &state).unwrap();
+        }
+        let holding = neko_protocol::workbench::MachineHealth { holding: Some("free disk is under 15 GB".into()), ..Default::default() };
+        let watch = |controller: &Controller| controller.command(Command::Snapshot).unwrap().mcp.responsibilities[0].clone();
+        for _ in 0..3 {
+            controller.responsibility_tick_with(Some(holding.clone())).unwrap();
+        }
+        let held = watch(&controller);
+        assert_eq!(held.last_result, "Held: free disk is under 15 GB\nFound two bugs", "one Held line over what it last found, however many ticks");
+        assert_eq!((held.next_due_ms, held.last_attempt_ms), (100, None), "nothing was claimed: it is still due and waits for its own tick");
+        // The hold clears: the same watch is claimed (not skipped), and the Held line is not its previous result.
+        assert!(controller.watch_may_wake(store::now_ms(), None).unwrap());
+        let claim = controller.claim_due(store::now_ms()).unwrap().expect("the same watch is claimed once the hold clears");
+        assert_eq!(claim.previous_result, "Found two bugs");
+        assert!(watch(&controller).next_due_ms > store::now_ms(), "claimed: its next due time moved on");
+    }
+    #[test]
+    fn a_watch_wake_over_the_spend_ceiling_or_at_the_cap_is_held_too() {
+        let controller = configured();
+        {
+            let db = controller.db.lock().unwrap();
+            neko_core::phone::save_settings(&db, neko_protocol::phone::PhoneSettings { quiet_enabled: false, ..Default::default() }).unwrap();
+        }
+        let now = store::now_ms();
+        let capped = neko_protocol::workbench::MachineHealth { cap: Some(1), ..Default::default() };
+        controller.active.lock().unwrap().push(Active { task_id: "worker".into(), cancelled: Arc::new(AtomicBool::new(false)) });
+        assert!(!controller.watch_may_wake(now, Some(&capped)).unwrap(), "one agent runs and the cap is one");
+        assert_eq!(controller.command(Command::Snapshot).unwrap().mcp.responsibilities[0].last_result, "Held: the Mac allows 1 agent at once right now, and that many are running\n");
+        controller.active.lock().unwrap().clear();
+        assert!(controller.watch_may_wake(now, Some(&capped)).unwrap(), "room again");
+        {
+            let db = controller.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            state.daily_budget_cents = Some(100);
+            store::save(&db, &state).unwrap();
+            neko_core::usage_ledger::record_cat_turn(&db, "c", now - 5_000, now - 4_000, "claude", "sonnet", 2_000_000);
+        }
+        assert!(!controller.watch_may_wake(now, None).unwrap(), "the daily ceiling is reached");
     }
     #[test]
     fn a_broken_connection_does_not_stop_tickets_from_starting() {

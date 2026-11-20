@@ -18,6 +18,9 @@ fn fixture() -> Fx {
     let repo = tempfile::tempdir().unwrap();
     assert!(std::process::Command::new("git").args(["init", "--quiet"]).arg(repo.path()).status().unwrap().success());
     let db = Arc::new(Mutex::new(Db::open_in_memory().unwrap()));
+    // Quiet hours hold unattended turns; these tests run at fixed instants in any time zone, so they are off here
+    // (`admission` tests the rule itself).
+    neko_core::phone::save_settings(&db.lock().unwrap(), neko_protocol::phone::PhoneSettings { quiet_enabled: false, ..Default::default() }).unwrap();
     let workspace = {
         let db = db.lock().unwrap();
         store::apply(&db, Command::SaveWorkspaceWithFolders {
@@ -334,12 +337,18 @@ fn a_holding_machine_a_full_cap_and_a_reached_spend_ceiling_each_stop_a_turn_and
 }
 
 #[test]
-fn the_steward_rule_is_holding_blocks_everything_and_a_cap_counts_running_agents() {
-    assert!(steward_allows(None, 9));
-    assert!(steward_allows(Some(&healthy()), 9));
-    assert!(!steward_allows(Some(&MachineHealth { holding: Some("hot".into()), ..healthy() }), 0));
-    let capped = MachineHealth { cap: Some(2), ..healthy() };
-    assert!(steward_allows(Some(&capped), 1) && !steward_allows(Some(&capped), 2));
+fn a_held_turn_leaves_one_held_line_for_the_person_however_long_the_hold_lasts() {
+    let fx = fixture();
+    let miso = fx.cat("miso", "c1");
+    fx.say(&miso, "hello", T0);
+    let holding = MachineHealth { holding: Some("Disk is low".into()), ..healthy() };
+    for tick in 0..4 {
+        assert!(fx.c.cat_plan(T0 + tick, Some(&holding)).unwrap().is_empty());
+    }
+    let held: Vec<_> = fx.thread(&miso).into_iter().filter(|(_, text)| text.starts_with("Held: ")).collect();
+    assert_eq!(held, vec![(CatMessageRole::Event, "Held: Disk is low".to_owned())], "one line, not one per tick");
+    assert_eq!(fx.pending(&miso), 1, "the wake is still waiting");
+    assert_eq!(fx.c.cat_plan(T0 + 9, Some(&healthy())).unwrap().len(), 1, "the hold clears and the same wake runs");
 }
 
 #[test]

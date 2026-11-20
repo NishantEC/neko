@@ -49,6 +49,12 @@ impl Controller {
             let Some(prompt) = neko_core::triage::prompt(&snapshot, &task_id) else {
                 return self.settle(&task_id, None, attempts);
             };
+            // The one gate: held, the task simply keeps waiting (with one "Held:" line) and is asked about again.
+            let running = self.running_agents();
+            let verdict = admission::may_start(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), admission::Start::new(admission::StartKind::Triage, Some(&snapshot.tasks.iter().find(|t| t.id == task_id).map(|t| t.workspace_id.clone()).unwrap_or_default())).running(running));
+            if let Some(line) = verdict.line() {
+                return self.update_task(&task_id, |t| admission::note_held_on_task(t, &line));
+            }
             match ask(&prompt, &snapshot.agent_runtime).map(|answer| neko_core::triage::parse(&answer)) {
                 Ok(Some(decision)) => Some(decision),
                 Ok(None) | Err(_) => {
@@ -111,6 +117,29 @@ mod tests {
         let after = store::load(&controller.db.lock().unwrap()).unwrap();
         assert!(after.untriaged.is_empty());
         assert_eq!(after.run_next, vec!["t".to_owned()]);
+    }
+
+    #[test]
+    fn a_held_triage_makes_no_model_call_and_leaves_the_task_waiting_with_one_held_line() {
+        let controller = super::super::tests::controller_with_task(TaskStatus::Queued);
+        {
+            let db = controller.db.lock().unwrap();
+            let mut snapshot = store::load(&db).unwrap();
+            snapshot.tasks[0].created_at_ms = store::now_ms();
+            snapshot.untriaged = vec!["t".into()];
+            snapshot.daily_budget_cents = Some(100);
+            store::save(&db, &snapshot).unwrap();
+            let now = store::now_ms();
+            neko_core::usage_ledger::record_cat_turn(&db, "c", now - 5_000, now - 4_000, "claude", "sonnet", 2_000_000);
+        }
+        let mut attempts = HashMap::new();
+        for _ in 0..3 {
+            controller.triage_one(&mut attempts, |_, _| panic!("a held start must not call the model")).unwrap();
+        }
+        let after = store::load(&controller.db.lock().unwrap()).unwrap();
+        assert_eq!(after.untriaged, vec!["t".to_owned()], "still waiting");
+        assert_eq!(after.tasks[0].events.iter().filter(|e| e.role == admission::HELD_ROLE).count(), 1);
+        assert!(attempts.is_empty(), "a held pass is not a failed attempt");
     }
 
     #[test]

@@ -32,7 +32,10 @@ fn backing_off(failure: Option<(Duration, u32)>) -> bool {
 /// (backing off), and while the machine steward holds new work.
 pub(super) fn refresh_in_background(db: Arc<Mutex<Db>>, profile: String, scope: Option<String>, refresh: Refresh, runtime: AgentRuntime) {
     let key = checkpoint::key(&profile, scope.as_deref());
-    if neko_core::machine::latest().is_some_and(|health| health.holding.is_some()) {
+    // The one gate (steward holding and cap, spend ceiling); a refresh skipped now is asked for again with the next message.
+    let running = super::admission::running_now();
+    let admitted = super::admission::admit_background(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), "chat summary", super::admission::Start::new(super::admission::StartKind::SmallModel, None).running(running));
+    if !admitted {
         return;
     }
     let failure = FAILED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&key).map(|(at, n)| (at.elapsed(), *n));

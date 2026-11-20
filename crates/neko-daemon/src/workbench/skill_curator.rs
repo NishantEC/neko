@@ -5,6 +5,7 @@
 //! the database is held. A pass that cannot start is retried on the next wake,
 //! not skipped for a day; one that ran (even with nothing to do) waits a day.
 use super::*;
+use super::admission::{admit_background, Start, StartKind};
 use neko_core::skills::curator::{self, Outcome};
 
 /// How often the thread looks at whether a pass is due and the Mac is idle.
@@ -47,6 +48,11 @@ impl Controller {
             }
         }
         if !self.idle_for_curator()? {
+            return Ok(0);
+        }
+        // The one gate (a stricter local rule above stays): steward cap, spend ceiling, quiet hours.
+        let running = self.running_agents();
+        if !admit_background(&*self.db.lock().map_err(|_| "Skill storage unavailable")?, "skill curator", Start::new(StartKind::SkillCurator, None).running(running)) {
             return Ok(0);
         }
         self.curate(now_ms, &|prompt| ask(&self.db, prompt))

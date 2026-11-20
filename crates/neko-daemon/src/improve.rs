@@ -65,6 +65,11 @@ pub(crate) fn tick(state: &AppState, now: i64) -> Result<usize, String> {
     if !(gather || event) || !state.workbench.idle_for_curator()? {
         return Ok(0);
     }
+    // The one gate: steward cap, spend ceiling, quiet hours (the idle check above is stricter and stays).
+    let running = state.workbench.running_agents();
+    if !crate::workbench::admission::admit_background(&lock(state), "self-improvement", crate::workbench::admission::Start::new(crate::workbench::admission::StartKind::SkillCurator, None).running(running)) {
+        return Ok(0);
+    }
     EVENT.store(false, Ordering::Relaxed);
     let made = gather_pass(state, now, &|prompt| crate::workbench::ask_cheap_model(&state.db, prompt))?;
     {

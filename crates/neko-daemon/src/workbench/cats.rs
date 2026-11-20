@@ -15,6 +15,7 @@ use neko_core::{cat_files, cats};
 use neko_protocol::cats::{Cat, CatFileKind, CatMessageRole};
 use neko_protocol::crew::CrewRole;
 use neko_protocol::workbench::MachineHealth;
+use super::admission::{may_start, Start, StartKind, HELD};
 
 const TICK: Duration = Duration::from_secs(3);
 /// A cat turn ends after this long, like a routine's long run.
@@ -48,11 +49,6 @@ pub(crate) struct TurnResult {
 /// Runs one cat turn's agent. The real one is `run_agent`; tests pass a fake.
 pub(crate) type Runner<'a> = &'a (dyn Fn(&TurnRequest) -> Result<TurnResult, String> + Sync);
 
-/// The machine steward's say: nothing starts while it holds, and under a cap only while fewer agents run than it allows.
-pub(crate) fn steward_allows(health: Option<&MachineHealth>, running: usize) -> bool {
-    health.is_none_or(|h| h.holding.is_none() && h.cap.is_none_or(|cap| running < cap as usize))
-}
-
 /// Frees a cat's slot and tells readers its turn is over, however the turn ended.
 struct Slot<'a> {
     controller: &'a Controller,
@@ -84,9 +80,15 @@ impl Controller {
     }
 
     /// Agents running now: ticket workers, the Home chat and cat turns. What a steward cap counts.
-    fn running_agents(&self) -> usize {
-        self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len()
-            + usize::from(self.chat_active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some())
+    // TODO(H3): routine, watch, curator, judge and small-model runs are not counted yet.
+    pub(crate) fn running_agents(&self) -> usize {
+        self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len() + self.others_running()
+    }
+
+    /// The Home chat and cat turns: `running_agents` without the ticket workers, for the
+    /// scheduler, which already holds that lock.
+    pub(crate) fn others_running(&self) -> usize {
+        usize::from(self.chat_active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some())
             + self.cat_active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len()
     }
 
@@ -127,14 +129,14 @@ impl Controller {
     /// Notices what sessions did, then decides which cats start a turn now and takes their slots.
     /// Wakes stay queued for a cat that may not launch yet; an archived cat's are dropped.
     pub(crate) fn cat_plan(&self, now_ms: i64, health: Option<&MachineHealth>) -> Result<Vec<Launch>, String> {
+        // Counted before the database lock, which the scheduler takes after its `active` lock; each turn launched below adds one.
+        let running_before = self.running_agents();
         let db = self.db.lock().map_err(|_| "Cat storage unavailable")?;
         let all = cats::list(&db, true)?;
         if all.is_empty() {
             return Ok(Vec::new());
         }
         let snapshot = store::load(&db)?;
-        // Read only when a turn is about to start: it walks the routines' runs, too much for an idle pass.
-        let spend_held = |db: &Db| neko_core::spend::today(db, &snapshot, now_ms).reached();
         let mut launches = Vec::new();
         for cat in all {
             if cat.archived {
@@ -148,7 +150,17 @@ impl Controller {
                 continue;
             }
             let (last_turn, turns_today) = thread::turn_stats(&db, &cat.id, now_ms)?;
-            if thread::launch_gate(&batch, now_ms, last_turn, turns_today).is_err() || !steward_allows(health, self.running_agents()) || spend_held(&db) {
+            if thread::launch_gate(&batch, now_ms, last_turn, turns_today).is_err() {
+                continue;
+            }
+            // The one gate. Read only when a turn is about to start: the spend check walks the routines' runs.
+            let start = Start::new(StartKind::CatTurn, Some(&cat.workspace_id)).by_person(batch.person).running(running_before + launches.len()).at(now_ms).with_health(health);
+            if let Some(line) = may_start(&db, start).line() {
+                // The wakes stay queued; one "Held:" line per hold period tells the person why nothing answered.
+                let noted = thread::recent(&db, &cat.id, 1)?.last().is_some_and(|m| m.role == CatMessageRole::Event && m.text.starts_with(HELD));
+                if !noted {
+                    thread::append(&db, &cat.id, CatMessageRole::Event, &line, now_ms)?;
+                }
                 continue;
             }
             let cancel = Arc::new(AtomicBool::new(false));

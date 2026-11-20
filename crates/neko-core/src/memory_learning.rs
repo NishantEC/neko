@@ -66,6 +66,11 @@ const MAX_PENDING: usize = 32;
 const MAX_INPUT: usize = 12 * 1024;
 const MAX_PROPOSALS: usize = 64;
 
+/// Whether a job is queued (not running, not finished): a model call is about to be needed.
+pub fn waiting(db: &Db) -> Result<bool, String> {
+    Ok(load(db)?.iter().any(|j| j.state == JobState::Queued))
+}
+
 fn load(db: &Db) -> Result<Vec<Job>, String> {
     db.get_setting(SETTING)
         .map_err(|e| e.to_string())?

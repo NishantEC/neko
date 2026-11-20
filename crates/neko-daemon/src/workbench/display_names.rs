@@ -90,6 +90,11 @@ impl Controller {
             (names::pending(&snapshot, PER_TICK, |s| backoff.waiting(s, now)), snapshot.agent_runtime)
         };
         let mut pass = Pass::default();
+        // The one gate, once per pass and only with names to make; held, the names wait for a later pass.
+        let running = self.running_agents();
+        if !jobs.is_empty() && !admission::admit_background(&*self.db.lock().map_err(|_| "Task storage unavailable")?, "naming", admission::Start::new(admission::StartKind::Naming, None).running(running)) {
+            return Ok(pass);
+        }
         for job in jobs {
             pass.attempted += 1;
             let name = generate(&job.prompt, &runtime).ok().and_then(|answer| names::parse_generated(&answer));
