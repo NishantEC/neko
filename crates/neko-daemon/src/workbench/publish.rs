@@ -342,7 +342,7 @@ mod tests {
 
     fn task(result: &str) -> Task {
         Task {
-            captain_id: None,
+            cat_id: None,
             id: "t1".into(), workspace_id: "w".into(), issue_id: None, title: "Fix".into(),
             goal: "SECRET source text".into(), status: TaskStatus::ReadyForReview, plan: String::new(),
             result: result.into(), worktree: None, events: vec![], created_at_ms: 0, updated_at_ms: 0,

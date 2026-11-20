@@ -270,29 +270,100 @@ impl Db {
             );
             CREATE INDEX IF NOT EXISTS idx_usage_events_at ON usage_events (at_ms);
             CREATE INDEX IF NOT EXISTS idx_usage_events_task ON usage_events (task_id);
-            CREATE TABLE IF NOT EXISTS captains (
+            CREATE TABLE IF NOT EXISTS cats (
                 id   TEXT PRIMARY KEY,
                 body TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS captain_messages (
-                captain_id TEXT    NOT NULL,
+            CREATE TABLE IF NOT EXISTS cat_messages (
+                cat_id TEXT    NOT NULL,
                 seq        INTEGER NOT NULL,
-                role       TEXT    NOT NULL CHECK (role IN ('person','captain','event')),
+                role       TEXT    NOT NULL CHECK (role IN ('person','cat','event')),
                 text       TEXT    NOT NULL,
                 at_ms      INTEGER NOT NULL,
-                PRIMARY KEY (captain_id, seq)
+                PRIMARY KEY (cat_id, seq)
             ) WITHOUT ROWID;
-            CREATE TABLE IF NOT EXISTS captain_wakes (
+            CREATE TABLE IF NOT EXISTS cat_wakes (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                captain_id TEXT    NOT NULL,
+                cat_id TEXT    NOT NULL,
                 reason     TEXT    NOT NULL,
                 task_id    TEXT    NOT NULL DEFAULT '',
                 at_ms      INTEGER NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_captain_wakes_captain ON captain_wakes (captain_id, id);
+            CREATE INDEX IF NOT EXISTS idx_cat_wakes_cat ON cat_wakes (cat_id, id);
             ",
+        )?;
+        self.migrate_captains_to_cats()
+    }
 
-        )
+    fn table_exists(&self, name: &str) -> rusqlite::Result<bool> {
+        self.conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)", [name], |row| row.get(0))
+    }
+
+    /// Phase 1 first called a cat a "captain" (batches B1 and B2 shipped the `captains`, `captain_messages` and
+    /// `captain_wakes` tables). Copies those rows into the `cat*` tables (message role `captain` becomes `cat`) and
+    /// drops the old tables, moves the two settings rows keyed by the old word, moves each delegated task's
+    /// `captain:<id>` origin and every `captain:<id>` usage ledger line to `cat:<id>`. All in one transaction,
+    /// and a no-op on a fresh database, on one from before B1 and on one already moved, so opening twice is harmless.
+    fn migrate_captains_to_cats(&self) -> rusqlite::Result<()> {
+        const OLD_REV: &str = "neko_captains_rev_v1";
+        const OLD_SEEN: &str = "neko_captain_seen_v1:";
+        const ORIGINS: &str = "neko_crew_origin_v1";
+        let (captains, messages, wakes) = (self.table_exists("captains")?, self.table_exists("captain_messages")?, self.table_exists("captain_wakes")?);
+        let old_rows = |sql: &str| -> rusqlite::Result<bool> { self.conn.query_row(sql, [], |row| row.get(0)) };
+        let ledger = old_rows("SELECT EXISTS(SELECT 1 FROM usage_events WHERE kind = 'captain' OR substr(task_id, 1, 8) = 'captain:' OR substr(run_key, 1, 8) = 'captain:')")?;
+        let settings = old_rows(&format!("SELECT EXISTS(SELECT 1 FROM settings WHERE key = '{OLD_REV}' OR substr(key, 1, {}) = '{OLD_SEEN}')", OLD_SEEN.len()))?;
+        let origins: Option<String> = self.conn.query_row("SELECT value FROM settings WHERE key = ?1", [ORIGINS], |row| row.get(0)).ok();
+        let origins = origins.filter(|json| json.contains("captain:"));
+        if !(captains || messages || wakes || ledger || settings || origins.is_some()) {
+            return Ok(());
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        if captains {
+            tx.execute_batch("INSERT OR IGNORE INTO cats (id, body) SELECT id, body FROM captains; DROP TABLE captains;")?;
+        }
+        if messages {
+            tx.execute_batch(
+                "INSERT OR IGNORE INTO cat_messages (cat_id, seq, role, text, at_ms)
+                 SELECT captain_id, seq, CASE role WHEN 'captain' THEN 'cat' ELSE role END, text, at_ms FROM captain_messages;
+                 DROP TABLE captain_messages;",
+            )?;
+        }
+        if wakes {
+            tx.execute_batch(
+                "INSERT OR IGNORE INTO cat_wakes (id, cat_id, reason, task_id, at_ms) SELECT id, captain_id, reason, task_id, at_ms FROM captain_wakes;
+                 DROP TABLE captain_wakes;",
+            )?;
+        }
+        if settings {
+            tx.execute_batch(&format!(
+                "INSERT OR IGNORE INTO settings (key, value) SELECT 'neko_cats_rev_v1', value FROM settings WHERE key = '{OLD_REV}';
+                 DELETE FROM settings WHERE key = '{OLD_REV}';
+                 INSERT OR IGNORE INTO settings (key, value) SELECT 'neko_cat_seen_v1:' || substr(key, {n}), value FROM settings WHERE substr(key, 1, {len}) = '{OLD_SEEN}';
+                 DELETE FROM settings WHERE substr(key, 1, {len}) = '{OLD_SEEN}';",
+                len = OLD_SEEN.len(),
+                n = OLD_SEEN.len() + 1,
+            ))?;
+        }
+        if let Some(json) = origins {
+            if let Ok(mut map) = serde_json::from_str::<std::collections::BTreeMap<String, String>>(&json) {
+                for origin in map.values_mut() {
+                    if let Some(rest) = origin.strip_prefix("captain:") {
+                        *origin = format!("cat:{rest}");
+                    }
+                }
+                if let Ok(moved) = serde_json::to_string(&map) {
+                    tx.execute("UPDATE settings SET value = ?2 WHERE key = ?1", (ORIGINS, moved))?;
+                }
+            }
+        }
+        if ledger {
+            tx.execute_batch(
+                "UPDATE OR IGNORE usage_events SET run_key = 'cat:' || substr(run_key, 9) WHERE substr(run_key, 1, 8) = 'captain:';
+                 UPDATE OR IGNORE usage_events SET task_id = 'cat:' || substr(task_id, 9) WHERE substr(task_id, 1, 8) = 'captain:';
+                 UPDATE usage_events SET kind = 'cat' WHERE kind = 'captain';",
+            )?;
+        }
+        tx.commit()
     }
 
     /// Whether a transaction (`atomic`) is open on this connection.
@@ -551,81 +622,81 @@ impl Db {
         self.conn.execute("DELETE FROM usage_events WHERE at_ms < ?1", [before_ms])
     }
 
-    /// Every captain row (JSON of `neko_protocol::captains::Captain`), unordered. Nothing `load` reads lives
+    /// Every cat row (JSON of `neko_protocol::cats::Cat`), unordered. Nothing `load` reads lives
     /// in this table, so like the usage ledger it does not bump `data_revision` or the `ContentStamp`.
-    pub fn captain_rows(&self) -> rusqlite::Result<Vec<String>> {
-        let mut statement = self.conn.prepare_cached("SELECT body FROM captains")?;
+    pub fn cat_rows(&self) -> rusqlite::Result<Vec<String>> {
+        let mut statement = self.conn.prepare_cached("SELECT body FROM cats")?;
         let rows = statement.query_map([], |row| row.get(0))?;
         rows.collect()
     }
 
-    /// Inserts or replaces one captain's row.
-    pub fn put_captain(&self, id: &str, body: &str) -> rusqlite::Result<()> {
+    /// Inserts or replaces one cat's row.
+    pub fn put_cat(&self, id: &str, body: &str) -> rusqlite::Result<()> {
         self.conn.execute(
-            "INSERT INTO captains (id, body) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET body = excluded.body",
+            "INSERT INTO cats (id, body) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET body = excluded.body",
             (id, body),
         )?;
         Ok(())
     }
 
-    /// Appends one line to a captain's thread and answers its `seq` (1, 2, ...). Append-only: nothing edits or
-    /// deletes a message. Like the other captain tables it bumps neither `data_revision` nor the
-    /// `ContentStamp`; `captains::bump_rev` is the change signal for readers.
-    pub fn append_captain_message(&self, captain_id: &str, role: &str, text: &str, at_ms: i64) -> rusqlite::Result<u64> {
+    /// Appends one line to a cat's thread and answers its `seq` (1, 2, ...). Append-only: nothing edits or
+    /// deletes a message. Like the other cat tables it bumps neither `data_revision` nor the
+    /// `ContentStamp`; `cats::bump_rev` is the change signal for readers.
+    pub fn append_cat_message(&self, cat_id: &str, role: &str, text: &str, at_ms: i64) -> rusqlite::Result<u64> {
         self.conn.query_row(
-            "INSERT INTO captain_messages (captain_id, seq, role, text, at_ms)
-             SELECT ?1, COALESCE(MAX(seq), 0) + 1, ?2, ?3, ?4 FROM captain_messages WHERE captain_id = ?1
+            "INSERT INTO cat_messages (cat_id, seq, role, text, at_ms)
+             SELECT ?1, COALESCE(MAX(seq), 0) + 1, ?2, ?3, ?4 FROM cat_messages WHERE cat_id = ?1
              RETURNING seq",
-            rusqlite::params![captain_id, role, text, at_ms],
+            rusqlite::params![cat_id, role, text, at_ms],
             |row| row.get::<_, i64>(0),
         )
         .map(|seq| seq.max(0) as u64)
     }
 
     /// Messages with `seq > since_seq`, oldest first, at most `limit`; as `(seq, role, text, at_ms)`.
-    pub fn captain_messages_after(&self, captain_id: &str, since_seq: u64, limit: usize) -> rusqlite::Result<Vec<(u64, String, String, i64)>> {
-        let mut statement = self.conn.prepare_cached("SELECT seq, role, text, at_ms FROM captain_messages WHERE captain_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3")?;
-        let rows = statement.query_map(rusqlite::params![captain_id, since_seq as i64, limit as i64], |row| Ok((row.get::<_, i64>(0)?.max(0) as u64, row.get(1)?, row.get(2)?, row.get(3)?)))?;
+    pub fn cat_messages_after(&self, cat_id: &str, since_seq: u64, limit: usize) -> rusqlite::Result<Vec<(u64, String, String, i64)>> {
+        let mut statement = self.conn.prepare_cached("SELECT seq, role, text, at_ms FROM cat_messages WHERE cat_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3")?;
+        let rows = statement.query_map(rusqlite::params![cat_id, since_seq as i64, limit as i64], |row| Ok((row.get::<_, i64>(0)?.max(0) as u64, row.get(1)?, row.get(2)?, row.get(3)?)))?;
         rows.collect()
     }
 
     /// The newest `limit` messages, oldest first.
-    pub fn captain_messages_last(&self, captain_id: &str, limit: usize) -> rusqlite::Result<Vec<(u64, String, String, i64)>> {
-        let mut statement = self.conn.prepare_cached("SELECT seq, role, text, at_ms FROM captain_messages WHERE captain_id = ?1 ORDER BY seq DESC LIMIT ?2")?;
-        let rows = statement.query_map(rusqlite::params![captain_id, limit as i64], |row| Ok((row.get::<_, i64>(0)?.max(0) as u64, row.get(1)?, row.get(2)?, row.get(3)?)))?;
+    pub fn cat_messages_last(&self, cat_id: &str, limit: usize) -> rusqlite::Result<Vec<(u64, String, String, i64)>> {
+        let mut statement = self.conn.prepare_cached("SELECT seq, role, text, at_ms FROM cat_messages WHERE cat_id = ?1 ORDER BY seq DESC LIMIT ?2")?;
+        let rows = statement.query_map(rusqlite::params![cat_id, limit as i64], |row| Ok((row.get::<_, i64>(0)?.max(0) as u64, row.get(1)?, row.get(2)?, row.get(3)?)))?;
         let mut all: Vec<_> = rows.collect::<rusqlite::Result<_>>()?;
         all.reverse();
         Ok(all)
     }
 
-    /// The newest `seq` in a captain's thread (0 when empty).
-    pub fn captain_last_seq(&self, captain_id: &str) -> rusqlite::Result<u64> {
-        self.conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM captain_messages WHERE captain_id = ?1", [captain_id], |row| row.get::<_, i64>(0)).map(|n| n.max(0) as u64)
+    /// The newest `seq` in a cat's thread (0 when empty).
+    pub fn cat_last_seq(&self, cat_id: &str) -> rusqlite::Result<u64> {
+        self.conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM cat_messages WHERE cat_id = ?1", [cat_id], |row| row.get::<_, i64>(0)).map(|n| n.max(0) as u64)
     }
 
     /// Queues one wake; its id orders the queue.
-    pub fn push_captain_wake(&self, captain_id: &str, reason: &str, task_id: &str, at_ms: i64) -> rusqlite::Result<u64> {
-        self.conn.execute("INSERT INTO captain_wakes (captain_id, reason, task_id, at_ms) VALUES (?1, ?2, ?3, ?4)", rusqlite::params![captain_id, reason, task_id, at_ms])?;
+    pub fn push_cat_wake(&self, cat_id: &str, reason: &str, task_id: &str, at_ms: i64) -> rusqlite::Result<u64> {
+        self.conn.execute("INSERT INTO cat_wakes (cat_id, reason, task_id, at_ms) VALUES (?1, ?2, ?3, ?4)", rusqlite::params![cat_id, reason, task_id, at_ms])?;
         Ok(self.conn.last_insert_rowid().max(0) as u64)
     }
 
-    /// A captain's pending wakes in order, as `(id, reason, task_id, at_ms)`.
-    pub fn captain_wakes_of(&self, captain_id: &str) -> rusqlite::Result<Vec<(u64, String, String, i64)>> {
-        let mut statement = self.conn.prepare_cached("SELECT id, reason, task_id, at_ms FROM captain_wakes WHERE captain_id = ?1 ORDER BY id")?;
-        let rows = statement.query_map([captain_id], |row| Ok((row.get::<_, i64>(0)?.max(0) as u64, row.get(1)?, row.get(2)?, row.get(3)?)))?;
+    /// A cat's pending wakes in order, as `(id, reason, task_id, at_ms)`.
+    pub fn cat_wakes_of(&self, cat_id: &str) -> rusqlite::Result<Vec<(u64, String, String, i64)>> {
+        let mut statement = self.conn.prepare_cached("SELECT id, reason, task_id, at_ms FROM cat_wakes WHERE cat_id = ?1 ORDER BY id")?;
+        let rows = statement.query_map([cat_id], |row| Ok((row.get::<_, i64>(0)?.max(0) as u64, row.get(1)?, row.get(2)?, row.get(3)?)))?;
         rows.collect()
     }
 
-    /// The captains that have a pending wake.
-    pub fn captains_with_wakes(&self) -> rusqlite::Result<Vec<String>> {
-        let mut statement = self.conn.prepare_cached("SELECT DISTINCT captain_id FROM captain_wakes ORDER BY captain_id")?;
+    /// The cats that have a pending wake.
+    pub fn cats_with_wakes(&self) -> rusqlite::Result<Vec<String>> {
+        let mut statement = self.conn.prepare_cached("SELECT DISTINCT cat_id FROM cat_wakes ORDER BY cat_id")?;
         let rows = statement.query_map([], |row| row.get(0))?;
         rows.collect()
     }
 
-    /// Removes a captain's wakes up to and including `up_to_id` (the ones one turn took); how many went.
-    pub fn delete_captain_wakes(&self, captain_id: &str, up_to_id: u64) -> rusqlite::Result<usize> {
-        self.conn.execute("DELETE FROM captain_wakes WHERE captain_id = ?1 AND id <= ?2", rusqlite::params![captain_id, up_to_id as i64])
+    /// Removes a cat's wakes up to and including `up_to_id` (the ones one turn took); how many went.
+    pub fn delete_cat_wakes(&self, cat_id: &str, up_to_id: u64) -> rusqlite::Result<usize> {
+        self.conn.execute("DELETE FROM cat_wakes WHERE cat_id = ?1 AND id <= ?2", rusqlite::params![cat_id, up_to_id as i64])
     }
 
     pub fn record_launch(&self, app_id: &str, at_unix_ms: i64) -> rusqlite::Result<()> {

@@ -95,8 +95,8 @@ fn visible(role: &CrewRole, scope_workspace: &str, own_workspace: Option<&str>, 
         CrewRole::ReadOnly if scope_workspace.is_empty() => snapshot.agent_profiles.owner(&task.workspace_id) == snapshot.agent_profiles.active_profile_id,
         CrewRole::ReadOnly => task.workspace_id == scope_workspace,
         CrewRole::Task { .. } => own_workspace.is_some_and(|w| w == task.workspace_id),
-        // A captain sees its own crew only: never another captain's session, never a captainless one (G28).
-        CrewRole::Captain { captain_id, .. } => task.captain_id.as_deref() == Some(captain_id.as_str()),
+        // A cat sees its own crew only: never another cat's session, never a catless one (G28).
+        CrewRole::Cat { cat_id, .. } => task.cat_id.as_deref() == Some(cat_id.as_str()),
     }
 }
 
@@ -147,7 +147,7 @@ impl Controller {
             "schedule" => self.crew_schedule(&scope, &args),
             "checkpoint_diff" => self.crew_checkpoint_diff(&scope, &role, &args),
             "undo_run" => self.crew_undo_run(&scope, &role, &args),
-            "captain_write" => self.crew_captain_write(&role, &args),
+            "cat_write" => self.crew_cat_write(&role, &args),
             "save_artifact" | "show_artifact" => artifacts(tool, args.clone(), match &role {
                 CrewRole::Task { ticket_id, .. } => Some(ticket_id.as_str()),
                 _ => None,
@@ -373,21 +373,21 @@ impl Controller {
         let db = self.db.lock().map_err(|_| "Task storage unavailable")?;
         let snapshot = store::load(&db)?;
         // A task run delegates only inside its own ticket's workspace.
-        let captain = match role {
-            CrewRole::Captain { captain_id, .. } => Some(neko_core::captains::get(&db, captain_id)?),
+        let cat = match role {
+            CrewRole::Cat { cat_id, .. } => Some(neko_core::cats::get(&db, cat_id)?),
             _ => None,
         };
-        if let Some(captain) = &captain {
-            if captain.archived {
-                return Err(format!("{} is archived and cannot start sessions", captain.name));
+        if let Some(cat) = &cat {
+            if cat.archived {
+                return Err(format!("{} is archived and cannot start sessions", cat.name));
             }
         }
         let workspace = match role {
-            // A captain only works inside its own workspace.
-            CrewRole::Captain { .. } => {
-                let own = captain.as_ref().map(|c| c.workspace_id.clone()).unwrap_or_default();
+            // A cat only works inside its own workspace.
+            CrewRole::Cat { .. } => {
+                let own = cat.as_ref().map(|c| c.workspace_id.clone()).unwrap_or_default();
                 if string_arg(args, "workspace_id").is_some_and(|w| w != own) {
-                    return Err("A captain only looks after its own workspace".into());
+                    return Err("A cat only looks after its own workspace".into());
                 }
                 own
             }
@@ -424,24 +424,24 @@ impl Controller {
             if matches!(role, CrewRole::Full) {
                 task.request = neko_chat::ticket_request(&request);
             }
-            if let CrewRole::Captain { captain_id, .. } = role {
-                task.captain_id = Some(captain_id.clone());
+            if let CrewRole::Cat { cat_id, .. } = role {
+                task.cat_id = Some(cat_id.clone());
             }
             store::append_event(task, "crew", &format!("Opened by {}: {}", role.label(), clip(&request, 200)));
             task.id.clone()
         };
         // The person asked their own chat for it: it builds without waiting for a
         // plan approval. A sub-task a ticket opens still needs the usual approval, and so does
-        // a session a captain opens in a turn nobody started (a wake): the person approves the plan.
-        if matches!(role, CrewRole::Full | CrewRole::Captain { person_turn: true, .. }) {
+        // a session a cat opens in a turn nobody started (a wake): the person approves the plan.
+        if matches!(role, CrewRole::Full | CrewRole::Cat { person_turn: true, .. }) {
             after.start_when_planned.insert(task_id.clone());
         }
         db.atomic(|| {
             store::save(&db, &after)?;
             rows::record_origin(&db, &task_id, &origin)?;
-            // The captain's own session is not news: its first change is what wakes it.
-            if let (CrewRole::Captain { captain_id, .. }, Some(task)) = (role, after.tasks.iter().find(|t| t.id == task_id)) {
-                neko_core::captain_thread::note_new_session(&db, captain_id, task)?;
+            // The cat's own session is not news: its first change is what wakes it.
+            if let (CrewRole::Cat { cat_id, .. }, Some(task)) = (role, after.tasks.iter().find(|t| t.id == task_id)) {
+                neko_core::cat_thread::note_new_session(&db, cat_id, task)?;
             }
             Ok(())
         })?;
@@ -467,7 +467,7 @@ impl Controller {
         Ok(json!({
             "task_id": task_id, "ref": short_ref(task), "title": title_of(task), "status": "Queued", "workspace_id": workspace,
             "goal_id": goal_id,
-            "note": if goal_id.is_some() { "Queued. Neko starts it when the machine has room. The goal is paused until the person reads its check and resumes it." } else if matches!(role, CrewRole::Full | CrewRole::Captain { person_turn: true, .. }) { "Queued. Neko plans it and starts it when the machine has room (a burst of tasks waits its turn). Use wait_for or task_status to follow it." } else { "Queued as a sub-task. It is planned and waits for the person's approval before it builds." },
+            "note": if goal_id.is_some() { "Queued. Neko starts it when the machine has room. The goal is paused until the person reads its check and resumes it." } else if matches!(role, CrewRole::Full | CrewRole::Cat { person_turn: true, .. }) { "Queued. Neko plans it and starts it when the machine has room (a burst of tasks waits its turn). Use wait_for or task_status to follow it." } else { "Queued as a sub-task. It is planned and waits for the person's approval before it builds." },
             "open_delegated": rows::open_delegated(&db, &after, &origin)?.len(),
             "delegation_cap": rows::cap(&db)?,
         }).to_string())
@@ -520,27 +520,27 @@ impl Controller {
         Ok(json!({"task_id": id, "status": "Cancelled"}).to_string())
     }
 
-    /// A captain's own notes. `PLAN.md` and `DIGEST.md` in any turn; `RULES.md` and `CREW.md` only in a turn the
-    /// person started, because they are what the person trusts the captain to follow and a wake reads text from
+    /// A cat's own notes. `PLAN.md` and `BRIEFING.md` in any turn; `RULES.md` and `TASK_RULES.md` only in a turn the
+    /// person started, because they are what the person trusts the cat to follow and a wake reads text from
     /// sessions (untrusted), which must never be able to rewrite them.
-    fn crew_captain_write(&self, role: &CrewRole, args: &Value) -> Result<String, String> {
-        use neko_protocol::captains::CaptainFileKind;
-        let CrewRole::Captain { captain_id, person_turn } = role else { return Err("Only a captain keeps these notes".into()) };
+    fn crew_cat_write(&self, role: &CrewRole, args: &Value) -> Result<String, String> {
+        use neko_protocol::cats::CatFileKind;
+        let CrewRole::Cat { cat_id, person_turn } = role else { return Err("Only a cat keeps these notes".into()) };
         let kind = match required(args, "file")?.to_lowercase().as_str() {
-            "plan" => CaptainFileKind::Plan,
-            "digest" => CaptainFileKind::Digest,
-            "rules" => CaptainFileKind::Rules,
-            "crew" => CaptainFileKind::Crew,
-            _ => return Err("file is one of plan, digest, rules, crew".into()),
+            "plan" => CatFileKind::Plan,
+            "briefing" => CatFileKind::Briefing,
+            "rules" => CatFileKind::Rules,
+            "task_rules" => CatFileKind::TaskRules,
+            _ => return Err("file is one of plan, briefing, rules, task_rules".into()),
         };
-        if matches!(kind, CaptainFileKind::Rules | CaptainFileKind::Crew) && !person_turn {
-            return Err(format!("{} can change only in a turn the person started; in this turn you may write plan and digest", kind.file_name()));
+        if matches!(kind, CatFileKind::Rules | CatFileKind::TaskRules) && !person_turn {
+            return Err(format!("{} can change only in a turn the person started; in this turn you may write plan and briefing", kind.file_name()));
         }
         let text = args.get("text").and_then(Value::as_str).ok_or("text is required (empty clears the file)")?;
-        let db = self.db.lock().map_err(|_| "Captain storage unavailable")?;
-        neko_core::captains::get(&db, captain_id)?;
-        neko_core::captain_files::write(&self.captain_root(), captain_id, kind, text)?;
-        neko_core::captain_thread::bump_rev(&db)?;
+        let db = self.db.lock().map_err(|_| "Cat storage unavailable")?;
+        neko_core::cats::get(&db, cat_id)?;
+        neko_core::cat_files::write(&self.cat_root(), cat_id, kind, text)?;
+        neko_core::cat_thread::bump_rev(&db)?;
         Ok(json!({"file": kind.file_name(), "written": !text.trim().is_empty(), "note": "The previous text is kept as the file's .prev."}).to_string())
     }
 
@@ -693,7 +693,7 @@ impl Controller {
 fn origin_of(role: &CrewRole) -> String {
     match role {
         CrewRole::Task { ticket_id, .. } => format!("ticket:{ticket_id}"),
-        CrewRole::Captain { captain_id, .. } => format!("captain:{captain_id}"),
+        CrewRole::Cat { cat_id, .. } => format!("cat:{cat_id}"),
         _ => rows::CHAT.to_owned(),
     }
 }

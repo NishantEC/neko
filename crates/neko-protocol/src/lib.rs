@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod agent_profiles;
 pub mod calendar;
-pub mod captains;
+pub mod cats;
 pub mod checkpoints;
 pub mod crew;
 pub mod phone;
@@ -455,8 +455,8 @@ pub enum Request {
     /// Packs: install, preview, update, remove and check bundles of tools,
     /// skills, a web plugin and routines (`neko_core::packs`).
     Packs(packs::PackCommand),
-    /// Captains: named agents that look after one workspace's sessions (`neko_core::captains`).
-    Captains(captains::CaptainCommand),
+    /// Cats: named agents that look after one workspace's sessions (`neko_core::cats`).
+    Cats(cats::CatCommand),
     /// The `.luau` files of an installed pack (native cards and views for the Rune client). A read: answered with
     /// `PackUi`, and only while the pack is Healthy and its files are exactly what the person approved (otherwise an error).
     PackUi { name: String },
@@ -562,7 +562,7 @@ pub enum Request {
     /// recorded here so they are not re-tried: encoding the prompt into
     /// `id` alongside the directory makes the row's identity change on
     /// every keystroke, and `panel::resolve_selection` keys the highlight
-    /// on `(kind, id)` — so a captain who picks a project and then types
+    /// on `(kind, id)` — so a cat who picks a project and then types
     /// one more word is silently returned to the first row, and Enter
     /// starts the agent in the wrong repository. Having the provider
     /// remember the last query it was searched with races the daemon's own
@@ -1257,8 +1257,8 @@ pub enum Response {
     },
     /// `Packs(List)` and what the other pack commands answer with.
     Packs(packs::PackListing),
-    /// What `Captains(..)` answers with.
-    Captains(Box<captains::CaptainsReply>),
+    /// What `Cats(..)` answers with.
+    Cats(Box<cats::CatsReply>),
     PackPreview(packs::PackPreview),
     PackUi(Vec<packs::PackUiFile>),
     Improve(improve::ImproveReply),

@@ -1,43 +1,43 @@
-//! A captain's own thread, its wake queue and the rules that turn them into turns.
+//! A cat's own thread, its wake queue and the rules that turn them into turns.
 //!
-//! The thread is `captain_messages` (append-only rows, never the Home chat's `neko_chat_v2` row), the queue is
-//! `captain_wakes`. Nothing here reads the clock or starts an agent: callers pass `now_ms` in, and the daemon's
-//! captain tick (`neko-daemon/src/workbench/captains.rs`) runs the turns. See `docs/knowledge/captains.md`.
-use crate::captains;
+//! The thread is `cat_messages` (append-only rows, never the Home chat's `neko_chat_v2` row), the queue is
+//! `cat_wakes`. Nothing here reads the clock or starts an agent: callers pass `now_ms` in, and the daemon's
+//! cat tick (`neko-daemon/src/workbench/cats.rs`) runs the turns. See `docs/knowledge/cats.md`.
+use crate::cats;
 use crate::db::Db;
-use neko_protocol::captains::{CaptainMessage, CaptainMessageRole, CaptainThreadView, CaptainWake, WakeReason, MAX_SAY_CHARS, THREAD_PAGE};
+use neko_protocol::cats::{CatMessage, CatMessageRole, CatThreadView, CatWake, WakeReason, MAX_SAY_CHARS, THREAD_PAGE};
 use neko_protocol::goals::GoalStatus;
 use neko_protocol::workbench::{Task, TaskStatus};
 use std::collections::BTreeMap;
 
-/// Pending wakes one captain keeps; the oldest go first.
+/// Pending wakes one cat keeps; the oldest go first.
 pub const MAX_PENDING_WAKES: usize = 200;
 /// The oldest pending wake must be this old before an unattended turn starts, so a burst becomes one turn.
 pub const DEBOUNCE_MS: i64 = 20_000;
-/// Unattended turns of one captain are at least this far apart.
+/// Unattended turns of one cat are at least this far apart.
 pub const MIN_GAP_MS: i64 = 60_000;
-/// Unattended turns of one captain per local day.
+/// Unattended turns of one cat per local day.
 pub const TURNS_PER_DAY: usize = 40;
-/// Messages a captain's prompt carries.
+/// Messages a cat's prompt carries.
 pub const PROMPT_HISTORY: usize = 30;
-/// A stored message is cut here (a captain's reply; the person's are limited by `MAX_SAY_CHARS`).
+/// A stored message is cut here (a cat's reply; the person's are limited by `MAX_SAY_CHARS`).
 pub const MAX_STORED_BYTES: usize = 32 * 1024;
 
-const REV_KEY: &str = "neko_captains_rev_v1";
-const SEEN_KEY: &str = "neko_captain_seen_v1:";
+const REV_KEY: &str = "neko_cats_rev_v1";
+const SEEN_KEY: &str = "neko_cat_seen_v1:";
 
 // ---------------------------------------------------------------------------
 // The change signal
 // ---------------------------------------------------------------------------
 
-/// The counter `Snapshot::captains_rev` carries. It is a settings row (not a process-wide static), so two
+/// The counter `Snapshot::cats_rev` carries. It is a settings row (not a process-wide static), so two
 /// databases never share it and a restart keeps it.
 pub fn rev(db: &Db) -> Result<u64, String> {
     Ok(db.get_setting(REV_KEY).map_err(|e| e.to_string())?.and_then(|v| v.parse().ok()).unwrap_or(0))
 }
 
 /// Moves the counter. The write goes through `set_setting`, which bumps the daemon's data revision and the
-/// load cache's stamp: a held `WorkbenchIfChanged` wakes, sees `captains_rev` changed in the snapshot's digest and
+/// load cache's stamp: a held `WorkbenchIfChanged` wakes, sees `cats_rev` changed in the snapshot's digest and
 /// answers. Called on every thread write and when a turn starts or ends; never on a timer.
 pub fn bump_rev(db: &Db) -> Result<(), String> {
     let next = rev(db)?.saturating_add(1);
@@ -48,8 +48,8 @@ pub fn bump_rev(db: &Db) -> Result<(), String> {
 // The thread
 // ---------------------------------------------------------------------------
 
-fn message_of(captain_id: &str, (seq, role, text, at_ms): (u64, String, String, i64)) -> CaptainMessage {
-    CaptainMessage { captain_id: captain_id.to_owned(), seq, role: CaptainMessageRole::parse(&role).unwrap_or(CaptainMessageRole::Event), text, at_ms }
+fn message_of(cat_id: &str, (seq, role, text, at_ms): (u64, String, String, i64)) -> CatMessage {
+    CatMessage { cat_id: cat_id.to_owned(), seq, role: CatMessageRole::parse(&role).unwrap_or(CatMessageRole::Event), text, at_ms }
 }
 
 fn cut(text: &str, max: usize) -> String {
@@ -63,25 +63,25 @@ fn cut(text: &str, max: usize) -> String {
     text[..end].to_owned()
 }
 
-/// Adds one line to a captain's thread (the captain must exist; archived is fine for a reply already running).
+/// Adds one line to a cat's thread (the cat must exist; archived is fine for a reply already running).
 /// Empty text is refused. Moves the change counter.
-pub fn append(db: &Db, captain_id: &str, role: CaptainMessageRole, text: &str, now_ms: i64) -> Result<CaptainMessage, String> {
-    captains::get(db, captain_id)?;
+pub fn append(db: &Db, cat_id: &str, role: CatMessageRole, text: &str, now_ms: i64) -> Result<CatMessage, String> {
+    cats::get(db, cat_id)?;
     let text = cut(text.trim(), MAX_STORED_BYTES);
     if text.is_empty() {
         return Err("A message cannot be empty".into());
     }
-    let seq = db.append_captain_message(captain_id, role.as_str(), &text, now_ms).map_err(|e| e.to_string())?;
+    let seq = db.append_cat_message(cat_id, role.as_str(), &text, now_ms).map_err(|e| e.to_string())?;
     bump_rev(db)?;
-    Ok(CaptainMessage { captain_id: captain_id.to_owned(), seq, role, text, at_ms: now_ms })
+    Ok(CatMessage { cat_id: cat_id.to_owned(), seq, role, text, at_ms: now_ms })
 }
 
 /// The person speaks: the message is stored and a `PersonMessage` wake queued, together or not at all.
-/// Archived captains do not take messages.
-pub fn say(db: &Db, captain_id: &str, text: &str, now_ms: i64) -> Result<CaptainMessage, String> {
-    let captain = captains::get(db, captain_id)?;
-    if captain.archived {
-        return Err(format!("{} is archived and does not take messages", captain.name));
+/// Archived cats do not take messages.
+pub fn say(db: &Db, cat_id: &str, text: &str, now_ms: i64) -> Result<CatMessage, String> {
+    let cat = cats::get(db, cat_id)?;
+    if cat.archived {
+        return Err(format!("{} is archived and does not take messages", cat.name));
     }
     let text = text.trim();
     if text.is_empty() {
@@ -94,54 +94,54 @@ pub fn say(db: &Db, captain_id: &str, text: &str, now_ms: i64) -> Result<Captain
         return Err("That text has a character Neko cannot keep".into());
     }
     db.atomic(|| {
-        let message = append(db, captain_id, CaptainMessageRole::Person, text, now_ms)?;
-        wake(db, captain_id, WakeReason::PersonMessage, "", now_ms)?;
+        let message = append(db, cat_id, CatMessageRole::Person, text, now_ms)?;
+        wake(db, cat_id, WakeReason::PersonMessage, "", now_ms)?;
         Ok(message)
     })
 }
 
 /// Messages with `seq > since_seq` (the newest page when `since_seq` is 0), oldest first, with the newest `seq`.
-pub fn view(db: &Db, captain_id: &str, since_seq: u64, running: bool) -> Result<CaptainThreadView, String> {
-    captains::get(db, captain_id)?;
-    let rows = if since_seq == 0 { db.captain_messages_last(captain_id, THREAD_PAGE) } else { db.captain_messages_after(captain_id, since_seq, THREAD_PAGE) }.map_err(|e| e.to_string())?;
-    Ok(CaptainThreadView {
-        captain_id: captain_id.to_owned(),
-        messages: rows.into_iter().map(|r| message_of(captain_id, r)).collect(),
-        last_seq: db.captain_last_seq(captain_id).map_err(|e| e.to_string())?,
+pub fn view(db: &Db, cat_id: &str, since_seq: u64, running: bool) -> Result<CatThreadView, String> {
+    cats::get(db, cat_id)?;
+    let rows = if since_seq == 0 { db.cat_messages_last(cat_id, THREAD_PAGE) } else { db.cat_messages_after(cat_id, since_seq, THREAD_PAGE) }.map_err(|e| e.to_string())?;
+    Ok(CatThreadView {
+        cat_id: cat_id.to_owned(),
+        messages: rows.into_iter().map(|r| message_of(cat_id, r)).collect(),
+        last_seq: db.cat_last_seq(cat_id).map_err(|e| e.to_string())?,
         running,
     })
 }
 
-/// The newest `n` messages, oldest first, for the captain's prompt.
-pub fn recent(db: &Db, captain_id: &str, n: usize) -> Result<Vec<CaptainMessage>, String> {
-    Ok(db.captain_messages_last(captain_id, n).map_err(|e| e.to_string())?.into_iter().map(|r| message_of(captain_id, r)).collect())
+/// The newest `n` messages, oldest first, for the cat's prompt.
+pub fn recent(db: &Db, cat_id: &str, n: usize) -> Result<Vec<CatMessage>, String> {
+    Ok(db.cat_messages_last(cat_id, n).map_err(|e| e.to_string())?.into_iter().map(|r| message_of(cat_id, r)).collect())
 }
 
 // ---------------------------------------------------------------------------
 // The wake queue
 // ---------------------------------------------------------------------------
 
-/// Queues one wake. At most `MAX_PENDING_WAKES` wait per captain; the oldest are dropped first.
-pub fn wake(db: &Db, captain_id: &str, reason: WakeReason, task_id: &str, now_ms: i64) -> Result<u64, String> {
-    let id = db.push_captain_wake(captain_id, reason.as_str(), task_id, now_ms).map_err(|e| e.to_string())?;
-    let waiting = db.captain_wakes_of(captain_id).map_err(|e| e.to_string())?;
+/// Queues one wake. At most `MAX_PENDING_WAKES` wait per cat; the oldest are dropped first.
+pub fn wake(db: &Db, cat_id: &str, reason: WakeReason, task_id: &str, now_ms: i64) -> Result<u64, String> {
+    let id = db.push_cat_wake(cat_id, reason.as_str(), task_id, now_ms).map_err(|e| e.to_string())?;
+    let waiting = db.cat_wakes_of(cat_id).map_err(|e| e.to_string())?;
     if waiting.len() > MAX_PENDING_WAKES {
         let keep_from = waiting[waiting.len() - MAX_PENDING_WAKES].0;
-        db.delete_captain_wakes(captain_id, keep_from.saturating_sub(1)).map_err(|e| e.to_string())?;
+        db.delete_cat_wakes(cat_id, keep_from.saturating_sub(1)).map_err(|e| e.to_string())?;
     }
     Ok(id)
 }
 
-/// A captain's pending wakes in the order they were written.
-pub fn pending(db: &Db, captain_id: &str) -> Result<Vec<CaptainWake>, String> {
-    Ok(db.captain_wakes_of(captain_id).map_err(|e| e.to_string())?.into_iter()
-        .filter_map(|(id, reason, task_id, at_ms)| Some(CaptainWake { id, captain_id: captain_id.to_owned(), reason: WakeReason::parse(&reason)?, task_id, at_ms }))
+/// A cat's pending wakes in the order they were written.
+pub fn pending(db: &Db, cat_id: &str) -> Result<Vec<CatWake>, String> {
+    Ok(db.cat_wakes_of(cat_id).map_err(|e| e.to_string())?.into_iter()
+        .filter_map(|(id, reason, task_id, at_ms)| Some(CatWake { id, cat_id: cat_id.to_owned(), reason: WakeReason::parse(&reason)?, task_id, at_ms }))
         .collect())
 }
 
-/// The captains with something pending.
-pub fn captains_with_wakes(db: &Db) -> Result<Vec<String>, String> {
-    db.captains_with_wakes().map_err(|e| e.to_string())
+/// The cats with something pending.
+pub fn cats_with_wakes(db: &Db) -> Result<Vec<String>, String> {
+    db.cats_with_wakes().map_err(|e| e.to_string())
 }
 
 /// What one turn takes from the queue: every pending wake, coalesced.
@@ -149,7 +149,7 @@ pub fn captains_with_wakes(db: &Db) -> Result<Vec<String>, String> {
 pub struct Batch {
     /// The newest wake taken; `take` removes everything up to it.
     pub up_to_id: u64,
-    /// The person wrote (the turn is theirs: it answers them and may change RULES.md and CREW.md).
+    /// The person wrote (the turn is theirs: it answers them and may change RULES.md and TASK_RULES.md).
     pub person: bool,
     /// What the sessions did, one entry per (reason, session), in order of first appearance.
     pub events: Vec<(WakeReason, String)>,
@@ -159,7 +159,7 @@ pub struct Batch {
 }
 
 /// Folds the pending wakes into one batch (`None` when there are none).
-pub fn coalesce(wakes: &[CaptainWake]) -> Option<Batch> {
+pub fn coalesce(wakes: &[CatWake]) -> Option<Batch> {
     let last = wakes.last()?;
     let mut events: Vec<(WakeReason, String)> = Vec::new();
     for wake in wakes.iter().filter(|w| w.reason != WakeReason::PersonMessage) {
@@ -172,13 +172,13 @@ pub fn coalesce(wakes: &[CaptainWake]) -> Option<Batch> {
 }
 
 /// Removes the wakes a turn took. Wakes written while it ran (higher ids) stay for the next turn.
-pub fn take(db: &Db, captain_id: &str, batch: &Batch) -> Result<(), String> {
-    db.delete_captain_wakes(captain_id, batch.up_to_id).map(|_| ()).map_err(|e| e.to_string())
+pub fn take(db: &Db, cat_id: &str, batch: &Batch) -> Result<(), String> {
+    db.delete_cat_wakes(cat_id, batch.up_to_id).map(|_| ()).map_err(|e| e.to_string())
 }
 
-/// Drops every pending wake of a captain (it was archived).
-pub fn drop_all(db: &Db, captain_id: &str) -> Result<(), String> {
-    db.delete_captain_wakes(captain_id, u64::MAX >> 1).map(|_| ()).map_err(|e| e.to_string())
+/// Drops every pending wake of a cat (it was archived).
+pub fn drop_all(db: &Db, cat_id: &str) -> Result<(), String> {
+    db.delete_cat_wakes(cat_id, u64::MAX >> 1).map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// Why an unattended batch is not launched yet.
@@ -210,25 +210,25 @@ pub fn launch_gate(batch: &Batch, now_ms: i64, last_turn_ms: Option<i64>, turns_
     Ok(())
 }
 
-/// When the captain's last turn was recorded and how many were recorded since local midnight: both read from
-/// the usage ledger's `captain:<id>` lines (R3), so no second counter exists to drift.
-pub fn turn_stats(db: &Db, captain_id: &str, now_ms: i64) -> Result<(Option<i64>, usize), String> {
-    let key = task_key(captain_id);
+/// When the cat's last turn was recorded and how many were recorded since local midnight: both read from
+/// the usage ledger's `cat:<id>` lines (R3), so no second counter exists to drift.
+pub fn turn_stats(db: &Db, cat_id: &str, now_ms: i64) -> Result<(Option<i64>, usize), String> {
+    let key = task_key(cat_id);
     let today = crate::spend::day_start_local(now_ms);
     let events = db.usage_events_for_task(&key).map_err(|e| e.to_string())?;
     Ok((events.iter().map(|e| e.at_ms).max(), events.iter().filter(|e| e.at_ms >= today).count()))
 }
 
-/// The ledger's `task_id` for a captain's own turns (R3): no migration, no column.
-pub fn task_key(captain_id: &str) -> String {
-    format!("captain:{captain_id}")
+/// The ledger's `task_id` for a cat's own turns (R3): no migration, no column.
+pub fn task_key(cat_id: &str) -> String {
+    format!("cat:{cat_id}")
 }
 
 // ---------------------------------------------------------------------------
 // Noticing what the sessions did
 // ---------------------------------------------------------------------------
 
-/// What the captain last saw of one session. Tool events and timestamps are not in it, so a chatty run never wakes anyone.
+/// What the cat last saw of one session. Tool events and timestamps are not in it, so a chatty run never wakes anyone.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Fingerprint {
     pub status: TaskStatus,
@@ -249,7 +249,7 @@ fn working(status: TaskStatus) -> bool {
 }
 
 /// What changed between two sightings of one session, as wake reasons. A session seen for the first time wakes
-/// nobody (an upgrade, or a session just made, never storms the captain).
+/// nobody (an upgrade, or a session just made, never storms the cat).
 pub fn diff(old: Option<&Fingerprint>, new: &Fingerprint) -> Vec<WakeReason> {
     let Some(old) = old else { return Vec::new() };
     let mut reasons = Vec::new();
@@ -268,27 +268,27 @@ pub fn diff(old: Option<&Fingerprint>, new: &Fingerprint) -> Vec<WakeReason> {
 
 type Seen = BTreeMap<String, Fingerprint>;
 
-fn load_seen(db: &Db, captain_id: &str) -> Result<Seen, String> {
-    Ok(db.get_setting(&format!("{SEEN_KEY}{captain_id}")).map_err(|e| e.to_string())?.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default())
+fn load_seen(db: &Db, cat_id: &str) -> Result<Seen, String> {
+    Ok(db.get_setting(&format!("{SEEN_KEY}{cat_id}")).map_err(|e| e.to_string())?.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default())
 }
 
-fn save_seen(db: &Db, captain_id: &str, seen: &Seen) -> Result<(), String> {
+fn save_seen(db: &Db, cat_id: &str, seen: &Seen) -> Result<(), String> {
     // Quiet: not part of the snapshot, so no reader wakes and nothing is rewritten when it did not change.
-    db.set_setting_quiet(&format!("{SEEN_KEY}{captain_id}"), &serde_json::to_string(seen).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    db.set_setting_quiet(&format!("{SEEN_KEY}{cat_id}"), &serde_json::to_string(seen).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
 
-/// Notes a session the captain itself just made, so its first change counts as a change.
-pub fn note_new_session(db: &Db, captain_id: &str, task: &Task) -> Result<(), String> {
-    let mut seen = load_seen(db, captain_id)?;
+/// Notes a session the cat itself just made, so its first change counts as a change.
+pub fn note_new_session(db: &Db, cat_id: &str, task: &Task) -> Result<(), String> {
+    let mut seen = load_seen(db, cat_id)?;
     seen.insert(task.id.clone(), fingerprint(task, None));
-    save_seen(db, captain_id, &seen)
+    save_seen(db, cat_id, &seen)
 }
 
-/// Compares every session of the captain with what it last saw, queues a wake for each change and remembers
+/// Compares every session of the cat with what it last saw, queues a wake for each change and remembers
 /// what it saw, in one transaction. Returns the wakes it queued. Sessions that are gone are forgotten.
-pub fn notice_sessions(db: &Db, captain_id: &str, tasks: &[Task], goals: &[neko_protocol::goals::Goal], now_ms: i64) -> Result<Vec<(WakeReason, String)>, String> {
-    let mine: Vec<&Task> = tasks.iter().filter(|t| t.captain_id.as_deref() == Some(captain_id)).collect();
-    let before = load_seen(db, captain_id)?;
+pub fn notice_sessions(db: &Db, cat_id: &str, tasks: &[Task], goals: &[neko_protocol::goals::Goal], now_ms: i64) -> Result<Vec<(WakeReason, String)>, String> {
+    let mine: Vec<&Task> = tasks.iter().filter(|t| t.cat_id.as_deref() == Some(cat_id)).collect();
+    let before = load_seen(db, cat_id)?;
     let mut after = Seen::new();
     let mut wakes = Vec::new();
     for task in mine {
@@ -304,9 +304,9 @@ pub fn notice_sessions(db: &Db, captain_id: &str, tasks: &[Task], goals: &[neko_
     }
     db.atomic(|| {
         for (reason, task_id) in &wakes {
-            wake(db, captain_id, *reason, task_id, now_ms)?;
+            wake(db, cat_id, *reason, task_id, now_ms)?;
         }
-        save_seen(db, captain_id, &after)
+        save_seen(db, cat_id, &after)
     })?;
     Ok(wakes)
 }
@@ -314,22 +314,22 @@ pub fn notice_sessions(db: &Db, captain_id: &str, tasks: &[Task], goals: &[neko_
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::captains::NewCaptain;
-    use neko_protocol::captains::{FaceRef, ModelPolicy};
+    use crate::cats::NewCat;
+    use neko_protocol::cats::{FaceRef, ModelPolicy};
     use neko_protocol::workbench::Workspace;
 
     fn workspace() -> Workspace {
         Workspace { id: "w1".into(), name: "Acme web".into(), repository: "/tmp/acme-web".into(), instructions: String::new(), away_enabled: false }
     }
 
-    fn captain(db: &Db, root: &std::path::Path, name: &str, id: &str) -> String {
-        let input = NewCaptain { name: name.into(), face: FaceRef("black-glasses".into()), workspace_id: "w1".into(), area: "Web".into(), model_policy: ModelPolicy::default(), daily_limit_micro_usd: None, purpose: "Look after the web app.".into() };
-        captains::create(db, root, &[workspace()], input, id.into(), 1).unwrap().id
+    fn cat(db: &Db, root: &std::path::Path, name: &str, id: &str) -> String {
+        let input = NewCat { name: name.into(), face: FaceRef("black-glasses".into()), workspace_id: "w1".into(), area: "Web".into(), model_policy: ModelPolicy::default(), daily_limit_micro_usd: None, purpose: "Look after the web app.".into() };
+        cats::create(db, root, &[workspace()], input, id.into(), 1).unwrap().id
     }
 
-    fn task(id: &str, captain: Option<&str>, status: TaskStatus) -> Task {
+    fn task(id: &str, cat: Option<&str>, status: TaskStatus) -> Task {
         Task {
-            captain_id: captain.map(str::to_owned),
+            cat_id: cat.map(str::to_owned),
             id: id.into(), workspace_id: "w1".into(), issue_id: None, title: "ENG-123 export".into(), goal: String::new(), status, plan: String::new(), result: String::new(),
             worktree: None, events: Vec::new(), created_at_ms: 1, updated_at_ms: 1, source_revision: None, supervision: None, base_commit: None, pull_request: None,
             landed_commit: None, display_title: None, parked: None, request: None,
@@ -339,27 +339,27 @@ mod tests {
     fn fixture() -> (Db, tempfile::TempDir, String) {
         let db = Db::open_in_memory().unwrap();
         let root = tempfile::tempdir().unwrap();
-        let id = captain(&db, root.path(), "miso", "c1");
+        let id = cat(&db, root.path(), "miso", "c1");
         (db, root, id)
     }
 
-    fn wake_of(reason: WakeReason, task: &str, at_ms: i64) -> CaptainWake {
-        CaptainWake { id: at_ms as u64, captain_id: "c1".into(), reason, task_id: task.into(), at_ms }
+    fn wake_of(reason: WakeReason, task: &str, at_ms: i64) -> CatWake {
+        CatWake { id: at_ms as u64, cat_id: "c1".into(), reason, task_id: task.into(), at_ms }
     }
 
     #[test]
-    fn the_thread_is_append_only_and_numbers_from_one_per_captain() {
+    fn the_thread_is_append_only_and_numbers_from_one_per_cat() {
         let (db, root, miso) = fixture();
-        let tofu = captain(&db, root.path(), "tofu", "c2");
-        append(&db, &miso, CaptainMessageRole::Person, "  hello  ", 10).unwrap();
-        append(&db, &miso, CaptainMessageRole::Captain, "hi", 11).unwrap();
-        append(&db, &tofu, CaptainMessageRole::Person, "other", 12).unwrap();
+        let tofu = cat(&db, root.path(), "tofu", "c2");
+        append(&db, &miso, CatMessageRole::Person, "  hello  ", 10).unwrap();
+        append(&db, &miso, CatMessageRole::Cat, "hi", 11).unwrap();
+        append(&db, &tofu, CatMessageRole::Person, "other", 12).unwrap();
         let all = view(&db, &miso, 0, false).unwrap();
-        assert_eq!(all.messages.iter().map(|m| (m.seq, m.role, m.text.as_str())).collect::<Vec<_>>(), [(1, CaptainMessageRole::Person, "hello"), (2, CaptainMessageRole::Captain, "hi")]);
+        assert_eq!(all.messages.iter().map(|m| (m.seq, m.role, m.text.as_str())).collect::<Vec<_>>(), [(1, CatMessageRole::Person, "hello"), (2, CatMessageRole::Cat, "hi")]);
         assert_eq!((all.last_seq, all.running), (2, false));
         assert_eq!(view(&db, &miso, 1, true).unwrap().messages.len(), 1, "since_seq returns what is newer");
-        assert_eq!(view(&db, &tofu, 0, false).unwrap().messages[0].seq, 1, "another captain starts at 1");
-        assert!(append(&db, &miso, CaptainMessageRole::Captain, "   ", 13).unwrap_err().contains("empty"));
+        assert_eq!(view(&db, &tofu, 0, false).unwrap().messages[0].seq, 1, "another cat starts at 1");
+        assert!(append(&db, &miso, CatMessageRole::Cat, "   ", 13).unwrap_err().contains("empty"));
         assert!(view(&db, "nobody", 0, false).is_err());
     }
 
@@ -367,11 +367,11 @@ mod tests {
     fn a_page_of_the_thread_is_the_newest_two_hundred_and_a_reply_is_cut_at_32_kb() {
         let (db, _root, miso) = fixture();
         for n in 0..THREAD_PAGE + 5 {
-            append(&db, &miso, CaptainMessageRole::Event, &format!("line {n}"), n as i64).unwrap();
+            append(&db, &miso, CatMessageRole::Event, &format!("line {n}"), n as i64).unwrap();
         }
         let page = view(&db, &miso, 0, false).unwrap();
         assert_eq!((page.messages.len(), page.messages[0].seq, page.last_seq), (THREAD_PAGE, 6, 205));
-        let long = append(&db, &miso, CaptainMessageRole::Captain, &"é".repeat(40_000), 1).unwrap();
+        let long = append(&db, &miso, CatMessageRole::Cat, &"é".repeat(40_000), 1).unwrap();
         assert!(long.text.len() <= MAX_STORED_BYTES && long.text.chars().all(|c| c == 'é'));
     }
 
@@ -379,12 +379,12 @@ mod tests {
     fn a_person_message_is_stored_and_queues_one_wake_together() {
         let (db, _root, miso) = fixture();
         let stored = say(&db, &miso, "  split this into two sessions ", 100).unwrap();
-        assert_eq!((stored.seq, stored.role, stored.text.as_str()), (1, CaptainMessageRole::Person, "split this into two sessions"));
+        assert_eq!((stored.seq, stored.role, stored.text.as_str()), (1, CatMessageRole::Person, "split this into two sessions"));
         let wakes = pending(&db, &miso).unwrap();
         assert_eq!(wakes.iter().map(|w| (w.reason, w.task_id.as_str(), w.at_ms)).collect::<Vec<_>>(), [(WakeReason::PersonMessage, "", 100)]);
         assert!(say(&db, &miso, " ", 1).is_err() && say(&db, &miso, &"x".repeat(MAX_SAY_CHARS + 1), 1).is_err() && say(&db, &miso, "a\0b", 1).is_err());
         assert_eq!((view(&db, &miso, 0, false).unwrap().messages.len(), pending(&db, &miso).unwrap().len()), (1, 1), "a refused message stores nothing and wakes nobody");
-        captains::archive(&db, &miso).unwrap();
+        cats::archive(&db, &miso).unwrap();
         assert!(say(&db, &miso, "hello?", 2).unwrap_err().contains("archived"));
     }
 
@@ -393,7 +393,7 @@ mod tests {
         let (db, _root, miso) = fixture();
         db.set_setting("neko_chat_v2", "[]").unwrap();
         say(&db, &miso, "hello", 1).unwrap();
-        append(&db, &miso, CaptainMessageRole::Captain, "hi", 2).unwrap();
+        append(&db, &miso, CatMessageRole::Cat, "hi", 2).unwrap();
         assert_eq!(db.get_setting("neko_chat_v2").unwrap().as_deref(), Some("[]"));
         assert!(crate::workbench::load(&db).unwrap().conversation.is_empty());
     }
@@ -401,15 +401,15 @@ mod tests {
     #[test]
     fn every_thread_write_moves_the_counter_the_snapshot_carries_and_the_data_revision() {
         let (db, _root, miso) = fixture();
-        let before = (crate::workbench::load(&db).unwrap().captains_rev, crate::db::data_revision());
+        let before = (crate::workbench::load(&db).unwrap().cats_rev, crate::db::data_revision());
         say(&db, &miso, "hello", 1).unwrap();
         let after_say = crate::workbench::load(&db).unwrap();
-        assert!(after_say.captains_rev > before.0 && crate::db::data_revision() > before.1, "{before:?} -> {}", after_say.captains_rev);
-        append(&db, &miso, CaptainMessageRole::Captain, "hi", 2).unwrap();
-        assert!(crate::workbench::load(&db).unwrap().captains_rev > after_say.captains_rev);
+        assert!(after_say.cats_rev > before.0 && crate::db::data_revision() > before.1, "{before:?} -> {}", after_say.cats_rev);
+        append(&db, &miso, CatMessageRole::Cat, "hi", 2).unwrap();
+        assert!(crate::workbench::load(&db).unwrap().cats_rev > after_say.cats_rev);
         // It is read for readers and never written into the stored snapshot row.
         let stored = db.get_setting("workbench_snapshot_v1").unwrap().unwrap_or_default();
-        assert!(!stored.contains("captains_rev"), "the counter lives in its own row");
+        assert!(!stored.contains("cats_rev"), "the counter lives in its own row");
     }
 
     #[test]
@@ -437,7 +437,7 @@ mod tests {
         let waiting = pending(&db, &miso).unwrap();
         assert_eq!((waiting.len(), waiting[0].task_id.as_str()), (MAX_PENDING_WAKES, "t7"));
         drop_all(&db, &miso).unwrap();
-        assert!(pending(&db, &miso).unwrap().is_empty() && captains_with_wakes(&db).unwrap().is_empty());
+        assert!(pending(&db, &miso).unwrap().is_empty() && cats_with_wakes(&db).unwrap().is_empty());
     }
 
     #[test]
@@ -472,7 +472,7 @@ mod tests {
     #[test]
     fn noticing_queues_wakes_for_my_sessions_only_and_a_first_sighting_or_my_own_new_session_is_quiet() {
         let (db, root, miso) = fixture();
-        let tofu = captain(&db, root.path(), "tofu", "c2");
+        let tofu = cat(&db, root.path(), "tofu", "c2");
         let mut tasks = vec![task("mine", Some(&miso), TaskStatus::Building), task("theirs", Some(&tofu), TaskStatus::Building), task("loose", None, TaskStatus::Building)];
         assert!(notice_sessions(&db, &miso, &tasks, &[], 10).unwrap().is_empty(), "first sighting");
         note_new_session(&db, &tofu, &tasks[1]).unwrap();
@@ -482,7 +482,7 @@ mod tests {
         assert_eq!(notice_sessions(&db, &miso, &tasks, &[], 20).unwrap(), [(WakeReason::Failed, "mine".to_owned())]);
         assert!(notice_sessions(&db, &miso, &tasks, &[], 30).unwrap().is_empty(), "noticed once");
         assert_eq!(pending(&db, &miso).unwrap().len(), 1);
-        assert_eq!(notice_sessions(&db, &tofu, &tasks, &[], 40).unwrap(), [(WakeReason::TurnFinished, "theirs".to_owned())], "a session its captain made counts from its creation");
+        assert_eq!(notice_sessions(&db, &tofu, &tasks, &[], 40).unwrap(), [(WakeReason::TurnFinished, "theirs".to_owned())], "a session its cat made counts from its creation");
         assert!(pending(&db, &miso).unwrap().iter().all(|w| w.task_id == "mine"));
     }
 
@@ -494,11 +494,11 @@ mod tests {
             let db = Db::open(&path).unwrap();
             db.set_setting("some_setting", "kept").unwrap();
         }
-        rusqlite::Connection::open(&path).unwrap().execute_batch("DROP TABLE captain_messages; DROP TABLE captain_wakes;").unwrap();
+        rusqlite::Connection::open(&path).unwrap().execute_batch("DROP TABLE cat_messages; DROP TABLE cat_wakes;").unwrap();
         let db = Db::open(&path).unwrap();
         assert_eq!(db.get_setting("some_setting").unwrap().as_deref(), Some("kept"));
         let root = tempfile::tempdir().unwrap();
-        let id = captain(&db, root.path(), "miso", "c1");
+        let id = cat(&db, root.path(), "miso", "c1");
         say(&db, &id, "hello", 1).unwrap();
         drop(db);
         let again = Db::open(&path).unwrap();
@@ -506,19 +506,19 @@ mod tests {
     }
 
     #[test]
-    fn captain_turns_are_ledger_lines_under_the_captain_key_and_count_toward_the_daily_ceiling() {
+    fn cat_turns_are_ledger_lines_under_the_cat_key_and_count_toward_the_daily_ceiling() {
         let (db, _root, miso) = fixture();
         let day = 1_800_000_000_000_i64;
-        crate::usage_ledger::record_captain_turn(&db, &miso, day, day + 5_000, "claude", "sonnet", 2_500_000);
-        crate::usage_ledger::record_captain_turn(&db, &miso, day, day + 5_000, "claude", "sonnet", 2_500_000);
-        let lines = db.usage_events_for_task("captain:c1").unwrap();
+        crate::usage_ledger::record_cat_turn(&db, &miso, day, day + 5_000, "claude", "sonnet", 2_500_000);
+        crate::usage_ledger::record_cat_turn(&db, &miso, day, day + 5_000, "claude", "sonnet", 2_500_000);
+        let lines = db.usage_events_for_task("cat:c1").unwrap();
         assert_eq!(lines.len(), 1, "one line per turn: the run key repeats");
-        assert_eq!((lines[0].kind.as_str(), lines[0].task_id.as_str(), lines[0].cost_micro_usd, lines[0].duration_ms), ("captain", "captain:c1", Some(2_500_000), 5_000));
+        assert_eq!((lines[0].kind.as_str(), lines[0].task_id.as_str(), lines[0].cost_micro_usd, lines[0].duration_ms), ("cat", "cat:c1", Some(2_500_000), 5_000));
         assert_eq!(turn_stats(&db, &miso, day + 6_000).unwrap().0, Some(day + 5_000));
         assert!((crate::spend::routines_usd_since(&db, day - 1) - 2.5).abs() < 1e-9, "a turn's cost is automation spend");
     }
     #[test]
-    fn captain_id_round_trips_through_the_task_rows_and_a_task_from_before_it_loads_with_none() {
+    fn cat_id_round_trips_through_the_task_rows_and_a_task_from_before_it_loads_with_none() {
         let (db, _root, miso) = fixture();
         let mut snapshot = crate::workbench::load(&db).unwrap();
         snapshot.workspaces.push(workspace());
@@ -528,11 +528,11 @@ mod tests {
         }
         crate::workbench::save(&db, &snapshot).unwrap();
         let loaded = crate::workbench::load(&db).unwrap();
-        assert_eq!(loaded.tasks.iter().map(|t| t.captain_id.as_deref()).collect::<Vec<_>>(), [Some("c1"), None]);
-        // None is not written, so a row from before captains and a row of a captainless task are the same bytes.
+        assert_eq!(loaded.tasks.iter().map(|t| t.cat_id.as_deref()).collect::<Vec<_>>(), [Some("c1"), None]);
+        // None is not written, so a row from before cats and a row of a catless task are the same bytes.
         let loose = serde_json::to_string(&loaded.tasks[1]).unwrap();
-        assert!(!loose.contains("captain_id"));
-        assert_eq!(serde_json::from_str::<Task>(&loose).unwrap().captain_id, None);
-        assert_eq!(serde_json::from_str::<Task>(&serde_json::to_string(&loaded.tasks[0]).unwrap()).unwrap().captain_id.as_deref(), Some("c1"));
+        assert!(!loose.contains("cat_id"));
+        assert_eq!(serde_json::from_str::<Task>(&loose).unwrap().cat_id, None);
+        assert_eq!(serde_json::from_str::<Task>(&serde_json::to_string(&loaded.tasks[0]).unwrap()).unwrap().cat_id.as_deref(), Some("c1"));
     }
 }

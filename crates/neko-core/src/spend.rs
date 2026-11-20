@@ -37,17 +37,17 @@ pub fn tasks_usd_since(snapshot: &Snapshot, since_ms: i64) -> f64 {
     snapshot.tasks.iter().map(|t| task_usd_since(t, since_ms)).sum()
 }
 
-/// What captains' own turns reported from `since_ms` on (the usage ledger's `captain:<id>` lines, R3).
-pub fn captains_usd_since(db: &crate::Db, since_ms: i64) -> f64 {
+/// What cats' own turns reported from `since_ms` on (the usage ledger's `cat:<id>` lines, R3).
+pub fn cats_usd_since(db: &crate::Db, since_ms: i64) -> f64 {
     db.usage_events_since(since_ms)
-        .map(|events| events.iter().filter(|e| e.kind == "captain").filter_map(|e| e.cost_micro_usd).map(|m| m as f64 / 1_000_000.0).sum())
+        .map(|events| events.iter().filter(|e| e.kind == "cat").filter_map(|e| e.cost_micro_usd).map(|m| m as f64 / 1_000_000.0).sum())
         .unwrap_or(0.0)
 }
 
-/// What routine runs started from `since_ms` on reported, across every routine, plus what captains' own turns
+/// What routine runs started from `since_ms` on reported, across every routine, plus what cats' own turns
 /// reported (automation spend: nobody typed it, so it counts against the daily ceiling with the routines).
 pub fn routines_usd_since(db: &crate::Db, since_ms: i64) -> f64 {
-    let Ok(store) = crate::routines::load(db) else { return captains_usd_since(db, since_ms) };
+    let Ok(store) = crate::routines::load(db) else { return cats_usd_since(db, since_ms) };
     store
         .routines
         .iter()
@@ -56,7 +56,7 @@ pub fn routines_usd_since(db: &crate::Db, since_ms: i64) -> f64 {
         .filter(|run| run.started_ms >= since_ms)
         .map(|run| run.cost_micro_usd as f64 / 1_000_000.0)
         .sum::<f64>()
-        + captains_usd_since(db, since_ms)
+        + cats_usd_since(db, since_ms)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

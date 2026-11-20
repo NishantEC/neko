@@ -232,7 +232,7 @@ mod tests {
                 assigned: true,
             }],
             tasks: vec![Task {
-                captain_id: None,
+                cat_id: None,
                 id: "t".into(),
                 workspace_id: "w".into(),
                 issue_id: Some("i".into()),

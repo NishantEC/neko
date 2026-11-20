@@ -158,12 +158,12 @@ pub fn record_routine_run(db: &crate::Db, routine_id: &str, run: &RoutineRun, pr
     }
 }
 
-/// A captain's own turn (R3): `task_id = "captain:<id>"`, `kind = "captain"`, one line per turn (`run_key` is
-/// `captain:<id>:<started_ms>`). The price is what the agent reported; none means `estimated`.
-pub fn captain_turn_event(captain_id: &str, started_ms: i64, now_ms: i64, provider: &str, model: &str, cost_micro_usd: u64) -> UsageEvent {
+/// A cat's own turn (R3): `task_id = "cat:<id>"`, `kind = "cat"`, one line per turn (`run_key` is
+/// `cat:<id>:<started_ms>`). The price is what the agent reported; none means `estimated`.
+pub fn cat_turn_event(cat_id: &str, started_ms: i64, now_ms: i64, provider: &str, model: &str, cost_micro_usd: u64) -> UsageEvent {
     let cost = (cost_micro_usd > 0).then_some(cost_micro_usd);
     UsageEvent {
-        run_key: format!("captain:{captain_id}:{started_ms}"),
+        run_key: format!("cat:{cat_id}:{started_ms}"),
         at_ms: now_ms,
         provider: provider.to_string(),
         model: model.to_string(),
@@ -172,13 +172,13 @@ pub fn captain_turn_event(captain_id: &str, started_ms: i64, now_ms: i64, provid
         cost_micro_usd: cost,
         source: estimate_source(cost, None, None),
         duration_ms: (now_ms - started_ms).max(0),
-        task_id: crate::captain_thread::task_key(captain_id),
-        kind: "captain".into(),
+        task_id: crate::cat_thread::task_key(cat_id),
+        kind: "cat".into(),
     }
 }
 
-pub fn record_captain_turn(db: &crate::Db, captain_id: &str, started_ms: i64, now_ms: i64, provider: &str, model: &str, cost_micro_usd: u64) {
-    if let Err(error) = db.record_usage_event(&captain_turn_event(captain_id, started_ms, now_ms, provider, model, cost_micro_usd)) {
+pub fn record_cat_turn(db: &crate::Db, cat_id: &str, started_ms: i64, now_ms: i64, provider: &str, model: &str, cost_micro_usd: u64) {
+    if let Err(error) = db.record_usage_event(&cat_turn_event(cat_id, started_ms, now_ms, provider, model, cost_micro_usd)) {
         eprintln!("usage ledger: {error}");
     }
 }

@@ -1300,7 +1300,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         }
 
         Request::Packs(command) => crate::packs::handle(state, command),
-        Request::Captains(command) => crate::captains::handle(state, command),
+        Request::Cats(command) => crate::cats::handle(state, command),
         Request::PackUi { name } => crate::packs::ui(state, &name),
         Request::Improve(command) => crate::improve::handle(state, command),
         Request::ListThemes => themes_listing(),

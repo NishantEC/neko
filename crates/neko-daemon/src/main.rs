@@ -3,7 +3,7 @@ mod improve;
 mod inbox_reply;
 mod morning_digest;
 mod mcp_host;
-mod captains;
+mod cats;
 mod packs;
 mod phone;
 mod routine_care;
@@ -157,6 +157,11 @@ fn main() {
         );
         std::process::exit(1);
     });
+
+    // Phase 1 called a cat a "captain": move its folder and two file names once (idempotent, never deletes).
+    for line in neko_core::cat_files::migrate_legacy(&neko_protocol::support_dir()) {
+        eprintln!("cats: {line}");
+    }
 
     eprintln!("neko-daemon: scanning installed applications…");
     let apps = neko_core::apps::scan_applications();

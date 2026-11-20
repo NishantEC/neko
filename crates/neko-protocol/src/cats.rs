@@ -1,10 +1,10 @@
-//! Captains: a named agent that looks after one workspace's crew of sessions.
-//! The wire types live here; storage and the rules are `neko_core::captains`
-//! and `neko_core::captain_files`. See `docs/knowledge/captains.md`.
+//! Cats: a named agent that looks after one workspace's crew of sessions.
+//! The wire types live here; storage and the rules are `neko_core::cats`
+//! and `neko_core::cat_files`. See `docs/knowledge/cats.md`.
 use crate::workbench::RuntimePreferences;
 use serde::{Deserialize, Deserializer, Serialize};
 
-/// The faces a captain may wear. The one list: the daemon refuses anything else
+/// The faces a cat may wear. The one list: the daemon refuses anything else
 /// and the clients draw these from vectors in code (never from files).
 pub const FACE_PRESETS: [&str; 6] = ["black-glasses", "persian-glasses", "tabby-headphones", "grey-scarf", "cream-bowtie", "calico-welding"];
 
@@ -12,15 +12,15 @@ pub const FACE_PRESETS: [&str; 6] = ["black-glasses", "persian-glasses", "tabby-
 pub const MAX_NAME_CHARS: usize = 40;
 pub const MAX_AREA_CHARS: usize = 40;
 pub const MAX_PURPOSE_CHARS: usize = 2_000;
-/// The most a captain may be limited to per day: 1,000,000 dollars, in micro-dollars.
+/// The most a cat may be limited to per day: 1,000,000 dollars, in micro-dollars.
 pub const MAX_DAILY_LIMIT_MICRO_USD: u64 = 1_000_000_000_000;
-/// Active (not archived) captains at once.
-pub const MAX_ACTIVE_CAPTAINS: usize = 16;
-/// The most one captain file holds.
-pub const MAX_CAPTAIN_FILE: usize = 16 * 1024;
-/// The longest message a person may post to a captain, in characters.
+/// Active (not archived) cats at once.
+pub const MAX_ACTIVE_CATS: usize = 16;
+/// The most one cat file holds.
+pub const MAX_CAT_FILE: usize = 16 * 1024;
+/// The longest message a person may post to a cat, in characters.
 pub const MAX_SAY_CHARS: usize = 8_000;
-/// Messages one `CaptainThread` answer carries at most.
+/// Messages one `CatThread` answer carries at most.
 pub const THREAD_PAGE: usize = 200;
 
 /// A preset id such as `black-glasses` (one of `FACE_PRESETS`).
@@ -31,20 +31,20 @@ pub struct FaceRef(pub String);
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default)]
 pub struct ModelPolicy {
-    /// The captain's own turns and the default for its sessions; all `None` = the stored default runtime.
+    /// The cat's own turns and the default for its sessions; all `None` = the stored default runtime.
     pub preferences: RuntimePreferences,
-    /// The captain may pick a model for each session it starts.
+    /// The cat may pick a model for each session it starts.
     pub per_session: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default)]
-pub struct Captain {
+pub struct Cat {
     pub id: String,
-    /// 1 to 40 characters, trimmed; unique among active captains, ignoring case.
+    /// 1 to 40 characters, trimmed; unique among active cats, ignoring case.
     pub name: String,
     pub face: FaceRef,
-    /// Must exist; the captain only works inside it, and it never changes.
+    /// Must exist; the cat only works inside it, and it never changes.
     pub workspace_id: String,
     /// A short label ("Web"), at most 40 characters.
     pub area: String,
@@ -65,13 +65,13 @@ fn present<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Option<u64>>, D::Er
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CaptainCommand {
-    /// Active captains in order, plus archived ones (last) when asked. Answered with `Listing`.
+pub enum CatCommand {
+    /// Active cats in order, plus archived ones (last) when asked. Answered with `Listing`.
     List {
         #[serde(default)]
         include_archived: bool,
     },
-    /// Makes a captain and its folder of files. An empty `face` takes the default for the name. Answered with `Listing`.
+    /// Makes a cat and its folder of files. An empty `face` takes the default for the name. Answered with `Listing`.
     Create {
         name: String,
         #[serde(default)]
@@ -102,82 +102,82 @@ pub enum CaptainCommand {
         #[serde(default)]
         purpose: Option<String>,
     },
-    /// Hides the captain and unpins it. Its files stay; nothing is deleted. Destructive: clients confirm. Answered with `Listing`.
+    /// Hides the cat and unpins it. Its files stay; nothing is deleted. Destructive: clients confirm. Answered with `Listing`.
     Archive { id: String },
     Pin { id: String, pinned: bool },
-    /// `ids` must be exactly the active captains, in the new order.
+    /// `ids` must be exactly the active cats, in the new order.
     Reorder { ids: Vec<String> },
-    /// A proposed first captain from the busiest workspace. A read; creates nothing. Answered with `Suggestion`.
+    /// A proposed first cat from the busiest workspace. A read; creates nothing. Answered with `Suggestion`.
     Suggest,
-    /// The four files of a captain. Answered with `Files`.
+    /// The four files of a cat. Answered with `Files`.
     Files { id: String },
     /// Replaces one file (the previous text is kept as `.prev`). Empty text clears it: destructive, clients confirm. Answered with `Files`.
-    WriteFile { id: String, kind: CaptainFileKind, text: String },
-    /// A read: the captain's own thread, messages with `seq > since_seq`, oldest first, at most `THREAD_PAGE`
+    WriteFile { id: String, kind: CatFileKind, text: String },
+    /// A read: the cat's own thread, messages with `seq > since_seq`, oldest first, at most `THREAD_PAGE`
     /// (with `since_seq` 0, the latest `THREAD_PAGE`). Answered with `Thread`. Clients ask again when
-    /// `Snapshot::captains_rev` moves.
-    CaptainThread {
-        captain: String,
+    /// `Snapshot::cats_rev` moves.
+    CatThread {
+        cat: String,
         #[serde(default)]
         since_seq: u64,
     },
-    /// The person speaks to the captain: the message is stored in its thread and wakes it (the captain answers in
+    /// The person speaks to the cat: the message is stored in its thread and wakes it (the cat answers in
     /// the thread, never in the Home chat). Answered with `Thread` holding the stored message.
-    CaptainSay { captain: String, text: String },
+    CatSay { cat: String, text: String },
 }
 
-/// Who wrote a line of a captain's thread.
+/// Who wrote a line of a cat's thread.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum CaptainMessageRole {
+pub enum CatMessageRole {
     #[default]
     Person,
-    Captain,
+    Cat,
     /// Something that happened (a turn failed, a turn was held), not a spoken line.
     Event,
 }
 
-impl CaptainMessageRole {
+impl CatMessageRole {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Person => "person",
-            Self::Captain => "captain",
+            Self::Cat => "cat",
             Self::Event => "event",
         }
     }
     pub fn parse(text: &str) -> Option<Self> {
         match text {
             "person" => Some(Self::Person),
-            "captain" => Some(Self::Captain),
+            "cat" => Some(Self::Cat),
             "event" => Some(Self::Event),
             _ => None,
         }
     }
 }
 
-/// One row of `captain_messages`: append-only, `seq` counts from 1 within a captain.
+/// One row of `cat_messages`: append-only, `seq` counts from 1 within a cat.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default)]
-pub struct CaptainMessage {
-    pub captain_id: String,
+pub struct CatMessage {
+    pub cat_id: String,
     pub seq: u64,
-    pub role: CaptainMessageRole,
+    pub role: CatMessageRole,
     pub text: String,
     pub at_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default)]
-pub struct CaptainThreadView {
-    pub captain_id: String,
-    pub messages: Vec<CaptainMessage>,
+pub struct CatThreadView {
+    pub cat_id: String,
+    pub messages: Vec<CatMessage>,
     /// The newest `seq` in the thread (0 when empty), whatever this answer carries.
     pub last_seq: u64,
-    /// A turn of this captain is running now.
+    /// A turn of this cat is running now.
     pub running: bool,
 }
 
-/// Why a captain is woken (`captain_wakes.reason`).
+/// Why a cat is woken (`cat_wakes.reason`).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum WakeReason {
@@ -187,7 +187,7 @@ pub enum WakeReason {
     Failed,
     /// One of its sessions needs the person (a plan to approve, a question).
     NeedsYou,
-    /// The person posted to the captain's thread.
+    /// The person posted to the cat's thread.
     PersonMessage,
 }
 
@@ -211,11 +211,11 @@ impl WakeReason {
     }
 }
 
-/// One row of `captain_wakes`.
+/// One row of `cat_wakes`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CaptainWake {
+pub struct CatWake {
     pub id: u64,
-    pub captain_id: String,
+    pub cat_id: String,
     pub reason: WakeReason,
     /// The session concerned; empty for a person's message.
     pub task_id: String,
@@ -223,29 +223,29 @@ pub struct CaptainWake {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum CaptainFileKind {
+pub enum CatFileKind {
     Rules,
-    Crew,
+    TaskRules,
     Plan,
-    Digest,
+    Briefing,
 }
 
-impl CaptainFileKind {
-    pub const ALL: [Self; 4] = [Self::Rules, Self::Crew, Self::Plan, Self::Digest];
+impl CatFileKind {
+    pub const ALL: [Self; 4] = [Self::Rules, Self::TaskRules, Self::Plan, Self::Briefing];
 
     pub fn file_name(self) -> &'static str {
         match self {
             Self::Rules => "RULES.md",
-            Self::Crew => "CREW.md",
+            Self::TaskRules => "TASK_RULES.md",
             Self::Plan => "PLAN.md",
-            Self::Digest => "DIGEST.md",
+            Self::Briefing => "BRIEFING.md",
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CaptainFile {
-    pub kind: CaptainFileKind,
+pub struct CatFile {
+    pub kind: CatFileKind,
     pub text: String,
     /// File modification time; 0 when there is no file.
     pub updated_ms: i64,
@@ -257,13 +257,13 @@ pub struct CaptainFile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CaptainFiles {
+pub struct CatFiles {
     pub id: String,
-    pub files: Vec<CaptainFile>,
+    pub files: Vec<CatFile>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CaptainSuggestion {
+pub struct CatSuggestion {
     pub name: String,
     pub face: FaceRef,
     pub workspace_id: String,
@@ -272,11 +272,11 @@ pub struct CaptainSuggestion {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CaptainsReply {
-    Listing(Vec<Captain>),
-    Suggestion(CaptainSuggestion),
-    Files(CaptainFiles),
-    Thread(CaptainThreadView),
+pub enum CatsReply {
+    Listing(Vec<Cat>),
+    Suggestion(CatSuggestion),
+    Files(CatFiles),
+    Thread(CatThreadView),
 }
 
 #[cfg(test)]
@@ -284,17 +284,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_empty_json_object_parses_to_a_default_captain() {
-        let captain: Captain = serde_json::from_str("{}").unwrap();
-        assert_eq!(captain, Captain::default());
+    fn an_empty_json_object_parses_to_a_default_cat() {
+        let cat: Cat = serde_json::from_str("{}").unwrap();
+        assert_eq!(cat, Cat::default());
     }
 
     #[test]
     fn a_null_daily_limit_clears_and_a_missing_one_leaves_alone() {
-        let clear: CaptainCommand = serde_json::from_str(r#"{"Update":{"id":"a","daily_limit_micro_usd":null}}"#).unwrap();
-        let keep: CaptainCommand = serde_json::from_str(r#"{"Update":{"id":"a"}}"#).unwrap();
-        let set: CaptainCommand = serde_json::from_str(r#"{"Update":{"id":"a","daily_limit_micro_usd":5}}"#).unwrap();
-        let limit = |c: CaptainCommand| match c { CaptainCommand::Update { daily_limit_micro_usd, .. } => daily_limit_micro_usd, _ => panic!() };
+        let clear: CatCommand = serde_json::from_str(r#"{"Update":{"id":"a","daily_limit_micro_usd":null}}"#).unwrap();
+        let keep: CatCommand = serde_json::from_str(r#"{"Update":{"id":"a"}}"#).unwrap();
+        let set: CatCommand = serde_json::from_str(r#"{"Update":{"id":"a","daily_limit_micro_usd":5}}"#).unwrap();
+        let limit = |c: CatCommand| match c { CatCommand::Update { daily_limit_micro_usd, .. } => daily_limit_micro_usd, _ => panic!() };
         assert_eq!((limit(clear), limit(keep), limit(set)), (Some(None), None, Some(Some(5))));
     }
 }

@@ -2800,7 +2800,7 @@ mod tests {
             pull_request: None,
             landed_commit: None,
             supervision: None,
-            display_title: None, parked: None, request: None, captain_id: None,
+            display_title: None, parked: None, request: None, cat_id: None,
         }
     }
 
