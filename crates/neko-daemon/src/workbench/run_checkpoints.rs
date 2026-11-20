@@ -82,6 +82,16 @@ impl Controller {
         folder_of(task)
     }
 
+    /// Whether undoing back to `run` (and everything after it) would go ahead, and which runs it would restore
+    /// away. Nothing changes; a refusal is the `checkpoint:<code>: <message>` text, unchanged.
+    pub(super) fn undo_preview(&self, task_id: &str, run: u32) -> Result<Vec<u32>, String> {
+        let task = self.task_for_checkpoints(task_id)?;
+        let dir = folder_of(&task)?;
+        let running = self.working_on(task_id) || publish::in_flight_now(task_id);
+        let options = cp::UndoOptions { run, through_later: true, pull_request_open: task.pull_request.as_ref().is_some_and(|p| p.is_open()), ..Default::default() };
+        cp::preview_undo(&self.db, task_id, &dir, options, running).map_err(|r| refusal_text(&r))
+    }
+
     /// One line per run, for the task view.
     pub fn checkpoint_list(&self, task_id: &str, check_unsaved: bool) -> Result<CheckpointList, String> {
         let task = self.task_for_checkpoints(task_id)?;

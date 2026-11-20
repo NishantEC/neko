@@ -22,9 +22,9 @@ fn slash_goal_reads_the_objective_the_check_and_the_turns() {
     assert_eq!(slash("goal: x"), None);
     assert_eq!(
         slash("/goal Make the build green --check cargo test --turns 8"),
-        Some(Slash::Set { objective: "Make the build green".into(), done_check: "cargo test".into(), max_turns: Some(8) })
+        Some(Slash::Set { objective: "Make the build green".into(), done_check: "cargo test".into(), max_turns: Some(8), default_after_hours: None })
     );
-    assert_eq!(slash("  /goal Write the migration guide "), Some(Slash::Set { objective: "Write the migration guide".into(), done_check: String::new(), max_turns: None }));
+    assert_eq!(slash("  /goal Write the migration guide "), Some(Slash::Set { objective: "Write the migration guide".into(), done_check: String::new(), max_turns: None, default_after_hours: None }));
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn a_proposed_goal_is_ignored_in_read_only_chat_and_cannot_ride_a_read_only_tick
     complete_chat_reply(&db, &AtomicBool::new(false), &turn, "again", None, proposal(Some(id.clone()))).unwrap();
     let state = store::load(&db.lock().unwrap()).unwrap();
     assert!(state.goals.is_empty(), "a read-only ticket takes no goal");
-    let err = controller.goal_command(GoalCommand::Create { workspace_id: workspace, objective: "x".into(), done_check: String::new(), constraints: String::new(), max_turns: None, ticket_id: Some(id.clone()), conversation_id: None }).unwrap_err();
+    let err = controller.goal_command(GoalCommand::Create { workspace_id: workspace, objective: "x".into(), done_check: String::new(), constraints: String::new(), max_turns: None, ticket_id: Some(id.clone()), conversation_id: None, default_after_hours: None }).unwrap_err();
     assert!(err.contains("read-only"), "{err}");
     // And a goal turn cannot reopen a read-only ticket.
     assert!(store::goal_turn(&db.lock().unwrap(), &id, "go on").is_err());
@@ -117,7 +117,7 @@ fn a_goal_turn_keeps_the_tickets_assessment_and_read_state() {
         });
         store::save(&guard, &s).unwrap();
     }
-    controller.goal_command(GoalCommand::Create { workspace_id: workspace, objective: "Finish".into(), done_check: String::new(), constraints: String::new(), max_turns: None, ticket_id: Some(id.clone()), conversation_id: None }).unwrap();
+    controller.goal_command(GoalCommand::Create { workspace_id: workspace, objective: "Finish".into(), done_check: String::new(), constraints: String::new(), max_turns: None, ticket_id: Some(id.clone()), conversation_id: None, default_after_hours: None }).unwrap();
     store::goal_turn(&db.lock().unwrap(), &id, "go on").unwrap();
     let after = store::load(&db.lock().unwrap()).unwrap();
     assert_eq!(after.tasks[0].supervision.as_ref().map(|s| s.files.clone()), Some(vec!["src/a.rs".to_owned()]), "the approved scope stays, so the scope check still runs");

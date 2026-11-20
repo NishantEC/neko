@@ -585,7 +585,7 @@ mod tests {
     }
 
     fn blocked_goal(state: &AppState) -> (Goal, u64) {
-        let mut goal = Goal { id: "g1".into(), workspace_id: "w".into(), objective: "Keep the reports job green".into(), status: GoalStatus::Blocked, blocked: Some(Blocked { question: "Which database?".into(), default_answer: "the primary".into(), inbox_seq: None }), ..Default::default() };
+        let mut goal = Goal { id: "g1".into(), workspace_id: "w".into(), objective: "Keep the reports job green".into(), status: GoalStatus::Blocked, blocked: Some(Blocked { question: "Which database?".into(), default_answer: "the primary".into(), inbox_seq: None, ..Default::default() }), ..Default::default() };
         goal.budget.max_turns = 20;
         let seq = goal_item(state, &mut goal, true);
         (goal, seq)

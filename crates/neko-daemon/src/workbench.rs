@@ -2186,7 +2186,7 @@ fn complete_chat_reply(
                 let named = proposed.task_id.as_deref().filter(|id| snapshot.tasks.iter().any(|t| t.id == *id && t.workspace_id == workspace.id)).map(str::to_owned);
                 let ticket = named.or_else(|| opened.first().cloned());
                 let conversation = neko_core::runtime_selection::home_id(&turn.agent_profile_id, chosen);
-                let spec = goals::Spec { workspace_id: &workspace.id, objective: &proposed.objective, done_check: &proposed.done_check, constraints: &proposed.constraints, max_turns: proposed.max_turns, ticket_id: ticket.as_deref(), conversation_id: Some(&conversation), by_person: false };
+                let spec = goals::Spec { workspace_id: &workspace.id, objective: &proposed.objective, done_check: &proposed.done_check, constraints: &proposed.constraints, max_turns: proposed.max_turns, ticket_id: ticket.as_deref(), conversation_id: Some(&conversation), default_after_hours: None, by_person: false };
                 match goals::create(&db, &spec) {
                     Ok(goal) => {
                         if ticket.is_none() {

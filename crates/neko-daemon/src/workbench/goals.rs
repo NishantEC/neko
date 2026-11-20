@@ -257,6 +257,8 @@ pub(crate) struct Spec<'a> {
     pub max_turns: Option<u32>,
     pub ticket_id: Option<&'a str>,
     pub conversation_id: Option<&'a str>,
+    /// Hours after which a blocked goal takes its own default (1 to 168). Only a goal the person set has one.
+    pub default_after_hours: Option<u32>,
     /// The person set it (`/goal`, the app): its check may run and it asks for
     /// local work. False for a goal a model proposed in a reply: it is stored
     /// paused, with its check unrun, until the person resumes it.
@@ -272,6 +274,11 @@ pub(crate) fn create(db: &Db, spec: &Spec) -> Result<Goal, String> {
     let now = store::now_ms();
     let mut goal = core::new_goal(spec.workspace_id, spec.objective, spec.done_check, spec.constraints, spec.max_turns, now)?;
     goal.conversation_id = spec.conversation_id.map(str::to_owned);
+    // The deadline is part of the person's own request: a goal a model proposed has none.
+    let default_after = core::validate_default_after(spec.default_after_hours)?;
+    if spec.by_person {
+        goal.default_after_hours = default_after;
+    }
     let snapshot = store::load(db)?;
     if !snapshot.workspaces.iter().any(|w| w.id == spec.workspace_id) {
         return Err("That workspace no longer exists".into());
@@ -347,8 +354,8 @@ pub(crate) fn create(db: &Db, spec: &Spec) -> Result<Goal, String> {
 pub(crate) enum Slash {
     /// `/goal` alone: where the goals stand.
     List,
-    /// `/goal <objective> [--check <command>] [--turns <n>]`.
-    Set { objective: String, done_check: String, max_turns: Option<u32> },
+    /// `/goal <objective> [--check <command>] [--turns <n>] [--default-after <hours>]`.
+    Set { objective: String, done_check: String, max_turns: Option<u32>, default_after_hours: Option<u32> },
 }
 
 /// Reads a chat message that is a `/goal` command; None for anything else.
@@ -362,17 +369,37 @@ pub(crate) fn slash(text: &str) -> Option<Slash> {
         return Some(Slash::List);
     }
     let mut max_turns = None;
-    if let Some((before, after)) = rest.rsplit_once(" --turns ") {
-        if let Ok(n) = after.trim().parse::<u32>() {
-            max_turns = Some(n);
-            rest = before.trim().to_owned();
+    let mut default_after_hours = None;
+    // The two numeric flags may come in either order, after the objective and the check.
+    loop {
+        let mut taken = false;
+        if max_turns.is_none() {
+            if let Some((before, after)) = rest.rsplit_once(" --turns ") {
+                if let Ok(n) = after.trim().parse::<u32>() {
+                    max_turns = Some(n);
+                    rest = before.trim().to_owned();
+                    taken = true;
+                }
+            }
+        }
+        if default_after_hours.is_none() {
+            if let Some((before, after)) = rest.rsplit_once(" --default-after ") {
+                if let Ok(n) = after.trim().parse::<u32>() {
+                    default_after_hours = Some(n);
+                    rest = before.trim().to_owned();
+                    taken = true;
+                }
+            }
+        }
+        if !taken {
+            break;
         }
     }
     let (objective, done_check) = match rest.split_once(" --check ") {
         Some((objective, check)) => (objective.trim().to_owned(), check.trim().to_owned()),
         None => (rest, String::new()),
     };
-    Some(Slash::Set { objective, done_check, max_turns })
+    Some(Slash::Set { objective, done_check, max_turns, default_after_hours })
 }
 
 /// The chat's answer to a `/goal` message, and the tickets it opened.
@@ -390,12 +417,12 @@ pub(crate) fn slash_reply(db: &Db, command: Slash, workspace_id: Option<&str>) -
             }
             (text, vec![])
         }
-        Slash::Set { objective, done_check, max_turns } => {
+        Slash::Set { objective, done_check, max_turns, default_after_hours } => {
             let workspace = workspace_id.map(str::to_owned).or_else(|| (snapshot.workspaces.len() == 1).then(|| snapshot.workspaces[0].id.clone()));
             let Some(workspace) = workspace else { return ("Choose a workspace for this goal first, then send it again.".into(), vec![]) };
             let profile = snapshot.agent_profiles.for_scope(Some(&workspace)).to_owned();
             let conversation = neko_core::runtime_selection::home_id(&profile, workspace_id);
-            match create(db, &Spec { workspace_id: &workspace, objective: &objective, done_check: &done_check, constraints: "", max_turns, ticket_id: None, conversation_id: Some(&conversation), by_person: true }) {
+            match create(db, &Spec { workspace_id: &workspace, objective: &objective, done_check: &done_check, constraints: "", max_turns, ticket_id: None, conversation_id: Some(&conversation), default_after_hours, by_person: true }) {
                 Ok(goal) => (
                     format!("Goal set: {}. I will keep working turn after turn, up to {} turns, and it is done only when {}.", core::head(&goal.objective, 160), goal.budget.max_turns, if goal.done_check.is_empty() { "a file or link proves it".to_owned() } else { format!("`{}` passes", core::head(&goal.done_check, 120)) }),
                     goal.ticket_id.into_iter().collect(),
@@ -431,6 +458,7 @@ fn commit(db: &Arc<Mutex<Db>>, id: &str, still: impl Fn(&Goal) -> bool, change: 
 /// reference for what a pass does).
 pub(super) fn tick(db: &Arc<Mutex<Db>>, env: &dyn Env) -> Result<(), String> {
     let goals = core::load_all(&*db.lock().map_err(|_| "Goal storage unavailable")?)?;
+    expire_defaults(db, &goals, env.now_ms());
     for goal in goals.iter().filter(|g| receipt_due(g, env.now_ms())) {
         write_receipt(db, &goal.id, env.now_ms());
     }
@@ -451,6 +479,7 @@ static IN_FLIGHT: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// is never stepped twice at once.
 fn tick_concurrently(db: &Arc<Mutex<Db>>, env: &Arc<Real>) -> Result<(), String> {
     let goals = core::load_all(&*db.lock().map_err(|_| "Goal storage unavailable")?)?;
+    expire_defaults(db, &goals, env.now_ms());
     // A receipt that failed to write is retried on its own thread (it reads git and writes a file).
     for goal in goals.iter().filter(|g| receipt_due(g, env.now_ms())) {
         let key = format!("receipt:{}", goal.id);
@@ -517,6 +546,7 @@ fn step(db: &Arc<Mutex<Db>>, env: &dyn Env, mut goal: Goal) -> Result<(), String
         GoalStatus::Running => running(db, env, goal),
         GoalStatus::Waiting => waiting(db, env, goal),
         GoalStatus::Held => held(db, env, goal),
+        GoalStatus::Blocked => blocked_deadline(db, env, goal),
         // Blocked waits for the person's answer; paused and finished goals are not ticked.
         _ => Ok(()),
     }
@@ -677,13 +707,47 @@ fn failed_turn(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: &Goal, snapshot: &Snaps
 fn block(db: &Db, goal: &mut Goal, question: &str, default_answer: &str, now: i64) -> Result<(), String> {
     // One question, always with a default: a second question is dropped and a missing default is filled.
     let question = &neko_core::inbox::one_question(question);
-    let default_answer = &neko_core::inbox::clean_default(default_answer).unwrap_or_else(|| "Use your best judgement and keep going.".to_owned());
+    // Only a default the judge actually gave can be taken at a deadline; the filler never is.
+    let judge_default = neko_core::inbox::clean_default(default_answer);
+    let real_default = judge_default.is_some();
+    let default_answer = &judge_default.unwrap_or_else(|| "Use your best judgement and keep going.".to_owned());
     goal.status = GoalStatus::Blocked;
     goal.in_turn = false;
+    goal.blocked = Some(raise_question(db, goal, question, default_answer, real_default, false, now)?);
+    core::push_journal(db, &goal.subject(), JournalEntry { at_ms: now, turn: goal.turns, note: format!("Blocked: {}", core::head(question, 160)), ..Default::default() })
+}
+
+/// Raises the Inbox item for a goal's one question and describes the question as the goal now holds it.
+fn raise_question(db: &Db, goal: &Goal, question: &str, default_answer: &str, real_default: bool, deadline_off: bool, now: i64) -> Result<Blocked, String> {
     let detail = format!("{question}\nIf you do not answer, Neko will go with: {default_answer}\nGoal: {}", core::head(&goal.objective, 300));
     let seq = crate::routines::raise_goal_item(db, &goal.workspace_id, &core::head(question, 120), &detail, &format!("goal:{}", goal.id), default_answer)?;
-    goal.blocked = Some(Blocked { question: question.to_owned(), default_answer: default_answer.to_owned(), inbox_seq: Some(seq) });
-    core::push_journal(db, &goal.subject(), JournalEntry { at_ms: now, turn: goal.turns, note: format!("Blocked: {}", core::head(question, 160)), ..Default::default() })
+    Ok(Blocked { question: question.to_owned(), default_answer: default_answer.to_owned(), inbox_seq: Some(seq), asked_ms: now, real_default, deadline_off })
+}
+
+/// Answers a blocked goal: the question is taken, the goal runs again, its Inbox item closes and the journal says
+/// so. `deadline` is the hours of a deadline answer (the default is taken and says so); otherwise it is the
+/// person's answer, or the default when `text` is empty. The caller saves. Returns the question and the answer.
+fn apply_answer(db: &Db, goal: &mut Goal, text: &str, now: i64, deadline: Option<u32>) -> Result<(Blocked, String), String> {
+    let Some(blocked) = goal.blocked.take() else { return Err("That goal is not waiting for an answer".into()) };
+    let answer = if text.trim().is_empty() { blocked.default_answer.clone() } else { core::head(text, 1000) };
+    goal.status = GoalStatus::Running;
+    goal.in_turn = false;
+    goal.last_tick_ms = now;
+    let note = match deadline {
+        Some(hours) => {
+            goal.reason = format!("Neko took the default \"{answer}\" after {hours} h to: {}", core::head(&blocked.question, 300));
+            format!("Took the default after {hours} h: {answer}")
+        }
+        None => {
+            goal.reason = format!("You answered \"{}\" to: {}", answer, core::head(&blocked.question, 300));
+            format!("Answered: {}", core::head(&answer, 120))
+        }
+    };
+    if let Some(seq) = blocked.inbox_seq {
+        let _ = crate::routines::close_goal_item(db, seq);
+    }
+    core::push_journal(db, &goal.subject(), JournalEntry { at_ms: now, turn: goal.turns, note, ..Default::default() })?;
+    Ok((blocked, answer))
 }
 
 #[cfg(test)]
@@ -770,6 +834,59 @@ fn evaluate(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: &Goal, snapshot: &Snapshot
         write_receipt(db, &id, now);
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// The deadline default
+// ---------------------------------------------------------------------------
+
+/// A blocked goal whose deadline passed takes its own default answer, once, when its ticket has a start
+/// checkpoint to undo to. Without one nothing is answered: the question's deadline is switched off and the
+/// journal says so. A person's answer racing this wins (`commit` drops the change if the goal moved).
+fn blocked_deadline(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: Goal) -> Result<(), String> {
+    let now = env.now_ms();
+    if !core::deadline_due(&goal, now) {
+        return Ok(());
+    }
+    let (Some(hours), Some(blocked)) = (goal.default_after_hours, goal.blocked.clone()) else { return Ok(()) };
+    let next_run = match &goal.ticket_id {
+        Some(ticket) => {
+            let present = store::load(&*db.lock().map_err(|_| "Goal storage unavailable")?)?.tasks.iter().any(|t| &t.id == ticket);
+            let row = neko_core::checkpoints::row(db, ticket)?;
+            (present && row.runs.iter().any(|r| !r.start.commit.is_empty())).then_some(row.next_run)
+        }
+        None => None,
+    };
+    let (question, asked) = (blocked.question.clone(), blocked.asked_ms);
+    let same_question = move |g: &Goal| g.status == GoalStatus::Blocked && g.blocked.as_ref().is_some_and(|b| b.question == question && b.asked_ms == asked);
+    let Some(next_run) = next_run else {
+        commit(db, &goal.id, same_question, |db, g| {
+            if let Some(b) = g.blocked.as_mut() {
+                b.deadline_off = true;
+            }
+            core::push_journal(db, &g.subject(), JournalEntry { at_ms: now, turn: g.turns, note: format!("Waited {hours} h for you. No checkpoint exists to undo to, so the default was not taken."), ..Default::default() })
+        })?;
+        return Ok(());
+    };
+    commit(db, &goal.id, same_question, |db, g| {
+        let (taken, answer) = apply_answer(db, g, &blocked.default_answer, now, Some(hours))?;
+        g.default_taken = Some(DefaultTaken { at_ms: now, after_hours: hours, question: taken.question, answer, undo_run: next_run + 1, expires_ms: now + DEFAULT_UNDO_KEPT_MS, inbox_seq: taken.inbox_seq });
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// A deadline answer's undo is kept seven days; after that the target goes (any goal, finished or not).
+fn expire_defaults(db: &Arc<Mutex<Db>>, goals: &[Goal], now: i64) {
+    for goal in goals.iter().filter(|g| g.default_taken.as_ref().is_some_and(|d| now >= d.expires_ms)) {
+        let result = commit(db, &goal.id, |g| g.default_taken.as_ref().is_some_and(|d| now >= d.expires_ms), |db, g| {
+            g.default_taken = None;
+            core::push_journal(db, &g.subject(), JournalEntry { at_ms: now, turn: g.turns, note: "The undo for the default answer expired".into(), ..Default::default() })
+        });
+        if let Err(error) = result {
+            eprintln!("neko goals: {}: {error}", goal.id);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1014,6 +1131,9 @@ pub(super) fn evidence_gate(db: &Db, task_id: &str, changed: &[String], builder_
 
 impl Controller {
     pub(super) fn goal_command(&self, command: GoalCommand) -> Result<Snapshot, String> {
+        if let GoalCommand::UndoDefault { goal } = &command {
+            return self.undo_default(goal);
+        }
         // The receipt of a goal the person marked done is written once the goal lock and the database are free.
         let (snapshot, receipt_for) = self.goal_command_inner(command)?;
         match receipt_for {
@@ -1025,6 +1145,69 @@ impl Controller {
         }
     }
 
+    /// Takes a deadline answer back: previews the undo (a refusal changes nothing), pauses the goal, restores
+    /// the folder to the start of the first run after the answer (and any later runs), and asks the question
+    /// again with its deadline off. It holds the goal lock throughout and takes the database only in short turns,
+    /// because the checkpoint code locks it itself.
+    fn undo_default(&self, goal_id: &str) -> Result<Snapshot, String> {
+        let _goals = GOAL_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = store::now_ms();
+        let save = |goal: &Goal| -> Result<(), String> {
+            let db = self.db.lock().map_err(|_| "Goal storage unavailable")?;
+            core::save(&db, goal)
+        };
+        let original = {
+            let db = self.db.lock().map_err(|_| "Goal storage unavailable")?;
+            core::load(&db, goal_id)?.ok_or_else(|| "That goal no longer exists".to_owned())?
+        };
+        let Some(taken) = original.default_taken.clone() else { return Err("There is no default answer to undo".into()) };
+        if original.status.is_finished() {
+            return Err("That goal already finished".into());
+        }
+        if now >= taken.expires_ms {
+            return Err("That undo is no longer available (kept 7 days)".into());
+        }
+        let ticket = original.ticket_id.clone().ok_or("That goal has no ticket")?;
+        let row = neko_core::checkpoints::row(&self.db, &ticket)?;
+        let exists = row.runs.iter().any(|r| r.n == taken.undo_run);
+        let began = row.next_run >= taken.undo_run;
+        if exists {
+            // Refused here means nothing has changed: the person gets the checkpoint code and its remedies.
+            self.undo_preview(&ticket, taken.undo_run)?;
+        } else if !began && original.in_turn {
+            return Err(format!("{}busy: The next turn is already queued. Stop the ticket first, then undo.", neko_protocol::checkpoints::REFUSAL_PREFIX));
+        }
+        let mut goal = original.clone();
+        goal.status = GoalStatus::Paused;
+        goal.paused_reason = "Undoing the default answer.".into();
+        save(&goal)?;
+        if exists {
+            if let Err(error) = self.checkpoint_command(neko_protocol::checkpoints::CheckpointCommand::Undo { task_id: ticket.clone(), run: taken.undo_run, through_later: true, snapshot_unsaved: false, revert: false }) {
+                save(&original)?;
+                return Err(error);
+            }
+        } else if began {
+            let why = "The checkpoint for that run is no longer kept, so the files cannot be restored".to_owned();
+            goal.paused_reason = why.clone();
+            save(&goal)?;
+            return Err(why);
+        }
+        {
+            let db = self.db.lock().map_err(|_| "Goal storage unavailable")?;
+            db.atomic(|| {
+                goal.blocked = Some(raise_question(&db, &goal, &taken.question, &taken.answer, true, true, now)?);
+                goal.status = GoalStatus::Blocked;
+                goal.in_turn = false;
+                goal.paused_reason.clear();
+                goal.default_taken = None;
+                goal.updated_ms = now;
+                core::push_journal(&db, &goal.subject(), JournalEntry { at_ms: now, turn: goal.turns, note: format!("Undid the default answer: {}", core::head(&taken.answer, 120)), ..Default::default() })?;
+                core::save(&db, &goal)
+            })?;
+        }
+        store::load(&*self.db.lock().map_err(|_| "Goal storage unavailable")?)
+    }
+
     fn goal_command_inner(&self, command: GoalCommand) -> Result<(Snapshot, Option<String>), String> {
         let mut receipt_for = None;
         let _goals = GOAL_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1032,9 +1215,19 @@ impl Controller {
         let now = store::now_ms();
         let find = |id: &str| core::load(&db, id)?.ok_or_else(|| "That goal no longer exists".to_owned());
         match command {
-            GoalCommand::Create { workspace_id, objective, done_check, constraints, max_turns, ticket_id, conversation_id } => {
-                create(&db, &Spec { workspace_id: &workspace_id, objective: &objective, done_check: &done_check, constraints: &constraints, max_turns, ticket_id: ticket_id.as_deref(), conversation_id: conversation_id.as_deref(), by_person: true })?;
+            GoalCommand::Create { workspace_id, objective, done_check, constraints, max_turns, ticket_id, conversation_id, default_after_hours } => {
+                create(&db, &Spec { workspace_id: &workspace_id, objective: &objective, done_check: &done_check, constraints: &constraints, max_turns, ticket_id: ticket_id.as_deref(), conversation_id: conversation_id.as_deref(), default_after_hours, by_person: true })?;
             }
+            GoalCommand::SetDefaultAfter { id, hours } => {
+                let mut goal = find(&id)?;
+                if goal.status.is_finished() {
+                    return Err("That goal is finished".into());
+                }
+                goal.default_after_hours = core::validate_default_after(hours)?;
+                core::save(&db, &goal)?;
+            }
+            // Handled before the database is taken (`goal_command`): it restores files through the checkpoint code.
+            GoalCommand::UndoDefault { .. } => return Err("Undo the default answer from the goal's line".into()),
             GoalCommand::Pause { id } => {
                 let mut goal = find(&id)?;
                 if !goal.status.is_active() {
@@ -1104,16 +1297,7 @@ impl Controller {
             }
             GoalCommand::Answer { id, text } => {
                 let mut goal = find(&id)?;
-                let Some(blocked) = goal.blocked.take() else { return Err("That goal is not waiting for an answer".into()) };
-                let answer = if text.trim().is_empty() { blocked.default_answer.clone() } else { core::head(&text, 1000) };
-                goal.status = GoalStatus::Running;
-                goal.in_turn = false;
-                goal.last_tick_ms = now;
-                goal.reason = format!("You answered \"{}\" to: {}", answer, core::head(&blocked.question, 300));
-                if let Some(seq) = blocked.inbox_seq {
-                    let _ = crate::routines::close_goal_item(&db, seq);
-                }
-                core::push_journal(&db, &goal.subject(), JournalEntry { at_ms: now, turn: goal.turns, note: format!("Answered: {}", core::head(&answer, 120)), ..Default::default() })?;
+                apply_answer(&db, &mut goal, &text, now, None)?;
                 core::save(&db, &goal)?;
             }
         }
@@ -1180,3 +1364,7 @@ mod more_tests;
 #[cfg(test)]
 #[path = "goals_receipt_tests.rs"]
 mod receipt_tests;
+
+#[cfg(test)]
+#[path = "goals_deadline_tests.rs"]
+mod deadline_tests;

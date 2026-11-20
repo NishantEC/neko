@@ -8,7 +8,7 @@ fn fixture(status: TaskStatus) -> (Controller, Arc<Mutex<Db>>) {
 }
 
 fn create_on_t(controller: &Controller) -> Result<Snapshot, String> {
-    controller.goal_command(GoalCommand::Create { workspace_id: "w".into(), objective: "Finish it".into(), done_check: String::new(), constraints: String::new(), max_turns: None, ticket_id: Some("t".into()), conversation_id: None })
+    controller.goal_command(GoalCommand::Create { workspace_id: "w".into(), objective: "Finish it".into(), done_check: String::new(), constraints: String::new(), max_turns: None, ticket_id: Some("t".into()), conversation_id: None, default_after_hours: None })
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn pausing_a_blocked_goal_and_resuming_it_brings_the_question_back_and_a_hold_is
         let guard = db.lock().unwrap();
         let mut g = core::load(&guard, &id).unwrap().unwrap();
         g.status = GoalStatus::Blocked;
-        g.blocked = Some(Blocked { question: "Which?".into(), default_answer: "A".into(), inbox_seq: None });
+        g.blocked = Some(Blocked { question: "Which?".into(), default_answer: "A".into(), inbox_seq: None, ..Default::default() });
         core::save(&guard, &g).unwrap();
     }
     controller.goal_command(GoalCommand::Pause { id: id.clone() }).unwrap();

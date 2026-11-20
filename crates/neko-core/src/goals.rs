@@ -212,6 +212,22 @@ pub fn validate(objective: &str, done_check: &str, constraints: &str) -> Result<
     Ok(())
 }
 
+/// A deadline the person set: `None` is off, otherwise 1 to 168 hours.
+pub fn validate_default_after(hours: Option<u32>) -> Result<Option<u32>, String> {
+    match hours {
+        None => Ok(None),
+        Some(h) if (1..=MAX_DEFAULT_AFTER_HOURS).contains(&h) => Ok(Some(h)),
+        Some(_) => Err(format!("Choose 1 to {MAX_DEFAULT_AFTER_HOURS} hours, or turn it off")),
+    }
+}
+
+/// Whether a blocked goal's deadline has passed: it has a deadline, its question has the judge's own default,
+/// it was asked since deadlines existed, and nobody switched this question's deadline off.
+pub fn deadline_due(goal: &Goal, now_ms: i64) -> bool {
+    let (Some(hours), Some(blocked)) = (goal.default_after_hours, goal.blocked.as_ref()) else { return false };
+    goal.status == GoalStatus::Blocked && blocked.real_default && !blocked.deadline_off && blocked.asked_ms > 0 && now_ms >= blocked.asked_ms + i64::from(hours) * 3_600_000
+}
+
 /// A new goal record (not stored).
 pub fn new_goal(workspace_id: &str, objective: &str, done_check: &str, constraints: &str, max_turns: Option<u32>, now: i64) -> Result<Goal, String> {
     validate(objective, done_check, constraints)?;
@@ -903,6 +919,29 @@ mod tests {
         }
         assert_eq!(log(&db, "t1").unwrap().ledger.len(), MAX_LEDGER);
         assert!(create(&db, Goal { ticket_id: Some("t1".into()), ..goal("") }).is_err(), "one unfinished goal per ticket");
+    }
+
+    #[test]
+    fn a_deadline_is_off_or_one_to_168_hours() {
+        assert_eq!(validate_default_after(None), Ok(None));
+        assert_eq!(validate_default_after(Some(1)), Ok(Some(1)));
+        assert_eq!(validate_default_after(Some(168)), Ok(Some(168)));
+        assert!(validate_default_after(Some(0)).is_err() && validate_default_after(Some(169)).is_err() && validate_default_after(Some(200)).is_err());
+    }
+
+    #[test]
+    fn a_deadline_is_due_only_for_a_judge_given_default_asked_long_enough_ago() {
+        let hour = 3_600_000;
+        let blocked = |real: bool, off: bool, asked: i64| Blocked { question: "Which?".into(), default_answer: "A".into(), real_default: real, deadline_off: off, asked_ms: asked, ..Default::default() };
+        let goal = |hours: Option<u32>, status: GoalStatus, b: Blocked| Goal { default_after_hours: hours, status, blocked: Some(b), ..Default::default() };
+        let due = goal(Some(2), GoalStatus::Blocked, blocked(true, false, 1_000));
+        assert!(!deadline_due(&due, 1_000 + 2 * hour - 1) && deadline_due(&due, 1_000 + 2 * hour));
+        assert!(!deadline_due(&Goal { default_after_hours: None, ..due.clone() }, i64::MAX / 2), "off by default");
+        assert!(!deadline_due(&goal(Some(2), GoalStatus::Blocked, blocked(false, false, 1_000)), i64::MAX / 2), "the generic filler never counts");
+        assert!(!deadline_due(&goal(Some(2), GoalStatus::Blocked, blocked(true, true, 1_000)), i64::MAX / 2), "switched off for this question");
+        assert!(!deadline_due(&goal(Some(2), GoalStatus::Blocked, blocked(true, false, 0)), i64::MAX / 2), "asked before deadlines existed");
+        assert!(!deadline_due(&goal(Some(2), GoalStatus::Paused, blocked(true, false, 1_000)), i64::MAX / 2));
+        assert!(!deadline_due(&Goal { blocked: None, ..due }, i64::MAX / 2));
     }
 
     #[test]

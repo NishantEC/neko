@@ -173,7 +173,7 @@ impl Real<'_> {
 
     /// A goal's ticket, found by the objective it was made with.
     fn make_task(&self, workspace_id: &str, objective: &str, done_check: &str) -> Result<String, String> {
-        let after = self.state.workbench.command(Command::Goals(GoalCommand::Create { workspace_id: workspace_id.to_owned(), objective: objective.to_owned(), done_check: done_check.to_owned(), constraints: String::new(), max_turns: None, ticket_id: None, conversation_id: None }))?;
+        let after = self.state.workbench.command(Command::Goals(GoalCommand::Create { workspace_id: workspace_id.to_owned(), objective: objective.to_owned(), done_check: done_check.to_owned(), constraints: String::new(), max_turns: None, ticket_id: None, conversation_id: None, default_after_hours: None }))?;
         after.goals.iter().filter(|g| g.objective == objective && g.workspace_id == workspace_id).max_by_key(|g| g.created_ms).and_then(|g| g.ticket_id.clone()).ok_or_else(|| "The task was not created".to_owned())
     }
 }

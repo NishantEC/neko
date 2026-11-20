@@ -429,7 +429,7 @@ impl Controller {
                 _ => request.clone(),
             };
             // A goal an agent proposes waits paused until the person has read its check.
-            let made = super::goals::create(&db, &super::goals::Spec { workspace_id: &workspace, objective: &objective, done_check: &check, constraints: &constraints, max_turns: turns, ticket_id: Some(&task_id), conversation_id: None, by_person: false })?;
+            let made = super::goals::create(&db, &super::goals::Spec { workspace_id: &workspace, objective: &objective, done_check: &check, constraints: &constraints, max_turns: turns, ticket_id: Some(&task_id), conversation_id: None, default_after_hours: None, by_person: false })?;
             goal_id = Some(made.id);
         }
         let task = after.tasks.iter().find(|t| t.id == task_id).ok_or("The task was not created")?;

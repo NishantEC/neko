@@ -81,7 +81,32 @@ pub struct Blocked {
     pub default_answer: String,
     /// The Inbox item raised for it (its `seq`), so it is raised once.
     pub inbox_seq: Option<u64>,
+    /// When the question was asked (0 on a question from before deadline defaults: it is never auto-answered).
+    pub asked_ms: i64,
+    /// The judge supplied the default; the generic "use your best judgement" filler never counts.
+    pub real_default: bool,
+    /// Do not answer this question by itself (an undo set it, or no checkpoint exists to undo to).
+    pub deadline_off: bool,
 }
+
+/// What Neko did when a deadline passed: the answer it took, and the undo it keeps for seven days.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct DefaultTaken {
+    pub at_ms: i64,
+    pub after_hours: u32,
+    pub question: String,
+    pub answer: String,
+    /// The run whose start checkpoint is the folder as it was right before the post-answer work.
+    pub undo_run: u32,
+    pub expires_ms: i64,
+    pub inbox_seq: Option<u64>,
+}
+
+/// The longest deadline, in hours (a week).
+pub const MAX_DEFAULT_AFTER_HOURS: u32 = 168;
+/// How long the undo of a deadline answer is kept.
+pub const DEFAULT_UNDO_KEPT_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -167,6 +192,11 @@ pub struct Goal {
     pub receipt: Option<ReceiptRef>,
     /// Failed attempts to write the receipt; the goal tick retries up to three.
     pub receipt_tries: u8,
+    /// Off (`None`) unless the person set it: hours (1 to 168) after which a blocked goal's own default
+    /// answer is taken, when its ticket has a checkpoint to undo to.
+    pub default_after_hours: Option<u32>,
+    /// The last deadline answer, while its undo is still kept.
+    pub default_taken: Option<DefaultTaken>,
 }
 
 /// Where a finished goal's receipt is kept.
@@ -202,6 +232,8 @@ pub enum GoalCommand {
         ticket_id: Option<String>,
         #[serde(default)]
         conversation_id: Option<String>,
+        #[serde(default)]
+        default_after_hours: Option<u32>,
     },
     Pause { id: String },
     Resume { id: String },
@@ -212,4 +244,9 @@ pub enum GoalCommand {
     Stop { id: String },
     /// Answers a blocked goal; empty text takes the default answer.
     Answer { id: String, text: String },
+    /// Hours (1 to 168) after which a blocked goal takes its own default answer; `None` turns it off.
+    SetDefaultAfter { id: String, hours: Option<u32> },
+    /// Undoes a deadline answer: the folder goes back to before the work done on it, and the question comes
+    /// back. Destructive: confirmed in the UI.
+    UndoDefault { goal: String },
 }

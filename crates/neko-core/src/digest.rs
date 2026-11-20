@@ -249,7 +249,7 @@ mod tests {
         let tasks = [task("Write docs", TaskStatus::Completed, 5_000), merged_task, task("Flaky build", TaskStatus::Failed, 6_000)];
         let goals = [
             Goal { objective: "Ship the exporter".into(), status: GoalStatus::Done, updated_ms: 7_000, ..Default::default() },
-            Goal { objective: "Migrate the reports".into(), status: GoalStatus::Blocked, blocked: Some(Blocked { question: "Which database?".into(), default_answer: "the primary".into(), inbox_seq: Some(4) }), ..Default::default() },
+            Goal { objective: "Migrate the reports".into(), status: GoalStatus::Blocked, blocked: Some(Blocked { question: "Which database?".into(), default_answer: "the primary".into(), inbox_seq: Some(4), ..Default::default() }), ..Default::default() },
         ];
         let items = [
             NeedsYou { seq: 4, title: "Extend by 10 turns?".into(), default: Some("Extend by 10 turns".into()), ..Default::default() },

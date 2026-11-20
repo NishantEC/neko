@@ -76,7 +76,7 @@ pub(super) fn fixture(status: TaskStatus) -> (Controller, Arc<Mutex<Db>>) {
 }
 
 pub(super) fn goal_on_t(controller: &Controller, check: &str, max_turns: Option<u32>) -> String {
-    controller.goal_command(GoalCommand::Create { workspace_id: "w".into(), objective: "Make the parser handle nested quotes".into(), done_check: check.into(), constraints: "Do not touch the lexer".into(), max_turns, ticket_id: Some("t".into()), conversation_id: None }).unwrap();
+    controller.goal_command(GoalCommand::Create { workspace_id: "w".into(), objective: "Make the parser handle nested quotes".into(), done_check: check.into(), constraints: "Do not touch the lexer".into(), max_turns, ticket_id: Some("t".into()), conversation_id: None, default_after_hours: None }).unwrap();
     let guard = controller.db.lock().unwrap();
     core::load_all(&guard).unwrap().pop().unwrap().id
 }
@@ -514,9 +514,9 @@ fn a_blocked_ticket_turns_into_one_question_with_a_default() {
 fn goals_attach_to_one_ticket_each_and_a_standalone_goal_makes_its_ticket() {
     let (controller, db) = fixture(TaskStatus::Building);
     goal_on_t(&controller, "", None);
-    let again = controller.goal_command(GoalCommand::Create { workspace_id: "w".into(), objective: "Another".into(), done_check: String::new(), constraints: String::new(), max_turns: None, ticket_id: Some("t".into()), conversation_id: None });
+    let again = controller.goal_command(GoalCommand::Create { workspace_id: "w".into(), objective: "Another".into(), done_check: String::new(), constraints: String::new(), max_turns: None, ticket_id: Some("t".into()), conversation_id: None, default_after_hours: None });
     assert!(again.unwrap_err().contains("already has a goal"));
-    assert!(controller.goal_command(GoalCommand::Create { workspace_id: "w".into(), objective: "  ".into(), done_check: String::new(), constraints: String::new(), max_turns: None, ticket_id: Some("t".into()), conversation_id: None }).is_err());
+    assert!(controller.goal_command(GoalCommand::Create { workspace_id: "w".into(), objective: "  ".into(), done_check: String::new(), constraints: String::new(), max_turns: None, ticket_id: Some("t".into()), conversation_id: None, default_after_hours: None }).is_err());
     // Standalone: a ticket is created in the workspace's repository.
     let repository = tempfile::tempdir().unwrap();
     let git = |args: &[&str]| assert!(std::process::Command::new("git").args(args).current_dir(repository.path()).output().unwrap().status.success());
@@ -527,7 +527,7 @@ fn goals_attach_to_one_ticket_each_and_a_standalone_goal_makes_its_ticket() {
         snapshot.workspaces[0].repository = repository.path().to_string_lossy().into_owned();
         store::save(&guard, &snapshot).unwrap();
     }
-    controller.goal_command(GoalCommand::Create { workspace_id: "w".into(), objective: "Keep the docs index current".into(), done_check: "none".into(), constraints: String::new(), max_turns: Some(5), ticket_id: None, conversation_id: Some("home:p:w".into()) }).unwrap();
+    controller.goal_command(GoalCommand::Create { workspace_id: "w".into(), objective: "Keep the docs index current".into(), done_check: "none".into(), constraints: String::new(), max_turns: Some(5), ticket_id: None, conversation_id: Some("home:p:w".into()), default_after_hours: None }).unwrap();
     let snapshot = store::load(&db.lock().unwrap()).unwrap();
     assert_eq!(snapshot.tasks.len(), 2);
     let made = snapshot.tasks.last().unwrap();
