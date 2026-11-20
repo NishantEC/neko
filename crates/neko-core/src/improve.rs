@@ -236,7 +236,7 @@ fn raise(db: &Db, workspace_id: &str, title: &str, detail: &str, link: &str, def
             browser: false,
             computer: false,
             customized: true,
-            catch_up: None,
+            catch_up: None, policy: Default::default(),
         });
         core::save_definitions(db, &store)?;
     }

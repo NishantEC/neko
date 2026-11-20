@@ -171,6 +171,67 @@ pub fn push_run(db: &crate::Db, id: &str, run: RoutineRun) -> Result<(), String>
     save_runs(db, id, &runs)
 }
 
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+/// Most run starts and skips kept in a routine's state row.
+pub const MAX_STARTS: usize = 1000;
+pub const MAX_SKIPS: usize = 200;
+/// Earlier runs a `standing` thread hands the next run, and the room they may take.
+const STANDING_RUNS: usize = 5;
+const STANDING_DID: usize = 6;
+const STANDING_LINE: usize = 200;
+const STANDING_BYTES: usize = 6 * 1024;
+
+/// Drops times older than 24 hours before `now_ms` and keeps at most `max` of the newest.
+pub fn prune_window(times: &mut Vec<i64>, now_ms: i64, max: usize) {
+    times.retain(|t| *t > now_ms - DAY_MS);
+    if times.len() > max {
+        times.drain(..times.len() - max);
+    }
+}
+
+/// Whether `daily_cap` runs have already started in the 24 hours before `now_ms`. A cap of 0 is never reached.
+pub fn cap_reached(starts_ms: &[i64], daily_cap: u32, now_ms: i64) -> Option<(usize, u32)> {
+    if daily_cap == 0 {
+        return None;
+    }
+    let count = starts_ms.iter().filter(|t| **t > now_ms - DAY_MS).count();
+    (count >= daily_cap as usize).then_some((count, daily_cap))
+}
+
+/// What a `standing` routine is told about its last runs: the newest five that really ran
+/// (skip rows left out), oldest first, each a few short lines, under 6 KB in all. `runs` is newest first.
+pub fn standing_thread(runs: &[RoutineRun]) -> Value {
+    let mut earlier: Vec<Value> = runs
+        .iter()
+        .filter(|r| r.skipped == 0)
+        .take(STANDING_RUNS)
+        .map(|r| {
+            let at = chrono::DateTime::from_timestamp_millis(r.started_ms).map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default();
+            let did: Vec<String> = r.did.iter().take(STANDING_DID).map(|line| cut_at(line, STANDING_LINE)).collect();
+            let needs: Vec<String> = r.needs_you.iter().map(|i| cut_at(&i.title, STANDING_LINE)).collect();
+            serde_json::json!({"at": at, "did": did, "needs_you": needs})
+        })
+        .collect();
+    earlier.reverse();
+    // Over the budget the oldest runs go first.
+    while earlier.len() > 1 && serde_json::json!({"earlier_runs": earlier}).to_string().len() > STANDING_BYTES {
+        earlier.remove(0);
+    }
+    serde_json::json!({"earlier_runs": earlier})
+}
+
+fn cut_at(text: &str, max: usize) -> String {
+    let text = text.trim();
+    if text.len() <= max {
+        return text.to_string();
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &text[..end])
+}
+
 pub fn memory_fits(memory: &Value) -> bool {
     memory.to_string().len() <= MAX_MEMORY
 }
@@ -544,7 +605,7 @@ pub fn seeds(scopes: &[ScopeProposal], home: &str) -> Vec<Routine> {
                 browser: !matches!(kind, RoutineKind::Reflect | RoutineKind::MacCare),
                 computer: !matches!(kind, RoutineKind::Reflect | RoutineKind::MacCare),
                 customized: false,
-                catch_up: None,
+                catch_up: None, policy: Default::default(),
             });
         }
     }
@@ -575,10 +636,54 @@ mod tests {
     }
 
     #[test]
+    fn the_cap_counts_starts_in_a_rolling_day_and_zero_means_none() {
+        let hour = 3_600_000;
+        let now = 100 * hour;
+        let starts = [now - hour, now - 2 * hour, now - 3 * hour];
+        assert_eq!(cap_reached(&starts, 3, now), Some((3, 3)));
+        assert_eq!(cap_reached(&starts, 4, now), None);
+        assert_eq!(cap_reached(&starts, 0, now), None, "0 is no cap");
+        // A start 25 hours old does not count.
+        let old = [now - 25 * hour, now - hour, now - 2 * hour];
+        assert_eq!(cap_reached(&old, 3, now), None);
+        assert_eq!(cap_reached(&old, 2, now), Some((2, 2)));
+        let mut times = vec![now - 30 * hour, now - hour];
+        prune_window(&mut times, now, MAX_STARTS);
+        assert_eq!(times, vec![now - hour]);
+        let mut many: Vec<i64> = (0..300).map(|i| now - i).collect();
+        many.reverse();
+        prune_window(&mut many, now, MAX_SKIPS);
+        assert_eq!(many.len(), MAX_SKIPS);
+        assert_eq!(*many.last().unwrap(), now, "the newest are kept");
+    }
+
+    fn ran(n: i64, lines: usize, skipped: u32) -> RoutineRun {
+        RoutineRun { id: format!("r{n}"), routine_id: "r".into(), started_ms: 1_700_000_000_000 + n * 3_600_000, ok: true, did: (0..lines).map(|i| format!("run {n} line {i}")).collect(), skipped, ..Default::default() }
+    }
+
+    #[test]
+    fn a_standing_thread_is_the_last_five_real_runs_oldest_first_and_small() {
+        // Newest first, as stored; run 7 is a skip row.
+        let mut runs: Vec<RoutineRun> = (0..8).rev().map(|n| ran(n, 3, if n == 7 { 4 } else { 0 })).collect();
+        let thread = standing_thread(&runs);
+        let earlier = thread["earlier_runs"].as_array().unwrap();
+        assert_eq!(earlier.len(), 5);
+        let firsts: Vec<&str> = earlier.iter().map(|e| e["did"][0].as_str().unwrap()).collect();
+        assert_eq!(firsts, ["run 2 line 0", "run 3 line 0", "run 4 line 0", "run 5 line 0", "run 6 line 0"], "no skip row, oldest first");
+        // Long runs are trimmed to six lines of 200 characters and the whole stays under 6 KB.
+        runs = (0..8).rev().map(|n| RoutineRun { did: (0..40).map(|i| format!("{n}-{i} {}", "x".repeat(400))).collect(), ..ran(n, 0, 0) }).collect();
+        let thread = standing_thread(&runs);
+        assert!(thread.to_string().len() <= STANDING_BYTES, "{}", thread.to_string().len());
+        assert!(thread["earlier_runs"][0]["did"].as_array().unwrap().len() <= 6);
+        assert!(thread["earlier_runs"][0]["did"][0].as_str().unwrap().chars().count() <= 201);
+        assert!(standing_thread(&[])["earlier_runs"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
     fn catch_up_defaults_on_for_messages_and_digest_only() {
         let mut routine = seeds(&[], "/tmp").into_iter().next().unwrap_or_else(|| Routine {
             id: "r".into(), workspace_id: "w".into(), kind: RoutineKind::Messages, name: "m".into(), instruction: "x".into(),
-            cadence: Cadence::Daily { hour: 9, minute: 0 }, enabled: true, model: String::new(), paseo_schedule: None, browser: false, computer: false, customized: false, catch_up: None,
+            cadence: Cadence::Daily { hour: 9, minute: 0 }, enabled: true, model: String::new(), paseo_schedule: None, browser: false, computer: false, customized: false, catch_up: None, policy: Default::default(),
         });
         for (kind, expect) in [(RoutineKind::Messages, true), (RoutineKind::Digest, true), (RoutineKind::PrSweep, false), (RoutineKind::Reflect, false), (RoutineKind::MacCare, false), (RoutineKind::Custom, false)] {
             routine.kind = kind;
@@ -679,6 +784,8 @@ mod tests {
         assert_eq!(routines[4].cadence, Cadence::Every { minutes: 60, from_hour: 8, to_hour: 23 });
         assert_eq!(routines.iter().filter(|r| r.kind == RoutineKind::MacCare).map(|r| r.workspace_id.as_str()).collect::<Vec<_>>(), vec!["w2"]);
         assert!(routines.iter().all(|r| r.paseo_schedule.is_none() && r.id.starts_with(&r.workspace_id)));
+        assert!(routines.iter().all(|r| r.policy == Default::default()), "seeded routines repeat on purpose: no cap, no gate");
+        assert_eq!(routines.iter().find(|r| r.kind == RoutineKind::Messages).unwrap().policy.daily_cap, 0);
         assert!(routines[4].instruction.contains("personal scope"));
         for kind in [RoutineKind::Messages, RoutineKind::Digest, RoutineKind::PrSweep] {
             assert!(routines.iter().find(|r| r.kind == kind).unwrap().instruction.contains("fresh subagent that did not write it"), "{kind:?}");
@@ -772,7 +879,7 @@ mod tests {
 
     #[test]
     fn the_reply_contract_in_the_prompt_asks_for_one_question_and_a_default() {
-        let routine = Routine { id: "r".into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: "n".into(), instruction: "x".into(), cadence: Cadence::Daily { hour: 9, minute: 0 }, enabled: true, model: String::new(), paseo_schedule: None, browser: false, computer: false, customized: true, catch_up: None };
+        let routine = Routine { id: "r".into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: "n".into(), instruction: "x".into(), cadence: Cadence::Daily { hour: 9, minute: 0 }, enabled: true, model: String::new(), paseo_schedule: None, browser: false, computer: false, customized: true, catch_up: None, policy: Default::default() };
         let scope = ScopeProposal { name: "Work".into(), folders: vec![], servers: vec![], problems: vec![], workspace_id: None, discovered: false, instructions: String::new() };
         let prompt = build_prompt(&routine, &scope, "", &serde_json::json!({}), "2026-11-14T00:00:00Z", &[], 7, "Pat", "");
         assert!(prompt.contains("\"default\":") && prompt.contains("exactly ONE question") && prompt.contains("memory.owner_replies"), "{prompt}");

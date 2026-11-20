@@ -39,6 +39,8 @@ mod packs;
 mod phone;
 #[path = "../routine_care.rs"]
 mod routine_care;
+#[path = "../routine_guard.rs"]
+mod routine_guard;
 #[path = "../routines.rs"]
 mod routines;
 #[path = "../self_update.rs"]

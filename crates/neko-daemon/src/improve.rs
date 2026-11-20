@@ -335,7 +335,7 @@ mod tests {
                 browser: false,
                 computer: false,
                 customized: true,
-                catch_up: None,
+                catch_up: None, policy: Default::default(),
             });
             neko_core::routines::save_definitions(&db, &store).unwrap();
             neko_core::routines::push_run(&db, "r1", neko_protocol::routines::RoutineRun { id: "run1".into(), routine_id: "r1".into(), started_ms: now - 1000, ok: false, error: Some("zsh: command not found: rg".into()), ..Default::default() }).unwrap();

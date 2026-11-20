@@ -380,6 +380,7 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
     ensure_seeded(state)?;
     let now = neko_core::workbench::now_ms();
     let mut routine_missed = None;
+    let manual;
     let (routine, scope) = {
         let store = core::load(&db(state))?;
         let states = store
@@ -413,6 +414,7 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
         let Some(id) = pick_due(&store, &states, now, &|cadence| core::in_window_local(cadence, now)) else { return Ok(()) };
         let routine = store.routines.iter().find(|r| r.id == id).cloned().ok_or("Routine vanished")?;
         let picked = states.iter().find(|(i, _)| *i == id).map(|(_, s)| s.clone()).unwrap_or_default();
+        manual = picked.run_requested;
         // The daily spend ceiling pauses new routine runs (a "Run now" from the person still goes).
         if !picked.run_requested && routine_care::spend_held(&db(state), now) {
             return Ok(());
@@ -444,7 +446,7 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
     let state = state.clone();
     std::thread::spawn(move || {
         let _busy = BusyGuard;
-        if let Err(error) = run_one(&state, &routine, scope) {
+        if let Err(error) = run_one(&state, &routine, scope, manual) {
             eprintln!("routine {}: {error}", routine.id);
         }
     });
@@ -543,7 +545,7 @@ pub(crate) fn raise_goal_item(db: &neko_core::Db, workspace_id: &str, title: &st
             id: id.clone(), workspace_id: workspace_id.to_owned(), kind: neko_protocol::routines::RoutineKind::Custom,
             name: "Goals".into(), instruction: "Goals that keep working report here.".into(),
             cadence: Cadence::Daily { hour: 0, minute: 0 }, enabled: false, model: String::new(), paseo_schedule: None,
-            browser: false, computer: false, customized: true, catch_up: None,
+            browser: false, computer: false, customized: true, catch_up: None, policy: Default::default(),
         });
         core::save_definitions(db, &store)?;
     }
@@ -820,9 +822,10 @@ fn retry_or_next(cadence: &Cadence, state: &RoutineState, now: i64) -> i64 {
 }
 
 /// Runs the routine; whatever happens, the routine is not left "running".
-fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) -> Result<(), String> {
+/// `manual` is a person's "Run now": the guard rails (daily cap, `run_only_when`) do not apply to it.
+fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, manual: bool) -> Result<(), String> {
     let mut pushed = None;
-    let result = run_body(state, routine, scope, &mut pushed);
+    let result = run_body(state, routine, scope, manual, &mut pushed);
     if result.is_err() {
         crate::improve::note_event();
     }
@@ -862,11 +865,18 @@ fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) ->
 
 /// Once the run's row is saved, `pushed` holds the state the run is about to
 /// save, so a failed save can be retried by `run_one` as it was meant.
-fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, pushed: &mut Option<RoutineState>) -> Result<(), String> {
+fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, manual: bool, pushed: &mut Option<RoutineState>) -> Result<(), String> {
     let started = neko_core::workbench::now_ms();
+    // Guard rails first: a skipped run builds no prompt and starts no agent.
+    let folder = scope.as_ref().and_then(|s| s.folders.first()).map(PathBuf::from);
+    if let crate::routine_guard::Verdict::Skip(_) = crate::routine_guard::admit(&state.db, routine, folder.as_deref(), manual, started)? {
+        return Ok(());
+    }
     let (orders, memory, open, age_out_days) = {
         let db = db(state);
-        (core::load(&db)?.orders_for(&routine.workspace_id).to_string(), with_owner_replies(core::load_state(&db, &routine.id)?.memory, &crate::inbox_reply::replies(&db, &routine.id, neko_core::workbench::now_ms())), open_items(&db, &routine.workspace_id, neko_core::workbench::now_ms())?, core::load(&db)?.age_out_days())
+        let memory = with_owner_replies(core::load_state(&db, &routine.id)?.memory, &crate::inbox_reply::replies(&db, &routine.id, neko_core::workbench::now_ms()));
+        let memory = crate::routine_guard::with_thread(memory, &routine.policy, &core::load_runs(&db, &routine.id).unwrap_or_default());
+        (core::load(&db)?.orders_for(&routine.workspace_id).to_string(), memory, open_items(&db, &routine.workspace_id, neko_core::workbench::now_ms())?, core::load(&db)?.age_out_days())
     };
     let mut meta = AgentMeta::default();
     let outcome: Result<core::Parsed, (String, String)> = match scope.as_ref().and_then(|s| s.folders.first().map(|f| (s, f))) {
@@ -961,7 +971,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
             } else {
                 routine_state.note = Some(format!("The run asked to remember more than {} KB; its previous memory was kept.", core::MAX_MEMORY / 1024));
             }
-            RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: true, quiet: parsed.quiet, did: parsed.did, needs_you, error: None, text: String::new(), runtime: meta.runtime.clone(), note: note.clone(), cost_micro_usd: meta.cost_micro }
+            RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: true, quiet: parsed.quiet, did: parsed.did, needs_you, error: None, text: String::new(), runtime: meta.runtime.clone(), note: note.clone(), cost_micro_usd: meta.cost_micro, skipped: 0 }
         }
         Err((error, text)) => {
             let mut end = text.len().min(KEEP_TEXT);
@@ -989,7 +999,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
                 });
             }
             next_due = Some(retry_or_next(&current.cadence, &routine_state, finished));
-            RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: false, quiet: false, did: Vec::new(), needs_you, error: Some(error), text: text[..end].to_string(), runtime: meta.runtime.clone(), note, cost_micro_usd: meta.cost_micro }
+            RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: false, quiet: false, did: Vec::new(), needs_you, error: Some(error), text: text[..end].to_string(), runtime: meta.runtime.clone(), note, cost_micro_usd: meta.cost_micro, skipped: 0 }
         }
     };
     let ok = run.ok;
@@ -1288,6 +1298,8 @@ fn edit(state: &AppState, request: Request) -> Result<(), String> {
             if routine.instruction.len() > core::MAX_INSTRUCTION {
                 return Err(format!("Keep the instruction under {} KB", core::MAX_INSTRUCTION / 1024));
             }
+            let mut routine = routine;
+            crate::routine_guard::validate(&mut routine.policy)?;
             match store.routines.iter_mut().find(|r| r.id == routine.id) {
                 Some(existing) => {
                     let rescheduled = existing.cadence != routine.cadence;
@@ -1372,7 +1384,7 @@ mod tests {
     use neko_protocol::routines::{Cadence, RoutineKind};
 
     fn routine(id: &str, enabled: bool) -> Routine {
-        Routine { id: id.into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: id.into(), instruction: "x".into(), cadence: Cadence::Daily { hour: 9, minute: 0 }, enabled, model: String::new(), paseo_schedule: None, browser: true, computer: true, customized: false, catch_up: None }
+        Routine { id: id.into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: id.into(), instruction: "x".into(), cadence: Cadence::Daily { hour: 9, minute: 0 }, enabled, model: String::new(), paseo_schedule: None, browser: true, computer: true, customized: false, catch_up: None, policy: Default::default() }
     }
 
     fn due(ms: Option<i64>, running: bool) -> RoutineState {
@@ -1678,6 +1690,54 @@ mod tests {
         assert!(same_words.customized, "and stays theirs");
         let untouched = merge_edit(&routine("b", true), Routine { cadence: Cadence::Daily { hour: 8, minute: 0 }, ..routine("b", true) });
         assert!(!untouched.customized, "a cadence change leaves the words Neko's");
+    }
+
+    #[test]
+    fn edit_refuses_a_cap_over_1000_and_a_command_over_1_kb_and_keeps_a_good_policy() {
+        use neko_protocol::routines::RoutinePolicy;
+        let state = crate::server::tests::test_state_for_phone();
+        let with = |policy: RoutinePolicy| Routine { policy, ..routine("a", true) };
+        assert_eq!(edit(&state, Request::SaveRoutine { routine: with(RoutinePolicy { daily_cap: 1001, ..Default::default() }) }), Err("Runs per day must be 0 to 1000".into()));
+        assert_eq!(edit(&state, Request::SaveRoutine { routine: with(RoutinePolicy { run_only_when: "x".repeat(1025), ..Default::default() }) }), Err("Keep the command under 1 KB".into()));
+        assert!(core::load(&db(&state)).unwrap().routines.is_empty(), "nothing was saved");
+        let good = RoutinePolicy { daily_cap: 5, run_only_when: "  test -f NEEDS_REVIEW ".into(), thread: neko_protocol::routines::RoutineThread::Standing, ..Default::default() };
+        edit(&state, Request::SaveRoutine { routine: with(good) }).unwrap();
+        let saved = core::load(&db(&state)).unwrap().routines.remove(0).policy;
+        assert_eq!((saved.daily_cap, saved.run_only_when.as_str(), saved.thread), (5, "test -f NEEDS_REVIEW", neko_protocol::routines::RoutineThread::Standing));
+        // An edit replaces the policy, with the rest of what the dialog sends.
+        edit(&state, Request::SaveRoutine { routine: with(RoutinePolicy::default()) }).unwrap();
+        assert_eq!(core::load(&db(&state)).unwrap().routines[0].policy, RoutinePolicy::default());
+    }
+
+    #[test]
+    fn a_capped_due_run_is_skipped_before_any_agent_and_run_now_goes_ahead() {
+        let state = crate::server::tests::test_state_for_phone();
+        let now = neko_core::workbench::now_ms();
+        let routine = Routine { policy: neko_protocol::routines::RoutinePolicy { daily_cap: 2, ..Default::default() }, ..routine("r", true) };
+        {
+            let db = db(&state);
+            core::save_definitions(&db, &core::Store { routines: vec![routine.clone()], ..Default::default() }).unwrap();
+            core::save_state(&db, "r", &RoutineState { running: true, starts_ms: vec![now - 1000, now - 2000], failures: 1, ..Default::default() }).unwrap();
+        }
+        let mut pushed = None;
+        run_body(&state, &routine, None, false, &mut pushed).unwrap();
+        assert!(pushed.is_none(), "a skip saves no run state of its own");
+        {
+            let db = db(&state);
+            let saved = core::load_state(&db, "r").unwrap();
+            assert!(!saved.running && saved.failures == 1 && saved.starts_ms.len() == 2);
+            let runs = core::load_runs(&db, "r").unwrap();
+            assert_eq!(runs.len(), 1);
+            assert_eq!((runs[0].skipped, runs[0].did[0].as_str(), runs[0].ok), (1, "Skipped: daily cap reached (2/2)", true));
+            core::save_state(&db, "r", &RoutineState { running: true, ..saved }).unwrap();
+        }
+        // The person pressed Run now: it goes ahead (here to the missing-workspace failure, no agent is started).
+        run_body(&state, &routine, None, true, &mut pushed).unwrap();
+        let db = db(&state);
+        let runs = core::load_runs(&db, "r").unwrap();
+        assert_eq!(runs.len(), 2);
+        assert!(!runs[0].ok && runs[0].skipped == 0 && runs[0].error.as_deref().is_some_and(|e| e.contains("no longer exists")));
+        assert_eq!(core::load_state(&db, "r").unwrap().starts_ms.len(), 3, "Run now is counted as a start");
     }
 
     #[test]

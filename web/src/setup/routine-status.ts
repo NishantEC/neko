@@ -20,6 +20,8 @@ export function routineStatus(view: Json): [StatusKind, string] {
     return ["backlog", `Held until ${at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}${sameDay ? "" : ` ${at.toLocaleDateString([], { weekday: "short" })}`} (${state.hold.reason || "usage limit"})`];
   }
   if (!last) return ["backlog", "Not run yet"];
+  // A guard rail stopped the run (the daily cap, the "only run when" command): not a failure, said in its own words.
+  if (last.skipped > 0) return ["backlog", String(last.did?.[0] ?? "Skipped")];
   if (!last.ok) return ["failed", "Failed"];
   return ["done", last.quiet ? "Quiet" : "Acted"];
 }
@@ -28,4 +30,10 @@ export function routineStatus(view: Json): [StatusKind, string] {
 export function itemProgress(view: Json): { done: number; total: number } {
   const items: Json[] = view?.runs?.[0]?.needs_you ?? [];
   return { done: items.filter((i) => i?.done).length, total: items.length };
+}
+
+/** How many times a guard rail skipped this routine in the last 24 hours (`state.skip_ms`). */
+export function recentSkips(state: Json, now: number): number {
+  const times: number[] = state?.skip_ms ?? [];
+  return times.filter((t) => typeof t === "number" && t > now - 24 * 60 * 60 * 1000).length;
 }

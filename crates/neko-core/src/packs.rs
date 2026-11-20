@@ -1626,7 +1626,7 @@ fn steps(dbm: &Mutex<Db>, paths: &Paths, env: &Env, dir: &Path, parsed: &Parsed,
                     browser: false,
                     computer: false,
                     customized: false,
-                    catch_up: None,
+                    catch_up: None, policy: neko_protocol::routines::RoutinePolicy::for_new_custom(),
                 });
             }
         }
@@ -2482,10 +2482,20 @@ summary = ["Does fake things", "Reads fake screens"]
     }
 
     #[test]
+    fn a_pack_routine_starts_capped_at_ten_runs_a_day() {
+        let f = Fixture::new();
+        f.install().unwrap();
+        let routines = routine_store::load(&f.d()).unwrap().routines;
+        let mine: Vec<_> = routines.iter().filter(|r| r.id.starts_with("pack:fakepack:")).collect();
+        assert!(!mine.is_empty());
+        assert!(mine.iter().all(|r| r.policy.daily_cap == 10 && r.policy.run_only_when.is_empty()), "a new pack routine gets the default cap");
+    }
+
+    #[test]
     fn an_install_is_refused_when_a_routine_with_its_id_already_exists() {
         let f = Fixture::new();
         let mut store = routine_store::load(&f.d()).unwrap();
-        store.routines.push(Routine { id: "pack:fakepack:morning-check".into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: "Mine".into(), instruction: "mine".into(), cadence: Cadence::Daily { hour: 8, minute: 0 }, enabled: true, model: String::new(), paseo_schedule: None, browser: false, computer: false, customized: false, catch_up: None });
+        store.routines.push(Routine { id: "pack:fakepack:morning-check".into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: "Mine".into(), instruction: "mine".into(), cadence: Cadence::Daily { hour: 8, minute: 0 }, enabled: true, model: String::new(), paseo_schedule: None, browser: false, computer: false, customized: false, catch_up: None, policy: Default::default() });
         routine_store::save_definitions(&f.d(), &store).unwrap();
         assert!(f.install().unwrap_err().contains("already exists and is not part of this pack"));
         assert!(f.state().is_none() && !f.paths.data.join("packs/fakepack").exists() && tree_names(&f.skills_root()).is_empty());
@@ -2536,7 +2546,7 @@ summary = ["Does fake things", "Reads fake screens"]
         snapshot.mcp.connections.push(McpConnection { oauth: false, id: "keep".into(), workspace_id: String::new(), label: "Keep".into(), config: ServerConfig::Http { url: "https://example.com/mcp".into() }, enabled: true, trusted: true, has_credentials: false, tools: vec![], discovered_ms: None, error: None, source_link: None, pack: None });
         workbench::save(&f.d(), &snapshot).unwrap();
         let mut store = routine_store::load(&f.d()).unwrap();
-        store.routines.push(Routine { id: "mine".into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: "Mine".into(), instruction: "x".into(), cadence: Cadence::Daily { hour: 8, minute: 0 }, enabled: true, model: String::new(), paseo_schedule: None, browser: false, computer: false, customized: false, catch_up: None });
+        store.routines.push(Routine { id: "mine".into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: "Mine".into(), instruction: "x".into(), cadence: Cadence::Daily { hour: 8, minute: 0 }, enabled: true, model: String::new(), paseo_schedule: None, browser: false, computer: false, customized: false, catch_up: None, policy: Default::default() });
         routine_store::save_definitions(&f.d(), &store).unwrap();
 
         f.install().unwrap();

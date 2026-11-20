@@ -6,6 +6,7 @@ mod mcp_host;
 mod packs;
 mod phone;
 mod routine_care;
+mod routine_guard;
 mod routines;
 mod self_update;
 mod server;

@@ -120,7 +120,7 @@ mod tests {
     use neko_protocol::routines::{Cadence, RoutineKind};
 
     fn routine(kind: RoutineKind, catch_up: Option<bool>) -> Routine {
-        Routine { id: "r".into(), workspace_id: "w".into(), kind, name: "r".into(), instruction: "x".into(), cadence: Cadence::Every { minutes: 20, from_hour: 0, to_hour: 0 }, enabled: true, model: String::new(), paseo_schedule: None, browser: false, computer: false, customized: false, catch_up }
+        Routine { id: "r".into(), workspace_id: "w".into(), kind, name: "r".into(), instruction: "x".into(), cadence: Cadence::Every { minutes: 20, from_hour: 0, to_hour: 0 }, enabled: true, model: String::new(), paseo_schedule: None, browser: false, computer: false, customized: false, catch_up, policy: Default::default() }
     }
 
     const MIN: i64 = 60_000;

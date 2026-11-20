@@ -21,7 +21,7 @@ const MIN: i64 = 60_000;
 const HOUR: i64 = 3_600_000;
 
 fn routine(id: &str, kind: RoutineKind, name: &str, instruction: &str, cadence: Cadence, enabled: bool) -> Routine {
-    Routine { id: id.into(), workspace_id: "w1".into(), kind, name: name.into(), instruction: instruction.into(), cadence, enabled, model: String::new(), paseo_schedule: None, browser: true, computer: false, customized: false, catch_up: None }
+    Routine { id: id.into(), workspace_id: "w1".into(), kind, name: name.into(), instruction: instruction.into(), cadence, enabled, model: String::new(), paseo_schedule: None, browser: true, computer: false, customized: false, catch_up: None, policy: Default::default() }
 }
 
 fn run(id: &str, routine_id: &str, ago_min: i64, ok: bool, did: &[&str], needs: usize, error: Option<&str>) -> RoutineRun {

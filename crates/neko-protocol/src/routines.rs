@@ -55,6 +55,52 @@ pub struct Routine {
     /// `None` is the default for the kind: on for Messages and Digest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catch_up: Option<bool>,
+    /// Guard rails (and, later, the run mode). A row from before it has none: `Default`.
+    #[serde(default)]
+    pub policy: RoutinePolicy,
+}
+
+/// Whether a proactive run acts or only records what it would have done.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutineMode {
+    #[default]
+    Act,
+    Record,
+}
+
+/// `Fresh`: every run starts clean. `Standing`: a run is given a short summary of the last few.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutineThread {
+    #[default]
+    Fresh,
+    Standing,
+}
+
+/// Most runs a routine may be given in any rolling 24 hours.
+pub const MAX_DAILY_CAP: u32 = 1000;
+/// The longest `run_only_when` command, in bytes.
+pub const MAX_GATE_BYTES: usize = 1024;
+/// A routine a person creates (or a pack installs) starts with this cap; existing and seeded routines stay uncapped.
+pub const NEW_ROUTINE_DAILY_CAP: u32 = 10;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct RoutinePolicy {
+    pub mode: RoutineMode,
+    /// Runs allowed in any rolling 24 hours. 0 means no cap.
+    pub daily_cap: u32,
+    /// Shell command; exit 0 means run. Empty means none.
+    pub run_only_when: String,
+    pub thread: RoutineThread,
+}
+
+impl RoutinePolicy {
+    /// The policy of a routine created now as `Custom`: capped, no gate, a fresh thread.
+    pub fn for_new_custom() -> Self {
+        RoutinePolicy { daily_cap: NEW_ROUTINE_DAILY_CAP, ..Default::default() }
+    }
 }
 
 impl Routine {
@@ -95,6 +141,12 @@ pub struct RoutineState {
     /// picked; the run records it and clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub missed: Option<Missed>,
+    /// Start times of runs in the last 24 hours (at most 1000): what the daily cap counts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub starts_ms: Vec<i64>,
+    /// Times of runs skipped by a guard in the last 24 hours (at most 200).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skip_ms: Vec<i64>,
 }
 
 /// What today's model use cost as agents reported it, and the ceiling (`Snapshot::daily_budget_cents`).
@@ -189,9 +241,16 @@ pub struct RoutineRun {
     /// What the run cost in millionths of a US dollar, when the agent reported a price.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub cost_micro_usd: u64,
+    /// Above 0 this is a skip row (a guard stopped the run): how many skips it stands for.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub skipped: u32,
 }
 
 fn is_zero(n: &u64) -> bool {
+    *n == 0
+}
+
+fn is_zero_u32(n: &u32) -> bool {
     *n == 0
 }
 
@@ -258,6 +317,7 @@ mod tests {
             computer: true,
             customized: false,
             catch_up: None,
+            policy: RoutinePolicy::default(),
         };
         let json = serde_json::to_string(&routine).unwrap();
         assert_eq!(serde_json::from_str::<Routine>(&json).unwrap(), routine);
@@ -283,6 +343,33 @@ mod tests {
         let json = r#"{"id":"r","workspace_id":"w","kind":"Messages","name":"M","instruction":"i","cadence":{"Daily":{"hour":9,"minute":0}},"enabled":true}"#;
         let routine = serde_json::from_str::<Routine>(json).unwrap();
         assert!(routine.browser && routine.computer);
+    }
+
+    #[test]
+    fn a_stored_routine_without_a_policy_is_uncapped() {
+        let json = r#"{"id":"r","workspace_id":"w","kind":"Messages","name":"M","instruction":"i","cadence":{"Daily":{"hour":9,"minute":0}},"enabled":true}"#;
+        let routine = serde_json::from_str::<Routine>(json).unwrap();
+        assert_eq!(routine.policy, RoutinePolicy::default());
+        assert_eq!(routine.policy.daily_cap, 0);
+        assert!(routine.policy.run_only_when.is_empty() && routine.policy.thread == RoutineThread::Fresh);
+        // A policy with only some fields fills the rest.
+        let partial: Routine = serde_json::from_str(&json.replace("\"enabled\":true", "\"enabled\":true,\"policy\":{\"daily_cap\":3}")).unwrap();
+        assert_eq!(partial.policy.daily_cap, 3);
+    }
+
+    #[test]
+    fn a_new_custom_policy_is_capped_at_ten() {
+        assert_eq!(RoutinePolicy::for_new_custom().daily_cap, 10);
+    }
+
+    #[test]
+    fn guard_state_and_skip_rows_stay_out_of_old_bytes() {
+        let state = serde_json::to_string(&RoutineState::default()).unwrap();
+        assert!(!state.contains("starts_ms") && !state.contains("skip_ms"));
+        let run = serde_json::to_string(&RoutineRun::default()).unwrap();
+        assert!(!run.contains("skipped"));
+        let old: RoutineState = serde_json::from_str(r#"{"last_run_ms":null,"next_due_ms":null,"quiet_streak":0,"running":false}"#).unwrap();
+        assert!(old.starts_ms.is_empty() && old.skip_ms.is_empty());
     }
 
     #[test]

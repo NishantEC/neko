@@ -163,7 +163,7 @@ mod tests {
             // Something to say: one open item with a default.
             let routine = neko_protocol::routines::Routine {
                 id: "a".into(), workspace_id: "w".into(), kind: neko_protocol::routines::RoutineKind::Custom, name: "R".into(), instruction: String::new(),
-                cadence: neko_protocol::routines::Cadence::Daily { hour: 9, minute: 0 }, enabled: true, model: String::new(), paseo_schedule: None, browser: false, computer: false, customized: true, catch_up: None,
+                cadence: neko_protocol::routines::Cadence::Daily { hour: 9, minute: 0 }, enabled: true, model: String::new(), paseo_schedule: None, browser: false, computer: false, customized: true, catch_up: None, policy: Default::default(),
             };
             neko_core::routines::save_definitions(&db, &neko_core::routines::Store { routines: vec![routine], ..Default::default() }).unwrap();
             let seq = neko_core::routines::reserve_seq(&db, 1).unwrap();

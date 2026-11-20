@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from "@/ui/sonner";
 import { ArrowCounterClockwise, ArrowSquareOut, CaretDown, Check, Copy, Link as LinkIcon, Pause, PencilSimple, Play, Tray } from "@/ui/icons";
 import { GlyphButton, ProgressRing, StatusGlyph } from "@/ui/status-glyph";
-import { itemProgress, routineStatus } from "@/setup/routine-status";
+import { itemProgress, recentSkips, routineStatus } from "@/setup/routine-status";
 import { copyText, useContextMenu } from "@/shell/context-menu";
 import { EmptyBlock, ErrorNote, FormField, GROUP_HEADING, LoadingRows, Panel, RowAction, RowActions, Section, SetupPage, Toggle } from "@/setup/kit";
 import { fillOwner, relativeTime, useNow } from "@/setup/lib";
@@ -117,9 +117,16 @@ function RoutineEditor({ routine, onClose, send }: { routine: Json | null; onClo
   const [browser, setBrowser] = useState(true);
   const [computer, setComputer] = useState(true);
   const [catchUp, setCatchUp] = useState(false);
+  // Guard rails: the cap is typed text ("" and 0 both mean no limit) and clamped on blur.
+  const [dailyCap, setDailyCap] = useState("");
+  const [gate, setGate] = useState("");
+  const [thread, setThread] = useState("fresh");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (!routine) return;
+    setDailyCap(routine.policy?.daily_cap ? String(routine.policy.daily_cap) : "");
+    setGate(routine.policy?.run_only_when ?? "");
+    setThread(routine.policy?.thread === "standing" ? "standing" : "fresh");
     setCatchUp(routine.catch_up ?? (routine.kind === "Messages" || routine.kind === "Digest"));
     setInstruction(routine.instruction ?? "");
     setModel(routine.model ?? "");
@@ -139,7 +146,8 @@ function RoutineEditor({ routine, onClose, send }: { routine: Json | null; onClo
       ? { Every: { minutes: clampInt(minutes, 5, 720, 20), from_hour: from, to_hour: to } }
       : { Daily: { hour, minute } };
     setBusy(true);
-    const ok = await send({ SaveRoutine: { routine: { ...routine, instruction: instruction.trim(), model: model.trim(), cadence, browser, computer, catch_up: catchUp } } }, "Routine saved");
+    const policy = { mode: routine?.policy?.mode ?? "act", daily_cap: clampInt(dailyCap, 0, 1000, 0), run_only_when: gate.trim(), thread };
+    const ok = await send({ SaveRoutine: { routine: { ...routine, instruction: instruction.trim(), model: model.trim(), cadence, browser, computer, catch_up: catchUp, policy } } }, "Routine saved");
     setBusy(false);
     if (ok) onClose();
   };
@@ -191,6 +199,20 @@ function RoutineEditor({ routine, onClose, send }: { routine: Json | null; onClo
                 <p className="text-[13px] text-muted-foreground">If Neko or the Mac was off across one or more of this routine’s times, run it once when it is back and say how many it missed. Off: skip them and wait for the next time.</p>
               </div>
               <Toggle checked={catchUp} label="Catch up after downtime" onChange={setCatchUp} />
+            </div>
+            <div className="flex flex-col gap-4" role="group" aria-labelledby="rt-guard-heading">
+              <p id="rt-guard-heading" className="text-sm font-medium text-foreground">Guard rails</p>
+              <FormField label="Runs per day" htmlFor="rt-cap" hint="At most this many runs in any 24 hours. Leave empty or 0 for no limit.">
+                <Input id="rt-cap" inputMode="numeric" value={dailyCap} placeholder="10" onChange={(e) => setDailyCap(e.target.value)} onBlur={() => setDailyCap(dailyCap.trim() === "" ? "" : String(clampInt(dailyCap, 0, 1000, 0)))} />
+              </FormField>
+              <FormField label="Only run when" htmlFor="rt-gate" hint="A shell command that runs in the workspace folder with no network access. The routine runs only if it exits 0. It gets 10 seconds.">
+                <Input id="rt-gate" className="font-mono" value={gate} placeholder="test -f NEEDS_REVIEW" spellCheck={false} autoCapitalize="off" autoCorrect="off" onChange={(e) => setGate(e.target.value)} />
+              </FormField>
+              <SegmentedControl value={thread} onValueChange={(v) => v && setThread(v)} aria-label="Conversation">
+                <SegmentedControlItem value="fresh">Fresh each run</SegmentedControlItem>
+                <SegmentedControlItem value="standing">Keep one thread</SegmentedControlItem>
+              </SegmentedControl>
+              <p className="-mt-2 text-[13px] text-muted-foreground">Keep one thread gives each run a short summary of the last five runs of this routine.</p>
             </div>
             <FormField label="Model" htmlFor="rt-model" hint="A Claude Code model alias such as sonnet or opus. Empty means sonnet.">
               <Input id="rt-model" value={model} onChange={(e) => setModel(e.target.value)} placeholder="sonnet" />
@@ -254,6 +276,7 @@ function RoutineRow({ view, now, send, onEdit }: { view: Json; now: number; send
     "separator",
     { label: "Copy name", icon: Copy, run: () => void copyText(String(routine.name ?? ""), "Copied the name") },
   ]);
+  const skips = recentSkips(state, now);
   const due = state.next_due_ms;
   const next = state.running || queued || !routine.enabled ? null
     : !due || due <= now ? "due now"
@@ -290,6 +313,7 @@ function RoutineRow({ view, now, send, onEdit }: { view: Json; now: number; send
           {last.note || `Last run used ${last.runtime === "codex" ? "Codex" : last.runtime}.`}
         </p>
       ) : null}
+      {skips ? <p data-slot="routine-skips" className="truncate text-[12.5px] text-muted-foreground">Skipped {skips === 1 ? "once" : `${skips} times`} in the last 24 hours</p> : null}
       {state.note ? <p className="truncate text-[12.5px] text-muted-foreground" title={state.note}>{state.note}</p> : null}
     </div>
   );
