@@ -284,6 +284,7 @@ impl Call {
                 max_turns: None,
                 ticket_id: Some(ticket_id),
                 conversation_id: None,
+                default_after_hours: None,
             })),
             Call::Undo { task_id, run, through_later, snapshot_unsaved, revert } => {
                 Request::Workbench(Command::Checkpoints(CheckpointCommand::Undo { task_id, run, through_later, snapshot_unsaved, revert }))

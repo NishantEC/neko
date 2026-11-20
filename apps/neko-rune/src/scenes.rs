@@ -622,7 +622,7 @@ pub const SCENES: &[Scene] = &[
         let mut m = demo_full("t0");
         if let Some(g) = m.goals.first_mut() {
             g.status = GoalStatus::Blocked;
-            g.blocked = Some(Blocked { question: "Should the retry also cover timeouts?".into(), default_answer: "Yes, three tries".into(), inbox_seq: None });
+            g.blocked = Some(Blocked { question: "Should the retry also cover timeouts?".into(), default_answer: "Yes, three tries".into(), inbox_seq: None, ..Default::default() });
         }
         s.apply_link(LinkEvent::Live(m));
         s.open_task("t6");
@@ -630,7 +630,7 @@ pub const SCENES: &[Scene] = &[
             let mut m = demo_full("t6");
             if let Some(g) = m.goals.first_mut() {
                 g.status = GoalStatus::Blocked;
-                g.blocked = Some(Blocked { question: "Should the retry also cover timeouts?".into(), default_answer: "Yes, three tries".into(), inbox_seq: None });
+                g.blocked = Some(Blocked { question: "Should the retry also cover timeouts?".into(), default_answer: "Yes, three tries".into(), inbox_seq: None, ..Default::default() });
             }
             m
         }));
