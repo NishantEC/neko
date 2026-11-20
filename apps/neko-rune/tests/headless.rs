@@ -83,16 +83,16 @@ fn texts(tree: &serde_json::Value) -> Vec<String> {
 
 #[test]
 fn the_shell_snaps_in_light_and_dark_with_the_neko_surfaces() {
-    // The sessions and Neko columns are the sidebar surface, the window background plus 2% lightness
-    // (#1b1b1b dark, #ffffff light: polish spec §4); the session is the window surface (#161616,
-    // #ffffff); the context panel is the card surface (#1b1b1b, #ffffff). The values follow the design system of 2026-11.
-    let cases = [("dark", [0x1b, 0x1b, 0x1b], [0x16, 0x16, 0x16], [0x1b, 0x1b, 0x1b]), ("light", [0xff, 0xff, 0xff], [0xff, 0xff, 0xff], [0xff, 0xff, 0xff])];
+    // The window is the chrome the panels float on, the web's `--sidebar` (#111111 dark, #fafafa light), and so are the margins beside the
+    // sessions panel and the Neko column's flat ground; the session is the window surface (#161616, #ffffff); the context panel is the card
+    // surface (#1b1b1b, #ffffff). The values follow the design system of 2026-11.
+    let cases = [("dark", [0x11, 0x11, 0x11], [0x16, 0x16, 0x16], [0x1b, 0x1b, 0x1b]), ("light", [0xfa, 0xfa, 0xfa], [0xff, 0xff, 0xff], [0xff, 0xff, 0xff])];
     for (theme, column, session, card) in cases {
         let image = Image::read(&snap("live", theme));
         assert_eq!((image.width, image.height), (SIZE.0 * SCALE, SIZE.1 * SCALE), "{theme}");
         let t = tree("live", theme);
         let r = rect_of(&t, "session-region");
-        assert!(near(image.at(3.0, 400.0), column), "{theme}: the sessions column edge is {column:?}, got {:?}", image.at(3.0, 400.0));
+        assert!(near(image.at(2.0, 2.0), column), "{theme}: the sessions column edge is {column:?}, got {:?}", image.at(2.0, 2.0));
         assert!(near(image.at(r[0] + r[2] / 2.0, r[1] + 200.0), session), "{theme}: the session is {session:?}, got {:?}", image.at(r[0] + r[2] / 2.0, r[1] + 200.0));
         let n = rect_of(&t, "neko");
         assert!(near(image.at(n[0] + n[2] - 3.0, 400.0), column), "{theme}: the Neko column is {column:?}");

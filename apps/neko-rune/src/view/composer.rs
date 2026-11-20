@@ -12,7 +12,7 @@ use crate::icons;
 use crate::theme::Neko;
 
 /// The card's radius.
-pub const RADIUS: f32 = 16.0;
+pub const RADIUS: f32 = 28.0;
 /// The text area's fewest lines.
 pub const MIN_LINES: usize = 3;
 
@@ -35,7 +35,14 @@ pub fn card_on(t: &Neko, key: &str, glass: Option<(crate::glass::Mode, bool)>, f
     }
     let card = col().key(key.to_owned()).w_full().padding(16.0).gap(12.0).radius(RADIUS);
     match glass {
-        None => card.fill(t.text.base.alpha(0.04)).border(1.0, t.surface.field_border).child(field).child(bar.child(send)),
+        // Glass over the page, the floating drop shadow, no border (design system 4.9).
+        None => card
+            .fill(t.surface.window)
+            .gradient(t.mat.glass_top, t.mat.glass_bottom)
+            .box_shadow(rune::Shadow { y: 24.0, blur: 60.0, spread: -18.0, color: t.mat.drop_far, ..rune::Shadow::default() })
+            .shadow(2.0, 6.0, t.mat.drop_near)
+            .child(field)
+            .child(bar.child(send)),
         Some((_, true)) => card.child(field).child(bar.child(send)),
         Some((mode, false)) => {
             let layer = if mode == crate::glass::Mode::Blur { crate::glass::CARD_GLASS } else { crate::glass::CARD_OPAQUE };
@@ -120,9 +127,9 @@ pub fn with_chips(s: &App, t: &Neko, dest: Dest, field: El) -> El {
     }
 }
 
-/// One half of a two-way control (Ask/Plan, Plan/Build).
+/// One half of a two-way control (Ask/Plan, Plan/Build): the open one is a pebble.
 pub fn seg(t: &Neko, key: &str, label: &str, aria: &str, help: &str, on: bool, f: impl Fn(&mut App) + 'static) -> El {
-    row()
+    let r = row()
         .key(key.to_owned())
         .role("button")
         .label(aria.to_owned())
@@ -130,43 +137,42 @@ pub fn seg(t: &Neko, key: &str, label: &str, aria: &str, help: &str, on: bool, f
         .checked(on)
         .focusable(true)
         .h(26.0)
-        .px(10.0)
+        .px(12.0)
         .center()
-        .radius(t.radius.control - 2.0)
-        .fill(if on { t.surface.active } else { Color::TRANSPARENT })
-        .hover(t.surface.hover)
+        .radius(13.0)
+        .hover(if on { Color::TRANSPARENT } else { t.surface.hover })
         .focus_ring(2.0, 2.0, t.surface.ring)
-        .on_press(f)
-        .child(text(label.to_owned()).font(TextStyle { weight: if on { 500.0 } else { 400.0 }, ..t.ty.meta }).color(if on { t.text.base } else { t.text.muted }).a11y_hidden())
+        .on_press(f);
+    let r = if on { super::webkit::pebble(t, r) } else { r };
+    r.child(text(label.to_owned()).font(TextStyle { weight: 500.0, ..t.ty.meta }).color(if on { t.mat.pebble_fg } else { t.text.muted }).a11y_hidden())
 }
 
-/// The frame of a two-way control.
+/// The frame of a two-way control: a well.
 pub fn segmented(t: &Neko, key: &str, aria: &str, a: El, b: El) -> El {
-    row().key(key.to_owned()).role("group").label(aria.to_owned()).h(32.0).padding(3.0).gap(2.0).center_y().radius(t.radius.control + 2.0).border(1.0, t.surface.field_border).child(a).child(b)
+    super::webkit::well(t, row().key(key.to_owned()).role("group").label(aria.to_owned()).h(32.0).padding(3.0).gap(2.0).center_y().radius(16.0)).child(a).child(b)
 }
 
-/// The Send button: a 32 point circle, Iris with a white arrow when there is something to send, the foreground at 10%
-/// with a muted arrow when there is not. A press with nothing to send does nothing, unless `press_anyway` (Home's Start,
-/// which says what is missing).
+/// The Send button: a 36 point circle, the ink with its arrow when there is something to send, a pebble with a muted arrow when there is
+/// not. A press with nothing to send does nothing, unless `press_anyway` (Home's Start, which says what is missing).
 pub fn send(t: &Neko, key: &str, label: &str, help: &str, can: bool, press_anyway: bool, f: impl Fn(&mut App) + 'static) -> El {
-    row()
+    let r = row()
         .key(key.to_owned())
         .role("button")
         .label(label.to_owned())
         .help(help.to_owned())
         .focusable(true)
-        .size(32.0, 32.0)
+        .size(36.0, 36.0)
         .center()
-        .radius(16.0)
-        .fill(if can { t.meaning.iris } else { t.text.base.alpha(0.10) })
-        .hover(Color::WHITE.alpha(if can { 0.14 } else { 0.0 }))
+        .radius(18.0)
         .focus_ring(2.0, 2.0, t.surface.ring)
+        .press_scale(0.97)
         .on_press(move |s: &mut App| {
             if can || press_anyway {
                 f(s);
             }
-        })
-        .child(icon(&icons::ARROW_UP, 16.0).color(if can { Color::WHITE } else { t.text.muted }).a11y_hidden())
+        });
+    let r = if can { super::webkit::ink(t, r) } else { super::webkit::pebble(t, r) };
+    r.child(icon(&icons::ARROW_UP, 16.0).color(if can { t.mat.ink_fg } else { t.text.muted }).a11y_hidden())
 }
 
 /// The text area every composer shares: Rune's own multi-line text input (the input method composes in place, an image

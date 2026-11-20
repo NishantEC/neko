@@ -64,6 +64,9 @@ pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
         .mx(2.0)
         .radius(t.radius.window)
         .fill(t.surface.window)
+        // The floating content panel's soft shadow (`shadow-sm`: `0 2 3 /.02, 0 12 32 -16 /.12`).
+        .shadow(2.0, 3.0, rune::Color::BLACK.alpha(0.02))
+        .box_shadow(rune::Shadow { y: 12.0, blur: 32.0, spread: -16.0, color: rune::Color::BLACK.alpha(0.12), ..rune::Shadow::default() })
         // Files dropped anywhere on the region are attached to the open session's reply box (or Home's new-session box).
         .on_drop_files(|s: &mut App, files: &[std::path::PathBuf], _| s.drop_files(files))
         .on_drop_hover(|s: &mut App, over: bool, _| s.compose.drop_over = over)
@@ -311,6 +314,8 @@ fn plugin_page(s: &App, page: &neko_protocol::PluginPage, t: &Neko) -> El {
 
 /// A full view: its own page (Calendar, Routines, Settings, Usage, Workspaces, Plugins).
 fn full_view(s: &App, view: FullView, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
+    // The web's viewport for every page: its `md:` and `sm:` breakpoints read the width of the region.
+    super::webkit::set_page_width(frame.region_w);
     match view {
         FullView::Calendar => super::calendar::view(s, t, layer),
         FullView::Routines => super::routines::view(s, t, layer),

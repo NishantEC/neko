@@ -635,10 +635,10 @@ fn the_right_click_menu_on_selected_text_asks_neko_or_searches() {
 }
 
 #[test]
-fn the_workspace_switcher_is_a_32_point_row_under_the_search_that_scopes_the_list_and_home() {
+fn the_workspace_switcher_is_a_36_point_row_under_the_search_that_scopes_the_list_and_home() {
     let mut rt = runtime(scene("live"));
     let (search, scope) = (rect(&rt, "sessions-search"), rect(&rt, "scope"));
-    assert_eq!(scope[3], 32.0);
+    assert_eq!(scope[3], 36.0);
     assert!(scope[1] >= search[1] + search[3] - 0.5 && scope[1] - (search[1] + search[3]) <= 9.0, "right under the search field: {search:?} {scope:?}");
     assert!(has_text(&rt, "All workspaces"));
     let before = rt.state.group_count(neko_rune::groups::Group::NeedsYou);
@@ -937,7 +937,7 @@ fn an_event_opens_a_popover_with_join_meeting_for_a_meeting_link_and_open_link_f
     click(&mut rt, "event-a");
     assert!(has_key(&rt, "cal-selected"));
     assert!(has_text(&rt, "Standup") && has_text(&rt, "Room 4") && has_text(&rt, "Join meeting"), "{:?}", texts(&rt));
-    assert_eq!(fill_of(&rt, "cal-event-link"), neko_rune::theme::theme(true).meaning.iris.hex(), "Join meeting is the primary button");
+    assert_eq!(fill_of(&rt, "cal-event-link"), neko_rune::theme::theme(true).mat.ink_bottom.hex(), "Join meeting is the primary button (the ink)");
     click(&mut rt, "cal-event-link");
     assert!(!has_key(&rt, "cal-selected"), "opening the link puts the popover away");
     click(&mut rt, "event-b");

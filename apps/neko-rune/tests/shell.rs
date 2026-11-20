@@ -90,10 +90,14 @@ fn a_row_is_one_line_with_an_icon_a_title_and_quiet_meta() {
     assert!(t.iter().any(|x| x == "Add a retry to the sync job"));
     assert!(t.iter().any(|x| x.ends_with('m')), "a needs-you row's meta is its age, in minutes");
     assert!(t.iter().any(|x| x == "2/7") && t.iter().any(|x| x == "3/7"), "a running row with a fraction says n/m: {t:?}");
-    for key in ["session-t0", "session-t6", "group-0", "group-1", "group-2", "new-session", "view-inbox", "sessions-search"] {
-        assert_eq!(rect(&rt, key)[3], 32.0, "{key} is one 32 point row");
+    for key in ["session-t0", "session-t6", "view-inbox", "sessions-search"] {
+        assert_eq!(rect(&rt, key)[3], 36.0, "{key} is one 36 point pill row");
     }
-    assert_eq!(rect(&rt, "sessions-footer")[3], 40.0, "the footer is 40");
+    for key in ["group-0", "group-1", "group-2"] {
+        assert_eq!(rect(&rt, key)[3], 28.0, "{key} is a 28 point group label");
+    }
+    assert_eq!(rect(&rt, "new-session")[3], 40.0, "New session is the 40 point pebble");
+    assert_eq!(rect(&rt, "sessions-footer")[3], 44.0, "the footer is 44");
 }
 
 #[test]
@@ -337,9 +341,9 @@ fn every_scene_lays_out_in_both_appearances() {
 fn light_and_dark_follow_the_system() {
     let fill = |rt: &Runtime<App>, key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).map(|e| e.fill.hex()).unwrap();
     let (dark, light) = (runtime(true, |_| {}), runtime(false, |_| {}));
-    // The window is the sidebar: the background plus 2% lightness (polish spec §4).
-    assert_eq!(fill(&dark, "window"), "#1b1b1bff");
-    assert_eq!(fill(&light, "window"), "#ffffffff");
+    // The window is the chrome the panels float on: the web's `--sidebar` (design system 2026-11).
+    assert_eq!(fill(&dark, "window"), "#111111ff");
+    assert_eq!(fill(&light, "window"), "#fafafaff");
     assert_eq!(fill(&dark, "session-region"), "#161616ff");
     assert_eq!(fill(&light, "session-region"), "#ffffffff");
 }

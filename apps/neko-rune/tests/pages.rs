@@ -82,9 +82,9 @@ fn routines_is_the_webs_inbox_with_its_sections_in_order_and_each_routine_one_li
     assert!(t.contains(&"Needs you".to_owned()));
     assert!(y("needs-you") < y("routines-group-w1") && y("routines-group-w1") < y("routines-group-w2"), "Needs you above each scope, in the order the scopes come");
     assert!(texts(&rt).contains(&"Neko".to_owned()) && rt.find("routine-scope-r1").is_none());
-    // A routine is one 28 point line: name, status in the one language, when it runs, then the 36 x 22 switch.
+    // A routine is one 28 point line: name, status in the one language, when it runs, then the 46 x 28 switch.
     let sw = rect(&rt, "routine-switch-r1");
-    assert_eq!((sw[2], sw[3]), (36.0, 22.0), "the web's switch");
+    assert_eq!((sw[2], sw[3]), (46.0, 28.0), "the web's switch");
     let facts = rect(&rt, "routine-facts-r1");
     assert!(facts[0] + facts[2] <= sw[0], "when it runs sits before the switch: {facts:?} {sw:?}");
     let facts_of = |id: &str| text_of(&rt, &format!("routine-facts-{id}")).unwrap_or_default();
@@ -484,7 +484,7 @@ fn settings_at_a_narrow_width_narrows_the_rail_and_keeps_inputs_inside() {
     let (field, region) = (rect(&rt, "dev-checkout"), rect(&rt, "session-region"));
     assert!(field[0] >= region[0] && field[0] + field[2] <= region[0] + region[2], "the field stays inside the page: {field:?} in {region:?}");
     let wide = runtime_at((1600.0, 900.0), "settings");
-    assert_eq!(rect(&wide, "settings-rail")[2], 241.0);
+    assert_eq!(rect(&wide, "settings-rail")[2], 248.0);
 }
 
 #[test]

@@ -303,14 +303,14 @@ fn nav_label_row(label: &str, key: &str, active: bool, t: &Neko) -> El {
         .label(label)
         .focusable(true)
         .w_full()
-        .h(32.0)
-        .px(10.0)
+        .h(36.0)
+        .px(12.0)
         .center_y()
         .radius(t.radius.row)
         .fill(if active { t.surface.selected } else { rune::Color::TRANSPARENT })
         .hover(t.surface.hover)
         .focus_ring(2.0, 2.0, t.kit.c.border_focus)
-        .child(text(label.to_owned()).font(t.ty.row).color(if active { t.text.base } else { t.text.muted }).truncate().a11y_hidden())
+        .child(text(label.to_owned()).font(webkit::font(t, 14.0, 400.0, 20.0)).color(if active { t.text.base } else { t.text.base.alpha(0.75) }).truncate().a11y_hidden())
 }
 
 /// A secondary action: text on the soft fill under the pointer (the web's outline and ghost buttons).
@@ -373,22 +373,10 @@ fn page_button(label: &str, key: &str, t: &Neko, on_press: impl Fn(&mut App) + '
         .child(text(label.to_owned()).font(rune::TextStyle { weight: 500.0, ..t.ty.brand }).color(rune::Color::WHITE).a11y_hidden())
 }
 
-/// The one primary action on a view: Iris, the colour of "do this".
+/// The one primary action on a view: the ink, near white in dark and near black in light (design system 4.1).
 fn primary_button(label: &str, key: &str, t: &Neko, on_press: impl Fn(&mut App) + 'static) -> El {
-    row()
-        .key(key.to_owned())
-        .role("button")
-        .label(label)
-        .focusable(true)
-        .h(28.0)
-        .px(12.0)
-        .radius(t.radius.control)
-        .center()
-        .fill(t.meaning.iris)
-        .hover(rune::Color::WHITE.alpha(0.14))
-        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
-        .on_press(on_press)
-        .child(text(label.to_owned()).font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(rune::Color::WHITE).a11y_hidden())
+    let r = row().key(key.to_owned()).role("button").label(label).focusable(true).h(28.0).px(12.0).radius(14.0).center().focus_ring(2.0, 2.0, t.kit.c.border_focus).press_scale(0.97).on_press(on_press);
+    webkit::ink(t, r).child(text(label.to_owned()).font(rune::TextStyle { weight: 500.0, ..t.ty.row }).color(t.mat.ink_fg).a11y_hidden())
 }
 
 /// The centred, quiet line a region shows while it has nothing yet.

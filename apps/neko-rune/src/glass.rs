@@ -17,7 +17,7 @@ use crate::theme::Neko;
 /// The blur's standard deviation in logical points (Rune scales it by the window's scale).
 pub const SIGMA: f32 = 20.0;
 /// The composer card's corner radius; the floating button's.
-pub const CARD_RADIUS: f32 = 16.0;
+pub const CARD_RADIUS: f32 = 28.0;
 pub const BUTTON_RADIUS: f32 = 8.0;
 /// The tint over the blur: the window's colour at this strength, dark and light.
 pub const TINT_DARK: f32 = 0.55;
@@ -101,7 +101,8 @@ pub fn text_shadow(t: &Neko) -> Color {
 /// The backing of a glass surface: an element that fills its parent, blurs what is behind it (or is opaque), tints it,
 /// and carries the 1 px border and the inner top highlight. Put it first in the parent, so what follows draws above it.
 pub fn backing(t: &Neko, mode: Mode, radius: f32, key: &str, with_highlight: bool) -> El {
-    let mut layer = el().key(key.to_owned()).pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).radius(radius).border(1.0, border(t)).a11y_hidden();
+    // No border (design system 4.9): the glass is shaped by its radius and the drop shadow of the card.
+    let mut layer = el().key(key.to_owned()).pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).radius(radius).a11y_hidden();
     layer = match mode {
         Mode::Blur => layer.backdrop_blur(SIGMA).fill(tint(t)),
         Mode::Opaque => layer.fill(opaque_fill(t)),

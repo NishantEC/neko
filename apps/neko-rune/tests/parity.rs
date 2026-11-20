@@ -87,7 +87,7 @@ fn fill_of(rt: &Runtime<App>, key: &str) -> String {
 
 #[test]
 fn the_composer_is_one_card_in_the_session_the_neko_column_and_home() {
-    let iris = neko_rune::theme::theme(true).meaning.iris.hex();
+    let iris = neko_rune::theme::theme(true).mat.ink_bottom.hex(); // Send is the ink when there is something to send
     // The session: inside the 760 column, centred, three lines of text and a bar, a 32 point round Send.
     let mut rt = runtime_sized(scene("live"), (1900.0, 900.0));
     let (region, card) = (rect(&rt, "session-region"), rect(&rt, "composer-card"));
@@ -96,12 +96,12 @@ fn the_composer_is_one_card_in_the_session_the_neko_column_and_home() {
     assert!(card[3] >= 3.0 * 17.0 + 32.0 + 32.0, "three lines and a bar: {card:?}");
     for key in ["send", "ask-send"] {
         let r = rect(&rt, key);
-        assert_eq!((r[2], r[3]), (32.0, 32.0), "{key}: {r:?}");
+        assert_eq!((r[2], r[3]), (36.0, 36.0), "{key}: {r:?}");
     }
-    assert_ne!(fill_of(&rt, "send"), iris, "no text: the foreground at 10%");
+    assert_ne!(fill_of(&rt, "send"), iris, "no text: a pebble");
     rt.update(|s, _| s.composer.replace_text("use three tries"));
     settle(&mut rt);
-    assert_eq!(fill_of(&rt, "send"), iris, "text: filled Iris");
+    assert_eq!(fill_of(&rt, "send"), iris, "text: the ink");
     // Neko's ask box: the same card, with Ask / Plan, a model chip and "+".
     for key in ["ask-card", "ask-mode", "ask-model", "ask-attach"] {
         assert!(has_key(&rt, key), "{key}");

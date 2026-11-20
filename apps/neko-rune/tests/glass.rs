@@ -43,7 +43,7 @@ fn home_draws_the_card_on_glass_with_its_words_above_it() {
         let glass = index(&els, "composer-glass").unwrap_or_else(|| panic!("no composer-glass, dark={dark}"));
         assert!(index(&els, "composer-opaque").is_none());
         let g = &els[glass];
-        assert_eq!(g.radius, 16.0, "radius 16");
+        assert_eq!(g.radius, 28.0, "radius 28");
         assert_eq!(g.fill.a, if dark { 0.55 } else { 0.60 }, "the tint's strength, dark={dark}");
         let card = els.iter().find(|e| e.key.as_deref() == Some("home-composer")).expect("the card");
         assert_eq!(g.rect, card.rect, "the glass is the card's own rect");
@@ -85,7 +85,7 @@ fn reduce_transparency_draws_the_opaque_card() {
         assert_eq!(o.fill.a, 1.0, "opaque");
         let want = t.surface.window.mix(t.text.base, 0.04);
         assert!((o.fill.r - want.r).abs() < 0.002 && (o.fill.g - want.g).abs() < 0.002 && (o.fill.b - want.b).abs() < 0.002, "the window's colour with the foreground at 4%");
-        assert_eq!(o.radius, 16.0);
+        assert_eq!(o.radius, 28.0);
     }
 }
 

@@ -70,34 +70,36 @@ fn the_traffic_lights_line_up_with_the_headers_and_the_header_words_start_after_
 // ---------------------------------------------------------------- the sessions column (§1)
 
 #[test]
-fn the_sessions_column_is_248_wide_with_12_of_padding_and_32_point_rows_on_an_8_gap() {
+fn the_sessions_column_is_248_wide_with_12_of_padding_and_36_point_pill_rows() {
     let rt = runtime(true, live);
     let col = rect(&rt, "sessions");
     assert_eq!(col[2], 248.0);
+    // The column is a panel inset 8 from the window on its top, bottom and left (design system 4.6).
+    assert_eq!((col[0], col[1]), (8.0, 8.0), "the panel floats 8 in from the window");
     for key in ["sessions-search", "new-session", "view-inbox", "view-calendar", "view-prs", "view-setup", "session-t0", "session-t6"] {
         let r = rect(&rt, key);
-        assert_eq!(r[3], 32.0, "{key} is 32 high");
+        assert_eq!(r[3], if key == "new-session" { 40.0 } else { 36.0 }, "{key}: New session is the 40 high pebble, every other row a 36 high pill");
         assert_eq!(r[0], col[0] + 12.0, "{key} is 12 in from the column's left");
         assert_eq!(r[2], 248.0 - 24.0, "{key} fills the column inside its 12 point padding");
     }
-    // Top to bottom: header 32, gap 8, search 32 with the workspace switcher (32) flush under it, gap 8, New session 32, four nav rows of 32 (Routines, Calendar, Pull requests, Setup).
+    // Top to bottom: header 32, gap 8, search 36 with the workspace switcher (36) flush under it, gap 8, New session 40, four nav rows of 36 four apart (Routines, Calendar, Pull requests, Setup).
     let (header, search, new, routines, calendar, prs, workspaces) = (rect(&rt, "sessions-header"), rect(&rt, "sessions-search"), rect(&rt, "new-session"), rect(&rt, "view-inbox"), rect(&rt, "view-calendar"), rect(&rt, "view-prs"), rect(&rt, "view-setup"));
     assert_eq!(search[1], header[1] + header[3] + 8.0);
     let scope = rect(&rt, "scope");
-    assert_eq!((scope[1], scope[3]), (search[1] + search[3], 32.0), "the switcher is a 32 point row right under the search field");
+    assert_eq!((scope[1], scope[3]), (search[1] + search[3], 36.0), "the switcher is a 36 point row right under the search field");
     assert_eq!(new[1], scope[1] + scope[3] + 8.0);
-    assert_eq!(routines[1], new[1] + new[3]);
-    assert_eq!(calendar[1], routines[1] + routines[3]);
-    assert_eq!(prs[1], calendar[1] + calendar[3]);
-    assert_eq!(workspaces[1], prs[1] + prs[3]);
-    // The list's sections are 8 apart, each header 32 tall.
+    assert_eq!(routines[1], new[1] + new[3] + 4.0);
+    assert_eq!(calendar[1], routines[1] + routines[3] + 4.0);
+    assert_eq!(prs[1], calendar[1] + calendar[3] + 4.0);
+    assert_eq!(workspaces[1], prs[1] + prs[3] + 4.0);
+    // The list's sections are 8 apart, each header 28 tall.
     let (needs, running) = (rect(&rt, "section-0"), rect(&rt, "section-1"));
-    assert_eq!(rect(&rt, "group-0")[3], 32.0);
+    assert_eq!(rect(&rt, "group-0")[3], 28.0);
     assert_eq!(running[1], needs[1] + needs[3] + 8.0);
-    // The footer: 40 tall, the column's last block, 12 up from the bottom.
+    // The footer: 44 tall, the panel's last block, 12 up from its bottom (8 above the window's).
     let footer = rect(&rt, "sessions-footer");
-    assert_eq!(footer[3], 40.0);
-    assert_eq!(footer[1] + footer[3], WINDOW.1 - 12.0);
+    assert_eq!(footer[3], 44.0);
+    assert_eq!(footer[1] + footer[3], WINDOW.1 - 8.0 - 12.0);
 }
 
 #[test]
@@ -198,7 +200,8 @@ fn home_is_a_680_column_with_the_greeting_a_status_line_and_the_composer() {
     assert!(xs.windows(2).all(|w| w[0] < w[1]), "attach, workspace, runtime, plan/build, model, send in that order: {xs:?}");
     for key in ["new-attach", "new-start"] {
         let r = rect(&rt, key);
-        assert_eq!((r[2], r[3]), (32.0, 32.0), "{key} is a 32 point square");
+        let side = if key == "new-start" { 36.0 } else { 32.0 };
+        assert_eq!((r[2], r[3]), (side, side), "{key} is a {side} point square (Send is the 36 point ink)");
     }
     assert!(rect(&rt, "new-request-box")[3] >= 3.0 * 17.0, "three lines at least");
     // "3 running" and "6 need you" filter the sessions column.
@@ -220,19 +223,19 @@ fn home_says_nothing_running_when_both_counts_are_zero_and_the_window_opens_on_i
 }
 
 #[test]
-fn the_send_button_is_iris_only_when_there_is_text() {
+fn the_send_button_is_ink_only_when_there_is_text() {
     let mut rt = runtime(true, |s| {
         live(s);
         s.open_new();
     });
     let fill = |rt: &Runtime<App>| rt.elements().into_iter().find(|e| e.key.as_deref() == Some("new-start")).map(|e| e.fill).unwrap();
-    let iris = neko_rune::theme::theme(true).meaning.iris;
-    assert_ne!(fill(&rt).hex(), iris.hex(), "no text: the foreground at 10%");
+    let mat = neko_rune::theme::theme(true).mat;
+    assert_eq!(fill(&rt).hex(), mat.pebble_bottom.hex(), "no text: a pebble");
     rt.update(|s, _| s.new_request.replace_text("Make the sync job retry"));
     for _ in 0..60 {
         rt.frame(1.0 / 60.0);
     }
-    assert_eq!(fill(&rt).hex(), iris.hex(), "text: filled Iris");
+    assert_eq!(fill(&rt).hex(), mat.ink_bottom.hex(), "text: the ink");
 }
 
 // ---------------------------------------------------------------- Neko's chat (§0)

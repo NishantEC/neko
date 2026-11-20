@@ -9,7 +9,7 @@
 //! foreground at 4%, the open row 7%. Colour appears only in the Needs you and Running icons.
 
 use neko_protocol::workbench::TaskStatus;
-use rune::{Color, El, LoopSpec, ScrollSpec, TextStyle, col, el, icon, row, text};
+use rune::{Color, El, LoopSpec, ScrollSpec, Shadow, TextStyle, col, el, icon, row, text};
 use rune_kit::{Menu, MenuItem, Placement, context_menu};
 
 use crate::app::App;
@@ -23,19 +23,24 @@ use crate::views::FullView;
 pub const PAD: f32 = 12.0;
 pub const GAP: f32 = 8.0;
 /// Every row, header rows included.
-pub const ROW_H: f32 = 32.0;
-/// The footer.
-pub const FOOTER_H: f32 = 40.0;
+pub const ROW_H: f32 = 36.0;
+/// The footer: the account row, 44 high at radius 22.
+pub const FOOTER_H: f32 = 44.0;
+/// The panel's inset from the window (top, bottom, left) and its corner radius (design system 4.6).
+pub const INSET: f32 = 8.0;
+pub const PANEL_RADIUS: f32 = 22.0;
 /// Where the header's words start, from the window's left edge: after the traffic lights.
 pub const HEADER_INSET: f32 = 80.0;
 
 pub fn column(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
-    let mut c = col().w_full().h_full().min_w(0.0).padding(PAD).gap(GAP);
+    // A glass panel inset 8 from the window on frosted chrome (the window's own fill): tint, 22 radius and the floating drop shadow, no border.
+    // The header keeps its centre on the traffic lights (28 from the window's top), so the panel's top padding is 4.
+    let mut c = col().w_full().min_w(0.0).ml(INSET).my(INSET).pt(4.0).px(PAD).pb(PAD).gap(GAP).radius(PANEL_RADIUS).fill(t.surface.sidebar).linear_gradient(std::f32::consts::PI, [(0.0, t.mat.panel_top), (0.55, t.mat.panel_mid), (1.0, t.mat.panel_bottom)]).box_shadow(Shadow { y: 24.0, blur: 60.0, spread: -18.0, color: t.mat.drop_far, ..Shadow::default() }).shadow(2.0, 6.0, t.mat.drop_near);
     c = c.child(header(s, t));
     // The search field and, flush under it, the workspace switcher (a 32 point row): one block, then the 8 point gap.
     c = c.child(col().key("sessions-find").w_full().child(search(t)).child(scope_row(s, t, layer)));
     // The fixed block: New session and the nav rows stay pinned above the scrolling list.
-    let mut fixed = col().w_full().gap(0.0).child(new_row(s, t));
+    let mut fixed = col().w_full().gap(4.0).child(new_row(s, t));
     for view in FullView::NAV {
         fixed = fixed.child(nav_row(s, view, t));
     }
@@ -50,8 +55,8 @@ fn header(_s: &App, t: &Neko) -> El {
     row()
         .key("sessions-header")
         .w_full()
-        .h(ROW_H)
-        .pl(HEADER_INSET - PAD)
+        .h(super::HEADER_H)
+        .pl(HEADER_INSET - PAD - INSET)
         .gap(8.0)
         .center_y()
         .window_drag()
@@ -75,17 +80,16 @@ fn search(t: &Neko) -> El {
         .focusable(true)
         .w_full()
         .h(ROW_H)
-        .px(8.0)
-        .gap(8.0)
+        .px(12.0)
+        .gap(12.0)
         .center_y()
         .radius(t.radius.row)
-        .border(1.0, t.surface.field_border)
         .hover(t.surface.hover)
         .focus_ring(2.0, 2.0, t.surface.ring)
         .on_press(|s: &mut App| s.palette_toggle())
-        .child(icon(&icons::SEARCH, 16.0).color(t.text.muted).a11y_hidden())
-        .child(text("Search sessions").font(t.ty.row).color(t.text.faint).truncate().grow(1.0).min_w(0.0).a11y_hidden())
-        .child(text("⌘K").font(t.ty.hint).color(t.text.faint).a11y_hidden())
+        .child(icon(&icons::SEARCH, 18.0).color(t.mat.icon).a11y_hidden())
+        .child(text("Search sessions").font(nav_font(t)).color(t.text.base.alpha(0.75)).truncate().grow(1.0).min_w(0.0).a11y_hidden())
+        .child(text("⌘K").font(TextStyle { tracking: 0.24, ..super::webkit::font(t, 12.0, 400.0, 16.0) }).color(t.text.muted.alpha(0.55)).a11y_hidden())
 }
 
 /// The workspace switcher: a 32 point row under the search field, a folder, "All workspaces" or one workspace's name, and a chevron.
@@ -101,17 +105,17 @@ fn scope_row(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         .focusable(true)
         .w_full()
         .h(ROW_H)
-        .px(8.0)
-        .gap(8.0)
+        .px(12.0)
+        .gap(12.0)
         .center_y()
         .radius(t.radius.row)
         .fill(if s.scope_open { t.surface.selected } else { Color::TRANSPARENT })
         .hover(t.surface.hover)
         .focus_ring(2.0, 2.0, t.surface.ring)
         .on_press(|s: &mut App| s.scope_open = !s.scope_open)
-        .child(icon(&icons::FOLDER, 16.0).color(t.text.muted).a11y_hidden())
-        .child(text(name.clone()).key("scope-name").font(t.ty.row).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden())
-        .child(icon(&icons::CHEVRON_DOWN, 16.0).color(t.text.muted).a11y_hidden());
+        .child(icon(&icons::FOLDER, 19.0).color(t.mat.icon).a11y_hidden())
+        .child(text(name.clone()).key("scope-name").font(nav_font(t)).color(t.text.base.alpha(0.75)).truncate().grow(1.0).min_w(0.0).a11y_hidden())
+        .child(icon(&icons::CHEVRON_DOWN, 14.0).color(t.mat.icon).a11y_hidden());
     let mut menu = Menu::new("scope-menu").trigger(trigger).open(s.scope_open).placement(Placement::BottomStart).min_width(220.0).on_close(|s: &mut App| s.scope_open = false);
     menu = menu.item(MenuItem::new("All workspaces").icon(&icons::FOLDER).checked(s.scope().is_none()).on_select(|s: &mut App| s.set_scope(None)));
     if let Some(summary) = s.summary.as_ref() {
@@ -123,7 +127,12 @@ fn scope_row(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     col().key("scope-row").w_full().child(menu.build(&t.kit, layer))
 }
 
-/// The shape every row shares: 32 high, 8 of padding, radius 8, the hover and open fills.
+/// The sidebar's row words: 14 on a 20 line (design system 4.6).
+fn nav_font(t: &Neko) -> TextStyle {
+    super::webkit::font(t, 14.0, 400.0, 20.0)
+}
+
+/// The shape every row shares: 36 high, 12 of padding and 12 between icon and words, a pill (radius 18), the hover (4%) and open (6%) fills.
 fn base_row(key: String, label: String, open: bool, t: &Neko) -> El {
     row()
         .key(key)
@@ -132,8 +141,8 @@ fn base_row(key: String, label: String, open: bool, t: &Neko) -> El {
         .focusable(true)
         .w_full()
         .h(ROW_H)
-        .px(8.0)
-        .gap(8.0)
+        .px(12.0)
+        .gap(12.0)
         .center_y()
         .radius(t.radius.row)
         .fill(if open { t.surface.selected } else { Color::TRANSPARENT })
@@ -141,9 +150,10 @@ fn base_row(key: String, label: String, open: bool, t: &Neko) -> El {
         .focus_ring(2.0, 2.0, t.surface.ring)
 }
 
-/// "New session": the primary row, a constant 7% fill and an Iris "+".
+/// "New session": the primary action, a pebble 40 high at radius 24 (gap 10, 14 and 16 at the sides, 14 medium words); its plus is 16
+/// at half strength.
 fn new_row(s: &App, t: &Neko) -> El {
-    row()
+    let r = row()
         .key("new-session")
         .role("button")
         .label("New session")
@@ -151,17 +161,16 @@ fn new_row(s: &App, t: &Neko) -> El {
         .checked(s.home_shown())
         .focusable(true)
         .w_full()
-        .h(ROW_H)
-        .px(8.0)
-        .gap(8.0)
+        .h(40.0)
+        .pl(14.0)
+        .pr(16.0)
+        .gap(10.0)
         .center_y()
-        .radius(t.radius.row)
-        .fill(t.text.base.alpha(0.07))
-        .hover(t.surface.hover)
+        .radius(24.0)
         .focus_ring(2.0, 2.0, t.surface.ring)
-        .on_press(|s: &mut App| s.open_new())
-        .child(icon(&icons::PLUS, 16.0).color(t.meaning.iris).a11y_hidden())
-        .child(text("New session").font(t.ty.row).color(t.text.base).truncate().grow(1.0).a11y_hidden())
+        .press_scale(0.97)
+        .on_press(|s: &mut App| s.open_new());
+    super::webkit::pebble(t, r).child(icon(&icons::PLUS, 16.0).color(t.mat.pebble_fg.alpha(0.5)).a11y_hidden()).child(text("New session").font(super::webkit::font(t, 14.0, 500.0, 20.0)).color(t.mat.pebble_fg).truncate().grow(1.0).a11y_hidden())
 }
 
 /// The count a nav row shows at its right.
@@ -182,10 +191,10 @@ fn nav_row(s: &App, view: FullView, t: &Neko) -> El {
     let count = nav_count(s, view);
     let mut r = base_row(format!("view-{}", view.web_id()), view.title().to_owned(), open, t)
         .on_press(move |s: &mut App| s.open_view(view))
-        .child(icon(view.icon(), 16.0).color(if open { t.text.base } else { t.text.muted }).a11y_hidden())
-        .child(text(view.title()).font(t.ty.row).color(if open { t.text.base } else { t.text.muted }).truncate().grow(1.0).a11y_hidden());
+        .child(icon(view.icon(), 19.0).color(if open { t.text.base } else { t.mat.icon }).a11y_hidden())
+        .child(text(view.title()).font(nav_font(t)).color(if open { t.text.base } else { t.text.base.alpha(0.75) }).truncate().grow(1.0).a11y_hidden());
     if let Some(n) = count {
-        r = r.child(text(n.to_string()).key(format!("count-{}", view.web_id())).font(t.ty.meta).color(t.text.muted).a11y_hidden());
+        r = r.child(text(n.to_string()).key(format!("count-{}", view.web_id())).font(super::webkit::tnum(super::webkit::font(t, 12.5, 400.0, 18.0))).color(t.text.muted.alpha(0.75)).a11y_hidden());
     }
     r
 }
@@ -199,8 +208,8 @@ fn section_header(group: Group, count: usize, collapsed: bool, t: &Neko) -> El {
         .expanded(!collapsed)
         .focusable(true)
         .w_full()
-        .h(ROW_H)
-        .px(8.0)
+        .h(28.0)
+        .px(12.0)
         .gap(8.0)
         .center_y()
         .radius(t.radius.row)
@@ -210,9 +219,9 @@ fn section_header(group: Group, count: usize, collapsed: bool, t: &Neko) -> El {
     if group.collapsed_by_default() {
         r = r.child(icon(if collapsed { &icons::CHEVRON_RIGHT } else { &icons::CHEVRON_DOWN }, 16.0).color(t.text.muted).a11y_hidden());
     }
-    r = r.child(text(group.title()).font(TextStyle { weight: 500.0, ..t.ty.meta }).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden());
+    r = r.child(text(group.title()).font(super::webkit::font(t, 12.5, 400.0, 18.0)).color(t.text.muted).truncate().grow(1.0).min_w(0.0).a11y_hidden());
     if group != Group::Recent {
-        r = r.child(text(count.to_string()).key(format!("group-count-{}", group.index())).font(t.ty.meta).color(t.text.muted).a11y_hidden());
+        r = r.child(text(count.to_string()).key(format!("group-count-{}", group.index())).font(super::webkit::tnum(super::webkit::font(t, 12.5, 400.0, 18.0))).color(t.text.muted.alpha(0.75)).a11y_hidden());
     }
     r
 }
@@ -359,7 +368,7 @@ pub(super) fn session_row(s: &App, task: &TaskRow, group: Group, t: &Neko, layer
     r = r.child(match group {
         Group::NeedsYou | Group::WaitingAWhile => {
             let (glyph, coral) = reason_icon(task);
-            let mut stack = el().size(16.0, 16.0).child(icon(glyph, 16.0).absolute(0.0, 0.0).color(if coral { t.meaning.coral } else { t.text.muted }).a11y_hidden());
+            let mut stack = el().size(16.0, 16.0).child(icon(glyph, 16.0).absolute(0.0, 0.0).color(if coral { t.meaning.coral } else { t.mat.icon }).a11y_hidden());
             if !coral {
                 // Amber only for the icon itself, and only while the row is hovered.
                 stack = stack.child(icon(glyph, 16.0).absolute(0.0, 0.0).color(t.meaning.amber).group_opacity(0.0, 1.0).a11y_hidden());
@@ -367,9 +376,9 @@ pub(super) fn session_row(s: &App, task: &TaskRow, group: Group, t: &Neko, layer
             stack
         }
         Group::Running => progress_ring(task.progress, t),
-        Group::Recent => icon(if task.status == TaskStatus::Completed { &icons::CHECK_LINE } else { &icons::CROSS }, 16.0).color(t.text.muted).a11y_hidden(),
+        Group::Recent => icon(if task.status == TaskStatus::Completed { &icons::CHECK_LINE } else { &icons::CROSS }, 16.0).color(t.mat.icon).a11y_hidden(),
     });
-    r = r.child(text(task.title.clone()).font(t.ty.row).color(t.text.base).truncate().grow(1.0).min_w(0.0).a11y_hidden());
+    r = r.child(text(task.title.clone()).font(nav_font(t)).color(t.text.base.alpha(0.75)).truncate().grow(1.0).min_w(0.0).a11y_hidden());
     if unseen {
         // Iris, 6 points: what changed since you looked (DESIGN.md §8 rule 13).
         r = r.child(el().key(format!("unseen-{}", task.id)).size(6.0, 6.0).radius(3.0).fill(t.meaning.iris).a11y_hidden());
@@ -395,9 +404,9 @@ fn footer(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     let runtimes: Vec<String> = s.pages.catalog.as_ref().map(|c| c.sources.iter().filter(|x| x.status == neko_protocol::agent_models::SourceStatus::Ready).map(|x| x.label.clone()).collect()).unwrap_or_default();
     let subtitle = format!("{agents} agent{}{}", if agents == 1 { "" } else { "s" }, if runtimes.is_empty() { String::new() } else { format!(" · {}", runtimes.join(", ")) });
     let avatar = if s.account.has_picture() {
-        el().key("account-avatar").size(24.0, 24.0).radius(12.0).pixels(&s.account.picture).a11y_hidden()
+        el().key("account-avatar").size(28.0, 28.0).radius(14.0).pixels(&s.account.picture).a11y_hidden()
     } else {
-        row().key("account-avatar").size(24.0, 24.0).radius(12.0).center().fill(t.meaning.iris).a11y_hidden().child(text(s.account.initials()).font(TextStyle { weight: 600.0, ..t.ty.id }).color(Color::WHITE))
+        row().key("account-avatar").size(28.0, 28.0).radius(14.0).center().fill(t.meaning.iris).a11y_hidden().child(text(s.account.initials()).font(TextStyle { weight: 600.0, ..t.ty.id }).color(Color::WHITE))
     };
     let trigger = row()
         .key("account")
@@ -406,17 +415,18 @@ fn footer(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
         .focusable(true)
         .w_full()
         .h(FOOTER_H)
-        .px(8.0)
+        .pl(8.0)
+        .pr(12.0)
         .gap(8.0)
         .center_y()
-        .radius(t.radius.row)
+        .radius(22.0)
         .fill(if s.more_open { t.surface.selected } else { Color::TRANSPARENT })
         .hover(t.surface.hover)
         .focus_ring(2.0, 2.0, t.surface.ring)
         .on_press(|s: &mut App| s.more_open = !s.more_open)
         .child(avatar)
-        .child(col().grow(1.0).min_w(0.0).child(text(name).font(t.ty.row).color(t.text.base).truncate().a11y_hidden()).child(text(subtitle).font(TextStyle { size: 12.0, ..t.ty.meta }).color(t.text.muted).truncate().a11y_hidden()))
-        .child(icon(&icons::CHEVRON_UP_DOWN, 16.0).color(t.text.muted).a11y_hidden());
+        .child(col().grow(1.0).min_w(0.0).child(text(name).font(nav_font(t)).color(t.text.base).truncate().a11y_hidden()).child(text(subtitle).font(TextStyle { size: 12.0, ..t.ty.meta }).color(t.text.muted).truncate().a11y_hidden()))
+        .child(icon(&icons::CHEVRON_UP_DOWN, 14.0).color(t.text.muted).a11y_hidden());
     let mut menu = Menu::new("account-menu").trigger(trigger).open(s.more_open).placement(Placement::TopStart).min_width(220.0).on_close(|s: &mut App| s.more_open = false);
     for view in FullView::MENU {
         menu = menu.item(MenuItem::new(view.title()).icon(view.icon()).checked(s.view == Some(view)).on_select(move |s: &mut App| {

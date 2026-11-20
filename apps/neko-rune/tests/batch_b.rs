@@ -429,10 +429,10 @@ fn the_page_is_the_webs_work_header_and_rows_with_their_note_line() {
     assert_eq!(texts_of(&rt, "page-count"), "2 ready · 1 to close · 1 need you", "pullRequestSubtitle");
     assert!(has_text(&rt, "Merge ") && has_text(&rt, " ready"), "Merge N ready, a text node per part");
     assert!(!has_text(&rt, "Merge all ready"), "the web's words");
-    // A row without notes is 8 + 21.9 + 8 high; one with a note line is 20.3 taller.
+    // A row without notes is 8 + 20.25 + 8 high (the web's body line is 1.5 now); one with a note line is 20.75 taller.
     let h = |key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).unwrap_or_else(|| panic!("no {key}")).rect[3];
-    assert!((h("pr-row-t3") - 37.94).abs() < 0.1, "{}", h("pr-row-t3"));
-    assert!((h("pr-row-t2") - 60.25).abs() < 0.1, "behind main adds the note line: {}", h("pr-row-t2"));
+    assert!((h("pr-row-t3") - 36.25).abs() < 0.1, "{}", h("pr-row-t3"));
+    assert!((h("pr-row-t2") - 57.0).abs() < 0.1, "behind main adds the note line: {}", h("pr-row-t2"));
     assert!(has_text(&rt, "Behind main"), "problems are worded with the base");
     assert!(has_text(&rt, "Checks failing: Lint, Unit") && has_text(&rt, "Conflicts with main"));
     assert!(has_text(&rt, "Handed back ") && has_text(&rt, " of ") && has_text(&rt, "2") && has_text(&rt, "4"), "Handed back N of 4 in its text nodes");
