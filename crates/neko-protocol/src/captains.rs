@@ -18,6 +18,10 @@ pub const MAX_DAILY_LIMIT_MICRO_USD: u64 = 1_000_000_000_000;
 pub const MAX_ACTIVE_CAPTAINS: usize = 16;
 /// The most one captain file holds.
 pub const MAX_CAPTAIN_FILE: usize = 16 * 1024;
+/// The longest message a person may post to a captain, in characters.
+pub const MAX_SAY_CHARS: usize = 8_000;
+/// Messages one `CaptainThread` answer carries at most.
+pub const THREAD_PAGE: usize = 200;
 
 /// A preset id such as `black-glasses` (one of `FACE_PRESETS`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -109,6 +113,113 @@ pub enum CaptainCommand {
     Files { id: String },
     /// Replaces one file (the previous text is kept as `.prev`). Empty text clears it: destructive, clients confirm. Answered with `Files`.
     WriteFile { id: String, kind: CaptainFileKind, text: String },
+    /// A read: the captain's own thread, messages with `seq > since_seq`, oldest first, at most `THREAD_PAGE`
+    /// (with `since_seq` 0, the latest `THREAD_PAGE`). Answered with `Thread`. Clients ask again when
+    /// `Snapshot::captains_rev` moves.
+    CaptainThread {
+        captain: String,
+        #[serde(default)]
+        since_seq: u64,
+    },
+    /// The person speaks to the captain: the message is stored in its thread and wakes it (the captain answers in
+    /// the thread, never in the Home chat). Answered with `Thread` holding the stored message.
+    CaptainSay { captain: String, text: String },
+}
+
+/// Who wrote a line of a captain's thread.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptainMessageRole {
+    #[default]
+    Person,
+    Captain,
+    /// Something that happened (a turn failed, a turn was held), not a spoken line.
+    Event,
+}
+
+impl CaptainMessageRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Person => "person",
+            Self::Captain => "captain",
+            Self::Event => "event",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "person" => Some(Self::Person),
+            "captain" => Some(Self::Captain),
+            "event" => Some(Self::Event),
+            _ => None,
+        }
+    }
+}
+
+/// One row of `captain_messages`: append-only, `seq` counts from 1 within a captain.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct CaptainMessage {
+    pub captain_id: String,
+    pub seq: u64,
+    pub role: CaptainMessageRole,
+    pub text: String,
+    pub at_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(default)]
+pub struct CaptainThreadView {
+    pub captain_id: String,
+    pub messages: Vec<CaptainMessage>,
+    /// The newest `seq` in the thread (0 when empty), whatever this answer carries.
+    pub last_seq: u64,
+    /// A turn of this captain is running now.
+    pub running: bool,
+}
+
+/// Why a captain is woken (`captain_wakes.reason`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum WakeReason {
+    /// One of its sessions finished a turn.
+    TurnFinished,
+    /// One of its sessions failed.
+    Failed,
+    /// One of its sessions needs the person (a plan to approve, a question).
+    NeedsYou,
+    /// The person posted to the captain's thread.
+    PersonMessage,
+}
+
+impl WakeReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::TurnFinished => "turn_finished",
+            Self::Failed => "failed",
+            Self::NeedsYou => "needs_you",
+            Self::PersonMessage => "person_message",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "turn_finished" => Some(Self::TurnFinished),
+            "failed" => Some(Self::Failed),
+            "needs_you" => Some(Self::NeedsYou),
+            "person_message" => Some(Self::PersonMessage),
+            _ => None,
+        }
+    }
+}
+
+/// One row of `captain_wakes`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CaptainWake {
+    pub id: u64,
+    pub captain_id: String,
+    pub reason: WakeReason,
+    /// The session concerned; empty for a person's message.
+    pub task_id: String,
+    pub at_ms: i64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -165,6 +276,7 @@ pub enum CaptainsReply {
     Listing(Vec<Captain>),
     Suggestion(CaptainSuggestion),
     Files(CaptainFiles),
+    Thread(CaptainThreadView),
 }
 
 #[cfg(test)]

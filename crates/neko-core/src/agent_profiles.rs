@@ -401,6 +401,7 @@ mod tests {
             away_enabled: false,
         });
         s.tasks.push(neko_protocol::workbench::Task {
+            captain_id: None,
             id: "t".into(),
             workspace_id: "w".into(),
             issue_id: None,

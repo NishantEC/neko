@@ -187,6 +187,25 @@ pub fn read_all(root: &Path, id: &str) -> Result<CaptainFiles, String> {
     Ok(CaptainFiles { id: id.to_owned(), files })
 }
 
+/// What the person or captain wrote in one file (its heading dropped, so a file that is only its heading is
+/// empty), as prompts read it. A missing, unreadable or linked file reads as empty: a prompt is never refused
+/// because a note is missing.
+pub fn prompt_body(root: &Path, id: &str, kind: CaptainFileKind) -> String {
+    let Ok(dir) = confined_dir(root, id, false) else { return String::new() };
+    match read_one(&dir.join(kind.file_name())) {
+        Ok(Some((text, ..))) => body(&text).to_owned(),
+        _ => String::new(),
+    }
+}
+
+/// The text appended to the rules of every session a captain starts: `CREW.md` under "Your captain's rules".
+/// Empty (nothing injected) for a session with no captain and for an empty `CREW.md`.
+pub fn crew_section(root: &Path, captain_id: Option<&str>) -> String {
+    let Some(id) = captain_id else { return String::new() };
+    let crew = prompt_body(root, id, CaptainFileKind::Crew);
+    if crew.is_empty() { String::new() } else { format!("\n\nYour captain's rules\n{}\n", crew.trim_end()) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,5 +347,29 @@ mod tests {
         assert_eq!(body("# Rules\n\nBe kind.\n"), "Be kind.");
         assert_eq!(body("Just text\n"), "Just text");
         assert_eq!(body(""), "");
+    }
+    #[test]
+    fn crew_section_is_empty_without_a_captain_a_file_or_a_body_and_has_the_exact_heading_otherwise() {
+        let root = root();
+        assert_eq!(crew_section(root.path(), None), "");
+        assert_eq!(crew_section(root.path(), Some("nobody")), "", "no folder");
+        create_all(root.path(), "c1", "Look after the web app.").unwrap();
+        assert_eq!(crew_section(root.path(), Some("c1")), "", "a heading-only CREW.md is empty");
+        write(root.path(), "c1", Crew, "# Crew rules\n\nAlways run the linter.\nNo force pushes.\n\n").unwrap();
+        assert_eq!(crew_section(root.path(), Some("c1")), "\n\nYour captain's rules\nAlways run the linter.\nNo force pushes.\n");
+        write(root.path(), "c1", Crew, "   \n").unwrap();
+        assert_eq!(crew_section(root.path(), Some("c1")), "", "clearing the file injects nothing");
+        assert_eq!(crew_section(root.path(), Some("../x")), "", "a bad id reads nothing");
+    }
+
+    #[test]
+    fn prompt_body_reads_the_text_after_the_heading_and_empty_when_missing() {
+        let root = root();
+        assert_eq!(prompt_body(root.path(), "c1", Plan), "");
+        create_all(root.path(), "c1", "Look after the web app.").unwrap();
+        assert_eq!(prompt_body(root.path(), "c1", Rules), "Look after the web app.");
+        assert_eq!(prompt_body(root.path(), "c1", Plan), "");
+        write(root.path(), "c1", Plan, "Ship the export fix first.").unwrap();
+        assert_eq!(prompt_body(root.path(), "c1", Plan), "Ship the export fix first.");
     }
 }

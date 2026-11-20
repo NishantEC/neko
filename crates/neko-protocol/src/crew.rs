@@ -109,20 +109,32 @@ pub enum CrewRole {
     ReadOnly,
     /// A ticket's own run: list, status, wait, save an artifact, and sub-tasks of its ticket.
     Task { ticket_id: String, may_create: bool },
+    /// A captain's own turn: it directs only its own crew (sessions carrying its id) in its own workspace.
+    /// `person_turn` is true when the person's message started the turn, false for a wake: an unattended turn
+    /// cannot cancel, wait, or rewrite RULES.md and CREW.md (text a wake read from a session is untrusted).
+    Captain { captain_id: String, person_turn: bool },
 }
 
-pub const TOOLS: [&str; 11] = ["list_tasks", "create_task", "steer_task", "wait_for", "cancel_task", "schedule", "task_status", "save_artifact", "show_artifact", "checkpoint_diff", "undo_run"];
+pub const TOOLS: [&str; 12] = ["list_tasks", "create_task", "steer_task", "wait_for", "cancel_task", "schedule", "task_status", "save_artifact", "show_artifact", "checkpoint_diff", "undo_run", "captain_write"];
 
 impl CrewRole {
     pub fn allows(&self, tool: &str) -> bool {
         match self {
-            Self::Full => TOOLS.contains(&tool),
+            // `captain_write` is a captain's own: the full chat has no notes of that kind to keep.
+            Self::Full => TOOLS.contains(&tool) && tool != "captain_write",
             Self::ReadOnly => matches!(tool, "list_tasks" | "task_status"),
             Self::Task { may_create, .. } => match tool {
                 // `save_artifact` records the ticket on the artifact (`Artifact::task_id`), so the
                 // Rune Canvas can list what a session made after a restart.
                 "list_tasks" | "task_status" | "wait_for" | "checkpoint_diff" | "save_artifact" => true,
                 "create_task" => *may_create,
+                _ => false,
+            },
+            // No merge tool, no scheduling, no artifacts, no undo: a captain directs sessions.
+            Self::Captain { person_turn, .. } => match tool {
+                "list_tasks" | "task_status" | "create_task" | "steer_task" | "checkpoint_diff" | "captain_write" => true,
+                // A wake turn must end quickly and cannot stop work on a session's say-so.
+                "wait_for" | "cancel_task" => *person_turn,
                 _ => false,
             },
         }
@@ -136,6 +148,36 @@ impl CrewRole {
             Self::Full => "chat".into(),
             Self::ReadOnly => "read-only chat".into(),
             Self::Task { ticket_id, .. } => format!("ticket {ticket_id}"),
+            Self::Captain { captain_id, .. } => format!("captain {captain_id}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_captain_role_allows_exactly_its_table() {
+        let captain = |person_turn| CrewRole::Captain { captain_id: "c1".into(), person_turn };
+        for tool in TOOLS {
+            let (person, wake) = match tool {
+                "list_tasks" | "task_status" | "create_task" | "steer_task" | "checkpoint_diff" | "captain_write" => (true, true),
+                // A person turn only: a wake must end quickly and cannot cancel on a session's say-so.
+                "wait_for" | "cancel_task" => (true, false),
+                // No scheduling, no artifacts, no undo, and no merge tool exists at all.
+                _ => (false, false),
+            };
+            assert_eq!((captain(true).allows(tool), captain(false).allows(tool)), (person, wake), "{tool}");
+        }
+        assert_eq!(captain(false).label(), "captain c1");
+        assert!(!captain(true).allows("merge_pull_request") && !captain(true).allows("tools-not-listed"));
+    }
+
+    #[test]
+    fn only_a_captain_can_write_captain_notes() {
+        assert!(!CrewRole::Full.allows("captain_write") && !CrewRole::ReadOnly.allows("captain_write"));
+        assert!(!CrewRole::Task { ticket_id: "t".into(), may_create: true }.allows("captain_write"));
+        assert_eq!(CrewRole::Full.tools().len(), TOOLS.len() - 1);
     }
 }

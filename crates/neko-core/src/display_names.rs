@@ -162,6 +162,7 @@ mod tests {
 
     fn task(id: &str, created: i64, display_title: Option<&str>) -> Task {
         Task {
+            captain_id: None,
             id: id.into(),
             workspace_id: "w".into(),
             issue_id: None,

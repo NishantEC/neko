@@ -1797,6 +1797,7 @@ mod tests {
                 away_enabled: false,
             });
             s.tasks.push(Task {
+                captain_id: None,
                 id: format!("t{id}"),
                 workspace_id: id.into(),
                 issue_id: None,

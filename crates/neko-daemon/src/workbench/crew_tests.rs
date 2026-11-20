@@ -84,7 +84,7 @@ fn a_lease_carries_only_what_its_role_allows() {
     let listed = |lease: &crate::mcp_host::Lease| -> Vec<String> {
         call(&c, lease, "tools", json!({})).unwrap()["tools"].as_array().unwrap().iter().map(|t| t.as_str().unwrap().to_owned()).collect()
     };
-    assert_eq!(listed(&full).len(), TOOLS.len());
+    assert_eq!(listed(&full).len(), TOOLS.len() - 1, "every tool but a captain's own notes");
     assert_eq!(listed(&read_only), ["list_tasks", "task_status"]);
     assert_eq!(listed(&own), ["list_tasks", "create_task", "wait_for", "task_status", "save_artifact", "checkpoint_diff"]);
 

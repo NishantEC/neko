@@ -374,6 +374,7 @@ fn load_stored(db: &Db) -> Result<Snapshot, String> {
     }
     // Only what still waits: settled entries are the task's record, not every reader's.
     snapshot.queued_messages = crate::command_queue::queued(db)?;
+    snapshot.captains_rev = crate::captain_thread::rev(db)?;
     snapshot.import_preview = crate::setup_import::load_preview(db)?;
     crate::decision_context::attach(db, &mut snapshot)?;
     Ok(snapshot)
@@ -564,6 +565,7 @@ fn encode(snapshot: &Snapshot) -> Result<Snapshot, String> {
     compacted.skills = Default::default();
     compacted.goals.clear();
     compacted.queued_messages.clear();
+    compacted.captains_rev = 0;
     compacted.import_preview = Default::default();
     compacted.mcp.receipts.clear();
     // The last look at the published repository changes on a timer.
@@ -1875,6 +1877,7 @@ pub fn create_task(
     required("Task goal", &goal, MAX_CONTENT_BYTES)?;
     let now = now_ms();
     let mut task = Task {
+        captain_id: None,
         id: new_id(),
         workspace_id,
         issue_id,

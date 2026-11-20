@@ -49,7 +49,23 @@ fn answer(state: &AppState, root: &Path, command: CaptainCommand) -> Result<Capt
         CaptainCommand::WriteFile { id, kind, text } => {
             captains::get(db, &id)?;
             neko_core::captain_files::write(root, &id, kind, &text)?;
+            // Clients that show the files re-read them when the change counter moves.
+            neko_core::captain_thread::bump_rev(db)?;
             neko_core::captain_files::read_all(root, &id).map(CaptainsReply::Files)
+        }
+        CaptainCommand::CaptainThread { captain, since_seq } => {
+            neko_core::captain_thread::view(db, &captain, since_seq, state.workbench.captain_running(&captain)).map(CaptainsReply::Thread)
+        }
+        // Stores the person's message in the captain's own thread and queues the wake; the captain's tick runs the
+        // turn. The Home chat is not involved.
+        CaptainCommand::CaptainSay { captain, text } => {
+            let message = neko_core::captain_thread::say(db, &captain, &text, neko_core::workbench::now_ms())?;
+            Ok(CaptainsReply::Thread(neko_protocol::captains::CaptainThreadView {
+                captain_id: captain.clone(),
+                last_seq: message.seq,
+                messages: vec![message],
+                running: state.workbench.captain_running(&captain),
+            }))
         }
     }
 }
@@ -179,5 +195,55 @@ mod tests {
         let request: neko_protocol::Request = serde_json::from_str(r#"{"Captains":{"Create":{"name":"miso","workspace_id":"w1"}}}"#).unwrap();
         let neko_protocol::Request::Captains(CaptainCommand::Create { face, daily_limit_micro_usd, .. }) = request else { panic!() };
         assert_eq!((face, daily_limit_micro_usd), (FaceRef::default(), None));
+    }
+    fn thread(response: Response) -> neko_protocol::captains::CaptainThreadView {
+        match response {
+            Response::Captains(reply) => match *reply { CaptainsReply::Thread(view) => view, other => panic!("not a thread: {other:?}") },
+            other => panic!("not Captains: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn say_stores_the_person_message_in_the_captains_thread_and_queues_its_wake_and_thread_reads_it_back() {
+        let (state, root) = setup();
+        let run = |command| handle_in(&state, root.path(), command);
+        let id = listing(run(create("miso")))[0].id.clone();
+        let rev = |state: &AppState| neko_core::workbench::load(&state.db.lock().unwrap()).unwrap().captains_rev;
+        let before = rev(&state);
+        let said = thread(run(CaptainCommand::CaptainSay { captain: id.clone(), text: "  Split the export rework in two.  ".into() }));
+        assert_eq!((said.messages.len(), said.messages[0].seq, said.messages[0].text.as_str(), said.last_seq, said.running), (1, 1, "Split the export rework in two.", 1, false));
+        assert!(rev(&state) > before, "clients hear of it through the snapshot");
+        assert_eq!(neko_core::captain_thread::pending(&state.db.lock().unwrap(), &id).unwrap().len(), 1, "and the captain is woken");
+        let again = thread(run(CaptainCommand::CaptainSay { captain: id.clone(), text: "And add a progress bar.".into() }));
+        assert_eq!(again.messages[0].seq, 2);
+        let all = thread(run(CaptainCommand::CaptainThread { captain: id.clone(), since_seq: 0 }));
+        assert_eq!(all.messages.iter().map(|m| m.seq).collect::<Vec<_>>(), [1, 2]);
+        let newer = thread(run(CaptainCommand::CaptainThread { captain: id.clone(), since_seq: 1 }));
+        assert_eq!((newer.messages.len(), newer.messages[0].text.as_str(), newer.last_seq), (1, "And add a progress bar.", 2));
+        assert!(thread(run(CaptainCommand::CaptainThread { captain: id.clone(), since_seq: 2 })).messages.is_empty());
+        // Not the Home chat.
+        assert!(neko_core::workbench::load(&state.db.lock().unwrap()).unwrap().conversation.is_empty());
+    }
+
+    #[test]
+    fn say_and_thread_refuse_what_cannot_be_stored() {
+        let (state, root) = setup();
+        let run = |command| handle_in(&state, root.path(), command);
+        let id = listing(run(create("miso")))[0].id.clone();
+        assert!(error(run(CaptainCommand::CaptainSay { captain: id.clone(), text: "   ".into() })).contains("Write something"));
+        assert!(error(run(CaptainCommand::CaptainSay { captain: id.clone(), text: "x".repeat(8_001) })).contains("under 8000"));
+        assert_eq!(error(run(CaptainCommand::CaptainSay { captain: "nobody".into(), text: "hi".into() })), "That captain no longer exists");
+        assert_eq!(error(run(CaptainCommand::CaptainThread { captain: "nobody".into(), since_seq: 0 })), "That captain no longer exists");
+        listing(run(CaptainCommand::Archive { id: id.clone() }));
+        assert!(error(run(CaptainCommand::CaptainSay { captain: id.clone(), text: "hello".into() })).contains("archived"));
+        assert!(thread(run(CaptainCommand::CaptainThread { captain: id, since_seq: 0 })).messages.is_empty(), "an archived captain's thread stays readable");
+    }
+
+    #[test]
+    fn the_wire_form_of_the_thread_requests_parses() {
+        let read: neko_protocol::Request = serde_json::from_str(r#"{"Captains":{"CaptainThread":{"captain":"c1"}}}"#).unwrap();
+        assert!(matches!(read, neko_protocol::Request::Captains(CaptainCommand::CaptainThread { since_seq: 0, .. })));
+        let say: neko_protocol::Request = serde_json::from_str(r#"{"Captains":{"CaptainSay":{"captain":"c1","text":"hi"}}}"#).unwrap();
+        assert!(matches!(say, neko_protocol::Request::Captains(CaptainCommand::CaptainSay { .. })));
     }
 }

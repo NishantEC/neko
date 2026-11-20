@@ -274,6 +274,22 @@ impl Db {
                 id   TEXT PRIMARY KEY,
                 body TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS captain_messages (
+                captain_id TEXT    NOT NULL,
+                seq        INTEGER NOT NULL,
+                role       TEXT    NOT NULL CHECK (role IN ('person','captain','event')),
+                text       TEXT    NOT NULL,
+                at_ms      INTEGER NOT NULL,
+                PRIMARY KEY (captain_id, seq)
+            ) WITHOUT ROWID;
+            CREATE TABLE IF NOT EXISTS captain_wakes (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                captain_id TEXT    NOT NULL,
+                reason     TEXT    NOT NULL,
+                task_id    TEXT    NOT NULL DEFAULT '',
+                at_ms      INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_captain_wakes_captain ON captain_wakes (captain_id, id);
             ",
 
         )
@@ -550,6 +566,66 @@ impl Db {
             (id, body),
         )?;
         Ok(())
+    }
+
+    /// Appends one line to a captain's thread and answers its `seq` (1, 2, ...). Append-only: nothing edits or
+    /// deletes a message. Like the other captain tables it bumps neither `data_revision` nor the
+    /// `ContentStamp`; `captains::bump_rev` is the change signal for readers.
+    pub fn append_captain_message(&self, captain_id: &str, role: &str, text: &str, at_ms: i64) -> rusqlite::Result<u64> {
+        self.conn.query_row(
+            "INSERT INTO captain_messages (captain_id, seq, role, text, at_ms)
+             SELECT ?1, COALESCE(MAX(seq), 0) + 1, ?2, ?3, ?4 FROM captain_messages WHERE captain_id = ?1
+             RETURNING seq",
+            rusqlite::params![captain_id, role, text, at_ms],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|seq| seq.max(0) as u64)
+    }
+
+    /// Messages with `seq > since_seq`, oldest first, at most `limit`; as `(seq, role, text, at_ms)`.
+    pub fn captain_messages_after(&self, captain_id: &str, since_seq: u64, limit: usize) -> rusqlite::Result<Vec<(u64, String, String, i64)>> {
+        let mut statement = self.conn.prepare_cached("SELECT seq, role, text, at_ms FROM captain_messages WHERE captain_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3")?;
+        let rows = statement.query_map(rusqlite::params![captain_id, since_seq as i64, limit as i64], |row| Ok((row.get::<_, i64>(0)?.max(0) as u64, row.get(1)?, row.get(2)?, row.get(3)?)))?;
+        rows.collect()
+    }
+
+    /// The newest `limit` messages, oldest first.
+    pub fn captain_messages_last(&self, captain_id: &str, limit: usize) -> rusqlite::Result<Vec<(u64, String, String, i64)>> {
+        let mut statement = self.conn.prepare_cached("SELECT seq, role, text, at_ms FROM captain_messages WHERE captain_id = ?1 ORDER BY seq DESC LIMIT ?2")?;
+        let rows = statement.query_map(rusqlite::params![captain_id, limit as i64], |row| Ok((row.get::<_, i64>(0)?.max(0) as u64, row.get(1)?, row.get(2)?, row.get(3)?)))?;
+        let mut all: Vec<_> = rows.collect::<rusqlite::Result<_>>()?;
+        all.reverse();
+        Ok(all)
+    }
+
+    /// The newest `seq` in a captain's thread (0 when empty).
+    pub fn captain_last_seq(&self, captain_id: &str) -> rusqlite::Result<u64> {
+        self.conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM captain_messages WHERE captain_id = ?1", [captain_id], |row| row.get::<_, i64>(0)).map(|n| n.max(0) as u64)
+    }
+
+    /// Queues one wake; its id orders the queue.
+    pub fn push_captain_wake(&self, captain_id: &str, reason: &str, task_id: &str, at_ms: i64) -> rusqlite::Result<u64> {
+        self.conn.execute("INSERT INTO captain_wakes (captain_id, reason, task_id, at_ms) VALUES (?1, ?2, ?3, ?4)", rusqlite::params![captain_id, reason, task_id, at_ms])?;
+        Ok(self.conn.last_insert_rowid().max(0) as u64)
+    }
+
+    /// A captain's pending wakes in order, as `(id, reason, task_id, at_ms)`.
+    pub fn captain_wakes_of(&self, captain_id: &str) -> rusqlite::Result<Vec<(u64, String, String, i64)>> {
+        let mut statement = self.conn.prepare_cached("SELECT id, reason, task_id, at_ms FROM captain_wakes WHERE captain_id = ?1 ORDER BY id")?;
+        let rows = statement.query_map([captain_id], |row| Ok((row.get::<_, i64>(0)?.max(0) as u64, row.get(1)?, row.get(2)?, row.get(3)?)))?;
+        rows.collect()
+    }
+
+    /// The captains that have a pending wake.
+    pub fn captains_with_wakes(&self) -> rusqlite::Result<Vec<String>> {
+        let mut statement = self.conn.prepare_cached("SELECT DISTINCT captain_id FROM captain_wakes ORDER BY captain_id")?;
+        let rows = statement.query_map([], |row| row.get(0))?;
+        rows.collect()
+    }
+
+    /// Removes a captain's wakes up to and including `up_to_id` (the ones one turn took); how many went.
+    pub fn delete_captain_wakes(&self, captain_id: &str, up_to_id: u64) -> rusqlite::Result<usize> {
+        self.conn.execute("DELETE FROM captain_wakes WHERE captain_id = ?1 AND id <= ?2", rusqlite::params![captain_id, up_to_id as i64])
     }
 
     pub fn record_launch(&self, app_id: &str, at_unix_ms: i64) -> rusqlite::Result<()> {

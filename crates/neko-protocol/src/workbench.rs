@@ -164,6 +164,9 @@ pub struct Task {
     /// summary; this is the authority on scope. `None` for other tickets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request: Option<String>,
+    /// The captain whose crew this session belongs to (`neko_protocol::captains`); `None` for every other session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captain_id: Option<String>,
 }
 
 /// The most of a person's message a ticket keeps as its `request`.
@@ -270,6 +273,10 @@ impl PrFollowUp {
 }
 
 fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+fn is_zero_u64(n: &u64) -> bool {
     *n == 0
 }
 
@@ -464,6 +471,11 @@ pub struct Snapshot {
     /// their own rows; never part of the stored snapshot (`neko_core::command_queue`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queued_messages: Vec<crate::crew::QueuedMessage>,
+    /// Changes whenever a captain's thread or turn state changes, so a held `WorkbenchIfChanged` wakes
+    /// clients that show a captain (`neko_core::captains::rev`). Attached for readers; never part of the
+    /// stored snapshot. Clients re-read the thread with `Captains(CaptainThread)` when it moves.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub captains_rev: u64,
     #[serde(default = "crate::mcp_host::legacy_state")]
     pub mcp: crate::mcp_host::McpState,
     pub workspaces: Vec<Workspace>,

@@ -26,6 +26,8 @@ pub mod clipboard;
 pub mod codex;
 pub mod commands;
 pub mod captain_files;
+pub mod captain_prompt;
+pub mod captain_thread;
 pub mod captains;
 pub mod command_queue;
 pub mod conversation;

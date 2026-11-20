@@ -235,3 +235,53 @@ fn goal_turns() {
     text.push_str(&neko_core::goals::gate_instruction("No check was run for the code you changed."));
     check("goal-turns", &text);
 }
+
+/// A captain's turn: the person wrote (`captain-chat.md`), and a wake the person did not start (`captain-wake.md`).
+fn golden_captain_turn(person_turn: bool) -> String {
+    use neko_core::captain_prompt::{prompt, PromptInput, SessionLine};
+    use neko_protocol::captains::{Captain, CaptainMessage, CaptainMessageRole};
+    let captain = Captain {
+        id: "c1".into(),
+        name: "miso".into(),
+        workspace_id: "w1".into(),
+        area: "Web".into(),
+        purpose: "Look after the web app.".into(),
+        ..Default::default()
+    };
+    let say = |seq, role, text: &str| CaptainMessage { captain_id: "c1".into(), seq, role, text: text.into(), at_ms: 1_000 + seq as i64 };
+    let history = vec![
+        say(1, CaptainMessageRole::Person, "Split the export rework into two sessions."),
+        say(2, CaptainMessageRole::Captain, "Opened t1 (batching) and t2 (progress bar)."),
+        say(3, CaptainMessageRole::Event, "I could not take this turn: the agent stopped."),
+        say(4, CaptainMessageRole::Person, "How is the batching going?"),
+    ];
+    let sessions = vec![
+        SessionLine { id: "t1".into(), title: "ENG-123 Rework the export batching".into(), status: "ReadyForReview".into() },
+        SessionLine { id: "t2".into(), title: "ENG-124 Export progress bar".into(), status: "Failed".into() },
+    ];
+    let events = "- \"ENG-123 Rework the export batching\" (session t1) finished a turn (now ReadyForReview)\n- \"ENG-124 Export progress bar\" (session t2) failed\n";
+    prompt(&PromptInput {
+        captain: &captain,
+        workspace_name: "acme-web",
+        owner: OWNER,
+        now_iso: NOW,
+        rules: "Never touch main.\nAsk before adding a dependency.",
+        plan: "1. Land the batching change.\n2. Then the progress bar.",
+        crew: "Always run the linter before you finish.",
+        digest: "## Needs you\n- Approve the plan for [progress bar](task:t2)\n\n## New\n\n## In progress\n- [batching](task:t1) is in review",
+        history: &history,
+        sessions: &sessions,
+        events: if person_turn { "" } else { events },
+        person_turn,
+    })
+}
+
+#[test]
+fn captain_chat() {
+    check("captain-chat", &golden_captain_turn(true));
+}
+
+#[test]
+fn captain_wake() {
+    check("captain-wake", &golden_captain_turn(false));
+}

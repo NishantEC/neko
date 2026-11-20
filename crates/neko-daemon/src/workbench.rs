@@ -43,6 +43,8 @@ mod pull_requests;
 pub(crate) mod goals;
 #[path = "workbench/crew.rs"]
 mod crew;
+#[path = "workbench/captains.rs"]
+pub(crate) mod captains;
 #[path = "workbench/run_checkpoints.rs"]
 mod run_checkpoints;
 
@@ -63,6 +65,11 @@ pub struct Controller {
     db: Arc<Mutex<Db>>,
     active: Mutex<Vec<Active>>,
     chat_active: Arc<Mutex<Option<Active>>>,
+    /// Captains with a turn running now, each with its cancel flag: one turn at a time per captain
+    /// (`workbench/captains.rs`). Not Home chat, not ticket workers.
+    captain_active: Mutex<std::collections::BTreeMap<String, Arc<AtomicBool>>>,
+    /// Where captain files live; `None` is the data folder. Tests point it at a temp folder.
+    captain_root: Mutex<Option<std::path::PathBuf>>,
     waking: Mutex<()>,
 }
 
@@ -107,8 +114,16 @@ impl Controller {
             db,
             active: Mutex::new(Vec::new()),
             chat_active: Arc::new(Mutex::new(None)),
+            captain_active: Mutex::new(Default::default()),
+            captain_root: Mutex::new(None),
             waking: Mutex::new(()),
         }
+    }
+
+    /// The rulebook every agent of a session works to, plus (for a session of a captain) the captain's
+    /// `CREW.md` under "Your captain's rules"; nothing is added when there is no captain or the file is empty.
+    pub(crate) fn rules_for(&self, snapshot: &Snapshot, task: &Task) -> String {
+        format!("{}{}", neko_core::rulebook::text(snapshot), neko_core::captain_files::crew_section(&self.captain_root(), task.captain_id.as_deref()))
     }
 
     pub fn command(&self, command: Command) -> Result<Snapshot, String> {
@@ -600,7 +615,8 @@ impl Controller {
     /// publishes in flight, and whether Neko is replying in chat.
     pub fn busy(&self) -> (usize, usize, bool) {
         let workers = self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len();
-        let chat = self.chat_active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some();
+        let chat = self.chat_active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some()
+            || !self.captain_active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_empty();
         (workers, publish::in_flight_count(), chat)
     }
 
@@ -655,6 +671,8 @@ impl Controller {
         self.start_pull_requests();
         // Goals keep working: resumed from their journals, then ticked.
         self.start_goals();
+        // Captains: wake on what their sessions do, one turn at a time each.
+        self.start_captains();
         // Once a day, when the Mac is idle: tidy the lessons skills have gathered.
         self.start_skill_curator();
         // Reads the Mac every 15 s; admission and the app use the reading.
@@ -1092,7 +1110,8 @@ impl Controller {
         if !planning && !claim.read_only_reply {
             run.begin(&self.db, &task.id, &directory);
         }
-        let rules = neko_core::rulebook::text(&snapshot);
+        // A session of a captain also hears its captain's rules (CREW.md; nothing when it is empty).
+        let rules = self.rules_for(&snapshot, task);
         let mut memory = neko_core::agent_profiles::context_about(&snapshot, Some(&workspace.id), Some(&format!("{} {}", task.title, task.goal)));
         memory.push_str(&decision_context::context_about(&snapshot, &workspace.id, Some(&task.id), &format!("{} {}", task.title, task.goal)));
         memory.push_str(&neko_core::skills::instructions(
@@ -3361,6 +3380,7 @@ mod tests {
 
     pub(crate) fn controller_task() -> Task {
         Task {
+            captain_id: None,
             id: "t".into(), workspace_id: "w".into(), issue_id: None, title: "Task".into(),
             goal: "Fix one thing".into(), status: TaskStatus::Queued, plan: String::new(),
             result: String::new(), worktree: None, events: vec![], created_at_ms: 0,
@@ -3380,6 +3400,7 @@ mod tests {
                 away_enabled: false,
             }],
             tasks: vec![Task {
+                captain_id: None,
                 id: "t".into(),
                 workspace_id: "w".into(),
                 issue_id: None,

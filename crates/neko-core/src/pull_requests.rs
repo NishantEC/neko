@@ -522,6 +522,7 @@ mod tests {
 
     fn task() -> Task {
         Task {
+            captain_id: None,
             id: "t".into(), workspace_id: "w".into(), issue_id: None, title: "Fix it".into(), goal: String::new(),
             status: TaskStatus::ReadyForReview, plan: String::new(), result: String::new(), worktree: None, events: vec![],
             created_at_ms: 0, updated_at_ms: 0, source_revision: None, supervision: None, base_commit: None,

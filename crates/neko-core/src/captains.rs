@@ -492,6 +492,7 @@ mod tests {
 
     fn task(workspace: &str, created: i64, updated: i64) -> Task {
         Task {
+            captain_id: None,
             id: format!("{workspace}-{created}"), workspace_id: workspace.into(), issue_id: None, title: "ENG-123".into(), goal: String::new(),
             status: neko_protocol::workbench::TaskStatus::Queued, plan: String::new(), result: String::new(), worktree: None, events: Vec::new(),
             created_at_ms: created, updated_at_ms: updated, source_revision: None, supervision: None, base_commit: None, pull_request: None,
