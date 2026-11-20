@@ -270,6 +270,10 @@ impl Db {
             );
             CREATE INDEX IF NOT EXISTS idx_usage_events_at ON usage_events (at_ms);
             CREATE INDEX IF NOT EXISTS idx_usage_events_task ON usage_events (task_id);
+            CREATE TABLE IF NOT EXISTS captains (
+                id   TEXT PRIMARY KEY,
+                body TEXT NOT NULL
+            );
             ",
 
         )
@@ -529,6 +533,23 @@ impl Db {
     /// Deletes ledger lines completed before `before_ms`; how many went.
     pub fn prune_usage_events(&self, before_ms: i64) -> rusqlite::Result<usize> {
         self.conn.execute("DELETE FROM usage_events WHERE at_ms < ?1", [before_ms])
+    }
+
+    /// Every captain row (JSON of `neko_protocol::captains::Captain`), unordered. Nothing `load` reads lives
+    /// in this table, so like the usage ledger it does not bump `data_revision` or the `ContentStamp`.
+    pub fn captain_rows(&self) -> rusqlite::Result<Vec<String>> {
+        let mut statement = self.conn.prepare_cached("SELECT body FROM captains")?;
+        let rows = statement.query_map([], |row| row.get(0))?;
+        rows.collect()
+    }
+
+    /// Inserts or replaces one captain's row.
+    pub fn put_captain(&self, id: &str, body: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO captains (id, body) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET body = excluded.body",
+            (id, body),
+        )?;
+        Ok(())
     }
 
     pub fn record_launch(&self, app_id: &str, at_unix_ms: i64) -> rusqlite::Result<()> {

@@ -3,6 +3,7 @@ mod improve;
 mod inbox_reply;
 mod morning_digest;
 mod mcp_host;
+mod captains;
 mod packs;
 mod phone;
 mod routine_care;

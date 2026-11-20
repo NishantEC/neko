@@ -31,6 +31,8 @@ mod inbox_reply;
 mod mcp_host;
 #[path = "../morning_digest.rs"]
 mod morning_digest;
+#[path = "../captains.rs"]
+mod captains;
 #[path = "../packs.rs"]
 mod packs;
 #[allow(dead_code)]

@@ -25,6 +25,8 @@ pub mod cancel;
 pub mod clipboard;
 pub mod codex;
 pub mod commands;
+pub mod captain_files;
+pub mod captains;
 pub mod command_queue;
 pub mod conversation;
 pub mod crew;

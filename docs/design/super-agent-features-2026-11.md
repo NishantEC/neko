@@ -1,5 +1,7 @@
 # Super-agent features: exact implementation spec (2026-11)
 
+> F2 (crew files per workspace) is superseded by `phase-1-captains-2026-11.md` section 2 (files per captain).
+
 Eight features, three build batches. The decisions in the brief are fixed; this file maps each to the code and removes the
 design choices. Where a decision left a real gap the smallest choice is written down and marked **GAP-CHOICE Gn**; all of them
 are listed at the end so a reviewer can accept or overrule each one. Names were checked against the tree on 2026-11-20.

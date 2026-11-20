@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod agent_profiles;
 pub mod calendar;
+pub mod captains;
 pub mod checkpoints;
 pub mod crew;
 pub mod phone;
@@ -454,6 +455,8 @@ pub enum Request {
     /// Packs: install, preview, update, remove and check bundles of tools,
     /// skills, a web plugin and routines (`neko_core::packs`).
     Packs(packs::PackCommand),
+    /// Captains: named agents that look after one workspace's sessions (`neko_core::captains`).
+    Captains(captains::CaptainCommand),
     /// The `.luau` files of an installed pack (native cards and views for the Rune client). A read: answered with
     /// `PackUi`, and only while the pack is Healthy and its files are exactly what the person approved (otherwise an error).
     PackUi { name: String },
@@ -1254,6 +1257,8 @@ pub enum Response {
     },
     /// `Packs(List)` and what the other pack commands answer with.
     Packs(packs::PackListing),
+    /// What `Captains(..)` answers with.
+    Captains(Box<captains::CaptainsReply>),
     PackPreview(packs::PackPreview),
     PackUi(Vec<packs::PackUiFile>),
     Improve(improve::ImproveReply),
