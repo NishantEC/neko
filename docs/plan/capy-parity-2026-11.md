@@ -10,6 +10,14 @@ How to read it:
 - Size: S = 0.5, M = 1.5, L = 3, XL = 6 agent-days (one agent working a focused day, tests and docs included). Priority: P0 the product does not make sense without it, P1 core parity, P2 worth building, P3 polish or edge. Items Neko already has are `[x]` with the doc that proves it.
 - Rules that apply to every item: new storage is small rows, never the workbench snapshot (`CLAUDE.md`, resource limits); new requests are named in `web/src/` so the Rune allow-list sees them; anything destructive is confirmed; UI work follows the design system, with the approved mockup before any build.
 
+## Owner decisions (2026-11-20)
+
+- **Issues:** build the full tracker like Capy's (states, priority, relations, sub-issues, due dates, linked PRs, agents file and update them). Moves the issues epic up from "thin" to "full".
+- **Reach:** a phone page over a private link comes first; device handoff later.
+- **Front door:** Linear first; Slack later.
+- **Cat art:** the owner wants to compare three sources (agent-made SVG, an illustrator, generated images) before choosing.
+- **Review depth:** not decided yet (Phase 2).
+
 ## 1. Summary
 
 Capy features counted: **235** (218 in the epics, 17 not planned).
