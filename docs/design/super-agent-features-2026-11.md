@@ -5,7 +5,7 @@ design choices. Where a decision left a real gap the smallest choice is written 
 are listed at the end so a reviewer can accept or overrule each one. Names were checked against the tree on 2026-11-20.
 Examples use placeholders (Asha, Acme, ENG-123); nothing here is private.
 
-## Owner rulings (2026-11-20): these override the body below
+## Rulings (2026-11-20, set by the orchestrator for the owner to review): these override the body below
 
 - **R1 Levels.** Only `read` and `steer` exist in this release. The `full` level is removed. `cancel_task` and `undo_run` are never available to an outside agent; it may only read the undo preview. (Overrides G14 and the `full` level in F3.)
 - **R2 Pairing is native-only.** `PairCode` is accepted only on the Unix socket that the Rune app uses (`neko.sock`), and refused on the HTTP API, so no web plugin can mint a code. The web UI cannot pair in this release; Rune's Settings does it. (Overrides the pairing route in F3.)
