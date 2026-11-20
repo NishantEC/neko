@@ -6,8 +6,9 @@
 //! turn, the skill curator, the goal judge, triage, naming and the other small
 //! model calls) asks `may_start` first. It checks, in order: the machine
 //! steward holding; the steward's cap on agents running at once; the daily
-//! spend ceiling; quiet hours, for starts nobody asked for. A start the
-//! person asked for directly skips quiet hours only. A held start is not a
+//! spend ceiling. Quiet hours are not a check: they silence notifications, never
+//! work (Neko keeps working while the person sleeps; the steward's night cap and
+//! night load rule already limit nights). A held start is not a
 //! failure: it stays pending for its own tick and the site records one
 //! `Held: <reason>` line where the person can see it.
 //!
@@ -62,11 +63,6 @@ impl StartKind {
         Self::SkillCurator, Self::Judge, Self::Triage, Self::Naming, Self::SmallModel,
     ];
 
-    /// Starts nobody asked for, which wait out quiet hours. (A person's own
-    /// Run now, message to a cat or typed task is never proactive.)
-    pub(crate) fn proactive(self) -> bool {
-        matches!(self, Self::Routine | Self::WatchWake | Self::CatTurn | Self::SkillCurator)
-    }
 }
 
 /// Why a start waits, in the words the person reads after `Held: `.
@@ -78,8 +74,6 @@ pub(crate) enum HoldReason {
     Cap(u32),
     /// Today's spend has reached the daily ceiling.
     Spend,
-    /// Quiet hours, and nobody asked for this start.
-    Quiet,
 }
 
 impl std::fmt::Display for HoldReason {
@@ -88,7 +82,6 @@ impl std::fmt::Display for HoldReason {
             Self::Machine(why) => f.write_str(why),
             Self::Cap(cap) => write!(f, "the Mac allows {cap} agent{} at once right now, and that many are running", if *cap == 1 { "" } else { "s" }),
             Self::Spend => f.write_str("today's spend has reached the daily ceiling"),
-            Self::Quiet => f.write_str("quiet hours; it starts when they end"),
         }
     }
 }
@@ -125,7 +118,6 @@ enum Health {
 pub(crate) struct Start<'a> {
     kind: StartKind,
     workspace: Option<&'a str>,
-    person: bool,
     running: usize,
     now_ms: i64,
     health: Health,
@@ -133,13 +125,7 @@ pub(crate) struct Start<'a> {
 
 impl<'a> Start<'a> {
     pub(crate) fn new(kind: StartKind, workspace: Option<&'a str>) -> Self {
-        Self { kind, workspace, person: false, running: 0, now_ms: neko_core::workbench::now_ms(), health: Health::Latest }
-    }
-
-    /// The person asked for this start directly: it skips quiet hours (only).
-    pub(crate) fn by_person(mut self, person: bool) -> Self {
-        self.person = person;
-        self
+        Self { kind, workspace, running: 0, now_ms: neko_core::workbench::now_ms(), health: Health::Latest }
     }
 
     /// Agents running now, for the steward's cap.
@@ -163,8 +149,8 @@ impl<'a> Start<'a> {
 }
 
 /// The decision itself, from facts already gathered: steward holding, the
-/// cap, the spend ceiling, quiet hours, in that order.
-pub(crate) fn decide(kind: StartKind, person: bool, health: Option<&MachineHealth>, running: usize, spend_held: impl FnOnce() -> bool, quiet: impl FnOnce() -> bool) -> Verdict {
+/// cap, the spend ceiling, in that order.
+pub(crate) fn decide(health: Option<&MachineHealth>, running: usize, spend_held: impl FnOnce() -> bool) -> Verdict {
     if let Some(health) = health {
         if let Some(why) = &health.holding {
             return Verdict::Hold(HoldReason::Machine(why.clone()));
@@ -178,15 +164,7 @@ pub(crate) fn decide(kind: StartKind, person: bool, health: Option<&MachineHealt
     if spend_held() {
         return Verdict::Hold(HoldReason::Spend);
     }
-    if kind.proactive() && !person && quiet() {
-        return Verdict::Hold(HoldReason::Quiet);
-    }
     Verdict::Admit
-}
-
-/// Whether the person's quiet hours are on at `now_ms` (the phone's setting, the one place they are kept).
-fn quiet_now(db: &Db, now_ms: i64) -> bool {
-    neko_core::phone::quiet_at(&neko_core::phone::load_settings(db), neko_core::machine::local_hour(now_ms))
 }
 
 /// The one gate. Every start of an agent asks here first.
@@ -195,15 +173,8 @@ pub(crate) fn may_start(db: &Db, start: Start) -> Verdict {
         Health::Latest => neko_core::machine::latest(),
         Health::Given(health) => health.clone(),
     };
-    let verdict = decide(
-        start.kind,
-        start.person,
-        health.as_ref(),
-        start.running,
-        || crate::routine_care::spend_held(db, start.now_ms),
-        || quiet_now(db, start.now_ms),
-    );
-    let _ = start.workspace; // the ceiling and quiet hours are global today; kept so a per-workspace rule needs no new call sites
+    let verdict = decide(health.as_ref(), start.running, || crate::routine_care::spend_held(db, start.now_ms));
+    let _ = (start.kind, start.workspace); // the gate is the same for every kind and workspace today; kept so a per-kind rule needs no new call sites
     verdict
 }
 
@@ -419,24 +390,13 @@ mod tests {
         db
     }
 
-    fn quiet_settings(db: &Db, around: i64) {
-        let hour = neko_core::machine::local_hour(around);
-        let settings = neko_protocol::phone::PhoneSettings { quiet_enabled: true, quiet_from_hour: hour, quiet_to_hour: (hour + 1) % 24, ..Default::default() };
-        neko_core::phone::save_settings(db, settings).unwrap();
-    }
-
-    fn no_quiet_hours(db: &Db) {
-        neko_core::phone::save_settings(db, neko_protocol::phone::PhoneSettings { quiet_enabled: false, ..Default::default() }).unwrap();
-    }
-
     #[test]
     fn every_kind_is_refused_while_the_steward_holds() {
         let db = Db::open_in_memory().unwrap();
-        no_quiet_hours(&db);
         let holding = health(Some("free disk is under 15 GB"), None);
         for kind in StartKind::ALL {
             for person in [false, true] {
-                let verdict = may_start(&db, Start::new(kind, Some("w")).by_person(person).with_health(Some(&holding)));
+                let verdict = may_start(&db, Start::new(kind, Some("w")).with_health(Some(&holding)));
                 assert_eq!(verdict, Verdict::Hold(HoldReason::Machine("free disk is under 15 GB".into())), "{kind:?} (person: {person})");
                 assert_eq!(verdict.line().as_deref(), Some("Held: free disk is under 15 GB"));
             }
@@ -448,24 +408,22 @@ mod tests {
     #[test]
     fn every_kind_is_refused_at_the_steward_cap_and_admitted_below_it() {
         let db = Db::open_in_memory().unwrap();
-        no_quiet_hours(&db);
         let capped = health(None, Some(2));
         for kind in StartKind::ALL {
             assert!(may_start(&db, Start::new(kind, None).running(1).with_health(Some(&capped))).admitted(), "{kind:?} fits under a cap of two with one running");
             let verdict = may_start(&db, Start::new(kind, None).running(2).with_health(Some(&capped)));
             assert_eq!(verdict, Verdict::Hold(HoldReason::Cap(2)), "{kind:?}");
             assert_eq!(verdict.line().as_deref(), Some("Held: the Mac allows 2 agents at once right now, and that many are running"));
-            assert!(!may_start(&db, Start::new(kind, None).by_person(true).running(3).with_health(Some(&capped))).admitted(), "{kind:?}: the person's own start obeys the cap too");
+            assert!(!may_start(&db, Start::new(kind, None).running(3).with_health(Some(&capped))).admitted(), "{kind:?}: the person's own start obeys the cap too");
         }
     }
 
     #[test]
     fn every_kind_is_refused_over_the_daily_spend_ceiling_and_a_new_day_clears_it() {
         let db = over_the_ceiling();
-        no_quiet_hours(&db);
         for kind in StartKind::ALL {
             for person in [false, true] {
-                assert_eq!(may_start(&db, Start::new(kind, None).by_person(person).with_health(None)), Verdict::Hold(HoldReason::Spend), "{kind:?} (person: {person})");
+                assert_eq!(may_start(&db, Start::new(kind, None).with_health(None)), Verdict::Hold(HoldReason::Spend), "{kind:?} (person: {person})");
             }
         }
         // The same ledger a day later is yesterday's spend.
@@ -481,43 +439,42 @@ mod tests {
     }
 
     #[test]
-    fn proactive_kinds_wait_out_quiet_hours_and_starts_the_person_asked_for_do_not() {
+    fn quiet_hours_never_hold_work_every_kind_starts_while_they_are_on() {
         let db = Db::open_in_memory().unwrap();
         let now = neko_core::workbench::now_ms();
-        quiet_settings(&db, now);
-        let proactive: Vec<_> = StartKind::ALL.into_iter().filter(|k| k.proactive()).collect();
-        assert_eq!(proactive, [StartKind::Routine, StartKind::WatchWake, StartKind::CatTurn, StartKind::SkillCurator]);
+        // Quiet hours cover the current hour, as the person set them for notifications.
+        let hour = neko_core::machine::local_hour(now);
+        let settings = neko_protocol::phone::PhoneSettings { quiet_enabled: true, quiet_from_hour: hour, quiet_to_hour: (hour + 1) % 24, ..Default::default() };
+        neko_core::phone::save_settings(&db, settings).unwrap();
+        assert!(neko_core::phone::quiet_at(&neko_core::phone::load_settings(&db), hour), "quiet hours are on");
         for kind in StartKind::ALL {
-            let unattended = may_start(&db, Start::new(kind, None).at(now).with_health(None));
-            let asked = may_start(&db, Start::new(kind, None).by_person(true).at(now).with_health(None));
-            if kind.proactive() {
-                assert_eq!(unattended, Verdict::Hold(HoldReason::Quiet), "{kind:?} waits for quiet hours to end");
-                assert_eq!(unattended.line().as_deref(), Some("Held: quiet hours; it starts when they end"));
-            } else {
-                assert!(unattended.admitted(), "{kind:?} is not proactive");
-            }
-            assert!(asked.admitted(), "{kind:?} the person asked for skips quiet hours");
+            assert!(may_start(&db, Start::new(kind, None).at(now).with_health(None)).admitted(), "{kind:?} starts during quiet hours");
         }
-        // Out of quiet hours, or with them off, everything starts.
-        assert!(may_start(&db, Start::new(StartKind::Routine, None).at(now + 3 * 3_600_000).with_health(None)).admitted());
-        no_quiet_hours(&db);
-        assert!(may_start(&db, Start::new(StartKind::WatchWake, None).at(now).with_health(None)).admitted());
+        // The steward still limits the night: its night cap of one and its holding stop the same starts.
+        let night = MachineHealth { night: true, cap: Some(1), ..Default::default() };
+        for kind in StartKind::ALL {
+            assert!(may_start(&db, Start::new(kind, None).at(now).running(0).with_health(Some(&night))).admitted(), "{kind:?}: the night cap leaves room for one");
+            assert_eq!(may_start(&db, Start::new(kind, None).at(now).running(1).with_health(Some(&night))), Verdict::Hold(HoldReason::Cap(1)), "{kind:?}");
+            assert!(!may_start(&db, Start::new(kind, None).at(now).with_health(Some(&health(Some("night load is over 12"), None)))).admitted(), "{kind:?}");
+        }
+        // And so does the ceiling.
+        let over = over_the_ceiling();
+        neko_core::phone::save_settings(&over, neko_core::phone::load_settings(&db)).unwrap();
+        assert_eq!(may_start(&over, Start::new(StartKind::Routine, None).at(now).with_health(None)), Verdict::Hold(HoldReason::Spend));
     }
 
     #[test]
-    fn the_checks_run_in_order_steward_then_cap_then_spend_then_quiet() {
-        let all = |holding: bool, cap: bool, spend: bool, quiet: bool| {
+    fn the_checks_run_in_order_steward_then_cap_then_spend() {
+        let all = |holding: bool, cap: bool, spend: bool| {
             let health = health(holding.then_some("hot"), cap.then_some(1));
-            decide(StartKind::Routine, false, Some(&health), 1, || spend, || quiet)
+            decide(Some(&health), 1, || spend)
         };
-        assert_eq!(all(true, true, true, true), Verdict::Hold(HoldReason::Machine("hot".into())));
-        assert_eq!(all(false, true, true, true), Verdict::Hold(HoldReason::Cap(1)));
-        assert_eq!(all(false, false, true, true), Verdict::Hold(HoldReason::Spend));
-        assert_eq!(all(false, false, false, true), Verdict::Hold(HoldReason::Quiet));
-        assert_eq!(all(false, false, false, false), Verdict::Admit);
-        // Later checks are not even evaluated once an earlier one holds (the spend check walks the ledger).
-        let verdict = decide(StartKind::Task, false, Some(&health(Some("hot"), None)), 0, || panic!("spend was read"), || panic!("quiet was read"));
-        assert_eq!(verdict, Verdict::Hold(HoldReason::Machine("hot".into())));
+        assert_eq!(all(true, true, true), Verdict::Hold(HoldReason::Machine("hot".into())));
+        assert_eq!(all(false, true, true), Verdict::Hold(HoldReason::Cap(1)));
+        assert_eq!(all(false, false, true), Verdict::Hold(HoldReason::Spend));
+        assert_eq!(all(false, false, false), Verdict::Admit);
+        // The spend check walks the ledger: it is not evaluated once the steward holds.
+        assert_eq!(decide(Some(&health(Some("hot"), None)), 0, || panic!("spend was read")), Verdict::Hold(HoldReason::Machine("hot".into())));
     }
 
     #[test]
@@ -531,7 +488,7 @@ mod tests {
         assert_eq!((task.events.last().unwrap().role.as_str(), task.events.last().unwrap().message.as_str()), (HELD_ROLE, "Held: today's spend has reached the daily ceiling"));
         // After something else happened, a new hold is a new period.
         neko_core::workbench::append_event(&mut task, "builder", "Started");
-        note_held_on_task(&mut task, "Held: quiet hours; it starts when they end");
+        note_held_on_task(&mut task, "Held: today's spend has reached the daily ceiling");
         assert_eq!(task.events.len(), before + 3);
     }
 
@@ -545,14 +502,12 @@ mod tests {
     #[test]
     fn a_background_start_with_no_item_logs_one_line_per_hold_period() {
         let db = Db::open_in_memory().unwrap();
-        no_quiet_hours(&db);
         let site = "test site";
         let holds = || background_holds().lock().unwrap().contains(site);
         // `Start` reads the real steward by default, so the hold here is the ceiling, which lives in this database.
         assert!(admit_background(&db, site, Start::new(StartKind::Naming, None).with_health(None)));
         assert!(!holds());
         let over = over_the_ceiling();
-        no_quiet_hours(&over);
         assert!(!admit_background(&over, site, Start::new(StartKind::Naming, None).with_health(None)));
         assert!(holds(), "the first held pass is logged and remembered");
         assert!(!admit_background(&over, site, Start::new(StartKind::Naming, None).with_health(None)));

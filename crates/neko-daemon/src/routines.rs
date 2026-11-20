@@ -415,9 +415,9 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
         let routine = store.routines.iter().find(|r| r.id == id).cloned().ok_or("Routine vanished")?;
         let picked = states.iter().find(|(i, _)| *i == id).map(|(_, s)| s.clone()).unwrap_or_default();
         manual = picked.run_requested;
-        // The one gate: steward holding and cap, the daily spend ceiling, quiet hours. A "Run now" from
-        // the person skips quiet hours only. Held: the routine stays due and its note says why, once.
-        if routine_held(&db(state), &routine, picked.run_requested, running, now, neko_core::machine::latest().as_ref())? {
+        // The one gate: steward holding and cap, the daily spend ceiling. Held: the routine stays due
+        // and its note says why, once. (Quiet hours do not hold it: they only silence notifications.)
+        if routine_held(&db(state), &routine, running, now, neko_core::machine::latest().as_ref())? {
             return Ok(());
         }
         // Down across due times: one catch-up run with a note, or skip them when catch-up is off.
@@ -456,8 +456,8 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
 
 /// Asks the gate whether `routine` may start a round now. Held: puts `Held: <reason>` in its note,
 /// unless the note already says it is held, and returns true; the routine stays due for a later tick.
-fn routine_held(db: &neko_core::Db, routine: &Routine, by_person: bool, running: usize, now: i64, health: Option<&neko_protocol::workbench::MachineHealth>) -> Result<bool, String> {
-    let start = admission::Start::new(admission::StartKind::Routine, Some(&routine.workspace_id)).by_person(by_person).running(running).at(now).with_health(health);
+fn routine_held(db: &neko_core::Db, routine: &Routine, running: usize, now: i64, health: Option<&neko_protocol::workbench::MachineHealth>) -> Result<bool, String> {
+    let start = admission::Start::new(admission::StartKind::Routine, Some(&routine.workspace_id)).running(running).at(now).with_health(health);
     let Some(line) = admission::may_start(db, start).line() else { return Ok(false) };
     let mut state = core::load_state(db, &routine.id)?;
     if !state.note.as_deref().is_some_and(|n| n.starts_with(admission::HELD)) {
@@ -1441,28 +1441,28 @@ mod tests {
     }
 
     #[test]
-    fn a_held_routine_stays_due_with_one_held_note_and_run_now_skips_only_quiet_hours() {
+    fn a_held_routine_stays_due_with_one_held_note_and_quiet_hours_do_not_hold_it() {
         let db = neko_core::Db::open_in_memory().unwrap();
         let now = neko_core::workbench::now_ms();
         let hour = neko_core::machine::local_hour(now);
         neko_core::phone::save_settings(&db, neko_protocol::phone::PhoneSettings { quiet_enabled: true, quiet_from_hour: hour, quiet_to_hour: (hour + 1) % 24, ..Default::default() }).unwrap();
         let r = routine("a", true);
         let state_of = |db: &neko_core::Db| core::load_state(db, "a").unwrap();
-        // Quiet hours hold an unattended round, twice, with one note and the same due time.
         core::save_state(&db, "a", &RoutineState { next_due_ms: Some(0), ..Default::default() }).unwrap();
+        // During quiet hours it starts: they silence notifications, they never hold work.
+        assert!(!routine_held(&db, &r, 0, now, None).unwrap());
+        assert_eq!(state_of(&db).note, None);
+        // The steward holding stops it (also a person's Run now), twice, with one note and the same due time.
+        let holding = neko_protocol::workbench::MachineHealth { holding: Some("free disk is under 15 GB".into()), ..Default::default() };
         for _ in 0..2 {
-            assert!(routine_held(&db, &r, false, 0, now, None).unwrap());
+            assert!(routine_held(&db, &r, 0, now, Some(&holding)).unwrap());
         }
         let held = state_of(&db);
-        assert_eq!((held.note.as_deref(), held.next_due_ms), (Some("Held: quiet hours; it starts when they end"), Some(0)));
-        // Run now from the person goes through quiet hours.
-        assert!(!routine_held(&db, &r, true, 0, now, None).unwrap());
-        // The steward holding stops even the person's Run now, and the note is not rewritten.
-        let holding = neko_protocol::workbench::MachineHealth { holding: Some("free disk is under 15 GB".into()), ..Default::default() };
-        assert!(routine_held(&db, &r, true, 0, now, Some(&holding)).unwrap());
-        assert_eq!(state_of(&db).note.as_deref(), Some("Held: quiet hours; it starts when they end"), "one Held note per hold period");
-        // Out of quiet hours and not held: it starts.
-        assert!(!routine_held(&db, &r, false, 0, now + 3 * 3_600_000, None).unwrap());
+        assert_eq!((held.note.as_deref(), held.next_due_ms), (Some("Held: free disk is under 15 GB"), Some(0)));
+        // The night cap of one stops it while an agent runs, and lets it start when none does.
+        let night = neko_protocol::workbench::MachineHealth { night: true, cap: Some(1), ..Default::default() };
+        assert!(routine_held(&db, &r, 1, now, Some(&night)).unwrap());
+        assert!(!routine_held(&db, &r, 0, now, Some(&night)).unwrap());
     }
 
     #[test]

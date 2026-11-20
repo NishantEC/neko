@@ -154,7 +154,7 @@ impl Controller {
                 continue;
             }
             // The one gate. Read only when a turn is about to start: the spend check walks the routines' runs.
-            let start = Start::new(StartKind::CatTurn, Some(&cat.workspace_id)).by_person(batch.person).running(running_before + launches.len()).at(now_ms).with_health(health);
+            let start = Start::new(StartKind::CatTurn, Some(&cat.workspace_id)).running(running_before + launches.len()).at(now_ms).with_health(health);
             if let Some(line) = may_start(&db, start).line() {
                 // The wakes stay queued; one "Held:" line per hold period tells the person why nothing answered.
                 let noted = thread::recent(&db, &cat.id, 1)?.last().is_some_and(|m| m.role == CatMessageRole::Event && m.text.starts_with(HELD));

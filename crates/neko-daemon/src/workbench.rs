@@ -135,7 +135,7 @@ impl Controller {
     /// check says why instead of guessing, and is not remembered as a failure).
     pub fn check_model(&self, runtime: &AgentRuntime) -> neko_protocol::agent_models::ModelCheck {
         let running = self.running_agents();
-        let verdict = admission::may_start(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), admission::Start::new(admission::StartKind::SmallModel, None).by_person(true).running(running));
+        let verdict = admission::may_start(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), admission::Start::new(admission::StartKind::SmallModel, None).running(running));
         match verdict.line() {
             Some(message) => neko_protocol::agent_models::ModelCheck { runtime: runtime.clone(), ok: false, unavailable: false, message },
             None => neko_core::agent_catalog::check(runtime),

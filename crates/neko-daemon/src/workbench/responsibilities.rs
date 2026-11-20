@@ -611,8 +611,6 @@ mod tests {
     use super::*;
     fn configured() -> Controller {
         let controller = super::super::tests::controller_with_task(TaskStatus::Completed);
-        // Quiet hours hold unattended wakes; these tests run at any hour (`admission` tests the rule itself).
-        neko_core::phone::save_settings(&controller.db.lock().unwrap(), neko_protocol::phone::PhoneSettings { quiet_enabled: false, ..Default::default() }).unwrap();
         let db = controller
             .db
             .lock()
@@ -672,7 +670,6 @@ mod tests {
         let controller = configured();
         {
             let db = controller.db.lock().unwrap();
-            neko_core::phone::save_settings(&db, neko_protocol::phone::PhoneSettings { quiet_enabled: false, ..Default::default() }).unwrap();
             let mut state = store::load(&db).unwrap();
             state.mcp.responsibilities[0].last_result = "Found two bugs".into();
             store::save(&db, &state).unwrap();
@@ -696,7 +693,6 @@ mod tests {
         let controller = configured();
         {
             let db = controller.db.lock().unwrap();
-            neko_core::phone::save_settings(&db, neko_protocol::phone::PhoneSettings { quiet_enabled: false, ..Default::default() }).unwrap();
         }
         let now = store::now_ms();
         let capped = neko_protocol::workbench::MachineHealth { cap: Some(1), ..Default::default() };

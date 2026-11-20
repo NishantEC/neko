@@ -18,9 +18,6 @@ fn fixture() -> Fx {
     let repo = tempfile::tempdir().unwrap();
     assert!(std::process::Command::new("git").args(["init", "--quiet"]).arg(repo.path()).status().unwrap().success());
     let db = Arc::new(Mutex::new(Db::open_in_memory().unwrap()));
-    // Quiet hours hold unattended turns; these tests run at fixed instants in any time zone, so they are off here
-    // (`admission` tests the rule itself).
-    neko_core::phone::save_settings(&db.lock().unwrap(), neko_protocol::phone::PhoneSettings { quiet_enabled: false, ..Default::default() }).unwrap();
     let workspace = {
         let db = db.lock().unwrap();
         store::apply(&db, Command::SaveWorkspaceWithFolders {

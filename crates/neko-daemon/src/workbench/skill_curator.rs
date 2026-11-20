@@ -50,7 +50,7 @@ impl Controller {
         if !self.idle_for_curator()? {
             return Ok(0);
         }
-        // The one gate (a stricter local rule above stays): steward cap, spend ceiling, quiet hours.
+        // The one gate (a stricter local rule above stays): steward cap, spend ceiling.
         let running = self.running_agents();
         if !admit_background(&*self.db.lock().map_err(|_| "Skill storage unavailable")?, "skill curator", Start::new(StartKind::SkillCurator, None).running(running)) {
             return Ok(0);
