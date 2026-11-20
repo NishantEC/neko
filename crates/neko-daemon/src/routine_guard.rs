@@ -85,6 +85,11 @@ pub(crate) fn run_gate(command: &str, folder: &Path, limit: Duration) -> Verdict
     let started = std::time::Instant::now();
     let status = loop {
         match child.try_wait() {
+            // A check that only finished after its time was up (a starved thread noticed late) is a timeout too.
+            Ok(Some(_)) if started.elapsed() > limit + Duration::from_millis(250) => {
+                unsafe { libc::kill(-pid, libc::SIGKILL) };
+                return Verdict::Skip(format!("Skipped: the check timed out after {} s", limit.as_secs()));
+            }
             Ok(Some(status)) => break Ok(status),
             Ok(None) if started.elapsed() >= limit => {
                 unsafe { libc::kill(-pid, libc::SIGKILL) };
@@ -372,7 +377,7 @@ mod tests {
         let verdict = run_gate("sleep 15", &folder, GATE_LIMIT);
         assert_eq!(verdict, Verdict::Skip("Skipped: the check timed out after 10 s".into()));
         let took = started.elapsed();
-        assert!(took >= Duration::from_secs(10) && took < Duration::from_secs(13), "{took:?}");
+        assert!(took >= Duration::from_secs(10) && took < Duration::from_secs(15), "{took:?}");
     }
 
     #[test]

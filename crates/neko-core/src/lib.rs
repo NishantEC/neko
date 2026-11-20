@@ -67,6 +67,7 @@ pub mod schedule_time;
 pub mod routines;
 pub mod runtime_health;
 pub mod spill;
+pub mod redact;
 pub mod spend;
 pub mod usage_ledger;
 pub mod scheduled_plans;

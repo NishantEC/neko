@@ -431,6 +431,9 @@ fn commit(db: &Arc<Mutex<Db>>, id: &str, still: impl Fn(&Goal) -> bool, change: 
 /// reference for what a pass does).
 pub(super) fn tick(db: &Arc<Mutex<Db>>, env: &dyn Env) -> Result<(), String> {
     let goals = core::load_all(&*db.lock().map_err(|_| "Goal storage unavailable")?)?;
+    for goal in goals.iter().filter(|g| receipt_due(g, env.now_ms())) {
+        write_receipt(db, &goal.id, env.now_ms());
+    }
     for goal in goals.into_iter().filter(|g| g.status.is_active()) {
         let id = goal.id.clone();
         if let Err(error) = step(db, env, goal) {
@@ -448,6 +451,28 @@ static IN_FLIGHT: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// is never stepped twice at once.
 fn tick_concurrently(db: &Arc<Mutex<Db>>, env: &Arc<Real>) -> Result<(), String> {
     let goals = core::load_all(&*db.lock().map_err(|_| "Goal storage unavailable")?)?;
+    // A receipt that failed to write is retried on its own thread (it reads git and writes a file).
+    for goal in goals.iter().filter(|g| receipt_due(g, env.now_ms())) {
+        let key = format!("receipt:{}", goal.id);
+        {
+            let mut busy = IN_FLIGHT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if busy.contains(&key) {
+                continue;
+            }
+            busy.push(key.clone());
+        }
+        let (db, id, now) = (db.clone(), goal.id.clone(), env.now_ms());
+        let spawned = std::thread::Builder::new().name(format!("neko-receipt-{id}")).spawn({
+            let key = key.clone();
+            move || {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| write_receipt(&db, &id, now)));
+                IN_FLIGHT.lock().unwrap_or_else(std::sync::PoisonError::into_inner).retain(|g| *g != key);
+            }
+        });
+        if spawned.is_err() {
+            IN_FLIGHT.lock().unwrap_or_else(std::sync::PoisonError::into_inner).retain(|g| *g != key);
+        }
+    }
     for goal in goals.into_iter().filter(|g| g.status.is_active()) {
         {
             let mut busy = IN_FLIGHT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -702,7 +727,7 @@ fn evaluate(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: &Goal, snapshot: &Snapshot
     let (turn, id) = (goal.turns, goal.id.clone());
     let same_turn = move |g: &Goal| g.status == GoalStatus::Running && g.turns == turn && g.in_turn;
     let stalled = error.as_deref().is_some_and(core::is_stall);
-    commit(db, &id, same_turn, |db, g| {
+    let applied = commit(db, &id, same_turn, |db, g| {
         g.wall_ms += spent_ms;
         if let Some(check) = &check {
             core::push_ledger(db, &g.subject(), check.clone())?;
@@ -740,7 +765,111 @@ fn evaluate(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: &Goal, snapshot: &Snapshot
             }
         }
     })?;
+    // The receipt is written after the save, never inside the commit or while the database is held.
+    if applied && ruling.verdict == core::Verdict::Done {
+        write_receipt(db, &id, now);
+    }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// The receipt: one markdown artifact when a goal is Done
+// ---------------------------------------------------------------------------
+
+/// One receipt is written at a time, so the judge's DONE and a person's "done" (or the retry sweep) cannot
+/// both write one for the same goal.
+static RECEIPT_LOCK: Mutex<()> = Mutex::new(());
+/// The goal tick retries a Done goal without a receipt this many times.
+const RECEIPT_TRIES: u8 = 3;
+const RECEIPT_RETRY_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
+
+#[cfg(test)]
+thread_local! {
+    /// Tests keep receipts in their own folder (the real one is under the data directory).
+    pub(super) static TEST_RECEIPTS: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+fn receipts_root() -> std::path::PathBuf {
+    #[cfg(test)]
+    {
+        if let Some(root) = TEST_RECEIPTS.with(|r| r.borrow().clone()) {
+            return root;
+        }
+        return std::env::temp_dir().join(format!("neko-test-receipts-{}", std::process::id()));
+    }
+    #[cfg(not(test))]
+    neko_core::artifacts::root()
+}
+
+/// What changed over the whole task, from its checkpoints. `None` when it has none or they cannot be read
+/// (the folder and its source checkout are both gone, or the objects were collected).
+fn receipt_changes(db: &Arc<Mutex<Db>>, task: Option<&Task>) -> Option<core::Changes> {
+    let task = task?;
+    let row = neko_core::checkpoints::row(db, &task.id).ok()?;
+    if row.runs.is_empty() {
+        return None;
+    }
+    // The source checkout holds the objects even when the ticket's folder is parked.
+    let repo = std::path::PathBuf::from(&row.repo);
+    let dir = if !row.repo.is_empty() && repo.is_dir() { repo } else { super::run_checkpoints::folder_of(task).ok()? };
+    let diff = neko_core::checkpoints::diff_of(db, &task.id, &dir, None).ok()?;
+    Some(core::Changes { files: diff.files, added: diff.added, removed: diff.removed })
+}
+
+/// Writes the receipt of a Done goal that has none, through `save_artifact`'s own store. A failure never changes
+/// the goal's status: it leaves a journal line and counts a try, and the tick tries again (three times in all).
+pub(super) fn write_receipt(db: &Arc<Mutex<Db>>, goal_id: &str, now: i64) {
+    let _one = RECEIPT_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let result = (|| -> Result<bool, String> {
+        let (goal, log, snapshot) = {
+            let guard = db.lock().map_err(|_| "Goal storage unavailable")?;
+            let Some(goal) = core::load(&guard, goal_id)? else { return Ok(false) };
+            if goal.status != GoalStatus::Done || goal.receipt.is_some() {
+                return Ok(false);
+            }
+            let log = core::log(&guard, &goal.subject())?;
+            (goal, log, store::load(&guard)?)
+        };
+        let task = goal.ticket_id.as_deref().and_then(|id| snapshot.tasks.iter().find(|t| t.id == id));
+        let changes = receipt_changes(db, task);
+        let totals = {
+            let guard = db.lock().map_err(|_| "Goal storage unavailable")?;
+            neko_core::usage_ledger::sum_for_task(&guard, goal.ticket_id.as_deref().unwrap_or(&goal.id))?
+        };
+        let pull_request = task.and_then(|t| t.pull_request.as_ref()).map(|pr| (pr.url.as_str(), pr.status.as_ref().map(|s| s.state.as_str())));
+        let markdown = neko_core::redact::scrub(&core::receipt_markdown(&core::ReceiptInput { goal: &goal, finished_ms: goal.updated_ms.max(1), ledger: &log.ledger, journal: &log.journal, changes: changes.as_ref(), totals: &totals, pull_request }));
+        let folder = std::env::temp_dir().join("neko-receipts");
+        std::fs::create_dir_all(&folder).map_err(|e| format!("cannot make {}: {e}", folder.display()))?;
+        let file = folder.join(format!("{}.md", goal.id));
+        std::fs::write(&file, markdown).map_err(|e| format!("cannot write {}: {e}", file.display()))?;
+        let first_line = goal.objective.lines().next().unwrap_or("");
+        let saved = neko_core::artifacts::save(&receipts_root(), neko_core::artifacts::Save {
+            title: format!("Receipt: {}", core::head(first_line.trim(), 100)),
+            file: file.clone(),
+            workspace_id: Some(goal.workspace_id.clone()),
+            task_id: goal.ticket_id.clone(),
+            note: "Goal receipt".into(),
+            ..Default::default()
+        });
+        let _ = std::fs::remove_file(&file);
+        let (artifact, version) = saved?;
+        commit(db, goal_id, |g| g.status == GoalStatus::Done && g.receipt.is_none(), |_, g| {
+            g.receipt = Some(ReceiptRef { artifact_id: artifact.id.clone(), version, at_ms: now });
+            Ok(())
+        })
+    })();
+    if let Err(error) = result {
+        eprintln!("neko goals: {goal_id}: could not write the receipt: {error}");
+        let _ = commit(db, goal_id, |g| g.status == GoalStatus::Done && g.receipt.is_none(), |db, g| {
+            g.receipt_tries = g.receipt_tries.saturating_add(1);
+            core::push_journal(db, &g.subject(), JournalEntry { at_ms: now, turn: g.turns, note: format!("Could not write the receipt: {}", core::head(&error, 160)), ..Default::default() })
+        });
+    }
+}
+
+/// A Done goal without a receipt (one that failed to write, or the daemon stopped first) is tried on the tick, three tries in all, for a day after it finished.
+fn receipt_due(goal: &Goal, now: i64) -> bool {
+    goal.status == GoalStatus::Done && goal.receipt.is_none() && goal.receipt_tries < RECEIPT_TRIES && now - goal.updated_ms <= RECEIPT_RETRY_WINDOW_MS
 }
 
 fn waiting(db: &Arc<Mutex<Db>>, env: &dyn Env, goal: Goal) -> Result<(), String> {
@@ -885,6 +1014,19 @@ pub(super) fn evidence_gate(db: &Db, task_id: &str, changed: &[String], builder_
 
 impl Controller {
     pub(super) fn goal_command(&self, command: GoalCommand) -> Result<Snapshot, String> {
+        // The receipt of a goal the person marked done is written once the goal lock and the database are free.
+        let (snapshot, receipt_for) = self.goal_command_inner(command)?;
+        match receipt_for {
+            Some(id) => {
+                write_receipt(&self.db, &id, store::now_ms());
+                store::load(&*self.db.lock().map_err(|_| "Goal storage unavailable")?)
+            }
+            None => Ok(snapshot),
+        }
+    }
+
+    fn goal_command_inner(&self, command: GoalCommand) -> Result<(Snapshot, Option<String>), String> {
+        let mut receipt_for = None;
         let _goals = GOAL_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let db = self.db.lock().map_err(|_| "Goal storage unavailable")?;
         let now = store::now_ms();
@@ -942,6 +1084,7 @@ impl Controller {
             }
             GoalCommand::MarkDone { id } => {
                 let mut goal = find(&id)?;
+                receipt_for = goal.receipt.is_none().then(|| id.clone());
                 goal.status = GoalStatus::Done;
                 goal.in_turn = false;
                 goal.verdict = "DONE".into();
@@ -974,7 +1117,7 @@ impl Controller {
                 core::save(&db, &goal)?;
             }
         }
-        store::load(&db)
+        Ok((store::load(&db)?, receipt_for))
     }
 
     /// The goal loop: resumes what a restart interrupted, then ticks.
@@ -1033,3 +1176,7 @@ mod chat_tests;
 #[cfg(test)]
 #[path = "goals_more_tests.rs"]
 mod more_tests;
+
+#[cfg(test)]
+#[path = "goals_receipt_tests.rs"]
+mod receipt_tests;

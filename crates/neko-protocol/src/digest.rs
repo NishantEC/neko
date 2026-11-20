@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 pub struct DigestLine {
     pub text: String,
     pub default: Option<String>,
+    /// `artifact:<id>` on a finished goal's line: where its receipt is. Never in the plain-text digest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -159,19 +159,19 @@ impl Controller {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use neko_protocol::crew::CrewRole;
     use serde_json::{json, Value};
 
-    fn git(dir: &Path, args: &[&str]) {
+    pub(crate) fn git(dir: &Path, args: &[&str]) {
         let out = std::process::Command::new("git").current_dir(dir)
             .args(["-c", "user.name=T", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]).args(args).output().unwrap();
         assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
     }
 
     /// A controller whose ticket "t" has a worktree under a temporary root.
-    fn fixture(status: TaskStatus) -> (Controller, tempfile::TempDir, PathBuf) {
+    pub(crate) fn fixture(status: TaskStatus) -> (Controller, tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path().join("repo");
         std::fs::create_dir(&repo).unwrap();
@@ -195,7 +195,7 @@ mod tests {
         (controller, dir, worktree)
     }
 
-    fn a_run(c: &Controller, worktree: &Path, content: &str) {
+    pub(crate) fn a_run(c: &Controller, worktree: &Path, content: &str) {
         let slot = RunSlot::default();
         slot.begin(&c.db, "t", worktree);
         std::fs::write(worktree.join("a.txt"), content).unwrap();

@@ -77,13 +77,13 @@ fn capped(mut lines: Vec<DigestLine>) -> Vec<DigestLine> {
     if lines.len() > MAX_LINES {
         let more = lines.len() - MAX_LINES;
         lines.truncate(MAX_LINES);
-        lines.push(DigestLine { text: format!("and {more} more"), default: None });
+        lines.push(DigestLine { text: format!("and {more} more"), default: None, link: None });
     }
     lines
 }
 
 fn plain(text: String) -> DigestLine {
-    DigestLine { text, default: None }
+    DigestLine { text, default: None, link: None }
 }
 
 fn merged(task: &Task) -> bool {
@@ -105,7 +105,9 @@ pub fn compose(f: &Facts) -> Option<Digest> {
         finished.push(plain(format!("Task done: {}", head(&task.title, 90))));
     }
     for goal in f.goals.iter().filter(|g| g.status == GoalStatus::Done && g.updated_ms >= since) {
-        finished.push(plain(format!("Goal done: {}", head(&goal.objective, 90))));
+        // A receipt, when one was written, is one click away from this line (never in the plain-text digest).
+        let link = goal.receipt.as_ref().map(|r| format!("artifact:{}", r.artifact_id));
+        finished.push(DigestLine { text: format!("Goal done: {}", head(&goal.objective, 90)), default: None, link });
     }
     for task in f.tasks.iter().filter(|t| merged(t) && t.updated_at_ms >= since) {
         finished.push(plain(format!("PR merged: {}", head(&task.title, 90))));
@@ -117,7 +119,7 @@ pub fn compose(f: &Facts) -> Option<Digest> {
         match goal.status {
             GoalStatus::Blocked => {
                 let (question, default) = goal.blocked.as_ref().map(|b| (head(&b.question, 120), Some(head(&b.default_answer, 120)))).unwrap_or_default();
-                stuck.push(DigestLine { text: format!("Blocked: {what}. {question}"), default });
+                stuck.push(DigestLine { text: format!("Blocked: {what}. {question}"), default, link: None });
             }
             GoalStatus::Held => stuck.push(plain(format!("Held: {what}. A usage limit is in the way; it resumes when it resets."))),
             GoalStatus::Paused => {
@@ -138,7 +140,7 @@ pub fn compose(f: &Facts) -> Option<Digest> {
     let decisions: Vec<DigestLine> = f
         .open_items
         .iter()
-        .map(|i| DigestLine { text: head(&i.title, 120), default: i.default.clone() })
+        .map(|i| DigestLine { text: head(&i.title, 120), default: i.default.clone(), link: None })
         .collect();
 
     if finished.is_empty() && stuck.is_empty() && decisions.is_empty() {
@@ -200,7 +202,7 @@ pub fn to_text(d: &Digest) -> String {
     group("Finished", &d.finished);
     group("Stuck", &d.stuck);
     // A decision with no default says so.
-    let decisions: Vec<DigestLine> = d.decisions.iter().map(|l| DigestLine { text: l.text.clone(), default: Some(l.default.clone().unwrap_or_else(|| "No default".into())) }).collect();
+    let decisions: Vec<DigestLine> = d.decisions.iter().map(|l| DigestLine { text: l.text.clone(), default: Some(l.default.clone().unwrap_or_else(|| "No default".into())), link: None }).collect();
     group("Needs a decision", &decisions);
     for extra in [&d.calendar, &d.spend] {
         if !extra.is_empty() {
@@ -265,6 +267,33 @@ mod tests {
         assert!(d.headline.starts_with("3 things finished, 3 things are stuck. 2 things need you."), "{}", d.headline);
         let text = to_text(&d);
         assert!(text.contains("- Sign in to the tracker? (default: No default)") && text.contains("(default: the primary)"), "{text}");
+    }
+
+    #[test]
+    fn a_done_goal_line_links_its_receipt_and_the_plain_text_does_not() {
+        use neko_protocol::goals::ReceiptRef;
+        let goals = [
+            Goal { objective: "Ship the exporter".into(), status: GoalStatus::Done, updated_ms: 7_000, receipt: Some(ReceiptRef { artifact_id: "art-1".into(), version: 1, at_ms: 7_000 }), ..Default::default() },
+            Goal { objective: "Write the guide".into(), status: GoalStatus::Done, updated_ms: 7_100, ..Default::default() },
+        ];
+        let d = compose(&facts(&[], &goals, &[])).unwrap();
+        assert_eq!(d.finished[0].link.as_deref(), Some("artifact:art-1"));
+        assert_eq!(d.finished[1].link, None, "no receipt, no link");
+        let text = to_text(&d);
+        assert!(text.contains("- Goal done: Ship the exporter") && !text.contains("artifact"), "{text}");
+        assert_eq!(title(&d), "Neko morning digest: 2 finished, 0 stuck, 0 for you");
+    }
+
+    #[test]
+    fn a_digest_line_round_trips_with_and_without_a_link() {
+        let with = DigestLine { text: "Goal done: x".into(), default: None, link: Some("artifact:a".into()) };
+        let json = serde_json::to_string(&with).unwrap();
+        assert_eq!(serde_json::from_str::<DigestLine>(&json).unwrap(), with);
+        let without = DigestLine { text: "Task done: y".into(), default: None, link: None };
+        let json = serde_json::to_string(&without).unwrap();
+        assert!(!json.contains("link"), "an old digest's bytes do not change: {json}");
+        assert_eq!(serde_json::from_str::<DigestLine>(&json).unwrap(), without);
+        assert_eq!(serde_json::from_str::<DigestLine>(r#"{"text":"old","default":null}"#).unwrap().link, None);
     }
 
     #[test]

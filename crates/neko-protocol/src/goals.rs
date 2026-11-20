@@ -161,8 +161,21 @@ pub struct Goal {
     pub judge_failures: u32,
     /// Capped at the last 12 for readers, newest last.
     pub ledger: Vec<CheckResult>,
-    /// Capped at the last 20 for readers, newest last.
+    /// Capped at the last 20 for readers (the log keeps 50), newest last.
     pub journal: Vec<JournalEntry>,
+    /// The receipt written when the goal reached Done (a markdown artifact).
+    pub receipt: Option<ReceiptRef>,
+    /// Failed attempts to write the receipt; the goal tick retries up to three.
+    pub receipt_tries: u8,
+}
+
+/// Where a finished goal's receipt is kept.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ReceiptRef {
+    pub artifact_id: String,
+    pub version: u32,
+    pub at_ms: i64,
 }
 
 impl Goal {

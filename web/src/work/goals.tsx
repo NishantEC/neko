@@ -19,6 +19,7 @@ import { Input } from "@/ui/input";
 import { Check, Pause, Play, Plus, Stop } from "@/ui/icons";
 import { toast } from "@/ui/sonner";
 import { cn } from "@/ui/lib/utils";
+import { artifactHref } from "@/canvas/artifacts";
 
 export type Goal = Json;
 
@@ -109,6 +110,11 @@ function Ledger({ goal, now }: { goal: Goal; now: number }) {
     <div data-slot="goal-detail" className="ms-8 mt-1 flex min-w-0 flex-col gap-3 pb-2 text-[12.5px] text-muted-foreground">
       {goal.done_check ? <p className="truncate"><span className="text-foreground/80">Check</span> <code className="font-mono text-[12px]">{goal.done_check}</code></p> : <p>No check. Done needs a file or a link that exists.</p>}
       {goal.constraints ? <p><span className="text-foreground/80">Constraints</span> {goal.constraints}</p> : null}
+      {goal.status === "Done" && goal.receipt ? (
+        <p data-slot="goal-receipt"><span className="text-foreground/80">Receipt</span> <a href={artifactHref(String(goal.receipt.artifact_id), goal.receipt.version)} className="text-foreground underline underline-offset-2">Open the receipt</a></p>
+      ) : goal.status === "Done" && (goal.receipt_tries ?? 0) >= 3 ? (
+        <p data-slot="goal-receipt-missing">No receipt could be written.</p>
+      ) : null}
       {ledger.length ? (
         <div>
           <p className="mb-1 font-medium text-foreground/80">Evidence</p>

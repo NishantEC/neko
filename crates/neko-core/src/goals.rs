@@ -20,9 +20,12 @@ const INDEX: &str = "neko_goals_index_v1";
 const ROW: &str = "neko_goal_v1:";
 const CLOCK: &str = "neko_goal_clock_v1";
 const LOG: &str = "neko_run_log_v1:";
-/// The ledger and journal readers see, newest last.
+/// The ledger readers see, newest last.
 pub const MAX_LEDGER: usize = 12;
-pub const MAX_JOURNAL: usize = 20;
+/// The journal kept in storage (a receipt reads all of it), newest last.
+pub const MAX_JOURNAL: usize = 50;
+/// What a reader of the snapshot gets of it for an active goal, so the snapshot does not grow.
+pub const READER_JOURNAL: usize = 20;
 /// Output kept per ledger entry.
 pub const TAIL_BYTES: usize = 1200;
 /// Goals kept; the oldest finished ones go first.
@@ -99,6 +102,8 @@ fn attach(db: &Db, goal: &mut Goal, clocks: &BTreeMap<String, Clock>) -> Result<
     if goal.status.is_finished() {
         log.ledger.drain(..log.ledger.len().saturating_sub(4));
         log.journal.drain(..log.journal.len().saturating_sub(6));
+    } else {
+        log.journal.drain(..log.journal.len().saturating_sub(READER_JOURNAL));
     }
     goal.ledger = log.ledger;
     goal.journal = log.journal;
@@ -224,6 +229,145 @@ pub fn new_goal(workspace_id: &str, objective: &str, done_check: &str, constrain
         last_tick_ms: now,
         ..Goal::default()
     })
+}
+
+// ---------------------------------------------------------------------------
+// The receipt
+// ---------------------------------------------------------------------------
+
+/// What changed in the ticket's folder over the whole task (first run's start to last run's end).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Changes {
+    pub files: Vec<String>,
+    pub added: usize,
+    pub removed: usize,
+}
+
+/// Everything a receipt says, read before it is written. The writer redacts the result.
+pub struct ReceiptInput<'a> {
+    pub goal: &'a Goal,
+    pub finished_ms: i64,
+    /// The evidence ledger, oldest first.
+    pub ledger: &'a [CheckResult],
+    /// The stored journal, oldest first.
+    pub journal: &'a [JournalEntry],
+    /// `None` when the ticket has no checkpoints (or they cannot be read).
+    pub changes: Option<&'a Changes>,
+    /// The usage ledger's totals for the goal's ticket.
+    pub totals: &'a crate::usage_ledger::TaskTotals,
+    /// The ticket's pull request, and its state when known.
+    pub pull_request: Option<(&'a str, Option<&'a str>)>,
+}
+
+const RECEIPT_OUTPUT_LINES: usize = 20;
+const RECEIPT_PATHS: usize = 30;
+
+fn local_time(ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms).map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default()
+}
+
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A fence longer than any run of backticks inside `text`.
+fn fence_for(text: &str) -> String {
+    let mut longest = 0;
+    let mut run = 0;
+    for c in text.chars() {
+        run = if c == '`' { run + 1 } else { 0 };
+        longest = longest.max(run);
+    }
+    "`".repeat(longest.max(2) + 1)
+}
+
+fn duration_words(ms: i64) -> String {
+    let minutes = (ms.max(0) + 30_000) / 60_000;
+    match (minutes / 60, minutes % 60) {
+        (0, m) => format!("{m}m"),
+        (h, m) => format!("{h}h {m}m"),
+    }
+}
+
+/// The receipt as markdown: the six sections in a fixed order (Pull request only when the ticket has one).
+/// Pure; the caller passes the result through `redact::scrub`. The cost line reads "Input and output" rather
+/// than "Tokens" because the scrub hides anything that names a token.
+pub fn receipt_markdown(input: &ReceiptInput) -> String {
+    let goal = input.goal;
+    let first_line = one_line(goal.objective.lines().next().unwrap_or(""));
+    let mut out = format!("# Receipt: {}\n\n", head(&first_line, 120));
+    let why = if goal.reason.trim().is_empty() { "You marked it done.".to_owned() } else { one_line(&goal.reason) };
+    out.push_str(&format!("Goal finished {}. {}\n\n", local_time(input.finished_ms), why));
+    out.push_str(&format!("## Objective\n{}\n\n", goal.objective.trim()));
+
+    out.push_str("## Checks\n");
+    if input.ledger.is_empty() {
+        out.push_str("No check was run.\n");
+    }
+    for check in input.ledger {
+        let command = one_line(&check.command).replace('`', "'");
+        let code = check.exit_code.map_or("none".to_owned(), |c| c.to_string());
+        out.push_str(&format!("### `{}` exit {code} ({}, {})\n", head(&command, 160), local_time(check.at_ms), if check.source.is_empty() { "neko" } else { &check.source }));
+        let lines: Vec<&str> = check.tail.lines().collect();
+        let shown = lines[lines.len().saturating_sub(RECEIPT_OUTPUT_LINES)..].join("\n");
+        let fence = fence_for(&shown);
+        out.push_str(&format!("{fence}\n{shown}\n{fence}\n"));
+    }
+    out.push('\n');
+
+    out.push_str("## Changes\n");
+    match input.changes {
+        None => out.push_str("No checkpoints were taken for this goal.\n"),
+        Some(changes) => {
+            out.push_str(&format!("Files changed: {}, +{} -{} (whole task: first run's start to last run's end)\n", changes.files.len(), changes.added, changes.removed));
+            for path in changes.files.iter().take(RECEIPT_PATHS) {
+                out.push_str(&format!("- {}\n", one_line(path)));
+            }
+            if changes.files.len() > RECEIPT_PATHS {
+                out.push_str(&format!("and {} more\n", changes.files.len() - RECEIPT_PATHS));
+            }
+        }
+    }
+    out.push('\n');
+
+    out.push_str("## Journal\n");
+    let skip = input.journal.len().saturating_sub(MAX_JOURNAL);
+    for entry in input.journal.iter().skip(skip) {
+        let mut line = format!("- turn {}: {} | next: {}", entry.turn, one_line(&entry.done), one_line(&entry.next));
+        if !entry.note.trim().is_empty() {
+            line.push_str(&format!(" | {}", one_line(&entry.note)));
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out.push('\n');
+
+    let totals = input.totals;
+    out.push_str("## Cost and time\n");
+    match totals.cost_micro_usd {
+        Some(micro) => {
+            out.push_str(&format!("Cost: ${:.2} reported across {} {}", micro as f64 / 1_000_000.0, totals.runs, if totals.runs == 1 { "run" } else { "runs" }));
+            if totals.estimated_runs > 0 {
+                out.push_str(&format!(" ({} {} reported no price)", totals.estimated_runs, if totals.estimated_runs == 1 { "run" } else { "runs" }));
+            }
+            out.push('\n');
+        }
+        None => out.push_str("Cost: no price reported\n"),
+    }
+    if totals.input_tokens.is_some() || totals.output_tokens.is_some() {
+        out.push_str(&format!("Input and output: {} in, {} out (reported runs only)\n", totals.input_tokens.unwrap_or(0), totals.output_tokens.unwrap_or(0)));
+    }
+    out.push_str(&format!("Agent time: {} running, {}/{} turns\n", duration_words(goal.wall_ms), goal.turns, goal.budget.max_turns));
+    out.push_str("Source: usage ledger (figures for this goal's ticket only)\n");
+
+    if let Some((url, state)) = input.pull_request {
+        out.push_str("\n## Pull request\n");
+        match state {
+            Some(state) if !state.is_empty() => out.push_str(&format!("{url} ({state})\n")),
+            _ => out.push_str(&format!("{url}\n")),
+        }
+    }
+    out
 }
 
 /// The end of `text`, on a character boundary, with a marker when shortened.
@@ -759,6 +903,104 @@ mod tests {
         }
         assert_eq!(log(&db, "t1").unwrap().ledger.len(), MAX_LEDGER);
         assert!(create(&db, Goal { ticket_id: Some("t1".into()), ..goal("") }).is_err(), "one unfinished goal per ticket");
+    }
+
+    #[test]
+    fn the_log_keeps_fifty_journal_entries_and_a_reader_of_the_snapshot_sees_twenty() {
+        let db = Db::open_in_memory().unwrap();
+        let mut g = goal("cargo test");
+        g.ticket_id = Some("t1".into());
+        let g = create(&db, g).unwrap();
+        for turn in 1..=60 {
+            push_journal(&db, "t1", JournalEntry { turn, done: format!("did {turn}"), ..Default::default() }).unwrap();
+        }
+        let stored = log(&db, "t1").unwrap().journal;
+        assert_eq!((stored.len(), stored[0].turn, stored[49].turn), (50, 11, 60), "the last 50 are stored");
+        let read = load(&db, &g.id).unwrap().unwrap();
+        assert_eq!((read.journal.len(), read.journal[0].turn), (20, 41), "a reader sees the last 20");
+        assert_eq!(load_all(&db).unwrap()[0].journal.len(), 20);
+        // A finished goal still shows only the end.
+        let mut done = read.clone();
+        done.status = GoalStatus::Done;
+        save(&db, &done).unwrap();
+        assert_eq!(load(&db, &g.id).unwrap().unwrap().journal.len(), 6);
+        assert_eq!(log(&db, "t1").unwrap().journal.len(), 50, "the receipt still reads all 50");
+    }
+
+    fn receipt_goal() -> Goal {
+        Goal { objective: "Ship the exporter\nand its docs".into(), reason: "The check passes.".into(), turns: 3, wall_ms: 4_500_000, budget: Budget { max_turns: 20, ..Budget::default() }, ..goal("cargo test") }
+    }
+
+    fn receipt_with<'a>(goal: &'a Goal, ledger: &'a [CheckResult], journal: &'a [JournalEntry], changes: Option<&'a Changes>, totals: &'a crate::usage_ledger::TaskTotals, pr: Option<(&'a str, Option<&'a str>)>) -> String {
+        receipt_markdown(&ReceiptInput { goal, finished_ms: 1_794_598_800_000, ledger, journal, changes, totals, pull_request: pr })
+    }
+
+    #[test]
+    fn a_receipt_has_the_sections_in_order_and_the_pull_request_only_when_there_is_one() {
+        let goal = receipt_goal();
+        let totals = crate::usage_ledger::TaskTotals { runs: 3, estimated_runs: 1, cost_micro_usd: Some(1_234_000), input_tokens: Some(1500), output_tokens: Some(200), duration_ms: 0 };
+        let changes = Changes { files: vec!["src/lib.rs".into()], added: 12, removed: 3 };
+        let without = receipt_with(&goal, &[], &[], Some(&changes), &totals, None);
+        let headings: Vec<&str> = without.lines().filter(|l| l.starts_with("## ") || l.starts_with("# ")).collect();
+        assert_eq!(headings, ["# Receipt: Ship the exporter", "## Objective", "## Checks", "## Changes", "## Journal", "## Cost and time"]);
+        let with = receipt_with(&goal, &[], &[], Some(&changes), &totals, Some(("https://example.com/acme/app/pull/12", Some("OPEN"))));
+        assert!(with.ends_with("## Pull request\nhttps://example.com/acme/app/pull/12 (OPEN)\n"), "{with}");
+        assert!(without.contains("The check passes.\n\n## Objective\nShip the exporter\nand its docs"));
+        assert!(without.contains("No check was run."));
+        assert!(!without.contains("Pull request"));
+    }
+
+    #[test]
+    fn the_checks_section_lists_each_entry_with_at_most_twenty_lines_of_output() {
+        let long: String = (1..=30).map(|n| format!("line {n}")).collect::<Vec<_>>().join("\n");
+        let ledger = [
+            CheckResult { command: "cargo test".into(), exit_code: Some(1), tail: long, at_ms: 1_794_598_000_000, source: "neko".into() },
+            CheckResult { command: "make `lint`".into(), exit_code: None, tail: "oops ``` fence".into(), at_ms: 1_794_598_500_000, source: "agent".into() },
+        ];
+        let text = receipt_with(&receipt_goal(), &ledger, &[], None, &Default::default(), None);
+        assert!(text.contains("### `cargo test` exit 1 (") && text.contains(", neko)\n```\nline 11\n"), "{text}");
+        assert!(text.contains("line 30\n```") && !text.contains("line 10\n"), "the last twenty lines only");
+        assert!(text.contains("### `make 'lint'` exit none (") && text.contains(", agent)\n````\noops ``` fence\n````"), "a longer fence guards a fence inside the output: {text}");
+        assert!(!text.contains("No check was run."));
+    }
+
+    #[test]
+    fn the_changes_section_shows_the_whole_task_stat_and_says_so_when_there_are_no_checkpoints() {
+        let files: Vec<String> = (1..=35).map(|n| format!("src/f{n}.rs")).collect();
+        let changes = Changes { files, added: 100, removed: 7 };
+        let text = receipt_with(&receipt_goal(), &[], &[], Some(&changes), &Default::default(), None);
+        assert!(text.contains("Files changed: 35, +100 -7 (whole task: first run's start to last run's end)\n- src/f1.rs\n"), "{text}");
+        assert!(text.contains("- src/f30.rs\nand 5 more\n") && !text.contains("src/f31.rs"));
+        let none = receipt_with(&receipt_goal(), &[], &[], None, &Default::default(), None);
+        assert!(none.contains("## Changes\nNo checkpoints were taken for this goal.\n"));
+    }
+
+    #[test]
+    fn the_journal_section_is_the_last_fifty_entries_one_line_each() {
+        let journal: Vec<JournalEntry> = (1..=60).map(|turn| JournalEntry { turn, done: format!("did\n{turn}"), next: "go on".into(), note: if turn == 60 { "DONE".into() } else { String::new() }, ..Default::default() }).collect();
+        let text = receipt_with(&receipt_goal(), &[], &journal, None, &Default::default(), None);
+        let lines: Vec<&str> = text.lines().filter(|l| l.starts_with("- turn ")).collect();
+        assert_eq!(lines.len(), 50);
+        assert_eq!(lines[0], "- turn 11: did 11 | next: go on");
+        assert_eq!(lines[49], "- turn 60: did 60 | next: go on | DONE");
+    }
+
+    #[test]
+    fn cost_and_time_come_from_the_ledger_totals_and_say_when_no_price_was_reported() {
+        let goal = receipt_goal();
+        let totals = crate::usage_ledger::TaskTotals { runs: 3, estimated_runs: 1, cost_micro_usd: Some(1_234_000), input_tokens: Some(1500), output_tokens: Some(200), duration_ms: 0 };
+        let text = receipt_with(&goal, &[], &[], None, &totals, None);
+        assert!(text.contains("Cost: $1.23 reported across 3 runs (1 run reported no price)\nInput and output: 1500 in, 200 out (reported runs only)\nAgent time: 1h 15m running, 3/20 turns\nSource: usage ledger (figures for this goal's ticket only)\n"), "{text}");
+        let none = receipt_with(&goal, &[], &[], None, &crate::usage_ledger::TaskTotals { runs: 2, estimated_runs: 2, ..Default::default() }, None);
+        assert!(none.contains("Cost: no price reported\nAgent time:") && !none.contains("Input and output"));
+        // The scrub, which runs over the whole receipt, leaves these lines alone.
+        assert_eq!(crate::redact::scrub(&text), text);
+    }
+
+    #[test]
+    fn a_marked_done_goal_reads_you_marked_it_done() {
+        let goal = Goal { reason: String::new(), ..receipt_goal() };
+        assert!(receipt_with(&goal, &[], &[], None, &Default::default(), None).contains(". You marked it done.\n\n## Objective"));
     }
 
     #[test]

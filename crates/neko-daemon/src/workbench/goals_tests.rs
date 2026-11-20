@@ -4,7 +4,7 @@ use super::*;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 
-struct Stub {
+pub(super) struct Stub {
     now: AtomicI64,
     checks: Mutex<VecDeque<i64>>,
     judges: Mutex<VecDeque<Result<String, String>>>,
@@ -17,20 +17,20 @@ struct Stub {
 }
 
 impl Stub {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self { now: AtomicI64::new(store::now_ms()), checks: Default::default(), judges: Default::default(), judged: AtomicUsize::new(0), checked: AtomicUsize::new(0), held: AtomicBool::new(false), pr: Default::default(), pid_alive: AtomicBool::new(true), artifact: AtomicBool::new(false) }
     }
-    fn check(self, codes: &[i64]) -> Self {
+    pub(super) fn check(self, codes: &[i64]) -> Self {
         self.checks.lock().unwrap().extend(codes.iter().copied());
         self
     }
-    fn say(&self, verdict: &str) {
+    pub(super) fn say(&self, verdict: &str) {
         self.judges.lock().unwrap().push_back(Ok(format!("{{\"verdict\":\"{verdict}\",\"reason\":\"because\",\"done\":\"did a step\",\"next\":\"the next step\"}}")));
     }
-    fn say_json(&self, json: &str) {
+    pub(super) fn say_json(&self, json: &str) {
         self.judges.lock().unwrap().push_back(Ok(json.to_owned()));
     }
-    fn advance(&self, ms: i64) {
+    pub(super) fn advance(&self, ms: i64) {
         self.now.fetch_add(ms, Ordering::SeqCst);
     }
 }
@@ -69,28 +69,28 @@ impl Env for Stub {
     }
 }
 
-fn fixture(status: TaskStatus) -> (Controller, Arc<Mutex<Db>>) {
+pub(super) fn fixture(status: TaskStatus) -> (Controller, Arc<Mutex<Db>>) {
     let controller = super::super::tests::controller_with_task(status);
     let db = controller.db.clone();
     (controller, db)
 }
 
-fn goal_on_t(controller: &Controller, check: &str, max_turns: Option<u32>) -> String {
+pub(super) fn goal_on_t(controller: &Controller, check: &str, max_turns: Option<u32>) -> String {
     controller.goal_command(GoalCommand::Create { workspace_id: "w".into(), objective: "Make the parser handle nested quotes".into(), done_check: check.into(), constraints: "Do not touch the lexer".into(), max_turns, ticket_id: Some("t".into()), conversation_id: None }).unwrap();
     let guard = controller.db.lock().unwrap();
     core::load_all(&guard).unwrap().pop().unwrap().id
 }
 
-fn goal(db: &Arc<Mutex<Db>>, id: &str) -> Goal {
+pub(super) fn goal(db: &Arc<Mutex<Db>>, id: &str) -> Goal {
     core::load(&db.lock().unwrap(), id).unwrap().unwrap()
 }
 
-fn task(db: &Arc<Mutex<Db>>) -> Task {
+pub(super) fn task(db: &Arc<Mutex<Db>>) -> Task {
     store::load(&db.lock().unwrap()).unwrap().tasks.remove(0)
 }
 
 /// The ticket's turn ended the way a run ends.
-fn end_turn(db: &Arc<Mutex<Db>>, status: TaskStatus, result: &str, failure: Option<&str>) {
+pub(super) fn end_turn(db: &Arc<Mutex<Db>>, status: TaskStatus, result: &str, failure: Option<&str>) {
     let db = db.lock().unwrap();
     let mut snapshot = store::load(&db).unwrap();
     let t = &mut snapshot.tasks[0];

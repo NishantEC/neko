@@ -7,10 +7,11 @@ import { request, type Json } from "@/api";
 import { CaretDown, Check } from "@/ui/icons";
 import { RowAction, RowActions } from "@/setup/kit";
 import { cn } from "@/ui/lib/utils";
+import { artifactHref } from "@/canvas/artifacts";
 
 const POLL_MS = 60_000;
 
-interface Line { text: string; default: string | null }
+interface Line { text: string; default: string | null; link?: string | null }
 interface Digest {
   at_ms: number;
   day: string;
@@ -32,6 +33,7 @@ function Group({ title, lines, slot, showDefault }: { title: string; lines: Line
         {lines.map((line, index) => (
           <li key={index} className="max-w-[80ch] text-[13px] text-foreground">
             {line.text}
+            {line.link?.startsWith("artifact:") ? <>{" "}<a href={artifactHref(line.link.slice("artifact:".length))} className="text-[13px] underline underline-offset-2 hover:text-foreground">Receipt</a></> : null}
             {showDefault || line.default ? <span className="text-muted-foreground"> · {line.default ? `default: ${line.default}` : "No default"}</span> : null}
           </li>
         ))}

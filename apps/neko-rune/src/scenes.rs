@@ -206,7 +206,7 @@ fn inbox() -> Vec<InboxItem> {
 }
 
 fn digest() -> Digest {
-    let line = |text: &str, default: Option<&str>| DigestLine { text: text.into(), default: default.map(Into::into) };
+    let line = |text: &str, default: Option<&str>| DigestLine { text: text.into(), default: default.map(Into::into), link: None };
     Digest {
         at_ms: DEMO_NOW - 3_600_000,
         day: "2027-01-15".into(),
