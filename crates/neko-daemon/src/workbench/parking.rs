@@ -18,7 +18,26 @@ const PER_PASS: usize = 5;
 const SWEEP_EVERY: Duration = Duration::from_secs(60);
 
 static LOCK: Mutex<()> = Mutex::new(());
+#[cfg(not(test))]
 static IN_USE: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+// Tests all call their ticket "t" and run in parallel, so one process-wide set
+// let a test that held "t" (publishing, an undo) make another test's sweep skip
+// it. In tests each thread has its own set; the daemon keeps the shared one.
+#[cfg(test)]
+thread_local! {
+    static IN_USE: std::cell::RefCell<HashSet<String>> = std::cell::RefCell::new(HashSet::new());
+}
+
+fn with_in_use<R>(f: impl FnOnce(&mut HashSet<String>) -> R) -> R {
+    #[cfg(not(test))]
+    {
+        f(IN_USE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get_or_insert_with(HashSet::new))
+    }
+    #[cfg(test)]
+    {
+        IN_USE.with(|set| f(&mut set.borrow_mut()))
+    }
+}
 
 /// Holds a ticket's folder for the life of the guard: the sweep will not park
 /// it. Taken by work that runs outside an admitted worker (publishing).
@@ -26,23 +45,19 @@ pub(super) struct InUse(String);
 
 impl InUse {
     pub(super) fn take(task_id: &str) -> Self {
-        IN_USE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get_or_insert_with(HashSet::new).insert(task_id.to_owned());
+        with_in_use(|set| set.insert(task_id.to_owned()));
         Self(task_id.to_owned())
     }
 }
 
 impl Drop for InUse {
     fn drop(&mut self) {
-        if let Some(set) = IN_USE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut() {
-            set.remove(&self.0);
-        }
+        with_in_use(|set| set.remove(&self.0));
     }
 }
 
 fn in_use(task_id: &str) -> bool {
-    IN_USE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-        .as_ref().is_some_and(|set| set.contains(task_id))
+    with_in_use(|set| set.contains(task_id))
 }
 
 /// Statuses with no agent working: the folder is only evidence until the
@@ -197,6 +212,18 @@ impl Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_held_by_another_test_does_not_block_this_sweep() {
+        // Every test names its ticket "t"; a hold taken on another thread (another test) must not show here.
+        let (held, release) = (std::sync::Arc::new(std::sync::Barrier::new(2)), std::sync::Arc::new(std::sync::Barrier::new(2)));
+        let (h, r) = (held.clone(), release.clone());
+        let other = std::thread::spawn(move || { let _held = InUse::take("t"); h.wait(); r.wait(); });
+        held.wait();
+        assert!(!in_use("t"));
+        release.wait();
+        other.join().unwrap();
+    }
 
     fn git(dir: &std::path::Path, args: &[&str]) {
         let out = std::process::Command::new("git").current_dir(dir)
