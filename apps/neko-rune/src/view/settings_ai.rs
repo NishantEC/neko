@@ -85,9 +85,9 @@ fn runtime(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
         let words = if src.connection.is_empty() { if ready { "Ready" } else { "Not ready" } } else { src.connection.as_str() };
         let mut right = row().gap(8.0).center_y().child(webkit::status(t, "set-connection-status", if ready { Tone::Success } else { Tone::Warning }, words));
         if let Some(note) = src.note.as_ref().filter(|n| !n.is_empty()) {
-            right = right.child(text(note.clone()).key("set-connection-note").font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted).wrap().min_w(0.0).max_w(339.0));
+            right = right.child(text(note.clone()).key("set-connection-note").font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.muted).wrap().min_w(0.0).max_w(339.0));
         }
-        let line = row().key("set-connection").w_full().px(12.0).py(14.0).gaps(12.0, 12.0).flex_wrap().center_y().justify_between().child(text("Connection".to_owned()).font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted)).child(right);
+        let line = row().key("set-connection").w_full().px(12.0).py(14.0).gaps(12.0, 12.0).flex_wrap().center_y().justify_between().child(text("Connection".to_owned()).font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.muted)).child(right);
         out.push(item(Section::Ai, G, "runtime-connection", "Connection", "", line));
     }
 
@@ -171,7 +171,7 @@ fn runtime(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     // What the last check said.
     if let Some(check) = &s.extra.model_check {
         let (glyph, ink) = if check.ok { (&icons::CHECK_LINE, t.meaning.mint) } else if check.unavailable { (&icons::INFO, t.meaning.amber) } else { (&icons::CROSS, t.meaning.coral) };
-        let line = row().key("set-check-result").w_full().px(12.0).py(14.0).gap(8.0).items_start().live_region(rune::LiveRegion::Polite).child(icon(glyph, 16.0).color(ink).mt(2.0).a11y_hidden()).child(text(check.message.clone()).key("set-check-result-words").font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.base).wrap().grow(1.0).min_w(0.0));
+        let line = row().key("set-check-result").w_full().px(12.0).py(14.0).gap(8.0).items_start().live_region(rune::LiveRegion::Polite).child(icon(glyph, 16.0).color(ink).mt(2.0).a11y_hidden()).child(text(check.message.clone()).key("set-check-result-words").font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.base).wrap().grow(1.0).min_w(0.0));
         out.push(item(Section::Ai, G, "check-result", "Check result", &check.message, with_note(s, t, "setting:model-check", line)));
     } else if let Some(n) = super::ui::note(s, t, "setting:model-check") {
         out.push(item(Section::Ai, G, "check-result", "Check result", "", n));
@@ -306,9 +306,9 @@ fn pins(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
 
     // Last run: one line of separate words that flow and wrap, as the web's inline text does.
     if let Some(last) = s.summary.as_ref().and_then(|m| m.settings.home_last.clone()) {
-        let plain = webkit::font(t, 13.0, 400.0, 21.125);
+        let plain = webkit::font(t, 13.0, 400.0, 19.5);
         let word = |w: String| text(w).font(plain).color(t.text.muted).wrap().min_w(0.0);
-        let mut line = row().key("set-pin-last").w_full().px(12.0).py(14.0).gaps(0.0, 4.0).flex_wrap().child(text("Last run".to_owned()).font(webkit::font(t, 12.5, 500.0, 20.3125)).color(t.text.muted)).child(word(if last.model.is_empty() { "default model".to_owned() } else { last.model.clone() }));
+        let mut line = row().key("set-pin-last").w_full().px(12.0).py(14.0).gaps(0.0, 4.0).flex_wrap().child(text("Last run".to_owned()).font(webkit::font(t, 12.5, 500.0, 18.75)).color(t.text.muted)).child(word(if last.model.is_empty() { "default model".to_owned() } else { last.model.clone() }));
         if let Some(e) = last.effort.as_ref().filter(|e| !e.is_empty()) {
             line = line.child(word(format!("· {e} effort")));
         }
@@ -337,7 +337,7 @@ fn money_row(s: &App, t: &Neko, id: &'static str, label: &str, help: &str, place
     let dirty = s.pages.edited(id, true);
     let save = button(t, &format!("{id}-save"), button_label, None, false, false, gated(dirty, move |s: &mut App| s.save_money(id, max, make)));
     let save = if dirty { save } else { save.disabled(true).opacity(0.5) };
-    let control = row().gap(8.0).center_y().shrink().child(text("US$".to_owned()).font(rune::TextStyle { size: 13.0, line_height: 21.125, ..t.ty.mono }).color(t.text.muted)).child(webkit::input(s, t, id, label, placeholder, 112.0, true, move |s: &mut App| s.save_money(id, max, make))).child(save);
+    let control = row().gap(8.0).center_y().shrink().child(text("US$".to_owned()).font(rune::TextStyle { size: 13.0, line_height: 19.5, ..t.ty.mono }).color(t.text.muted)).child(webkit::input(s, t, id, label, placeholder, 112.0, true, move |s: &mut App| s.save_money(id, max, make))).child(save);
     item(Section::Ai, "Budget & limits", id, label, help, with_note(s, t, &format!("setting:{id}"), setting_row(t, &format!("set-{id}"), label, Some(help), control)))
 }
 

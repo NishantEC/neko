@@ -33,7 +33,7 @@ pub fn rail(prefix: &str, narrow: bool, search: Option<El>, rows: Vec<El>) -> El
     if let Some(search) = search {
         c = c.child(search.h(32.0)).child(el().h(8.0));
     }
-    let list = col().key(format!("{prefix}-rail-list")).w_full().gap(0.0).children(rows);
+    let list = col().key(format!("{prefix}-rail-list")).w_full().gap(4.0).children(rows);
     c.child(col().key(format!("{prefix}-rail-scroll")).w_full().grow(1.0).min_h(0.0).clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(list))
 }
 
@@ -43,15 +43,18 @@ pub fn page_column(t: &Neko, key: &str, title: &str, count: Option<usize>, trail
 }
 
 fn page_column_with(t: &Neko, key: &str, title: &str, count: Option<String>, trailing: Vec<El>, body: El, max_w: f32) -> El {
-    let mut head = row().w_full().gap(10.0).center_y().flex_wrap().min_h(36.0).child(text(title.to_owned()).key("title").font(t.ty.title).color(t.text.base).role("heading"));
+    // `PageContainer`: 24 at the sides (40 from 768), 48 above (64 from 768), 96 below; the header and the page 28 apart.
+    let wide = super::webkit::page_width() >= 768.0;
+    let mut head = row().w_full().gap(16.0).center_y().flex_wrap().min_h(40.0);
+    let mut name = row().gap(10.0).center_y().child(text(title.to_owned()).key("title").font(rune::TextStyle { tracking: -0.41, ..super::webkit::font(t, 20.0, 600.0, 30.0) }).color(t.text.strong).role("heading"));
     if let Some(n) = count {
-        head = head.child(text(n).key("page-count").font(rune::TextStyle { weight: 400.0, ..t.ty.brand }).color(t.text.muted));
+        name = name.child(text(n).key("page-count").font(super::webkit::tnum(super::webkit::font(t, 14.0, 400.0, 21.0))).color(t.text.muted).mt(3.0));
     }
-    head = head.child(el().grow(1.0));
+    head = head.child(name).child(el().grow(1.0));
     for e in trailing {
         head = head.child(e);
     }
-    col().key(format!("full-{key}")).w_full().max_w(max_w).px(28.0).pt(24.0).pb(40.0).gap(32.0).child(head).child(body)
+    col().key(format!("full-{key}")).w_full().max_w(max_w).px(if wide { 40.0 } else { 24.0 }).pt(if wide { 64.0 } else { 48.0 }).pb(96.0).gap(28.0).child(head).child(body)
 }
 
 /// A quiet group heading ("Standing orders", "Recent runs").
@@ -91,30 +94,10 @@ pub fn note(s: &App, t: &Neko, key: &str) -> Option<El> {
     s.pages.notes.get(key).map(|n| text(n.clone()).key(format!("note-{key}")).font(t.ty.meta).color(t.meaning.amber).wrap().px(6.0).pb(4.0).live_region(rune::LiveRegion::Polite))
 }
 
-/// The web's switch (`ui/switch.tsx`): a 36 x 21 capsule, Iris when on, the foreground at 18% when off, and a 17 point
-/// thumb 2 points in. It says what it does to assistive technology and shows only its state.
+/// The web's switch (`ui/switch.tsx`): 46 x 28, off is the well, on is the ink. It says what it does to assistive technology and
+/// shows only its state.
 fn web_switch(t: &Neko, key: &str, label: &str, on: bool, enabled: bool, f: impl Fn(&mut App) + 'static) -> El {
-    let thumb = if on || !t.dark { rune::Color::WHITE } else { t.text.base };
-    let track = if on { t.meaning.iris } else { t.text.base.alpha(0.18) };
-    let mut r = row()
-        .key(key.to_owned())
-        .role("switch")
-        .label(label.to_owned())
-        .checked(on)
-        .disabled(!enabled)
-        .focusable(enabled)
-        .size(36.0, 21.0)
-        .px(2.0)
-        .center_y()
-        .radius(10.5)
-        .fill(if enabled { track } else { track.alpha(0.5) })
-        .focus_ring(2.0, 2.0, t.surface.ring)
-        .child(el().size(17.0, 17.0).radius(8.5).fill(thumb).a11y_hidden());
-    r = if on { r.justify_end() } else { r.justify_start() };
-    if enabled {
-        r = r.on_press(f);
-    }
-    r
+    super::webkit::toggle_when(t, key, label, on, enabled, f)
 }
 
 /// A switch that says what it does to assistive technology and shows only its state.

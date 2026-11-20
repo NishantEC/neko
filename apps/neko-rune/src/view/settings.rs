@@ -8,7 +8,7 @@
 use neko_protocol::agent_models::{CatalogModel, ModelAccess};
 use neko_protocol::calendar::CalendarAccess;
 use neko_protocol::phone::RemindersAccess;
-use rune::{El, ScrollSpec, col, el, row, text};
+use rune::{El, ScrollSpec, col, row, text};
 use rune_kit::TextInput;
 
 use super::ui::{edit_of, editing, note, switch};
@@ -27,10 +27,12 @@ pub(super) struct Item {
     pub(super) id: String,
     pub(super) words: String,
     pub(super) el: El,
+    /// Set for a note that sits under its section's panel, not in it (the web's `<p>` after the `Panel`).
+    pub(super) after: bool,
 }
 
 pub(super) fn item(section: Section, group: &'static str, id: impl Into<String>, label: &str, help: &str, el: El) -> Item {
-    Item { section, group, id: id.into(), words: format!("{label} {help} {}", section.title()).to_lowercase(), el }
+    Item { section, group, id: id.into(), words: format!("{label} {help} {}", section.title()).to_lowercase(), el, after: false }
 }
 
 /// A read-only value at the right of a row.
@@ -81,18 +83,24 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
         // The web has no Budget section (its settings are "Budget & limits" in "AI & agents") and no Workspaces one (a Setup page).
         let shown = |i: &Item| i.section == s.pages.section;
         // One block per web `<Section>`, in the order its first row appears; an item with no group already is a section.
-        let mut blocks: Vec<(&'static str, Vec<El>)> = Vec::new();
+        let mut blocks: Vec<(&'static str, Vec<El>, Vec<El>)> = Vec::new();
         for it in all.into_iter().filter(shown) {
-            match blocks.iter_mut().find(|(g, _)| !g.is_empty() && *g == it.group) {
-                Some((_, rows)) => rows.push(it.el),
-                None => blocks.push((it.group, vec![it.el])),
-            }
+            let at = match blocks.iter().position(|(g, _, _)| !g.is_empty() && *g == it.group) {
+                Some(at) => at,
+                None => {
+                    blocks.push((it.group, Vec::new(), Vec::new()));
+                    blocks.len() - 1
+                }
+            };
+            if it.after { blocks[at].2.push(it.el) } else { blocks[at].1.push(it.el) }
         }
-        for (group, rows) in blocks {
+        for (group, rows, after) in blocks {
             if group.is_empty() {
                 content = content.children(rows);
             } else {
-                content = content.child(webkit::section(t, &format!("group-{}", slug(group)), group, None, None, webkit::panel(rows)));
+                let mut body = col().w_full().gap(14.0).child(webkit::panel_rows(t, rows));
+                body = body.children(after);
+                content = content.child(webkit::section(t, &format!("group-{}", slug(group)), group, None, None, body));
             }
         }
     } else {
@@ -110,10 +118,9 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
     let wide = frame.region_w >= 900.0;
     let mut column = col().key("settings-body").w_full().grow(1.0).min_h(0.0);
     column = column.child(breadcrumb(t, title));
-    let side = if wide { 240.0 } else { 0.0 };
-    // `w-full max-w-[52rem] px-10 pt-6 pb-24`: at most 832 wide counting the 40 point sides.
-    let inner = (frame.region_w - side - if wide { 1.0 } else { 0.0 }).min(832.0) - 80.0;
-    let page = col().key("full-settings").w(inner + 80.0).px(40.0).pt(24.0).pb(96.0).gap(12.0).child(content);
+    // `w-full px-6 pt-8 pb-24 md:px-9`: the whole width of the panel, 36 at the sides from 768 (24 below), 32 above, 96 below.
+    let sides = if frame.region_w >= 768.0 { 36.0 } else { 24.0 };
+    let page = col().key("full-settings").w_full().px(sides).pt(32.0).pb(96.0).gap(28.0).child(content);
     let scroll = col().key("page-scroll").grow(1.0).min_w(0.0).h_full().clip_rounded(0.0).scroll(ScrollSpec { stick_bottom: false }).child(page);
     let rail = rail(s, t, wide);
     column = if wide { column.child(row().w_full().grow(1.0).min_h(0.0).child(rail).child(scroll)) } else { column.child(rail).child(scroll) };
@@ -141,10 +148,11 @@ fn rail(s: &App, t: &Neko, wide: bool) -> El {
     let mut field = TextInput::new(edit_of(s, "settings:search")).label("Find a setting").placeholder("Find a setting").width(None).leading_icon(&icons::SEARCH).on_edit(editing("settings:search".to_owned()));
     // The ⌘F hint hides while the field has text (the clear button takes its place), so the two never share the corner.
     field = if searching { field.clear_button() } else { field.trailing(row().key("settings-search-hint").h(20.0).px(4.0).gap(4.0).center_y().child(text("⌘".to_owned()).font(webkit::font(t, 12.0, 500.0, 16.0)).color(t.text.muted)).child(text("F".to_owned()).font(webkit::font(t, 12.0, 500.0, 16.0)).color(t.text.muted)).a11y_hidden()) };
-    let search = field.build(&t.kit).key("settings-search").w_full().h(40.0).radius(24.0).fill(t.text.base.alpha(0.05));
+    let search = field.build(&t.kit).key("settings-search").w_full().h(40.0).radius(24.0);
+    let search = webkit::well(t, search);
     let pill = |section: Section| {
         let active = !searching && s.pages.section == section;
-        let ink = if active { t.text.base } else { t.text.base.alpha(0.65) };
+        let ink = if active { t.text.base } else { t.text.base.alpha(0.75) };
         row()
             .key(format!("settings-section-{}", section.key()))
             .role("button")
@@ -153,26 +161,26 @@ fn rail(s: &App, t: &Neko, wide: bool) -> El {
             .h(36.0)
             .px(if wide { 12.0 } else { 16.0 })
             .center_y()
-            .radius(if wide { 8.0 } else { 18.0 })
-            .fill(if active { t.text.base.alpha(0.07) } else { rune::Color::TRANSPARENT })
+            .radius(18.0)
+            .fill(if active { t.text.base.alpha(0.06) } else { rune::Color::TRANSPARENT })
             .hover(t.surface.hover)
             .focus_ring(2.0, 2.0, t.kit.c.border_focus)
             .on_press(move |s: &mut App| s.go_section(section))
-            .child(text(section.title().to_owned()).font(rune::TextStyle { size: 13.5, line_height: 21.9375, weight: if active { 500.0 } else { 400.0 }, ..t.ty.row }).color(ink).a11y_hidden())
+            .child(text(section.title().to_owned()).font(webkit::font(t, 14.0, 400.0, 20.0)).color(ink).a11y_hidden())
     };
     if !wide {
         let strip = row().key("settings-nav").mx(-4.0).h(40.0).px(4.0).pb(4.0).gap(4.0).scroll_x().children(Section::ALL.iter().map(|&section| pill(section)));
-        return col().key("settings-rail").w_full().px(16.0).pt(12.0).pb(8.0).gap(12.0).child(search).child(strip).child(el().w_full().h(1.0).mt(-12.0).fill(t.surface.border));
+        return col().key("settings-rail").w_full().px(16.0).pt(12.0).pb(8.0).gap(12.0).child(search).child(strip);
     }
     let mut groups = col().key("settings-nav").w_full().gap(16.0);
     for group in ["Neko", "This Mac"] {
-        let mut g = col().w_full().gap(2.0).child(text(group.to_owned()).key(format!("settings-group-{group}")).font(rune::TextStyle { size: 12.0, line_height: 16.0, weight: 500.0, ..t.ty.meta }).color(t.text.muted).px(12.0).pb(4.0));
+        let mut g = col().w_full().gap(4.0).child(text(group.to_owned()).key(format!("settings-group-{group}")).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted).px(12.0).pb(4.0));
         for section in Section::ALL.iter().copied().filter(|s| s.group_name() == group) {
             g = g.child(pill(section));
         }
         groups = groups.child(g);
     }
-    row().key("settings-rail").w(241.0).h_full().child(col().w(240.0).h_full().px(12.0).pt(24.0).pb(24.0).gap(16.0).scroll(ScrollSpec { stick_bottom: false }).child(search).child(groups)).child(el().w(1.0).h_full().fill(t.surface.border))
+    row().key("settings-rail").w(248.0).h_full().child(col().w(248.0).h_full().px(12.0).pt(24.0).pb(24.0).gap(16.0).scroll(ScrollSpec { stick_bottom: false }).child(search).child(groups))
 }
 
 fn items(s: &App, t: &Neko, layer: &mut Vec<El>) -> Vec<Item> {
@@ -223,26 +231,28 @@ pub(super) fn cap(word: &str) -> String {
 
 fn phone(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     let Some(data) = &s.pages.phone else {
-        out.push(item(Section::Phone, "", "phone-loading", "Phone", "", text(s.pages.notes.get("page:phone").map_or("Loading…", String::as_str).to_owned()).key("phone-loading").font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted)));
+        out.push(item(Section::Phone, "", "phone-loading", "Phone", "", text(s.pages.notes.get("page:phone").map_or("Loading…", String::as_str).to_owned()).key("phone-loading").font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.muted)));
         return;
     };
     let start = out.len();
     let p = data.settings.clone();
     let status = &data.status;
-    let note_font = webkit::font(t, 12.5, 400.0, 20.3125);
+    let note_font = webkit::font(t, 12.5, 400.0, 18.75);
 
     // Channels: one line each, no subtitles (the web's Phone page has none), then the paragraph about replies.
     out.push(item(Section::Phone, "Channels", "phone-reminders", "Apple Reminders", "", setting_row(t, "set-reminders", "Apple Reminders", None, switch(t, "set-reminders-switch", "Apple Reminders", p.reminders, move |s: &mut App| s.change_phone("reminders", |p| p.reminders = !p.reminders)))));
     out.push(item(Section::Phone, "Channels", "phone-ntfy", "ntfy", "", setting_row(t, "set-ntfy", "ntfy", None, switch(t, "set-ntfy-switch", "ntfy", p.ntfy, move |s: &mut App| s.change_phone("ntfy", |p| p.ntfy = !p.ntfy)))));
     let replies = "Replies need Apple Reminders: complete a reminder to take its default, or add a line that starts with > to answer in words. ntfy only notifies, because answering through it would mean opening your Mac to the internet.";
-    out.push(item(Section::Phone, "Channels", "phone-replies", "Replies", replies, col().key("phone-replies").w_full().px(24.0).pt(14.0).child(text(replies.to_owned()).font(note_font).color(t.text.muted).wrap().min_w(0.0))));
+    let mut note = item(Section::Phone, "Channels", "phone-replies", "Replies", replies, col().key("phone-replies").w_full().px(12.0).pt(8.0).child(text(replies.to_owned()).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted).wrap().min_w(0.0)));
+    note.after = true;
+    out.push(note);
 
     // ntfy, only while it is on.
     if p.ntfy {
         const G: &str = "ntfy";
         out.push(item(Section::Phone, G, "phone-ntfy-server", "Server", "", setting_row(t, "set-ntfy-server", "Server", None, webkit::input(s, t, "ntfy-server", "ntfy server", "", 256.0, false, |s: &mut App| s.save_ntfy_server()))));
         let topic = p.ntfy_topic.clone();
-        let mono = rune::TextStyle { size: 12.5, line_height: 20.3125, ..t.ty.mono };
+        let mono = rune::TextStyle { size: 12.5, line_height: 18.75, ..t.ty.mono };
         let copy_topic = topic.clone();
         let copy = |key: &str, label: &'static str, words: String| {
             webkit::ghost_button(t, key, "Copy", None, |_: &mut App| {}).label(label).on_press_tx(move |s: &mut App, tx: &mut rune::Tx| {
@@ -298,7 +308,7 @@ fn phone(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     }
 
     // Status: plain lines, not rows.
-    let line = webkit::font(t, 13.0, 400.0, 21.125);
+    let line = webkit::font(t, 13.0, 400.0, 19.5);
     let access = match status.reminders_access {
         RemindersAccess::Granted => "Reminders allowed",
         RemindersAccess::Denied => "Reminders blocked: allow Neko in System Settings → Privacy & Security → Reminders",

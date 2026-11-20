@@ -177,31 +177,17 @@ fn header(s: &App, t: &Neko, days: &[i64]) -> Vec<El> {
     vec![row().gap(6.0).center_y().flex_wrap().child(today_button).child(arrows).child(mode_switch(s, t))]
 }
 
-/// `SegmentedControl` (`ui/segmented-control.tsx`): a 32 high well (radius 10, 4 inside, 2 between) of 24 high items with 10 at the
-/// sides in 13 point words; the open one has a raised fill and stronger words.
+/// `SegmentedControl` (`ui/segmented-control.tsx`): a 40 high well (radius 24, 3 inside, 2 between) of 34 high items with 14 at the
+/// sides in 14 point medium words; the open one is a pebble.
 fn mode_switch(s: &App, t: &Neko) -> El {
-    let mut well = row().key("cal-mode").role("radiogroup").label("Calendar view").h(32.0).padding(4.0).gap(2.0).center_y().radius(10.0).fill(t.text.base.alpha(0.06));
+    let mut track = webkit::well(t, row().key("cal-mode").role("radiogroup").label("Calendar view").h(40.0).padding(3.0).gap(2.0).center_y().radius(24.0));
     for (key, label, mode) in [("cal-mode-day", "Day", CalMode::Day), ("cal-mode-week", "Week", CalMode::Week), ("cal-mode-month", "Month", CalMode::Month)] {
         let open = s.pages.cal_mode == mode;
-        let raised = if t.dark { rune::color::hex("#151515").unwrap_or(t.surface.window) } else { rune::Color::WHITE };
-        well = well.child(
-            row()
-                .key(key)
-                .role("radio")
-                .label(label)
-                .checked(open)
-                .focusable(true)
-                .h(24.0)
-                .px(10.0)
-                .center()
-                .radius(10.0)
-                .fill(if open { raised } else { rune::Color::TRANSPARENT })
-                .focus_ring(2.0, 2.0, t.kit.c.border_focus)
-                .on_press(move |s: &mut App| s.cal_mode(mode))
-                .child(text(label).font(webkit::font(t, 13.0, if open { 500.0 } else { 400.0 }, 21.125)).color(if open { t.text.strong } else { t.text.muted }).a11y_hidden()),
-        );
+        let item = row().key(key).role("radio").label(label).checked(open).focusable(true).h(34.0).px(14.0).center().radius(21.0).hover(if open { rune::Color::TRANSPARENT } else { t.surface.hover }).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(move |s: &mut App| s.cal_mode(mode));
+        let item = if open { webkit::pebble(t, item) } else { item };
+        track = track.child(item.child(text(label).font(webkit::font(t, 14.0, 500.0, 20.0)).color(if open { t.mat.pebble_fg } else { t.text.muted }).a11y_hidden()));
     }
-    well
+    track
 }
 
 pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
@@ -243,7 +229,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
 
 /// `AccessNote`: what to do when Calendar is off or cannot be read, in the person's words.
 fn access_note(s: &App, t: &Neko, d: &crate::link::CalendarData) -> Option<El> {
-    let small = webkit::font(t, 13.0, 400.0, 21.125);
+    let small = webkit::font(t, 13.0, 400.0, 19.5);
     let calendar_icon = || icon(&icons::CALENDAR, 14.0).color(t.text.muted).a11y_hidden();
     if !d.status.enabled {
         let words = row().child(text("Calendar is off.".to_owned()).font(small).color(t.text.base).a11y_hidden()).child(text(" Turn it on to see your meetings beside Neko’s work.".to_owned()).font(small).color(t.text.muted).a11y_hidden());
@@ -259,7 +245,7 @@ fn access_note(s: &App, t: &Neko, d: &crate::link::CalendarData) -> Option<El> {
                 .padding(12.0)
                 .radius(20.0)
                 .fill(t.text.base.alpha(0.03))
-                .child(text("Neko can’t read your calendars".to_owned()).font(webkit::font(t, 13.0, 500.0, 21.125)).color(t.text.base))
+                .child(text("Neko can’t read your calendars".to_owned()).font(webkit::font(t, 13.0, 500.0, 19.5)).color(t.text.base))
                 .child(text("Allow Calendar access in System Settings → Privacy & Security → Calendars: turn on Neko, then reopen Neko. Neko’s own work still shows below.".to_owned()).font(small).color(t.text.muted).wrap().min_w(0.0))
                 .child(row().child(webkit::button(t, "cal-open-settings", "Open Privacy & Security", None, false, false, |s: &mut App| s.open_view(FullView::Settings)))),
         ),
@@ -282,7 +268,7 @@ fn sync_line(s: &App, t: &Neko, d: &crate::link::CalendarData, empty: bool) -> O
         CalMode::Week => "this week",
         CalMode::Month => "this month",
     };
-    let style = webkit::font(t, 12.5, 400.0, 20.3125);
+    let style = webkit::font(t, 12.5, 400.0, 18.75);
     let node = |words: String| text(words).font(style).color(t.text.muted).a11y_hidden();
     let source = if d.status.source.is_empty() { "macOS Calendar" } else { d.status.source.as_str() };
     let mut line = row().key("cal-sync").role("status").w_full().flex_wrap();
@@ -374,7 +360,7 @@ fn month_grid(s: &App, t: &Neko, days: &[i64], events: &[&CalendarEvent], neko: 
     let anchor = if s.pages.cal_day == 0 { today } else { s.pages.cal_day };
     let month = clock::local(clock::month_start(anchor) + 12 * 3_600_000).month;
     let line = hairline(t);
-    let head_style = webkit::font(t, 12.0, 400.0, 19.5);
+    let head_style = webkit::font(t, 12.0, 400.0, 18.0);
     let mut heads = row().w_full().child(el().w(40.0));
     for name in clock::WEEKDAYS {
         heads = heads.child(row().grow(1.0).w(0.0).child(el().w(1.0).fill(line)).child(row().grow(1.0).min_w(0.0).px(8.0).py(6.0).child(text(name).font(head_style).color(t.text.muted))));
@@ -383,7 +369,7 @@ fn month_grid(s: &App, t: &Neko, days: &[i64], events: &[&CalendarEvent], neko: 
     let weeks: Vec<&[i64]> = days.chunks(7).collect();
     for (w, week) in weeks.iter().enumerate() {
         let first = clock::local(week[0] + 12 * 3_600_000);
-        let label = row().w(40.0).justify_center().items_start().pt(8.0).child(text("W".to_owned()).font(webkit::tnum(webkit::font(t, 11.0, 400.0, 17.875))).color(t.text.muted).a11y_hidden()).child(text(iso_week(first.year, first.month, first.day).to_string()).font(webkit::tnum(webkit::font(t, 11.0, 400.0, 17.875))).color(t.text.muted).a11y_hidden());
+        let label = row().w(40.0).justify_center().items_start().pt(8.0).child(text("W".to_owned()).font(webkit::tnum(webkit::font(t, 11.0, 400.0, 16.5))).color(t.text.muted).a11y_hidden()).child(text(iso_week(first.year, first.month, first.day).to_string()).font(webkit::tnum(webkit::font(t, 11.0, 400.0, 16.5))).color(t.text.muted).a11y_hidden());
         let mut cells = row().w_full().min_h(112.0).child(label);
         for &d in week.iter() {
             let next = clock::add_days(d, 1);
@@ -411,7 +397,7 @@ fn month_grid(s: &App, t: &Neko, days: &[i64], events: &[&CalendarEvent], neko: 
                 .fill(if d == today { t.meaning.iris } else { rune::Color::TRANSPARENT })
                 .focus_ring(2.0, 2.0, t.kit.c.border_focus)
                 .on_press(move |s: &mut App| s.cal_pick_day(d))
-                .child(text(l.day.to_string()).font(webkit::tnum(webkit::font(t, 13.0, if d == today { 600.0 } else { 400.0 }, 21.125))).color(ink).a11y_hidden());
+                .child(text(l.day.to_string()).font(webkit::tnum(webkit::font(t, 13.0, if d == today { 600.0 } else { 400.0 }, 19.5))).color(ink).a11y_hidden());
             let mut inner = col().key(format!("cal-cell-{d}")).grow(1.0).min_w(0.0).padding(4.0).gap(2.0).child(row().px(2.0).child(number));
             for chip in chips.into_iter().take(SHOWN) {
                 inner = inner.child(chip);
@@ -428,8 +414,8 @@ fn month_grid(s: &App, t: &Neko, days: &[i64], events: &[&CalendarEvent], neko: 
                         .radius(4.0)
                         .focus_ring(2.0, 2.0, t.kit.c.border_focus)
                         .on_press(move |s: &mut App| s.cal_pick_day(d))
-                        .child(text(hidden.to_string()).font(webkit::font(t, 11.0, 400.0, 17.875)).color(t.text.muted).a11y_hidden())
-                        .child(text(" more".to_owned()).font(webkit::font(t, 11.0, 400.0, 17.875)).color(t.text.muted).a11y_hidden()),
+                        .child(text(hidden.to_string()).font(webkit::font(t, 11.0, 400.0, 16.5)).color(t.text.muted).a11y_hidden())
+                        .child(text(" more".to_owned()).font(webkit::font(t, 11.0, 400.0, 16.5)).color(t.text.muted).a11y_hidden()),
                 );
             }
             cells = cells.child(row().grow(1.0).w(0.0).child(el().w(1.0).fill(line)).child(inner));
@@ -461,13 +447,13 @@ fn all_day_chip(t: &Neko, e: &CalendarEvent) -> El {
         .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .on_press(move |s: &mut App| s.pages.cal_event = Some(id.clone()))
         .child(el().w(3.0).fill(color))
-        .child(row().grow(1.0).min_w(0.0).px(6.0).py(2.0).child(text(title).font(webkit::font(t, 12.0, 400.0, 19.5)).color(t.text.base).truncate().min_w(0.0).a11y_hidden()))
+        .child(row().grow(1.0).min_w(0.0).px(6.0).py(2.0).child(text(title).font(webkit::font(t, 12.0, 400.0, 18.0)).color(t.text.base).truncate().min_w(0.0).a11y_hidden()))
 }
 
 /// A timed event in a cell: its calendar's dot, its time and its title.
 fn timed_chip(t: &Neko, e: &CalendarEvent, day: i64) -> El {
     let id = e.id.clone();
-    let style = webkit::font(t, 12.0, 400.0, 19.5);
+    let style = webkit::font(t, 12.0, 400.0, 18.0);
     let title = if e.title.is_empty() { "Untitled event".to_owned() } else { e.title.clone() };
     row()
         .key(format!("event-{}", e.id))
@@ -492,7 +478,7 @@ fn timed_chip(t: &Neko, e: &CalendarEvent, day: i64) -> El {
 /// One of Neko's dated things in a cell (`NekoChip compact`): the status glyph or a clock, its time and its title, in Iris.
 fn neko_chip(t: &Neko, item: &NekoCalendarItem) -> El {
     let route = item.route.clone();
-    let style = webkit::font(t, 12.0, 400.0, 19.5);
+    let style = webkit::font(t, 12.0, 400.0, 18.0);
     let lead: El = match item.kind {
         NekoItemKind::Task if !item.status.is_empty() => status_glyph(kind_of(&item.status), t, 12.0, Some(item.status.as_str())),
         _ => icon(&icons::CLOCK, 12.0).color(t.meaning.iris).a11y_hidden(),

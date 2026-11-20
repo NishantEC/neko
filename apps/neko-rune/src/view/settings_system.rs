@@ -31,7 +31,7 @@ pub(super) fn all(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
 
 /// A dim 12.5 point line, the description of an info row.
 fn dim(t: &Neko, key: &str, words: &str) -> El {
-    text(words.to_owned()).key(key.to_owned()).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(t.text.muted).truncate().grow(1.0).min_w(0.0)
+    text(words.to_owned()).key(key.to_owned()).font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.muted).truncate().grow(1.0).min_w(0.0)
 }
 
 fn mono_dim(t: &Neko, key: &str, words: &str) -> El {
@@ -40,7 +40,7 @@ fn mono_dim(t: &Neko, key: &str, words: &str) -> El {
 
 /// A 13 point muted paragraph in a panel (`px-3 py-4`).
 fn paragraph(t: &Neko, key: &str, words: &str, pad_y: f32) -> El {
-    col().key(key.to_owned()).w_full().px(12.0).py(pad_y).child(text(words.to_owned()).font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted).wrap().min_w(0.0))
+    col().key(key.to_owned()).w_full().px(12.0).py(pad_y).child(text(words.to_owned()).font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.muted).wrap().min_w(0.0))
 }
 
 /// The default size (`Button` with no `size`): 40 high, 16 at the sides, 8 between the icon and the words.
@@ -58,13 +58,13 @@ fn quick_panel(s: &App, t: &Neko, out: &mut Vec<Item>) {
     const G: &str = "Included folders";
     let list = match &s.extra.folders {
         None => col().key("set-folders").w_full().padding(20.0).child(skeleton(t, "folders-loading", 256.0, 16.0)),
-        Some(f) if f.is_empty() => row().key("set-folders").w_full().px(12.0).py(20.0).gap(8.0).center_y().child(icon(&icons::FOLDER, 13.0).color(t.text.muted).a11y_hidden()).child(text("No folders added".to_owned()).key("folders-none").font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted)),
+        Some(f) if f.is_empty() => row().key("set-folders").w_full().px(12.0).py(20.0).gap(8.0).center_y().child(icon(&icons::FOLDER, 13.0).color(t.text.muted).a11y_hidden()).child(text("No folders added".to_owned()).key("folders-none").font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.muted)),
         Some(f) => {
             let mut list = col().key("set-folders").w_full();
             for (i, folder) in f.iter().enumerate() {
                 let id = folder.id.clone();
                 let leading = row().size(20.0, 20.0).center().child(icon(&icons::FOLDER, 16.0).color(t.text.muted));
-                let title = text(folder.title.clone()).key(format!("folder-{i}-title")).font(rune::TextStyle { size: 13.0, line_height: 21.9375, ..t.ty.mono }).color(t.text.base).truncate().min_w(0.0);
+                let title = text(folder.title.clone()).key(format!("folder-{i}-title")).font(rune::TextStyle { size: 13.0, line_height: 20.25, ..t.ty.mono }).color(t.text.base).truncate().min_w(0.0);
                 let remove = ghost_button(t, &format!("folder-remove-{i}"), "Remove", Some(&icons::CROSS), move |s: &mut App| s.remove_folder(&id)).label(format!("Remove {} from search", folder.title));
                 list = list.child(info_row(t, &format!("folder-{i}"), title, None, Some(leading), vec![remove], None));
             }
@@ -94,10 +94,14 @@ fn access_control(t: &Neko, id: &str, access: Access, pane: Pane, badge: bool) -
             s.notice = Some("Couldn’t open System Settings.".to_owned());
         }
     };
-    let state = text(access.words()).key(format!("perm-{id}-state")).font(webkit::font(t, 12.5, 400.0, 20.3125)).color(ink);
+    let state = text(access.words()).key(format!("perm-{id}-state")).font(webkit::font(t, 12.5, 400.0, 18.75)).color(ink);
     if badge {
         let badge = status(t, &format!("perm-{id}-open"), Tone::Neutral, "Managed in the native app").role("button").label("Open System Settings").focusable(true).hover(t.text.base.alpha(0.08)).on_press(open);
-        return row().gap(8.0).center_y().child(state).child(badge);
+        // The web's row holds only the badge, so its words get the width the badge leaves: the Mac's answer is drawn in the margin to the badge's
+        // left (a negative margin the width of the words and the gap), taking none of the row's width.
+        let style = webkit::font(t, 12.5, 400.0, 18.75);
+        let width = rune::text::measure(access.words(), &[], style, None).0;
+        return row().center_y().child(state.ml(-(width + 8.0)).mr(8.0).shrink()).child(badge);
     }
     row().gap(10.0).center_y().child(state).child(ghost_button(t, &format!("perm-{id}-open"), "Open System Settings", None, open))
 }
@@ -151,7 +155,7 @@ fn permissions(s: &App, t: &Neko, out: &mut Vec<Item>) {
     }
     for (i, (folder, count)) in protected.iter().enumerate() {
         let words = format!("{} here. macOS asks once, the first time a task opens it, and there is no way to check the answer without asking.", if *count == 1 { "1 workspace is".to_owned() } else { format!("{count} workspaces are") });
-        let title = text(folder.clone()).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().min_w(0.0);
+        let title = text(folder.clone()).font(webkit::font(t, 14.0, 500.0, 20.0)).color(t.text.base).truncate().min_w(0.0);
         out.push(item(Section::Permissions, W, format!("workspace-folder-{i}"), folder, &words, info_row(t, &format!("set-protected-{i}"), title, Some(dim(t, &format!("set-protected-{i}-words"), &words)), None, vec![status(t, &format!("set-protected-{i}-badge"), Tone::Success, "Asked on first use")], None)));
     }
     // Agent access: a paragraph.
@@ -183,15 +187,15 @@ fn diagnostics(s: &App, t: &Neko, out: &mut Vec<Item>) {
     let run = big(button(t, "diag-run", if running { "Running…" } else { "Run diagnostics" }, Some(&icons::GAUGE), true, false, webkit::gated(!running, |s: &mut App| s.run_diagnostics())));
     let mut r = col().key("diag-checks").w_full().child(setting_row(t, "set-diag-run", "Run diagnostics", Some(help), dim_if(!running, run)));
     match &s.extra.diag {
-        None if !running => r = r.child(col().key("diag-none").w_full().child(el().w_full().h(1.0).fill(t.surface.border)).child(col().w_full().px(12.0).py(24.0).child(text("Run a check to see connection and runtime details.".to_owned()).font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted).wrap().min_w(0.0).self_center()))),
+        None if !running => r = r.child(col().key("diag-none").w_full().child(el().w_full().h(1.0).fill(t.surface.border)).child(col().w_full().px(12.0).py(24.0).child(text("Run a check to see connection and runtime details.".to_owned()).font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.muted).wrap().min_w(0.0).self_center()))),
         None => {}
         Some((ms, checks)) => {
-            let line = row().key("diag-roundtrip").w_full().px(12.0).py(14.0).gap(12.0).center_y().justify_between().child(text("Neko window ↔ daemon".to_owned()).font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.muted)).child(text(format!("{ms} ms")).key("diag-roundtrip-ms").font(rune::TextStyle { size: 13.0, line_height: 21.125, ..t.ty.mono }).color(t.text.base));
+            let line = row().key("diag-roundtrip").w_full().px(12.0).py(14.0).gap(12.0).center_y().justify_between().child(text("Neko window ↔ daemon".to_owned()).font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.muted)).child(text(format!("{ms} ms")).key("diag-roundtrip-ms").font(rune::TextStyle { size: 13.0, line_height: 19.5, ..t.ty.mono }).color(t.text.base));
             r = r.child(line);
             for (i, c) in checks.iter().enumerate() {
                 let (glyph, ink) = if c.ok { (&icons::CHECK_LINE, t.meaning.mint) } else { (&icons::INFO, t.meaning.amber) };
                 let leading = row().size(20.0, 20.0).center().child(icon(glyph, 16.0).color(ink));
-                let title = text(c.name.clone()).key(format!("diag-check-{i}-name")).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().min_w(0.0);
+                let title = text(c.name.clone()).key(format!("diag-check-{i}-name")).font(webkit::font(t, 14.0, 500.0, 20.0)).color(t.text.base).truncate().min_w(0.0);
                 let trailing = if c.millis > 0 { vec![text(format!("{} ms", c.millis)).font(rune::TextStyle { size: 12.0, line_height: 16.0, ..t.ty.mono }).color(t.text.muted)] } else { Vec::new() };
                 r = r.child(info_row(t, &format!("diag-check-{i}"), title, Some(dim(t, &format!("diag-check-{i}-detail"), &c.detail)), Some(leading), trailing, None));
             }
@@ -231,12 +235,12 @@ fn updates(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
     // `--app` while the Swift app runs: it keeps the menu bar, notifications and hotkeys (`shell/mod.rs`); read-only, and it goes when Rune takes them over.
     if s.shell.duties.swift_holds {
         let words = crate::shell::SWIFT_ROW_WORDS;
-        let title = text(crate::shell::SWIFT_ROW_TITLE.to_owned()).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().min_w(0.0);
+        let title = text(crate::shell::SWIFT_ROW_TITLE.to_owned()).font(webkit::font(t, 14.0, 500.0, 20.0)).color(t.text.base).truncate().min_w(0.0);
         out.push(item(Section::Updates, G, "swift-app", crate::shell::SWIFT_ROW_TITLE, words, info_row(t, "set-swift-app", title, Some(dim(t, "set-swift-app-words", words)), None, Vec::new(), None)));
     }
     let Some(u) = s.summary.as_ref().and_then(|m| m.settings.self_update.clone()) else { return };
     let busy = u.requested || u.installing.is_some();
-    let title = |words: &str| text(words.to_owned()).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().min_w(0.0);
+    let title = |words: &str| text(words.to_owned()).font(webkit::font(t, 14.0, 500.0, 20.0)).color(t.text.base).truncate().min_w(0.0);
 
     // Where updates come from (read-only in the web; "Change…" opens the field here).
     let source = if u.source.is_empty() { DEFAULT_SOURCE.to_owned() } else { u.source.clone() };
@@ -323,7 +327,7 @@ fn updates(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<Item>) {
 
 fn about(s: &App, t: &Neko, out: &mut Vec<Item>) {
     const G: &str = "About";
-    let title = |words: &str| text(words.to_owned()).font(webkit::font(t, 13.5, 400.0, 21.9375)).color(t.text.base).truncate().min_w(0.0);
+    let title = |words: &str| text(words.to_owned()).font(webkit::font(t, 14.0, 500.0, 20.0)).color(t.text.base).truncate().min_w(0.0);
     let live = matches!(s.link, crate::app::LinkState::Live);
     let line = crate::app::status_line(&s.link, s.summary.as_ref());
     let served = match &s.web {

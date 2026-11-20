@@ -116,15 +116,15 @@ fn theme_grid(s: &App, t: &Neko, layer: &mut Vec<El>, dark: bool) -> El {
     // `grid-cols-2 sm:grid-cols-3 lg:grid-cols-4`, gap 12, by the page's own width (the web's viewport).
     let page_w = super::webkit::page_width();
     let cols = if page_w >= 1024.0 { 4 } else if page_w >= 640.0 { 3 } else { 2 };
-    let avail = if page_w >= 900.0 { page_w - 241.0 } else { page_w };
-    let grid_w = avail.min(832.0) - 80.0;
+    let avail = if page_w >= 900.0 { page_w - 248.0 } else { page_w };
+    let grid_w = avail - 2.0 * if page_w >= 768.0 { 36.0 } else { 24.0 };
     let card_w = ((grid_w - 12.0 * (cols as f32 - 1.0)) / cols as f32 * 10.0).floor() / 10.0;
     let mut grid = row().key(format!("themes-{slot}")).w(grid_w).gap(12.0).flex_wrap().role("radiogroup").label(if dark { "Dark theme" } else { "Light theme" });
     for e in all {
         let key = format!("theme-{slot}-{}", e.id);
         let on = e.id == selected;
         let id = e.id.clone();
-        let mut name = row().w_full().min_h(21.0).px(2.0).gap(6.0).center_y().child(text(e.name.clone()).font(super::webkit::font(t, 13.0, 500.0, 21.125)).color(t.text.strong).truncate().min_w(0.0).a11y_hidden());
+        let mut name = row().w_full().min_h(19.5).px(2.0).gap(6.0).center_y().child(text(e.name.clone()).font(super::webkit::font(t, 13.0, 500.0, 19.5)).color(t.text.strong).truncate().min_w(0.0).a11y_hidden());
         if on {
             name = name.child(el().grow(1.0)).child(icon(&icons::CHECK_LINE, 14.0).color(t.meaning.iris).a11y_hidden());
         }
@@ -221,7 +221,7 @@ pub(super) fn appearance(s: &App, t: &Neko, layer: &mut Vec<El>, out: &mut Vec<I
         rows.push(word(t, &format!("theme-problem-{i}"), &format!("{file} was skipped: {message}"), t.meaning.amber).px(12.0).py(12.0));
     }
     let make = button(t, "make-theme", "Make me a theme", Some(&icons::SPARK), true, false, |s: &mut App| s.ask_make_theme());
-    out.push(item(Section::Appearance, "", "make-theme", "Make me a theme", help, section(t, "set-your-themes", "Your themes", None, Some(make), with_note(s, t, "setting:make-theme", panel(rows)))));
+    out.push(item(Section::Appearance, "", "make-theme", "Make me a theme", help, section(t, "set-your-themes", "Your themes", None, Some(make), with_note(s, t, "setting:make-theme", panel(t, rows)))));
 }
 
 // ---- Rulebook -----------------------------------------------------------------------------------
@@ -248,14 +248,14 @@ pub(super) fn rulebook(s: &App, t: &Neko, out: &mut Vec<Item>) {
     }
     let save = button(t, "rulebook-save", "Save rulebook", None, true, false, webkit::gated(dirty, |s: &mut App| s.save_rulebook()));
     buttons.push(if dirty { save } else { save.disabled(true).opacity(0.5) });
-    let body_panel = panel(vec![with_note(s, t, "setting:rulebook", editor), panel_footer_with("rulebook-footer", left, buttons)]);
+    let body_panel = panel(t, vec![with_note(s, t, "setting:rulebook", editor), panel_footer_with("rulebook-footer", left, buttons)]);
     let open = s.open("rulebook:default");
     let toggle = webkit::ghost_button_after(t, "rulebook-default-toggle", "View Neko’s built-in default", &icons::CHEVRON_DOWN, |s: &mut App| s.toggle("rulebook:default")).ml(-8.0);
     let mut body = col().w_full().gap(6.0).child(body_panel).child(row().child(toggle));
     if open {
         let built_in = s.summary.as_ref().map_or("", |m| m.settings.rulebook_default.as_str());
         let words = if built_in.is_empty() { "The daemon didn’t send the built-in default." } else { built_in };
-        let pre = text(words.to_owned()).key("rulebook-default").font(webkit::font(t, 13.0, 400.0, 21.125)).color(t.text.base.alpha(0.85)).wrap().min_w(0.0);
+        let pre = text(words.to_owned()).key("rulebook-default").font(webkit::font(t, 13.0, 400.0, 19.5)).color(t.text.base.alpha(0.85)).wrap().min_w(0.0);
         body = body.child(col().w_full().max_h(384.0).mt(2.0).padding(16.0).radius(12.0).border(1.0, t.surface.border).fill(t.text.base.alpha(0.03)).scroll(rune::ScrollSpec { stick_bottom: false }).child(pre));
     }
     let badge = webkit::status(t, "rulebook-status", if custom { Tone::Success } else { Tone::Neutral }, if custom { "Using your own rules" } else { "Using Neko’s default rules" });

@@ -92,9 +92,6 @@ pub const FONT_SANS: &str = "Inter, ui-sans-serif, -apple-system, BlinkMacSystem
 /// The web's `--font-mono`, verbatim.
 pub const FONT_MONO: &str = "ui-monospace, \"SF Mono\", \"JetBrains Mono\", Menlo, monospace";
 
-/// How much lighter than the window the sidebar is painted (polish spec §4), in HSL lightness.
-const SIDEBAR_LIFT: f32 = 0.02;
-
 /// Share of the muted grey that is left in the faint grey. The web's `muted-foreground/70` is 0.70; 0.72 is the smallest step that keeps the
 /// faint grey at 3.0:1 on both windows now that the muted greys are #838383 and #686868.
 const FAINT_SHARE: f32 = 0.72;
@@ -151,6 +148,169 @@ pub struct Radii {
     pub control: f32,
 }
 
+/// The materials of the 2026-11 design system (`docs/design/system-2026-11.md` section 2.2, `web/src/styles/sky-materials.css`):
+/// the pebble (a secondary control) and the ink (the primary one) are gradients a few percent apart with a lit top edge, an input
+/// is a well with an inner shadow, a settings group is a slab, and the sidebar and the composer are tinted glass. Neko's own two
+/// themes use the spec's literals; any other theme gets the same materials built from its own tokens, so it keeps its palette.
+#[derive(Clone, Copy, Debug)]
+pub struct Materials {
+    pub pebble_top: Color,
+    pub pebble_bottom: Color,
+    /// The words on a pebble.
+    pub pebble_fg: Color,
+    /// The 1 px lit top edge (`inset 0 1px 0`).
+    pub pebble_edge: Color,
+    pub ink_top: Color,
+    pub ink_bottom: Color,
+    /// The words on the ink.
+    pub ink_fg: Color,
+    pub ink_edge: Color,
+    /// The 1 px ring inside the ink's edge (`inset 0 0 0 1px`).
+    pub ink_ring: Color,
+    /// An input's or a track's fill, and the shadow inside its top edge (`inset 0 1px 2px`).
+    pub well: Color,
+    pub well_shadow: Color,
+    /// A settings slab's fill, its hover, and the hairline between its rows.
+    pub group: Color,
+    pub group_hover: Color,
+    pub divider: Color,
+    /// The drop shadow of a floating layer (`0 24 60 -18` and `0 2 6`).
+    pub drop_far: Color,
+    pub drop_near: Color,
+    /// Glass (the composer): the tint from the top edge to the bottom one.
+    pub glass_top: Color,
+    pub glass_bottom: Color,
+    /// The sidebar panel's tint, top, middle (at 55%) and bottom.
+    pub panel_top: Color,
+    pub panel_mid: Color,
+    pub panel_bottom: Color,
+    /// A line icon: the foreground at about 46%.
+    pub icon: Color,
+    /// A switch's thumb when off, and when on.
+    pub thumb_off: Color,
+    pub thumb_on: Color,
+}
+
+impl Materials {
+    fn of(dark: bool, hex: &Hex, window: Color, card: Color, fg: Color, sidebar: Color) -> Materials {
+        let k = |r: u8, g: u8, b: u8, a: f32| rgb8(r, g, b).alpha(a);
+        if *hex == DARK {
+            return Materials {
+                pebble_top: c("#232326"),
+                pebble_bottom: c("#1d1d20"),
+                pebble_fg: c("#fafafa"),
+                pebble_edge: k(255, 255, 255, 0.07),
+                ink_top: c("#ffffff"),
+                ink_bottom: c("#ececec"),
+                ink_fg: c("#171717"),
+                ink_edge: Color::WHITE,
+                ink_ring: k(255, 255, 255, 0.4),
+                well: k(255, 255, 255, 0.05),
+                well_shadow: k(0, 0, 0, 0.35),
+                group: c("#222224"),
+                group_hover: c("#2b2b2d"),
+                divider: k(255, 255, 255, 0.07),
+                drop_far: k(0, 0, 0, 0.65),
+                drop_near: k(0, 0, 0, 0.30),
+                glass_top: k(23, 23, 23, 0.55),
+                glass_bottom: k(23, 23, 23, 0.38),
+                panel_top: k(38, 38, 42, 0.72),
+                panel_mid: k(24, 24, 27, 0.66),
+                panel_bottom: k(18, 18, 20, 0.60),
+                icon: k(242, 242, 243, 0.42),
+                thumb_off: c("#6b6b73"),
+                thumb_on: c("#141416"),
+            };
+        }
+        if *hex == LIGHT {
+            return Materials {
+                pebble_top: c("#f7f7f8"),
+                pebble_bottom: c("#ebebed"),
+                pebble_fg: c("#171717"),
+                pebble_edge: Color::WHITE,
+                ink_top: c("#3d3d3d"),
+                ink_bottom: c("#1c1c1c"),
+                ink_fg: c("#fafafa"),
+                ink_edge: k(255, 255, 255, 0.16),
+                ink_ring: k(0, 0, 0, 0.5),
+                well: k(0, 0, 0, 0.045),
+                well_shadow: k(0, 0, 0, 0.08),
+                group: c("#f6f7f9"),
+                group_hover: c("#eff1f4"),
+                divider: k(0, 0, 0, 0.06),
+                drop_far: k(0, 0, 0, 0.22),
+                drop_near: k(0, 0, 0, 0.05),
+                glass_top: k(255, 255, 255, 0.62),
+                glass_bottom: k(255, 255, 255, 0.36),
+                panel_top: k(232, 240, 255, 0.75),
+                panel_mid: k(238, 243, 255, 0.675),
+                panel_bottom: k(244, 247, 255, 0.60),
+                icon: k(27, 27, 29, 0.46),
+                thumb_off: Color::WHITE,
+                thumb_on: Color::WHITE,
+            };
+        }
+        // Any other theme: the same materials from its own tokens (the generic block of `sky-materials.css`).
+        let (white, black) = (Color::WHITE, Color::BLACK);
+        let pebble_fg = fg;
+        if dark {
+            Materials {
+                pebble_top: mix_srgb(window, fg, 0.09),
+                pebble_bottom: mix_srgb(window, fg, 0.06),
+                pebble_fg,
+                pebble_edge: k(255, 255, 255, 0.07),
+                ink_top: mix_srgb(white, fg, 0.40),
+                ink_bottom: mix_srgb(black, fg, 0.96),
+                ink_fg: window,
+                ink_edge: white,
+                ink_ring: k(255, 255, 255, 0.4),
+                well: fg.alpha(0.05),
+                well_shadow: k(0, 0, 0, 0.35),
+                group: mix_srgb(card, fg, 0.04),
+                group_hover: mix_srgb(card, fg, 0.08),
+                divider: k(255, 255, 255, 0.07),
+                drop_far: k(0, 0, 0, 0.65),
+                drop_near: k(0, 0, 0, 0.30),
+                glass_top: card.alpha(0.80),
+                glass_bottom: card.alpha(0.60),
+                panel_top: mix_srgb(sidebar, fg, 0.03),
+                panel_mid: mix_srgb(sidebar, fg, 0.03),
+                panel_bottom: mix_srgb(sidebar, fg, 0.03),
+                icon: fg.alpha(0.42),
+                thumb_off: fg,
+                thumb_on: window,
+            }
+        } else {
+            Materials {
+                pebble_top: mix_srgb(card, fg, 0.025),
+                pebble_bottom: mix_srgb(card, fg, 0.07),
+                pebble_fg,
+                pebble_edge: k(255, 255, 255, 0.9),
+                ink_top: mix_srgb(fg, white, 0.14),
+                ink_bottom: mix_srgb(fg, black, 0.28),
+                ink_fg: window,
+                ink_edge: k(255, 255, 255, 0.16),
+                ink_ring: k(0, 0, 0, 0.5),
+                well: fg.alpha(0.045),
+                well_shadow: k(0, 0, 0, 0.08),
+                group: mix_srgb(card, fg, 0.03),
+                group_hover: mix_srgb(card, fg, 0.06),
+                divider: k(0, 0, 0, 0.06),
+                drop_far: k(0, 0, 0, 0.22),
+                drop_near: k(0, 0, 0, 0.05),
+                glass_top: k(255, 255, 255, 0.62),
+                glass_bottom: k(255, 255, 255, 0.36),
+                panel_top: mix_srgb(sidebar, fg, 0.03),
+                panel_mid: mix_srgb(sidebar, fg, 0.03),
+                panel_bottom: mix_srgb(sidebar, fg, 0.03),
+                icon: fg.alpha(0.46),
+                thumb_off: white,
+                thumb_on: white,
+            }
+        }
+    }
+}
+
 /// The type scale (DESIGN.md §8 rule 7): page title 20 semibold; group heading 12.5 medium muted;
 /// row title 13.5 regular; meta 12.5 muted; ids 12 faint tabular. Bold is for the page title only.
 #[derive(Clone, Copy, Debug)]
@@ -200,6 +360,8 @@ pub struct Neko {
     pub meaning: Meaning,
     pub radius: Radii,
     pub ty: NekoType,
+    /// The pebble, ink, well, slab and glass of the design system.
+    pub mat: Materials,
     /// The kit's components (buttons, menus, tabs, dialogs) read their tokens from this.
     pub kit: Kit,
 }
@@ -209,40 +371,10 @@ fn c(hex: &str) -> Color {
 }
 
 /// `share` of `over` laid on `under`, blended in gamma-encoded sRGB the way CSS alpha is.
-fn mix_srgb(under: Color, over: Color, share: f32) -> Color {
+pub fn mix_srgb(under: Color, over: Color, share: f32) -> Color {
     use rune::color::{srgb_decode, srgb_encode};
     let m = |a: f32, b: f32| srgb_decode(srgb_encode(a) * (1.0 - share) + srgb_encode(b) * share);
     Color { r: m(under.r, over.r), g: m(under.g, over.g), b: m(under.b, over.b), a: 1.0 }
-}
-
-/// `colour` with its HSL lightness raised by `by` (0.02 = two points), saturation and hue kept. In
-/// gamma-encoded sRGB, as a designer's lightness is.
-fn lighten(colour: Color, by: f32) -> Color {
-    use rune::color::{srgb_decode, srgb_encode};
-    let (r, g, b) = (srgb_encode(colour.r), srgb_encode(colour.g), srgb_encode(colour.b));
-    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
-    let l = (max + min) / 2.0;
-    let d = max - min;
-    let (h, sat) = if d < 1e-6 {
-        (0.0, 0.0)
-    } else {
-        let sat = d / (1.0 - (2.0 * l - 1.0).abs());
-        let h = if max == r { ((g - b) / d).rem_euclid(6.0) } else if max == g { (b - r) / d + 2.0 } else { (r - g) / d + 4.0 };
-        (h, sat)
-    };
-    let l2 = (l + by).clamp(0.0, 1.0);
-    let k = (1.0 - (2.0 * l2 - 1.0).abs()) * sat;
-    let x = k * (1.0 - ((h % 2.0) - 1.0).abs());
-    let (r1, g1, b1) = match h as u32 {
-        0 => (k, x, 0.0),
-        1 => (x, k, 0.0),
-        2 => (0.0, k, x),
-        3 => (0.0, x, k),
-        4 => (x, 0.0, k),
-        _ => (k, 0.0, x),
-    };
-    let m = l2 - k / 2.0;
-    Color { r: srgb_decode(r1 + m), g: srgb_decode(g1 + m), b: srgb_decode(b1 + m), a: colour.a }
 }
 
 impl Neko {
@@ -259,12 +391,13 @@ impl Neko {
         let surface = Surfaces {
             window,
             card: c(hex.card),
-            sidebar: lighten(window, SIDEBAR_LIFT),
+            // The chrome behind the floating panels: the web's `--sidebar` (darker than the page in dark, `#fafafa` in light).
+            sidebar: c(hex.sidebar),
             popover: c(hex.popover),
             border: c(hex.border).alpha(hex.border_alpha),
             hover: ink(0.04),
-            active: ink(0.07),
-            selected: ink(0.07),
+            active: ink(0.06),
+            selected: ink(0.06),
             field_border: ink(0.10),
             ring: c(hex.iris).alpha(0.6),
         };
@@ -273,7 +406,7 @@ impl Neko {
         let faint = mix_srgb(window, muted, FAINT_SHARE);
         let text = Greys { strong: c(hex.strong), base: fg, muted, faint };
         let meaning = Meaning { iris: c(hex.iris), amber: c(hex.amber), sky: c(hex.sky), mint: c(hex.mint), coral: c(hex.coral) };
-        let radius = Radii { window: 20.0, row: 8.0, control: 8.0 };
+        let radius = Radii { window: 20.0, row: 18.0, control: 24.0 };
         let ty = NekoType::new();
 
         let mut kit = Kit::from_palette(PaletteSeed { bg: window, fg, accent: meaning.iris });
@@ -295,7 +428,8 @@ impl Neko {
             state.fg = role;
             state.icon = role;
         }
-        kit.radius = rune_kit::Radius { xs: 4.0, sm: 6.0, md: radius.control, lg: radius.row, xl: radius.window };
+        // The spec's popup scale: a menu item 14, a menu and a popover 16, the sheet 20 (the 24 control radius is ours, not the kit's).
+        kit.radius = rune_kit::Radius { xs: 6.0, sm: 14.0, md: 16.0, lg: 16.0, xl: radius.window };
         // The kit's own scale follows ours, so its buttons and menus read as the same product.
         kit.ty.ui = TextStyle { size: ty.row.size, ..kit.ty.ui };
         kit.ty.ui_medium = TextStyle { size: ty.row.size, weight: 500.0, ..kit.ty.ui_medium };
@@ -307,7 +441,8 @@ impl Neko {
         kit.ty.small = TextStyle { size: ty.id.size, ..kit.ty.small };
         kit.ty.small_medium = TextStyle { size: ty.id.size, weight: 500.0, ..kit.ty.small_medium };
 
-        Neko { dark, hex, surface, text, meaning, radius, ty, kit }
+        let mat = Materials::of(dark, &hex, window, surface.card, fg, c(hex.sidebar));
+        Neko { dark, hex, surface, text, meaning, radius, ty, mat, kit }
     }
 }
 
@@ -577,27 +712,52 @@ mod tests {
             let t = theme(dark);
             let fg = t.text.base;
             assert_eq!(t.surface.hover.a, 0.04);
-            assert_eq!(t.surface.selected.a, 0.07);
+            // The active nav row and the open row: the foreground at 6% (design system 4.6).
+            assert_eq!(t.surface.selected.a, 0.06);
             assert_eq!(t.surface.field_border.a, 0.10);
             assert_eq!(t.surface.hover.hex()[..7], fg.hex()[..7]);
-            assert_eq!(t.radius.row, 8.0);
+            // A 36 point row is a pill (radius 18); a control's 24 clamps to its half height.
+            assert_eq!(t.radius.row, 18.0);
+            assert_eq!(t.radius.control, 24.0);
             assert_eq!(t.surface.ring.a, 0.6);
             assert_eq!(t.surface.ring.hex()[..7], t.meaning.iris.hex()[..7]);
         }
     }
 
     #[test]
-    fn the_sidebar_is_two_points_lighter_than_the_window() {
-        let lightness = |c: Color| {
-            use rune::color::srgb_encode;
-            let (r, g, b) = (srgb_encode(c.r), srgb_encode(c.g), srgb_encode(c.b));
-            (r.max(g).max(b) + r.min(g).min(b)) / 2.0
+    fn the_chrome_behind_the_panels_is_the_webs_sidebar() {
+        for (dark, id) in [(true, "neutral"), (false, "neutral-light")] {
+            let css = css_block(id);
+            assert_eq!(theme(dark).surface.sidebar.hex(), c(&css["sidebar"]).hex(), "{id}");
+        }
+    }
+
+    /// The pebble, ink, group and glass literals are the web's (`web/src/styles/sky-materials.css`, the Neko themes' blocks).
+    #[test]
+    fn the_materials_are_the_webs() {
+        const MATERIALS: &str = include_str!("../../../web/src/styles/sky-materials.css");
+        let block = |theme: &str| {
+            let start = MATERIALS.find(&format!("html[data-neko-theme=\"{theme}\"] .sky {{")).unwrap_or_else(|| panic!("no block for {theme}"));
+            let rest = &MATERIALS[start..];
+            rest[..rest.find("}\n").unwrap()].to_owned()
         };
-        for dark in [true, false] {
-            let t = theme(dark);
-            let d = lightness(t.surface.sidebar) - lightness(t.surface.window);
-            let want = if dark { 0.02 } else { 0.02f32.min(1.0 - lightness(t.surface.window)) };
-            assert!((d - want).abs() < 0.004, "dark={dark}: {d}");
+        for (dark, id) in [(true, "neutral"), (false, "neutral-light")] {
+            let css = block(id);
+            let m = theme(dark).mat;
+            for (var, got) in [
+                ("--sky-pebble-top", m.pebble_top),
+                ("--sky-pebble-bottom", m.pebble_bottom),
+                ("--sky-pebble-fg", m.pebble_fg),
+                ("--sky-ink-top", m.ink_top),
+                ("--sky-ink-bottom", m.ink_bottom),
+                ("--sky-ink-fg", m.ink_fg),
+                ("--sky-group", m.group),
+                ("--sky-group-hover", m.group_hover),
+            ] {
+                let line = css.lines().find(|l| l.trim_start().starts_with(&format!("{var}:"))).unwrap_or_else(|| panic!("{id} has no {var}"));
+                let want = line.split(':').nth(1).unwrap().trim().trim_end_matches(';').to_owned();
+                assert_eq!(got.hex()[..7].to_lowercase(), want.to_lowercase(), "{id} {var}");
+            }
         }
     }
 }
