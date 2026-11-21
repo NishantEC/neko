@@ -8,7 +8,7 @@ use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
 fn runtime(scene: &str, size: (f32, f32)) -> Runtime<App> {
     let (_, f) = SCENES.iter().find(|(n, _)| *n == scene).unwrap_or_else(|| panic!("no scene {scene}"));
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     f(&mut app);
     app.outbox.clear();
     let mut rt = Runtime::new(app, view, size, Env { system_dark: true, scale: 1.0 });
@@ -41,7 +41,7 @@ fn a_folded_column_shows_the_button_at_x_80_on_the_traffic_lights_line_and_it_op
         let b = info(&rt, "sidebar-show").unwrap_or_else(|| panic!("{scene}: no Show sidebar button"));
         assert!((b.rect[0] - 80.0).abs() <= 1.0, "{scene}: its left edge is 80 from the window's: {:?}", b.rect);
         assert_eq!((b.rect[2], b.rect[3]), (28.0, 28.0), "{scene}: 28 by 28");
-        assert!((b.rect[1] + b.rect[3] / 2.0 - 28.0).abs() <= 1.0, "{scene}: centred on the traffic lights' line (28): {:?}", b.rect);
+        assert!((b.rect[1] + b.rect[3] / 2.0 - 24.0).abs() <= 1.0, "{scene}: centred on the bar's line (24): {:?}", b.rect);
         assert_eq!(b.label.as_deref(), Some("Show sidebar"));
         assert_eq!(b.help.as_deref(), Some("Show sidebar ⌘\\"));
         assert_eq!(b.radius, 8.0);
@@ -62,15 +62,16 @@ fn the_session_header_moves_right_of_the_button_and_the_open_column_hides_with_i
     let b = info(&rt, "sidebar-show").expect("the button").rect;
     let title = info(&rt, "top-title").expect("the session's title").rect;
     assert!(title[0] >= b[0] + b[2] + 4.0, "the title starts after the button, not under it or the traffic lights: {title:?} vs {b:?}");
-    // Open: the fold button in the column's header says what it does and which key does it too.
+    // Open: the key brings the column back (the prototype's sidebar has no fold button of its own; ⌘\ hides it again).
     press_backslash(&mut rt);
     assert!(rt.state.layout.sessions.is_open());
-    let fold = info(&rt, "sidebar-fold").expect("the fold button");
-    assert_eq!(fold.help.as_deref(), Some("Hide sidebar ⌘\\"));
+    press_backslash(&mut rt);
+    assert!(!rt.state.layout.sessions.is_open(), "the same key folds it again");
+    press_backslash(&mut rt);
     // Home has its own button over the art, at the same spot.
     let rt = runtime("home-sessions-collapsed", (1360.0, 900.0));
     let home = info(&rt, "sidebar-show").expect("Home's button").rect;
-    assert!((home[0] - 80.0).abs() <= 1.0 && (home[1] + home[3] / 2.0 - 28.0).abs() <= 1.0, "{home:?}");
+    assert!((home[0] - 80.0).abs() <= 1.0 && (home[1] + home[3] / 2.0 - 24.0).abs() <= 1.0, "{home:?}");
 }
 
 #[test]

@@ -19,7 +19,7 @@ pub fn scene(name: &str) -> impl FnOnce(&mut App) + '_ {
 }
 
 fn runtime_sized(setup: impl FnOnce(&mut App), size: (f32, f32)) -> Runtime<App> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     setup(&mut app);
     let mut rt = Runtime::new(app, view, size, Env { system_dark: true, scale: 1.0 });
     // The window's own key handler (⌘K, ⌘⇧Esc, `/`, J, K, ...), as the real window installs it.
@@ -244,8 +244,9 @@ fn delete_and_retry_ask_in_a_dialog_with_a_coral_button_and_send_nothing_until_y
 
 #[test]
 fn the_row_menu_is_the_same_list_as_the_session_menu() {
-    let mut rt = runtime(in_status(TaskStatus::Failed));
-    let id = rt.state.selected.clone().unwrap();
+    // The sidebar lists a task only under its cat: miso's building task in the cats scene.
+    let mut rt = runtime(scene("cat-page"));
+    let id = "t6".to_owned();
     let header: Vec<String> = neko_rune::task_actions::entries(&rt.state, &id).into_iter().map(|e| e.label).collect();
     right_click(&mut rt, &format!("session-{id}"));
     for label in &header {
@@ -635,11 +636,11 @@ fn the_right_click_menu_on_selected_text_asks_neko_or_searches() {
 }
 
 #[test]
-fn the_workspace_switcher_is_a_36_point_row_under_the_search_that_scopes_the_list_and_home() {
+fn the_workspace_switcher_is_in_the_brand_row_and_scopes_the_list_and_home() {
     let mut rt = runtime(scene("live"));
-    let (search, scope) = (rect(&rt, "sessions-search"), rect(&rt, "scope"));
-    assert_eq!(scope[3], 36.0);
-    assert!(scope[1] >= search[1] + search[3] - 0.5 && scope[1] - (search[1] + search[3]) <= 9.0, "right under the search field: {search:?} {scope:?}");
+    let (brand, scope) = (rect(&rt, "sessions-header"), rect(&rt, "scope"));
+    assert_eq!(scope[3], 20.0);
+    assert!(scope[1] >= brand[1] && scope[1] + scope[3] <= brand[1] + brand[3] + 0.5 && scope[0] > brand[0] + 60.0, "at the right of the brand row: {brand:?} {scope:?}");
     assert!(has_text(&rt, "All workspaces"));
     let before = rt.state.group_count(neko_rune::groups::Group::NeedsYou);
     let workspaces: Vec<(String, String)> = rt.state.summary.as_ref().unwrap().workspaces.iter().map(|w| (w.id.clone(), w.name.clone())).collect();

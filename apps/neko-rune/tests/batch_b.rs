@@ -22,7 +22,7 @@ fn scene(name: &str) -> impl FnOnce(&mut App) + '_ {
 }
 
 fn runtime(setup: impl FnOnce(&mut App)) -> Runtime<App> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     setup(&mut app);
     let mut rt = Runtime::new(app, view, WINDOW, Env { system_dark: true, scale: 1.0 });
     rt.on_key = Some(neko_rune::on_key);
@@ -318,11 +318,13 @@ fn j_and_k_walk_the_trees_open_rows() {
 fn the_sidebar_has_a_pull_requests_row_after_calendar_with_what_waits_on_you() {
     let mut rt = runtime(scene("bb-prs"));
     let y = |rt: &Runtime<App>, key: &str| rt.find(key).map(|p| p.1).unwrap_or_else(|| panic!("no {key}"));
-    assert!(y(&rt, "view-calendar") < y(&rt, "view-prs") && y(&rt, "view-prs") < y(&rt, "view-setup"), "after Calendar");
-    assert_eq!(texts_of(&rt, "count-prs"), "4", "two ready, one to close, one needing a call");
+    // Pull requests moved to the account menu with the prototype's sidebar; what waits on you is still counted.
+    let _ = y;
+    assert_eq!(rt.state.pr_attention(), Some(4), "two ready, one to close, one needing a call");
+    assert!(rt.state.pr_attention().is_some() && !has_key(&rt, "view-prs"), "no sidebar row of its own");
     rt.update(|s, _| s.summary.as_mut().unwrap().pull_requests.clear());
     settle(&mut rt);
-    assert!(!has_key(&rt, "count-prs"), "no count at 0");
+    assert_eq!(rt.state.pr_attention(), None, "no count at 0");
 }
 
 #[test]

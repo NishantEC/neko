@@ -13,7 +13,7 @@ use rune::{Env, Runtime};
 const WINDOW: (f32, f32) = (1280.0, 800.0);
 
 fn runtime(dark: bool, setup: impl FnOnce(&mut App)) -> Runtime<App> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     setup(&mut app);
     let mut rt = Runtime::new(app, view, WINDOW, Env { system_dark: dark, scale: 2.0 });
     rt.frame(0.0);
@@ -68,42 +68,40 @@ fn the_four_regions_stand_left_to_right_and_there_are_no_tabs() {
 }
 
 #[test]
-fn sessions_are_grouped_by_state_with_counts_and_the_first_one_that_needs_you_is_open() {
+fn the_sidebar_is_the_prototypes_rows_in_the_prototypes_order() {
+    // The prototype's sidebar: Home, Search, Calendar, Tasks, the Cats section, then Rounds and Settings pinned to the bottom, the footer last.
+    // There is no list of what needs you, runs or finished in it any more: Home has them, and a cat's face carries the amber dot.
     let rt = runtime(true, live);
-    let t = texts(&rt);
-    for title in ["Needs you", "Running", "Recent"] {
-        assert!(t.contains(&title.to_owned()), "{title}: {t:?}");
+    let y = |key: &str| rect(&rt, key)[1];
+    let order = ["sessions-header", "view-home", "sessions-search", "view-calendar", "view-all", "view-inbox", "view-settings", "account"];
+    for pair in order.windows(2) {
+        assert!(y(pair[0]) < y(pair[1]), "{} is above {}", pair[0], pair[1]);
     }
-    // 2 awaiting approval + 3 ready for review + 1 failed = 6 need you (at most 8); 3 + 1 + 1 + 4 queued = 9 run (all);
-    // 6 done + 1 cancelled = 7 are recent but only 5 show.
-    assert_eq!(keyed(&rt, "session-t"), 6 + 9 + 5, "needs you, running, and Recent's five");
-    assert_eq!(keyed(&rt, "section-"), 3);
-    assert!(rt.find("view-all").is_some(), "Recent has its View all link");
+    for title in ["Needs you", "Running", "Recent"] {
+        assert!(!texts(&rt).contains(&title.to_owned()), "{title} is not a sidebar group any more");
+    }
+    assert_eq!(keyed(&rt, "section-"), 0);
     assert!(rt.state.selected.is_some());
     assert_eq!(rt.state.session().map(|t| t.status), Some(neko_protocol::workbench::TaskStatus::AwaitingApproval));
 }
 
 #[test]
-fn a_row_is_one_line_with_an_icon_a_title_and_quiet_meta() {
+fn a_nav_row_is_32_high_with_an_icon_the_words_and_a_quiet_count() {
     let rt = runtime(true, live);
     let t = texts(&rt);
-    assert!(t.iter().any(|x| x == "Add a retry to the sync job"));
-    assert!(t.iter().any(|x| x.ends_with('m')), "a needs-you row's meta is its age, in minutes");
-    assert!(t.iter().any(|x| x == "2/7") && t.iter().any(|x| x == "3/7"), "a running row with a fraction says n/m: {t:?}");
-    for key in ["session-t0", "session-t6", "view-inbox", "sessions-search"] {
-        assert_eq!(rect(&rt, key)[3], 36.0, "{key} is one 36 point pill row");
+    for key in ["view-home", "sessions-search", "view-calendar", "view-all", "view-inbox", "view-settings"] {
+        assert_eq!(rect(&rt, key)[3], 32.0, "{key} is one 32 point row");
     }
-    for key in ["group-0", "group-1", "group-2"] {
-        assert_eq!(rect(&rt, key)[3], 28.0, "{key} is a 28 point group label");
-    }
-    assert_eq!(rect(&rt, "new-session")[3], 40.0, "New session is the 40 point pebble");
-    assert_eq!(rect(&rt, "sessions-footer")[3], 44.0, "the footer is 44");
+    assert!(t.iter().any(|x| x == "⌘K"), "Search carries its shortcut: {t:?}");
+    assert_eq!(rect(&rt, "account")[3], 30.0, "the footer is one 30 point row");
+    assert_eq!(rect(&rt, "sessions")[2], 248.0);
 }
 
 #[test]
 fn clicking_a_session_selects_it_and_the_top_line_names_it() {
     let mut rt = runtime(true, live);
-    click(&mut rt, "session-t6");
+    rt.update(|s, _| s.select("t6"));
+    settle(&mut rt);
     assert_eq!(rt.state.selected.as_deref(), Some("t6"));
     assert!(rt.state.outbox.contains(&neko_rune::link::Call::Refresh), "choosing a session asks the daemon for its events");
     // The daemon's answer carries the open session in full.
@@ -122,34 +120,18 @@ fn clicking_a_session_selects_it_and_the_top_line_names_it() {
 }
 
 #[test]
-fn groups_collapse_and_expand_with_their_count_kept() {
-    let mut rt = runtime(true, live);
-    let before = keyed(&rt, "session-t");
-    click(&mut rt, "group-1");
-    assert!(rt.state.collapsed[1]);
-    assert_eq!(keyed(&rt, "session-t"), before - 9, "the nine running rows are hidden");
-    assert!(texts(&rt).contains(&"Running".to_owned()), "the heading stays");
-    click(&mut rt, "group-1");
-    assert_eq!(keyed(&rt, "session-t"), before);
-}
-
-#[test]
 fn the_foot_opens_full_views_in_the_sessions_place_and_a_session_brings_it_back() {
     let mut rt = runtime(true, live);
-    for key in ["view-calendar", "view-inbox", "view-setup", "account", "new-session"] {
+    for key in ["view-home", "view-calendar", "view-inbox", "view-settings", "account"] {
         assert!(rt.find(key).is_some(), "{key} is in the sessions column");
     }
     // Settings is in the account footer's menu.
-    click(&mut rt, "account");
-    let e = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Settings")).expect("Settings in the account menu");
-    let (x, y) = (e.rect[0] + e.rect[2] / 2.0, e.rect[1] + e.rect[3] / 2.0);
-    rt.pointer_down(x, y);
-    rt.pointer_up(x, y);
-    settle(&mut rt);
+    click(&mut rt, "view-settings");
     assert_eq!(rt.state.view, Some(FullView::Settings));
     assert!(rt.find("full-settings").is_some() && rt.find("composer").is_none(), "the view replaces the session and its composer");
     assert!(rt.find("settings-search").is_some() && texts(&rt).contains(&"AI & agents".to_owned()), "Settings is its own page now");
-    click(&mut rt, "session-t0");
+    rt.update(|s, _| s.select("t0"));
+    settle(&mut rt);
     assert_eq!(rt.state.view, None);
     assert!(rt.find("composer").is_some());
 }
@@ -160,7 +142,7 @@ fn the_account_menu_lists_the_other_views_and_opens_one() {
     click(&mut rt, "account");
     assert!(rt.state.more_open);
     let t = texts(&rt);
-    for title in ["Settings", "Usage", "Plugins", "Open the web UI", "Quit"] {
+    for title in ["Usage", "Plugins", "Pull requests", "Open the web UI", "Quit"] {
         assert!(t.contains(&title.to_owned()), "{title} in More: {t:?}");
     }
     let e = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Usage")).unwrap();
@@ -278,21 +260,19 @@ fn before_and_without_a_daemon_it_says_so_calmly_in_the_column() {
     settle(&mut rt);
     let t = texts(&rt);
     assert!(t.iter().any(|l| l.starts_with("Neko isn't running. Trying again in 4 s. Last known: 22 tasks")), "{t:?}");
-    assert!(keyed(&rt, "session-t") > 0, "what was known stays on screen");
+    assert!(rt.state.summary.is_some() && rt.find("view-home").is_some(), "what was known stays on screen");
 }
 
 #[test]
 fn an_empty_workbench_says_no_sessions_once() {
     let (_, scene) = scenes::SCENES.iter().find(|(n, _)| *n == "empty").unwrap();
     let rt = runtime(false, scene);
-    assert_eq!(texts(&rt).iter().filter(|t| *t == "No sessions yet").count(), 1);
-    assert!(texts(&rt).contains(&"Nothing needs you right now".to_owned()));
-    assert!(texts(&rt).contains(&"Nothing needs you".to_owned()), "the empty digest says so");
+    assert!(texts(&rt).contains(&"Nothing is waiting for you.".to_owned()), "Home says nothing waits");
     // With nothing chosen the window is on Home, which is where a first session starts.
     assert!(rt.find("home-composer").is_some() && rt.find("home-title").is_some(), "Home offers the one thing to do");
     let (home, composer) = (rect(&rt, "home"), rect(&rt, "home-composer"));
     assert!(((composer[0] + composer[2] / 2.0) - (home[0] + home[2] / 2.0)).abs() < 1.0, "centred, not off to one side");
-    assert!(composer[2] <= 680.0 + 0.5, "at most 680 wide: {}", composer[2]);
+    assert!(composer[2] <= 720.0 + 0.5, "at most 720 wide: {}", composer[2]);
 }
 
 #[test]
@@ -341,9 +321,9 @@ fn every_scene_lays_out_in_both_appearances() {
 fn light_and_dark_follow_the_system() {
     let fill = |rt: &Runtime<App>, key: &str| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).map(|e| e.fill.hex()).unwrap();
     let (dark, light) = (runtime(true, |_| {}), runtime(false, |_| {}));
-    // The window is the chrome the panels float on: the web's `--sidebar` (design system 2026-11).
-    assert_eq!(fill(&dark, "window"), "#111111ff");
-    assert_eq!(fill(&light, "window"), "#fafafaff");
-    assert_eq!(fill(&dark, "session-region"), "#161616ff");
+    // The window is the prototype's chrome, the sidebar's own colour; the content is its surface.
+    assert_eq!(fill(&dark, "window"), "#0c0c0dff");
+    assert_eq!(fill(&light, "window"), "#ececeeff");
+    assert_eq!(fill(&dark, "session-region"), "#141416ff");
     assert_eq!(fill(&light, "session-region"), "#ffffffff");
 }

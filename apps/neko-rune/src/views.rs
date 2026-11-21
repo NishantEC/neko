@@ -22,17 +22,19 @@ pub enum FullView {
 }
 
 impl FullView {
-    /// The sessions column's nav rows, in order (polish spec §1): each with its count.
-    pub const NAV: [FullView; 4] = [FullView::Routines, FullView::Calendar, FullView::PullRequests, FullView::Setup];
-    /// In the account footer's menu, above "Open the web UI" and "Quit".
-    pub const MENU: [FullView; 3] = [FullView::Settings, FullView::Usage, FullView::Plugins];
+    /// The sidebar's nav rows that open a full view (Home, Search and Tasks are not full views of this list), in order: each may carry a count.
+    pub const NAV: [FullView; 3] = [FullView::Calendar, FullView::Routines, FullView::Settings];
+    /// In the account footer's menu, above "Stop all work", "Open the web UI" and "Quit".
+    pub const MENU: [FullView; 3] = [FullView::Usage, FullView::Plugins, FullView::PullRequests];
+    /// Setup (workspaces, tools, skills, memory, profiles, packs, improvements) lives in Settings: its rail's last group opens these.
+    pub const IN_SETTINGS: [FullView; 1] = [FullView::Setup];
     /// The views the nav and the account menu place (every one has exactly one place).
     pub const ALL: [FullView; 7] = [FullView::Calendar, FullView::Routines, FullView::Settings, FullView::Usage, FullView::Setup, FullView::Plugins, FullView::PullRequests];
 
     pub fn title(self) -> &'static str {
         match self {
             FullView::Calendar => "Calendar",
-            FullView::Routines => "Routines",
+            FullView::Routines => "Rounds",
             FullView::Settings => "Settings",
             FullView::Usage => "Usage",
             FullView::Setup => "Setup",
@@ -79,6 +81,7 @@ mod tests {
     fn every_view_has_one_place_a_route_and_an_icon() {
         let mut placed: Vec<FullView> = FullView::NAV.to_vec();
         placed.extend(FullView::MENU);
+        placed.extend(FullView::IN_SETTINGS);
         assert_eq!(placed.len(), FullView::ALL.len());
         for v in FullView::ALL {
             assert_eq!(placed.iter().filter(|p| **p == v).count(), 1, "{v:?}");
@@ -91,7 +94,7 @@ mod tests {
         icons.sort_unstable();
         icons.dedup();
         assert_eq!(icons.len(), FullView::ALL.len());
-        assert_eq!(FullView::NAV.map(FullView::title), ["Routines", "Calendar", "Pull requests", "Setup"]);
-        assert_eq!(FullView::MENU.map(FullView::title), ["Settings", "Usage", "Plugins"]);
+        assert_eq!(FullView::NAV.map(FullView::title), ["Calendar", "Rounds", "Settings"]);
+        assert_eq!(FullView::MENU.map(FullView::title), ["Usage", "Plugins", "Pull requests"]);
     }
 }

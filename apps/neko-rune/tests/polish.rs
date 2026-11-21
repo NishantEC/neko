@@ -4,7 +4,6 @@
 
 use neko_protocol::workbench::{ChatMessage, ChatRole};
 use neko_rune::app::{App, DEMO_NOW};
-use neko_rune::groups::Group;
 use neko_rune::scenes;
 use neko_rune::view::{BAND, TRAFFIC_LIGHTS, view};
 use rune::{Env, Runtime};
@@ -12,7 +11,7 @@ use rune::{Env, Runtime};
 const WINDOW: (f32, f32) = (1440.0, 900.0);
 
 fn runtime(dark: bool, setup: impl FnOnce(&mut App)) -> Runtime<App> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     setup(&mut app);
     let mut rt = Runtime::new(app, view, WINDOW, Env { system_dark: dark, scale: 2.0 });
     rt.frame(0.0);
@@ -51,55 +50,45 @@ fn centre_y(r: [f32; 4]) -> f32 {
 // ---------------------------------------------------------------- window chrome (§0)
 
 #[test]
-fn the_traffic_lights_line_up_with_the_headers_and_the_header_words_start_after_them() {
+fn the_traffic_lights_line_up_with_the_headers_and_the_brand_row_is_the_prototypes() {
     // 14 point buttons, their left edge 12 from the window's, centred on the header row (28 from the top).
     assert_eq!(TRAFFIC_LIGHTS.0, 12.0);
     assert_eq!(TRAFFIC_LIGHTS.1 + 7.0, 28.0, "the lights' centre is the header row's centre");
     assert_eq!(BAND, 44.0);
     let rt = runtime(true, live);
+    // The prototype's brand row sits 45 below the window's top (the lights have the room above it): an 18 point mark and 14 below it.
     let header = rect(&rt, "sessions-header");
-    assert_eq!((header[1], header[3]), (12.0, 32.0), "the header row: 12 from the top, 32 high");
-    assert_eq!(centre_y(header), 28.0);
-    assert!(rect(&rt, "sessions-brand")[0] >= 80.0 + 16.0, "the header's words start after the traffic lights: the mark and 'Neko' come after an 80 point inset");
-    // Session view and Neko column: their header rows are on the same centre line.
+    assert_eq!((header[1], header[3]), (45.0, 32.0), "the brand row: 45 from the top, 32 with its 14 of space below");
+    assert!(rect(&rt, "sessions-brand")[0] >= 10.0 + 8.0 + 18.0, "'Neko' follows the mark");
+    // Neko's column (opened by choice) keeps its header row on the 28 centre line.
     assert_eq!(centre_y(rect(&rt, "neko-title")), 28.0, "Neko's header is centred on 28");
     let neko_header = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("neko-collapse")).unwrap().rect;
     assert_eq!(centre_y(neko_header), 28.0);
 }
 
-// ---------------------------------------------------------------- the sessions column (§1)
-
 #[test]
-fn the_sessions_column_is_248_wide_with_12_of_padding_and_36_point_pill_rows() {
+fn the_sidebar_is_248_wide_flat_with_10_of_padding_and_32_point_rows() {
     let rt = runtime(true, live);
     let col = rect(&rt, "sessions");
     assert_eq!(col[2], 248.0);
-    // The column is a panel inset 8 from the window on its top, bottom and left (design system 4.6).
-    assert_eq!((col[0], col[1]), (8.0, 8.0), "the panel floats 8 in from the window");
-    for key in ["sessions-search", "new-session", "view-inbox", "view-calendar", "view-prs", "view-setup", "session-t0", "session-t6"] {
+    // The column is flat on the window: no inset, no card (the prototype's `.side`).
+    assert_eq!((col[0], col[1], col[3]), (0.0, 0.0, WINDOW.1), "flush with the window's edges");
+    for key in ["view-home", "sessions-search", "view-calendar", "view-all", "view-inbox", "view-settings"] {
         let r = rect(&rt, key);
-        assert_eq!(r[3], if key == "new-session" { 40.0 } else { 36.0 }, "{key}: New session is the 40 high pebble, every other row a 36 high pill");
-        assert_eq!(r[0], col[0] + 12.0, "{key} is 12 in from the column's left");
-        assert_eq!(r[2], 248.0 - 24.0, "{key} fills the column inside its 12 point padding");
+        assert_eq!(r[3], 32.0, "{key}: every nav row is 32 high");
+        assert_eq!(r[0], 10.0, "{key} is 10 in from the column's left");
+        assert_eq!(r[2], 248.0 - 20.0, "{key} fills the column inside its 10 point padding");
     }
-    // Top to bottom: header 32, gap 8, search 36 with the workspace switcher (36) flush under it, gap 8, New session 40, four nav rows of 36 four apart (Routines, Calendar, Pull requests, Setup).
-    let (header, search, new, routines, calendar, prs, workspaces) = (rect(&rt, "sessions-header"), rect(&rt, "sessions-search"), rect(&rt, "new-session"), rect(&rt, "view-inbox"), rect(&rt, "view-calendar"), rect(&rt, "view-prs"), rect(&rt, "view-setup"));
-    assert_eq!(search[1], header[1] + header[3] + 8.0);
-    let scope = rect(&rt, "scope");
-    assert_eq!((scope[1], scope[3]), (search[1] + search[3], 36.0), "the switcher is a 36 point row right under the search field");
-    assert_eq!(new[1], scope[1] + scope[3] + 8.0);
-    assert_eq!(routines[1], new[1] + new[3] + 4.0);
-    assert_eq!(calendar[1], routines[1] + routines[3] + 4.0);
-    assert_eq!(prs[1], calendar[1] + calendar[3] + 4.0);
-    assert_eq!(workspaces[1], prs[1] + prs[3] + 4.0);
-    // The list's sections are 8 apart, each header 28 tall.
-    let (needs, running) = (rect(&rt, "section-0"), rect(&rt, "section-1"));
-    assert_eq!(rect(&rt, "group-0")[3], 28.0);
-    assert_eq!(running[1], needs[1] + needs[3] + 8.0);
-    // The footer: 44 tall, the panel's last block, 12 up from its bottom (8 above the window's).
-    let footer = rect(&rt, "sessions-footer");
-    assert_eq!(footer[3], 44.0);
-    assert_eq!(footer[1] + footer[3], WINDOW.1 - 8.0 - 12.0);
+    // Top to bottom: the brand row, then Home, Search, Calendar and Tasks with no gap between them.
+    let (home, search, calendar, tasks) = (rect(&rt, "view-home"), rect(&rt, "sessions-search"), rect(&rt, "view-calendar"), rect(&rt, "view-all"));
+    assert_eq!(search[1], home[1] + home[3]);
+    assert_eq!(calendar[1], search[1] + search[3]);
+    assert_eq!(tasks[1], calendar[1] + calendar[3]);
+    // Rounds and Settings are pinned to the bottom, above the footer; the footer is 30 high and 10 up from the window's bottom.
+    let (rounds, settings, footer) = (rect(&rt, "view-inbox"), rect(&rt, "view-settings"), rect(&rt, "account"));
+    assert_eq!(settings[1], rounds[1] + rounds[3]);
+    assert_eq!(footer[3], 30.0);
+    assert_eq!(footer[1] + footer[3], WINDOW.1 - 10.0);
 }
 
 #[test]
@@ -109,77 +98,22 @@ fn the_nav_rows_carry_their_counts_and_the_footer_carries_the_account_and_its_me
         s.account.name = "Ada Lovelace".into();
     });
     let t = texts(&rt);
-    // Routines, Calendar, Setup: in that order; Setup counts what needs attention and shows no count when nothing does.
-    assert!(rt.find("count-setup").is_none(), "no count when nothing needs attention");
-    for word in ["Routines", "Calendar", "Setup", "New session", "Search sessions", "⌘K", "Ada Lovelace", "AL"] {
+    for word in ["Home", "Search", "Calendar", "Tasks", "Rounds", "Settings", "⌘K", "Ada", "AL"] {
         assert!(t.contains(&word.to_owned()), "{word}: {t:?}");
     }
-    assert!(t.iter().any(|x| x.ends_with(" agents") || x.contains(" agents")), "the subtitle counts agents: {t:?}");
+    // Home counts what needs you, in amber.
+    assert!(rt.find("count-view-home").is_some(), "Home carries the count of what needs you");
     let mut rt = rt;
     click(&mut rt, "account");
     let menu = texts(&rt);
-    for item in ["Settings", "Usage", "Plugins", "Open the web UI", "Quit"] {
+    for item in ["Usage", "Plugins", "Pull requests", "Open the web UI", "Quit"] {
         assert!(menu.contains(&item.to_owned()), "{item}");
     }
 }
 
 #[test]
-fn needs_you_shows_eight_then_show_n_more_and_recent_five_and_view_all_and_waiting_a_while_is_folded() {
-    use neko_protocol::workbench::TaskStatus;
-    let mut rt = runtime(true, |s| {
-        live(s);
-        let m = s.summary.as_mut().unwrap();
-        let template = m.tasks.iter().find(|t| t.status == TaskStatus::AwaitingApproval).unwrap().clone();
-        for i in 0..12 {
-            let mut t = template.clone();
-            t.id = format!("extra-{i}");
-            t.title = format!("Extra {i}");
-            t.updated_at_ms = DEMO_NOW - (60 + i64::from(i)) * 60_000;
-            m.tasks.push(t);
-        }
-        let mut old = template.clone();
-        old.id = "stale".into();
-        old.title = "Parked a month".into();
-        old.updated_at_ms = DEMO_NOW - 40 * 86_400_000;
-        m.tasks.push(old);
-    });
-    let rows = |rt: &Runtime<App>, prefix: &str| rt.elements().iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with(prefix) && k[prefix.len()..].starts_with(|c: char| c.is_ascii_alphanumeric()))).count();
-    let count = |rt: &Runtime<App>, n: usize| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("group-count-{n}"))).and_then(|e| e.text);
-    // 6 + 12 = 18 need you: 8 rows and "Show 10 more"; the header says 18.
-    assert_eq!(count(&rt, 0).as_deref(), Some("18"));
-    assert!(texts(&rt).contains(&"Show 10 more".to_owned()));
-    let needs_rows = rt.elements().iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("session-")) && e.rect[1] >= rect(&rt, "section-0")[1] && e.rect[1] < rect(&rt, "section-0")[1] + rect(&rt, "section-0")[3]).count();
-    assert_eq!(needs_rows, 8, "eight rows");
-    click(&mut rt, "needs-more");
-    assert!(texts(&rt).contains(&"Show fewer".to_owned()));
-    assert!(rt.elements().iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("meta-"))).count() >= 18);
-    // Recent: five rows and "View all".
-    let recent = rect(&rt, "section-2");
-    assert!(rt.find("view-all").is_some());
-    let _ = (rows(&rt, "section-"), recent);
-    // Waiting a while: folded, with its count; its rows are not drawn until it is opened.
-    assert_eq!(count(&rt, 3).as_deref(), Some("1"));
-    assert!(rt.find("session-stale").is_none(), "folded by default");
-    assert!(rt.state.collapsed[Group::WaitingAWhile.index()]);
-    // (The header is below the fold of this long list, so the press is made on the state, as its handler does.)
-    rt.update(|s, _| s.toggle_group(Group::WaitingAWhile));
-    assert!(!rt.state.collapsed[Group::WaitingAWhile.index()], "its header opens it");
-}
-
-#[test]
-fn colour_appears_only_in_the_needs_you_and_running_icons() {
-    // The Recent icon is muted grey for done and for failed or cancelled: never Mint, never Coral.
-    let rt = runtime(true, live);
-    let recent_rows: Vec<_> = rt.elements().into_iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("session-t")) && e.rect[1] > rect(&rt, "section-2")[1]).collect();
-    assert!(!recent_rows.is_empty());
-    let _ = recent_rows;
-}
-
-// ---------------------------------------------------------------- Home (§2)
-
-#[test]
-fn home_is_a_680_column_with_the_greeting_a_status_line_and_the_composer() {
-    let mut rt = runtime(true, |s| {
+fn home_is_a_720_column_with_the_greeting_a_status_line_and_the_composer() {
+    let rt = runtime(true, |s| {
         live(s);
         s.account.name = "Ada Lovelace".into();
         s.open_new();
@@ -188,29 +122,22 @@ fn home_is_a_680_column_with_the_greeting_a_status_line_and_the_composer() {
     let title = texts(&rt).into_iter().find(|t| t.starts_with("Good ")).expect("a greeting");
     assert!(title.ends_with(", Ada"), "{title}");
     let (home, composer) = (rect(&rt, "home"), rect(&rt, "home-composer"));
-    assert!(composer[2] <= 680.0 + 0.5 && composer[2] > 600.0, "{}", composer[2]);
+    assert!(composer[2] <= 720.0 + 0.5 && composer[2] > 600.0, "{}", composer[2]);
     assert!((composer[0] + composer[2] / 2.0 - (home[0] + home[2] / 2.0)).abs() < 1.0, "centred");
-    // The column's middle is about 40% down the region.
-    let greeting = rect(&rt, "home-greeting");
-    let middle = (greeting[1] + composer[1] + composer[3]) / 2.0 - home[1];
-    assert!((middle / home[3] - 0.40).abs() < 0.08, "the column sits slightly above the middle: {:.2}", middle / home[3]);
-    // The composer card: radius 16 is the spec's; 3 lines at least; the controls in the order the spec names.
-    let order = ["new-attach", "new-workspace", "new-runtime", "new-mode", "new-model", "new-start"];
+    // The prototype's Home: the greeting 44 below the top, the composer's bar in the order attach, cat, model, send.
+    assert!(rect(&rt, "home-title")[1] >= home[1] + 44.0 - 2.0, "the greeting sits 44 below the top");
+    let order = ["new-attach", "new-cat", "new-model", "new-start"];
     let xs: Vec<f32> = order.iter().map(|k| rect(&rt, k)[0]).collect();
-    assert!(xs.windows(2).all(|w| w[0] < w[1]), "attach, workspace, runtime, plan/build, model, send in that order: {xs:?}");
+    assert!(xs.windows(2).all(|w| w[0] < w[1]), "attach, cat, model, send in that order: {xs:?}");
     for key in ["new-attach", "new-start"] {
         let r = rect(&rt, key);
-        let side = if key == "new-start" { 36.0 } else { 32.0 };
-        assert_eq!((r[2], r[3]), (side, side), "{key} is a {side} point square (Send is the 36 point ink)");
+        let side = if key == "new-start" { 30.0 } else { 26.0 };
+        assert_eq!((r[2], r[3]), (side, side), "{key} is a {side} point square (Send is the 30 point ink)");
     }
-    assert!(rect(&rt, "new-request-box")[3] >= 3.0 * 17.0, "three lines at least");
-    // "3 running" and "6 need you" filter the sessions column.
-    assert!(texts(&rt).contains(&"9 running".to_owned()) && texts(&rt).contains(&"6 need you".to_owned()), "{:?}", texts(&rt));
-    click(&mut rt, "home-running");
-    assert_eq!(rt.state.filter, Some(Group::Running));
-    assert!(rt.find("section-0").is_none() && rt.find("section-1").is_some(), "the column shows Running only");
-    click(&mut rt, "home-running");
-    assert_eq!(rt.state.filter, None);
+    assert!(rect(&rt, "new-request-box")[3] >= 2.0 * 17.0, "two lines at least");
+    // "9 working" and "6 need you" are plain words in the status line.
+    let t = texts(&rt);
+    assert!(t.iter().any(|x| x.ends_with(" working")) && t.iter().any(|x| x.ends_with(" you")), "{t:?}");
 }
 
 #[test]
@@ -230,7 +157,7 @@ fn the_send_button_is_ink_only_when_there_is_text() {
     });
     let fill = |rt: &Runtime<App>| rt.elements().into_iter().find(|e| e.key.as_deref() == Some("new-start")).map(|e| e.fill).unwrap();
     let mat = neko_rune::theme::theme(true).mat;
-    assert_eq!(fill(&rt).hex(), mat.pebble_bottom.hex(), "no text: a pebble");
+    assert_eq!(fill(&rt).hex(), neko_rune::theme::theme(true).surface.tint.hex(), "no text: the tint");
     rt.update(|s, _| s.new_request.replace_text("Make the sync job retry"));
     for _ in 0..60 {
         rt.frame(1.0 / 60.0);

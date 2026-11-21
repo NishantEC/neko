@@ -27,7 +27,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
             Some(why) => why.clone(),
             None => "Looking for your routines…".to_owned(),
         };
-        return page(t, "routines", "Inbox", None, Vec::new(), quiet_line(t, "routines-loading", &line));
+        return page(t, "routines", "Rounds", None, Vec::new(), quiet_line(t, "routines-loading", &line));
     };
     let views: Vec<&RoutineView> = data.views.iter().filter(|v| !is_goal_routine(v) && s.scope().is_none_or(|w| v.routine.workspace_id == w)).collect();
     let mut body = col().w_full().gap(28.0);
@@ -65,7 +65,7 @@ pub fn view(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     if !any {
         body = body.child(empty_block(t));
     }
-    page(t, "routines", "Inbox", None, Vec::new(), body)
+    page(t, "routines", "Rounds", None, Vec::new(), body)
 }
 
 /// `EmptyBlock`: no routines yet.

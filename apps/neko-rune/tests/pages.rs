@@ -12,7 +12,7 @@ use neko_rune::views::FullView;
 use rune::{Env, Runtime};
 
 fn runtime_at(window: (f32, f32), name: &str) -> Runtime<App> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     let (_, f) = scenes::SCENES.iter().find(|(n, _)| *n == name).unwrap_or_else(|| panic!("no scene {name}"));
     f(&mut app);
     app.outbox.clear();
@@ -82,9 +82,9 @@ fn routines_is_the_webs_inbox_with_its_sections_in_order_and_each_routine_one_li
     assert!(t.contains(&"Needs you".to_owned()));
     assert!(y("needs-you") < y("routines-group-w1") && y("routines-group-w1") < y("routines-group-w2"), "Needs you above each scope, in the order the scopes come");
     assert!(texts(&rt).contains(&"Neko".to_owned()) && rt.find("routine-scope-r1").is_none());
-    // A routine is one 28 point line: name, status in the one language, when it runs, then the 46 x 28 switch.
+    // A routine is one 28 point line: name, status in the one language, when it runs, then the prototype's 34 x 20 switch.
     let sw = rect(&rt, "routine-switch-r1");
-    assert_eq!((sw[2], sw[3]), (46.0, 28.0), "the web's switch");
+    assert_eq!((sw[2], sw[3]), (34.0, 20.0), "the prototype's switch");
     let facts = rect(&rt, "routine-facts-r1");
     assert!(facts[0] + facts[2] <= sw[0], "when it runs sits before the switch: {facts:?} {sw:?}");
     let facts_of = |id: &str| text_of(&rt, &format!("routine-facts-{id}")).unwrap_or_default();
@@ -393,7 +393,7 @@ fn nothing_customised_is_the_webs_empty_state_with_the_manifest_example() {
 fn the_more_menu_lists_usage_workspaces_plugins_and_the_web_ui() {
     let mut rt = runtime("more");
     let t = texts(&rt);
-    for item in ["Usage", "Setup", "Plugins", "Open the web UI"] {
+    for item in ["Usage", "Pull requests", "Plugins", "Open the web UI"] {
         assert!(t.contains(&item.to_owned()), "{item}: {t:?}");
     }
     assert!(!t.contains(&"Memory".to_owned()) && !t.contains(&"Profiles".to_owned()));
@@ -448,7 +448,7 @@ fn an_untouched_field_saves_nothing_and_a_never_seeded_one_cannot_clear_a_settin
     click(&mut rt, "task-budget-save");
     assert!(rt.state.outbox.is_empty(), "and pressing Save sends nothing");
     // A field that was never filled (the daemon had not answered) is not a request to clear it.
-    let mut fresh = App::headless();
+    let mut fresh = App::headless_neko();
     fresh.save_money("daily-budget", 10000.0, |cents| Call::SetDailyBudget { cents });
     fresh.save_dev_checkout();
     fresh.save_ntfy_server();
@@ -466,7 +466,7 @@ fn an_untouched_field_saves_nothing_and_a_never_seeded_one_cannot_clear_a_settin
 
 #[test]
 fn a_new_saved_value_replaces_an_untouched_field_but_not_a_typed_one() {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     app.pages.seed("daily-budget", "5.00");
     app.pages.seed("daily-budget", "6.00");
     assert_eq!(app.pages.text("daily-budget"), "6.00", "untouched, it follows what is saved");
@@ -510,7 +510,7 @@ fn rows_have_right_click_menus_with_their_actions() {
 
 #[test]
 fn a_calendar_answer_for_days_no_longer_on_screen_is_dropped() {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     app.open_view(FullView::Calendar);
     let (from, to) = app.calendar_range();
     let data = |f, t| neko_rune::link::CalendarData { events: vec![], neko: vec![], status: Default::default(), from_ms: f, to_ms: t };
@@ -523,7 +523,7 @@ fn a_calendar_answer_for_days_no_longer_on_screen_is_dropped() {
 #[test]
 fn the_routines_master_switch_waits_for_its_data() {
     let rt = runtime("default");
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     let _ = rt;
     app.open_view(FullView::Settings);
     let mut rt = Runtime::new(app, view, (1360.0, 900.0), Env { system_dark: true, scale: 1.0 });
@@ -536,7 +536,7 @@ fn the_routines_master_switch_waits_for_its_data() {
 
 #[test]
 fn settings_rows_show_their_description_under_a_group_heading_as_the_web_does() {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     app.open_view(FullView::Settings);
     let mut rt = Runtime::new(app, view, (1360.0, 900.0), Env { system_dark: true, scale: 1.0 });
     rt.frame(0.0);

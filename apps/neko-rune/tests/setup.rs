@@ -60,7 +60,7 @@ fn scene(name: &str) -> Runtime<App> {
 }
 
 fn scene_in(name: &str, window: (f32, f32)) -> Runtime<App> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     let (_, f) = scenes::SCENES.iter().find(|(n, _)| *n == name).unwrap_or_else(|| panic!("no scene {name}"));
     f(&mut app);
     app.outbox.clear();
@@ -106,10 +106,10 @@ fn the_rail_lists_the_nine_sections_in_order_and_each_opens_its_own_page() {
 #[test]
 fn the_sessions_column_counts_what_needs_attention_and_deep_links_choose_the_section() {
     let mut rt = scene("setup-counted");
-    let count = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("count-setup")).and_then(|e| e.text);
+    let count = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("count-view-settings")).and_then(|e| e.text);
     // Two connections need you, a suggested watch, two skill proposals, a memory proposal and one piece of guidance.
     assert_eq!(count.as_deref(), Some("7"));
-    assert!(rt.find("view-setup").is_some() && !has_text(&rt, "Workspaces 2"));
+    assert!(rt.find("view-settings").is_some() && !has_text(&rt, "Workspaces 2"));
     // "Open connection" lands in Tools, on that connection's detail with a back arrow.
     rt.update(|s, _| s.open_connection("c2"));
     settle(&mut rt);
@@ -356,7 +356,7 @@ fn memory_has_the_webs_tabs_and_section_titles_in_order() {
     // The web's header has no count; its tab list is Saved memories, Working style.
     assert!(rt.find("page-count").is_none(), "Memory's header is the title alone");
     assert!(y_of(&rt, "Saved memories") < y_of(&rt, "Suggested") || y_of(&rt, "Saved memories") < 200.0);
-    let ys: Vec<f32> = ["Suggested", "Everywhere", "Settings", "Suggest new memories", "Use saved memory"].iter().map(|w| y_of(&rt, w)).collect();
+    let ys: Vec<f32> = ["Suggested", "Everywhere", "Suggest new memories", "Use saved memory"].iter().map(|w| y_of(&rt, w)).collect();
     assert!(ys.windows(2).all(|w| w[0] < w[1]), "Saved memories: Suggested, the scopes, then Settings: {ys:?}");
     // Working style: the guidance line, the three states, then the recent decisions.
     click(&mut rt, "mem-tab-style");
@@ -448,7 +448,7 @@ fn an_empty_list_is_one_quiet_line_and_one_action() {
         (SetupSection::Tools, "tools-empty"),
         (SetupSection::Profiles, "profiles-empty"),
     ] {
-        let mut app = App::headless();
+        let mut app = App::headless_neko();
         app.apply_link(neko_rune::link::LinkEvent::Live(neko_rune::link::Summary { digest: "empty".into(), ..Default::default() }));
         if matches!(section, SetupSection::Profiles) {
             app.summary.as_mut().unwrap().setup.profiles.profiles.clear();
@@ -552,7 +552,7 @@ fn start() -> Option<Harness> {
 
 /// An app that talks to the harness on the calling thread, open on a Setup section.
 fn live(h: &Harness, section: SetupSection) -> Runtime<App> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     app.clock = neko_rune::app::system_ms;
     app.now_ms = neko_rune::app::system_ms();
     app.dispatch = Dispatch::Blocking { socket: h.data.join("neko.sock") };
