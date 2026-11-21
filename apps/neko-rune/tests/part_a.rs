@@ -17,7 +17,7 @@ fn scene(name: &str, app: &mut App) {
 }
 
 fn runtime_at(window: (f32, f32), name: &str, setup: impl FnOnce(&mut App)) -> Runtime<App> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     scene(name, &mut app);
     setup(&mut app);
     let mut rt = Runtime::new(app, view, window, Env { system_dark: true, scale: 1.0 });
@@ -57,10 +57,8 @@ fn session_rows_have_no_id_and_their_titles_get_the_room() {
     // The header is one row (glyph, title, badge, runtime, menu, toggle): no id there either.
     assert_eq!(texts(&rt).iter().filter(|t| t.as_str() == "NK-101").count(), 0, "no id on a row");
     assert!(rt.find("top-id").is_none() && rt.find("top-title").is_some());
-    let title = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Fix the empty state on the board")).expect("a row title");
-    assert!(title.rect[2] >= 130.0, "twenty letters or more fit in the 248 point column: {}", title.rect[2]);
-    // Only amber rows carry a word, the others their age.
-    assert_eq!(rt.elements().into_iter().find(|e| e.key.as_deref() == Some("meta-t2")).and_then(|e| e.text).as_deref(), Some("16m"));
+    // The sidebar lists a task only under its cat, by its title alone (no id, no age).
+    assert!(rt.elements().iter().all(|e| !e.key.as_deref().is_some_and(|k| k.starts_with("meta-"))), "no meta on a sidebar row");
 }
 
 #[test]
@@ -76,8 +74,8 @@ fn the_neko_column_never_overlaps_at_560_700_840_or_1200_high() {
         let (list, sfoot) = (rect(&rt, "sessions-scroll"), rect(&rt, "sessions-footer"));
         assert!(bottom(list) <= sfoot[1] + 0.5, "{h}: the list scrolls inside its region");
         assert!(bottom(sfoot) <= h + 0.5, "{h}: the account footer is pinned on screen");
-        let new = rect(&rt, "new-session");
-        assert!(bottom(new) <= list[1] + 0.5, "{h}: New session is pinned above the list, not inside it");
+        let tasks = rect(&rt, "view-all");
+        assert!(bottom(tasks) <= list[1] + 0.5, "{h}: the nav rows are pinned above the cats, not inside the scroll");
     }
 }
 
@@ -104,7 +102,7 @@ fn the_inbox_is_rows_with_a_quiet_default_and_at_most_three_show() {
 
 #[test]
 fn a_goals_inbox_item_offers_the_goals_own_actions_not_the_routines_default() {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     scene("goal-open", &mut app);
     // The goal is paused on its budget, as its Inbox item says.
     let summary = app.summary.as_mut().unwrap();
@@ -162,7 +160,7 @@ fn the_request_bubble_shows_only_the_persons_words() {
 
 #[test]
 fn a_finished_session_is_seen_only_while_the_window_is_focused_and_the_session_is_on_screen() {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     scene("live", &mut app);
     let id = "t2".to_owned();
     app.unseen.insert(id.clone());
@@ -216,7 +214,7 @@ fn the_inbox_says_when_it_could_not_be_read_and_offers_retry() {
 
 #[test]
 fn a_failed_page_read_never_leaks_into_the_session() {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     scene("live", &mut app);
     app.open_view(neko_rune::views::FullView::Routines);
     app.apply_reply(&Call::RoutinesFull, Reply::Routines(Box::new(neko_rune::scenes_pages::routines_data())));
@@ -225,7 +223,7 @@ fn a_failed_page_read_never_leaks_into_the_session() {
     app.apply_reply(&Call::RoutinesFull, Reply::Refused("Neko is slow to answer.".into()));
     assert!(app.work.notice.is_none() && app.pages.notes.is_empty(), "{:?} {:?}", app.work.notice, app.pages.notes);
     // With no data, the page says why in place of "Looking for…".
-    let mut fresh = App::headless();
+    let mut fresh = App::headless_neko();
     scene("live", &mut fresh);
     fresh.open_view(neko_rune::views::FullView::Settings);
     fresh.apply_reply(&Call::PhoneSettings, Reply::Refused("Neko is slow to answer.".into()));

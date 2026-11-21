@@ -35,15 +35,17 @@ pub const DRAG_SLOP: f32 = 6.0;
 pub enum CatTab {
     Overview,
     Files,
+    Rounds,
 }
 
 impl CatTab {
-    pub const ALL: [CatTab; 2] = [CatTab::Overview, CatTab::Files];
+    pub const ALL: [CatTab; 3] = [CatTab::Overview, CatTab::Files, CatTab::Rounds];
 
     pub fn title(self) -> &'static str {
         match self {
             CatTab::Overview => "Overview",
             CatTab::Files => "Files",
+            CatTab::Rounds => "Rounds",
         }
     }
 }
@@ -253,6 +255,14 @@ impl App {
 
     pub fn cat_tab(&self) -> CatTab {
         self.cats.tab.unwrap_or(CatTab::Overview)
+    }
+
+    /// The model chip of a cat's composer: the cat's own choice when it has one ("Claude · Sonnet"), else the model Neko picks.
+    pub fn cat_model_label(&self, cat: &Cat) -> String {
+        match (&cat.model_policy.preferences.provider, &cat.model_policy.preferences.model) {
+            (Some(p), Some(m)) => self.cats.choices.iter().find(|c| &c.provider == p && &c.model == m).map_or_else(|| m.clone(), |c| c.label.replace(" · ", " ")),
+            _ => "Auto".to_owned(),
+        }
     }
 
     /// The workspace's name for a cat's header ("Acme web").

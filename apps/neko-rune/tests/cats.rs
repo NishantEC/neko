@@ -15,7 +15,7 @@ const WINDOW: (f32, f32) = (1440.0, 900.0);
 
 fn runtime(scene: &str) -> Runtime<App> {
     let (_, f) = SCENES.iter().find(|(n, _)| *n == scene).unwrap_or_else(|| panic!("no scene {scene}"));
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     f(&mut app);
     app.outbox.clear();
     let mut rt = Runtime::new(app, view, WINDOW, Env { system_dark: true, scale: 1.0 });
@@ -91,8 +91,12 @@ fn the_sidebar_shows_three_pinned_faces_with_names_and_the_rest_as_rows_with_the
     answer(&mut rt, CatCall::List, listing(5));
     for id in ["c1", "c2", "c3"] {
         assert!(has_key(&rt, &format!("cat-{id}")), "{id} is a face");
+    }
+    // A face has no area beside it; the open cat (the first, until one is opened) has its line under the faces, with its area.
+    for id in ["c2", "c3"] {
         assert!(!has_key(&rt, &format!("cat-area-{id}")), "{id}: a face has no area beside it");
     }
+    assert!(has_key(&rt, "cat-head-c1") && info(&rt, "cat-area-c1").and_then(|e| e.text).as_deref() == Some("Web"));
     let names: Vec<String> = ["c1", "c2", "c3"].iter().map(|id| info(&rt, &format!("cat-name-{id}")).and_then(|e| e.text).unwrap_or_default()).collect();
     assert_eq!(names, ["miso", "mochi", "tofu"]);
     // The rest are rows: face, name, area.
@@ -104,7 +108,7 @@ fn the_sidebar_shows_three_pinned_faces_with_names_and_the_rest_as_rows_with_the
     assert!(a[0] < b[0] && b[0] < c[0] && (a[1] - c[1]).abs() < 0.5, "three faces in a row");
     let (row4, row5) = (info(&rt, "cat-c4").unwrap().rect, info(&rt, "cat-c5").unwrap().rect);
     assert!(row4[1] >= a[1] + a[3] && row5[1] > row4[1], "the rows come under the faces, in order");
-    assert_eq!(row4[3], 36.0, "a row is 36 high like every row of the column");
+    assert_eq!(row4[3], 30.0, "a row is 30 high, the prototype's list row");
     assert!(has_key(&rt, "cats-new") && has_text(&rt, "Cats"), "the header has the title and a plus");
 }
 
@@ -136,7 +140,7 @@ fn no_cats_says_so_and_offers_a_new_cat_which_opens_the_sheet_and_asks_for_a_sug
 
 #[test]
 fn the_list_is_read_when_a_snapshot_first_arrives_and_again_when_cats_rev_moves() {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     app.cats_sync(0);
     assert_eq!(app.outbox.len(), 1, "the first snapshot asks for the list");
     app.cats_sync(0);
@@ -263,18 +267,20 @@ fn clicking_a_cat_opens_its_page_with_the_header_and_the_panel() {
 fn the_overview_has_four_sections_each_with_its_own_honest_empty_line() {
     let mut rt = runtime("cats-3");
     click(&mut rt, "cat-c3");
-    for (key, line) in [("needs", "Nothing is waiting for you."), ("ready", "Nothing is ready to merge yet."), ("rounds", "No rounds yet.")] {
+    // Working and Ready to merge are sections only when something is in them (the prototype's Overview); the other two always say so.
+    assert!(!has_key(&rt, "cat-empty-ready"));
+    for (key, line) in [("needs", "Nothing is waiting for you."), ("rounds", "No rounds yet.")] {
         assert_eq!(info(&rt, &format!("cat-empty-{key}")).and_then(|e| e.text).as_deref(), Some(line), "{key}");
     }
     // tofu is building something: that section lists it and says nothing false.
-    assert!(!has_key(&rt, "cat-empty-working") && has_key(&rt, "cat-task-t7"));
-    for title in ["Needs you", "Working", "Ready to merge", "Rounds"] {
+    assert!(has_key(&rt, "cat-sec-working") && has_key(&rt, "cat-task-t7"));
+    for title in ["Needs you", "Working", "Rounds"] {
         assert!(has_text(&rt, title), "{title}");
     }
     // A cat with nothing running says so.
     let mut rt = runtime("cats-5");
     click(&mut rt, "cat-c5");
-    assert_eq!(info(&rt, "cat-empty-working").and_then(|e| e.text).as_deref(), Some("No tasks are running."));
+    assert!(!has_key(&rt, "cat-sec-working"), "no Working section for a cat that runs nothing");
 }
 
 #[test]
@@ -296,7 +302,7 @@ fn opening_a_session_or_a_view_closes_the_cat_page_and_the_panel_it_opened() {
 #[test]
 fn the_files_tab_lists_the_four_files_and_asks_for_them() {
     let mut rt = runtime("cat-page");
-    click(&mut rt, "segment1");
+    click(&mut rt, "cat-tabs-1");
     assert!(asked(&rt).contains(&CatCall::Files { id: "c1".into() }));
     for (file, title) in [("RULES.md", "Rules"), ("TASK_RULES.md", "Task rules"), ("PLAN.md", "Plan"), ("BRIEFING.md", "Briefing")] {
         assert!(has_key(&rt, &format!("cat-file-{file}")), "{file}");
@@ -344,7 +350,7 @@ fn revert_goes_back_to_the_saved_text() {
 fn leaving_an_unsaved_file_asks_first_and_keep_editing_keeps_the_words() {
     let mut rt = runtime("cat-editor-dirty");
     let words = rt.state.pages.text(F_FILE).to_owned();
-    for leave in ["cat-file-back", "segment0"] {
+    for leave in ["cat-file-back", "cat-tabs-0"] {
         click(&mut rt, leave);
         assert!(has_key(&rt, "guard-discard") && has_text(&rt, "This file has changes that are not saved"), "{leave}: asked first");
         click(&mut rt, "guard-keep");

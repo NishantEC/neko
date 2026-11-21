@@ -110,7 +110,7 @@ fn socket(h: &Harness) -> PathBuf {
 
 /// An app that talks to the harness on the calling thread, and the first things a window reads.
 fn app(h: &Harness) -> App {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     // The daemon's rows are as old as the seed run made them: read them against the real clock, as the window does.
     app.clock = neko_rune::app::system_ms;
     app.now_ms = neko_rune::app::system_ms();
@@ -362,14 +362,14 @@ fn a_session_is_made_from_home_and_opens() {
     let reply = ask(&socket(&h), Request::Workbench(Wb::SaveWorkspaceWithFolders { workspace: Workspace { id: String::new(), name: "Sandbox".into(), repository: repo.to_string_lossy().into_owned(), instructions: String::new(), away_enabled: false }, folders: vec![repo.to_string_lossy().into_owned()] }));
     assert!(matches!(reply, Ok(Response::Workbench(_))), "{reply:?}");
     let mut rt = runtime(app(&h));
-    click(&mut rt, "new-session");
+    click(&mut rt, "view-home");
     assert!(rt.find("home-composer").is_some() && rt.find("new-request").is_some());
     assert!(rt.find("new-start").is_some() && rt.state.new_blocker() == Some("Say what you want done."), "Start waits for words");
     click(&mut rt, "new-request");
     rt.paste("Make the sync job retry when a request fails.\nThree tries, waiting longer each time.");
     settle(&mut rt);
     // Choose the new workspace from the menu.
-    click(&mut rt, "new-workspace");
+    click(&mut rt, "new-cat");
     assert!(has_text(&rt, "Sandbox"));
     let e = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Sandbox")).expect("its menu item");
     rt.pointer_down(e.rect[0] + 5.0, e.rect[1] + e.rect[3] / 2.0);

@@ -256,6 +256,8 @@ pub fn live_scene(s: &mut App) {
 }
 
 fn live(s: &mut App) {
+    // The scenes of the Neko column's features (chat, Inbox rows, digest, strip) show the column: the shipped shell hides it.
+    s.layout.neko_off = false;
     s.apply_link(LinkEvent::Live(demo_full("t0")));
     s.open_first_session();
     s.set_web(Some(WebTarget::new(4747, &"0".repeat(64))));
@@ -269,6 +271,7 @@ fn live(s: &mut App) {
 
 /// A session being built, with its goal, runs and a queue of waiting messages.
 pub(crate) fn running(s: &mut App) {
+    s.layout.neko_off = false;
     s.apply_link(LinkEvent::Live(demo_full("t6")));
     s.set_web(Some(WebTarget::new(4747, &"0".repeat(64))));
     s.selected = Some("t6".into());
@@ -456,6 +459,9 @@ pub const SCENES: &[Scene] = &[
     ("cat-sheet", crate::scenes_cats::sheet),
     ("cat-sheet-errors", crate::scenes_cats::sheet_errors),
     ("cat-page", crate::scenes_cats::page),
+    // The look, measured against the prototype (`scripts/look-pairs.mjs`): the prototype's own placeholder data.
+    ("look-home", crate::scenes_look::home),
+    ("look-cat", crate::scenes_look::cat),
     ("cat-files", crate::scenes_cats::files_tab),
     ("cat-editor", crate::scenes_cats::editor),
     ("cat-editor-dirty", crate::scenes_cats::editor_dirty),

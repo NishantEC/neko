@@ -45,6 +45,8 @@ pub struct NewForm {
     /// The model's id; `None` is Auto (the runtime's own choice).
     pub model: Option<String>,
     pub menu: Option<NewMenu>,
+    /// The cat Home's request is for ("Who takes it"); `None` is "Let Neko choose". A cat brings its workspace along.
+    pub cat: Option<String>,
     pub busy: bool,
     pub error: Option<String>,
     /// The workspaces' branches, read from their folders when Home opens: (workspace id, branch).
@@ -57,7 +59,7 @@ pub struct NewForm {
 
 impl NewForm {
     pub fn fresh() -> NewForm {
-        NewForm { workspace: 0, mode: Mode::Plan, choices: Vec::new(), runtime: None, model: None, menu: None, busy: false, error: None, branches: Vec::new(), known: HashSet::new(), expect: String::new() }
+        NewForm { workspace: 0, mode: Mode::Plan, choices: Vec::new(), runtime: None, model: None, menu: None, cat: None, busy: false, error: None, branches: Vec::new(), known: HashSet::new(), expect: String::new() }
     }
 
     /// The models the chosen runtime offers (the daemon's own list), for the model select.
