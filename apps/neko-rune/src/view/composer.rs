@@ -11,21 +11,17 @@ use crate::compose::{ChipState, Dest, size_words};
 use crate::icons;
 use crate::theme::Neko;
 
-/// The card's radius.
-pub const RADIUS: f32 = 28.0;
+/// The card's radius (the prototype's `.composer`: 14).
+pub const RADIUS: f32 = 14.0;
 /// The text area's fewest lines.
-pub const MIN_LINES: usize = 3;
+pub const MIN_LINES: usize = 2;
 
 /// The card: `field` (a text area built without a fill), then the bar. `key` names it.
+///
+/// The prototype's composer: the raised colour, a hairline ring at the stronger line, 12 above and 10 below, 14 at the left and 12 at the
+/// right; the bar under the text holds the chips at the left and the round send button at the far right.
 pub fn card(t: &Neko, key: &str, field: El, left: Vec<El>, right: Vec<El>, send: El) -> El {
-    card_on(t, key, None, field, left, right, send)
-}
-
-/// [`card`], optionally on glass (Home): the card has no fill or border of its own then; its first child is the glass
-/// backing (a blur of what is behind, the tint, the border and the top highlight) and the text and controls draw above it.
-/// `glass` is how the backing is made, and `probe` leaves it out (a test hook that shows the raw art).
-pub fn card_on(t: &Neko, key: &str, glass: Option<(crate::glass::Mode, bool)>, field: El, left: Vec<El>, right: Vec<El>, send: El) -> El {
-    let mut bar = row().key(format!("{key}-bar")).w_full().min_w(0.0).gap(4.0).center_y().flex_wrap();
+    let mut bar = row().key(format!("{key}-bar")).w_full().min_w(0.0).gap(6.0).center_y().flex_wrap();
     for e in left {
         bar = bar.child(e);
     }
@@ -33,32 +29,17 @@ pub fn card_on(t: &Neko, key: &str, glass: Option<(crate::glass::Mode, bool)>, f
     for e in right {
         bar = bar.child(e);
     }
-    let card = col().key(key.to_owned()).w_full().padding(16.0).gap(12.0).radius(RADIUS);
-    match glass {
-        // Glass over the page, the floating drop shadow, no border (design system 4.9).
-        None => card
-            .fill(t.surface.window)
-            .gradient(t.mat.glass_top, t.mat.glass_bottom)
-            .box_shadow(rune::Shadow { y: 24.0, blur: 60.0, spread: -18.0, color: t.mat.drop_far, ..rune::Shadow::default() })
-            .shadow(2.0, 6.0, t.mat.drop_near)
-            .child(field)
-            .child(bar.child(send)),
-        Some((_, true)) => card.child(field).child(bar.child(send)),
-        Some((mode, false)) => {
-            let layer = if mode == crate::glass::Mode::Blur { crate::glass::CARD_GLASS } else { crate::glass::CARD_OPAQUE };
-            card.child(crate::glass::backing(t, mode, RADIUS, layer, true)).child(field).child(bar.child(send))
-        }
-    }
+    col().key(key.to_owned()).w_full().pt(12.0).pb(10.0).pl(14.0).pr(12.0).gap(8.0).radius(RADIUS).fill(t.surface.card).border(1.0, t.surface.line_strong).child(field).child(bar.child(send))
 }
 
 /// A 32 point square icon button (the "+" attach).
 pub fn square(t: &Neko, glyph: &'static Icon, label: &str, key: &str) -> El {
-    row().key(key.to_owned()).role("button").label(label).help(label).focusable(true).size(32.0, 32.0).center().radius(t.radius.control).hover(t.surface.hover).focus_ring(2.0, 2.0, t.surface.ring).child(icon(glyph, 16.0).color(t.text.muted).a11y_hidden())
+    row().key(key.to_owned()).role("button").label(label).help(label).focusable(true).size(26.0, 26.0).center().radius(t.radius.control).hover(t.surface.tint).focus_ring(2.0, 2.0, t.surface.ring).child(icon(glyph, 14.0).color(t.text.muted).a11y_hidden())
 }
 
 /// The "+" that opens a file dialog for any file: each file chosen becomes a chip above the text and is uploaded.
 pub fn attach(t: &Neko, key: &str, dest: Dest) -> El {
-    square(t, &icons::PLUS, "Attach a file", key).on_press_tx(move |_: &mut App, tx: &mut rune::Tx| {
+    square(t, &icons::CLIP, "Attach a file", key).on_press_tx(move |_: &mut App, tx: &mut rune::Tx| {
         tx.open_file(rune::FileDialogOptions { title: "Attach a file".into(), ..Default::default() }, move |s: &mut App, answer, _| {
             if let Ok(Some(path)) = answer {
                 s.attach_files(dest, &[path]);
@@ -136,23 +117,23 @@ pub fn seg(t: &Neko, key: &str, label: &str, aria: &str, help: &str, on: bool, f
         .help(help.to_owned())
         .checked(on)
         .focusable(true)
-        .h(26.0)
-        .px(12.0)
+        .h(24.0)
+        .px(10.0)
         .center()
-        .radius(13.0)
+        .radius(6.0)
         .hover(if on { Color::TRANSPARENT } else { t.surface.hover })
         .focus_ring(2.0, 2.0, t.surface.ring)
         .on_press(f);
-    let r = if on { super::webkit::pebble(t, r) } else { r };
-    r.child(text(label.to_owned()).font(TextStyle { weight: 500.0, ..t.ty.meta }).color(if on { t.mat.pebble_fg } else { t.text.muted }).a11y_hidden())
+    let r = if on { r.fill(t.surface.seg_on).border(1.0, t.surface.border) } else { r };
+    r.child(text(label.to_owned()).font(TextStyle { size: 12.0, line_height: 16.0, ..t.ty.meta }).color(if on { t.text.base } else { t.text.faint }).a11y_hidden())
 }
 
 /// The frame of a two-way control: a well.
 pub fn segmented(t: &Neko, key: &str, aria: &str, a: El, b: El) -> El {
-    super::webkit::well(t, row().key(key.to_owned()).role("group").label(aria.to_owned()).h(32.0).padding(3.0).gap(2.0).center_y().radius(16.0)).child(a).child(b)
+    row().key(key.to_owned()).role("group").label(aria.to_owned()).h(28.0).padding(2.0).gap(1.0).center_y().radius(8.0).fill(t.surface.seg).child(a).child(b)
 }
 
-/// The Send button: a 36 point circle, the ink with its arrow when there is something to send, a pebble with a muted arrow when there is
+/// The Send button: a 30 point circle, the ink with its arrow when there is something to send, a pebble with a muted arrow when there is
 /// not. A press with nothing to send does nothing, unless `press_anyway` (Home's Start, which says what is missing).
 pub fn send(t: &Neko, key: &str, label: &str, help: &str, can: bool, press_anyway: bool, f: impl Fn(&mut App) + 'static) -> El {
     let r = row()
@@ -161,9 +142,9 @@ pub fn send(t: &Neko, key: &str, label: &str, help: &str, can: bool, press_anywa
         .label(label.to_owned())
         .help(help.to_owned())
         .focusable(true)
-        .size(36.0, 36.0)
+        .size(30.0, 30.0)
         .center()
-        .radius(18.0)
+        .radius(15.0)
         .focus_ring(2.0, 2.0, t.surface.ring)
         .press_scale(0.97)
         .on_press(move |s: &mut App| {
@@ -172,7 +153,7 @@ pub fn send(t: &Neko, key: &str, label: &str, help: &str, can: bool, press_anywa
             }
         });
     let r = if can { super::webkit::ink(t, r) } else { super::webkit::pebble(t, r) };
-    r.child(icon(&icons::ARROW_UP, 16.0).color(if can { t.mat.ink_fg } else { t.text.muted }).a11y_hidden())
+    r.child(icon(&icons::ARROW_UP, 16.0).color(if can { t.mat.ink_fg } else { t.text.faint }).a11y_hidden())
 }
 
 /// The text area every composer shares: Rune's own multi-line text input (the input method composes in place, an image

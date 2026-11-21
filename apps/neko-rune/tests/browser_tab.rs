@@ -22,7 +22,7 @@ fn record(url: &str) -> std::io::Result<()> {
 }
 
 fn runtime(setup: impl FnOnce(&mut App)) -> Runtime<App> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     setup(&mut app);
     let mut rt = Runtime::new(app, view, WINDOW, Env { system_dark: true, scale: 2.0 });
     rt.frame(0.0);
@@ -67,7 +67,7 @@ fn the_tab_is_fifth_in_the_order_a_request_and_never_the_default() {
     assert!(at(Tab::Terminal) < at(Tab::Browser) && at(Tab::Browser) < at(Tab::Details), "{tabs:?}");
     assert!(!rt.state.panel_content_tabs().contains(&Tab::Browser), "it never opens the panel by itself");
     // A person who opens the panel on a session that has only this and Details lands on Details, not the browser.
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     scenes_panel::browser(&mut app);
     app.panel.sessions.get_mut("t6").unwrap().tab = None;
     assert_ne!(app.panel_tab(), Some(Tab::Browser));

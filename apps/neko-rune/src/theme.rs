@@ -1,9 +1,10 @@
-//! The Neko theme in Rune: DESIGN.md's tokens as one module, light and dark.
+//! The Neko theme in Rune: the approved prototype's tokens as one module, light and dark.
 //!
-//! Values come from the web UI's default themes (`web/src/themes/builtin.generated.css`, built from
-//! `neutral*.json`), exactly, so the two clients look alike while both exist: the test at the foot of
-//! this file parses that CSS and compares every token (polish spec §0). Nothing outside this module names a colour, a radius
-//! or a font size (DESIGN.md §2, §7, §8 rule 7); screens read a [`Neko`].
+//! Values come from the prototype (`~/Documents/neko-design/prototype-2026-11-21/_src/app.css`, the `.window` and
+//! `.window.light` custom properties), exactly: since 2026-11-21 the prototype, not the web UI's CSS, is the source of truth for how
+//! Rune looks (`docs/knowledge/rune-look-2026-11.md`). The prototype's names map as chrome = [`Surfaces::sidebar`], surface =
+//! [`Surfaces::window`], raised = [`Surfaces::card`], text / text-2 / text-3 = [`Greys`] base / muted / faint, run = Iris.
+//! Nothing outside this module names a colour, a radius or a font size; screens read a [`Neko`].
 //!
 //! * Surfaces: window, card, sidebar, popover. One border tone, one large window radius.
 //! * Text in three greys: base, muted, faint.
@@ -48,42 +49,44 @@ pub struct Hex {
     pub coral: &'static str,
 }
 
-/// `html[data-neko-theme="neutral"]` in `web/src/themes/builtin.generated.css` ("Neko Dark").
+/// The prototype's `.window` (dark). `background` is its `--surface` (the content), `card` its `--raised`, `sidebar` its `--chrome`,
+/// `muted` its `--text-2`; `iris` is its `--run` (the colour of work in progress and of focus). `sky` (ready to review) is the one hue the
+/// prototype does not draw: a cyan a step off `--run`, so the two never read as one meaning.
 pub const DARK: Hex = Hex {
-    background: "#161616",
-    card: "#1b1b1b",
-    popover: "#1b1b1b",
-    sidebar: "#111111",
-    foreground: "#f5f5f5",
-    strong: "#ffffff",
-    muted: "#838383",
+    background: "#141416",
+    card: "#1b1b1e",
+    popover: "#1b1b1e",
+    sidebar: "#0c0c0d",
+    foreground: "#ededef",
+    strong: "#f4f4f5",
+    muted: "#a0a0a7",
     border: "#ffffff",
-    border_alpha: 0.06,
-    code: "#1b1b1b",
-    iris: "#346bf1",
-    amber: "#e0a042",
-    sky: "#2393f1",
-    mint: "#4cc38a",
-    coral: "#e5484d",
+    border_alpha: 0.07,
+    code: "#1b1b1e",
+    iris: "#8ab4ff",
+    amber: "#f2b24c",
+    sky: "#7ec8e3",
+    mint: "#6cc28a",
+    coral: "#f07171",
 };
 
-/// `html[data-neko-theme="neutral-light"]` ("Neko Light").
+/// The prototype's `.window.light`.
 pub const LIGHT: Hex = Hex {
     background: "#ffffff",
-    card: "#ffffff",
-    popover: "#ffffff",
-    sidebar: "#fafafa",
-    foreground: "#262626",
-    strong: "#171717",
-    muted: "#686868",
+    card: "#f5f5f7",
+    popover: "#f5f5f7",
+    sidebar: "#ececee",
+    foreground: "#18181b",
+    strong: "#18181b",
+    muted: "#55555c",
     border: "#000000",
-    border_alpha: 0.08,
-    code: "#ffffff",
-    iris: "#346bf1",
-    amber: "#e19b1b",
-    sky: "#0083e0",
-    mint: "#00af6f",
-    coral: "#e6293f",
+    border_alpha: 0.07,
+    code: "#f5f5f7",
+    iris: "#3d6fe0",
+    amber: "#d48a12",
+    sky: "#2a8fb0",
+    mint: "#2f9a5a",
+    coral: "#d94a4a",
 };
 
 /// The web's `--font-sans` with its first face, `"Inter Variable"` (the web's bundled build), read as the
@@ -92,29 +95,41 @@ pub const FONT_SANS: &str = "Inter, ui-sans-serif, -apple-system, BlinkMacSystem
 /// The web's `--font-mono`, verbatim.
 pub const FONT_MONO: &str = "ui-monospace, \"SF Mono\", \"JetBrains Mono\", Menlo, monospace";
 
-/// Share of the muted grey that is left in the faint grey. The web's `muted-foreground/70` is 0.70; 0.72 is the smallest step that keeps the
-/// faint grey at 3.0:1 on both windows now that the muted greys are #838383 and #686868.
+/// Share of the muted grey that is left in the faint grey for a theme the person picked (the web's `muted-foreground/70` is 0.70; 0.72 keeps 3.0:1).
 const FAINT_SHARE: f32 = 0.72;
+/// The prototype's `--text-3` as a share of its `--text-2` laid on the content colour: #6b6b73 on #141416 is 0.62 of #a0a0a7, #7d7d85 on white is
+/// 0.765 of #55555c (so the faint grey is exactly the prototype's, 3.4:1 in dark and 4.0:1 in light).
+const FAINT_SHARE_DARK: f32 = 0.62;
+const FAINT_SHARE_LIGHT: f32 = 0.765;
 
 /// Surfaces. Every page sits on `window`; a card is a step off it (light) or the same
 /// near-black (dark), never ringed with a border (DESIGN.md §8 rule 10).
 #[derive(Clone, Copy, Debug)]
 pub struct Surfaces {
+    /// The prototype's `--surface`: the content, flush with the window's edges.
     pub window: Color,
+    /// The prototype's `--raised`: the composer, a card, a popover.
     pub card: Color,
+    /// The prototype's `--chrome`: the sidebar and the cat panel, on the window itself.
     pub sidebar: Color,
     pub popover: Color,
-    /// The one border tone: the web's `--border` (white 7% in dark, black 8% in light).
+    /// The hairline (`--line`: 7%).
     pub border: Color,
-    /// A row under the pointer: the foreground at 4% (polish spec §1).
+    /// The stronger hairline (`--line-strong`: 11% dark, 12% light): a control's outline, the composer's ring.
+    pub line_strong: Color,
+    /// A row under the pointer (`--hover`: 4% dark, 3.5% light).
     pub hover: Color,
-    /// The active tab and the open rail place: a soft fill, the foreground at 7%.
+    /// The open row, the active nav row (`--sel`: 7% dark, 5.5% light).
     pub active: Color,
-    /// The open row of a list: the foreground at 7%.
     pub selected: Color,
-    /// The sidebar's field: a 1 px border at the foreground's 10% (polish spec §1).
+    /// A pill's or a quiet button's wash (`--tint`: 5.5% dark, 4.5% light).
+    pub tint: Color,
+    /// The segmented control's well (`--seg`) and its chosen segment (`--seg-on`).
+    pub seg: Color,
+    pub seg_on: Color,
+    /// A field's 1 px outline: the stronger hairline.
     pub field_border: Color,
-    /// The focus ring: Iris at 60% (polish spec §4).
+    /// The focus ring: Iris at 60%.
     pub ring: Color,
 }
 
@@ -132,20 +147,28 @@ pub struct Greys {
 /// or a symbol; the status glyphs are the main user.
 #[derive(Clone, Copy, Debug)]
 pub struct Meaning {
+    /// The prototype's `--run`: work in progress, focus. (Its primary button is the ink, not this.)
     pub iris: Color,
     pub amber: Color,
+    /// `--amber-t`: amber as words (a count, a line under a name), and `--amber-bg` for its wash.
+    pub amber_text: Color,
+    pub amber_bg: Color,
     pub sky: Color,
     pub mint: Color,
     pub coral: Color,
 }
 
-/// Radii: one large window radius, rows and controls smaller (DESIGN.md §8 rule 2). The web's
-/// `--radius` is 1.25rem = 20; a row is 8 (polish spec §1).
+/// Radii of the prototype: row 8, button 7, card 12, composer and sheet 14, pill 999.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Radii {
+    /// A sheet, the composer: 14.
     pub window: f32,
+    /// A nav row, a list row: 8.
     pub row: f32,
+    /// A button, a field: 7.
     pub control: f32,
+    /// A card (a cat on Home, a question): 12.
+    pub card: f32,
 }
 
 /// The materials of the 2026-11 design system (`docs/design/system-2026-11.md` section 2.2, `web/src/styles/sky-materials.css`):
@@ -192,121 +215,49 @@ pub struct Materials {
 }
 
 impl Materials {
+    /// The prototype has no gradients, glows or lit edges: every material is a flat fill (or none) and a hairline. A theme the person picked gets
+    /// the same flat materials from its own tokens. `ink` is the prototype's `--ink` / `--on-ink`.
     fn of(dark: bool, hex: &Hex, window: Color, card: Color, fg: Color, sidebar: Color) -> Materials {
         let k = |r: u8, g: u8, b: u8, a: f32| rgb8(r, g, b).alpha(a);
-        if *hex == DARK {
-            return Materials {
-                pebble_top: c("#232326"),
-                pebble_bottom: c("#1d1d20"),
-                pebble_fg: c("#fafafa"),
-                pebble_edge: k(255, 255, 255, 0.07),
-                ink_top: c("#ffffff"),
-                ink_bottom: c("#ececec"),
-                ink_fg: c("#171717"),
-                ink_edge: Color::WHITE,
-                ink_ring: k(255, 255, 255, 0.4),
-                well: k(255, 255, 255, 0.05),
-                well_shadow: k(0, 0, 0, 0.35),
-                group: c("#222224"),
-                group_hover: c("#2b2b2d"),
-                divider: k(255, 255, 255, 0.07),
-                drop_far: k(0, 0, 0, 0.65),
-                drop_near: k(0, 0, 0, 0.30),
-                glass_top: k(23, 23, 23, 0.55),
-                glass_bottom: k(23, 23, 23, 0.38),
-                panel_top: k(38, 38, 42, 0.72),
-                panel_mid: k(24, 24, 27, 0.66),
-                panel_bottom: k(18, 18, 20, 0.60),
-                icon: k(242, 242, 243, 0.42),
-                thumb_off: c("#6b6b73"),
-                thumb_on: c("#141416"),
-            };
-        }
-        if *hex == LIGHT {
-            return Materials {
-                pebble_top: c("#f7f7f8"),
-                pebble_bottom: c("#ebebed"),
-                pebble_fg: c("#171717"),
-                pebble_edge: Color::WHITE,
-                ink_top: c("#3d3d3d"),
-                ink_bottom: c("#1c1c1c"),
-                ink_fg: c("#fafafa"),
-                ink_edge: k(255, 255, 255, 0.16),
-                ink_ring: k(0, 0, 0, 0.5),
-                well: k(0, 0, 0, 0.045),
-                well_shadow: k(0, 0, 0, 0.08),
-                group: c("#f6f7f9"),
-                group_hover: c("#eff1f4"),
-                divider: k(0, 0, 0, 0.06),
-                drop_far: k(0, 0, 0, 0.22),
-                drop_near: k(0, 0, 0, 0.05),
-                glass_top: k(255, 255, 255, 0.62),
-                glass_bottom: k(255, 255, 255, 0.36),
-                panel_top: k(232, 240, 255, 0.75),
-                panel_mid: k(238, 243, 255, 0.675),
-                panel_bottom: k(244, 247, 255, 0.60),
-                icon: k(27, 27, 29, 0.46),
-                thumb_off: Color::WHITE,
-                thumb_on: Color::WHITE,
-            };
-        }
-        // Any other theme: the same materials from its own tokens (the generic block of `sky-materials.css`).
-        let (white, black) = (Color::WHITE, Color::BLACK);
-        let pebble_fg = fg;
-        if dark {
-            Materials {
-                pebble_top: mix_srgb(window, fg, 0.09),
-                pebble_bottom: mix_srgb(window, fg, 0.06),
-                pebble_fg,
-                pebble_edge: k(255, 255, 255, 0.07),
-                ink_top: mix_srgb(white, fg, 0.40),
-                ink_bottom: mix_srgb(black, fg, 0.96),
-                ink_fg: window,
-                ink_edge: white,
-                ink_ring: k(255, 255, 255, 0.4),
-                well: fg.alpha(0.05),
-                well_shadow: k(0, 0, 0, 0.35),
-                group: mix_srgb(card, fg, 0.04),
-                group_hover: mix_srgb(card, fg, 0.08),
-                divider: k(255, 255, 255, 0.07),
-                drop_far: k(0, 0, 0, 0.65),
-                drop_near: k(0, 0, 0, 0.30),
-                glass_top: card.alpha(0.80),
-                glass_bottom: card.alpha(0.60),
-                panel_top: mix_srgb(sidebar, fg, 0.03),
-                panel_mid: mix_srgb(sidebar, fg, 0.03),
-                panel_bottom: mix_srgb(sidebar, fg, 0.03),
-                icon: fg.alpha(0.42),
-                thumb_off: fg,
-                thumb_on: window,
-            }
+        let none = Color::TRANSPARENT;
+        let (ink, on_ink, tint, group_hover, divider, drop_far, thumb_off) = if *hex == DARK {
+            (c("#f4f4f5"), c("#111111"), k(255, 255, 255, 0.055), k(255, 255, 255, 0.04), k(255, 255, 255, 0.07), k(0, 0, 0, 0.4), c("#d8d8dc"))
+        } else if *hex == LIGHT {
+            (c("#18181b"), Color::WHITE, k(0, 0, 0, 0.045), k(0, 0, 0, 0.035), k(0, 0, 0, 0.07), k(0, 0, 0, 0.12), Color::WHITE)
+        } else if dark {
+            (fg, window, fg.alpha(0.055), fg.alpha(0.04), k(255, 255, 255, 0.07), k(0, 0, 0, 0.4), fg)
         } else {
-            Materials {
-                pebble_top: mix_srgb(card, fg, 0.025),
-                pebble_bottom: mix_srgb(card, fg, 0.07),
-                pebble_fg,
-                pebble_edge: k(255, 255, 255, 0.9),
-                ink_top: mix_srgb(fg, white, 0.14),
-                ink_bottom: mix_srgb(fg, black, 0.28),
-                ink_fg: window,
-                ink_edge: k(255, 255, 255, 0.16),
-                ink_ring: k(0, 0, 0, 0.5),
-                well: fg.alpha(0.045),
-                well_shadow: k(0, 0, 0, 0.08),
-                group: mix_srgb(card, fg, 0.03),
-                group_hover: mix_srgb(card, fg, 0.06),
-                divider: k(0, 0, 0, 0.06),
-                drop_far: k(0, 0, 0, 0.22),
-                drop_near: k(0, 0, 0, 0.05),
-                glass_top: k(255, 255, 255, 0.62),
-                glass_bottom: k(255, 255, 255, 0.36),
-                panel_top: mix_srgb(sidebar, fg, 0.03),
-                panel_mid: mix_srgb(sidebar, fg, 0.03),
-                panel_bottom: mix_srgb(sidebar, fg, 0.03),
-                icon: fg.alpha(0.46),
-                thumb_off: white,
-                thumb_on: white,
-            }
+            (fg, window, fg.alpha(0.045), fg.alpha(0.035), k(0, 0, 0, 0.07), k(0, 0, 0, 0.12), Color::WHITE)
+        };
+        let thumb_on = if dark { window } else { Color::WHITE };
+        Materials {
+            // A secondary control is the tint, flat.
+            pebble_top: tint,
+            pebble_bottom: tint,
+            pebble_fg: fg,
+            pebble_edge: none,
+            ink_top: ink,
+            ink_bottom: ink,
+            ink_fg: on_ink,
+            ink_edge: none,
+            ink_ring: none,
+            well: tint,
+            well_shadow: none,
+            // A settings group: the raised colour; its hover and the hairline between its rows.
+            group: card,
+            group_hover,
+            divider,
+            drop_far,
+            drop_near: none,
+            glass_top: card,
+            glass_bottom: card,
+            panel_top: sidebar,
+            panel_mid: sidebar,
+            panel_bottom: sidebar,
+            // A line icon: the second grey at 75% (`.nav a .i`).
+            icon: c(hex.muted).alpha(0.75),
+            thumb_off,
+            thumb_on,
         }
     }
 }
@@ -320,9 +271,9 @@ pub struct NekoType {
     pub row: TextStyle,
     pub meta: TextStyle,
     pub id: TextStyle,
-    /// The sidebar's brand line: "Neko" 14 semibold.
+    /// The sidebar's brand line: "Neko" 13.5 semibold.
     pub brand: TextStyle,
-    /// Home's greeting: 34 semibold.
+    /// Home's greeting: 28 semibold, tracking -0.02em.
     pub greeting: TextStyle,
     /// A faint shortcut hint: 12 with tabular numbers.
     pub hint: TextStyle,
@@ -342,8 +293,8 @@ impl NekoType {
             row: TextStyle::new(13.5, 400.0).lh(20.0),
             meta: TextStyle::new(12.5, 400.0).lh(18.0),
             id: TextStyle { features: "'tnum' 1", ..TextStyle::new(12.0, 400.0).lh(16.0) },
-            brand: TextStyle::new(14.0, 600.0).lh(20.0),
-            greeting: TextStyle::new(34.0, 600.0).lh(40.0),
+            brand: TextStyle::new(13.5, 600.0).lh(20.0),
+            greeting: TextStyle { tracking: -0.56, ..TextStyle::new(28.0, 600.0).lh(32.0) },
             hint: TextStyle { features: "'tnum' 1", ..TextStyle::new(12.0, 400.0).lh(16.0) },
             mono: TextStyle { family: rune::Family::Mono, ..TextStyle::new(12.0, 400.0).lh(17.0) },
             mono_meta: TextStyle { family: rune::Family::Mono, ..TextStyle::new(12.5, 400.0).lh(18.0) },
@@ -388,25 +339,39 @@ impl Neko {
         let fg = c(hex.foreground);
         let muted = c(hex.muted);
         let ink = |a: f32| fg.alpha(a);
+        // The prototype's washes: hover 4% (3.5% light), selected 7% (5.5%), tint 5.5% (4.5%), the strong hairline 11% (12%).
+        let (hover_a, sel_a, tint_a, strong_a, seg_a) = if dark { (0.04, 0.07, 0.055, 0.11, 0.06) } else { (0.035, 0.055, 0.045, 0.12, 0.05) };
+        let line = c(hex.border);
         let surface = Surfaces {
             window,
             card: c(hex.card),
-            // The chrome behind the floating panels: the web's `--sidebar` (darker than the page in dark, `#fafafa` in light).
             sidebar: c(hex.sidebar),
             popover: c(hex.popover),
-            border: c(hex.border).alpha(hex.border_alpha),
-            hover: ink(0.04),
-            active: ink(0.06),
-            selected: ink(0.06),
-            field_border: ink(0.10),
+            border: line.alpha(hex.border_alpha),
+            line_strong: line.alpha(strong_a),
+            hover: ink(hover_a),
+            active: ink(sel_a),
+            selected: ink(sel_a),
+            tint: ink(tint_a),
+            seg: ink(seg_a),
+            seg_on: if dark { Color::WHITE.alpha(0.11) } else { Color::WHITE },
+            field_border: line.alpha(strong_a),
             ring: c(hex.iris).alpha(0.6),
         };
         // The faint grey is the muted grey thinned toward the window, an opaque colour so it
         // never changes with what is under it. Blended in sRGB, as the web's `/70` is.
-        let faint = mix_srgb(window, muted, FAINT_SHARE);
+        let share = if hex == DARK { FAINT_SHARE_DARK } else if hex == LIGHT { FAINT_SHARE_LIGHT } else { FAINT_SHARE };
+        let faint = mix_srgb(window, muted, share);
         let text = Greys { strong: c(hex.strong), base: fg, muted, faint };
-        let meaning = Meaning { iris: c(hex.iris), amber: c(hex.amber), sky: c(hex.sky), mint: c(hex.mint), coral: c(hex.coral) };
-        let radius = Radii { window: 20.0, row: 18.0, control: 24.0 };
+        let (amber_text, amber_bg) = if hex == DARK {
+            (c("#f6cf8f"), c(hex.amber).alpha(0.09))
+        } else if hex == LIGHT {
+            (c("#9a6200"), c(hex.amber).alpha(0.09))
+        } else {
+            (c(hex.amber), c(hex.amber).alpha(0.09))
+        };
+        let meaning = Meaning { iris: c(hex.iris), amber: c(hex.amber), amber_text, amber_bg, sky: c(hex.sky), mint: c(hex.mint), coral: c(hex.coral) };
+        let radius = Radii { window: 14.0, row: 8.0, control: 7.0, card: 12.0 };
         let ty = NekoType::new();
 
         let mut kit = Kit::from_palette(PaletteSeed { bg: window, fg, accent: meaning.iris });
@@ -428,8 +393,8 @@ impl Neko {
             state.fg = role;
             state.icon = role;
         }
-        // The spec's popup scale: a menu item 14, a menu and a popover 16, the sheet 20 (the 24 control radius is ours, not the kit's).
-        kit.radius = rune_kit::Radius { xs: 6.0, sm: 14.0, md: 16.0, lg: 16.0, xl: radius.window };
+        // The prototype's scale: a menu item 7, a menu and a popover 10 (`.pop`), a card 12, the sheet 14.
+        kit.radius = rune_kit::Radius { xs: 6.0, sm: 7.0, md: 10.0, lg: 12.0, xl: radius.window };
         // The kit's own scale follows ours, so its buttons and menus read as the same product.
         kit.ty.ui = TextStyle { size: ty.row.size, ..kit.ty.ui };
         kit.ty.ui_medium = TextStyle { size: ty.row.size, weight: 500.0, ..kit.ty.ui_medium };
@@ -535,13 +500,13 @@ mod tests {
     }
 
     #[test]
-    fn the_two_appearances_follow_the_web_defaults() {
+    fn the_two_appearances_follow_the_prototype() {
         let (d, l) = (theme(true), theme(false));
         assert!(d.dark && !l.dark);
-        assert_eq!(d.surface.window.hex(), "#161616ff");
+        assert_eq!(d.surface.window.hex(), "#141416ff");
         assert_eq!(l.surface.window.hex(), "#ffffffff");
-        assert_eq!(d.meaning.mint.hex(), "#4cc38aff");
-        assert_eq!(l.meaning.coral.hex(), "#e6293fff");
+        assert_eq!(d.meaning.mint.hex(), "#6cc28aff");
+        assert_eq!(l.meaning.coral.hex(), "#d94a4aff");
         // The window is darker than its text in dark, lighter in light.
         assert!(d.surface.window.luminance() < d.text.base.luminance());
         assert!(l.surface.window.luminance() > l.text.base.luminance());
@@ -615,149 +580,60 @@ mod tests {
         }
     }
 
-    // ---- the web's CSS, parsed (polish spec §0) ----
+    // ---- the prototype's tokens, pinned (`_src/app.css` `.window` and `.window.light`) ----
 
-    const WEB_THEMES: &str = include_str!("../../../web/src/themes/builtin.generated.css");
-    const WEB_GLOBALS: &str = include_str!("../../../web/src/styles/globals.css");
-
-    /// The custom properties of one `html[data-neko-theme="id"] { ... }` block.
-    fn css_block(id: &str) -> std::collections::HashMap<String, String> {
-        let head = format!("html[data-neko-theme=\"{id}\"] {{");
-        let at = WEB_THEMES.find(&head).unwrap_or_else(|| panic!("no block for {id}"));
-        let body = &WEB_THEMES[at + head.len()..];
-        let body = &body[..body.find('}').expect("block ends")];
-        body.lines()
-            .filter_map(|l| {
-                let l = l.trim().strip_suffix(';')?;
-                let (name, value) = l.split_once(':')?;
-                Some((name.trim().trim_start_matches("--").to_owned(), value.trim().to_owned()))
-            })
-            .collect()
-    }
-
-    /// `rgba(255, 255, 255, 0.07)` as ("#ffffff", 0.07).
-    fn rgba(value: &str) -> (String, f32) {
-        let inner = value.strip_prefix("rgba(").and_then(|v| v.strip_suffix(')')).unwrap_or_else(|| panic!("not rgba: {value}"));
-        let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
-        let hex = format!("#{:02x}{:02x}{:02x}", parts[0].parse::<u8>().unwrap(), parts[1].parse::<u8>().unwrap(), parts[2].parse::<u8>().unwrap());
-        (hex, parts[3].parse().unwrap())
-    }
-
-    fn css_var(name: &str) -> String {
-        let at = WEB_GLOBALS.find(&format!("--{name}:")).unwrap_or_else(|| panic!("no --{name} in globals.css"));
-        let rest = &WEB_GLOBALS[at + name.len() + 3..];
-        rest[..rest.find(';').unwrap()].trim().to_owned()
+    #[test]
+    fn the_token_table_is_the_prototypes_exactly() {
+        // [chrome, surface, raised, text, text-2, run, amber, red, green, ink]
+        let dark = [("#0c0c0d", DARK.sidebar), ("#141416", DARK.background), ("#1b1b1e", DARK.card), ("#ededef", DARK.foreground), ("#a0a0a7", DARK.muted), ("#8ab4ff", DARK.iris), ("#f2b24c", DARK.amber), ("#f07171", DARK.coral), ("#6cc28a", DARK.mint), ("#f4f4f5", DARK.strong)];
+        let light = [("#ececee", LIGHT.sidebar), ("#ffffff", LIGHT.background), ("#f5f5f7", LIGHT.card), ("#18181b", LIGHT.foreground), ("#55555c", LIGHT.muted), ("#3d6fe0", LIGHT.iris), ("#d48a12", LIGHT.amber), ("#d94a4a", LIGHT.coral), ("#2f9a5a", LIGHT.mint), ("#18181b", LIGHT.strong)];
+        for (want, got) in dark.into_iter().chain(light) {
+            assert_eq!(want, got);
+        }
+        assert_eq!((DARK.border, DARK.border_alpha, LIGHT.border, LIGHT.border_alpha), ("#ffffff", 0.07, "#000000", 0.07));
     }
 
     #[test]
-    fn the_token_table_is_the_web_uis_css_exactly() {
-        for (id, h) in [("neutral", DARK), ("neutral-light", LIGHT)] {
-            let css = css_block(id);
-            let pairs = [
-                ("background", h.background),
-                ("card", h.card),
-                ("popover", h.popover),
-                ("sidebar", h.sidebar),
-                ("foreground", h.foreground),
-                ("strong", h.strong),
-                ("muted-foreground", h.muted),
-                ("code", h.code),
-                ("iris", h.iris),
-                ("warning", h.amber),
-                ("info", h.sky),
-                ("success", h.mint),
-                ("destructive", h.coral),
-            ];
-            for (name, ours) in pairs {
-                assert_eq!(css[name], ours, "{id}: --{name}");
+    fn the_third_grey_is_the_prototypes_text_3() {
+        // `--text-3`: #6b6b73 in dark, #7d7d85 in light; the share above reproduces it to within 4 of the 8-bit steps (one share cannot hit all three channels).
+        for (dark, want) in [(true, [0x6b, 0x6b, 0x73]), (false, [0x7d, 0x7d, 0x85])] {
+            let got = theme(dark).text.faint.hex();
+            for (i, w) in want.iter().enumerate() {
+                let g = i32::from_str_radix(&got[1 + 2 * i..3 + 2 * i], 16).unwrap();
+                assert!((g - w).abs() <= 4, "{got} dark={dark}");
             }
-            let (border, alpha) = rgba(&css["border"]);
-            assert_eq!((border.as_str(), alpha), (h.border, h.border_alpha), "{id}: --border");
         }
     }
 
     #[test]
-    fn the_built_theme_paints_those_tokens() {
-        for (dark, id) in [(true, "neutral"), (false, "neutral-light")] {
-            let (t, css) = (theme(dark), css_block(id));
-            let hex = |name: &str| c(&css[name]).hex();
-            assert_eq!(t.surface.window.hex(), hex("background"));
-            assert_eq!(t.surface.card.hex(), hex("card"));
-            assert_eq!(t.surface.popover.hex(), hex("popover"));
-            assert_eq!(t.text.base.hex(), hex("foreground"));
-            assert_eq!(t.text.muted.hex(), hex("muted-foreground"));
-            assert_eq!(t.meaning.iris.hex(), hex("iris"));
-            assert_eq!(t.meaning.coral.hex(), hex("destructive"));
-            // --border is a colour at an alpha, painted as that.
-            let (b, a) = rgba(&css["border"]);
-            assert_eq!(t.surface.border.hex(), c(&b).alpha(a).hex());
-            // The faint grey is the muted grey laid on the background at FAINT_SHARE.
-            assert_eq!(t.text.faint.hex(), mix_srgb(c(&css["background"]), c(&css["muted-foreground"]), FAINT_SHARE).hex());
-        }
-    }
-
-    #[test]
-    fn faces_and_radius_are_the_webs() {
-        // `--font-sans` starts with "Inter Variable", the web's bundled build of the Inter Rune embeds.
-        assert_eq!(css_var("font-sans").replace("\"Inter Variable\"", "Inter"), FONT_SANS);
-        assert_eq!(css_var("font-mono"), FONT_MONO);
-        // `--radius: 1.25rem` at the web's 16 px root.
-        assert_eq!(css_var("radius"), "1.25rem");
-        assert_eq!(theme(true).radius.window, 1.25 * 16.0);
-    }
-
-    #[test]
-    fn the_polish_spec_fills_are_exact() {
+    fn the_prototypes_washes_and_radii_are_exact() {
         for dark in [true, false] {
             let t = theme(dark);
             let fg = t.text.base;
-            assert_eq!(t.surface.hover.a, 0.04);
-            // The active nav row and the open row: the foreground at 6% (design system 4.6).
-            assert_eq!(t.surface.selected.a, 0.06);
-            assert_eq!(t.surface.field_border.a, 0.10);
+            assert_eq!(t.surface.hover.a, if dark { 0.04 } else { 0.035 });
+            assert_eq!(t.surface.selected.a, if dark { 0.07 } else { 0.055 });
+            assert_eq!(t.surface.tint.a, if dark { 0.055 } else { 0.045 });
+            assert_eq!(t.surface.border.a, 0.07);
+            assert_eq!(t.surface.line_strong.a, if dark { 0.11 } else { 0.12 });
             assert_eq!(t.surface.hover.hex()[..7], fg.hex()[..7]);
-            // A 36 point row is a pill (radius 18); a control's 24 clamps to its half height.
-            assert_eq!(t.radius.row, 18.0);
-            assert_eq!(t.radius.control, 24.0);
+            assert_eq!((t.radius.row, t.radius.control, t.radius.card, t.radius.window), (8.0, 7.0, 12.0, 14.0));
             assert_eq!(t.surface.ring.a, 0.6);
             assert_eq!(t.surface.ring.hex()[..7], t.meaning.iris.hex()[..7]);
         }
     }
 
     #[test]
-    fn the_chrome_behind_the_panels_is_the_webs_sidebar() {
-        for (dark, id) in [(true, "neutral"), (false, "neutral-light")] {
-            let css = css_block(id);
-            assert_eq!(theme(dark).surface.sidebar.hex(), c(&css["sidebar"]).hex(), "{id}");
-        }
-    }
-
-    /// The pebble, ink, group and glass literals are the web's (`web/src/styles/sky-materials.css`, the Neko themes' blocks).
-    #[test]
-    fn the_materials_are_the_webs() {
-        const MATERIALS: &str = include_str!("../../../web/src/styles/sky-materials.css");
-        let block = |theme: &str| {
-            let start = MATERIALS.find(&format!("html[data-neko-theme=\"{theme}\"] .sky {{")).unwrap_or_else(|| panic!("no block for {theme}"));
-            let rest = &MATERIALS[start..];
-            rest[..rest.find("}\n").unwrap()].to_owned()
-        };
-        for (dark, id) in [(true, "neutral"), (false, "neutral-light")] {
-            let css = block(id);
+    fn the_materials_are_flat() {
+        for dark in [true, false] {
             let m = theme(dark).mat;
-            for (var, got) in [
-                ("--sky-pebble-top", m.pebble_top),
-                ("--sky-pebble-bottom", m.pebble_bottom),
-                ("--sky-pebble-fg", m.pebble_fg),
-                ("--sky-ink-top", m.ink_top),
-                ("--sky-ink-bottom", m.ink_bottom),
-                ("--sky-ink-fg", m.ink_fg),
-                ("--sky-group", m.group),
-                ("--sky-group-hover", m.group_hover),
-            ] {
-                let line = css.lines().find(|l| l.trim_start().starts_with(&format!("{var}:"))).unwrap_or_else(|| panic!("{id} has no {var}"));
-                let want = line.split(':').nth(1).unwrap().trim().trim_end_matches(';').to_owned();
-                assert_eq!(got.hex()[..7].to_lowercase(), want.to_lowercase(), "{id} {var}");
-            }
+            // No gradient, no lit edge: the ink is one colour, so is the tint.
+            assert_eq!(m.ink_top.hex(), m.ink_bottom.hex());
+            assert_eq!(m.pebble_top.hex(), m.pebble_bottom.hex());
+            assert_eq!(m.ink_edge.a, 0.0);
+            assert_eq!(m.pebble_edge.a, 0.0);
         }
+        assert_eq!(theme(true).mat.ink_top.hex(), "#f4f4f5ff");
+        assert_eq!(theme(true).mat.ink_fg.hex(), "#111111ff");
+        assert_eq!(theme(false).mat.ink_top.hex(), "#18181bff");
     }
 }

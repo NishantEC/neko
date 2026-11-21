@@ -43,6 +43,15 @@ icon_body!(PLAY, "play", r#"<path d="M5 3.5L12 8L5 12.5Z" fill="none" stroke="cu
 icon_body!(EXTERNAL, "external", r#"<path d="M9 3H13V7M13 3L7.5 8.5M11 9.5V12.5H3.5V5H6.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
 icon_body!(EXPAND, "expand", r#"<path d="M9.5 2.5H13.5V6.5M6.5 13.5H2.5V9.5M13.5 2.5L9 7M2.5 13.5L7 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
 icon_body!(COLLAPSE, "collapse", r#"<path d="M13 6H9V2M3 10H7V14M9 6L13.5 1.5M7 10L2.5 14.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+// The prototype's own glyphs (2026-11-21, `_src/sprite.html`): Home, Tasks (the issues glyph), Rounds, the briefing sparkle, attach, a cat, the model chip, a merge.
+icon_body!(HOME, "home", r#"<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.2 8 2.8l5.5 4.4V13a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5Z"/></g>"#);
+icon_body!(ISSUES, "issues", r#"<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="1.5"/></g>"#);
+icon_body!(ROUND, "round", r#"<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8a5 5 0 0 1 8.6-3.4L13 6M13 3v3h-3M13 8a5 5 0 0 1-8.6 3.4L3 10M3 13v-3h3"/></g>"#);
+icon_body!(SPARKLES, "sparkles", r#"<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2.5 8.3 6l3.5 1.3L8.3 8.7 7 12.2 5.7 8.7 2.2 7.3 5.7 6Z"/></g>"#);
+icon_body!(CLIP, "clip", r#"<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m12.8 7.4-4.6 4.6a3 3 0 0 1-4.2-4.2l5-5a2 2 0 0 1 2.8 2.8l-5 5a1 1 0 0 1-1.4-1.4l4.4-4.4"/></g>"#);
+icon_body!(CAT, "cat", r#"<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V2.8l3 2a6.5 6.5 0 0 1 4 0l3-2V7c0 3.5-2.2 6.2-5 6.2S3 10.5 3 7Z"/><path d="M6 8h.01M10 8h.01M7.4 10.1c.3.3 1.0.3 1.2 0"/></g>"#);
+icon_body!(SLIDERS, "sliders", r#"<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5h5.5M12 5h1.5M2.5 11H4M8 11h5.5"/><circle cx="10" cy="5" r="1.7"/><circle cx="6" cy="11" r="1.7"/></g>"#);
+icon_body!(MERGE, "merge", r#"<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="3.8" r="1.5"/><circle cx="4.5" cy="12.2" r="1.5"/><circle cx="11.5" cy="8" r="1.5"/><path d="M4.5 5.3v5.4M4.5 6c0 1.4 1.2 2 2.6 2H10"/></g>"#);
 // The context panel's four tabs when the panel is too narrow for their words (`view/context.rs`).
 icon_body!(CANVAS, "canvas", r#"<path d="M8 2L14 8L8 14L2 8Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>"#);
 icon_body!(DIFF, "diff", r#"<path d="M8 2.5V8.5M5 5.5H11M5 12H11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
@@ -129,7 +138,7 @@ pub fn ring_arc(fraction: f32) -> &'static Icon {
 static ALL: &[&Icon] = &[
     &CIRCLE_HALF, &SUN, &MOON, &GLOBE, &PAUSE, &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND, &COLLAPSE, &CANVAS, &DIFF,
     &FILES, &TERMINAL, &SIDEBAR, &SIDEBAR_LEFT, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CHECKLIST, &INFO, &CROSS, &DOT, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &ARROW_RIGHT, &ROWS, &KANBAN, &TREE, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO,
-    &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &PENCIL, &TRASH, &LOCK, &PIN, &ARCHIVE, &KEY,
+    &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &PENCIL, &TRASH, &LOCK, &PIN, &ARCHIVE, &KEY, &HOME, &ISSUES, &ROUND, &SPARKLES, &CLIP, &CAT, &SLIDERS, &MERGE,
 ];
 
 /// The icon named `name` (`"inbox"`, `"clock"`, ...), or none: a plugin that names an icon the set does not have gets the dot.
@@ -152,7 +161,7 @@ mod tests {
         let declared = src.lines().filter(|l| l.starts_with("icon_body!(")).count();
         let icons = vec![
             &CIRCLE_HALF, &SUN, &MOON, &GLOBE, &PAUSE, &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND,
-            &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &SIDEBAR_LEFT, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &ARROW_RIGHT, &ROWS, &KANBAN, &TREE, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO, &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &CHECKLIST, &INFO, &PENCIL, &TRASH, &KEY, &LOCK, &PIN, &ARCHIVE,
+            &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &SIDEBAR_LEFT, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &ARROW_RIGHT, &ROWS, &KANBAN, &TREE, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO, &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &CHECKLIST, &INFO, &PENCIL, &TRASH, &KEY, &LOCK, &PIN, &ARCHIVE, &HOME, &ISSUES, &ROUND, &SPARKLES, &CLIP, &CAT, &SLIDERS, &MERGE,
         ];
         // The two filled ones (MORE's dots count as line icons here: they carry no stroke) are `icon_body!` lines too.
         assert_eq!(icons.len() + 1, declared, "a declared icon is missing from this list (the dot is the +1)");

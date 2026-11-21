@@ -50,7 +50,7 @@ fn fill(rt: &mut Runtime<App>, key: &str, text: &str) {
 }
 
 fn scene(name: &str) -> Runtime<App> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     let (_, f) = scenes::SCENES.iter().find(|(n, _)| *n == name).unwrap_or_else(|| panic!("no scene {name}"));
     f(&mut app);
     app.outbox.clear();

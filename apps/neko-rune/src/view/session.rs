@@ -62,13 +62,9 @@ pub fn region(s: &App, t: &Neko, layer: &mut Vec<El>, frame: Frame) -> El {
         .key("session-region")
         .grow(1.0)
         .min_w(0.0)
-        .my(8.0)
-        .mx(2.0)
-        .radius(t.radius.window)
+        // Flush: the surface colour to the window's edges and one hairline on the left (the prototype's `.main`).
         .fill(t.surface.window)
-        // The floating content panel's soft shadow (`shadow-sm`: `0 2 3 /.02, 0 12 32 -16 /.12`).
-        .shadow(2.0, 3.0, rune::Color::BLACK.alpha(0.02))
-        .box_shadow(rune::Shadow { y: 12.0, blur: 32.0, spread: -16.0, color: rune::Color::BLACK.alpha(0.12), ..rune::Shadow::default() })
+        .border_sides([0.0, 0.0, 0.0, 1.0], t.surface.border)
         // Files dropped anywhere on the region are attached to the open session's reply box (or Home's new-session box).
         .on_drop_files(|s: &mut App, files: &[std::path::PathBuf], _| s.drop_files(files))
         .on_drop_hover(|s: &mut App, over: bool, _| s.compose.drop_over = over)

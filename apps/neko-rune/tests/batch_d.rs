@@ -15,7 +15,7 @@ use rune::{Env, Key, KeyEvent, Mods, Runtime};
 const WINDOW: (f32, f32) = (1360.0, 900.0);
 
 fn runtime(name: &str) -> Runtime<App> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     let (_, f) = SCENES.iter().find(|(n, _)| *n == name).unwrap_or_else(|| panic!("no scene {name}"));
     f(&mut app);
     app.outbox.clear();
@@ -524,7 +524,7 @@ fn the_canvas_rows_offer_download_open_in_browser_and_copy_link() {
 
 #[test]
 fn rune_reports_itself_as_rune_and_only_when_something_changed() {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     app.focused = true;
     // Headless runs send nothing: the report is built, not sent.
     assert_eq!(app.tick_report(Some([1360, 900])), None);

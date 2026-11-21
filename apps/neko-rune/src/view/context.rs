@@ -19,7 +19,7 @@ use crate::viewers::{self, ViewerInput, family};
 use crate::web_panel::Want;
 
 /// The header's height.
-pub const HEAD: f32 = 36.0;
+pub const HEAD: f32 = 48.0;
 
 /// Below this panel width the tabs are icons only (Canvas, Diff, Files, Terminal) with a tooltip
 /// naming each: four labels in a 36 point header truncated ("Termi…") before this was a rule.
@@ -57,7 +57,8 @@ pub fn panel(s: &App, t: &Neko, layer: &mut Vec<El>, width: f32) -> El {
         Some(Tab::Details) => context_info::details(s, t),
         None => placeholder(&["Nothing to show yet."], t),
     };
-    col().key("context").min_w(0.0).my(8.0).mx(2.0).radius(t.radius.window).clip_rounded(t.radius.window).fill(t.surface.card).child(head).child(viewers::web::region(col().key("context-body").w_full().grow(1.0).min_h(0.0).child(body)))
+    // Flush, on the chrome colour, with one hairline on its left (the prototype's `.ov`).
+    col().key("context").min_w(0.0).fill(t.surface.sidebar).border_sides([0.0, 0.0, 0.0, 1.0], t.surface.border).child(head.border_sides([0.0, 0.0, 1.0, 0.0], t.surface.border)).child(viewers::web::region(col().key("context-body").w_full().grow(1.0).min_h(0.0).child(body)))
 }
 
 /// The icon of a tab.

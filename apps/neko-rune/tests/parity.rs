@@ -18,7 +18,7 @@ pub fn scene(name: &str) -> impl FnOnce(&mut App) + '_ {
 }
 
 pub fn runtime_sized(setup: impl FnOnce(&mut App), size: (f32, f32)) -> Runtime<App> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     setup(&mut app);
     let mut rt = Runtime::new(app, view, size, Env { system_dark: true, scale: 1.0 });
     rt.frame(0.0);
@@ -93,12 +93,12 @@ fn the_composer_is_one_card_in_the_session_the_neko_column_and_home() {
     let (region, card) = (rect(&rt, "session-region"), rect(&rt, "composer-card"));
     assert!(card[2] <= 760.0 - 64.0 + 0.5 && card[2] >= 690.0, "760 wide with 32 at each side: {card:?}");
     assert!(((card[0] + card[2] / 2.0) - (region[0] + region[2] / 2.0)).abs() < 2.0, "centred: {card:?} {region:?}");
-    assert!(card[3] >= 3.0 * 17.0 + 32.0 + 32.0, "three lines and a bar: {card:?}");
+    assert!(card[3] >= 2.0 * 17.0 + 30.0 + 22.0, "two lines and a bar: {card:?}");
     for key in ["send", "ask-send"] {
         let r = rect(&rt, key);
-        assert_eq!((r[2], r[3]), (36.0, 36.0), "{key}: {r:?}");
+        assert_eq!((r[2], r[3]), (30.0, 30.0), "{key}: {r:?}");
     }
-    assert_ne!(fill_of(&rt, "send"), iris, "no text: a pebble");
+    assert_ne!(fill_of(&rt, "send"), iris, "no text: the tint");
     rt.update(|s, _| s.composer.replace_text("use three tries"));
     settle(&mut rt);
     assert_eq!(fill_of(&rt, "send"), iris, "text: the ink");

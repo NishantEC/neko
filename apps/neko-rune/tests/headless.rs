@@ -86,7 +86,8 @@ fn the_shell_snaps_in_light_and_dark_with_the_neko_surfaces() {
     // The window is the chrome the panels float on, the web's `--sidebar` (#111111 dark, #fafafa light), and so are the margins beside the
     // sessions panel and the Neko column's flat ground; the session is the window surface (#161616, #ffffff); the context panel is the card
     // surface (#1b1b1b, #ffffff). The values follow the design system of 2026-11.
-    let cases = [("dark", [0x11, 0x11, 0x11], [0x16, 0x16, 0x16], [0x1b, 0x1b, 0x1b]), ("light", [0xfa, 0xfa, 0xfa], [0xff, 0xff, 0xff], [0xff, 0xff, 0xff])];
+    // (The prototype's chrome, surface and raised: #0c0c0d, #141416, #1b1b1e dark; #ececee, #ffffff, #f5f5f7 light. The sampled point of the context panel is its body, the raised colour.)
+    let cases = [("dark", [0x0c, 0x0c, 0x0d], [0x14, 0x14, 0x16], [0x1b, 0x1b, 0x1e]), ("light", [0xec, 0xec, 0xee], [0xff, 0xff, 0xff], [0xf5, 0xf5, 0xf7])];
     for (theme, column, session, card) in cases {
         let image = Image::read(&snap("live", theme));
         assert_eq!((image.width, image.height), (SIZE.0 * SCALE, SIZE.1 * SCALE), "{theme}");
@@ -112,7 +113,7 @@ fn the_tree_has_the_four_regions_and_no_layout_warnings() {
         let t = tree("live", theme);
         assert_eq!(t["title"], "Neko (Rune)");
         assert_eq!(t["warnings"].as_array().unwrap().len(), 0, "{theme}: {}", t["warnings"]);
-        for key in ["sessions", "session-region", "neko", "group-0", "group-1", "group-2", "session-t0", "composer-input", "steer-trigger", "crew", "inbox", "ask", "grip-sessions", "grip-neko", "view-calendar", "view-inbox", "view-setup", "account", "sessions-search", "new-session"] {
+        for key in ["sessions", "session-region", "neko", "composer-input", "steer-trigger", "crew", "inbox", "ask", "grip-sessions", "grip-neko", "view-home", "view-calendar", "view-inbox", "view-settings", "account", "sessions-search"] {
             assert!(element(&t, key).is_some(), "{theme}: {key}");
         }
         assert!(element(&t, "context").is_none(), "the context panel starts closed");
@@ -120,7 +121,7 @@ fn the_tree_has_the_four_regions_and_no_layout_warnings() {
         assert!(words.contains(&"5 agents working · 6 need you".to_owned()), "{words:?}");
         assert!(words.contains(&"Connected · 22 tasks".to_owned()), "{words:?}");
         // Everything that does something has a name for assistive technology.
-        for key in ["session-t0", "context-toggle", "neko-collapse", "view-inbox", "account", "sessions-search", "new-session", "steer-trigger", "grip-sessions"] {
+        for key in ["context-toggle", "neko-collapse", "view-inbox", "view-home", "account", "sessions-search", "steer-trigger", "grip-sessions"] {
             let label = element(&t, key).unwrap()["label"].as_str().unwrap_or("");
             assert!(!label.is_empty(), "{theme}: {key} has no label");
         }
@@ -144,8 +145,8 @@ fn the_glyph_lab_shows_all_seven_status_glyphs_in_their_colours() {
         let r: Vec<f32> = e["rect"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap() as f32).collect();
         image.at(r[0] - 8.0 - 12.5, r[1] + r[3] / 2.0)
     };
-    assert!(near(disc("Done"), [0x4c, 0xc3, 0x8a]), "Done is Mint, got {:?}", disc("Done"));
-    assert!(near(disc("Failed"), [0xe5, 0x48, 0x4d]), "Failed is Coral, got {:?}", disc("Failed"));
+    assert!(near(disc("Done"), [0x6c, 0xc2, 0x89]), "Done is Mint, got {:?}", disc("Done"));
+    assert!(near(disc("Failed"), [0xf0, 0x71, 0x71]), "Failed is Coral, got {:?}", disc("Failed"));
 }
 
 #[test]

@@ -37,7 +37,7 @@ fn runtime(app: App) -> Runtime<App> {
 }
 
 fn scene_rt(name: &str, dark: bool) -> Runtime<App> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     let (_, f) = SCENES.iter().find(|(n, _)| *n == name).unwrap_or_else(|| panic!("no scene {name}"));
     f(&mut app);
     app.outbox.clear();
@@ -110,7 +110,7 @@ fn card(id: &str, title: &str, init: &str, render: &str) -> String {
 }
 
 fn app_with(files: &[(&str, &str)], wire: Wire) -> App {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     install_for_tests(&mut app, "demo", files, wire);
     app
 }
@@ -626,7 +626,7 @@ fn a_changed_file_reloads_in_place_and_keeps_its_state() {
 
 #[test]
 fn a_pack_answer_asks_for_its_panels_again_and_the_clock_does_too_every_thirty_seconds() {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     app.luau.next_sync = 500.0;
     app.luau.resync();
     assert_eq!(app.luau.next_sync, 0.0);
@@ -680,7 +680,7 @@ fn the_example_view_renders_headless_with_its_filter_working() {
 
 #[test]
 fn views_are_listed_next_to_the_web_plugin_pages_and_open_by_route() {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     install_for_tests(&mut app, "hello-luau", &[("ui/needs-you.luau", NEEDS_YOU), ("ui/routines.luau", ROUTINES)], demo_wire());
     let pages: Vec<_> = app.luau.views().iter().filter_map(|p| p.page()).collect();
     assert_eq!(pages.len(), 1);

@@ -196,7 +196,7 @@ fn crawl(rt: &Runtime<App>, label: &str) -> Vec<String> {
 }
 
 fn scene_app(name: &str) -> App {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     let (_, f) = SCENES.iter().find(|(n, _)| *n == name).unwrap_or_else(|| panic!("no scene {name}"));
     f(&mut app);
     app.outbox.clear();
@@ -262,7 +262,7 @@ fn the_copied_data_keeps_the_windows_shape() {
         return;
     };
     let fresh = || {
-        let mut app = App::headless();
+        let mut app = App::headless_neko();
         app.clock = neko_rune::app::system_ms;
         app.now_ms = neko_rune::app::system_ms();
         app.dispatch = Dispatch::Blocking { socket: socket.clone() };
@@ -386,7 +386,7 @@ fn the_overlays_keep_their_shape() {
             bad.extend(overlay_crawl(&rt, &format!("pill:{activity:?}:{}", if expanded { "widened" } else { "compact" })));
         }
     }
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     let (_, scene) = SCENES.iter().find(|(n, _)| *n == "live").unwrap();
     scene(&mut app);
     let rows = app.palette_all();

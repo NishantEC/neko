@@ -106,7 +106,7 @@ fn a_press_on_the_capsule_is_the_overlays_only_click_target() {
 // ---- the launcher ----------------------------------------------------------------------------------
 
 fn live_rows() -> Vec<neko_rune::palette::Item> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     let (_, f) = scenes::SCENES.iter().find(|(n, _)| *n == "live").unwrap();
     f(&mut app);
     app.palette_all()
@@ -168,7 +168,7 @@ fn escape_and_the_arrows_work_from_the_search_field() {
 // ---- the stop-all key ------------------------------------------------------------------------------
 
 fn app_runtime(scene: &str) -> Runtime<App> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     let (_, f) = scenes::SCENES.iter().find(|(n, _)| *n == scene).unwrap_or_else(|| panic!("no scene {scene}"));
     f(&mut app);
     app.outbox.clear();
@@ -205,7 +205,7 @@ fn the_stop_all_key_asks_first_and_only_a_yes_sends_the_request() {
 
 #[test]
 fn the_stop_all_key_with_nothing_running_opens_nothing() {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     app.summary = Some(neko_rune::link::Summary::default());
     let mut rt = Runtime::new(app, view, (1360.0, 900.0), Env { system_dark: true, scale: 1.0 });
     rt.on_key = Some(neko_rune::on_key);
@@ -224,7 +224,7 @@ fn the_stop_all_key_with_nothing_running_opens_nothing() {
 
 #[test]
 fn with_the_gate_off_a_poll_never_touches_the_pill_or_its_tracker() {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     assert!(!app.overlays.plan.any(), "a window starts with nothing planned");
     let (_, f) = scenes::SCENES.iter().find(|(n, _)| *n == "running").unwrap();
     f(&mut app);
@@ -241,7 +241,7 @@ fn with_the_gate_off_a_poll_never_touches_the_pill_or_its_tracker() {
 
 #[test]
 fn with_the_gate_on_the_pill_follows_the_summary_and_the_preference_hides_it() {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     app.overlays.plan = neko_rune::overlays::plan(true);
     app.clock = || 1_000;
     let task = |status: TaskStatus| TaskRow { id: "a".into(), key: None, title: "Ship it".into(), status, updated_at_ms: 1, goal: String::new(), wait: Wait::None, progress: None, line: Default::default() };
@@ -270,7 +270,7 @@ fn with_the_gate_on_the_pill_follows_the_summary_and_the_preference_hides_it() {
 #[test]
 fn settings_offers_the_pill_switch_only_when_the_overlays_are_on_and_it_turns_the_pill_off() {
     let setup = |on: bool| {
-        let mut app = App::headless();
+        let mut app = App::headless_neko();
         let (_, f) = scenes::SCENES.iter().find(|(n, _)| *n == "live").unwrap();
         f(&mut app);
         app.overlays.plan = neko_rune::overlays::plan(on);

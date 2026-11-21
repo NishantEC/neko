@@ -468,6 +468,14 @@ impl App {
         App { opener: |_| Ok(()), revealer: |_| Ok(()), access_probe: crate::permissions::none, clock: || DEMO_NOW, now_ms: DEMO_NOW, linked: false, ..App::default() }
     }
 
+    /// A headless app with the Neko column in the window, as every build before the prototype's shell (2026-11-21) drew it: the tests of what
+    /// the column does (its chat, Inbox rows, digest, strip) and of its layout rules use this one. `headless()` is the shell as it ships.
+    pub fn headless_neko() -> App {
+        let mut app = App::headless();
+        app.layout.neko_off = false;
+        app
+    }
+
     /// Whether the window is dark: the daemon's mode when it is Light or Dark (the web UI's own setting), else the system's.
     pub fn appearance_dark(&self, system_dark: bool) -> bool {
         match self.pages.appearance.as_deref() {

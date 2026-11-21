@@ -24,7 +24,7 @@ fn runtime(setup: impl FnOnce(&mut App)) -> Runtime<App> {
 }
 
 fn runtime_at(size: (f32, f32), setup: impl FnOnce(&mut App)) -> Runtime<App> {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     setup(&mut app);
     let mut rt = Runtime::new(app, view, size, Env { system_dark: true, scale: 2.0 });
     rt.frame(0.0);
@@ -112,13 +112,13 @@ fn the_tabs_that_have_content_show_in_order_and_a_recent_artifact_wins_the_first
     assert!(rt.state.layout.context.is_open());
     assert_eq!(segments(&rt), ["Canvas", "Diff", "Files", "Terminal", "Browser", "Details"], "the control shows each, in this order, then the tabs asked for");
     assert!(rt.find("context-picker").is_some() && rt.find("context-expand").is_some() && rt.find("context-close").is_some());
-    assert_eq!(rect(&rt, "context-head")[3], 36.0, "the header is 36 points");
+    assert_eq!(rect(&rt, "context-head")[3], 48.0, "the header is 48 points (the prototype's `.ovhead`)");
     assert_eq!(rect(&rt, "context")[2], 420.0, "the default width");
 }
 
 #[test]
 fn without_a_recent_artifact_the_first_tab_is_diff_then_terminal_then_files() {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     scenes_panel::auto_canvas(&mut app);
     // The artifact was shown eleven minutes ago: the Canvas is still there, but not first.
     app.panel.sessions.get_mut("t6").unwrap().shown[0].at_ms = app.now_ms - 11 * MIN;
@@ -230,7 +230,7 @@ fn closing_the_panel_sticks_for_that_session_until_an_artifact_is_shown() {
 
 #[test]
 fn a_shown_artifact_goes_to_the_session_that_showed_it_before() {
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     scenes_panel::auto_diff(&mut app);
     app.apply_link(LinkEvent::ShowArtifact { id: "abc".into(), version: Some(1) });
     assert_eq!(app.selected.as_deref(), Some("t6"));
@@ -393,7 +393,7 @@ fn coming_back_to_a_session_lists_its_folder_again_when_the_tree_was_another_ses
     let folder = Temp::new("relist");
     std::fs::write(folder.0.join("a.txt"), "a").unwrap();
     let path = folder.0.to_string_lossy().into_owned();
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     scenes_panel::diff(&mut app);
     app.folder_arrived("t6", Some(path));
     assert!(app.panel.files_tree.contains("a.txt"));
@@ -451,7 +451,7 @@ fn an_artifact_is_read_only_from_under_the_artifact_store() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("v1.csv"), samples::csv(5)).unwrap();
     std::fs::write(data.0.join("outside.csv"), "id\n1\n").unwrap();
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     scenes_panel::auto_closed(&mut app);
     app.panel.data_dir = data.0.clone();
     app.panel.artifacts.insert("abc".into(), artifact("abc", "csv", 1));

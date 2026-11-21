@@ -46,12 +46,12 @@ fn every_focus_ring_is_two_points_at_an_offset_of_two() {
 #[test]
 fn only_the_hover_fill_the_panel_and_the_ring_animate() {
     // Anything that moves on its own is named here, in the files that own it: the hover curve (motion.rs, set once on
-    // the root in view.rs), the context panel's spring (view.rs), the progress ring's turn (view/sessions.rs) and
+    // the root in view.rs), the context panel's spring (view.rs), the progress ring's turn (view/sessions.rs, view/look.rs) and
     // Home's art (art.rs, art_gpu.rs). A new `transition`, `looping`, `.motion(` or tween elsewhere fails here.
     // presence.rs (P4, the activity pill, `--overlays`): the glow's breathing and the working ring's turn, both stopped under Reduce Motion
     // (the owner's brief: "respect Reduce Motion (no pulse) as Swift does"); the pill is its own window and never in the main one.
     // toasts.rs only declares that a toast stands still (`Transition::none()`), as the one that came before it did in view.rs.
-    let owners = ["motion.rs", "view.rs", "sessions.rs", "art.rs", "art_gpu.rs", "model3d_gpu.rs", "toasts.rs", "presence.rs"];
+    let owners = ["motion.rs", "view.rs", "sessions.rs", "look.rs", "art.rs", "art_gpu.rs", "model3d_gpu.rs", "toasts.rs", "presence.rs"];
     for (path, text) in all_sources() {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
         for word in [".transition(", ".looping(", ".motion(", ".token_motion(", ".offset_motion(", ".opacity_motion(", ".scale_motion(", ".sequence(", ".fold_glide(", "Curve::tween", "Spring::new"] {
@@ -63,7 +63,7 @@ fn only_the_hover_fill_the_panel_and_the_ring_animate() {
 #[test]
 fn the_neko_column_uses_the_sidebars_row_metrics() {
     let (_, scene) = scenes::SCENES.iter().find(|(n, _)| *n == "live").unwrap();
-    let mut app = App::headless();
+    let mut app = App::headless_neko();
     scene(&mut app);
     let mut rt = Runtime::new(app, view, (1440.0, 900.0), Env { system_dark: true, scale: 2.0 });
     rt.frame(0.0);
@@ -83,5 +83,5 @@ fn the_neko_column_uses_the_sidebars_row_metrics() {
     assert_eq!(first.rect[3], 32.0, "an Inbox item is one 32 point row");
     // The session view's header row is the sidebar header's: 32 high, centred on the same line.
     let top = rect("top-title");
-    assert!((top[1] + top[3] / 2.0 - 28.0).abs() <= 2.0, "the session header's centre is on the sidebar header's: {top:?}");
+    assert!((top[1] + top[3] / 2.0 - 24.0).abs() <= 2.0, "the session header's centre is on the bar's line (24): {top:?}");
 }

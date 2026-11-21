@@ -9,7 +9,7 @@
 
 use rune_kit::shell::PaneState;
 
-/// The Neko column when collapsed to an icon.
+/// The Neko column when collapsed to an icon. (The window no longer draws the icon: the prototype's shell has no Neko column, `view.rs`.)
 pub const NEKO_STRIP: f32 = 44.0;
 /// Below this window width Neko starts as its icon (the person can open it).
 pub const NEKO_AUTO_WIDTH: f32 = 1100.0;
@@ -18,8 +18,11 @@ pub const MIDDLE_MIN: f32 = 320.0;
 /// What the session view should keep before Neko gives way: below this (window − sessions −
 /// context panel − Neko) the Neko column collapses to its icon by itself (P3b).
 pub const SESSION_COMFORT: f32 = 480.0;
-/// How wide the draggable edge between two regions is.
+/// What the fit arithmetic reserves for an edge between two regions. The regions are flush now (the hairline is painted by the region on its
+/// left), so this is only a little spare room, kept so the layout rules and their tests stay as they were.
 pub const GRIP: f32 = 7.0;
+/// How wide the draggable handle laid over an edge is.
+pub const HANDLE: f32 = 7.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Region {
@@ -46,6 +49,9 @@ pub struct Layout {
     /// The person's own expand (`Some(true)`) or collapse (`Some(false)`) of Neko this run. It wins
     /// over the layout-pressure rule until the next launch; never saved (`restored` starts at None).
     pub neko_choice: Option<bool>,
+    /// The prototype's shell has no Neko column (2026-11-21): while this is true the window draws neither the column nor its strip. Opening
+    /// Neko (`set_neko_open(true)`, "Ask Neko about this") clears it; a launch always starts with it set.
+    pub neko_off: bool,
 }
 
 /// What is kept between runs (Rune's `prefs` store): each region's width and whether it shows.
@@ -73,6 +79,7 @@ impl Default for Layout {
             neko: PaneState::new(340.0).range(280.0, 480.0),
             neko_auto: true,
             neko_choice: None,
+            neko_off: true,
         }
     }
 }
@@ -94,11 +101,16 @@ impl Layout {
         l.sessions.set_open(saved.sessions_open);
         l.neko_auto = false;
         l.neko_choice = None;
+        // Whatever an earlier build left (it showed the column to everyone), a launch starts without the column.
+        l.neko_off = true;
         l
     }
 
     /// Opens or closes Neko by choice: from then on the window's width no longer decides.
     pub fn set_neko_open(&mut self, open: bool) {
+        if open {
+            self.neko_off = false;
+        }
         self.neko.set_open(open);
         self.neko_auto = false;
         self.neko_choice = Some(open);

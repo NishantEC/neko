@@ -142,14 +142,32 @@ fn breadcrumb(t: &Neko, current: &str) -> El {
         .child(text(current.to_owned()).key("title").font(rune::TextStyle { weight: 500.0, ..plain }).color(t.text.base).role("heading"))
 }
 
+/// A row of the rail's Setup group: the same pill as a section's, but it opens a Setup page.
+fn setup_pill(t: &Neko, title: &str, key: String, active: bool, press: impl Fn(&mut App) + 'static) -> El {
+    row()
+        .key(key)
+        .role("button")
+        .label(title.to_owned())
+        .focusable(true)
+        .h(34.0)
+        .px(10.0)
+        .center_y()
+        .radius(t.radius.row)
+        .fill(if active { t.surface.selected } else { rune::Color::TRANSPARENT })
+        .hover(t.surface.hover)
+        .focus_ring(2.0, 2.0, t.kit.c.border_focus)
+        .on_press(press)
+        .child(text(title.to_owned()).font(webkit::font(t, 13.5, 400.0, 18.0)).color(t.text.muted).a11y_hidden())
+}
+
 /// The search box and the section list: a strip of pills with a line under it, or a 240 point rail with a line beside it.
 fn rail(s: &App, t: &Neko, wide: bool) -> El {
     let searching = !s.pages.text("settings:search").trim().is_empty();
     let mut field = TextInput::new(edit_of(s, "settings:search")).label("Find a setting").placeholder("Find a setting").width(None).leading_icon(&icons::SEARCH).on_edit(editing("settings:search".to_owned()));
     // The ⌘F hint hides while the field has text (the clear button takes its place), so the two never share the corner.
     field = if searching { field.clear_button() } else { field.trailing(row().key("settings-search-hint").h(20.0).px(4.0).gap(4.0).center_y().child(text("⌘".to_owned()).font(webkit::font(t, 12.0, 500.0, 16.0)).color(t.text.muted)).child(text("F".to_owned()).font(webkit::font(t, 12.0, 500.0, 16.0)).color(t.text.muted)).a11y_hidden()) };
-    let search = field.build(&t.kit).key("settings-search").w_full().h(40.0).radius(24.0);
-    let search = webkit::well(t, search);
+    let search = field.build(&t.kit).key("settings-search").w_full().h(32.0).radius(8.0);
+    let search = webkit::outlined(t, search);
     let pill = |section: Section| {
         let active = !searching && s.pages.section == section;
         let ink = if active { t.text.base } else { t.text.base.alpha(0.75) };
@@ -158,21 +176,27 @@ fn rail(s: &App, t: &Neko, wide: bool) -> El {
             .role("button")
             .label(section.title())
             .focusable(true)
-            .h(36.0)
-            .px(if wide { 12.0 } else { 16.0 })
+            .h(34.0)
+            .px(if wide { 10.0 } else { 14.0 })
             .center_y()
-            .radius(18.0)
-            .fill(if active { t.text.base.alpha(0.06) } else { rune::Color::TRANSPARENT })
+            .radius(t.radius.row)
+            .fill(if active { t.surface.selected } else { rune::Color::TRANSPARENT })
             .hover(t.surface.hover)
             .focus_ring(2.0, 2.0, t.kit.c.border_focus)
             .on_press(move |s: &mut App| s.go_section(section))
-            .child(text(section.title().to_owned()).font(webkit::font(t, 14.0, 400.0, 20.0)).color(ink).a11y_hidden())
+            .child(text(section.title().to_owned()).font(webkit::font(t, 13.5, 400.0, 18.0)).color(ink).a11y_hidden())
     };
     if !wide {
         let strip = row().key("settings-nav").mx(-4.0).h(40.0).px(4.0).pb(4.0).gap(4.0).scroll_x().children(Section::ALL.iter().map(|&section| pill(section)));
         return col().key("settings-rail").w_full().px(16.0).pt(12.0).pb(8.0).gap(12.0).child(search).child(strip);
     }
     let mut groups = col().key("settings-nav").w_full().gap(16.0);
+    // Setup lives here since the prototype's shell (2026-11-21): its pages open from this group, in the same window.
+    let mut setup = col().key("settings-setup-group").w_full().gap(4.0).child(text("Setup".to_owned()).key("settings-group-Setup").font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted).px(12.0).pb(4.0));
+    for section in crate::view::setup::SetupSection::ALL {
+        setup = setup.child(setup_pill(t, section.title(), format!("settings-setup-{}", section.key()), false, move |s: &mut App| s.open_setup(section)));
+    }
+    setup = setup.child(setup_pill(t, "Plugins", "settings-setup-plugins".to_owned(), false, |s: &mut App| s.open_view(crate::views::FullView::Plugins)));
     for group in ["Neko", "This Mac"] {
         let mut g = col().w_full().gap(4.0).child(text(group.to_owned()).key(format!("settings-group-{group}")).font(webkit::font(t, 12.5, 400.0, 18.75)).color(t.text.muted).px(12.0).pb(4.0));
         for section in Section::ALL.iter().copied().filter(|s| s.group_name() == group) {
@@ -180,6 +204,7 @@ fn rail(s: &App, t: &Neko, wide: bool) -> El {
         }
         groups = groups.child(g);
     }
+    groups = groups.child(setup);
     row().key("settings-rail").w(248.0).h_full().child(col().w(248.0).h_full().px(12.0).pt(24.0).pb(24.0).gap(16.0).scroll(ScrollSpec { stick_bottom: false }).child(search).child(groups))
 }
 

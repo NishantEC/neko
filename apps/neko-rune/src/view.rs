@@ -22,6 +22,7 @@ mod context_info;
 mod context_terminal;
 mod dialogs;
 mod fences;
+mod look;
 mod home;
 mod luau;
 mod more;
@@ -54,13 +55,17 @@ use rune::{Cursor, Cx, Drag, El, Phase, col, el, icon, row, text};
 use rune_kit::root;
 
 use crate::app::App;
-use crate::layout::{GRIP, NEKO_STRIP, Region};
+use crate::layout::{HANDLE, NEKO_STRIP, Region};
 use crate::theme::Neko;
 
-/// Home's scrim: the window's colour at this strength over this radius.
+/// The scrim the Home art was drawn under: the window's colour at this strength over this radius. Home draws no art since the prototype's look
+/// (2026-11-21); `art.rs` keeps its own contrast test against these figures.
 pub fn home_scrim() -> (f32, f32) {
-    (home::SCRIM_ALPHA, home::SCRIM_RADIUS)
+    (0.70, 520.0)
 }
+
+/// A cat's right panel: 372 wide (the prototype's `.ov`).
+pub const CAT_PANEL: f32 = 372.0;
 
 /// One column for full views and the lab (DESIGN.md §8 rule 8).
 pub const COLUMN: f32 = 880.0;
@@ -104,38 +109,51 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         Some([w, h]) => (layout.fit(w), h, w),
         None => (crate::layout::Fit { context: layout.context.shown_width(), neko_open: layout.neko.is_open() }, 840.0, 1360.0),
     };
-    let neko_w = if fit.neko_open { layout.neko.width() } else { NEKO_STRIP };
-    // The edges between regions are drawn only beside a region that shows (the strip has none), so count the ones that are there.
-    let grips = f32::from(layout.sessions.is_open()) + f32::from(fit.context > 0.0 && !(s.panel.expanded && fit.context > 0.0)) + f32::from(fit.neko_open);
-    let frame = Frame { win_h, region_w: (win_w - layout.sessions.shown_width() - fit.context - neko_w - grips * GRIP - 4.0).max(0.0) };
+    // The prototype has no Neko column: the window is the sidebar, the content and (on a cat's page or beside a task) a panel, all flush.
+    // The column is still there for the person who opens it (`layout.set_neko_open`), as a fourth region at the right.
+    let neko_shown = !layout.neko_off && fit.neko_open;
+    let neko_strip = !layout.neko_off && !fit.neko_open;
+    let neko_w = if neko_shown { layout.neko.width() } else if neko_strip { NEKO_STRIP } else { 0.0 };
+    // A cat's panel is the prototype's 372 (`.ov`); a task's context panel keeps the width the person gave it.
+    let side_w = if s.cats.open.is_some() { fit.context.min(CAT_PANEL) } else { fit.context };
+    let frame = Frame { win_h, region_w: (win_w - layout.sessions.shown_width() - side_w - neko_w).max(0.0) };
 
     s.panel.hidden.set(layout.context.is_open() && fit.context <= 0.0);
     // The web view is wanted by whatever shows it below, in this very build (`viewers::web`, `context.rs`, `session.rs`).
     s.web_view.set_want(None);
     // Expanded, the panel takes the session's region and its own; the sessions and Neko columns stay.
     let expanded = s.panel.expanded && fit.context > 0.0;
+    // The window itself is the sidebar's colour (the prototype's `--chrome`): the sidebar sits on it, with no card and no gutter.
     let mut window = row().key("window").w_full().h_full().fill(t.surface.sidebar);
+    let sessions_w = layout.sessions.shown_width();
     if layout.sessions.is_open() {
         window = window.child(sessions::column(s, &t, &mut layer).w(layout.sessions.width()).key("sessions"));
-        window = window.child(grip(Region::Sessions, &t));
     }
-    // The session and the context panel are two cards in the window, inset from its edges.
+    // The content is flush: the surface colour to the window's edges, one hairline on its left (painted by the region).
     if expanded {
         window = window.child(context::panel(s, &t, &mut layer, win_w).grow(1.0));
     } else {
         window = window.child(session::region(s, &t, &mut layer, frame));
         if fit.context > 0.0 {
-            window = window.child(grip(Region::Context, &t));
-            // On a cat's page the panel is the cat's (Overview, Files); otherwise the session's context.
+            // On a cat's page the panel is the cat's (Overview, Files, Rounds); otherwise the session's context.
             let side = if s.cats.open.is_some() { cats::panel(s, &t, &mut layer) } else { context::panel(s, &t, &mut layer, fit.context) };
-            window = window.child(side.w(fit.context).transition(panel_transition()));
+            window = window.child(side.w(side_w).transition(panel_transition()));
         }
     }
-    if fit.neko_open {
-        window = window.child(grip(Region::Neko, &t));
-        window = window.child(neko::column(s, &t, win_h, &mut layer).w(layout.neko.width()).key("neko"));
-    } else {
-        window = window.child(neko::strip(s, &t).w(NEKO_STRIP).key("neko"));
+    if neko_shown {
+        window = window.child(neko::column(s, &t, win_h, &mut layer).w(layout.neko.width()).key("neko").border_sides([0.0, 0.0, 0.0, 1.0], t.surface.border));
+    } else if neko_strip {
+        window = window.child(neko::strip(s, &t).w(NEKO_STRIP).key("neko").border_sides([0.0, 0.0, 0.0, 1.0], t.surface.border));
+    }
+    // The edges between regions are 1 px hairlines painted by the regions; what resizes them is a 7 point handle laid over the edge.
+    if layout.sessions.is_open() {
+        window = window.child(grip(Region::Sessions, &t).absolute(sessions_w - HANDLE / 2.0, 0.0));
+    }
+    if fit.context > 0.0 && !expanded {
+        window = window.child(grip(Region::Context, &t).absolute(win_w - neko_w - side_w - HANDLE / 2.0, 0.0));
+    }
+    if neko_shown {
+        window = window.child(grip(Region::Neko, &t).absolute(win_w - neko_w - HANDLE / 2.0, 0.0));
     }
     palette::mount(s, &t, (win_w, win_h), &mut layer);
     shortcuts::mount(s, &t, &mut layer);
@@ -196,7 +214,7 @@ fn grip(region: Region, t: &Neko) -> El {
     el().key(format!("grip-{name}"))
         .role("separator")
         .label(format!("Resize {name}"))
-        .w(GRIP)
+        .w(HANDLE)
         .h_full()
         .cursor(Cursor::ResizeColumn)
         .hover(t.surface.hover)
@@ -212,7 +230,7 @@ fn grip(region: Region, t: &Neko) -> El {
 /// Where the "Show sidebar" button's left edge sits, from the window's left: just after the traffic lights (polish spec §0).
 pub const SHOW_SIDEBAR_X: f32 = 80.0;
 /// How far the session region's own left edge is from the window's (its 2 point margin).
-const REGION_LEFT: f32 = 2.0;
+const REGION_LEFT: f32 = 0.0;
 /// The gap between the items of a header row.
 const BAND_GAP: f32 = 8.0;
 
@@ -237,7 +255,8 @@ fn band_px(t: &Neko, px: f32) -> El {
 /// The header row, and with it the button that unfolds the sessions column when it is folded. On Home the button is
 /// glass (`glass`: how it is made, `None` elsewhere), because it floats over the art with no header bar behind it.
 fn band_with(t: &Neko, px: f32, glass: Option<(crate::glass::Mode, bool)>) -> El {
-    let mut row = row().h(HEADER_H + 4.0).pt(4.0).w_full().px(px).gap(BAND_GAP).center_y().window_drag();
+    // The prototype's bar: 48 high on the hairline's line (`.bar`), so its centre is 24 from the window's top.
+    let mut row = row().h(48.0).w_full().px(px).gap(BAND_GAP).center_y().window_drag();
     if SIDEBAR_FOLDED.with(std::cell::Cell::get) {
         // The row's own padding and gap are in the way: the spacer makes the button's left edge land on 80.
         row = row.child(el().w(SHOW_SIDEBAR_X - REGION_LEFT - px - BAND_GAP).h(1.0).a11y_hidden()).child(show_sidebar_button(t, glass));
@@ -275,11 +294,6 @@ fn show_sidebar_button(t: &Neko, glass: Option<(crate::glass::Mode, bool)>) -> E
 fn flat_band(t: &Neko) -> El {
     let _ = t;
     row().h(BAND).pt(12.0).w_full().px(12.0).gap(8.0).center_y().window_drag()
-}
-
-/// Home's header row: the same as the session's, over the art, with the "Show sidebar" button on glass.
-fn home_band(t: &Neko, glass: (crate::glass::Mode, bool)) -> El {
-    band_with(t, 12.0, Some(glass))
 }
 
 /// A small icon button: 28 points, the ink muted, a soft fill under the pointer.

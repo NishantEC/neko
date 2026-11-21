@@ -3,7 +3,7 @@
 //!
 //! Every number here was read off the web page in embed mode (`scripts/identity-dom.mjs`), not guessed.
 
-use rune::{Color, El, Icon, Shadow, TextStyle, col, el, icon, row, text};
+use rune::{Color, El, Icon, TextStyle, col, el, icon, row, text};
 use rune_kit::{Select, TextInput};
 
 use crate::app::App;
@@ -53,22 +53,24 @@ pub fn tnum(style: TextStyle) -> TextStyle {
     TextStyle { features: "'tnum' 1", ..style }
 }
 
-/// A pebble: the secondary control's material (`.sky-pebble`): a gradient a few percent apart and the 1 px lit top edge.
+/// A pebble: the secondary control's material. The prototype has no gradient or lit edge: it is the tint, flat (`--tint`).
 pub fn pebble(t: &Neko, e: El) -> El {
-    let m = &t.mat;
-    e.fill(m.pebble_bottom).gradient(m.pebble_top, m.pebble_bottom).box_shadow(Shadow { y: 1.0, color: m.pebble_edge, inset: true, ..Shadow::default() })
+    e.fill(t.mat.pebble_bottom)
 }
 
-/// The ink: the primary control's material (`.sky-ink`): near black in light, near white in dark, the lit edge and a 1 px ring.
+/// The ink: the primary control's material (the prototype's `.btn.ink`): `--ink` flat, near white in dark and near black in light.
 pub fn ink(t: &Neko, e: El) -> El {
-    let m = &t.mat;
-    e.fill(m.ink_bottom).gradient(m.ink_top, m.ink_bottom).box_shadow(Shadow { y: 1.0, color: m.ink_edge, inset: true, ..Shadow::default() }).box_shadow(Shadow { spread: 1.0, color: m.ink_ring, inset: true, ..Shadow::default() })
+    e.fill(t.mat.ink_bottom)
 }
 
-/// A well: an input's or a track's fill with the shadow inside its top edge (`.sky-well`).
+/// A well: an input's or a track's fill, flat (`--tint`).
 pub fn well(t: &Neko, e: El) -> El {
-    let m = &t.mat;
-    e.fill(m.well).box_shadow(Shadow { y: 1.0, blur: 2.0, color: m.well_shadow, inset: true, ..Shadow::default() })
+    e.fill(t.mat.well)
+}
+
+/// An outlined control (`.btn.line`, `.sel`): no fill, the stronger hairline round it.
+pub fn outlined(t: &Neko, e: El) -> El {
+    e.border(1.0, t.surface.line_strong)
 }
 
 /// `Section` (`kit.tsx`): a heading line 28 high (20 semibold, a quiet count after it, actions at the right), 14 below it, then the body.
@@ -92,18 +94,18 @@ pub fn heading(t: &Neko) -> TextStyle {
 /// `Panel`: the grouped slab (radius 20, one fill, no border, no shadow). Its rows draw whatever they draw; for rows that are
 /// `SettingRow`s or `Row`s, which the web divides with hairlines, use [`panel_rows`].
 pub fn panel(t: &Neko, rows: Vec<El>) -> El {
-    col().w_full().radius(20.0).fill(t.mat.group).clip_rounded(20.0).children(rows)
+    col().w_full().radius(t.radius.card).fill(t.mat.group).clip_rounded(t.radius.card).children(rows)
 }
 
 /// [`panel`] whose rows are divided by hairlines 22 short of the edges, drawn on a row's top edge so they take no room
 /// (`.sky-group :is([data-slot="setting-row"], [data-slot="setup-row"]) + ...::before`).
 pub fn panel_rows(t: &Neko, rows: Vec<El>) -> El {
-    let mut c = col().w_full().radius(20.0).fill(t.mat.group).clip_rounded(20.0);
+    let mut c = col().w_full().radius(t.radius.card).fill(t.mat.group).clip_rounded(t.radius.card);
     for (i, r) in rows.into_iter().enumerate() {
         if i == 0 {
             c = c.child(r);
         } else {
-            c = c.child(col().w_full().child(r).child(row().absolute(0.0, 0.0).w_full().px(22.0).child(el().grow(1.0).h(1.0).fill(t.mat.divider).a11y_hidden()).a11y_hidden()));
+            c = c.child(col().w_full().child(r).child(row().absolute(0.0, 0.0).w_full().px(14.0).child(el().grow(1.0).h(1.0).fill(t.mat.divider).a11y_hidden()).a11y_hidden()));
         }
     }
     c
@@ -126,7 +128,7 @@ pub fn status(t: &Neko, key: &str, tone: Tone, words: &str) -> El {
 /// [`status`] with a key for its words too.
 pub fn status_keyed(t: &Neko, key: &str, text_key: &str, tone: Tone, words: &str) -> El {
     let (dot, wash, ink) = tone_colours(t, tone);
-    row().key(key.to_owned()).h(23.0).px(7.0).gap(6.0).center_y().radius(10.0).fill(wash).child(el().size(6.0, 6.0).radius(3.0).fill(dot).a11y_hidden()).child(text(words.to_owned()).key(text_key.to_owned()).font(font(t, 11.0, 500.0, 17.0)).color(ink))
+    row().key(key.to_owned()).h(22.0).px(9.0).gap(6.0).center_y().radius(11.0).fill(wash).child(el().size(6.0, 6.0).radius(3.0).fill(dot).a11y_hidden()).child(text(words.to_owned()).key(text_key.to_owned()).font(font(t, 11.0, 500.0, 17.0)).color(ink))
 }
 
 /// A status badge's dot, fill and words (`component-surfaces.css` `.ui-status`): the card at 96% over the foreground, or the meaning at 9 to
@@ -301,24 +303,23 @@ pub fn gated(enabled: bool, f: impl Fn(&mut App) + 'static) -> impl Fn(&mut App)
 /// `primary` is the ink, the page's one call to action; the others are the pebble. No border, no hover change, a press shrinks
 /// it to 97% (design system 4.1). `selected` is the same pebble: the web's secondary button is one too.
 pub fn button(t: &Neko, key: &str, label: &str, glyph: Option<&'static Icon>, primary: bool, selected: bool, on_press: impl Fn(&mut App) + 'static) -> El {
-    let _ = selected;
     let ink_words = if primary { t.mat.ink_fg } else { t.mat.pebble_fg };
-    // The icon is pulled 2 points in at both ends (`[&_svg]:-mx-0.5`).
-    let r = row().key(key.to_owned()).role("button").label(label).focusable(true).h(36.0).px(15.0).gap(6.0).center().radius(24.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).press_scale(0.97).on_press(on_press);
-    let mut r = if primary { ink(t, r) } else { pebble(t, r) };
+    // The prototype's `.btn`: 28 high, 11 at the sides, radius 7, 12.5 words; `.btn.ink` is the one primary, `.btn.line` an outline.
+    let r = row().key(key.to_owned()).role("button").label(label).focusable(true).h(28.0).px(11.0).gap(6.0).center().radius(t.radius.control).focus_ring(2.0, 2.0, t.kit.c.border_focus).press_scale(0.97).on_press(on_press);
+    let mut r = if primary { ink(t, r) } else if selected { outlined(t, r).fill(t.surface.tint) } else { outlined(t, r) };
     if let Some(g) = glyph {
         r = r.child(icon(g, 16.0).color(ink_words.alpha(0.8)).mx(-2.0).a11y_hidden());
     }
-    r.child(text(label.to_owned()).font(font(t, 14.0, 500.0, 20.0)).color(ink_words).a11y_hidden())
+    r.child(text(label.to_owned()).font(font(t, 12.5, if primary { 500.0 } else { 400.0 }, 18.0)).color(ink_words).a11y_hidden())
 }
 
 /// `Button variant="ghost" size="sm"`: no fill, the same words, the foreground at 4% under the pointer.
 pub fn ghost_button(t: &Neko, key: &str, label: &str, glyph: Option<&'static Icon>, on_press: impl Fn(&mut App) + 'static) -> El {
-    let mut r = row().key(key.to_owned()).role("button").label(label).focusable(true).h(36.0).px(15.0).gap(6.0).center().radius(24.0).hover(t.surface.hover).focus_ring(2.0, 2.0, t.kit.c.border_focus).press_scale(0.97).on_press(on_press);
+    let mut r = row().key(key.to_owned()).role("button").label(label).focusable(true).h(28.0).px(11.0).gap(6.0).center().radius(t.radius.control).hover(t.surface.tint).focus_ring(2.0, 2.0, t.kit.c.border_focus).press_scale(0.97).on_press(on_press);
     if let Some(g) = glyph {
-        r = r.child(icon(g, 16.0).color(t.text.base.alpha(0.8)).mx(-2.0).a11y_hidden());
+        r = r.child(icon(g, 16.0).color(t.text.muted).mx(-2.0).a11y_hidden());
     }
-    r.child(text(label.to_owned()).font(font(t, 14.0, 500.0, 20.0)).color(t.text.base).a11y_hidden())
+    r.child(text(label.to_owned()).font(font(t, 12.5, 400.0, 18.0)).color(t.text.muted).a11y_hidden())
 }
 
 /// A ghost button whose icon follows its words (the Rulebook's "View Neko’s built-in default" and its caret).
@@ -328,29 +329,29 @@ pub fn ghost_button_after(t: &Neko, key: &str, label: &str, glyph: &'static Icon
         .role("button")
         .label(label)
         .focusable(true)
-        .h(36.0)
-        .px(15.0)
+        .h(28.0)
+        .px(11.0)
         .gap(6.0)
         .center()
-        .radius(24.0)
-        .hover(t.surface.hover)
+        .radius(t.radius.control)
+        .hover(t.surface.tint)
         .focus_ring(2.0, 2.0, t.kit.c.border_focus)
         .press_scale(0.97)
         .on_press(on_press)
-        .child(text(label.to_owned()).font(font(t, 14.0, 500.0, 20.0)).color(t.text.base).a11y_hidden())
-        .child(icon(glyph, 16.0).color(t.text.base.alpha(0.8)).a11y_hidden())
+        .child(text(label.to_owned()).font(font(t, 12.5, 400.0, 18.0)).color(t.text.muted).a11y_hidden())
+        .child(icon(glyph, 16.0).color(t.text.muted).a11y_hidden())
 }
 
 /// The pebble button with its icon after the words ("Open commits on GitHub" and its arrow).
 pub fn button_after(t: &Neko, key: &str, label: &str, glyph: &'static Icon, on_press: impl Fn(&mut App) + 'static) -> El {
-    let r = row().key(key.to_owned()).role("button").label(label).focusable(true).h(36.0).px(15.0).gap(6.0).center().radius(24.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).press_scale(0.97).on_press(on_press);
-    pebble(t, r).child(text(label.to_owned()).font(font(t, 14.0, 500.0, 20.0)).color(t.mat.pebble_fg).a11y_hidden()).child(icon(glyph, 16.0).color(t.mat.pebble_fg.alpha(0.8)).a11y_hidden())
+    let r = row().key(key.to_owned()).role("button").label(label).focusable(true).h(28.0).px(11.0).gap(6.0).center().radius(t.radius.control).focus_ring(2.0, 2.0, t.kit.c.border_focus).press_scale(0.97).on_press(on_press);
+    outlined(t, r).child(text(label.to_owned()).font(font(t, 12.5, 400.0, 18.0)).color(t.mat.pebble_fg).a11y_hidden()).child(icon(glyph, 16.0).color(t.mat.pebble_fg.alpha(0.8)).a11y_hidden())
 }
 
 /// `Button variant="destructive-outline" size="sm"`: a pebble with coral words.
 pub fn danger_button(t: &Neko, key: &str, label: &str, on_press: impl Fn(&mut App) + 'static) -> El {
-    let r = row().key(key.to_owned()).role("button").label(label).focusable(true).h(36.0).px(15.0).center().radius(24.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).press_scale(0.97).on_press(on_press);
-    pebble(t, r).child(text(label.to_owned()).font(font(t, 14.0, 500.0, 20.0)).color(t.meaning.coral).a11y_hidden())
+    let r = row().key(key.to_owned()).role("button").label(label).focusable(true).h(28.0).px(11.0).center().radius(t.radius.control).focus_ring(2.0, 2.0, t.kit.c.border_focus).press_scale(0.97).on_press(on_press);
+    outlined(t, r).child(text(label.to_owned()).font(font(t, 12.5, 400.0, 18.0)).color(t.meaning.coral).a11y_hidden())
 }
 
 /// The web's `Select` trigger in a settings row (`ui/select.tsx`): `width` wide, 36 high, a well at radius 24, 15 at the
@@ -359,7 +360,7 @@ pub fn danger_button(t: &Neko, key: &str, label: &str, on_press: impl Fn(&mut Ap
 pub fn select(s: &App, t: &Neko, layer: &mut Vec<El>, key: &str, label: &str, options: &[String], current: &str, width: f32, choose: impl Fn(&mut App, &str) + Clone + 'static) -> El {
     let mut kit = t.kit.clone();
     // Under 640 the select's `sm:text-sm` is off: 16 point words.
-    kit.ty.ui_medium = if page_width() < 640.0 { font(t, 16.0, 400.0, 24.0) } else { font(t, 14.0, 400.0, 20.0) };
+    kit.ty.ui_medium = font(t, 12.5, 400.0, 18.0);
     let (open_key, close_key) = (key.to_owned(), key.to_owned());
     let trigger = Select::new(key, options)
         .current(Some(current))
@@ -379,14 +380,14 @@ pub fn select(s: &App, t: &Neko, layer: &mut Vec<El>, key: &str, label: &str, op
         .build(&kit, layer)
         .key(format!("pick-{key}"))
         .w(width)
-        .h(36.0)
-        .pl(15.0)
-        .pr(15.0)
+        .h(28.0)
+        .pl(10.0)
+        .pr(8.0)
         .py(0.0)
         .gap(6.0)
-        .radius(24.0)
+        .radius(t.radius.control)
         .justify_between();
-    well(t, trigger)
+    outlined(t, trigger)
 }
 
 /// `Tabs` (`ui/tabs.tsx`): a 42 high well (radius 10, 3 inside, tabs 2 apart) holding 36 high tabs with 9 at the sides, 16 point
@@ -394,13 +395,12 @@ pub fn select(s: &App, t: &Neko, layer: &mut Vec<El>, key: &str, label: &str, op
 pub type Tab = (String, String, bool, Box<dyn Fn(&mut App)>);
 
 pub fn tabs(t: &Neko, tabs: Vec<Tab>) -> El {
-    // A 40 high well (radius 24, 3 inside, tabs 2 apart) of 34 high tabs, 14 at the sides, 14 point medium words; the open one a pebble.
-    let mut track = row().key("tabs").role("tablist").h(40.0).padding(3.0).gap(2.0).center_y().radius(24.0);
-    track = well(t, track);
+    // The prototype's `.seg`: a well of 2 inside (radius 8, the tint at 6%), buttons 24 high with 10 at the sides, 12 point words, the open one raised.
+    let mut track = row().key("tabs").role("tablist").h(28.0).padding(2.0).gap(1.0).center_y().radius(8.0).fill(t.surface.seg);
     for (key, label, open, press) in tabs {
-        let tab = row().key(key).role("tab").label(label.clone()).checked(open).focusable(true).h(34.0).px(14.0).center().radius(21.0).hover(if open { Color::TRANSPARENT } else { t.surface.hover }).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(move |s: &mut App| press(s));
-        let tab = if open { pebble(t, tab) } else { tab };
-        track = track.child(tab.child(text(label).font(font(t, 14.0, 500.0, 20.0)).color(if open { t.mat.pebble_fg } else { t.text.muted }).a11y_hidden()));
+        let tab = row().key(key).role("tab").label(label.clone()).checked(open).focusable(true).h(24.0).px(10.0).center().radius(6.0).hover(if open { Color::TRANSPARENT } else { t.surface.hover }).focus_ring(2.0, 2.0, t.kit.c.border_focus).on_press(move |s: &mut App| press(s));
+        let tab = if open { tab.fill(t.surface.seg_on).border(1.0, t.surface.border) } else { tab };
+        track = track.child(tab.child(text(label).font(font(t, 12.0, 400.0, 16.0)).color(if open { t.text.base } else { t.text.faint }).a11y_hidden()));
     }
     track
 }
@@ -434,9 +434,10 @@ pub fn toggle(t: &Neko, key: &str, label: &str, on: bool, f: impl Fn(&mut App) +
 
 /// [`toggle`] that cannot be pressed while `enabled` is false (what it changes has not loaded).
 pub fn toggle_when(t: &Neko, key: &str, label: &str, on: bool, enabled: bool, f: impl Fn(&mut App) + 'static) -> El {
-    let thumb = el().size(20.0, 20.0).radius(10.0).fill(if on { t.mat.thumb_on } else { t.mat.thumb_off }).shadow(1.0, 3.0, Color::BLACK.alpha(0.25)).a11y_hidden();
-    let mut r = row().key(key.to_owned()).role("switch").label(label.to_owned()).checked(on).disabled(!enabled).focusable(enabled).size(46.0, 28.0).padding(4.0).center_y().radius(14.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).child(thumb);
-    r = if on { r.fill(t.mat.pebble_fg) } else { well(t, r) };
+    // The prototype's `.sw`: 34 x 20, the thumb 16 and 2 inside; off is the stronger hairline, on is the ink.
+    let thumb = el().size(16.0, 16.0).radius(8.0).fill(if on { t.mat.thumb_on } else { t.mat.thumb_off }).a11y_hidden();
+    let mut r = row().key(key.to_owned()).role("switch").label(label.to_owned()).checked(on).disabled(!enabled).focusable(enabled).size(34.0, 20.0).padding(2.0).center_y().radius(10.0).focus_ring(2.0, 2.0, t.kit.c.border_focus).child(thumb);
+    r = if on { r.fill(t.mat.ink_bottom) } else { r.fill(t.surface.line_strong) };
     if !enabled {
         r = r.opacity(0.5);
     }
