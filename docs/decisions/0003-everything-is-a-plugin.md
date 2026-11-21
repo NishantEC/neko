@@ -453,7 +453,7 @@ files. Effort: **S** up to a day, **M** two to four days, **L** one to two weeks
 | Checkpoints and undo | `neko.checkpoints` | On | Rq, T, Tb | M | Hidden refs stay git's |
 | Claude Code, Codex, OpenCode adapters | `neko.runtime-claude`, `-codex`, `-opencode` | One foundation, rest On | Rt | M each | Behind K5; ends per-site fallback code (S3) |
 | MCP connections, OAuth, credentials, registry, Tools page | `neko.mcp` | On | Rq, T, St, UI, Tb | L | The bridge transport and leases stay K7; this feeds tools into it |
-| Crew tools and command queue | `neko.crew` | On | T, P, Rq, Tb | M | Replaces the static `TOOLS` array |
+| Delegation tools and command queue | `neko.delegation` | On | T, P, Rq, Tb | M | Replaces the static `TOOLS` array |
 | Home chat, tool cards, full power | `neko.chat` | On | Rq, P, UI | L | Becomes a kind of conversation (S8) when cats/tasks follow |
 | Cats | `neko.cats` | On | Rq, Tr, UI, Tb, T, P | M | Already table, variant, tick, files: nearest to done |
 | Routines ("rounds"), guard rails, catch-up | `neko.rounds` | On | Tr, Rq, N, UI, Tb | L | Rename in code follows the owner's words |
@@ -511,7 +511,7 @@ machine needs; the whole plan is **about ten to twelve weeks of agent time**, an
 | **5** | **`Runs` service (H3 of the system map)** | Held starts and running counts include routines, watches, curator and judge, not only tickets and cats | ~5 days |
 | **6** | **Cats, watches, rounds, goals** (in that order) | Each is a row on the Plugins page you can drain and stop; `quiet` profile exists | cats ~3 days, watches ~4, rounds ~7, goals ~8 |
 | **7** | **`neko.issues`, born as a plugin** | The Issues page and its agent tools | ~8 days |
-| **8** | **Tools as a contribution: `neko.crew`, `neko.mcp`, `neko.chat`** | A plugin adds an agent tool by manifest; the static `TOOLS` array and `crew_call` match arms are gone | ~10 days |
+| **8** | **Tools as a contribution: `neko.delegation`, `neko.mcp`, `neko.chat`** | A plugin adds an agent tool by manifest; the static `TOOLS` array and `crew_call` match arms are gone | ~10 days |
 | **9** | **Plugin manager: packs, web plugins and Luau under one install flow; web plugins behind a sandboxed frame; decide the process-tier protocol** | One "Plugins" page replaces Packs and Customisations; a web plugin can no longer reach the page's authority directly | ~6 days |
 | **10** | **Foundation: sessions, pipeline, delivery, checkpoints, runtimes; delete the legacy set** | No change on screen; `neko-core` and `neko-daemon` no longer contain feature names outside plugin directories | ~3 weeks |
 
@@ -591,7 +591,7 @@ section 2, not from running `dsh`. The 8 to 10 thousand line kernel estimate is 
 | 1 | Search `Provider` trait | `neko-core/src/provider.rs`; 24 `impl Provider` | Quick panel results |
 | 2 | Agent runner variants | `native_runner/cli_workers.rs`, Codex adapter, `AgentRuntime.provider`, `agent_catalog.rs` | Every run kind |
 | 3 | MCP connections | `mcp_host`, per-workspace grants | Agent tools |
-| 4 | Crew tools | `neko_protocol::crew::TOOLS`, `mcp_host/bridge.rs`, `workbench/crew.rs` | Chat, ticket runs, cats |
+| 4 | Delegation tools (code: `crew`, to be renamed) | `neko_protocol::crew::TOOLS`, `mcp_host/bridge.rs`, `workbench/crew.rs` | Chat, ticket runs, cats |
 | 5 | Packs (`pack.toml`) | `neko-core/src/packs.rs`, `packs/` | Tools, skills, UI, routines, in one approval |
 | 6 | Luau slots (card, view) | `apps/neko-rune/src/luau/` | Rune only |
 | 7 | Web plugins, viewers, fences, pages, settings sections, task tabs | `web/src/{host.ts,registry.ts,plugins.tsx,canvas/viewers.ts}`, `/api/plugins`, `/api/storage` | Web UI and the Home prompt |
