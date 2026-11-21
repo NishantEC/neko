@@ -290,7 +290,7 @@ pub fn mount_guard(s: &App, t: &Neko, layer: &mut Vec<El>) {
         .px(16.0)
         .pb(16.0)
         .gap(12.0)
-        .child(text("The rulebook has changes that are not saved. Leaving now discards them.").key("guard-detail").font(t.ty.meta).color(t.text.muted).wrap().min_w(0.0))
+        .child(text(if s.cats.open.is_some() && s.cat_file_dirty() { "This file has changes that are not saved. Leaving now discards them." } else { "The rulebook has changes that are not saved. Leaving now discards them." }).key("guard-detail").font(t.ty.meta).color(t.text.muted).wrap().min_w(0.0))
         .child(row().w_full().gap(8.0).justify_end().child(no).child(yes));
     rune_kit::Dialog::new("guard", "Discard your changes?").open(true).width(420.0).fit().child(body).on_close(|s: &mut App| s.guard_keep()).build(&t.kit, layer);
 }

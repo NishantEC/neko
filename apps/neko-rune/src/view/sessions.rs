@@ -251,6 +251,8 @@ fn more_row(key: &str, label: String, t: &Neko, on_press: impl Fn(&mut App) + 's
 fn list(s: &App, t: &Neko, layer: &mut Vec<El>) -> El {
     // The rows are one focus group: Up and Down rove between them, Return opens the one in focus.
     let mut c = col().key("sessions-list").role("list").label("Sessions").focus_group().w_full().gap(GAP);
+    // Cats come first: their faces, then the sessions by state.
+    c = c.child(super::cats::section(s, t, layer));
     match &s.summary {
         None => {
             // Before the first snapshot, and while Neko is not running: say which, calmly.

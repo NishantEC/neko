@@ -137,6 +137,8 @@ pub enum Reply {
     /// The suggestions and whether Neko looks for patterns (the answer to every Improvements request).
     Improve(Box<neko_protocol::improve::ImproveReply>),
     Answered(String),
+    /// What the daemon said about cats: the active list, a suggestion or a cat's files.
+    Cats(Box<super::CatsData>),
     /// Done, and nothing to apply.
     Done,
     /// The daemon said no, in its own words.
@@ -268,6 +270,7 @@ pub fn make(socket: &Path, call: &Call, open: Option<&str>) -> Reply {
         Response::Packs(listing) => Reply::Packs(listing),
         Response::PackPreview(preview) => Reply::PackPreview(preview),
         Response::Improve(reply) => Reply::Improve(Box::new(reply)),
+        Response::Cats(reply) => super::CatsData::from_reply(*reply).map_or(Reply::Done, |d| Reply::Cats(Box::new(d))),
         Response::SearchResults { items, .. } => Reply::Quota(quota_rows(&items)),
         Response::NeedsYouAnswered { summary } => Reply::Answered(summary),
         Response::Error { message } => Reply::Refused(message),

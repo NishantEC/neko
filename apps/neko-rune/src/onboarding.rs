@@ -116,6 +116,7 @@ impl App {
         if !self.guard(crate::extra::Going::Onboarding) {
             return;
         }
+        self.leave_cats();
         self.onboarding.step = at.index();
         self.onboarding.manual = true;
         self.onboarding.error = None;

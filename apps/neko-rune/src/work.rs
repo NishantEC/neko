@@ -384,7 +384,7 @@ impl App {
     }
 
     /// What was typed for the task open now is kept for when it is opened again.
-    fn park_draft(&mut self) {
+    pub(crate) fn park_draft(&mut self) {
         if let Some(id) = self.selected.clone() {
             let text = self.composer.text.clone();
             if text.is_empty() { self.work.drafts.remove(&id) } else { self.work.drafts.insert(id, text) };
@@ -400,6 +400,7 @@ impl App {
         if !same {
             self.park_draft();
         }
+        self.leave_cats();
         self.selected = Some(id.to_owned());
         self.panel.log_all = false;
         self.view = None;
@@ -719,6 +720,10 @@ impl App {
 
     /// What a daemon answer does to the state. True when something on screen changed.
     pub fn apply_reply(&mut self, call: &Call, reply: Reply) -> bool {
+        // Cats have their own state and their own words for a refusal (`cats.rs`).
+        if let Call::Cats(cat_call) = call {
+            return self.cats_reply(cat_call, reply);
+        }
         // A pack was installed, updated, approved or removed: its panels are asked for again at the next tick.
         if matches!(reply, Reply::Packs(_)) {
             self.luau.resync();
@@ -795,6 +800,7 @@ impl App {
             Reply::Extra(answer) => self.extra_answer(call, *answer),
             Reply::Models { choices, catalog } => {
                 self.onboarding.checking = false;
+                self.cats.choices = choices.clone();
                 if let Some(form) = self.new_form.as_mut() {
                     form.choices = choices;
                 }
@@ -869,6 +875,8 @@ impl App {
                 self.neko.loaded = true;
                 changed
             }
+            // Cat answers are taken at the top of this function.
+            Reply::Cats(_) => false,
             Reply::Answered(summary) => {
                 self.neko.notes.clear();
                 self.neko.note = Some(format!("Done: {summary}"));

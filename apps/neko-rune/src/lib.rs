@@ -14,6 +14,8 @@ pub mod art_gpu;
 pub mod attachments;
 pub mod board;
 pub mod browser;
+pub mod cat_face;
+pub mod cats;
 pub mod clock;
 pub mod compose;
 pub mod connection;
@@ -51,6 +53,7 @@ pub mod runtime_pick;
 pub mod scenes_batch_a;
 pub mod scenes_batch_b;
 pub mod scenes_batch_d;
+pub mod scenes_cats;
 pub mod scenes_luau;
 pub mod scenes_pages;
 pub mod scenes_setup;
@@ -231,6 +234,11 @@ pub fn on_key(s: &mut App, ev: &rune::KeyEvent, tx: &mut rune::Tx) -> bool {
     // ⌘F in Settings goes to its search field, which filters the rows of every section.
     if ev.is_command('f') && !ev.mods.shift && s.view == Some(views::FullView::Settings) {
         tx.focus("settings-search", true);
+        return true;
+    }
+    // ⌘S in a cat's file saves it.
+    if ev.is_command('s') && !ev.mods.shift && s.cats.open.is_some() && s.cats.editor.is_some() {
+        s.save_cat_file();
         return true;
     }
     // ⌘S in the rulebook saves it (the web's textarea does the same).

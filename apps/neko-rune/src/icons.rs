@@ -92,6 +92,9 @@ icon_body!(DONE, "done", r#"<circle cx="8" cy="8" r="5.5" fill="none" stroke="cu
 icon_body!(PENCIL, "pencil", r#"<path d="M3 13L3.6 10.2L10.8 3L13 5.2L5.8 12.4L3 13Z M9.4 4.4L11.6 6.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
 icon_body!(TRASH, "trash", r#"<path d="M3 4.5H13M6.2 4.5V3H9.8V4.5M4.5 4.5L5 13H11L11.5 4.5M7 7V10.5M9 7V10.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
 icon_body!(LOCK, "lock", r#"<rect x="3.5" y="7" width="9" height="6.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 7V5.2C5.5 3.9 6.6 3 8 3C9.4 3 10.5 3.9 10.5 5.2V7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
+// Cats (`view/cats.rs`): a pushpin for Pin, a box for Archive.
+icon_body!(PIN, "pin", r#"<path d="M9.8 2.5L13.5 6.2L11.6 7.2L10.6 10.6L5.4 5.4L8.8 4.4ZM5.6 10.4L2.5 13.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+icon_body!(ARCHIVE, "archive", r#"<rect x="2.5" y="3" width="11" height="3.2" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3.5 6.2V12C3.5 12.6 4 13 4.6 13H11.4C12 13 12.5 12.6 12.5 12V6.2M6.5 9H9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
 icon_body!(KEY, "key", r#"<circle cx="5.5" cy="10.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7.3 8.7L13 3M11 5L12.5 6.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 
 /// A progress ring's arc of `fraction` (0 to 1) on the 16-unit grid: 2 px stroke, starting at the top and
@@ -126,7 +129,7 @@ pub fn ring_arc(fraction: f32) -> &'static Icon {
 static ALL: &[&Icon] = &[
     &CIRCLE_HALF, &SUN, &MOON, &GLOBE, &PAUSE, &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND, &COLLAPSE, &CANVAS, &DIFF,
     &FILES, &TERMINAL, &SIDEBAR, &SIDEBAR_LEFT, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CHECKLIST, &INFO, &CROSS, &DOT, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &ARROW_RIGHT, &ROWS, &KANBAN, &TREE, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO,
-    &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &PENCIL, &TRASH, &LOCK, &KEY,
+    &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &PENCIL, &TRASH, &LOCK, &PIN, &ARCHIVE, &KEY,
 ];
 
 /// The icon named `name` (`"inbox"`, `"clock"`, ...), or none: a plugin that names an icon the set does not have gets the dot.
@@ -149,7 +152,7 @@ mod tests {
         let declared = src.lines().filter(|l| l.starts_with("icon_body!(")).count();
         let icons = vec![
             &CIRCLE_HALF, &SUN, &MOON, &GLOBE, &PAUSE, &INBOX, &CALENDAR, &GEAR, &MORE, &PLUS, &CLOSE_SMALL, &SEARCH, &PULL_REQUEST, &EYE, &CLOCK, &MEMORY, &PEOPLE, &WRENCH, &GAUGE, &PANEL_RIGHT, &SPARK, &SEND, &CHECK_LINE, &CHEVRON_LEFT, &CHEVRON_RIGHT, &PLAY, &EXTERNAL, &EXPAND,
-            &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &SIDEBAR_LEFT, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &ARROW_RIGHT, &ROWS, &KANBAN, &TREE, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO, &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &CHECKLIST, &INFO, &PENCIL, &TRASH, &KEY, &LOCK,
+            &COLLAPSE, &CANVAS, &DIFF, &FILES, &TERMINAL, &SIDEBAR, &SIDEBAR_LEFT, &CHEVRON_DOWN, &CHEVRON_UP_DOWN, &FOLDER, &REASON_LIST, &REASON_QUESTION, &REASON_BRANCH, &CROSS, &CLAUDE_GLYPH, &CODEX_GLYPH, &OPENCODE_GLYPH, &POWER, &ARROW_UP, &ARROW_RIGHT, &ROWS, &KANBAN, &TREE, &REFRESH, &FILE, &QUOTE, &COPY, &UNDO, &KEYBOARD, &EDIT, &SEND_NOW, &DONE, &CHECKLIST, &INFO, &PENCIL, &TRASH, &KEY, &LOCK, &PIN, &ARCHIVE,
         ];
         // The two filled ones (MORE's dots count as line icons here: they carry no stroke) are `icon_body!` lines too.
         assert_eq!(icons.len() + 1, declared, "a declared icon is missing from this list (the dot is the +1)");

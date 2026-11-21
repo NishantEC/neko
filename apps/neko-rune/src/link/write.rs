@@ -189,6 +189,8 @@ pub enum Call {
     Extra(Box<super::ExtraCall>),
     /// One request of the Setup pages (Workspaces, Watching, Tools, Skills, Memory, Profiles, Schedules): `link/setup.rs`.
     Setup(Box<super::SetupAction>),
+    /// One request about cats (`link/cats.rs`): the list, create, edit, pin, reorder, archive and a cat's four files.
+    Cats(Box<super::CatCall>),
 }
 
 impl Call {
@@ -233,7 +235,7 @@ impl Call {
 
     /// Whether this only fetches.
     pub fn reads(&self) -> bool {
-        matches!(self, Call::Refresh | Call::Checkpoints { .. } | Call::CheckpointDiff { .. } | Call::TaskFolder { .. } | Call::ArtifactFile { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } | Call::SignedWebUrl { .. } | Call::PluginViewers | Call::PluginPages | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::ModelsRefresh | Call::RoutinesFull | Call::CalendarEvents { .. } | Call::PhoneSettings | Call::Appearance | Call::Quota | Call::Plugins) || matches!(self, Call::Setup(a) if a.reads())
+        matches!(self, Call::Refresh | Call::Checkpoints { .. } | Call::CheckpointDiff { .. } | Call::TaskFolder { .. } | Call::ArtifactFile { .. } | Call::ArtifactInfo { .. } | Call::TaskArtifacts { .. } | Call::SignedWebUrl { .. } | Call::PluginViewers | Call::PluginPages | Call::Unseen | Call::Digest | Call::Inbox | Call::Models | Call::ModelsRefresh | Call::RoutinesFull | Call::CalendarEvents { .. } | Call::PhoneSettings | Call::Appearance | Call::Quota | Call::Plugins) || matches!(self, Call::Setup(a) if a.reads()) || matches!(self, Call::Cats(c) if c.reads())
     }
 
     /// The request the daemon receives: the same JSON the web UI posts.
@@ -350,6 +352,7 @@ impl Call {
             Call::ApplyUpdate => Request::Workbench(Command::ApplyPendingUpdate),
             Call::SetDevCheckout { path } => Request::Workbench(Command::SetDevCheckout { path }),
             Call::Setup(call) => call.wire(),
+            Call::Cats(call) => call.wire(),
             Call::WipeTasks => Request::Workbench(Command::StartOver { keep_published: true }),
             Call::DropTheme { id } => Request::RemoveTheme { id },
             Call::PreviousWebBuild => Request::Workbench(Command::RollBackWebUi),

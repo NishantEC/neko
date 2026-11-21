@@ -48,7 +48,7 @@ fn bare(code: &str, needle: &str) -> usize {
         .count()
 }
 
-const PREFIXES: [&str; 13] = ["Request::", "Command::", "CrewCommand::", "CheckpointCommand::", "GoalCommand::", "McpCommand::", "SkillCommand::", "ProfileCommand::", "ScheduleCommand::", "ImportCommand::", "DecisionContextCommand::", "PackCommand::", "ImproveCommand::"];
+const PREFIXES: [&str; 14] = ["Request::", "Command::", "CrewCommand::", "CheckpointCommand::", "GoalCommand::", "McpCommand::", "SkillCommand::", "ProfileCommand::", "ScheduleCommand::", "ImportCommand::", "DecisionContextCommand::", "PackCommand::", "ImproveCommand::", "CatCommand::"];
 
 /// Every `Prefix::Name` the code names, as the daemon's request paths.
 fn named(code: &str) -> BTreeSet<String> {
@@ -145,6 +145,9 @@ const RUNE_EXTRAS: &[&str] = &[
     // Luau plugins (`src/luau/`): the files of a healthy, unchanged pack, which Rune runs in a sandbox. The daemon refuses a pack that is
     // not Healthy or whose files differ from what the person approved; Rune never reads a pack folder itself.
     "PackUi",
+    // Cats (docs/knowledge/cats.md, "Rune: slice 1"): the web UI does not send these yet. The sub-commands are `CAT_REQUESTS` below; the
+    // thread (`CatThread`, `CatSay`) is not in this slice. `Archive` is built only inside a confirm (`archiving_a_cat_...`).
+    "Cats",
     // Rune as the Mac app (`src/shell/notify.rs`, `--app`): the routine notifier polls for needs-you items, as the Swift app's `RoutineNotifier.swift` does.
     "RoutineNotifications",
     // Rune as the Mac app, Calendar and Reminders from EventKit (`src/shell/calendar.rs`, `reminders.rs`, `--app`): what the Swift app's EventKit
@@ -155,6 +158,9 @@ const RUNE_EXTRAS: &[&str] = &[
     "PhoneRemindersSync",
     "PhoneRemindersDone",
 ];
+
+/// The cat requests the cat screens send (`CatCommand`, all but the thread): none is the web's yet, so they are named here.
+const CAT_REQUESTS: &[&str] = &["List", "Create", "Update", "Archive", "Pin", "Reorder", "Suggest", "Files", "WriteFile"];
 
 /// The envelopes: the web sends `Crew`, `Goals` and `Checkpoints` with the sub-command in the payload, and
 /// `Workbench` around every command.
@@ -298,6 +304,7 @@ fn rune_sends_only_what_the_web_sends_and_its_extras() {
         let known = web.contains(tail)
             || RUNE_EXTRAS.contains(&tail)
             || ENVELOPES.contains(&tail)
+            || (prefix == "CatCommand" && CAT_REQUESTS.contains(&tail))
             || (SUBCOMMAND_PREFIXES.contains(&prefix) && web_mentions(tail));
         if !known {
             unreviewed.push(full.clone());
@@ -340,6 +347,58 @@ fn the_improve_requests_are_exactly_the_protocols_and_the_webs() {
     for name in &improve {
         assert!(web_mentions(name), "the web's sources do not send Improve `{name}`");
     }
+}
+
+#[test]
+fn the_cat_requests_are_exactly_the_protocols_but_the_thread() {
+    // Rune names every `CatCommand` the protocol has except the cat's own thread (`CatThread`, `CatSay`: the next build), and `Request::Cats`.
+    let used = sent();
+    let cats: BTreeSet<&str> = used.iter().filter_map(|s| s.strip_prefix("CatCommand::")).collect();
+    let protocol = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/neko-protocol/src/cats.rs")).unwrap();
+    let enum_text = protocol.split("pub enum CatCommand {").nth(1).unwrap().split("\n}\n").next().unwrap();
+    let variants: BTreeSet<&str> = enum_text.lines().filter(|l| l.starts_with("    ") && !l.starts_with("     ") && !l.trim_start().starts_with("//")).filter_map(|l| l.trim().split(|c: char| !c.is_alphanumeric()).next()).filter(|v| v.chars().next().is_some_and(char::is_uppercase)).filter(|v| !matches!(*v, "CatThread" | "CatSay")).collect();
+    assert!(variants.len() >= 9, "{variants:?}");
+    assert_eq!(cats, variants);
+    assert_eq!(CAT_REQUESTS.iter().copied().collect::<BTreeSet<_>>(), variants, "CAT_REQUESTS lists exactly them");
+    assert!(used.contains("Request::Cats"));
+    for (path, text) in crate_sources() {
+        if !path.components().any(|c| c.as_os_str() == "link") {
+            assert!(!production(&text).contains("CatCommand"), "{} names `CatCommand`: cat requests belong in src/link/", path.display());
+        }
+    }
+}
+
+#[test]
+fn archiving_a_cat_and_clearing_a_file_are_only_sent_from_a_confirmation() {
+    // `CatCall::Archive` is built once, in `ask_archive_cat`, inside `confirm(Ask {`; a `WriteFile` with empty text (it clears the file) likewise.
+    let mut archives = 0;
+    let mut clears = 0;
+    for (path, text) in crate_sources() {
+        if path.components().any(|c| c.as_os_str() == "link") {
+            continue;
+        }
+        let code = production(&text);
+        let confirmed = |at: usize| {
+            let mut from = at.saturating_sub(900);
+            while !code.is_char_boundary(from) {
+                from += 1;
+            }
+            code[from..at].contains("confirm(Ask {")
+        };
+        for (at, _) in code.match_indices("CatCall::Archive") {
+            archives += 1;
+            assert!(confirmed(at), "{}: `CatCall::Archive` is built outside a confirm dialog", path.display());
+            assert!(path.ends_with("cats.rs") && !path.to_string_lossy().contains("/view/"), "{}: archive belongs in src/cats.rs", path.display());
+        }
+        for (at, _) in code.match_indices("CatCall::WriteFile") {
+            let tail: String = code[at..].chars().take(140).collect();
+            if tail.contains("text: String::new()") {
+                clears += 1;
+                assert!(confirmed(at), "{}: an emptying `CatCall::WriteFile` is built outside a confirm dialog", path.display());
+            }
+        }
+    }
+    assert_eq!((archives, clears), (1, 1), "the archive and the clear are each built in one confirmation");
 }
 
 #[test]

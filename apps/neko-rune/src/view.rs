@@ -10,6 +10,7 @@
 
 mod all;
 mod board;
+mod cats;
 mod calendar;
 mod compose;
 mod composer;
@@ -125,7 +126,9 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         window = window.child(session::region(s, &t, &mut layer, frame));
         if fit.context > 0.0 {
             window = window.child(grip(Region::Context, &t));
-            window = window.child(context::panel(s, &t, &mut layer, fit.context).w(fit.context).transition(panel_transition()));
+            // On a cat's page the panel is the cat's (Overview, Files); otherwise the session's context.
+            let side = if s.cats.open.is_some() { cats::panel(s, &t, &mut layer) } else { context::panel(s, &t, &mut layer, fit.context) };
+            window = window.child(side.w(fit.context).transition(panel_transition()));
         }
     }
     if fit.neko_open {
@@ -141,6 +144,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     compose::mount_message_menu(s, &t, &mut layer);
     runtime::mount(s, &t, &mut layer);
     dialogs::mount(s, &t, &mut layer);
+    cats::mount_sheet(s, &t, &mut layer, win_h);
     settings_d::mount_guard(s, &t, &mut layer);
     crate::toasts::mount(s, &t, &mut layer);
     // Every popover, menu, select, dialog, the palette and toast is an element of this layer: while there is

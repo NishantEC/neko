@@ -454,6 +454,9 @@ pub struct TaskMeta {
     pub display_title: Option<String>,
     #[serde(default)]
     pub created_at_ms: i64,
+    /// The cat that started it, when one did (`Task::cat_id`).
+    #[serde(default)]
+    pub cat_id: Option<String>,
 }
 
 /// A runtime in words, as the web's header chip says it (`modelLabel` with a default): "Claude · default".
@@ -485,6 +488,9 @@ pub fn short_id(id: &str) -> String {
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Summary {
     pub digest: String,
+    /// The change signal for cats (`Snapshot::cats_rev`): when it moves, the cat list and a cat's files are read again.
+    #[serde(default)]
+    pub cats_rev: u64,
     /// The runtime new work uses, as words ("Codex · default model").
     #[serde(default)]
     pub runtime: String,
@@ -581,6 +587,7 @@ impl Summary {
         let now = neko_protocol_now_ms();
         let (tree_input, tree) = super::tree_model::TreeInput::from_snapshot(snapshot, now);
         Summary {
+            cats_rev: snapshot.cats_rev,
             settings: SettingsView {
                 runtime: snapshot.agent_runtime.clone(),
                 task_budget_cents: snapshot.task_budget_cents,
@@ -619,7 +626,7 @@ impl Summary {
                 .iter()
                 .map(|t| {
                     let pull_request = t.pull_request.as_ref().filter(|p| !p.url.is_empty() && !p.status.as_ref().is_some_and(|s| matches!(s.state.as_str(), "MERGED" | "CLOSED"))).map(|p| p.url.clone());
-                    (t.id.clone(), TaskMeta { workspace_id: t.workspace_id.clone(), repository: snapshot.task_roots.get(&t.id).cloned().unwrap_or_default(), pull_request, display_title: t.display_title.clone().filter(|d| !d.is_empty()), created_at_ms: t.created_at_ms })
+                    (t.id.clone(), TaskMeta { workspace_id: t.workspace_id.clone(), repository: snapshot.task_roots.get(&t.id).cloned().unwrap_or_default(), pull_request, display_title: t.display_title.clone().filter(|d| !d.is_empty()), created_at_ms: t.created_at_ms, cat_id: t.cat_id.clone() })
                 })
                 .collect(),
             land_on_main: snapshot.land_on_main.iter().cloned().collect(),

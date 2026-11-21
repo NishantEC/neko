@@ -97,7 +97,8 @@ pub enum CatCommand {
         area: Option<String>,
         #[serde(default)]
         model_policy: Option<ModelPolicy>,
-        #[serde(default, deserialize_with = "present")]
+        // Not written when unchanged: a `null` on the wire means "remove the limit", so a client that serialised `None` as `null` would clear it.
+        #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
         daily_limit_micro_usd: Option<Option<u64>>,
         #[serde(default)]
         purpose: Option<String>,

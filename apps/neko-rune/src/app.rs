@@ -212,6 +212,8 @@ pub struct App {
     pub pages: Pages,
     /// Setup: its section, the open dialog and rows (`view/setup/`).
     pub setup: crate::view::setup::SetupState,
+    /// Cats: the list, the open cat's page, the New cat sheet and the file editor (`cats.rs`).
+    pub cats: crate::cats::CatsState,
     /// The context panel: its tabs, the loaded file or artifact, the viewers' state.
     pub panel: crate::panel::Panel,
     /// The right-click menu on a message: which, and where.
@@ -427,6 +429,7 @@ impl Default for App {
             closed_menu: None,
             pages: Pages::default(),
             setup: crate::view::setup::SetupState::default(),
+            cats: crate::cats::CatsState::default(),
             panel: crate::panel::Panel::standard(),
             msg_menu: None,
             compose: crate::compose::ComposeUi::default(),
@@ -528,7 +531,9 @@ impl App {
         self.now_ms = (self.clock)();
         // A window opens on Home; a selection that has gone puts it back there.
         let gone = self.selected.as_ref().is_some_and(|id| !summary.tasks.iter().any(|t| &t.id == id));
+        let cats_rev = summary.cats_rev;
         self.summary = Some(summary);
+        self.cats_sync(cats_rev);
         self.seed_settings();
         if gone {
             self.selected = None;
@@ -687,6 +692,7 @@ impl App {
         if !self.guard(crate::extra::Going::Plugin(page.clone())) {
             return;
         }
+        self.leave_cats();
         self.plugin_view = Some(page);
         self.view = None;
         self.more_open = false;
@@ -698,6 +704,7 @@ impl App {
         if view != FullView::Settings && !self.guard(crate::extra::Going::View(view)) {
             return;
         }
+        self.leave_cats();
         self.plugin_view = None;
         self.view = Some(view);
         self.more_open = false;
@@ -776,7 +783,7 @@ impl App {
 
     /// Whether Home is what the middle region shows: no session chosen and no full view or plugin page.
     pub fn home_shown(&self) -> bool {
-        self.selected.is_none() && self.view.is_none() && self.plugin_view.is_none() && !self.lab
+        self.selected.is_none() && self.view.is_none() && self.plugin_view.is_none() && self.cats.open.is_none() && !self.lab
     }
 
     /// Home's "3 running" and "3 need you" filter the sessions column to that group; pressing it again clears it.

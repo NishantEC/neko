@@ -18,6 +18,7 @@
 
 pub mod http;
 pub mod luau;
+mod cats;
 mod extra;
 mod model;
 mod pages;
@@ -36,6 +37,7 @@ use std::time::{Duration, Instant};
 use neko_protocol::workbench::Command;
 use neko_protocol::{Request, Response};
 
+pub use cats::*;
 pub use extra::*;
 pub use model::*;
 pub use pages::*;

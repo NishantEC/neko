@@ -25,6 +25,12 @@ pub enum Going {
     Home,
     Plugin(neko_protocol::PluginPage),
     Onboarding,
+    /// Another cat's page.
+    Cat(String),
+    /// Another tab of the open cat's panel.
+    CatTab(crate::cats::CatTab),
+    /// Another cat file in the editor, or (None) back to the list of files.
+    CatFile(Option<neko_protocol::cats::CatFileKind>),
 }
 
 /// A line under a control, with whether it is good news.
@@ -399,12 +405,22 @@ impl App {
             self.extra.going = Some(going);
             return false;
         }
+        // A cat's file with words not saved yet: leaving it (another cat, another file, another page) asks first.
+        let same_file = matches!((&going, self.cats.editor.as_ref()), (Going::CatFile(Some(k)), Some(e)) if *k == e.kind);
+        if self.cats.open.is_some() && self.cat_file_dirty() && !same_file {
+            self.extra.going = Some(going);
+            return false;
+        }
         true
     }
 
     /// "Discard": the draft goes back to what is saved and the person goes where they were going.
     pub fn guard_discard(&mut self) {
-        self.revert_rulebook();
+        if self.cats.open.is_some() && self.cat_file_dirty() {
+            self.revert_cat_file();
+        } else {
+            self.revert_rulebook();
+        }
         let Some(going) = self.extra.going.take() else { return };
         match going {
             Going::Section(section) => {
@@ -417,6 +433,10 @@ impl App {
             Going::Home => self.open_new(),
             Going::Plugin(page) => self.open_plugin_page(page),
             Going::Onboarding => self.open_onboarding(crate::onboarding::Step::Welcome),
+            Going::Cat(id) => self.open_cat(&id),
+            Going::CatTab(tab) => self.cat_choose_tab(tab),
+            Going::CatFile(Some(kind)) => self.open_cat_file(kind),
+            Going::CatFile(None) => self.close_cat_file(),
         }
     }
 
