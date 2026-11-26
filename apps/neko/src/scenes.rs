@@ -5,7 +5,10 @@ use rune::TextEdit;
 
 use crate::state::App;
 
-pub const SCENES: &[(&str, fn(&mut App))] = &[("empty-home", |_| {}), ("home-typed", home_typed), ("task-open", task_open), ("tasks-home", tasks_home)];
+/// A scene: its name and what it does to the fresh state.
+pub type Scene = (&'static str, fn(&mut App));
+
+pub const SCENES: &[Scene] = &[("empty-home", |_| {}), ("home-typed", home_typed), ("task-open", task_open), ("tasks-home", tasks_home)];
 
 /// A task made `minutes_ago` before the fixed clock.
 fn task(n: u32, words: &str, minutes_ago: i64) -> Task {

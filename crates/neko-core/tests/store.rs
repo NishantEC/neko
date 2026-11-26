@@ -11,7 +11,10 @@ fn temp() -> (std::path::PathBuf, impl Drop) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
-    let dir = std::env::temp_dir().join(format!("neko-core-test-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    // A counter as well as the time: tests run in parallel threads, and the clock's grain is a microsecond.
+    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("neko-core-test-{}-{n}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
     std::fs::create_dir_all(&dir).unwrap();
     (dir.join("neko.sqlite3"), Gone(dir))
 }

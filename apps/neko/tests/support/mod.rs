@@ -21,7 +21,7 @@ pub fn settle(rt: &mut Runtime<App>) {
     }
 }
 
-pub fn scenes() -> &'static [(&'static str, fn(&mut App))] {
+pub fn scenes() -> &'static [neko_app::scenes::Scene] {
     neko_app::scenes::SCENES
 }
 

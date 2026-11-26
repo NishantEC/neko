@@ -13,6 +13,7 @@ use neko_protocol::{Change, ErrorCode, Reply, Request, ServerMessage, files};
 
 fn temp_dir(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    // The test's name keeps parallel tests apart; the time keeps runs apart.
     let dir = std::env::temp_dir().join(format!("neko-daemon-test-{name}-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
