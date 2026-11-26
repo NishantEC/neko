@@ -155,9 +155,8 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   you, Settings) is gone in that frame and the new one fades in on a clean page (`view::page_swap`). Rune fades a removed element
   out over a quarter second by default, so the conversation and Review were drawn one over the other when Review opened
   (QA defect 10); `tests/page_swap.rs` takes frames while the swap moves and fails if both are drawn.
-- **Review's file headers** are Neko's own card (`review_view::file_card`, lines drawn as rune-ui's Diff draws them): the path and
-  the file's figures in the receipt's form (12 points, a file that only gained lines shows no "−0"). An upstream ask: a figures
-  slot on Diff.
+- **Review's files** are rune-ui's Diff (0.10): `.stats` for a folded file's counts, `.hide_zero(true)` (a file that only gained
+  lines shows no "−0"), `.selectable(true)` and `.foot(..)` for the note, Show all, Copy diff, Copy path and Reveal.
 - **Settings** has three pages, Agents, Workspaces and Notifications, switched by rune-ui's SegmentedControl.
 
 ## Not done yet

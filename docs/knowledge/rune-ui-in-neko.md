@@ -1,6 +1,6 @@
-# rune-ui in Neko (S0, 2026-11-26; v0.9.0 since the polish round)
+# rune-ui in Neko (S0, 2026-11-26; v0.10.0 since 2026-11-27)
 
-rune-ui v0.9.0, on Rune `53f6d36a96439d357a6f2a2560383d7b9e9ec9c2`. Its components are copied into `apps/neko/src/ui/` by its CLI
+rune-ui v0.10.0, on Rune `53f6d36a96439d357a6f2a2560383d7b9e9ec9c2`. Its components are copied into `apps/neko/src/ui/` by its CLI
 and recorded in `apps/neko/rune-ui.lock`.
 
 ## Installing
@@ -19,6 +19,10 @@ crates, all at the same rev). `add` brought `base`, `icons`, `agent` and `font_i
 
 The polish round moved to v0.9.0: both git dependencies on `tag = "v0.9.0"`, `rune-ui update`, then `rune-ui add task`. The CLI is
 built from the tag in `$NEKO_TARGET/rune-ui-src` into `$NEKO_TARGET/cli`.
+
+0.10.0 (2026-11-27): both git dependencies on `tag = "v0.10.0"`, `rune-ui update` (a three-way merge into the copies; `.rune-ui/base`
+keeps what was last written), then `rune-ui add portrait receipt reorder`. Rune itself is taken with `default-features = false` (see
+"Licences"). `receipt` and `reorder` are installed and not used yet (below).
 
 The undo slice added `diff` with the same CLI (`rune-ui add diff`).
 
@@ -48,51 +52,50 @@ At this rev Rune makes a symbol image on a short-lived launch thread, and the Do
 Responding". `dock::register_on_main_thread` asks for a symbol image on the main thread before Rune starts, for a real window
 only (tested by reading `lib.rs`).
 
-## What Neko uses from 0.9.0 (its own stand-ins are gone)
+## What Neko uses from 0.10.0 (its own stand-ins are gone)
 
-- **Message:** the person's Copy shows on hover or focus with `reveal_actions` and takes no room while hidden (`App::reveals`).
-  A run is one assistant turn: its blocks are `BLOCK_GAP` apart, turns `TURN_GAP` (tested: nothing sits further apart).
-- **Context:** the ring face and the kit's popover, with the note line for a subscription only (`task_view::cost_note`).
-- **Tool** with `label` (Neko's phrases), `note` ("exit 1") and `Status::Denied`; **Reasoning**; **FoldLine** `indent(false)`.
-- **Response** `selectable` and `muted` (interim words: words with a step after them, and every word inside a folded run).
-- **Confirmation** `why` and `destructive`; **Task** (the run card) with only changes and a branch.
-- **SidebarItem** `lead` (the task's mark, `agent::mark`), `list_row` and `description`. Hit areas are role `none`: the
-  accessibility test no longer allows unnamed buttons.
-- `RadioGroup` descriptions wrap to the group's width; Neko had no workaround to remove.
+- **Theme file** (`apps/neko/themes/neko.json`): the teal is the theme's `color.identity` ramp and `role.identity` (the `blue` ramp is the
+  kit's blue again; `info`, `accent` and `ring` point at the identity ramp), House's type scale is `type.<step>`, the dialog scrim is
+  `number.scrim` (0.18 light, 0.55 dark; black). `view::theme` is `Theme::from_json` and Reduce Motion, nothing else.
+  `base.keys-font` is left out: the keys' face is then the theme's own, Figtree. The workspace menu's Move up and Move down show
+  their shortcuts (⌥⌘↑ and ⌥⌘↓).
+- **Portrait** (`faces::portrait`, `faces::portrait_in`): `Portrait::new(key, name, size).face(drawing).ground(..)` (or `.image(..)` for the
+  development art), `.ringed(true)`, `.state(Activity::..)`, `.under(surface)`, `.decorative(true)`. Neko keeps the drawn faces, their
+  grounds, `wash` and the art override. Every portrait takes a key.
+- **Message**: the person's words are `Message::user(..).bubble(Bubble::Well)` with `reveal_actions`; a turn's head is `Message::header`.
+- **SidebarItem**: `.button(true)` (New task, Add workspace, New cat, Show more) and `.trail(pill)` (Needs you).
+- **Marks**: `agent::mark_with(.., Marks::Neutral)` for a step's and an answered request's mark, `Reasoning` with `.icon(None)` for a
+  thought, `agent::hollow_dot` for the run line. A denied answer is the dash, as a denied step is (it was a cross).
+- **Diff** in Review: `.stats`, `.hide_zero(true)`, `.selectable(true)`, `.foot(..)`; no copy of its header or lines.
+- **Context**: `.placement(Placement::TopStart)` and `.limit_assumed(..)`.
+- **Status::Stopped** for a stopped task's mark on a cat's page.
+- Still from 0.9.0: Message's reveal and gaps, Context's ring, `Response` `selectable` and `muted`, `Confirmation`'s `why` and
+  `destructive` (unused: Neko's request card is its own, below), `Task`'s facts (unused since the receipt), `SidebarItem` `lead`,
+  `list_row` and `description`.
 
 ## What rune-ui cannot do here (for upstream)
 
-After 0.9.0:
+Neko tried each of these on 0.10.0 and kept its own, because the render got worse. Each says what would let it go.
 
-- `task::Run` has no "Stopped" status: a stopped or interrupted run's pill would say "Skipped". Neko keeps a small card of its own
-  for those two states (`stopped_card`). Ask: `Status::Stopped`, or a status word on `Run`.
-- `Context`'s popover opens `TopEnd`; with the ring at the composer's left it hangs out over the sidebar. Ask: `.placement(..)`.
-- `Context::Usage` cannot say the window was assumed (not reported). Ask: `limit_assumed: bool` or a second note.
-- `SidebarItem` has no button form: the New task row adds `.role("button")` on the built row.
-
-From the workspaces slice:
-
-- `Select`'s options are `option`s in a `listbox` without `position_in_set` (and the current one says `unselected`), so Neko's
-  accessibility rules fail on it. The composer's picker is a DropdownMenu with checked rows instead (a Mac pop-up button is a
-  menu too). Ask: `position_in_set(i + 1, n)` and `selected` on each option in `popup::Popup::surface` for role `listbox`.
-- `popup::mount` makes the open surface a modal with no name. Neko adds `.label(..)` on the built surface (`view::menu_named`).
-  Ask: `Popup::surface` labels its content with `self.name`, or `DropdownMenu::name(..)`.
-- `popup::Row::shortcut` sets its keys in Inter, which Neko's "Figtree everywhere" rule refuses; Move up and Move down show no
-  keys. Ask: the shortcut in the theme's face (or its keys font from the theme).
-- No sortable list: reordering workspaces is by keyboard and menu only. Ask: a drag-to-reorder helper for a column of rows.
-
-From the undo slice (`diff` added with the CLI):
-
-- `Diff` draws its lines as plain text: they cannot be selected. Ask: `Diff::selectable(bool)` passing `.selectable(true)` to each
-  line's words (and one `selection_group` over the lines). Neko offers Copy diff in each open file's foot instead.
-- `Diff`'s header counts the lines it is given, so a folded file (no lines yet) or a cut one shows the wrong `+n −n`. Neko gives a
-  folded file that many empty marks. Ask: `Diff::stats(added, removed)` to set the counts.
-- `Diff` has no place for a file's actions or note (renamed from, binary, Show all, Copy path, Reveal). Neko appends a foot row to
-  the built slab. Ask: `Diff::foot(El)` or `actions(..)`, and a `binary`/`note` line style.
-- `Task` (the run card) has one primary action only. Neko appends a row with Review and Undo to the built card. Ask:
-  `Task::secondary(words, f)` or an actions row.
-
-Still open from S0: `SidebarItem` rows outside a list are `role("link")`.
+- **The cats' and tasks' two-line rows** (`sidebar::face_row`): `SidebarItem::subtitle` is plain words in one ink. Neko's second line is
+  parts in their own inks (the state word in its colour, the round's mark before it). Ask: `SidebarItem::subtitle_el(El)`.
+- **The run receipt** (`turn::receipt`): `Receipt` draws the failed sentence in the plain ink (Neko's is red: "miso could not
+  finish", and muted once undone), has no branch glyph, puts the note above the files, and cannot say "and N more" when the run
+  changed more files than the list holds. Ask: `Receipt::sentence_ink(Color)` (or a tone), `.branch_icon`, `.note_after_files`, `.more(n)`.
+- **The composer's portrait in the margin** (`task_view`): `PromptInput::lead` puts it inside the field, which makes the one-line
+  composer taller and moves the text off the reading edge. Ask: a lead that hangs in the margin (`lead_outside`).
+- **Tool and Confirmation** (`turn::step`, `turn::request`): `Tool` repeats a given line at the top of the fold, adds the time after an
+  exit note, and says "Failed" where Neko says "Could not run" (and drops "It did not finish."). `Confirmation`'s answered mark is the
+  icon's full size, two points more than a step's tick, so its words do not line up with the steps'. Ask: `Tool::failed_note`,
+  `marks_size`.
+- **DropdownMenu names** (`view::menu_named`): the open surface is named "Menu" now, not nothing; Neko names it for its list ("Cats",
+  "Task options"). Ask: `DropdownMenu::name(..)`.
+- **Reorder** for the workspaces: the sections have different heights (a header and its tasks), and `Reorder` takes rows of one pitch.
+  Ask: variable pitch. Until then workspaces are ordered by the menu and ⌥⌘↑ and ⌥⌘↓.
+- **Select** is installed and unused by choice: the composer's workspace and cat pickers are chips that open a menu with the current
+  row checked, as a Mac pop-up button does; 0.10's Select now says "2 of 5" but is a field-shaped control.
+- `Status::Stopped` gave the stopped mark; `stopped_card` and the appended Review and Undo row no longer exist (the receipt replaced
+  them), so there was nothing to delete for `Task::secondary`.
 
 ## Licences
 

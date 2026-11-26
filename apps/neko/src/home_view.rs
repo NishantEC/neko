@@ -212,7 +212,7 @@ fn cat_picker(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
 }
 
 /// Where a new task goes: a pop-up menu in the composer's footer (as a Mac pop-up button is: the current choice checked), with
-/// General, the workspaces and "Add folder…". (rune-ui's Select is not used: its options do not say their place in the list.)
+/// General, the workspaces and "Add folder…". (rune-ui's Select is a field-shaped control; a chip that opens a menu is how this one reads.)
 fn workspace_picker(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let options = s.picker_options();
     let current = options.iter().find(|o| o.1.as_deref() == Some(s.workspace.as_str())).map_or_else(|| "General".to_owned(), |o| o.0.clone());

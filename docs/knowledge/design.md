@@ -10,7 +10,7 @@ This is the app's one design: there is no look switch.
 | --- | --- |
 | `themes/neko.json` | The colours (warm neutrals; the deep teal is the theme's `identity` ramp and role, `blue` is the kit's blue), the type steps (`type.<step>`), the scrim (`number.scrim`), radius 9.6, continuous corners, Figtree. |
 | `view.rs` | `theme()` (the theme file as it is), `raised` and `well` surfaces, `state_ink`. |
-| `faces.rs` | The portraits: a drawn face per face id, the working ring, the state dots, the `NEKO_CAT_ART` override. |
+| `faces.rs` | The drawn face per face id, its ground, the wash and the `NEKO_CAT_ART` override, given to rune-ui's `Portrait` (the tile, the working ring, the state dots). |
 | `sidebar.rs`, `home_view.rs`, `turn.rs`, `cat_view.rs`, `review_view.rs` | The inset panel, Home and the house, a turn's pieces and the receipt, a cat's page. |
 
 ## Type scale (Figtree)
@@ -65,8 +65,11 @@ only at 36 points and up.
 | snow | White | #7894c6 |
 | smoke | Grey | #e4b23e |
 
-A portrait in its state (`portrait_in`) takes the same room in every state: a turning ring while the cat works (at least 2.5
-points of stroke, a still arc under Reduce Motion), an amber dot when it needs the person, a red dot when it could not go on.
+A portrait in its state (`faces::portrait_in`, rune-ui's `Portrait` with `.ringed(true)` and `.state(..)`) takes the same room in
+every state: a turning ring in the identity colour while the cat works (at least 2.5 points of stroke, a still arc under Reduce
+Motion), an amber dot when it needs the person, a red dot when it could not go on. Ring and dot are taken toward their strong ink
+until they reach 4.5:1 and 3:1 against the surface they sit on, so the amber dot is a little lighter on a light card than it was
+when Neko chose it by hand.
 
 A cat's page puts its face on a wash of its ground (`faces::wash`). The ground is mixed into the page until the wash sits a fixed
 step from the page (contrast 1.09:1 in light, 1.16:1 in dark), so the white cat's deep blue is no heavier than the grey cat's
@@ -92,6 +95,6 @@ up and in); a tile's colours spring as its cat's state changes. Under Reduce Mot
 
 ## Upstream asks (rune-ui)
 
-Neko builds these in its own code until rune-ui has them: a portrait with ring and status dot; a turn header slot on `Message`; a
-well-style person bubble; a leading slot on `PromptInput`; a two-line `SidebarItem` with an image, a raised selection and a
-trailing slot; neutral step marks on `Tool` and `Confirmation`; a run receipt with a file list and actions on `Task`; a figures slot on `Diff`'s file header (Review draws its own card to hide a zero side).
+rune-ui 0.10.0 gave Neko the portrait, the turn header and well bubble, neutral marks, the diff's figures and foot, the theme's
+identity ramp, type steps and scrim. What Neko still builds itself, and what would let it stop, is in
+`docs/knowledge/rune-ui-in-neko.md`, "What rune-ui cannot do here".

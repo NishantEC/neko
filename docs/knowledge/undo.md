@@ -172,7 +172,7 @@ binary file is named with its sizes, never shown. An open file's foot has a note
 
 ## Not here yet
 
-- Text inside rune-ui's Diff cannot be selected (the component has no way to say so); Copy diff copies a file's lines instead.
+- Copy diff copies a whole file's lines, signs included, in one press; the lines can also be selected (rune-ui's Diff, 0.10).
 - No way on screen to bring back a `before_redo` checkpoint.
 - Undo of one file, or of part of a run.
 
