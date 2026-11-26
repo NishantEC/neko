@@ -79,7 +79,7 @@ line (split at `&&`, `||`, `;`, `|`) is read by its program: `rm`, `rmdir`, `sud
 ## In the app
 
 A pending request is rune-ui's Confirmation (Allow once in ink, first; Always allow; Deny; Escape denies), with a quiet line under
-it saying why Neko asks. A destructive one is drawn by Neko in the same look with two equal answers, Allow once and Deny. Once
+it saying why Neko asks. A destructive one is the same Confirmation in its destructive form: Allow once in the danger material, Deny, no "Always" and no default answer. Once
 answered it becomes one quiet line. The task's sidebar row shows a warning mark while it waits, and the window announces it.
 
 ## Tests

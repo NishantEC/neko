@@ -24,6 +24,7 @@ pub mod response;
 pub mod scroll_area;
 pub mod shimmer;
 pub mod sidebar;
+pub mod task;
 pub mod tool;
 pub mod tooltip;
 

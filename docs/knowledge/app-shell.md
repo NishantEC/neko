@@ -73,7 +73,7 @@ window asks `subscribe` and `list_tasks`. Words sent while the daemon is away st
   the answer, requests, the card, the composer. Surfaces (fold lines' hover, the card, a request, the composer) start on the edge;
   an open "Worked for" shows its steps after it on the same edge, not indented (tested at both window shapes).
 - **The conversation** is rune-ui's Conversation: pinned to the newest content until the person scrolls up, then a "Jump to
-  latest" pill. The person's words are a Message at the right with a copy button that shows on hover or focus. The agent's
+  latest" pill. The person's words are a Message at the right; its copy button shows on hover or focus and takes no room while hidden. The agent's
   ("Neko") are Markdown on the page, no bubble, selectable; only a run's final answer has a copy button.
 - **Steps** are quiet single lines that fold, built on rune-ui's FoldLine. A shell step is its command, on one line, cut in its
   middle past 72 characters (the whole command is in the fold); other tools read as phrases ("Read src/app.rs", "Edited
@@ -88,10 +88,10 @@ window asks `subscribe` and `list_tasks`. Words sent while the daemon is away st
   nothing to fold shows the same line without a chevron. The live run is always open.
 - **The run card** shows only when the run changed files, has a branch, or failed: its state, files with + and −, the branch. No
   duration (the line has it) and no money.
-- **The context ring** sits in the composer's footer: rune-ui's Context (a small bar and the share; a ring is an upstream ask),
-  named "Context 31% used", reached by Tab, opened by Return or a press. Its panel is Neko's own (`ctx-panel`): context used,
-  tokens in, out and cached for the task, and the cost as reported with how to read it. Escape closes it and focus goes back to
-  the ring. Nothing else in the app shows money; the sidebar's foot no longer has a day total.
+- **The context ring** sits in the composer's footer: rune-ui's Context with its ring face, named "Context 31% used, 61.4k of 200k
+  tokens", reached by Tab, opened by Return, Space or a press. Its popover is the kit's: context used and window, tokens in, out
+  and cached, the cost when reported, and "API-equivalent, as Claude Code reports it. Not charged on a subscription." only for a
+  subscription login. Escape closes it and focus goes back to the ring. Nothing else in the app shows money.
 - **Permission requests**: see `permissions.md`.
 - **The composer** (`reply`): Return sends a follow-up; while it works Send is Stop and Escape stops (also when the focus is
   elsewhere in the task; with the context panel open, Escape closes it first).
@@ -101,10 +101,8 @@ window asks `subscribe` and `list_tasks`. Words sent while the daemon is away st
 - **Home's folder chip** opens the Mac's open panel (Rune's `native-file-dialog`, rfd); the choice is kept in the prefs
   (`last-folder`) and dropped if the folder is gone. Without a folder a task gets a scratch folder.
 
-## Not done in S0
+## Not done yet
 
-- **Unnamed hit areas.** rune-ui's 40 point hit areas (`hit(<key>)`) show to assistive technology as unnamed buttons around the
-  named control. The rule allows that one pattern; upstream they should be `a11y_hidden` or take the control's name.
 - No app icon yet.
 
 ## Check in the real app (headless cannot)

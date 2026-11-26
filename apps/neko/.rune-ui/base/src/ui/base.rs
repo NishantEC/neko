@@ -1,4 +1,4 @@
-//! rune-ui registry: base 0.8.0 What every component shares: the press type, size metrics, the 40 point hit area, a glyph, the
+//! rune-ui registry: base 0.9.0 What every component shares: the press type, size metrics, the 40 point hit area, a glyph, the
 //! spinner, the words beside a control, and `paint` re-exported from the style layer. `rune-ui init` copies it; yours to change.
 
 use std::rc::Rc;
@@ -90,13 +90,14 @@ impl Shape for El {
 }
 
 /// The hit area round a drawn control: a wrapper as much larger as the control is short of the hit size on each axis, pulled back by
-/// the same negative margin, so layout keeps the control's own size. Keyed `hit(<key>)`, not focusable and silent to assistive
-/// technology; the control keeps its key, name, focus ring and press. Neighbours must sit twice `x` apart.
+/// the same negative margin, so layout keeps the control's own size. Keyed `hit(<key>)`, not focusable and out of the accessibility
+/// tree (role `none`: a keyed box with a press would otherwise read as an unnamed button round the named control); the control keeps
+/// its key, name, focus ring and press. Neighbours must sit twice `x` apart.
 pub fn hit_area<S: 'static>(key: &str, face: El, x: f32, y: f32, on_press: Option<Press<S>>) -> El {
     if x <= 0.0 && y <= 0.0 {
         return face;
     }
-    let mut w = row().key(format!("hit({key})")).mx(-x).my(-y).px(x).py(y).center().child(face);
+    let mut w = row().key(format!("hit({key})")).role("none").mx(-x).my(-y).px(x).py(y).center().child(face);
     if let Some(f) = on_press {
         w = w.on_press(move |s: &mut S| f(s));
     }

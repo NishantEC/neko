@@ -1,4 +1,4 @@
-//! rune-ui registry: conversation 0.8.0 Copied into your app by `rune-ui add conversation`; yours to change.
+//! rune-ui registry: conversation 0.9.0 Copied into your app by `rune-ui add conversation`; yours to change.
 //!
 //! The scroll area a chat lives in. It stays pinned to the newest content while the reader is at the bottom (Rune's
 //! `ScrollSpec::stick_bottom`), lets go as soon as they scroll up, and then shows a raised "Jump to latest" pill over its bottom edge that
@@ -17,6 +17,9 @@ use rune_ui_style::weight;
 
 use super::base::{Shape, Theme, glyph, hit_area, paint_state};
 use super::icons;
+
+/// Between turns, in grid steps: 20 points at the default spacing (Message's `TURN_GAP`; nothing in a conversation sits further apart).
+pub const TURN_GAP: f32 = 5.0;
 
 /// What a report of being at the bottom does.
 pub type Report<S> = Rc<dyn Fn(&mut S, bool)>;
@@ -84,7 +87,7 @@ impl<S: 'static> Conversation<S> {
             }
             e
         } else {
-            col().key(format!("{}-content", self.key)).w_full().max_w(self.column).px(t.metrics.inset).py(t.space.at(6.0)).gap(t.space.at(6.0)).children(self.body)
+            col().key(format!("{}-content", self.key)).w_full().max_w(self.column).px(t.metrics.inset).py(t.space.at(6.0)).gap(t.space.at(TURN_GAP)).children(self.body)
         };
         let mut scroll = col().key(scroll_key.clone()).role("log").label("Conversation").w_full().h_full().items_center().scroll(rune::ScrollSpec { stick_bottom: true }).scroll_edge_fade(24.0).child(content);
         if let Some(f) = self.report {

@@ -1,4 +1,4 @@
-//! rune-ui registry: agent 0.8.0 (base). What the agent set shares: a step's [`Status`] and its mark, the quiet [`FoldLine`] every
+//! rune-ui registry: agent 0.9.0 (base). What the agent set shares: a step's [`Status`] and its mark, the quiet [`FoldLine`] every
 //! tool call, reasoning and step list folds behind, a small icon button that can reach the clipboard, a chip face, the slab code and
 //! output sit on, monospaced type, and the words for durations, token counts and money. `rune-ui add` copies it with any agent item.
 //!
@@ -30,10 +30,12 @@ pub enum Status {
     Skipped,
     /// Waiting for a person (a permission, an answer).
     Waiting,
+    /// A person (or a rule) said no. Neutral, not a failure: nothing went wrong.
+    Denied,
 }
 
 impl Status {
-    pub const ALL: [Status; 6] = [Status::Pending, Status::Running, Status::Done, Status::Error, Status::Skipped, Status::Waiting];
+    pub const ALL: [Status; 7] = [Status::Pending, Status::Running, Status::Done, Status::Error, Status::Skipped, Status::Waiting, Status::Denied];
 
     pub fn word(self) -> &'static str {
         match self {
@@ -43,6 +45,7 @@ impl Status {
             Status::Error => "Failed",
             Status::Skipped => "Skipped",
             Status::Waiting => "Needs you",
+            Status::Denied => "Denied",
         }
     }
 
@@ -60,7 +63,7 @@ impl Status {
     /// The ink its mark is drawn in.
     pub fn ink(self, t: &Theme) -> Color { // guard: allow (a return type, not a colour)
         match self {
-            Status::Pending | Status::Skipped => t.ink_faint(),
+            Status::Pending | Status::Skipped | Status::Denied => t.ink_faint(),
             Status::Running => t.ink_muted(),
             Status::Done => t.c.success.fg,
             Status::Error => t.c.danger.fg,
@@ -70,7 +73,7 @@ impl Status {
 }
 
 /// A status as one small mark: a hollow ring (pending), a turning ring (running, the one thing that loops), a check, a cross, a
-/// slashed ring (skipped), a warning (needs you).
+/// slashed ring (skipped), a warning (needs you), a shield (denied: a permission said no).
 pub fn mark(t: &Theme, s: Status, size: f32) -> El {
     let icon: &'static Icon = match s {
         Status::Running => return spinner_in(t, size, s.ink(t), s.word()),
@@ -79,8 +82,14 @@ pub fn mark(t: &Theme, s: Status, size: f32) -> El {
         Status::Error => &icons::CIRCLE_X,
         Status::Skipped => &icons::CIRCLE_SLASH,
         Status::Waiting => &icons::WARNING,
+        Status::Denied => &icons::SHIELD,
     };
     glyph(icon, size, s.ink(t))
+}
+
+/// A duration worth showing: none under one second (a step that quick needs no figure), else [`elapsed`].
+pub fn took(secs: f64) -> Option<String> {
+    (secs >= 1.0).then(|| elapsed(secs))
 }
 
 /// A duration in words that stay short: "0.4s", "12s", "2m 14s", "1h 3m".
@@ -171,6 +180,8 @@ pub struct FoldLine<S: 'static> {
     meta: Vec<String>,
     open: bool,
     disabled: bool,
+    indent: bool,
+    middle: bool,
     pinned: Option<State>,
     toggle: Option<Press<S>>,
 }
@@ -178,7 +189,7 @@ pub struct FoldLine<S: 'static> {
 impl<S: 'static> FoldLine<S> {
     /// `label` is the line's words and its name.
     pub fn new(key: impl Into<String>, label: impl Into<String>, open: bool) -> FoldLine<S> {
-        FoldLine { key: key.into(), label: label.into(), words: None, lead: None, meta: Vec::new(), open, disabled: false, pinned: None, toggle: None }
+        FoldLine { key: key.into(), label: label.into(), words: None, lead: None, meta: Vec::new(), open, disabled: false, indent: true, middle: false, pinned: None, toggle: None }
     }
 
     /// Draws the words as this element (a shimmer) instead of plain text; the label still names the line.
@@ -204,6 +215,19 @@ impl<S: 'static> FoldLine<S> {
         self
     }
 
+    /// Whether the open body sits indented under the line's words (true, the default) or on the line's own left edge (false): steps
+    /// inside "Worked for 2m" then share the page's left edge.
+    pub fn indent(mut self, on: bool) -> Self {
+        self.indent = on;
+        self
+    }
+
+    /// Cuts long words in the middle instead of at the end, keeping both ends (a command, a path).
+    pub fn truncate_middle(mut self, on: bool) -> Self {
+        self.middle = on;
+        self
+    }
+
     pub fn state(mut self, s: State) -> Self {
         self.pinned = Some(s);
         self
@@ -223,7 +247,11 @@ impl<S: 'static> FoldLine<S> {
         face = paint_state(face, &t.mat.row, st);
         let icon = t.control.icon;
         face = face.child(row().size(icon, icon).center().child(self.lead.unwrap_or_else(|| glyph(&icons::WRENCH, icon, t.ink_faint()))));
-        face = face.child(self.words.unwrap_or_else(|| text(self.label.clone()).font(t.ty.base).color(t.ink_muted()).truncate().min_w(0.0)).a11y_hidden());
+        let middle = self.middle;
+        face = face.child(self.words.unwrap_or_else(|| {
+            let w = text(self.label.clone()).font(t.ty.base).color(t.ink_muted()).min_w(0.0).shrink();
+            if middle { w.truncate_middle() } else { w.truncate() }
+        }).a11y_hidden());
         for m in self.meta {
             face = face.child(meta(t, m).a11y_hidden());
         }
@@ -236,10 +264,10 @@ impl<S: 'static> FoldLine<S> {
             let g = f.clone();
             face = face.on_press(move |s: &mut S| f(s)).on_key(move |s: &mut S, k: &rune::KeyEvent, _: &mut Tx| return_presses(k, || g(s)));
         }
-        let line = row().w_full().child(hit_area(&trigger_key, face, 0.0, t.control.slop(h), press));
+        let line = row().w_full().min_w(0.0).child(hit_area(&trigger_key, face.min_w(0.0).shrink(), 0.0, t.control.slop(h), press).min_w(0.0).shrink());
         let mut c = col().key(self.key.clone()).w_full().gap(t.space.at(1.0)).child(line);
         if self.open && !body.is_empty() {
-            let indent = t.space.at(1.5) + icon + t.metrics.gap;
+            let indent = if self.indent { t.space.at(1.5) + icon + t.metrics.gap } else { 0.0 };
             c = c.child(col().key(format!("{}-content", self.key)).w_full().pl(indent).pb(t.space.at(1.0)).gap(t.space.at(2.0)).children(body));
         }
         c

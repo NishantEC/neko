@@ -36,6 +36,6 @@ conversation with `--resume`.
 ## Cost
 
 Only what the CLI reported, labelled with who reported it. Nothing about money is on screen until the person opens the context
-ring in a task's composer: its panel shows how full the context is (the newest run's, against the reported window or an assumed
-200K, said so), the task's tokens in, out and cached, and the cost as reported with how to read it ("API-equivalent, as Claude
-Code reports it. Not charged on a subscription."). The run card and the sidebar show no money.
+ring in a task's composer: rune-ui's popover shows how full the context is (the newest run's, against the reported window or an
+assumed 200K), the task's tokens in, out and cached, the cost when one was reported, and, for a subscription login only, "API-equivalent,
+as Claude Code reports it. Not charged on a subscription." The run card and the sidebar show no money.

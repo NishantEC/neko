@@ -45,7 +45,20 @@ fn no_money_is_on_screen_until_the_context_ring_is_opened() {
     let rt = runtime((1200.0, 800.0), false, scene("task-context-open"));
     let t = texts(&rt);
     assert!(t.iter().any(|x| x.contains("Not charged on a subscription")), "how to read the cost: {t:?}");
-    assert!(t.iter().any(|x| x == "61.4k of 200k"), "how full the context is: {t:?}");
+    assert!(t.iter().any(|x| x == "61.4k") && t.iter().any(|x| x == "200k"), "how full the context is, used and window: {t:?}");
+    // The note is for a subscription only: a cost charged per call has none.
+    let mut charged = runtime((1200.0, 800.0), false, scene("task-context-open"));
+    charged.update(|s, _| {
+        for b in s.books.values_mut() {
+            for r in &mut b.runs {
+                if let Some(u) = &mut r.usage {
+                    u.pricing = neko_protocol::Pricing::Charged;
+                }
+            }
+        }
+    });
+    settle(&mut charged);
+    assert!(!texts(&charged).iter().any(|x| x.contains("Not charged")), "no subscription note for a charged cost");
 }
 
 #[test]
@@ -116,7 +129,48 @@ fn copy_is_for_final_answers_and_the_persons_words_on_hover() {
     assert_eq!(copies.len(), 3, "two final answers and the person's follow-up: {copies:?}");
     assert!(!copies.contains(&"copy-part-4".to_owned()), "interim words have none: {copies:?}");
     let person = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("copy-task-message")).expect("the person's copy button");
-    assert!(person.opacity < 0.01, "hidden until hover or focus: {}", person.opacity);
+    assert!(person.visible[2] * person.visible[3] < 0.5, "hidden until hover or focus, and taking no room: {:?}", person.visible);
+    // No loose gap under the person's words: the next block starts one turn's gap (20 points) after the bubble.
+    let bubble = rect(&rt, "task-message-bubble");
+    let next = rect(&rt, "turn-run_1");
+    let gap = next[1] - (bubble[1] + bubble[3]);
+    assert!((gap - 20.0).abs() <= 1.0, "the gap under the person's words is the turn gap, not {gap}");
+}
+
+#[test]
+fn the_persons_copy_shows_on_hover_and_on_focus() {
+    let mut rt = runtime((1200.0, 800.0), false, scene("task-done"));
+    let [x, y, w, h] = rect(&rt, "task-message-bubble");
+    rt.pointer_move(x + w / 2.0, y + h / 2.0);
+    settle(&mut rt);
+    let copy = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("copy-task-message")).unwrap();
+    assert!(copy.visible[2] > 1.0 && copy.visible[3] > 1.0, "shown while the pointer is over the words: {:?}", copy.visible);
+    rt.pointer_move(5.0, 790.0);
+    settle(&mut rt);
+    let copy = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("copy-task-message")).unwrap();
+    assert!(copy.visible[2] * copy.visible[3] < 0.5, "hidden again: {:?}", copy.visible);
+    while focus(&rt).as_deref() != Some("copy-task-message") {
+        tab(&mut rt, false);
+    }
+    settle(&mut rt);
+    let copy = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("copy-task-message")).unwrap();
+    assert!(copy.visible[2] > 1.0, "shown while it has focus: {:?}", copy.visible);
+}
+
+#[test]
+fn nothing_in_a_task_sits_further_apart_than_the_turn_gap() {
+    for name in ["task-real-run-open", "task-done", "task-follow-up", "task-needs-you"] {
+        let rt = runtime((1200.0, 800.0), false, scene(name));
+        let content = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("transcript-content")).unwrap();
+        // The direct children of the column: each turn. Between any two, at most the turn gap.
+        let prefix = format!("{}/", content.path);
+        let kids: Vec<_> = rt.elements().into_iter().filter(|e| e.path.strip_prefix(&prefix).is_some_and(|rest| !rest.contains('/'))).collect();
+        assert!(kids.len() >= 2, "{name}: the turns are found");
+        for pair in kids.windows(2) {
+            let gap = pair[1].rect[1] - (pair[0].rect[1] + pair[0].rect[3]);
+            assert!(gap <= 20.5, "{name}: {:?} and {:?} are {gap} apart", pair[0].key, pair[1].key);
+        }
+    }
 }
 
 #[test]
@@ -138,7 +192,7 @@ fn finished_runs_fold_and_the_choice_is_remembered() {
 fn the_context_ring_is_named_reached_and_left_by_the_keyboard() {
     let mut rt = runtime((1200.0, 800.0), false, scene("task-real-run"));
     let ring = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("ctx-trigger")).expect("the ring");
-    assert_eq!(ring.label.as_deref(), Some("Context 31% used"));
+    assert_eq!(ring.label.as_deref(), Some("Context 31% used, 61.4k of 200k tokens"));
     let mut seen = Vec::new();
     for _ in 0..40 {
         tab(&mut rt, false);

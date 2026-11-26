@@ -1,6 +1,6 @@
-# rune-ui in Neko (S0, 2026-11-26)
+# rune-ui in Neko (S0, 2026-11-26; v0.9.0 since the polish round)
 
-rune-ui v0.8.1, on Rune `53f6d36a96439d357a6f2a2560383d7b9e9ec9c2`. Its components are copied into `apps/neko/src/ui/` by its CLI
+rune-ui v0.9.0, on Rune `53f6d36a96439d357a6f2a2560383d7b9e9ec9c2`. Its components are copied into `apps/neko/src/ui/` by its CLI
 and recorded in `apps/neko/rune-ui.lock`.
 
 ## Installing
@@ -16,6 +16,9 @@ cd apps/neko && <cli> init --git https://github.com/NishantEC/rune-ui --tag v0.8
 
 `init` wrote the `rune`, `rune-kit`, `rune-ui-style`, `rune-ui-themes` dependencies and Rune's `[patch.crates-io]` table (eight
 crates, all at the same rev). `add` brought `base`, `icons`, `agent` and `font_inter` along.
+
+The polish round moved to v0.9.0: both git dependencies on `tag = "v0.9.0"`, `rune-ui update`, then `rune-ui add task`. The CLI is
+built from the tag in `$NEKO_TARGET/rune-ui-src` into `$NEKO_TARGET/cli`.
 
 S1 added `response`, `reasoning` (with `shimmer`), `tool`, `confirmation`, `badge`, `radio_group` and, after the first real run,
 `context` with the same CLI (`rune-ui add …`); `response` turned on rune-kit's `markdown` feature (pulldown-cmark, MIT). Rune's `native-file-dialog` feature brings rfd (MIT).
@@ -40,39 +43,29 @@ At this rev Rune makes a symbol image on a short-lived launch thread, and the Do
 Responding". `dock::register_on_main_thread` asks for a symbol image on the main thread before Rune starts, for a real window
 only (tested by reading `lib.rs`).
 
+## What Neko uses from 0.9.0 (its own stand-ins are gone)
+
+- **Message:** the person's Copy shows on hover or focus with `reveal_actions` and takes no room while hidden (`App::reveals`).
+  A run is one assistant turn: its blocks are `BLOCK_GAP` apart, turns `TURN_GAP` (tested: nothing sits further apart).
+- **Context:** the ring face and the kit's popover, with the note line for a subscription only (`task_view::cost_note`).
+- **Tool** with `label` (Neko's phrases), `note` ("exit 1") and `Status::Denied`; **Reasoning**; **FoldLine** `indent(false)`.
+- **Response** `selectable` and `muted` (interim words: words with a step after them, and every word inside a folded run).
+- **Confirmation** `why` and `destructive`; **Task** (the run card) with only changes and a branch.
+- **SidebarItem** `lead` (the task's mark, `agent::mark`), `list_row` and `description`. Hit areas are role `none`: the
+  accessibility test no longer allows unnamed buttons.
+- `RadioGroup` descriptions wrap to the group's width; Neko had no workaround to remove.
+
 ## What rune-ui cannot do here (for upstream)
 
-S1, after the first real run:
+After 0.9.0:
 
-- `Context` draws a bar, not a ring; it always shows a dollar figure in its panel, with no "not reported" and no line saying how
-  to read the cost; its share is input + output + cache over the limit, not how full the context is now. Asks: a ring face
-  (`Context::ring()`), `Usage::context` separate from the token totals, `cost: Option<f64>`, and a `note(String)` line under the
-  cost. Neko passes the context held as `input` (so the share is right), never shows Context's own panel, and draws its own.
-- `Context`'s trigger does not open on Return (Space only); Neko adds the key on the built element.
-- `Tool` always shows the tool's name before its summary and a duration under a second ("0.0s"); it has no "exit N" or "denied"
-  state. Asks: a label override, `secs` hidden under one second, and a `meta(String)`. Neko builds its step lines from
-  `FoldLine`, `mark`, `caption` and `pre`.
-- `Reasoning` says "Thought for 0s" under a second and folds open to nothing when the thought is empty. Asks: hide the duration
-  under a second, and draw nothing for an empty finished thought.
-- `FoldLine` indents its open body; a column with one edge wants `indent(false)`. Neko draws the open body after the line.
-- `Message` has no way to show its actions only on hover; Neko uses Rune's `hover_group` and `group_opacity` on the built
-  elements, and the hidden row still takes its height.
+- `task::Run` has no "Stopped" status: a stopped or interrupted run's pill would say "Skipped". Neko keeps a small card of its own
+  for those two states (`stopped_card`). Ask: `Status::Stopped`, or a status word on `Run`.
+- `Context`'s popover opens `TopEnd`; with the ring at the composer's left it hangs out over the sidebar. Ask: `.placement(..)`.
+- `Context::Usage` cannot say the window was assumed (not reported). Ask: `limit_assumed: bool` or a second note.
+- `SidebarItem` has no button form: the New task row adds `.role("button")` on the built row.
 
-S1:
-
-- `Response` has no `selectable(bool)`: Neko builds the same Markdown with `Response::style` and turns selection on itself.
-- `Confirmation` has no place for why it asks, and no destructive form (no default answer, no Always allow). Neko puts the why
-  under it, and draws destructive requests itself in the same look.
-- `Task` (run card) always shows checks passed and a dollar figure; it needs optional facts (no checks, tokens instead of cost, a
-  branch, a note line). Neko draws its own card.
-- `SidebarItem` takes only a static icon in the row's ink; a status mark (a spinner, a coloured warning) wants a `lead(El)`.
-- `RadioGroup` options' descriptions wrap at a narrow width even when the column is wide.
-
-S0:
-
-- Hit areas (`hit(<key>)`) are unnamed buttons in the accessibility tree.
-- `SidebarItem` rows are `role("link")` with `checked` for the current page; a list of choosable rows wants `option` with
-  `focus_selected` (Neko adds those on the built row).
+Still open from S0: `SidebarItem` rows outside a list are `role("link")`.
 
 ## Licences
 

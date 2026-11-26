@@ -193,8 +193,8 @@ Written by `scripts/licenses.py`. Each crate's own licence files go into the bun
 | rune-taffy | 0.0.1 | MIT |
 | rune-text | 0.0.1 | MIT |
 | rune-tiny-skia-path | 0.11.4 | BSD-3-Clause |
-| rune-ui-style | 0.8.1 | MIT |
-| rune-ui-themes | 0.8.1 | MIT |
+| rune-ui-style | 0.9.0 | MIT |
+| rune-ui-themes | 0.9.0 | MIT |
 | rusqlite | 0.37.0 | MIT |
 | rustc-demangle | 0.1.28 | MIT/Apache-2.0 |
 | rustc-hash | 1.1.0 | Apache-2.0/MIT |

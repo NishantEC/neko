@@ -1,7 +1,8 @@
-//! rune-ui registry: reasoning 0.6.0. Copied into your app by `rune-ui add reasoning`; yours to change.
+//! rune-ui registry: reasoning 0.9.0. Copied into your app by `rune-ui add reasoning`; yours to change.
 //!
-//! The model's thinking, kept out of the way. While it thinks, a quiet line says "Thinking…" with a shimmer; afterwards it says "Thought
-//! for 12s" and folds open to the thoughts, in the second ink, indented under the line.
+//! The model's thinking, kept out of the way. While it thinks, a quiet line says "Thinking…" with a shimmer (its words held still under
+//! Reduce Motion); afterwards it says "Thought for 12s" ("Thought" under a second) and folds open to the thoughts, in the second ink,
+//! indented under the line. Nothing to show means nothing shown: a finished thought with no words draws nothing and takes no room.
 //!
 //! ```ignore
 //! Reasoning::new("r1", s.thinking, s.thought_secs, s.open("r1")).text(&thoughts).on_toggle(|s: &mut App| s.flip("r1")).build(t)
@@ -9,9 +10,9 @@
 
 use std::rc::Rc;
 
-use rune::{El, text};
+use rune::{El, el, text};
 
-use super::agent::{FoldLine, elapsed};
+use super::agent::{FoldLine, elapsed, took};
 use super::base::{Press, Theme, glyph};
 use super::icons;
 use super::shimmer::Shimmer;
@@ -42,7 +43,15 @@ impl<S: 'static> Reasoning<S> {
     }
 
     pub fn build(self, t: &Theme) -> El {
-        let label = if self.streaming { "Thinking…".to_owned() } else { format!("Thought for {}", elapsed(self.secs.round())) };
+        if !self.streaming && self.words.trim().is_empty() {
+            // Out of the flow and no size: no height, and no gap in the column it sits in.
+            return el().key(self.key).absolute(0.0, 0.0).size(0.0, 0.0).a11y_hidden();
+        }
+        let label = if self.streaming {
+            "Thinking…".to_owned()
+        } else {
+            took(self.secs).map_or_else(|| "Thought".to_owned(), |_| format!("Thought for {}", elapsed(self.secs.round())))
+        };
         let mut line = FoldLine::<S>::new(self.key.clone(), label.clone(), self.open).lead(glyph(&icons::SPARKLE, t.control.icon, t.ink_faint()));
         if self.streaming {
             line = line.words(Shimmer::new(format!("{}-shimmer", self.key), label).build(t));

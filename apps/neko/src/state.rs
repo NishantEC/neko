@@ -74,6 +74,8 @@ pub struct App {
     pub runtimes: Option<(Vec<RuntimeInfo>, Settings)>,
     /// The person's home folder, so paths under it read `~/…` (None: shown whole).
     pub home: Option<String>,
+    /// Whether each message's actions show (pointer over it or focus in it), by the message's key (rune-ui's `reveal_actions`).
+    pub reveals: HashMap<String, crate::ui::message::Reveal>,
     /// The context ring's panel is open (in the open task's composer).
     pub context_open: bool,
     /// The task whose words stream to this window.
@@ -185,6 +187,7 @@ impl Default for App {
             settings_open: false,
             runtimes: None,
             home: None,
+            reveals: HashMap::new(),
             context_open: false,
             watching: None,
             asked: HashMap::new(),
@@ -238,6 +241,11 @@ impl App {
         if !self.open_folds.remove(key) {
             self.open_folds.insert(key.to_owned());
         }
+    }
+
+    /// Whether a message's actions show now.
+    pub fn reveal(&self, key: &str) -> crate::ui::message::Reveal {
+        self.reveals.get(key).copied().unwrap_or_default()
     }
 
     pub fn is_open(&self, key: &str) -> bool {

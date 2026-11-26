@@ -4,18 +4,17 @@
 //! the window. The lights' room comes from Rune (`Cx::titlebar_inset`, zero in full screen). Everything drawn here comes from
 //! rune-ui's copies (`crate::ui`) and the theme file; the only colours are the theme's.
 
-use rune::{Cx, El, Key, KeyEvent, Tx, col, el, row, text};
+use rune::{Cx, El, col, el, row, text};
 use rune_ui_style::weight;
 
 use std::rc::Rc;
 
 use neko_protocol::TaskStatus;
-use rune::Icon;
 use rune_ui_style::ButtonVariant;
 
 use crate::icons;
 use crate::state::{App, Daemon};
-use crate::ui::agent::{PressTx, chip, icon_button};
+use crate::ui::agent::{PressTx, Status, chip, icon_button, mark};
 use crate::ui::base::{Size, Theme, glyph, paint};
 use crate::ui::button::Button;
 use crate::ui::kbd::Kbd;
@@ -113,16 +112,17 @@ fn sidebar(s: &App, t: &Theme, lights: f32) -> El {
     column
 }
 
-/// The quiet mark a task's row shows for its state.
-fn status_icon(s: TaskStatus) -> (&'static Icon, &'static str) {
+/// The mark a task's row shows for its state (rune-ui's step marks: a spinner while it works, the warning while it needs you), and
+/// the words that say it.
+pub fn status_mark(s: TaskStatus) -> (Status, &'static str) {
     match s {
-        TaskStatus::New => (&crate::ui::icons::CIRCLE, "New"),
-        TaskStatus::Working => (&crate::ui::icons::CIRCLE_DOT, "Working"),
-        TaskStatus::NeedsYou => (&crate::ui::icons::WARNING, "Needs you"),
-        TaskStatus::Done => (&crate::ui::icons::CIRCLE_CHECK, "Done"),
-        TaskStatus::Failed => (&crate::ui::icons::CIRCLE_X, "Failed"),
-        TaskStatus::Stopped => (&crate::ui::icons::CIRCLE_SLASH, "Stopped"),
-        TaskStatus::Interrupted => (&crate::ui::icons::CIRCLE_SLASH, "Interrupted"),
+        TaskStatus::New => (Status::Pending, "New"),
+        TaskStatus::Working => (Status::Running, "Working"),
+        TaskStatus::NeedsYou => (Status::Waiting, "Needs you"),
+        TaskStatus::Done => (Status::Done, "Done"),
+        TaskStatus::Failed => (Status::Error, "Failed"),
+        TaskStatus::Stopped => (Status::Skipped, "Stopped"),
+        TaskStatus::Interrupted => (Status::Skipped, "Interrupted"),
     }
 }
 
@@ -147,22 +147,16 @@ fn task_list(s: &App, t: &Theme, key: &str, label: &str, tasks: &[&neko_protocol
     let n = tasks.len();
     for (i, task) in tasks.iter().enumerate() {
         let open = s.open.as_ref() == Some(&task.id);
-        let (id, for_key) = (task.id.clone(), task.id.clone());
-        let (mark, word) = status_icon(task.status);
-        let row_el = SidebarItem::new(format!("task-{}", task.id.0), task.title.clone()).icon(mark).selected(open).on_press(move |s: &mut App| s.open_task_id(&id)).build(t);
-        let row_el = row_el
-            .role("option")
+        let id = task.id.clone();
+        let (status, word) = status_mark(task.status);
+        // The open task is selected, and the list's Tab stop (with none open, focus enters at the first row); Return opens a row.
+        let row_el = SidebarItem::new(format!("task-{}", task.id.0), task.title.clone())
+            .lead(mark(t, status, t.control.icon))
+            .list_row(i + 1, n)
             .description(word)
-            .position_in_set(i + 1, n)
-            // The open task is selected, and the list's Tab stop (with none open, focus enters at the first row).
-            .focus_selected(open)
-            .on_key(move |s: &mut App, ev: &KeyEvent, _: &mut Tx| {
-                if ev.key == Key::Enter && !(ev.mods.cmd || ev.mods.shift || ev.mods.alt || ev.mods.ctrl) {
-                    s.open_task_id(&for_key);
-                    return true;
-                }
-                false
-            });
+            .selected(open)
+            .on_press(move |s: &mut App| s.open_task_id(&id))
+            .build(t);
         list = list.child(row_el);
     }
     col().w_full().child(heading).child(list)

@@ -19,9 +19,9 @@ fn every_scene_reads_well_to_assistive_technology() {
                 if has(n, "actions", "focus") {
                     assert!(named, "{at}: a focusable {role} has no name: {n}");
                 }
-                // A pressable thing without one is a hit area around a named control (rune-ui's 40 point targets).
-                if has(n, "actions", "click") && !has(n, "actions", "focus") && !named {
-                    assert!(children(i).any(|c| !str_of(&all[c].1, "name").is_empty()), "{at}: an unnamed {role} holds no named control: {n}");
+                // Anything pressable has a name too (rune-ui 0.9 hides its 40 point hit areas: no unnamed buttons round a control).
+                if has(n, "actions", "click") {
+                    assert!(named, "{at}: an unnamed pressable {role}: {n}");
                 }
                 if role.contains("text-input") || role == "text-field" {
                     assert!(named, "{at}: a field without a label: {n}");
