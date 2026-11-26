@@ -372,8 +372,8 @@ fn workspace_menu(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El 
     }
     menu = menu
         .separator()
-        .item(DropdownMenuItem::new("Move up").disabled(!s.can_move(&w.id, -1)).on_select(move |s: &mut App| s.move_workspace(&c, -1)))
-        .item(DropdownMenuItem::new("Move down").disabled(!s.can_move(&w.id, 1)).on_select(move |s: &mut App| s.move_workspace(&d, 1)))
+        .item(DropdownMenuItem::new("Move up").shortcut("⌥⌘↑").disabled(!s.can_move(&w.id, -1)).on_select(move |s: &mut App| s.move_workspace(&c, -1)))
+        .item(DropdownMenuItem::new("Move down").shortcut("⌥⌘↓").disabled(!s.can_move(&w.id, 1)).on_select(move |s: &mut App| s.move_workspace(&d, 1)))
         .danger_item(DropdownMenuItem::new("Remove…").on_select(move |s: &mut App| s.ask_remove_workspace(&e)));
     menu_named(menu, t, layer, &format!("{} options", w.name), open)
 }
