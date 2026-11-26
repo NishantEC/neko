@@ -223,6 +223,9 @@ fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, pos: usize, n
     r.on_key(move |s: &mut App, ev: &KeyEvent, tx: &mut Tx| row_keys(s, ev, tx, &mine, before.as_deref(), after.as_deref(), default))
 }
 
+/// How long the empty line waits before it fades in: an answered item's exit (seconds).
+pub const EMPTY_AFTER: f32 = 0.25;
+
 pub fn needs_view(s: &App, t: &Theme) -> El {
     let items = s.visible_needs();
     let n = items.len();
@@ -238,7 +241,8 @@ pub fn needs_view(s: &App, t: &Theme) -> El {
     if items.is_empty() {
         let waiting = !s.needs_loaded && s.daemon != Daemon::Absent;
         let words = if waiting { "Loading…" } else { "Nothing needs you right now." };
-        page = page.child(text(words).key("needs-empty").role("status").font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0));
+        // It fades in once the last item has faded out, never over it (and over its "1 waiting").
+        page = page.child(text(words).key("needs-empty").role("status").font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0).transition(rune::Transition::opacity()).enter_delay(EMPTY_AFTER));
         return wrap(t, page);
     }
     // The daemon's order: groups by workspace, in the order of their oldest item.

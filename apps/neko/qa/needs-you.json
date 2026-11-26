@@ -162,6 +162,44 @@
       "expect": "The Needs you list"
     },
     {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "gone": {
+              "key": "needs"
+            }
+          },
+          {
+            "see": {
+              "key": "needs-you",
+              "name": "2 waiting"
+            }
+          }
+        ]
+      },
+      "within": 3,
+      "expect": "Escape in the list goes back, and both items still wait"
+    },
+    {
+      "do": "key",
+      "key": "cmd+2"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "listitem",
+          "label": "Run the tests"
+        }
+      },
+      "within": 3
+    },
+    {
       "do": "assert",
       "that": {
         "focus": {
@@ -233,6 +271,16 @@
       },
       "within": 5,
       "expect": "The list is empty and says so"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "focus": {
+          "key": "needs-you"
+        },
+        "ring": false
+      },
+      "expect": "After the last answer the keyboard is on the sidebar's Needs you row"
     },
     {
       "do": "snap",

@@ -64,7 +64,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let mut layer = Vec::new();
     let mut root = row().key(ROOT).w_full().h_full().fill(t.c.page.bg).color(t.ink());
     if shown {
-        root = root.child(sidebar(s, &t, lights, &mut layer)).child(el().w(1.0).h_full().fill(t.c.line));
+        // Raised: while it comes in it paints above the content, never under it.
+        root = root.child(sidebar(s, &t, lights, &mut layer).raise()).child(el().w(1.0).h_full().fill(t.c.line));
     }
     let page = if s.settings_open {
         crate::settings_view::settings_view(s, &t)
@@ -410,6 +411,11 @@ pub fn slow_line(s: &App, t: &Theme) -> Option<El> {
     )
 }
 
+/// Under this content width (points) the band drops the task's folder line, so the title keeps its room.
+pub const NARROW_BAND: f32 = 700.0;
+/// The least room the band's title keeps before anything else does.
+pub const TITLE_MIN: f32 = 140.0;
+
 /// The content's band: the sidebar's button when it is folded, and the open task's title.
 fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     let mut band = row().key("content-band").w_full().h(BAND).center_y().px(12.0).gap(t.space.at(2.0)).window_drag();
@@ -417,7 +423,10 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
         band = band.child(lights_room(lights).w(if lights > 0.0 { (lights - 4.0).max(0.0) } else { 0.0 })).child(toggle_button(t, false));
     }
     if let Some(task) = s.open_task().filter(|_| !s.settings_open) {
-        band = band.child(text(task.title.clone()).key("band-title").role("heading").level(1).font(weight(t.ty.base, t.ty.medium)).color(t.ink()).truncate().min_w(0.0).shrink());
+        // The title always wins the room: in a narrow content area the folder line goes first and the workspace's name shortens.
+        let room = s.width.map_or(f32::MAX, |w| w - if s.sidebar_shown() { SIDEBAR + 1.0 } else { 0.0 });
+        let narrow = room < NARROW_BAND;
+        band = band.child(text(task.title.clone()).key("band-title").role("heading").level(1).font(weight(t.ty.base, t.ty.medium)).color(t.ink()).truncate().min_w(TITLE_MIN).shrink());
         band = band.child(row().grow(1.0).min_w(t.space.at(4.0)).h_full());
         // Who does it: the cat's face and name; a press opens its page.
         if let Some(c) = s.cat(&task.cat) {
@@ -441,11 +450,14 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
                     .font(weight(t.ty.sm, t.ty.medium))
                     .color(t.ink_muted())
                     .truncate()
-                    .min_w(72.0)
-                    .max_w(if s.sidebar_shown() { 180.0 } else { 110.0 }),
+                    .min_w(0.0)
+                    .shrink()
+                    .max_w(if narrow { 110.0 } else { 180.0 }),
             );
         }
-        if let Some(place) = task_folder(s, t) {
+        if !narrow
+            && let Some(place) = task_folder(s, t)
+        {
             band = band.child(place);
         }
         band = band.child(task_menu(s, t, task, layer));

@@ -152,12 +152,21 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             s.close_review();
             return true;
         }
-        if !s.settings_open && s.open_is_working() {
-            s.stop();
-            return true;
-        }
+        // In the Needs you list Escape goes back, whatever the task behind it is doing.
         if s.needs_open {
             s.leave_needs();
+            return true;
+        }
+        // A request waiting in the open task: Escape answers it no (the destructive form has no other key), and the agent carries
+        // on. Only with nothing asked does Escape stop the run.
+        if !s.settings_open
+            && let Some(p) = s.pending_request()
+        {
+            s.decide(&p, neko_protocol::Decision::Deny);
+            return true;
+        }
+        if !s.settings_open && s.open_is_working() {
+            s.stop();
             return true;
         }
         s.draft.focused = false;
@@ -186,6 +195,16 @@ pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     if let Some(key) = s.focus_next.take() {
         tx.focus(key, true);
+    }
+    // A request appears in the open task: the keyboard leaves the composer, so Escape answers it no and Return presses nothing
+    // the person did not choose (the request's own answers are a Tab away).
+    let asking = if s.settings_open || s.needs_open { None } else { s.pending_request() };
+    if asking != s.request_seen {
+        if asking.is_some() && s.reply_box().is_some_and(|r| r.focused) {
+            s.reply_mut().focused = false;
+            tx.blur();
+        }
+        s.request_seen = asking;
     }
     if let Some((words, urgent)) = s.announce.take() {
         tx.announce(words, if urgent { rune::LiveRegion::Assertive } else { rune::LiveRegion::Polite });

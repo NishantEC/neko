@@ -109,7 +109,6 @@
           "text": "slow1"
         }
       },
-      "soft": true,
       "expect": "The words the person saw stream before the quit are kept"
     },
     {
@@ -125,11 +124,10 @@
       "do": "assert",
       "that": {
         "see": {
-          "name": "Neko stopped while this was running"
+          "name": "Neko was quit while this was running"
         }
       },
-      "soft": true,
-      "expect": "A notice says Neko stopped while it ran"
+      "expect": "The notice says Neko was quit and nothing was lost"
     },
     {
       "do": "snap",

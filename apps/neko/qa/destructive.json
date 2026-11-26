@@ -129,6 +129,43 @@
       "do": "snap",
       "name": "denied",
       "expect": "Denied by Escape"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Count slowly now [fake:slow]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "slow1"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Stopped after"
+        }
+      },
+      "within": 1.5,
+      "expect": "With nothing asked, Escape still stops the run"
     }
   ]
 }

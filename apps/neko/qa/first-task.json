@@ -86,11 +86,11 @@
       "do": "wait",
       "until": {
         "see": {
-          "text": "word1"
+          "text": "word1 word2"
         }
       },
       "within": 5,
-      "expect": "The agent's words start to stream in"
+      "expect": "The agent's words stream in from the first one"
     },
     {
       "do": "snap",

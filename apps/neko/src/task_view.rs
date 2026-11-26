@@ -600,10 +600,15 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let inset = t.metrics.inset;
     let conversation = Conversation::<App>::new("transcript", s.at_bottom).column(COLUMN + 2.0 * inset).children(items).on_at_bottom(|s: &mut App, at| s.at_bottom = at).build(t);
     let working = s.open_is_working();
+    // While a request waits, Escape answers it no (`lib.rs`), so the composer does not take Escape as Stop then: the answer comes
+    // first, and Stop comes back as soon as the request is answered.
+    let asking = working && s.pending_request().is_some();
     let reply = s.reply_box().cloned().unwrap_or_default();
     let cat = s.cat_name(task);
     let mut composer = PromptInput::new("reply", &reply, |s: &mut App| s.reply_mut())
-        .placeholder(if working {
+        .placeholder(if asking {
+            format!("{cat} is waiting for your answer above. Escape denies it.")
+        } else if working {
             format!("{cat} is working. Press Escape to stop.")
         } else if task.status == neko_protocol::TaskStatus::Asked {
             format!("Answer {cat}'s question")
@@ -611,7 +616,7 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
             format!("Reply to {cat}")
         })
         .spellcheck(true)
-        .phase(if working { Phase::Streaming } else { Phase::Ready })
+        .phase(if working && !asking { Phase::Streaming } else { Phase::Ready })
         .on_submit(|s: &mut App| s.follow_up())
         .on_stop(|s: &mut App| s.stop());
     if let Some(ring) = context_ring(s, t, book, layer) {

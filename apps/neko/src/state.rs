@@ -239,6 +239,8 @@ pub struct App {
     pub needs_notice: Option<String>,
     /// The element to focus at the next frame (the next item after one is answered).
     pub focus_next: Option<String>,
+    /// The request in the open task the window last moved the keyboard for (a new one takes it out of the composer).
+    pub request_seen: Option<PermissionId>,
     /// The notification model and its poster (a recorder everywhere but the real window).
     pub notifier: Notifier,
     /// Neko is the frontmost app with its window focused (the real window reads it every frame).
@@ -434,6 +436,7 @@ impl Default for App {
             needs_replies: HashMap::new(),
             needs_notice: None,
             focus_next: None,
+            request_seen: None,
             notifier: Notifier::default(),
             front: true,
             allowed: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
@@ -733,7 +736,8 @@ impl App {
         self.needs_notice = None;
         if let Some(at) = at {
             let next = shown.get(at + 1).or_else(|| at.checked_sub(1).and_then(|b| shown.get(b)));
-            self.focus_next = next.map(|n| need_key(n));
+            // After the last one, the keyboard goes to the sidebar's Needs you row (its empty page has no control of its own).
+            self.focus_next = Some(next.map_or_else(|| "needs-you".to_owned(), |n| need_key(n)));
             self.announce = Some((left_words(shown.len() - 1), false));
         }
     }
@@ -1125,6 +1129,12 @@ impl App {
     /// The open task's transcript.
     pub fn book(&self) -> Option<&Book> {
         self.open.as_ref().and_then(|id| self.books.get(id))
+    }
+
+    /// The newest request still waiting for the person in the open task (Escape answers it no).
+    pub fn pending_request(&self) -> Option<PermissionId> {
+        let b = self.book()?;
+        b.permissions.values().filter(|p| p.state == neko_protocol::PermissionState::Pending).max_by_key(|p| (p.asked_ms, p.id.0.clone())).map(|p| p.id.clone())
     }
 
     /// Whether the open task's agent is at work.
@@ -1628,6 +1638,8 @@ impl App {
                     let id = task.id.clone();
                     self.upsert(task);
                     self.open_task_id(&id);
+                    // The keyboard follows the words: into the new task's composer (Home's has gone).
+                    self.replies.entry(id).or_default().focused = true;
                     return;
                 }
                 self.upsert(task);

@@ -97,6 +97,16 @@
       "expect": "The sidebar shown in the narrow window"
     },
     {
+      "do": "assert",
+      "that": {
+        "see": {
+          "key": "band-title",
+          "text": "Water the plants"
+        }
+      },
+      "expect": "With the sidebar shown at 760 wide the band still shows the whole title"
+    },
+    {
       "do": "click",
       "on": {
         "key": "sidebar-hide"

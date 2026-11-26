@@ -120,7 +120,13 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
 - **Settings**: the line saying what the person's Claude Code rules allow sits right under the Permissions heading, in sight
   without scrolling in the default window (tested).
 - **The composer** (`reply`): Return sends a follow-up; while it works Send is Stop and Escape stops (also when the focus is
-  elsewhere in the task; with the context panel open, Escape closes it first).
+  elsewhere in the task; with the context panel open, Escape closes it first). While a request waits in the task, Escape answers
+  it no and the agent carries on: when it appears the keyboard leaves the composer, which shows Send (not Stop) and says "Escape
+  denies it" until the request is answered. In the Needs you list Escape goes back, whatever the task behind it is doing.
+- After a task is sent from Home the keyboard is in its composer. After the last Needs you item is answered it is on the
+  sidebar's Needs you row.
+- **The band** keeps the task's title: in a content area under 700 points (the smallest window with the sidebar shown) the folder
+  line is left out and the workspace's name shortens first; the title keeps at least 140 points.
 - The sidebar row's mark is rune-ui's step mark on `SidebarItem::lead`: hollow (new), a spinner (working), warning (needs you:
   a request waits, or the run ended with a question for the person), check (done), cross (failed), slash (stopped or
   interrupted); the row's description says it in words. When the run ended with a question the composer says "Answer Neko's

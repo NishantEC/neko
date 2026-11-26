@@ -42,7 +42,6 @@
           "key": "reply-input"
         }
       },
-      "soft": true,
       "expect": "After sending, the keyboard is in the task's composer"
     },
     {
