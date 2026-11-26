@@ -52,7 +52,7 @@ pub fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     // The panel starts INSET down and in: its band is twice that shorter, so the lights stay on the window's centre line.
     let band = row().key("sidebar-band").w_full().h(BAND - 2.0 * INSET).center_y().pr(INSET).window_drag().child(lights_room((lights - INSET).max(0.0))).child(row().grow(1.0).h_full()).child(toggle_button(t, true));
     // A sidebar row that acts: the same alignment as Home and the tasks, as Mail's and Notes' sidebars have.
-    let new = SidebarItem::new("new-task", "New task").icon(&icons::COMPOSE).on_press(|s: &mut App| s.new_task_here()).build(t).role("button");
+    let new = SidebarItem::new("new-task", "New task").icon(&icons::COMPOSE).button(true).on_press(|s: &mut App| s.new_task_here()).build(t);
     let new = Tooltip::new("New task").keys("⌘N").wrap(new);
     let home = SidebarItem::new("home", "Home").icon(&crate::ui::icons::HOME).selected(s.open.is_none() && !s.settings_open && !s.needs_open && !s.rounds_open && s.open_cat.is_none()).on_press(|s: &mut App| s.go_home()).build(t);
     let home = Tooltip::new("Home").keys("⌘1").wrap(home);
@@ -60,12 +60,10 @@ pub fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     let n = s.visible_needs().len();
     let mut needs = SidebarItem::new("needs-you", "Needs you").icon(&crate::ui::icons::INBOX).selected(s.needs_open).on_press(|s: &mut App| s.open_needs());
     if n > 0 {
-        needs = needs.description(if n == 1 { "1 waiting".to_owned() } else { format!("{n} waiting") });
+        // The count is the amber pill; the row says it in words ("3 waiting").
+        needs = needs.description(if n == 1 { "1 waiting".to_owned() } else { format!("{n} waiting") }).trail(pill(t, "needs-you-count", n));
     }
-    let mut needs = needs.build(t);
-    if n > 0 {
-        needs = needs.child(pill(t, "needs-you-count", n));
-    }
+    let needs = needs.build(t);
     let needs = Tooltip::new("Needs you").keys("⌘2").wrap(needs);
     // Work that starts by itself: with how many rounds there are, or that every one is paused.
     let rounds_n = s.rounds.len();
@@ -83,7 +81,7 @@ pub fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     }
     body = body.child(sections);
     let add: PressTx<App> = Rc::new(|s: &mut App, tx: &mut rune::Tx| crate::pick_folder(s, Pick::Add { select: false }, tx));
-    let add = SidebarItem::<App>::new("add-workspace", "Add workspace…").icon(&icons::FOLDER_PLUS).build(t).role("button").on_press_tx(move |s: &mut App, tx: &mut rune::Tx| add(s, tx));
+    let add = SidebarItem::<App>::new("add-workspace", "Add workspace…").icon(&icons::FOLDER_PLUS).button(true).build(t).on_press_tx(move |s: &mut App, tx: &mut rune::Tx| add(s, tx));
     body = body.child(add).child(cats_section(s, t));
     let list = col().key("sidebar-scroll").w_full().grow(1.0).min_h(0.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(body.pb(t.space.at(4.0)));
     let mut column = col().key("sidebar").role("navigation").label("Sidebar").w_full().h_full().child(band).child(list);
@@ -106,6 +104,8 @@ fn under(t: &Theme, selected: bool) -> Color {
 
 /// A two-line sidebar row: a portrait in its state, a title and a line under it, selected as a raised pebble. The same words and
 /// keys as rune-ui's SidebarItem in a list: an option, its place in the list, its state as the description, Return presses it.
+/// Kept here, not a `SidebarItem` with `.image` and `.subtitle`: that second line is plain words, and this one is parts in their own
+/// inks (the state word in its colour, the round's mark before it). Upstream ask: a second line given as an element.
 #[allow(clippy::too_many_arguments)]
 fn face_row(t: &Theme, key: String, title: &str, description: String, face: &str, st: Option<TaskStatus>, meta: El, i: usize, n: usize, selected: bool) -> El {
     let mut r = row()
@@ -191,7 +191,7 @@ fn cats_section(s: &App, t: &Theme) -> El {
         let selected = s.open_cat.as_deref() == Some(c.id.as_str());
         list = list.child(face_row(t, format!("cat-{}", c.id), &c.name, state.words(), &c.face, st, meta_line(t, parts), i, n, selected).on_press(move |s: &mut App| s.open_cat_page(&id)));
     }
-    let new = SidebarItem::new("new-cat", "New cat…").icon(&crate::ui::icons::PLUS).on_press(|s: &mut App| s.start_new_cat()).build(t).role("button");
+    let new = SidebarItem::new("new-cat", "New cat…").icon(&crate::ui::icons::PLUS).button(true).on_press(|s: &mut App| s.start_new_cat()).build(t);
     col().key("cats-section").role("group").label("Cats").w_full().gap(1.0).pt(t.space.at(4.0)).child(head).child(list).child(new)
 }
 
@@ -316,8 +316,8 @@ fn section(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
                     s.show_all.insert(more.clone());
                 }
             })
-            .build(t)
-            .role("button");
+            .button(true)
+            .build(t);
         sec = sec.child(toggle_more);
     }
     sec
