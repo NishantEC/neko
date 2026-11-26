@@ -57,8 +57,7 @@ only (tested by reading `lib.rs`).
 - **Theme file** (`apps/neko/themes/neko.json`): the teal is the theme's `color.identity` ramp and `role.identity` (the `blue` ramp is the
   kit's blue again; `info`, `accent` and `ring` point at the identity ramp), House's type scale is `type.<step>`, the dialog scrim is
   `number.scrim` (0.18 light, 0.55 dark; black). `view::theme` is `Theme::from_json` and Reduce Motion, nothing else.
-  `base.keys-font` is left out: the keys' face is then the theme's own, Figtree. The workspace menu's Move up and Move down show
-  their shortcuts (⌥⌘↑ and ⌥⌘↓).
+  `base.keys-font` is left out: the keys' face is then the theme's own, Figtree (Kbd passes the Figtree test).
 - **Portrait** (`faces::portrait`, `faces::portrait_in`): `Portrait::new(key, name, size).face(drawing).ground(..)` (or `.image(..)` for the
   development art), `.ringed(true)`, `.state(Activity::..)`, `.under(surface)`, `.decorative(true)`. Neko keeps the drawn faces, their
   grounds, `wash` and the art override. Every portrait takes a key.
@@ -90,6 +89,9 @@ Neko tried each of these on 0.10.0 and kept its own, because the render got wors
   `marks_size`.
 - **DropdownMenu names** (`view::menu_named`): the open surface is named "Menu" now, not nothing; Neko names it for its list ("Cats",
   "Task options"). Ask: `DropdownMenu::name(..)`.
+- **Shortcuts in menu rows** (`Row::shortcut`): the row's keys are drawn in the keycap face, but `shortcut_hint` makes the element carry
+  its text in Inter, and `tests/structure.rs` ("Figtree everywhere") fails on it. Neko tried ⌥⌘↑ and ⌥⌘↓ on Move up and Move down
+  and took them out again. Ask: the hint's text in the theme's keycap face.
 - **Reorder** for the workspaces: the sections have different heights (a header and its tasks), and `Reorder` takes rows of one pitch.
   Ask: variable pitch. Until then workspaces are ordered by the menu and ⌥⌘↑ and ⌥⌘↓.
 - **Select** is installed and unused by choice: the composer's workspace and cat pickers are chips that open a menu with the current
