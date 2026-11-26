@@ -145,7 +145,7 @@ pub fn turn_head(t: &Theme, r: &Run, name: &str, face: &str, waiting: bool, undo
         .center_y()
         // The portrait's ring sits in the margin, so the portrait itself starts on the reading edge.
         .ml(-(crate::faces::ringed(32.0) - 32.0) / 2.0)
-        .child(portrait_in(t, face, 32.0, st, t.c.page.bg))
+        .child(portrait_in(t, &format!("turn-{}-face", r.id.0), face, 32.0, st, t.c.page.bg))
         .child(text(name.to_owned()).font(weight(t.ty.base, t.ty.semibold)).color(t.ink()).a11y_hidden())
         .child(text(doing).font(t.ty.sm).color(ink).a11y_hidden())
 }
@@ -226,7 +226,7 @@ pub fn request(t: &Theme, p: &Permission, name: &str, face: &str) -> El {
         .w_full()
         .gap(t.space.at(3.0))
         .items_start()
-        .child(portrait_in(t, face, 32.0, Some(TaskStatus::NeedsYou), crate::view::raised_fill(t)))
+        .child(portrait_in(t, &format!("{key}-face"), face, 32.0, Some(TaskStatus::NeedsYou), crate::view::raised_fill(t)))
         .child(
             col()
                 .grow(1.0)
@@ -346,7 +346,7 @@ pub fn receipt(s: &App, t: &Theme, r: &Run, parts: &[&Part], o: &Offer, changed:
         .h(t.control.lg + 8.0)
         .gap(t.space.at(2.5))
         .center_y()
-        .child(portrait(t, face, 24.0))
+        .child(portrait(t, &format!("{key}-face"), face, 24.0))
         .child(text(sentence.clone()).role("heading").level(3).font(weight(t.ty.base, t.ty.semibold)).color(if failed { t.c.danger.fg } else if o.undone { t.ink_muted() } else { t.ink() }).grow(1.0).truncate().min_w(0.0))
         .child(facts);
     let mut card = col().key(key.clone()).role("group").label(sentence).w_full().gap(0.0).child(head);

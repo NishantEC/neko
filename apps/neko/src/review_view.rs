@@ -204,7 +204,7 @@ pub fn review_view(s: &App, t: &Theme, r: &Review) -> El {
     };
     let mut title = row().w_full().gap(t.space.at(3.0)).center_y();
     if let Some(c) = &cat {
-        title = title.child(crate::faces::portrait(t, &c.face, 32.0));
+        title = title.child(crate::faces::portrait(t, "review-cat-face", &c.face, 32.0));
     }
     title = title.child(text(heading).key("review-title").role("heading").level(2).font(weight(t.ty.xl, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0));
     let mut page = col().key("review").w_full().max_w(COLUMN).gap(t.space.at(3.0)).child(top).child(title);

@@ -62,7 +62,7 @@ fn face_picker(t: &Theme, c: &Cat) -> El {
         if on {
             frame = frame.border(2.0, t.c.ring);
         }
-        sw = sw.child(frame.child(crate::faces::portrait(t, coat.id, size))).child(text(coat.words).font(weight(t.ty.xs, if on { t.ty.semibold } else { t.ty.regular })).color(if on { t.ink() } else { t.ink_muted() }).a11y_hidden());
+        sw = sw.child(frame.child(crate::faces::portrait(t, &format!("face-swatch-{}", coat.id), coat.id, size))).child(text(coat.words).font(weight(t.ty.xs, if on { t.ty.semibold } else { t.ty.regular })).color(if on { t.ink() } else { t.ink_muted() }).a11y_hidden());
         swatches = swatches.child(sw.on_press(move |s: &mut App| s.set_cat_face(&cat, &face)));
     }
     swatches
@@ -159,7 +159,7 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
         .radius(t.radius.xl + t.space.at(5.0) - 8.0)
         .round_as(t)
         .fill(wash)
-        .child(crate::faces::portrait_in(t, &c.face, 112.0, st, wash))
+        .child(crate::faces::portrait_in(t, "cat-hero-face", &c.face, 112.0, st, wash))
         .child(who)
         .child(actions);
     let facts = col()

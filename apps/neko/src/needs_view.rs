@@ -130,7 +130,7 @@ fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, pos: usize, n
         Need::Question { .. } => format!("{} has a question", item.cat_name),
         Need::Failure { .. } => format!("{} could not go on", item.cat_name),
     };
-    let lead = crate::faces::portrait_in(t, &face, 44.0, Some(if failed { neko_protocol::TaskStatus::Failed } else { neko_protocol::TaskStatus::NeedsYou }), crate::view::raised_fill(t));
+    let lead = crate::faces::portrait_in(t, &format!("{key}-face"), &face, 44.0, Some(if failed { neko_protocol::TaskStatus::Failed } else { neko_protocol::TaskStatus::NeedsYou }), crate::view::raised_fill(t));
     let who = row()
         .key(format!("{key}-cat"))
         .w_full()

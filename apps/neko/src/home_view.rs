@@ -112,7 +112,7 @@ fn tile(s: &App, t: &Theme, cat: &Cat, small: bool) -> El {
     if !small {
         words_col = words_col.child(text(line).font(t.ty.sm).color(if task.is_some() { t.ink_muted() } else { t.ink_faint() }).max_lines(2).wrap().min_w(0.0).pt(2.0).a11y_hidden());
     }
-    card = card.child(portrait_in(t, &cat.face, face, st, under)).child(words_col);
+    card = card.child(portrait_in(t, &format!("cat-tile-{}-face", cat.id), &cat.face, face, st, under)).child(words_col);
     match task {
         Some(x) => {
             let id = x.id.clone();
@@ -171,7 +171,7 @@ fn cat_picker(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let picked = s.cat_pick().and_then(|id| s.cat(id));
     let name = picked.map_or_else(|| "Any cat".to_owned(), |c| c.name.clone());
     let faces = match picked {
-        Some(c) => Some(portrait(t, &c.face, FACE_CHIP)),
+        Some(c) => Some(portrait(t, "cat-picker-face", &c.face, FACE_CHIP)),
         // Before the house is known there are no faces to show: the chip is its words alone.
         None if s.active_cats().is_empty() => None,
         None => {
@@ -184,7 +184,7 @@ fn cat_picker(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
             let mut stack = el().size(width, cut);
             for (i, c) in shown.iter().enumerate().rev() {
                 // Each face sits in a disc of the chip's own surface, so the one under it is cut where they meet.
-                stack = stack.child(el().size(cut, cut).radius(cut * 0.3).fill(raised_fill(t)).child(portrait(t, &c.face, FACE_CHIP).absolute(ring, ring)).absolute(step * i as f32, 0.0));
+                stack = stack.child(el().size(cut, cut).radius(cut * 0.3).fill(raised_fill(t)).child(portrait(t, &format!("cat-picker-face-{}", c.id), &c.face, FACE_CHIP).absolute(ring, ring)).absolute(step * i as f32, 0.0));
             }
             Some(stack)
         }
@@ -304,7 +304,7 @@ fn list_row(s: &App, t: &Theme, task: &Task, list: &str, i: usize, n: usize, wha
         .child(text(task.title.clone()).font(weight(t.ty.base, t.ty.medium)).color(t.ink()).truncate().min_w(0.0).a11y_hidden())
         .child(text(sub).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0).a11y_hidden());
     let ink = state_ink(t, task.status).unwrap_or(t.ink_faint());
-    r.child(portrait_in(t, s.cat_face(&task.cat), 32.0, Some(task.status), t.c.input.bg))
+    r.child(portrait_in(t, &format!("{list}-{}-face", task.id.0), s.cat_face(&task.cat), 32.0, Some(task.status), t.c.input.bg))
         .child(words)
         .child(text(word).font(weight(t.ty.sm, t.ty.semibold)).color(ink).a11y_hidden())
         .child(text(since(s, task.created_ms)).font(tabular(t.ty.sm)).color(t.ink_faint()).w(56.0).align(rune::Align::End).a11y_hidden())

@@ -2,9 +2,9 @@
 //! (`neko_protocol::cats::FACES`), each on a ground colour of its own, so eight cats are told apart by colour at 20 points and by
 //! their markings at 76.
 //!
-//! A portrait is a continuous-corner square: the ground, the cat's head and shoulders cut by its foot, a hairline and a soft shadow.
-//! [`portrait_in`] puts it in its state: a turning ring while the cat works (still under Reduce Motion), a dot at its foot when it
-//! needs the person or could not go on.
+//! A portrait is rune-ui's `Portrait` tile with the cat's head and shoulders (cut by its foot) drawn as its face, on the face's
+//! ground. [`portrait_in`] puts it in its state: a turning ring while the cat works (still under Reduce Motion), a dot at its foot
+//! when it needs the person or could not go on.
 //!
 //! Development builds only: when `NEKO_CAT_ART` names a folder holding `<face>.png` (`ginger.png`, `calico.png`, …), that picture is
 //! drawn in place of the face. No artwork ships with Neko; a release build never reads the variable.
@@ -13,10 +13,12 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use neko_protocol::TaskStatus;
-use rune::{Color, El, LineCap, Path, Pixels, Shadow, Shape, el};
+use rune::{Color, El, LineCap, Pixels, Shape, el};
 use rune_ui_style::hex;
 
 use crate::ui::base::Theme;
+use crate::ui::portrait::{Activity, Portrait};
+pub use crate::ui::portrait::{radius, ringed};
 
 /// How a face is drawn: its ground, coat, inner ear, muzzle, markings and eyes.
 pub struct Coat {
@@ -240,11 +242,6 @@ fn art(face: &str) -> Option<Pixels> {
     ART.with(|a| a.borrow_mut().get_or_insert_with(load_art).get(face).cloned())
 }
 
-/// The corner radius of a portrait of `size`: a continuous-corner square, about a fifth of its side.
-pub fn radius(size: f32) -> f32 {
-    (size * 0.24).round()
-}
-
 /// How far a wash is from the page, as the biggest step in any colour channel as the eye's encoding has it (0 to 1).
 pub fn wash_step(page: Color, wash: Color) -> f32 {
     let e = rune::color::srgb_encode;
@@ -261,96 +258,34 @@ pub fn wash(t: &Theme, face: &str) -> Color {
     rune_ui_style::mix(page, ground, (aim / far).clamp(0.04, 0.30))
 }
 
-/// A cat's portrait: its ground, its face (or the development art), a hairline and a soft two-layer shadow. Hidden from assistive
-/// technology: the row, turn or tile it sits in says the cat's name.
-pub fn portrait(t: &Theme, face: &str, size: f32) -> El {
-    let r = radius(size);
-    let mut p = el().size(size, size).radius(r).fill(hex(coat(face).ground)).gradient(Color::WHITE.alpha(0.16), Color::WHITE.alpha(0.0)).clip_rounded(r);
-    p = match art(face) {
-        Some(px) => p.pixels(&px),
-        None => p.child(drawing(face, size)),
-    };
-    let edge = if t.dark { Color::WHITE.alpha(0.14) } else { Color::BLACK.alpha(0.10) };
-    let mut p = p.border(if size < 24.0 { 0.5 } else { 1.0 }, edge);
-    if size >= 24.0 {
-        p = p
-            .box_shadow(Shadow { y: 1.0, blur: 2.0, color: Color::BLACK.alpha(if t.dark { 0.45 } else { 0.10 }), ..Shadow::default() })
-            .box_shadow(Shadow { y: size * 0.06, blur: size * 0.18, spread: -size * 0.04, color: Color::BLACK.alpha(if t.dark { 0.5 } else { 0.14 }), ..Shadow::default() });
-    }
-    p.a11y_hidden()
-}
 
-/// A circle as a path.
-fn circle(cx: f32, cy: f32, r: f32) -> Path {
-    Path::from_svg(&ellipse(cx, cy, r, r))
-}
-
-/// A third of a circle from twelve o'clock, as a path (the working ring's moving arc).
-fn arc(cx: f32, cy: f32, r: f32) -> Path {
-    let k = 0.5523 * r;
-    let (x1, y1) = (cx + r, cy);
-    let a = 30f32.to_radians();
-    let (x2, y2) = (cx + r * a.cos(), cy + r * a.sin());
-    let k2 = r * 4.0 / 3.0 * (a / 4.0).tan();
-    Path::new().move_to([cx, cy - r]).cubic_to([cx + k, cy - r], [cx + r, cy - k], [x1, y1]).cubic_to([x1, y1 + k2], [x2 + k2 * a.sin(), y2 - k2 * a.cos()], [x2, y2])
-}
-
-/// The room a portrait of `size` takes in its state: the ring's gap and stroke on each side.
-pub fn ringed(size: f32) -> f32 {
-    let (gap, stroke) = ring_metrics(size);
-    size + 2.0 * (gap + stroke)
-}
-
-/// The ring's gap and stroke at a portrait size: at least 2.5 points of stroke at every size, so it reads at 20.
-fn ring_metrics(size: f32) -> (f32, f32) {
-    ((size * 0.06).clamp(2.0, 5.0).round(), (size * 0.04).clamp(2.5, 3.5))
-}
-
-/// The colour of a portrait's state dot: amber for needs you, red for could not go on. In light the amber is taken a step deeper
-/// than the theme's solid, and in dark the red a step lighter, so each dot reaches 3:1 on every surface (tests/contrast.rs).
-pub fn dot(t: &Theme, failed: bool) -> Color {
-    match (failed, t.dark) {
-        (true, false) => t.c.danger.solid,
-        (true, true) => rune_ui_style::mix(t.c.danger.solid, t.c.danger.fg, 0.35),
-        (false, true) => t.c.warning.solid,
-        (false, false) => rune_ui_style::mix(t.c.warning.solid, t.c.warning.fg, 0.32),
-    }
+/// A cat's portrait: rune-ui's `Portrait` tile with the cat's drawn face on its ground (or the development art). Hidden from
+/// assistive technology: the row, turn or tile it sits in says the cat's name. `key` is the tile's own key (unique on the page).
+pub fn portrait(t: &Theme, key: &str, face: &str, size: f32) -> El {
+    tile(t, key, face, size, Activity::None, false, t.c.page.bg)
 }
 
 /// A portrait in its state: a calm turning ring in the identity colour while the cat works (a still arc under Reduce Motion), a
 /// dot at its foot when it needs the person (amber) or could not go on (red). `under` is the surface it sits on (the dot's ring).
 /// It takes the same room in every state ([`ringed`]), so nothing moves when the state changes.
-pub fn portrait_in(t: &Theme, face: &str, size: f32, st: Option<TaskStatus>, under: Color) -> El {
-    let (gap, stroke) = ring_metrics(size);
-    let outer = ringed(size);
-    let mut b = el().size(outer, outer).child(portrait(t, face, size).absolute(gap + stroke, gap + stroke));
-    match st {
-        Some(TaskStatus::Working) => {
-            let c = t.c.ring;
-            let r = outer / 2.0 - stroke / 2.0;
-            let track = Shape::new().stroke_path(&circle(outer / 2.0, outer / 2.0, r), stroke, LineCap::Round, c.alpha(if t.dark { 0.28 } else { 0.22 }));
-            let sweep = Shape::new().stroke_path(&arc(outer / 2.0, outer / 2.0, r), stroke, LineCap::Round, c);
-            let mut moving = el().size(outer, outer).shape(sweep).absolute(0.0, 0.0);
-            if !t.reduced_motion {
-                moving = moving.looping(rune::LoopSpec::rotation(2.4));
-            }
-            b = b.child(el().size(outer, outer).shape(track).absolute(0.0, 0.0)).child(moving);
-        }
-        Some(s) => {
-            let solid = match s {
-                TaskStatus::NeedsYou | TaskStatus::Asked => Some(dot(t, false)),
-                TaskStatus::Failed => Some(dot(t, true)),
-                _ => None,
-            };
-            if let Some(c) = solid {
-                let d = (size * 0.3).round().clamp(9.0, 18.0);
-                let ring = if size < 32.0 { 1.5 } else { 2.0 };
-                b = b.child(el().size(d, d).radius(d / 2.0).fill(c).box_shadow(Shadow { spread: ring, color: under, ..Shadow::default() }).absolute(outer - d - 1.0, outer - d - 1.0));
-            }
-        }
-        None => {}
+pub fn portrait_in(t: &Theme, key: &str, face: &str, size: f32, st: Option<TaskStatus>, under: Color) -> El {
+    let activity = match st {
+        Some(TaskStatus::Working) => Activity::Working,
+        Some(TaskStatus::NeedsYou | TaskStatus::Asked) => Activity::NeedsYou,
+        Some(TaskStatus::Failed) => Activity::Failed,
+        _ => Activity::None,
+    };
+    tile(t, key, face, size, activity, true, under)
+}
+
+fn tile(t: &Theme, key: &str, face: &str, size: f32, activity: Activity, ringed: bool, under: Color) -> El {
+    let px = art(face);
+    let p = Portrait::new(key, words(face), size).ground(hex(coat(face).ground)).state(activity).ringed(ringed).under(under).decorative(true);
+    match &px {
+        Some(px) => p.image(px),
+        None => p.face(drawing(face, size)),
     }
-    b.a11y_hidden()
+    .build(t)
 }
 
 #[cfg(test)]
@@ -376,7 +311,7 @@ mod tests {
     #[test]
     fn the_ring_reads_at_small_sizes_and_takes_the_same_room_in_every_state() {
         for size in [20.0, 24.0, 28.0] {
-            let (_, stroke) = ring_metrics(size);
+            let (_, stroke) = crate::ui::portrait::ring_metrics(size);
             assert!(stroke >= 2.5, "the ring at {size} is {stroke}");
         }
         assert_eq!(ringed(28.0), 28.0 + 2.0 * (2.0 + 2.5));

@@ -224,7 +224,7 @@ fn cats_page(s: &App, t: &Theme) -> El {
             crate::state::CatState::NeedsYou if c.is_active() => Some(neko_protocol::TaskStatus::NeedsYou),
             _ => None,
         };
-        let face = crate::faces::portrait_in(t, &c.face, 40.0, st, t.c.surface.bg);
+        let face = crate::faces::portrait_in(t, &format!("{key}-face"), &c.face, 40.0, st, t.c.surface.bg);
         let face = if c.is_active() { face } else { face.opacity(0.55) };
         part = part.child(paint(row().key(key.clone()).role("group").label(c.name.clone()).w_full().padding(t.space.at(3.0)).gap(t.space.at(3.0)).center_y().radius(t.radius.xl).round_as(t), &t.mat.slab.base).child(face).child(facts).child(action));
     }

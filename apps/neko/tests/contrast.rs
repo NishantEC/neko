@@ -5,6 +5,7 @@
 use rune::Color;
 use rune_ui_style::{contrast, over};
 
+use neko_app::ui::portrait::{DOT_CONTRAST, RING_CONTRAST, seen_on};
 use neko_app::view::{raised_fill, theme};
 
 /// Each surface as painted: a translucent one (a well, a wash) laid over the paper it sits on.
@@ -59,7 +60,17 @@ fn marks_without_words_reach_three_to_one() {
         let which = if dark { "dark" } else { "light" };
         for (surface, bg) in surfaces(&t) {
             let bg = Color { a: 1.0, ..bg };
-            for (name, mark) in [("focus and working ring", t.c.ring), ("needs-you dot", neko_app::faces::dot(&t, false)), ("failed dot", neko_app::faces::dot(&t, true))] {
+            // The portrait's ring and dots are the colours rune-ui's Portrait draws on this surface (taken toward the strong ink until
+            // they are seen on it).
+            let id = t.identity();
+            let seen = |tone: &rune_ui_style::tokens::Tone, min: f32| seen_on(tone.solid, tone.fg, bg, min);
+            let marks = [
+                ("focus ring", t.c.ring),
+                ("working ring", seen_on(id.solid, id.fg, bg, RING_CONTRAST)),
+                ("needs-you dot", seen(&t.c.warning, DOT_CONTRAST)),
+                ("failed dot", seen(&t.c.danger, DOT_CONTRAST)),
+            ];
+            for (name, mark) in marks {
                 let c = contrast(mark, bg);
                 assert!(c >= 3.0, "{which} {name} on {surface}: {c:.2}:1");
             }

@@ -109,7 +109,7 @@ fn under(t: &Theme, selected: bool) -> Color {
 #[allow(clippy::too_many_arguments)]
 fn face_row(t: &Theme, key: String, title: &str, description: String, face: &str, st: Option<TaskStatus>, meta: El, i: usize, n: usize, selected: bool) -> El {
     let mut r = row()
-        .key(key)
+        .key(key.clone())
         .role("option")
         .label(title.to_owned())
         .help(title.to_owned())
@@ -134,7 +134,8 @@ fn face_row(t: &Theme, key: String, title: &str, description: String, face: &str
         .gap(1.0)
         .child(text(title.to_owned()).font(weight(t.ty.base, if selected { t.ty.semibold } else { t.ty.medium })).color(t.ink()).truncate().min_w(0.0).a11y_hidden())
         .child(meta);
-    r.child(crate::faces::portrait_in(t, face, FACE, st, under(t, selected))).child(words)
+    let portrait = crate::faces::portrait_in(t, &format!("{key}-face"), face, FACE, st, under(t, selected));
+    r.child(portrait).child(words)
 }
 
 /// The quiet line under a row's title, its parts apart by middle dots.

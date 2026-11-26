@@ -214,7 +214,7 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
         let id = c.id.clone();
         let st = (task.status == TaskStatus::Working).then_some(TaskStatus::Working);
         let face = row().key("task-cat").role("button").label(format!("Cat: {}", c.name)).help(format!("Open {}'s page", c.name)).focusable(true).padding(2.0).radius(t.radius.md).round_as(t);
-        band = band.child(paint_state(face, &t.mat.row, States::default()).child(crate::faces::portrait_in(t, &c.face, 24.0, st, t.c.page.bg)).on_press(move |s: &mut App| s.open_cat_page(&id)));
+        band = band.child(paint_state(face, &t.mat.row, States::default()).child(crate::faces::portrait_in(t, "task-cat-face", &c.face, 24.0, st, t.c.page.bg)).on_press(move |s: &mut App| s.open_cat_page(&id)));
     }
     // The title always wins the room: in a narrow content area the folder line goes first and the workspace's name shortens.
     let room = s.width.map_or(f32::MAX, |w| w - if s.sidebar_shown() { SIDEBAR + 2.0 * crate::sidebar::INSET + 1.0 } else { 0.0 });
@@ -390,7 +390,7 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
             let face = neko_protocol::cats::FACES.iter().find(|f| !taken.contains(f)).copied().unwrap_or(neko_protocol::cats::FACES[0]);
             let said = format!("It gets the {} face. You can change it on its page.", crate::faces::words(face));
             dialog = dialog.child(
-                row().key("cat-name-face").role("note").label(said.clone()).w_full().gap(t.space.at(3.0)).center_y().child(crate::faces::portrait(t, face, 40.0)).child(text(said).font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0).shrink().a11y_hidden()),
+                row().key("cat-name-face").role("note").label(said.clone()).w_full().gap(t.space.at(3.0)).center_y().child(crate::faces::portrait(t, "cat-name-face-img", face, 40.0)).child(text(said).font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0).shrink().a11y_hidden()),
             );
         }
         dialog.child(field).footer(vec![cancel, save]).width(400.0).open(true).return_focus(back).on_close(|s: &mut App| s.naming = None).build(t, layer);

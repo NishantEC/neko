@@ -157,7 +157,7 @@ fn card(s: &App, t: &Theme, r: &Round, i: usize, n: usize, layer: &mut Vec<El>) 
         .padding(t.space.at(4.0))
         .radius(t.radius.xl + 4.0)
         .round_as(t);
-    let lead = crate::faces::portrait_in(t, &face, 44.0, None, crate::view::raised_fill(t));
+    let lead = crate::faces::portrait_in(t, &format!("round-{id}-face"), &face, 44.0, None, crate::view::raised_fill(t));
     raised(t, shell).child(row().w_full().gap(t.space.at(4.0)).items_start().child(lead).child(body))
 }
 
@@ -254,7 +254,7 @@ fn pickers(s: &App, t: &Theme, f: &RoundForm, menus: &mut Vec<El>) -> El {
     let cat_name = cat.map_or_else(|| "Choose a cat".to_owned(), |c| c.name.clone());
     let mut cat_chip = chip(t, "round-cat", None).role("button").label(format!("Cat: {cat_name}"));
     if let Some(c) = cat {
-        cat_chip = cat_chip.child(crate::faces::portrait(t, &c.face, 20.0));
+        cat_chip = cat_chip.child(crate::faces::portrait(t, "round-cat-face", &c.face, 20.0));
     }
     cat_chip = cat_chip.child(text(cat_name).font(t.ty.sm).color(t.ink()).truncate().max_w(160.0).min_w(0.0).a11y_hidden());
     let mut cat_menu = DropdownMenu::new("round-cat-menu").min_width(200.0).label("Cat");
