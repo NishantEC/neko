@@ -126,15 +126,40 @@
     {
       "do": "allow-until",
       "until": {
-        "count": {
-          "of": {
-            "name": "Worked for"
+        "all": [
+          {
+            "count": {
+              "of": {
+                "key": "turn-*",
+                "role": "article"
+              },
+              "min": 2
+            }
           },
-          "min": 2
-        }
+          {
+            "gone": {
+              "key": "run-*-working"
+            }
+          },
+          {
+            "gone": {
+              "key": "reply-submit",
+              "label": "Stop"
+            }
+          }
+        ]
       },
       "within": 180,
       "expect": "The follow-up finishes in the same task"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "ok"
+        }
+      },
+      "expect": "Its answer is on the page"
     },
     {
       "do": "snap",
