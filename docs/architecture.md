@@ -69,11 +69,17 @@ A round is a cat's standing work that starts by itself. One daemon thread (`neko
 when no round is on), makes each due time an ordinary task and starts it through the same path as a task the person makes, so the
 permission mode, the cat's rules, the run guard and Undo apply unchanged. See `docs/knowledge/rounds.md`.
 
+## The Briefing
+
+What happened while the person was away is derived by the daemon from the records above, never written by a model and never stored apart from where the
+person last read it. It is pushed like Needs you, and the rounds scheduler's thread also decides the morning notification, which
+the app posts. See `docs/knowledge/briefing.md`.
+
 ## The app
 
 A sidebar of workspace sections and the content beside it, under one 52 point header band on the traffic lights' line. Home has a greeting and a
 composer. Return sends the words to the daemon; the new task opens in the task view. Components come from rune-ui, copied in
 by its CLI. The task view shows the conversation with the agent, permission requests, a run card, and a composer that sends
 follow-ups and stops the run. Settings (⌘,) lists the agent CLIs. Needs you (⌘2) lists what waits for the person, derived by the daemon, with Mac
-notifications and the Dock badge; `neko://task/<id>` opens a task. See `docs/knowledge/needs-you.md`. See `docs/knowledge/app-shell.md` and
+notifications and the Dock badge; `neko://task/<id>` opens a task. The Briefing (⌘4) says what happened while the person was away; `neko://briefing` opens it. See `docs/knowledge/needs-you.md`. See `docs/knowledge/app-shell.md` and
 `docs/knowledge/rune-ui-in-neko.md`.

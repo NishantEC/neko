@@ -45,6 +45,27 @@ itself off", "mochi is retired", "Folder missing"), the ink while it is only pau
 is the page's, and while every round is paused Resume rounds is, with New round… stepping back to secondary. The icon is Neko's own
 (`icons::ROUNDS`, two arrows chasing round); a task a round made carries it, small, before its line in the sidebar.
 
+## The Briefing
+
+The page a person reads over coffee (`briefing.md`): the date in the small faint step, the window as the page title (xl, "Since
+yesterday 18:00") and the headline under it at the lg step in the second ink, as Home's line under the greeting. Then sections, each
+headed at the base step with its count (amber for Needs you, the identity teal for Still working, faint otherwise):
+
+- **Needs you** is the Needs you card itself: raised, led by the 44 point portrait with its amber dot.
+- **Finished** and **Rounds** and **Still working** are *wells* (the pressed-in surface Home's lists use), one per section, rows
+  separated by a hairline: calmer than the cards, because nothing in them must be done. A finished row is led by a 40 point
+  portrait; a round line by a 24 point one. Who and how it ended is the sm step in the second ink with the time in tabular
+  figures; the title is md semibold; the sentence base in the second ink; the files, branch and "Undone" in sm. "Open task" is a ghost
+  button at the right of the who line on every row, so every row has the same way in; Review and Undo are secondary buttons on the
+  row's last line, only when the run offers them. Red is only for "could not finish" and a round that turned itself off.
+- The totals are one quiet sm line, the cost note under it in xs; **Mark as read** is the one primary button, with its key in a
+  keycap beside it (words, not symbols: the keycap's face has no ⌘ glyph and falls back to another font).
+- Caught up is rune-ui's Empty (a check in a small well, "You're caught up"); with a request still waiting, its card follows under
+  "Still waiting for you".
+
+Home's line is a well too, one row high, with the Briefing's own glyph (a sun rising over a line, `icons::BRIEFING`) and Open
+briefing as a secondary button.
+
 ## Faces
 
 The daemon gives each cat one of eight face ids (`neko_protocol::cats::FACES`); a new cat gets the first no active cat has, so a

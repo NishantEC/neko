@@ -137,8 +137,7 @@ too (tested). It cannot change the event log's times, task times or ids.
 
 ## Not here yet
 
-- **The Briefing:** a morning summary of what the rounds did overnight. Rounds leave tasks, history and Needs you items; nothing
-  gathers them yet.
+- **The Briefing** gathers what the rounds did overnight, with everything else (`briefing.md`): its lines are the history lines and brakes of the window. The morning notification runs on this scheduler's thread.
 - **Running while the Mac sleeps:** rounds run while Neko (its daemon) is running and the Mac is awake. A time that passes
   meanwhile runs once on wake if it is at most a day old (see above). Waking the Mac for a round (launchd, `pmset`) is not done.
 - **Starting at login:** the daemon starts with the app. Nothing starts it at login, so a round does not run if Neko was never

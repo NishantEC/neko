@@ -17,6 +17,7 @@
 | `cat_view.rs`, `review_view.rs` | A cat's page; Review. |
 | `settings_view.rs` | Settings (⌘,): the agent CLIs, which one new tasks use, the permission mode, workspaces, notifications. |
 | `rounds.rs`, `rounds_view.rs` | Rounds (⌘3): the words for schedules and times, the New round / Edit panel's form; the page of cards and the panel (`rounds.md`). |
+| `briefing.rs`, `briefing_view.rs` | The Briefing (⌘4): the words for a window, a round line and the totals, the state it keeps; the page (`briefing.md`). |
 | `needs_view.rs` | Needs you (⌘2): one list of what waits for the person, answered in place (`needs-you.md`). |
 | `notify.rs`, `deeplink.rs` | The notification model and its poster (a recorder outside the real window); `neko://task/<id>`. |
 | `link.rs` | The supervisor thread: find or start the daemon, connect, reconnect, an inbox the window drains. |
@@ -44,20 +45,20 @@
 ## Menus
 
 Neko (About Neko with version and commit, Services, Hide, Hide Others, Show All, Quit), File (New Task ⌘N, Close Window ⌘W),
-Edit (Rune's standard items; AppKit adds Start Dictation and Emoji & Symbols), View (Home ⌘1, Needs You ⌘2, Rounds ⌘3, Hide/Show Sidebar ⌃⌘S, Enter/Exit Full
+Edit (Rune's standard items; AppKit adds Start Dictation and Emoji & Symbols), View (Home ⌘1, Needs You ⌘2, Rounds ⌘3, Briefing ⌘4, Hide/Show Sidebar ⌃⌘S, Enter/Exit Full
 Screen ⌃⌘F), Window (Minimize, Zoom, Bring All to Front), Help (Neko Help, registered as the help menu). Raw AppKit does three
 things Rune does not: register the Help menu, remove Rune's Window ▸ Close (File has it), keep AppKit's own Enter Full Screen out.
 The model is pure and tested (`menu.rs`): no key is taken twice.
 
 ## Keyboard
 
-- Tab goes once round every control in reading order: Hide sidebar, New task, Home, Needs you, Rounds, the workspaces list (one stop), each
+- Tab goes once round every control in reading order: Hide sidebar, New task, Home, Briefing, Needs you, Rounds, the workspaces list (one stop), each
   section's own buttons, Add workspace…, the cats (one stop), New cat…, the composer, the cat picker and the workspace picker in its footer, each cat's tile in the house. In a task: copy buttons, fold lines, request answers, then the composer and its context ring.
   `App::tab_visits_controls(true)` makes this so whatever the Mac's Keyboard Navigation setting is.
 - In the workspaces list the arrow keys move through section headers and rows (`focus_group`), a typed name goes to it, Return
   opens a row or folds a section; Left and Right fold and open; ⌥⌘↑ and ⌥⌘↓ move a section (`workspaces.md`).
 - In the composer Return sends, Shift+Return makes a new line. Escape gives focus back.
-- ⌘1 is Home, ⌘2 Needs you (`needs-you.md`), ⌘3 Rounds (`rounds.md`).
+- ⌘1 is Home, ⌘2 Needs you (`needs-you.md`), ⌘3 Rounds (`rounds.md`), ⌘4 the Briefing (`briefing.md`; ⌘↩ marks it read).
 - ⌘N goes Home with the keyboard in the composer, in the workspace of the task in view. ⌘, opens Settings (Neko ▸ Settings…).
 
 ## Accessibility
@@ -157,7 +158,7 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   (QA defect 10); `tests/page_swap.rs` takes frames while the swap moves and fails if both are drawn.
 - **Review's files** are rune-ui's Diff (0.10): `.stats` for a folded file's counts, `.hide_zero(true)` (a file that only gained
   lines shows no "−0"), `.selectable(true)` and `.foot(..)` for the note, Show all, Copy diff, Copy path and Reveal.
-- **Settings** has three pages, Agents, Workspaces and Notifications, switched by rune-ui's SegmentedControl.
+- **Settings** has five pages, Agents, Workspaces, Notifications, Cats and Briefing, switched by rune-ui's SegmentedControl.
 
 ## Not done yet
 

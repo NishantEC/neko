@@ -28,6 +28,10 @@ with `NEKO_DEBUG_CLOCK=1` and moves the scheduler's clock with the `clock` step 
 pause all holds the third; after the request is denied a later time makes a second task. The step works only against a debug
 daemon started with that variable; a release daemon refuses it (`rounds.md`).
 
+## The briefing scenarios
+
+`briefing` makes a round (every day, a minute from now, so the daemon is started with `TZ=UTC` and the step's words say `{{utc+1}}`, the UTC time N minutes from now), a task that finishes and one that waits on a request (ask mode), waits for the round to start by itself, opens the Briefing (⌘4) and checks its sections and the first sentence of each answer, answers the request from the page, marks it read with ⌘↩, checks "You're caught up" and that Home's line is gone, then finishes a new task and checks the line comes back. `briefing-morning` sets the morning time three hours ahead in Settings ▸ Briefing, moves the scheduler's clock past it (`clock`) and checks one notification, "Your briefing: 1 finished, 1 needs you", in the notification log, none more when the clock moves on the same day, and the same counts on the page. Headless runs have no system to post to: the driver gives the app a poster that writes to the run's `notify.jsonl` in the form the window runs' log has, so `notified`, `withdrawn` and `posts` (`{max, titled}`: only the posts whose title starts so) are checked the same way in both.
+
 ## How it drives and records
 
 - **Headless (default).** `apps/neko/examples/neko-qa.rs` builds the real app (`neko_app::app()`: its view, state, keys, `poll`

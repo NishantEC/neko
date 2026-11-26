@@ -104,6 +104,8 @@ System Settings at Notifications). Send a test notification.
 `task/` path, an id of the daemon's shape. A link that comes before the task list waits for it; one for a task that is gone goes
 Home with a quiet line.
 
+`neko://briefing` opens the Briefing (`briefing.md`): that exact link, a trailing slash allowed. The Briefing's Needs you section is the very list and the same cards, answered the same way (and Escape goes back from it); the morning notification (`neko.briefing`, "Your briefing: 3 finished, 1 needs you") follows these rules: silent, the system's permission and Focus apply, nothing when Neko is in front on the Briefing, a click opens the link, taken back when the page opens.
+
 ## What `rune-notify` cannot do at this rev
 
 - **No thread identifier**: notifications cannot be grouped by task in Notification Center. Neko keeps one per task instead.
@@ -117,7 +119,7 @@ Home with a quiet line.
 
 ## Not here, on purpose
 
-Phone push, digests, quiet hours, dismissing an item without answering it, per-workspace switches.
+Phone push, quiet hours, dismissing an item without answering it, per-workspace switches.
 
 ## Tests
 

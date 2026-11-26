@@ -1,6 +1,6 @@
 # The protocol (S1, 2026-11-26)
 
-`crates/neko-protocol` is the contract between a screen and the daemon. Version 9 (rounds).
+`crates/neko-protocol` is the contract between a screen and the daemon. Version 10 (the Briefing).
 
 ## Shape
 
@@ -52,6 +52,9 @@
 | `set_rounds_paused {paused}` | `ok`; every round then follows as `round_updated` |
 | `round_history {round}` | `round_runs {runs}`: the last 50 lines, newest first |
 | `debug_clock {offset_ms?}` | `ok` in a debug daemon started with `NEKO_DEBUG_CLOCK=1`, else `refused` (`rounds.md`) |
+| `get_briefing {from_ms?, to_ms?}` | `briefing {briefing}`: what happened in the window (the last mark-read, else 24 hours, up to now; start inclusive, end exclusive), derived by the daemon (`briefing.md`) |
+| `mark_briefing_read` | `briefing {briefing}` for the new window, also pushed as `briefing_changed` |
+| `get_briefing_settings`, `set_briefing_settings {settings}` | `briefing_settings {settings}` (`morning_on`, `morning_at` as HH:MM), or `bad_request` for a time that is not one |
 | `day_usage {from_ms}` | `day_usage {usage}`: what runs started since then reported |
 
 Before `hello`, any request gets `error hello_first`. Something unparseable gets `error bad_request`; an unknown type is refused,
@@ -60,7 +63,7 @@ never guessed.
 ## Events
 
 `task_created`, `task_updated`, `task_removed`, `workspace_added`, `workspace_updated` (renamed, removed, restored, located, moved:
-the whole row), `run_changed`, `part_changed`, `permission_changed`, `settings_changed`, `needs_changed` (the whole Needs you list, derived, sent when it differs), `cat_added`, `cat_updated` (the whole cat), `round_added`, `round_updated` (the whole round: edited, switched, run, skipped, braked, a new next time), `round_removed`, `rounds_paused`, each with `revision`: the
+the whole row), `run_changed`, `part_changed`, `permission_changed`, `settings_changed`, `needs_changed` (the whole Needs you list, derived, sent when it differs), `cat_added`, `cat_updated` (the whole cat), `round_added`, `round_updated` (the whole round: edited, switched, run, skipped, braked, a new next time), `round_removed`, `rounds_paused`, `briefing_changed` (the whole briefing, derived, sent when its content differs), `briefing_settings_changed`, `briefing_due {counts}` (the morning notification is due: not stored, revision is the last stored change), each with `revision`: the
 store's event sequence number. `part_delta {task, part, text}` appends streamed words; it goes only to connections watching the
 task, is not stored as an event, and carries revision 0. A screen that made the task may see the event before its own reply; it
 keeps everything by id, so nothing doubles.
@@ -72,7 +75,7 @@ keeps everything by id, so nothing doubles.
   answers it). Version 5 added workspaces: a task's `workspace` names one, `create_task` takes a workspace instead of a folder. Version 6 added Needs you: `list_needs`, `needs_changed`, a notice's `failure`
   kind, and `answering` on a follow-up. Version 7 added undo: a run's `undo` (state, why not, its own changes, committed), the
   diff requests, undo, redo, the storage figure and clearing it. Each change to a run's undo is a `run_changed` with the run whole.
-  `neko_protocol::undo::offers` says which run may be undone or redone, for both ends. Version 9 added rounds: a task's `round` (`{id, name, due_ms}`), the round requests, replies and events, and `RoundStatus`/`RunKind`/`RunEnd` (`rounds.md`; the arithmetic is `neko_protocol::schedule`, shared with the app). Version 8 added cats: a task's `cat`, a run's
+  `neko_protocol::undo::offers` says which run may be undone or redone, for both ends. Version 9 added rounds: a task's `round` (`{id, name, due_ms}`), the round requests, replies and events, and `RoundStatus`/`RunKind`/`RunEnd` (`rounds.md`; the arithmetic is `neko_protocol::schedule`, shared with the app). Version 10 added the Briefing: `get_briefing`, `mark_briefing_read`, the settings requests, the `Briefing` shapes (`protocol/src/briefing.rs`) and the three events; `undo::Offer` and `Action` are now serialisable, since a finished task carries what its run's card offers. Version 8 added cats: a task's `cat`, a run's
   `cat` and `rules_hash`, the `rules_changed` part, a Needs-you item's `cat` and `cat_name`, the cat requests and events, and
   `invalid_name` (`cats.md`).
 - `DaemonInfo` (`daemon.json`) is part of the contract: `{pid, port, protocol, version}`.

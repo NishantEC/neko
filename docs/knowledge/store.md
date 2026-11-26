@@ -26,6 +26,7 @@
   `round_runs (id, round_id, due_ms, at_ms, kind, task_id, reason, ended)` (the last 50 per round; removed with the round), and on
   `tasks` `round_id`, `round_due_ms`, `round_name`. The pause is `settings.rounds_paused`. A due time's task, history line and
   cursor are one transaction. See `rounds.md`.
+- The Briefing (protocol 10) adds **no table and no migration**: where the person last read it, the morning switch and time and the morning's cursor are `settings` rows (`briefing_read_ms`, `briefing_morning_on`, `briefing_morning_at`, `briefing_morning_cursor_ms`). The store stays at version 7. See `briefing.md`.
 - `events (seq, at_ms, workspace_id, subject, kind, data)`. One row per change, in the same transaction as the change.
   `seq` is the revision the daemon pushes. Triggers refuse `UPDATE` and `DELETE` on it.
 
@@ -49,4 +50,4 @@ Ids are `task_` and 26 base-32 characters: 48 bits of time, 80 random bits (the 
 `crates/neko-core/tests/workspaces.rs`: the migration from version 3, adding, renaming, removing, a missing folder, locating,
 reordering, the tidy rule on real repositories. `crates/neko-core/tests/store.rs`: create and list, refusals, reopen, migration and the newer-version refusal, the migration to
 version 5 with a run from version 4, the append-only log, two connections. `crates/neko-core/tests/cats.rs`: the migration to
-version 6 from a version-5 store made in the test. `crates/neko-core/tests/rounds.rs`: the scheduler's logic with time handed in, and the migration to version 7 from a version-6 store made in the test.
+version 6 from a version-5 store made in the test. `crates/neko-core/tests/rounds.rs`: the scheduler's logic with time handed in, and the migration to version 7 from a version-6 store made in the test. `crates/neko-core/tests/briefing.rs`: the Briefing's logic, and a store made before it (no briefing rows) opening with its defaults.
