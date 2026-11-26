@@ -1,6 +1,6 @@
 {
   "name": "neko",
-  "description": "Neko's theme (House): warm paper on a warm window ground, deep warm charcoal in dark, one identity colour (a deep teal, in the blue ramp's place until the theme file has an identity ramp) for focus and work, comfortable density, radius 9.6, continuous corners, Figtree.",
+  "description": "Neko's theme (House): warm paper on a warm window ground, deep warm charcoal in dark, one identity colour (a deep teal, in the theme's identity ramp) for focus and work, comfortable density, radius 9.6, continuous corners, Figtree, House's type scale and a black scrim.",
   "base": {
     "spacing": {
       "$type": "number",
@@ -25,6 +25,107 @@
     "font": {
       "$type": "string",
       "$value": "figtree"
+    }
+  },
+  "type": {
+    "$type": "number",
+    "xs": {
+      "size": {
+        "$value": 12
+      },
+      "line-height": {
+        "$value": 16
+      },
+      "weight": {
+        "$value": 400
+      },
+      "tracking": {
+        "$value": 0
+      }
+    },
+    "sm": {
+      "size": {
+        "$value": 13
+      },
+      "line-height": {
+        "$value": 18
+      },
+      "weight": {
+        "$value": 400
+      },
+      "tracking": {
+        "$value": 0
+      }
+    },
+    "base": {
+      "size": {
+        "$value": 15
+      },
+      "line-height": {
+        "$value": 21
+      },
+      "weight": {
+        "$value": 400
+      },
+      "tracking": {
+        "$value": 0
+      }
+    },
+    "md": {
+      "size": {
+        "$value": 15
+      },
+      "line-height": {
+        "$value": 23
+      },
+      "weight": {
+        "$value": 400
+      },
+      "tracking": {
+        "$value": 0
+      }
+    },
+    "lg": {
+      "size": {
+        "$value": 18
+      },
+      "line-height": {
+        "$value": 24
+      },
+      "weight": {
+        "$value": 600
+      },
+      "tracking": {
+        "$value": -0.2
+      }
+    },
+    "xl": {
+      "size": {
+        "$value": 24
+      },
+      "line-height": {
+        "$value": 30
+      },
+      "weight": {
+        "$value": 600
+      },
+      "tracking": {
+        "$value": -0.4
+      }
+    },
+    "xxl": {
+      "size": {
+        "$value": 40
+      },
+      "line-height": {
+        "$value": 46
+      },
+      "weight": {
+        "$value": 700
+      },
+      "tracking": {
+        "$value": -1.2
+      }
     }
   },
   "color": {
@@ -89,6 +190,41 @@
       }
     },
     "blue": {
+      "50": {
+        "$value": "#f0f6fe"
+      },
+      "100": {
+        "$value": "#dbe9ff"
+      },
+      "200": {
+        "$value": "#bbd6ff"
+      },
+      "300": {
+        "$value": "#90bcfe"
+      },
+      "400": {
+        "$value": "#5c9eff"
+      },
+      "500": {
+        "$value": "#3082f6"
+      },
+      "600": {
+        "$value": "#1069da"
+      },
+      "700": {
+        "$value": "#0252b3"
+      },
+      "800": {
+        "$value": "#013e8b"
+      },
+      "900": {
+        "$value": "#012b63"
+      },
+      "950": {
+        "$value": "#011d47"
+      }
+    },
+    "identity": {
       "50": {
         "$value": "#eef8f6"
       },
@@ -291,10 +427,10 @@
         },
         "accent": {
           "bg": {
-            "$value": "{blue.600} / 0.12"
+            "$value": "{identity.600} / 0.12"
           },
           "fg": {
-            "$value": "{blue.700}"
+            "$value": "{identity.700}"
           }
         },
         "input": {
@@ -307,13 +443,27 @@
         },
         "info": {
           "bg": {
-            "$value": "{blue.500} / 0.13"
+            "$value": "{identity.500} / 0.13"
           },
           "fg": {
-            "$value": "{blue.700}"
+            "$value": "{identity.700}"
           },
           "solid": {
-            "$value": "{blue.600}"
+            "$value": "{identity.600}"
+          },
+          "on-solid": {
+            "$value": "{neutral.0}"
+          }
+        },
+        "identity": {
+          "bg": {
+            "$value": "{identity.500} / 0.13"
+          },
+          "fg": {
+            "$value": "{identity.700}"
+          },
+          "solid": {
+            "$value": "{identity.600}"
           },
           "on-solid": {
             "$value": "{neutral.0}"
@@ -365,7 +515,7 @@
           "$value": "{neutral.1000} / 0.08"
         },
         "ring": {
-          "$value": "{blue.600}"
+          "$value": "{identity.600}"
         }
       },
       "state": {
@@ -432,6 +582,9 @@
         },
         "texture": {
           "$value": 1.0
+        },
+        "scrim": {
+          "$value": 0.18
         }
       }
     },
@@ -496,10 +649,10 @@
         },
         "accent": {
           "bg": {
-            "$value": "{blue.400} / 0.16"
+            "$value": "{identity.400} / 0.16"
           },
           "fg": {
-            "$value": "{blue.300}"
+            "$value": "{identity.300}"
           }
         },
         "input": {
@@ -512,13 +665,27 @@
         },
         "info": {
           "bg": {
-            "$value": "{blue.400} / 0.16"
+            "$value": "{identity.400} / 0.16"
           },
           "fg": {
-            "$value": "{blue.300}"
+            "$value": "{identity.300}"
           },
           "solid": {
-            "$value": "{blue.600}"
+            "$value": "{identity.600}"
+          },
+          "on-solid": {
+            "$value": "{neutral.0}"
+          }
+        },
+        "identity": {
+          "bg": {
+            "$value": "{identity.400} / 0.16"
+          },
+          "fg": {
+            "$value": "{identity.300}"
+          },
+          "solid": {
+            "$value": "{identity.600}"
           },
           "on-solid": {
             "$value": "{neutral.0}"
@@ -570,7 +737,7 @@
           "$value": "{neutral.0} / 0.08"
         },
         "ring": {
-          "$value": "{blue.400}"
+          "$value": "{identity.400}"
         }
       },
       "state": {
@@ -637,6 +804,9 @@
         },
         "texture": {
           "$value": 1.0
+        },
+        "scrim": {
+          "$value": 0.55
         }
       }
     }

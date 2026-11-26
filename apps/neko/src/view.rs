@@ -41,35 +41,10 @@ thread_local! {
 /// colour (a deep teal) for focus and work.
 pub const THEME: &str = include_str!("../themes/neko.json");
 
-/// House's type scale, step by step: (size, line height, weight, tracking). The theme file has no knob for each step yet (an
-/// upstream ask, docs/knowledge/design.md), so the view sets them here.
-pub const TYPE_SCALE: [(&str, f32, f32, f32, f32); 7] = [
-    ("xs", 12.0, 16.0, 400.0, 0.0),
-    ("sm", 13.0, 18.0, 400.0, 0.0),
-    ("base", 15.0, 21.0, 400.0, 0.0),
-    ("md", 15.0, 23.0, 400.0, 0.0),
-    ("lg", 18.0, 24.0, 600.0, -0.2),
-    ("xl", 24.0, 30.0, 600.0, -0.4),
-    ("xxl", 40.0, 46.0, 700.0, -1.2),
-];
-
-/// The theme in the system's appearance, with the person's Reduce Motion and House's type scale.
+/// The theme in the system's appearance, with the person's Reduce Motion. House's type scale, its identity colour and its scrim are
+/// in the theme file.
 pub fn theme(dark: bool, reduced_motion: bool) -> Theme {
-    let mut t = Theme::from_json(THEME, dark).expect("the theme file is valid (tested)").with_reduced_motion(reduced_motion);
-    let base = t.ty.base;
-    for (step, size, line_height, w, tracking) in TYPE_SCALE {
-        let style = rune::TextStyle { size, line_height, weight: w, ..base }.tracking(tracking);
-        match step {
-            "xs" => t.ty.xs = style,
-            "sm" => t.ty.sm = style,
-            "base" => t.ty.base = style,
-            "md" => t.ty.md = style,
-            "lg" => t.ty.lg = style,
-            "xl" => t.ty.xl = style,
-            _ => t.ty.xxl = style,
-        }
-    }
-    t
+    Theme::from_json(THEME, dark).expect("the theme file is valid (tested)").with_reduced_motion(reduced_motion)
 }
 
 /// The fill of a raised surface: the floating surface in light; in dark, a small step above the page, so the light from above (its
@@ -295,16 +270,6 @@ fn task_menu(s: &App, t: &Theme, task: &neko_protocol::Task, layer: &mut Vec<El>
 
 /// The panels that ask or say something: rename a workspace, remove one, remove a task, and why something was not done.
 fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
-    let first = layer.len();
-    dialogs_open(s, t, layer);
-    // rune-ui's scrim is the page's ink at half strength: in dark that is a light fog. A dialog dims the window, so in dark it is black.
-    if t.dark && layer.len() > first {
-        let scrim = layer.remove(first);
-        layer.insert(first, scrim.fill(rune::Color::BLACK.alpha(0.55)));
-    }
-}
-
-fn dialogs_open(s: &App, t: &Theme, layer: &mut Vec<El>) {
     if let Some((id, edit)) = &s.renaming {
         let name = s.workspace_of(id).map_or_else(String::new, |w| w.name.clone());
         let field = Input::new("rename-input", edit, |s: &mut App| &mut s.renaming.as_mut().expect("renaming").1).name("Name").on_submit(|s: &mut App| s.finish_rename()).build(t);

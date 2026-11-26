@@ -8,8 +8,8 @@ This is the app's one design: there is no look switch.
 
 | File | What |
 | --- | --- |
-| `themes/neko.json` | The colours (warm neutrals; a deep teal in the blue ramp's place), radius 9.6, continuous corners, Figtree. |
-| `view.rs` | `theme()` with the type scale (`TYPE_SCALE`), `raised` and `well` surfaces, `state_ink`. |
+| `themes/neko.json` | The colours (warm neutrals; the deep teal is the theme's `identity` ramp and role, `blue` is the kit's blue), the type steps (`type.<step>`), the scrim (`number.scrim`), radius 9.6, continuous corners, Figtree. |
+| `view.rs` | `theme()` (the theme file as it is), `raised` and `well` surfaces, `state_ink`. |
 | `faces.rs` | The portraits: a drawn face per face id, the working ring, the state dots, the `NEKO_CAT_ART` override. |
 | `sidebar.rs`, `home_view.rs`, `turn.rs`, `cat_view.rs`, `review_view.rs` | The inset panel, Home and the house, a turn's pieces and the receipt, a cat's page. |
 
@@ -25,11 +25,11 @@ This is the app's one design: there is no look switch.
 | sm | 13 / 18 | 400 | 0 | Second lines, states, receipts |
 | xs | 12 / 16 | 400 | 0 | Row meta, the run counter |
 
-Nothing that matters is under 12 points. The theme file has no per-step sizes yet, so `view::theme` sets them.
+Nothing that matters is under 12 points. The steps are in the theme file (`type.<step>.{size, line-height, weight, tracking}`, rune-ui 0.10).
 
 ## Colour
 
-One identity colour, the teal (`ring`, `accent`): focus, the working ring, the word "working", the run counter. Amber says the
+One identity colour, the teal (the theme's `identity`; `ring` and `accent` use it): focus, the working ring, the word "working", the run counter. Amber says the
 person is needed, red that something could not go on, green and red are the + and − of changes. Finished things carry no colour.
 Contrast is measured from the theme by `tests/contrast.rs`: every ink on every surface at least 4.5:1, the rings and dots 3:1.
 
@@ -94,5 +94,4 @@ up and in); a tile's colours spring as its cat's state changes. Under Reduce Mot
 
 Neko builds these in its own code until rune-ui has them: a portrait with ring and status dot; a turn header slot on `Message`; a
 well-style person bubble; a leading slot on `PromptInput`; a two-line `SidebarItem` with an image, a raised selection and a
-trailing slot; neutral step marks on `Tool` and `Confirmation`; a run receipt with a file list and actions on `Task`; a figures slot on `Diff`'s file header (Review draws its own card to hide a zero side); an identity
-ramp and per-step type sizes in the theme file.
+trailing slot; neutral step marks on `Tool` and `Confirmation`; a run receipt with a file list and actions on `Task`; a figures slot on `Diff`'s file header (Review draws its own card to hide a zero side).
