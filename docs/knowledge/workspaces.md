@@ -22,7 +22,10 @@ first-class thing: it goes in **General**.
    workspace", and no new task can be made in it. The app asks first, saying exactly that.
 6. A workspace whose folder is gone shows "Folder not found" with Locate… and Remove. Its tasks stay readable. A new task in it is
    refused with a plain line. Locate… moves the workspace (and its tasks' folder) to where the folder is now and runs
-   `git worktree repair` for their worktrees.
+   `git worktree repair` for their worktrees. A folder that goes away or comes back while Neko runs is noticed within a few seconds
+   (`crates/neko-daemon/src/folders.rs`): while a screen is subscribed one thread looks at the folders every 3 s and pushes a
+   `workspace_updated`; with no screen it sleeps with no timer. Measured idle, 60 s, one screen, two workspaces: 0 ms CPU before,
+   7 ms (0.012 %) after (`tests/measure.rs`, `idle_with_a_screen_and_two_workspaces`).
 7. Paths are stored absolute and shown with `~`.
 
 ## The tidy rule

@@ -59,3 +59,22 @@ fn idle_and_a_five_minute_run() {
         rss
     );
 }
+
+#[test]
+#[ignore = "a measurement: about a minute"]
+fn idle_with_a_screen_and_two_workspaces() {
+    let d = Daemon::start("measure-idle");
+    let pid = d.child.id() as i32;
+    let mut c = d.client();
+    c.request(Request::Subscribe).unwrap();
+    for name in ["acme-api", "acme-site"] {
+        let f = d.dir.join(name);
+        std::fs::create_dir_all(&f).unwrap();
+        c.request(Request::AddWorkspace { folder: f.to_string_lossy().into_owned() }).unwrap();
+    }
+    std::thread::sleep(Duration::from_secs(3));
+    let (cpu0, _, _) = usage(pid);
+    std::thread::sleep(Duration::from_secs(60));
+    let (cpu1, _, _) = usage(pid);
+    println!("idle, 60 s, one screen subscribed, two workspaces: {} ms CPU ({:.3}%)", cpu1 - cpu0, (cpu1 - cpu0) as f64 / 600.0);
+}

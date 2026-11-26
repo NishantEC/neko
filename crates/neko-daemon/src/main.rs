@@ -5,6 +5,7 @@
 //! checkpointed and `daemon.json` is removed. See docs/architecture.md.
 
 mod files;
+mod folders;
 mod hook;
 mod http;
 mod runs;

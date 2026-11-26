@@ -77,6 +77,11 @@ impl Shared {
     }
 
     /// Pushes a change to every subscribed connection. Called with the core locked, so events leave in revision order.
+    /// Whether any screen is subscribed (the folder watcher runs only then).
+    pub fn screens(&self) -> bool {
+        lock(&self.conns).values().any(|c| c.subscribed)
+    }
+
     pub fn broadcast(&self, msg: &ServerMessage) {
         if let ServerMessage::Event { change: Change::TaskUpdated { .. } | Change::PermissionChanged { .. } | Change::TaskRemoved { .. } | Change::CatUpdated { .. }, .. } = msg {
             *lock(&self.needs.dirty) = true;
@@ -166,6 +171,7 @@ pub fn run(dir: &Path, port: u16) -> Result<(), StartError> {
     let shared = Arc::new(Shared { core: Mutex::new(core), conns: Mutex::new(HashMap::new()), token, port, stopping: AtomicBool::new(false), runs, needs });
     let for_needs = shared.clone();
     std::thread::Builder::new().name("neko-needs".into()).spawn(move || watch_needs(for_needs))?;
+    crate::folders::spawn(shared.clone())?;
     // Find the agent CLIs once now, off the main thread, so the first task and Settings do not wait for it.
     let warm = shared.clone();
     let _ = std::thread::Builder::new().name("neko-detect".into()).spawn(move || {
@@ -221,6 +227,7 @@ fn stop(shared: &Shared) {
     shared.stopping.store(true, Ordering::SeqCst);
     // Pending requests never hold the stop up: runs end through their guards and write their words (docs/knowledge/run-guard.md).
     crate::runs::stop_all(shared);
+    crate::folders::stopping();
     *lock(&shared.needs.dirty) = true;
     shared.needs.wake.notify_one();
     for c in lock(&shared.conns).values() {
@@ -566,6 +573,7 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
                     if let Some(c) = lock(&shared.conns).get_mut(&conn) {
                         c.subscribed = true;
                     }
+                    crate::folders::screen_subscribed();
                     Reply::Subscribed { revision }
                 }
                 Err(e) => internal(e),

@@ -53,9 +53,8 @@
           "text": "Folder not found"
         }
       },
-      "within": 10,
-      "soft": true,
-      "expect": "While the app runs, the section soon says Folder not found"
+      "within": 8,
+      "expect": "While the app runs, the section says Folder not found within a few seconds"
     },
     {
       "do": "quit-app"
