@@ -1,0 +1,17 @@
+[package]
+name = "neko-protocol"
+description = "The requests, replies and events between a Neko screen and the daemon, as JSON."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# The WebSocket link both ends use: the daemon's side of a connection and a screen's client.
+ws = ["dep:tungstenite", "dep:libc"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tungstenite = { workspace = true, optional = true }
+libc = { workspace = true, optional = true }
