@@ -414,7 +414,9 @@ pub fn cost_note(u: &TaskUsage) -> Option<String> {
 fn context_ring(s: &App, t: &Theme, book: &Book, layer: &mut Vec<El>) -> Option<El> {
     let u = task_usage(book)?;
     let meter = Meter { context: u.context, limit: u.window, input: u.input, output: u.output, cache: u.cached, cost: u.cost };
-    let mut ring = Context::<App>::new("ctx", &meter, s.context_open).on_open(|s: &mut App, open| s.context_open = open);
+    // The ring sits at the composer's left, so its breakdown opens from the trigger's start (the default hangs out over the sidebar);
+    // a window the model did not report says so.
+    let mut ring = Context::<App>::new("ctx", &meter, s.context_open).placement(rune_kit::Placement::TopStart).limit_assumed(u.window_assumed).on_open(|s: &mut App, open| s.context_open = open);
     if let Some(n) = cost_note(&u) {
         ring = ring.note(n);
     }
