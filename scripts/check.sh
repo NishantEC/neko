@@ -49,7 +49,8 @@ step() {
 lints=(-D unused_must_use -D clippy::correctness -D clippy::suspicious -D clippy::dbg_macro -D clippy::todo -D clippy::unimplemented)
 
 core() { CARGO_TARGET_DIR="$target/core" cargo "$@"; }
-app() { (cd "$root/apps/neko" && CARGO_TARGET_DIR="$target/app" NEKO_DAEMON_BIN="$target/core/debug/neko-daemon" cargo "$@"); }
+# The app's tests start a daemon; it runs the fake CLI as `claude`, never the real one (no test spends anything).
+app() { (cd "$root/apps/neko" && CARGO_TARGET_DIR="$target/app" NEKO_DAEMON_BIN="$target/core/debug/neko-daemon" NEKO_CLAUDE_BIN="$target/core/debug/neko-fake-claude" cargo "$@"); }
 
 printf 'neko check (%s)\n' "$mode"
 if [[ "$mode" == quick ]]; then
@@ -58,8 +59,8 @@ if [[ "$mode" == quick ]]; then
 else
   step core-clippy core clippy --workspace --all-targets --quiet -- "${lints[@]}"
   step core-test core test --workspace --quiet
-  # The app's end-to-end test starts this binary.
-  step daemon-build core build --quiet -p neko-daemon
+  # The app's end-to-end test starts these: the daemon, and the fake CLI it runs instead of `claude`.
+  step daemon-build core build --quiet -p neko-daemon -p neko-core --bins
   step app-clippy app clippy --all-targets --quiet -- "${lints[@]}"
   step app-test app test --quiet
   step privacy bash "$root/scripts/privacy-check.sh"
