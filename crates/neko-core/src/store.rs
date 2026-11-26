@@ -105,6 +105,9 @@ const MIGRATIONS: &[&str] = &[
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     );",
+    // 3: how full the conversation's context was at a run's last call, and the model's window, as reported.
+    "ALTER TABLE usage ADD COLUMN context_tokens INTEGER;
+    ALTER TABLE usage ADD COLUMN context_window INTEGER;",
 ];
 
 /// The schema version this build writes.

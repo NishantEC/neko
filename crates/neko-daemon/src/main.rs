@@ -5,6 +5,7 @@
 //! checkpointed and `daemon.json` is removed. See docs/architecture.md.
 
 mod files;
+mod hook;
 mod http;
 mod runs;
 mod server;
@@ -29,6 +30,10 @@ fn default_data_dir() -> Option<PathBuf> {
 fn main() -> ExitCode {
     // As a run's guardian (`--neko-run-guard`), this binary only guards: it never opens the store or the network.
     neko_core::guard::run_if_requested();
+    // As a run's `PreToolUse` hook (`--hook`), it asks the daemon about one step and prints the decision.
+    if std::env::args().nth(1).as_deref() == Some("--hook") {
+        return hook::helper();
+    }
     let mut data_dir = None;
     let mut port = 0u16;
     let mut args = std::env::args().skip(1);

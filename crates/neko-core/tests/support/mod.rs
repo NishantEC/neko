@@ -64,7 +64,7 @@ impl Drop for Reap {
 }
 
 pub fn spec(words: &str, dir: &Path) -> StartSpec {
-    StartSpec { words: words.into(), workdir: dir.to_path_buf(), resume: None, mode: PermissionMode::Ask }
+    StartSpec { words: words.into(), workdir: dir.to_path_buf(), resume: None, mode: PermissionMode::Ask, hook: None }
 }
 
 /// Every event of a run until it finishes (with a deadline), answering permission requests with `answer`.
@@ -221,7 +221,7 @@ impl Runtime for FakeRuntime {
             let w = &spec.words;
             let outcome = if w.contains("[fake:permission]") {
                 c.asked.lock().unwrap().push("p1".into());
-                send(AgentEvent::PermissionAsked { id: "p1".into(), tool: "Bash".into(), action: Action::Command { command: "cargo test".into() } });
+                send(AgentEvent::PermissionAsked { id: "p1".into(), tool: "Bash".into(), action: Action::Command { command: "cargo test".into() }, tool_use: None });
                 match arx.recv() {
                     Ok((_, Answer::Allow)) => send(AgentEvent::TextDelta("The tests pass.".into())),
                     Ok((_, Answer::Deny)) => send(AgentEvent::TextDelta("Okay, I did not run the tests.".into())),
@@ -257,7 +257,10 @@ pub fn fake_cli() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_neko-fake-claude"))
 }
 
-/// The Claude runtime on the fake CLI, with the fake as its run guard too.
+/// The Claude runtime on the fake CLI, with the fake as its run guard too, and a HOME of its own so the person's own Claude Code
+/// settings never reach a test.
 pub fn claude_on_fake() -> neko_core::claude::ClaudeRuntime {
-    neko_core::claude::ClaudeRuntime::new(Some(fake_cli()), fake_cli())
+    let home = std::env::temp_dir().join(format!("neko-fake-home-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&home);
+    neko_core::claude::ClaudeRuntime::new(Some(fake_cli()), fake_cli()).with_env("HOME", &home.to_string_lossy())
 }

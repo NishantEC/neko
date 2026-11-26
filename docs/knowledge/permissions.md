@@ -1,17 +1,56 @@
 # Permissions, asked in the task (S1, 2026-11-26)
 
-Neko never skips permissions. Claude Code runs with `--permission-mode default --permission-prompt-tool stdio`, so every step it
-would ask about comes to Neko as a `can_use_tool` request. Neko's policy (`crates/neko-core/src/policy.rs`) decides, or asks the
-person in the task.
+Neko never skips permissions. Every step Claude Code would ask about comes to Neko as a `can_use_tool` request
+(`--permission-prompt-tool stdio`). Neko's policy (`crates/neko-core/src/policy.rs`) decides, or asks the person in the task.
 
-## The two modes (Settings)
+## Why there are three modes
 
-- **Ask before risky steps** (the default). Go ahead: reading inside the task's folder, and editing there when the folder is the
-  task's own (a scratch folder or a git worktree). Ask: running a command, reading or writing outside the folder, the network, a
-  tool Neko does not know, and the first edit in a chosen folder that is not a repository.
+The first real run showed that `--permission-mode default` was not enough. Claude Code asks only about a step its own rules do not
+already allow. The person's own settings allowed `Bash`, `Edit` and `Write` outright and set the default mode to `auto`, so the CLI
+never asked anyone, and Neko's screen said "Ask before risky steps". Now each mode does what its name says.
+
+## The three modes (Settings)
+
+- **Follow Claude Code's own rules** (the default, and what a data folder with no stored mode reads as). Neko adds nothing: no
+  `--permission-mode`, no settings. What the person's Claude Code settings allow runs without asking, as in Terminal. Anything
+  Claude Code would ask about arrives as `can_use_tool` and is asked in the task. Settings shows one line read from the CLI's
+  settings files (managed, the newest task's folder's `.claude/settings.local.json` and `.claude/settings.json`, then
+  `~/.claude/settings.json`), for example "Your Claude Code settings allow Bash, Edit and Write without asking." Neko only reads
+  them (`claude/rules.rs`).
+- **Ask before risky steps**. Enforced by Neko whatever the person's settings say. Go ahead: reading inside the task's folder, and
+  editing there when the folder is the task's own (a scratch folder or a git worktree). Ask: every shell command, reading or
+  writing outside the folder, the network, a tool Neko does not know, and the first edit in a chosen folder that is not a
+  repository.
 - **Full access**. Everything goes ahead. Settings says so plainly. Neko still uses the same route; it just answers yes.
 
+Claude Code's own bookkeeping tools (its plan, a subagent, a question, `ToolSearch`) are left to Claude Code in every mode.
+
 Paths are resolved against the folder, with `..` and links followed, so a link that points out of the folder is outside.
+
+## How "Ask before risky steps" is enforced: the hook
+
+For a run in this mode only, Neko passes `--permission-mode default` and this `--settings` JSON (never written to a file):
+
+```json
+{"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"<neko-daemon>","args":["--hook"],"timeout":86400,"onFailure":"block"}]}]}}
+```
+
+- Claude Code runs `neko-daemon --hook` before every tool call, in exec form (no shell). Hooks from `--settings` are added to the
+  person's own hooks, which still run.
+- The child gets `NEKO_HOOK_PORT` and `NEKO_HOOK_SECRET` in its environment: the daemon's loopback port and a secret made for that
+  run (32 random bytes). Hooks inherit Claude Code's environment.
+- The helper reads the hook's JSON on stdin and posts it to `POST /v1/hook` with the run's secret as its bearer. A wrong or old
+  secret is refused (the install token is not accepted either), and the helper prints a deny.
+- The daemon applies the policy. A safe step: allowed at once. A risky step: the same stored request the Task view shows; the
+  helper waits for the answer, then prints
+  `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"|"deny","permissionDecisionReason":"…"}}` and
+  exits 0. A deny's reason is what the agent reads.
+- The request expires, and the step is denied, after a day less a minute (`NEKO_HOOK_EXPIRE_MS` in tests), when the run ends, or
+  when Claude Code hangs up on the helper. `onFailure: "block"` blocks the call if the helper crashes or times out.
+- When the person's ask rules make Claude Code ask too after the hook said yes, Neko answers that `can_use_tool` yes for the same
+  tool call (by its `tool_use_id`), so nobody is asked twice.
+- The secret is in the environment of every command the agent runs. With it a command can only put a request to the person; it
+  cannot answer one.
 
 ## A request
 
@@ -27,11 +66,20 @@ expires.
 Scoped to the task, never wider: the same program for a command (`cargo` in `cd x && cargo test`), the same folder outside the
 task's, the same host on the network, the same unknown tool, edits in the same plain folder.
 
-A destructive step (`rm`, `git push --force`, `git reset --hard`, `sudo` and the like) has no default answer and no "Always"
-button; an "always" answer to one counts once.
+A destructive step has no default answer and no "Always" button; an "always" answer to one counts once. Each part of a command
+line (split at `&&`, `||`, `;`, `|`) is read by its program: `rm`, `rmdir`, `sudo`, `dd`, `kill`, `chmod -R`, `find -delete`,
+`git push --force` (or `-f`, `+ref`, `--delete`), `git reset --hard`, `git clean` (not `-n`), `git branch -D` or `-d`,
+`git checkout -- …`, `git restore`, `git stash drop`, and SQL that drops, truncates or deletes. `grep -r rm src` is not `rm`.
 
 ## In the app
 
 A pending request is rune-ui's Confirmation (Allow once in ink, first; Always allow; Deny; Escape denies), with a quiet line under
 it saying why Neko asks. A destructive one is drawn by Neko in the same look with two equal answers, Allow once and Deny. Once
 answered it becomes one quiet line. The task's sidebar row shows a warning mark while it waits, and the window announces it.
+
+## Tests
+
+`crates/neko-daemon/tests/hooks.rs`, on a temporary HOME holding the person's settings (Bash, Edit and Write allowed, auto mode,
+a hook of their own): mode 1 asks nothing for a command those rules allow; mode 2 asks the same command; a read is not asked;
+allow, deny, always allow, a destructive command, expiry and the run ending while a step waits; the helper refuses a wrong secret;
+the settings files are byte for byte the same afterwards. `crates/neko-core/tests/conductor.rs` covers the routing.

@@ -221,6 +221,12 @@ fn two_tasks_run_at_once_and_one_task_runs_once() {
     events_until(&mut c, "a stopped", task_is(&a.id, TaskStatus::Stopped));
 }
 
+/// Settings: "Ask before risky steps".
+fn ask_before_risky_steps(c: &mut Client) {
+    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Ask };
+    assert_eq!(c.request(Request::SetSettings { settings: s.clone() }).unwrap(), Reply::Settings { settings: s });
+}
+
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git").arg("-C").arg(dir).args(args).env("GIT_TERMINAL_PROMPT", "0").output().unwrap();
     assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
@@ -245,6 +251,7 @@ fn a_repository_gets_its_own_worktree_and_the_checkout_is_never_touched() {
     let head = git(&r, &["rev-parse", "HEAD"]);
     let d = Daemon::start("worktree");
     let mut c = watcher(&d);
+    ask_before_risky_steps(&mut c);
     let task = create(&mut c, "Tidy the README [fake:tools]", Some(&r));
     assert_eq!(task.folder.as_deref(), Some(r.to_string_lossy().as_ref()));
     events_until(&mut c, "done", task_is(&task.id, TaskStatus::Done));
@@ -277,6 +284,7 @@ fn a_plain_folder_is_worked_in_directly_and_its_first_edit_asks() {
     let folder = folder.canonicalize().unwrap();
     let d = Daemon::start("plain");
     let mut c = watcher(&d);
+    ask_before_risky_steps(&mut c);
     let task = create(&mut c, "[fake:tools]", Some(&folder));
     let p = pending(&events_until(&mut c, "the first edit to ask", task_is(&task.id, TaskStatus::NeedsYou)));
     assert_eq!(p.title, "Edit files in this folder");
@@ -347,7 +355,7 @@ fn settings_list_the_agents_and_full_access_asks_nothing() {
     let d = Daemon::start("settings");
     let mut c = watcher(&d);
     let Reply::Runtimes { runtimes, settings } = c.request(Request::ListRuntimes).unwrap() else { panic!("runtimes") };
-    assert_eq!(settings, Settings { runtime: "claude".into(), permission_mode: PermissionMode::Ask });
+    assert_eq!(settings, Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow }, "a new install follows Claude Code's own rules");
     let claude = &runtimes[0];
     assert_eq!((claude.id.as_str(), claude.found, claude.version.as_deref(), claude.signed_in), ("claude", true, Some("9.9.9"), Some(true)));
     assert_eq!(claude.login.as_deref(), Some("Claude subscription (Max)"));

@@ -91,14 +91,47 @@ pub fn settings_view(s: &App, t: &Theme) -> El {
             );
             let mode = settings.permission_mode;
             let modes = [
-                ("Ask before risky steps", Some("Reading, and editing inside the task's own folder, go ahead. Commands, other folders, the internet and anything that deletes ask first.")),
+                (
+                    "Follow Claude Code's own rules",
+                    Some("Neko adds nothing. What your Claude Code settings allow runs without asking, as in Terminal. Anything Claude Code would ask about is asked in the task."),
+                ),
+                (
+                    "Ask before risky steps",
+                    Some("Neko asks before every command, any change outside the task's folder and the internet, whatever your Claude Code settings allow. Reading, and editing in the task's own folder, go ahead."),
+                ),
                 ("Full access", Some("Everything goes ahead without asking.")),
             ];
+            let chosen = match mode {
+                PermissionMode::Follow => 0,
+                PermissionMode::Ask => 1,
+                PermissionMode::Full => 2,
+            };
             let mut perms = col().key("settings-permissions").w_full().gap(t.space.at(3.0)).child(text("Permissions").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())).child(
-                RadioGroup::<App>::new("settings-mode", "How much the agent may do without asking", &modes, Some(if mode == PermissionMode::Full { 1 } else { 0 }))
-                    .on_change(|s: &mut App, i| s.set_permission_mode(if i == 1 { PermissionMode::Full } else { PermissionMode::Ask }))
+                RadioGroup::<App>::new("settings-mode", "How much the agent may do without asking", &modes, Some(chosen))
+                    .on_change(|s: &mut App, i| {
+                        s.set_permission_mode(match i {
+                            1 => PermissionMode::Ask,
+                            2 => PermissionMode::Full,
+                            _ => PermissionMode::Follow,
+                        })
+                    })
                     .build(t),
             );
+            // What the person's own Claude Code settings let it do, read from them (never written), when Neko follows them.
+            let rules = list.iter().find(|r| r.id == settings.runtime).and_then(|r| r.rules.clone());
+            if let (PermissionMode::Follow, Some(line)) = (mode, rules) {
+                perms = perms.child(
+                    row()
+                        .key("settings-rules")
+                        .role("status")
+                        .label(line.clone())
+                        .w_full()
+                        .gap(t.metrics.gap)
+                        .items_start()
+                        .child(row().size(t.control.icon, t.ty.base.line_height).center().child(glyph(&icons::INFO, t.control.icon, t.ink_faint())))
+                        .child(text(line).font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0).shrink().a11y_hidden()),
+                );
+            }
             if mode == PermissionMode::Full {
                 perms = perms.child(
                     row()

@@ -3,6 +3,8 @@
 //! A request is served only when it names this daemon as its host (`127.0.0.1:<port>` or `localhost:<port>`, against DNS
 //! rebinding), comes from no web page (no `Origin` header), and carries the token (`Authorization: Bearer …`). Then it is either the
 //! plain hello (`GET /v1/hello`) or the WebSocket upgrade (`GET /v1/ws`).
+//!
+//! One more: a run's hook helper (`POST /v1/hook`) carries that run's own secret instead of the token; the run checks it.
 
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
@@ -14,12 +16,20 @@ use crate::files::same_token;
 /// The longest request head read.
 const MAX_HEAD: usize = 16 * 1024;
 
+/// Where a run's hook helper asks (docs/knowledge/permissions.md).
+pub const HOOK_PATH: &str = "/v1/hook";
+
+/// The longest hook body read (a tool's input, as Claude Code sends it).
+pub const MAX_HOOK_BODY: usize = 1024 * 1024;
+
 /// What the head asked for, once it passed the checks.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Asked {
     Hello,
     /// The WebSocket upgrade, with the client's `Sec-WebSocket-Key`.
     Upgrade(String),
+    /// A hook helper's question: the secret it carries and the body's length. The run checks the secret.
+    Hook { secret: String, length: usize },
 }
 
 /// Why a head was refused, as the status sent back.
@@ -61,6 +71,14 @@ pub fn check(head: &[u8], port: u16, token: &str) -> Result<Asked, Refused> {
         return Err(Refused::Forbidden);
     }
     let bearer = header("authorization").and_then(|v| v.strip_prefix("Bearer ")).map(str::trim);
+    if req.path == Some(HOOK_PATH) {
+        if req.method != Some("POST") {
+            return Err(Refused::NotFound);
+        }
+        let Some(secret) = bearer.filter(|b| !b.is_empty()) else { return Err(Refused::Unauthorized) };
+        let length = header("content-length").and_then(|l| l.parse::<usize>().ok()).filter(|l| *l <= MAX_HOOK_BODY).ok_or(Refused::Bad)?;
+        return Ok(Asked::Hook { secret: secret.to_owned(), length });
+    }
     if !bearer.is_some_and(|b| same_token(b, token)) {
         return Err(Refused::Unauthorized);
     }
@@ -80,7 +98,7 @@ pub fn check(head: &[u8], port: u16, token: &str) -> Result<Asked, Refused> {
     }
 }
 
-fn respond(stream: &mut TcpStream, status: &str, content_type: &str, body: &str) -> io::Result<()> {
+pub fn respond(stream: &mut TcpStream, status: &str, content_type: &str, body: &str) -> io::Result<()> {
     write!(stream, "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n{body}", body.len())?;
     stream.flush()
 }
@@ -127,6 +145,17 @@ mod tests {
         assert_eq!(check(&head(&[ok[0], ok[1], ok[2], "Origin: https://example.com"]), 4000, TOKEN), Err(Refused::Forbidden), "a web page");
         assert_eq!(check(&head(&["GET /other HTTP/1.1", ok[1], ok[2]]), 4000, TOKEN), Err(Refused::NotFound));
         assert_eq!(check(b"nonsense\r\n\r\n", 4000, TOKEN), Err(Refused::Bad));
+    }
+
+    #[test]
+    fn a_hook_posts_with_its_runs_secret_and_a_length() {
+        let base = ["POST /v1/hook HTTP/1.1", "Host: 127.0.0.1:4000", "Authorization: Bearer s3cret", "Content-Length: 12"];
+        assert_eq!(check(&head(&base), 4000, TOKEN), Ok(Asked::Hook { secret: "s3cret".into(), length: 12 }));
+        assert_eq!(check(&head(&base[..3]), 4000, TOKEN), Err(Refused::Bad), "no length");
+        assert_eq!(check(&head(&[base[0], base[1], base[3]]), 4000, TOKEN), Err(Refused::Unauthorized), "no secret");
+        assert_eq!(check(&head(&[base[0], "Host: evil.example.com:4000", base[2], base[3]]), 4000, TOKEN), Err(Refused::Forbidden));
+        assert_eq!(check(&head(&[base[0], base[1], base[2], base[3], "Origin: https://example.com"]), 4000, TOKEN), Err(Refused::Forbidden), "a web page");
+        assert_eq!(check(&head(&["GET /v1/hook HTTP/1.1", base[1], base[2]]), 4000, TOKEN), Err(Refused::NotFound));
     }
 
     #[test]

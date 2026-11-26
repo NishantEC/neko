@@ -84,6 +84,11 @@ fn a_task_streams_asks_stops_and_its_transcript_survives_a_restart() {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
     let mut folder = Folder { dir: std::env::temp_dir().join(format!("neko-e2e-{}-{nanos}", std::process::id())), pids: Vec::new() };
     let dir: &Path = &folder.dir.clone();
+    // A HOME of the test's own: the person's Claude Code settings never reach the fake.
+    let home = dir.join("home");
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    // SAFETY: as above, before any thread reads the environment.
+    unsafe { std::env::set_var("HOME", &home) };
 
     let mut rt = runtime((1200.0, 800.0), false, |_| {});
     let conn = neko_app::link::Conn::start(dir.to_path_buf(), Some(bin), || {});

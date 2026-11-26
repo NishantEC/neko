@@ -48,7 +48,7 @@ pub struct Shared {
     pub core: Mutex<Core>,
     conns: Mutex<HashMap<u64, Conn>>,
     token: String,
-    port: u16,
+    pub port: u16,
     stopping: AtomicBool,
     pub runs: Runs,
 }
@@ -190,6 +190,7 @@ fn serve(mut stream: TcpStream, id: u64, shared: &Arc<Shared>) {
         Ok(http::Asked::Hello) => {
             let _ = http::hello(&mut stream);
         }
+        Ok(http::Asked::Hook { secret, length }) => crate::hook::serve(shared, stream, &secret, length),
         Ok(http::Asked::Upgrade(key)) => {
             if http::accept_upgrade(&mut stream, &key).is_ok() && stream.set_read_timeout(None).is_ok() && stream.set_nonblocking(true).is_ok() {
                 session(stream, id, shared);
@@ -294,7 +295,9 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
             Reply::Ok
         }
         Request::ListRuntimes => {
-            let runtimes = shared.runs.infos(Duration::from_secs(10));
+            // The newest task's chosen folder: its own Claude Code settings count in the line Settings shows.
+            let folder = lock(&shared.core).store.list_tasks(neko_core::DEFAULT_WORKSPACE).ok().and_then(|t| t.into_iter().find_map(|t| t.folder));
+            let runtimes = shared.runs.infos(Duration::from_secs(10), folder.as_deref().map(std::path::Path::new));
             match lock(&shared.core).store.settings() {
                 Ok(settings) => Reply::Runtimes { runtimes, settings },
                 Err(e) => internal(e),

@@ -75,7 +75,21 @@ pub struct StartSpec {
     /// The CLI's conversation to continue.
     pub resume: Option<String>,
     pub mode: PermissionMode,
+    /// In "Ask before risky steps": where the run's hook helper reaches the daemon. None in the other modes.
+    pub hook: Option<HookLink>,
 }
+
+/// How a run's `PreToolUse` hook helper (`neko-daemon --hook`) reaches the daemon: its loopback port and the run's own secret,
+/// handed to the CLI's environment for that run only (docs/knowledge/permissions.md).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HookLink {
+    pub port: u16,
+    pub secret: String,
+}
+
+/// The environment variables a hook helper reads.
+pub const HOOK_PORT_ENV: &str = "NEKO_HOOK_PORT";
+pub const HOOK_SECRET_ENV: &str = "NEKO_HOOK_SECRET";
 
 /// What a tool wants to do, as Neko's policy sees it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,6 +104,9 @@ pub enum Action {
     Network { target: String },
     /// Anything else, named by the tool.
     Other { summary: String },
+    /// Claude Code's own bookkeeping (its plan, a subagent, a question to the person): nothing on the Mac changes by it, so Neko
+    /// leaves it to Claude Code.
+    Internal { tool: String },
 }
 
 /// How a run ended.
@@ -127,6 +144,10 @@ pub struct Reported {
     pub cached_tokens: u64,
     pub cost_usd: Option<f64>,
     pub model: Option<String>,
+    /// The context the last model call held (its input, cache read and cache written), when a message reported its usage.
+    pub context_tokens: Option<u64>,
+    /// The model's context window, when the CLI reported it.
+    pub context_window: Option<u64>,
 }
 
 /// Neko's events, the same for every runtime.
@@ -143,10 +164,11 @@ pub enum AgentEvent {
     ThinkingDone,
     /// A tool call began: its id, its name, a few words of what it does, and its input (shortened).
     ToolStarted { id: String, name: String, summary: String, input: String },
-    /// A tool call ended, with its output (shortened).
-    ToolFinished { id: String, ok: bool, output: String },
-    /// The agent asks to do something. Answer with [`Control::answer`] and the same id.
-    PermissionAsked { id: String, tool: String, action: Action },
+    /// A tool call ended, with its output (shortened). `ok` is false only when the tool could not run (denied, an error, cut
+    /// off); a command that ran and exited non-zero is `ok` with its `exit` code.
+    ToolFinished { id: String, ok: bool, output: String, exit: Option<i32> },
+    /// The agent asks to do something. Answer with [`Control::answer`] and the same id. `tool_use` is the call it is for.
+    PermissionAsked { id: String, tool: String, action: Action, tool_use: Option<String> },
     /// The CLI took back a request it asked (it no longer needs the answer).
     PermissionWithdrawn { id: String },
     Usage(Reported),

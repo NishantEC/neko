@@ -32,7 +32,7 @@ fn log(tx: &Transaction<'_>, now_ms: i64, subject: &str, kind: &str, data: serde
 }
 
 const RUN_COLUMNS: &str = "r.id, r.task_id, r.runtime, r.model, r.status, r.started_ms, r.ended_ms, r.session, r.workdir, r.branch, r.reason, r.files, r.added, r.removed, \
-    u.input_tokens, u.output_tokens, u.cached_tokens, u.cost_usd, u.model, u.pricing, u.reported_by";
+    u.input_tokens, u.output_tokens, u.cached_tokens, u.cost_usd, u.model, u.pricing, u.reported_by, u.context_tokens, u.context_window";
 
 fn run_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Run> {
     let changes = match (row.get::<_, Option<u32>>(11)?, row.get::<_, Option<u32>>(12)?, row.get::<_, Option<u32>>(13)?) {
@@ -48,6 +48,8 @@ fn run_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Run> {
             model: row.get(18)?,
             pricing: status_of::<Pricing>(&row.get::<_, String>(19)?)?,
             reported_by: row.get(20)?,
+            context_tokens: row.get::<_, Option<i64>>(21)?.map(|n| n as u64),
+            context_window: row.get::<_, Option<i64>>(22)?.map(|n| n as u64),
         }),
         None => None,
     };
@@ -169,9 +171,20 @@ impl Store {
         )?;
         if let Some(u) = &r.usage {
             tx.execute(
-                "INSERT INTO usage (run_id, input_tokens, output_tokens, cached_tokens, cost_usd, model, pricing, reported_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                 ON CONFLICT(run_id) DO UPDATE SET input_tokens = ?2, output_tokens = ?3, cached_tokens = ?4, cost_usd = ?5, model = ?6, pricing = ?7, reported_by = ?8",
-                params![r.id.0, u.input_tokens as i64, u.output_tokens as i64, u.cached_tokens as i64, u.cost_usd, u.model, status_name(u.pricing), u.reported_by],
+                "INSERT INTO usage (run_id, input_tokens, output_tokens, cached_tokens, cost_usd, model, pricing, reported_by, context_tokens, context_window) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 ON CONFLICT(run_id) DO UPDATE SET input_tokens = ?2, output_tokens = ?3, cached_tokens = ?4, cost_usd = ?5, model = ?6, pricing = ?7, reported_by = ?8, context_tokens = ?9, context_window = ?10",
+                params![
+                    r.id.0,
+                    u.input_tokens as i64,
+                    u.output_tokens as i64,
+                    u.cached_tokens as i64,
+                    u.cost_usd,
+                    u.model,
+                    status_name(u.pricing),
+                    u.reported_by,
+                    u.context_tokens.map(|n| n as i64),
+                    u.context_window.map(|n| n as i64)
+                ],
             )?;
         }
         let seq = log(&tx, now_ms, &r.id.0, "run_changed", serde_json::json!({ "status": status_name(r.status) }))?;

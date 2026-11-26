@@ -29,6 +29,7 @@ pub const SCENES: &[Scene] = &[
     ("task-stopped", task_stopped),
     ("task-interrupted", task_interrupted),
     ("settings", settings),
+    ("settings-ask", settings_ask),
     ("settings-full-access", settings_full),
     ("settings-signed-out", settings_signed_out),
 ];
@@ -111,7 +112,7 @@ impl Script {
 
     fn tool(&mut self, name: &str, summary: &str, input: &str, output: &str, state: ToolState, secs: i64) -> &mut Self {
         let done = state != ToolState::Running;
-        self.part(PartBody::Tool { call: format!("call_{}", self.seq), name: name.into(), summary: summary.into(), input: input.into(), output: done.then(|| output.into()), state }, secs, done)
+        self.part(PartBody::Tool { call: format!("call_{}", self.seq), name: name.into(), summary: summary.into(), input: input.into(), output: done.then(|| output.into()), state, exit: None }, secs, done)
     }
 
     fn say(&mut self, words: &str, done: bool) -> &mut Self {
@@ -155,6 +156,8 @@ fn run(id: &str, task: &Task, status: RunStatus, started: i64, secs: i64) -> Run
             model: Some("claude-model".into()),
             pricing: Pricing::ApiEquivalent,
             reported_by: "Claude Code".into(),
+            context_tokens: Some(48_200),
+            context_window: Some(200_000),
         }),
         changes: (status == RunStatus::Done).then_some(Changes { files: 3, added: 42, removed: 7 }),
     }
@@ -264,7 +267,7 @@ fn task_failed(s: &mut App) {
     sc.notice(Tone::Error, "Claude Code has reached its usage limit.", "It resets at 17:00. Send a follow-up then to carry on.");
     let mut r = run("run_1", task, RunStatus::Failed, start(s), 9);
     r.reason = Some("Claude Code has reached its usage limit.".into());
-    r.usage = Some(Usage { input_tokens: 2_100, output_tokens: 90, cached_tokens: 0, cost_usd: None, model: None, pricing: Pricing::ApiEquivalent, reported_by: "Claude Code".into() });
+    r.usage = Some(Usage { input_tokens: 2_100, output_tokens: 90, cached_tokens: 0, cost_usd: None, model: None, pricing: Pricing::ApiEquivalent, reported_by: "Claude Code".into(), context_tokens: None, context_window: None });
     open_with(s, TaskStatus::Failed, vec![r], vec![sc]);
 }
 
@@ -309,6 +312,7 @@ fn agents(signed_in: bool, mode: PermissionMode) -> (Vec<RuntimeInfo>, Settings)
                 sign_in: "claude auth login".into(),
                 install: "curl -fsSL https://claude.ai/install.sh | bash".into(),
                 supported: true,
+                rules: Some("Your Claude Code settings allow Bash, Edit and Write without asking.".into()),
             },
             RuntimeInfo {
                 id: "codex".into(),
@@ -320,6 +324,7 @@ fn agents(signed_in: bool, mode: PermissionMode) -> (Vec<RuntimeInfo>, Settings)
                 sign_in: "codex login".into(),
                 install: "npm install -g @openai/codex".into(),
                 supported: false,
+                rules: None,
             },
         ],
         Settings { runtime: "claude".into(), permission_mode: mode },
@@ -329,6 +334,11 @@ fn agents(signed_in: bool, mode: PermissionMode) -> (Vec<RuntimeInfo>, Settings)
 fn settings(s: &mut App) {
     s.tasks = sample_tasks();
     s.settings_open = true;
+    s.runtimes = Some(agents(true, PermissionMode::Follow));
+}
+
+fn settings_ask(s: &mut App) {
+    settings(s);
     s.runtimes = Some(agents(true, PermissionMode::Ask));
 }
 
@@ -339,5 +349,5 @@ fn settings_full(s: &mut App) {
 
 fn settings_signed_out(s: &mut App) {
     settings(s);
-    s.runtimes = Some(agents(false, PermissionMode::Ask));
+    s.runtimes = Some(agents(false, PermissionMode::Follow));
 }

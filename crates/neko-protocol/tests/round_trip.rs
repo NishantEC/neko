@@ -98,6 +98,10 @@ fn the_requests_that_run_a_task_round_trip() {
         ClientMessage { id: 11, request: Request::SetSettings { settings: Settings { runtime: "claude".into(), permission_mode: PermissionMode::Full } } },
         r#"{"id":11,"type":"set_settings","settings":{"runtime":"claude","permission_mode":"full"}}"#,
     );
+    for (m, name) in [(PermissionMode::Follow, "follow"), (PermissionMode::Ask, "ask"), (PermissionMode::Full, "full")] {
+        pinned(m, &format!("\"{name}\""));
+    }
+    assert_eq!(PermissionMode::default(), PermissionMode::Follow, "a new install follows Claude Code's own rules");
     pinned(ClientMessage { id: 12, request: Request::DayUsage { from_ms: 5 } }, r#"{"id":12,"type":"day_usage","from_ms":5}"#);
     for (d, name) in [(Decision::AllowOnce, "allow_once"), (Decision::AlwaysAllow, "always_allow"), (Decision::Deny, "deny")] {
         pinned(d, &format!("\"{name}\""));
@@ -117,7 +121,7 @@ fn run() -> Run {
         workdir: "/Users/example/acme-api".into(),
         branch: Some("neko/abcd1234".into()),
         reason: None,
-        usage: Some(Usage { input_tokens: 12, output_tokens: 34, cached_tokens: 56, cost_usd: Some(0.25), model: Some("claude-x".into()), pricing: Pricing::ApiEquivalent, reported_by: "Claude Code".into() }),
+        usage: Some(Usage { input_tokens: 12, output_tokens: 34, cached_tokens: 56, cost_usd: Some(0.25), model: Some("claude-x".into()), pricing: Pricing::ApiEquivalent, reported_by: "Claude Code".into(), context_tokens: Some(48_000), context_window: Some(200_000) }),
         changes: Some(Changes { files: 2, added: 10, removed: 3 }),
     }
 }
@@ -126,15 +130,19 @@ fn run() -> Run {
 fn runs_parts_and_permissions_round_trip() {
     pinned(
         run(),
-        r#"{"id":"run_1","task":"task_1","runtime":"claude","model":"claude-x","status":"done","started_ms":10,"ended_ms":20,"session":"5f0c","workdir":"/Users/example/acme-api","branch":"neko/abcd1234","usage":{"input_tokens":12,"output_tokens":34,"cached_tokens":56,"cost_usd":0.25,"model":"claude-x","pricing":"api_equivalent","reported_by":"Claude Code"},"changes":{"files":2,"added":10,"removed":3}}"#,
+        r#"{"id":"run_1","task":"task_1","runtime":"claude","model":"claude-x","status":"done","started_ms":10,"ended_ms":20,"session":"5f0c","workdir":"/Users/example/acme-api","branch":"neko/abcd1234","usage":{"input_tokens":12,"output_tokens":34,"cached_tokens":56,"cost_usd":0.25,"model":"claude-x","pricing":"api_equivalent","reported_by":"Claude Code","context_tokens":48000,"context_window":200000},"changes":{"files":2,"added":10,"removed":3}}"#,
     );
     let part = |seq, body| Part { id: PartId(format!("part_{seq}")), task: TaskId("task_1".into()), run: Some(RunId("run_1".into())), seq, at_ms: 1, ended_ms: None, body };
     pinned(part(1, PartBody::Person { text: "Hi".into() }), r#"{"id":"part_1","task":"task_1","run":"run_1","seq":1,"at_ms":1,"body":{"kind":"person","text":"Hi"}}"#);
     pinned(part(2, PartBody::Agent { text: "**Done**".into(), done: true }), r#"{"id":"part_2","task":"task_1","run":"run_1","seq":2,"at_ms":1,"body":{"kind":"agent","text":"**Done**","done":true}}"#);
     pinned(part(3, PartBody::Thinking { text: "Hm".into(), done: false }), r#"{"id":"part_3","task":"task_1","run":"run_1","seq":3,"at_ms":1,"body":{"kind":"thinking","text":"Hm","done":false}}"#);
     pinned(
-        part(4, PartBody::Tool { call: "t1".into(), name: "Read".into(), summary: "src/main.rs".into(), input: "{}".into(), output: Some("fn main".into()), state: ToolState::Done }),
+        part(4, PartBody::Tool { call: "t1".into(), name: "Read".into(), summary: "src/main.rs".into(), input: "{}".into(), output: Some("fn main".into()), state: ToolState::Done, exit: None }),
         r#"{"id":"part_4","task":"task_1","run":"run_1","seq":4,"at_ms":1,"body":{"kind":"tool","call":"t1","name":"Read","summary":"src/main.rs","input":"{}","output":"fn main","state":"done"}}"#,
+    );
+    pinned(
+        part(7, PartBody::Tool { call: "t2".into(), name: "Bash".into(), summary: "test -f a".into(), input: "test -f a".into(), output: Some("Exit code 1".into()), state: ToolState::Done, exit: Some(1) }),
+        r#"{"id":"part_7","task":"task_1","run":"run_1","seq":7,"at_ms":1,"body":{"kind":"tool","call":"t2","name":"Bash","summary":"test -f a","input":"test -f a","output":"Exit code 1","state":"done","exit":1}}"#,
     );
     pinned(part(5, PartBody::Permission { permission: PermissionId("perm_1".into()) }), r#"{"id":"part_5","task":"task_1","run":"run_1","seq":5,"at_ms":1,"body":{"kind":"permission","permission":"perm_1"}}"#);
     pinned(
@@ -177,7 +185,7 @@ fn transcripts_runtimes_and_usage_round_trip() {
     let back: Reply = serde_json::from_str(&serde_json::to_string(&Reply::Transcript { transcript: transcript.clone() }).unwrap()).unwrap();
     assert_eq!(back, Reply::Transcript { transcript });
     pinned(
-        RuntimeInfo { id: "codex".into(), name: "Codex".into(), found: false, version: None, signed_in: None, login: None, sign_in: "codex login".into(), install: "npm install -g @openai/codex".into(), supported: false },
+        RuntimeInfo { id: "codex".into(), name: "Codex".into(), found: false, version: None, signed_in: None, login: None, sign_in: "codex login".into(), install: "npm install -g @openai/codex".into(), supported: false, rules: None },
         r#"{"id":"codex","name":"Codex","found":false,"sign_in":"codex login","install":"npm install -g @openai/codex","supported":false}"#,
     );
     pinned(UsageTotal { runs: 2, input_tokens: 3, output_tokens: 4, cost_usd: Some(0.5), api_equivalent: true }, r#"{"runs":2,"input_tokens":3,"output_tokens":4,"cost_usd":0.5,"api_equivalent":true}"#);

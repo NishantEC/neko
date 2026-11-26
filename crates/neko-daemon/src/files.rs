@@ -13,7 +13,7 @@ pub fn ensure_dir(dir: &Path) -> io::Result<()> {
     fs::set_permissions(dir, Permissions::from_mode(0o700))
 }
 
-fn random_hex(bytes: usize) -> io::Result<String> {
+pub fn random_hex(bytes: usize) -> io::Result<String> {
     let mut buf = vec![0u8; bytes];
     fs::File::open("/dev/urandom")?.read_exact(&mut buf)?;
     Ok(buf.iter().map(|b| format!("{b:02x}")).collect())

@@ -15,8 +15,9 @@ pub mod client;
 #[cfg(feature = "ws")]
 pub mod pump;
 
-/// The version of this contract. A screen and a daemon talk only when theirs are equal. 2: tasks run (S1).
-pub const PROTOCOL_VERSION: u32 = 2;
+/// The version of this contract. A screen and a daemon talk only when theirs are equal. 2: tasks run (S1). 3: three permission
+/// modes, the context window, a command's exit code, Claude Code's own rules in words.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -124,6 +125,12 @@ pub struct Usage {
     pub pricing: Pricing,
     /// Who reported it ("Claude Code").
     pub reported_by: String,
+    /// How many tokens the conversation's context held at the run's last model call, as reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u64>,
+    /// The model's context window, when the CLI reported it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
 }
 
 /// What a task's branch changed, from git.
@@ -191,8 +198,19 @@ pub enum PartBody {
     /// The agent's words (Markdown); `done` once the block is whole.
     Agent { text: String, done: bool },
     Thinking { text: String, done: bool },
-    /// One tool call. `summary` is a few words after the name; `input` and `output` are shortened for the fold.
-    Tool { call: String, name: String, summary: String, input: String, #[serde(default, skip_serializing_if = "Option::is_none")] output: Option<String>, state: ToolState },
+    /// One tool call. `summary` is a few words after the name; `input` and `output` are shortened for the fold. `exit` is a
+    /// command's exit code when it ran and ended with one other than zero: the step still finished (`done`), it is not a failure.
+    Tool {
+        call: String,
+        name: String,
+        summary: String,
+        input: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<String>,
+        state: ToolState,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exit: Option<i32>,
+    },
     /// A request for permission, by its id.
     Permission { permission: PermissionId },
     /// Something Neko says: a failure, an interruption. `next` is what to do about it.
@@ -258,12 +276,16 @@ pub struct Permission {
     pub answered_ms: Option<i64>,
 }
 
-/// How a new task's agent may act.
+/// How a new task's agent may act (docs/knowledge/permissions.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionMode {
-    /// Reading and editing inside the task's folder go ahead; commands, other folders, the network and anything destructive ask.
+    /// Claude Code's own rules, as in the terminal: what the person's settings allow runs without asking; what Claude Code would
+    /// ask about is asked in the task. Neko adds nothing. The default, and what a store with no mode stored reads as.
     #[default]
+    Follow,
+    /// Enforced by Neko whatever the person's settings say: reading and editing inside the task's folder go ahead; every command,
+    /// other folders, the network and anything destructive ask.
     Ask,
     /// Everything goes ahead.
     Full,
@@ -299,6 +321,10 @@ pub struct RuntimeInfo {
     pub install: String,
     /// Whether this Neko can run it yet.
     pub supported: bool,
+    /// What the CLI's own settings let it do without asking, in one line ("Your Claude Code settings allow Bash, Edit and Write
+    /// without asking."). Read from its settings files, never written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rules: Option<String>,
 }
 
 /// What a day's runs used, as reported.

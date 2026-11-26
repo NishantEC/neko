@@ -19,9 +19,21 @@
 //! | `limit` | The account's usage limit is reached. |
 //! | `signin` | Not signed in. |
 //! | `stall` | Starts, then says nothing. |
+//! | `hook-shell` | Runs `cargo test` (asking, unless the person's settings allow `Bash`), then says whether it ran and why not. |
+//! | `hook-twice` | Runs `cargo test`, then `cargo build`. |
+//! | `hook-read` | Reads `README.md` in its folder (Claude Code never asks about that). |
+//! | `hook-destructive` | Runs `git reset --hard HEAD~1`. |
+//! | `real` | The shapes a real run showed: empty thinking, several words between tools, a long absolute path, a check that exits 1. |
 //!
 //! With `--resume ID` it continues conversation ID and says so. `--version` and `auth status --json` answer like the real CLI
 //! (`NEKO_FAKE_AUTH=out` makes it signed out). It also serves as the run guard in tests (`--neko-run-guard`).
+//!
+//! Like Claude Code it reads the person's own rules from `$HOME/.claude/settings.json` (`permissions.allow`: a tool named there
+//! is never asked about), and it runs the `PreToolUse` hooks given with `--settings` before every tool call, as the hooks
+//! documentation says: exec form (`command` and `args`, no shell), the hook's JSON on stdin, `timeout` in seconds, exit 0 with
+//! `hookSpecificOutput.permissionDecision` (`allow` skips the ask, `deny` blocks with `permissionDecisionReason`), exit 2 blocks,
+//! anything else is a failure that blocks only with `onFailure: "block"`. `NEKO_FAKE_HOOK_LOG` names a file each hook input is
+//! appended to.
 
 use std::io::{BufRead, Write};
 use std::sync::mpsc::{self, Receiver};
@@ -39,7 +51,104 @@ fn now_s() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
 
+/// One `PreToolUse` hook from `--settings`.
+#[derive(Clone)]
+struct Hook {
+    matcher: String,
+    command: String,
+    args: Vec<String>,
+    timeout: Duration,
+    block_on_failure: bool,
+}
+
+/// What the hooks decided for one call.
+enum Hooked {
+    Allow,
+    Deny(String),
+    Nothing,
+}
+
+/// The `PreToolUse` hooks in a `--settings` JSON string.
+fn hooks_from(settings: Option<&str>) -> Vec<Hook> {
+    let Some(v) = settings.and_then(|s| serde_json::from_str::<Value>(s).ok()) else { return Vec::new() };
+    let mut out = Vec::new();
+    for group in v["hooks"]["PreToolUse"].as_array().into_iter().flatten() {
+        let matcher = group["matcher"].as_str().unwrap_or("").to_owned();
+        for h in group["hooks"].as_array().into_iter().flatten().filter(|h| h["type"] == "command") {
+            out.push(Hook {
+                matcher: matcher.clone(),
+                command: h["command"].as_str().unwrap_or("").to_owned(),
+                args: h["args"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default(),
+                timeout: Duration::from_secs(h["timeout"].as_u64().unwrap_or(600)),
+                block_on_failure: h["onFailure"] == "block",
+            });
+        }
+    }
+    out
+}
+
+/// The tools the person's own settings allow outright.
+fn allowed_by_settings() -> Vec<String> {
+    let Some(home) = std::env::var_os("HOME") else { return Vec::new() };
+    let p = std::path::Path::new(&home).join(".claude/settings.json");
+    let Some(v) = std::fs::read(p).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else { return Vec::new() };
+    v["permissions"]["allow"].as_array().into_iter().flatten().filter_map(|r| r.as_str()).filter(|r| !r.contains('(')).map(str::to_owned).collect()
+}
+
+/// Runs one hook as the documentation says, and reads its decision.
+fn run_hook(h: &Hook, input: &Value) -> Hooked {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    let failed = |why: String| if h.block_on_failure { Hooked::Deny(why) } else { Hooked::Nothing };
+    let Ok(mut child) = Command::new(&h.command).args(&h.args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() else {
+        return failed(format!("PreToolUse hook error: [{}]: failed", h.command));
+    };
+    if let Some(mut i) = child.stdin.take() {
+        let _ = writeln!(i, "{input}");
+    }
+    let until = Instant::now() + h.timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break Some(st),
+            Ok(None) if Instant::now() < until => std::thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+        }
+    };
+    let Some(status) = status else { return failed(format!("PreToolUse hook error: [{}]: timed out", h.command)) };
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    if let Some(mut o) = child.stdout.take() {
+        let _ = o.read_to_string(&mut stdout);
+    }
+    if let Some(mut e) = child.stderr.take() {
+        let _ = e.read_to_string(&mut stderr);
+    }
+    match status.code() {
+        Some(2) => Hooked::Deny(stderr.trim().to_owned()),
+        Some(0) if stdout.trim().is_empty() => Hooked::Nothing,
+        Some(0) => match serde_json::from_str::<Value>(stdout.trim()) {
+            Ok(v) => {
+                let o = &v["hookSpecificOutput"];
+                let why = o["permissionDecisionReason"].as_str().unwrap_or("").to_owned();
+                match o["permissionDecision"].as_str() {
+                    Some("allow") => Hooked::Allow,
+                    Some("deny") => Hooked::Deny(why),
+                    _ => Hooked::Nothing,
+                }
+            }
+            Err(_) => failed("PreToolUse hook error: not JSON".into()),
+        },
+        _ => failed(format!("PreToolUse hook error: [{}]: failed", h.command)),
+    }
+}
+
 struct Fake {
+    hooks: Vec<Hook>,
+    allowed: Vec<String>,
     session: String,
     resumed: bool,
     cwd: String,
@@ -71,7 +180,7 @@ impl Fake {
             std::thread::sleep(gap);
         }
         out(json!({"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null,"session_id":self.session}));
-        out(json!({"type":"assistant","message":{"id":id,"model":"claude-fake-1","role":"assistant","content":[{"type":"text","text":text}]},"parent_tool_use_id":null,"session_id":self.session}));
+        out(json!({"type":"assistant","message":{"id":id,"model":"claude-fake-1","role":"assistant","content":[{"type":"text","text":text}],"usage":{"input_tokens":8,"cache_read_input_tokens":15_200,"cache_creation_input_tokens":1_100,"output_tokens":120}},"parent_tool_use_id":null,"session_id":self.session}));
         out(json!({"type":"stream_event","event":{"type":"message_stop"},"parent_tool_use_id":null,"session_id":self.session}));
     }
 
@@ -86,19 +195,63 @@ impl Fake {
         out(json!({"type":"assistant","message":{"id":id,"model":"claude-fake-1","content":[{"type":"thinking","thinking":text}]},"parent_tool_use_id":null,"session_id":self.session}));
     }
 
-    /// A tool call; with `ask`, a permission request first, waiting for Neko's answer. Returns whether it ran.
+    /// A tool call; with `ask`, Claude Code would ask about it (unless the person's settings allow the tool or a hook allowed
+    /// it), waiting for Neko's answer. Returns whether it ran.
     fn tool(&mut self, name: &str, input: Value, ask: bool, result: &str) -> bool {
+        self.tool_why(name, input, ask, result, false).0
+    }
+
+    /// The same, and why it did not run. With `fails`, it ran and exited 1, as a shell check does.
+    fn tool_why(&mut self, name: &str, input: Value, ask: bool, result: &str, fails: bool) -> (bool, String) {
         let tool_id = self.id("toolu");
         let msg = self.message();
-        out(json!({"type":"assistant","message":{"id":msg,"model":"claude-fake-1","content":[{"type":"tool_use","id":tool_id,"name":name,"input":input}]},"parent_tool_use_id":null,"session_id":self.session}));
-        let allowed = !ask || {
-            let req = self.id("req");
-            out(json!({"type":"control_request","request_id":req,"request":{"subtype":"can_use_tool","tool_name":name,"input":input,"tool_use_id":tool_id}}));
-            self.wait_answer(&req)
+        out(json!({"type":"assistant","message":{"id":msg,"model":"claude-fake-1","content":[{"type":"tool_use","id":tool_id,"name":name,"input":input}],"usage":{"input_tokens":6,"cache_read_input_tokens":14_000,"cache_creation_input_tokens":800,"output_tokens":40}},"parent_tool_use_id":null,"session_id":self.session}));
+        // The hooks run first; a deny blocks, an allow skips the ask.
+        let hook_input = json!({"session_id":self.session,"transcript_path":"/tmp/fake-transcript.jsonl","cwd":self.cwd,"permission_mode":"default","hook_event_name":"PreToolUse","tool_name":name,"tool_input":input,"tool_use_id":tool_id});
+        let mut decided = Hooked::Nothing;
+        for h in self.hooks.clone().iter().filter(|h| h.matcher.is_empty() || h.matcher == "*" || h.matcher.split('|').any(|m| m == name)) {
+            if let Ok(log) = std::env::var("NEKO_FAKE_HOOK_LOG") {
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log) {
+                    let _ = writeln!(f, "{hook_input}");
+                }
+            }
+            match run_hook(h, &hook_input) {
+                Hooked::Deny(why) => {
+                    decided = Hooked::Deny(why);
+                    break;
+                }
+                Hooked::Allow => decided = Hooked::Allow,
+                Hooked::Nothing => {}
+            }
+        }
+        let (ran, why) = match decided {
+            Hooked::Deny(why) => (false, why),
+            Hooked::Allow => (true, String::new()),
+            Hooked::Nothing if !ask || self.allowed.iter().any(|a| a == name) => (true, String::new()),
+            Hooked::Nothing => {
+                let req = self.id("req");
+                out(json!({"type":"control_request","request_id":req,"request":{"subtype":"can_use_tool","tool_name":name,"input":input,"tool_use_id":tool_id}}));
+                if self.wait_answer(&req) { (true, String::new()) } else { (false, "The person denied this.".to_owned()) }
+            }
         };
-        let content = if allowed { result.to_owned() } else { "The person denied this.".to_owned() };
-        out(json!({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":tool_id,"is_error":!allowed,"content":content}]},"parent_tool_use_id":null,"session_id":self.session}));
-        allowed
+        let (content, error) = match (ran, fails) {
+            (false, _) => (if why.is_empty() { "The person denied this.".to_owned() } else { why.clone() }, true),
+            (true, true) => (format!("Exit code 1\n{result}"), true),
+            (true, false) => (result.to_owned(), false),
+        };
+        out(json!({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":tool_id,"is_error":error,"content":content}]},"parent_tool_use_id":null,"session_id":self.session}));
+        (ran, why)
+    }
+
+    /// Thinking as Claude Code 2.1.331 sends it: a block with no words, only a signature.
+    fn think_empty(&mut self) {
+        let id = self.message();
+        out(json!({"type":"stream_event","event":{"type":"message_start","message":{"id":id}},"parent_tool_use_id":null,"session_id":self.session}));
+        out(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}},"parent_tool_use_id":null,"session_id":self.session}));
+        out(json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}},"parent_tool_use_id":null,"session_id":self.session}));
+        out(json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"c2lnbmF0dXJl"}},"parent_tool_use_id":null,"session_id":self.session}));
+        out(json!({"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null,"session_id":self.session}));
+        out(json!({"type":"assistant","message":{"id":id,"model":"claude-fake-1","content":[{"type":"thinking","thinking":"","signature":"c2lnbmF0dXJl"}]},"parent_tool_use_id":null,"session_id":self.session}));
     }
 
     fn wait_answer(&mut self, req: &str) -> bool {
@@ -116,7 +269,7 @@ impl Fake {
             "type":"result","subtype":"success","is_error":error,"duration_ms":1200,"duration_api_ms":1000,"num_turns":1,"result":words,
             "session_id":self.session,"total_cost_usd":0.0123,
             "usage":{"input_tokens":1200,"cache_creation_input_tokens":0,"cache_read_input_tokens":5000,"output_tokens":340},
-            "modelUsage":{"claude-fake-1":{"inputTokens":1200,"outputTokens":340}},"permission_denials":[]
+            "modelUsage":{"claude-fake-1":{"inputTokens":1200,"outputTokens":340,"contextWindow":200000}},"permission_denials":[]
         }));
     }
 
@@ -199,6 +352,41 @@ impl Fake {
                 self.say("I started a background job.", 2, Duration::from_millis(10));
                 self.result("Done.", false);
             }
+            "hook-shell" => {
+                let (ran, why) = self.tool_why("Bash", json!({"command":"cargo test","description":"Run the tests"}), true, "test result: ok. 12 passed", false);
+                let words = if ran { "The tests pass.".to_owned() } else { format!("I did not run the tests. Claude Code said: {why}") };
+                self.say(&words, 2, Duration::from_millis(10));
+                self.result(&words, false);
+            }
+            "hook-twice" => {
+                self.tool("Bash", json!({"command":"cargo test"}), true, "test result: ok");
+                self.tool("Bash", json!({"command":"cargo build --release"}), true, "Finished");
+                self.say("Tested and built.", 2, Duration::from_millis(10));
+                self.result("Done.", false);
+            }
+            "hook-read" => {
+                let ran = self.tool("Read", json!({"file_path": format!("{cwd}/README.md")}), false, "# Acme");
+                self.say(if ran { "I read the README." } else { "I could not read the README." }, 2, Duration::from_millis(10));
+                self.result("Done.", false);
+            }
+            "hook-destructive" => {
+                let (ran, why) = self.tool_why("Bash", json!({"command":"git reset --hard HEAD~1"}), true, "HEAD is now at 1a2b3c4", false);
+                let words = if ran { "I reset the branch.".to_owned() } else { format!("I left the branch alone. Claude Code said: {why}") };
+                self.say(&words, 2, Duration::from_millis(10));
+                self.result(&words, false);
+            }
+            "real" => {
+                self.think_empty();
+                self.tool("Read", json!({"file_path":"/Users/example/Documents/acme-api/docs/guides/getting-started/installing-on-a-new-mac.md"}), false, "# Installing\nSteps.");
+                self.think_empty();
+                self.say("The guide is current. I will check the branches next.", 3, Duration::from_millis(5));
+                self.tool("Bash", json!({"command":"git status --short && git branch --list 'neko/*' --format='%(refname:short) %(upstream:track)' && git log --oneline -5 --decorate"}), false, "?? notes.txt\nneko/x7k2m9qa [ahead 1]");
+                self.say("One branch is ahead. Checking whether anything is left to commit.", 3, Duration::from_millis(5));
+                self.tool_why("Bash", json!({"command":"git diff --quiet && git diff --cached --quiet"}), false, "", true);
+                self.think_empty();
+                self.say("There are uncommitted changes, so I left them as they are.\n\n- `notes.txt` is new and untracked\n- `neko/x7k2m9qa` is one commit ahead", 4, Duration::from_millis(5));
+                self.result("There are uncommitted changes.", false);
+            }
             "crash" => {
                 eprintln!("fatal: the fake fell over");
                 std::process::exit(3);
@@ -264,6 +452,7 @@ fn main() {
         return;
     }
     let resume = args.iter().position(|a| a == "--resume").and_then(|i| args.get(i + 1)).cloned();
+    let settings = args.iter().position(|a| a == "--settings").and_then(|i| args.get(i + 1)).cloned();
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         for line in std::io::stdin().lock().lines() {
@@ -277,7 +466,7 @@ fn main() {
     });
     let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
     let session = resume.clone().unwrap_or_else(|| format!("fake-{}-{}", std::process::id(), now_s()));
-    let mut fake = Fake { session: session.clone(), resumed: resume.is_some(), cwd: cwd.clone(), input: rx, queued: Vec::new(), n: 0 };
+    let mut fake = Fake { hooks: hooks_from(settings.as_deref()), allowed: allowed_by_settings(), session: session.clone(), resumed: resume.is_some(), cwd: cwd.clone(), input: rx, queued: Vec::new(), n: 0 };
     let mut started = false;
     loop {
         let v = if fake.queued.is_empty() {

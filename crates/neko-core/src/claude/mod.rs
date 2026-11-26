@@ -5,13 +5,19 @@
 //!
 //! ```text
 //! claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages
-//!        --permission-mode default --permission-prompt-tool stdio [--resume <session>]
+//!        --permission-prompt-tool stdio [--permission-mode default] [--settings <hook>] [--resume <session>]
 //! ```
 //!
 //! The person's words go in as a `user` message on stdin. With `--permission-prompt-tool stdio`, every step Claude Code would ask
 //! about arrives as a `can_use_tool` control request on stdout and waits for Neko's `control_response`; Neko's policy decides it or
 //! asks the person in the task. Once every message sent has its `result`, stdin closes and the CLI ends. A follow-up after that is a
 //! new run with `--resume` and the conversation id the first one reported.
+//!
+//! The permission mode (docs/knowledge/permissions.md): following Claude Code's own rules, Neko passes no `--permission-mode` and
+//! no settings, so the person's own default mode and rules apply as in the terminal. Asking before risky steps, it passes
+//! `--permission-mode default` and, for that run only, a `PreToolUse` hook in `--settings` whose command is the daemon's own binary
+//! as `--hook` ([`hook_settings`]). Claude Code adds those hooks to the person's own; it never writes them to a file. Full access
+//! passes `--permission-mode default` and answers every ask with yes.
 
 pub mod stream;
 
@@ -27,7 +33,10 @@ use serde_json::{Value, json};
 
 use crate::find;
 use crate::guard::{self, Stopper};
-use crate::runtime::{AgentEvent, Answer, Control, ControlError, Detection, Failure, Login, Outcome, Runtime, StartSpec, Started, shorten};
+use crate::runtime::{AgentEvent, Answer, Control, ControlError, Detection, Failure, HOOK_PORT_ENV, HOOK_SECRET_ENV, Login, Outcome, Runtime, StartSpec, Started, shorten};
+use neko_protocol::PermissionMode;
+
+pub mod rules;
 use stream::{Mapper, Said};
 
 /// How long `--version` and `auth status` may take.
@@ -39,11 +48,18 @@ pub struct ClaudeRuntime {
     pub binary: Option<PathBuf>,
     /// The binary that acts as the run guard (the daemon's own).
     pub guard: PathBuf,
+    /// More environment for the CLI (tests give the fake a HOME of its own).
+    pub env: Vec<(String, String)>,
 }
 
 impl ClaudeRuntime {
     pub fn new(binary: Option<PathBuf>, guard: PathBuf) -> ClaudeRuntime {
-        ClaudeRuntime { binary, guard }
+        ClaudeRuntime { binary, guard, env: Vec::new() }
+    }
+
+    pub fn with_env(mut self, key: &str, value: &str) -> ClaudeRuntime {
+        self.env.push((key.to_owned(), value.to_owned()));
+        self
     }
 
     fn path(&self) -> Option<PathBuf> {
@@ -51,24 +67,47 @@ impl ClaudeRuntime {
     }
 }
 
-/// The arguments for a run (after the program).
-pub fn arguments(resume: Option<&str>) -> Vec<String> {
-    let mut a: Vec<String> = [
-        "-p",
-        "--input-format",
-        "stream-json",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-        "--permission-mode",
-        "default",
-        "--permission-prompt-tool",
-        "stdio",
-    ]
-    .iter()
-    .map(|s| (*s).to_owned())
-    .collect();
+/// How long Claude Code waits for the hook helper, in seconds (its `timeout` field): a day. The person may answer late; the
+/// daemon denies before then.
+pub const HOOK_TIMEOUT_S: u64 = 86_400;
+
+/// The settings JSON Neko passes with `--settings` when it asks before risky steps: one `PreToolUse` hook for every tool, run in
+/// exec form (no shell) as `<helper> --hook`, waiting up to a day, and blocking the call if the helper fails or times out.
+pub fn hook_settings(helper: &Path) -> String {
+    json!({
+        "hooks": {
+            "PreToolUse": [{
+                "matcher": "*",
+                "hooks": [{
+                    "type": "command",
+                    "command": helper.to_string_lossy(),
+                    "args": ["--hook"],
+                    "timeout": HOOK_TIMEOUT_S,
+                    "onFailure": "block"
+                }]
+            }]
+        }
+    })
+    .to_string()
+}
+
+/// The arguments for a run (after the program). `hook` is the hook helper's path, in "Ask before risky steps".
+pub fn arguments(resume: Option<&str>, mode: PermissionMode, hook: Option<&Path>) -> Vec<String> {
+    let mut a: Vec<String> = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio"]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    // Following Claude Code's own rules, the person's own default mode applies, as in the terminal.
+    if mode != PermissionMode::Follow {
+        a.push("--permission-mode".into());
+        a.push("default".into());
+    }
+    if mode == PermissionMode::Ask
+        && let Some(h) = hook
+    {
+        a.push("--settings".into());
+        a.push(hook_settings(h));
+    }
     if let Some(id) = resume {
         a.push("--resume".into());
         a.push(id.to_owned());
@@ -128,8 +167,16 @@ impl Runtime for ClaudeRuntime {
         if !spec.workdir.is_dir() {
             return Err(Failure::FolderGone);
         }
-        let env = vec![("PATH".to_owned(), find::child_path(&path))];
-        let guarded = guard::spawn(&self.guard, &path, &arguments(spec.resume.as_deref()), &spec.workdir, &env, |c| {
+        let mut env = vec![("PATH".to_owned(), find::child_path(&path))];
+        env.extend(self.env.iter().cloned());
+        // The hook helper finds the daemon through these; Claude Code's hooks inherit its environment.
+        let hook = spec.hook.as_ref().filter(|_| spec.mode == PermissionMode::Ask);
+        if let Some(h) = hook {
+            env.push((HOOK_PORT_ENV.to_owned(), h.port.to_string()));
+            env.push((HOOK_SECRET_ENV.to_owned(), h.secret.clone()));
+        }
+        let args = arguments(spec.resume.as_deref(), spec.mode, hook.map(|_| self.guard.as_path()));
+        let guarded = guard::spawn(&self.guard, &path, &args, &spec.workdir, &env, |c| {
             c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         })
         .map_err(|e| Failure::Crashed { code: None, words: format!("Neko could not start Claude Code: {e}") })?;
@@ -251,8 +298,8 @@ impl Session {
             }
             Said::Ask { request, tool, input, tool_use } => {
                 let action = stream::action(&tool, &input, workdir);
-                self.asks.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(request.clone(), (input, tool_use));
-                let _ = tx.send(AgentEvent::PermissionAsked { id: request, tool, action });
+                self.asks.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(request.clone(), (input, tool_use.clone()));
+                let _ = tx.send(AgentEvent::PermissionAsked { id: request, tool, action, tool_use });
             }
             Said::Unsupported { request, subtype } => {
                 let _ = self.write(&json!({"type": "control_response", "response": {"subtype": "error", "request_id": request, "error": format!("Neko does not handle {subtype}")}}));
@@ -313,12 +360,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_command_line_resumes_when_asked() {
-        let a = arguments(None);
-        assert!(a.windows(2).any(|w| w == ["--permission-prompt-tool", "stdio"]));
-        assert!(a.windows(2).any(|w| w == ["--permission-mode", "default"]));
-        assert!(!a.iter().any(|x| x.contains("dangerously") || x.contains("bypass")), "never skips permissions");
-        assert!(arguments(Some("abc")).ends_with(&["--resume".to_owned(), "abc".to_owned()]));
+    fn the_command_line_follows_the_mode_and_resumes_when_asked() {
+        let helper = Path::new("/Applications/Neko.app/Contents/MacOS/neko-daemon");
+        let follow = arguments(None, PermissionMode::Follow, Some(helper));
+        assert!(follow.windows(2).any(|w| w == ["--permission-prompt-tool", "stdio"]));
+        assert!(!follow.iter().any(|x| x == "--permission-mode" || x == "--settings"), "Claude Code's own rules: Neko adds nothing");
+        let ask = arguments(None, PermissionMode::Ask, Some(helper));
+        assert!(ask.windows(2).any(|w| w == ["--permission-mode", "default"]));
+        let at = ask.iter().position(|x| x == "--settings").expect("the hook is passed");
+        let v: Value = serde_json::from_str(&ask[at + 1]).unwrap();
+        let h = &v["hooks"]["PreToolUse"][0];
+        assert_eq!(h["matcher"], "*");
+        assert_eq!(h["hooks"][0], json!({"type": "command", "command": helper.to_string_lossy(), "args": ["--hook"], "timeout": 86_400, "onFailure": "block"}));
+        let full = arguments(None, PermissionMode::Full, Some(helper));
+        assert!(!full.iter().any(|x| x == "--settings"));
+        for a in [&follow, &ask, &full] {
+            assert!(!a.iter().any(|x| x.contains("dangerously") || x.contains("bypass") || x == "--setting-sources"), "never skips permissions, never drops the person's settings");
+        }
+        assert!(arguments(Some("abc"), PermissionMode::Ask, None).ends_with(&["--resume".to_owned(), "abc".to_owned()]));
     }
 
     #[test]

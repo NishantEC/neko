@@ -34,10 +34,18 @@ pub fn spawn(dir: &Path) -> Child {
     spawn_with(dir, &[])
 }
 
+/// The HOME a test's daemon (and so the fake CLI) sees: a folder of its own beside the data folder, so the person's own Claude
+/// Code settings never reach a test. A test writes the settings it wants there.
+pub fn home_of(dir: &Path) -> PathBuf {
+    let h = dir.join("home");
+    std::fs::create_dir_all(h.join(".claude")).unwrap();
+    h
+}
+
 /// The daemon with the fake CLI and `env` (short run limits, a signed-out fake, …).
 pub fn spawn_with(dir: &Path, env: &[(&str, &str)]) -> Child {
     let mut c = Command::new(env!("CARGO_BIN_EXE_neko-daemon"));
-    c.arg("--data-dir").arg(dir).env("NEKO_CLAUDE_BIN", fake_cli()).env_remove("NEKO_FAKE_AUTH").env_remove("NEKO_FAKE_SCRIPT");
+    c.arg("--data-dir").arg(dir).env("NEKO_CLAUDE_BIN", fake_cli()).env("HOME", home_of(dir)).env_remove("NEKO_FAKE_AUTH").env_remove("NEKO_FAKE_SCRIPT").env_remove("NEKO_HOOK_EXPIRE_MS");
     for (k, v) in env {
         c.env(k, v);
     }

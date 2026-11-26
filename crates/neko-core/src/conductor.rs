@@ -28,6 +28,21 @@ pub enum Out {
     Delta { part: PartId, text: String },
     /// Answer the runtime's request now.
     Answer { request: String, answer: Answer },
+    /// Answer a waiting hook helper ("Ask before risky steps"): its request id (`hook:…`), the answer and why, in words for the
+    /// agent.
+    HookAnswer { request: String, answer: Answer, why: String },
+}
+
+/// The prefix of a request that came through the run's hook, not the CLI's own control channel.
+pub const HOOK: &str = "hook:";
+
+/// Why a hook's step was denied, in words the agent reads.
+pub const DENIED: &str = "The person said no to this step in Neko. Do not try it another way; say what you would have done instead.";
+pub const RUN_ENDED: &str = "This run ended before the person answered in Neko, so the step did not run.";
+pub const EXPIRED: &str = "No one answered in Neko in time, so the step did not run.";
+
+fn answer_out(request: String, answer: Answer, why: &str) -> Out {
+    if request.starts_with(HOOK) { Out::HookAnswer { request, answer, why: why.to_owned() } } else { Out::Answer { request, answer } }
 }
 
 /// What the runtime is, for the words of a notice.
@@ -66,8 +81,12 @@ pub struct RunBook {
     open: Option<(Part, bool)>,
     last_flush: i64,
     tools: HashMap<String, Part>,
-    /// Requests put to the person: Neko's id → the runtime's.
+    /// Requests put to the person: Neko's id → the runtime's (or the hook's).
     asked: HashMap<PermissionId, String>,
+    /// The hook's requests and the tool calls they are for.
+    hook_calls: HashMap<String, String>,
+    /// Tool calls the hook let go ahead: Claude Code's own ask for one of them is answered yes at once.
+    approved: std::collections::HashSet<String>,
     /// Bytes of part bodies written so far (for the write-rate check).
     pub written: u64,
     pub writes: u32,
@@ -99,7 +118,7 @@ impl RunBook {
         let mut out = Vec::new();
         let rev = core.store.insert_run(&run, now)?;
         out.push(Out::Change(rev, Change::RunChanged { run: run.clone() }));
-        let mut book = RunBook { run, task: task.clone(), who, place, mode, open: None, last_flush: now, tools: HashMap::new(), asked: HashMap::new(), written: 0, writes: 0 };
+        let mut book = RunBook { run, task: task.clone(), who, place, mode, open: None, last_flush: now, tools: HashMap::new(), asked: HashMap::new(), hook_calls: HashMap::new(), approved: Default::default(), written: 0, writes: 0 };
         if let Some(w) = words {
             let p = book.new_part(core, PartBody::Person { text: w.to_owned() }, now, true)?;
             out.extend(p);
@@ -198,6 +217,11 @@ impl RunBook {
         if now - self.last_flush >= FLUSH_EVERY_MS { self.flush(core, now, false) } else { Ok(Vec::new()) }
     }
 
+    /// The folder the run works in.
+    pub fn workdir(&self) -> &str {
+        &self.place.workdir
+    }
+
     /// Whether a request is waiting for the person.
     pub fn waiting(&self) -> bool {
         !self.asked.is_empty()
@@ -220,13 +244,14 @@ impl RunBook {
             AgentEvent::TextDone | AgentEvent::ThinkingDone => out.extend(self.flush(core, now, true)?),
             AgentEvent::ToolStarted { id, name, summary, input } => {
                 out.extend(self.flush(core, now, true)?);
-                out.extend(self.new_part(core, PartBody::Tool { call: id, name, summary, input, output: None, state: ToolState::Running }, now, false)?);
+                out.extend(self.new_part(core, PartBody::Tool { call: id, name, summary, input, output: None, state: ToolState::Running, exit: None }, now, false)?);
             }
-            AgentEvent::ToolFinished { id, ok, output } => {
+            AgentEvent::ToolFinished { id, ok, output, exit } => {
                 if let Some(mut part) = self.tools.remove(&id) {
-                    if let PartBody::Tool { output: o, state, .. } = &mut part.body {
+                    if let PartBody::Tool { output: o, state, exit: e, .. } = &mut part.body {
                         *o = Some(output);
                         *state = if ok { ToolState::Done } else { ToolState::Failed };
+                        *e = exit;
                     }
                     part.ended_ms = Some(now);
                     let rev = core.store.update_part(&part, now)?;
@@ -234,8 +259,9 @@ impl RunBook {
                     out.push(Out::Change(rev, Change::PartChanged { part }));
                 }
             }
-            AgentEvent::PermissionAsked { id, tool, action } => out.extend(self.asked(core, id, tool, action, now)?),
+            AgentEvent::PermissionAsked { id, tool, action, tool_use } => out.extend(self.asked(core, id, tool, action, tool_use, now)?),
             AgentEvent::PermissionWithdrawn { id } => {
+                self.hook_calls.remove(&id);
                 if let Some((perm, _)) = self.asked.iter().find(|(_, r)| **r == id).map(|(p, r)| (p.clone(), r.clone())) {
                     self.asked.remove(&perm);
                     if let Some((p, rev)) = core.store.settle_permission(&perm, PermissionState::Expired, now)? {
@@ -255,6 +281,8 @@ impl RunBook {
                     model: r.model.clone(),
                     pricing: self.who.pricing,
                     reported_by: self.who.name.clone(),
+                    context_tokens: r.context_tokens,
+                    context_window: r.context_window,
                 });
                 if self.run.model.is_none() {
                     self.run.model = r.model;
@@ -267,14 +295,27 @@ impl RunBook {
         Ok(out)
     }
 
-    /// A permission request: decided by the policy, or stored and put to the person.
-    fn asked(&mut self, core: &mut Core, request: String, tool: String, action: Action, now: i64) -> Result<Vec<Out>, StoreError> {
+    /// A permission request, from the CLI or from the run's hook: decided by the policy, or stored and put to the person.
+    fn asked(&mut self, core: &mut Core, request: String, tool: String, action: Action, tool_use: Option<String>, now: i64) -> Result<Vec<Out>, StoreError> {
+        let hook = request.starts_with(HOOK);
+        // The hook already let this call go ahead (the person said yes, or Neko's policy did): Claude Code's own ask is answered.
+        if !hook && tool_use.as_ref().is_some_and(|t| self.approved.contains(t)) {
+            return Ok(vec![Out::Answer { request, answer: Answer::Allow }]);
+        }
         let always = core.store.always_rules(&self.task)?;
         let cx = policy::Context { workdir: std::path::Path::new(&self.place.workdir), mode: self.mode, plain: self.place.plain, always: &always };
         let ask = match policy::decide(&action, &cx) {
-            Verdict::Allow => return Ok(vec![Out::Answer { request, answer: Answer::Allow }]),
+            Verdict::Allow => {
+                if hook && let Some(t) = &tool_use {
+                    self.approved.insert(t.clone());
+                }
+                return Ok(vec![answer_out(request, Answer::Allow, "Neko's policy allows this step.")]);
+            }
             Verdict::Ask(a) => a,
         };
+        if hook && let Some(t) = &tool_use {
+            self.hook_calls.insert(request.clone(), t.clone());
+        }
         let mut out = self.flush(core, now, true)?;
         let perm = Permission {
             id: PermissionId(core.new_id("perm")),
@@ -310,7 +351,13 @@ impl RunBook {
         let Some((settled, rev)) = core.store.settle_permission(perm, state, now)? else { return Err(AnswerError::Settled) };
         let mut out = vec![Out::Change(rev, Change::PermissionChanged { permission: settled })];
         if let Some(request) = self.asked.remove(perm) {
-            out.push(Out::Answer { request, answer: if d == Decision::Deny { Answer::Deny } else { Answer::Allow } });
+            let answer = if d == Decision::Deny { Answer::Deny } else { Answer::Allow };
+            if let Some(t) = self.hook_calls.remove(&request)
+                && answer == Answer::Allow
+            {
+                self.approved.insert(t);
+            }
+            out.push(answer_out(request, answer, if answer == Answer::Allow { "The person allowed this step in Neko." } else { DENIED }));
         }
         if self.asked.is_empty() {
             out.extend(self.task_status(core, TaskStatus::Working, now)?);
@@ -335,7 +382,13 @@ impl RunBook {
                 out.push(Out::Change(rev, Change::PermissionChanged { permission: p }));
             }
         }
-        self.asked.clear();
+        // A hook still waiting hears no: the step does not run.
+        for (_, request) in self.asked.drain() {
+            if request.starts_with(HOOK) {
+                out.push(answer_out(request, Answer::Deny, RUN_ENDED));
+            }
+        }
+        self.hook_calls.clear();
         let (status, task_status) = match &outcome {
             Outcome::Done => (RunStatus::Done, TaskStatus::Done),
             Outcome::Stopped => (RunStatus::Stopped, TaskStatus::Stopped),

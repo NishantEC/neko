@@ -1,9 +1,14 @@
 //! What goes ahead without asking (docs/knowledge/permissions.md).
 //!
-//! "Ask before risky steps", the default: reading anywhere in the task's folder, and editing there when the folder is the task's
-//! own (a scratch folder or a git worktree), go ahead. Everything else asks the person in the task: running a command, reading or
-//! writing outside the folder, the network, a tool Neko does not know, and the first edit in a chosen folder that is not a
-//! repository (there is no branch to undo it). "Full access" lets everything go ahead.
+//! "Follow Claude Code's own rules", the default: Neko adds nothing. Whatever reaches Neko is a step Claude Code itself would ask
+//! about under the person's own settings, so it is asked in the task (Claude Code's bookkeeping tools aside).
+//!
+//! "Ask before risky steps": reading anywhere in the task's folder, and editing there when the folder is the task's own (a scratch
+//! folder or a git worktree), go ahead. Everything else asks the person in the task: running any command, reading or writing
+//! outside the folder, the network, a tool Neko does not know, and the first edit in a chosen folder that is not a repository
+//! (there is no branch to undo it). Neko enforces this through a hook whatever the person's Claude Code settings allow.
+//!
+//! "Full access" lets everything go ahead.
 //!
 //! An answer of "Always allow" lets the same kind of step go ahead for the rest of the task only: the same program for a
 //! command, the same folder outside the task's own, the same host on the network. A destructive step (it deletes or overwrites
@@ -88,16 +93,42 @@ pub fn inside(dir: &Path, path: &Path) -> bool {
     canon(path).starts_with(canon(dir))
 }
 
-/// Commands that delete or overwrite things.
+/// Commands that delete or overwrite things: each part of a command line (split at `&&`, `||`, `;`, `|` and new lines) is read
+/// by its program and arguments, so `grep -r rm src` is not `rm`.
 pub fn destructive(command: &str) -> bool {
-    let c = format!(" {} ", command.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" "));
-    [
-        " rm ", " rmdir ", " unlink ", " shred ", " mkfs", " dd ", " sudo ", " chmod -r", " chown -r", "git push --force", "git push -f", "git reset --hard", "git clean -", "git checkout -- ",
-        "git branch -d", "git branch -D", " truncate ", "drop table", "drop database", " > /", " kill ", " killall ", " pkill ", "launchctl ", " diskutil ",
-    ]
-    .iter()
-    .any(|p| c.contains(&p.to_lowercase()))
-        || c.contains(" rm -") // rm with flags
+    let lower = command.to_lowercase();
+    if ["drop table", "drop database", "drop schema", "truncate table", "delete from"].iter().any(|p| lower.contains(p)) {
+        return true;
+    }
+    command.split(['&', '|', ';', '\n', '(', ')', '`']).any(|part| {
+        let words: Vec<&str> = part.split_whitespace().skip_while(|w| w.contains('=') && !w.starts_with('-')).collect();
+        let Some((first, args)) = words.split_first() else { return false };
+        let program = first.rsplit('/').next().unwrap_or(first);
+        let has = |flags: &[&str]| args.iter().any(|a| flags.contains(a));
+        match program {
+            "sudo" | "doas" | "rm" | "rmdir" | "unlink" | "shred" | "dd" | "truncate" | "kill" | "killall" | "pkill" | "launchctl" | "diskutil" | "srm" => true,
+            p if p.starts_with("mkfs") => true,
+            "chmod" | "chown" => has(&["-R", "-r", "--recursive"]),
+            "find" => has(&["-delete"]) || args.windows(2).any(|w| w[0] == "-exec" && matches!(w[1], "rm" | "/bin/rm")),
+            "git" => {
+                let sub: Vec<&str> = args.iter().copied().skip_while(|a| a.starts_with('-')).collect();
+                match sub.first().copied() {
+                    Some("push") => sub.iter().any(|a| matches!(*a, "--force" | "-f" | "--force-with-lease" | "--delete" | "-d" | "--mirror") || a.starts_with('+') || a.starts_with("--force") || a.starts_with(":")),
+                    Some("reset") => sub.contains(&"--hard") || sub.contains(&"--merge"),
+                    Some("clean") => !sub.iter().any(|a| matches!(*a, "-n" | "--dry-run")),
+                    Some("branch") => sub.iter().any(|a| matches!(*a, "-D" | "-d" | "--delete" | "-M" | "-f" | "--force")),
+                    Some("checkout") => sub.iter().any(|a| matches!(*a, "--" | "." | "-f" | "--force")),
+                    Some("restore") => true,
+                    Some("stash") => sub.iter().any(|a| matches!(*a, "drop" | "clear")),
+                    Some("filter-branch" | "filter-repo") => true,
+                    Some("reflog") => sub.contains(&"expire") || sub.contains(&"delete"),
+                    Some("update-ref") => has(&["-d"]),
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    })
 }
 
 /// The program a command runs first ("git" in `cd x && git status`), for an "always" rule.
@@ -113,9 +144,11 @@ fn host(target: &str) -> String {
 
 /// Decides one step.
 pub fn decide(action: &Action, cx: &Context<'_>) -> Verdict {
-    if cx.mode == PermissionMode::Full {
+    if cx.mode == PermissionMode::Full || matches!(action, Action::Internal { .. }) {
         return Verdict::Allow;
     }
+    // Following Claude Code's own rules, nothing goes ahead by Neko's say: what arrives is what Claude Code asks about.
+    let shortcut = cx.mode == PermissionMode::Ask;
     let ask = |title: String, why: &str, detail: String, destructive: bool, rule: String| {
         if !destructive && cx.always.contains(&rule) {
             return Verdict::Allow;
@@ -126,7 +159,11 @@ pub fn decide(action: &Action, cx: &Context<'_>) -> Verdict {
         Action::Read { path } => {
             let p = resolve(cx.workdir, path);
             if inside(cx.workdir, &p) {
-                return Verdict::Allow;
+                if shortcut {
+                    return Verdict::Allow;
+                }
+                let folder = p.parent().unwrap_or(&p).to_string_lossy().into_owned();
+                return ask("Read a file".into(), "Claude Code asks before this under your own settings.", p.to_string_lossy().into_owned(), false, format!("read:{folder}"));
             }
             let folder = p.parent().unwrap_or(&p).to_string_lossy().into_owned();
             ask("Read outside the task's folder".into(), "It is outside the folder this task works in.", p.to_string_lossy().into_owned(), false, format!("read:{folder}"))
@@ -135,6 +172,9 @@ pub fn decide(action: &Action, cx: &Context<'_>) -> Verdict {
             let p = resolve(cx.workdir, path);
             let shown = p.to_string_lossy().into_owned();
             if inside(cx.workdir, &p) {
+                if !shortcut {
+                    return ask("Edit a file".into(), "Claude Code asks before this under your own settings.", shown, false, format!("edit:{}", cx.workdir.to_string_lossy()));
+                }
                 if !cx.plain {
                     return Verdict::Allow;
                 }
@@ -159,6 +199,7 @@ pub fn decide(action: &Action, cx: &Context<'_>) -> Verdict {
             let tool = summary.split_whitespace().next().unwrap_or("tool").to_owned();
             ask(format!("Use {tool}"), "Neko does not know what this tool does.", summary.clone(), false, format!("tool:{tool}"))
         }
+        Action::Internal { .. } => Verdict::Allow,
     }
 }
 
@@ -218,6 +259,28 @@ mod tests {
         assert!(destructive("git push --force origin main"));
         assert!(!destructive("git status"));
         assert!(!destructive("cargo test"));
+    }
+
+    #[test]
+    fn following_claude_codes_rules_asks_whatever_reaches_neko() {
+        let c = Context { workdir: Path::new("/tmp/neko-policy-w"), mode: PermissionMode::Follow, plain: false, always: &[] };
+        let a = asked(decide(&Action::Edit { path: "/tmp/neko-policy-w/a.rs".into() }, &c));
+        assert_eq!(a.title, "Edit a file", "Claude Code asked, so the person is asked: Neko lets nothing through by itself");
+        assert!(matches!(decide(&Action::Read { path: "/tmp/neko-policy-w/a.rs".into() }, &c), Verdict::Ask(_)));
+        assert!(asked(decide(&Action::Command { command: "git reset --hard".into() }, &c)).destructive, "destructive keeps its form");
+        let rules = vec![a.rule];
+        assert_eq!(decide(&Action::Edit { path: "/tmp/neko-policy-w/b.rs".into() }, &Context { always: &rules, ..c }), Verdict::Allow, "always allow still holds");
+        assert_eq!(decide(&Action::Internal { tool: "TodoWrite".into() }, &c), Verdict::Allow);
+    }
+
+    #[test]
+    fn every_destructive_command_is_known() {
+        for c in ["rm -rf build", "git push --force origin main", "git push -f", "git branch -D old", "git reset --hard HEAD~1", "git clean -fdx", "psql -c 'DROP TABLE users'", "sqlite3 a.db 'drop database x'", "cd x && rm a.txt"] {
+            assert!(destructive(c), "{c}");
+        }
+        for c in ["git status", "cargo test", "ls -la", "git branch", "grep -r rm src"] {
+            assert!(!destructive(c), "{c}");
+        }
     }
 
     #[test]

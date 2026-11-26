@@ -4,16 +4,16 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::RecvTimeoutError;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use neko_core::conductor::{self, AnswerError, Out, RunBook, Who};
-use neko_core::runtime::{Control, Detection, Failure, Outcome, Runtime, StartSpec};
+use neko_core::runtime::{Answer, Control, Detection, Failure, HookLink, Outcome, Runtime, StartSpec};
 use neko_core::workplace::{self, PlaceError};
 use neko_core::{Core, Place};
-use neko_protocol::{Change, Decision, ErrorCode, PermissionId, Pricing, Reply, RuntimeInfo, ServerMessage, Task, TaskId, TaskStatus, Tone};
+use neko_protocol::{Change, Decision, ErrorCode, PermissionId, PermissionMode, Pricing, Reply, RuntimeInfo, ServerMessage, Task, TaskId, TaskStatus, Tone};
 
 use crate::server::{Shared, lock};
 
@@ -37,6 +37,30 @@ pub struct Active {
     pub book: Option<Arc<Mutex<RunBook>>>,
     /// Stop was asked before the agent was up.
     pub cancelled: Arc<AtomicBool>,
+    /// The secret this run's hook helper carries ("Ask before risky steps" only).
+    pub secret: Option<String>,
+}
+
+/// A run, as its hook helper reaches it.
+pub struct HookRun {
+    pub task: TaskId,
+    pub book: Arc<Mutex<RunBook>>,
+    pub control: Option<Arc<dyn Control>>,
+}
+
+/// The running run whose hook carries `secret`.
+pub fn by_secret(shared: &Shared, secret: &str) -> Option<HookRun> {
+    lock(&shared.runs.active).iter().find_map(|(task, a)| match (&a.secret, &a.book) {
+        (Some(s), Some(b)) if crate::files::same_token(s, secret) => Some(HookRun { task: task.clone(), book: b.clone(), control: a.control.clone() }),
+        _ => None,
+    })
+}
+
+static HOOK_CALLS: AtomicU64 = AtomicU64::new(1);
+
+/// A number for a hook call that came without a tool-use id.
+pub fn next_hook() -> u64 {
+    HOOK_CALLS.fetch_add(1, Ordering::Relaxed)
 }
 
 /// The runtimes, what was found of them, and the active runs.
@@ -46,11 +70,13 @@ pub struct Runs {
     found: Mutex<Option<(Instant, HashMap<String, Detection>)>>,
     pub data_dir: PathBuf,
     pub limits: Limits,
+    /// Hook helpers waiting for an answer, by their request id.
+    pub hooks: Mutex<HashMap<String, Sender<(Answer, String)>>>,
 }
 
 impl Runs {
     pub fn new(runtimes: Vec<Arc<dyn Runtime>>, data_dir: PathBuf) -> Runs {
-        Runs { runtimes, active: Mutex::new(HashMap::new()), found: Mutex::new(None), data_dir, limits: Limits::from_env() }
+        Runs { runtimes, active: Mutex::new(HashMap::new()), found: Mutex::new(None), data_dir, limits: Limits::from_env(), hooks: Mutex::new(HashMap::new()) }
     }
 
     /// What was found of each runtime, read again when older than `fresh`.
@@ -65,8 +91,9 @@ impl Runs {
         d
     }
 
-    /// Settings' list: each runtime Neko runs, then the ones it knows of but cannot run yet.
-    pub fn infos(&self, fresh: Duration) -> Vec<RuntimeInfo> {
+    /// Settings' list: each runtime Neko runs, then the ones it knows of but cannot run yet. `folder` is the folder whose own
+    /// Claude Code settings count too (the newest task's).
+    pub fn infos(&self, fresh: Duration, folder: Option<&std::path::Path>) -> Vec<RuntimeInfo> {
         let found = self.detections(fresh);
         let mut list: Vec<RuntimeInfo> = self
             .runtimes
@@ -83,6 +110,8 @@ impl Runs {
                     sign_in: r.sign_in_line().to_owned(),
                     install: r.install_line().to_owned(),
                     supported: true,
+                    // What its own settings let it do without asking: read, never written.
+                    rules: (r.id() == "claude" && d.found).then(|| std::env::var_os("HOME").map(|h| neko_core::claude::rules::summary(std::path::Path::new(&h), folder))).flatten(),
                 }
             })
             .collect();
@@ -103,6 +132,7 @@ impl Runs {
             sign_in: "codex login".into(),
             install: "npm install -g @openai/codex".into(),
             supported: false,
+            rules: None,
         });
         list
     }
@@ -115,8 +145,9 @@ fn vendor(id: &str) -> &'static str {
     }
 }
 
-/// Pushes a run book's changes, answers the runtime's requests. Called with the core locked, so events leave in order.
-fn push(shared: &Shared, task: &TaskId, outs: Vec<Out>, control: Option<&Arc<dyn Control>>) {
+/// Pushes a run book's changes, answers the runtime's requests and the waiting hooks. Called with the core locked, so events
+/// leave in order.
+pub fn push(shared: &Shared, task: &TaskId, outs: Vec<Out>, control: Option<&Arc<dyn Control>>) {
     for o in outs {
         match o {
             Out::Change(revision, change) => shared.broadcast(&ServerMessage::Event { revision, change }),
@@ -124,6 +155,11 @@ fn push(shared: &Shared, task: &TaskId, outs: Vec<Out>, control: Option<&Arc<dyn
             Out::Answer { request, answer } => {
                 if let Some(c) = control {
                     let _ = c.answer(&request, answer);
+                }
+            }
+            Out::HookAnswer { request, answer, why } => {
+                if let Some(tx) = lock(&shared.runs.hooks).remove(&request) {
+                    let _ = tx.send((answer, why));
                 }
             }
         }
@@ -150,7 +186,7 @@ pub fn start(shared: &Arc<Shared>, task: Task, words: Option<String>) -> Result<
         if active.contains_key(&task.id) {
             return Err(Reply::error(ErrorCode::Busy, "Neko is already working on this task."));
         }
-        active.insert(task.id.clone(), Active { control: None, book: None, cancelled: cancelled.clone() });
+        active.insert(task.id.clone(), Active { control: None, book: None, cancelled: cancelled.clone(), secret: None });
     }
     let s = shared.clone();
     let id = task.id.clone();
@@ -252,7 +288,16 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
     if cancelled.load(Ordering::SeqCst) {
         return finish(Outcome::Stopped);
     }
-    let spec = StartSpec { words: words.clone().unwrap_or_else(|| task.words.clone()), workdir: PathBuf::from(&place.workdir), resume, mode: settings.permission_mode };
+    // Asking before risky steps, the run's hook helper reaches the daemon with a secret of its own.
+    let hook = (settings.permission_mode == PermissionMode::Ask).then(|| crate::files::random_hex(32).ok()).flatten().map(|secret| HookLink { port: shared.port, secret });
+    if settings.permission_mode == PermissionMode::Ask && hook.is_none() {
+        return finish(Outcome::Failed(Failure::Crashed { code: None, words: "Neko could not make a secret for this run's hook.".into() }));
+    }
+    if let Some(a) = lock(&shared.runs.active).get_mut(&task.id) {
+        a.secret = hook.as_ref().map(|h| h.secret.clone());
+        a.book = Some(book.clone());
+    }
+    let spec = StartSpec { words: words.clone().unwrap_or_else(|| task.words.clone()), workdir: PathBuf::from(&place.workdir), resume, mode: settings.permission_mode, hook };
     let started = match runtime.start(spec) {
         Ok(s) => s,
         Err(f) => return finish(Outcome::Failed(f)),

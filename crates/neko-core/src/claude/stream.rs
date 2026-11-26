@@ -15,6 +15,13 @@
 //!
 //! Words are streamed from `stream_event` deltas; a message whose deltas never came (an older CLI, or no partial messages) gives
 //! its words whole from the `assistant` event instead, so nothing is shown twice and nothing is lost.
+//!
+//! Thinking: Claude Code 2.1.331 sends thinking blocks with empty text and only a `signature` (the model's thoughts are not shown
+//! to it either: its own transcript holds the same empty blocks). An empty delta, a `signature_delta` and a `redacted_thinking`
+//! block say nothing a person can read, so they make no event at all.
+//!
+//! A shell command that ran and exited non-zero comes back as a `tool_result` with `is_error` and text that begins
+//! "Exit code N". That step finished: it is `ok`, with its exit code. A tool that could not run (denied, an error, cut off) is not.
 
 use std::collections::{HashMap, HashSet};
 
@@ -54,6 +61,8 @@ pub struct Mapper {
     /// The block open in the stream, by its index.
     open: HashMap<u64, Open>,
     tools: HashMap<String, String>,
+    /// The context the last top-level model call held, from its message's usage.
+    context: Option<u64>,
     pub session: Option<String>,
     pub model: Option<String>,
     /// The CLI said the account's limit was reached; when it resets, in words.
@@ -182,8 +191,12 @@ impl Mapper {
                     if let Some(m) = &self.current {
                         self.streamed.insert(m.clone());
                     }
-                    self.start(out);
-                    out.push(Said::Event(event));
+                    // An empty piece (Claude Code's thinking comes with none) opens nothing.
+                    let empty = matches!(&event, AgentEvent::TextDelta(t) | AgentEvent::ThinkingDelta(t) if t.is_empty());
+                    if !empty {
+                        self.start(out);
+                        out.push(Said::Event(event));
+                    }
                 }
             }
             "content_block_stop" => {
@@ -209,6 +222,13 @@ impl Mapper {
         // A subagent's own messages (parent_tool_use_id set) stay inside its tool call.
         if !v["parent_tool_use_id"].is_null() {
             return;
+        }
+        let u = &m["usage"];
+        if u.is_object() {
+            let held = ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"].iter().filter_map(|k| u[*k].as_u64()).sum::<u64>();
+            if held > 0 {
+                self.context = Some(held);
+            }
         }
         for block in m["content"].as_array().into_iter().flatten() {
             match s(&block["type"]).unwrap_or("") {
@@ -251,15 +271,16 @@ impl Mapper {
                 continue;
             }
             let Some(id) = s(&block["tool_use_id"]) else { continue };
-            if !self.tools.contains_key(id) {
-                continue;
-            }
+            let Some(name) = self.tools.get(id) else { continue };
             let output = match &block["content"] {
                 Value::String(t) => t.clone(),
                 Value::Array(parts) => parts.iter().filter_map(|p| s(&p["text"])).collect::<Vec<_>>().join("\n"),
                 _ => String::new(),
             };
-            out.push(Said::Event(AgentEvent::ToolFinished { id: id.to_owned(), ok: block["is_error"].as_bool() != Some(true), output: shorten(&output, MAX_OUTPUT) }));
+            let error = block["is_error"].as_bool() == Some(true);
+            // A command that ran and ended non-zero finished; only a tool that could not run failed.
+            let exit = if error && name == "Bash" { exit_code(&output) } else { None };
+            out.push(Said::Event(AgentEvent::ToolFinished { id: id.to_owned(), ok: !error || exit.is_some(), output: shorten(&output, MAX_OUTPUT), exit }));
         }
     }
 
@@ -275,12 +296,15 @@ impl Mapper {
             // The model that did the most work names the run.
             m.iter().max_by_key(|(_, mu)| mu["outputTokens"].as_u64().unwrap_or(0)).map(|(k, _)| k.clone())
         });
+        let window = v["modelUsage"].as_object().and_then(|m| m.values().filter_map(|mu| mu["contextWindow"].as_u64()).max());
         let reported = Reported {
             input_tokens: u["input_tokens"].as_u64().unwrap_or(0) + u["cache_creation_input_tokens"].as_u64().unwrap_or(0),
             output_tokens: u["output_tokens"].as_u64().unwrap_or(0),
             cached_tokens: u["cache_read_input_tokens"].as_u64().unwrap_or(0),
             cost_usd: v["total_cost_usd"].as_f64(),
             model: model.or_else(|| self.model.clone()),
+            context_tokens: self.context,
+            context_window: window,
         };
         if reported != Reported::default() {
             out.push(Said::Event(AgentEvent::Usage(reported)));
@@ -291,6 +315,19 @@ impl Mapper {
         out.push(Said::TurnEnded { ok: self.failure.is_none() });
     }
 }
+
+/// The exit code a shell tool's result begins with ("Exit code 1"), when it does.
+pub fn exit_code(output: &str) -> Option<i32> {
+    let rest = output.trim_start().strip_prefix("Exit code ")?;
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '-').collect();
+    digits.parse().ok().filter(|c| *c != 0)
+}
+
+/// Claude Code's own bookkeeping tools: nothing on the Mac changes by them.
+pub const INTERNAL_TOOLS: &[&str] = &[
+    "TodoWrite", "TodoRead", "Task", "Agent", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput", "TaskStop", "BashOutput", "KillShell", "KillBash", "ToolSearch", "AskUserQuestion",
+    "ExitPlanMode", "EnterPlanMode", "Skill", "SlashCommand", "ListMcpResourcesTool", "ReadMcpResourceTool",
+];
 
 /// What a turn's words and flags say went wrong, if anything.
 pub fn classify(words: &str, failed: bool, limit: Option<Option<String>>) -> Option<Failure> {
@@ -377,6 +414,7 @@ pub fn action(tool: &str, input: &Value, workdir: &str) -> Action {
         "Bash" => Action::Command { command: field(input, &["command"]).unwrap_or("").to_owned() },
         "WebFetch" => Action::Network { target: field(input, &["url"]).unwrap_or("").to_owned() },
         "WebSearch" => Action::Network { target: format!("a web search: {}", field(input, &["query"]).unwrap_or("")) },
+        t if INTERNAL_TOOLS.contains(&t) => Action::Internal { tool: t.to_owned() },
         other => Action::Other { summary: format!("{other} {}", summary(other, input, workdir)).trim().to_owned() },
     }
 }
@@ -413,7 +451,7 @@ mod tests {
                 AgentEvent::TextDelta("Hel".into()),
                 AgentEvent::TextDelta("lo".into()),
                 AgentEvent::TextDone,
-                AgentEvent::Usage(Reported { input_tokens: 5, output_tokens: 4, cached_tokens: 7, cost_usd: Some(0.01), model: Some("claude-x".into()) }),
+                AgentEvent::Usage(Reported { input_tokens: 5, output_tokens: 4, cached_tokens: 7, cost_usd: Some(0.01), model: Some("claude-x".into()), context_tokens: None, context_window: None }),
             ]
         );
         assert_eq!(said.last(), Some(&Said::TurnEnded { ok: true }));
@@ -434,7 +472,55 @@ mod tests {
         let mut m = Mapper::new();
         feed(&mut m, &[r#"{"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/w/src/a.rs"}}]},"parent_tool_use_id":null}"#]);
         let said = feed(&mut m, &[r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":[{"type":"text","text":"no such file"}]}]},"parent_tool_use_id":null}"#]);
-        assert_eq!(events(&said), vec![AgentEvent::ToolFinished { id: "t1".into(), ok: false, output: "no such file".into() }]);
+        assert_eq!(events(&said), vec![AgentEvent::ToolFinished { id: "t1".into(), ok: false, output: "no such file".into(), exit: None }]);
+    }
+
+    #[test]
+    fn a_command_that_exits_non_zero_finished_and_says_its_code() {
+        let mut m = Mapper::new();
+        feed(&mut m, &[r#"{"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"git diff --quiet"}},{"type":"tool_use","id":"b2","name":"Bash","input":{"command":"cargo test"}}]},"parent_tool_use_id":null}"#]);
+        let said = feed(&mut m, &[
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"b1","is_error":true,"content":"Exit code 1\nfiles differ"}]},"parent_tool_use_id":null}"#,
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"b2","is_error":true,"content":"The person denied this."}]},"parent_tool_use_id":null}"#,
+        ]);
+        assert_eq!(events(&said), vec![
+            AgentEvent::ToolFinished { id: "b1".into(), ok: true, output: "Exit code 1\nfiles differ".into(), exit: Some(1) },
+            AgentEvent::ToolFinished { id: "b2".into(), ok: false, output: "The person denied this.".into(), exit: None },
+        ]);
+        assert_eq!(exit_code("Exit code 127"), Some(127));
+        assert_eq!(exit_code("Exit code 0"), None);
+        assert_eq!(exit_code("exit 1"), None);
+    }
+
+    #[test]
+    fn empty_thinking_makes_no_event_and_signatures_are_ignored() {
+        // The shape Claude Code 2.1.331 sends: a thinking block, an empty delta, a signature, the whole block with no text.
+        let mut m = Mapper::new();
+        let said = feed(&mut m, &[
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1"}},"parent_tool_use_id":null}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}},"parent_tool_use_id":null}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}},"parent_tool_use_id":null}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EqQBCkYIBxgCKkA"}},"parent_tool_use_id":null}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null}"#,
+            r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"thinking","thinking":"","signature":"EqQBCkYIBxgCKkA"},{"type":"redacted_thinking","data":"x"}]},"parent_tool_use_id":null}"#,
+        ]);
+        assert!(!events(&said).iter().any(|e| matches!(e, AgentEvent::ThinkingDelta(_) | AgentEvent::Started { .. })), "nothing to show: {said:?}");
+        // A thought with words still comes through.
+        let said = feed(&mut m, &[r#"{"type":"assistant","message":{"id":"m2","content":[{"type":"thinking","thinking":"Check the tests first."}]},"parent_tool_use_id":null}"#]);
+        assert!(events(&said).contains(&AgentEvent::ThinkingDelta("Check the tests first.".into())));
+    }
+
+    #[test]
+    fn the_context_held_is_the_last_calls_input_and_the_window_comes_from_the_result() {
+        let mut m = Mapper::new();
+        feed(&mut m, &[
+            r#"{"type":"assistant","message":{"id":"m1","content":[],"usage":{"input_tokens":4,"cache_read_input_tokens":1000,"cache_creation_input_tokens":200,"output_tokens":9}},"parent_tool_use_id":null}"#,
+            r#"{"type":"assistant","message":{"id":"m2","content":[],"usage":{"input_tokens":6,"cache_read_input_tokens":1200,"cache_creation_input_tokens":300,"output_tokens":9}},"parent_tool_use_id":null}"#,
+            r#"{"type":"assistant","message":{"id":"s1","content":[],"usage":{"input_tokens":99999}},"parent_tool_use_id":"toolu_sub"}"#,
+        ]);
+        let said = feed(&mut m, &[r#"{"type":"result","subtype":"success","is_error":false,"result":"ok","usage":{"input_tokens":10,"output_tokens":18},"modelUsage":{"claude-x":{"outputTokens":18,"contextWindow":200000}}}"#]);
+        let Some(AgentEvent::Usage(r)) = events(&said).into_iter().find(|e| matches!(e, AgentEvent::Usage(_))) else { panic!("no usage") };
+        assert_eq!((r.context_tokens, r.context_window), (Some(1506), Some(200_000)), "a subagent's calls are not the conversation's");
     }
 
     #[test]
@@ -468,5 +554,6 @@ mod tests {
         assert_eq!(action("Bash", &v(r#"{"command":"cargo test"}"#), "/w"), Action::Command { command: "cargo test".into() });
         assert_eq!(action("WebFetch", &v(r#"{"url":"https://example.com"}"#), "/w"), Action::Network { target: "https://example.com".into() });
         assert!(matches!(action("mcp__x__y", &v("{}"), "/w"), Action::Other { .. }));
+        assert_eq!(action("TodoWrite", &v("{}"), "/w"), Action::Internal { tool: "TodoWrite".into() });
     }
 }
