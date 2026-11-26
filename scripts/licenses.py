@@ -13,7 +13,7 @@ Prints the licences found and fails if one is outside MIT, Apache-2.0, OFL and t
 import json, os, subprocess, sys
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-REVIEWED = ["MIT", "Apache-2.0", "Zlib", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unlicense", "0BSD", "CC0-1.0", "MIT-0", "MPL-2.0", "LLVM-exception"]
+REVIEWED = ["MIT", "Apache-2.0", "Zlib", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unlicense", "0BSD", "CC0-1.0", "MIT-0", "LLVM-exception"]
 crates = {}
 for ws in [root, os.path.join(root, "apps", "neko")]:
     meta = json.loads(subprocess.check_output(["cargo", "metadata", "--format-version", "1", "--filter-platform", "aarch64-apple-darwin"], cwd=ws))

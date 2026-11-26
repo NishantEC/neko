@@ -15,5 +15,5 @@ Neko.app ships the following work by others, each under its own licence. The tex
   Apache-2.0.txt).
 
 Most crates are MIT or Apache-2.0. Through Rune also come Zlib, BSD-2-Clause, BSD-3-Clause, ISC, Unicode-3.0 and
-Unlicense crates (permissive), and MPL-2.0 crates (symphonia, opuscule: Ogg audio decoding, unmodified; their source is
-on crates.io). See docs/knowledge/rune-ui-in-neko.md, "Licences".
+Unlicense crates (permissive). No MPL-2.0 crate ships: Neko takes Rune without its Ogg audio decoders (symphonia,
+opuscule). See docs/knowledge/rune-ui-in-neko.md, "Licences".

@@ -53,7 +53,6 @@ Written by `scripts/licenses.py`. Each crate's own licence files go into the bun
 | displaydoc | 0.2.7 | MIT OR Apache-2.0 |
 | document-features | 0.2.12 | MIT OR Apache-2.0 |
 | dpi | 0.1.2 | Apache-2.0 AND MIT |
-| encoding_rs | 0.8.44 | (Apache-2.0 OR MIT) AND BSD-3-Clause |
 | equivalent | 1.0.3 | Apache-2.0 OR MIT |
 | euclid | 0.22.14 | MIT OR Apache-2.0 |
 | fallible-iterator | 0.3.0 | MIT/Apache-2.0 |
@@ -100,7 +99,6 @@ Written by `scripts/licenses.py`. Each crate's own licence files go into the bun
 | itoa | 1.0.19 | MIT OR Apache-2.0 |
 | jobserver | 0.1.35 | MIT OR Apache-2.0 |
 | kurbo | 0.11.3 | Apache-2.0 OR MIT |
-| lazy_static | 1.5.1 | MIT OR Apache-2.0 |
 | libc | 0.2.191 | MIT OR Apache-2.0 |
 | libloading | 0.8.9 | ISC |
 | libm | 0.2.16 | MIT |
@@ -115,7 +113,6 @@ Written by `scripts/licenses.py`. Each crate's own licence files go into the bun
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 |
 | miniz_oxide | 0.9.1 | MIT OR Zlib OR Apache-2.0 |
 | moxcms | 0.8.1 | BSD-3-Clause OR Apache-2.0 |
-| multiversion_no_op | 1.0.0 | Apache-2.0 OR MIT |
 | naga | 30.0.1 | MIT OR Apache-2.0 |
 | naga-types | 30.0.2 | MIT OR Apache-2.0 |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 |
@@ -144,7 +141,6 @@ Written by `scripts/licenses.py`. Each crate's own licence files go into the bun
 | objc2-quartz-core | 0.3.2 | Zlib OR Apache-2.0 OR MIT |
 | object | 0.39.1 | Apache-2.0 OR MIT |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 |
-| opuscule | 0.2.2 | MPL-2.0 |
 | ordered-float | 5.5.1 | MIT |
 | parking_lot | 0.12.5 | MIT OR Apache-2.0 |
 | parking_lot_core | 0.9.12 | MIT OR Apache-2.0 |
@@ -194,13 +190,12 @@ Written by `scripts/licenses.py`. Each crate's own licence files go into the bun
 | rune-taffy | 0.0.1 | MIT |
 | rune-text | 0.0.1 | MIT |
 | rune-tiny-skia-path | 0.11.4 | BSD-3-Clause |
-| rune-ui-style | 0.9.0 | MIT |
-| rune-ui-themes | 0.9.0 | MIT |
+| rune-ui-style | 0.10.0 | MIT |
+| rune-ui-themes | 0.10.0 | MIT |
 | rusqlite | 0.37.0 | MIT |
 | rustc-demangle | 0.1.28 | MIT/Apache-2.0 |
 | rustc-hash | 1.1.0 | Apache-2.0/MIT |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT |
-| rustversion | 1.0.23 | MIT OR Apache-2.0 |
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 |
 | serde | 1.0.229 | MIT OR Apache-2.0 |
 | serde_core | 1.0.229 | MIT OR Apache-2.0 |
@@ -209,7 +204,6 @@ Written by `scripts/licenses.py`. Each crate's own licence files go into the bun
 | sha1 | 0.11.0 | MIT OR Apache-2.0 |
 | shlex | 2.0.1 | MIT OR Apache-2.0 |
 | simd-adler32 | 0.3.10 | MIT |
-| simdutf8 | 0.1.5 | MIT OR Apache-2.0 |
 | simplecss | 0.2.2 | Apache-2.0 OR MIT |
 | siphasher | 1.0.4 | MIT OR Apache-2.0 |
 | skrifa | 0.44.0 | MIT OR Apache-2.0 |
@@ -223,13 +217,6 @@ Written by `scripts/licenses.py`. Each crate's own licence files go into the bun
 | strict-num | 0.1.1 | MIT |
 | svgtypes | 0.15.3 | Apache-2.0 OR MIT |
 | swash | 0.2.10 | Apache-2.0 OR MIT |
-| symphonia | 0.5.5 | MPL-2.0 |
-| symphonia-codec-vorbis | 0.5.5 | MPL-2.0 |
-| symphonia-core | 0.5.5 | MPL-2.0 |
-| symphonia-format-mkv | 0.5.5 | MPL-2.0 |
-| symphonia-format-ogg | 0.5.5 | MPL-2.0 |
-| symphonia-metadata | 0.5.5 | MPL-2.0 |
-| symphonia-utils-xiph | 0.5.5 | MPL-2.0 |
 | syn | 2.0.119 | MIT OR Apache-2.0 |
 | syn | 3.0.10 | MIT OR Apache-2.0 |
 | synstructure | 0.14.0 | MIT |

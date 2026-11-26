@@ -99,7 +99,10 @@ Still open from S0: `SidebarItem` rows outside a list are `role("link")`.
 Rune, rune-ui: MIT. Figtree, Inter: OFL 1.1. The crates are listed in `THIRD_PARTY_LICENSES/crates.md`
 (`python3 scripts/licenses.py` rewrites it and fails on a licence not reviewed); their own licence files, which name their
 authors, are written into the bundle only (`build-app.sh`), so the privacy check stays strict. Through Rune also come permissive crates under
-Zlib, BSD-2/3-Clause, ISC, Unicode-3.0 and Unlicense, and two MPL-2.0 crates: `symphonia` and `opuscule`, Rune's Ogg audio
-decoders. MPL-2.0 is a weak, file-level copyleft. They arrive because `rune-ui-style` depends on `rune` with its default features,
-which include `ogg-audio`; Neko cannot turn it off. Upstream fix: `rune-ui-style` and `rune-ui-themes` depend on `rune` with
-`default-features = false` (or Rune drops `ogg-audio` from its defaults). Open question for the owner before shipping.
+Zlib, BSD-2/3-Clause, ISC, Unicode-3.0 and Unlicense. No MPL-2.0 crate ships any more (0.10.0, 2026-11-27): the `symphonia` and
+`opuscule` crates (Rune's Ogg audio decoders, MPL-2.0) came through Rune's default `ogg-audio` feature, and `apps/neko/Cargo.toml`
+now takes Rune with `default-features = false` and names the six other defaults it uses (`accessibility`, `dbus`,
+`embedded-fonts`, `hunspell`, `metal-backend`, `svg`) and `native-file-dialog`. `cargo tree -i symphonia` and `-i opuscule` find
+no package, `Cargo.lock` has neither, and `scripts/licenses.py` no longer lists MPL-2.0 among the licences it accepts, so one that
+comes back fails the check. Neko plays no audio. Cargo unifies features: any new dependency that turns Rune's defaults back on
+brings them back, and the licence script will say so.
