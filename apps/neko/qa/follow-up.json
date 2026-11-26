@@ -86,7 +86,7 @@
           "of": {
             "role": "option",
             "in": {
-              "key": "today-list"
+              "key": "ws-default-list"
             }
           },
           "is": 1

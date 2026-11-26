@@ -1,6 +1,6 @@
 // Presses a control by its accessible name in one process's front window, without focus or the pointer (AXPress):
 //   osascript -l JavaScript scripts/qa/ax-press.js PID "Allow once" [nth]
-// Prints "pressed" or "none". Used by the QA rig's --window mode (docs/knowledge/qa.md) for controls whose keys are made at
+// Prints "pressed", or "none" and the buttons it saw. Used by the QA rig's --window mode (docs/knowledge/qa.md) for controls whose keys are made at
 // run time (a permission request's answers); needs Accessibility access for the terminal running the rig.
 function run(argv) {
   var pid = parseInt(argv[0], 10), name = argv[1], nth = argv.length > 2 ? parseInt(argv[2], 10) : 0;
@@ -8,7 +8,7 @@ function run(argv) {
   var procs = se.processes.whose({ unixId: pid });
   if (procs.length === 0) return "none";
   var win = procs[0].windows[0];
-  var found = [];
+  var found = [], seen = [];
   function walk(el, depth) {
     if (depth > 40) return;
     var kids;
@@ -21,17 +21,21 @@ function run(argv) {
       var r = "";
       try { r = k.role() || ""; } catch (e) {}
       var control = r !== "AXStaticText" && r !== "AXGroup" && r !== "AXUnknown";
+      if (control && (r === "AXButton") && seen.indexOf(n || d) < 0) seen.push(n || d);
       if (control && (n === name || d === name || n.indexOf(name) === 0)) found.push(k);
       walk(k, depth + 1);
     }
   }
   // AccessKit builds the tree when an assistive client first asks: ask, wait a moment, and look again.
-  for (var tries = 0; tries < 3 && found.length <= nth; tries++) {
-    if (tries > 0) delay(0.4);
+  // A control that has just appeared may take a moment to reach the tree: look again for up to ten seconds.
+  var began = Date.now();
+  for (var tries = 0; found.length <= nth && (tries < 3 || Date.now() - began < 10000); tries++) {
+    if (tries > 0) delay(0.5);
     found = [];
+    seen = [];
     walk(win, 0);
   }
-  if (found.length <= nth) return "none";
+  if (found.length <= nth) return "none; controls seen: " + seen.join(", ");
   found[nth].actions.byName("AXPress").perform();
   return "pressed";
 }

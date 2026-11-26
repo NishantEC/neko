@@ -78,7 +78,8 @@
         }
       },
       "soft": true,
-      "expect": "The sidebar row says the task needs you"
+      "expect": "The sidebar row says the task needs you",
+      "window": false
     },
     {
       "do": "click",

@@ -130,9 +130,18 @@
     {
       "do": "wait",
       "until": {
-        "see": {
-          "name": "The folder this task works in is gone"
-        }
+        "all": [
+          {
+            "see": {
+              "name": "is gone"
+            }
+          },
+          {
+            "see": {
+              "text": "Put it back"
+            }
+          }
+        ]
       },
       "within": 10,
       "expect": "The folder gone: a calm notice"
@@ -165,7 +174,14 @@
     {
       "do": "click",
       "on": {
-        "key": "folder-clear"
+        "key": "workspace-picker"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitemcheckbox",
+        "label": "General"
       }
     },
     {

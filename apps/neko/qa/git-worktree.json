@@ -31,11 +31,11 @@
       "do": "wait",
       "until": {
         "see": {
-          "key": "folder-chip",
+          "key": "workspace-picker",
           "label": "acme-api"
         }
       },
-      "expect": "The folder chip names the repository"
+      "expect": "The repository is added as a workspace and chosen in the composer's picker"
     },
     {
       "do": "click",
@@ -71,6 +71,33 @@
         }
       },
       "expect": "The band shows the working folder and its neko/ branch"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "task-workspace",
+              "text": "acme-api"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Tidy the README",
+              "in": {
+                "role": "group",
+                "label_is": "acme-api"
+              }
+            }
+          },
+          {
+            "title": "Tidy the README [fake:tools] — acme-api"
+          }
+        ]
+      },
+      "expect": "The task sits under the acme-api section; the band and the window's title name the workspace"
     },
     {
       "do": "assert",

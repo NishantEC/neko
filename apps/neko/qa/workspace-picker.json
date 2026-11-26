@@ -1,0 +1,263 @@
+{
+  "name": "workspace-picker",
+  "title": "The composer's workspace picker",
+  "about": "On Home the picker lists General and the workspaces and Add folder…. It remembers the last choice across a relaunch. Command-N from an open task starts a new task in that task's workspace.",
+  "cli": [
+    "fake"
+  ],
+  "window": true,
+  "setup": {
+    "files": {
+      "acme-api": {
+        "git": true,
+        "files": {
+          "README.md": "# Acme\n"
+        }
+      },
+      "acme-site": {
+        "files": {
+          "index.html": "<p>hi</p>\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "add-workspace",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "add-workspace",
+      "path": "$files/acme-site"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "button",
+          "label_is": "acme-site"
+        }
+      },
+      "expect": "Both folders are workspaces"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "workspace-picker"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "menuitemcheckbox",
+              "label": "General"
+            }
+          },
+          {
+            "see": {
+              "role": "menuitemcheckbox",
+              "label": "acme-api"
+            }
+          },
+          {
+            "see": {
+              "role": "menuitemcheckbox",
+              "label": "acme-site"
+            }
+          },
+          {
+            "see": {
+              "role": "menuitem",
+              "name": "Add folder…"
+            }
+          }
+        ]
+      },
+      "expect": "The picker lists General, both workspaces and Add folder…"
+    },
+    {
+      "do": "snap",
+      "name": "picker-open",
+      "expect": "The picker's menu"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitemcheckbox",
+        "label": "acme-site"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "workspace-picker",
+          "label": "acme-site"
+        }
+      },
+      "expect": "Choosing acme-site shows it on the picker"
+    },
+    {
+      "do": "quit-app",
+      "window": false
+    },
+    {
+      "do": "start-app",
+      "window": false
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "workspace-picker",
+          "label": "acme-site"
+        }
+      },
+      "within": 15,
+      "window": false,
+      "expect": "After a relaunch the picker still says acme-site"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Draft the page [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Draft the page"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "expect": "The task opens"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "key": "task-workspace",
+          "text": "acme-site"
+        }
+      },
+      "expect": "It was made in acme-site"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "workspace-picker",
+          "label": "acme-site"
+        }
+      },
+      "expect": "Command-N from the acme-site task starts in acme-site"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "workspace-picker"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitemcheckbox",
+        "label": "General"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Plan lunch [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Plan lunch"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "expect": "A General task opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Draft the page"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "Draft the page"
+        }
+      },
+      "expect": "The acme-site task opens from the sidebar"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "workspace-picker",
+          "label": "acme-site"
+        }
+      },
+      "expect": "Command-N starts in the open task's workspace (acme-site), not the last choice (General)"
+    },
+    {
+      "do": "snap",
+      "name": "cmd-n-here",
+      "expect": "Home with acme-site chosen"
+    }
+  ]
+}

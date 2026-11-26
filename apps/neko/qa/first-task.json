@@ -64,12 +64,12 @@
           "role": "option",
           "label": "Write a haiku about miso",
           "in": {
-            "key": "today-list"
+            "key": "ws-default-list"
           }
         }
       },
       "within": 5,
-      "expect": "The task appears in the sidebar under Today"
+      "expect": "The task appears in the sidebar under General"
     },
     {
       "do": "wait",
@@ -105,7 +105,8 @@
           "name": "Stop"
         }
       },
-      "expect": "While it works, the composer's button is Stop"
+      "expect": "While it works, the composer's button is Stop",
+      "window": false
     },
     {
       "do": "wait",
@@ -128,14 +129,20 @@
       "that": {
         "all": [
           {
-            "title": "Write a haiku about miso"
+            "title": "Write a haiku about miso — General"
+          },
+          {
+            "see": {
+              "key": "task-workspace",
+              "text": "General"
+            }
           },
           {
             "see": {
               "role": "option",
               "label": "Write a haiku about miso",
               "in": {
-                "key": "today-list"
+                "key": "ws-default-list"
               }
             }
           },
@@ -143,7 +150,7 @@
             "gone": {
               "text": "Keep it short",
               "in": {
-                "key": "today-list"
+                "key": "ws-default-list"
               }
             }
           },

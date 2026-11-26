@@ -1,0 +1,320 @@
+{
+  "name": "workspaces",
+  "title": "Workspaces as sidebar sections",
+  "about": "Two folders are added as workspaces (one a git repository). Both appear as sections after General. A task runs in each and one in General; each sits under its own section with the right header. A section is folded; after a quit and relaunch the fold and everything else is as it was.",
+  "cli": [
+    "fake"
+  ],
+  "window": true,
+  "setup": {
+    "files": {
+      "acme-api": {
+        "git": true,
+        "files": {
+          "README.md": "# Acme\n"
+        }
+      },
+      "mochi-notes": {
+        "files": {
+          "notes.md": "Notes\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "add-workspace",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "add-workspace",
+      "path": "$files/mochi-notes"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "button",
+              "label_is": "General"
+            }
+          },
+          {
+            "see": {
+              "role": "button",
+              "label_is": "acme-api"
+            }
+          },
+          {
+            "see": {
+              "role": "button",
+              "label_is": "mochi-notes"
+            }
+          }
+        ]
+      },
+      "expect": "General and both workspaces appear as sections"
+    },
+    {
+      "do": "snap",
+      "name": "sections",
+      "expect": "The sidebar with three sections"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "New task in acme-api"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check the API [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Check the API"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "expect": "A task runs in acme-api"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "task-workspace",
+              "text": "acme-api"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Check the API",
+              "in": {
+                "role": "group",
+                "label_is": "acme-api"
+              }
+            }
+          }
+        ]
+      },
+      "expect": "It sits under acme-api; the band names acme-api"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "New task in mochi-notes"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Sort the notes [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Sort the notes"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "expect": "A task runs in mochi-notes"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "task-workspace",
+              "text": "mochi-notes"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Sort the notes",
+              "in": {
+                "role": "group",
+                "label_is": "mochi-notes"
+              }
+            }
+          },
+          {
+            "title": "Sort the notes [fake:plain] — mochi-notes"
+          }
+        ]
+      },
+      "expect": "It sits under mochi-notes; the band and the window's title name it"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "New task in General"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Plan lunch [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Plan lunch"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "expect": "A task runs in General"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "task-workspace",
+              "text": "General"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Plan lunch",
+              "in": {
+                "role": "group",
+                "label_is": "General"
+              }
+            }
+          }
+        ]
+      },
+      "expect": "It sits under General"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "acme-api"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "role": "option",
+          "label": "Check the API"
+        }
+      },
+      "expect": "Pressing the acme-api header folds its section"
+    },
+    {
+      "do": "snap",
+      "name": "folded",
+      "expect": "acme-api folded"
+    },
+    {
+      "do": "quit-app"
+    },
+    {
+      "do": "start-app"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "button",
+              "label_is": "acme-api"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Sort the notes",
+              "in": {
+                "role": "group",
+                "label_is": "mochi-notes"
+              }
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Plan lunch",
+              "in": {
+                "role": "group",
+                "label_is": "General"
+              }
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "After a relaunch the sections and their tasks are back"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "role": "option",
+          "label": "Check the API"
+        }
+      },
+      "expect": "acme-api is still folded after the relaunch"
+    },
+    {
+      "do": "snap",
+      "name": "relaunched",
+      "expect": "The sidebar after the relaunch"
+    }
+  ]
+}

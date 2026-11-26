@@ -295,6 +295,9 @@ pub fn descendants(root: i32) -> Vec<(u32, String)> {
 
 fn run(o: &Opts) -> Result<bool, String> {
     let places = Places { work: o.work.clone(), files: o.work.join("files"), home: o.work.join("home"), data: o.work.join("data") };
+    // The app's prefs (frame, last workspace, folded sections) live in the run's folder, never the person's.
+    // SAFETY: set before any other thread starts.
+    unsafe { std::env::set_var("RUNE_DIRS_ROOT", o.work.join("rune")) };
     for d in [&places.files, &places.home.join(".claude"), &places.data, &o.work.join("tmp"), &o.out.join("steps"), &o.out.join("tree")] {
         std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
     }
@@ -335,7 +338,12 @@ static FIRST: OnceLock<((f32, f32), Option<String>)> = OnceLock::new();
 fn qa_state() -> App {
     let (size, home) = FIRST.get().cloned().unwrap_or(((1200.0, 800.0), None));
     let (now_ms, utc_offset_s) = neko_app::state::system_clock();
-    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: neko_app::state::system_clock, home, width: Some(size.0), ..App::default() }
+    // As the real window does: the last workspace and the folded sections from the prefs, and choices written back. The prefs are
+    // the run's own (`RUNE_DIRS_ROOT` points into its folder), so a quit and relaunch keeps them and nothing else is touched.
+    let prefs = rune::prefs::Prefs::open(neko_app::PREFS_ID);
+    let workspace = prefs.get::<String>(neko_app::WORKSPACE_KEY).filter(|w| !w.is_empty()).unwrap_or_else(|| neko_protocol::GENERAL.to_owned());
+    let folded = prefs.get::<Vec<String>>(neko_app::FOLDED_KEY).unwrap_or_default().into_iter().collect();
+    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: neko_app::state::system_clock, home, width: Some(size.0), persist: true, workspace, folded, ..App::default() }
 }
 
 fn new_app(r: &Run) -> Runtime<App> {
@@ -563,9 +571,18 @@ impl Headless<'_> {
                 self.pump();
                 self.check(&v["that"])?;
             }
-            "choose-folder" => {
+            "choose-folder" | "add-workspace" => {
+                // The Mac's folder panel cannot open headless: Rune's headless runtime holds the app's own request for it, and
+                // this answers it with the path, so the app's own code adds the folder as a workspace.
                 let path = v["path"].as_str().unwrap_or("").to_owned();
-                self.click(&json!({"key": "folder-chip"}))?;
+                if step.kind() == "choose-folder" {
+                    // Home's composer: the workspace picker's "Add folder…" (the new workspace is then chosen).
+                    self.click(&json!({"key": "workspace-picker"}))?;
+                    self.click(&json!({"name": "Add folder…", "role": "menuitem"}))?;
+                } else {
+                    self.click(&json!({"key": "add-workspace"}))?;
+                }
+                self.pump();
                 self.rt()?.resolve_file_dialog(Some(PathBuf::from(&path))).map_err(|e| format!("the folder panel: {e:?}"))?;
                 self.pump();
                 self.pump();
@@ -750,6 +767,11 @@ fn matches(all: &[ElementInfo], e: &ElementInfo, sel: &Value) -> bool {
     }
     if let Some(t) = sel["label"].as_str()
         && !has(&e.label, t)
+    {
+        return false;
+    }
+    if let Some(t) = sel["label_is"].as_str()
+        && e.label.as_deref() != Some(t)
     {
         return false;
     }

@@ -103,13 +103,13 @@ fn press_name(sel: &Value) -> Option<String> {
             }
         }
     }
-    sel["name"].as_str().or(sel["label"].as_str()).map(str::to_owned)
+    sel["name"].as_str().or(sel["label_is"].as_str()).or(sel["label"].as_str()).map(str::to_owned)
 }
 
 /// The scenario as a window script and marks. Steps a window cannot do are left out and said so.
-fn plan(r: &mut Run, steps: &[Step]) -> Result<(Vec<Plan>, Option<String>, Vec<String>), String> {
+fn plan(r: &mut Run, steps: &[Step]) -> Result<(Vec<Plan>, Vec<(String, bool)>, Vec<String>), String> {
     let mut out = Vec::new();
-    let mut folder = None;
+    let mut folders: Vec<(String, bool)> = Vec::new();
     let mut left_out = Vec::new();
     for (i, s) in steps.iter().enumerate() {
         let v = &s.v;
@@ -119,7 +119,7 @@ fn plan(r: &mut Run, steps: &[Step]) -> Result<(Vec<Plan>, Option<String>, Vec<S
         }
         match s.kind() {
             "click" => match v["on"]["key"].as_str().filter(|k| !k.contains('*')) {
-                Some(k) if v["on"].get("name").is_none() && v["on"].get("label").is_none() => out.push(Plan::Events(vec![json!({"type": "tap", "key": k}), json!({"pause": 0.6})])),
+                Some(k) if v["on"].get("name").is_none() && v["on"].get("label").is_none() && v["on"].get("label_is").is_none() => out.push(Plan::Events(vec![json!({"type": "tap", "key": k}), json!({"pause": 0.6})])),
                 _ => {
                     let name = press_name(&v["on"]).ok_or(format!("step {}: no accessible name to press for {}", s.n, v["on"]))?;
                     out.push(Plan::Mark(format!("press:{i}"), Action::Press(name)));
@@ -146,9 +146,9 @@ fn plan(r: &mut Run, steps: &[Step]) -> Result<(Vec<Plan>, Option<String>, Vec<S
                 out.push(Plan::Events(vec![json!({"pause": PAUSE})]));
                 out.push(Plan::Mark(format!("check:{i}"), Action::Check));
             }
-            "choose-folder" if out.iter().all(|p| !matches!(p, Plan::Events(e) if e.iter().any(|x| x["type"] == "key" && x["name"] == "Enter"))) => {
-                // The open panel would take focus: the folder is set where the app keeps it (its prefs) before launch instead.
-                folder = v["path"].as_str().map(str::to_owned);
+            "choose-folder" | "add-workspace" if out.iter().all(|p| !matches!(p, Plan::Events(e) if e.iter().any(|x| x["type"] == "key" && x["name"] == "Enter"))) => {
+                // The folder panel would take focus: the folder is added before launch instead (and chosen, for choose-folder).
+                folders.push((v["path"].as_str().unwrap_or("").to_owned(), s.kind() == "choose-folder"));
             }
             "git-record" => {
                 let repo = v["repo"].as_str().unwrap_or("").to_owned();
@@ -158,7 +158,7 @@ fn plan(r: &mut Run, steps: &[Step]) -> Result<(Vec<Plan>, Option<String>, Vec<S
             other => left_out.push(format!("step {} ({other})", s.n)),
         }
     }
-    Ok((out, folder, left_out))
+    Ok((out, folders, left_out))
 }
 
 /// Turns the plan into the script's events, with times.
@@ -212,7 +212,7 @@ fn check_words(c: &Value, words: &[String], title: &str) -> Result<Option<()>, S
         }
         return Ok(any.then_some(()));
     }
-    let wants = |sel: &Value| -> Vec<String> { ["text", "label", "name"].iter().filter_map(|k| sel[*k].as_str().map(str::to_owned)).collect() };
+    let wants = |sel: &Value| -> Vec<String> { ["text", "label", "label_is", "name"].iter().filter_map(|k| sel[*k].as_str().map(str::to_owned)).collect() };
     let seen = |w: &[String]| words.iter().any(|x| w.iter().all(|want| x.contains(want.as_str())));
     if let Some(sel) = c.get("see") {
         let w = wants(sel);
@@ -246,7 +246,7 @@ fn check_words(c: &Value, words: &[String], title: &str) -> Result<Option<()>, S
 pub fn run(r: &mut Run) -> Result<(), String> {
     let app = r.o.app.clone().ok_or("--window needs --app")?;
     let steps: Vec<Step> = std::mem::take(&mut r.s.steps);
-    let (plan, folder, left_out) = plan(r, &steps)?;
+    let (plan, folders, left_out) = plan(r, &steps)?;
     if !left_out.is_empty() {
         r.notes_info.push(format!("Not replayed in a window (headless covers them): {}", left_out.join(", ")));
     }
@@ -254,10 +254,22 @@ pub fn run(r: &mut Run) -> Result<(), String> {
     let script_path = r.places.work.join("window-script.json");
     std::fs::write(&script_path, serde_json::to_vec_pretty(&events).unwrap_or_default()).map_err(|e| e.to_string())?;
     let rune_root = r.places.work.join("rune");
-    if let Some(f) = &folder {
-        let dir = rune_root.join("config").join(neko_app::PREFS_ID);
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        std::fs::write(dir.join("prefs.json"), serde_json::to_vec(&json!({ neko_app::FOLDER_KEY: f })).unwrap_or_default()).map_err(|e| e.to_string())?;
+    // The folder panel would take focus: folders are added as workspaces by the daemon's own request before launch, and a chosen
+    // one is made the composer's choice where the app keeps it (its prefs, in the run's folder).
+    for (f, choose) in &folders {
+        let (info, token) = neko_protocol::client::find(&r.places.data).map_err(|e| e.to_string())?;
+        let mut c = neko_protocol::client::Client::connect(info.port, &token, "neko-qa").map_err(|e| e.to_string())?;
+        let id = match c.request(neko_protocol::Request::AddWorkspace { folder: f.clone() }).map_err(|e| e.to_string())? {
+            neko_protocol::Reply::Workspace { workspace, .. } => workspace.id,
+            other => return Err(format!("adding the workspace: {other:?}")),
+        };
+        c.close();
+        r.say(&format!("added workspace {} before launch (the daemon's add_workspace)", super::short(f)));
+        if *choose {
+            let dir = rune_root.join("config").join(neko_app::PREFS_ID);
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            std::fs::write(dir.join("prefs.json"), serde_json::to_vec(&json!({ neko_app::WORKSPACE_KEY: id })).unwrap_or_default()).map_err(|e| e.to_string())?;
+        }
     }
     // Its own name, so its Dock item and process are told apart from any other Neko.
     let bin = r.places.work.join(NAME);
@@ -388,10 +400,14 @@ pub fn run(r: &mut Run) -> Result<(), String> {
                 let label = label.clone();
                 match osascript_js("ax-press.js", &[&pid.to_string(), &label]) {
                     Ok(s) if s == "pressed" => r.say(&format!("pressed {label:?} (AXPress)")),
-                    Ok(_) | Err(_) => {
+                    other => {
                         let rel = format!("steps/{}-FAILED.png", step.stem());
                         let _ = capture(id, &r.o.out.join(&rel));
-                        r.outcome(step, Some(false), format!("no control named {label:?} to press in the window"), t.elapsed().as_secs_f64(), Some(rel));
+                        let why = match other {
+                            Err(e) => format!("pressing {label:?} by its accessible name failed: {e}"),
+                            Ok(s) => format!("no control named {label:?} to press in the window ({})", cut(&s, 300)),
+                        };
+                        r.outcome(step, Some(false), why, t.elapsed().as_secs_f64(), Some(rel));
                         failed_at = Some(i);
                     }
                 }

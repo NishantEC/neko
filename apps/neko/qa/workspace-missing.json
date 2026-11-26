@@ -1,0 +1,150 @@
+{
+  "name": "workspace-missing",
+  "title": "A workspace whose folder is gone",
+  "about": "The folder of a workspace is deleted while the app runs. Its section says Folder not found, with Locate… and Remove; a new task there is refused in plain words.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "files": {
+      "tofu-notes": {
+        "files": {
+          "a.md": "A\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "add-workspace",
+      "path": "$files/tofu-notes"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "button",
+          "label_is": "tofu-notes"
+        }
+      },
+      "expect": "The workspace is a section"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "workspace-picker"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitemcheckbox",
+        "label": "tofu-notes"
+      }
+    },
+    {
+      "do": "remove",
+      "path": "$files/tofu-notes"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Folder not found"
+        }
+      },
+      "within": 10,
+      "soft": true,
+      "expect": "While the app runs, the section soon says Folder not found"
+    },
+    {
+      "do": "quit-app"
+    },
+    {
+      "do": "start-app"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Folder not found"
+        }
+      },
+      "within": 15,
+      "expect": "After a relaunch, the section says Folder not found"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "role": "button",
+              "name": "Locate…"
+            }
+          },
+          {
+            "see": {
+              "role": "button",
+              "label_is": "Remove"
+            }
+          }
+        ]
+      },
+      "expect": "With Locate… and Remove"
+    },
+    {
+      "do": "snap",
+      "name": "missing",
+      "expect": "Folder not found in the sidebar"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Read the notes [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "notice"
+        }
+      },
+      "within": 5,
+      "expect": "A new task there is refused with a plain line"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "gone": {
+              "role": "option",
+              "label": "Read the notes"
+            }
+          },
+          {
+            "gone": {
+              "text": "{\""
+            }
+          }
+        ]
+      },
+      "expect": "No task was made, and no raw error is shown"
+    },
+    {
+      "do": "snap",
+      "name": "refused",
+      "expect": "The refusal"
+    }
+  ]
+}

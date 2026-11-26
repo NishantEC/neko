@@ -1,0 +1,234 @@
+{
+  "name": "workspace-remove",
+  "title": "Removing a workspace",
+  "about": "Remove… asks first and says nothing on disk is touched. Afterwards the section reads \"Earlier, removed workspace\", the folder is untouched, its task is readable, and no new task can be made in it. Adding the folder again brings it back.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "files": {
+      "mochi-site": {
+        "files": {
+          "index.html": "<p>miso</p>\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "add-workspace",
+      "path": "$files/mochi-site"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "button",
+          "label_is": "mochi-site"
+        }
+      },
+      "expect": "The workspace is a section"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "New task in mochi-site"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check the page [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Check the page"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "expect": "A task runs in it"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "mochi-site options"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitem",
+        "name": "Remove…"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "remove-workspace-dialog",
+          "name": "Remove mochi-site from Neko?"
+        }
+      },
+      "expect": "Remove… asks first"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "Nothing on disk is touched",
+          "in": {
+            "key": "remove-workspace-dialog"
+          }
+        }
+      },
+      "expect": "The question says nothing on disk is touched"
+    },
+    {
+      "do": "snap",
+      "name": "remove-asks",
+      "expect": "The question"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "Remove",
+        "in": {
+          "key": "remove-workspace-dialog"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Earlier, removed workspace"
+        }
+      },
+      "expect": "The section now reads Earlier, removed workspace"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "file": {
+              "path": "$files/mochi-site/index.html",
+              "has": "miso"
+            }
+          },
+          {
+            "gone": {
+              "role": "button",
+              "label_is": "New task in mochi-site"
+            }
+          }
+        ]
+      },
+      "expect": "The folder on disk is untouched, and the section offers no new task"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Check the page"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Hello from the fake"
+        }
+      },
+      "expect": "Its task stays readable"
+    },
+    {
+      "do": "snap",
+      "name": "removed",
+      "expect": "The removed workspace and its readable task"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "workspace-picker"
+      }
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "role": "menuitemcheckbox",
+          "label": "mochi-site"
+        }
+      },
+      "expect": "A new task cannot be made there: the picker does not offer it"
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "add-workspace",
+      "path": "$files/mochi-site"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "gone": {
+              "text": "Earlier, removed workspace"
+            }
+          },
+          {
+            "see": {
+              "role": "button",
+              "label_is": "New task in mochi-site"
+            }
+          }
+        ]
+      },
+      "expect": "Adding the folder again brings the workspace back"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "role": "option",
+          "label": "Check the page",
+          "in": {
+            "role": "group",
+            "label_is": "mochi-site"
+          }
+        }
+      },
+      "expect": "With its task"
+    },
+    {
+      "do": "snap",
+      "name": "back",
+      "expect": "The workspace is back"
+    }
+  ]
+}
