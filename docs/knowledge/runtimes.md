@@ -41,6 +41,9 @@ claude -p --input-format stream-json --output-format stream-json --verbose --inc
 - The task's cat reaches the agent as `--append-system-prompt`, one argument, on every run; `--system-prompt-snapshot off` makes a
   resumed run take rules edited since. It changes no other flag (`cats.md`).
 
+- `NEKO_CLAUDE_MODEL` in the daemon's environment adds `--model <name>` (the QA rig sets `haiku` for real runs,
+  `docs/knowledge/qa.md`). Unset or empty, no `--model` is passed and the CLI's own default applies. The fake reports the model
+  it was given (`tests/model.rs`).
 - It runs in the task's folder, under the run guard (`run-guard.md`), with PATH set as above. "Ask before risky steps" adds
   `NEKO_HOOK_PORT` and `NEKO_HOOK_SECRET`; nothing else is added.
 - The permission mode decides the rest (`permissions.md`): following Claude Code's own rules adds neither `--permission-mode` nor

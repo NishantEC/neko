@@ -31,7 +31,8 @@
 //! `{"stdin": <line>}` for every line it reads. Tests read it to see exactly what reached the CLI.
 //!
 //! With `--resume ID` it continues conversation ID and says so. `--version` and `auth status --json` answer like the real CLI
-//! (`NEKO_FAKE_AUTH=out` makes it signed out). It also serves as the run guard in tests (`--neko-run-guard`).
+//! (`NEKO_FAKE_AUTH=out` makes it signed out). It also serves as the run guard in tests (`--neko-run-guard`). With `--model NAME`
+//! it reports NAME as its model (else `claude-fake-1`).
 //!
 //! Like Claude Code it reads the person's own rules from `$HOME/.claude/settings.json` (`permissions.allow`: a tool named there
 //! is never asked about), and it runs the `PreToolUse` hooks given with `--settings` before every tool call, as the hooks
@@ -52,6 +53,12 @@ fn out(v: Value) {
     let mut o = std::io::stdout().lock();
     let _ = writeln!(o, "{v}");
     let _ = o.flush();
+}
+
+/// The model it reports: `--model NAME` when given, else `claude-fake-1`.
+fn model() -> String {
+    let args: Vec<String> = std::env::args().collect();
+    args.iter().position(|a| a == "--model").and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(|| "claude-fake-1".to_owned())
 }
 
 fn now_s() -> i64 {
@@ -195,7 +202,7 @@ impl Fake {
             std::thread::sleep(gap);
         }
         out(json!({"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null,"session_id":self.session}));
-        out(json!({"type":"assistant","message":{"id":id,"model":"claude-fake-1","role":"assistant","content":[{"type":"text","text":text}],"usage":{"input_tokens":8,"cache_read_input_tokens":15_200,"cache_creation_input_tokens":1_100,"output_tokens":120}},"parent_tool_use_id":null,"session_id":self.session}));
+        out(json!({"type":"assistant","message":{"id":id,"model":model(),"role":"assistant","content":[{"type":"text","text":text}],"usage":{"input_tokens":8,"cache_read_input_tokens":15_200,"cache_creation_input_tokens":1_100,"output_tokens":120}},"parent_tool_use_id":null,"session_id":self.session}));
         out(json!({"type":"stream_event","event":{"type":"message_stop"},"parent_tool_use_id":null,"session_id":self.session}));
     }
 
@@ -207,7 +214,7 @@ impl Fake {
             out(json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":w}},"parent_tool_use_id":null,"session_id":self.session}));
         }
         out(json!({"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null,"session_id":self.session}));
-        out(json!({"type":"assistant","message":{"id":id,"model":"claude-fake-1","content":[{"type":"thinking","thinking":text}]},"parent_tool_use_id":null,"session_id":self.session}));
+        out(json!({"type":"assistant","message":{"id":id,"model":model(),"content":[{"type":"thinking","thinking":text}]},"parent_tool_use_id":null,"session_id":self.session}));
     }
 
     /// A tool call; with `ask`, Claude Code would ask about it (unless the person's settings allow the tool or a hook allowed
@@ -220,7 +227,7 @@ impl Fake {
     fn tool_why(&mut self, name: &str, input: Value, ask: bool, result: &str, fails: bool) -> (bool, String) {
         let tool_id = self.id("toolu");
         let msg = self.message();
-        out(json!({"type":"assistant","message":{"id":msg,"model":"claude-fake-1","content":[{"type":"tool_use","id":tool_id,"name":name,"input":input}],"usage":{"input_tokens":6,"cache_read_input_tokens":14_000,"cache_creation_input_tokens":800,"output_tokens":40}},"parent_tool_use_id":null,"session_id":self.session}));
+        out(json!({"type":"assistant","message":{"id":msg,"model":model(),"content":[{"type":"tool_use","id":tool_id,"name":name,"input":input}],"usage":{"input_tokens":6,"cache_read_input_tokens":14_000,"cache_creation_input_tokens":800,"output_tokens":40}},"parent_tool_use_id":null,"session_id":self.session}));
         // The hooks run first; a deny blocks, an allow skips the ask.
         // Exactly the keys Claude Code 2.1.331 sends.
         let hook_input = json!({"cwd":self.cwd,"effort":"medium","hook_event_name":"PreToolUse","permission_mode":"default","prompt_id":"prompt-fake-1","session_id":self.session,"tool_input":input,"tool_name":name,"tool_use_id":tool_id,"transcript_path":"/tmp/fake-transcript.jsonl"});
@@ -270,7 +277,7 @@ impl Fake {
         out(json!({"type":"system","subtype":"thinking_tokens","estimated_tokens":95,"estimated_tokens_delta":55,"session_id":self.session}));
         out(json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"c2lnbmF0dXJl"}},"parent_tool_use_id":null,"session_id":self.session}));
         out(json!({"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null,"session_id":self.session}));
-        out(json!({"type":"assistant","message":{"id":id,"model":"claude-fake-1","content":[{"type":"thinking","thinking":"","signature":"c2lnbmF0dXJl"}]},"parent_tool_use_id":null,"session_id":self.session}));
+        out(json!({"type":"assistant","message":{"id":id,"model":model(),"content":[{"type":"thinking","thinking":"","signature":"c2lnbmF0dXJl"}]},"parent_tool_use_id":null,"session_id":self.session}));
     }
 
     fn wait_answer(&mut self, req: &str) -> bool {
@@ -288,7 +295,7 @@ impl Fake {
             "type":"result","subtype":"success","is_error":error,"duration_ms":1200,"duration_api_ms":1000,"num_turns":1,"result":words,
             "session_id":self.session,"total_cost_usd":0.0123,
             "usage":{"input_tokens":1200,"cache_creation_input_tokens":0,"cache_read_input_tokens":5000,"output_tokens":340},
-            "modelUsage":{"claude-fake-1":{"inputTokens":1200,"outputTokens":340,"contextWindow":200000}},"permission_denials":[]
+            "modelUsage":{ model(): {"inputTokens":1200,"outputTokens":340,"contextWindow":200000}},"permission_denials":[]
         }));
     }
 
@@ -431,7 +438,7 @@ impl Fake {
             "hook-no-verdict" => {
                 let tool_id = self.id("toolu");
                 let msg = self.message();
-                out(json!({"type":"assistant","message":{"id":msg,"model":"claude-fake-1","content":[{"type":"tool_use","id":tool_id,"name":"Bash","input":{"command":"cargo test","description":"Run the tests"}}]},"parent_tool_use_id":null,"session_id":self.session}));
+                out(json!({"type":"assistant","message":{"id":msg,"model":model(),"content":[{"type":"tool_use","id":tool_id,"name":"Bash","input":{"command":"cargo test","description":"Run the tests"}}]},"parent_tool_use_id":null,"session_id":self.session}));
                 no_verdict(&tool_id);
                 out(json!({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":tool_id,"is_error":false,"content":"test result: ok"}]},"parent_tool_use_id":null,"session_id":self.session}));
                 std::thread::sleep(Duration::from_millis(300));
@@ -568,7 +575,7 @@ fn main() {
                     out(json!({"type":"system","subtype":"hook_response","hook_name":"SessionStart:startup","stdout":"","stderr":"sh: acme-hook: command not found","exit_code":127,"session_id":session}));
                     let tools: Vec<String> = ["Read", "Edit", "Bash", "Glob"].iter().map(|t| (*t).to_owned()).chain((0..300).map(|i| format!("mcp__acme__tool_{i}"))).collect();
                     let mode = if args.iter().any(|a| a == "--permission-mode") { "default" } else { "auto" };
-                    out(json!({"type":"system","subtype":"init","session_id":session,"model":"claude-fake-1","cwd":cwd,"tools":tools,"permissionMode":mode,"apiKeySource":"none","claude_code_version":"9.9.9"}));
+                    out(json!({"type":"system","subtype":"init","session_id":session,"model":model(),"cwd":cwd,"tools":tools,"permissionMode":mode,"apiKeySource":"none","claude_code_version":"9.9.9"}));
                     out(json!({"type":"system","subtype":"commands_changed","commands":(0..500).map(|i| format!("/command-{i}")).collect::<Vec<_>>(),"session_id":session}));
                     out(json!({"type":"system","subtype":"session_state_changed","state":"running","session_id":session}));
                     out(json!({"type":"system","subtype":"status","status":"requesting","session_id":session}));

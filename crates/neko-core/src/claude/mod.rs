@@ -6,13 +6,15 @@
 //! ```text
 //! claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages
 //!        --permission-prompt-tool stdio [--permission-mode default] [--settings <hook>]
-//!        [--append-system-prompt <the cat's block> --system-prompt-snapshot off] [--resume <session>]
+//!        [--append-system-prompt <the cat's block> --system-prompt-snapshot off] [--resume <session>] [--model <name>]
 //! ```
 //!
 //! The task's cat (docs/knowledge/cats.md) reaches the agent as `--append-system-prompt`: one argument, its block, added to the end
 //! of Claude Code's own system prompt on every run. `--system-prompt-snapshot off` goes with it, because by default Claude Code
 //! records the system prompt at a conversation's first request and sends that record on every resume, so rules edited between
 //! runs would never arrive. The block is text inside one argument; it never adds, removes or changes another flag.
+//!
+//! `--model` is passed only when `NEKO_CLAUDE_MODEL` names one ([`MODEL_ENV`]); otherwise the CLI's own default applies.
 //!
 //! The person's words go in as a `user` message on stdin. With `--permission-prompt-tool stdio`, every step Claude Code would ask
 //! about arrives as a `can_use_tool` control request on stdout and waits for Neko's `control_response`; Neko's policy decides it or
@@ -128,6 +130,18 @@ pub fn arguments(resume: Option<&str>, mode: PermissionMode, hook: Option<&Path>
     a
 }
 
+/// Names the model a run asks Claude Code for (`--model`), read from the daemon's environment. Unset or empty: no `--model`, so
+/// the CLI's own default applies. The QA rig sets it to the cheapest model for real runs (docs/knowledge/qa.md).
+pub const MODEL_ENV: &str = "NEKO_CLAUDE_MODEL";
+
+/// `--model NAME` when a model is named, else nothing.
+pub fn model_arguments(model: Option<&str>) -> Vec<String> {
+    match model.map(str::trim).filter(|m| !m.is_empty()) {
+        Some(m) => vec!["--model".to_owned(), m.to_owned()],
+        None => Vec::new(),
+    }
+}
+
 /// Reads `claude auth status --json`: whether it is signed in and with which login. Never its account details.
 pub fn read_auth(out: &[u8]) -> (Option<bool>, Option<Login>) {
     let Ok(v) = serde_json::from_slice::<Value>(out) else { return (None, None) };
@@ -192,7 +206,8 @@ impl Runtime for ClaudeRuntime {
             env.push((HOOK_PORT_ENV.to_owned(), h.port.to_string()));
             env.push((HOOK_SECRET_ENV.to_owned(), h.secret.clone()));
         }
-        let args = arguments(spec.resume.as_deref(), spec.mode, hook.map(|h| h.helper.as_path()), spec.instructions.as_deref());
+        let mut args = arguments(spec.resume.as_deref(), spec.mode, hook.map(|h| h.helper.as_path()), spec.instructions.as_deref());
+        args.extend(model_arguments(std::env::var(MODEL_ENV).ok().as_deref()));
         let guarded = guard::spawn(&self.guard, &path, &args, &spec.workdir, &env, |c| {
             c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         })
