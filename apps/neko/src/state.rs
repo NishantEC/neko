@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 use neko_protocol::{
-    Cat, Change, Decision, DiffPatch, DiffSummary, ErrorCode, GENERAL, Need, NeedsItem, Part, PartBody, Permission, PermissionId, PermissionMode, Reply, Request, Run, RunId, RunStatus, RuntimeInfo,
+    Briefing, BriefingSettings, Cat, Change, Decision, DiffPatch, DiffSummary, ErrorCode, GENERAL, Need, NeedsItem, Part, PartBody, Permission, PermissionId, PermissionMode, Reply, Request, Run, RunId, RunStatus, RuntimeInfo,
     ServerMessage, Settings, Task, TaskId, Transcript, UndoStorage, Workspace,
 };
 use rune::TextEdit;
@@ -278,6 +278,16 @@ pub struct App {
     /// The rounds whose history shows on their card, and each one's lines (newest first) as the daemon last said.
     pub round_history_open: HashSet<String>,
     pub round_history: HashMap<String, Vec<neko_protocol::RoundRun>>,
+    /// What happened while the person was away, as the daemon last said (replaced whole each time it changes).
+    pub briefing: Option<Briefing>,
+    /// The Briefing page shows instead of the content (⌘4).
+    pub briefing_open: bool,
+    /// The task the person came from to the Briefing (Escape goes back to it).
+    pub briefing_back: Option<TaskId>,
+    /// The morning time and whether its notification is posted, as the daemon last said.
+    pub briefing_settings: Option<BriefingSettings>,
+    /// The morning time being typed in Settings ▸ Briefing.
+    pub briefing_time: TextEdit,
 }
 
 impl Review {
@@ -321,6 +331,10 @@ pub enum Asked {
     RoundRun,
     /// A round's history, for its card.
     RoundHistory(String),
+    /// "Mark as read" in the Briefing.
+    BriefingRead,
+    /// A change to the briefing's settings (the morning time, its switch).
+    BriefingSettings,
     Other,
 }
 
@@ -484,6 +498,11 @@ impl Default for App {
             round_form: None,
             round_history_open: HashSet::new(),
             round_history: HashMap::new(),
+            briefing: None,
+            briefing_open: false,
+            briefing_back: None,
+            briefing_settings: None,
+            briefing_time: TextEdit::default(),
         }
     }
 }
@@ -510,6 +529,9 @@ impl App {
         }
         if self.rounds_open {
             return "Rounds".to_owned();
+        }
+        if self.briefing_open {
+            return "Briefing".to_owned();
         }
         match self.open_task() {
             Some(t) => match self.workspace_of(&t.workspace) {
@@ -596,6 +618,7 @@ impl App {
         self.settings_open = false;
         self.needs_open = false;
         self.rounds_open = false;
+        self.briefing_open = false;
         self.menu_open = None;
         let d = self.cat_drafts.entry(cat.id.clone()).or_insert_with(|| CatDraft::of(&cat));
         // Opening a page puts the keyboard in none of its fields.
@@ -731,8 +754,8 @@ impl App {
 
     /// Where the person is, for the notifications.
     pub fn here(&self) -> Here {
-        let looking = !self.settings_open && !self.needs_open && !self.rounds_open;
-        Here { front: self.front, task: self.open.clone().filter(|_| looking), needs_view: self.needs_open }
+        let looking = !self.settings_open && !self.needs_open && !self.rounds_open && !self.briefing_open;
+        Here { front: self.front, task: self.open.clone().filter(|_| looking), needs_view: self.needs_open || self.briefing_open, briefing_view: self.briefing_open }
     }
 
     /// The Needs you list (⌘2, the sidebar's row), with the keyboard on its first item.
@@ -746,6 +769,7 @@ impl App {
         self.context_open = false;
         self.settings_open = false;
         self.rounds_open = false;
+        self.briefing_open = false;
         self.needs_open = true;
         self.needs_notice = None;
         self.follow_open();
@@ -754,6 +778,9 @@ impl App {
 
     /// Escape in the list: back to the task the person came from, else Home.
     pub fn leave_needs(&mut self) {
+        if self.briefing_open {
+            return self.leave_briefing();
+        }
         match self.needs_back.take().filter(|t| self.tasks.iter().any(|x| &x.id == t)) {
             Some(t) => self.open_task_id(&t),
             None => self.go_home(),
@@ -832,7 +859,7 @@ impl App {
     }
 
     fn act_on(&mut self, what: ClickDo) {
-        if !matches!(what, ClickDo::Open(_) | ClickDo::Nothing) && self.daemon != Daemon::Connected {
+        if !matches!(what, ClickDo::Open(_) | ClickDo::OpenBriefing | ClickDo::Nothing) && self.daemon != Daemon::Connected {
             self.pending_clicks.push(what);
             return;
         }
@@ -855,12 +882,21 @@ impl App {
                     self.needs_hidden.insert(item);
                 }
             }
+            ClickDo::OpenBriefing => {
+                self.effects.push(Effect::Front);
+                self.open_briefing();
+            }
             ClickDo::Nothing => {}
         }
     }
 
     /// A link the system opened with Neko (`neko://task/<id>`). Anything else is ignored. True when it was one of Neko's.
     pub fn open_link(&mut self, link: &str) -> bool {
+        if crate::deeplink::is_briefing(link) {
+            self.effects.push(Effect::Front);
+            self.open_briefing();
+            return true;
+        }
         let Some(task) = crate::deeplink::parse(link) else { return false };
         self.effects.push(Effect::Front);
         self.go_to_task(task);
@@ -1145,6 +1181,12 @@ impl App {
         self.send_undo(task, run.clone(), redo, false);
     }
 
+    /// Undo (or Redo) of a run of any task: the Briefing's rows offer it without opening the task. Files changed since ask first, a
+    /// refusal is said in a panel, exactly as on the run's own card.
+    pub fn undo_run(&mut self, task: &TaskId, run: &RunId, redo: bool) {
+        self.send_undo(task.clone(), run.clone(), redo, false);
+    }
+
     fn send_undo(&mut self, task: TaskId, run: RunId, redo: bool, anyway: bool) {
         let r = if redo { Request::RedoRun { task: task.clone(), run: run.clone(), anyway } } else { Request::UndoRun { task: task.clone(), run: run.clone(), anyway } };
         if let Some(id) = self.send(r) {
@@ -1279,6 +1321,7 @@ impl App {
         self.settings_open = true;
         self.needs_open = false;
         self.rounds_open = false;
+        self.briefing_open = false;
         self.open_cat = None;
         self.send(Request::ListRuntimes);
         self.ask_undo_storage();
@@ -1324,6 +1367,7 @@ impl App {
         self.settings_open = false;
         self.needs_open = false;
         self.rounds_open = false;
+        self.briefing_open = false;
         self.follow_open();
     }
 
@@ -1343,6 +1387,7 @@ impl App {
         self.settings_open = false;
         self.needs_open = false;
         self.rounds_open = false;
+        self.briefing_open = false;
         self.notifier.opened(id);
         self.at_bottom = true;
         self.follow_open();
@@ -1422,6 +1467,8 @@ impl App {
                 self.send(Request::ListNeeds);
                 self.send(Request::ListCats);
                 self.send(Request::ListRounds);
+                self.send(Request::GetBriefing { from_ms: None, to_ms: None });
+                self.send(Request::GetBriefingSettings);
                 // A new connection watches nothing yet.
                 self.watching = None;
                 self.follow_open();
@@ -1526,8 +1573,9 @@ impl App {
                 }
             }
             Change::RoundsPaused { paused } => self.rounds_paused = paused,
-            // The Briefing's page and its notification come with the app's own commit.
-            Change::BriefingChanged { .. } | Change::BriefingSettingsChanged { .. } | Change::BriefingDue { .. } => {}
+            Change::BriefingChanged { briefing } => self.set_briefing(briefing),
+            Change::BriefingSettingsChanged { settings } => self.set_briefing_settings(settings),
+            Change::BriefingDue { counts } => self.briefing_due(&counts),
         }
     }
 
@@ -1605,6 +1653,22 @@ impl App {
             }
             Reply::Needs { items } => {
                 self.set_needs(items);
+                return;
+            }
+            Reply::Briefing { briefing } => {
+                let read = matches!(asked, Some(Asked::BriefingRead));
+                self.set_briefing(briefing);
+                if read {
+                    self.caught_up();
+                }
+                return;
+            }
+            Reply::BriefingSettings { settings } => {
+                self.set_briefing_settings(settings);
+                return;
+            }
+            Reply::Error { message, .. } if matches!(asked, Some(Asked::BriefingRead | Asked::BriefingSettings)) => {
+                self.refusal = Some(Refusal { title: "Neko could not do that".into(), words: message, reveal: None });
                 return;
             }
             Reply::Error { code, message } if matches!(asked, Some(Asked::Answer { .. })) => {

@@ -54,8 +54,15 @@ pub fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     // A sidebar row that acts: the same alignment as Home and the tasks, as Mail's and Notes' sidebars have.
     let new = SidebarItem::new("new-task", "New task").icon(&icons::COMPOSE).button(true).on_press(|s: &mut App| s.new_task_here()).build(t);
     let new = Tooltip::new("New task").keys("⌘N").wrap(new);
-    let home = SidebarItem::new("home", "Home").icon(&crate::ui::icons::HOME).selected(s.open.is_none() && !s.settings_open && !s.needs_open && !s.rounds_open && s.open_cat.is_none()).on_press(|s: &mut App| s.go_home()).build(t);
+    let home = SidebarItem::new("home", "Home").icon(&crate::ui::icons::HOME).selected(s.open.is_none() && !s.settings_open && !s.needs_open && !s.rounds_open && !s.briefing_open && s.open_cat.is_none()).on_press(|s: &mut App| s.go_home()).build(t);
     let home = Tooltip::new("Home").keys("⌘1").wrap(home);
+    // What happened while the person was away: when there is news the row says it in words (Needs you keeps the count).
+    let news = s.briefing_news();
+    let mut briefing = SidebarItem::new("briefing", "Briefing").icon(&icons::BRIEFING).selected(s.briefing_open).on_press(|s: &mut App| s.open_briefing());
+    if let Some(c) = &news {
+        briefing = briefing.description(c.headline());
+    }
+    let briefing = Tooltip::new("Briefing").keys("⌘4").wrap(briefing.build(t));
     // Everything waiting for the person, with how many (the same count as the Dock's).
     let n = s.visible_needs().len();
     let mut needs = SidebarItem::new("needs-you", "Needs you").icon(&crate::ui::icons::INBOX).selected(s.needs_open).on_press(|s: &mut App| s.open_needs());
@@ -74,7 +81,7 @@ pub fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
         rounds = rounds.description(if rounds_n == 1 { "1 round".to_owned() } else { format!("{rounds_n} rounds") });
     }
     let rounds = Tooltip::new("Rounds").keys("⌘3").wrap(rounds.build(t));
-    let mut body = col().w_full().px(t.space.at(2.0)).gap(t.space.at(1.0)).child(new).child(home).child(needs).child(rounds);
+    let mut body = col().w_full().px(t.space.at(2.0)).gap(t.space.at(1.0)).child(new).child(home).child(briefing).child(needs).child(rounds);
     let mut sections = col().key("workspaces").role("list").label("Workspaces").w_full().gap(t.space.at(1.0)).pt(t.space.at(3.0)).focus_group();
     for w in s.sections() {
         sections = sections.child(section(s, t, &w, layer));

@@ -31,6 +31,7 @@ fn tab_reaches_every_control_once_in_reading_order() {
             "sidebar-hide",
             "new-task",
             "home",
+            "briefing",
             "needs-you",
             "rounds",
             "ws-default",
@@ -45,7 +46,7 @@ fn tab_reaches_every_control_once_in_reading_order() {
             "cat-tile-cat_mochi",
             "cat-tile-cat_tofu"
         ],
-        "Home, then Needs you, then Rounds; the sections and their rows are one stop; a section's New task is its own; the cats are one stop, then New cat; the words, then the cat picker and the workspace picker in the composer's footer (the empty composer's Send is off); then each cat's tile in the house"
+        "Home, then the Briefing, then Needs you, then Rounds; the sections and their rows are one stop; a section's New task is its own; the cats are one stop, then New cat; the words, then the cat picker and the workspace picker in the composer's footer (the empty composer's Send is off); then each cat's tile in the house"
     );
     // Round once, the focus is back on the first control; Shift+Tab walks back the same way, wrapping.
     assert_eq!(focus(&rt).as_deref(), Some("sidebar-hide"));
@@ -58,7 +59,7 @@ fn tab_reaches_every_control_once_in_reading_order() {
 #[test]
 fn the_arrows_move_in_the_list_and_return_opens() {
     let mut rt = runtime((1200.0, 800.0), false, scene("tasks-home"));
-    for _ in 0..6 {
+    for _ in 0..7 {
         tab(&mut rt, false);
     }
     assert_eq!(focus(&rt).as_deref(), Some("ws-default"), "with no task open, the list's stop is the first section");

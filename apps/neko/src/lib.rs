@@ -3,6 +3,8 @@
 //! It draws what the daemon says and sends what the person asks; it keeps no records of its own beyond where its window was.
 
 pub mod about;
+pub mod briefing;
+pub mod briefing_view;
 pub mod cat_view;
 pub mod clock;
 pub mod deeplink;
@@ -127,15 +129,22 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         new_task(s, tx);
         return true;
     }
-    if (ev.is_command('1') || ev.is_command('2') || ev.is_command('3')) && !(m.shift || m.alt || m.ctrl) {
+    if (ev.is_command('1') || ev.is_command('2') || ev.is_command('3') || ev.is_command('4')) && !(m.shift || m.alt || m.ctrl) {
         if ev.is_command('1') {
             s.go_home();
         } else if ev.is_command('2') {
             s.open_needs();
-        } else {
+        } else if ev.is_command('3') {
             s.open_rounds();
+        } else {
+            s.open_briefing();
         }
         tx.instant();
+        return true;
+    }
+    // ⌘↩ on the Briefing: mark it read.
+    if s.briefing_open && ev.key == Key::Enter && m.cmd && !(m.shift || m.alt || m.ctrl) {
+        s.mark_briefing_read();
         return true;
     }
     if ev.is_command(',') && !(m.shift || m.alt || m.ctrl) {
@@ -155,13 +164,17 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             s.context_open = false;
             return true;
         }
-        if !s.settings_open && !s.needs_open && s.review.is_some() {
+        if !s.settings_open && !s.needs_open && !s.briefing_open && s.review.is_some() {
             s.close_review();
             return true;
         }
-        // In the Needs you list Escape goes back, whatever the task behind it is doing.
+        // In the Needs you list and on the Briefing Escape goes back, whatever the task behind it is doing.
         if s.needs_open {
             s.leave_needs();
+            return true;
+        }
+        if s.briefing_open {
+            s.leave_briefing();
             return true;
         }
         // A request waiting in the open task: Escape answers it no (the destructive form has no other key), and the agent carries
@@ -206,7 +219,7 @@ pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     // A request appears in the open task: the keyboard leaves the composer, so Escape answers it no and Return presses nothing
     // the person did not choose (the request's own answers are a Tab away).
-    let asking = if s.settings_open || s.needs_open || s.rounds_open { None } else { s.pending_request() };
+    let asking = if s.settings_open || s.needs_open || s.rounds_open || s.briefing_open { None } else { s.pending_request() };
     if asking != s.request_seen {
         if asking.is_some() && s.reply_box().is_some_and(|r| r.focused) {
             s.reply_mut().focused = false;

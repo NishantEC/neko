@@ -118,7 +118,7 @@ fn row_keys(s: &mut App, ev: &KeyEvent, tx: &mut Tx, item: &str, before: Option<
 }
 
 /// One item: its task's title, where and how long it has waited, what is asked, and its answers.
-fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, pos: usize, n: usize, before: Option<String>, after: Option<String>) -> El {
+pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, pos: usize, n: usize, before: Option<String>, after: Option<String>) -> El {
     let key = need_key(&item.id);
     let since = waited(item.since_ms, s.now_ms);
     let asked = what(item);

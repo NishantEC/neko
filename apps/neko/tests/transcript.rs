@@ -36,6 +36,10 @@ fn no_money_is_on_screen_until_the_context_ring_is_opened() {
             let money: Vec<String> = texts(&rt).into_iter().filter(|t| t.contains('$')).collect();
             if name == "task-context-open" {
                 assert!(money.iter().any(|t| t == "$0.96"), "{name}: the cost is in the panel: {money:?}");
+            } else if name.starts_with("briefing") && !name.contains("empty") && !name.contains("caught") {
+                // The Briefing's totals line is the one other place that says what runs cost, as Claude Code reported it
+                // (docs/knowledge/briefing.md): only that line, and only in the briefing's own scenes.
+                assert!(money.iter().all(|t| t.contains("as Claude Code reported it")), "{name} at {size:?} shows money outside its totals line: {money:?}");
             } else {
                 assert!(money.is_empty(), "{name} at {size:?} shows money: {money:?}");
             }

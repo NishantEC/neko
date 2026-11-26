@@ -346,6 +346,9 @@ pub fn home(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     if let Some(n) = &s.notice {
         page = page.child(text(n.clone()).key("notice").role("status").font(t.ty.sm).color(t.ink_muted()).wrap());
     }
+    if let Some(line) = briefing_line(s, t) {
+        page = page.child(line);
+    }
     let room = s.width.unwrap_or(1200.0) - if s.sidebar_shown() { SIDEBAR + 2.0 * crate::sidebar::INSET } else { 0.0 } - 2.0 * t.space.at(10.0);
     let (grid, small) = house(s, t, room);
     if !s.active_cats().is_empty() {
@@ -372,6 +375,32 @@ pub fn home(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
         page = page.child(section(t, "home-progress", "In progress", Some(n), list(t, "home-progress", "In progress", rows)));
     }
     col().key("home-scroll").w_full().grow(1.0).min_h(0.0).items_center().px(t.space.at(10.0)).pt(t.space.at(10.0)).scroll(rune::ScrollSpec { stick_bottom: false }).child(page.pb(t.space.at(14.0)))
+}
+
+/// One quiet card above the house when the briefing has news: "While you were away: 3 finished, 1 needs you", and a way in. Nothing
+/// when there is nothing new or it was read.
+pub fn briefing_line(s: &App, t: &Theme) -> Option<El> {
+    let c = s.briefing_news()?;
+    let words = format!("While you were away: {}", c.headline());
+    let open = crate::ui::button::Button::<App>::new("home-briefing-open", "Open briefing").variant(rune_ui_style::ButtonVariant::Secondary).size(rune_ui_style::Size::Sm).on_press(|s: &mut App| s.open_briefing()).build(t);
+    let r = row()
+        .key("home-briefing")
+        .role("group")
+        .label(words.clone())
+        .w_full()
+        .px(t.space.at(4.0))
+        .py(t.space.at(2.5))
+        .gap(t.space.at(3.0))
+        .center_y()
+        .radius(t.radius.xl)
+        .round_as(t);
+    Some(
+        well(t, r)
+            .fill(t.c.input.bg)
+            .child(glyph(&icons::BRIEFING, t.control.icon, t.ink_muted()))
+            .child(text(words).key("home-briefing-words").font(weight(t.ty.base, t.ty.medium)).color(t.ink()).truncate().min_w(0.0).shrink().grow(1.0).a11y_hidden())
+            .child(open),
+    )
 }
 
 /// "Next round: mochi, Docs check, tomorrow 09:00": the round due soonest that will run by itself (None: no round will).

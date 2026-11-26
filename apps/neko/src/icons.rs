@@ -29,3 +29,10 @@ pub static FOLDER_PLUS: Icon = Icon {
     view: 16.0,
     body: r#"<path d="M13.5 8V6.3c0-.8-.7-1.5-1.5-1.5H8L6.4 3H4c-.8 0-1.5.7-1.5 1.5v7c0 .8.7 1.5 1.5 1.5h4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/><path d="M12 10v4M10 12h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#,
 };
+
+/// A sun rising over a line: the Briefing, what happened while you were away.
+pub static BRIEFING: Icon = Icon {
+    name: "neko-briefing",
+    view: 16.0,
+    body: r#"<path d="M4.25 10.75a3.75 3.75 0 0 1 7.5 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M1.75 10.75h12.5M5 13.5h6M8 2.25v1.5M3.6 5.1l1 1M12.4 5.1l-1 1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#,
+};

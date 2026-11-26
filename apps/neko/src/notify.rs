@@ -10,6 +10,9 @@
 //!   task.
 //! - Posted only when it would not be noise: the app is not in front, or the person is looking at another task (the Needs you list
 //!   shows every item, so it counts as looking).
+//! - The morning briefing is one more notification (`neko.briefing`, title "Your briefing: 3 finished, 1 needs you"), posted when the
+//!   daemon says it is the morning and the window has news, unless the person has the Briefing open in front. Its click opens
+//!   `neko://briefing`; opening the page takes it back.
 //! - A permission request carries Allow once (first), Always allow and Deny; a destructive one carries none and only opens the
 //!   task. A question carries a reply field. A failure only opens the task.
 
@@ -196,6 +199,8 @@ pub struct Here {
     pub task: Option<TaskId>,
     /// The Needs you list is in view.
     pub needs_view: bool,
+    /// The Briefing is in view.
+    pub briefing_view: bool,
 }
 
 /// What a task's notification is for.
@@ -216,6 +221,8 @@ pub struct Notifier {
     notified: HashSet<String>,
     /// The first list has been heard (what was waiting before the app started is not news).
     heard: bool,
+    /// The morning briefing's notification is in Notification Center.
+    briefing_posted: bool,
 }
 
 impl Default for Notifier {
@@ -234,7 +241,7 @@ pub const TEST_ID: &str = "neko.test";
 
 impl Notifier {
     pub fn new(poster: Box<dyn Poster>) -> Notifier {
-        Notifier { switches: Switches::default(), poster, posted: HashMap::new(), notified: HashSet::new(), heard: false }
+        Notifier { switches: Switches::default(), poster, posted: HashMap::new(), notified: HashSet::new(), heard: false, briefing_posted: false }
     }
 
     /// The daemon's list, as it is now. Takes back the notifications whose item is gone, and posts one for each item never seen
@@ -287,6 +294,22 @@ impl Notifier {
         self.posted.insert(task.clone(), Shown::Said);
     }
 
+    /// The morning: "Your briefing: 3 finished, 1 needs you", unless the person is looking at the Briefing already.
+    pub fn briefing(&mut self, counts: &neko_protocol::BriefingCounts, body: &str, here: &Here) {
+        if !counts.news || (here.front && here.briefing_view) {
+            return;
+        }
+        self.poster.post(&briefing_note(counts, body));
+        self.briefing_posted = true;
+    }
+
+    /// The person opened the Briefing (or marked it read): its notification has done its work.
+    pub fn briefing_opened(&mut self) {
+        if std::mem::take(&mut self.briefing_posted) {
+            self.poster.withdraw(&[BRIEFING_NOTE.to_owned()]);
+        }
+    }
+
     /// Settings' "Send a test notification".
     pub fn test(&mut self) {
         self.poster.post(&Note { id: TEST_ID.into(), title: "Neko".into(), body: "Notifications from Neko look like this.".into(), info: Vec::new(), buttons: Vec::new() });
@@ -310,6 +333,20 @@ fn link_info(task: &TaskId, item: Option<&str>) -> Vec<(String, String)> {
         info.push(("item".to_owned(), i.to_owned()));
     }
     info
+}
+
+/// The morning briefing's notification id.
+pub const BRIEFING_NOTE: &str = "neko.briefing";
+
+/// The morning's notification: the counts in its title, one line of what is first in its body; a click opens `neko://briefing`.
+pub fn briefing_note(counts: &neko_protocol::BriefingCounts, body: &str) -> Note {
+    Note {
+        id: BRIEFING_NOTE.into(),
+        title: format!("Your briefing: {}", counts.headline()),
+        body: short(body, BODY_CHARS),
+        info: vec![("briefing".to_owned(), "1".to_owned()), ("url".to_owned(), crate::deeplink::BRIEFING_URL.to_owned())],
+        buttons: Vec::new(),
+    }
 }
 
 /// One line, spaces collapsed, cut at a word to `max` characters.
@@ -377,6 +414,8 @@ pub enum ClickDo {
     Answer { task: TaskId, permission: PermissionId, decision: Decision },
     /// Words typed in a question's reply field: the same follow-up the app's reply box sends.
     Reply { task: TaskId, run: RunId, words: String },
+    /// Open Neko at the Briefing (a click on the morning notification).
+    OpenBriefing,
     /// Not one of Neko's.
     Nothing,
 }
@@ -385,6 +424,10 @@ pub enum ClickDo {
 /// most; an action never answers a destructive request.
 pub fn read_click(action: Option<&str>, typed: Option<&str>, info: &[(String, String)]) -> ClickDo {
     let get = |k: &str| info.iter().find(|(key, _)| key == k).map(|(_, v)| v.as_str());
+    // The morning briefing's notification has no actions: any click on it opens the Briefing.
+    if get("briefing") == Some("1") && get("task").is_none() {
+        return ClickDo::OpenBriefing;
+    }
     let Some(task) = get("task").filter(|t| crate::deeplink::is_task_id(t)).map(|t| TaskId(t.to_owned())) else { return ClickDo::Nothing };
     let open = ClickDo::Open(task.clone());
     match action {
@@ -501,7 +544,7 @@ mod tests {
     }
 
     fn away() -> Here {
-        Here { front: false, task: None, needs_view: false }
+        Here { front: false, task: None, needs_view: false, ..Here::default() }
     }
 
     fn notifier() -> (Notifier, Recorder) {
@@ -545,16 +588,16 @@ mod tests {
         let mut n = Notifier::new(Box::new(r.clone()));
         n.needs(&[perm(T1, false)], &away());
         assert!(r.take().is_empty(), "the first list after launch is not news");
-        let front_in_task = Here { front: true, task: Some(TaskId(T2.into())), needs_view: false };
+        let front_in_task = Here { front: true, task: Some(TaskId(T2.into())), needs_view: false, ..Here::default() };
         n.needs(&[perm(T1, false), question(T2)], &front_in_task);
         assert!(r.take().is_empty(), "the person is in that task, in front");
-        let front_elsewhere = Here { front: true, task: Some(TaskId(T1.into())), needs_view: false };
+        let front_elsewhere = Here { front: true, task: Some(TaskId(T1.into())), needs_view: false, ..Here::default() };
         n.needs(&[perm(T1, false), question(T2), failure("task_00000000000000000000000003")], &front_elsewhere);
         assert_eq!(posted(&r.take()).len(), 1, "in front, but in a different task");
-        let in_list = Here { front: true, task: None, needs_view: true };
+        let in_list = Here { front: true, task: None, needs_view: true, ..Here::default() };
         n.needs(&[perm(T1, false), question(T2), failure("task_00000000000000000000000003"), failure("task_00000000000000000000000004")], &in_list);
         assert!(r.take().is_empty(), "the Needs you list shows it");
-        let home = Here { front: true, task: None, needs_view: false };
+        let home = Here { front: true, task: None, needs_view: false, ..Here::default() };
         n.needs(&[failure("task_00000000000000000000000005")], &home);
         assert_eq!(posted(&r.take()).len(), 1, "Home does not show it");
     }
@@ -594,7 +637,7 @@ mod tests {
     #[test]
     fn a_finished_run_says_done_with_its_first_line_unless_the_person_is_in_that_task() {
         let (mut n, r) = notifier();
-        let here = Here { front: true, task: Some(TaskId(T1.into())), needs_view: true };
+        let here = Here { front: true, task: Some(TaskId(T1.into())), needs_view: true, ..Here::default() };
         n.finished(&TaskId(T1.into()), "Draft the notes", "miso", Some("Done."), &here);
         assert!(r.take().is_empty(), "the person is looking at it");
         n.finished(&TaskId(T2.into()), "Draft the notes", "tofu", Some("## I renamed **the button**\n\n- and more"), &here);
@@ -627,6 +670,36 @@ mod tests {
         let p = posted(&sent);
         assert_eq!((p[0].id.as_str(), p[0].body.as_str()), ("neko.task.task_00000000000000000000000001", "That was already answered."));
         assert!(n.showing(&TaskId(T1.into())));
+    }
+
+    #[test]
+    fn the_morning_briefing_is_one_notification_with_the_counts_and_its_own_click() {
+        let (mut n, r) = notifier();
+        let counts = neko_protocol::BriefingCounts { needs_you: 1, finished: 3, working: 0, rounds_ran: 0, rounds_not_run: 0, news: true };
+        n.briefing(&counts, "mochi asks: Run a command: cargo test", &away());
+        let sent = r.take();
+        let p = posted(&sent);
+        assert_eq!(p.len(), 1);
+        assert_eq!((p[0].id.as_str(), p[0].title.as_str(), p[0].body.as_str()), ("neko.briefing", "Your briefing: 3 finished, 1 needs you", "mochi asks: Run a command: cargo test"));
+        assert!(p[0].buttons.is_empty(), "no actions: a click opens the Briefing");
+        assert_eq!(read_click(None, None, &p[0].info), ClickDo::OpenBriefing);
+        assert!(p[0].info.contains(&("url".to_owned(), "neko://briefing".to_owned())));
+        // Opening the Briefing takes it back, once.
+        n.briefing_opened();
+        assert_eq!(r.take(), vec![Sent::Withdraw(vec!["neko.briefing".to_owned()])]);
+        n.briefing_opened();
+        assert!(r.take().is_empty(), "nothing left to take back");
+    }
+
+    #[test]
+    fn the_morning_briefing_stays_quiet_when_there_is_no_news_or_the_person_is_reading_it() {
+        let (mut n, r) = notifier();
+        let counts = neko_protocol::BriefingCounts { finished: 1, news: true, ..Default::default() };
+        n.briefing(&neko_protocol::BriefingCounts { news: false, ..counts }, "", &away());
+        n.briefing(&counts, "", &Here { front: true, briefing_view: true, ..Here::default() });
+        assert!(r.take().is_empty());
+        n.briefing(&counts, "", &Here { front: true, task: None, needs_view: false, briefing_view: false });
+        assert_eq!(posted(&r.take()).len(), 1, "in front on another page is worth one");
     }
 
     #[test]

@@ -1,4 +1,5 @@
-//! Neko's links (docs/knowledge/needs-you.md): `neko://task/<id>` opens the app at that task. The bundle declares the scheme
+//! Neko's links (docs/knowledge/needs-you.md, docs/knowledge/briefing.md): `neko://task/<id>` opens the app at that task, and
+//! `neko://briefing` at the Briefing. The bundle declares the scheme
 //! (`scripts/build-app.sh`); Rune hands each link to `on_open_url`, the one that launched the app too. A link comes from anyone who
 //! can run `open`, so it is read strictly: one scheme, one kind of path, an id of the shape the daemon makes, nothing else.
 
@@ -10,6 +11,15 @@ pub const SCHEME: &str = "neko";
 /// The link that opens `task`.
 pub fn url(task: &TaskId) -> String {
     format!("{SCHEME}://task/{}", task.0)
+}
+
+/// The link that opens the Briefing (the morning notification's).
+pub const BRIEFING_URL: &str = "neko://briefing";
+
+/// Whether `link` is exactly `neko://briefing` (a trailing slash is allowed; the scheme is read without regard to case).
+pub fn is_briefing(link: &str) -> bool {
+    let Some((scheme, rest)) = link.trim().split_once("://") else { return false };
+    scheme.eq_ignore_ascii_case(SCHEME) && rest.trim_end_matches('/') == "briefing" && !rest.contains(['?', '#'])
 }
 
 /// Whether `id` is a task id as the daemon makes them: `task_` and 26 capital letters and digits.
@@ -32,6 +42,15 @@ pub fn parse(link: &str) -> Option<TaskId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_briefing_link_is_read_strictly() {
+        assert!(is_briefing("neko://briefing") && is_briefing("NEKO://briefing/") && is_briefing(BRIEFING_URL));
+        for bad in ["neko://briefing/more", "neko://briefing?x=1", "neko://briefings", "neko://briefing#top", "neko:briefing", "https://briefing", "neko://task/briefing", ""] {
+            assert!(!is_briefing(bad), "{bad:?} is not the briefing link");
+        }
+        assert_eq!(parse("neko://briefing"), None, "it is not a task link");
+    }
 
     const ID: &str = "task_01HZX3J0000000000000000000";
 

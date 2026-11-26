@@ -100,7 +100,19 @@ pub const SCENES: &[Scene] = &[
     ("task-from-round", task_from_round),
     ("cat-page-rounds", cat_page_rounds),
     ("home-next-round", home_next_round),
+    ("briefing", briefing::briefing),
+    ("briefing-finished", briefing::briefing_finished),
+    ("briefing-empty", briefing::briefing_empty),
+    ("briefing-caught-up", briefing::briefing_caught_up),
+    ("briefing-caught-up-waiting", briefing::briefing_caught_up_waiting),
+    ("briefing-many", briefing::briefing_many),
+    ("briefing-morning-off", briefing::briefing_morning_off),
+    ("home-briefing", briefing::home_briefing),
+    ("settings-briefing", briefing::settings_briefing),
+    ("settings-briefing-invalid", briefing::settings_briefing_invalid),
 ];
+
+mod briefing;
 
 /// The starter cats as a new install has them, each with one placeholder purpose; mochi has standing rules and an earlier version.
 pub fn sample_cats() -> Vec<Cat> {

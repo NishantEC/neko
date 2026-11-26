@@ -120,6 +120,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         crate::needs_view::needs_view(s, &t)
     } else if s.rounds_open {
         crate::rounds_view::rounds_view(s, &t, &mut layer)
+    } else if s.briefing_open {
+        crate::briefing_view::briefing_view(s, &t)
     } else {
         match s.open_task() {
             Some(_) => crate::task_view::task_view(s, &t, &mut layer),
@@ -148,6 +150,9 @@ fn main_label(s: &App) -> String {
     }
     if s.rounds_open {
         return "Rounds".to_owned();
+    }
+    if s.briefing_open {
+        return "Briefing".to_owned();
     }
     if let Some(c) = s.page_cat() {
         return c.name.clone();
@@ -209,7 +214,7 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     if !s.sidebar_shown() {
         band = band.child(lights_room(lights).w(if lights > 0.0 { (lights - 4.0).max(0.0) } else { 0.0 })).child(toggle_button(t, false));
     }
-    let Some(task) = s.open_task().filter(|_| !s.settings_open && !s.needs_open && !s.rounds_open && s.page_cat().is_none()) else { return band };
+    let Some(task) = s.open_task().filter(|_| !s.settings_open && !s.needs_open && !s.rounds_open && !s.briefing_open && s.page_cat().is_none()) else { return band };
     if let Some(c) = s.cat(&task.cat) {
         let id = c.id.clone();
         let st = (task.status == TaskStatus::Working).then_some(TaskStatus::Working);
