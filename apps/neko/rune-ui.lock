@@ -1,0 +1,114 @@
+# rune-ui.lock: what `rune-ui` copied into this app, and each file's hash as written. Kept by `rune-ui add`; commit it.
+version = 1
+rune = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2"
+
+[[item]]
+name = "agent"
+version = "0.8.0"
+files = [
+  { target = "src/ui/agent.rs", sha256 = "2647c35ea32e28131f9ec06cb6fa4b97eaad64da967b6a551288f139ffd5c602" },
+]
+
+[[item]]
+name = "base"
+version = "0.8.0"
+files = [
+  { target = "src/ui/base.rs", sha256 = "e8ae5af013621b76dd077a4665fe2565d6d181a31dbdfa7ba1bf12977dfb0f3c" },
+]
+
+[[item]]
+name = "button"
+version = "0.8.0"
+files = [
+  { target = "src/ui/button.rs", sha256 = "fa2dbbe1a4fa452409afcae4049048d5fe73d3ad85617ae7e86dc83f11f8095c" },
+]
+
+[[item]]
+name = "conversation"
+version = "0.8.0"
+files = [
+  { target = "src/ui/conversation.rs", sha256 = "64cb554049676be1c5262d4c1de5770f730f20ec99a62897bc1f532c39c44b7d" },
+]
+
+[[item]]
+name = "empty"
+version = "0.5.0"
+files = [
+  { target = "src/ui/empty.rs", sha256 = "46181f969e2506b237862883288d6f6e0b42efd60bb6f0f173a36e0d29752dac" },
+]
+
+[[item]]
+name = "font_figtree"
+version = "0.8.0"
+files = [
+  { target = "src/ui/font_figtree/mod.rs", sha256 = "5c4fa501503595e16da203916e5c2eaec325e3688130181ec2dddce87ae52b9d" },
+  { target = "src/ui/font_figtree/Figtree-Variable.ttf", sha256 = "26ad3db9b31ff7dde67a91ff515d022d2f495cd506590699cf264f0bfe6fb714" },
+  { target = "src/ui/font_figtree/OFL.txt", sha256 = "140d37233e7f3ce7313798befa9600893bcceaf41a55fa0fa5ad52f7f657a268" },
+]
+
+[[item]]
+name = "font_inter"
+version = "0.8.0"
+files = [
+  { target = "src/ui/font_inter/mod.rs", sha256 = "f6a49881166f06b6dacad5cf5888b81d9fd790f34a448fef650e11fa1a3f2598" },
+  { target = "src/ui/font_inter/Inter-Regular.ttf", sha256 = "40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82" },
+  { target = "src/ui/font_inter/Inter-Medium.ttf", sha256 = "97ad806f526e41546d46365bb3a393145f75b7b1568913db74549ad8b8dba872" },
+  { target = "src/ui/font_inter/Inter-SemiBold.ttf", sha256 = "78a843fade9d4612a5567302fb595b56976eb5fcebf4fea5a5912d638bafcde3" },
+  { target = "src/ui/font_inter/OFL.txt", sha256 = "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a" },
+]
+
+[[item]]
+name = "icons"
+version = "0.8.0"
+files = [
+  { target = "src/ui/icons.rs", sha256 = "82fffd9c9ca5b7cbbc30440a72a68f4399e2a961642c82fe738bbab27fef4d7f" },
+]
+
+[[item]]
+name = "kbd"
+version = "0.5.0"
+files = [
+  { target = "src/ui/kbd.rs", sha256 = "02cac83386471a3db42a485306024dff9dea3f7777b92ccceb36f6706fc9813c" },
+]
+
+[[item]]
+name = "message"
+version = "0.8.0"
+files = [
+  { target = "src/ui/message.rs", sha256 = "e7c549f2fba7e70e15776e88dc8d7496de17670654d6fc5c6730da9edba93c0a" },
+]
+
+[[item]]
+name = "popup"
+version = "0.8.0"
+files = [
+  { target = "src/ui/popup.rs", sha256 = "d9fce3c86e35b9c3e5b56b14a64411da2bea4356b67aeb44c27dbc15ffbaa6db" },
+]
+
+[[item]]
+name = "prompt_input"
+version = "0.8.0"
+files = [
+  { target = "src/ui/prompt_input.rs", sha256 = "9664541daf5cba9615eeb6aa5eafde520e4cbd2eead18edcd08f42200cba71d0" },
+]
+
+[[item]]
+name = "scroll_area"
+version = "0.5.0"
+files = [
+  { target = "src/ui/scroll_area.rs", sha256 = "2c5d866422c96c346a029efcfe55651f8aba4198a03aa51759d3f17db8babe75" },
+]
+
+[[item]]
+name = "sidebar"
+version = "0.5.0"
+files = [
+  { target = "src/ui/sidebar.rs", sha256 = "93fe7a682009da309cb1a27e214f9b500ee7f2ff57c67a25e40f2ed0abf0c8b4" },
+]
+
+[[item]]
+name = "tooltip"
+version = "0.5.0"
+files = [
+  { target = "src/ui/tooltip.rs", sha256 = "84385fac833bf91c0e300ea1b979e62805bb6d67de3bbf403fa7c94ef0348248" },
+]

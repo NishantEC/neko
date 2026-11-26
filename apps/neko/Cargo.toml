@@ -1,0 +1,55 @@
+# Neko's desktop app, drawn with Rune. Its own Cargo workspace: Rune's `[patch.crates-io]` table (below) must not reach the
+# daemon's workspace at the repository root, which never lists this folder.
+[workspace]
+resolver = "3"
+members = ["."]
+
+[package]
+name = "neko-app"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Neko's desktop app: a thin client that draws what the daemon says."
+
+[lib]
+name = "neko_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "neko"
+path = "src/main.rs"
+
+[dependencies]
+rune = { git = "https://github.com/anomalyco/rune", rev = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2" }
+rune-kit = { git = "https://github.com/anomalyco/rune", rev = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2" }
+rune-ui-style = { git = "https://github.com/NishantEC/rune-ui", tag = "v0.8.0" } # privacy-ok: rune-ui's public repository (a dependency)
+rune-ui-themes = { git = "https://github.com/NishantEC/rune-ui", tag = "v0.8.0" } # privacy-ok: rune-ui's public repository (a dependency)
+neko-protocol = { path = "../../crates/neko-protocol", features = ["ws"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+
+# The Dock registration, the About panel and the menu fix-ups (`dock.rs`, `about.rs`, `menu.rs`): AppKit through objc2, the
+# versions Rune already builds (no new crate in the tree).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSObject"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSMenu", "NSMenuItem", "NSResponder", "NSRunningApplication"] }
+
+[dev-dependencies]
+# The rune-ui drift gate (`tests/rune_ui.rs`) hashes the copies as the CLI does; already in the tree through Rune.
+sha2 = "0.10"
+
+[profile.dev]
+debug = "line-tables-only"
+
+[patch.crates-io]
+winit = { git = "https://github.com/anomalyco/rune", rev = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2" }
+sctk-adwaita = { git = "https://github.com/anomalyco/rune", rev = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2" }
+parley_engine = { git = "https://github.com/anomalyco/rune", rev = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2" }
+naga = { git = "https://github.com/anomalyco/rune", rev = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2" }
+accesskit_atspi_common = { git = "https://github.com/anomalyco/rune", rev = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2" }
