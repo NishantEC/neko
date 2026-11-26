@@ -44,7 +44,10 @@ mkdir -p "$data"
 app="$("$root/scripts/build-app.sh" --dev | tail -n 1)"
 exe="$app/Contents/MacOS/neko"
 quit_open_copy
-/usr/bin/open -n -g "$app" --env "NEKO_DATA_DIR=$data" --env "RUNE_PREFS_DIR=$data/prefs"
+env_args=(--env "NEKO_DATA_DIR=$data" --env "RUNE_PREFS_DIR=$data/prefs")
+# A folder of the person's own cat pictures, if they named one (development builds only; docs/knowledge/design.md).
+if [[ -n "${NEKO_CAT_ART:-}" ]]; then env_args+=(--env "NEKO_CAT_ART=$NEKO_CAT_ART"); fi
+/usr/bin/open -n -g "$app" "${env_args[@]}"
 # `open` does not say which process it started: find it by its exact executable path (read only; nothing is signalled here).
 pid=""
 for _ in $(seq 1 50); do
