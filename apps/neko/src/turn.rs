@@ -12,7 +12,8 @@ use rune_ui_style::{ButtonVariant, Size, tabular, weight};
 
 use crate::faces::{portrait, portrait_in};
 use crate::state::App;
-use crate::ui::agent::{FoldLine, PressTx, caption, elapsed, icon_button, mono, pre, return_presses, took};
+use crate::ui::agent::{FoldLine, Marks, PressTx, Status, caption, elapsed, icon_button, mark_with, mono, pre, return_presses, took};
+use crate::ui::reasoning::Reasoning;
 use crate::ui::base::{Shape, Theme, glyph};
 use crate::ui::button::Button;
 use crate::ui::icons;
@@ -41,15 +42,15 @@ pub fn person(s: &App, t: &Theme, key: &str, words_key: &str, words: &str) -> El
         .build(t)
 }
 
-/// A neutral step mark: the state's shape in the third ink (a tick, a dash, a turning ring), never a colour; red only for a tool
-/// that could not run.
+/// A neutral step mark: rune-ui's `Marks::Neutral` (a tick and a dash in the third ink, a turning ring in the second), red only for a
+/// tool that could not run. A tick and a turning ring are two points under the icon's size, so a step stays quiet.
 fn mark(t: &Theme, st: ToolState) -> El {
     let i = t.control.icon;
     match st {
-        ToolState::Running => crate::ui::base::spinner_in(t, i - 2.0, t.ink_muted(), "Running").a11y_hidden(),
-        ToolState::Done => glyph(&icons::CHECK, i - 2.0, t.ink_faint()),
-        ToolState::Failed => glyph(&icons::CIRCLE_X, i, t.c.danger.fg),
-        ToolState::Denied => row().size(i, i).center().child(el().w(8.0).h(1.5).radius(0.75).fill(t.ink_faint())).a11y_hidden(),
+        ToolState::Running => mark_with(t, Status::Running, i - 2.0, Marks::Neutral).a11y_hidden(),
+        ToolState::Done => mark_with(t, Status::Done, i - 2.0, Marks::Neutral),
+        ToolState::Failed => mark_with(t, Status::Error, i, Marks::Neutral),
+        ToolState::Denied => mark_with(t, Status::Denied, i, Marks::Neutral),
     }
 }
 
@@ -90,19 +91,16 @@ pub fn step(s: &App, t: &Theme, key: &str, p: &Part, workdir: &str) -> Option<El
     Some(line.build(t, body))
 }
 
-/// A thought on the rail: "Thought for 4s" with a hollow dot, folding to its words. A thought with no words is no step: left out.
+/// A thought on the rail: rune-ui's `Reasoning` with the hollow dot ("Thought for 4s", folding to its words). A thought with no words
+/// is no step: left out.
 pub fn thought(s: &App, t: &Theme, key: &str, p: &Part) -> Option<El> {
     let PartBody::Thinking { text: words, done } = &p.body else { return None };
     if words.trim().is_empty() {
         return None;
     }
     let secs = p.ended_ms.map_or(0.0, |e| (e - p.at_ms).max(0) as f64 / 1000.0);
-    let label = if !*done { "Thinking…".to_owned() } else if secs < 1.0 { "Thought".to_owned() } else { format!("Thought for {}", elapsed(secs.round())) };
-    let open = s.is_open(key);
     let k = key.to_owned();
-    let lead = row().size(t.control.icon, t.control.icon).center().child(el().size(7.0, 7.0).radius(3.5).border(1.2, t.ink_faint())).a11y_hidden();
-    let body = if open { vec![text(words.clone()).font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0).selectable(true)] } else { Vec::new() };
-    Some(FoldLine::<App>::new(key.to_owned(), label, open).lead(lead).on_toggle(move |s: &mut App| s.flip(&k)).build(t, body))
+    Some(Reasoning::<App>::new(key.to_owned(), !*done, secs, s.is_open(key)).text(words.clone()).icon(None).on_toggle(move |s: &mut App| s.flip(&k)).build(t))
 }
 
 /// Steps in a row hang on a rail: a hairline in the margin, twelve points left of the reading edge; the steps keep the edge.
@@ -171,11 +169,14 @@ pub fn live_line(t: &Theme, r: &Run, name: &str, thinking: bool, steps: usize) -
 pub fn request(t: &Theme, p: &Permission, name: &str, face: &str) -> El {
     let key = format!("perm-{}", p.id.0);
     if p.state != PermissionState::Pending {
-        let (icon, word) = match p.state {
-            PermissionState::Allowed => (&icons::CHECK, "Allowed once"),
-            PermissionState::AlwaysAllowed => (&icons::CHECK, "Always allowed"),
-            PermissionState::Denied => (&icons::CLOSE, "Denied"),
-            _ => (&icons::CLOCK, "Expired"),
+        // rune-ui's `Confirmation::answered_marks(Marks::Neutral)` draws the same line with the mark at the icon's full size; a step's
+        // tick here is two points smaller, so the answered line's words line up with the steps' (upstream ask: a mark size).
+        let small = t.control.icon - 2.0;
+        let (mark, word) = match p.state {
+            PermissionState::Allowed => (mark_with(t, Status::Done, small, Marks::Neutral), "Allowed once"),
+            PermissionState::AlwaysAllowed => (mark_with(t, Status::Done, small, Marks::Neutral), "Always allowed"),
+            PermissionState::Denied => (mark_with(t, Status::Denied, t.control.icon, Marks::Neutral), "Denied"),
+            _ => (glyph(&icons::CLOCK, small, t.ink_faint()), "Expired"),
         };
         return row()
             .key(key)
@@ -186,7 +187,7 @@ pub fn request(t: &Theme, p: &Permission, name: &str, face: &str) -> El {
             .pl(t.space.at(1.5))
             .gap(t.metrics.gap)
             .center_y()
-            .child(glyph(icon, t.control.icon - 2.0, t.ink_faint()))
+            .child(mark)
             .child(text(word).font(weight(t.ty.base, t.ty.medium)).color(t.ink_muted()).a11y_hidden())
             .child(text(p.title.clone()).font(t.ty.base).color(t.ink_faint()).truncate().min_w(0.0).a11y_hidden());
     }

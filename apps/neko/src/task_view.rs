@@ -335,8 +335,7 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
     let key = format!("worked-{}", r.id.0);
     let offer = offer_of(book, r);
     let mut out = Vec::new();
-    let mark = el().size(7.0, 7.0).radius(3.5).border(1.2, t.ink_faint()).a11y_hidden();
-    let lead = row().size(t.control.icon, t.control.icon).center().child(mark);
+    let lead = crate::ui::agent::hollow_dot(t, t.control.icon);
     if work.is_empty() {
         // Nothing to open: one quiet line with the time.
         let words = if offer.undone { format!("{} · undone", worked_words(r)) } else { worked_words(r) };
