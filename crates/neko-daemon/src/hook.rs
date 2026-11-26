@@ -127,6 +127,17 @@ fn ask(shared: &Arc<Shared>, stream: &TcpStream, run: &runs::HookRun, body: &[u8
 /// `neko-daemon --hook`: Claude Code's `PreToolUse` hook for a run Neko started. Prints the decision and exits 0; when the daemon
 /// cannot be reached or does not know the run, the step is denied (and the hook's `onFailure: "block"` covers a crash).
 pub fn helper() -> ExitCode {
+    // Claude Code runs the call when its hook gives no verdict, so every path prints one: a panic too.
+    match std::panic::catch_unwind(helper_inner) {
+        Ok(code) => code,
+        Err(_) => {
+            println!("{}", decision(Answer::Deny, "Neko's check failed, so the step did not run."));
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+fn helper_inner() -> ExitCode {
     let deny = |why: &str| {
         println!("{}", decision(Answer::Deny, why));
         ExitCode::SUCCESS
@@ -145,8 +156,12 @@ pub fn helper() -> ExitCode {
     if s.write_all(head.as_bytes()).and_then(|()| s.write_all(&input)).and_then(|()| s.flush()).is_err() {
         return deny("Neko could not be reached, so the step did not run.");
     }
+    // The daemon answers within a day; past that (and a little), the helper says no itself.
+    let _ = s.set_read_timeout(Some(Duration::from_secs(neko_core::claude::HOOK_TIMEOUT_S - 10)));
     let mut reply = Vec::new();
-    let _ = s.read_to_end(&mut reply);
+    if s.read_to_end(&mut reply).is_err() && reply.is_empty() {
+        return deny("Neko did not answer in time, so the step did not run.");
+    }
     let text = String::from_utf8_lossy(&reply);
     let status = text.split_whitespace().nth(1).unwrap_or("");
     let body = text.split_once("\r\n\r\n").map_or("", |(_, b)| b);

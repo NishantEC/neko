@@ -85,6 +85,8 @@ pub struct StartSpec {
 pub struct HookLink {
     pub port: u16,
     pub secret: String,
+    /// The helper Claude Code runs as the hook (the daemon's own binary).
+    pub helper: PathBuf,
 }
 
 /// The environment variables a hook helper reads.
@@ -134,6 +136,10 @@ pub enum Failure {
     TimedOut,
     /// Said nothing for too long.
     Stalled,
+    /// Asking before risky steps, a step ran that Neko's hook could not check; the words name it.
+    Unchecked { step: Option<String> },
+    /// Asking before risky steps, the hook helper is missing or cannot run, so nothing started.
+    HookMissing,
 }
 
 /// The usage a CLI reported for a run. Figures it did not report are zero or None, never guessed.
@@ -159,6 +165,8 @@ pub enum AgentEvent {
     TextDelta(String),
     /// The current block of words is whole.
     TextDone,
+    /// The agent began thinking (Claude Code sends no words for it, only that it thinks).
+    ThinkingStarted,
     /// Thinking, as it arrives.
     ThinkingDelta(String),
     ThinkingDone,
@@ -171,6 +179,8 @@ pub enum AgentEvent {
     PermissionAsked { id: String, tool: String, action: Action, tool_use: Option<String> },
     /// The CLI took back a request it asked (it no longer needs the answer).
     PermissionWithdrawn { id: String },
+    /// A hook gave Claude Code no usable verdict, and it ran the call unchecked (it fails open).
+    Unchecked { tool_use: Option<String> },
     Usage(Reported),
     /// The last event.
     Finished(Outcome),

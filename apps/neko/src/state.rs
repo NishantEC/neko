@@ -98,11 +98,13 @@ pub struct Book {
     pub permissions: HashMap<PermissionId, Permission>,
     /// The daemon's whole transcript arrived (until then, events only add to what is there).
     pub loaded: bool,
+    /// The agent is thinking now (the daemon says so as it happens; never stored).
+    pub thinking: bool,
 }
 
 impl Book {
     pub fn from(t: Transcript) -> Book {
-        Book { runs: t.runs, parts: t.parts, permissions: t.permissions.into_iter().map(|p| (p.id.clone(), p)).collect(), loaded: true }
+        Book { runs: t.runs, parts: t.parts, permissions: t.permissions.into_iter().map(|p| (p.id.clone(), p)).collect(), loaded: true, thinking: false }
     }
 
     fn run(&mut self, r: Run) {
@@ -434,6 +436,11 @@ impl App {
             }
             Change::PermissionChanged { permission } => {
                 self.books.entry(permission.task.clone()).or_default().permissions.insert(permission.id.clone(), permission);
+            }
+            Change::Activity { task, thinking } => {
+                if let Some(b) = self.books.get_mut(&task) {
+                    b.thinking = thinking;
+                }
             }
             Change::SettingsChanged { settings } => {
                 if let Some((_, s)) = &mut self.runtimes {

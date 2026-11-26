@@ -31,6 +31,8 @@ pub enum Out {
     /// Answer a waiting hook helper ("Ask before risky steps"): its request id (`hook:…`), the answer and why, in words for the
     /// agent.
     HookAnswer { request: String, answer: Answer, why: String },
+    /// Tell screens watching the task whether the agent is thinking (not stored).
+    Activity { thinking: bool },
 }
 
 /// The prefix of a request that came through the run's hook, not the CLI's own control channel.
@@ -83,8 +85,12 @@ pub struct RunBook {
     tools: HashMap<String, Part>,
     /// Requests put to the person: Neko's id → the runtime's (or the hook's).
     asked: HashMap<PermissionId, String>,
-    /// The hook's requests and the tool calls they are for.
+    /// Requests (the hook's and the CLI's) and the tool calls they are for.
     hook_calls: HashMap<String, String>,
+    /// Tool calls the person said no to (or no one answered): they end as denied, not failed.
+    denied: std::collections::HashSet<String>,
+    /// Whether the agent is thinking now, as screens were last told.
+    thinking: bool,
     /// Tool calls the hook let go ahead: Claude Code's own ask for one of them is answered yes at once.
     approved: std::collections::HashSet<String>,
     /// Bytes of part bodies written so far (for the write-rate check).
@@ -118,7 +124,7 @@ impl RunBook {
         let mut out = Vec::new();
         let rev = core.store.insert_run(&run, now)?;
         out.push(Out::Change(rev, Change::RunChanged { run: run.clone() }));
-        let mut book = RunBook { run, task: task.clone(), who, place, mode, open: None, last_flush: now, tools: HashMap::new(), asked: HashMap::new(), hook_calls: HashMap::new(), approved: Default::default(), written: 0, writes: 0 };
+        let mut book = RunBook { run, task: task.clone(), who, place, mode, open: None, last_flush: now, tools: HashMap::new(), asked: HashMap::new(), hook_calls: HashMap::new(), denied: Default::default(), thinking: false, approved: Default::default(), written: 0, writes: 0 };
         if let Some(w) = words {
             let p = book.new_part(core, PartBody::Person { text: w.to_owned() }, now, true)?;
             out.extend(p);
@@ -222,6 +228,11 @@ impl RunBook {
         &self.place.workdir
     }
 
+    /// The step a tool call is, in a few words ("Bash cargo test"), while it runs or after.
+    pub fn step_words(&self, call: &str) -> Option<String> {
+        self.tools.get(call).and_then(|p| if let PartBody::Tool { name, summary, .. } = &p.body { Some(format!("{name} {summary}").trim().to_owned()) } else { None })
+    }
+
     /// Whether a request is waiting for the person.
     pub fn waiting(&self) -> bool {
         !self.asked.is_empty()
@@ -230,7 +241,20 @@ impl RunBook {
     /// One event from the runtime. `Finished` is [`RunBook::finish`]'s.
     pub fn on(&mut self, core: &mut Core, ev: AgentEvent, now: i64) -> Result<Vec<Out>, StoreError> {
         let mut out = Vec::new();
+        // Anything else that arrives ends the thinking screens show.
+        let thinks = matches!(ev, AgentEvent::ThinkingStarted | AgentEvent::ThinkingDelta(_) | AgentEvent::Usage(_) | AgentEvent::Unchecked { .. } | AgentEvent::Started { .. });
+        if self.thinking && !thinks {
+            self.thinking = false;
+            out.push(Out::Activity { thinking: false });
+        }
         match ev {
+            AgentEvent::ThinkingStarted => {
+                if !self.thinking {
+                    self.thinking = true;
+                    out.push(Out::Activity { thinking: true });
+                }
+            }
+            AgentEvent::Unchecked { .. } => {}
             AgentEvent::Started { session, model } => {
                 if session.is_some() {
                     self.run.session = session;
@@ -249,8 +273,9 @@ impl RunBook {
             AgentEvent::ToolFinished { id, ok, output, exit } => {
                 if let Some(mut part) = self.tools.remove(&id) {
                     if let PartBody::Tool { output: o, state, exit: e, .. } = &mut part.body {
+                        let said_no = self.denied.contains(&id);
                         *o = Some(output);
-                        *state = if ok { ToolState::Done } else { ToolState::Failed };
+                        *state = if ok { ToolState::Done } else if said_no { ToolState::Denied } else { ToolState::Failed };
                         *e = exit;
                     }
                     part.ended_ms = Some(now);
@@ -261,7 +286,12 @@ impl RunBook {
             }
             AgentEvent::PermissionAsked { id, tool, action, tool_use } => out.extend(self.asked(core, id, tool, action, tool_use, now)?),
             AgentEvent::PermissionWithdrawn { id } => {
-                self.hook_calls.remove(&id);
+                // A hook's step no one answered is denied; a step the CLI took back is not.
+                if let Some(t) = self.hook_calls.remove(&id)
+                    && id.starts_with(HOOK)
+                {
+                    self.denied.insert(t);
+                }
                 if let Some((perm, _)) = self.asked.iter().find(|(_, r)| **r == id).map(|(p, r)| (p.clone(), r.clone())) {
                     self.asked.remove(&perm);
                     if let Some((p, rev)) = core.store.settle_permission(&perm, PermissionState::Expired, now)? {
@@ -313,7 +343,7 @@ impl RunBook {
             }
             Verdict::Ask(a) => a,
         };
-        if hook && let Some(t) = &tool_use {
+        if let Some(t) = &tool_use {
             self.hook_calls.insert(request.clone(), t.clone());
         }
         let mut out = self.flush(core, now, true)?;
@@ -352,10 +382,14 @@ impl RunBook {
         let mut out = vec![Out::Change(rev, Change::PermissionChanged { permission: settled })];
         if let Some(request) = self.asked.remove(perm) {
             let answer = if d == Decision::Deny { Answer::Deny } else { Answer::Allow };
-            if let Some(t) = self.hook_calls.remove(&request)
-                && answer == Answer::Allow
-            {
-                self.approved.insert(t);
+            if let Some(t) = self.hook_calls.remove(&request) {
+                if answer == Answer::Allow {
+                    if request.starts_with(HOOK) {
+                        self.approved.insert(t);
+                    }
+                } else {
+                    self.denied.insert(t);
+                }
             }
             out.push(answer_out(request, answer, if answer == Answer::Allow { "The person allowed this step in Neko." } else { DENIED }));
         }
@@ -369,6 +403,10 @@ impl RunBook {
     /// failure leaves a notice that says what to do next.
     pub fn finish(&mut self, core: &mut Core, outcome: Outcome, changes: Option<Changes>, now: i64) -> Result<Vec<Out>, StoreError> {
         let mut out = self.flush(core, now, true)?;
+        if self.thinking {
+            self.thinking = false;
+            out.push(Out::Activity { thinking: false });
+        }
         for (_, mut part) in std::mem::take(&mut self.tools) {
             if let PartBody::Tool { state, .. } = &mut part.body {
                 *state = ToolState::Failed;
@@ -436,6 +474,17 @@ pub fn notice(who: &Who, f: &Failure) -> (String, Option<String>) {
         Failure::Reported(words) => (format!("{n} could not finish: {words}"), Some("Send a follow-up to try again.".to_owned())),
         Failure::TimedOut => ("This ran for 30 minutes, the longest one run may take, so Neko stopped it.".to_owned(), Some("Send a follow-up to carry on where it stopped.".to_owned())),
         Failure::Stalled => (format!("{n} said nothing for 5 minutes, so Neko stopped it."), Some("Send a follow-up to try again.".to_owned())),
+        Failure::HookMissing => (
+            "Neko's permission check is missing, so it did not start this run.".to_owned(),
+            Some("Reinstall Neko, or choose another permission mode in Settings (⌘,), then send a follow-up.".to_owned()),
+        ),
+        Failure::Unchecked { step } => (
+            "Neko could not check a step, so it stopped the run.".to_owned(),
+            Some(match step {
+                Some(st) => format!("This step ran unchecked: {st}. Look at what it did, then send a follow-up."),
+                None => "One step ran unchecked. Look at what it did, then send a follow-up.".to_owned(),
+            }),
+        ),
     }
 }
 

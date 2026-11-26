@@ -177,7 +177,10 @@ pub struct Run {
 pub enum ToolState {
     Running,
     Done,
+    /// It could not run: an error, cut off, timed out.
     Failed,
+    /// The person (or Neko on their behalf, when no one answered) said no: their choice, not a failure.
+    Denied,
 }
 
 /// How a notice in the transcript reads.
@@ -448,6 +451,9 @@ pub enum Change {
     PartDelta { task: TaskId, part: PartId, text: String },
     PermissionChanged { permission: Permission },
     SettingsChanged { settings: Settings },
+    /// Whether the agent is thinking right now (no words arrive while it does); sent only to screens watching the task, never
+    /// stored.
+    Activity { task: TaskId, thinking: bool },
 }
 
 /// What the daemon sends.

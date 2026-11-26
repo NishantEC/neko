@@ -45,6 +45,11 @@ For a run in this mode only, Neko passes `--permission-mode default` and this `-
   helper waits for the answer, then prints
   `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"|"deny","permissionDecisionReason":"…"}}` and
   exits 0. A deny's reason is what the agent reads.
+- Claude Code fails open: a hook that gives no verdict lets the call run (measured, `runtimes.md`). So the helper prints a verdict
+  on every path, a deny on any error; a run in this mode does not start when the helper is missing (`NEKO_HOOK_HELPER` in tests);
+  and when the stream says `hook_no_verdict` the daemon stops the run at once: "Neko could not check a step, so it stopped the
+  run.", naming the step that ran unchecked.
+- A step the person denied (or no one answered) shows as "Denied", not failed.
 - The request expires, and the step is denied, after a day less a minute (`NEKO_HOOK_EXPIRE_MS` in tests), when the run ends, or
   when Claude Code hangs up on the helper. `onFailure: "block"` blocks the call if the helper crashes or times out.
 - When the person's ask rules make Claude Code ask too after the hook said yes, Neko answers that `can_use_tool` yes for the same
@@ -81,5 +86,7 @@ answered it becomes one quiet line. The task's sidebar row shows a warning mark 
 
 `crates/neko-daemon/tests/hooks.rs`, on a temporary HOME holding the person's settings (Bash, Edit and Write allowed, auto mode,
 a hook of their own): mode 1 asks nothing for a command those rules allow; mode 2 asks the same command; a read is not asked;
-allow, deny, always allow, a destructive command, expiry and the run ending while a step waits; the helper refuses a wrong secret;
+allow, deny (shown as denied), always allow, a destructive command, expiry and the run ending while a step waits; the helper
+refuses a wrong secret and says no when it cannot reach Neko; a missing helper stops the run from starting; `hook_no_verdict`
+stops the run;
 the settings files are byte for byte the same afterwards. `crates/neko-core/tests/conductor.rs` covers the routing.

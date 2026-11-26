@@ -173,6 +173,8 @@ fn runs_parts_and_permissions_round_trip() {
         pinned(s, &format!("\"{name}\""));
     }
     pinned(ServerMessage::Event { revision: 9, change: Change::PermissionChanged { permission: perm } }, &format!(r#"{{"kind":"event","revision":9,"change":{{"type":"permission_changed","permission":{}}}}}"#, r#"{"id":"perm_1","task":"task_1","run":"run_1","tool":"Bash","title":"Run a command","why":"Commands can change anything on this Mac.","detail":"cargo test","destructive":false,"state":"pending","asked_ms":3}"#));
+    pinned(ServerMessage::Event { revision: 0, change: Change::Activity { task: TaskId("task_1".into()), thinking: true } }, r#"{"kind":"event","revision":0,"change":{"type":"activity","task":"task_1","thinking":true}}"#);
+    pinned(ToolState::Denied, "\"denied\"");
     pinned(
         ServerMessage::Event { revision: 9, change: Change::PartDelta { task: TaskId("task_1".into()), part: PartId("part_2".into()), text: "more".into() } },
         r#"{"kind":"event","revision":9,"change":{"type":"part_delta","task":"task_1","part":"part_2","text":"more"}}"#,

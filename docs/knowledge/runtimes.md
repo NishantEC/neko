@@ -56,7 +56,36 @@ claude -p --input-format stream-json --output-format stream-json --verbose --inc
   `modelUsage[…].contextWindow` when it is there. Once every message sent has its result, Neko closes stdin and the CLI ends.
 - A follow-up after a run is a new run with `--resume` and the conversation id the last run reported.
 
-## The hook contract, as checked
+## The hook, measured on Claude Code 2.1.331
+
+Three small real runs (outside Neko, in a scratch folder) measured:
+
+1. `--settings` with a `PreToolUse` hook (`matcher` `"*"`, `timeout` 86400) works on top of the person's own settings: their own
+   hooks still ran, and the hook was called for every tool call.
+2. The hook's stdin has exactly `cwd`, `effort`, `hook_event_name` (`PreToolUse`), `permission_mode`, `prompt_id`, `session_id`,
+   `tool_input` (for Bash: `command`, `description`), `tool_name`, `tool_use_id`, `transcript_path`.
+3. `permissionDecision` `deny` with a reason blocked a Bash call although the person's settings allowed Bash outright in `auto`
+   mode. The stream then carries a `tool_result` with `is_error` and the text "PreToolUse:Bash hook error: <reason>", and the
+   `result` lists it under `permission_denials`. `allow` let the call run. Neko shows a denied step as "Denied", not failed.
+4. `timeout` is in seconds and holds past the default: a hook that slept 70 seconds, then allowed, was waited for.
+5. **It fails open.** When the hook command could not run, Claude Code sent
+   `{"type":"system","subtype":"informational","level":"warning","tag":"hook_no_verdict",…,"hook_no_verdict":{"hook_event":"PreToolUse","tool_use_id":…}}`
+   and ran the tool. So: the helper prints a verdict on every path (deny on any error, its own timeout, a wrong secret, an
+   unreachable daemon, a panic); the runtime refuses to start a run in this mode when the helper is missing or not executable;
+   and the daemon stops the run at once when `hook_no_verdict` arrives in this mode, with the notice "Neko could not check a
+   step, so it stopped the run." naming the step that ran unchecked.
+6. Thinking words are not sent: a thinking block starts with `thinking: ""` and a `signature`, each `thinking_delta` has
+   `thinking: ""` and `estimated_tokens`, and `system/thinking_tokens` lines count tokens. Those drive the live "Thinking…" line
+   (`Change::Activity`, not stored).
+7. Lines the parser passes over without a word: `system/hook_started`, `system/hook_response` (the person's own hooks; some
+   print errors such as "command not found" under a short PATH, never shown), `system/session_state_changed`, `system/status`,
+   `system/commands_changed` (very large), `system/informational`, `rate_limit_event`. `system/init` carries `permissionMode`
+   (`auto`, from the person's settings, when no mode flag is passed), `model` and several hundred tools. The `result` line has
+   `total_cost_usd`, `duration_ms`, `num_turns`, `usage`, `modelUsage` keyed by model name, and `permission_denials`.
+
+The fake CLI sends all of these shapes, with placeholder content.
+
+## The hook contract, as documented
 
 Checked on 2026-11-26 against Claude Code's hooks documentation (https://code.claude.com/docs/en/hooks), its settings page
 (https://code.claude.com/docs/en/settings) and permissions page (https://code.claude.com/docs/en/permissions), and
@@ -89,8 +118,8 @@ and its last stderr line when it is plain words), a failure the CLI reported, 30
 
 `crates/neko-core/src/bin/neko-fake-claude.rs` speaks the same protocol from scripts picked by `[fake:NAME]` in the words: plain,
 long, thinking, tools, permission, destructive, outside, slow, spawn, spawn-stay, crash, limit, signin, stall, hook-shell,
-hook-twice, hook-read, hook-destructive, real (empty thinking, words between tools, a long path, a check that exits 1), and a
-resumed conversation. Like Claude Code it reads `permissions.allow` from `$HOME/.claude/settings.json` and runs the `PreToolUse`
+hook-twice, hook-read, hook-destructive, hook-no-verdict, real (empty thinking, words between tools, a long path, a check that
+exits 1), and a resumed conversation. Like Claude Code it reads `permissions.allow` from `$HOME/.claude/settings.json` and runs the `PreToolUse`
 hooks given with `--settings` as the documentation says. Tests give it a HOME of their own. No test runs the real CLI.
 
 ## What the first real run confirmed (Claude Code 2.1.331)
@@ -107,16 +136,12 @@ hooks given with `--settings` as the documentation says. Tests give it a HOME of
 
 ## Still not sure: check on a real run
 
-1. The hook route as a whole: that 2.1.331 runs a `PreToolUse` hook given only through `--settings` in a `-p` stream-json run,
-   with exec form `args` and `onFailure`; that a timeout of 86400 seconds is accepted; and that an invalid `--settings` value is
-   refused loudly rather than ignored (if it were ignored, mode 2 would fall back to Claude Code's own asks).
-2. That a `deny` with a reason reaches the model as the tool's error text, and an `allow` skips the person's own `auto` mode
-   classifier.
-3. Whether a mod or plugin that approves calls (`tool.check`) can approve a call the hook denied in this setup (the permissions
-   page says it can without managed settings).
+1. `onFailure: "block"` and exec form `args` in a `--settings` hook (the measured runs used a plain `command`). If `onFailure`
+   were refused, the whole `--settings` value might be ignored; the `hook_no_verdict` stop does not depend on it.
+2. That an invalid `--settings` value is refused loudly rather than ignored.
+3. Whether a mod or plugin that approves calls (`tool.check`) can approve a call the hook denied in this setup.
 4. `--permission-mode default` is not in 2.1.331's list of choices; it worked, but may be an alias that goes away (`manual`?).
-5. `modelUsage[…].contextWindow` in the `result` line (the session file's cost record has no such field). Without it the ring
-   assumes a 200K window and says so.
+5. `modelUsage[…].contextWindow` in the `result` line. Without it the ring assumes a 200K window and says so.
 6. Whether a second `user` message while a turn runs gets its own `result` (Neko closes stdin when the counts match).
 7. `--include-partial-messages`: `message_start` ids matching the `assistant` message ids, so words are not shown twice.
 8. `result.usage`: `cache_creation_input_tokens` counted as input.

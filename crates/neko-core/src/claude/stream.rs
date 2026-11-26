@@ -97,6 +97,11 @@ impl Mapper {
         };
         let mut out = Vec::new();
         match s(&v["type"]).unwrap_or("") {
+            // Claude Code's own news (hooks starting and answering, its state, its commands, notices): never shown. Two matter.
+            "system" if s(&v["subtype"]) == Some("thinking_tokens") => out.push(Said::Event(AgentEvent::ThinkingStarted)),
+            "system" if s(&v["tag"]) == Some("hook_no_verdict") || !v["hook_no_verdict"].is_null() => {
+                out.push(Said::Event(AgentEvent::Unchecked { tool_use: s(&v["hook_no_verdict"]["tool_use_id"]).map(str::to_owned) }))
+            }
             "system" => self.system(&v, &mut out),
             // A subagent's own stream stays inside its tool call.
             "stream_event" if v["parent_tool_use_id"].is_null() => self.stream(&v["event"], &mut out),
@@ -176,6 +181,7 @@ impl Mapper {
                     }
                     Some("thinking") => {
                         self.open.insert(i, Open::Thinking);
+                        out.push(Said::Event(AgentEvent::ThinkingStarted));
                     }
                     _ => {}
                 }
@@ -505,9 +511,31 @@ mod tests {
             r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"thinking","thinking":"","signature":"EqQBCkYIBxgCKkA"},{"type":"redacted_thinking","data":"x"}]},"parent_tool_use_id":null}"#,
         ]);
         assert!(!events(&said).iter().any(|e| matches!(e, AgentEvent::ThinkingDelta(_) | AgentEvent::Started { .. })), "nothing to show: {said:?}");
+        assert_eq!(events(&said), vec![AgentEvent::ThinkingStarted, AgentEvent::ThinkingDone], "only that it thought");
         // A thought with words still comes through.
         let said = feed(&mut m, &[r#"{"type":"assistant","message":{"id":"m2","content":[{"type":"thinking","thinking":"Check the tests first."}]},"parent_tool_use_id":null}"#]);
         assert!(events(&said).contains(&AgentEvent::ThinkingDelta("Check the tests first.".into())));
+    }
+
+    #[test]
+    fn claude_codes_own_news_is_quiet_and_a_hook_with_no_verdict_is_heard() {
+        let mut m = Mapper::new();
+        let said = feed(&mut m, &[
+            r#"{"type":"system","subtype":"hook_started","hook_name":"SessionStart"}"#,
+            r#"{"type":"system","subtype":"hook_response","stdout":"","stderr":"sh: node: command not found","exit_code":127}"#,
+            r#"{"type":"system","subtype":"session_state_changed","state":"running"}"#,
+            r#"{"type":"system","subtype":"status","status":"requesting"}"#,
+            r#"{"type":"system","subtype":"commands_changed","commands":["a","b"]}"#,
+            r#"{"type":"system","subtype":"informational","level":"info","content":"Something to note"}"#,
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}"#,
+        ]);
+        assert!(said.is_empty(), "{said:?}");
+        assert!(m.noise.is_empty());
+        let said = feed(&mut m, &[
+            r#"{"type":"system","subtype":"thinking_tokens","estimated_tokens":120,"estimated_tokens_delta":40}"#,
+            r#"{"type":"system","subtype":"informational","level":"warning","tag":"hook_no_verdict","content":"A hook gave no usable answer, so it didn't check this action.","hook_no_verdict":{"hook_event":"PreToolUse","tool_use_id":"toolu_1"}}"#,
+        ]);
+        assert_eq!(events(&said), vec![AgentEvent::ThinkingStarted, AgentEvent::Unchecked { tool_use: Some("toolu_1".into()) }]);
     }
 
     #[test]

@@ -167,6 +167,10 @@ impl Runtime for ClaudeRuntime {
         if !spec.workdir.is_dir() {
             return Err(Failure::FolderGone);
         }
+        // Claude Code runs a call unchecked when its hook cannot run: asking before risky steps, no helper, no run.
+        if spec.mode == PermissionMode::Ask && !spec.hook.as_ref().is_some_and(|h| find::executable(&h.helper)) {
+            return Err(Failure::HookMissing);
+        }
         let mut env = vec![("PATH".to_owned(), find::child_path(&path))];
         env.extend(self.env.iter().cloned());
         // The hook helper finds the daemon through these; Claude Code's hooks inherit its environment.
@@ -175,7 +179,7 @@ impl Runtime for ClaudeRuntime {
             env.push((HOOK_PORT_ENV.to_owned(), h.port.to_string()));
             env.push((HOOK_SECRET_ENV.to_owned(), h.secret.clone()));
         }
-        let args = arguments(spec.resume.as_deref(), spec.mode, hook.map(|_| self.guard.as_path()));
+        let args = arguments(spec.resume.as_deref(), spec.mode, hook.map(|h| h.helper.as_path()));
         let guarded = guard::spawn(&self.guard, &path, &args, &spec.workdir, &env, |c| {
             c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         })

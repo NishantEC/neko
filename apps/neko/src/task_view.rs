@@ -73,6 +73,7 @@ fn tool_status(s: ToolState) -> Status {
         ToolState::Running => Status::Running,
         ToolState::Done => Status::Done,
         ToolState::Failed => Status::Error,
+        ToolState::Denied => Status::Skipped,
     }
 }
 

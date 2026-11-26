@@ -157,6 +157,8 @@ fn a_denied_step_does_not_run_and_the_agent_hears_why() {
     let t = transcript(&mut c, &task.id);
     assert!(agent_words(&t).contains("I did not run the tests. Claude Code said: The person said no to this step in Neko."), "{}", agent_words(&t));
     assert_eq!(t.permissions[0].state, PermissionState::Denied);
+    let states: Vec<ToolState> = t.parts.iter().filter_map(|p| if let PartBody::Tool { state, .. } = &p.body { Some(*state) } else { None }).collect();
+    assert_eq!(states, [ToolState::Denied], "the person's choice, not a failure");
 }
 
 #[test]
@@ -287,4 +289,59 @@ fn settings_say_in_one_line_what_the_persons_rules_allow() {
     let mut c = watcher(&d);
     let Reply::Runtimes { runtimes, .. } = c.request(Request::ListRuntimes).unwrap() else { panic!("runtimes") };
     assert_eq!(runtimes[0].rules.as_deref(), Some("Your Claude Code settings allow Bash, Edit and Write without asking. Its default mode is auto: Claude Code decides the rest by itself."));
+}
+
+fn notices(t: &Transcript) -> Vec<(String, Option<String>)> {
+    t.parts.iter().filter_map(|p| if let PartBody::Notice { text, next, .. } = &p.body { Some((text.clone(), next.clone())) } else { None }).collect()
+}
+
+#[test]
+fn a_step_claude_code_ran_unchecked_stops_the_run_when_asking_before_risky_steps() {
+    let (d, _) = daemon("hook-no-verdict", &[]);
+    let mut c = watcher(&d);
+    // Following Claude Code's own rules, the person's own hooks are theirs: the run goes on.
+    let follow = create(&mut c, "[fake:hook-no-verdict]");
+    events_until(&mut c, "done", task_is(&follow.id, TaskStatus::Done));
+    set_mode(&mut c, PermissionMode::Ask);
+    let task = create(&mut c, "[fake:hook-no-verdict]");
+    events_until(&mut c, "the run to stop", task_is(&task.id, TaskStatus::Failed));
+    let n = notices(&transcript(&mut c, &task.id));
+    assert_eq!(n.len(), 1, "{n:?}");
+    assert_eq!(n[0].0, "Neko could not check a step, so it stopped the run.");
+    assert!(n[0].1.as_deref().is_some_and(|x| x.contains("ran unchecked: Bash cargo test")), "the step is named: {n:?}");
+}
+
+#[test]
+fn without_its_helper_a_run_that_asks_before_risky_steps_does_not_start() {
+    let (d, log) = daemon("hook-missing", &[("NEKO_HOOK_HELPER", "/nonexistent/neko-daemon")]);
+    let mut c = watcher(&d);
+    set_mode(&mut c, PermissionMode::Ask);
+    let task = create(&mut c, "[fake:hook-shell]");
+    events_until(&mut c, "refused", task_is(&task.id, TaskStatus::Failed));
+    let t = transcript(&mut c, &task.id);
+    assert!(notices(&t)[0].0.contains("permission check is missing"), "{:?}", notices(&t));
+    assert!(agent_words(&t).is_empty() && hook_inputs(&log).is_empty(), "nothing ran");
+}
+
+#[test]
+fn the_helper_says_no_when_it_cannot_reach_neko_or_runs_outside_a_run() {
+    // A port nothing listens on.
+    let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    for (port, secret) in [(free, "s3cret"), (0, "")] {
+        let (code, out) = helper(port, secret);
+        assert_eq!(code, Some(0));
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap_or_else(|_| panic!("a verdict on every path: {out}"));
+        assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny", "{out}");
+    }
+}
+
+#[test]
+fn screens_hear_when_the_agent_thinks() {
+    let (d, _) = daemon("thinking", &[]);
+    let mut c = watcher(&d);
+    let task = create(&mut c, "[fake:real]");
+    assert_eq!(c.request(Request::WatchTask { task: Some(task.id.clone()) }).unwrap(), Reply::Ok);
+    let changes = events_until(&mut c, "done", task_is(&task.id, TaskStatus::Done));
+    let thinking: Vec<bool> = changes.iter().filter_map(|ch| if let Change::Activity { thinking, .. } = ch { Some(*thinking) } else { None }).collect();
+    assert!(thinking.contains(&true) && thinking.last() == Some(&false), "{thinking:?}");
 }

@@ -157,6 +157,7 @@ pub fn push(shared: &Shared, task: &TaskId, outs: Vec<Out>, control: Option<&Arc
                     let _ = c.answer(&request, answer);
                 }
             }
+            Out::Activity { thinking } => shared.stream(task, &ServerMessage::Event { revision: 0, change: Change::Activity { task: task.clone(), thinking } }),
             Out::HookAnswer { request, answer, why } => {
                 if let Some(tx) = lock(&shared.runs.hooks).remove(&request) {
                     let _ = tx.send((answer, why));
@@ -289,7 +290,9 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
         return finish(Outcome::Stopped);
     }
     // Asking before risky steps, the run's hook helper reaches the daemon with a secret of its own.
-    let hook = (settings.permission_mode == PermissionMode::Ask).then(|| crate::files::random_hex(32).ok()).flatten().map(|secret| HookLink { port: shared.port, secret });
+    // The helper is this binary (`NEKO_HOOK_HELPER` names another, for tests); the runtime refuses to start without it.
+    let helper = std::env::var_os("NEKO_HOOK_HELPER").filter(|h| !h.is_empty()).map(PathBuf::from).or_else(|| std::env::current_exe().ok()).unwrap_or_default();
+    let hook = (settings.permission_mode == PermissionMode::Ask).then(|| crate::files::random_hex(32).ok()).flatten().map(|secret| HookLink { port: shared.port, secret, helper });
     if settings.permission_mode == PermissionMode::Ask && hook.is_none() {
         return finish(Outcome::Failed(Failure::Crashed { code: None, words: "Neko could not make a secret for this run's hook.".into() }));
     }
@@ -348,6 +351,13 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
                     (_, o) => o,
                 });
                 return;
+            }
+            Some(neko_core::runtime::AgentEvent::Unchecked { tool_use }) => {
+                // Claude Code ran a step our hook could not check. Asking before risky steps, that run stops now.
+                if settings.permission_mode == PermissionMode::Ask && limit.is_none() {
+                    limit = Some(Failure::Unchecked { step: tool_use.as_deref().and_then(|t| b.step_words(t)) });
+                    control.stop();
+                }
             }
             Some(ev) => {
                 let mut core = lock(&shared.core);
