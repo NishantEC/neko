@@ -1,0 +1,9 @@
+/target
+**/target
+.DS_Store
+# Renders and captures stay local: they can show a real screen.
+*.png
+!docs/**/*.png
+# Local agent worktrees and scratch.
+/.claude/worktrees/
+/.worktrees/

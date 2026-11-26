@@ -1,0 +1,11 @@
+#!/bin/bash
+# Before a commit lands: nothing personal or work-related may enter the repo, and staged Rust must compile.
+# Enabled with `git config core.hooksPath .githooks`.
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+"$root/scripts/privacy-check.sh" --staged
+# No `grep -q` at the end of a pipe: under pipefail it fails the pipe when the writer is still writing.
+rust="$(git diff --cached --name-only --diff-filter=ACMR | grep -cE '\.rs$|(^|/)Cargo\.(toml|lock)$' || true)"
+if [ "$rust" != "0" ] && [ -x "$root/scripts/check.sh" ]; then
+  exec "$root/scripts/check.sh" --quick
+fi
