@@ -4,8 +4,10 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod agent;
+pub mod badge;
 pub mod base;
 pub mod button;
+pub mod confirmation;
 pub mod conversation;
 pub mod empty;
 pub mod font_figtree;
@@ -15,8 +17,13 @@ pub mod kbd;
 pub mod message;
 pub mod popup;
 pub mod prompt_input;
+pub mod radio_group;
+pub mod reasoning;
+pub mod response;
 pub mod scroll_area;
+pub mod shimmer;
 pub mod sidebar;
+pub mod tool;
 pub mod tooltip;
 
 /// Every installed font item: `AppSpec { fonts: rune_ui_style::fonts::install(ui::FONTS), .. }` registers them with Rune and lets

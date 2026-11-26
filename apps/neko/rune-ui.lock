@@ -10,6 +10,13 @@ files = [
 ]
 
 [[item]]
+name = "badge"
+version = "0.5.0"
+files = [
+  { target = "src/ui/badge.rs", sha256 = "5c394890d10ac202ca11f484b776e1575740223a1bf6d3a0b4caf73ed9a3dcf3" },
+]
+
+[[item]]
 name = "base"
 version = "0.8.0"
 files = [
@@ -21,6 +28,13 @@ name = "button"
 version = "0.8.0"
 files = [
   { target = "src/ui/button.rs", sha256 = "fa2dbbe1a4fa452409afcae4049048d5fe73d3ad85617ae7e86dc83f11f8095c" },
+]
+
+[[item]]
+name = "confirmation"
+version = "0.8.0"
+files = [
+  { target = "src/ui/confirmation.rs", sha256 = "b334981311f1ce14e15bc61959841c126dc7316c847b373b3dc6d3dc16b89b87" },
 ]
 
 [[item]]
@@ -93,6 +107,27 @@ files = [
 ]
 
 [[item]]
+name = "radio_group"
+version = "0.5.0"
+files = [
+  { target = "src/ui/radio_group.rs", sha256 = "9989de9b268cc59d607cdc9d2d527fc34773f24a9b2d71d67ecc1c477830e9e0" },
+]
+
+[[item]]
+name = "reasoning"
+version = "0.6.0"
+files = [
+  { target = "src/ui/reasoning.rs", sha256 = "3ebbf657431c9345903cc2e91099d279a75805d098277a1ede1dfe1e899c48a4" },
+]
+
+[[item]]
+name = "response"
+version = "0.8.0"
+files = [
+  { target = "src/ui/response.rs", sha256 = "8eb87d26821947de5609b037459a3f1b7e315e205a9aac084494ac00e8b97f2f" },
+]
+
+[[item]]
 name = "scroll_area"
 version = "0.5.0"
 files = [
@@ -100,10 +135,24 @@ files = [
 ]
 
 [[item]]
+name = "shimmer"
+version = "0.8.0"
+files = [
+  { target = "src/ui/shimmer.rs", sha256 = "6a7fd4cafed3f259a501f6a87859c070c80d627ab1d3c3d6a18c727082ae1d1d" },
+]
+
+[[item]]
 name = "sidebar"
 version = "0.5.0"
 files = [
   { target = "src/ui/sidebar.rs", sha256 = "93fe7a682009da309cb1a27e214f9b500ee7f2ff57c67a25e40f2ed0abf0c8b4" },
+]
+
+[[item]]
+name = "tool"
+version = "0.8.0"
+files = [
+  { target = "src/ui/tool.rs", sha256 = "3f40a83a2da293aa9aa44ef69aeb8e298f61efa6d2a99bc42b885c5d426e8bbc" },
 ]
 
 [[item]]
