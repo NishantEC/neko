@@ -364,6 +364,17 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
     let began = Instant::now();
     let mut heard = Instant::now();
     let mut limit: Option<Failure> = None;
+    // The daemon is stopping (`stop_all` ended the agent through the run guard): every word the person saw is written now, and the
+    // run is left for the quit to mark interrupted (`interrupted_at_quit`), so a follow-up resumes it.
+    let quit = || {
+        let mut b = lock(&book);
+        let mut core = lock(&shared.core);
+        let now = core.now();
+        if let Ok(outs) = b.save_words(&mut core, now) {
+            push(shared, &task.id, outs, None);
+        }
+        release(shared, &task.id, cancelled);
+    };
     loop {
         let ev = match started.events.recv_timeout(Duration::from_secs(1)) {
             Ok(ev) => {
@@ -371,6 +382,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
                 Some(ev)
             }
             Err(RecvTimeoutError::Timeout) => None,
+            Err(RecvTimeoutError::Disconnected) if shared.stopping.load(Ordering::SeqCst) => return quit(),
             Err(RecvTimeoutError::Disconnected) => {
                 finish(limit.take().map_or(Outcome::Failed(Failure::Crashed { code: None, words: String::new() }), Outcome::Failed));
                 return;
@@ -391,6 +403,10 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
             }
         }
         match ev {
+            Some(neko_core::runtime::AgentEvent::Finished(_)) if shared.stopping.load(Ordering::SeqCst) => {
+                drop(b);
+                return quit();
+            }
             Some(neko_core::runtime::AgentEvent::Finished(o)) => {
                 drop(b);
                 // A run the limits ended failed with that reason, not "stopped".
@@ -519,12 +535,65 @@ pub fn remove_task(shared: &Shared, task: &TaskId) -> Reply {
     }
 }
 
-/// At start: runs the last daemon left running are interrupted, with a notice in each task.
+/// At start: runs the last daemon left running are interrupted, with a notice in each task. That daemon did not stop cleanly (a clean
+/// stop marks its runs itself, `interrupted_at_quit`), so the words of the last few seconds may not have reached the disk: the notice
+/// says so.
 pub fn recover(core: &mut Core) {
+    interrupt(core, "Neko stopped unexpectedly while this was running. Its last few seconds of words may be missing.");
+}
+
+/// At a clean stop, after every run wrote its words (`stop_all`): each run still running is interrupted, with a notice that nothing
+/// was lost.
+pub fn interrupted_at_quit(core: &mut Core) {
+    interrupt(core, "Neko was quit while this was running. Everything it said is kept.");
+}
+
+fn interrupt(core: &mut Core, words: &str) {
     let Ok(tasks) = core.store.interrupt_leftovers(core.now()) else { return };
     for t in tasks {
         if let Ok(Some(task)) = core.store.get_task(&t) {
-            let _ = conductor::standalone_notice(core, &task, Tone::Warning, "Neko stopped while this was running. What was written is kept.".into(), Some("Send a follow-up to carry on.".into()), None);
+            let _ = conductor::standalone_notice(core, &task, Tone::Warning, words.into(), Some("Send a follow-up to carry on.".into()), None);
         }
     }
+}
+
+/// The daemon is stopping: every running agent is ended through its run guard, and requests waiting for the person expire (the
+/// hook helpers see `stopping`). Returns at once; the run threads write their words and end (`run`'s `quit`).
+pub fn stop_all(shared: &Shared) {
+    for a in lock(&shared.runs.active).values() {
+        if let Some(c) = &a.control {
+            c.stop();
+        }
+    }
+    // A hook helper waiting on an answer is told no now.
+    for (_, tx) in lock(&shared.runs.hooks).drain() {
+        let _ = tx.send((Answer::Deny, "Neko is stopping.".into()));
+    }
+}
+
+/// A task's transcript, sent to one connection from inside its running run's lock (if it has one): the open part carries every word
+/// streamed so far (the store lags it by the write rate), and no streamed word can be sent between the snapshot and the reply, so a
+/// screen that opens a task while words stream misses none and doubles none.
+pub fn send_transcript(shared: &Shared, conn: u64, reply_id: u64, task: &TaskId) {
+    let book = lock(&shared.runs.active).get(task).and_then(|a| a.book.clone());
+    let held = book.as_ref().map(|b| lock(b));
+    let reply = {
+        let core = lock(&shared.core);
+        let s = &core.store;
+        match (s.get_task(task), s.runs_of(task), s.parts_of(task), s.permissions_of(task)) {
+            (Ok(Some(t)), Ok(runs), Ok(mut parts), Ok(permissions)) => {
+                if let Some(open) = held.as_ref().and_then(|b| b.open_part()) {
+                    match parts.iter_mut().find(|p| p.id == open.id) {
+                        Some(p) => *p = open.clone(),
+                        None => parts.push(open.clone()),
+                    }
+                }
+                Reply::Transcript { transcript: neko_protocol::Transcript { task: t, runs, parts, permissions } }
+            }
+            (Ok(None), ..) => Reply::error(ErrorCode::NotFound, "There is no such task."),
+            (Err(e), ..) | (_, Err(e), ..) | (_, _, Err(e), _) | (.., Err(e)) => Reply::error(ErrorCode::Internal, e.to_string()),
+        }
+    };
+    shared.send_to(conn, &ServerMessage::Reply { id: reply_id, reply });
+    drop(held);
 }

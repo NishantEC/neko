@@ -190,6 +190,16 @@ impl RunBook {
         self.written += serde_json::to_string(&p.body).map_or(0, |s| s.len() as u64);
     }
 
+    /// The part words are streaming into, with every word so far (the store may lag it by the write rate).
+    pub fn open_part(&self) -> Option<&Part> {
+        self.open.as_ref().map(|(p, _)| p)
+    }
+
+    /// Writes every word the open part holds now, whatever the write rate (the daemon is stopping: what the person saw is kept).
+    pub fn save_words(&mut self, core: &mut Core, now: i64) -> Result<Vec<Out>, StoreError> {
+        self.flush(core, now, false)
+    }
+
     /// Writes the open part's words if they changed; `end` closes it (and pushes it whole).
     fn flush(&mut self, core: &mut Core, now: i64, end: bool) -> Result<Vec<Out>, StoreError> {
         let mut out = Vec::new();

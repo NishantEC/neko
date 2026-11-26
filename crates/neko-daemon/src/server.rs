@@ -49,7 +49,7 @@ pub struct Shared {
     conns: Mutex<HashMap<u64, Conn>>,
     token: String,
     pub port: u16,
-    stopping: AtomicBool,
+    pub stopping: AtomicBool,
     pub runs: Runs,
     /// "Needs you": the list screens were last told, and whether a change may have altered it.
     needs: NeedsWatch,
@@ -69,7 +69,7 @@ pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl Shared {
     /// Sends `msg` to one connection.
-    fn send_to(&self, id: u64, msg: &ServerMessage) {
+    pub fn send_to(&self, id: u64, msg: &ServerMessage) {
         if let Some(c) = lock(&self.conns).get(&id) {
             let _ = c.tx.send(Out::Text(msg.to_json()));
             c.wake.wake();
@@ -205,6 +205,8 @@ pub fn run(dir: &Path, port: u16) -> Result<(), StartError> {
     while shared.runs.threads.load(Ordering::SeqCst) > 0 && std::time::Instant::now() < until {
         std::thread::sleep(Duration::from_millis(10));
     }
+    // Runs still marked running were cut off by this stop: interrupted, with nothing lost.
+    crate::runs::interrupted_at_quit(&mut lock(&shared.core));
     if let Err(e) = lock(&shared.core).store.checkpoint() {
         eprintln!("neko-daemon: checkpoint at shutdown failed: {e}");
     }
@@ -217,6 +219,8 @@ pub fn run(dir: &Path, port: u16) -> Result<(), StartError> {
 /// Closes every connection and wakes the accept loop so it can end.
 fn stop(shared: &Shared) {
     shared.stopping.store(true, Ordering::SeqCst);
+    // Pending requests never hold the stop up: runs end through their guards and write their words (docs/knowledge/run-guard.md).
+    crate::runs::stop_all(shared);
     *lock(&shared.needs.dirty) = true;
     shared.needs.wake.notify_one();
     for c in lock(&shared.conns).values() {
@@ -261,6 +265,13 @@ fn session(stream: TcpStream, id: u64, shared: &Arc<Shared>) {
     let mut ws = WebSocket::from_raw_socket(stream, Role::Server, None);
     let mut said_hello = false;
     let _ = pump::run(&mut ws, fd, &wake_rx, &rx, |text| {
+        // A transcript is sent from inside the run's lock, so no streamed word falls between it and the words after it.
+        if said_hello
+            && let Ok(ClientMessage { id: reply_id, request: Request::GetTranscript { task } }) = serde_json::from_str::<ClientMessage>(&text)
+        {
+            crate::runs::send_transcript(shared, id, reply_id, &task);
+            return Flow::Continue;
+        }
         let (reply_id, reply, flow) = answer(&text, id, &mut said_hello, shared);
         shared.send_to(id, &ServerMessage::Reply { id: reply_id, reply });
         flow

@@ -104,13 +104,18 @@ fn ask(shared: &Arc<Shared>, stream: &TcpStream, run: &runs::HookRun, body: &[u8
         }
     };
     loop {
-        match rx.recv_timeout(Duration::from_millis(500)) {
+        match rx.recv_timeout(Duration::from_millis(100)) {
             Ok((answer, why)) => {
                 lock(&shared.runs.hooks).remove(&request);
                 return Some(decision(answer, &why));
             }
             Err(RecvTimeoutError::Disconnected) => return Some(decision(Answer::Deny, RUN_ENDED)),
             Err(RecvTimeoutError::Timeout) => {
+                // The daemon is stopping: a pending request never holds it up.
+                if shared.stopping.load(std::sync::atomic::Ordering::SeqCst) {
+                    lock(&shared.runs.hooks).remove(&request);
+                    return Some(decision(Answer::Deny, "Neko is stopping."));
+                }
                 if Instant::now() >= until {
                     withdraw(shared);
                     return Some(decision(Answer::Deny, EXPIRED));
