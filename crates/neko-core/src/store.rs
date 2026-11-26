@@ -40,6 +40,71 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE TRIGGER events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
     CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;",
+    // 2: tasks run (S1). Where a task works, its runs, the transcript's parts, permission requests, each run's usage, settings.
+    "ALTER TABLE tasks ADD COLUMN folder TEXT;
+    ALTER TABLE tasks ADD COLUMN workdir TEXT;
+    ALTER TABLE tasks ADD COLUMN branch TEXT;
+    ALTER TABLE tasks ADD COLUMN base_commit TEXT;
+    ALTER TABLE tasks ADD COLUMN repo TEXT;
+    ALTER TABLE tasks ADD COLUMN plain INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE runs (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES tasks(id),
+        runtime TEXT NOT NULL,
+        model TEXT,
+        status TEXT NOT NULL,
+        started_ms INTEGER NOT NULL,
+        ended_ms INTEGER,
+        session TEXT,
+        workdir TEXT NOT NULL,
+        branch TEXT,
+        reason TEXT,
+        files INTEGER,
+        added INTEGER,
+        removed INTEGER
+    );
+    CREATE INDEX runs_by_task ON runs(task_id, started_ms);
+    CREATE INDEX runs_by_status ON runs(status);
+    CREATE TABLE usage (
+        run_id TEXT PRIMARY KEY REFERENCES runs(id),
+        input_tokens INTEGER NOT NULL,
+        output_tokens INTEGER NOT NULL,
+        cached_tokens INTEGER NOT NULL,
+        cost_usd REAL,
+        model TEXT,
+        pricing TEXT NOT NULL,
+        reported_by TEXT NOT NULL
+    );
+    CREATE TABLE parts (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES tasks(id),
+        run_id TEXT,
+        seq INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        body TEXT NOT NULL,
+        at_ms INTEGER NOT NULL,
+        ended_ms INTEGER
+    );
+    CREATE UNIQUE INDEX parts_by_task ON parts(task_id, seq);
+    CREATE TABLE permissions (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES tasks(id),
+        run_id TEXT NOT NULL,
+        tool TEXT NOT NULL,
+        title TEXT NOT NULL,
+        why TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        destructive INTEGER NOT NULL,
+        rule TEXT NOT NULL,
+        state TEXT NOT NULL,
+        asked_ms INTEGER NOT NULL,
+        answered_ms INTEGER
+    );
+    CREATE INDEX permissions_by_task ON permissions(task_id, asked_ms);
+    CREATE TABLE settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );",
 ];
 
 /// The schema version this build writes.
@@ -71,15 +136,15 @@ impl From<rusqlite::Error> for StoreError {
 
 /// One connection to the store.
 pub struct Store {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 /// A status as stored: its protocol name ("new").
-fn status_name(s: TaskStatus) -> String {
+pub(crate) fn status_name<T: serde::Serialize>(s: T) -> String {
     serde_json::to_value(s).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
 }
 
-fn status_of(name: &str) -> rusqlite::Result<TaskStatus> {
+pub(crate) fn status_of<T: serde::de::DeserializeOwned>(name: &str) -> rusqlite::Result<T> {
     serde_json::from_value(serde_json::Value::String(name.to_owned())).map_err(|e| rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(e)))
 }
 
@@ -91,10 +156,11 @@ fn task_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         title: row.get(3)?,
         status: status_of(&row.get::<_, String>(4)?)?,
         created_ms: row.get(5)?,
+        folder: row.get(6)?,
     })
 }
 
-const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms";
+const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder";
 
 impl Store {
     /// Opens the store at `path` (made if missing), in WAL mode, and runs any migration it lacks.
@@ -143,12 +209,12 @@ impl Store {
     }
 
     /// Stores a task and its `task_created` event in one transaction. Returns the task and the event's sequence number.
-    pub fn create_task(&mut self, id: &TaskId, workspace: &str, words: &str, now_ms: i64) -> Result<(Task, u64), StoreError> {
-        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New };
+    pub fn create_task(&mut self, id: &TaskId, workspace: &str, words: &str, folder: Option<&str>, now_ms: i64) -> Result<(Task, u64), StoreError> {
+        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New, folder: folder.map(str::to_owned) };
         let tx = self.conn.transaction()?;
         tx.execute(
-            &format!("INSERT INTO tasks ({TASK_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6)"),
-            params![task.id.0, task.workspace, task.words, task.title, status_name(task.status), task.created_ms],
+            &format!("INSERT INTO tasks ({TASK_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"),
+            params![task.id.0, task.workspace, task.words, task.title, status_name(task.status), task.created_ms, task.folder],
         )?;
         let data = serde_json::json!({ "title": task.title }).to_string();
         tx.execute("INSERT INTO events (at_ms, workspace_id, subject, kind, data) VALUES (?1, ?2, ?3, 'task_created', ?4)", params![now_ms, workspace, task.id.0, data])?;

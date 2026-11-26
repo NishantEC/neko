@@ -3,11 +3,20 @@
 //! Logic here never reads the system clock or makes a random id itself: a [`Clock`] and an [`Ids`] are handed in, so the tests
 //! run the same every time. The daemon hands in [`SystemClock`] and [`RandomIds`].
 
+pub mod claude;
 pub mod clock;
+pub mod conductor;
+pub mod find;
+pub mod guard;
+pub mod policy;
+pub mod records;
+pub mod runtime;
 pub mod store;
 pub mod title;
+pub mod workplace;
 
 pub use clock::{Clock, FixedClock, Ids, RandomIds, SequentialIds, SystemClock};
+pub use records::Place;
 pub use store::{DEFAULT_WORKSPACE, Store, StoreError};
 
 use neko_protocol::{MAX_WORDS_BYTES, Task, TaskId};
@@ -47,6 +56,11 @@ impl Core {
 
     /// Stores a task with the person's exact words, and the event that says so. Returns the task and the event's revision.
     pub fn create_task(&mut self, words: &str) -> Result<(Task, u64), NewTaskError> {
+        self.create_task_in(words, None)
+    }
+
+    /// [`Core::create_task`] in a folder the person chose.
+    pub fn create_task_in(&mut self, words: &str, folder: Option<&str>) -> Result<(Task, u64), NewTaskError> {
         if words.trim().is_empty() {
             return Err(NewTaskError::Empty);
         }
@@ -55,6 +69,17 @@ impl Core {
         }
         let now = self.clock.now_ms();
         let id = TaskId(format!("task_{}", self.ids.next_id(now)));
-        self.store.create_task(&id, DEFAULT_WORKSPACE, words, now).map_err(|e| NewTaskError::Store(e.to_string()))
+        self.store.create_task(&id, DEFAULT_WORKSPACE, words, folder, now).map_err(|e| NewTaskError::Store(e.to_string()))
+    }
+
+    /// Now, from the clock handed in.
+    pub fn now(&self) -> i64 {
+        self.clock.now_ms()
+    }
+
+    /// A new id with its prefix (`run_`, `part_`, `perm_`).
+    pub fn new_id(&mut self, prefix: &str) -> String {
+        let now = self.clock.now_ms();
+        format!("{prefix}_{}", self.ids.next_id(now))
     }
 }

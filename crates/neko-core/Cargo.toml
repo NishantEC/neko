@@ -10,3 +10,13 @@ publish.workspace = true
 neko-protocol.workspace = true
 rusqlite.workspace = true
 serde_json.workspace = true
+serde.workspace = true
+libc.workspace = true
+
+# A stand-in for the `claude` CLI that speaks its streaming protocol from scripts: every test and scene uses it, never the real
+# CLI. Built with the workspace's tests; never shipped (scripts/build-app.sh builds only neko-daemon).
+[[bin]]
+name = "neko-fake-claude"
+path = "src/bin/neko-fake-claude.rs"
+test = false
+doctest = false

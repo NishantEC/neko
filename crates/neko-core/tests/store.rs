@@ -70,16 +70,16 @@ fn migrations_run_once_from_version_one_and_a_newer_store_is_left_alone() {
     let (path, _g) = temp();
     let s = Store::open(&path).unwrap();
     assert_eq!(s.version().unwrap(), SCHEMA_VERSION);
-    assert_eq!(SCHEMA_VERSION, 1);
+    assert_eq!(SCHEMA_VERSION, 2);
     let mode: String = s.connection().query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
     assert_eq!(mode, "wal");
     drop(s);
     let s = Store::open(&path).unwrap();
-    assert_eq!(s.version().unwrap(), 1, "opening again changes nothing");
+    assert_eq!(s.version().unwrap(), 2, "opening again changes nothing");
     s.connection().pragma_update(None, "user_version", 99).unwrap();
     drop(s);
     match Store::open(&path) {
-        Err(StoreError::Newer { found: 99, known: 1 }) => {}
+        Err(StoreError::Newer { found: 99, known: 2 }) => {}
         Err(e) => panic!("wrong error: {e}"),
         Ok(_) => panic!("a store from a newer Neko must not be opened"),
     }
@@ -111,4 +111,28 @@ fn two_connections_see_each_others_writes() {
     let mut other = Core::open(&path, Box::new(FixedClock::new(1_765_000_000_000, 1000)), Box::new(SequentialIds(100))).unwrap();
     other.create_task("From the other side").unwrap();
     assert_eq!(writer.store.list_tasks("default").unwrap().len(), 2);
+}
+
+#[test]
+fn an_s0_store_moves_to_version_two_with_its_tasks() {
+    let (path, _g) = temp();
+    {
+        // The S0 schema, as version 1 wrote it, with one task.
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_ms INTEGER NOT NULL);
+             CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), words TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, created_ms INTEGER NOT NULL);
+             CREATE INDEX tasks_by_workspace ON tasks(workspace_id, created_ms DESC);
+             CREATE TABLE events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at_ms INTEGER NOT NULL, workspace_id TEXT NOT NULL, subject TEXT NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL);
+             INSERT INTO workspaces VALUES ('default', 'Home', 1);
+             INSERT INTO tasks VALUES ('task_1', 'default', 'Fix it', 'Fix it', 'new', 5);
+             PRAGMA user_version = 1;",
+        )
+        .unwrap();
+    }
+    let c = core(&path);
+    assert_eq!(c.store.version().unwrap(), 2);
+    let t = c.store.get_task(&TaskId("task_1".into())).unwrap().unwrap();
+    assert_eq!((t.words.as_str(), t.status, t.folder), ("Fix it", TaskStatus::New, None));
+    assert!(c.store.runs_of(&t.id).unwrap().is_empty());
 }
