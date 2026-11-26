@@ -4,8 +4,8 @@
 use std::collections::{HashMap, HashSet};
 
 use neko_protocol::{
-    Change, Decision, ErrorCode, GENERAL, Need, NeedsItem, Part, PartBody, Permission, PermissionId, PermissionMode, Reply, Request, Run, RunStatus, RuntimeInfo, ServerMessage, Settings,
-    Task, TaskId, Transcript, Workspace,
+    Change, Decision, DiffPatch, DiffSummary, ErrorCode, GENERAL, Need, NeedsItem, Part, PartBody, Permission, PermissionId, PermissionMode, Reply, Request, Run, RunId, RunStatus, RuntimeInfo,
+    ServerMessage, Settings, Task, TaskId, Transcript, UndoStorage, Workspace,
 };
 use rune::TextEdit;
 
@@ -53,6 +53,26 @@ pub enum Pick {
 pub enum Confirm {
     RemoveWorkspace(String),
     RemoveTask(TaskId),
+    /// Undo (or redo) over files that changed since: the files, named in the question.
+    UndoAnyway { task: TaskId, run: RunId, redo: bool, files: Vec<String> },
+    ClearUndo,
+}
+
+/// A run's changes (or the task's, with no run), open in place of the conversation (docs/knowledge/undo.md).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Review {
+    pub task: TaskId,
+    /// None: all of the task's changes.
+    pub run: Option<RunId>,
+    /// The run the person opened it from: "This run" goes back to it.
+    pub from: Option<RunId>,
+    pub summary: Option<DiffSummary>,
+    /// Why there is nothing to show.
+    pub error: Option<String>,
+    /// Each file's lines, as they arrive.
+    pub patches: HashMap<String, DiffPatch>,
+    /// Files open (each is folded until the person opens it).
+    pub open: HashSet<String>,
 }
 
 /// Why something was not done, in a small panel: the words, and a folder to reveal.
@@ -179,6 +199,16 @@ pub struct App {
     pub window_handle: Option<rune::WindowHandle>,
     /// The count the Dock icon shows now.
     pub badge_set: Option<u32>,
+    /// A run's changes, open in the task (Review).
+    pub review: Option<Review>,
+    /// How much room undo takes (Settings ▸ Workspaces), as the daemon last said.
+    pub undo_storage: Option<UndoStorage>,
+}
+
+impl Review {
+    pub fn new(task: TaskId, run: Option<RunId>, from: Option<RunId>) -> Review {
+        Review { task, run, from, summary: None, error: None, patches: HashMap::new(), open: HashSet::new() }
+    }
 }
 
 /// The picker's last line: a folder the person adds as a workspace, there and then.
@@ -199,6 +229,11 @@ pub enum Asked {
     RemoveTask(TaskId),
     /// An answer from the Needs you list or a notification: a refusal says so plainly.
     Answer { item: String, task: TaskId, from_notification: bool },
+    /// Undo or redo of a run: files changed since ask first; a refusal is said in a panel.
+    Undo { task: TaskId, run: RunId, redo: bool },
+    /// A review's file list, or one file's lines.
+    Diff,
+    ClearUndo,
     Other,
 }
 
@@ -344,6 +379,8 @@ impl Default for App {
             pending_clicks: Vec::new(),
             window_handle: None,
             badge_set: None,
+            review: None,
+            undo_storage: None,
         }
     }
 }
@@ -423,6 +460,7 @@ impl App {
             self.needs_back = self.open.clone().filter(|_| !self.settings_open);
         }
         self.open = None;
+        self.review = None;
         self.context_open = false;
         self.settings_open = false;
         self.needs_open = true;
@@ -738,8 +776,79 @@ impl App {
                     self.asked.insert(id, Asked::RemoveTask(task));
                 }
             }
+            Some(Confirm::UndoAnyway { task, run, redo, .. }) => self.send_undo(task, run, redo, true),
+            Some(Confirm::ClearUndo) => {
+                if let Some(id) = self.send(Request::ClearUndo) {
+                    self.asked.insert(id, Asked::ClearUndo);
+                }
+            }
             None => {}
         }
+    }
+
+    /// Review on a run's card (None: the task's "All changes"): its files, folded, in place of the conversation.
+    pub fn open_review(&mut self, task: &TaskId, run: Option<RunId>) {
+        let from = run.clone().or_else(|| self.review.as_ref().filter(|r| &r.task == task).and_then(|r| r.from.clone()));
+        self.menu_open = None;
+        self.review = Some(Review::new(task.clone(), run.clone(), from));
+        if let Some(id) = self.send(Request::GetDiff { task: task.clone(), run }) {
+            self.asked.insert(id, Asked::Diff);
+        }
+    }
+
+    /// Back to the conversation.
+    pub fn close_review(&mut self) {
+        self.review = None;
+    }
+
+    /// Opens or folds a file of the review; its lines are asked for the first time it opens.
+    pub fn review_flip(&mut self, path: &str) {
+        let Some(r) = &mut self.review else { return };
+        if r.open.remove(path) {
+            return;
+        }
+        r.open.insert(path.to_owned());
+        if !r.patches.contains_key(path) {
+            let (task, run) = (r.task.clone(), r.run.clone());
+            self.ask_lines(task, run, path, false);
+        }
+    }
+
+    /// "Show all": every line of a file that was cut.
+    pub fn review_all(&mut self, path: &str) {
+        if let Some(r) = &self.review {
+            let (task, run) = (r.task.clone(), r.run.clone());
+            self.ask_lines(task, run, path, true);
+        }
+    }
+
+    fn ask_lines(&mut self, task: TaskId, run: Option<RunId>, path: &str, full: bool) {
+        if let Some(id) = self.send(Request::GetDiffFile { task, run, path: path.to_owned(), full }) {
+            self.asked.insert(id, Asked::Diff);
+        }
+    }
+
+    /// Undo (or Redo) on a run's card.
+    pub fn undo(&mut self, run: &RunId, redo: bool) {
+        let Some(task) = self.open.clone() else { return };
+        self.send_undo(task, run.clone(), redo, false);
+    }
+
+    fn send_undo(&mut self, task: TaskId, run: RunId, redo: bool, anyway: bool) {
+        let r = if redo { Request::RedoRun { task: task.clone(), run: run.clone(), anyway } } else { Request::UndoRun { task: task.clone(), run: run.clone(), anyway } };
+        if let Some(id) = self.send(r) {
+            self.asked.insert(id, Asked::Undo { task, run, redo });
+        }
+    }
+
+    /// Settings ▸ Workspaces: "Clear undo history…" asks first.
+    pub fn ask_clear_undo(&mut self) {
+        self.confirm = Some(Confirm::ClearUndo);
+    }
+
+    /// The room undo takes, asked again (Settings ▸ Workspaces shows it).
+    pub fn ask_undo_storage(&mut self) {
+        self.send(Request::UndoStorage);
     }
 
     /// Up (-1) or down (1) among the workspaces the person added: the keyboard's move and the menu's Move up / Move down.
@@ -853,6 +962,7 @@ impl App {
         self.settings_open = true;
         self.needs_open = false;
         self.send(Request::ListRuntimes);
+        self.ask_undo_storage();
     }
 
     pub fn set_permission_mode(&mut self, mode: PermissionMode) {
@@ -889,6 +999,7 @@ impl App {
 
     pub fn go_home(&mut self) {
         self.open = None;
+        self.review = None;
         self.context_open = false;
         self.settings_open = false;
         self.needs_open = false;
@@ -902,6 +1013,9 @@ impl App {
     }
 
     pub fn open_task_id(&mut self, id: &TaskId) {
+        if self.open.as_ref() != Some(id) {
+            self.review = None;
+        }
         self.open = Some(id.clone());
         self.context_open = false;
         self.settings_open = false;
@@ -1042,7 +1156,14 @@ impl App {
                 }
                 self.upsert_workspace(workspace);
             }
-            Change::RunChanged { run } => self.books.entry(run.task.clone()).or_default().run(run),
+            Change::RunChanged { run } => {
+                // "All changes" ends where the newest run left the folder: an undo or a new run moves it.
+                let again = self.review.as_ref().is_some_and(|r| r.task == run.task && r.run.is_none() && run.status != RunStatus::Running);
+                self.books.entry(run.task.clone()).or_default().run(run);
+                if again && let Some(r) = self.review.clone() {
+                    self.open_review(&r.task, None);
+                }
+            }
             Change::PartChanged { part } => self.books.entry(part.task.clone()).or_default().part(part),
             Change::PartDelta { task, part, text } => {
                 if let Some(b) = self.books.get_mut(&task) {
@@ -1123,6 +1244,63 @@ impl App {
                     self.needs_hidden.remove(&item);
                     self.needs_notice = Some(message);
                 }
+                return;
+            }
+            Reply::Diff { diff } => {
+                if let Some(r) = &mut self.review
+                    && r.task == diff.task
+                    && r.run == diff.run
+                {
+                    r.error = None;
+                    // One file opens by itself; more stay folded until the person opens them.
+                    let only = (diff.files.len() == 1).then(|| diff.files[0].path.clone());
+                    r.summary = Some(diff);
+                    if let Some(p) = only {
+                        self.review_flip(&p);
+                    }
+                }
+                return;
+            }
+            Reply::DiffFile { file } => {
+                if let Some(r) = &mut self.review {
+                    r.patches.insert(file.path.clone(), file);
+                }
+                return;
+            }
+            Reply::Error { message, .. } if matches!(asked, Some(Asked::Diff)) => {
+                if let Some(r) = &mut self.review {
+                    r.error = Some(message);
+                }
+                return;
+            }
+            Reply::ChangedSince { files } => {
+                if let Some(Asked::Undo { task, run, redo }) = asked {
+                    self.confirm = Some(Confirm::UndoAnyway { task, run, redo, files });
+                }
+                return;
+            }
+            Reply::Ok if matches!(asked, Some(Asked::Undo { .. })) => {
+                if let Some(Asked::Undo { redo, .. }) = asked {
+                    self.announce = Some((if redo { "Redone: the run's changes are back." } else { "Undone: the files are as they were before the run." }.to_owned(), false));
+                }
+                return;
+            }
+            Reply::Error { message, .. } if matches!(asked, Some(Asked::Undo { .. })) => {
+                let redo = matches!(asked, Some(Asked::Undo { redo: true, .. }));
+                self.refusal = Some(Refusal { title: if redo { "Neko did not redo this run" } else { "Neko did not undo this run" }.into(), words: message, reveal: None });
+                return;
+            }
+            Reply::UndoStorage { storage } => {
+                self.undo_storage = Some(storage);
+                return;
+            }
+            Reply::Ok if matches!(asked, Some(Asked::ClearUndo)) => {
+                self.ask_undo_storage();
+                self.announce = Some(("The undo history was cleared.".to_owned(), false));
+                return;
+            }
+            Reply::Error { message, .. } if matches!(asked, Some(Asked::ClearUndo)) => {
+                self.refusal = Some(Refusal { title: "Neko kept the undo history".into(), words: message, reveal: None });
                 return;
             }
             Reply::Workspaces { workspaces } => {

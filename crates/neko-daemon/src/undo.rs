@@ -212,7 +212,7 @@ fn refused(words: impl Into<String>) -> Reply {
 
 /// The two trees a diff is between: a run's start and end, or for the whole task its first run's start and where its newest run
 /// left the folder. With the folder to read them from.
-fn ends(shared: &Shared, task: &TaskId, run: Option<&RunId>) -> Result<(String, String, Folder), Reply> {
+fn ends(shared: &Shared, task: &TaskId, run: Option<&RunId>) -> Result<(String, String, Folder, String), Reply> {
     let core = lock(&shared.core);
     let place = core.store.place(task).ok().flatten();
     let list = core.store.checkpoints_of(task).map_err(|e| Reply::error(ErrorCode::Internal, e.to_string()))?;
@@ -221,7 +221,7 @@ fn ends(shared: &Shared, task: &TaskId, run: Option<&RunId>) -> Result<(String, 
     match run {
         Some(r) => {
             let (Some(a), Some(b)) = (kept(r, history::START), kept(r, history::END)) else { return Err(none()) };
-            Ok((a.tree.clone(), b.tree.clone(), reader(&b, place.as_ref())))
+            Ok((a.tree.clone(), b.tree.clone(), reader(&b, place.as_ref()), b.work.clone()))
         }
         None => {
             let runs = core.store.runs_of(task).map_err(|e| Reply::error(ErrorCode::Internal, e.to_string()))?;
@@ -230,21 +230,21 @@ fn ends(shared: &Shared, task: &TaskId, run: Option<&RunId>) -> Result<(String, 
             let state = last.undo.as_ref().map(|u| u.state);
             let at = if state == Some(UndoState::Applied) { kept(&last.id, history::BEFORE_UNDO).or_else(|| kept(&last.id, history::END)) } else { kept(&last.id, history::START) };
             let at = at.ok_or_else(none)?;
-            Ok((first.tree.clone(), at.tree.clone(), reader(&at, place.as_ref())))
+            Ok((first.tree.clone(), at.tree.clone(), reader(&at, place.as_ref()), at.work.clone()))
         }
     }
 }
 
 /// A run's (or the task's) changes, file by file.
 pub fn diff(shared: &Shared, task: &TaskId, run: Option<RunId>) -> Reply {
-    let (a, b, f) = match ends(shared, task, run.as_ref()) {
+    let (a, b, f, root) = match ends(shared, task, run.as_ref()) {
         Ok(e) => e,
         Err(r) => return r,
     };
     match checkpoint::files(&f, &a, &b) {
         Ok(files) => {
             let (added, removed) = (files.iter().map(|x| x.added).sum(), files.iter().map(|x| x.removed).sum());
-            Reply::Diff { diff: DiffSummary { task: task.clone(), run, files, added, removed } }
+            Reply::Diff { diff: DiffSummary { task: task.clone(), run, root, files, added, removed } }
         }
         Err(e) => refused(format!("Neko could not read the changes: {e}.")),
     }
@@ -252,7 +252,7 @@ pub fn diff(shared: &Shared, task: &TaskId, run: Option<RunId>) -> Reply {
 
 /// One file's lines, cut at [`undo::CUT_LINES`] unless `full` (then at [`undo::ALL_LINES`]).
 pub fn diff_file(shared: &Shared, task: &TaskId, run: Option<RunId>, path: &str, full: bool) -> Reply {
-    let (a, b, f) = match ends(shared, task, run.as_ref()) {
+    let (a, b, f, _) = match ends(shared, task, run.as_ref()) {
         Ok(e) => e,
         Err(r) => return r,
     };

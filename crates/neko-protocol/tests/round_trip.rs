@@ -312,8 +312,8 @@ fn undo_round_trips() {
     let file = DiffFile { path: "docs/start.md".into(), old_path: Some("docs/guide.md".into()), status: FileStatus::Renamed, added: 1, removed: 0, binary: false, old_size: None, new_size: None, old_mode: None, new_mode: None };
     let logo = DiffFile { path: "logo.png".into(), old_path: None, status: FileStatus::Modified, added: 0, removed: 0, binary: true, old_size: Some(6), new_size: Some(8), old_mode: Some("100644".into()), new_mode: Some("100755".into()) };
     pinned(
-        Reply::Diff { diff: DiffSummary { task: t(), run: Some(r()), files: vec![file, logo], added: 1, removed: 0 } },
-        r#"{"type":"diff","diff":{"task":"task_1","run":"run_1","files":[{"path":"docs/start.md","old_path":"docs/guide.md","status":"renamed","added":1,"removed":0},{"path":"logo.png","status":"modified","added":0,"removed":0,"binary":true,"old_size":6,"new_size":8,"old_mode":"100644","new_mode":"100755"}],"added":1,"removed":0}}"#,
+        Reply::Diff { diff: DiffSummary { task: t(), run: Some(r()), root: "/Users/example/acme-api".into(), files: vec![file, logo], added: 1, removed: 0 } },
+        r#"{"type":"diff","diff":{"task":"task_1","run":"run_1","root":"/Users/example/acme-api","files":[{"path":"docs/start.md","old_path":"docs/guide.md","status":"renamed","added":1,"removed":0},{"path":"logo.png","status":"modified","added":0,"removed":0,"binary":true,"old_size":6,"new_size":8,"old_mode":"100644","new_mode":"100755"}],"added":1,"removed":0}}"#,
     );
     pinned(Reply::DiffFile { file: DiffPatch { path: "a.rs".into(), lines: vec!["@@ -1 +1 @@".into(), "-a".into(), "+b".into()], total: 3, cut: false } }, r#"{"type":"diff_file","file":{"path":"a.rs","lines":["@@ -1 +1 @@","-a","+b"],"total":3}}"#);
     pinned(Reply::ChangedSince { files: vec!["README.md".into()] }, r#"{"type":"changed_since","files":["README.md"]}"#);

@@ -6,6 +6,7 @@ use neko_protocol::{
     Changes, FailureKind, GENERAL, Need, NeedsItem, Part, PartBody, PartId, Permission, PermissionId, PermissionMode, PermissionState, Pricing, Run, RunId, RunStatus, RuntimeInfo, Settings, Task, TaskId, TaskStatus, Tone,
     ToolState, Usage, Workspace,
 };
+use neko_protocol::{DiffFile, DiffPatch, DiffSummary, FileStatus, RunUndo, UndoState, UndoStorage};
 use rune::TextEdit;
 
 use crate::state::{App, Book};
@@ -55,6 +56,19 @@ pub const SCENES: &[Scene] = &[
     ("settings-notifications-not-asked", settings_notifications_not_asked),
     ("settings-notifications-denied", settings_notifications_denied),
     ("settings-notifications-unavailable", settings_notifications_unavailable),
+    ("task-undo", task_undo),
+    ("task-undone", task_undone),
+    ("task-undo-older", task_undo_older),
+    ("task-undo-committed", task_undo_committed),
+    ("task-undo-unavailable", task_undo_unavailable),
+    ("task-undo-dropped", task_undo_dropped),
+    ("undo-anyway", undo_anyway),
+    ("review", review),
+    ("review-open", review_open),
+    ("review-all", review_all),
+    ("review-undone", review_undone),
+    ("settings-undo", settings_undo),
+    ("clear-undo", clear_undo),
 ];
 
 /// A task made `minutes_ago` before the fixed clock.
@@ -338,6 +352,7 @@ fn settings_workspaces(s: &mut App) {
     s.settings_open = true;
     s.settings_page = 1;
     s.runtimes = Some(agents(true, PermissionMode::Follow));
+    s.undo_storage = Some(UndoStorage { bytes: 0, checkpoints: 0, tasks: 0 });
 }
 
 fn tasks_home(s: &mut App) {
@@ -717,4 +732,169 @@ fn task_real_run_open(s: &mut App) {
 fn task_context_open(s: &mut App) {
     real_run(s);
     s.context_open = true;
+}
+
+/// A finished run with its checkpoints: what it changed itself.
+fn with_undo(mut r: Run, state: UndoState, files: u32) -> Run {
+    r.undo = Some(RunUndo { state, why: None, changes: Some(Changes { files, added: 42, removed: 7 }), committed: false });
+    r
+}
+
+/// The done task, its run undoable.
+fn task_undo(s: &mut App) {
+    let task = &sample_tasks()[1];
+    let sc = done_script(s, task);
+    let r = with_undo(run("run_1", task, RunStatus::Done, start(s), 134), UndoState::Applied, 4);
+    open_with(s, TaskStatus::Done, vec![r], vec![sc]);
+}
+
+fn task_undone(s: &mut App) {
+    let task = &sample_tasks()[1];
+    let sc = done_script(s, task);
+    let r = with_undo(run("run_1", task, RunStatus::Done, start(s), 134), UndoState::Undone, 4);
+    open_with(s, TaskStatus::Done, vec![r], vec![sc]);
+}
+
+/// Two runs that changed files: the older one's Undo waits for the newer one.
+fn two_runs(s: &App, task: &Task, second: UndoState) -> (Vec<Run>, Vec<Script>) {
+    let sc = done_script(s, task);
+    let first = with_undo(run("run_1", task, RunStatus::Done, start(s), 134), UndoState::Applied, 4);
+    let mut sc2 = Script::new(task, "run_2", start(s) + 20 * 60_000);
+    sc2.seq = sc.seq;
+    sc2.person("Also rename it in the help pages.");
+    sc2.tool("Edit", "docs/help.md", "{\n  \"file_path\": \"docs/help.md\"\n}", "The file was edited.", ToolState::Done, 1);
+    sc2.say("The help page now says **Preferences** too.", true);
+    let mut r2 = run("run_2", task, RunStatus::Done, start(s) + 20 * 60_000, 31);
+    r2.undo = Some(RunUndo { state: second, why: None, changes: Some(Changes { files: 1, added: 2, removed: 2 }), committed: false });
+    (vec![first, r2], vec![sc, sc2])
+}
+
+fn task_undo_older(s: &mut App) {
+    let task = &sample_tasks()[1];
+    let (runs, scripts) = two_runs(s, task, UndoState::Applied);
+    open_with(s, TaskStatus::Done, runs, scripts);
+    s.open_folds.insert("worked-run_2".into());
+}
+
+fn task_undo_committed(s: &mut App) {
+    let task = &sample_tasks()[1];
+    let sc = done_script(s, task);
+    let mut r = with_undo(run("run_1", task, RunStatus::Done, start(s), 134), UndoState::Applied, 4);
+    if let Some(u) = &mut r.undo {
+        u.committed = true;
+    }
+    open_with(s, TaskStatus::Done, vec![r], vec![sc]);
+}
+
+fn task_undo_unavailable(s: &mut App) {
+    let task = &sample_tasks()[1];
+    let sc = done_script(s, task);
+    let mut r = run("run_1", task, RunStatus::Done, start(s), 134);
+    r.undo = Some(RunUndo { state: UndoState::Unavailable, why: Some("the folder has 12,480 new or changed files (310.2 MB), more than undo keeps (10,000 files or 100.0 MB)".into()), changes: None, committed: false });
+    open_with(s, TaskStatus::Done, vec![r], vec![sc]);
+}
+
+fn task_undo_dropped(s: &mut App) {
+    let task = &sample_tasks()[1];
+    let (mut runs, mut scripts) = two_runs(s, task, UndoState::Applied);
+    if let Some(u) = &mut runs[0].undo {
+        u.state = UndoState::Dropped;
+    }
+    // The notice the follow-up left when it started from the undone files, right after the person's words.
+    let person = scripts[1].parts[0].clone();
+    for p in &mut scripts[1].parts[1..] {
+        p.seq += 1;
+    }
+    let notice = Part {
+        id: PartId("part_redo_dropped".into()),
+        task: task.id.clone(),
+        run: None,
+        seq: person.seq + 1,
+        at_ms: person.at_ms,
+        ended_ms: Some(person.at_ms),
+        body: PartBody::Notice { tone: Tone::Info, text: "This message starts from the undone files, so the undone run can no longer be redone.".into(), next: None, failure: None },
+    };
+    scripts[1].parts.insert(1, notice);
+    open_with(s, TaskStatus::Done, runs, scripts);
+}
+
+fn undo_anyway(s: &mut App) {
+    task_undo(s);
+    let task = s.tasks[1].id.clone();
+    s.confirm = Some(crate::state::Confirm::UndoAnyway { task, run: RunId("run_1".into()), redo: false, files: vec!["src/toolbar.rs".into(), "docs/help.md".into()] });
+}
+
+fn diff_file(path: &str, status: FileStatus, added: u32, removed: u32) -> DiffFile {
+    DiffFile { path: path.into(), old_path: None, status, added, removed, binary: false, old_size: None, new_size: None, old_mode: None, new_mode: None }
+}
+
+/// What the review shows: several files, a renamed one, a binary one, a script made executable.
+fn review_files() -> Vec<DiffFile> {
+    let mut moved = diff_file("docs/preferences.md", FileStatus::Renamed, 3, 3);
+    moved.old_path = Some("docs/settings.md".into());
+    let mut icon = diff_file("assets/preferences.png", FileStatus::Modified, 0, 0);
+    icon.binary = true;
+    (icon.old_size, icon.new_size) = (Some(2_400), Some(3_150));
+    let mut script = diff_file("scripts/check-labels.sh", FileStatus::Added, 6, 0);
+    (script.old_mode, script.new_mode) = (None, None);
+    vec![diff_file("src/toolbar.rs", FileStatus::Modified, 3, 2), diff_file("src/menu.rs", FileStatus::Modified, 1, 1), moved, icon, script, diff_file("tests/old_labels.rs", FileStatus::Deleted, 0, 18)]
+}
+
+fn review_with(s: &mut App, run: Option<&str>, open: &[&str]) {
+    let task = s.tasks[1].id.clone();
+    let mut r = crate::state::Review::new(task.clone(), run.map(|r| RunId(r.into())), Some(RunId("run_1".into())));
+    let files = review_files();
+    let (added, removed) = (files.iter().map(|f| f.added).sum(), files.iter().map(|f| f.removed).sum());
+    r.summary = Some(DiffSummary { task, run: r.run.clone(), root: "/Users/example/Library/Application Support/neko/worktrees/x7k2m9qa".into(), files, added, removed });
+    let toolbar = [
+        "@@ -9,8 +9,9 @@ use crate::ui::button::Button;",
+        " ",
+        " /// The toolbar at the top of the window.",
+        " pub fn toolbar() -> El {",
+        "-    row().child(Button::new(\"settings\", \"Settings\"))",
+        "-        .child(Button::new(\"help\", \"Help\"))",
+        "+    row()",
+        "+        .child(Button::new(\"preferences\", \"Preferences\").keys(\"⌘,\"))",
+        "+        .child(Button::new(\"help\", \"Help\"))",
+        " }",
+        " ",
+        " #[cfg(test)]",
+    ];
+    r.patches.insert("src/toolbar.rs".into(), DiffPatch { path: "src/toolbar.rs".into(), lines: toolbar.iter().map(|l| (*l).to_owned()).collect(), total: toolbar.len() as u32, cut: false });
+    let moved = ["@@ -1,6 +1,6 @@", "-# Settings", "+# Preferences", " ", "-Open Settings with ⌘, to change how Acme looks.", "+Open Preferences with ⌘, to change how Acme looks.", " ", "-Settings are saved as you go.", "+Preferences are saved as you go."];
+    r.patches.insert("docs/preferences.md".into(), DiffPatch { path: "docs/preferences.md".into(), lines: moved.iter().map(|l| (*l).to_owned()).collect(), total: 4_210, cut: true });
+    for p in open {
+        r.open.insert((*p).to_owned());
+    }
+    s.review = Some(r);
+}
+
+fn review(s: &mut App) {
+    task_undo(s);
+    review_with(s, Some("run_1"), &[]);
+}
+
+fn review_open(s: &mut App) {
+    task_undo(s);
+    review_with(s, Some("run_1"), &["src/toolbar.rs", "docs/preferences.md", "assets/preferences.png"]);
+}
+
+fn review_all(s: &mut App) {
+    task_undo_older(s);
+    review_with(s, None, &["src/toolbar.rs"]);
+}
+
+fn review_undone(s: &mut App) {
+    task_undone(s);
+    review_with(s, Some("run_1"), &["src/toolbar.rs"]);
+}
+
+fn settings_undo(s: &mut App) {
+    settings_workspaces(s);
+    s.undo_storage = Some(UndoStorage { bytes: 18_400_000, checkpoints: 38, tasks: 6 });
+}
+
+fn clear_undo(s: &mut App) {
+    settings_undo(s);
+    s.confirm = Some(crate::state::Confirm::ClearUndo);
 }

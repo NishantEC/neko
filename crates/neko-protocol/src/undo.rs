@@ -104,6 +104,8 @@ pub struct DiffSummary {
     pub task: TaskId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<RunId>,
+    /// The folder the paths are in (the worktree's top folder, or the plain folder).
+    pub root: String,
     pub files: Vec<DiffFile>,
     pub added: u32,
     pub removed: u32,

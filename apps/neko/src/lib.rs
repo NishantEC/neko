@@ -11,6 +11,7 @@ pub mod link;
 pub mod menu;
 pub mod needs_view;
 pub mod notify;
+pub mod review_view;
 pub mod scenes;
 pub mod settings_view;
 pub mod state;
@@ -141,6 +142,10 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         // works; otherwise it gives focus back.
         if s.context_open {
             s.context_open = false;
+            return true;
+        }
+        if !s.settings_open && !s.needs_open && s.review.is_some() {
+            s.close_review();
             return true;
         }
         if !s.settings_open && s.open_is_working() {

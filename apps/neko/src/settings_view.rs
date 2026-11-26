@@ -236,6 +236,7 @@ fn workspaces_page(s: &App, t: &Theme) -> El {
         }
         part = part.child(card);
     }
+    part = part.child(undo_storage(s, t));
     let add = Button::<App>::new("settings-add-workspace", "Add workspace…").variant(ButtonVariant::Secondary).size(Size::Sm).build(t).on_press_tx(|s: &mut App, tx: &mut rune::Tx| crate::pick_folder(s, crate::state::Pick::Add { select: false }, tx));
     part = part.child(row().child(add));
     let removed: Vec<&str> = s.workspaces.iter().filter(|w| !w.is_active()).map(|w| w.name.as_str()).collect();
@@ -250,6 +251,32 @@ fn workspaces_page(s: &App, t: &Theme) -> El {
         );
     }
     part
+}
+
+/// "Storage used by undo": the shadow repositories' bytes and the checkpoints kept, with "Clear undo history…" (it asks first).
+fn undo_storage(s: &App, t: &Theme) -> El {
+    let words = match s.undo_storage {
+        None => "Storage used by undo: reading…".to_owned(),
+        Some(u) if u.checkpoints == 0 => "Storage used by undo: none. No run has a checkpoint now.".to_owned(),
+        Some(u) => format!(
+            "Storage used by undo: {} in Neko's folder, {} checkpoint{} in {} task{}. Checkpoints of a git repository are kept in the repository itself.",
+            crate::review_view::size_words(u.bytes),
+            u.checkpoints,
+            if u.checkpoints == 1 { "" } else { "s" },
+            u.tasks,
+            if u.tasks == 1 { "" } else { "s" }
+        ),
+    };
+    let none = s.undo_storage.is_none_or(|u| u.checkpoints == 0 && u.bytes == 0);
+    let clear = Button::new("settings-clear-undo", "Clear undo history…").variant(ButtonVariant::Secondary).size(Size::Sm).disabled(none).on_press(|s: &mut App| s.ask_clear_undo()).build(t);
+    col()
+        .key("settings-undo")
+        .w_full()
+        .gap(t.space.at(2.0))
+        .pt(t.space.at(2.0))
+        .child(text("Undo").role("heading").level(3).font(weight(t.ty.base, t.ty.medium)).color(t.ink()))
+        .child(text(words).key("settings-undo-storage").font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0))
+        .child(row().child(clear))
 }
 
 /// What the page says about the system's permission, and the one step to fix it.

@@ -12,6 +12,7 @@ pub mod confirmation;
 pub mod context;
 pub mod conversation;
 pub mod dialog;
+pub mod diff;
 pub mod dropdown_menu;
 pub mod empty;
 pub mod font_figtree;

@@ -66,6 +66,13 @@ files = [
 ]
 
 [[item]]
+name = "diff"
+version = "0.8.0"
+files = [
+  { target = "src/ui/diff.rs", sha256 = "5b333632736fea94300570e48c9a007d6fd78465152713b7fa81c97d50138490" },
+]
+
+[[item]]
 name = "dropdown_menu"
 version = "0.6.0"
 files = [

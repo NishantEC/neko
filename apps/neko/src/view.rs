@@ -412,6 +412,11 @@ fn task_menu(s: &App, t: &Theme, task: &neko_protocol::Task, layer: &mut Vec<El>
         .open(open)
         .min_width(180.0)
         .on_close(|s: &mut App| s.menu_open = None)
+        .item({
+            let id = task.id.clone();
+            let any = s.book().is_some_and(|b| b.runs.iter().any(|r| r.undo.as_ref().is_some_and(neko_protocol::RunUndo::ready)));
+            DropdownMenuItem::new("All changes").disabled(!any).on_select(move |s: &mut App| s.open_review(&id, None))
+        })
         .item(DropdownMenuItem::new("Remove task…").danger(true).disabled(s.open_is_working()).on_select(move |s: &mut App| s.ask_remove_task(&id)));
     menu_named(menu, t, layer, "Task options", open)
 }
@@ -463,6 +468,32 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
                 .action("Remove", |s: &mut App| s.confirmed())
                 .open(true)
                 .return_focus("task-more-button")
+                .build(t, layer);
+        }
+        Some(Confirm::UndoAnyway { redo, files, .. }) => {
+            let verb = if *redo { "Redo" } else { "Undo" };
+            let named = match files.len() {
+                0 => String::new(),
+                1..=5 => files.join(", "),
+                n => format!("{} and {} more", files[..4].join(", "), n - 4),
+            };
+            let which = if files.len() == 1 { "This file changed" } else { "These files changed" };
+            AlertDialog::new("undo-anyway", format!("{verb} over files that changed since?"))
+                .description(format!("{which} after the run: {named}. Neko keeps the folder as it is now as a checkpoint of its own first, so Redo can bring it back."))
+                .destructive()
+                .cancel("Cancel", |s: &mut App| s.confirm = None)
+                .action(format!("{verb} anyway"), |s: &mut App| s.confirmed())
+                .open(true)
+                .build(t, layer);
+        }
+        Some(Confirm::ClearUndo) => {
+            AlertDialog::new("clear-undo", "Clear the undo history?")
+                .description("Every checkpoint goes: no run can be reviewed, undone or redone after this. Your files and commits are not touched.")
+                .destructive()
+                .cancel("Cancel", |s: &mut App| s.confirm = None)
+                .action("Clear", |s: &mut App| s.confirmed())
+                .open(true)
+                .return_focus("settings-clear-undo")
                 .build(t, layer);
         }
         None => {}

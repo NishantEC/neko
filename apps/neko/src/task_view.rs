@@ -17,6 +17,9 @@ use crate::ui::base::Shape;
 use crate::state::{App, Book};
 use crate::ui::agent::{FoldLine, PressTx, Status, elapsed, icon_button, mono};
 use crate::ui::badge::Badge;
+use crate::ui::base::{ButtonVariant, Size};
+use crate::ui::button::Button;
+use neko_protocol::undo::{self, Action, Offer};
 use crate::ui::base::{Theme, Tone, glyph, paint};
 use crate::ui::confirmation::{Confirmation, Decision};
 use crate::ui::context::{Context, Usage as Meter};
@@ -239,12 +242,48 @@ fn notice(t: &Theme, p: &Part) -> Option<El> {
     )
 }
 
-/// The run card, only when a run has something to show beyond time: files changed, a branch, or a failure. rune-ui's `Task` with
-/// only the facts Neko has (no checks, no money, no time: the run's line has it).
-fn run_card(t: &Theme, r: &Run) -> Option<El> {
-    let changed = r.changes.filter(|c| c.files > 0);
+/// What undo offers for a run (docs/knowledge/undo.md), from all of its task's runs.
+pub fn offer_of(book: &Book, r: &Run) -> Offer {
+    book.runs.iter().position(|x| x.id == r.id).map(|i| undo::offers(&book.runs).swap_remove(i)).unwrap_or_default()
+}
+
+/// What a run itself changed: between its checkpoints when it has them, else what its branch changed (from before undo).
+fn own_changes(r: &Run) -> Option<neko_protocol::Changes> {
+    match &r.undo {
+        Some(u) if u.ready() => u.changes,
+        _ => r.changes,
+    }
+    .filter(|c| c.files > 0)
+}
+
+/// Review and Undo (or Redo) under a card's facts; Undo off, with the card's note saying why, when it cannot be pressed now.
+fn undo_row(r: &Run, o: &Offer, t: &Theme) -> Option<El> {
+    if !o.review && o.action.is_none() {
+        return None;
+    }
+    let mut row_el = row().key(format!("run-{}-actions", r.id.0)).gap(t.space.at(2.0)).center_y();
+    if o.review {
+        let (task, run) = (r.task.clone(), r.id.clone());
+        row_el = row_el.child(Button::new(format!("run-{}-review", r.id.0), "Review").variant(ButtonVariant::Secondary).size(Size::Sm).icon(&icons::FILE_CODE).on_press(move |s: &mut App| s.open_review(&task, Some(run.clone()))).build(t));
+    }
+    if let Some((action, enabled)) = o.action {
+        let run = r.id.clone();
+        let (words, icon, redo) = match action {
+            Action::Undo => ("Undo", &icons::RESTORE, false),
+            Action::Redo => ("Redo", &icons::RETRY, true),
+        };
+        row_el = row_el.child(Button::new(format!("run-{}-{}", r.id.0, words.to_lowercase()), words).variant(ButtonVariant::Secondary).size(Size::Sm).icon(icon).disabled(!enabled).on_press(move |s: &mut App| s.undo(&run, redo)).build(t));
+    }
+    Some(row_el)
+}
+
+/// The run card, only when a run has something to show beyond time: files changed, a branch, a failure, or something undo says.
+/// rune-ui's `Task` with only the facts Neko has (no checks, no money, no time: the run's line has it), its note the one quiet
+/// line about undo, and Review and Undo under it.
+fn run_card(t: &Theme, r: &Run, o: &Offer) -> Option<El> {
+    let changed = own_changes(r);
     let failed = r.status == RunStatus::Failed;
-    if changed.is_none() && r.branch.is_none() && !failed {
+    if changed.is_none() && r.branch.is_none() && !failed && o.line.is_none() && !o.review {
         return None;
     }
     let status = match r.status {
@@ -252,7 +291,7 @@ fn run_card(t: &Theme, r: &Run) -> Option<El> {
         RunStatus::Done => Status::Done,
         RunStatus::Failed => Status::Error,
         // rune-ui's statuses have no "Stopped": its pill would say "Skipped" (an upstream ask). Neko keeps its own pill for these.
-        RunStatus::Stopped | RunStatus::Interrupted => return Some(stopped_card(t, r, changed)),
+        RunStatus::Stopped | RunStatus::Interrupted => return Some(stopped_card(t, r, changed, o)),
     };
     // A short title, not the task's again (the band has it): what the card is about.
     let title = if failed { "Could not finish" } else if changed.is_some() { "Changes" } else { "Branch" };
@@ -263,11 +302,18 @@ fn run_card(t: &Theme, r: &Run) -> Option<El> {
     if let Some(b) = &r.branch {
         card = card.branch(b.clone());
     }
-    Some(card::Task::<App>::new(format!("run-{}", r.id.0), &card).build(t))
+    if let Some(line) = &o.line {
+        card = card.note(line.clone());
+    }
+    let mut built = card::Task::<App>::new(format!("run-{}", r.id.0), &card).build(t);
+    if let Some(actions) = undo_row(r, o, t) {
+        built = built.child(actions);
+    }
+    Some(built)
 }
 
 /// A stopped or interrupted run's card, in the look of rune-ui's `Task` with the right word on its pill.
-fn stopped_card(t: &Theme, r: &Run, changed: Option<neko_protocol::Changes>) -> El {
+fn stopped_card(t: &Theme, r: &Run, changed: Option<neko_protocol::Changes>, o: &Offer) -> El {
     let word = if r.status == RunStatus::Stopped { "Stopped" } else { "Interrupted" };
     let fact = |icon, words: El| row().gap(t.space.at(1.5)).center_y().child(glyph(icon, t.control.icon_sm, t.ink_faint())).child(words);
     let figures = |s: String| text(s).font(tabular(t.ty.sm)).color(t.ink_muted());
@@ -284,7 +330,14 @@ fn stopped_card(t: &Theme, r: &Run, changed: Option<neko_protocol::Changes>) -> 
         facts = facts.child(fact(&icons::COMMIT, text(b.clone()).font(mono(t, t.ty.sm)).color(t.ink_muted()).truncate_middle().min_w(0.0).shrink()));
     }
     let head = row().w_full().gap(t.space.at(3.0)).center_y().child(Badge::new(format!("run-{}-status", r.id.0), word).tone(Tone::Neutral).dot().build(t)).child(facts);
-    paint(col().key(format!("run-{}", r.id.0)).role("group").label(format!("Run: {word}")).w_full().padding(t.metrics.inset).gap(t.space.at(3.0)).radius(t.radius.xl).round_as(t), &t.mat.slab.base).child(head)
+    let mut card = paint(col().key(format!("run-{}", r.id.0)).role("group").label(format!("Run: {word}")).w_full().padding(t.metrics.inset).gap(t.space.at(3.0)).radius(t.radius.xl).round_as(t), &t.mat.slab.base).child(head);
+    if let Some(line) = &o.line {
+        card = card.child(text(line.clone()).key(format!("run-{}-note", r.id.0)).font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0));
+    }
+    if let Some(actions) = undo_row(r, o, t) {
+        card = card.child(actions);
+    }
+    card
 }
 
 /// What the transcript is made of, in order.
@@ -402,17 +455,26 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part]) -> El {
     let (work, tail) = parts.split_at(tail_from);
     let work: Vec<&Part> = work.iter().copied().filter(|p| part_el(s, t, book, r, p, false, false, false).is_some() && !matches!(p.body, PartBody::Notice { .. })).collect();
     let key = format!("worked-{}", r.id.0);
+    let offer = offer_of(book, r);
     let mut out = Vec::new();
     let lead = row().size(t.control.icon, t.control.icon).center().child(glyph(&icons::CLOCK, t.control.icon, t.ink_faint()));
     if work.is_empty() {
         // Nothing to open: one quiet line with the time.
-        out.push(row().key(key).role("status").label(worked_words(r)).w_full().h(t.control.md).pl(t.space.at(1.5)).gap(t.metrics.gap).center_y().child(lead).child(text(worked_words(r)).font(t.ty.base).color(t.ink_muted()).a11y_hidden()));
+        let words = if offer.undone { format!("{} · undone", worked_words(r)) } else { worked_words(r) };
+        out.push(row().key(key).role("status").label(words.clone()).w_full().h(t.control.md).pl(t.space.at(1.5)).gap(t.metrics.gap).center_y().child(lead).child(text(words).font(t.ty.base).color(t.ink_muted()).a11y_hidden()));
     } else {
         let n = work.iter().filter(|p| quiet_line(p)).count();
         let k = key.clone();
         let mut line = FoldLine::<App>::new(key.clone(), worked_words(r), s.is_open(&key)).lead(lead).indent(false).on_toggle(move |s: &mut App| s.flip(&k));
-        if n > 0 {
-            line = line.meta(format!("{n} step{}", if n == 1 { "" } else { "s" }));
+        // An undone run's steps stay readable, marked "undone".
+        let steps = (n > 0).then(|| format!("{n} step{}", if n == 1 { "" } else { "s" }));
+        let meta = match (steps, offer.undone) {
+            (Some(st), true) => Some(format!("{st} · undone")),
+            (None, true) => Some("undone".to_owned()),
+            (st, false) => st,
+        };
+        if let Some(m) = meta {
+            line = line.meta(m);
         }
         // Inside the fold every word is interim: quieter than the answer.
         let steps = if s.is_open(&key) { vec![col().key(format!("{key}-steps")).w_full().gap(t.space.at(BLOCK_GAP)).children(lay_out_folded(s, t, book, r, &work))] } else { Vec::new() };
@@ -420,7 +482,7 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part]) -> El {
     }
     let tail_last = tail.iter().rposition(|p| matches!(&p.body, PartBody::Agent { text, .. } if !text.trim().is_empty()));
     out.extend(lay_out(s, t, book, r, tail, None, tail_last));
-    out.extend(run_card(t, r));
+    out.extend(run_card(t, r, &offer));
     out.into_iter().fold(turn, Message::child).build(t)
 }
 
@@ -482,6 +544,9 @@ fn context_ring(s: &App, t: &Theme, book: &Book, layer: &mut Vec<El>) -> Option<
 /// The open task: its conversation, and its composer.
 pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let Some(task) = s.open_task() else { return el() };
+    if let Some(r) = s.review.as_ref().filter(|r| r.task == task.id) {
+        return col().key("task").w_full().grow(1.0).min_h(0.0).child(crate::review_view::review_view(s, t, r));
+    }
     let empty = Book::default();
     let book = s.book().unwrap_or(&empty);
     // The task's own words first (their text keyed "task-words", as in S0).
