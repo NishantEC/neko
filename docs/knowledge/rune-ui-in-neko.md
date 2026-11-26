@@ -20,6 +20,9 @@ crates, all at the same rev). `add` brought `base`, `icons`, `agent` and `font_i
 The polish round moved to v0.9.0: both git dependencies on `tag = "v0.9.0"`, `rune-ui update`, then `rune-ui add task`. The CLI is
 built from the tag in `$NEKO_TARGET/rune-ui-src` into `$NEKO_TARGET/cli`.
 
+Workspaces added `dropdown_menu`, `dialog`, `alert_dialog`, `input`, `segmented_control` and `select` (the last is installed but not
+used; see below) with the same CLI.
+
 S1 added `response`, `reasoning` (with `shimmer`), `tool`, `confirmation`, `badge`, `radio_group` and, after the first real run,
 `context` with the same CLI (`rune-ui add …`); `response` turned on rune-kit's `markdown` feature (pulldown-cmark, MIT). Rune's `native-file-dialog` feature brings rfd (MIT).
 
@@ -64,6 +67,17 @@ After 0.9.0:
 - `Context`'s popover opens `TopEnd`; with the ring at the composer's left it hangs out over the sidebar. Ask: `.placement(..)`.
 - `Context::Usage` cannot say the window was assumed (not reported). Ask: `limit_assumed: bool` or a second note.
 - `SidebarItem` has no button form: the New task row adds `.role("button")` on the built row.
+
+From the workspaces slice:
+
+- `Select`'s options are `option`s in a `listbox` without `position_in_set` (and the current one says `unselected`), so Neko's
+  accessibility rules fail on it. The composer's picker is a DropdownMenu with checked rows instead (a Mac pop-up button is a
+  menu too). Ask: `position_in_set(i + 1, n)` and `selected` on each option in `popup::Popup::surface` for role `listbox`.
+- `popup::mount` makes the open surface a modal with no name. Neko adds `.label(..)` on the built surface (`view::menu_named`).
+  Ask: `Popup::surface` labels its content with `self.name`, or `DropdownMenu::name(..)`.
+- `popup::Row::shortcut` sets its keys in Inter, which Neko's "Figtree everywhere" rule refuses; Move up and Move down show no
+  keys. Ask: the shortcut in the theme's face (or its keys font from the theme).
+- No sortable list: reordering workspaces is by keyboard and menu only. Ask: a drag-to-reorder helper for a column of rows.
 
 Still open from S0: `SidebarItem` rows outside a list are `role("link")`.
 

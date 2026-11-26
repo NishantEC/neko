@@ -4,7 +4,11 @@
 
 ## Records
 
-- `workspaces (id, name, created_ms)`. One default workspace, id `default`, named Home, made at first open.
+- `workspaces (id, name, created_ms, folder, removed_ms, position)`. General is id `default` with no folder, made at first open.
+  Version 4 (workspaces) adds the folder (unique, links resolved), when it was removed and its place in the sidebar. Its
+  migration renames the default row General and makes one workspace per folder tasks were made in (its id from its oldest
+  task's, so no clock or randomness is needed), moving those tasks into it; tasks with no folder stay in General.
+  See `workspaces.md`.
 - `tasks (id, workspace_id, words, title, status, created_ms)`. `words` are the person's words exactly as sent (whitespace and
   all). `title` is the first line with words, spaces collapsed, cut at a word before 80 characters. `status` is the newest run's: `new`, `working`, `needs_you`, `done`,
   `failed`, `stopped`, `interrupted`.
@@ -21,11 +25,14 @@ Ids are `task_` and 26 base-32 characters: 48 bits of time, 80 random bits (the 
 - No clock and no randomness inside logic. `Core` is handed a `Clock` and an `Ids`; tests use `FixedClock` and `SequentialIds`.
 - WAL, `synchronous=NORMAL`, `foreign_keys=ON`, `busy_timeout` 5 s, `journal_size_limit` 8 MB. The daemon checkpoints
   (`TRUNCATE`) at a clean shutdown.
-- Migrations: `user_version` counts the migrations run; each runs in its own transaction. A store from a newer Neko (a higher
+- Migrations: `user_version` counts the migrations run; each runs in its own transaction. A migration is SQL, or SQL then a
+  step in code (version 4 reads folders on disk). `Store::open_at` stops at an older version, so a test can build a store as an
+  older Neko left it. A store from a newer Neko (a higher
   version) is refused, not touched.
 - Two connections on one file see each other's writes (tested).
 
 ## Tests
 
-`crates/neko-core/tests/store.rs`: create and list, refusals, reopen, migration and the newer-version refusal, the append-only
+`crates/neko-core/tests/workspaces.rs`: the migration from version 3, adding, renaming, removing, a missing folder, locating,
+reordering, the tidy rule on real repositories. `crates/neko-core/tests/store.rs`: create and list, refusals, reopen, migration and the newer-version refusal, the append-only
 log, two connections.

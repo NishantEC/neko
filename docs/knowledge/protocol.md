@@ -1,6 +1,6 @@
 # The protocol (S1, 2026-11-26)
 
-`crates/neko-protocol` is the contract between a screen and the daemon. Version 2 (S1: tasks run).
+`crates/neko-protocol` is the contract between a screen and the daemon. Version 5 (workspaces).
 
 ## Shape
 
@@ -16,8 +16,15 @@
 | Request | Reply |
 | --- | --- |
 | `hello {client, protocol}` | `hello {daemon, protocol, workspace}`, or `error protocol_mismatch` and the connection closes |
-| `list_tasks` | `tasks {tasks}`, newest first |
-| `create_task {words, folder?}` | `task {task}`, or `error invalid_words` (empty, or over 100 KB). Its agent starts by itself. |
+| `list_tasks` | `tasks {tasks}`, every workspace's, newest first |
+| `create_task {words, workspace?}` | `task {task}` (no workspace: General), or `error invalid_words` (empty, or over 100 KB), `refused` (a removed workspace, or its folder not found), `not_found`. Its agent starts by itself. |
+| `remove_task {task}` | `ok`, `busy` while it runs, or `unsaved_work` (uncommitted changes or scratch files: nothing deleted) |
+| `list_workspaces` | `workspaces {workspaces}`: General, the person's order, removed ones last; `missing` when the folder is gone |
+| `add_workspace {folder}` | `workspace {workspace, existed?}`, or `invalid_folder` |
+| `rename_workspace {workspace, name}` | `workspace {workspace}`, or `refused` (General, an empty name) |
+| `remove_workspace {workspace}` | `workspace {workspace}` with `removed_ms`, or `refused` (General) |
+| `locate_workspace {workspace, folder}` | `workspace {workspace}`, or `invalid_folder`, `refused` (another workspace's folder) |
+| `move_workspace {workspace, to}` | `ok`; `to` counts the person's workspaces on the list from 0 |
 | `get_task {task}` | `task {task}`, or `error not_found` |
 | `subscribe` | `subscribed {revision}`; then an event for every change |
 | `get_transcript {task}` | `transcript {transcript}`: the task, its runs, parts and permission requests |
@@ -34,7 +41,8 @@ never guessed.
 
 ## Events
 
-`task_created`, `task_updated`, `run_changed`, `part_changed`, `permission_changed`, `settings_changed`, each with `revision`: the
+`task_created`, `task_updated`, `task_removed`, `workspace_added`, `workspace_updated` (renamed, removed, restored, located, moved:
+the whole row), `run_changed`, `part_changed`, `permission_changed`, `settings_changed`, each with `revision`: the
 store's event sequence number. `part_delta {task, part, text}` appends streamed words; it goes only to connections watching the
 task, is not stored as an event, and carries revision 0. A screen that made the task may see the event before its own reply; it
 keeps everything by id, so nothing doubles.
@@ -43,7 +51,7 @@ keeps everything by id, so nothing doubles.
 
 - The JSON shapes are pinned by `tests/round_trip.rs`. A change to a shape is a new version. Version 4 added the task status
   `asked`: the run finished and its last words end in a question mark, so it is the person's turn (not working; a follow-up
-  answers it).
+  answers it). Version 5 added workspaces: a task's `workspace` names one, `create_task` takes a workspace instead of a folder.
 - `DaemonInfo` (`daemon.json`) is part of the contract: `{pid, port, protocol, version}`.
 - `client::find(dir)` reads `daemon.json` and `token`. `client::Client` is blocking (tests, tools). `client::Link` runs on its own
   thread and hands replies and events to a callback (the app).

@@ -9,7 +9,7 @@
 | --- | --- |
 | `lib.rs` | `run()`: headless runs return first; then the menu prep, the saved frame, the Dock registration, `rune::run_windows`. `poll` drains the link, follows the width, sets the title, keeps the frame, replaces the menu. `on_key`: ⌘N, ⌃⌘S, Escape. |
 | `state.rs` | `App` and what each event changes. No drawing, no I/O. |
-| `view.rs` | The window: sidebar (each task's state as its mark), content band, Home and its folder chip. |
+| `view.rs` | The window: sidebar (workspace sections, each task's state as its mark), content band, Home and its workspace picker, the panels that ask (rename, remove). |
 | `task_view.rs` | The task view: the conversation, steps, permission requests, run cards, the composer and its context ring. |
 | `settings_view.rs` | Settings (⌘,): the agent CLIs, which one new tasks use, the permission mode. |
 | `link.rs` | The supervisor thread: find or start the daemon, connect, reconnect, an inbox the window drains. |
@@ -29,7 +29,7 @@
 - **Where it was.** The normal frame is written to `~/Library/Application Support/dev.neko.app/prefs.json` (Rune's prefs, apart from
   the daemon's data) once it has been still for half a second, and at close and quit. The next launch puts it back, clamped to the
   displays present. Full screen, zoomed and minimised frames are never saved. First launch: 1200 × 800, centred.
-- **Title.** The open task's title, else "Neko". A title is one short line: the first line of the person's words, cut at a word
+- **Title.** The open task's title and its workspace's name ("Fix the build — acme-api"), else "Neko". A title is one short line: the first line of the person's words, cut at a word
   before 60 characters (`neko_protocol::title`, used by the daemon when it stores a task and by the app when a task arrives, so
   the sidebar, the band and the window's title always agree).
 - **Closing.** ⌘W closes the window and the app keeps running (`keep_running`); the Dock icon brings it back. ⌘Q quits.
@@ -44,12 +44,13 @@ The model is pure and tested (`menu.rs`): no key is taken twice.
 
 ## Keyboard
 
-- Tab goes once round every control in reading order: Hide sidebar, New task, Home, each task list (one stop each), the composer,
-  the folder chip. In a task: copy buttons, fold lines, request answers, then the composer and its context ring.
+- Tab goes once round every control in reading order: Hide sidebar, New task, Home, the workspaces list (one stop), each
+  section's own buttons, Add workspace…, the composer, the workspace picker. In a task: copy buttons, fold lines, request answers, then the composer and its context ring.
   `App::tab_visits_controls(true)` makes this so whatever the Mac's Keyboard Navigation setting is.
-- In a task list the arrow keys move (`focus_group`), Return opens the row.
+- In the workspaces list the arrow keys move through section headers and rows (`focus_group`), a typed name goes to it, Return
+  opens a row or folds a section; Left and Right fold and open; ⌥⌘↑ and ⌥⌘↓ move a section (`workspaces.md`).
 - In the composer Return sends, Shift+Return makes a new line. Escape gives focus back.
-- ⌘N goes Home with the keyboard in the composer. ⌘, opens Settings (Neko ▸ Settings…).
+- ⌘N goes Home with the keyboard in the composer, in the workspace of the task in view. ⌘, opens Settings (Neko ▸ Settings…).
 
 ## Accessibility
 
@@ -124,8 +125,10 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
 - **The task's folder** shows once, quietly, at the band's right: the newest run's working folder (else the chosen folder),
   shortened with `~` and cut in its middle, the branch beside it, and a Reveal in Finder button (`Tx::reveal_path`). The window title follows the task. Finishing, failing and needing you
   are announced (`Tx::announce`).
-- **Home's folder chip** opens the Mac's open panel (Rune's `native-file-dialog`, rfd); the choice is kept in the prefs
-  (`last-folder`) and dropped if the folder is gone. Without a folder a task gets a scratch folder.
+- **Home's workspace picker** is a pop-up menu in the composer's footer: General, the workspaces, "Add folder…" (the Mac's open
+  panel, Rune's `native-file-dialog`, rfd). The choice is kept in the prefs (`last-workspace`). See `workspaces.md`.
+- **The task's band** shows its workspace's name before the folder, and a menu with Remove task….
+- **Settings** has two pages, Agents and Workspaces, switched by rune-ui's SegmentedControl.
 
 ## Not done yet
 

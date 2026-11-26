@@ -55,6 +55,7 @@ ships in `NOTICE` and `THIRD_PARTY_LICENSES/`.
 - [Permissions](docs/knowledge/permissions.md) — what goes ahead, what asks, request states, "always" scoped to the task.
 - [The run guard](docs/knowledge/run-guard.md) — nothing a run starts outlives it; the limits; the known gap.
 - [The transcript](docs/knowledge/transcript.md) — runs, parts, usage, write rate, interrupted runs, cost as reported.
+- [Workspaces](docs/knowledge/workspaces.md) — folders the person added, General, removing, a missing folder, the tidy rule, Remove task.
 
 ## Showing a change
 
