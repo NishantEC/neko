@@ -27,6 +27,9 @@
 //! | `real` | The shapes a real run showed: empty thinking, several words between tools, a long absolute path, a check that exits 1. |
 //! | `hook-no-verdict` | Says a hook gave no usable answer for `cargo test`, then runs it anyway, as Claude Code does (it fails open). |
 //!
+//! `NEKO_FAKE_RECORD` names a file it appends what it was given to, one JSON line each: `{"argv": [...]}` when it starts, then
+//! `{"stdin": <line>}` for every line it reads. Tests read it to see exactly what reached the CLI.
+//!
 //! With `--resume ID` it continues conversation ID and says so. `--version` and `auth status --json` answer like the real CLI
 //! (`NEKO_FAKE_AUTH=out` makes it signed out). It also serves as the run guard in tests (`--neko-run-guard`).
 //!
@@ -501,6 +504,15 @@ fn spawn_grandchild(pidfile: &str) {
     }
 }
 
+/// Appends `v` to the file `NEKO_FAKE_RECORD` names, if any.
+fn keep(v: &Value) {
+    if let Some(r) = std::env::var_os("NEKO_FAKE_RECORD").filter(|r| !r.is_empty())
+        && let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(r)
+    {
+        let _ = writeln!(f, "{v}");
+    }
+}
+
 fn main() {
     neko_core::guard::run_if_requested();
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -516,6 +528,7 @@ fn main() {
         println!(r#"{{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}}"#);
         return;
     }
+    keep(&json!({ "argv": args }));
     let resume = args.iter().position(|a| a == "--resume").and_then(|i| args.get(i + 1)).cloned();
     let settings = args.iter().position(|a| a == "--settings").and_then(|i| args.get(i + 1)).cloned();
     let (tx, rx) = mpsc::channel();
@@ -523,6 +536,7 @@ fn main() {
         for line in std::io::stdin().lock().lines() {
             let Ok(line) = line else { break };
             if let Ok(v) = serde_json::from_str::<Value>(&line) {
+                keep(&json!({ "stdin": v }));
                 if tx.send(v).is_err() {
                     break;
                 }

@@ -240,6 +240,8 @@ mod tests {
             usage: None,
             changes: None,
             undo,
+            cat: None,
+            rules_hash: None,
         }
     }
 

@@ -23,10 +23,12 @@ pub const QUESTION_CHARS: usize = 200;
 /// Everything waiting for the person now, oldest first, grouped by workspace.
 pub fn derive(store: &Store) -> Result<Vec<NeedsItem>, StoreError> {
     let tasks: HashMap<_, Task> = store.all_tasks()?.into_iter().map(|t| (t.id.clone(), t)).collect();
+    let names: HashMap<String, String> = store.list_cats()?.into_iter().map(|c| (c.id, c.name)).collect();
+    let cat_name = |t: &Task| names.get(&t.cat).cloned().unwrap_or_else(|| "Neko".to_owned());
     let mut items = Vec::new();
     for p in store.pending_permissions()? {
         let Some(t) = tasks.get(&p.task) else { continue };
-        items.push(NeedsItem { id: format!("perm:{}", p.id.0), task: t.id.clone(), workspace: t.workspace.clone(), title: t.title.clone(), since_ms: p.asked_ms, need: Need::Permission { permission: p } });
+        items.push(NeedsItem { id: format!("perm:{}", p.id.0), task: t.id.clone(), workspace: t.workspace.clone(), title: t.title.clone(), cat: t.cat.clone(), cat_name: cat_name(t), since_ms: p.asked_ms, need: Need::Permission { permission: p } });
     }
     for t in tasks.values() {
         match t.status {
@@ -40,7 +42,7 @@ pub fn derive(store: &Store) -> Result<Vec<NeedsItem>, StoreError> {
                     continue;
                 };
                 let since = run.ended_ms.unwrap_or(run.started_ms);
-                items.push(NeedsItem { id: format!("question:{}", run.id.0), task: t.id.clone(), workspace: t.workspace.clone(), title: t.title.clone(), since_ms: since, need: Need::Question { run: run.id, question: question_of(words) } });
+                items.push(NeedsItem { id: format!("question:{}", run.id.0), task: t.id.clone(), workspace: t.workspace.clone(), title: t.title.clone(), cat: t.cat.clone(), cat_name: cat_name(t), since_ms: since, need: Need::Question { run: run.id, question: question_of(words) } });
             }
             TaskStatus::Failed => {
                 let parts = store.parts_of(&t.id)?;
@@ -57,6 +59,8 @@ pub fn derive(store: &Store) -> Result<Vec<NeedsItem>, StoreError> {
                     task: t.id.clone(),
                     workspace: t.workspace.clone(),
                     title: t.title.clone(),
+                    cat: t.cat.clone(),
+                    cat_name: cat_name(t),
                     since_ms: part.at_ms,
                     need: Need::Failure { failure: kind, text: text.clone(), next: next.clone(), command: next.as_deref().and_then(command_of) },
                 });

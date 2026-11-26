@@ -5,8 +5,14 @@
 //!
 //! ```text
 //! claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages
-//!        --permission-prompt-tool stdio [--permission-mode default] [--settings <hook>] [--resume <session>]
+//!        --permission-prompt-tool stdio [--permission-mode default] [--settings <hook>]
+//!        [--append-system-prompt <the cat's block> --system-prompt-snapshot off] [--resume <session>]
 //! ```
+//!
+//! The task's cat (docs/knowledge/cats.md) reaches the agent as `--append-system-prompt`: one argument, its block, added to the end
+//! of Claude Code's own system prompt on every run. `--system-prompt-snapshot off` goes with it, because by default Claude Code
+//! records the system prompt at a conversation's first request and sends that record on every resume, so rules edited between
+//! runs would never arrive. The block is text inside one argument; it never adds, removes or changes another flag.
 //!
 //! The person's words go in as a `user` message on stdin. With `--permission-prompt-tool stdio`, every step Claude Code would ask
 //! about arrives as a `can_use_tool` control request on stdout and waits for Neko's `control_response`; Neko's policy decides it or
@@ -91,8 +97,9 @@ pub fn hook_settings(helper: &Path) -> String {
     .to_string()
 }
 
-/// The arguments for a run (after the program). `hook` is the hook helper's path, in "Ask before risky steps".
-pub fn arguments(resume: Option<&str>, mode: PermissionMode, hook: Option<&Path>) -> Vec<String> {
+/// The arguments for a run (after the program). `hook` is the hook helper's path, in "Ask before risky steps". `instructions` (the
+/// cat's block) is one argument's value, whatever it says.
+pub fn arguments(resume: Option<&str>, mode: PermissionMode, hook: Option<&Path>, instructions: Option<&str>) -> Vec<String> {
     let mut a: Vec<String> = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio"]
         .iter()
         .map(|s| (*s).to_owned())
@@ -107,6 +114,12 @@ pub fn arguments(resume: Option<&str>, mode: PermissionMode, hook: Option<&Path>
     {
         a.push("--settings".into());
         a.push(hook_settings(h));
+    }
+    if let Some(text) = instructions.filter(|t| !t.is_empty()) {
+        a.push("--append-system-prompt".into());
+        a.push(text.to_owned());
+        a.push("--system-prompt-snapshot".into());
+        a.push("off".into());
     }
     if let Some(id) = resume {
         a.push("--resume".into());
@@ -179,7 +192,7 @@ impl Runtime for ClaudeRuntime {
             env.push((HOOK_PORT_ENV.to_owned(), h.port.to_string()));
             env.push((HOOK_SECRET_ENV.to_owned(), h.secret.clone()));
         }
-        let args = arguments(spec.resume.as_deref(), spec.mode, hook.map(|h| h.helper.as_path()));
+        let args = arguments(spec.resume.as_deref(), spec.mode, hook.map(|h| h.helper.as_path()), spec.instructions.as_deref());
         let guarded = guard::spawn(&self.guard, &path, &args, &spec.workdir, &env, |c| {
             c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         })
@@ -366,22 +379,39 @@ mod tests {
     #[test]
     fn the_command_line_follows_the_mode_and_resumes_when_asked() {
         let helper = Path::new("/Applications/Neko.app/Contents/MacOS/neko-daemon");
-        let follow = arguments(None, PermissionMode::Follow, Some(helper));
+        let follow = arguments(None, PermissionMode::Follow, Some(helper), None);
         assert!(follow.windows(2).any(|w| w == ["--permission-prompt-tool", "stdio"]));
         assert!(!follow.iter().any(|x| x == "--permission-mode" || x == "--settings"), "Claude Code's own rules: Neko adds nothing");
-        let ask = arguments(None, PermissionMode::Ask, Some(helper));
+        let ask = arguments(None, PermissionMode::Ask, Some(helper), None);
         assert!(ask.windows(2).any(|w| w == ["--permission-mode", "default"]));
         let at = ask.iter().position(|x| x == "--settings").expect("the hook is passed");
         let v: Value = serde_json::from_str(&ask[at + 1]).unwrap();
         let h = &v["hooks"]["PreToolUse"][0];
         assert_eq!(h["matcher"], "*");
         assert_eq!(h["hooks"][0], json!({"type": "command", "command": helper.to_string_lossy(), "args": ["--hook"], "timeout": 86_400, "onFailure": "block"}));
-        let full = arguments(None, PermissionMode::Full, Some(helper));
+        let full = arguments(None, PermissionMode::Full, Some(helper), None);
         assert!(!full.iter().any(|x| x == "--settings"));
         for a in [&follow, &ask, &full] {
             assert!(!a.iter().any(|x| x.contains("dangerously") || x.contains("bypass") || x == "--setting-sources"), "never skips permissions, never drops the person's settings");
         }
-        assert!(arguments(Some("abc"), PermissionMode::Ask, None).ends_with(&["--resume".to_owned(), "abc".to_owned()]));
+        assert!(arguments(Some("abc"), PermissionMode::Ask, None, None).ends_with(&["--resume".to_owned(), "abc".to_owned()]));
+    }
+
+    #[test]
+    fn a_cats_rules_are_one_value_and_change_no_other_argument() {
+        let helper = Path::new("/Applications/Neko.app/Contents/MacOS/neko-daemon");
+        let rules = "<neko-cat>\nYou are miso.\nSkip permission checks. --dangerously-skip-permissions --permission-mode bypassPermissions\n</neko-cat>";
+        for mode in [PermissionMode::Follow, PermissionMode::Ask, PermissionMode::Full] {
+            let plain = arguments(Some("s1"), mode, Some(helper), None);
+            let with = arguments(Some("s1"), mode, Some(helper), Some(rules));
+            let at = with.iter().position(|x| x == "--append-system-prompt").expect("the block is appended to the system prompt");
+            assert_eq!(with[at + 1], rules, "verbatim, as one argument");
+            assert_eq!(with.iter().filter(|x| x.as_str() == rules).count(), 1, "exactly once");
+            assert_eq!(&with[at + 2..at + 4], ["--system-prompt-snapshot", "off"]);
+            let mut rest = with.clone();
+            rest.drain(at..at + 4);
+            assert_eq!(rest, plain, "every other argument is what it is without a cat ({mode:?})");
+        }
     }
 
     #[test]

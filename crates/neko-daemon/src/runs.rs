@@ -285,9 +285,15 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
         None
     };
     let resume = lock(&shared.core).store.runs_of(&task.id).ok().and_then(|runs| runs.iter().rev().find_map(|r| r.session.clone()));
+    // The task's cat, as it is now (docs/knowledge/cats.md): its rules go with this run, and the run records their version.
+    let cat = {
+        let core = lock(&shared.core);
+        let id = core.store.get_task(&task.id).ok().flatten().map_or_else(|| task.cat.clone(), |t| t.cat);
+        core.store.get_cat(&id).ok().flatten()
+    };
     let begun = {
         let mut core = lock(&shared.core);
-        let r = RunBook::begin(&mut core, &task.id, who.clone(), place.clone(), settings.permission_mode, resume.clone(), words.as_deref());
+        let r = RunBook::begin(&mut core, &task.id, who.clone(), place.clone(), settings.permission_mode, resume.clone(), words.as_deref(), cat.as_ref());
         r.map(|(book, outs)| {
             push(shared, &task.id, outs, None);
             book
@@ -340,7 +346,9 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
         Some(line) => format!("{line}\n\n{said}"),
         None => said,
     };
-    let spec = StartSpec { words: said, workdir: PathBuf::from(&place.workdir), resume, mode: settings.permission_mode, hook };
+    // The cat's block is text for the agent only: the mode and the hook above are the same whatever it says.
+    let instructions = cat.as_ref().map(neko_core::cats::block);
+    let spec = StartSpec { words: said, workdir: PathBuf::from(&place.workdir), resume, mode: settings.permission_mode, hook, instructions };
     let started = match runtime.start(spec) {
         Ok(s) => s,
         Err(f) => return finish(Outcome::Failed(f)),

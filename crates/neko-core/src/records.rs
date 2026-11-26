@@ -38,7 +38,7 @@ fn log(tx: &Transaction<'_>, now_ms: i64, subject: &str, kind: &str, data: serde
 
 const RUN_COLUMNS: &str = "r.id, r.task_id, r.runtime, r.model, r.status, r.started_ms, r.ended_ms, r.session, r.workdir, r.branch, r.reason, r.files, r.added, r.removed, \
     u.input_tokens, u.output_tokens, u.cached_tokens, u.cost_usd, u.model, u.pricing, u.reported_by, u.context_tokens, u.context_window, \
-    r.undo_state, r.undo_why, r.undo_files, r.undo_added, r.undo_removed, r.undo_committed";
+    r.undo_state, r.undo_why, r.undo_files, r.undo_added, r.undo_removed, r.undo_committed, r.cat_id, r.rules_hash";
 
 fn run_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Run> {
     let changes = match (row.get::<_, Option<u32>>(11)?, row.get::<_, Option<u32>>(12)?, row.get::<_, Option<u32>>(13)?) {
@@ -74,6 +74,8 @@ fn run_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Run> {
         usage,
         changes,
         undo: crate::history::undo_of(row, 23)?,
+        cat: row.get(29)?,
+        rules_hash: row.get(30)?,
     })
 }
 
@@ -100,6 +102,7 @@ fn kind_of(b: &PartBody) -> &'static str {
         PartBody::Tool { .. } => "tool",
         PartBody::Permission { .. } => "permission",
         PartBody::Notice { .. } => "notice",
+        PartBody::RulesChanged { .. } => "rules_changed",
     }
 }
 
@@ -160,8 +163,8 @@ impl Store {
     pub fn insert_run(&mut self, r: &Run, now_ms: i64) -> Result<u64, StoreError> {
         let tx = self.conn.transaction()?;
         tx.execute(
-            "INSERT INTO runs (id, task_id, runtime, model, status, started_ms, ended_ms, session, workdir, branch, reason) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            params![r.id.0, r.task.0, r.runtime, r.model, status_name(r.status), r.started_ms, r.ended_ms, r.session, r.workdir, r.branch, r.reason],
+            "INSERT INTO runs (id, task_id, runtime, model, status, started_ms, ended_ms, session, workdir, branch, reason, cat_id, rules_hash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![r.id.0, r.task.0, r.runtime, r.model, status_name(r.status), r.started_ms, r.ended_ms, r.session, r.workdir, r.branch, r.reason, r.cat, r.rules_hash],
         )?;
         let seq = log(&tx, now_ms, &r.id.0, "run_started", serde_json::json!({ "task": r.task.0, "runtime": r.runtime }))?;
         tx.commit()?;

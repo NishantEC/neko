@@ -14,9 +14,11 @@ use serde::{Deserialize, Serialize};
 pub mod client;
 #[cfg(feature = "ws")]
 pub mod pump;
+pub mod cats;
 pub mod title;
 pub mod undo;
 
+pub use cats::Cat;
 pub use undo::{DiffFile, DiffPatch, DiffSummary, FileStatus, Offer, RunUndo, UndoState, UndoStorage};
 
 /// The version of this contract. A screen and a daemon talk only when theirs are equal. 2: tasks run (S1). 3: three permission
@@ -24,8 +26,9 @@ pub use undo::{DiffFile, DiffPatch, DiffSummary, FileStatus, Offer, RunUndo, Und
 /// a question for the person). 5: workspaces (a task is made in one; list, add, rename, remove, locate and move them; remove a
 /// task). 6: "Needs you" (the items waiting for the person, listed and pushed whole; a failure's notice says what kind it is; a
 /// follow-up may say which question it answers). 7: undo (a run's checkpoints and where its undo stands; a run's changes as a diff,
-/// per file; undo, redo; the storage undo uses, and clearing it).
-pub const PROTOCOL_VERSION: u32 = 7;
+/// per file; undo, redo; the storage undo uses, and clearing it). 8: cats (named agents with standing rules; every task has one; a
+/// run records its cat and the version of its rules; "Needs you" items name the cat).
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -130,6 +133,8 @@ pub struct Task {
     /// Its workspace's folder when it was made; None: a scratch folder of its own (General).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
+    /// The cat doing it (a [`Cat`]'s id). Set when the task is made; changed only while no run has started.
+    pub cat: String,
 }
 
 /// Where a run stands.
@@ -219,6 +224,12 @@ pub struct Run {
     /// never started its agent, and for runs from before protocol 7.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub undo: Option<RunUndo>,
+    /// The cat whose rules went with this run (None for runs from before protocol 8).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cat: Option<String>,
+    /// The version of the cat's rules it used ([`cats::rules_hash`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rules_hash: Option<String>,
 }
 
 /// A tool call's state.
@@ -276,6 +287,9 @@ pub enum PartBody {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         failure: Option<FailureKind>,
     },
+    /// The cat's standing rules changed since the task's last run: this run is the first with the new ones. `name` is the cat's
+    /// name then.
+    RulesChanged { cat: String, name: String },
 }
 
 /// A failure the person can do something about (docs/knowledge/needs-you.md). Every other failure is a notice only.
@@ -320,6 +334,9 @@ pub struct NeedsItem {
     pub workspace: String,
     /// The task's title.
     pub title: String,
+    /// The task's cat, and its name ("miso asks…").
+    pub cat: String,
+    pub cat_name: String,
     /// Since when it has waited (ms since the epoch).
     pub since_ms: i64,
     pub need: Need,
@@ -465,12 +482,47 @@ pub enum Request {
     Hello { client: String, protocol: u32 },
     /// Every task of every workspace, newest first.
     ListTasks,
-    /// A new task from the person's words, in `workspace` (None: General). Its agent starts by itself.
+    /// A new task from the person's words, in `workspace` (None: General), for `cat` (None: the workspace's default cat, else the
+    /// least busy). Its agent starts by itself.
     CreateTask {
         words: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workspace: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cat: Option<String>,
     },
+    /// Give a task to another cat. Refused once a run has started.
+    SetTaskCat { task: TaskId, cat: String },
+    /// Every cat: the active ones first (oldest first), then the retired.
+    ListCats,
+    /// A new cat. No face: the first of [`cats::FACES`] no active cat has.
+    CreateCat {
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        face: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        purpose: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<String>,
+    },
+    RenameCat { cat: String, name: String },
+    SetCatFace { cat: String, face: String },
+    /// An empty purpose clears it.
+    SetCatPurpose { cat: String, purpose: String },
+    /// None: no default workspace.
+    SetCatWorkspace {
+        cat: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<String>,
+    },
+    /// Save the cat's standing rules; the ones before become its previous rules.
+    SaveCatRules { cat: String, rules: String },
+    /// Put the previous rules back (the current ones become the previous).
+    RestoreCatRules { cat: String },
+    /// Retire a cat: it takes no new tasks; its tasks stay readable. Refused for the last active cat.
+    RetireCat { cat: String },
+    /// Bring a retired cat back. Refused when [`cats::MAX_ACTIVE`] are active.
+    BringBackCat { cat: String },
     /// Forget a task: its record goes, and its worktree or scratch folder when nothing unsaved is in it. Refused while it runs and
     /// when its folder holds unsaved work.
     RemoveTask { task: TaskId },
@@ -587,6 +639,8 @@ pub enum ErrorCode {
     Refused,
     /// The task's folder holds work that is not saved (uncommitted changes, or files in its scratch folder): nothing is deleted.
     UnsavedWork,
+    /// A cat's name is empty, too long, or another cat's; the words say which.
+    InvalidName,
 }
 
 /// The daemon's answer to one request.
@@ -618,6 +672,8 @@ pub enum Reply {
     /// Undo or redo did nothing: these files changed since (paths in the task's folder). Asking again with `anyway` goes ahead.
     ChangedSince { files: Vec<String> },
     UndoStorage { storage: UndoStorage },
+    Cats { cats: Vec<Cat> },
+    Cat { cat: Cat },
     /// Done; the change arrives as events.
     Ok,
     Error { code: ErrorCode, message: String },
@@ -648,6 +704,9 @@ pub enum Change {
     /// What waits for the person changed: the whole list as it is now (it is derived, never stored; `revision` is the change that
     /// caused it).
     NeedsChanged { items: Vec<NeedsItem> },
+    CatAdded { cat: Cat },
+    /// Renamed, a new face, purpose, default workspace or rules, retired or brought back: the whole cat as it is now.
+    CatUpdated { cat: Cat },
 }
 
 /// What the daemon sends.
@@ -718,7 +777,7 @@ impl PartBody {
         match self {
             PartBody::Person { text } | PartBody::Agent { text, .. } | PartBody::Thinking { text, .. } | PartBody::Notice { text, .. } => text,
             PartBody::Tool { summary, .. } => summary,
-            PartBody::Permission { .. } => "",
+            PartBody::Permission { .. } | PartBody::RulesChanged { .. } => "",
         }
     }
 }

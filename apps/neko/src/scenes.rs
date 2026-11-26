@@ -75,7 +75,9 @@ pub const SCENES: &[Scene] = &[
 fn task(n: u32, words: &str, minutes_ago: i64) -> Task {
     let (now, _) = crate::fixed_clock();
     let title = words.lines().next().unwrap_or("").to_owned();
-    Task { id: TaskId(format!("task_{n:026}")), workspace: "default".into(), words: words.into(), title, created_ms: now - minutes_ago * 60_000, status: TaskStatus::New, folder: None }
+    // Each sample task has one of the starter cats, in turn.
+    let cat = ["cat_miso", "cat_mochi", "cat_tofu"][n as usize % 3].to_owned();
+    Task { id: TaskId(format!("task_{n:026}")), workspace: "default".into(), words: words.into(), title, created_ms: now - minutes_ago * 60_000, status: TaskStatus::New, folder: None, cat }
 }
 
 /// Four tasks: three from today and one from earlier in the week, each in a different state.
@@ -175,6 +177,11 @@ fn ago(s: &App, minutes: i64) -> i64 {
     s.now_ms - minutes * 60_000
 }
 
+/// A cat's name as the sample data has it.
+fn cat_name(s: &App, id: &str) -> String {
+    s.cat(id).map_or_else(|| "Neko".to_owned(), |c| c.name.clone())
+}
+
 fn permission_item(s: &App, task: &Task, title: &str, detail: &str, destructive: bool, minutes: i64) -> NeedsItem {
     let p = Permission {
         id: PermissionId(format!("perm_{}", task.id.0)),
@@ -189,7 +196,7 @@ fn permission_item(s: &App, task: &Task, title: &str, detail: &str, destructive:
         asked_ms: ago(s, minutes),
         answered_ms: None,
     };
-    NeedsItem { id: format!("perm:{}", p.id.0), task: task.id.clone(), workspace: task.workspace.clone(), title: task.title.clone(), since_ms: p.asked_ms, need: Need::Permission { permission: p } }
+    NeedsItem { id: format!("perm:{}", p.id.0), task: task.id.clone(), workspace: task.workspace.clone(), title: task.title.clone(), cat: task.cat.clone(), cat_name: cat_name(s, &task.cat), since_ms: p.asked_ms, need: Need::Permission { permission: p } }
 }
 
 /// Every kind of item, in three workspaces, in the daemon's order (the workspace waiting longest first, oldest first inside it).
@@ -206,6 +213,8 @@ fn needs_you(s: &mut App) {
         task: t.id.clone(),
         workspace: t.workspace.clone(),
         title: t.title.clone(),
+        cat: t.cat.clone(),
+        cat_name: cat_name(s, &t.cat),
         since_ms: ago(s, minutes),
         need: Need::Failure { failure: kind, text: text.into(), next: Some(next.into()), command: command.map(str::to_owned) },
     };
@@ -216,6 +225,8 @@ fn needs_you(s: &mut App) {
             task: notes.id.clone(),
             workspace: notes.workspace.clone(),
             title: notes.title.clone(),
+            cat: notes.cat.clone(),
+            cat_name: cat_name(s, &notes.cat),
             since_ms: ago(s, 12),
             need: Need::Question { run: RunId(format!("run_{}", notes.id.0)), question: "The notes cover the sidebar and the composer. Should I also mention the new keyboard shortcuts, or keep them for 0.3?".into() },
         },
@@ -457,6 +468,8 @@ fn run(id: &str, task: &Task, status: RunStatus, started: i64, secs: i64) -> Run
         }),
         changes: (status == RunStatus::Done).then_some(Changes { files: 3, added: 42, removed: 7 }),
         undo: None,
+        cat: Some(task.cat.clone()),
+        rules_hash: Some(neko_protocol::cats::rules_hash("")),
     }
 }
 

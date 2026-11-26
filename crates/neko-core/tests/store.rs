@@ -71,16 +71,16 @@ fn migrations_run_once_from_version_one_and_a_newer_store_is_left_alone() {
     let (path, _g) = temp();
     let s = Store::open(&path).unwrap();
     assert_eq!(s.version().unwrap(), SCHEMA_VERSION);
-    assert_eq!(SCHEMA_VERSION, 5);
+    assert_eq!(SCHEMA_VERSION, 6);
     let mode: String = s.connection().query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
     assert_eq!(mode, "wal");
     drop(s);
     let s = Store::open(&path).unwrap();
-    assert_eq!(s.version().unwrap(), 5, "opening again changes nothing");
+    assert_eq!(s.version().unwrap(), 6, "opening again changes nothing");
     s.connection().pragma_update(None, "user_version", 99).unwrap();
     drop(s);
     match Store::open(&path) {
-        Err(StoreError::Newer { found: 99, known: 5 }) => {}
+        Err(StoreError::Newer { found: 99, known: 6 }) => {}
         Err(e) => panic!("wrong error: {e}"),
         Ok(_) => panic!("a store from a newer Neko must not be opened"),
     }
@@ -100,7 +100,7 @@ fn version_5_adds_checkpoints_and_a_run_s_undo() {
         c.execute("INSERT INTO runs (id, task_id, runtime, status, started_ms, ended_ms, workdir, files, added, removed) VALUES ('run_1', 'task_1', 'claude', 'done', 1, 2, '/Users/example/acme-api', 2, 5, 1)", []).unwrap();
     }
     let mut s = Store::open(&path).unwrap();
-    assert_eq!(s.version().unwrap(), 5);
+    assert_eq!(s.version().unwrap(), SCHEMA_VERSION);
     let run = s.get_run(&neko_protocol::RunId("run_1".into())).unwrap().unwrap();
     assert_eq!(run.undo, None, "a run from before undo has none");
     assert_eq!(run.changes, Some(neko_protocol::Changes { files: 2, added: 5, removed: 1 }));

@@ -151,6 +151,29 @@ const MIGRATIONS: &[Migration] = &[
     ALTER TABLE runs ADD COLUMN undo_added INTEGER;
     ALTER TABLE runs ADD COLUMN undo_removed INTEGER;
     ALTER TABLE runs ADD COLUMN undo_committed INTEGER;"),
+    // 6: cats (docs/knowledge/cats.md). A row per cat; every task has one; a run records its cat and the version of its rules.
+    // Existing tasks go to the three starter cats by the rule new tasks follow, oldest first.
+    Migration::Then(
+        "CREATE TABLE cats (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            name_key TEXT NOT NULL,
+            face TEXT NOT NULL,
+            purpose TEXT,
+            rules TEXT NOT NULL DEFAULT '',
+            previous_rules TEXT,
+            rules_saved_ms INTEGER,
+            workspace_id TEXT,
+            created_ms INTEGER NOT NULL,
+            retired_ms INTEGER
+        );
+        CREATE UNIQUE INDEX cats_by_name ON cats(name_key);
+        ALTER TABLE tasks ADD COLUMN cat_id TEXT;
+        CREATE INDEX tasks_by_cat ON tasks(cat_id, status);
+        ALTER TABLE runs ADD COLUMN cat_id TEXT;
+        ALTER TABLE runs ADD COLUMN rules_hash TEXT;",
+        crate::cats::migrate_tasks,
+    ),
 ];
 
 /// The schema version this build writes.
@@ -203,10 +226,11 @@ fn task_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         status: status_of(&row.get::<_, String>(4)?)?,
         created_ms: row.get(5)?,
         folder: row.get(6)?,
+        cat: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
     })
 }
 
-const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder";
+const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id";
 
 impl Store {
     /// Opens the store at `path` (made if missing), in WAL mode, and runs any migration it lacks.
@@ -258,15 +282,15 @@ impl Store {
         Ok(())
     }
 
-    /// Stores a task and its `task_created` event in one transaction. Returns the task and the event's sequence number.
-    pub fn create_task(&mut self, id: &TaskId, workspace: &str, words: &str, folder: Option<&str>, now_ms: i64) -> Result<(Task, u64), StoreError> {
-        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New, folder: folder.map(str::to_owned) };
+    /// Stores a task for `cat` and its `task_created` event in one transaction. Returns the task and the event's sequence number.
+    pub fn create_task(&mut self, id: &TaskId, workspace: &str, words: &str, folder: Option<&str>, cat: &str, now_ms: i64) -> Result<(Task, u64), StoreError> {
+        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New, folder: folder.map(str::to_owned), cat: cat.to_owned() };
         let tx = self.conn.transaction()?;
         tx.execute(
-            &format!("INSERT INTO tasks ({TASK_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"),
-            params![task.id.0, task.workspace, task.words, task.title, status_name(task.status), task.created_ms, task.folder],
+            &format!("INSERT INTO tasks ({TASK_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"),
+            params![task.id.0, task.workspace, task.words, task.title, status_name(task.status), task.created_ms, task.folder, task.cat],
         )?;
-        let data = serde_json::json!({ "title": task.title }).to_string();
+        let data = serde_json::json!({ "title": task.title, "cat": task.cat }).to_string();
         tx.execute("INSERT INTO events (at_ms, workspace_id, subject, kind, data) VALUES (?1, ?2, ?3, 'task_created', ?4)", params![now_ms, workspace, task.id.0, data])?;
         let seq = tx.last_insert_rowid() as u64;
         tx.commit()?;

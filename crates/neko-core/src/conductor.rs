@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 
 use neko_protocol::{
+    Cat,
     Change, Changes, Decision, FailureKind, Part, PartBody, PartId, Permission, PermissionId, PermissionMode, PermissionState, Pricing, Run, RunId, RunStatus, Task, TaskId, TaskStatus, Tone, ToolState, Usage,
 };
 
@@ -103,9 +104,14 @@ fn part_kind_open(b: &PartBody) -> bool {
 }
 
 impl RunBook {
-    /// Stores the new run and the task's new status. `words` (the person's) is stored first as their part, unless None.
-    pub fn begin(core: &mut Core, task: &TaskId, who: Who, place: Place, mode: PermissionMode, resume: Option<String>, words: Option<&str>) -> Result<(RunBook, Vec<Out>), StoreError> {
+    /// Stores the new run and the task's new status. `words` (the person's) is stored first as their part, unless None. `cat` is
+    /// the task's cat: the run records it and the version of its rules, and when those rules differ from the ones the task's last
+    /// run used, one quiet part says so first.
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin(core: &mut Core, task: &TaskId, who: Who, place: Place, mode: PermissionMode, resume: Option<String>, words: Option<&str>, cat: Option<&Cat>) -> Result<(RunBook, Vec<Out>), StoreError> {
         let now = core.now();
+        let before = core.store.runs_of(task)?.into_iter().rev().find_map(|r| r.rules_hash);
+        let changed = cat.filter(|c| before.as_ref().is_some_and(|h| *h != c.rules_hash));
         let run = Run {
             id: RunId(core.new_id("run")),
             task: task.clone(),
@@ -121,11 +127,17 @@ impl RunBook {
             usage: None,
             changes: None,
             undo: None,
+            cat: cat.map(|c| c.id.clone()),
+            rules_hash: cat.map(|c| c.rules_hash.clone()),
         };
         let mut out = Vec::new();
         let rev = core.store.insert_run(&run, now)?;
         out.push(Out::Change(rev, Change::RunChanged { run: run.clone() }));
         let mut book = RunBook { run, task: task.clone(), who, place, mode, open: None, last_flush: now, tools: HashMap::new(), asked: HashMap::new(), hook_calls: HashMap::new(), denied: Default::default(), thinking: false, approved: Default::default(), written: 0, writes: 0 };
+        if let Some(c) = changed {
+            let p = book.new_part(core, PartBody::RulesChanged { cat: c.id.clone(), name: c.name.clone() }, now, true)?;
+            out.extend(p);
+        }
         if let Some(w) = words {
             let p = book.new_part(core, PartBody::Person { text: w.to_owned() }, now, true)?;
             out.extend(p);

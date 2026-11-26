@@ -3,6 +3,7 @@
 //! Logic here never reads the system clock or makes a random id itself: a [`Clock`] and an [`Ids`] are handed in, so the tests
 //! run the same every time. The daemon hands in [`SystemClock`] and [`RandomIds`].
 
+pub mod cats;
 pub mod checkpoint;
 pub mod claude;
 pub mod clock;
@@ -19,6 +20,7 @@ pub mod title;
 pub mod workplace;
 pub mod workspaces;
 
+pub use cats::CatError;
 pub use clock::{Clock, FixedClock, Ids, RandomIds, SequentialIds, SystemClock};
 pub use records::Place;
 pub use store::{DEFAULT_WORKSPACE, Store, StoreError};
@@ -36,6 +38,8 @@ pub enum NewTaskError {
     Removed(String),
     /// The workspace's folder is not there.
     FolderMissing(String),
+    /// The cat picked cannot take it (retired, not there), or no cat is at work.
+    Cat(CatError),
     Store(String),
 }
 
@@ -47,6 +51,7 @@ impl std::fmt::Display for NewTaskError {
             NewTaskError::NoWorkspace => f.write_str("That workspace is not there any more. Choose another one."),
             NewTaskError::Removed(name) => write!(f, "{name} was removed from Neko, so no new task can be made in it. Add its folder again, or choose another workspace."),
             NewTaskError::FolderMissing(name) => write!(f, "The folder of {name} was not found. Locate it in the sidebar, or choose another workspace."),
+            NewTaskError::Cat(e) => write!(f, "{e}"),
             NewTaskError::Store(e) => write!(f, "The task could not be saved: {e}"),
         }
     }
@@ -101,8 +106,10 @@ pub struct Core {
 impl Core {
     /// Opens (or makes) the store at `path` and makes sure the default workspace exists.
     pub fn open(path: &std::path::Path, clock: Box<dyn Clock>, ids: Box<dyn Ids>) -> Result<Core, StoreError> {
-        let store = Store::open(path)?;
-        store.ensure_default_workspace(clock.now_ms())?;
+        let mut store = Store::open(path)?;
+        let now = clock.now_ms();
+        store.ensure_default_workspace(now)?;
+        store.ensure_starter_cats(now)?;
         Ok(Core { store, clock, ids })
     }
 
@@ -115,6 +122,12 @@ impl Core {
     /// [`Core::create_task`] in a workspace (None: General). The task works in the workspace's folder; a removed workspace, or one
     /// whose folder is not there, takes no new task.
     pub fn create_task_in(&mut self, words: &str, workspace: Option<&str>) -> Result<(Task, u64), NewTaskError> {
+        self.create_task_for(words, workspace, None)
+    }
+
+    /// [`Core::create_task_in`] for a cat: `cat` when picked, else the workspace's default cat, else the least busy
+    /// ([`cats::choose`]).
+    pub fn create_task_for(&mut self, words: &str, workspace: Option<&str>, cat: Option<&str>) -> Result<(Task, u64), NewTaskError> {
         if words.trim().is_empty() {
             return Err(NewTaskError::Empty);
         }
@@ -129,9 +142,10 @@ impl Core {
         if workspaces::with_missing(w.clone()).missing {
             return Err(NewTaskError::FolderMissing(w.name));
         }
+        let cat = self.cat_for(&w.id, cat).map_err(NewTaskError::Cat)?;
         let now = self.clock.now_ms();
         let id = TaskId(format!("task_{}", self.ids.next_id(now)));
-        self.store.create_task(&id, &w.id, words, w.folder.as_deref(), now).map_err(|e| NewTaskError::Store(e.to_string()))
+        self.store.create_task(&id, &w.id, words, w.folder.as_deref(), &cat.id, now).map_err(|e| NewTaskError::Store(e.to_string()))
     }
 
     /// Every workspace, with whether its folder is there now.

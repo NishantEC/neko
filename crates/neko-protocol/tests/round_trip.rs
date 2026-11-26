@@ -13,6 +13,7 @@ fn task() -> Task {
         created_ms: 1_764_000_000_000,
         status: TaskStatus::New,
         folder: None,
+        cat: "cat_miso".into(),
     }
 }
 
@@ -28,9 +29,9 @@ fn pinned<T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug>(value: 
 fn requests_round_trip_with_their_ids() {
     pinned(ClientMessage { id: 0, request: Request::Hello { client: "neko-app".into(), protocol: 1 } }, r#"{"id":0,"type":"hello","client":"neko-app","protocol":1}"#);
     pinned(ClientMessage { id: 1, request: Request::ListTasks }, r#"{"id":1,"type":"list_tasks"}"#);
-    pinned(ClientMessage { id: 2, request: Request::CreateTask { words: "Fix the build".into(), workspace: None } }, r#"{"id":2,"type":"create_task","words":"Fix the build"}"#);
+    pinned(ClientMessage { id: 2, request: Request::CreateTask { words: "Fix the build".into(), workspace: None, cat: None } }, r#"{"id":2,"type":"create_task","words":"Fix the build"}"#);
     pinned(
-        ClientMessage { id: 2, request: Request::CreateTask { words: "Fix the build".into(), workspace: Some("ws_1".into()) } },
+        ClientMessage { id: 2, request: Request::CreateTask { words: "Fix the build".into(), workspace: Some("ws_1".into()), cat: None } },
         r#"{"id":2,"type":"create_task","words":"Fix the build","workspace":"ws_1"}"#,
     );
     pinned(ClientMessage { id: 3, request: Request::GetTask { task: TaskId("task_1".into()) } }, r#"{"id":3,"type":"get_task","task":"task_1"}"#);
@@ -43,7 +44,7 @@ fn replies_and_events_round_trip() {
         ServerMessage::Reply { id: 0, reply: Reply::Hello { daemon: "0.1.0".into(), protocol: 1, workspace: "default".into() } },
         r#"{"kind":"reply","id":0,"reply":{"type":"hello","daemon":"0.1.0","protocol":1,"workspace":"default"}}"#,
     );
-    let t = r#"{"id":"task_01HZX3J0000000000000000000","workspace":"default","words":"Rename the sidebar label\nand check ENG-123","title":"Rename the sidebar label","created_ms":1764000000000,"status":"new"}"#;
+    let t = r#"{"id":"task_01HZX3J0000000000000000000","workspace":"default","words":"Rename the sidebar label\nand check ENG-123","title":"Rename the sidebar label","created_ms":1764000000000,"status":"new","cat":"cat_miso"}"#;
     pinned(ServerMessage::Reply { id: 2, reply: Reply::Task { task: task() } }, &format!(r#"{{"kind":"reply","id":2,"reply":{{"type":"task","task":{t}}}}}"#));
     pinned(ServerMessage::Reply { id: 1, reply: Reply::Tasks { tasks: vec![task()] } }, &format!(r#"{{"kind":"reply","id":1,"reply":{{"type":"tasks","tasks":[{t}]}}}}"#));
     pinned(ServerMessage::Reply { id: 4, reply: Reply::Subscribed { revision: 7 } }, r#"{"kind":"reply","id":4,"reply":{"type":"subscribed","revision":7}}"#);
@@ -68,6 +69,7 @@ fn every_error_code_has_a_stable_name() {
         (ErrorCode::InvalidFolder, "invalid_folder"),
         (ErrorCode::Refused, "refused"),
         (ErrorCode::UnsavedWork, "unsaved_work"),
+        (ErrorCode::InvalidName, "invalid_name"),
     ] {
         pinned(code, &format!("\"{name}\""));
     }
@@ -117,7 +119,7 @@ fn workspace_replies_and_events_round_trip() {
     t.folder = Some("/Users/example/acme-api".into());
     pinned(
         t,
-        r#"{"id":"task_01HZX3J0000000000000000000","workspace":"ws_1","words":"Rename the sidebar label\nand check ENG-123","title":"Rename the sidebar label","created_ms":1764000000000,"status":"new","folder":"/Users/example/acme-api"}"#,
+        r#"{"id":"task_01HZX3J0000000000000000000","workspace":"ws_1","words":"Rename the sidebar label\nand check ENG-123","title":"Rename the sidebar label","created_ms":1764000000000,"status":"new","folder":"/Users/example/acme-api","cat":"cat_miso"}"#,
     );
 }
 
@@ -175,6 +177,8 @@ fn run() -> Run {
         usage: Some(Usage { input_tokens: 12, output_tokens: 34, cached_tokens: 56, cost_usd: Some(0.25), model: Some("claude-x".into()), pricing: Pricing::ApiEquivalent, reported_by: "Claude Code".into(), context_tokens: Some(48_000), context_window: Some(200_000) }),
         changes: Some(Changes { files: 2, added: 10, removed: 3 }),
         undo: None,
+        cat: None,
+        rules_hash: None,
     }
 }
 
@@ -272,8 +276,8 @@ fn needs_you_round_trips() {
         ClientMessage { id: 2, request: Request::FollowUp { task: TaskId("task_1".into()), words: "On main.".into(), answering: Some(RunId("run_1".into())) } },
         r#"{"id":2,"type":"follow_up","task":"task_1","words":"On main.","answering":"run_1"}"#,
     );
-    let item = |id: &str, need: Need| NeedsItem { id: id.into(), task: TaskId("task_1".into()), workspace: "ws_1".into(), title: "Fix the build".into(), since_ms: 5, need };
-    let head = |id: &str| format!(r#"{{"id":"{id}","task":"task_1","workspace":"ws_1","title":"Fix the build","since_ms":5,"need":"#);
+    let item = |id: &str, need: Need| NeedsItem { id: id.into(), task: TaskId("task_1".into()), workspace: "ws_1".into(), title: "Fix the build".into(), cat: "cat_tofu".into(), cat_name: "tofu".into(), since_ms: 5, need };
+    let head = |id: &str| format!(r#"{{"id":"{id}","task":"task_1","workspace":"ws_1","title":"Fix the build","cat":"cat_tofu","cat_name":"tofu","since_ms":5,"need":"#);
     let p = r#"{"id":"perm_1","task":"task_1","run":"run_1","tool":"Bash","title":"Run a command","why":"Commands can change anything on this Mac.","detail":"cargo test","destructive":false,"state":"pending","asked_ms":3}"#;
     pinned(item("perm:perm_1", Need::Permission { permission: perm() }), &format!(r#"{}{{"kind":"permission","permission":{p}}}}}"#, head("perm:perm_1")));
     pinned(
@@ -326,5 +330,64 @@ fn undo_round_trips() {
     for (s, name) in [(UndoState::Taking, "taking"), (UndoState::Undone, "undone"), (UndoState::Dropped, "dropped"), (UndoState::Removed, "removed")] {
         assert_eq!(serde_json::to_string(&s).unwrap(), format!("\"{name}\""));
     }
-    assert_eq!(PROTOCOL_VERSION, 7);
+}
+
+fn cat() -> Cat {
+    Cat {
+        id: "cat_miso".into(),
+        name: "miso".into(),
+        face: "ginger".into(),
+        purpose: Some("Keeps the docs tidy.".into()),
+        rules: "- Use British spelling.".into(),
+        rules_hash: cats::rules_hash("- Use British spelling."),
+        previous_rules: Some(String::new()),
+        rules_saved_ms: Some(9),
+        workspace: Some("ws_1".into()),
+        created_ms: 1,
+        retired_ms: None,
+    }
+}
+
+#[test]
+fn cats_round_trip() {
+    let c = || "cat_miso".to_owned();
+    pinned(ClientMessage { id: 1, request: Request::ListCats }, r#"{"id":1,"type":"list_cats"}"#);
+    pinned(
+        ClientMessage { id: 2, request: Request::CreateCat { name: "Asha's helper".into(), face: Some("tabby".into()), purpose: None, workspace: Some("ws_1".into()) } },
+        r#"{"id":2,"type":"create_cat","name":"Asha's helper","face":"tabby","workspace":"ws_1"}"#,
+    );
+    pinned(ClientMessage { id: 3, request: Request::CreateCat { name: "pip".into(), face: None, purpose: None, workspace: None } }, r#"{"id":3,"type":"create_cat","name":"pip"}"#);
+    pinned(ClientMessage { id: 4, request: Request::RenameCat { cat: c(), name: "Miso".into() } }, r#"{"id":4,"type":"rename_cat","cat":"cat_miso","name":"Miso"}"#);
+    pinned(ClientMessage { id: 5, request: Request::SetCatFace { cat: c(), face: "void".into() } }, r#"{"id":5,"type":"set_cat_face","cat":"cat_miso","face":"void"}"#);
+    pinned(ClientMessage { id: 6, request: Request::SetCatPurpose { cat: c(), purpose: "Docs".into() } }, r#"{"id":6,"type":"set_cat_purpose","cat":"cat_miso","purpose":"Docs"}"#);
+    pinned(ClientMessage { id: 7, request: Request::SetCatWorkspace { cat: c(), workspace: None } }, r#"{"id":7,"type":"set_cat_workspace","cat":"cat_miso"}"#);
+    pinned(ClientMessage { id: 8, request: Request::SaveCatRules { cat: c(), rules: "Rules\n".into() } }, r#"{"id":8,"type":"save_cat_rules","cat":"cat_miso","rules":"Rules\n"}"#);
+    pinned(ClientMessage { id: 9, request: Request::RestoreCatRules { cat: c() } }, r#"{"id":9,"type":"restore_cat_rules","cat":"cat_miso"}"#);
+    pinned(ClientMessage { id: 10, request: Request::RetireCat { cat: c() } }, r#"{"id":10,"type":"retire_cat","cat":"cat_miso"}"#);
+    pinned(ClientMessage { id: 11, request: Request::BringBackCat { cat: c() } }, r#"{"id":11,"type":"bring_back_cat","cat":"cat_miso"}"#);
+    pinned(ClientMessage { id: 12, request: Request::SetTaskCat { task: TaskId("task_1".into()), cat: c() } }, r#"{"id":12,"type":"set_task_cat","task":"task_1","cat":"cat_miso"}"#);
+    pinned(
+        ClientMessage { id: 13, request: Request::CreateTask { words: "Fix it".into(), workspace: None, cat: Some(c()) } },
+        r#"{"id":13,"type":"create_task","words":"Fix it","cat":"cat_miso"}"#,
+    );
+    let j = r#"{"id":"cat_miso","name":"miso","face":"ginger","purpose":"Keeps the docs tidy.","rules":"- Use British spelling.","rules_hash":"HASH","previous_rules":"","rules_saved_ms":9,"workspace":"ws_1","created_ms":1}"#.replace("HASH", &cats::rules_hash("- Use British spelling."));
+    pinned(Reply::Cat { cat: cat() }, &format!(r#"{{"type":"cat","cat":{j}}}"#));
+    pinned(Reply::Cats { cats: vec![cat()] }, &format!(r#"{{"type":"cats","cats":[{j}]}}"#));
+    pinned(ServerMessage::Event { revision: 3, change: Change::CatAdded { cat: cat() } }, &format!(r#"{{"kind":"event","revision":3,"change":{{"type":"cat_added","cat":{j}}}}}"#));
+    let mut retired = cat();
+    retired.retired_ms = Some(20);
+    retired.purpose = None;
+    retired.previous_rules = None;
+    let encoded = serde_json::to_string(&Change::CatUpdated { cat: retired.clone() }).unwrap();
+    assert!(encoded.starts_with(r#"{"type":"cat_updated","cat":{"id":"cat_miso","name":"miso","face":"ginger","rules":"#) && encoded.ends_with(r#""workspace":"ws_1","created_ms":1,"retired_ms":20}}"#), "{encoded}");
+    assert!(!retired.is_active());
+    pinned(ErrorCode::InvalidName, "\"invalid_name\"");
+    // A run says which cat and which version of its rules went with it; a quiet part says when they changed.
+    let mut r = run();
+    r.cat = Some(c());
+    r.rules_hash = Some("cbf29ce484222325".into());
+    let json = serde_json::to_string(&r).unwrap();
+    assert!(json.ends_with(r#""cat":"cat_miso","rules_hash":"cbf29ce484222325"}"#), "{json}");
+    pinned(PartBody::RulesChanged { cat: c(), name: "miso".into() }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso"}"#);
+    assert_eq!(PROTOCOL_VERSION, 8);
 }

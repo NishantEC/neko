@@ -77,6 +77,9 @@ pub struct StartSpec {
     pub mode: PermissionMode,
     /// In "Ask before risky steps": where the run's hook helper reaches the daemon. None in the other modes.
     pub hook: Option<HookLink>,
+    /// Standing instructions for the agent on this run (the task's cat: `cats::block`), given the way the CLI takes them best. Text
+    /// only: they change no permission, flag or hook.
+    pub instructions: Option<String>,
 }
 
 /// How a run's `PreToolUse` hook helper (`neko-daemon --hook`) reaches the daemon: its loopback port and the run's own secret,

@@ -21,7 +21,7 @@ fn book(mode: PermissionMode) -> (Core, RunBook, Gone) {
     let (task, _) = core.create_task("Run the tests").unwrap();
     let who = Who { id: "claude".into(), name: "Claude Code".into(), sign_in: "claude auth login".into(), install: "x".into(), pricing: Pricing::ApiEquivalent };
     let place = Place { workdir: dir.join("w").to_string_lossy().into_owned(), branch: None, base_commit: None, repo: None, plain: false };
-    let (b, _) = RunBook::begin(&mut core, &task.id, who, place, mode, None, None).unwrap();
+    let (b, _) = RunBook::begin(&mut core, &task.id, who, place, mode, None, None, None).unwrap();
     (core, b, Gone(dir))
 }
 

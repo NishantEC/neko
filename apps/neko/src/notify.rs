@@ -460,11 +460,11 @@ mod tests {
             asked_ms: 1,
             answered_ms: None,
         };
-        NeedsItem { id: format!("perm:{}", p.id.0), task: p.task.clone(), workspace: "default".into(), title: "Run the tests".into(), since_ms: 1, need: Need::Permission { permission: p } }
+        NeedsItem { id: format!("perm:{}", p.id.0), task: p.task.clone(), workspace: "default".into(), title: "Run the tests".into(), cat: "cat_miso".into(), cat_name: "miso".into(), since_ms: 1, need: Need::Permission { permission: p } }
     }
 
     fn question(task: &str) -> NeedsItem {
-        NeedsItem { id: format!("question:{task}"), task: TaskId(task.into()), workspace: "default".into(), title: "Rename the button".into(), since_ms: 2, need: Need::Question { run: RunId("run_2".into()), question: "Should I rename all four?".into() } }
+        NeedsItem { id: format!("question:{task}"), task: TaskId(task.into()), workspace: "default".into(), title: "Rename the button".into(), cat: "cat_mochi".into(), cat_name: "mochi".into(), since_ms: 2, need: Need::Question { run: RunId("run_2".into()), question: "Should I rename all four?".into() } }
     }
 
     fn failure(task: &str) -> NeedsItem {
@@ -473,6 +473,8 @@ mod tests {
             task: TaskId(task.into()),
             workspace: "default".into(),
             title: "Tidy the folder".into(),
+            cat: "cat_tofu".into(),
+            cat_name: "tofu".into(),
             since_ms: 3,
             need: Need::Failure { failure: FailureKind::NotSignedIn, text: "Claude Code is not signed in.".into(), next: None, command: Some("claude auth login".into()) },
         }

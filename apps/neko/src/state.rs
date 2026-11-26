@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 use neko_protocol::{
-    Change, Decision, DiffPatch, DiffSummary, ErrorCode, GENERAL, Need, NeedsItem, Part, PartBody, Permission, PermissionId, PermissionMode, Reply, Request, Run, RunId, RunStatus, RuntimeInfo,
+    Cat, Change, Decision, DiffPatch, DiffSummary, ErrorCode, GENERAL, Need, NeedsItem, Part, PartBody, Permission, PermissionId, PermissionMode, Reply, Request, Run, RunId, RunStatus, RuntimeInfo,
     ServerMessage, Settings, Task, TaskId, Transcript, UndoStorage, Workspace,
 };
 use rune::TextEdit;
@@ -86,6 +86,10 @@ pub struct Refusal {
 pub struct App {
     /// Every task of every workspace, newest first, as the daemon last said.
     pub tasks: Vec<Task>,
+    /// Every cat: the active ones first, then the retired (as the daemon last said).
+    pub cats: Vec<Cat>,
+    /// The cat picked in Home's composer for each workspace (the last explicit choice there). Remembered for the next launch.
+    pub cat_picks: HashMap<String, String>,
     /// The workspaces: General first, then the person's order, then the removed ones (as the daemon last said).
     pub workspaces: Vec<Workspace>,
     /// The workspace Home's composer makes the next task in (General's id by default). Remembered for the next launch.
@@ -318,6 +322,8 @@ impl Default for App {
     fn default() -> Self {
         App {
             tasks: Vec::new(),
+            cats: Vec::new(),
+            cat_picks: HashMap::new(),
             workspaces: Vec::new(),
             workspace: GENERAL.to_owned(),
             picker_open: false,
@@ -412,6 +418,23 @@ impl App {
             },
             None => "Neko".to_owned(),
         }
+    }
+
+    /// A cat by its id, active or retired.
+    pub fn cat(&self, id: &str) -> Option<&Cat> {
+        self.cats.iter().find(|c| c.id == id)
+    }
+
+    /// The cat Home's composer gives the next task to (None: "Any cat", the daemon chooses).
+    pub fn cat_pick(&self) -> Option<&str> {
+        self.cat_picks.get(&self.workspace).map(String::as_str).filter(|id| self.cat(id).is_some_and(Cat::is_active))
+    }
+
+    /// Adds or replaces a cat, keeping the daemon's order (active first, oldest first; then the retired).
+    fn upsert_cat(&mut self, cat: Cat) {
+        self.cats.retain(|c| c.id != cat.id);
+        self.cats.push(cat);
+        self.cats.sort_by(|a, b| (!a.is_active(), a.created_ms, &a.id).cmp(&(!b.is_active(), b.created_ms, &b.id)));
     }
 
     pub fn workspace_of(&self, id: &str) -> Option<&Workspace> {
@@ -1059,7 +1082,8 @@ impl App {
             return;
         }
         let workspace = Some(self.workspace.clone()).filter(|w| w != GENERAL);
-        match self.send(Request::CreateTask { words: words.clone(), workspace }) {
+        let cat = self.cat_pick().map(str::to_owned);
+        match self.send(Request::CreateTask { words: words.clone(), workspace, cat }) {
             Some(id) => {
                 self.creating = Some((id, words));
                 self.draft = TextEdit::default();
@@ -1184,6 +1208,7 @@ impl App {
                 }
             }
             Change::NeedsChanged { items } => self.set_needs(items),
+            Change::CatAdded { cat } | Change::CatUpdated { cat } => self.upsert_cat(cat),
         }
     }
 
@@ -1410,7 +1435,7 @@ mod tests {
     use neko_protocol::TaskStatus;
 
     fn task(id: &str, ms: i64) -> Task {
-        Task { id: TaskId(id.into()), workspace: "default".into(), words: format!("words of {id}"), title: id.into(), created_ms: ms, status: TaskStatus::New, folder: None }
+        Task { id: TaskId(id.into()), workspace: "default".into(), words: format!("words of {id}"), title: id.into(), created_ms: ms, status: TaskStatus::New, folder: None, cat: "cat_miso".into() }
     }
 
     #[test]

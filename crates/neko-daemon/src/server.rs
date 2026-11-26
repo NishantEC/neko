@@ -78,7 +78,7 @@ impl Shared {
 
     /// Pushes a change to every subscribed connection. Called with the core locked, so events leave in revision order.
     pub fn broadcast(&self, msg: &ServerMessage) {
-        if let ServerMessage::Event { change: Change::TaskUpdated { .. } | Change::PermissionChanged { .. } | Change::TaskRemoved { .. }, .. } = msg {
+        if let ServerMessage::Event { change: Change::TaskUpdated { .. } | Change::PermissionChanged { .. } | Change::TaskRemoved { .. } | Change::CatUpdated { .. }, .. } = msg {
             *lock(&self.needs.dirty) = true;
             self.needs.wake.notify_one();
         }
@@ -291,6 +291,31 @@ fn one_workspace(shared: &Shared, done: Result<(neko_protocol::Workspace, u64), 
     }
 }
 
+/// A refused change to a cat, as a reply.
+fn cat_error(e: neko_core::CatError) -> Reply {
+    use neko_core::CatError as C;
+    let code = match &e {
+        C::NotFound => ErrorCode::NotFound,
+        C::InvalidName(_) => ErrorCode::InvalidName,
+        C::Refused(_) => ErrorCode::Refused,
+        C::Store(_) => ErrorCode::Internal,
+    };
+    Reply::error(code, e.to_string())
+}
+
+/// A cat changed: every screen hears it whole (and "Needs you" again, since its items carry the cat's name), and the asker gets
+/// it. The core stays locked while the event leaves, so events leave in order.
+fn one_cat(shared: &Shared, change: impl FnOnce(&mut Core) -> Result<(neko_protocol::Cat, u64), neko_core::CatError>) -> Reply {
+    let mut core = lock(&shared.core);
+    match change(&mut core) {
+        Ok((cat, revision)) => {
+            shared.broadcast(&ServerMessage::Event { revision, change: Change::CatUpdated { cat: cat.clone() } });
+            Reply::Cat { cat }
+        }
+        Err(e) => cat_error(e),
+    }
+}
+
 /// The reply to one message, the id it answers, and whether the connection goes on.
 fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) -> (u64, Reply, Flow) {
     let msg: ClientMessage = match serde_json::from_str(text) {
@@ -321,10 +346,10 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
             Ok(None) => Reply::error(ErrorCode::NotFound, "There is no such task."),
             Err(e) => internal(e),
         },
-        Request::CreateTask { words, workspace } => {
+        Request::CreateTask { words, workspace, cat } => {
             let made = {
                 let mut core = lock(&shared.core);
-                let made = core.create_task_in(&words, workspace.as_deref());
+                let made = core.create_task_for(&words, workspace.as_deref(), cat.as_deref());
                 if let Ok((task, revision)) = &made {
                     shared.broadcast(&ServerMessage::Event { revision: *revision, change: Change::TaskCreated { task: task.clone() } });
                 }
@@ -339,10 +364,46 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
                 Err(e @ (NewTaskError::Empty | NewTaskError::TooLong)) => Reply::error(ErrorCode::InvalidWords, e.to_string()),
                 Err(e @ NewTaskError::NoWorkspace) => Reply::error(ErrorCode::NotFound, e.to_string()),
                 Err(e @ (NewTaskError::Removed(_) | NewTaskError::FolderMissing(_))) => Reply::error(ErrorCode::Refused, e.to_string()),
+                Err(NewTaskError::Cat(e)) => cat_error(e),
                 Err(e) => Reply::error(ErrorCode::Internal, e.to_string()),
             }
         }
         Request::RemoveTask { task } => runs::remove_task(shared, &task),
+        Request::SetTaskCat { task, cat } => {
+            if lock(&shared.runs.active).contains_key(&task) {
+                return (id, Reply::error(ErrorCode::Refused, "This task has started, so its cat stays."), Flow::Continue);
+            }
+            let mut core = lock(&shared.core);
+            match core.set_task_cat(&task, &cat) {
+                Ok((task, revision)) => {
+                    shared.broadcast(&ServerMessage::Event { revision, change: Change::TaskUpdated { task: task.clone() } });
+                    Reply::Task { task }
+                }
+                Err(e) => cat_error(e),
+            }
+        }
+        Request::ListCats => match lock(&shared.core).cats() {
+            Ok(cats) => Reply::Cats { cats },
+            Err(e) => internal(e),
+        },
+        Request::CreateCat { name, face, purpose, workspace } => {
+            let mut core = lock(&shared.core);
+            match core.create_cat(&name, face.as_deref(), purpose.as_deref(), workspace.as_deref()) {
+                Ok((cat, revision)) => {
+                    shared.broadcast(&ServerMessage::Event { revision, change: Change::CatAdded { cat: cat.clone() } });
+                    Reply::Cat { cat }
+                }
+                Err(e) => cat_error(e),
+            }
+        }
+        Request::RenameCat { cat, name } => one_cat(shared, |c| c.rename_cat(&cat, &name)),
+        Request::SetCatFace { cat, face } => one_cat(shared, |c| c.set_cat_face(&cat, &face)),
+        Request::SetCatPurpose { cat, purpose } => one_cat(shared, |c| c.set_cat_purpose(&cat, &purpose)),
+        Request::SetCatWorkspace { cat, workspace } => one_cat(shared, |c| c.set_cat_workspace(&cat, workspace.as_deref())),
+        Request::SaveCatRules { cat, rules } => one_cat(shared, |c| c.save_cat_rules(&cat, &rules)),
+        Request::RestoreCatRules { cat } => one_cat(shared, |c| c.restore_cat_rules(&cat)),
+        Request::RetireCat { cat } => one_cat(shared, |c| c.retire_cat(&cat)),
+        Request::BringBackCat { cat } => one_cat(shared, |c| c.bring_back_cat(&cat)),
         Request::ListWorkspaces => match lock(&shared.core).workspaces() {
             Ok(workspaces) => Reply::Workspaces { workspaces },
             Err(e) => internal(e),
