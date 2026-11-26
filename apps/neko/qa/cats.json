@@ -1,0 +1,469 @@
+{
+  "name": "cats",
+  "title": "Cats: who does a task, their rules, new and retired cats",
+  "about": "Three starter cats exist. A task for Any cat goes to one of them. Picking mochi makes the task mochi's everywhere. Rules written on mochi's page reach the agent once and verbatim on the next run, with a line saying they changed. New cat… makes a fourth. Retire asks first; a retired cat takes no new task and its tasks stay readable; Bring back from Settings.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "cat-cat_*",
+              "label": "miso"
+            }
+          },
+          {
+            "see": {
+              "key": "cat-cat_*",
+              "label": "mochi"
+            }
+          },
+          {
+            "see": {
+              "key": "cat-cat_*",
+              "label": "tofu"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "The three starter cats are in the sidebar"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Plan the week [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Plan the week"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "expect": "A task for Any cat runs"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "key": "task-cat"
+        }
+      },
+      "expect": "It has a cat in its header"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cat-picker"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitemcheckbox",
+        "label": "mochi"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cat-picker",
+          "label": "mochi"
+        }
+      },
+      "expect": "The composer's picker says mochi"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Feed the fish [fake:question]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "Feed the fish"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "task-cat",
+              "label": "mochi"
+            }
+          },
+          {
+            "see": {
+              "text": "mochi",
+              "in": {
+                "key": "turn-*-cat"
+              }
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Feed the fish",
+              "name": "mochi"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "The task is mochi's in the header, the turn and the sidebar row"
+    },
+    {
+      "do": "key",
+      "key": "cmd+2"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "mochi has a question"
+        }
+      },
+      "within": 10,
+      "expect": "Needs you says mochi has a question"
+    },
+    {
+      "do": "snap",
+      "name": "mochi-needs",
+      "expect": "mochi in Needs you"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cat-cat_*",
+        "label": "mochi"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cat-rules"
+        }
+      },
+      "expect": "mochi's page opens with its rules"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cat-rules-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "QA-RULE-7: Answer in one short paragraph."
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cat-save"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "gone": {
+              "key": "cat-unsaved"
+            }
+          },
+          {
+            "see": {
+              "key": "cat-rules-input",
+              "text": "QA-RULE-7"
+            }
+          }
+        ]
+      },
+      "within": 5,
+      "expect": "Save keeps the rules"
+    },
+    {
+      "do": "snap",
+      "name": "mochi-page",
+      "expect": "mochi's page with its rules"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Feed the fish"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Tuesday works [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "rules-changed-*"
+        }
+      },
+      "within": 10,
+      "expect": "The follow-up shows a line that mochi's rules changed"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "sh": {
+          "run": "python3 -c \"import json; l=[json.loads(x) for x in open('fake-record.jsonl') if x.startswith('{\\\"argv')]; print(sum(a.count('QA-RULE-7: Answer in one short paragraph.') for a in l[-1]['argv']))\"",
+          "is": "1"
+        }
+      },
+      "within": 10,
+      "expect": "The CLI received the rules block exactly once, verbatim"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "new-cat"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cat-name-input"
+        }
+      }
+    },
+    {
+      "do": "type",
+      "text": "nori"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cat-name-save"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cat-cat_*",
+          "label": "nori"
+        }
+      },
+      "within": 5,
+      "expect": "New cat… makes a fourth cat, nori"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cat-cat_*",
+        "label": "mochi"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cat-retire"
+        }
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cat-retire"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "retire-cat-dialog"
+        }
+      },
+      "expect": "Retire asks first"
+    },
+    {
+      "do": "snap",
+      "name": "retire-asks",
+      "expect": "The question"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "Retire",
+        "in": {
+          "key": "retire-cat-dialog"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "key": "retire-cat-dialog"
+        }
+      }
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "role": "option",
+          "label": "Feed the fish"
+        }
+      },
+      "expect": "mochi's tasks stay readable in the sidebar"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cat-picker"
+      }
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "role": "menuitemcheckbox",
+          "label": "mochi"
+        }
+      },
+      "expect": "A retired cat takes no new task: the picker does not offer mochi"
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cats",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "button",
+          "name": "Bring back"
+        }
+      },
+      "expect": "Settings ▸ Cats offers Bring back"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "name": "Bring back"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "role": "button",
+          "name": "Bring back"
+        }
+      },
+      "within": 5
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cat-picker"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "menuitemcheckbox",
+          "label": "mochi"
+        }
+      },
+      "within": 5,
+      "expect": "After Bring back the picker offers mochi again"
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    }
+  ]
+}

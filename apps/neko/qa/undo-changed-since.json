@@ -1,0 +1,183 @@
+{
+  "name": "undo-changed-since",
+  "title": "Undo when a file changed by hand since the run",
+  "about": "After the run the person edits README.md by hand. Undo names that file and writes nothing; Undo anyway restores the files; Redo brings back the folder as it was before the undo, the hand edit included.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "files": {
+      "acme-api": {
+        "git": true,
+        "files": {
+          "README.md": "# Acme\nA small project.\n",
+          "OLD.md": "Old notes\n",
+          "docs/guide.md": "# Guide\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "choose-folder",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Tidy the project [fake:edit]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Tidy the project"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "within": 15
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "run-*-undo"
+        }
+      }
+    },
+    {
+      "do": "run",
+      "cmd": "cd \"$(git -C files/acme-api worktree list --porcelain | sed -n 's/^worktree //p' | tail -n 1)\" && printf 'Edited by Asha\\n' >> README.md"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "run-*-undo"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "undo-anyway-dialog",
+          "name": "README.md"
+        }
+      },
+      "within": 10,
+      "expect": "Undo asks first and names README.md"
+    },
+    {
+      "do": "snap",
+      "name": "asks",
+      "expect": "The question naming the file"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "cd \"$(git -C files/acme-api worktree list --porcelain | sed -n 's/^worktree //p' | tail -n 1)\" && cat README.md",
+          "has": "Edited by Asha"
+        }
+      },
+      "expect": "Nothing was written yet"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "Undo anyway",
+        "in": {
+          "key": "undo-anyway-dialog"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "run-*-redo"
+        }
+      },
+      "within": 10,
+      "expect": "Undo anyway is done"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "cd \"$(git -C files/acme-api worktree list --porcelain | sed -n 's/^worktree //p' | tail -n 1)\" && cat README.md",
+              "is": "# Acme\nA small project."
+            }
+          },
+          {
+            "sh": {
+              "run": "cd \"$(git -C files/acme-api worktree list --porcelain | sed -n 's/^worktree //p' | tail -n 1)\" && cat OLD.md",
+              "has": "Old notes"
+            }
+          }
+        ]
+      },
+      "expect": "The files are as before the run"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "run-*-redo"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "run-*-undo"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "cd \"$(git -C files/acme-api worktree list --porcelain | sed -n 's/^worktree //p' | tail -n 1)\" && cat README.md",
+              "has": "Edited by Asha"
+            }
+          },
+          {
+            "sh": {
+              "run": "cd \"$(git -C files/acme-api worktree list --porcelain | sed -n 's/^worktree //p' | tail -n 1)\" && cat README.md",
+              "has": "tidy"
+            }
+          }
+        ]
+      },
+      "expect": "Redo brings back the folder as it was before the undo, the hand edit included"
+    },
+    {
+      "do": "snap",
+      "name": "redone",
+      "expect": "After Redo"
+    }
+  ]
+}

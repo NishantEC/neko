@@ -664,6 +664,14 @@ impl Headless<'_> {
                 }
                 self.r.say(&format!("allowed {allowed} request(s)"));
             }
+            "run" => {
+                // A person's own change on disk (an edit by hand), inside the run's folder only.
+                let cmd = v["cmd"].as_str().unwrap_or("");
+                let st = Command::new("/bin/sh").arg("-c").arg(cmd).current_dir(&self.r.places.work).env("HOME", &self.r.places.home).env("GIT_CONFIG_NOSYSTEM", "1").env("GIT_CONFIG_GLOBAL", "/dev/null").status().map_err(|e| e.to_string())?;
+                if !st.success() {
+                    return Err(format!("`{}` ended with {st}", short(cmd)));
+                }
+            }
             "stale-answer" => {
                 // A second answer to a question already answered, sent as the app sends one (follow_up naming the run it answers),
                 // straight to the daemon: it must be refused.

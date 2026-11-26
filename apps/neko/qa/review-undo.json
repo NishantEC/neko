@@ -1,0 +1,335 @@
+{
+  "name": "review-undo",
+  "title": "Review, Undo and Redo of a run in a git workspace",
+  "about": "A run (the fake's edit script) edits README.md, adds src/retry/mod.rs and logo.png, deletes OLD.md and renames docs/guide.md in the task's worktree. Review shows exactly those; Undo puts the files back and leaves the person's checkout untouched; Redo brings the changes back; after an undo, a follow-up's words to the agent start with the line that says the files were undone.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "files": {
+      "acme-api": {
+        "git": true,
+        "files": {
+          "README.md": "# Acme\nA small project.\n",
+          "OLD.md": "Old notes\n",
+          "docs/guide.md": "# Guide\n"
+        }
+      }
+    },
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "git-record",
+      "repo": "$files/acme-api",
+      "as": "before"
+    },
+    {
+      "do": "choose-folder",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Tidy the project [fake:edit]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Tidy the project"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "The run edits files in its worktree and finishes"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "run-*-review"
+            }
+          },
+          {
+            "see": {
+              "key": "run-*-undo"
+            }
+          }
+        ]
+      },
+      "expect": "The run card offers Review and Undo"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "run-*-review"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "name": "README.md",
+              "in": {
+                "key": "review-files"
+              }
+            }
+          },
+          {
+            "see": {
+              "name": "src/retry/mod.rs",
+              "in": {
+                "key": "review-files"
+              }
+            }
+          },
+          {
+            "see": {
+              "name": "OLD.md",
+              "in": {
+                "key": "review-files"
+              }
+            }
+          },
+          {
+            "see": {
+              "name": "docs/start.md",
+              "in": {
+                "key": "review-files"
+              }
+            }
+          },
+          {
+            "see": {
+              "name": "logo.png",
+              "in": {
+                "key": "review-files"
+              }
+            }
+          }
+        ]
+      },
+      "expect": "Review lists exactly the run's changes: README.md, src/retry/mod.rs, OLD.md, docs/start.md, logo.png"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "count": {
+          "of": {
+            "key": "review-file-*",
+            "role": "button"
+          },
+          "max": 5
+        }
+      },
+      "soft": true,
+      "expect": "and nothing else"
+    },
+    {
+      "do": "snap",
+      "name": "review",
+      "expect": "The Review page"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "review-back"
+      }
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "cd \"$(git -C files/acme-api worktree list --porcelain | sed -n 's/^worktree //p' | tail -n 1)\" && cat README.md",
+          "has": "tidy"
+        }
+      },
+      "expect": "Before Undo the worktree holds the run's edit"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "run-*-undo"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "run-*-redo"
+        }
+      },
+      "within": 10,
+      "expect": "Undo is done; the card offers Redo"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "cd \"$(git -C files/acme-api worktree list --porcelain | sed -n 's/^worktree //p' | tail -n 1)\" && cat README.md",
+              "has": "small"
+            }
+          },
+          {
+            "sh": {
+              "run": "cd \"$(git -C files/acme-api worktree list --porcelain | sed -n 's/^worktree //p' | tail -n 1)\" && cat OLD.md docs/guide.md",
+              "has": "Old notes"
+            }
+          },
+          {
+            "sh": {
+              "run": "cd \"$(git -C files/acme-api worktree list --porcelain | sed -n 's/^worktree //p' | tail -n 1)\" && ls src/retry/mod.rs logo.png docs/start.md 2>/dev/null | wc -l | tr -d ' '",
+              "is": "0"
+            }
+          }
+        ]
+      },
+      "expect": "Undo restored every file: the edit, the deletion, the rename, and removed the new files"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "cd \"$(git -C files/acme-api worktree list --porcelain | sed -n 's/^worktree //p' | tail -n 1)\" && git status --porcelain",
+          "is": ""
+        }
+      },
+      "expect": "The worktree is back to its branch's state (git status is clean)"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "git_same": "before"
+      },
+      "expect": "The person's checkout is untouched: HEAD, branch, index and status"
+    },
+    {
+      "do": "snap",
+      "name": "undone",
+      "expect": "After Undo"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "run-*-redo"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "run-*-undo"
+        }
+      },
+      "within": 10,
+      "expect": "Redo is done; the card offers Undo again"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "cd \"$(git -C files/acme-api worktree list --porcelain | sed -n 's/^worktree //p' | tail -n 1)\" && cat README.md",
+              "has": "tidy"
+            }
+          },
+          {
+            "sh": {
+              "run": "cd \"$(git -C files/acme-api worktree list --porcelain | sed -n 's/^worktree //p' | tail -n 1)\" && cat src/retry/mod.rs",
+              "has": "attempts"
+            }
+          }
+        ]
+      },
+      "expect": "Redo brought the changes back"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "run-*-undo"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "run-*-redo"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Carry on [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "count": {
+          "of": {
+            "key": "turn-*",
+            "role": "article"
+          },
+          "min": 2
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "wait",
+      "until": {
+        "sh": {
+          "run": "grep -q 'the person undid the changes of your last run' fake-record.jsonl && echo yes",
+          "is": "yes"
+        }
+      },
+      "within": 10,
+      "expect": "After an undo, the follow-up's words to the agent start with the line that says so"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "git_same": "before"
+      },
+      "expect": "The person's checkout is still untouched"
+    }
+  ]
+}

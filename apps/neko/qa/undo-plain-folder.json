@@ -1,0 +1,238 @@
+{
+  "name": "undo-plain-folder",
+  "title": "Undo in a plain folder, and a run that commits",
+  "about": "In a plain (not git) workspace folder the same journey works and nothing is written into the folder but the restored files (the history lives in Neko's own folder). In a git workspace, a run that commits is refused for undo with its plain line.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "files": {
+      "mochi-notes": {
+        "files": {
+          "README.md": "# Notes\nA small note.\n",
+          "OLD.md": "Old notes\n",
+          "docs/guide.md": "# Guide\n"
+        }
+      },
+      "acme-api": {
+        "git": true,
+        "files": {
+          "README.md": "# Acme\nA small project.\n",
+          "OLD.md": "Old notes\n",
+          "docs/guide.md": "# Guide\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "choose-folder",
+      "path": "$files/mochi-notes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Tidy the notes [fake:edit]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Tidy the notes"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "within": 15
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "run-*-undo"
+        }
+      },
+      "expect": "The run in a plain folder offers Undo"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "run-*-review"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "name": "README.md",
+              "in": {
+                "key": "review-files"
+              }
+            }
+          },
+          {
+            "see": {
+              "name": "src/retry/mod.rs",
+              "in": {
+                "key": "review-files"
+              }
+            }
+          },
+          {
+            "see": {
+              "name": "OLD.md",
+              "in": {
+                "key": "review-files"
+              }
+            }
+          },
+          {
+            "see": {
+              "name": "docs/start.md",
+              "in": {
+                "key": "review-files"
+              }
+            }
+          },
+          {
+            "see": {
+              "name": "logo.png",
+              "in": {
+                "key": "review-files"
+              }
+            }
+          }
+        ]
+      },
+      "expect": "Review lists the run's changes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "review-back"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "run-*-undo"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "run-*-redo"
+        }
+      },
+      "within": 10,
+      "expect": "Undo is done"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "cat files/mochi-notes/README.md",
+              "has": "small"
+            }
+          },
+          {
+            "sh": {
+              "run": "cd files/mochi-notes && find . -mindepth 1 | sort | tr '\\n' ' '",
+              "is": "./OLD.md ./README.md ./docs ./docs/guide.md"
+            }
+          }
+        ]
+      },
+      "expect": "The folder holds exactly its files as before: nothing of Neko's was written into it"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "no_file": "$files/mochi-notes/.git"
+      },
+      "expect": "No git repository was made in the folder"
+    },
+    {
+      "do": "snap",
+      "name": "plain-undone",
+      "expect": "Undone in a plain folder"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "choose-folder",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Write the changelog [fake:commit]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Write the changelog"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "within": 15
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "This run committed its work; revert the commit instead."
+        }
+      },
+      "expect": "A run that committed is refused for undo with its plain line"
+    },
+    {
+      "do": "snap",
+      "name": "committed",
+      "expect": "The refusal on the card"
+    }
+  ]
+}
