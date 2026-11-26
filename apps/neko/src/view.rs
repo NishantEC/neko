@@ -118,7 +118,7 @@ pub fn status_mark(s: TaskStatus) -> (Status, &'static str) {
     match s {
         TaskStatus::New => (Status::Pending, "New"),
         TaskStatus::Working => (Status::Running, "Working"),
-        TaskStatus::NeedsYou => (Status::Waiting, "Needs you"),
+        TaskStatus::NeedsYou | TaskStatus::Asked => (Status::Waiting, "Needs you"),
         TaskStatus::Done => (Status::Done, "Done"),
         TaskStatus::Failed => (Status::Error, "Failed"),
         TaskStatus::Stopped => (Status::Skipped, "Stopped"),
@@ -190,8 +190,49 @@ fn content_band(s: &App, t: &Theme, lights: f32) -> El {
     }
     if let Some(task) = s.open_task().filter(|_| !s.settings_open) {
         band = band.child(text(task.title.clone()).key("band-title").role("heading").level(1).font(weight(t.ty.base, t.ty.medium)).color(t.ink()).truncate().min_w(0.0).shrink());
+        if let Some(place) = task_folder(s, t) {
+            band = band.child(row().grow(1.0).min_w(t.space.at(4.0)).h_full()).child(place);
+        }
     }
     band
+}
+
+/// Where the open task works: its newest run's folder (else the folder chosen for it), and the run's branch.
+pub fn working_folder(s: &App) -> Option<(String, Option<String>)> {
+    let task = s.open_task()?;
+    let run = s.book().and_then(|b| b.runs.iter().rev().find(|r| !r.workdir.is_empty()));
+    match run {
+        Some(r) => Some((r.workdir.clone(), r.branch.clone())),
+        None => task.folder.clone().map(|f| (f, None)),
+    }
+}
+
+/// The task's folder, once and quietly, at the band's right: the path shortened with `~` (cut in its middle when long), the branch
+/// beside it, and Reveal in Finder.
+fn task_folder(s: &App, t: &Theme) -> Option<El> {
+    let (folder, branch) = working_folder(s)?;
+    let shown = crate::task_view::show_path(&folder, "", s.home.as_deref());
+    let label = match &branch {
+        Some(b) => format!("Working folder: {shown}, on branch {b}"),
+        None => format!("Working folder: {shown}"),
+    };
+    let mut place = row()
+        .key("task-folder")
+        .role("group")
+        .label(label)
+        .help(folder.clone())
+        .gap(t.space.at(1.5))
+        .center_y()
+        .child(glyph(&crate::ui::icons::FOLDER, t.control.icon_sm, t.ink_faint()))
+        // The title gives way first; the path is cut in its middle to a width that leaves the branch whole.
+        .child(text(shown).key("task-folder-path").font(t.ty.sm).color(t.ink_muted()).truncate_middle().max_w(if s.sidebar_shown() { 320.0 } else { 180.0 }).a11y_hidden());
+    if let Some(b) = branch {
+        place = place.child(glyph(&crate::ui::icons::COMMIT, t.control.icon_sm, t.ink_faint())).child(text(b).key("task-folder-branch").font(crate::ui::agent::mono(t, t.ty.sm)).color(t.ink_muted()).truncate_middle().max_w(160.0).a11y_hidden());
+    }
+    let reveal: PressTx<App> = Rc::new(move |_: &mut App, tx: &mut rune::Tx| {
+        let _ = tx.reveal_path(&folder);
+    });
+    Some(place.child(icon_button(t, "task-folder-reveal", "Reveal in Finder", &crate::ui::icons::FOLDER_OPEN, None, false, Some(reveal))))
 }
 
 fn home(s: &App, t: &Theme) -> El {

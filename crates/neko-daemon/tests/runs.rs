@@ -190,13 +190,13 @@ fn a_follow_up_continues_the_same_conversation() {
     let task = create(&mut c, "Hello [fake:plain]", None);
     events_until(&mut c, "done", task_is(&task.id, TaskStatus::Done));
     let first = transcript(&mut c, &task.id).runs[0].session.clone().unwrap();
-    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "What did I say?".into() }).unwrap(), Reply::Ok);
+    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "Tell me what I said.".into() }).unwrap(), Reply::Ok);
     events_until(&mut c, "done again", task_is(&task.id, TaskStatus::Done));
     let t = transcript(&mut c, &task.id);
     assert_eq!(t.runs.len(), 2);
     assert_eq!(t.runs[1].session.as_deref(), Some(first.as_str()), "the CLI's session was resumed");
     assert!(agent_words(&t).contains(&format!("I remember our conversation {first}")));
-    assert!(t.parts.iter().any(|p| matches!(&p.body, PartBody::Person { text } if text == "What did I say?")), "the follow-up is in the transcript");
+    assert!(t.parts.iter().any(|p| matches!(&p.body, PartBody::Person { text } if text == "Tell me what I said.")), "the follow-up is in the transcript");
     assert_eq!(t.runs[1].workdir, t.runs[0].workdir, "in the same folder");
 }
 
@@ -406,4 +406,18 @@ fn when_the_daemon_dies_the_run_dies_with_it_and_a_restart_marks_it_interrupted(
     drop(c);
     drop(d);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_run_that_ends_with_a_question_leaves_the_task_with_the_person() {
+    let d = Daemon::start("asked");
+    let mut c = watcher(&d);
+    let task = create(&mut c, "Hello [fake:plain]", None);
+    events_until(&mut c, "done", task_is(&task.id, TaskStatus::Done));
+    // The fake repeats the follow-up's words last, so its answer ends with this question.
+    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "Which branch should it go on?".into() }).unwrap(), Reply::Ok);
+    events_until(&mut c, "the person's turn", task_is(&task.id, TaskStatus::Asked));
+    assert!(!TaskStatus::Asked.is_active(), "not working: a follow-up answers it");
+    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "On main.".into() }).unwrap(), Reply::Ok);
+    events_until(&mut c, "done after the answer", task_is(&task.id, TaskStatus::Done));
 }

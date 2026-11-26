@@ -502,7 +502,13 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let working = s.open_is_working();
     let reply = s.reply_box().cloned().unwrap_or_default();
     let mut composer = PromptInput::new("reply", &reply, |s: &mut App| s.reply_mut())
-        .placeholder(if working { "Neko is working. Press Escape to stop." } else { "Reply to Neko" })
+        .placeholder(if working {
+            "Neko is working. Press Escape to stop."
+        } else if task.status == neko_protocol::TaskStatus::Asked {
+            "Answer Neko's question"
+        } else {
+            "Reply to Neko"
+        })
         .spellcheck(true)
         .phase(if working { Phase::Streaming } else { Phase::Ready })
         .on_submit(|s: &mut App| s.follow_up())

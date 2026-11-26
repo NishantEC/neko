@@ -431,7 +431,10 @@ impl App {
     }
 
     /// Adds or replaces a task, keeping newest first.
-    fn upsert(&mut self, task: Task) {
+    fn upsert(&mut self, mut task: Task) {
+        // One short line, whatever the store holds (a title kept from before titles were cut): the sidebar, the band and the
+        // window's title all read this.
+        task.title = neko_protocol::title::title(&task.title);
         self.tasks.retain(|t| t.id != task.id);
         let at = self.tasks.iter().position(|t| (t.created_ms, &t.id) < (task.created_ms, &task.id)).unwrap_or(self.tasks.len());
         self.tasks.insert(at, task);
@@ -507,6 +510,7 @@ impl App {
         use neko_protocol::TaskStatus as S;
         let words = match task.status {
             S::NeedsYou => Some((format!("Neko needs you: {}", task.title), true)),
+            S::Asked => Some((format!("Neko has a question for you: {}", task.title), true)),
             S::Done => Some((format!("Neko finished: {}", task.title), false)),
             S::Failed => Some((format!("Neko could not finish: {}", task.title), false)),
             S::Stopped => Some((format!("Stopped: {}", task.title), false)),
@@ -639,6 +643,18 @@ mod tests {
         let mut c = App { creating: Some((9, "Kept".into())), ..App::default() };
         c.take(Incoming::Lost("gone".into()));
         assert_eq!(c.draft.text, "Kept", "a lost connection gives the words back");
+    }
+
+    #[test]
+    fn a_task_title_is_one_short_line_everywhere() {
+        let mut long = task("t", 5);
+        long.title = "Look at the failing nightly build, find the cause, fix it, and then write up what happened\nLogs:\nerror".into();
+        let mut a = App::default();
+        a.take(Incoming::Message(ServerMessage::Reply { id: 1, reply: Reply::Tasks { tasks: vec![long] } }));
+        a.open_task_id(&TaskId("t".into()));
+        let title = a.window_title();
+        assert!(!title.contains('\n') && title.chars().count() <= neko_protocol::title::MAX + 1, "{title}");
+        assert_eq!(a.tasks[0].title, title, "the sidebar and the window agree");
     }
 
     #[test]

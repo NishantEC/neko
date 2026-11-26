@@ -28,6 +28,7 @@ pub const SCENES: &[Scene] = &[
     ("task-failed", task_failed),
     ("task-thinking", task_thinking),
     ("task-talked", task_talked),
+    ("task-asked", task_asked),
     ("task-real-run", task_real_run),
     ("task-real-run-open", task_real_run_open),
     ("task-context-open", task_context_open),
@@ -392,6 +393,16 @@ fn task_talked(s: &mut App) {
     sc.say("Preferences is the usual word on a Mac since macOS Ventura renamed it to Settings in the system, so **Settings** now matches the system and is the better choice. I would keep it.", true);
     let r = scratch(run("run_1", task, RunStatus::Done, start(s), 29));
     open_with(s, TaskStatus::Done, vec![r], vec![sc]);
+}
+
+/// A run that ends with a question for the person: the task is theirs to answer.
+fn task_asked(s: &mut App) {
+    let task = &sample_tasks()[1];
+    let mut sc = Script::new(task, "run_1", start(s));
+    sc.think_empty();
+    sc.say("The button is called **Settings** in three places and **Preferences** in one. Should I rename all four to Preferences, or keep Settings to match macOS?", true);
+    let r = scratch(run("run_1", task, RunStatus::Done, start(s), 14));
+    open_with(s, TaskStatus::Asked, vec![r], vec![sc]);
 }
 
 /// Two runs with the shapes a real run showed: empty thoughts, words between tools, a long path under home, a check that exits 1,

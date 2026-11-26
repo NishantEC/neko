@@ -41,7 +41,9 @@ keeps everything by id, so nothing doubles.
 
 ## Rules
 
-- The JSON shapes are pinned by `tests/round_trip.rs`. A change to a shape is a new version.
+- The JSON shapes are pinned by `tests/round_trip.rs`. A change to a shape is a new version. Version 4 added the task status
+  `asked`: the run finished and its last words end in a question mark, so it is the person's turn (not working; a follow-up
+  answers it).
 - `DaemonInfo` (`daemon.json`) is part of the contract: `{pid, port, protocol, version}`.
 - `client::find(dir)` reads `daemon.json` and `token`. `client::Client` is blocking (tests, tools). `client::Link` runs on its own
   thread and hands replies and events to a callback (the app).

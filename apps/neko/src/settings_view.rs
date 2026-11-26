@@ -106,19 +106,10 @@ pub fn settings_view(s: &App, t: &Theme) -> El {
                 PermissionMode::Ask => 1,
                 PermissionMode::Full => 2,
             };
-            let mut perms = col().key("settings-permissions").w_full().gap(t.space.at(3.0)).child(text("Permissions").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())).child(
-                RadioGroup::<App>::new("settings-mode", "How much the agent may do without asking", &modes, Some(chosen))
-                    .on_change(|s: &mut App, i| {
-                        s.set_permission_mode(match i {
-                            1 => PermissionMode::Ask,
-                            2 => PermissionMode::Full,
-                            _ => PermissionMode::Follow,
-                        })
-                    })
-                    .build(t),
-            );
-            // What the person's own Claude Code settings let it do, read from them (never written), when Neko follows them.
+            // What the person's own Claude Code settings let it do, read from them (never written), when Neko follows them. It sits
+            // right under the heading, so it is in sight without scrolling in the default window.
             let rules = list.iter().find(|r| r.id == settings.runtime).and_then(|r| r.rules.clone());
+            let mut perms = col().key("settings-permissions").w_full().gap(t.space.at(3.0)).child(text("Permissions").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()));
             if let (PermissionMode::Follow, Some(line)) = (mode, rules) {
                 perms = perms.child(
                     row()
@@ -132,6 +123,17 @@ pub fn settings_view(s: &App, t: &Theme) -> El {
                         .child(text(line).font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0).shrink().a11y_hidden()),
                 );
             }
+            perms = perms.child(
+                RadioGroup::<App>::new("settings-mode", "How much the agent may do without asking", &modes, Some(chosen))
+                    .on_change(|s: &mut App, i| {
+                        s.set_permission_mode(match i {
+                            1 => PermissionMode::Ask,
+                            2 => PermissionMode::Full,
+                            _ => PermissionMode::Follow,
+                        })
+                    })
+                    .build(t),
+            );
             if mode == PermissionMode::Full {
                 perms = perms.child(
                     row()

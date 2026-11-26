@@ -224,5 +224,39 @@ fn settings_name_three_modes_and_say_what_claude_codes_own_rules_allow() {
     }
     assert!(has_key(&rt, "settings-rules"), "the one honest line, following Claude Code's rules");
     assert!(t.iter().any(|x| x == "Your Claude Code settings allow Bash, Edit and Write without asking."));
+    // In sight without scrolling in the default window (1200 by 800).
+    let r = rect(&rt, "settings-rules");
+    assert!(r[1] + r[3] <= 800.0 - 16.0, "the rules line ends at {} in an 800 point window", r[1] + r[3]);
     assert!(!has_key(&runtime((1200.0, 800.0), false, scene("settings-ask")), "settings-rules"), "Neko's own rules apply there");
+}
+
+#[test]
+fn a_run_that_ends_with_a_question_says_needs_you() {
+    let rt = runtime((1200.0, 800.0), false, scene("task-asked"));
+    let open = rt.state.open.clone().unwrap();
+    let row = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("task-{}", open.0))).expect("the task's row");
+    let tree = nodes(&rt.accessibility_json());
+    let node = tree.iter().find(|(_, n)| str_of(n, "key") == format!("task-{}", open.0)).map(|(_, n)| n.clone()).expect("the row in the tree");
+    assert!(node.to_string().contains("Needs you"), "the row says needs you, not done: {node}");
+    assert!(!rt.state.open_is_working(), "it is not working: the person can answer");
+    assert!(row.rect[2] > 0.0);
+    assert!(rt.accessibility_json().to_string().contains("Answer Neko's question"), "the composer asks for the answer");
+}
+
+#[test]
+fn the_task_band_shows_its_folder_and_branch_once_with_reveal_in_finder() {
+    let mut rt = runtime((1200.0, 800.0), false, scene("task-done"));
+    let t = texts(&rt);
+    assert_eq!(t.iter().filter(|x| x.as_str() == "~/Library/Application Support/neko/worktrees/x7k2m9qa").count(), 1, "the folder, once, with ~: {t:?}");
+    assert!(t.iter().any(|x| x == "neko/x7k2m9qa"), "the branch beside it: {t:?}");
+    click(&mut rt, "task-folder-reveal");
+    let asked = rt.take_path_requests();
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    assert_eq!(asked[0].path, std::path::PathBuf::from("/Users/example/Library/Application Support/neko/worktrees/x7k2m9qa"));
+    assert_eq!(asked[0].action, rune::PathAction::Reveal);
+    // At the smallest window it still fits the band (cut in its middle, never over the title).
+    let rt = runtime((760.0, 560.0), false, scene("task-done"));
+    let band = rect(&rt, "content-band");
+    let place = rect(&rt, "task-folder");
+    assert!(place[0] + place[2] <= band[0] + band[2] + 0.5, "{place:?} in {band:?}");
 }

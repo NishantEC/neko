@@ -14,10 +14,12 @@ use serde::{Deserialize, Serialize};
 pub mod client;
 #[cfg(feature = "ws")]
 pub mod pump;
+pub mod title;
 
 /// The version of this contract. A screen and a daemon talk only when theirs are equal. 2: tasks run (S1). 3: three permission
-/// modes, the context window, a command's exit code, Claude Code's own rules in words.
-pub const PROTOCOL_VERSION: u32 = 3;
+/// modes, the context window, a command's exit code, Claude Code's own rules in words. 4: a task can be `asked` (its run ended with
+/// a question for the person).
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -67,6 +69,9 @@ pub enum TaskStatus {
     Stopped,
     /// The daemon stopped while it ran; a follow-up continues it.
     Interrupted,
+    /// The run finished with a question for the person (its last words end in a question mark, nothing pending): their turn. Not
+    /// working; a follow-up answers it.
+    Asked,
 }
 
 /// A task as a screen sees it.
@@ -76,7 +81,7 @@ pub struct Task {
     pub workspace: String,
     /// The person's words, exactly as sent.
     pub words: String,
-    /// A short title made from the words (their first line, cut at a word near 80 characters).
+    /// A short title made from the words (their first line, cut at a word near 60 characters: [`title::title`]).
     pub title: String,
     /// Milliseconds since the Unix epoch.
     pub created_ms: i64,

@@ -29,7 +29,9 @@
 - **Where it was.** The normal frame is written to `~/Library/Application Support/dev.neko.app/prefs.json` (Rune's prefs, apart from
   the daemon's data) once it has been still for half a second, and at close and quit. The next launch puts it back, clamped to the
   displays present. Full screen, zoomed and minimised frames are never saved. First launch: 1200 × 800, centred.
-- **Title.** The open task's title, else "Neko".
+- **Title.** The open task's title, else "Neko". A title is one short line: the first line of the person's words, cut at a word
+  before 60 characters (`neko_protocol::title`, used by the daemon when it stores a task and by the app when a task arrives, so
+  the sidebar, the band and the window's title always agree).
 - **Closing.** ⌘W closes the window and the app keeps running (`keep_running`); the Dock icon brings it back. ⌘Q quits.
 
 ## Menus
@@ -111,10 +113,16 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   and cached, the cost when reported, and "API-equivalent, as Claude Code reports it. Not charged on a subscription." only for a
   subscription login. Escape closes it and focus goes back to the ring. Nothing else in the app shows money.
 - **Permission requests**: see `permissions.md`.
+- **Settings**: the line saying what the person's Claude Code rules allow sits right under the Permissions heading, in sight
+  without scrolling in the default window (tested).
 - **The composer** (`reply`): Return sends a follow-up; while it works Send is Stop and Escape stops (also when the focus is
   elsewhere in the task; with the context panel open, Escape closes it first).
-- The sidebar row's mark: hollow (new), dot (working), warning (needs you), check (done), cross (failed), slash (stopped or
-  interrupted); the row's description says it in words. The window title follows the task. Finishing, failing and needing you
+- The sidebar row's mark is rune-ui's step mark on `SidebarItem::lead`: hollow (new), a spinner (working), warning (needs you:
+  a request waits, or the run ended with a question for the person), check (done), cross (failed), slash (stopped or
+  interrupted); the row's description says it in words. When the run ended with a question the composer says "Answer Neko's
+  question".
+- **The task's folder** shows once, quietly, at the band's right: the newest run's working folder (else the chosen folder),
+  shortened with `~` and cut in its middle, the branch beside it, and a Reveal in Finder button (`Tx::reveal_path`). The window title follows the task. Finishing, failing and needing you
   are announced (`Tx::announce`).
 - **Home's folder chip** opens the Mac's open panel (Rune's `native-file-dialog`, rfd); the choice is kept in the prefs
   (`last-folder`) and dropped if the folder is gone. Without a folder a task gets a scratch folder.

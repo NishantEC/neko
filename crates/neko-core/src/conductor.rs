@@ -428,6 +428,7 @@ impl RunBook {
         }
         self.hook_calls.clear();
         let (status, task_status) = match &outcome {
+            Outcome::Done if ends_with_question(&core.store.parts_of(&self.task)?, &self.run.id) => (RunStatus::Done, TaskStatus::Asked),
             Outcome::Done => (RunStatus::Done, TaskStatus::Done),
             Outcome::Stopped => (RunStatus::Stopped, TaskStatus::Stopped),
             Outcome::Failed(_) => (RunStatus::Failed, TaskStatus::Failed),
@@ -447,6 +448,16 @@ impl RunBook {
         out.push(Out::Change(rev, Change::RunChanged { run: self.run.clone() }));
         out.extend(self.task_status(core, task_status, now)?);
         Ok(out)
+    }
+}
+
+/// Whether a finished run ended with a question for the person: its last part is the agent's words and they end in a question mark
+/// (closing quotes, brackets and emphasis aside). Its requests have all been settled by then.
+pub fn ends_with_question(parts: &[Part], run: &RunId) -> bool {
+    let last = parts.iter().rev().find(|p| p.run.as_ref() == Some(run) && !matches!(&p.body, PartBody::Agent { text, .. } if text.trim().is_empty()));
+    match last.map(|p| &p.body) {
+        Some(PartBody::Agent { text, .. }) => text.trim_end().trim_end_matches(['*', '_', '"', '\'', ')', ']', '`', '\u{201D}', '\u{2019}']).ends_with('?'),
+        _ => false,
     }
 }
 
@@ -502,4 +513,30 @@ pub fn person_part(core: &mut Core, task: &TaskId, words: &str) -> Result<Vec<Ou
     let part = Part { id: PartId(core.new_id("part")), task: task.clone(), run: None, seq: core.store.next_part_seq(task)?, at_ms: now, ended_ms: Some(now), body: PartBody::Person { text: words.to_owned() } };
     let rev = core.store.insert_part(&part, now)?;
     Ok(vec![Out::Change(rev, Change::PartChanged { part })])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn part(seq: u64, run: &str, body: PartBody) -> Part {
+        Part { id: PartId(format!("p{seq}")), task: TaskId("t".into()), run: Some(RunId(run.into())), seq, at_ms: 0, ended_ms: None, body }
+    }
+
+    fn words(seq: u64, run: &str, text: &str) -> Part {
+        part(seq, run, PartBody::Agent { text: text.into(), done: true })
+    }
+
+    #[test]
+    fn a_run_that_ends_with_a_question_is_the_persons_turn() {
+        let run = RunId("r".into());
+        assert!(ends_with_question(&[words(1, "r", "Which branch should I use?")], &run));
+        assert!(ends_with_question(&[words(1, "r", "Should I push it?**\n\n")], &run), "emphasis and spaces aside");
+        assert!(ends_with_question(&[words(1, "r", "Shall I go on?"), words(2, "r", "  ")], &run), "empty words are not the last part");
+        assert!(!ends_with_question(&[words(1, "r", "Done. The tests pass.")], &run));
+        assert!(!ends_with_question(&[words(1, "r", "Is this right? I checked it.")], &run), "a question in the middle is not one for the person");
+        let tool = part(2, "r", PartBody::Tool { call: "c".into(), name: "Bash".into(), summary: "ls".into(), input: "ls".into(), output: None, state: ToolState::Done, exit: None });
+        assert!(!ends_with_question(&[words(1, "r", "Shall I?"), tool], &run), "a step after the question");
+        assert!(!ends_with_question(&[words(1, "other", "Shall I?")], &run), "another run's words");
+    }
 }

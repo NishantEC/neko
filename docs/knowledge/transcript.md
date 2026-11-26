@@ -20,7 +20,8 @@ What a task said and did, stored so a restart loses nothing. `crates/neko-core/s
 - `permissions`: see `permissions.md`.
 - `settings`: key and value (the runtime new tasks use, the permission mode).
 
-The task's own words are its first message; a follow-up is a person part. Every change also appends an event row, as in S0.
+The task's own words are its first message; a follow-up is a person part. A run that finishes with words ending in a question
+mark (nothing pending, no step after them) leaves its task `asked` rather than `done` (`conductor::ends_with_question`). Every change also appends an event row, as in S0.
 
 ## Writing words
 

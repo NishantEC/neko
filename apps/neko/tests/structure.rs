@@ -48,7 +48,7 @@ fn every_scene_holds_the_structure_rules() {
                     }
                 }
                 // What sits in the band sits on the lights' centre line.
-                for e in els.iter().filter(|e| matches!(e.key.as_deref(), Some("sidebar-hide" | "sidebar-show" | "band-title"))) {
+                for e in els.iter().filter(|e| matches!(e.key.as_deref(), Some("sidebar-hide" | "sidebar-show" | "band-title" | "task-folder"))) {
                     let mid = e.rect[1] + e.rect[3] / 2.0;
                     assert!((mid - LINE).abs() <= 1.0, "{at}: {:?} is centred at {mid}, not on the band's line {LINE}", e.key);
                 }
