@@ -6,7 +6,7 @@ function run(argv) {
   var se = Application("System Events");
   var procs = se.processes.whose({ unixId: pid });
   if (procs.length === 0) return "[]";
-  var win = procs[0].windows[0];
+  var wins = procs[0].windows();
   var out = [];
   function walk(el, depth) {
     if (depth > 40) return;
@@ -25,7 +25,7 @@ function run(argv) {
   for (var tries = 0; tries < 3 && out.length < 5; tries++) {
     if (tries > 0) delay(0.4);
     out = [];
-    walk(win, 0);
+    for (var w = 0; w < wins.length; w++) walk(wins[w], 0);
   }
   return JSON.stringify(out);
 }

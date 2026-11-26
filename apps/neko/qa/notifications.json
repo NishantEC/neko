@@ -1,0 +1,31 @@
+{
+  "name": "notifications",
+  "title": "Notifications, the Dock badge and links, from a real bundle",
+  "about": "Window only, from a development bundle; posts real macOS notifications (at most four). With Neko not in front, a permission request posts one notification with the task's title, what is asked and the request's answers; the Dock badge is 1, then 0 once the request is answered (both read from the app's own log, NEKO_NOTIFY_LOG, never from the system or the screen). neko://task/<id> brings Neko to that task while it runs, and starts it at that task from cold. If the system asks the person for permission, those checks are marked \"needs the person once\".",
+  "cli": ["fake"],
+  "window": true,
+  "headless": false,
+  "steps": [
+    {"do": "key", "key": "cmd+,"},
+    {"do": "wait", "until": {"see": {"key": "settings-mode-1"}}, "expect": "Settings opens"},
+    {"do": "click", "on": {"key": "settings-mode-1"}},
+    {"do": "sleep", "secs": 0.5},
+    {"do": "key", "key": "cmd+n"},
+    {"do": "click", "on": {"key": "composer-input"}},
+    {"do": "type", "text": "Run the tests [fake:hook-shell]"},
+    {"do": "key", "key": "return"},
+    {"do": "wait", "until": {"notified": {"title": "Run the tests", "body": "Run a command: cargo test", "buttons": ["Allow once", "Always allow", "Deny"]}}, "window_pause": 5, "expect": "A permission request posts one notification: the task's title, what is asked, Allow once, Always allow and Deny"},
+    {"do": "assert", "that": {"badge": 1}, "expect": "The Dock badge says 1"},
+    {"do": "snap", "name": "request-waiting", "expect": "The request waits in the window"},
+    {"do": "key", "key": "cmd+2"},
+    {"do": "sleep", "secs": 1.0},
+    {"do": "key", "key": "return"},
+    {"do": "wait", "until": {"all": [{"badge": 0}, {"withdrawn": true}]}, "window_pause": 4, "expect": "Once answered, the badge is 0 and the notification is taken back"},
+    {"do": "key", "key": "cmd+n"},
+    {"do": "open-link", "title": "Run the tests"},
+    {"do": "wait", "until": {"title": "Run the tests [fake:hook-shell] — General"}, "window_pause": 3, "expect": "While Neko runs, the task's link brings it to that task"},
+    {"do": "snap", "name": "after-link", "expect": "The task, opened by its link"},
+    {"do": "assert", "that": {"posts": {"max": 4}}, "expect": "No more than four notifications were posted"},
+    {"do": "cold-link", "title": "Run the tests [fake:hook-shell]", "expect": "From cold, the task's link starts Neko at that task"}
+  ]
+}

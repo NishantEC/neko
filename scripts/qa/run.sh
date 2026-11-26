@@ -67,7 +67,17 @@ mkdir -p "$out" || exit 2
 work="$(mktemp -d /tmp/neko-qa-work.XXXXXX)" || exit 2
 
 args=(--scenario "$file" --out "$out" --work "$work" --daemon "$daemon" --fake "$fake" --cli "$cli" --commit "$commit")
-(( window )) && args+=(--window --app "$app")
+if (( window )); then
+  # A development bundle of our own (never the owner's $NEKO_TARGET/bundle-dev), renamed so its Dock item reads "Neko QA".
+  bundle="$target/qa-bundle/Neko QA.app"
+  if (( build )) || [[ ! -d "$bundle" ]]; then
+    rm -rf "$target/qa-bundle"
+    NEKO_TARGET="$target" "$root/scripts/build-app.sh" --dev "$target/qa-bundle" >/dev/null || { rm -rf "$out" "$work"; exit 2; }
+    mv "$target/qa-bundle/Neko.app" "$bundle" || { rm -rf "$out" "$work"; exit 2; }
+  fi
+  export NEKO_QA_BUNDLE="$bundle"
+  args+=(--window --app "$app")
+fi
 NEKO_QA_SCRIPTS="$root/scripts/qa" "$driver" "${args[@]}"
 code=$?
 

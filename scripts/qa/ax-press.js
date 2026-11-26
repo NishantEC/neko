@@ -7,7 +7,7 @@ function run(argv) {
   var se = Application("System Events");
   var procs = se.processes.whose({ unixId: pid });
   if (procs.length === 0) return "none";
-  var win = procs[0].windows[0];
+  var wins = procs[0].windows();
   var found = [], seen = [];
   function walk(el, depth) {
     if (depth > 40) return;
@@ -33,7 +33,7 @@ function run(argv) {
     if (tries > 0) delay(0.5);
     found = [];
     seen = [];
-    walk(win, 0);
+    for (var w = 0; w < wins.length; w++) walk(wins[w], 0);
   }
   if (found.length <= nth) return "none; controls seen: " + seen.join(", ");
   found[nth].actions.byName("AXPress").perform();

@@ -14,6 +14,8 @@ pub struct Scenario {
     pub cli: Vec<String>,
     /// Whether it also runs in a real window (`--window`).
     pub window: bool,
+    /// Whether it runs headless too (false: window only, e.g. real notifications).
+    pub headless: bool,
     /// The window's size in points.
     pub size: (f32, f32),
     /// Folders made before the app starts, by name (`$files/NAME`).
@@ -113,6 +115,7 @@ pub fn load(path: &Path, places: &Places) -> Result<Scenario, String> {
         about: v["about"].as_str().unwrap_or("").to_owned(),
         cli: if cli.is_empty() { vec!["fake".to_owned()] } else { cli },
         window: v["window"].as_bool().unwrap_or(false),
+        headless: v["headless"].as_bool().unwrap_or(true),
         size,
         files,
         claude_settings: v["setup"]["claude_settings"].as_object().map(|o| Value::Object(o.clone())),

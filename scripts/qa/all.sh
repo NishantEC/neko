@@ -31,6 +31,8 @@ list="$summary_dir/runs.txt"
 target="${NEKO_TARGET:-$HOME/Library/Caches/neko/target}"
 CARGO_TARGET_DIR="$target/core" cargo build --quiet --manifest-path "$root/Cargo.toml" -p neko-daemon -p neko-core --bins || exit 2
 (cd "$root/apps/neko" && CARGO_TARGET_DIR="$target/app" cargo build --quiet --bin neko --example neko-qa) || exit 2
+# The window runs' bundle is made again from this build by the first of them.
+(( window )) && rm -rf "$target/qa-bundle"
 
 one() {
   local log
@@ -43,8 +45,9 @@ one() {
 for f in "$root"/apps/neko/qa/*.json; do
   clis="$(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1])).get("cli", ["fake"])))' "$f")"
   has_window="$(python3 -c 'import json,sys; print(1 if json.load(open(sys.argv[1])).get("window") else 0)' "$f")"
+  headless="$(python3 -c 'import json,sys; print(0 if json.load(open(sys.argv[1])).get("headless") is False else 1)' "$f")"
   if [[ " $clis " == *" fake "* ]]; then
-    one "$f"
+    (( headless )) && one "$f"
     (( window && has_window )) && one "$f" --window
   fi
   if (( real )) && [[ " $clis " == *" real "* ]]; then

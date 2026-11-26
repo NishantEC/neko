@@ -306,6 +306,9 @@ fn run(o: &Opts) -> Result<bool, String> {
     if !s.cli.iter().any(|c| c == cli) {
         return Err(format!("{} does not run with --cli {cli} (it runs with {})", s.name, s.cli.join(", ")));
     }
+    if !o.window && !s.headless {
+        return Err(format!("{} runs only in a window (--window)", s.name));
+    }
     if o.window && !s.window {
         return Err(format!("{} has no --window form", s.name));
     }
@@ -925,7 +928,7 @@ pub fn utc_now() -> String {
 
 fn write_results(r: &Run, started_utc: &str, usage: Option<Value>) -> Result<bool, String> {
     let checks: Vec<&Outcome> = r.outcomes.iter().collect();
-    let picture_only = |c: &Outcome| c.ok.is_none() && c.reason.starts_with("picture only");
+    let picture_only = |c: &Outcome| c.ok.is_none() && (c.reason.starts_with("picture only") || c.reason.starts_with("needs the person once"));
     let passed = !checks.is_empty() && checks.iter().all(|c| c.ok == Some(true) || picture_only(c)) && r.notes.is_empty();
     let mode = if r.o.window { "window" } else { "headless" };
     let cli = if r.o.real { "real" } else { "fake" };
@@ -938,7 +941,7 @@ fn write_results(r: &Run, started_utc: &str, usage: Option<Value>) -> Result<boo
         "passed": passed,
         "started_utc": started_utc,
         "duration_s": (r.began.elapsed().as_secs_f64() * 10.0).round() / 10.0,
-        "expectations": checks.iter().map(|c| json!({"step": c.step, "expect": c.expect, "result": match c.ok { Some(true) => "pass", Some(false) => "fail", None if picture_only(c) => "picture only", None => "not reached" }, "reason": c.reason, "secs": (c.secs * 100.0).round() / 100.0, "picture": c.picture})).collect::<Vec<_>>(),
+        "expectations": checks.iter().map(|c| json!({"step": c.step, "expect": c.expect, "result": match c.ok { Some(true) => "pass", Some(false) => "fail", None if picture_only(c) => if c.reason.starts_with("needs") { "needs the person once" } else { "picture only" }, None => "not reached" }, "reason": c.reason, "secs": (c.secs * 100.0).round() / 100.0, "picture": c.picture})).collect::<Vec<_>>(),
         "notes": r.notes,
         "info": r.notes_info,
         "usage": usage,
@@ -953,7 +956,7 @@ fn write_results(r: &Run, started_utc: &str, usage: Option<Value>) -> Result<boo
         let res = match c.ok {
             Some(true) => "pass".to_owned(),
             Some(false) => format!("**FAIL**: {}", c.reason.replace('|', "\\|")),
-            None if picture_only(c) => "picture only".to_owned(),
+            None if picture_only(c) => if c.reason.starts_with("needs") { "needs the person once".to_owned() } else { "picture only".to_owned() },
             None => "not reached".to_owned(),
         };
         md.push_str(&format!("| {:02} | {} | {} | {} |\n", c.step, c.expect.replace('|', "\\|"), res, c.picture.clone().unwrap_or_default()));
@@ -968,7 +971,7 @@ fn write_results(r: &Run, started_utc: &str, usage: Option<Value>) -> Result<boo
     std::fs::write(r.o.out.join("report.md"), md).map_err(|e| e.to_string())?;
     // The log: the driver's, the daemon's, ffmpeg's; the person's home as `~`.
     let mut log = String::new();
-    for (name, path) in [("driver", r.o.out.join("driver.log")), ("daemon", r.places.work.join("daemon.log")), ("app (window)", r.places.work.join("app.log")), ("ffmpeg", r.places.work.join("ffmpeg.log"))] {
+    for (name, path) in [("driver", r.o.out.join("driver.log")), ("daemon", r.places.work.join("daemon.log")), ("app (window)", r.places.work.join("app.log")), ("notifications the app posted (window)", r.places.work.join("notify.jsonl")), ("ffmpeg", r.places.work.join("ffmpeg.log"))] {
         if let Ok(t) = std::fs::read_to_string(&path) {
             log.push_str(&format!("==== {name} ====\n{}\n", short(&t)));
         }

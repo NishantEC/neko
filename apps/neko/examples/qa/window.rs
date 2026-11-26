@@ -140,6 +140,11 @@ fn plan(r: &mut Run, steps: &[Step]) -> Result<(Vec<Plan>, Vec<(String, bool)>, 
                     out.push(Plan::Mark(format!("check:{i}"), Action::Check));
                 }
             }
+            "open-link" => {
+                out.push(Plan::Mark(format!("link:{i}"), Action::Check));
+                out.push(Plan::Events(vec![json!({"pause": v["window_pause"].as_f64().unwrap_or(PAUSE)})]));
+            }
+            "cold-link" => {}
             "allow-until" => {
                 out.push(Plan::Events(vec![json!({"pause": v["window_pause"].as_f64().unwrap_or(PAUSE)})]));
                 out.push(Plan::Mark(format!("press:{i}"), Action::Press("Allow once".into())));
@@ -196,7 +201,12 @@ fn script(plan: &[Plan]) -> (Vec<Value>, f64) {
 
 /// What the window says to assistive technology: each element's words.
 fn ax_words(pid: u32) -> Vec<String> {
-    let Ok(text) = osascript_js("ax-texts.js", &[&pid.to_string()]) else { return Vec::new() };
+    // Reading the tree can fail while the window changes under it: once more after a moment.
+    let text = osascript_js("ax-texts.js", &[&pid.to_string()]).ok().filter(|t| t.len() > 2).or_else(|| {
+        std::thread::sleep(Duration::from_millis(500));
+        osascript_js("ax-texts.js", &[&pid.to_string()]).ok()
+    });
+    let Some(text) = text else { return Vec::new() };
     let list: Vec<Value> = serde_json::from_str(&text).unwrap_or_default();
     list.iter().map(|e| [e["name"].as_str(), e["desc"].as_str(), e["value"].as_str()].iter().flatten().copied().collect::<Vec<_>>().join(" ")).filter(|s| !s.trim().is_empty()).collect()
 }
@@ -271,42 +281,75 @@ pub fn run(r: &mut Run) -> Result<(), String> {
             std::fs::write(dir.join("prefs.json"), serde_json::to_vec(&json!({ neko_app::WORKSPACE_KEY: id })).unwrap_or_default()).map_err(|e| e.to_string())?;
         }
     }
-    // Its own name, so its Dock item and process are told apart from any other Neko.
-    let bin = r.places.work.join(NAME);
-    std::fs::hard_link(&app, &bin).or_else(|_| std::fs::copy(&app, &bin).map(|_| ())).map_err(|e| format!("{}: {e}", bin.display()))?;
     let log_path = r.places.work.join("app.log");
-    let launched = Instant::now();
-    let mut child = Command::new(&bin)
-        .arg("--window-script")
-        .arg(&script_path)
-        .env("RUNE_OPEN_INACTIVE", "1")
-        .env("RUNE_DIRS_ROOT", &rune_root)
-        .env("NEKO_DATA_DIR", &r.places.data)
-        .env("NEKO_DAEMON_BIN", &r.o.daemon)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("the app could not start: {e}"))?;
-    let pid = child.id();
-    r.started(NAME, pid);
-    r.say(&format!("app started in a window (pid {pid}), script {:.0} s", end_t));
-    // The app's lines: marks go to this side, everything goes to the log.
+    let notify_log = r.places.work.join("notify.jsonl");
     let (tx, rx) = mpsc::channel::<String>();
+    let launched = Instant::now();
+    let (mut child, pid, dock_name): (Option<std::process::Child>, u32, String) = match std::env::var_os("NEKO_QA_BUNDLE").map(PathBuf::from) {
+        // A development bundle (scripts/build-app.sh --dev into the run's own folder, renamed "Neko QA.app" so its Dock item is
+        // told apart from any other Neko): only a bundle gets notifications, the Dock badge, the link and a proper Dock item.
+        // `open -n -g` starts a new copy in the background; its PID is found by the exact path of its executable.
+        Some(bundle) => {
+            let exe = bundle.join("Contents/MacOS/neko");
+            let out = r.places.work.join("app.out");
+            std::fs::write(&out, "").map_err(|e| e.to_string())?;
+            let mut c = Command::new("open");
+            c.args(["-n", "-g"]).arg(&bundle).arg("--stdout").arg(&out).arg("--stderr").arg(&out);
+            for (k, v) in [("RUNE_OPEN_INACTIVE", "1".into()), ("RUNE_DIRS_ROOT", rune_root.display().to_string()), ("RUNE_PREFS_DIR", rune_root.join("prefs").display().to_string()), ("NEKO_DATA_DIR", r.places.data.display().to_string()), ("NEKO_NOTIFY_LOG", notify_log.display().to_string())] {
+                c.arg("--env").arg(format!("{k}={v}"));
+            }
+            c.arg("--args").arg("--window-script").arg(&script_path);
+            let st = c.status().map_err(|e| format!("open: {e}"))?;
+            if !st.success() {
+                return Err(format!("open ended with {st}"));
+            }
+            let mut pid = None;
+            while pid.is_none() && launched.elapsed() < Duration::from_secs(15) {
+                pid = pid_of(&exe);
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            let pid = pid.ok_or("the bundle's process did not appear")?;
+            follow_file(out, tx);
+            let name = bundle.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Neko".into());
+            (None, pid, name)
+        }
+        None => {
+            // The bare binary, hard-linked under its own name (its Dock item and process are told apart from any other Neko).
+            let bin = r.places.work.join(NAME);
+            std::fs::hard_link(&app, &bin).or_else(|_| std::fs::copy(&app, &bin).map(|_| ())).map_err(|e| format!("{}: {e}", bin.display()))?;
+            let mut ch = Command::new(&bin)
+                .arg("--window-script")
+                .arg(&script_path)
+                .env("RUNE_OPEN_INACTIVE", "1")
+                .env("RUNE_DIRS_ROOT", &rune_root)
+                .env("NEKO_DATA_DIR", &r.places.data)
+                .env("NEKO_DAEMON_BIN", &r.o.daemon)
+                .env("NEKO_NOTIFY_LOG", &notify_log)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| format!("the app could not start: {e}"))?;
+            let stdout = ch.stdout.take().ok_or("no stdout")?;
+            let stderr = ch.stderr.take().ok_or("no stderr")?;
+            let tx2 = tx.clone();
+            std::thread::spawn(move || {
+                for l in BufReader::new(stdout).lines().map_while(Result::ok) {
+                    let _ = tx.send(l);
+                }
+            });
+            std::thread::spawn(move || {
+                for l in BufReader::new(stderr).lines().map_while(Result::ok) {
+                    let _ = tx2.send(l);
+                }
+            });
+            let pid = ch.id();
+            (Some(ch), pid, NAME.to_owned())
+        }
+    };
+    r.started("neko (window)", pid);
+    r.say(&format!("app started in a window (pid {pid}), script {:.0} s", end_t));
     let mut log = std::fs::File::create(&log_path).map_err(|e| e.to_string())?;
-    let stdout = child.stdout.take().ok_or("no stdout")?;
-    let stderr = child.stderr.take().ok_or("no stderr")?;
-    let tx2 = tx.clone();
-    std::thread::spawn(move || {
-        for l in BufReader::new(stdout).lines().map_while(Result::ok) {
-            let _ = tx.send(l);
-        }
-    });
-    std::thread::spawn(move || {
-        for l in BufReader::new(stderr).lines().map_while(Result::ok) {
-            let _ = tx2.send(l);
-        }
-    });
 
     // The window, and how long it took to appear.
     let mut win = None;
@@ -362,7 +405,7 @@ pub fn run(r: &mut Run) -> Result<(), String> {
     let mut failed_at: Option<usize> = None;
     while Instant::now() < deadline {
         let Ok(line) = rx.recv_timeout(Duration::from_millis(200)) else {
-            if let Ok(Some(_)) = child.try_wait() {
+            if exited(&mut child, pid) {
                 break;
             }
             continue;
@@ -412,6 +455,21 @@ pub fn run(r: &mut Run) -> Result<(), String> {
                     }
                 }
             }
+            "link" => {
+                // The task's link, opened by this bundle (`open -a`, so no other Neko on the Mac takes it). This brings Neko to the front.
+                let ok = link_target(r, step).and_then(|url| {
+                    let bundle = std::env::var("NEKO_QA_BUNDLE").map_err(|_| "links need the bundle".to_owned())?;
+                    let st = Command::new("open").arg("-a").arg(&bundle).arg(&url).status().map_err(|e| e.to_string())?;
+                    if st.success() { Ok(url) } else { Err(format!("open {url} ended with {st}")) }
+                });
+                match ok {
+                    Ok(url) => r.say(&format!("opened {url}")),
+                    Err(e) => {
+                        r.outcome(step, Some(false), e, t.elapsed().as_secs_f64(), None);
+                        failed_at = Some(i);
+                    }
+                }
+            }
             "check" => {
                 let cond = if step.kind() == "allow-until" { &step.v["until"] } else if step.kind() == "wait" { &step.v["until"] } else { &step.v["that"] };
                 let title = window_of(pid).map(|w| w.6).unwrap_or_default();
@@ -420,6 +478,8 @@ pub fn run(r: &mut Run) -> Result<(), String> {
                 let pic = capture(id, &r.o.out.join(&rel)).ok().map(|_| rel);
                 let daemon_side = check_other(r, cond);
                 match (check_words(cond, &words, &title), daemon_side) {
+                    // The system asking the person for permission is not the app's failure: it needs the person once.
+                    (_, Some(Err(e))) if e.starts_with("needs the person once") => r.outcome(step, None, e, t.elapsed().as_secs_f64(), pic),
                     (Err(e), _) | (_, Some(Err(e))) => {
                         r.outcome(step, Some(false), e, t.elapsed().as_secs_f64(), pic);
                         if step.v["soft"].as_bool() != Some(true) {
@@ -446,21 +506,41 @@ pub fn run(r: &mut Run) -> Result<(), String> {
 
     // The Dock menu, read once.
     let dock_step = Step { n: steps.len() + 2, v: json!({"do": "dock", "expect": "The Dock menu is normal: not \"Application Not Responding\", and it has Quit"}) };
-    let dock = Command::new("osascript").arg(scripts().join("dock-menu.applescript")).arg(NAME).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+    let dock = Command::new("osascript").arg(scripts().join("dock-menu.applescript")).arg(&dock_name).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
     let items: Vec<&str> = dock.lines().filter(|l| !l.trim().is_empty()).collect();
     let dock_ok = items.iter().any(|i| i.starts_with("Quit")) && !items.iter().any(|i| i.contains("Not Responding"));
     r.outcome(&dock_step, Some(dock_ok), if dock_ok { String::new() } else { format!("the Dock menu reads: {}", items.join(" / ")) }, 0.0, None);
     r.say(&format!("Dock menu: {}", items.join(" / ")));
+    // From cold: with the app quit, the task's link starts it at that task.
+    if let Some(step) = steps.iter().find(|s| s.kind() == "cold-link")
+        && failed_at.is_none()
+    {
+        let t = Instant::now();
+        let end = Instant::now() + Duration::from_secs(8);
+        while Instant::now() < end && !exited(&mut child, pid) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        stop(&mut child, pid);
+        let result = cold_link(r, step, &rune_root, &notify_log);
+        match result {
+            Ok((cold_pid, title)) => {
+                let want = step.v["title"].as_str().unwrap_or("");
+                let ok = title.starts_with(want);
+                r.outcome(step, Some(ok), if ok { String::new() } else { format!("the window opened on {title:?}") }, t.elapsed().as_secs_f64(), None);
+                r.started("neko (cold link)", cold_pid);
+                let mut none = None;
+                stop(&mut none, cold_pid);
+            }
+            Err(e) => r.outcome(step, Some(false), e, t.elapsed().as_secs_f64(), None),
+        }
+    }
     if let Some(ms) = first_frame {
         r.notes_info.push(format!("Window on screen {appeared:.2} s after launch; Rune reported the first frame after {ms} ms."));
     }
 
     // Quit (the script asked for it), else stop it by its PID.
     let end = Instant::now() + Duration::from_secs(8);
-    while Instant::now() < end {
-        if let Ok(Some(_)) = child.try_wait() {
-            break;
-        }
+    while Instant::now() < end && !exited(&mut child, pid) {
         std::thread::sleep(Duration::from_millis(100));
     }
     stop(&mut child, pid);
@@ -488,22 +568,81 @@ pub fn run(r: &mut Run) -> Result<(), String> {
     Ok(())
 }
 
-fn stop(child: &mut std::process::Child, pid: u32) {
-    if let Ok(Some(_)) = child.try_wait() {
+/// Whether the app has ended: its child (the bare binary) or its PID (a bundle `open` started).
+fn exited(child: &mut Option<std::process::Child>, pid: u32) -> bool {
+    match child {
+        Some(c) => matches!(c.try_wait(), Ok(Some(_))),
+        // SAFETY: signal 0 only asks whether the process this run started is still there.
+        None => unsafe { libc::kill(pid as i32, 0) != 0 },
+    }
+}
+
+/// Stops the app this run started, by its PID: SIGTERM, then SIGKILL after three seconds.
+fn stop(child: &mut Option<std::process::Child>, pid: u32) {
+    if exited(child, pid) {
         return;
     }
     // SAFETY: the app this run started, by its PID.
     unsafe { libc::kill(pid as i32, libc::SIGTERM) };
     let end = Instant::now() + Duration::from_secs(3);
     while Instant::now() < end {
-        if let Ok(Some(_)) = child.try_wait() {
+        if exited(child, pid) {
             return;
         }
         std::thread::sleep(Duration::from_millis(50));
     }
     // SAFETY: as above.
     unsafe { libc::kill(pid as i32, libc::SIGKILL) };
-    let _ = child.wait();
+    if let Some(c) = child {
+        let _ = c.wait();
+    }
+}
+
+/// The PID of the process running exactly this executable.
+fn pid_of(exe: &Path) -> Option<u32> {
+    let out = Command::new("ps").args(["-axo", "pid=,comm="]).output().ok()?;
+    let want = exe.to_string_lossy();
+    String::from_utf8_lossy(&out.stdout).lines().find_map(|l| {
+        let l = l.trim_start();
+        let (pid, comm) = l.split_once(' ')?;
+        (comm.trim() == want).then(|| pid.parse().ok()).flatten()
+    })
+}
+
+/// Sends each new line of a file as it is written (the bundle's stdout, which `open` writes to a file).
+fn follow_file(path: PathBuf, tx: mpsc::Sender<String>) {
+    std::thread::spawn(move || {
+        let Ok(f) = std::fs::File::open(&path) else { return };
+        let mut reader = BufReader::new(f);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => std::thread::sleep(Duration::from_millis(50)),
+                Ok(_) if line.ends_with('\n') => {
+                    if tx.send(line.trim_end().to_owned()).is_err() {
+                        return;
+                    }
+                }
+                Ok(_) => {
+                    // A part of a line: wait for the rest.
+                    let mut rest = String::new();
+                    while !rest.ends_with('\n') {
+                        match reader.read_line(&mut rest) {
+                            Ok(0) => std::thread::sleep(Duration::from_millis(50)),
+                            Ok(_) => {}
+                            Err(_) => return,
+                        }
+                    }
+                    line.push_str(&rest);
+                    if tx.send(line.trim_end().to_owned()).is_err() {
+                        return;
+                    }
+                }
+                Err(_) => return,
+            }
+        }
+    });
 }
 
 /// The checks that do not look at the screen (git, files, commands), as headless runs them. None when `c` has none.
@@ -514,6 +653,9 @@ fn check_other(r: &Run, c: &Value) -> Option<Result<(), String>> {
             return None;
         }
         return Some(results.into_iter().collect());
+    }
+    if c.get("notified").is_some() || c.get("badge").is_some() || c.get("withdrawn").is_some() || c.get("posts").is_some() {
+        return Some(check_notify_log(r, c));
     }
     if let Some(name) = c["git_same"].as_str() {
         let (repo, before) = r.notes_marks.get(name).and_then(|v| v.split_once('\n')).map(|(a, b)| (a.to_owned(), b.to_owned()))?;
@@ -532,4 +674,92 @@ fn check_other(r: &Run, c: &Value) -> Option<Result<(), String>> {
         return Some(if body.contains(f["has"].as_str().unwrap_or("")) && !body.is_empty() { Ok(()) } else { Err("the file is missing or wrong".into()) });
     }
     None
+}
+
+/// The app's own log of what it posted (`NEKO_NOTIFY_LOG`): one JSON line per notification posted or taken back, and per badge.
+fn notify_events(r: &Run) -> Vec<Value> {
+    std::fs::read_to_string(r.places.work.join("notify.jsonl")).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
+}
+
+/// `notified` {title, body, buttons}: a post like that was made; `badge` n: the last badge count; `withdrawn`: a post was taken back;
+/// `posts` {max}: no more than that many were posted. A post the system refused while it asks the person for permission says so.
+fn check_notify_log(r: &Run, c: &Value) -> Result<(), String> {
+    let ev = notify_events(r);
+    let posts: Vec<&Value> = ev.iter().filter(|e| e.get("post").is_some()).collect();
+    if let Some(n) = c.get("notified") {
+        let found = posts.iter().find(|p| {
+            n["title"].as_str().is_none_or(|t| p["title"].as_str().is_some_and(|x| x.starts_with(t)))
+                && n["body"].as_str().is_none_or(|b| p["body"].as_str().is_some_and(|x| x.contains(b)))
+                && n["buttons"].as_array().is_none_or(|bs| bs.iter().all(|b| p["buttons"].as_array().is_some_and(|pb| pb.contains(b))))
+        });
+        let Some(p) = found else { return Err(format!("no such notification was posted; the app posted: {}", cut(&serde_json::to_string(&posts).unwrap_or_default(), 300))) };
+        if p["posted"] == json!(false) {
+            return Err("needs the person once: the system did not take the notification (it may be asking for permission)".into());
+        }
+    }
+    if let Some(want) = c["badge"].as_u64() {
+        let last = ev.iter().rev().find_map(|e| e["badge"].as_u64());
+        if last != Some(want) {
+            return Err(format!("the Dock badge is {last:?}"));
+        }
+    }
+    if c.get("withdrawn").is_some() && !ev.iter().any(|e| e.get("withdraw").is_some()) {
+        return Err("no notification was taken back".into());
+    }
+    if let Some(max) = c["posts"]["max"].as_u64()
+        && posts.len() as u64 > max
+    {
+        return Err(format!("{} notifications were posted (at most {max})", posts.len()));
+    }
+    Ok(())
+}
+
+/// `neko://task/<id>` for the task whose title starts with the step's `title`, asked of the daemon.
+fn link_target(r: &Run, step: &Step) -> Result<String, String> {
+    use neko_protocol::{Reply, Request};
+    let want = step.v["title"].as_str().unwrap_or("");
+    let (info, token) = neko_protocol::client::find(&r.places.data).map_err(|e| e.to_string())?;
+    let mut c = neko_protocol::client::Client::connect(info.port, &token, "neko-qa").map_err(|e| e.to_string())?;
+    let tasks = match c.request(Request::ListTasks).map_err(|e| e.to_string())? {
+        Reply::Tasks { tasks } => tasks,
+        other => return Err(format!("list_tasks: {other:?}")),
+    };
+    c.close();
+    let task = tasks.into_iter().find(|t| t.title.starts_with(want)).ok_or(format!("no task titled {want:?}"))?;
+    Ok(format!("neko://task/{}", task.id.0))
+}
+
+/// Starts the bundle from cold with the task's link, waits for its window, and says what its title is.
+fn cold_link(r: &Run, step: &Step, rune_root: &Path, notify_log: &Path) -> Result<(u32, String), String> {
+    let url = link_target(r, step)?;
+    let bundle = PathBuf::from(std::env::var("NEKO_QA_BUNDLE").map_err(|_| "links need the bundle".to_owned())?);
+    let exe = bundle.join("Contents/MacOS/neko");
+    let mut c = Command::new("open");
+    c.args(["-n", "-g", "-a"]).arg(&bundle);
+    for (k, v) in [("RUNE_DIRS_ROOT", rune_root.display().to_string()), ("RUNE_PREFS_DIR", rune_root.join("prefs").display().to_string()), ("NEKO_DATA_DIR", r.places.data.display().to_string()), ("NEKO_NOTIFY_LOG", notify_log.display().to_string())] {
+        c.arg("--env").arg(format!("{k}={v}"));
+    }
+    let st = c.arg(&url).status().map_err(|e| e.to_string())?;
+    if !st.success() {
+        return Err(format!("open {url} ended with {st}"));
+    }
+    let began = Instant::now();
+    let mut pid = None;
+    while pid.is_none() && began.elapsed() < Duration::from_secs(15) {
+        pid = pid_of(&exe);
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let pid = pid.ok_or("the app did not start from the link")?;
+    let want = step.v["title"].as_str().unwrap_or("");
+    let mut title = String::new();
+    while began.elapsed() < Duration::from_secs(20) {
+        if let Some(w) = window_of(pid) {
+            title = w.6;
+            if title.starts_with(want) {
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    Ok((pid, title))
 }
