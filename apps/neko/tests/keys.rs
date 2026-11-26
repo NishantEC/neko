@@ -37,14 +37,14 @@ fn tab_reaches_every_control_once_in_reading_order() {
             "add-workspace",
             "cat-cat_miso",
             "new-cat",
-            "cat-picker",
             "composer-input",
+            "cat-picker",
             "workspace-picker",
             "cat-tile-cat_miso",
             "cat-tile-cat_mochi",
             "cat-tile-cat_tofu"
         ],
-        "Home, then Needs you; the sections and their rows are one stop; a section's New task is its own; the cats are one stop, then New cat; the cat picker at the composer's left, the words, the workspace picker in its footer (the empty composer's Send is off); then each cat's tile in the house"
+        "Home, then Needs you; the sections and their rows are one stop; a section's New task is its own; the cats are one stop, then New cat; the words, then the cat picker and the workspace picker in the composer's footer (the empty composer's Send is off); then each cat's tile in the house"
     );
     // Round once, the focus is back on the first control; Shift+Tab walks back the same way, wrapping.
     assert_eq!(focus(&rt).as_deref(), Some("sidebar-hide"));

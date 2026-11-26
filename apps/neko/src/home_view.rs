@@ -24,6 +24,8 @@ const PAGE: f32 = 880.0;
 /// A cat's portrait on a full tile, and on a small one.
 const TILE_FACE: f32 = 76.0;
 const SMALL_FACE: f32 = 40.0;
+/// A face in the cat picker's chip.
+const FACE_CHIP: f32 = 20.0;
 
 /// The live task a cat is on, if any: working first, then one that needs the person.
 fn doing<'a>(s: &'a App, cat: &Cat) -> Option<&'a Task> {
@@ -162,50 +164,43 @@ fn house(s: &App, t: &Theme, room: f32) -> (El, bool) {
     (grid, small)
 }
 
-/// Who the next task goes to, as the composer's leading slot: the picked cat's portrait (or the free cats', overlapping, for "Any
-/// cat"), its name under it, a menu on a press. The current choice is checked.
+/// Who the next task goes to: a chip in the composer's footer beside the workspace's, as raised as it. At rest it shows the picked
+/// cat's face and name, or for "Any cat" the free cats' faces overlapping in one row; a press opens the menu, the current choice
+/// checked.
 fn cat_picker(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let picked = s.cat_pick().and_then(|id| s.cat(id));
     let name = picked.map_or_else(|| "Any cat".to_owned(), |c| c.name.clone());
-    let size = 48.0;
     let faces = match picked {
-        Some(c) => portrait(t, &c.face, size),
+        Some(c) => Some(portrait(t, &c.face, FACE_CHIP)),
+        // Before the house is known there are no faces to show: the chip is its words alone.
+        None if s.active_cats().is_empty() => None,
         None => {
-            // The free cats (else the first), up to four in a two-by-two grid: the house, small.
-            let free: Vec<&Cat> = s.active_cats().into_iter().filter(|c| s.cat_state(&c.id) == CatState::Napping).take(4).collect();
-            let shown: Vec<&Cat> = if free.is_empty() { s.active_cats().into_iter().take(4).collect() } else { free };
-            let mut stack = el().size(size, size);
-            if shown.len() == 1 {
-                stack = stack.child(portrait(t, &shown[0].face, 36.0).absolute(6.0, 6.0));
-            } else {
-                let (small, gap) = (21.0, 4.0);
-                let rows = shown.len().div_ceil(2);
-                let top = (size - (rows as f32 * small + (rows - 1) as f32 * gap)) / 2.0;
-                for (i, c) in shown.iter().enumerate() {
-                    let in_row = if i / 2 == rows - 1 && shown.len() % 2 == 1 { 1 } else { 2 };
-                    let left = (size - (in_row as f32 * small + (in_row - 1) as f32 * gap)) / 2.0;
-                    stack = stack.child(portrait(t, &c.face, small).absolute(left + (i % 2) as f32 * (small + gap), top + (i / 2) as f32 * (small + gap)));
-                }
+            // The free cats (else any), up to three, overlapping, each cut from the next by the chip's own colour.
+            let free: Vec<&Cat> = s.active_cats().into_iter().filter(|c| s.cat_state(&c.id) == CatState::Napping).take(3).collect();
+            let shown: Vec<&Cat> = if free.is_empty() { s.active_cats().into_iter().take(3).collect() } else { free };
+            let (step, ring) = (FACE_CHIP - 6.0, 1.5);
+            let width = FACE_CHIP + step * shown.len().saturating_sub(1) as f32 + 2.0 * ring;
+            let cut = FACE_CHIP + 2.0 * ring;
+            let mut stack = el().size(width, cut);
+            for (i, c) in shown.iter().enumerate().rev() {
+                // Each face sits in a disc of the chip's own surface, so the one under it is cut where they meet.
+                stack = stack.child(el().size(cut, cut).radius(cut * 0.3).fill(raised_fill(t)).child(portrait(t, &c.face, FACE_CHIP).absolute(ring, ring)).absolute(step * i as f32, 0.0));
             }
-            stack.a11y_hidden()
+            Some(stack)
         }
     };
-    let face = col()
-        .key("cat-picker")
+    let mut face = chip(t, "cat-picker", None)
         .role("button")
         .label(format!("Cat: {name}"))
         .help("Who does the next task")
         .expanded(s.cat_picker_open)
-        .focusable(true)
-        .w(72.0)
-        .py(t.space.at(1.5))
-        .gap(t.space.at(1.5))
-        .items_center()
-        .radius(t.radius.lg)
-        .round_as(t);
-    let face = paint_state(face, &t.mat.row, States::default())
-        .child(faces)
-        .child(row().gap(2.0).center_y().child(text(name).font(weight(t.ty.sm, t.ty.semibold)).color(t.ink_muted()).truncate().max_w(52.0).min_w(0.0).a11y_hidden()).child(glyph(&crate::ui::icons::CHEVRON_UP_DOWN, 12.0, t.ink_faint())))
+        .focusable(true);
+    if let Some(faces) = faces {
+        face = face.child(faces.a11y_hidden());
+    }
+    let face = face
+        .child(text(name.clone()).font(weight(t.ty.sm, t.ty.medium)).color(t.ink()).truncate().max_w(140.0).min_w(0.0).a11y_hidden())
+        .child(glyph(&crate::ui::icons::CHEVRON_UP_DOWN, t.control.icon_sm, t.ink_faint()))
         .on_press(|s: &mut App| s.cat_picker_open = !s.cat_picker_open);
     let mut menu = DropdownMenu::new("cat-menu").trigger(face).open(s.cat_picker_open).min_width(220.0).on_close(|s: &mut App| s.cat_picker_open = false).label("New task for");
     menu = menu.item(DropdownMenuItem::new("Any cat").checked(picked.is_none()).on_select(|s: &mut App| s.pick_cat(None))).separator();
@@ -262,19 +257,19 @@ fn hint(t: &Theme) -> El {
         .child(text("for a new line").font(t.ty.sm).color(t.ink_faint()))
 }
 
-/// The composer, addressed to a cat: the picker at its left, "Ask tofu to…", generous at rest; the workspace in its footer.
+/// The composer, addressed to a cat: "Ask tofu to…", generous at rest; the cat and the workspace in its footer.
 fn composer(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let to = s.cat_pick().and_then(|id| s.cat(id)).map_or_else(|| "a cat".to_owned(), |c| c.name.clone());
-    let lead = cat_picker(s, t, layer);
     let field = PromptInput::new("composer", &s.draft, |s: &mut App| &mut s.draft)
         .placeholder(format!("Ask {to} to…"))
         .spellcheck(true)
         .rows(3, 8)
+        .tool(cat_picker(s, t, layer))
         .tool(workspace_picker(s, t, layer))
         .phase(if s.creating.is_some() { Phase::Disabled } else { Phase::Ready })
         .on_submit(|s: &mut App| s.submit())
         .build(t);
-    row().key("composer-block").w_full().gap(t.space.at(3.0)).items_start().child(lead).child(col().grow(1.0).min_w(0.0).gap(t.space.at(2.0)).child(field).child(row().pl(t.space.at(1.0)).child(hint(t))))
+    col().key("composer-block").w_full().gap(t.space.at(2.0)).child(field).child(row().pl(t.space.at(1.0)).child(hint(t)))
 }
 
 /// A list row led by the cat's portrait: what, the cat and where (or what it asks), the state in words, how long. Opens the task.
