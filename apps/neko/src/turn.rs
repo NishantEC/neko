@@ -288,6 +288,20 @@ fn figures(t: &Theme, added: u32, removed: u32, style: rune::TextStyle) -> [El; 
     [text(format!("+{added}")).font(tabular(style)).color(t.c.success.fg).a11y_hidden(), text(format!("\u{2212}{removed}")).font(tabular(style)).color(t.c.danger.fg).a11y_hidden()]
 }
 
+/// A file's own figures in the receipt's form (the small step, green and red, only the side that says something): a file that
+/// only gained lines shows no "\u{2212}0". Review's file headers use the same.
+pub fn file_figures(t: &Theme, added: u32, removed: u32) -> Vec<El> {
+    let [plus, minus] = figures(t, added, removed, t.ty.xs);
+    let mut v = Vec::new();
+    if added > 0 {
+        v.push(plus);
+    }
+    if removed > 0 {
+        v.push(minus);
+    }
+    v
+}
+
 /// How many files a receipt lists before "and N more".
 const RECEIPT_FILES: usize = 5;
 
@@ -348,13 +362,7 @@ pub fn receipt(s: &App, t: &Theme, r: &Run, parts: &[&Part], o: &Offer, changed:
                 .child(text(f.path.clone()).font(mono(t, t.ty.sm)).color(if o.undone { t.ink_muted() } else { t.ink() }).truncate_middle().min_w(0.0).grow(1.0).a11y_hidden());
             // Only the figures that say something: a file that only gained lines shows no "−0".
             if let Some((a, b)) = f.counts {
-                let [plus, minus] = figures(t, a, b, t.ty.xs);
-                if a > 0 {
-                    line = line.child(plus);
-                }
-                if b > 0 {
-                    line = line.child(minus);
-                }
+                line = line.children(file_figures(t, a, b));
             }
             if let Some(n) = f.note {
                 line = line.child(text(n).font(t.ty.xs).color(t.ink_faint()).a11y_hidden());

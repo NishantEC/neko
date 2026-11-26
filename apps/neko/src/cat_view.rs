@@ -121,7 +121,6 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
         crate::state::CatState::NeedsYou => t.c.warning.fg,
         crate::state::CatState::Napping => t.ink_faint(),
     };
-    let ground = rune_ui_style::hex(crate::faces::coat(&c.face).ground);
     let actions = row()
         .gap(t.space.at(2.0))
         .center_y()
@@ -149,6 +148,7 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
         Some(p) => who.child(text(p.clone()).key("cat-purpose-line").font(weight(t.ty.lg, t.ty.regular)).color(t.ink_muted()).wrap().min_w(0.0).pt(t.space.at(1.0))),
         None => who,
     };
+    let wash = crate::faces::wash(t, &c.face);
     // The hero: the portrait large, on a wash of its own ground, the name at display size, what it is doing, and its two actions.
     let hero = row()
         .key("cat-hero")
@@ -158,8 +158,8 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
         .items_start()
         .radius(t.radius.xl + t.space.at(5.0) - 8.0)
         .round_as(t)
-        .fill(rune_ui_style::mix(t.c.page.bg, ground, if t.dark { 0.12 } else { 0.16 }))
-        .child(crate::faces::portrait_in(t, &c.face, 112.0, st, rune_ui_style::mix(t.c.page.bg, ground, if t.dark { 0.12 } else { 0.16 })))
+        .fill(wash)
+        .child(crate::faces::portrait_in(t, &c.face, 112.0, st, wash))
         .child(who)
         .child(actions);
     let facts = col()

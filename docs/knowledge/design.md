@@ -11,7 +11,7 @@ This is the app's one design: there is no look switch.
 | `themes/neko.json` | The colours (warm neutrals; a deep teal in the blue ramp's place), radius 9.6, continuous corners, Figtree. |
 | `view.rs` | `theme()` with the type scale (`TYPE_SCALE`), `raised` and `well` surfaces, `state_ink`. |
 | `faces.rs` | The portraits: a drawn face per face id, the working ring, the state dots, the `NEKO_CAT_ART` override. |
-| `sidebar.rs`, `home_view.rs`, `turn.rs`, `cat_view.rs` | The inset panel, Home and the house, a turn's pieces and the receipt, a cat's page. |
+| `sidebar.rs`, `home_view.rs`, `turn.rs`, `cat_view.rs`, `review_view.rs` | The inset panel, Home and the house, a turn's pieces and the receipt, a cat's page. |
 
 ## Type scale (Figtree)
 
@@ -60,11 +60,22 @@ only at 36 points and up.
 A portrait in its state (`portrait_in`) takes the same room in every state: a turning ring while the cat works (at least 2.5
 points of stroke, a still arc under Reduce Motion), an amber dot when it needs the person, a red dot when it could not go on.
 
+A cat's page puts its face on a wash of its ground (`faces::wash`). The ground is mixed into the page until the wash sits a fixed
+step from the page (contrast 1.09:1 in light, 1.16:1 in dark), so the white cat's deep blue is no heavier than the grey cat's
+yellow (a fixed share of the ground made the cool grounds heavy).
+
 ### The `NEKO_CAT_ART` override (development builds only)
 
 `NEKO_CAT_ART=<folder>` holding `<face id>.png` (`ginger.png`, `calico.png`, …) draws those pictures in place of the drawn faces,
 for faces that have one. It is read only in a debug build (`cfg!(debug_assertions)`); a release build never reads it. No artwork is
 in the repository: the drawn faces are what Neko ships.
+
+## The harness's cyan rectangle
+
+The thin cyan rectangle round the traffic lights in the renders is not in the app: `--chrome` (`scripts/snap.sh` passes it) tells
+Rune to draw the macOS traffic-light positions and report overlapping elements, and the rectangle is that overlay. Renders
+without `--chrome` have neither the lights nor the rectangle, and the delivery renders are taken without it. No element in the
+band is focused at rest; the app lets Tab visit the window's own controls (`tab_visits_controls`), and a ring there is then the system's. It could not be checked in a real window here (no windows in this run).
 
 ## Motion
 
@@ -75,5 +86,5 @@ up and in); a tile's colours spring as its cat's state changes. Under Reduce Mot
 
 Neko builds these in its own code until rune-ui has them: a portrait with ring and status dot; a turn header slot on `Message`; a
 well-style person bubble; a leading slot on `PromptInput`; a two-line `SidebarItem` with an image, a raised selection and a
-trailing slot; neutral step marks on `Tool` and `Confirmation`; a run receipt with a file list and actions on `Task`; an identity
+trailing slot; neutral step marks on `Tool` and `Confirmation`; a run receipt with a file list and actions on `Task`; a figures slot on `Diff`'s file header (Review draws its own card to hide a zero side); an identity
 ramp and per-step type sizes in the theme file.

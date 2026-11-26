@@ -1,5 +1,6 @@
 //! Review (docs/knowledge/undo.md): what a run changed, or the whole task ("All changes"), in place of the conversation. Each file
-//! is rune-ui's Diff, folded until opened; its lines come from the daemon when it opens. Binary files are named with their sizes,
+//! is a card like rune-ui's Diff (its lines drawn the same), folded until opened, whose header carries the file's figures in the
+//! receipt's form; its lines come from the daemon when it opens. Binary files are named with their sizes,
 //! very long diffs are cut with "Show all", and an open file has Copy diff, Copy path and Reveal in Finder.
 
 use std::rc::Rc;
@@ -13,7 +14,9 @@ use crate::state::{App, Review};
 use crate::ui::agent::{PressTx, icon_button};
 use crate::ui::base::{ButtonVariant, Size, Theme};
 use crate::ui::button::Button;
-use crate::ui::diff::{Diff, FileDiff, Line};
+use crate::ui::agent::{mono, return_presses, slab};
+use crate::ui::base::{Press, Shape, glyph, hit_area, paint_state};
+use crate::ui::diff::Line;
 use crate::ui::icons;
 use crate::ui::segmented_control::SegmentedControl;
 use crate::view::COLUMN;
@@ -138,6 +141,44 @@ fn foot(t: &Theme, key: &str, root: &str, f: &DiffFile, patch: Option<&DiffPatch
     r.child(icon_button(t, &format!("{key}-reveal"), if deleted { "Reveal its folder in Finder" } else { "Reveal in Finder" }, &icons::FOLDER_OPEN, None, false, Some(reveal)))
 }
 
+/// One file of the review: a header that folds it (a chevron, the path cut at its start so the file name stays, and the file's own
+/// figures in the receipt's form), then, open, its lines in a monospaced face on the success and danger washes. The keys, names and
+/// look are rune-ui's Diff; only the figures differ (Diff always draws "+0 \u{2212}0"). An upstream ask: a figures slot on Diff.
+fn file_card(t: &Theme, key: &str, path: &str, counts: (u32, u32), lines: &[(Line, String)], open: bool, toggle: impl Fn(&mut App) + 'static) -> El {
+    let h = t.control.md;
+    let trigger = format!("{key}-trigger");
+    let toggle: Press<App> = Rc::new(toggle);
+    let (add, del) = counts;
+    let mut head = row().key(trigger.clone()).role("button").label(format!("{path}, {add} added, {del} removed")).expanded(open).focusable(true).w_full().h(h).px(t.space.at(3.0)).gap(t.metrics.gap).center_y().radius(t.radius.lg).round_as(t);
+    head = paint_state(head, &t.mat.row, Default::default())
+        .child(glyph(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, t.control.icon_sm, t.ink_faint()))
+        .child(glyph(&icons::FILE, t.control.icon, t.ink_muted()))
+        .child(text(path.to_owned()).font(mono(t, t.ty.sm)).color(t.ink()).truncate_head().min_w(0.0).grow(1.0).a11y_hidden())
+        .children(crate::turn::file_figures(t, add, del));
+    let (f, g) = (toggle.clone(), toggle.clone());
+    head = head.on_press(move |s: &mut App| f(s)).on_key(move |s: &mut App, k: &rune::KeyEvent, _: &mut Tx| return_presses(k, || g(s)));
+    let mut card = slab(t, key.to_owned()).role("group").label(format!("Changes to {path}")).child(hit_area(&trigger, head, 0.0, t.control.slop(h), Some(toggle)));
+    if open {
+        let style = mono(t, t.ty.sm);
+        let mut body = col().w_full().gap(0.0);
+        for (kind, words) in lines {
+            let (sign, fill, ink) = match kind {
+                Line::Added => ("+", Some(t.c.success.bg), t.ink()),
+                Line::Removed => ("\u{2212}", Some(t.c.danger.bg), t.ink()),
+                Line::Context => (" ", None, t.ink_muted()),
+                Line::Hunk => ("", Some(t.c.muted.bg), t.ink_faint()),
+            };
+            let mut r = row().w_full().px(t.space.at(3.0)).gap(t.space.at(2.0));
+            if let Some(f) = fill {
+                r = r.fill(f);
+            }
+            body = body.child(r.child(text(sign.to_owned()).font(style).color(ink).w(10.0)).child(text(if words.is_empty() { " ".to_owned() } else { words.clone() }).font(style).color(ink)));
+        }
+        card = card.child(col().key(format!("{key}-lines")).w_full().border_sides([1.0, 0.0, 0.0, 0.0], t.c.line).py(t.space.at(2.0)).scroll_x().child(body));
+    }
+    card
+}
+
 /// The review, in place of the conversation.
 pub fn review_view(s: &App, t: &Theme, r: &Review) -> El {
     let back = Button::new("review-back", "Back to the conversation").variant(ButtonVariant::Ghost).size(Size::Sm).icon(&icons::CHEVRON_LEFT).on_press(|s: &mut App| s.close_review()).build(t);
@@ -198,9 +239,9 @@ pub fn review_view(s: &App, t: &Theme, r: &Review) -> El {
                 let key = format!("diff-{i}");
                 let open = r.open.contains(&f.path);
                 let patch = r.patches.get(&f.path);
-                let fd = FileDiff { path: file_label(f), lines: file_lines(f, open, patch) };
+                let lines = file_lines(f, open, patch);
                 let p = f.path.clone();
-                let mut el = Diff::<App>::new(key.clone(), &fd, open).on_toggle(move |s: &mut App| s.review_flip(&p)).build(t);
+                let mut el = file_card(t, &key, &file_label(f), (f.added, f.removed), &lines, open, move |s: &mut App| s.review_flip(&p));
                 if open {
                     el = el.child(foot(t, &key, &d.root, f, patch));
                 }

@@ -98,9 +98,9 @@ How it looks is in `design.md`.
 
 - Sidebar: a Cats section under the workspaces, each active cat with its portrait in its state and what it is doing (napping,
   working on N, needs you; a napping cat with a purpose shows it), then New cat….
-- Home: the composer's cat picker at its left (the picked cat's portrait, or the free cats' for "Any cat"); the house below it,
+- Home: the cat picker, a chip in the composer's footer beside the workspace's (the picked cat's face and name, or the free cats' faces overlapping in one row for "Any cat"); the house below it,
   each cat as a tile; a napping cat's tile addresses the composer to it.
-- A cat's page: its portrait large on a wash of its own ground, its name, what it is doing, Rename… and Retire… (asks first); the
+- A cat's page: its portrait large on a quiet wash of its own ground (every wash the same step from the page, `faces::wash`), its name, what it is doing, Rename… and Retire… (asks first); the
   faces as a row of portraits to choose from, the default workspace picker, purpose, the rules editor (rune-ui's Textarea) with
   Save, Revert, "Unsaved changes" and Restore previous rules, then its tasks: working, needs you, recent.
 - New cat…: the dialog shows the face it will get.

@@ -245,6 +245,22 @@ pub fn radius(size: f32) -> f32 {
     (size * 0.24).round()
 }
 
+/// How far a wash is from the page, as the biggest step in any colour channel as the eye's encoding has it (0 to 1).
+pub fn wash_step(page: Color, wash: Color) -> f32 {
+    let e = rune::color::srgb_encode;
+    (e(page.r) - e(wash.r)).abs().max((e(page.g) - e(wash.g)).abs()).max((e(page.b) - e(wash.b)).abs())
+}
+
+/// The quiet colour behind a cat's hero on its page: the face's ground mixed into the page until every wash is the same colour
+/// step from the page, so the deep blue of the white cat is no heavier than the yellow of the grey one (a fixed share of the
+/// ground made the cool, dark grounds heavy and the pale ones faint). The share stays between a hint and a gentle tint.
+pub fn wash(t: &Theme, face: &str) -> Color {
+    let (page, ground) = (t.c.page.bg, hex(coat(face).ground));
+    let far = wash_step(page, ground).max(0.01);
+    let aim = if t.dark { 0.070 } else { 0.078 };
+    rune_ui_style::mix(page, ground, (aim / far).clamp(0.04, 0.30))
+}
+
 /// A cat's portrait: its ground, its face (or the development art), a hairline and a soft two-layer shadow. Hidden from assistive
 /// technology: the row, turn or tile it sits in says the cat's name.
 pub fn portrait(t: &Theme, face: &str, size: f32) -> El {
