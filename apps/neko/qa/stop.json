@@ -57,7 +57,7 @@
         "see": {
           "role": "option",
           "label": "Count slowly",
-          "name": "Stopped"
+          "name": "stopped"
         }
       },
       "soft": true,

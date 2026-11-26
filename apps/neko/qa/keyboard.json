@@ -88,7 +88,10 @@
     {
       "do": "tab-to",
       "on": {
-        "role": "option"
+        "role": "option",
+        "in": {
+          "key": "ws-default-list"
+        }
       },
       "back": true,
       "max": 25,

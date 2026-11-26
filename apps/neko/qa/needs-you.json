@@ -119,7 +119,7 @@
         "see": {
           "role": "option",
           "label": "Plan the trip",
-          "name": "Needs you"
+          "name": "needs you"
         }
       },
       "within": 10,
