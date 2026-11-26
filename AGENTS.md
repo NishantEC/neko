@@ -56,6 +56,12 @@ ships in `NOTICE` and `THIRD_PARTY_LICENSES/`.
 - [The run guard](docs/knowledge/run-guard.md) — nothing a run starts outlives it; the limits; the known gap.
 - [The transcript](docs/knowledge/transcript.md) — runs, parts, usage, write rate, interrupted runs, cost as reported.
 
+## Showing a change
+
+`scripts/show.sh` builds the current source, quits the development copy of Neko if it is open, and opens the new build with the
+same development data folder, so tasks made while trying one build are still there in the next. After a change is published, run
+it so the person sees the latest build without doing anything. It never touches an installed Neko or its data.
+
 ## The gate
 
 `scripts/check.sh` runs clippy's always-a-defect lints and every test in both workspaces (the app's end-to-end test starts a real
