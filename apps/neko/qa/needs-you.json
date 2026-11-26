@@ -1,0 +1,253 @@
+{
+  "name": "needs-you",
+  "title": "Needs you: one list of what waits for the person",
+  "about": "In ask mode one task waits on a permission request; another ends with a question. The Needs you row counts 2; the list shows both under General, oldest first. Return answers the request with its default (Allow once) and the keyboard moves to the question; a typed reply is sent with Return; the list is then empty and says so. A second answer to the same question is refused.",
+  "cli": [
+    "fake"
+  ],
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-mode-1"
+        }
+      },
+      "expect": "Settings opens and lists the permission modes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-mode-1"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 0.5
+    },
+    {
+      "do": "snap",
+      "name": "ask-mode-chosen",
+      "expect": "\"Ask before risky steps\" is chosen"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Run the tests [fake:hook-shell]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "perm-*-allow"
+        }
+      },
+      "within": 10,
+      "expect": "The first task waits on a request"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Plan the trip [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Plan the trip"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "expect": "The second task finishes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Which day suits mochi?"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Plan the trip",
+          "name": "Needs you"
+        }
+      },
+      "within": 10,
+      "expect": "It ends with a question: the task needs the person"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "needs-you",
+          "name": "2 waiting"
+        }
+      },
+      "within": 5,
+      "expect": "The Needs you row counts 2"
+    },
+    {
+      "do": "key",
+      "key": "cmd+2"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "count": {
+          "of": {
+            "role": "listitem",
+            "in": {
+              "role": "list",
+              "label": "Waiting in General"
+            }
+          },
+          "is": 2
+        }
+      },
+      "expect": "The list shows both under General"
+    },
+    {
+      "do": "snap",
+      "name": "needs-list",
+      "expect": "The Needs you list"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "focus": {
+          "role": "listitem",
+          "label": "Run the tests"
+        },
+        "ring": false
+      },
+      "soft": true,
+      "expect": "The oldest item (the request) has the keyboard"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "role": "listitem",
+          "label": "Run the tests"
+        }
+      },
+      "within": 5,
+      "expect": "Return allows it once and it leaves the list"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "focus": {
+          "role": "listitem",
+          "label": "Plan the trip"
+        },
+        "ring": false
+      },
+      "soft": true,
+      "expect": "The keyboard moves to the next item"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "focus": {
+          "key": "*-reply-input"
+        },
+        "ring": false
+      },
+      "soft": true,
+      "expect": "Return on a question puts the keyboard in its reply box"
+    },
+    {
+      "do": "type",
+      "text": "Tuesday"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "needs-empty",
+          "text": "Nothing needs you right now"
+        }
+      },
+      "within": 5,
+      "expect": "The list is empty and says so"
+    },
+    {
+      "do": "snap",
+      "name": "needs-empty",
+      "expect": "Nothing needs you right now"
+    },
+    {
+      "do": "sleep",
+      "secs": 1.5
+    },
+    {
+      "do": "stale-answer",
+      "task": "Plan the trip",
+      "words": "Wednesday",
+      "expect": "A second answer to the same question is refused"
+    }
+  ]
+}

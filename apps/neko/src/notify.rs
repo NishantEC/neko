@@ -143,6 +143,16 @@ impl Poster for Recorder {
     }
 }
 
+/// With `NEKO_NOTIFY_LOG` naming a file, each notification posted or taken back, and each Dock badge count, is appended to it as
+/// one JSON line, so the QA rig can check what a real window did without reading the system's notifications (docs/knowledge/qa.md).
+pub fn log_event(event: serde_json::Value) {
+    use std::io::Write;
+    let Some(path) = std::env::var_os("NEKO_NOTIFY_LOG").filter(|p| !p.is_empty()) else { return };
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{event}");
+    }
+}
+
 /// The real thing: Rune's `rune-notify`. The first post asks the person for permission (the system does, once); a post while it is
 /// refused is dropped by the system. Silent: no sound is set, so the system's own rules (Focus among them) apply untouched.
 pub struct System;
@@ -159,11 +169,21 @@ impl Poster for System {
                 Button::Reply { id, placeholder, label } => r.reply(*id, *placeholder, *label),
             };
         }
-        let _ = rune_notify::post(&r);
+        let posted = rune_notify::post(&r);
+        let buttons: Vec<String> = n
+            .buttons
+            .iter()
+            .map(|b| match b {
+                Button::Action { label, .. } => (*label).to_owned(),
+                Button::Reply { label, .. } => format!("reply: {label}"),
+            })
+            .collect();
+        log_event(serde_json::json!({"post": n.id, "title": n.title, "body": n.body, "buttons": buttons, "posted": posted}));
     }
     fn withdraw(&self, ids: &[String]) {
         let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
         rune_notify::remove(&ids);
+        log_event(serde_json::json!({"withdraw": ids}));
     }
 }
 

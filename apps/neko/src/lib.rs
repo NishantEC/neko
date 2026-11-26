@@ -223,6 +223,7 @@ pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             let words = if badge == 1 { "1 thing needs you".to_owned() } else { format!("{badge} things need you") };
             w.set_taskbar(rune::Taskbar::new().badge(badge, words));
             s.badge_set = Some(badge);
+            notify::log_event(serde_json::json!({"badge": badge}));
         }
         let (write, again) = s.window.look(t, window_place::current(s.full_screen));
         if let Some(f) = write {

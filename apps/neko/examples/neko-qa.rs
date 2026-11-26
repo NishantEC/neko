@@ -661,6 +661,30 @@ impl Headless<'_> {
                 }
                 self.r.say(&format!("allowed {allowed} request(s)"));
             }
+            "stale-answer" => {
+                // A second answer to a question already answered, sent as the app sends one (follow_up naming the run it answers),
+                // straight to the daemon: it must be refused.
+                use neko_protocol::{Reply, Request};
+                let (info, token) = neko_protocol::client::find(&self.r.places.data).map_err(|e| e.to_string())?;
+                let mut c = neko_protocol::client::Client::connect(info.port, &token, "neko-qa").map_err(|e| e.to_string())?;
+                let want = v["task"].as_str().unwrap_or("");
+                let tasks = match c.request(Request::ListTasks).map_err(|e| e.to_string())? {
+                    Reply::Tasks { tasks } => tasks,
+                    other => return Err(format!("list_tasks: {other:?}")),
+                };
+                let task = tasks.into_iter().find(|t| t.title.starts_with(want)).ok_or(format!("no task titled {want:?}"))?;
+                let runs = match c.request(Request::GetTranscript { task: task.id.clone() }).map_err(|e| e.to_string())? {
+                    Reply::Transcript { transcript } => transcript.runs,
+                    other => return Err(format!("get_transcript: {other:?}")),
+                };
+                let asked = runs.iter().rev().nth(1).ok_or("the task has no earlier run")?.id.clone();
+                let reply = c.request(Request::FollowUp { task: task.id, words: v["words"].as_str().unwrap_or("Again").to_owned(), answering: Some(asked) }).map_err(|e| e.to_string())?;
+                c.close();
+                match reply {
+                    Reply::Error { message, .. } => self.r.say(&format!("refused: {message}")),
+                    other => return Err(format!("a second answer was taken: {other:?}")),
+                }
+            }
             "dump" => {
                 let rt = self.rt()?;
                 let lines: Vec<String> = rt.elements().iter().filter(|e| !e.exiting && (e.key.is_some() || e.text.is_some() || e.label.is_some())).map(describe).collect();

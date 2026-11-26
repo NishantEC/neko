@@ -1,0 +1,225 @@
+{
+  "name": "needs-you-restart",
+  "title": "Needs you survives a restart",
+  "about": "A request, a question and a failure wait. After the app quits and starts again all three are listed; after the daemon also restarts, the question and the failure are still listed (the request's run was interrupted, so the request expired, as documented).",
+  "cli": [
+    "fake"
+  ],
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-mode-1"
+        }
+      },
+      "expect": "Settings opens and lists the permission modes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-mode-1"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 0.5
+    },
+    {
+      "do": "snap",
+      "name": "ask-mode-chosen",
+      "expect": "\"Ask before risky steps\" is chosen"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Run the tests [fake:hook-shell]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "perm-*-allow"
+        }
+      },
+      "within": 10,
+      "expect": "A request waits"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Plan the trip [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Plan the trip"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Which day suits mochi?"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "sleep",
+      "secs": 1.0
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check the login [fake:signin]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "needs-you",
+          "name": "3 waiting"
+        }
+      },
+      "within": 10,
+      "expect": "Three things wait"
+    },
+    {
+      "do": "quit-app"
+    },
+    {
+      "do": "start-app"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "needs-you",
+          "name": "3 waiting"
+        }
+      },
+      "within": 15,
+      "expect": "After the app restarts, all three still wait"
+    },
+    {
+      "do": "quit-app"
+    },
+    {
+      "do": "stop-daemon"
+    },
+    {
+      "do": "start-daemon"
+    },
+    {
+      "do": "start-app"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "daemon": "connected"
+      },
+      "within": 15
+    },
+    {
+      "do": "key",
+      "key": "cmd+2"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "listitem",
+              "label": "Plan the trip"
+            }
+          },
+          {
+            "see": {
+              "role": "listitem",
+              "label": "Check the login"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "After the daemon restarts too, the question and the failure are listed"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "role": "listitem",
+          "label": "Run the tests"
+        }
+      },
+      "expect": "The interrupted run's request expired, as documented"
+    },
+    {
+      "do": "snap",
+      "name": "after-restart",
+      "expect": "The list after both restarted"
+    }
+  ]
+}
