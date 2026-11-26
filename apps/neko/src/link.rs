@@ -35,6 +35,8 @@ struct Shared {
     link: Mutex<Option<Link>>,
     wake: Box<dyn Fn() + Send + Sync>,
     stop: AtomicBool,
+    /// Retry pressed: start the daemon at the next try, whenever the last start was.
+    retry: AtomicBool,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -79,7 +81,7 @@ impl Conn {
     /// Starts the link for the daemon of `dir`. `wake` is called (on the link's thread) whenever the inbox has something new.
     /// With `daemon` the link starts that binary when no daemon answers.
     pub fn start(dir: PathBuf, daemon: Option<PathBuf>, wake: impl Fn() + Send + Sync + 'static) -> Conn {
-        let shared = Arc::new(Shared { inbox: Mutex::new(VecDeque::new()), link: Mutex::new(None), wake: Box::new(wake), stop: AtomicBool::new(false) });
+        let shared = Arc::new(Shared { inbox: Mutex::new(VecDeque::new()), link: Mutex::new(None), wake: Box::new(wake), stop: AtomicBool::new(false), retry: AtomicBool::new(false) });
         let s = shared.clone();
         let _ = std::thread::Builder::new().name("neko-link-supervisor".into()).spawn(move || supervise(&s, &dir, daemon.as_deref()));
         Conn { shared }
@@ -88,6 +90,11 @@ impl Conn {
     /// Sends a request now; None while not connected.
     pub fn send(&self, request: Request) -> Option<u64> {
         lock(&self.shared.link).as_ref().map(|l| l.send(request))
+    }
+
+    /// Tries again now: the next attempt starts the daemon even if one was started a moment ago.
+    pub fn retry(&self) {
+        self.shared.retry.store(true, Ordering::SeqCst);
     }
 
     /// Everything that arrived since the last call.
@@ -140,8 +147,12 @@ fn supervise(shared: &Arc<Shared>, dir: &Path, daemon: Option<&Path>) {
             }
             Err(e) => {
                 // No daemon answers: start one, at most every few seconds (one that is still starting is given time).
+                let retry = shared.retry.swap(false, Ordering::SeqCst);
+                if retry {
+                    delay = Duration::from_millis(50);
+                }
                 if let Some(bin) = daemon
-                    && started.is_none_or(|at| at.elapsed() >= START_GAP)
+                    && (retry || started.is_none_or(|at| at.elapsed() >= START_GAP))
                 {
                     started = Some(Instant::now());
                     if let Err(why) = start_daemon(bin, dir) {
@@ -154,7 +165,11 @@ fn supervise(shared: &Arc<Shared>, dir: &Path, daemon: Option<&Path>) {
                 }
             }
         }
-        std::thread::sleep(delay);
+        // Wait in short slices, so Retry and the end are heard at once.
+        let until = Instant::now() + delay;
+        while Instant::now() < until && !shared.stop.load(Ordering::SeqCst) && !shared.retry.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(25));
+        }
         delay = (delay * 2).min(MAX_DELAY);
     }
 }

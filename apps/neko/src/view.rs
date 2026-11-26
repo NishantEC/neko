@@ -129,6 +129,7 @@ pub fn status_mark(s: TaskStatus) -> (Status, &'static str) {
 /// A quiet line at the sidebar's foot while the daemon is not there.
 fn connection_line(s: &App, t: &Theme) -> Option<El> {
     let words = match &s.daemon {
+        _ if s.daemon_slow() => "Neko has not started",
         Daemon::Starting => "Starting Neko…",
         Daemon::Lost(_) => "Reconnecting to Neko…",
         Daemon::Connected | Daemon::Absent => return None,
@@ -136,12 +137,31 @@ fn connection_line(s: &App, t: &Theme) -> Option<El> {
     Some(text(words).key("connection").role("status").font(t.ty.sm).color(t.ink_faint()))
 }
 
+/// The calm line when the daemon has not answered for a few seconds, with Retry (under the composer, Home's or the task's).
+pub fn slow_line(s: &App, t: &Theme) -> Option<El> {
+    if !s.daemon_slow() {
+        return None;
+    }
+    let words = "Neko's background service has not started yet.";
+    let retry = Button::new("daemon-retry", "Retry").variant(ButtonVariant::Secondary).size(Size::Sm).on_press(|s: &mut App| s.retry_link()).build(t);
+    Some(
+        row()
+            .key("daemon-slow")
+            .gap(t.space.at(3.0))
+            .center_y()
+            .child(text(words).key("daemon-slow-words").role("status").font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0).shrink())
+            .child(retry),
+    )
+}
+
 /// One labelled group of tasks: a list the arrow keys move through (one Tab stop), Return opening the row with focus.
 fn task_list(s: &App, t: &Theme, key: &str, label: &str, tasks: &[&neko_protocol::Task]) -> El {
     let heading = row().h(28.0).px(t.space.at(2.0)).pt(t.space.at(3.0)).center_y().child(text(label.to_owned()).role("heading").level(2).font(weight(t.ty.xs, t.ty.medium)).color(t.ink_faint()));
     let mut list = col().key(format!("{key}-list")).role("listbox").label(if key == "today" { "Tasks from today".to_owned() } else { "Earlier tasks".to_owned() }).w_full().gap(1.0).focus_group();
     if tasks.is_empty() {
-        let none = text("No tasks yet").key(format!("{key}-none")).font(t.ty.sm).color(t.ink_faint());
+        // Before the daemon's list arrives: a quiet placeholder, not "No tasks yet".
+        let waiting = s.daemon != Daemon::Absent && !s.tasks_loaded;
+        let none = text(if waiting { "Loading…" } else { "No tasks yet" }).key(format!("{key}-none")).font(t.ty.sm).color(t.ink_faint());
         return col().w_full().child(heading).child(row().h(t.metrics.row).px(t.space.at(2.0)).center_y().child(none));
     }
     let n = tasks.len();
@@ -198,6 +218,9 @@ fn home(s: &App, t: &Theme) -> El {
         .child(Kbd::new("hint-newline", "Shift Return").build(t))
         .child(text("for a new line").font(t.ty.sm).color(t.ink_faint()));
     let mut stack = col().key("home").w_full().max_w(COLUMN).gap(t.space.at(6.0)).items_center().child(greeting).child(col().w_full().gap(t.space.at(3.0)).items_center().child(composer).child(hint));
+    if let Some(line) = slow_line(s, t) {
+        stack = stack.child(line);
+    }
     if let Some(n) = &s.notice {
         stack = stack.child(text(n.clone()).key("notice").role("status").font(t.ty.sm).color(t.ink_muted()).wrap().align(rune::Align::Center));
     }

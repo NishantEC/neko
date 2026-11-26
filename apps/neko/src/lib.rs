@@ -162,6 +162,19 @@ pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             tx.wake_after(std::time::Duration::from_millis(250));
         }
     }
+    // Waiting for the daemon: look again when the wait becomes long enough to say so.
+    if let Some(at) = s.waiting_since {
+        let left = s.slow_after.saturating_sub(at.elapsed());
+        if left.is_zero() {
+            if !s.slow_shown {
+                s.slow_shown = true;
+                changed = true;
+            }
+        } else {
+            s.slow_shown = false;
+            tx.wake_after(left + std::time::Duration::from_millis(20));
+        }
+    }
     // The minute changes the greeting and "Today": look again when it turns.
     tx.wake_after(std::time::Duration::from_millis((60_000 - now.rem_euclid(60_000)) as u64 + 50));
     changed
@@ -210,6 +223,31 @@ pub fn test_app() -> rune::App<App> {
     app().init(headless_state)
 }
 
+/// Starts the link to the daemon of `dir`. Returns at once: finding, starting and greeting the daemon happen on the link's own
+/// thread; `wake` is called there whenever something arrived, and the window drains it on its own thread.
+pub fn begin_link(dir: PathBuf, daemon: Option<PathBuf>, wake: impl Fn() + Send + Sync + 'static) -> link::Conn {
+    link::Conn::start(dir, daemon, wake)
+}
+
+/// After the window's first frame: starts the link ([`begin_link`]) and hands it to the window.
+pub fn start_link(handle: &rune::AppHandle<App>, dir: PathBuf, daemon: Option<PathBuf>) {
+    let waker = handle.clone();
+    let conn = begin_link(dir, daemon, move || {
+        waker.update_if(|s: &mut App, tx| {
+            let changed = s.drain_link();
+            if changed {
+                tx.instant();
+            }
+            changed
+        });
+    });
+    let for_state = handle.clone();
+    handle.update(move |s: &mut App, _| {
+        s.link_started(conn);
+        s.handle = Some(for_state);
+    });
+}
+
 /// Opens the window, starts (or finds) the daemon and connects to it.
 pub fn run() {
     if headless() {
@@ -223,26 +261,14 @@ pub fn run() {
     let app = app().keep_running().on_window(window_place::remember).on_close(flush_window).on_quit(flush_window);
     let handle = app.handle();
     let mut started = false;
+    // Nothing before the first frame waits for the daemon: the window opens with what it can show by itself, and the link (find or
+    // start the daemon, connect, hello, the first lists) starts after the first frame, off the UI thread (`start_link`).
     let app = app.on_ready(move |_| {
         if std::mem::replace(&mut started, true) {
             return;
         }
         let Some(dir) = data_dir() else { return };
-        let waker = handle.clone();
-        let conn = link::Conn::start(dir, link::daemon_binary(), move || {
-            waker.update_if(|s: &mut App, tx| {
-                let changed = s.drain_link();
-                if changed {
-                    tx.instant();
-                }
-                changed
-            });
-        });
-        let for_state = handle.clone();
-        handle.update(move |s: &mut App, _| {
-            s.conn = Some(conn);
-            s.handle = Some(for_state);
-        });
+        start_link(&handle, dir, link::daemon_binary());
     });
     // Before Rune starts: the Dock registration must happen on this thread (`dock.rs`).
     dock::register_on_main_thread();
@@ -254,4 +280,25 @@ pub fn run() {
         };
         [rune::WindowSpec::from_app("main", app)]
     });
+}
+
+#[cfg(test)]
+mod tests {
+    /// Nothing before the first frame waits for the daemon: `run` starts the link only from `on_ready` (after the first frame), and
+    /// neither `init` nor `main`'s setup reaches the link. (The behaviour itself is tested in `tests/startup.rs`.)
+    #[test]
+    fn the_link_starts_only_after_the_first_frame() {
+        let all = include_str!("lib.rs");
+        let code = &all[..all.rfind("#[cfg(test)]").expect("this module")];
+        let run = &code[code.find("pub fn run() {").expect("run")..];
+        let run = &run[..run.find("\n}\n").expect("the end of run")];
+        let ready = run.find(".on_ready(").expect("run starts the link from on_ready");
+        let start = run.find("start_link(").expect("run starts the link");
+        assert!(ready < start, "the link starts inside on_ready");
+        assert!(!run.contains("Conn::start") && !run.contains("begin_link"), "run reaches the link only through start_link");
+        let init = &code[code.find("fn init() -> App {").expect("init")..];
+        let init = &init[..init.find("\n}\n").unwrap()];
+        assert!(!init.contains("link") && !init.contains("Conn"), "init does not touch the link");
+        assert_eq!(code.matches("link::Conn::start(").count(), 1, "one place starts the link: begin_link");
+    }
 }

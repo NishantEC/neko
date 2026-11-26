@@ -59,9 +59,27 @@ landmarks exist. Reduce Motion goes to rune-ui's theme (`Theme::with_reduced_mot
 ## The link
 
 The supervisor thread reads `daemon.json` and `token`, opens a `Link`, and pushes `Connected`, each message, then `Lost` into the
-inbox. When no daemon answers it starts `neko-daemon` (from `NEKO_DAEMON_BIN`, else beside the app), at most every 3 s, in its own
-process group, output appended to `<data>/daemon.log`, with a thread waiting on it. Retries back off to 2 s. On `Connected` the
-window asks `subscribe` and `list_tasks`. Words sent while the daemon is away stay in the composer with a quiet line saying so.
+inbox. When no daemon answers it starts `neko-daemon` (from `NEKO_DAEMON_BIN`, else beside the app), at most every 3 s (Retry
+starts it at once), in its own process group, output appended to `<data>/daemon.log`, with a thread waiting on it. Retries back off
+to 2 s. On `Connected` the window asks `subscribe`, `list_tasks` and `list_runtimes`.
+
+## Startup order
+
+1. `main`: the menu prep, the saved frame (one small prefs read), the Dock registration, `rune::run_windows`. Nothing here or in
+   `init` touches the daemon.
+2. The first frame: the shell, the sidebar ("Starting Neko…" at its foot, "Loading…" where the tasks go), Home with a usable
+   composer.
+3. `on_ready` (after the first frame): `start_link` starts the link thread and returns at once. Finding or starting the daemon, the
+   hello and the first lists happen on that thread; the window drains what arrives.
+4. Return before the daemon answers keeps the words in the composer (`App::queued`) with a quiet line; they are sent on
+   `Connected`. After 6 s without an answer (`SLOW_AFTER`) a calm line says Neko has not started, with Retry.
+
+`tests/startup.rs` holds this: with a daemon that takes 5 s, the first frame is drawn in under a second (measured about 75 ms),
+`begin_link` returns in microseconds, every frame stays quick, and a task typed meanwhile is sent and opens. A daemon that never
+comes up gets the line and Retry. `lib.rs`'s own test fails if `run` or `init` reaches the link before `on_ready`.
+
+The 2.8 s "setup in `main`" Rune once reported was macOS checking a freshly built 150 MB debug binary on its first exec (about 2 s
+before `main` runs, measured with `--list-scenes` on a fresh copy), not the daemon. A second launch of the same binary does not pay it.
 
 ## Data folder
 

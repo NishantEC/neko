@@ -512,6 +512,9 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     }
     let composer = composer.build(t);
     let mut foot = col().key("reply-area").w_full().max_w(COLUMN).gap(t.space.at(2.0)).child(composer);
+    if let Some(line) = crate::view::slow_line(s, t) {
+        foot = foot.child(line);
+    }
     if let Some(n) = &s.notice {
         foot = foot.child(text(n.clone()).key("reply-notice").role("status").font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0));
     }

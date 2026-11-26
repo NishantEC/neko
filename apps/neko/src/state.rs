@@ -84,7 +84,20 @@ pub struct App {
     pub asked: HashMap<u64, Asked>,
     /// Something to say to assistive technology at the next frame (the words, and whether it interrupts).
     pub announce: Option<(String, bool)>,
+    /// Return was pressed in Home before the daemon answered: the words in the composer are sent as soon as it does.
+    pub queued: bool,
+    /// The daemon's list of tasks has arrived (until then the sidebar says it is loading).
+    pub tasks_loaded: bool,
+    /// Since when the app has waited for its daemon (None: connected, or no daemon at all).
+    pub waiting_since: Option<std::time::Instant>,
+    /// How long the app waits for its daemon before it says so and offers Retry.
+    pub slow_after: std::time::Duration,
+    /// The slow line was drawn (so the frame that crosses the wait redraws once).
+    pub slow_shown: bool,
 }
+
+/// How long the app waits for its daemon before a calm line says so, with Retry.
+pub const SLOW_AFTER: std::time::Duration = std::time::Duration::from_secs(6);
 
 /// What a sent request's reply is for.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -192,6 +205,11 @@ impl Default for App {
             watching: None,
             asked: HashMap::new(),
             announce: None,
+            queued: false,
+            tasks_loaded: false,
+            waiting_since: None,
+            slow_after: SLOW_AFTER,
+            slow_shown: false,
         }
     }
 }
@@ -363,6 +381,28 @@ impl App {
         self.follow_open();
     }
 
+    /// The link is set up (after the first frame, `lib.rs`): the app waits for the daemon from now.
+    pub fn link_started(&mut self, conn: Conn) {
+        self.conn = Some(conn);
+        if self.daemon != Daemon::Connected {
+            self.daemon = Daemon::Starting;
+            self.waiting_since = Some(std::time::Instant::now());
+        }
+    }
+
+    /// The daemon has not answered for longer than [`App::slow_after`]: a calm line says so, with Retry.
+    pub fn daemon_slow(&self) -> bool {
+        matches!(self.daemon, Daemon::Starting | Daemon::Lost(_)) && self.waiting_since.is_some_and(|at| at.elapsed() >= self.slow_after)
+    }
+
+    /// Retry: the link starts the daemon again now, and the wait starts over.
+    pub fn retry_link(&mut self) {
+        if let Some(c) = &self.conn {
+            c.retry();
+            self.waiting_since = Some(std::time::Instant::now());
+        }
+    }
+
     /// Sends a request; None when there is no daemon to send it to.
     pub fn send(&self, r: Request) -> Option<u64> {
         self.conn.as_ref().and_then(|c| c.send(r))
@@ -379,8 +419,14 @@ impl App {
                 self.creating = Some((id, words));
                 self.draft = TextEdit::default();
                 self.notice = None;
+                self.queued = false;
             }
-            None => self.notice = Some("Neko is still starting. Your words are kept; press Return again in a moment.".to_owned()),
+            // The link is coming up: the words stay in the box and go as soon as the daemon answers.
+            None if self.conn.is_some() => {
+                self.queued = true;
+                self.notice = Some("Neko is starting. Your task is sent as soon as it is ready.".to_owned());
+            }
+            None => self.notice = Some("Neko is not running. Your words are kept.".to_owned()),
         }
     }
 
@@ -396,15 +442,20 @@ impl App {
         match i {
             Incoming::Connected(_) => {
                 self.daemon = Daemon::Connected;
+                self.waiting_since = None;
                 self.send(Request::Subscribe);
                 self.send(Request::ListTasks);
                 self.send(Request::ListRuntimes);
                 // A new connection watches nothing yet.
                 self.watching = None;
                 self.follow_open();
+                if std::mem::take(&mut self.queued) {
+                    self.submit();
+                }
             }
             Incoming::Lost(why) => {
                 self.daemon = Daemon::Lost(why);
+                self.waiting_since.get_or_insert_with(std::time::Instant::now);
                 // An answer that will never come: the words go back in the box.
                 if let Some((_, words)) = self.creating.take()
                     && self.draft.text.is_empty()
@@ -502,6 +553,7 @@ impl App {
         }
         match reply {
             Reply::Tasks { tasks } => {
+                self.tasks_loaded = true;
                 // A list answers from the store, so it replaces what the window had (a task made meanwhile comes as an event).
                 for t in tasks {
                     self.upsert(t);
@@ -595,6 +647,7 @@ mod tests {
         a.submit();
         assert_eq!(a.draft.text, "Hello");
         assert!(a.notice.is_some());
+        assert!(!a.queued, "no link at all: nothing to send it to later");
     }
 
     #[test]
