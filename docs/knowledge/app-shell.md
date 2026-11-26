@@ -66,8 +66,6 @@ window asks `subscribe` and `list_tasks`. Words sent while the daemon is away st
 
 ## Not done in S0
 
-- **Spell check in the composer.** rune-ui's `PromptInput` builds its text field itself and has no way to turn on
-  `El::spellcheck`. Upstream fix: a `PromptInput::spellcheck(bool)` that calls `.spellcheck(on)` on its `text_input`.
 - **Unnamed hit areas.** rune-ui's 40 point hit areas (`hit(<key>)`) show to assistive technology as unnamed buttons around the
   named control. The rule allows that one pattern; upstream they should be `a11y_hidden` or take the control's name.
 - No app icon yet.
@@ -76,3 +74,9 @@ window asks `subscribe` and `list_tasks`. Words sent while the daemon is away st
 
 The lights on the band's line, dragging by the band, double-click zoom, full screen with the sidebar folded, quit and relaunch on
 one display and after unplugging a second, the Dock menu, Help's search field, one Close item (in File), About's commit.
+
+## The composer
+
+- **Spell check is on** (`PromptInput::spellcheck(true)`, rune-ui 0.8.1). The system's checker marks a word about a second after
+  typing stops.
+- **Send with nothing to send** is a raised button at rest with a faint arrow: off, but still a button. With words it is ink.

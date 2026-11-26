@@ -131,11 +131,18 @@ pub struct PromptInput<'a, S: 'static> {
     command: Option<OnCommand<S>>,
     menu: MenuState,
     menu_access: Option<MenuAccess<S>>,
+    spellcheck: bool,
 }
 
 impl<'a, S: 'static> PromptInput<'a, S> {
     pub fn new(key: impl Into<String>, edit: &'a TextEdit, access: impl for<'b> Fn(&'b mut S) -> &'b mut TextEdit + 'static) -> PromptInput<'a, S> {
-        PromptInput { key: key.into(), edit, access: Rc::new(access), placeholder: "Ask anything".to_owned(), phase: Phase::Ready, attachments: Vec::new(), tools: Vec::new(), rows: (1, 8), submit: None, stop: None, attach: None, mentions: Vec::new(), commands: Vec::new(), command: None, menu: MenuState::default(), menu_access: None }
+        PromptInput { key: key.into(), edit, access: Rc::new(access), placeholder: "Ask anything".to_owned(), phase: Phase::Ready, attachments: Vec::new(), tools: Vec::new(), rows: (1, 8), submit: None, stop: None, attach: None, mentions: Vec::new(), commands: Vec::new(), command: None, menu: MenuState::default(), menu_access: None, spellcheck: false }
+    }
+
+    /// Marks misspelt words as the person writes, with the system's checker. Off by default: turn it on where people write prose.
+    pub fn spellcheck(mut self, on: bool) -> Self {
+        self.spellcheck = on;
+        self
     }
 
     pub fn placeholder(mut self, p: impl Into<String>) -> Self {
@@ -297,6 +304,7 @@ impl<'a, S: 'static> PromptInput<'a, S> {
             .placeholder(self.placeholder.clone(), t.ink_faint())
             .caret(t.ink(), t.c.accent.fg.alpha(0.28))
             .label("Message")
+            .spellcheck(self.spellcheck)
             .pill_colors(t.c.selected, Some(t.ink()))
             .on_submit(move |s: &mut S, _: &mut Tx| {
                 if ready && !words_in(s).text.trim().is_empty() && let Some(f) = &on_enter {
@@ -359,12 +367,15 @@ impl<'a, S: 'static> PromptInput<'a, S> {
             bar = bar.child(icon_button(t, &format!("{}-attach", self.key), "Attach files", &icons::PAPERCLIP, None, disabled, Some(p)));
         }
         bar = bar.children(std::mem::take(&mut self.tools)).child(row().grow(1.0));
-        // The submit button: ink, round, an arrow; Stop while streaming.
+        // The submit button: round, an arrow; Stop while streaming. With something to send it is ink. With nothing to send it is
+        // still a button you can see the shape of: the raised material at rest with a faint arrow, not ink dimmed to a flat grey
+        // disc. It is off either way (not focusable, no press, announced as disabled).
         let h = t.control.sm + 4.0;
         let key = format!("{}-submit", self.key);
         let live = if streaming { stop.is_some() } else { send.is_some() };
         let face = row().key(key.clone()).role("button").label(if streaming { "Stop" } else { "Send" }).help(if streaming { "Stop (Escape)" } else { "Send (Return)" }).focusable(live).size(h, h).center().radius(h / 2.0);
-        let mut face = paint_state(face, &t.mat.ink, states(None, !live, false)).child(glyph(if streaming { &icons::STOP } else { &icons::ARROW_UP }, t.control.icon, t.c.primary.fg));
+        let (material, arrow) = if live { (&t.mat.ink, t.c.primary.fg) } else { (&t.mat.raised, t.ink_faint()) };
+        let mut face = paint_state(face, material, states(None, false, false)).child(glyph(if streaming { &icons::STOP } else { &icons::ARROW_UP }, t.control.icon, arrow));
         if !live {
             face = face.disabled(true);
         }

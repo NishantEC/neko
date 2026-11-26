@@ -159,6 +159,7 @@ fn home(s: &App, t: &Theme) -> El {
         .child(text("What should Neko do?").key("greeting-sub").font(t.ty.md).color(t.ink_muted()));
     let composer = PromptInput::new("composer", &s.draft, |s: &mut App| &mut s.draft)
         .placeholder("Describe a task")
+        .spellcheck(true)
         .phase(if s.creating.is_some() { Phase::Disabled } else { Phase::Ready })
         .on_submit(|s: &mut App| s.submit())
         .build(t);

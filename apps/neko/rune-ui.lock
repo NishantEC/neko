@@ -87,9 +87,9 @@ files = [
 
 [[item]]
 name = "prompt_input"
-version = "0.8.0"
+version = "0.8.1"
 files = [
-  { target = "src/ui/prompt_input.rs", sha256 = "9664541daf5cba9615eeb6aa5eafde520e4cbd2eead18edcd08f42200cba71d0" },
+  { target = "src/ui/prompt_input.rs", sha256 = "11df870f1c352a75b6fc15916d47f91aad72a80a79e2da5bddb88c8146ad195f" },
 ]
 
 [[item]]

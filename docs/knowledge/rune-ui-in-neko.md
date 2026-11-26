@@ -1,6 +1,6 @@
 # rune-ui in Neko (S0, 2026-11-26)
 
-rune-ui v0.8.0, on Rune `53f6d36a96439d357a6f2a2560383d7b9e9ec9c2`. Its components are copied into `apps/neko/src/ui/` by its CLI
+rune-ui v0.8.1, on Rune `53f6d36a96439d357a6f2a2560383d7b9e9ec9c2`. Its components are copied into `apps/neko/src/ui/` by its CLI
 and recorded in `apps/neko/rune-ui.lock`.
 
 ## Installing
@@ -8,9 +8,9 @@ and recorded in `apps/neko/rune-ui.lock`.
 Build the CLI from a shallow clone of the tag in a cache folder, never from a working copy:
 
 ```sh
-git clone --depth 1 --branch v0.8.0 https://github.com/NishantEC/rune-ui ~/Library/Caches/neko/rune-ui-src  # privacy-ok: rune-ui's public repository
+git clone --depth 1 --branch v0.8.1 https://github.com/NishantEC/rune-ui ~/Library/Caches/neko/rune-ui-src  # privacy-ok: rune-ui's public repository
 cd ~/Library/Caches/neko/rune-ui-src && cargo build --release -p rune-ui-cli
-cd apps/neko && <cli> init --git https://github.com/NishantEC/rune-ui --tag v0.8.0  # privacy-ok: rune-ui's public repository
+cd apps/neko && <cli> init --git https://github.com/NishantEC/rune-ui --tag v0.8.1  # privacy-ok: rune-ui's public repository
 <cli> add sidebar scroll_area button tooltip prompt_input message conversation empty kbd popup font_figtree
 ```
 
@@ -39,7 +39,6 @@ only (tested by reading `lib.rs`).
 
 ## What rune-ui cannot do here (for upstream)
 
-- `PromptInput` has no spell check switch (its inner `text_input` never calls `.spellcheck`).
 - Hit areas (`hit(<key>)`) are unnamed buttons in the accessibility tree.
 - `SidebarItem` rows are `role("link")` with `checked` for the current page; a list of choosable rows wants `option` with
   `focus_selected` (Neko adds those on the built row).
