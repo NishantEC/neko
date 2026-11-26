@@ -58,12 +58,16 @@ pub fn headless_state() -> App {
 }
 
 fn init() -> App {
+    // The width is known before the first frame (the picture's size, the window's saved frame), so a narrow window opens with its
+    // sidebar already folded instead of folding a frame later.
     if headless() {
-        return headless_state();
+        let width = rune::tooling::headless_run().map(|r| r.size().0);
+        return App { width, ..headless_state() };
     }
     let (now_ms, utc_offset_s) = state::system_clock();
     let saved = SAVED.with(Cell::get);
-    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, ..App::default() }
+    let width = Some(saved.map_or(window_place::DEFAULT.0, |f| f.w.max(window_place::MIN.0)) as f32);
+    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, ..App::default() }
 }
 
 /// New Task: Home with the keyboard in the composer.
