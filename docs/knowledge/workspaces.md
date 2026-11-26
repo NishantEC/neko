@@ -47,8 +47,8 @@ in a scratch folder, refuse the removal in plain words with Reveal in Finder: no
 ## Screens
 
 - **Sidebar:** New task, Home, then one section per workspace (General first, then the person's order, removed ones last while they
-  have tasks). A header folds the section (remembered in the prefs, `folded-workspaces`) and shows a quiet count of tasks that need
-  the person or are working. New task in this workspace and the menu (Rename…, Reveal in Finder, Locate…, Move up, Move down,
+  have tasks). A header folds the section (remembered in the prefs, `folded-workspaces`) and shows a quiet count of what needs
+  the person there (Needs you's items; not what is working). New task in this workspace and the menu (Rename…, Reveal in Finder, Locate…, Move up, Move down,
   Remove…) show on hover or focus. Eight tasks, then "Show N more". "Add workspace…" at the foot opens the folder panel.
 - **Keys:** the sections and their rows are one list (`role list`, `focus_group`): one Tab stop, Up and Down move through headers
   and rows, typing a name goes to it. On a header, Left folds, Right opens, Return toggles, ⌥⌘↑ and ⌥⌘↓ move it. A header's own

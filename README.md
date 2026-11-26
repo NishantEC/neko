@@ -3,13 +3,15 @@
 An operating system for agents. Anything a person does on a computer, Neko and its cats can do, and keep doing while the person
 is away: code, browsers, files, spreadsheets, documents and creative apps, alongside the person or on their own.
 
-**Status: slice S1, a task runs, with workspaces.** Neko is being rebuilt from an empty repository (begun 2026-11-26). Add a
+**Status: slice S1, a task runs, with workspaces and Needs you.** Neko is being rebuilt from an empty repository (begun 2026-11-26). Add a
 folder as a workspace once; the sidebar lists each workspace with its tasks under it, and General holds tasks with no folder.
 Type a task on Home, pick its workspace in the composer, press Return: the agent starts by itself and its words stream into the task. Thinking and tool calls
 are quiet lines that fold. Settings offers three permission modes: follow Claude Code's own rules, ask before risky steps
 (enforced by Neko), or full access; a step that waits shows in the task for Allow once, Always allow or Deny. Stop stops it at
 once, a follow-up continues the same conversation, a finished run folds behind one "Worked for" line, and a run card shows what
-changed when something did. An empty worktree is tidied away after its run; one with work in it is never deleted. Quit and
+changed when something did. An empty worktree is tidied away after its run; one with work in it is never deleted. Needs you (⌘2) lists everything waiting for you, oldest first, answered in place: a step to
+allow, a question to reply to, a failure you can fix. The installed app posts a Mac notification when a task starts needing you
+or finishes, and the Dock icon shows the count. Quit and
 relaunch: the workspaces and the whole transcript are still there. This page changes as each slice ships, and only describes what is built.
 
 **No API key.** Neko uses the agent CLIs already installed and signed in on your Mac, as child processes. Today that is Claude

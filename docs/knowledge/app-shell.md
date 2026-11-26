@@ -11,7 +11,9 @@
 | `state.rs` | `App` and what each event changes. No drawing, no I/O. |
 | `view.rs` | The window: sidebar (workspace sections, each task's state as its mark), content band, Home and its workspace picker, the panels that ask (rename, remove). |
 | `task_view.rs` | The task view: the conversation, steps, permission requests, run cards, the composer and its context ring. |
-| `settings_view.rs` | Settings (⌘,): the agent CLIs, which one new tasks use, the permission mode. |
+| `settings_view.rs` | Settings (⌘,): the agent CLIs, which one new tasks use, the permission mode, workspaces, notifications. |
+| `needs_view.rs` | Needs you (⌘2): one list of what waits for the person, answered in place (`needs-you.md`). |
+| `notify.rs`, `deeplink.rs` | The notification model and its poster (a recorder outside the real window); `neko://task/<id>`. |
 | `link.rs` | The supervisor thread: find or start the daemon, connect, reconnect, an inbox the window drains. |
 | `window_place.rs` | Where the window was: frame from placement, restore onto the displays there are now, write once still. |
 | `menu.rs`, `about.rs`, `dock.rs` | The menu bar, the About panel, the Dock registration. |
@@ -37,7 +39,7 @@
 ## Menus
 
 Neko (About Neko with version and commit, Services, Hide, Hide Others, Show All, Quit), File (New Task ⌘N, Close Window ⌘W),
-Edit (Rune's standard items; AppKit adds Start Dictation and Emoji & Symbols), View (Hide/Show Sidebar ⌃⌘S, Enter/Exit Full
+Edit (Rune's standard items; AppKit adds Start Dictation and Emoji & Symbols), View (Home ⌘1, Needs You ⌘2, Hide/Show Sidebar ⌃⌘S, Enter/Exit Full
 Screen ⌃⌘F), Window (Minimize, Zoom, Bring All to Front), Help (Neko Help, registered as the help menu). Raw AppKit does three
 things Rune does not: register the Help menu, remove Rune's Window ▸ Close (File has it), keep AppKit's own Enter Full Screen out.
 The model is pure and tested (`menu.rs`): no key is taken twice.
@@ -50,6 +52,7 @@ The model is pure and tested (`menu.rs`): no key is taken twice.
 - In the workspaces list the arrow keys move through section headers and rows (`focus_group`), a typed name goes to it, Return
   opens a row or folds a section; Left and Right fold and open; ⌥⌘↑ and ⌥⌘↓ move a section (`workspaces.md`).
 - In the composer Return sends, Shift+Return makes a new line. Escape gives focus back.
+- ⌘1 is Home, ⌘2 Needs you (`needs-you.md`).
 - ⌘N goes Home with the keyboard in the composer, in the workspace of the task in view. ⌘, opens Settings (Neko ▸ Settings…).
 
 ## Accessibility
@@ -128,7 +131,7 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
 - **Home's workspace picker** is a pop-up menu in the composer's footer: General, the workspaces, "Add folder…" (the Mac's open
   panel, Rune's `native-file-dialog`, rfd). The choice is kept in the prefs (`last-workspace`). See `workspaces.md`.
 - **The task's band** shows its workspace's name before the folder, and a menu with Remove task….
-- **Settings** has two pages, Agents and Workspaces, switched by rune-ui's SegmentedControl.
+- **Settings** has three pages, Agents, Workspaces and Notifications, switched by rune-ui's SegmentedControl.
 
 ## Not done yet
 

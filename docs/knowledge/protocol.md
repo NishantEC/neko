@@ -1,6 +1,6 @@
 # The protocol (S1, 2026-11-26)
 
-`crates/neko-protocol` is the contract between a screen and the daemon. Version 5 (workspaces).
+`crates/neko-protocol` is the contract between a screen and the daemon. Version 6 (Needs you).
 
 ## Shape
 
@@ -28,7 +28,8 @@
 | `get_task {task}` | `task {task}`, or `error not_found` |
 | `subscribe` | `subscribed {revision}`; then an event for every change |
 | `get_transcript {task}` | `transcript {transcript}`: the task, its runs, parts and permission requests |
-| `follow_up {task, words}` | `ok`; a running agent gets the words, else a new run resumes the conversation. `busy` while it starts |
+| `follow_up {task, words, answering?}` | `ok`; a running agent gets the words, else a new run resumes the conversation. `busy` while it starts. With `answering` (a run): only while the task is still `asked` on that run, else `already_answered` |
+| `list_needs` | `needs {items}`: what waits for the person, oldest first, grouped by workspace (`needs-you.md`) |
 | `stop_task {task}` | `ok`, also when nothing runs |
 | `answer_permission {permission, decision}` | `ok`, or `already_answered` (answered or expired) |
 | `watch_task {task?}` | `ok`; this connection now gets that task's streaming words |
@@ -42,7 +43,7 @@ never guessed.
 ## Events
 
 `task_created`, `task_updated`, `task_removed`, `workspace_added`, `workspace_updated` (renamed, removed, restored, located, moved:
-the whole row), `run_changed`, `part_changed`, `permission_changed`, `settings_changed`, each with `revision`: the
+the whole row), `run_changed`, `part_changed`, `permission_changed`, `settings_changed`, `needs_changed` (the whole Needs you list, derived, sent when it differs), each with `revision`: the
 store's event sequence number. `part_delta {task, part, text}` appends streamed words; it goes only to connections watching the
 task, is not stored as an event, and carries revision 0. A screen that made the task may see the event before its own reply; it
 keeps everything by id, so nothing doubles.
@@ -51,7 +52,8 @@ keeps everything by id, so nothing doubles.
 
 - The JSON shapes are pinned by `tests/round_trip.rs`. A change to a shape is a new version. Version 4 added the task status
   `asked`: the run finished and its last words end in a question mark, so it is the person's turn (not working; a follow-up
-  answers it). Version 5 added workspaces: a task's `workspace` names one, `create_task` takes a workspace instead of a folder.
+  answers it). Version 5 added workspaces: a task's `workspace` names one, `create_task` takes a workspace instead of a folder. Version 6 added Needs you: `list_needs`, `needs_changed`, a notice's `failure`
+  kind, and `answering` on a follow-up.
 - `DaemonInfo` (`daemon.json`) is part of the contract: `{pid, port, protocol, version}`.
 - `client::find(dir)` reads `daemon.json` and `token`. `client::Client` is blocking (tests, tools). `client::Link` runs on its own
   thread and hands replies and events to a callback (the app).
