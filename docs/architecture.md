@@ -1,0 +1,58 @@
+# Architecture
+
+Neko is two programs on one Mac: a daemon that owns the data, and an app that draws it. This page describes what is built
+now (slice S0). It changes as each slice ships.
+
+## The crates
+
+| Crate | Workspace | What it is |
+| --- | --- | --- |
+| `crates/neko-protocol` | root | The requests, replies and events between a screen and the daemon, as JSON. With the `ws` feature, the WebSocket link both ends use. |
+| `crates/neko-core` | root | The store and its records: workspaces, tasks and the event log, in SQLite. |
+| `crates/neko-daemon` | root | The `neko-daemon` binary. It owns one data folder and serves the protocol. |
+| `apps/neko` | its own | The desktop app, drawn with Rune and rune-ui. |
+
+The app has its own Cargo workspace. Rune needs a `[patch.crates-io]` table, and that table must not reach the daemon's
+workspace. The app depends on `neko-protocol` by path and on nothing else of the daemon.
+
+## The daemon and the screens
+
+The daemon holds the truth. A screen is a thin client: it draws what the daemon says and sends what the person asks. It keeps
+no records of its own, only where its window was.
+
+The daemon runs with or without a screen: `neko-daemon --data-dir DIR`. The app starts it beside itself when none is running
+(the binary sits next to the app inside `Neko.app`), and reconnects when it restarts. Quitting the app leaves the daemon
+running.
+
+One daemon serves one data folder. It holds an exclusive lock on `daemon.lock`; a second daemon for the same folder exits with
+code 3. SIGTERM, SIGINT or SIGHUP stop it cleanly: connections close, the store is checkpointed, `daemon.json` is removed.
+
+## Transport and token
+
+- The daemon listens on `127.0.0.1` only, on a free port. It writes the port to `daemon.json` in the data folder.
+- Every request carries the per-install token: `Authorization: Bearer <token>`. The token is in the folder's `token` file,
+  mode 0600, made at first start. The folder itself is 0700.
+- A request must name the daemon as its host (`127.0.0.1:<port>` or `localhost:<port>`) and carry no `Origin` header. This
+  keeps web pages and DNS rebinding out.
+- `GET /v1/hello` answers plain HTTP with the version. `GET /v1/ws` upgrades to a WebSocket that carries the protocol.
+- Each connection has one thread that sleeps in `poll(2)` until the socket or its wake pipe has something. A quiet connection
+  costs no CPU.
+
+## The protocol
+
+One JSON object per WebSocket text frame. A screen sends `{"id": n, "type": ...}`; the daemon answers with a reply carrying the
+same id. The first request is `hello`, which names the protocol version; another version is refused. After `subscribe`, the
+daemon pushes an event for every change. See `docs/knowledge/protocol.md`.
+
+## The store
+
+SQLite, bundled, in WAL mode, at `neko.sqlite3` in the data folder. One row per entity: `workspaces`, `tasks`. Every change
+also appends one row to `events`, in the same transaction. Triggers refuse any update or delete of an event. The schema version
+is SQLite's `user_version`; migrations run in order from version 1. Logic never reads the clock or makes an id itself: both are
+handed in. See `docs/knowledge/store.md`.
+
+## The app
+
+A sidebar and the content beside it, under one 52 point header band on the traffic lights' line. Home has a greeting and a
+composer. Return sends the words to the daemon; the new task opens in the task view. Components come from rune-ui, copied in
+by its CLI. See `docs/knowledge/app-shell.md` and `docs/knowledge/rune-ui-in-neko.md`.

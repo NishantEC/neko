@@ -1,0 +1,18 @@
+Neko
+Copyright © 2026 The Neko authors. Released under the MIT License (see LICENSE).
+
+Neko.app ships the following work by others, each under its own licence. The texts are in THIRD_PARTY_LICENSES/.
+
+- Rune (https://github.com/anomalyco/rune), MIT. Copyright (c) 2026 Anomaly. rune-LICENSE.txt
+- rune-ui (https://github.com/NishantEC/rune-ui), MIT. Copyright (c) 2026 The rune-ui authors. Its components are copied <!-- privacy-ok: rune-ui's public repository -->
+  into apps/neko/src/ui/ by its CLI. rune-ui-LICENSE.txt
+- Figtree, SIL Open Font License 1.1. Copyright 2022 The Figtree Project Authors. Figtree-OFL.txt
+- Inter, SIL Open Font License 1.1. Copyright 2016 The Inter Project Authors. Inter-OFL.txt
+- SQLite (bundled by rusqlite), public domain.
+- The Rust crates listed in crates.md, each under the licence it names. Inside Neko.app, crate-licences.txt holds the
+  licence files each crate carries; a crate that carries none is under the licence it names (Apache-2.0 text:
+  Apache-2.0.txt).
+
+Most crates are MIT or Apache-2.0. Through Rune also come Zlib, BSD-2-Clause, BSD-3-Clause, ISC, Unicode-3.0 and
+Unlicense crates (permissive), and MPL-2.0 crates (symphonia, opuscule: Ogg audio decoding, unmodified; their source is
+on crates.io). See docs/knowledge/rune-ui-in-neko.md, "Licences".

@@ -43,6 +43,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 PLIST
 cp "$root/LICENSE" "$root/NOTICE" "$app/Contents/Resources/"
 cp -R "$root/THIRD_PARTY_LICENSES" "$app/Contents/Resources/"
+python3 "$root/scripts/licenses.py" --texts "$app/Contents/Resources/THIRD_PARTY_LICENSES/crate-licences.txt" >/dev/null
 plutil -lint "$app/Contents/Info.plist" >/dev/null
 # Ad hoc: the daemon first, then the bundle around it.
 codesign --force --sign - --timestamp=none "$app/Contents/MacOS/neko-daemon"

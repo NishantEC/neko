@@ -46,3 +46,14 @@ ships in `NOTICE` and `THIRD_PARTY_LICENSES/`.
 
 - [Keeping Neko public](docs/knowledge/keeping-neko-public.md) — what may not enter the repo, the placeholders, the check.
 - [0001: Neko starts again](docs/decisions/0001-neko-starts-again.md) — why the repository was emptied and what the new one is built on.
+- [Architecture](docs/architecture.md) — the crates, the daemon and the screens, the transport and token, the store.
+- [The store](docs/knowledge/store.md) — SQLite rows per entity, the append-only event log, migrations, the clock and ids handed in.
+- [The protocol](docs/knowledge/protocol.md) — requests, replies and events as JSON, versioned at hello, the WebSocket pump.
+- [The app shell](docs/knowledge/app-shell.md) — the band, folding, the window's frame, menus, keyboard, accessibility, the link.
+- [rune-ui in Neko](docs/knowledge/rune-ui-in-neko.md) — installing with the CLI, never editing copies, the theme, licences, upstream asks.
+
+## The gate
+
+`scripts/check.sh` runs clippy's always-a-defect lints and every test in both workspaces (the app's end-to-end test starts a real
+daemon), then the privacy check. `--quick` compiles only; the pre-commit hook runs it. `scripts/snap.sh` renders every scene to
+`/tmp/neko-s0/`: look at each picture before calling a change done.
