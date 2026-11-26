@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use neko_protocol::{
-    Changes, FailureKind, GENERAL, Need, NeedsItem, Part, PartBody, PartId, Permission, PermissionId, PermissionMode, PermissionState, Pricing, Run, RunId, RunStatus, RuntimeInfo, Settings, Task, TaskId, TaskStatus, Tone,
+    Cat, Changes, FailureKind, GENERAL, Need, NeedsItem, Part, PartBody, PartId, Permission, PermissionId, PermissionMode, PermissionState, Pricing, Run, RunId, RunStatus, RuntimeInfo, Settings, Task, TaskId, TaskStatus, Tone,
     ToolState, Usage, Workspace,
 };
 use neko_protocol::{DiffFile, DiffPatch, DiffSummary, FileStatus, RunUndo, UndoState, UndoStorage};
@@ -69,7 +69,101 @@ pub const SCENES: &[Scene] = &[
     ("review-undone", review_undone),
     ("settings-undo", settings_undo),
     ("clear-undo", clear_undo),
+    ("cat-page", cat_page),
+    ("cat-page-rules", cat_page_rules),
+    ("cat-page-editing", cat_page_editing),
+    ("cat-new", cat_new),
+    ("cat-retire", cat_retire),
+    ("cat-picker", cat_picker),
+    ("task-rules-changed", task_rules_changed),
+    ("settings-cats", settings_cats),
 ];
+
+/// The starter cats as a new install has them, each with one placeholder purpose; mochi has standing rules and an earlier version.
+pub fn sample_cats() -> Vec<Cat> {
+    let cat = |id: &str, name: &str, face: &str, purpose: Option<&str>, rules: &str| Cat {
+        id: id.into(),
+        name: name.into(),
+        face: face.into(),
+        purpose: purpose.map(str::to_owned),
+        rules: rules.into(),
+        rules_hash: neko_protocol::cats::rules_hash(rules),
+        previous_rules: None,
+        rules_saved_ms: None,
+        workspace: None,
+        created_ms: 1,
+        retired_ms: None,
+    };
+    let mut mochi = cat("cat_mochi", "mochi", "snow", Some("Writes and tidies the docs."), MOCHI_RULES);
+    mochi.previous_rules = Some("Use British spelling.".into());
+    mochi.rules_saved_ms = Some(2);
+    vec![cat("cat_miso", "miso", "ginger", None, ""), mochi, cat("cat_tofu", "tofu", "calico", Some("Runs the tests and fixes what breaks."), "")]
+}
+
+const MOCHI_RULES: &str = "# How I like docs\n\n- Use British spelling.\n- Short sentences; one idea each.\n- Never push or open a pull request: leave the branch for Asha.\n- Name a file before you change it.\n";
+
+fn cat_page(s: &mut App) {
+    with_workspaces(s);
+    s.open_cat_page("cat_miso");
+}
+
+fn cat_page_rules(s: &mut App) {
+    with_workspaces(s);
+    s.cats[1].workspace = Some("ws_acme".into());
+    s.open_cat_page("cat_mochi");
+}
+
+fn cat_page_editing(s: &mut App) {
+    cat_page_rules(s);
+    let d = s.cat_draft_mut("cat_mochi");
+    d.rules = TextEdit::new(&format!("{MOCHI_RULES}- Link ENG-123 in every changelog line.\n"));
+    d.rules.focused = true;
+}
+
+fn cat_new(s: &mut App) {
+    with_workspaces(s);
+    s.start_new_cat();
+    if let Some((_, e)) = &mut s.naming {
+        *e = TextEdit::new("pip");
+        e.focused = true;
+    }
+}
+
+fn cat_retire(s: &mut App) {
+    cat_page_rules(s);
+    s.ask_retire_cat("cat_mochi");
+}
+
+fn cat_picker(s: &mut App) {
+    with_workspaces(s);
+    s.draft = TextEdit::new("Tidy the release notes");
+    s.cat_picks.insert(GENERAL.into(), "cat_mochi".into());
+    s.cat_picker_open = true;
+}
+
+/// A follow-up after its cat's rules changed: one quiet line before the run that used the new ones.
+fn task_rules_changed(s: &mut App) {
+    task_follow_up(s);
+    let id = s.open.clone().expect("open");
+    let cat = s.tasks.iter().find(|t| t.id == id).map(|t| t.cat.clone()).expect("the task");
+    let name = s.cat(&cat).map(|c| c.name.clone()).expect("its cat");
+    if let Some(b) = s.books.get_mut(&id) {
+        let at = b.parts.iter().position(|p| p.run.as_ref().is_some_and(|r| r.0 == "run_2")).expect("the second run");
+        let seq = b.parts[at].seq;
+        for p in b.parts.iter_mut().filter(|p| p.seq >= seq) {
+            p.seq += 1;
+        }
+        let first = b.parts[at].clone();
+        b.parts.insert(at, Part { id: PartId("part_rules".into()), seq, body: PartBody::RulesChanged { cat, name }, ..first });
+    }
+}
+
+fn settings_cats(s: &mut App) {
+    with_workspaces(s);
+    s.cats[2].retired_ms = Some(3);
+    s.settings_open = true;
+    s.settings_page = 3;
+}
 
 /// A task made `minutes_ago` before the fixed clock.
 fn task(n: u32, words: &str, minutes_ago: i64) -> Task {

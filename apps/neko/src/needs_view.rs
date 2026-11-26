@@ -126,6 +126,20 @@ fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, pos: usize, n
         Need::Failure { .. } => (&icons::CIRCLE_X, t.c.danger.fg),
         _ => (&icons::WARNING, t.c.warning.fg),
     };
+    // Led by the cat: its face and what it says ("miso asks").
+    let face = s.cat(&item.cat).map_or_else(String::new, |c| c.face.clone());
+    let says = match &item.need {
+        Need::Permission { .. } => format!("{} asks", item.cat_name),
+        Need::Question { .. } => format!("{} has a question", item.cat_name),
+        Need::Failure { .. } => format!("{} could not go on", item.cat_name),
+    };
+    let lead = row()
+        .key(format!("{key}-cat"))
+        .w_full()
+        .gap(t.metrics.gap)
+        .center_y()
+        .child(row().size(t.control.icon, t.control.icon).center().child(crate::faces::face(t, &face, t.control.icon)))
+        .child(text(says.clone()).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_muted()).truncate().min_w(0.0).a11y_hidden());
     let head = row()
         .w_full()
         .gap(t.metrics.gap)
@@ -169,7 +183,7 @@ fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, pos: usize, n
             let reply = s.needs_replies.get(&item.id).cloned().unwrap_or_default();
             let (a, b, c) = (id.clone(), id.clone(), id.clone());
             let empty = reply.text.trim().is_empty();
-            let field = Input::new(format!("{key}-reply"), &reply, move |s: &mut App| s.need_reply_mut(&a)).name(format!("Answer to {}", item.title)).placeholder("Answer Neko").on_submit(move |s: &mut App| s.reply_need(&b)).build(t);
+            let field = Input::new(format!("{key}-reply"), &reply, move |s: &mut App| s.need_reply_mut(&a)).name(format!("Answer to {}", item.title)).placeholder(format!("Answer {}", item.cat_name)).on_submit(move |s: &mut App| s.reply_need(&b)).build(t);
             controls = controls.child(row().grow(1.0).min_w(200.0).child(field)).child(
                 Button::<App>::new(format!("{key}-send"), "Send").size(Size::Sm).disabled(empty).on_press(move |s: &mut App| s.reply_need(&c)).build(t),
             );
@@ -189,7 +203,7 @@ fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, pos: usize, n
     }
     controls = controls.child(open);
     body = body.child(controls);
-    let label = format!("{}: {asked}", item.title);
+    let label = format!("{says}: {}: {asked}", item.title);
     let description = format!("{workspace}, waiting {since}");
     let default = default_of(item);
     let mine = item.id.clone();
@@ -205,7 +219,7 @@ fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, pos: usize, n
         .gap(t.space.at(2.0))
         .radius(t.radius.xl)
         .round_as(t);
-    r = paint_state(r, &t.mat.row, States::default()).child(head).child(body);
+    r = paint_state(r, &t.mat.row, States::default()).child(lead).child(head).child(body);
     r.on_key(move |s: &mut App, ev: &KeyEvent, tx: &mut Tx| row_keys(s, ev, tx, &mine, before.as_deref(), after.as_deref(), default))
 }
 

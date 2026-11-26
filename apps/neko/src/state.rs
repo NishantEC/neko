@@ -56,7 +56,49 @@ pub enum Confirm {
     /// Undo (or redo) over files that changed since: the files, named in the question.
     UndoAnyway { task: TaskId, run: RunId, redo: bool, files: Vec<String> },
     ClearUndo,
+    /// Retire a cat (its id).
+    RetireCat(String),
 }
+
+/// A cat page's fields while the person edits them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CatDraft {
+    pub purpose: TextEdit,
+    pub rules: TextEdit,
+}
+
+impl CatDraft {
+    /// The fields as the cat has them saved.
+    pub fn of(cat: &Cat) -> CatDraft {
+        CatDraft { purpose: TextEdit::new(cat.purpose.as_deref().unwrap_or("")), rules: TextEdit::new(&cat.rules) }
+    }
+
+    /// Whether anything differs from what the cat has saved.
+    pub fn unsaved(&self, cat: &Cat) -> bool {
+        self.rules.text != cat.rules || self.purpose.text.split_whitespace().collect::<Vec<_>>().join(" ") != cat.purpose.clone().unwrap_or_default()
+    }
+}
+
+/// What a cat is doing, as the sidebar and its page say it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CatState {
+    Napping,
+    Working(usize),
+    NeedsYou,
+}
+
+impl CatState {
+    pub fn words(self) -> String {
+        match self {
+            CatState::Napping => "napping".to_owned(),
+            CatState::Working(n) => format!("working on {n}"),
+            CatState::NeedsYou => "needs you".to_owned(),
+        }
+    }
+}
+
+/// The prefs key of the cat picked last in each workspace.
+pub const CAT_PICKS_KEY: &str = "cat-picks";
 
 /// A run's changes (or the task's, with no run), open in place of the conversation (docs/knowledge/undo.md).
 #[derive(Clone, Debug, PartialEq)]
@@ -90,6 +132,14 @@ pub struct App {
     pub cats: Vec<Cat>,
     /// The cat picked in Home's composer for each workspace (the last explicit choice there). Remembered for the next launch.
     pub cat_picks: HashMap<String, String>,
+    /// The composer's cat picker is open.
+    pub cat_picker_open: bool,
+    /// The cat whose page shows instead of the content.
+    pub open_cat: Option<String>,
+    /// Each cat page's purpose and rules as the person is editing them (Save sends them; Revert puts the saved ones back).
+    pub cat_drafts: HashMap<String, CatDraft>,
+    /// The panel that names a cat: a new one (None) or a rename (its id), and the name being typed.
+    pub naming: Option<(Option<String>, TextEdit)>,
     /// The workspaces: General first, then the person's order, then the removed ones (as the daemon last said).
     pub workspaces: Vec<Workspace>,
     /// The workspace Home's composer makes the next task in (General's id by default). Remembered for the next launch.
@@ -237,6 +287,8 @@ pub enum Asked {
     Undo { task: TaskId, run: RunId, redo: bool },
     /// A review's file list, or one file's lines.
     Diff,
+    /// A change to a cat: a refusal is said in a panel. `open`: the cat made opens its page.
+    Cat { open: bool },
     ClearUndo,
     Other,
 }
@@ -324,6 +376,10 @@ impl Default for App {
             tasks: Vec::new(),
             cats: Vec::new(),
             cat_picks: HashMap::new(),
+            cat_picker_open: false,
+            open_cat: None,
+            cat_drafts: HashMap::new(),
+            naming: None,
             workspaces: Vec::new(),
             workspace: GENERAL.to_owned(),
             picker_open: false,
@@ -432,9 +488,161 @@ impl App {
 
     /// Adds or replaces a cat, keeping the daemon's order (active first, oldest first; then the retired).
     fn upsert_cat(&mut self, cat: Cat) {
+        // A page's fields follow a change saved elsewhere, unless the person has unsaved words in them.
+        if let (Some(old), Some(d)) = (self.cat(&cat.id), self.cat_drafts.get(&cat.id))
+            && !d.unsaved(old)
+        {
+            let mut fresh = CatDraft::of(&cat);
+            fresh.rules.focused = d.rules.focused;
+            fresh.purpose.focused = d.purpose.focused;
+            self.cat_drafts.insert(cat.id.clone(), fresh);
+        }
         self.cats.retain(|c| c.id != cat.id);
         self.cats.push(cat);
         self.cats.sort_by(|a, b| (!a.is_active(), a.created_ms, &a.id).cmp(&(!b.is_active(), b.created_ms, &b.id)));
+    }
+
+    /// The active cats, oldest first.
+    pub fn active_cats(&self) -> Vec<&Cat> {
+        self.cats.iter().filter(|c| c.is_active()).collect()
+    }
+
+    /// A task's cat's name ("Neko" until the cats arrive).
+    pub fn cat_name(&self, task: &Task) -> String {
+        self.cat(&task.cat).map_or_else(|| "Neko".to_owned(), |c| c.name.clone())
+    }
+
+    /// What a cat is doing now: something of it waits for the person, it works on some tasks, or it naps.
+    pub fn cat_state(&self, id: &str) -> CatState {
+        if self.visible_needs().iter().any(|i| i.cat == id) {
+            return CatState::NeedsYou;
+        }
+        match self.tasks.iter().filter(|t| t.cat == id && t.status.is_active()).count() {
+            0 => CatState::Napping,
+            n => CatState::Working(n),
+        }
+    }
+
+    /// "Any cat" (None) or a cat for the next task in the chosen workspace, remembered for that workspace.
+    pub fn pick_cat(&mut self, cat: Option<String>) {
+        self.cat_picker_open = false;
+        match cat {
+            Some(c) => self.cat_picks.insert(self.workspace.clone(), c),
+            None => self.cat_picks.remove(&self.workspace),
+        };
+        if self.persist {
+            let picks = self.cat_picks.clone();
+            let _ = std::thread::Builder::new().name("neko-prefs".into()).spawn(move || {
+                let _ = rune::prefs::Prefs::open(crate::PREFS_ID).set(CAT_PICKS_KEY, &picks);
+            });
+        }
+    }
+
+    /// A cat's page, in place of the content.
+    pub fn open_cat_page(&mut self, id: &str) {
+        let Some(cat) = self.cat(id).cloned() else { return };
+        self.open = None;
+        self.review = None;
+        self.context_open = false;
+        self.settings_open = false;
+        self.needs_open = false;
+        self.menu_open = None;
+        let d = self.cat_drafts.entry(cat.id.clone()).or_insert_with(|| CatDraft::of(&cat));
+        // Opening a page puts the keyboard in none of its fields.
+        d.rules.focused = false;
+        d.purpose.focused = false;
+        self.open_cat = Some(cat.id);
+        self.follow_open();
+    }
+
+    /// The open cat, when there is one the daemon has.
+    pub fn page_cat(&self) -> Option<&Cat> {
+        self.open_cat.as_deref().and_then(|id| self.cat(id))
+    }
+
+    pub fn cat_draft_mut(&mut self, id: &str) -> &mut CatDraft {
+        let saved = self.cat(id).map(CatDraft::of).unwrap_or_default();
+        self.cat_drafts.entry(id.to_owned()).or_insert(saved)
+    }
+
+    fn cat_request(&mut self, r: Request, open: bool) {
+        if let Some(id) = self.send(r) {
+            self.asked.insert(id, Asked::Cat { open });
+        }
+    }
+
+    /// Save on a cat's page: the purpose and the rules, each only when it changed.
+    pub fn save_cat(&mut self, id: &str) {
+        let (Some(cat), Some(d)) = (self.cat(id).cloned(), self.cat_drafts.get(id).cloned()) else { return };
+        let purpose = d.purpose.text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if purpose != cat.purpose.clone().unwrap_or_default() {
+            self.cat_request(Request::SetCatPurpose { cat: cat.id.clone(), purpose }, false);
+        }
+        if d.rules.text != cat.rules {
+            self.cat_request(Request::SaveCatRules { cat: cat.id.clone(), rules: d.rules.text.clone() }, false);
+        }
+    }
+
+    /// Revert on a cat's page: the saved purpose and rules back in the fields.
+    pub fn revert_cat(&mut self, id: &str) {
+        if let Some(cat) = self.cat(id).cloned() {
+            self.cat_drafts.insert(cat.id.clone(), CatDraft::of(&cat));
+        }
+    }
+
+    /// Restore previous rules: the daemon swaps them; the fields follow.
+    pub fn restore_cat_rules(&mut self, id: &str) {
+        self.cat_drafts.remove(id);
+        self.cat_request(Request::RestoreCatRules { cat: id.to_owned() }, false);
+    }
+
+    pub fn set_cat_face(&mut self, id: &str, face: &str) {
+        self.menu_open = None;
+        self.cat_request(Request::SetCatFace { cat: id.to_owned(), face: face.to_owned() }, false);
+    }
+
+    pub fn set_cat_workspace(&mut self, id: &str, workspace: Option<String>) {
+        self.menu_open = None;
+        self.cat_request(Request::SetCatWorkspace { cat: id.to_owned(), workspace }, false);
+    }
+
+    /// New cat…: the panel that names it.
+    pub fn start_new_cat(&mut self) {
+        let mut edit = TextEdit::default();
+        edit.focused = true;
+        self.naming = Some((None, edit));
+    }
+
+    pub fn start_rename_cat(&mut self, id: &str) {
+        if let Some(c) = self.cat(id) {
+            let mut edit = TextEdit::new(&c.name);
+            edit.focused = true;
+            self.naming = Some((Some(c.id.clone()), edit));
+        }
+    }
+
+    /// The naming panel's button: make the cat (its page opens) or rename it.
+    pub fn finish_naming(&mut self) {
+        let Some((id, edit)) = self.naming.take() else { return };
+        let name = edit.text.trim().to_owned();
+        if name.is_empty() {
+            return;
+        }
+        match id {
+            None => self.cat_request(Request::CreateCat { name, face: None, purpose: None, workspace: None }, true),
+            Some(id) if self.cat(&id).is_some_and(|c| c.name != name) => self.cat_request(Request::RenameCat { cat: id, name }, false),
+            Some(_) => {}
+        }
+    }
+
+    pub fn ask_retire_cat(&mut self, id: &str) {
+        self.menu_open = None;
+        self.confirm = Some(Confirm::RetireCat(id.to_owned()));
+    }
+
+    /// Bring back (Settings ▸ Cats).
+    pub fn bring_back_cat(&mut self, id: &str) {
+        self.cat_request(Request::BringBackCat { cat: id.to_owned() }, false);
     }
 
     pub fn workspace_of(&self, id: &str) -> Option<&Workspace> {
@@ -483,6 +691,7 @@ impl App {
             self.needs_back = self.open.clone().filter(|_| !self.settings_open);
         }
         self.open = None;
+        self.open_cat = None;
         self.review = None;
         self.context_open = false;
         self.settings_open = false;
@@ -800,6 +1009,13 @@ impl App {
                 }
             }
             Some(Confirm::UndoAnyway { task, run, redo, .. }) => self.send_undo(task, run, redo, true),
+            Some(Confirm::RetireCat(id)) => {
+                if self.open_cat.as_deref() == Some(id.as_str()) {
+                    self.go_home();
+                }
+                self.cat_picks.retain(|_, c| *c != id);
+                self.cat_request(Request::RetireCat { cat: id }, false);
+            }
             Some(Confirm::ClearUndo) => {
                 if let Some(id) = self.send(Request::ClearUndo) {
                     self.asked.insert(id, Asked::ClearUndo);
@@ -984,6 +1200,7 @@ impl App {
     pub fn open_settings(&mut self) {
         self.settings_open = true;
         self.needs_open = false;
+        self.open_cat = None;
         self.send(Request::ListRuntimes);
         self.ask_undo_storage();
     }
@@ -1022,6 +1239,7 @@ impl App {
 
     pub fn go_home(&mut self) {
         self.open = None;
+        self.open_cat = None;
         self.review = None;
         self.context_open = false;
         self.settings_open = false;
@@ -1040,6 +1258,7 @@ impl App {
             self.review = None;
         }
         self.open = Some(id.clone());
+        self.open_cat = None;
         self.context_open = false;
         self.settings_open = false;
         self.needs_open = false;
@@ -1120,6 +1339,7 @@ impl App {
                 self.send(Request::ListWorkspaces);
                 self.send(Request::ListRuntimes);
                 self.send(Request::ListNeeds);
+                self.send(Request::ListCats);
                 // A new connection watches nothing yet.
                 self.watching = None;
                 self.follow_open();
@@ -1159,7 +1379,8 @@ impl App {
                     let words = self.last_words(&task.id);
                     let here = self.here();
                     let title = neko_protocol::title::title(&task.title);
-                    self.notifier.finished(&task.id, &title, words.as_deref(), &here);
+                    let cat = self.cat_name(&task);
+                    self.notifier.finished(&task.id, &title, &cat, words.as_deref(), &here);
                 }
                 self.upsert(task);
             }
@@ -1215,11 +1436,12 @@ impl App {
     /// Tells assistive technology what a task's new state means, when it matters.
     fn say_status(&mut self, task: &Task) {
         use neko_protocol::TaskStatus as S;
+        let cat = self.cat_name(task);
         let words = match task.status {
-            S::NeedsYou => Some((format!("Neko needs you: {}", task.title), true)),
-            S::Asked => Some((format!("Neko has a question for you: {}", task.title), true)),
-            S::Done => Some((format!("Neko finished: {}", task.title), false)),
-            S::Failed => Some((format!("Neko could not finish: {}", task.title), false)),
+            S::NeedsYou => Some((format!("{cat} needs you: {}", task.title), true)),
+            S::Asked => Some((format!("{cat} has a question for you: {}", task.title), true)),
+            S::Done => Some((format!("{cat} finished: {}", task.title), false)),
+            S::Failed => Some((format!("{cat} could not finish: {}", task.title), false)),
             S::Stopped => Some((format!("Stopped: {}", task.title), false)),
             _ => None,
         };
@@ -1317,6 +1539,25 @@ impl App {
             }
             Reply::UndoStorage { storage } => {
                 self.undo_storage = Some(storage);
+                return;
+            }
+            Reply::Cats { cats } => {
+                self.cats.clear();
+                for c in cats {
+                    self.upsert_cat(c);
+                }
+                return;
+            }
+            Reply::Cat { cat } => {
+                let id = cat.id.clone();
+                self.upsert_cat(cat);
+                if matches!(asked, Some(Asked::Cat { open: true })) {
+                    self.open_cat_page(&id);
+                }
+                return;
+            }
+            Reply::Error { message, .. } if matches!(asked, Some(Asked::Cat { .. })) => {
+                self.refusal = Some(Refusal { title: "Neko could not do that".into(), words: message, reveal: None });
                 return;
             }
             Reply::Ok if matches!(asked, Some(Asked::ClearUndo)) => {

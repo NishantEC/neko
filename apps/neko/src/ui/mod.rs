@@ -33,6 +33,7 @@ pub mod shimmer;
 pub mod sidebar;
 pub mod switch;
 pub mod task;
+pub mod textarea;
 pub mod tool;
 pub mod tooltip;
 

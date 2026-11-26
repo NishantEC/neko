@@ -77,7 +77,7 @@ fn empty_thoughts_show_nothing_and_thinking_shows_one_live_line() {
     assert!(!texts(&rt).iter().any(|t| t.starts_with("Thought")), "no fold that opens to nothing");
     let rt = runtime((1200.0, 800.0), false, scene("task-thinking"));
     let live = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("run-run_1-working")).expect("the live line");
-    assert_eq!(live.label.as_deref(), Some("Neko is thinking"));
+    assert_eq!(live.label.as_deref(), Some("miso is thinking"), "the task's cat, by name");
     assert!(texts(&rt).iter().any(|t| t == "Thinking…"));
     assert!(!texts(&rt).iter().any(|t| t == "Working…"), "one live line");
 }
@@ -237,10 +237,10 @@ fn a_run_that_ends_with_a_question_says_needs_you() {
     let row = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("task-{}", open.0))).expect("the task's row");
     let tree = nodes(&rt.accessibility_json());
     let node = tree.iter().find(|(_, n)| str_of(n, "key") == format!("task-{}", open.0)).map(|(_, n)| n.clone()).expect("the row in the tree");
-    assert!(node.to_string().contains("Needs you"), "the row says needs you, not done: {node}");
+    assert!(node.to_string().contains("miso, needs you"), "the row says its cat and needs you, not done: {node}");
     assert!(!rt.state.open_is_working(), "it is not working: the person can answer");
     assert!(row.rect[2] > 0.0);
-    assert!(rt.accessibility_json().to_string().contains("Answer Neko's question"), "the composer asks for the answer");
+    assert!(rt.accessibility_json().to_string().contains("Answer miso's question"), "the composer asks for the cat's answer");
 }
 
 #[test]

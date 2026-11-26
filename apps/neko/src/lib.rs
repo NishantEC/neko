@@ -3,9 +3,11 @@
 //! It draws what the daemon says and sends what the person asks; it keeps no records of its own beyond where its window was.
 
 pub mod about;
+pub mod cat_view;
 pub mod clock;
 pub mod deeplink;
 pub mod dock;
+pub mod faces;
 pub mod icons;
 pub mod link;
 pub mod menu;
@@ -64,7 +66,7 @@ pub fn fixed_clock() -> (i64, i64) {
 /// The state of a picture or a test: no daemon, no prefs, the fixed clock.
 pub fn headless_state() -> App {
     let (now_ms, utc_offset_s) = fixed_clock();
-    App { now_ms, utc_offset_s, clock: fixed_clock, home: Some("/Users/example".into()), ..App::default() }
+    App { now_ms, utc_offset_s, clock: fixed_clock, home: Some("/Users/example".into()), cats: scenes::sample_cats(), ..App::default() }
 }
 
 fn init() -> App {
@@ -81,10 +83,12 @@ fn init() -> App {
     let prefs = rune::prefs::Prefs::open(PREFS_ID);
     let workspace = prefs.get::<String>(WORKSPACE_KEY).filter(|w| !w.is_empty()).unwrap_or_else(|| neko_protocol::GENERAL.to_owned());
     let folded = prefs.get::<Vec<String>>(FOLDED_KEY).unwrap_or_default().into_iter().collect();
+    // The cat picked last in each workspace (a retired or missing one counts as "Any cat").
+    let cat_picks = prefs.get::<std::collections::HashMap<String, String>>(state::CAT_PICKS_KEY).unwrap_or_default();
     // The real window posts real notifications; everything else keeps the recorder `App::default` gives.
     let mut notifier = notify::Notifier::new(Box::new(notify::System));
     notifier.switches = prefs.get::<notify::Switches>(notify::SWITCHES_KEY).unwrap_or_default();
-    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, workspace, folded, home: std::env::var("HOME").ok(), notifier, ..App::default() }
+    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, workspace, folded, cat_picks, home: std::env::var("HOME").ok(), notifier, ..App::default() }
 }
 
 /// New Task (⌘N): Home with the keyboard in the composer, in the workspace of the task in view.

@@ -73,7 +73,7 @@ fn the_list_is_grouped_one_column_and_says_how_long_each_item_waited() {
     let rows: Vec<&serde_json::Value> = all.iter().map(|(_, n)| n).filter(|n| str_of(n, "key").starts_with("need-") && n.get("position").is_some()).collect();
     assert_eq!(rows.len(), 5, "every item is a row with its place");
     assert!(str_of(rows[0], "description").contains("General, waiting 3 days"), "{}", rows[0]);
-    assert!(str_of(rows[3], "name").starts_with("Answer the question about the retry limit"), "{}", rows[3]);
+    assert!(str_of(rows[3], "name").starts_with("tofu asks: Answer the question about the retry limit"), "led by its cat: {}", rows[3]);
     // The destructive request keeps no default and no Always allow.
     let hero = need_key(&rt.state.needs[4].id);
     assert!(el(&rt, &format!("{hero}-allow")).is_some() && el(&rt, &format!("{hero}-always")).is_none());
@@ -226,7 +226,8 @@ fn answering_from_the_list_and_from_notifications_against_a_real_daemon() {
     until(&mut rt, "the run to finish", |rt| rt.state.tasks.iter().any(|t| t.id == perm.task && t.status == TaskStatus::Done));
     let sent = rec.take();
     assert!(sent.contains(&Sent::Withdraw(vec![neko_app::notify::note_id(&perm.task)])), "its notification is taken back: {sent:?}");
-    assert!(posts(&sent).iter().any(|n| n.body == "Done: The tests pass."), "the finished run says Done with its first line: {sent:?}");
+    let cat = rt.state.tasks.iter().find(|t| t.id == perm.task).map(|t| rt.state.cat_name(t)).expect("the task's cat");
+    assert!(posts(&sent).iter().any(|n| n.body == format!("{cat} is done: The tests pass.")), "the finished run says its cat is done, with its first line: {sent:?}");
 
     // A notification's Allow once on what was already answered: nothing harmful, said plainly.
     rt.update(move |s, _| s.clicked(Some(ALLOW_ONCE.into()), None, perm_info));

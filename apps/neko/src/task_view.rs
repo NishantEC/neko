@@ -34,9 +34,6 @@ use crate::ui::task as card;
 use crate::ui::tool::{Tool, ToolCall};
 use crate::view::COLUMN;
 
-/// What the agent is called in this slice (named cats come later).
-pub const AGENT: &str = "Neko";
-
 /// The context window assumed when the CLI did not report one.
 pub const ASSUMED_WINDOW: u64 = 200_000;
 
@@ -242,6 +239,36 @@ fn notice(t: &Theme, p: &Part) -> Option<El> {
     )
 }
 
+/// The quiet line before a run whose cat's rules changed since the task's last run (docs/knowledge/cats.md).
+fn rules_changed(t: &Theme, p: &Part) -> Option<El> {
+    let PartBody::RulesChanged { name, .. } = &p.body else { return None };
+    let words = format!("{name}'s rules changed since the last run.");
+    Some(
+        row()
+            .key(format!("rules-changed-{}", p.seq))
+            .role("status")
+            .label(words.clone())
+            .w_full()
+            .h(t.control.md)
+            .pl(t.space.at(1.5))
+            .gap(t.metrics.gap)
+            .center_y()
+            .child(row().size(t.control.icon, t.control.icon).center().child(glyph(&icons::INFO, t.control.icon, t.ink_faint())))
+            .child(text(words).font(t.ty.sm).color(t.ink_muted()).a11y_hidden()),
+    )
+}
+
+/// Who did a run: its cat's face and name, at the head of the turn (in place of "Neko").
+fn turn_head(t: &Theme, r: &Run, name: &str, face: &str) -> El {
+    row()
+        .key(format!("turn-{}-cat", r.id.0))
+        .w_full()
+        .gap(t.space.at(1.5))
+        .center_y()
+        .child(crate::faces::face(t, face, t.control.icon))
+        .child(text(name.to_owned()).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_muted()).a11y_hidden())
+}
+
 /// What undo offers for a run (docs/knowledge/undo.md), from all of its task's runs.
 pub fn offer_of(book: &Book, r: &Run) -> Offer {
     book.runs.iter().position(|x| x.id == r.id).map(|i| undo::offers(&book.runs).swap_remove(i)).unwrap_or_default()
@@ -354,6 +381,11 @@ fn blocks<'a>(book: &'a Book) -> Vec<Block<'a>> {
             out.push(Block::Person(p));
             continue;
         }
+        // The rules line stands before its run, outside its fold.
+        if let PartBody::RulesChanged { .. } = p.body {
+            out.push(Block::Loose(p));
+            continue;
+        }
         let Some(run) = p.run.as_ref().and_then(|id| book.runs.iter().find(|r| &r.id == id)) else {
             out.push(Block::Loose(p));
             continue;
@@ -420,12 +452,12 @@ fn worked_words(r: &Run) -> String {
 }
 
 /// The live line: "Thinking…" while the agent thinks and nothing else arrives, "Working…" while it waits on something else.
-fn live_line(t: &Theme, r: &Run, thinking: bool) -> El {
+fn live_line(t: &Theme, r: &Run, thinking: bool, name: &str) -> El {
     let words = if thinking { "Thinking…" } else { "Working…" };
     row()
         .key(format!("run-{}-working", r.id.0))
         .role("status")
-        .label(if thinking { "Neko is thinking" } else { "Neko is working" })
+        .label(if thinking { format!("{name} is thinking") } else { format!("{name} is working") })
         .w_full()
         .h(t.control.md)
         .pl(t.space.at(1.5))
@@ -438,15 +470,18 @@ fn live_line(t: &Theme, r: &Run, thinking: bool) -> El {
 /// One run, as one turn of the agent's (rune-ui's rhythm: its blocks [`BLOCK_GAP`] apart). While it works: its steps and words as
 /// they come, and the live line. Once it ends: one "Worked for" fold that opens to its steps on the page's own edge (`indent(false)`),
 /// the final answer, notices, and the card if it earns one.
-fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part]) -> El {
-    let turn = Message::assistant(format!("turn-{}", r.id.0), AGENT).column(COLUMN);
+fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &Task) -> El {
+    // The run's own cat (a task keeps one), else the task's.
+    let cat = s.cat(r.cat.as_deref().unwrap_or(&task.cat)).or_else(|| s.cat(&task.cat));
+    let (name, face) = cat.map_or_else(|| ("Neko".to_owned(), String::new()), |c| (c.name.clone(), c.face.clone()));
+    let turn = Message::assistant(format!("turn-{}", r.id.0), name.clone()).column(COLUMN).child(turn_head(t, r, &name, &face));
     if r.status == RunStatus::Running {
         let streaming = parts.last().is_some_and(|p| matches!(&p.body, PartBody::Agent { done: false, .. }) || matches!(&p.body, PartBody::Thinking { done: false, text } if !text.trim().is_empty()));
         let mut out = lay_out(s, t, book, r, parts, if streaming { Some(parts.len() - 1) } else { None }, None);
         let waiting = parts.iter().any(|p| matches!(&p.body, PartBody::Permission { permission } if book.permissions.get(permission).is_some_and(|x| x.state == PermissionState::Pending)));
         let tool_running = parts.iter().any(|p| matches!(&p.body, PartBody::Tool { state: ToolState::Running, .. }));
         if !streaming && !waiting && !tool_running {
-            out.push(live_line(t, r, book.thinking));
+            out.push(live_line(t, r, book.thinking, &name));
         }
         return out.into_iter().fold(turn, Message::child).build(t);
     }
@@ -557,8 +592,8 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     for b in blocks(book) {
         match b {
             Block::Person(p) => items.push(person(s, t, &format!("part-{}", p.seq), &format!("part-{}-words", p.seq), p.body.text())),
-            Block::Loose(p) => items.extend(notice(t, p)),
-            Block::Run(r, parts) => items.push(run_block(s, t, book, r, &parts)),
+            Block::Loose(p) => items.extend(notice(t, p).or_else(|| rules_changed(t, p))),
+            Block::Run(r, parts) => items.push(run_block(s, t, book, r, &parts, task)),
         }
     }
     // One reading column: the conversation's content and the composer have the same width and left edge.
@@ -566,13 +601,14 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let conversation = Conversation::<App>::new("transcript", s.at_bottom).column(COLUMN + 2.0 * inset).children(items).on_at_bottom(|s: &mut App, at| s.at_bottom = at).build(t);
     let working = s.open_is_working();
     let reply = s.reply_box().cloned().unwrap_or_default();
+    let cat = s.cat_name(task);
     let mut composer = PromptInput::new("reply", &reply, |s: &mut App| s.reply_mut())
         .placeholder(if working {
-            "Neko is working. Press Escape to stop."
+            format!("{cat} is working. Press Escape to stop.")
         } else if task.status == neko_protocol::TaskStatus::Asked {
-            "Answer Neko's question"
+            format!("Answer {cat}'s question")
         } else {
-            "Reply to Neko"
+            format!("Reply to {cat}")
         })
         .spellcheck(true)
         .phase(if working { Phase::Streaming } else { Phase::Ready })

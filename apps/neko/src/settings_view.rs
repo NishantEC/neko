@@ -71,7 +71,7 @@ fn agent_card(t: &Theme, r: &RuntimeInfo) -> El {
 }
 
 /// Settings' pages, in the order the switch shows them.
-pub const PAGES: [&str; 3] = ["Agents", "Workspaces", "Notifications"];
+pub const PAGES: [&str; 4] = ["Agents", "Workspaces", "Notifications", "Cats"];
 
 pub fn settings_view(s: &App, t: &Theme) -> El {
     let mut page = col().key("settings").w_full().max_w(COLUMN).gap(t.space.at(6.0));
@@ -95,6 +95,9 @@ pub fn settings_view(s: &App, t: &Theme) -> El {
     }
     if s.settings_page == 2 {
         return wrap(t, page.child(notifications_page(s, t)));
+    }
+    if s.settings_page == 3 {
+        return wrap(t, page.child(cats_page(s, t)));
     }
     let mut agents = col().key("settings-agents").w_full().gap(t.space.at(3.0)).child(text("Agents").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())).child(
         text("Neko uses the agent CLIs already installed and signed in on this Mac. It asks for no API key and never stores one.").font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0),
@@ -185,6 +188,45 @@ pub fn settings_view(s: &App, t: &Theme) -> El {
 }
 
 /// The Workspaces page: each workspace with its folder and how many tasks it has, and what can be done to it.
+/// Settings ▸ Cats: every cat, the ones at work with Open, the retired ones with Bring back (docs/knowledge/cats.md).
+fn cats_page(s: &App, t: &Theme) -> El {
+    let mut part = col().key("settings-cats").w_full().gap(t.space.at(3.0)).child(text("Cats").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())).child(
+        text("The cats who do your tasks, each with its own standing rules. A retired cat keeps its tasks readable and takes no new ones until you bring it back. At most 16 are at work at once.")
+            .font(t.ty.base)
+            .color(t.ink_muted())
+            .wrap()
+            .min_w(0.0),
+    );
+    for c in &s.cats {
+        let key = format!("settings-cat-{}", c.id);
+        let n = s.tasks.iter().filter(|x| x.cat == c.id).count();
+        let count = match n {
+            0 => "No tasks yet".to_owned(),
+            1 => "1 task".to_owned(),
+            n => format!("{n} tasks"),
+        };
+        let state = if c.is_active() { s.cat_state(&c.id).words() } else { "retired".to_owned() };
+        let mut head = row().w_full().gap(t.space.at(2.0)).center_y().child(crate::faces::face(t, &c.face, t.control.icon)).child(text(c.name.clone()).role("heading").level(3).font(weight(t.ty.md, t.ty.medium)).color(t.ink()).truncate().min_w(0.0).shrink());
+        if !c.is_active() {
+            head = head.child(Badge::new(format!("{key}-retired"), "Retired").tone(Tone::Neutral).dot().build(t));
+        }
+        let facts = col().grow(1.0).min_w(0.0).gap(t.space.at(1.0)).child(head).child(text(format!("{} · {count}", capital(&state))).key(format!("{key}-facts")).font(t.ty.sm).color(t.ink_faint()));
+        let id = c.id.clone();
+        let action = if c.is_active() {
+            Button::new(format!("{key}-open"), "Open").variant(ButtonVariant::Secondary).size(Size::Sm).on_press(move |s: &mut App| s.open_cat_page(&id)).build(t)
+        } else {
+            Button::new(format!("{key}-back"), "Bring back").variant(ButtonVariant::Secondary).size(Size::Sm).on_press(move |s: &mut App| s.bring_back_cat(&id)).build(t)
+        };
+        part = part.child(paint(row().key(key.clone()).role("group").label(c.name.clone()).w_full().padding(t.metrics.inset).gap(t.space.at(3.0)).center_y().radius(t.radius.xl).round_as(t), &t.mat.slab.base).child(facts).child(action));
+    }
+    part
+}
+
+fn capital(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+}
+
 fn workspaces_page(s: &App, t: &Theme) -> El {
     let mut part = col().key("settings-workspaces").w_full().gap(t.space.at(3.0)).child(text("Workspaces").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())).child(
         text("Folders you added. A new task works in the one you choose; in General each task gets a scratch folder of its own. Removing a workspace takes it off the list only: nothing on disk is touched.")

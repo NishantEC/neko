@@ -27,15 +27,15 @@ fn tab_reaches_every_control_once_in_reading_order() {
     }
     assert_eq!(
         seen,
-        ["sidebar-hide", "new-task", "home", "needs-you", "ws-default", "ws-default-new", "add-workspace", "composer-input", "workspace-picker"],
-        "Home, then Needs you; the sections and their rows are one stop; a section's New task is its own; the empty composer's Send is off; the picker follows the words"
+        ["sidebar-hide", "new-task", "home", "needs-you", "ws-default", "ws-default-new", "add-workspace", "cat-cat_miso", "new-cat", "composer-input", "workspace-picker", "cat-picker"],
+        "Home, then Needs you; the sections and their rows are one stop; a section's New task is its own; the cats are one stop, then New cat; the empty composer's Send is off; the pickers follow the words"
     );
     // Round once, the focus is back on the first control; Shift+Tab walks back the same way, wrapping.
     assert_eq!(focus(&rt).as_deref(), Some("sidebar-hide"));
     tab(&mut rt, true);
-    assert_eq!(focus(&rt).as_deref(), Some("workspace-picker"));
+    assert_eq!(focus(&rt).as_deref(), Some("cat-picker"));
     tab(&mut rt, true);
-    assert_eq!(focus(&rt).as_deref(), Some("composer-input"));
+    assert_eq!(focus(&rt).as_deref(), Some("workspace-picker"));
 }
 
 #[test]

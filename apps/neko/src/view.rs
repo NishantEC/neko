@@ -68,6 +68,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     }
     let page = if s.settings_open {
         crate::settings_view::settings_view(s, &t)
+    } else if let Some(cat) = s.page_cat() {
+        crate::cat_view::cat_view(s, &t, cat, &mut layer)
     } else if s.needs_open {
         crate::needs_view::needs_view(s, &t)
     } else {
@@ -88,6 +90,9 @@ fn main_label(s: &App) -> String {
     if s.needs_open {
         return "Needs you".to_owned();
     }
+    if let Some(c) = s.page_cat() {
+        return c.name.clone();
+    }
     s.open_task().map_or_else(|| "Home".to_owned(), |t| t.title.clone())
 }
 
@@ -107,7 +112,7 @@ fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     // A sidebar row that acts: the same alignment as Home and the tasks, as Mail's and Notes' sidebars have.
     let new = SidebarItem::new("new-task", "New task").icon(&icons::COMPOSE).on_press(|s: &mut App| s.new_task_here()).build(t).role("button");
     let new = Tooltip::new("New task").keys("⌘N").wrap(new);
-    let home = SidebarItem::new("home", "Home").icon(&crate::ui::icons::HOME).selected(s.open.is_none() && !s.settings_open && !s.needs_open).on_press(|s: &mut App| s.go_home()).build(t);
+    let home = SidebarItem::new("home", "Home").icon(&crate::ui::icons::HOME).selected(s.open.is_none() && !s.settings_open && !s.needs_open && s.open_cat.is_none()).on_press(|s: &mut App| s.go_home()).build(t);
     let home = Tooltip::new("Home").keys("⌘1").wrap(home);
     // Everything waiting for the person, with how many (the same count as the Dock's).
     let n = s.visible_needs().len();
@@ -126,7 +131,7 @@ fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     body = body.child(sections);
     let add: PressTx<App> = Rc::new(|s: &mut App, tx: &mut rune::Tx| crate::pick_folder(s, Pick::Add { select: false }, tx));
     let add = SidebarItem::<App>::new("add-workspace", "Add workspace…").icon(&icons::FOLDER_PLUS).build(t).role("button").on_press_tx(move |s: &mut App, tx: &mut rune::Tx| add(s, tx));
-    body = body.child(add);
+    body = body.child(add).child(cats_section(s, t));
     let list = col().key("sidebar-scroll").w_full().grow(1.0).min_h(0.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(body.pb(t.space.at(4.0)));
     let mut column = paint(col().key("sidebar").role("navigation").label("Sidebar").w(SIDEBAR).h_full(), &t.mat.slab.base).child(band).child(list);
     // No money at the foot: what runs cost is in the task's context ring, for whoever opens it.
@@ -134,6 +139,35 @@ fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
         column = column.child(row().w_full().px(t.space.at(4.0)).py(t.space.at(3.0)).child(line));
     }
     column
+}
+
+/// The sidebar's Cats: each active cat with its face and what it is doing (napping, working on N, needs you), its page on a press;
+/// then New cat….
+fn cats_section(s: &App, t: &Theme) -> El {
+    let head = row().h(t.control.sm).pl(t.metrics.gap).center_y().child(text("Cats").key("cats-heading").role("heading").level(2).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_faint()));
+    let cats = s.active_cats();
+    let n = cats.len();
+    let mut list = col().key("cats").role("listbox").label("Cats").w_full().gap(1.0).focus_group();
+    for (i, c) in cats.into_iter().enumerate() {
+        let id = c.id.clone();
+        let state = s.cat_state(&c.id);
+        let mut item = SidebarItem::new(format!("cat-{}", c.id), c.name.clone())
+            .lead(crate::faces::face(t, &c.face, t.control.icon))
+            .list_row(i + 1, n)
+            .description(state.words())
+            .selected(s.open_cat.as_deref() == Some(c.id.as_str()))
+            .on_press(move |s: &mut App| s.open_cat_page(&id));
+        if let crate::state::CatState::Working(k) = state {
+            item = item.count(k);
+        }
+        let mut built = item.build(t);
+        if state == crate::state::CatState::NeedsYou {
+            built = built.child(glyph(&crate::ui::icons::WARNING, t.control.icon_sm, t.c.warning.fg));
+        }
+        list = list.child(built);
+    }
+    let new = SidebarItem::new("new-cat", "New cat…").icon(&crate::ui::icons::PLUS).on_press(|s: &mut App| s.start_new_cat()).build(t).role("button");
+    col().key("cats-section").role("group").label("Cats").w_full().gap(1.0).pt(t.space.at(3.0)).child(head).child(list).child(new)
 }
 
 /// What a section's header says about its workspace, after its name.
@@ -245,14 +279,19 @@ fn section(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
         let open = s.open.as_ref() == Some(&task.id);
         let tid = task.id.clone();
         let (status, word) = status_mark(task.status);
-        // The open task is selected, and the list's Tab stop; Return opens a row.
-        let row_el = SidebarItem::new(format!("task-{}", task.id.0), task.title.clone())
+        let cat = s.cat(&task.cat);
+        let said = cat.map_or_else(|| word.to_owned(), |c| format!("{}, {}", c.name, word.to_lowercase()));
+        // The open task is selected, and the list's Tab stop; Return opens a row. Its cat's face sits at the row's end.
+        let mut row_el = SidebarItem::new(format!("task-{}", task.id.0), task.title.clone())
             .lead(mark(t, status, t.control.icon))
             .list_row(i + 1, n)
-            .description(word)
+            .description(said)
             .selected(open)
             .on_press(move |s: &mut App| s.open_task_id(&tid))
             .build(t);
+        if let Some(c) = cat {
+            row_el = row_el.child(crate::faces::face(t, &c.face, t.control.icon_sm));
+        }
         list = list.child(row_el);
     }
     sec = sec.child(list);
@@ -380,6 +419,19 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     if let Some(task) = s.open_task().filter(|_| !s.settings_open) {
         band = band.child(text(task.title.clone()).key("band-title").role("heading").level(1).font(weight(t.ty.base, t.ty.medium)).color(t.ink()).truncate().min_w(0.0).shrink());
         band = band.child(row().grow(1.0).min_w(t.space.at(4.0)).h_full());
+        // Who does it: the cat's face and name; a press opens its page.
+        if let Some(c) = s.cat(&task.cat) {
+            let id = c.id.clone();
+            band = band.child(
+                chip(t, "task-cat", None)
+                    .role("button")
+                    .label(format!("Cat: {}", c.name))
+                    .focusable(true)
+                    .child(crate::faces::face(t, &c.face, t.control.icon_sm))
+                    .child(text(c.name.clone()).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_muted()).truncate().max_w(120.0).min_w(0.0).a11y_hidden())
+                    .on_press(move |s: &mut App| s.open_cat_page(&id)),
+            );
+        }
         if let Some(w) = s.workspace_of(&task.workspace) {
             band = band.child(
                 text(w.name.clone())
@@ -486,6 +538,23 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
                 .open(true)
                 .build(t, layer);
         }
+        Some(Confirm::RetireCat(id)) => {
+            let name = s.cat(id).map_or_else(String::new, |c| c.name.clone());
+            let n = s.tasks.iter().filter(|x| &x.cat == id).count();
+            let tasks = match n {
+                0 => String::new(),
+                1 => format!(" Its task stays readable, still {name}'s."),
+                n => format!(" Its {n} tasks stay readable, still {name}'s."),
+            };
+            AlertDialog::new("retire-cat", format!("Retire {name}?"))
+                .description(format!("{name} takes no new tasks after this, and no workspace's new tasks go to it.{tasks} You can bring {name} back from Settings ▸ Cats."))
+                .destructive()
+                .cancel("Cancel", |s: &mut App| s.confirm = None)
+                .action("Retire", |s: &mut App| s.confirmed())
+                .open(true)
+                .return_focus("cat-retire")
+                .build(t, layer);
+        }
         Some(Confirm::ClearUndo) => {
             AlertDialog::new("clear-undo", "Clear the undo history?")
                 .description("Every checkpoint goes: no run can be reviewed, undone or redone after this. Your files and commits are not touched.")
@@ -497,6 +566,17 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
                 .build(t, layer);
         }
         None => {}
+    }
+    if let Some((id, edit)) = &s.naming {
+        let renaming = id.as_ref().and_then(|i| s.cat(i)).map(|c| c.name.clone());
+        let field = Input::new("cat-name-input", edit, |s: &mut App| &mut s.naming.as_mut().expect("naming").1).name("Name").placeholder("miso").on_submit(|s: &mut App| s.finish_naming()).build(t);
+        let cancel = Button::new("cat-name-cancel", "Cancel").variant(ButtonVariant::Secondary).on_press(|s: &mut App| s.naming = None).build(t);
+        let save = Button::new("cat-name-save", if renaming.is_some() { "Rename" } else { "Make cat" }).disabled(edit.text.trim().is_empty()).on_press(|s: &mut App| s.finish_naming()).build(t);
+        let (title, words, back) = match &renaming {
+            Some(n) => (format!("Rename {n}"), "Its tasks keep it; the new name shows everywhere, and reaches the agent from the next run.".to_owned(), "cat-rename".to_owned()),
+            None => ("New cat".to_owned(), "A name of up to 40 characters, not another cat's. You can give it a face, a purpose and standing rules on its page.".to_owned(), "new-cat".to_owned()),
+        };
+        Dialog::new("cat-name", title).description(words).child(field).footer(vec![cancel, save]).width(400.0).open(true).return_focus(back).on_close(|s: &mut App| s.naming = None).build(t, layer);
     }
     if let Some(r) = &s.refusal {
         let mut buttons = Vec::new();
@@ -565,6 +645,7 @@ fn home(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
         .placeholder("Describe a task")
         .spellcheck(true)
         .tool(workspace_picker(s, t, layer))
+        .tool(cat_picker(s, t, layer))
         .phase(if s.creating.is_some() { Phase::Disabled } else { Phase::Ready })
         .on_submit(|s: &mut App| s.submit())
         .build(t);
@@ -621,9 +702,32 @@ fn workspace_picker(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     row().key("workspace").center_y().child(menu_named(menu, t, layer, "Workspaces", s.picker_open))
 }
 
+/// Who the new task goes to: "Any cat" (the workspace's default cat, else the least busy) or a cat, remembered per workspace. A
+/// pop-up menu beside the workspace picker, the current choice checked.
+fn cat_picker(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
+    let picked = s.cat_pick().and_then(|id| s.cat(id));
+    let name = picked.map_or_else(|| "Any cat".to_owned(), |c| c.name.clone());
+    let mut face = chip(t, "cat-picker", None).role("button").label(format!("Cat: {name}")).help("Who does the next task").expanded(s.cat_picker_open).focusable(true);
+    face = match picked {
+        Some(c) => face.child(crate::faces::face(t, &c.face, t.control.icon_sm)),
+        None => face.child(glyph(&crate::faces::SNOW, t.control.icon_sm, t.ink_faint())),
+    };
+    let face = face
+        .child(text(name).font(t.ty.sm).color(t.ink()).truncate().max_w(140.0).min_w(0.0).a11y_hidden())
+        .child(glyph(&crate::ui::icons::CHEVRON_UP_DOWN, t.control.icon_sm, t.ink_faint()))
+        .on_press(|s: &mut App| s.cat_picker_open = !s.cat_picker_open);
+    let mut menu = DropdownMenu::new("cat-menu").trigger(face).open(s.cat_picker_open).min_width(220.0).on_close(|s: &mut App| s.cat_picker_open = false).label("New task for");
+    menu = menu.item(DropdownMenuItem::new("Any cat").checked(picked.is_none()).on_select(|s: &mut App| s.pick_cat(None))).separator();
+    for c in s.active_cats() {
+        let id = c.id.clone();
+        menu = menu.item(DropdownMenuItem::new(c.name.clone()).checked(picked.is_some_and(|p| p.id == c.id)).on_select(move |s: &mut App| s.pick_cat(Some(id.clone()))));
+    }
+    row().key("cat").center_y().child(menu_named(menu, t, layer, "Cats", s.cat_picker_open))
+}
+
 /// A rune-ui DropdownMenu, its open surface named for assistive technology (the kit's own leaves the modal surface unnamed; the
 /// name is added on the built element, never in the copy).
-fn menu_named(menu: DropdownMenu<App>, t: &Theme, layer: &mut Vec<El>, name: &str, open: bool) -> El {
+pub fn menu_named(menu: DropdownMenu<App>, t: &Theme, layer: &mut Vec<El>, name: &str, open: bool) -> El {
     let before = layer.len();
     let trigger = menu.build(t, layer);
     if open && layer.len() > before
