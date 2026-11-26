@@ -1,7 +1,12 @@
-//! rune-ui registry: textarea 0.5.0. Copied into your app by `rune-ui add textarea`; yours to change.
+//! rune-ui registry: textarea 0.10.0 Copied into your app by `rune-ui add textarea`; yours to change.
 //!
 //! Several lines on the **well** material, `rows` tall at first and growing with the text to `max_rows`. Focus rings the well; invalid
 //! rings it in the danger colour. Editing is Rune's `text_input`.
+//!
+//! **A limit and a counter** (optional): `limit(500)` shows "123 / 500" at the well's foot in tabular figures, in the warning ink
+//! from 90% and the danger ink over the limit (the well is then invalid, and the text box says "N characters over"). Characters, not
+//! bytes, are counted. The limit is soft, so a pasted text is never silently cut; `hard_limit(true)` makes it firm: what would pass
+//! the limit is taken out again as it is typed or pasted.
 //!
 //! ```ignore
 //! Textarea::new("notes", &s.notes, |s: &mut App| &mut s.notes).placeholder("Notes").rows(3, 8).build(t)
@@ -9,7 +14,8 @@
 
 use std::rc::Rc;
 
-use rune::{El, TextEdit, col};
+use rune::{El, TextEdit, col, row, text};
+use rune_ui_style::tabular;
 
 use super::base::{Shape, State, Theme, paint, recipes, resolve, states};
 
@@ -24,12 +30,14 @@ pub struct Textarea<'a, S: 'static> {
     invalid: bool,
     disabled: bool,
     pinned: Option<State>,
+    limit: Option<usize>,
+    hard: bool,
 }
 
 impl<'a, S: 'static> Textarea<'a, S> {
     pub fn new(key: impl Into<String>, edit: &'a TextEdit, access: impl for<'b> Fn(&'b mut S) -> &'b mut TextEdit + 'static) -> Textarea<'a, S> {
         let key = key.into();
-        Textarea { name: key.clone(), key, edit, access: Rc::new(access), placeholder: String::new(), rows: (3, 10), width: None, invalid: false, disabled: false, pinned: None }
+        Textarea { name: key.clone(), key, edit, access: Rc::new(access), placeholder: String::new(), rows: (3, 10), width: None, invalid: false, disabled: false, pinned: None, limit: None, hard: false }
     }
 
     pub fn name(mut self, n: impl Into<String>) -> Self {
@@ -53,6 +61,18 @@ impl<'a, S: 'static> Textarea<'a, S> {
         self
     }
 
+    /// At most this many characters, with a counter at the foot ("12 / 500").
+    pub fn limit(mut self, n: usize) -> Self {
+        self.limit = Some(n);
+        self
+    }
+
+    /// With a limit: keep to it. What would go past it is taken out as it is typed or pasted (the excess just before the caret).
+    pub fn hard_limit(mut self, on: bool) -> Self {
+        self.hard = on;
+        self
+    }
+
     pub fn invalid(mut self, on: bool) -> Self {
         self.invalid = on;
         self
@@ -70,11 +90,14 @@ impl<'a, S: 'static> Textarea<'a, S> {
 
     pub fn build(self, t: &Theme) -> El {
         let parts = recipes::field(t);
+        let count = self.edit.text.chars().count();
+        let over = self.limit.map_or(0, |l| count.saturating_sub(l));
+        let invalid = self.invalid || over > 0;
         let mut st = states(self.pinned, self.disabled, false);
-        st.invalid = self.invalid;
+        st.invalid = invalid;
         let mut well = col().key(self.key.clone()).role("group").px(t.metrics.pad_md - 2.0).py(t.metrics.gap).radius(t.radius.lg).round_as(t);
         well = paint(well, &resolve(&parts.root, st));
-        if st.live() && !st.pinned() && !self.invalid
+        if st.live() && !st.pinned() && !invalid
             && let Some((w, o, c)) = parts.root.live().focus_ring
         {
             well = well.focus_within_ring(w, o, c);
@@ -91,11 +114,47 @@ impl<'a, S: 'static> Textarea<'a, S> {
             .placeholder(self.placeholder.clone(), t.ink_faint())
             .caret(t.ink(), t.c.accent.fg.alpha(0.28))
             .label(self.name.clone())
-            .invalid(self.invalid)
+            .invalid(invalid)
             .on_edit(rune::edit_access(move |s: &mut S| access(s)));
+        if let Some(l) = self.limit {
+            input = input.description(if over > 0 { format!("{over} characters over the limit of {l}") } else { format!("{count} of {l} characters") });
+            if self.hard {
+                let trim = self.access.clone();
+                input = input.on_input_change(move |s: &mut S, _: &mut rune::Tx| trim_to(trim(s), l));
+            }
+        }
         if self.disabled {
             input = input.disabled(true).read_only(true).focusable(false);
         }
-        well.child(rune::auto_grow(input, self.rows.0, self.rows.1))
+        let well = well.child(rune::auto_grow(input, self.rows.0, self.rows.1));
+        match self.limit {
+            Some(l) => {
+                let ink = if over > 0 { t.c.danger.fg } else if count * 10 >= l * 9 { t.c.warning.fg } else { t.ink_faint() };
+                well.child(row().key(format!("{}-count-row", self.key)).w_full().justify_end().child(text(format!("{count} / {l}")).key(format!("{}-count", self.key)).font(tabular(t.ty.sm)).color(ink).a11y_hidden()))
+            }
+            None => well,
+        }
+    }
+}
+
+/// Takes what is past `limit` characters out of `e`: the excess just before the caret first (what was typed or pasted), then from
+/// the end if that was not enough.
+fn trim_to(e: &mut TextEdit, limit: usize) {
+    let n = e.text.chars().count();
+    if n <= limit {
+        return;
+    }
+    let caret = e.range().1.min(e.text.len());
+    let before: Vec<usize> = e.text[..caret].char_indices().map(|(i, _)| i).collect();
+    let k = (n - limit).min(before.len());
+    if k > 0 {
+        e.set_selection(before[before.len() - k], caret);
+        e.insert("");
+    }
+    if e.text.chars().count() > limit {
+        let at = e.text.char_indices().nth(limit).map_or(e.text.len(), |(i, _)| i);
+        let end = e.text.len();
+        e.set_selection(at, end);
+        e.insert("");
     }
 }

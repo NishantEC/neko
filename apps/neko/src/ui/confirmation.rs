@@ -1,13 +1,16 @@
-//! rune-ui registry: confirmation 0.9.0 Copied into your app by `rune-ui add confirmation`; yours to change.
+//! rune-ui registry: confirmation 0.10.0 Copied into your app by `rune-ui add confirmation`; yours to change.
 //!
 //! A tool call asking permission. While it waits it is the one thing that needs you: a slab with the warning mark and "Needs you", what
 //! the tool wants to do, the exact command or input in a monospaced face, and three answers: **Allow once** (the ink), **Always allow**
 //! (raised) and **Deny** (ghost). Tab reaches each answer and Return or Space gives it; Escape anywhere in the request denies. Once
 //! answered (or expired) it becomes one quiet line saying what happened, with no buttons, so it cannot be answered twice.
 //!
-//! An optional `why` line under the request says why it is asked. The **destructive** form is for what cannot be taken back: there is
+//! Escape denies by default; `escape_denies(false)` leaves Escape to whatever the request sits in (a list, a sheet), and
+//! `in_list(position, size)` numbers one request among several. An optional `why` line under the request says why it is asked. The **destructive** form is for what cannot be taken back: there is
 //! no "Always allow", the confirm button is the danger material, Return gives no answer (only a press or Space on a focused answer
 //! does), and Escape still denies.
+//!
+//! `answered_marks(Marks::Neutral)` draws that line without the green check or the red cross: a tick in the third ink, or a dash.
 //!
 //! ```ignore
 //! Confirmation::new("perm", "Run a shell command", s.decision).detail("rm -rf target").on_decide(|s: &mut App, d| s.decision = d).build(t)
@@ -16,10 +19,10 @@
 
 use std::rc::Rc;
 
-use rune::{El, Icon, Key, KeyEvent, Tx, col, row, text};
+use rune::{El, Key, KeyEvent, Tx, col, row, text};
 use rune_ui_style::weight;
 
-use super::agent::{pre, return_presses, slab};
+use super::agent::{Marks, Status, mark_with, pre, return_presses, slab};
 use super::base::{ButtonVariant, Shape, Theme, glyph};
 use super::button::Button;
 use super::icons;
@@ -57,6 +60,9 @@ pub struct Confirmation<S: 'static> {
     detail: Option<String>,
     why: Option<String>,
     destructive: bool,
+    marks: Marks,
+    escape_denies: bool,
+    place: Option<(usize, usize)>,
     decision: Decision,
     decide: Option<Decide<S>>,
 }
@@ -64,7 +70,7 @@ pub struct Confirmation<S: 'static> {
 impl<S: 'static> Confirmation<S> {
     /// `title`: what the tool wants to do, in words.
     pub fn new(key: impl Into<String>, title: impl Into<String>, decision: Decision) -> Confirmation<S> {
-        Confirmation { key: key.into(), title: title.into(), detail: None, why: None, destructive: false, decision, decide: None }
+        Confirmation { key: key.into(), title: title.into(), detail: None, why: None, destructive: false, marks: Marks::Coloured, escape_denies: true, place: None, decision, decide: None }
     }
 
     /// The exact command or input, shown monospaced.
@@ -86,6 +92,28 @@ impl<S: 'static> Confirmation<S> {
         self
     }
 
+    /// Whether Escape anywhere in a pending request denies it (on by default). Turn it off when the request sits in something that
+    /// has its own use for Escape (a list whose Escape clears the selection, a sheet that closes): Escape then reaches that, and
+    /// the request waits for a deliberate answer.
+    pub fn escape_denies(mut self, on: bool) -> Self {
+        self.escape_denies = on;
+        self
+    }
+
+    /// One request among several in a list: its place (1-based) and the list's size, for assistive technology. The request, and
+    /// its quiet line once answered, say "2 of 3".
+    pub fn in_list(mut self, position: usize, size: usize) -> Self {
+        self.place = Some((position, size));
+        self
+    }
+
+    /// How the one quiet line of an answered request is marked: coloured (a green check, a red cross; the default) or
+    /// [`Marks::Neutral`]: a tick in the third ink for allowed, a dash for denied, no green and no red.
+    pub fn answered_marks(mut self, m: Marks) -> Self {
+        self.marks = m;
+        self
+    }
+
     /// An answer given. Called only while the request is pending.
     pub fn on_decide(mut self, f: impl Fn(&mut S, Decision) + 'static) -> Self {
         self.decide = Some(Rc::new(f));
@@ -94,15 +122,21 @@ impl<S: 'static> Confirmation<S> {
 
     pub fn build(self, t: &Theme) -> El {
         if self.decision != Decision::Pending {
-            let (icon, ink): (&'static Icon, _) = match self.decision {
-                Decision::AllowedOnce | Decision::AlwaysAllowed => (&icons::CIRCLE_CHECK, t.c.success.fg),
-                Decision::Denied => (&icons::CIRCLE_X, t.c.danger.fg),
-                _ => (&icons::CLOCK, t.ink_faint()),
+            let mark = match (self.marks, self.decision) {
+                (Marks::Neutral, Decision::AllowedOnce | Decision::AlwaysAllowed) => mark_with(t, Status::Done, t.control.icon, Marks::Neutral),
+                (Marks::Neutral, Decision::Denied) => mark_with(t, Status::Denied, t.control.icon, Marks::Neutral),
+                (_, Decision::AllowedOnce | Decision::AlwaysAllowed) => glyph(&icons::CIRCLE_CHECK, t.control.icon, t.c.success.fg),
+                (_, Decision::Denied) => glyph(&icons::CIRCLE_X, t.control.icon, t.c.danger.fg),
+                _ => glyph(&icons::CLOCK, t.control.icon, t.ink_faint()),
             };
-            return row().key(self.key).role("status").label(format!("{}: {}", self.title, self.decision.word())).w_full().h(t.control.md).px(t.space.at(1.5)).gap(t.metrics.gap).center_y()
-                .child(glyph(icon, t.control.icon, ink))
+            let line = row().key(self.key).role("status").label(format!("{}: {}", self.title, self.decision.word())).w_full().h(t.control.md).px(t.space.at(1.5)).gap(t.metrics.gap).center_y()
+                .child(mark)
                 .child(text(self.decision.word()).font(weight(t.ty.base, t.ty.medium)).color(t.ink_muted()).a11y_hidden())
                 .child(text(self.title).font(t.ty.base).color(t.ink_faint()).truncate().min_w(0.0).a11y_hidden());
+            return match self.place {
+                Some((p, n)) => line.position_in_set(p, n),
+                None => line,
+            };
         }
         let destructive = self.destructive;
         let answer = |suffix: &str, words: &str, v: ButtonVariant, d: Decision| {
@@ -136,9 +170,13 @@ impl<S: 'static> Confirmation<S> {
         }
         let how = if destructive { "Allow once or deny. Escape denies." } else { "Allow once, always allow, or deny. Escape denies." };
         let mut panel = slab(t, self.key.clone()).role("alertdialog").label(format!("Permission: {}", self.title)).description(how).round_as(t).child(body.child(answers));
+        if let Some((p, n)) = self.place {
+            panel = panel.position_in_set(p, n);
+        }
         if let Some(f) = self.decide {
+            let escape = self.escape_denies;
             panel = panel.on_key(move |s: &mut S, k: &KeyEvent, _: &mut Tx| match k.key {
-                Key::Escape => {
+                Key::Escape if escape => {
                     f(s, Decision::Denied);
                     true
                 }

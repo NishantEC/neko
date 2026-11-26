@@ -1,7 +1,7 @@
-//! rune-ui registry: task 0.9.0 Copied into your app by `rune-ui add task`; yours to change.
+//! rune-ui registry: task 0.10.0 Copied into your app by `rune-ui add task`; yours to change.
 //!
 //! A run card: the one thing on an agent screen that should stand out once work is finished. A slab with the run's title and a status
-//! pill (its meaning as a wash, a dot and words), then quiet facts in tabular figures and one primary action in ink. Every fact is
+//! pill (its meaning as a wash, a dot and words), then quiet facts in tabular figures and one primary action in ink and any secondary actions beside it (`secondary`). Every fact is
 //! optional and simply absent when not given: files changed with `+n −n`, checks passed and failed (none when there were no checks,
 //! never "0 passed"), cost (or tokens in its place), time, the branch, and a free note line under them.
 //!
@@ -17,7 +17,7 @@ use rune_ui_style::{tabular, weight};
 
 use super::agent::{Status, elapsed, money, tokens};
 use super::badge::Badge;
-use super::base::{Press, Shape, Theme, glyph, paint};
+use super::base::{ButtonVariant, Press, Shape, Theme, glyph, paint};
 use super::button::Button;
 use super::icons;
 
@@ -98,16 +98,24 @@ pub struct Task<'a, S: 'static> {
     key: String,
     run: &'a Run,
     action: Option<(String, Press<S>)>,
+    secondary: Vec<(String, Press<S>)>,
 }
 
 impl<'a, S: 'static> Task<'a, S> {
     pub fn new(key: impl Into<String>, run: &'a Run) -> Task<'a, S> {
-        Task { key: key.into(), run, action: None }
+        Task { key: key.into(), run, action: None, secondary: Vec::new() }
     }
 
     /// The one primary action.
     pub fn action(mut self, words: impl Into<String>, f: impl Fn(&mut S) + 'static) -> Self {
         self.action = Some((words.into(), Rc::new(f)));
+        self
+    }
+
+    /// A secondary action beside the primary one (Undo, Open the branch): raised, not ink, in the order given, each its own Tab
+    /// stop. They share the actions row, keyed `<key>-secondary<N>` from zero. Without a primary action they still show.
+    pub fn secondary(mut self, words: impl Into<String>, f: impl Fn(&mut S) + 'static) -> Self {
+        self.secondary.push((words.into(), Rc::new(f)));
         self
     }
 
@@ -157,8 +165,15 @@ impl<'a, S: 'static> Task<'a, S> {
             }
             card = card.child(block);
         }
-        if let Some((words, f)) = self.action {
-            card = card.child(row().child(Button::new(format!("{}-action", self.key), words).on_press(move |s: &mut S| f(s)).build(t)));
+        if self.action.is_some() || !self.secondary.is_empty() {
+            let mut actions = row().key(format!("{}-actions", self.key)).gap(t.space.at(2.0)).flex_wrap();
+            if let Some((words, f)) = self.action {
+                actions = actions.child(Button::new(format!("{}-action", self.key), words).on_press(move |s: &mut S| f(s)).build(t));
+            }
+            for (i, (words, f)) in self.secondary.into_iter().enumerate() {
+                actions = actions.child(Button::new(format!("{}-secondary{i}", self.key), words).variant(ButtonVariant::Secondary).on_press(move |s: &mut S| f(s)).build(t));
+            }
+            card = card.child(actions);
         }
         card
     }

@@ -1,4 +1,4 @@
-//! rune-ui registry: context 0.9.0. Copied into your app by `rune-ui add context`; yours to change.
+//! rune-ui registry: context 0.10.0 Copied into your app by `rune-ui add context`; yours to change.
 //!
 //! How full the model's context is, and what it has cost. The trigger is a small ghost button holding a **ring** (a 20 point circle
 //! whose quiet stroke fills clockwise from the top; the default) or a **bar** (a well holding an ink fill), with the share in tabular
@@ -6,6 +6,8 @@
 //! the context used against its window, the token totals (in, out, cached), the cost when there is one (no cost, no row), and an
 //! optional note line. Escape or a press outside closes it and focus goes back to the trigger. The fill takes the warning ink from
 //! 80% and the danger ink from 95%: colour as state.
+//!
+//! `placement(..)` moves the breakdown (above and to the right by default); `limit_assumed(true)` marks a window that is a guess.
 //!
 //! ```ignore
 //! let usage = Usage { context: 86_000, limit: 200_000, input: 48_200, output: 6_100, cache: 31_000, cost: Some(0.42) };
@@ -67,12 +69,14 @@ pub struct Context<'a, S: 'static> {
     face: Face,
     percent: bool,
     note: Option<String>,
+    placement: Placement,
+    assumed: bool,
     change: Option<Toggle<S>>,
 }
 
 impl<'a, S: 'static> Context<'a, S> {
     pub fn new(key: impl Into<String>, usage: &'a Usage, open: bool) -> Context<'a, S> {
-        Context { key: key.into(), usage, open, face: Face::Ring, percent: true, note: None, change: None }
+        Context { key: key.into(), usage, open, face: Face::Ring, percent: true, note: None, placement: Placement::TopEnd, assumed: false, change: None }
     }
 
     /// The ring (the default) or the bar.
@@ -90,6 +94,20 @@ impl<'a, S: 'static> Context<'a, S> {
     /// One quiet line at the foot of the breakdown, under the cost ("Billed to Acme", "Resets at 14:00").
     pub fn note(mut self, words: impl Into<String>) -> Self {
         self.note = Some(words.into());
+        self
+    }
+
+    /// Where the breakdown opens relative to the trigger (above, ending at its right edge, by default). Place it where it has room:
+    /// with the trigger at the left of a composer, `Placement::TopStart` keeps it from hanging out over the column beside it.
+    pub fn placement(mut self, p: Placement) -> Self {
+        self.placement = p;
+        self
+    }
+
+    /// The window is a guess: the model did not report one. The breakdown calls it "Window (assumed)" and says so under the figures,
+    /// and the trigger's name for assistive technology says it too.
+    pub fn limit_assumed(mut self, on: bool) -> Self {
+        self.assumed = on;
         self
     }
 
@@ -131,7 +149,7 @@ impl<'a, S: 'static> Context<'a, S> {
         let pct = format!("{:.0}%", share * 100.0);
         let h = t.control.sm;
         let trigger = format!("{}-trigger", self.key);
-        let name = format!("Context {pct} used, {} of {} tokens", tokens(u.context), tokens(u.limit));
+        let name = format!("Context {pct} used, {} of {} tokens{}", tokens(u.context), tokens(u.limit), if self.assumed { " (window assumed)" } else { "" });
         let mut face = row().key(trigger.clone()).role("meter").label(name).range_value(f64::from(share * 100.0), 0.0, 100.0).expanded(self.open).focusable(true).h(h).px(t.space.at(if self.face == Face::Ring { 1.5 } else { 2.0 })).gap(t.space.at(1.5)).center_y().radius(rune_ui_style::Radius::fit(t.radius.md, h)).round_as(t);
         face = paint_state(face, &t.mat.ghost, Default::default()).child(match self.face {
             Face::Ring => Context::<S>::ring(t, share, 20.0),
@@ -162,13 +180,16 @@ impl<'a, S: 'static> Context<'a, S> {
                 .child(row().w_full().items_end().child(text("Context").font(weight(t.ty.base, t.ty.semibold)).color(t.c.floating.fg).grow(1.0)).child(text(pct).font(tabular(t.ty.sm)).color(t.ink_muted())))
                 .child(row().w_full().py(t.space.at(1.5)).child(Context::<S>::bar(t, share, 232.0)))
                 .child(line("Used", tokens(u.context)))
-                .child(line("Window", tokens(u.limit)))
+                .child(line(if self.assumed { "Window (assumed)" } else { "Window" }, tokens(u.limit)))
                 .child(rule())
                 .child(line("In", tokens(u.input)))
                 .child(line("Out", tokens(u.output)))
                 .child(line("Cached", tokens(u.cache)));
             if let Some(c) = u.cost {
                 panel = panel.child(rule()).child(line("Cost", money(c)));
+            }
+            if self.assumed {
+                panel = panel.child(text("The window is assumed: the model did not report one.").key(format!("{}-assumed", self.key)).font(t.ty.xs).color(t.ink_faint()).wrap().min_w(0.0).pt(t.space.at(1.0)));
             }
             if let Some(n) = &self.note {
                 panel = panel.child(text(n.clone()).key(format!("{}-note", self.key)).font(t.ty.xs).color(t.ink_faint()).wrap().min_w(0.0).pt(t.space.at(1.0)));
@@ -179,7 +200,7 @@ impl<'a, S: 'static> Context<'a, S> {
                 panel = panel.modal(true, move |s: &mut S| g(s, false));
                 layer.push(rune_kit::scrim(format!("{}-scrim", self.key), move |s: &mut S| f(s, false)));
             }
-            layer.push(rune_kit::popover::anchored(t.to_kit(), panel, &trigger, Placement::TopEnd, t.space.at(1.5)));
+            layer.push(rune_kit::popover::anchored(t.to_kit(), panel, &trigger, self.placement, t.space.at(1.5)));
         }
         hit_area(&trigger, face, 0.0, t.control.slop(h), toggle)
     }

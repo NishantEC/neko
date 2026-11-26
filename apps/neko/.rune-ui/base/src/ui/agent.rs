@@ -1,4 +1,4 @@
-//! rune-ui registry: agent 0.9.0 (base). What the agent set shares: a step's [`Status`] and its mark, the quiet [`FoldLine`] every
+//! rune-ui registry: agent 0.10.0 (base). What the agent set shares: a step's [`Status`] and its mark, the quiet [`FoldLine`] every
 //! tool call, reasoning and step list folds behind, a small icon button that can reach the clipboard, a chip face, the slab code and
 //! output sit on, monospaced type, and the words for durations, token counts and money. `rune-ui add` copies it with any agent item.
 //!
@@ -7,7 +7,7 @@
 
 use std::rc::Rc;
 
-use rune::{Color, El, Family, Icon, TextStyle, Tx, col, row, text};
+use rune::{Color, El, Family, Icon, TextStyle, Tx, col, el, row, text};
 use rune_ui_style::{tabular, weight};
 
 use super::base::{Press, Shape, State, Theme, Tone, glyph, hit_area, paint, paint_state, spinner_in, states};
@@ -32,10 +32,12 @@ pub enum Status {
     Waiting,
     /// A person (or a rule) said no. Neutral, not a failure: nothing went wrong.
     Denied,
+    /// Stopped before it finished, by the person or by the app closing under it. Neutral, not a failure: a square, not a cross.
+    Stopped,
 }
 
 impl Status {
-    pub const ALL: [Status; 7] = [Status::Pending, Status::Running, Status::Done, Status::Error, Status::Skipped, Status::Waiting, Status::Denied];
+    pub const ALL: [Status; 8] = [Status::Pending, Status::Running, Status::Done, Status::Error, Status::Skipped, Status::Waiting, Status::Denied, Status::Stopped];
 
     pub fn word(self) -> &'static str {
         match self {
@@ -46,6 +48,7 @@ impl Status {
             Status::Skipped => "Skipped",
             Status::Waiting => "Needs you",
             Status::Denied => "Denied",
+            Status::Stopped => "Stopped",
         }
     }
 
@@ -63,7 +66,7 @@ impl Status {
     /// The ink its mark is drawn in.
     pub fn ink(self, t: &Theme) -> Color { // guard: allow (a return type, not a colour)
         match self {
-            Status::Pending | Status::Skipped | Status::Denied => t.ink_faint(),
+            Status::Pending | Status::Skipped | Status::Denied | Status::Stopped => t.ink_faint(),
             Status::Running => t.ink_muted(),
             Status::Done => t.c.success.fg,
             Status::Error => t.c.danger.fg,
@@ -72,8 +75,39 @@ impl Status {
     }
 }
 
+/// How a step's mark is drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Marks {
+    /// Colour says the state: a green check for done, a red cross for a failure, and so on ([`mark`]).
+    #[default]
+    Coloured,
+    /// Quiet marks that leave colour to what needs a person: done is a tick in the third ink, denied and skipped are a short dash
+    /// and a slashed ring in the third ink, running is the spinner in the second ink, pending a hollow ring. Only a failure keeps
+    /// colour (a red circle with a cross), and "needs you" keeps its warning mark.
+    Neutral,
+}
+
+/// A status as one small mark in the given style: [`mark`] is `mark_with(t, s, size, Marks::Coloured)`.
+pub fn mark_with(t: &Theme, s: Status, size: f32, marks: Marks) -> El {
+    if marks == Marks::Coloured {
+        return mark(t, s, size);
+    }
+    match s {
+        Status::Done => glyph(&icons::CHECK, size, t.ink_faint()),
+        // A short dash, 8 by 1.5 points, centred in the mark's box.
+        Status::Denied => row().size(size, size).center().a11y_hidden().child(el().size(8.0, 1.5).radius(0.75).fill(t.ink_faint())),
+        _ => mark(t, s, size),
+    }
+}
+
+/// A hollow dot, 7 points across, centred in a box `size` across: a quiet mark for something that has no state of its own (a
+/// thought, a plain step).
+pub fn hollow_dot(t: &Theme, size: f32) -> El {
+    row().size(size, size).center().a11y_hidden().child(el().size(7.0, 7.0).radius(3.5).border(1.25, t.ink_faint()))
+}
+
 /// A status as one small mark: a hollow ring (pending), a turning ring (running, the one thing that loops), a check, a cross, a
-/// slashed ring (skipped), a warning (needs you), a shield (denied: a permission said no).
+/// slashed ring (skipped), a warning (needs you), a shield (denied: a permission said no), a square (stopped).
 pub fn mark(t: &Theme, s: Status, size: f32) -> El {
     let icon: &'static Icon = match s {
         Status::Running => return spinner_in(t, size, s.ink(t), s.word()),
@@ -83,6 +117,7 @@ pub fn mark(t: &Theme, s: Status, size: f32) -> El {
         Status::Skipped => &icons::CIRCLE_SLASH,
         Status::Waiting => &icons::WARNING,
         Status::Denied => &icons::SHIELD,
+        Status::Stopped => &icons::STOP,
     };
     glyph(icon, size, s.ink(t))
 }

@@ -4,9 +4,9 @@ rune = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2"
 
 [[item]]
 name = "agent"
-version = "0.9.0"
+version = "0.10.0"
 files = [
-  { target = "src/ui/agent.rs", sha256 = "add742a6cb3e8b86919375ae3cafd09928dec0ae1a5bbf91bd878e99249e69f5" },
+  { target = "src/ui/agent.rs", sha256 = "4ab61b618bc77d26e41df73c925c35577fa6c9a1c43456aa6b57e8bc7786545e" },
 ]
 
 [[item]]
@@ -39,16 +39,16 @@ files = [
 
 [[item]]
 name = "confirmation"
-version = "0.9.0"
+version = "0.10.0"
 files = [
-  { target = "src/ui/confirmation.rs", sha256 = "cf5547e9e1fc0a2283ba1423c59fbaaf320c4d7acd508dfa5a82a981f6f9f727" },
+  { target = "src/ui/confirmation.rs", sha256 = "1a7f019be06ebb22455c2f5bacee9ff98b5d3f7133b58f022a22f160f8166929" },
 ]
 
 [[item]]
 name = "context"
-version = "0.9.0"
+version = "0.10.0"
 files = [
-  { target = "src/ui/context.rs", sha256 = "ee40d33e63da91e9f3613fe1bc43517016aecb0846bd20f48173115540b5c105" },
+  { target = "src/ui/context.rs", sha256 = "6eaa3c8e366be7ab1fad5f95eb6b0917480c8ca62e5a7fa77122857b35eed2ed" },
 ]
 
 [[item]]
@@ -60,23 +60,23 @@ files = [
 
 [[item]]
 name = "dialog"
-version = "0.5.0"
+version = "0.10.0"
 files = [
-  { target = "src/ui/dialog.rs", sha256 = "0003820e550ad2a462886c4ab983396e2b0b69a5ecc4ef63ab60c40cc5b2512f" },
+  { target = "src/ui/dialog.rs", sha256 = "270afad3a126bd498e9d22198be44dae1193dbeaa3df8bffcc2c8866029621b8" },
 ]
 
 [[item]]
 name = "diff"
-version = "0.8.0"
+version = "0.10.0"
 files = [
-  { target = "src/ui/diff.rs", sha256 = "5b333632736fea94300570e48c9a007d6fd78465152713b7fa81c97d50138490" },
+  { target = "src/ui/diff.rs", sha256 = "91203f09597bc605d4e69aa6fa785d5b1220bf5e259180050a65848d31a27336" },
 ]
 
 [[item]]
 name = "dropdown_menu"
-version = "0.6.0"
+version = "0.10.0"
 files = [
-  { target = "src/ui/dropdown_menu.rs", sha256 = "94b7cb4ea7aa7864a52de4e9abf460a397703d97dddb837e260964d3765073b5" },
+  { target = "src/ui/dropdown_menu.rs", sha256 = "a278ba6b1923d565ebed9112b8339cf6be3f59a4bbb61be7710a049ad0276c60" },
 ]
 
 [[item]]
@@ -122,30 +122,37 @@ files = [
 
 [[item]]
 name = "kbd"
-version = "0.5.0"
+version = "0.10.0"
 files = [
-  { target = "src/ui/kbd.rs", sha256 = "02cac83386471a3db42a485306024dff9dea3f7777b92ccceb36f6706fc9813c" },
+  { target = "src/ui/kbd.rs", sha256 = "c94146b813cd37bed8eea113f241a4a7072657e9bc22bbb1347f31d96fbc7a80" },
 ]
 
 [[item]]
 name = "message"
-version = "0.9.0"
+version = "0.10.0"
 files = [
-  { target = "src/ui/message.rs", sha256 = "31f613dba2742f6beb8eedc9612ab999c0ac0472b996720f823421e7ff16a33a" },
+  { target = "src/ui/message.rs", sha256 = "6a9be7776cb9db7fb2dd399f0be9de9a388e0fd08035e78de15c27f9cdbb1ac7" },
 ]
 
 [[item]]
 name = "popup"
-version = "0.8.0"
+version = "0.10.0"
 files = [
-  { target = "src/ui/popup.rs", sha256 = "d9fce3c86e35b9c3e5b56b14a64411da2bea4356b67aeb44c27dbc15ffbaa6db" },
+  { target = "src/ui/popup.rs", sha256 = "13a860a401e3e863452494dea659d24c982d0cb60c3482ec3e9842c2671b1ddf" },
+]
+
+[[item]]
+name = "portrait"
+version = "0.10.0"
+files = [
+  { target = "src/ui/portrait.rs", sha256 = "e1669042a44823f7f5a71f5e5d3022b7d8d07bb66881d771fb2c178dd3bef08e" },
 ]
 
 [[item]]
 name = "prompt_input"
-version = "0.8.1"
+version = "0.10.0"
 files = [
-  { target = "src/ui/prompt_input.rs", sha256 = "11df870f1c352a75b6fc15916d47f91aad72a80a79e2da5bddb88c8146ad195f" },
+  { target = "src/ui/prompt_input.rs", sha256 = "cddcab793506a117536965bc386441b654b0099c6d76b89aee1b0780adbd49b1" },
 ]
 
 [[item]]
@@ -157,9 +164,23 @@ files = [
 
 [[item]]
 name = "reasoning"
-version = "0.9.0"
+version = "0.10.0"
 files = [
-  { target = "src/ui/reasoning.rs", sha256 = "aae0522f6e5b208abc7caf0d40f0c6139a7a11831d6e1296b62f8f3fb2dd952b" },
+  { target = "src/ui/reasoning.rs", sha256 = "b50d4686187019711d6718d7d01969a0be63aeebb900b4b4b497ebe4f05461d8" },
+]
+
+[[item]]
+name = "receipt"
+version = "0.10.0"
+files = [
+  { target = "src/ui/receipt.rs", sha256 = "457df95808fb2abe1c70fa04aed7aac472213f936ce903a19150b38a108fd9e7" },
+]
+
+[[item]]
+name = "reorder"
+version = "0.10.0"
+files = [
+  { target = "src/ui/reorder.rs", sha256 = "b384c71676b8e3f93b25190fd3fc920ade57d84871efff179cd43ee282835e80" },
 ]
 
 [[item]]
@@ -199,9 +220,9 @@ files = [
 
 [[item]]
 name = "sidebar"
-version = "0.9.0"
+version = "0.10.0"
 files = [
-  { target = "src/ui/sidebar.rs", sha256 = "c6697abfc6611a670c95a96671fbecc0d648d4f55a7db1293e502b4d515503fb" },
+  { target = "src/ui/sidebar.rs", sha256 = "0bffb4994c3c3677eddb069ab86e9261ff1875d31ded644526e2d993b85bf9ed" },
 ]
 
 [[item]]
@@ -213,23 +234,23 @@ files = [
 
 [[item]]
 name = "task"
-version = "0.9.0"
+version = "0.10.0"
 files = [
-  { target = "src/ui/task.rs", sha256 = "25af4fa8a0de83cfc0cd907d65adf76b14c1cebd44f7389c8630de065bc21955" },
+  { target = "src/ui/task.rs", sha256 = "3e6a45840070c7261e0a032dcf5ecb1049df68edc8ad1677886c8aaa949b84d3" },
 ]
 
 [[item]]
 name = "textarea"
-version = "0.5.0"
+version = "0.10.0"
 files = [
-  { target = "src/ui/textarea.rs", sha256 = "c971de4c239ab62f23b9d8a096a4c3d5409245756bf6bc5256e87f193fb6a396" },
+  { target = "src/ui/textarea.rs", sha256 = "39fe8982dc0283e8633f06b21a4f1448b6cbc866ef13e762ae9a8f774107d9a2" },
 ]
 
 [[item]]
 name = "tool"
-version = "0.9.0"
+version = "0.10.0"
 files = [
-  { target = "src/ui/tool.rs", sha256 = "dbfe0440e0e9dadeb679920aed88b9a9ed5810c3d4177944600fdd8fbbe5c084" },
+  { target = "src/ui/tool.rs", sha256 = "974c72d561b8815aca8f9debd8d76b5c81ea210327291e8f313369d979290dcd" },
 ]
 
 [[item]]

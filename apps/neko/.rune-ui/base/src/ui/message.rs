@@ -1,4 +1,4 @@
-//! rune-ui registry: message 0.9.0 Copied into your app by `rune-ui add message`; yours to change.
+//! rune-ui registry: message 0.10.0 Copied into your app by `rune-ui add message`; yours to change.
 //!
 //! One turn of a conversation. A **user** message is a quiet bubble at the right: the muted fill, no shadow, no outline, at most four
 //! fifths of the column. An **assistant** message is the page itself: its words sit on the page in a reading column (720 points at
@@ -8,6 +8,9 @@
 //! ```ignore
 //! Message::user("m1", "Asha").child(message::words(t, "Why is the build slow?")).build(t)
 //! Message::assistant("m2", "Assistant").child(response).actions(bar).build(t)
+//! // a leader above the turn's blocks (a portrait, a name, a state), and the person's words sunk into a well:
+//! Message::assistant("m3", "Assistant").header(leader).child(response).build(t)
+//! Message::user("m1", "Asha").bubble(Bubble::Well).child(words).build(t)
 //! // actions only while the message is hovered or holds focus (the app keeps one `Reveal` per message):
 //! Message::user("m1", "Asha").child(words).actions(bar).reveal_actions(s.reveal("m1"), |s: &mut App| s.reveal_mut("m1")).build(t)
 //! ```
@@ -19,7 +22,7 @@ use std::rc::Rc;
 
 use rune::{El, Tx, col, row, text};
 
-use super::base::{Shape, Theme};
+use super::base::{Shape, Theme, paint};
 
 /// Between turns, in grid steps (`t.space.at(TURN_GAP)`): 20 points at the default spacing.
 pub const TURN_GAP: f32 = 5.0;
@@ -44,6 +47,16 @@ impl Reveal {
 
 type Wire = Rc<dyn Fn(El) -> El>;
 
+/// How a person's bubble is painted.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Bubble {
+    /// The muted fill, no shadow, no outline.
+    #[default]
+    Quiet,
+    /// Sunken into the page like a text field's well, lit from above: a tint pressed in with a soft inner shadow, no heavy fill.
+    Well,
+}
+
 /// Who is speaking.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum From {
@@ -64,6 +77,8 @@ pub struct Message {
     body: Vec<El>,
     avatar: Option<El>,
     attachments: Vec<El>,
+    header: Option<El>,
+    bubble: Bubble,
     actions: Option<El>,
     reveal: Option<(Reveal, Wire)>,
     column: f32,
@@ -72,7 +87,7 @@ pub struct Message {
 impl Message {
     /// A person's message; `name` names it for assistive technology ("Asha said").
     pub fn user(key: impl Into<String>, name: impl Into<String>) -> Message {
-        Message { key: key.into(), from: From::User, name: name.into(), body: Vec::new(), avatar: None, attachments: Vec::new(), actions: None, reveal: None, column: 720.0 }
+        Message { key: key.into(), from: From::User, name: name.into(), body: Vec::new(), avatar: None, attachments: Vec::new(), header: None, bubble: Bubble::Quiet, actions: None, reveal: None, column: 720.0 }
     }
 
     /// The agent's message.
@@ -94,6 +109,21 @@ impl Message {
     /// Files and images sent with it, shown above the words (`Attachment` chips).
     pub fn attachment(mut self, e: El) -> Self {
         self.attachments.push(e);
+        self
+    }
+
+    /// A row above the turn's blocks that leads it: a portrait, the speaker's name, its state. It sits on the reading edge, one
+    /// [`BLOCK_GAP`] above the first block, and is part of the message (its buttons, if any, are in the Tab order before the words).
+    /// Keyed `<key>-header`.
+    pub fn header(mut self, e: El) -> Self {
+        self.header = Some(e);
+        self
+    }
+
+    /// How a person's bubble is painted: [`Bubble::Quiet`] (the muted fill, as before) or [`Bubble::Well`]. An agent's message has
+    /// no bubble, so this changes nothing for it.
+    pub fn bubble(mut self, b: Bubble) -> Self {
+        self.bubble = b;
         self
     }
 
@@ -146,6 +176,9 @@ impl Message {
         // The words (and attachments) with their own gap; the action bar's slot after them brings its own space, so a hidden bar
         // leaves no gap behind.
         let mut stack = col().gap(gap).min_w(0.0);
+        if let Some(h) = self.header {
+            stack = stack.child(row().key(format!("{}-header", self.key)).min_w(0.0).child(h));
+        }
         if !self.attachments.is_empty() {
             let mut r = row().key(format!("{}-attachments", self.key)).gap(t.space.at(2.0)).flex_wrap();
             if self.from == From::User {
@@ -155,7 +188,11 @@ impl Message {
         }
         let article = match self.from {
             From::User => {
-                let bubble = col().key(format!("{}-bubble", self.key)).px(t.metrics.pad_md).py(t.space.at(2.5)).gap(gap).radius(t.radius.xl).round_as(t).fill(t.c.muted.bg).max_w(self.column * 0.8).min_w(0.0).children(self.body);
+                let bubble = col().key(format!("{}-bubble", self.key)).gap(gap).radius(t.radius.xl).round_as(t).max_w(self.column * 0.8).min_w(0.0).children(self.body);
+                let bubble = match self.bubble {
+                    Bubble::Quiet => bubble.px(t.metrics.pad_md).py(t.space.at(2.5)).fill(t.c.muted.bg),
+                    Bubble::Well => paint(bubble.px(t.space.at(4.0)).py(t.space.at(2.5)), &t.mat.well.base),
+                };
                 stack = stack.items_end().child(bubble);
                 let mut outer = col().items_end().min_w(0.0).child(stack);
                 if let Some(a) = self.actions {

@@ -1,4 +1,4 @@
-//! rune-ui registry: prompt_input 0.8.0 Copied into your app by `rune-ui add prompt_input`; yours to change.
+//! rune-ui registry: prompt_input 0.10.0 Copied into your app by `rune-ui add prompt_input`; yours to change.
 //!
 //! Where a person writes to the agent: a well holding attachment chips, a text area that grows with the text (one line at first, eight
 //! at most, then it scrolls while the toolbar stays put), and a toolbar row (an attach button, whatever the app puts there, such as a
@@ -122,6 +122,8 @@ pub struct PromptInput<'a, S: 'static> {
     phase: Phase,
     attachments: Vec<El>,
     tools: Vec<El>,
+    lead: Option<El>,
+    chips: Vec<El>,
     rows: (usize, usize),
     submit: Option<Press<S>>,
     stop: Option<Press<S>>,
@@ -136,7 +138,7 @@ pub struct PromptInput<'a, S: 'static> {
 
 impl<'a, S: 'static> PromptInput<'a, S> {
     pub fn new(key: impl Into<String>, edit: &'a TextEdit, access: impl for<'b> Fn(&'b mut S) -> &'b mut TextEdit + 'static) -> PromptInput<'a, S> {
-        PromptInput { key: key.into(), edit, access: Rc::new(access), placeholder: "Ask anything".to_owned(), phase: Phase::Ready, attachments: Vec::new(), tools: Vec::new(), rows: (1, 8), submit: None, stop: None, attach: None, mentions: Vec::new(), commands: Vec::new(), command: None, menu: MenuState::default(), menu_access: None, spellcheck: false }
+        PromptInput { key: key.into(), edit, access: Rc::new(access), placeholder: "Ask anything".to_owned(), phase: Phase::Ready, attachments: Vec::new(), tools: Vec::new(), lead: None, chips: Vec::new(), rows: (1, 8), submit: None, stop: None, attach: None, mentions: Vec::new(), commands: Vec::new(), command: None, menu: MenuState::default(), menu_access: None, spellcheck: false }
     }
 
     /// Marks misspelt words as the person writes, with the system's checker. Off by default: turn it on where people write prose.
@@ -164,6 +166,22 @@ impl<'a, S: 'static> PromptInput<'a, S> {
     /// Something for the toolbar, after the attach button (a model selector, a tool toggle).
     pub fn tool(mut self, e: El) -> Self {
         self.tools.push(e);
+        self
+    }
+
+    /// An element at the left of the text, top-aligned with its first line: the picture of who the message is for, a mode switch.
+    /// It is its own Tab stop, reached before the text (reading order), and the text keeps the room that is left. Without one the
+    /// composer is as before.
+    pub fn lead(mut self, e: El) -> Self {
+        self.lead = Some(e);
+        self
+    }
+
+    /// An element in the row of chips under the text and above the toolbar (the folder the work will happen in, the branch, a
+    /// model): chips wrap, keep their order, and are Tab stops after the text and before the toolbar. The row is keyed
+    /// `<key>-chips` and exists only when there is a chip.
+    pub fn chip(mut self, e: El) -> Self {
+        self.chips.push(e);
         self
     }
 
@@ -360,7 +378,15 @@ impl<'a, S: 'static> PromptInput<'a, S> {
         } else {
             input = input.on_edit(rune::edit_access(move |s: &mut S| access(s)));
         }
-        well = well.child(rune::auto_grow(input, self.rows.0, self.rows.1));
+        let field = rune::auto_grow(input, self.rows.0, self.rows.1);
+        well = match self.lead.take() {
+            // Beside the text: top-aligned with its first line, the text taking what is left.
+            Some(lead) => well.child(row().key(format!("{}-body", self.key)).w_full().gap(t.space.at(3.0)).items_start().child(lead).child(col().grow(1.0).shrink().min_w(0.0).child(field))),
+            None => well.child(field),
+        };
+        if !self.chips.is_empty() {
+            well = well.child(row().key(format!("{}-chips", self.key)).w_full().gap(t.space.at(2.0)).flex_wrap().center_y().children(std::mem::take(&mut self.chips)));
+        }
         let mut bar = row().key(format!("{}-toolbar", self.key)).w_full().gap(t.space.at(3.5)).center_y();
         if let Some(f) = self.attach.clone() {
             let p: PressTx<S> = Rc::new(move |s: &mut S, _: &mut Tx| f(s));

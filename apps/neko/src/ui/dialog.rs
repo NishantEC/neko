@@ -1,4 +1,4 @@
-//! rune-ui registry: dialog 0.5.0. Copied into your app by `rune-ui add dialog`; yours to change. Needs: button.
+//! rune-ui registry: dialog 0.10.0 Copied into your app by `rune-ui add dialog`; yours to change. Needs: button.
 //!
 //! A modal panel over a scrim: the **floating** material at the dialog's radius, a title, a description, a body, a footer of buttons, a
 //! close button in its corner. Behaviour is Rune's `El::modal`: focus is trapped inside, the page behind is inert, Escape and a press
@@ -118,7 +118,7 @@ impl<S: 'static> Dialog<S> {
         if let Some(f) = close {
             panel = panel.modal(outside, move |s: &mut S| f(s));
         }
-        layer.push(el().key(format!("{key}-scrim")).absolute(0.0, 0.0).w_full().h_full().fill(t.c.page.fg.alpha(if t.dark { 0.5 } else { 0.18 })).a11y_hidden());
+        layer.push(el().key(format!("{key}-scrim")).absolute(0.0, 0.0).w_full().h_full().fill(t.scrim()).a11y_hidden());
         layer.push(el().key(format!("{key}-layer")).absolute(0.0, 0.0).w_full().h_full().padding(t.space.at(4.0)).center().child(panel));
     }
 }

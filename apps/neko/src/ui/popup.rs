@@ -1,4 +1,4 @@
-//! rune-ui registry: popup 0.8.0 The floating list that Select, DropdownMenu and ContextMenu open (and Combobox's rows): drawn by
+//! rune-ui registry: popup 0.10.0 The floating list that Select, DropdownMenu and ContextMenu open (and Combobox's rows): drawn by
 //! rune-ui on Rune's core behaviour, not rune-kit's list. `rune-ui add` brings it with them.
 //!
 //! * **Placement**: anchored under its trigger with a 4 point gap, sharing the trigger's left edge and at least its width; it flips
@@ -6,7 +6,9 @@
 //! * **Look**: the floating material at the large radius; rows inset 4 points from its edge at the concentric radius; the highlight is
 //!   a filled row that follows both the pointer and the keys (`El::focus_highlight`); the current choice has a check and is focused
 //!   (so scrolled into view) on open; disabled rows are faint and skipped; sections have labels and separators; shortcuts sit right;
-//!   destructive rows are tinted.
+//!   destructive rows are tinted. Every row says its place (`2 of 5`), a listbox's current option says it is selected, and the open
+//!   surface is named after the list. A row can lead with a picture or element of your own (`Row::image`) in place of its icon; its
+//!   shortcut is drawn in the theme's keycap style (`Theme::keycap`).
 //! * **Keys**: Up and Down move and wrap, Home and End jump (`El::focus_group` on a listbox or menu), Return and Space choose, a typed
 //!   letter jumps to the next row starting with it, Escape closes (`El::modal`) and Tab closes, focus going back to the trigger
 //!   (`El::focus_return`). A press outside closes it (`rune_kit::scrim`).
@@ -16,7 +18,7 @@
 use std::rc::Rc;
 
 use rune::{Align, El, Icon, Key, KeyEvent, Side, Spring, SpringPair, Transition, Tx, Vec2, col, el, row, text};
-use rune_ui_style::{Radius, tabular, weight};
+use rune_ui_style::{Radius, weight};
 
 use super::base::{Press, Shape, Theme, glyph, paint, press};
 use super::icons;
@@ -26,6 +28,9 @@ pub struct Row<S: 'static> {
     pub key: Option<String>,
     pub label: String,
     pub icon: Option<&'static Icon>,
+    /// A leading picture or element in place of the icon (a portrait, a swatch, a file icon): built at the size you want, centred
+    /// in the icon's column, hidden from assistive technology (the row's label names it).
+    pub image: Option<Box<El>>,
     pub shortcut: Option<String>,
     pub description: Option<String>,
     pub checked: Option<bool>,
@@ -36,7 +41,7 @@ pub struct Row<S: 'static> {
 
 impl<S: 'static> Row<S> {
     pub fn new(label: impl Into<String>) -> Row<S> {
-        Row { key: None, label: label.into(), icon: None, shortcut: None, description: None, checked: None, disabled: false, danger: false, press: None }
+        Row { key: None, label: label.into(), icon: None, image: None, shortcut: None, description: None, checked: None, disabled: false, danger: false, press: None }
     }
 
     /// Its own key (otherwise `<list>-item<N>`).
@@ -47,6 +52,13 @@ impl<S: 'static> Row<S> {
 
     pub fn icon(mut self, i: &'static Icon) -> Self {
         self.icon = Some(i);
+        self
+    }
+
+    /// A leading picture or element (a portrait, a colour swatch) in place of an icon. It sits in a column as wide as an icon's,
+    /// or as wide as it is when larger, and the row grows to hold it.
+    pub fn image(mut self, e: El) -> Self {
+        self.image = Some(Box::new(e));
         self
     }
 
@@ -108,7 +120,9 @@ pub fn paint_row<S: 'static>(t: &Theme, r: &Row<S>, key: String, highlight: Opti
         None if !r.disabled => e.focus_highlight(wash),
         None => e,
     };
-    if let Some(i) = r.icon {
+    if let Some(img) = &r.image {
+        e = e.child(row().min_w(t.control.icon).center().a11y_hidden().child((**img).clone()));
+    } else if let Some(i) = r.icon {
         e = e.child(glyph(i, t.control.icon, if r.disabled || r.danger { ink } else { t.ink_muted() }));
     }
     let mut words = col().grow(1.0).shrink().min_w(0.0).gap(1.0).child(text(r.label.clone()).font(t.ty.base).color(ink).truncate().a11y_hidden());
@@ -118,7 +132,7 @@ pub fn paint_row<S: 'static>(t: &Theme, r: &Row<S>, key: String, highlight: Opti
     }
     e = e.child(words);
     if let Some(k) = &r.shortcut {
-        e = e.child(text(k.clone()).font(tabular(t.ty.sm)).color(t.ink_faint()).a11y_hidden()).shortcut_hint(k.clone());
+        e = e.child(text(k.clone()).font(weight(t.keycap, t.ty.regular)).color(t.ink_faint()).a11y_hidden()).shortcut_hint(k.clone());
     }
     match r.checked {
         Some(true) => e = e.child(glyph(&icons::CHECK, t.control.icon, ink)),
@@ -153,6 +167,9 @@ impl<S: 'static> Popup<S> {
         let mut rows = col().key("rows").w_full().gap(1.0);
         let mut targets: Vec<(String, String)> = Vec::new();
         let mut i = 0;
+        // Each row's place among the rows (labels and separators do not count), for assistive technology.
+        let total = self.entries.iter().filter(|e| matches!(e, Entry::Row(_))).count();
+        let mut place = 0;
         for entry in self.entries {
             i += 1;
             match entry {
@@ -161,7 +178,8 @@ impl<S: 'static> Popup<S> {
                 Entry::Row(r) => {
                     let key = r.key.clone().unwrap_or_else(|| format!("{}-item{i}", self.key));
                     let current = r.checked == Some(true);
-                    let mut e = paint_row(t, &r, key.clone(), None).role(if option { "option" } else if r.checked.is_some() { "menuitemcheckbox" } else { "menuitem" });
+                    place += 1;
+                    let mut e = paint_row(t, &r, key.clone(), None).role(if option { "option" } else if r.checked.is_some() { "menuitemcheckbox" } else { "menuitem" }).position_in_set(place, total);
                     if let Some(c) = r.checked {
                         e = e.checked(c);
                     }
@@ -187,7 +205,7 @@ impl<S: 'static> Popup<S> {
         let list = col().key(format!("{}-list", self.key)).role(self.role).label(self.name.clone()).focus_group().w_full().max_h(self.max_h).shrink().min_h(0.0).child(rune_kit::popover::fit_scroll(rows));
         let keys = close.clone();
         // `shrink` also zeroes the least width, so the trigger's width goes after it.
-        let surface = col().key(format!("{}-content", self.key)).shrink().min_h(0.0).min_w(self.min_w).max_w(self.min_w.max(360.0)).padding(INSET).radius(t.radius.lg).round_as(t);
+        let surface = col().key(format!("{}-content", self.key)).label(self.name.clone()).shrink().min_h(0.0).min_w(self.min_w).max_w(self.min_w.max(360.0)).padding(INSET).radius(t.radius.lg).round_as(t);
         paint(surface, &t.mat.floating.base).child(list).on_key(move |s: &mut S, k: &KeyEvent, tx: &mut Tx| match &k.key {
             Key::Tab => {
                 keys(s);

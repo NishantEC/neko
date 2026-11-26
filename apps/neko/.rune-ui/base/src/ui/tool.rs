@@ -1,10 +1,12 @@
-//! rune-ui registry: tool 0.9.0 Copied into your app by `rune-ui add tool`; yours to change.
+//! rune-ui registry: tool 0.10.0 Copied into your app by `rune-ui add tool`; yours to change.
 //!
 //! One tool call as one quiet line that reads like a sentence: its status mark, its name and a short summary of what it did (or the
 //! whole line the app supplies, such as the command itself), a quiet note after it ("exit 1"), and how long it took when that was a
 //! second or more. A long line is cut in the middle, keeping both ends, and the whole of it is in the fold. It folds open to free words
 //! the app supplies, the input it was given and the output it returned (or its error, in the danger ink), monospaced on the slab. A
 //! call a person denied is neutral (a shield and "Denied"), not a failure. The line is never louder than the answer around it.
+//!
+//! `marks(Marks::Neutral)` draws quiet marks (a tick in the third ink for done, a dash for denied; only a failure keeps colour).
 //!
 //! ```ignore
 //! Tool::new("t1", &call, s.open("t1")).on_toggle(|s: &mut App| s.flip("t1")).build(t)
@@ -15,7 +17,7 @@ use std::rc::Rc;
 
 use rune::{El, text};
 
-use super::agent::{FoldLine, Status, caption, mark, pre, took};
+use super::agent::{FoldLine, Marks, Status, caption, mark_with, pre, took};
 use super::base::{Press, State, Theme};
 
 /// What the app knows about one call.
@@ -40,13 +42,14 @@ pub struct Tool<'a, S: 'static> {
     label: Option<String>,
     note: Option<String>,
     words: Option<String>,
+    marks: Marks,
     pinned: Option<State>,
     toggle: Option<Press<S>>,
 }
 
 impl<'a, S: 'static> Tool<'a, S> {
     pub fn new(key: impl Into<String>, call: &'a ToolCall, open: bool) -> Tool<'a, S> {
-        Tool { key: key.into(), call, open, label: None, note: None, words: None, pinned: None, toggle: None }
+        Tool { key: key.into(), call, open, label: None, note: None, words: None, marks: Marks::Coloured, pinned: None, toggle: None }
     }
 
     /// The whole line, in place of the name and summary (the command itself, "Read src/main.rs"). Cut in the middle when long; the
@@ -68,6 +71,12 @@ impl<'a, S: 'static> Tool<'a, S> {
         self
     }
 
+    /// How the status mark is drawn: coloured (the default) or [`Marks::Neutral`], quiet marks where only a failure keeps colour.
+    pub fn marks(mut self, m: Marks) -> Self {
+        self.marks = m;
+        self
+    }
+
     pub fn state(mut self, s: State) -> Self {
         self.pinned = Some(s);
         self
@@ -82,14 +91,14 @@ impl<'a, S: 'static> Tool<'a, S> {
         let c = self.call;
         let given = self.label.is_some();
         let label = self.label.unwrap_or_else(|| if c.summary.is_empty() { c.name.clone() } else { format!("{} {}", c.name, c.summary) });
-        let mut line = FoldLine::<S>::new(self.key.clone(), label.clone(), self.open).lead(mark(t, c.status, t.control.icon)).truncate_middle(true);
+        let mut line = FoldLine::<S>::new(self.key.clone(), label.clone(), self.open).lead(mark_with(t, c.status, t.control.icon, self.marks)).truncate_middle(true);
         if let Some(n) = &self.note {
             line = line.meta(n.clone());
         }
         // What the figures say: a word where the mark alone would need colour to read (waiting, denied, a failure with no time), the
         // time when it was a second or more, and nothing for a quick step that went well.
         let figure = match (c.status, c.secs.and_then(took)) {
-            (Status::Pending | Status::Waiting | Status::Denied, _) => Some(c.status.word().to_owned()),
+            (Status::Pending | Status::Waiting | Status::Denied | Status::Stopped, _) => Some(c.status.word().to_owned()),
             (_, Some(d)) => Some(d),
             (Status::Error | Status::Skipped, None) => Some(c.status.word().to_owned()),
             _ => None,

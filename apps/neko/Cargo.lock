@@ -3045,8 +3045,8 @@ dependencies = [
 
 [[package]]
 name = "rune-ui-style"
-version = "0.9.0"
-source = "git+https://github.com/NishantEC/rune-ui?tag=v0.9.0#89dec85c11b9521df249425fbf43a3d7136e7186"
+version = "0.10.0"
+source = "git+https://github.com/NishantEC/rune-ui?tag=v0.10.0#35ab1faaf584f5c56d5256db0403d1bfd6cd49a9"
 dependencies = [
  "rune",
  "rune-kit",
@@ -3055,8 +3055,8 @@ dependencies = [
 
 [[package]]
 name = "rune-ui-themes"
-version = "0.9.0"
-source = "git+https://github.com/NishantEC/rune-ui?tag=v0.9.0#89dec85c11b9521df249425fbf43a3d7136e7186"
+version = "0.10.0"
+source = "git+https://github.com/NishantEC/rune-ui?tag=v0.10.0#35ab1faaf584f5c56d5256db0403d1bfd6cd49a9"
 dependencies = [
  "rune-ui-style",
 ]

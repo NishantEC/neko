@@ -1,8 +1,10 @@
-//! rune-ui registry: reasoning 0.9.0. Copied into your app by `rune-ui add reasoning`; yours to change.
+//! rune-ui registry: reasoning 0.10.0 Copied into your app by `rune-ui add reasoning`; yours to change.
 //!
 //! The model's thinking, kept out of the way. While it thinks, a quiet line says "Thinking…" with a shimmer (its words held still under
 //! Reduce Motion); afterwards it says "Thought for 12s" ("Thought" under a second) and folds open to the thoughts, in the second ink,
 //! indented under the line. Nothing to show means nothing shown: a finished thought with no words draws nothing and takes no room.
+//!
+//! `icon(None)` swaps the sparkle for a quiet hollow dot.
 //!
 //! ```ignore
 //! Reasoning::new("r1", s.thinking, s.thought_secs, s.open("r1")).text(&thoughts).on_toggle(|s: &mut App| s.flip("r1")).build(t)
@@ -10,9 +12,9 @@
 
 use std::rc::Rc;
 
-use rune::{El, el, text};
+use rune::{El, Icon, el, text};
 
-use super::agent::{FoldLine, elapsed, took};
+use super::agent::{FoldLine, elapsed, hollow_dot, took};
 use super::base::{Press, Theme, glyph};
 use super::icons;
 use super::shimmer::Shimmer;
@@ -23,17 +25,24 @@ pub struct Reasoning<S: 'static> {
     secs: f64,
     open: bool,
     words: String,
+    icon: Option<&'static Icon>,
     toggle: Option<Press<S>>,
 }
 
 impl<S: 'static> Reasoning<S> {
     /// `secs`: how long it thought (or has thought so far).
     pub fn new(key: impl Into<String>, streaming: bool, secs: f64, open: bool) -> Reasoning<S> {
-        Reasoning { key: key.into(), streaming, secs, open, words: String::new(), toggle: None }
+        Reasoning { key: key.into(), streaming, secs, open, words: String::new(), icon: Some(&icons::SPARKLE), toggle: None }
     }
 
     pub fn text(mut self, w: impl Into<String>) -> Self {
         self.words = w.into();
+        self
+    }
+
+    /// The mark at the line's start: a glyph of your own (the sparkle by default), or `None` for a quiet hollow dot, 7 points across.
+    pub fn icon(mut self, i: Option<&'static Icon>) -> Self {
+        self.icon = i;
         self
     }
 
@@ -52,7 +61,10 @@ impl<S: 'static> Reasoning<S> {
         } else {
             took(self.secs).map_or_else(|| "Thought".to_owned(), |_| format!("Thought for {}", elapsed(self.secs.round())))
         };
-        let mut line = FoldLine::<S>::new(self.key.clone(), label.clone(), self.open).lead(glyph(&icons::SPARKLE, t.control.icon, t.ink_faint()));
+        let mut line = FoldLine::<S>::new(self.key.clone(), label.clone(), self.open).lead(match self.icon {
+            Some(i) => glyph(i, t.control.icon, t.ink_faint()),
+            None => hollow_dot(t, t.control.icon),
+        });
         if self.streaming {
             line = line.words(Shimmer::new(format!("{}-shimmer", self.key), label).build(t));
         }
