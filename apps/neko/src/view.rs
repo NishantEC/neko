@@ -175,7 +175,7 @@ pub fn status_mark(s: TaskStatus) -> (Status, &'static str) {
         TaskStatus::NeedsYou | TaskStatus::Asked => (Status::Waiting, "Needs you"),
         TaskStatus::Done => (Status::Done, "Done"),
         TaskStatus::Failed => (Status::Error, "Failed"),
-        TaskStatus::Stopped => (Status::Skipped, "Stopped"),
+        TaskStatus::Stopped => (Status::Stopped, "Stopped"),
         TaskStatus::Interrupted => (Status::Skipped, "Interrupted"),
     }
 }
