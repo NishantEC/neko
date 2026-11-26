@@ -32,8 +32,15 @@ and anything still running from its folder) and removes the folder. Anything lef
   `Runtime::resolve_file_dialog` answers it, so "Add workspace…" and the picker's "Add folder…" run the app's own code with the path
   (`add-workspace`, `choose-folder`). In a window the panel would take focus, so those folders are added before launch with the
   daemon's `add_workspace` request, and a chosen one is written as the composer's last choice in the run's prefs.
-- **`--window`.** The app binary is hard-linked as `neko-qa-win` (its own Dock item) and launched with `RUNE_OPEN_INACTIVE` (no
-  focus taken; checked), `RUNE_DIRS_ROOT` and `NEKO_DATA_DIR` in the run's folder; the owner's copy and data are never touched. The
+- **`--window`.** `run.sh` builds a development bundle with `scripts/build-app.sh --dev "$NEKO_TARGET/qa-bundle"` (never the
+  owner's `bundle-dev`) and renames it `Neko QA.app`, so its Dock item reads "Neko QA" and is found by that label (the owner's
+  copies read "Neko" or "Neko Dev"). Only a bundle gets notifications, the Dock badge, the link and a proper Dock item. It is
+  started with `open -n -g` and `--env RUNE_OPEN_INACTIVE=1` (no focus taken; checked), `RUNE_DIRS_ROOT`,
+  `NEKO_DATA_DIR` and `NEKO_NOTIFY_LOG` in the run's folder (`RUNE_DIRS_ROOT` already keeps the prefs there); its PID is found by the exact path of its executable and it is stopped
+  by that PID. Only scenarios that need it (`"bundle": true`: notifications, the badge, links) use the bundle. The others run the
+  bare binary, hard-linked as `neko-qa-win` (its own Dock item), because in the bundle the window's accessibility tree, which the
+  word checks and presses read, went empty a few seconds after launch while a window script replayed (2026-11-26, cause not
+  found; see the QA report). The owner's copy and data are never touched. The
   scenario becomes a `--window-script` that Rune replays on the wall clock (typing, keys, taps on fixed keys). Waits become pauses.
   Script marks tell the driver to capture the window (`screencapture -l`, that window only, even behind others), to check an
   expectation by what the window says to assistive technology (`scripts/qa/ax-texts.js`), or to press a control whose key is made
@@ -45,6 +52,15 @@ and anything still running from its folder) and removes the folder. Anything lef
   `NEKO_CLAUDE_MODEL` (`NEKO_QA_MODEL`, default `haiku`) so it asks for the cheapest model; tokens and the reported cost go in
   `result.json`. Real runs may touch only the scenario's temporary folder. Claude Code still keeps its own session files under the
   person's `~/.claude`, as any run does.
+
+- **Notifications and the badge.** With `NEKO_NOTIFY_LOG` set, the app appends one JSON line per notification it posts or takes
+  back (title, body, buttons, whether the system took it) and per Dock badge count (`notify::log_event`). Window checks `notified`,
+  `badge`, `withdrawn` and `posts` read that file; the system's notifications are never read. A post the system refused while it
+  asks the person for permission is marked "needs the person once", not a failure. `open-link` opens `neko://task/<id>` with
+  `open -a <the QA bundle>`, so no other Neko on the Mac takes it (this brings Neko QA to the front); `cold-link` quits the app and
+  starts it from the link. The `notifications` scenario is window-only (`"headless": false`) and posts at most four.
+- **Needs you.** `stale-answer` sends a second answer to an answered question straight to the daemon (`follow_up` naming the run)
+  and expects it refused.
 
 ## Scenarios
 
@@ -67,3 +83,7 @@ unless `ring: false`), `title`, `daemon`, `file`, `no_file`, `sh`, `git_same`, `
 - The folder panel is never shown (see above). Real-window clicks on fixed keys go through Rune's script input, not the system's
   pointer: the system's event path is not exercised.
 - Reading the window's accessibility tree takes seconds, so window runs leave long pauses after presses and checks.
+- Pressing by accessible name depends on the window's accessibility tree being current. Where controls that are on screen are
+  missing from it (seen in the 2026-11-26 runs), the scenario answers by keyboard instead (Needs you, Return) and the gap is
+  reported as an app defect.
+- A real window run cannot click the system's notification permission prompt: it records it and needs the person once.

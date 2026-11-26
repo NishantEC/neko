@@ -5,6 +5,7 @@
   "cli": ["fake"],
   "window": true,
   "headless": false,
+  "bundle": true,
   "steps": [
     {"do": "key", "key": "cmd+,"},
     {"do": "wait", "until": {"see": {"key": "settings-mode-1"}}, "expect": "Settings opens"},

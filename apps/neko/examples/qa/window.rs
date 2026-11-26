@@ -285,7 +285,7 @@ pub fn run(r: &mut Run) -> Result<(), String> {
     let notify_log = r.places.work.join("notify.jsonl");
     let (tx, rx) = mpsc::channel::<String>();
     let launched = Instant::now();
-    let (mut child, pid, dock_name): (Option<std::process::Child>, u32, String) = match std::env::var_os("NEKO_QA_BUNDLE").map(PathBuf::from) {
+    let (mut child, pid, dock_name): (Option<std::process::Child>, u32, String) = match std::env::var_os("NEKO_QA_BUNDLE").map(PathBuf::from).filter(|_| r.s.bundle) {
         // A development bundle (scripts/build-app.sh --dev into the run's own folder, renamed "Neko QA.app" so its Dock item is
         // told apart from any other Neko): only a bundle gets notifications, the Dock badge, the link and a proper Dock item.
         // `open -n -g` starts a new copy in the background; its PID is found by the exact path of its executable.
@@ -295,7 +295,7 @@ pub fn run(r: &mut Run) -> Result<(), String> {
             std::fs::write(&out, "").map_err(|e| e.to_string())?;
             let mut c = Command::new("open");
             c.args(["-n", "-g"]).arg(&bundle).arg("--stdout").arg(&out).arg("--stderr").arg(&out);
-            for (k, v) in [("RUNE_OPEN_INACTIVE", "1".into()), ("RUNE_DIRS_ROOT", rune_root.display().to_string()), ("RUNE_PREFS_DIR", rune_root.join("prefs").display().to_string()), ("NEKO_DATA_DIR", r.places.data.display().to_string()), ("NEKO_NOTIFY_LOG", notify_log.display().to_string())] {
+            for (k, v) in [("RUNE_OPEN_INACTIVE", "1".into()), ("RUNE_DIRS_ROOT", rune_root.display().to_string()), ("NEKO_DATA_DIR", r.places.data.display().to_string()), ("NEKO_NOTIFY_LOG", notify_log.display().to_string())] {
                 c.arg("--env").arg(format!("{k}={v}"));
             }
             c.arg("--args").arg("--window-script").arg(&script_path);
@@ -736,7 +736,7 @@ fn cold_link(r: &Run, step: &Step, rune_root: &Path, notify_log: &Path) -> Resul
     let exe = bundle.join("Contents/MacOS/neko");
     let mut c = Command::new("open");
     c.args(["-n", "-g", "-a"]).arg(&bundle);
-    for (k, v) in [("RUNE_DIRS_ROOT", rune_root.display().to_string()), ("RUNE_PREFS_DIR", rune_root.join("prefs").display().to_string()), ("NEKO_DATA_DIR", r.places.data.display().to_string()), ("NEKO_NOTIFY_LOG", notify_log.display().to_string())] {
+    for (k, v) in [("RUNE_DIRS_ROOT", rune_root.display().to_string()), ("NEKO_DATA_DIR", r.places.data.display().to_string()), ("NEKO_NOTIFY_LOG", notify_log.display().to_string())] {
         c.arg("--env").arg(format!("{k}={v}"));
     }
     let st = c.arg(&url).status().map_err(|e| e.to_string())?;
