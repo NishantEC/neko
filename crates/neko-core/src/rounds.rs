@@ -539,7 +539,7 @@ impl Core {
                 } else if let Some((_, why)) = self.blocker(&row) {
                     why
                 } else {
-                    self.overlap(&row)?.map(|w| format!("{w} Skipped this time."))
+                    self.overlap(&row)?
                 };
                 match skip {
                     Some(why) => lines.push(line(self, latest, RunKind::Skipped, Some(why))),

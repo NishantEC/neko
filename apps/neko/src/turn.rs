@@ -119,14 +119,17 @@ pub fn rail(t: &Theme, steps: Vec<El>) -> El {
 }
 
 /// The turn's head: the cat's portrait (32, ringed while it works), its name, and how the run stands. `waiting`: a request of this
-/// run waits for the person, so the head says so (as the sidebar's row does) instead of "working".
-pub fn turn_head(t: &Theme, r: &Run, name: &str, face: &str, waiting: bool) -> El {
+/// run waits for the person, so the head says so (as the sidebar's row does) instead of "working". `undone`: its changes were
+/// undone, so a finished run says "undone", not "done".
+pub fn turn_head(t: &Theme, r: &Run, name: &str, face: &str, waiting: bool, undone: bool) -> El {
     let (st, doing) = match r.status {
         RunStatus::Running if waiting => (Some(TaskStatus::NeedsYou), "needs you"),
         RunStatus::Running => (Some(TaskStatus::Working), "working"),
         RunStatus::Failed => (Some(TaskStatus::Failed), "could not finish"),
         RunStatus::Stopped => (None, "stopped"),
         RunStatus::Interrupted => (None, "was interrupted"),
+        // A run whose changes were undone is not "done": the files are as they were before it.
+        RunStatus::Done if undone => (None, "undone"),
         RunStatus::Done => (None, "done"),
     };
     let ink = match r.status {
@@ -429,7 +432,8 @@ pub fn counter(s: &App, t: &Theme) -> Option<El> {
         format!("Step {}", n + 1)
     } else {
         let secs = r.ended_ms.map_or(0.0, |e| (e - r.started_ms).max(0) as f64 / 1000.0).round().max(1.0);
-        format!("{n} step{} · {}", if n == 1 { "" } else { "s" }, elapsed(secs))
+        // A run with no steps has only its time to show: "0 steps · 9s" says nothing a person wants.
+        if n == 0 { elapsed(secs) } else { format!("{n} step{} · {}", if n == 1 { "" } else { "s" }, elapsed(secs)) }
     };
     let label = if running { format!("Working, step {}", n + 1) } else { words.clone() };
     let mut pill = well(t, row().key("run-counter").role("status").label(label).h(24.0).px(t.space.at(2.5)).gap(t.space.at(1.5)).center_y().radius(12.0));

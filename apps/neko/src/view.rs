@@ -143,6 +143,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         crate::cat_view::cat_view(s, &t, cat, &mut layer)
     } else if s.needs_open {
         crate::needs_view::needs_view(s, &t)
+    } else if s.rounds_open {
+        crate::rounds_view::rounds_view(s, &t, &mut layer)
     } else {
         match s.open_task() {
             Some(_) => crate::task_view::task_view(s, &t, &mut layer),
@@ -168,6 +170,9 @@ fn main_label(s: &App) -> String {
     }
     if s.needs_open {
         return "Needs you".to_owned();
+    }
+    if s.rounds_open {
+        return "Rounds".to_owned();
     }
     if let Some(c) = s.page_cat() {
         return c.name.clone();
@@ -229,7 +234,7 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     if !s.sidebar_shown() {
         band = band.child(lights_room(lights).w(if lights > 0.0 { (lights - 4.0).max(0.0) } else { 0.0 })).child(toggle_button(t, false));
     }
-    let Some(task) = s.open_task().filter(|_| !s.settings_open && !s.needs_open && s.page_cat().is_none()) else { return band };
+    let Some(task) = s.open_task().filter(|_| !s.settings_open && !s.needs_open && !s.rounds_open && s.page_cat().is_none()) else { return band };
     if let Some(c) = s.cat(&task.cat) {
         let id = c.id.clone();
         let st = (task.status == TaskStatus::Working).then_some(TaskStatus::Working);
@@ -380,6 +385,17 @@ fn dialogs_open(s: &App, t: &Theme, layer: &mut Vec<El>) {
                 .return_focus("cat-retire")
                 .build(t, layer);
         }
+        Some(Confirm::RemoveRound(id)) => {
+            let name = s.round(id).map_or_else(String::new, |r| r.name.clone());
+            AlertDialog::new("remove-round", format!("Remove the round {name}?"))
+                .description("It stops starting by itself, and its history goes. The tasks it made stay where they are.")
+                .destructive()
+                .cancel("Cancel", |s: &mut App| s.confirm = None)
+                .action("Remove", |s: &mut App| s.confirmed())
+                .open(true)
+                .return_focus("rounds-new")
+                .build(t, layer);
+        }
         Some(Confirm::ClearUndo) => {
             AlertDialog::new("clear-undo", "Clear the undo history?")
                 .description("Every checkpoint goes: no run can be reviewed, undone or redone after this. Your files and commits are not touched.")
@@ -392,6 +408,7 @@ fn dialogs_open(s: &App, t: &Theme, layer: &mut Vec<El>) {
         }
         None => {}
     }
+    crate::rounds_view::dialog(s, t, layer);
     if let Some((id, edit)) = &s.naming {
         let renaming = id.as_ref().and_then(|i| s.cat(i)).map(|c| c.name.clone());
         let field = Input::new("cat-name-input", edit, |s: &mut App| &mut s.naming.as_mut().expect("naming").1).name("Name").placeholder("miso").on_submit(|s: &mut App| s.finish_naming()).build(t);

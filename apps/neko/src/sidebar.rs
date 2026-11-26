@@ -54,7 +54,7 @@ pub fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     // A sidebar row that acts: the same alignment as Home and the tasks, as Mail's and Notes' sidebars have.
     let new = SidebarItem::new("new-task", "New task").icon(&icons::COMPOSE).on_press(|s: &mut App| s.new_task_here()).build(t).role("button");
     let new = Tooltip::new("New task").keys("⌘N").wrap(new);
-    let home = SidebarItem::new("home", "Home").icon(&crate::ui::icons::HOME).selected(s.open.is_none() && !s.settings_open && !s.needs_open && s.open_cat.is_none()).on_press(|s: &mut App| s.go_home()).build(t);
+    let home = SidebarItem::new("home", "Home").icon(&crate::ui::icons::HOME).selected(s.open.is_none() && !s.settings_open && !s.needs_open && !s.rounds_open && s.open_cat.is_none()).on_press(|s: &mut App| s.go_home()).build(t);
     let home = Tooltip::new("Home").keys("⌘1").wrap(home);
     // Everything waiting for the person, with how many (the same count as the Dock's).
     let n = s.visible_needs().len();
@@ -67,7 +67,16 @@ pub fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
         needs = needs.child(pill(t, "needs-you-count", n));
     }
     let needs = Tooltip::new("Needs you").keys("⌘2").wrap(needs);
-    let mut body = col().w_full().px(t.space.at(2.0)).gap(t.space.at(1.0)).child(new).child(home).child(needs);
+    // Work that starts by itself: with how many rounds there are, or that every one is paused.
+    let rounds_n = s.rounds.len();
+    let mut rounds = SidebarItem::new("rounds", "Rounds").icon(&icons::ROUNDS).selected(s.rounds_open).on_press(|s: &mut App| s.open_rounds());
+    if s.rounds_paused && rounds_n > 0 {
+        rounds = rounds.description("Paused");
+    } else if rounds_n > 0 {
+        rounds = rounds.description(if rounds_n == 1 { "1 round".to_owned() } else { format!("{rounds_n} rounds") });
+    }
+    let rounds = Tooltip::new("Rounds").keys("⌘3").wrap(rounds.build(t));
+    let mut body = col().w_full().px(t.space.at(2.0)).gap(t.space.at(1.0)).child(new).child(home).child(needs).child(rounds);
     let mut sections = col().key("workspaces").role("list").label("Workspaces").w_full().gap(t.space.at(1.0)).pt(t.space.at(3.0)).focus_group();
     for w in s.sections() {
         sections = sections.child(section(s, t, &w, layer));
@@ -150,7 +159,13 @@ pub fn task_row(s: &App, t: &Theme, task: &Task, i: usize, n: usize, open: bool)
         vec![(name.clone(), t.ink_muted(), true), (word.to_lowercase(), ink.unwrap_or(t.ink_faint()), ink.is_some()), (since(s, task.created_ms), t.ink_faint(), false)],
     );
     let tid = task.id.clone();
-    face_row(t, format!("task-{}", task.id.0), &task.title, format!("{name}, {}", word.to_lowercase()), s.cat_face(&task.cat), Some(task.status), meta, i, n, open).on_press(move |s: &mut App| s.open_task_id(&tid))
+    // A task a round made carries a small round mark before its line.
+    let (meta, from) = if task.round.is_some() {
+        (row().gap(t.space.at(1.0)).center_y().min_w(0.0).child(glyph(&icons::ROUNDS, 11.0, t.ink_faint()).a11y_hidden()).child(meta), ", from a round")
+    } else {
+        (meta, "")
+    };
+    face_row(t, format!("task-{}", task.id.0), &task.title, format!("{name}, {}{from}", word.to_lowercase()), s.cat_face(&task.cat), Some(task.status), meta, i, n, open).on_press(move |s: &mut App| s.open_task_id(&tid))
 }
 
 /// The house's cats: each active cat with its portrait in its state and what it is doing (napping, working on 2, needs you); its

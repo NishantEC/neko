@@ -210,6 +210,19 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
     if size > neko_protocol::cats::MAX_RULES {
         rules = rules.child(text(format!("That is {} KB; a cat's rules can be at most 16 KB.", size.div_ceil(1024))).key("cat-rules-long").role("status").font(t.ty.sm).color(t.c.warning.fg));
     }
+    // The cat's rounds: its standing work that starts by itself, and a way to make another.
+    let mine_rounds = s.rounds_of(&c.id);
+    let mut rounds = col().key("cat-rounds").w_full().gap(t.space.at(2.5)).child(label(t, "Rounds"));
+    if mine_rounds.is_empty() {
+        rounds = rounds.child(text(format!("{} has no rounds. A round starts work by itself at the times you choose.", c.name)).key("cat-no-rounds").font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0));
+    } else {
+        rounds = rounds.child(crate::rounds_view::cards(s, t, "cat-rounds-list", &format!("{}'s rounds", c.name), &mine_rounds, layer));
+    }
+    let new_round = {
+        let id = id.clone();
+        Button::new("cat-new-round", format!("New round for {}…", c.name)).variant(ButtonVariant::Secondary).size(Size::Sm).disabled(!c.is_active()).on_press(move |s: &mut App| s.start_new_round(Some(&id))).build(t)
+    };
+    rounds = rounds.child(row().child(new_round));
     let mine: Vec<&Task> = s.tasks.iter().filter(|x| x.cat == c.id).collect();
     let waiting: Vec<&Task> = mine.iter().copied().filter(|x| s.visible_needs().iter().any(|i| i.task == x.id) || x.status == neko_protocol::TaskStatus::Asked).collect();
     let working: Vec<&Task> = mine.iter().copied().filter(|x| x.status.is_active() && !waiting.iter().any(|w| w.id == x.id)).collect();
@@ -236,6 +249,7 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
         .child(facts)
         .child(col().w_full().gap(t.space.at(2.0)).child(label(t, "Purpose")).child(purpose))
         .child(rules)
+        .child(rounds)
         .child(tasks);
     col().key("cat-scroll").w_full().grow(1.0).min_h(0.0).items_center().px(t.space.at(8.0)).pt(t.space.at(6.0)).pb(t.space.at(10.0)).scroll(rune::ScrollSpec { stick_bottom: false }).child(page)
 }

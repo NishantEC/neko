@@ -6,6 +6,9 @@ use neko_protocol::{
     Cat, Changes, FailureKind, GENERAL, Need, NeedsItem, Part, PartBody, PartId, Permission, PermissionId, PermissionMode, PermissionState, Pricing, Run, RunId, RunStatus, RuntimeInfo, Settings, Task, TaskId, TaskStatus, Tone,
     ToolState, Usage, Workspace,
 };
+use neko_protocol::rounds::{RunEnd, RunKind};
+use neko_protocol::schedule::{Schedule, Weekday};
+use neko_protocol::{Round, RoundRun, RoundStatus, TaskRound};
 use neko_protocol::{DiffFile, DiffPatch, DiffSummary, FileStatus, RunUndo, UndoState, UndoStorage};
 use rune::TextEdit;
 
@@ -81,6 +84,22 @@ pub const SCENES: &[Scene] = &[
     ("home-house", home_house),
     ("home-many", home_many),
     ("home-new-cat", home_new_cat),
+    ("rounds-empty", rounds_empty),
+    ("rounds", rounds),
+    ("rounds-history", rounds_history),
+    ("rounds-paused", rounds_paused),
+    ("rounds-braked", rounds_braked),
+    ("rounds-remove", rounds_remove),
+    ("round-new", round_new),
+    ("round-daily", round_daily),
+    ("round-hours", round_hours),
+    ("round-manual", round_manual),
+    ("round-edit", round_edit),
+    ("round-invalid", round_invalid),
+    ("round-cat-menu", round_cat_menu),
+    ("task-from-round", task_from_round),
+    ("cat-page-rounds", cat_page_rounds),
+    ("home-next-round", home_next_round),
 ];
 
 /// The starter cats as a new install has them, each with one placeholder purpose; mochi has standing rules and an earlier version.
@@ -1081,4 +1100,206 @@ fn settings_undo(s: &mut App) {
 fn clear_undo(s: &mut App) {
     settings_undo(s);
     s.confirm = Some(crate::state::Confirm::ClearUndo);
+}
+
+// ---- Rounds (docs/knowledge/rounds.md) ----
+
+const HOUR: i64 = 3_600_000;
+
+/// The day's 09:00 (UTC, the scenes' zone) `days` after today.
+fn nine(s: &App, days: i64) -> i64 {
+    s.now_ms - s.now_ms.rem_euclid(86_400_000) + days * 86_400_000 + 9 * HOUR
+}
+
+fn round(s: &App, n: u32, name: &str, words: &str, cat: &str, workspace: &str, schedule: Schedule) -> Round {
+    let mut r = Round {
+        id: format!("round_{n:026}"),
+        name: name.into(),
+        words: words.into(),
+        cat: cat.into(),
+        workspace: workspace.into(),
+        schedule,
+        on: true,
+        created_ms: s.now_ms - 20 * 86_400_000 + i64::from(n),
+        changed_ms: s.now_ms - 20 * 86_400_000,
+        status: RoundStatus::Scheduled,
+        next_due_ms: None,
+        note: None,
+        last: None,
+    };
+    r.next_due_ms = r.schedule.next_due(r.created_ms, s.now_ms, &*s.zone());
+    r
+}
+
+fn line(r: &Round, n: u32, due: Option<i64>, at: i64, kind: RunKind, task: Option<&Task>, end: Option<RunEnd>, reason: Option<&str>) -> RoundRun {
+    RoundRun { id: format!("rrun_{n:026}"), round: r.id.clone(), due_ms: due, at_ms: at, kind, task: task.map(|t| t.id.clone()), reason: reason.map(str::to_owned), end }
+}
+
+/// Three rounds: weekdays at 09:00 that went well this morning, every six hours whose last time was skipped, and one by hand.
+fn with_rounds(s: &mut App) {
+    with_workspaces(s);
+    let weekdays = Schedule::Weekdays { days: vec![Weekday::Mon, Weekday::Tue, Weekday::Wed, Weekday::Thu, Weekday::Fri], at: "09:00".into() };
+    let mut docs = round(s, 1, "Docs check", "Check the docs for broken links and fix the ones you can.", "cat_mochi", "ws_acme", weekdays);
+    let mut notes = round(s, 2, "Release notes", "Draft the release notes from this week's merged changes.", "cat_miso", GENERAL, Schedule::Every { hours: 6 });
+    // Made an hour and a half ago: its six hours count from then.
+    notes.created_ms = s.now_ms - 90 * 60_000;
+    notes.next_due_ms = notes.schedule.next_due(notes.created_ms, s.now_ms, &*s.zone());
+    let mut tidy = round(s, 3, "Tidy downloads", "Move old files from Downloads into Archive.", "cat_tofu", GENERAL, Schedule::Manual);
+    tidy.status = RoundStatus::Manual;
+    // This morning's task for the docs check, done; the notes round's last time was skipped while its task still worked.
+    let mut done = task(40, "Check the docs for broken links and fix the ones you can.", 5 * 60);
+    done.title = "Docs check".into();
+    done.workspace = "ws_acme".into();
+    done.folder = Some("/Users/example/acme-api".into());
+    done.cat = "cat_mochi".into();
+    done.status = TaskStatus::Done;
+    done.round = Some(TaskRound { id: docs.id.clone(), name: docs.name.clone(), due_ms: Some(nine(s, 0)) });
+    let mut working = task(41, "Draft the release notes from this week's merged changes.", 90);
+    working.title = "Release notes".into();
+    working.cat = "cat_miso".into();
+    working.status = TaskStatus::Working;
+    working.round = Some(TaskRound { id: notes.id.clone(), name: notes.name.clone(), due_ms: Some(s.now_ms - 90 * 60_000) });
+    docs.last = Some(line(&docs, 1, Some(nine(s, 0)), nine(s, 0), RunKind::Started, Some(&done), Some(RunEnd::Done), None));
+    notes.last = Some(line(&notes, 2, Some(s.now_ms - 20 * 60_000), s.now_ms - 20 * 60_000, RunKind::Skipped, None, None, Some("The last run is still working.")));
+    s.tasks.push(done);
+    s.tasks.push(working);
+    s.tasks.sort_by_key(|t| std::cmp::Reverse(t.created_ms));
+    s.rounds = vec![docs, notes, tidy];
+    s.rounds_loaded = true;
+}
+
+fn rounds_empty(s: &mut App) {
+    with_workspaces(s);
+    s.rounds_loaded = true;
+    s.open_rounds();
+}
+
+fn rounds(s: &mut App) {
+    with_rounds(s);
+    s.open_rounds();
+}
+
+fn rounds_history(s: &mut App) {
+    with_rounds(s);
+    s.open_rounds();
+    let docs = s.rounds[0].clone();
+    let done = s.tasks.iter().find(|t| t.title == "Docs check").cloned().expect("the sample task");
+    s.round_history_open.insert(docs.id.clone());
+    s.round_history.insert(
+        docs.id.clone(),
+        vec![
+            line(&docs, 1, Some(nine(s, 0)), nine(s, 0), RunKind::Started, Some(&done), Some(RunEnd::Done), None),
+            line(&docs, 2, Some(nine(s, -1)), nine(s, -1), RunKind::Started, Some(&done), Some(RunEnd::Failed), None),
+            line(&docs, 3, Some(nine(s, -2)), nine(s, -2), RunKind::Skipped, None, None, Some("Every round was paused.")),
+            line(&docs, 4, Some(nine(s, -5)), nine(s, -3) + HOUR, RunKind::Started, Some(&done), Some(RunEnd::Done), None),
+            line(&docs, 5, Some(nine(s, -6)), nine(s, -3) + HOUR, RunKind::Missed, None, None, Some("Missed: Neko was not running, or this Mac was asleep.")),
+        ],
+    );
+}
+
+fn rounds_paused(s: &mut App) {
+    with_rounds(s);
+    s.rounds_paused = true;
+    for r in &mut s.rounds {
+        if r.on && r.schedule.is_automatic() {
+            r.status = RoundStatus::Paused;
+            r.next_due_ms = None;
+        }
+    }
+    s.open_rounds();
+}
+
+fn rounds_braked(s: &mut App) {
+    with_rounds(s);
+    let r = &mut s.rounds[0];
+    r.on = false;
+    r.status = RoundStatus::Braked;
+    r.next_due_ms = None;
+    r.note = Some("Turned itself off after 3 failed runs in a row. Turn it back on when it is fixed.".into());
+    let n = &mut s.rounds[1];
+    n.status = RoundStatus::CatRetired;
+    n.next_due_ms = None;
+    n.note = Some("miso is retired.".into());
+    let mut folder = round(s, 4, "Check the notes", "Sort the meeting notes by project.", "cat_tofu", "ws_notes", Schedule::Daily { at: "18:30".into() });
+    folder.status = RoundStatus::FolderMissing;
+    folder.next_due_ms = None;
+    folder.note = Some("The folder of notes was not found.".into());
+    s.rounds.push(folder);
+    s.open_rounds();
+}
+
+fn rounds_remove(s: &mut App) {
+    with_rounds(s);
+    s.open_rounds();
+    let id = s.rounds[0].id.clone();
+    s.ask_remove_round(&id);
+}
+
+fn round_new(s: &mut App) {
+    with_rounds(s);
+    s.open_rounds();
+    s.start_new_round(Some("cat_mochi"));
+    let f = s.form_mut();
+    f.name = TextEdit::new("Link check");
+    f.words = TextEdit::new("Check the docs for broken links in acme-api and list the ones that need a person.");
+    f.workspace = "ws_acme".into();
+}
+
+fn round_daily(s: &mut App) {
+    round_new(s);
+    let f = s.form_mut();
+    f.kind = 0;
+    f.time = TextEdit::new("18:30");
+}
+
+fn round_hours(s: &mut App) {
+    round_new(s);
+    let f = s.form_mut();
+    f.kind = 2;
+    f.hours = TextEdit::new("6");
+}
+
+fn round_manual(s: &mut App) {
+    round_new(s);
+    s.form_mut().kind = 3;
+}
+
+fn round_edit(s: &mut App) {
+    with_rounds(s);
+    s.open_rounds();
+    let id = s.rounds[0].id.clone();
+    s.start_edit_round(&id);
+}
+
+fn round_invalid(s: &mut App) {
+    round_new(s);
+    let f = s.form_mut();
+    f.time = TextEdit::new("9am");
+    f.error = Some("Neko could not save the round.".into());
+}
+
+fn round_cat_menu(s: &mut App) {
+    round_new(s);
+    s.menu_open = Some("round-cat-menu".into());
+}
+
+fn task_from_round(s: &mut App) {
+    with_rounds(s);
+    let id = s.tasks.iter().find(|t| t.title == "Docs check").map(|t| t.id.clone()).expect("the sample task");
+    let task = s.tasks.iter().find(|t| t.id == id).cloned().expect("the sample task");
+    let mut sc = Script::new(&task, "run_1", start(s));
+    steps(&mut sc);
+    sc.say(ANSWER, true);
+    let r = run("run_1", &task, RunStatus::Done, start(s), 134);
+    s.books.insert(id.clone(), Book { runs: vec![r], loaded: true, parts: sc.parts, ..Book::default() });
+    s.open = Some(id);
+}
+
+fn cat_page_rounds(s: &mut App) {
+    with_rounds(s);
+    s.open_cat_page("cat_mochi");
+}
+
+fn home_next_round(s: &mut App) {
+    with_rounds(s);
 }

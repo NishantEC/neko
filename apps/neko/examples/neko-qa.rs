@@ -696,6 +696,19 @@ impl Headless<'_> {
                     other => return Err(format!("a second answer was taken: {other:?}")),
                 }
             }
+            "clock" => {
+                // The rounds scheduler's clock, `minutes` ahead of the real one (a debug daemon started with NEKO_DEBUG_CLOCK=1 only).
+                use neko_protocol::{Reply, Request};
+                let (info, token) = neko_protocol::client::find(&self.r.places.data).map_err(|e| e.to_string())?;
+                let mut c = neko_protocol::client::Client::connect(info.port, &token, "neko-qa").map_err(|e| e.to_string())?;
+                let offset_ms = v["minutes"].as_i64().map(|m| m * 60_000);
+                let reply = c.request(Request::DebugClock { offset_ms }).map_err(|e| e.to_string())?;
+                c.close();
+                if reply != Reply::Ok {
+                    return Err(format!("debug_clock: {reply:?}"));
+                }
+                self.r.say(&format!("the scheduler's clock is {} minutes ahead", v["minutes"].as_i64().unwrap_or(0)));
+            }
             "dump" => {
                 let rt = self.rt()?;
                 let lines: Vec<String> = rt.elements().iter().filter(|e| !e.exiting && (e.key.is_some() || e.text.is_some() || e.label.is_some())).map(describe).collect();

@@ -15,6 +15,8 @@ pub mod menu;
 pub mod needs_view;
 pub mod notify;
 pub mod review_view;
+pub mod rounds;
+pub mod rounds_view;
 pub mod scenes;
 pub mod settings_view;
 pub mod sidebar;
@@ -125,11 +127,13 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         new_task(s, tx);
         return true;
     }
-    if (ev.is_command('1') || ev.is_command('2')) && !(m.shift || m.alt || m.ctrl) {
+    if (ev.is_command('1') || ev.is_command('2') || ev.is_command('3')) && !(m.shift || m.alt || m.ctrl) {
         if ev.is_command('1') {
             s.go_home();
-        } else {
+        } else if ev.is_command('2') {
             s.open_needs();
+        } else {
+            s.open_rounds();
         }
         tx.instant();
         return true;
@@ -202,7 +206,7 @@ pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     // A request appears in the open task: the keyboard leaves the composer, so Escape answers it no and Return presses nothing
     // the person did not choose (the request's own answers are a Tab away).
-    let asking = if s.settings_open || s.needs_open { None } else { s.pending_request() };
+    let asking = if s.settings_open || s.needs_open || s.rounds_open { None } else { s.pending_request() };
     if asking != s.request_seen {
         if asking.is_some() && s.reply_box().is_some_and(|r| r.focused) {
             s.reply_mut().focused = false;

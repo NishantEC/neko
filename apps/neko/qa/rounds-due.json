@@ -1,0 +1,315 @@
+{
+  "name": "rounds-due",
+  "title": "Rounds: a time comes while the app is open, the next is skipped while a request waits, pause all holds it",
+  "about": "In ask mode a round (every 6 hours, made from mochi's page) is made due by moving the scheduler's clock (a debug daemon with NEKO_DEBUG_CLOCK=1). Its task starts by itself and its step waits in Needs you, exactly as a task made by hand would. The next time comes while that request waits: it is skipped, with its reason. Pause all holds the third time. After the request is denied, letting rounds go on and a fourth time makes a second task.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_DEBUG_CLOCK": "1"
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-mode-1"
+        }
+      },
+      "within": 15,
+      "expect": "Settings opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-mode-1"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 0.5
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cat-cat_mochi"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cat-new-round"
+        }
+      },
+      "within": 15,
+      "expect": "mochi's page offers New round for mochi…"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cat-new-round"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-name-input"
+        }
+      },
+      "within": 15,
+      "expect": "The New round panel opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-name-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Run tests"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-words-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Run the tests [fake:hook-shell]"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-kind-2"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 0.4
+    },
+    {
+      "do": "snap",
+      "name": "new-round",
+      "expect": "Every 6 hours, from the moment of saving, in words"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-first",
+          "text": "then every 6 hours"
+        }
+      },
+      "within": 15,
+      "expect": "The first run is said in words"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-save"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-*-run"
+        }
+      },
+      "within": 15,
+      "expect": "The round is made"
+    },
+    {
+      "do": "clock",
+      "minutes": 361
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "needs-you-count",
+          "text": "1"
+        }
+      },
+      "within": 20,
+      "expect": "The round's task started by itself and its step waits for the person"
+    },
+    {
+      "do": "key",
+      "key": "cmd+3"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-*-last-words",
+          "text": "Needs you"
+        }
+      },
+      "within": 15,
+      "expect": "The card says the last run needs you"
+    },
+    {
+      "do": "snap",
+      "name": "started",
+      "expect": "The round started by itself; its step waits"
+    },
+    {
+      "do": "clock",
+      "minutes": 721
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-*-last-words",
+          "text": "waiting for you"
+        }
+      },
+      "within": 20,
+      "expect": "The next time was skipped, with its reason"
+    },
+    {
+      "do": "snap",
+      "name": "skipped",
+      "expect": "Skipped: the last run is waiting for you"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "rounds-pause"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "rounds-paused"
+            }
+          },
+          {
+            "see": {
+              "key": "rounds-pause",
+              "label": "Resume rounds"
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "Pause all shows a clear paused state"
+    },
+    {
+      "do": "clock",
+      "minutes": 1081
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-*-last-words",
+          "text": "Every round was paused"
+        }
+      },
+      "within": 20,
+      "expect": "The third time was held by the pause"
+    },
+    {
+      "do": "snap",
+      "name": "paused",
+      "expect": "Paused: nothing starts"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "rounds-pause"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "key": "rounds-paused"
+        }
+      },
+      "within": 15,
+      "expect": "Rounds go on"
+    },
+    {
+      "do": "key",
+      "key": "cmd+2"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "need-*-deny"
+        }
+      },
+      "within": 15,
+      "expect": "The request is in Needs you"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "need-*-deny"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "key": "need-*-deny"
+        }
+      },
+      "within": 15,
+      "expect": "Denied: the task goes on"
+    },
+    {
+      "do": "clock",
+      "minutes": 1441
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "task-*",
+          "label": "Run tests"
+        }
+      },
+      "within": 20,
+      "expect": "Another time makes a task"
+    },
+    {
+      "do": "key",
+      "key": "cmd+3"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-*-last-words",
+          "text": "Last:"
+        }
+      },
+      "within": 15,
+      "expect": "The card follows"
+    },
+    {
+      "do": "snap",
+      "name": "later",
+      "expect": "After the request was answered the round runs again"
+    }
+  ]
+}

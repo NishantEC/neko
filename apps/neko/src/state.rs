@@ -58,6 +58,8 @@ pub enum Confirm {
     ClearUndo,
     /// Retire a cat (its id).
     RetireCat(String),
+    /// Remove a round (its id): its past tasks stay.
+    RemoveRound(String),
 }
 
 /// A cat page's fields while the person edits them.
@@ -263,6 +265,19 @@ pub struct App {
     pub receipts: HashMap<RunId, DiffSummary>,
     /// The runs whose files were asked for (each is asked once).
     pub receipts_asked: HashSet<RunId>,
+    /// Every round, oldest first, as the daemon last said (with each one's next time, status and last line).
+    pub rounds: Vec<neko_protocol::Round>,
+    /// Every round is paused.
+    pub rounds_paused: bool,
+    /// The daemon's list of rounds has arrived.
+    pub rounds_loaded: bool,
+    /// The Rounds page shows instead of the content (⌘3).
+    pub rounds_open: bool,
+    /// The New round / Edit panel, while it is open.
+    pub round_form: Option<crate::rounds::RoundForm>,
+    /// The rounds whose history shows on their card, and each one's lines (newest first) as the daemon last said.
+    pub round_history_open: HashSet<String>,
+    pub round_history: HashMap<String, Vec<neko_protocol::RoundRun>>,
 }
 
 impl Review {
@@ -298,6 +313,14 @@ pub enum Asked {
     /// A change to a cat: a refusal is said in a panel. `open`: the cat made opens its page.
     Cat { open: bool },
     ClearUndo,
+    /// A change to a round (switch, pause, remove): a refusal is said in a panel.
+    Round,
+    /// Save in the round panel: it closes when the daemon accepts it, and says why when it does not.
+    RoundForm,
+    /// Run now: a refusal is said in a panel.
+    RoundRun,
+    /// A round's history, for its card.
+    RoundHistory(String),
     Other,
 }
 
@@ -454,6 +477,13 @@ impl Default for App {
             undo_storage: None,
             receipts: HashMap::new(),
             receipts_asked: HashSet::new(),
+            rounds: Vec::new(),
+            rounds_paused: false,
+            rounds_loaded: false,
+            rounds_open: false,
+            round_form: None,
+            round_history_open: HashSet::new(),
+            round_history: HashMap::new(),
         }
     }
 }
@@ -477,6 +507,9 @@ impl App {
         }
         if self.needs_open {
             return "Needs you".to_owned();
+        }
+        if self.rounds_open {
+            return "Rounds".to_owned();
         }
         match self.open_task() {
             Some(t) => match self.workspace_of(&t.workspace) {
@@ -562,6 +595,7 @@ impl App {
         self.context_open = false;
         self.settings_open = false;
         self.needs_open = false;
+        self.rounds_open = false;
         self.menu_open = None;
         let d = self.cat_drafts.entry(cat.id.clone()).or_insert_with(|| CatDraft::of(&cat));
         // Opening a page puts the keyboard in none of its fields.
@@ -697,7 +731,7 @@ impl App {
 
     /// Where the person is, for the notifications.
     pub fn here(&self) -> Here {
-        let looking = !self.settings_open && !self.needs_open;
+        let looking = !self.settings_open && !self.needs_open && !self.rounds_open;
         Here { front: self.front, task: self.open.clone().filter(|_| looking), needs_view: self.needs_open }
     }
 
@@ -711,6 +745,7 @@ impl App {
         self.review = None;
         self.context_open = false;
         self.settings_open = false;
+        self.rounds_open = false;
         self.needs_open = true;
         self.needs_notice = None;
         self.follow_open();
@@ -1038,6 +1073,7 @@ impl App {
                     self.asked.insert(id, Asked::ClearUndo);
                 }
             }
+            Some(Confirm::RemoveRound(id)) => self.remove_round(&id),
             None => {}
         }
     }
@@ -1242,6 +1278,7 @@ impl App {
     pub fn open_settings(&mut self) {
         self.settings_open = true;
         self.needs_open = false;
+        self.rounds_open = false;
         self.open_cat = None;
         self.send(Request::ListRuntimes);
         self.ask_undo_storage();
@@ -1286,6 +1323,7 @@ impl App {
         self.context_open = false;
         self.settings_open = false;
         self.needs_open = false;
+        self.rounds_open = false;
         self.follow_open();
     }
 
@@ -1304,6 +1342,7 @@ impl App {
         self.context_open = false;
         self.settings_open = false;
         self.needs_open = false;
+        self.rounds_open = false;
         self.notifier.opened(id);
         self.at_bottom = true;
         self.follow_open();
@@ -1382,6 +1421,7 @@ impl App {
                 self.send(Request::ListRuntimes);
                 self.send(Request::ListNeeds);
                 self.send(Request::ListCats);
+                self.send(Request::ListRounds);
                 // A new connection watches nothing yet.
                 self.watching = None;
                 self.follow_open();
@@ -1472,7 +1512,20 @@ impl App {
             }
             Change::NeedsChanged { items } => self.set_needs(items),
             Change::CatAdded { cat } | Change::CatUpdated { cat } => self.upsert_cat(cat),
-            Change::RoundAdded { .. } | Change::RoundUpdated { .. } | Change::RoundRemoved { .. } | Change::RoundsPaused { .. } => {}
+            Change::RoundAdded { round } | Change::RoundUpdated { round } => {
+                let id = round.id.clone();
+                self.upsert_round(round);
+                self.refresh_round_history(&id);
+            }
+            Change::RoundRemoved { round } => {
+                self.rounds.retain(|r| r.id != round);
+                self.round_history.remove(&round);
+                self.round_history_open.remove(&round);
+                if self.confirm == Some(Confirm::RemoveRound(round)) {
+                    self.confirm = None;
+                }
+            }
+            Change::RoundsPaused { paused } => self.rounds_paused = paused,
         }
     }
 
@@ -1515,6 +1568,39 @@ impl App {
                 return;
             }
             Reply::DayUsage { .. } => return,
+            Reply::Rounds { rounds, paused } => {
+                self.rounds_loaded = true;
+                self.rounds_paused = paused;
+                self.rounds.clear();
+                for r in rounds {
+                    self.upsert_round(r);
+                }
+                return;
+            }
+            Reply::Round { round } => {
+                self.upsert_round(round);
+                if matches!(asked, Some(Asked::RoundForm)) {
+                    self.round_form = None;
+                }
+                return;
+            }
+            Reply::RoundRuns { runs } => {
+                if let Some(Asked::RoundHistory(id)) = asked {
+                    self.round_history.insert(id, runs);
+                }
+                return;
+            }
+            Reply::Error { message, .. } if matches!(asked, Some(Asked::RoundForm)) => {
+                if let Some(f) = &mut self.round_form {
+                    f.error = Some(message);
+                }
+                return;
+            }
+            Reply::Error { message, .. } if matches!(asked, Some(Asked::Round | Asked::RoundRun)) => {
+                let title = if matches!(asked, Some(Asked::RoundRun)) { "Neko did not run this round" } else { "Neko could not do that" };
+                self.refusal = Some(Refusal { title: title.into(), words: message, reveal: None });
+                return;
+            }
             Reply::Needs { items } => {
                 self.set_needs(items);
                 return;

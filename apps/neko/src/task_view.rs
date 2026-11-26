@@ -164,6 +164,22 @@ pub fn offer_of(book: &Book, r: &Run) -> Offer {
     book.runs.iter().position(|x| x.id == r.id).map(|i| undo::offers(&book.runs).swap_remove(i)).unwrap_or_default()
 }
 
+/// "From the round Docs check, due 09:00": a task a round made says so, with the round's name as a link to the Rounds page.
+fn from_round(s: &App, t: &Theme, task: &Task) -> Option<El> {
+    let r = task.round.as_ref()?;
+    let said = match r.due_ms {
+        Some(due) => format!("From the round {}, due {}", r.name, crate::rounds::when_at(due, s.now_ms, &*s.zone())),
+        None => format!("From the round {}, run by hand", r.name),
+    };
+    let mut line = row().key("task-round").role("note").label(said.clone()).w_full().gap(t.space.at(2.0)).center_y().min_w(0.0);
+    line = line.child(glyph(&crate::icons::ROUNDS, t.control.icon_sm, t.ink_faint()).a11y_hidden());
+    line = line.child(text(said.clone()).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0).shrink().a11y_hidden());
+    if s.round(&r.id).is_some() {
+        line = line.child(crate::ui::button::Button::new("task-round-open", "Open round").variant(rune_ui_style::ButtonVariant::Link).size(rune_ui_style::Size::Sm).on_press(|s: &mut App| s.open_rounds()).build(t));
+    }
+    Some(line)
+}
+
 /// The band's run counter (`turn::counter`).
 pub fn run_counter(s: &App, t: &Theme) -> Option<El> {
     turn::counter(s, t)
@@ -300,7 +316,7 @@ fn worked_words(r: &Run) -> String {
 /// the final answer, notices, and the card if it earns one.
 fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &Task) -> El {
     let w = who(s, r, task);
-    let turn = Message::assistant(format!("turn-{}", r.id.0), w.name.clone()).column(COLUMN).child(turn::turn_head(t, r, &w.name, &w.face, r.status == RunStatus::Running && s.pending_request().is_some()));
+    let turn = Message::assistant(format!("turn-{}", r.id.0), w.name.clone()).column(COLUMN).child(turn::turn_head(t, r, &w.name, &w.face, r.status == RunStatus::Running && s.pending_request().is_some(), offer_of(book, r).undone));
     if r.status == RunStatus::Running {
         let streaming = parts.last().is_some_and(|p| matches!(&p.body, PartBody::Agent { done: false, .. }) || matches!(&p.body, PartBody::Thinking { done: false, text } if !text.trim().is_empty()));
         let mut out = lay_out(s, t, book, r, &w, parts, if streaming { Some(parts.len() - 1) } else { None }, None);
@@ -415,7 +431,11 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let empty = Book::default();
     let book = s.book().unwrap_or(&empty);
     // The task's own words first (their text keyed "task-words", as in S0).
-    let mut items = vec![turn::person(s, t, "task-message", "task-words", &task.words)];
+    let mut items = Vec::new();
+    if let Some(from) = from_round(s, t, task) {
+        items.push(from);
+    }
+    items.push(turn::person(s, t, "task-message", "task-words", &task.words));
     if book.loaded && book.runs.is_empty() && book.parts.is_empty() && task.status == neko_protocol::TaskStatus::New {
         items.push(status_line(s, t, task));
     }

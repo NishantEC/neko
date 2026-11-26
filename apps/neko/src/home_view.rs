@@ -334,6 +334,11 @@ pub fn home(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
         .child(text(crate::clock::date_line(s.now_ms, s.utc_offset_s)).key("home-date").font(weight(t.ty.sm, t.ty.semibold)).color(t.ink_faint()))
         .child(text(s.greeting()).key("greeting").role("heading").level(1).font(t.ty.xxl).color(t.ink()))
         .child(text(house_line(s)).key("greeting-sub").font(weight(t.ty.lg, t.ty.regular)).color(t.ink_muted()).wrap().min_w(0.0));
+    // One quiet line for the next round due, and nothing when there is none.
+    let head = match next_round_line(s) {
+        Some(words) => head.child(text(words.clone()).key("home-next-round").role("note").label(words).font(t.ty.sm).color(t.ink_faint()).truncate().min_w(0.0).pt(t.space.at(1.0))),
+        None => head,
+    };
     let mut page = col().key("home").w_full().max_w(PAGE).gap(t.space.at(8.0)).child(col().w_full().gap(t.space.at(6.0)).child(head).child(composer(s, t, layer)));
     if let Some(line) = crate::view::slow_line(s, t) {
         page = page.child(line);
@@ -367,6 +372,14 @@ pub fn home(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
         page = page.child(section(t, "home-progress", "In progress", Some(n), list(t, "home-progress", "In progress", rows)));
     }
     col().key("home-scroll").w_full().grow(1.0).min_h(0.0).items_center().px(t.space.at(10.0)).pt(t.space.at(10.0)).scroll(rune::ScrollSpec { stick_bottom: false }).child(page.pb(t.space.at(14.0)))
+}
+
+/// "Next round: mochi, Docs check, tomorrow 09:00": the round due soonest that will run by itself (None: no round will).
+pub fn next_round_line(s: &App) -> Option<String> {
+    let r = s.next_round()?;
+    let at = crate::rounds::when(r.next_due_ms?, s.now_ms, &*s.zone());
+    let cat = s.cat(&r.cat).map_or_else(|| "A cat".to_owned(), |c| c.name.clone());
+    Some(format!("Next round: {cat}, {}, {at}", r.name))
 }
 
 fn lower_first(s: &str) -> String {

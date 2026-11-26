@@ -9,6 +9,13 @@ pub static SIDEBAR: Icon = Icon {
     body: r#"<rect x="2.25" y="3" width="11.5" height="10" rx="2.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.25 3.25v9.5" fill="none" stroke="currentColor" stroke-width="1.5"/>"#,
 };
 
+/// Two arrows chasing round: Rounds, work that starts by itself.
+pub static ROUNDS: Icon = Icon {
+    name: "neko-rounds",
+    view: 16.0,
+    body: r#"<path d="M2.75 7.25V7A3 3 0 0 1 5.75 4h6.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="m10.25 1.75 2.25 2.25-2.25 2.25" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M13.25 8.75V9a3 3 0 0 1-3 3h-6.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="m5.75 14.25-2.25-2.25 2.25-2.25" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#,
+};
+
 /// A pencil over a page: New task.
 pub static COMPOSE: Icon = Icon {
     name: "neko-compose",

@@ -1,0 +1,364 @@
+{
+  "name": "rounds",
+  "title": "Rounds: make one, run it now, see where its task came from, switch it off, remove it",
+  "about": "From mochi's page, New round for mochi… makes a round that runs only on Run now in the acme-api workspace. Run now makes an ordinary task: it appears under acme-api, is mochi's, and says it came from the round. The round's history shows how it ended. Switching the round off is said on its card. Removing it asks first; its task stays.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "files": {
+      "acme-api": {
+        "git": true,
+        "files": {
+          "README.md": "# Acme\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "add-workspace",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "button",
+          "label_is": "acme-api"
+        }
+      },
+      "within": 15,
+      "expect": "acme-api is a workspace"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cat-cat_mochi"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cat-new-round"
+        }
+      },
+      "within": 15,
+      "expect": "mochi's page offers New round for mochi…"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cat-new-round"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-name-input"
+        }
+      },
+      "within": 15,
+      "expect": "The New round panel opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-name-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Docs check"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-words-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check the docs [fake:plain]"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-workspace"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitem",
+        "name": "acme-api"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-kind-3"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 0.4
+    },
+    {
+      "do": "snap",
+      "name": "new-round",
+      "expect": "The panel: name, words, mochi, acme-api, Run now only, and what that means"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-first",
+          "text": "never starts by itself"
+        }
+      },
+      "within": 15,
+      "expect": "It says a manual round never starts by itself"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-save"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-*-run"
+        }
+      },
+      "within": 15,
+      "expect": "The round is on mochi's page"
+    },
+    {
+      "do": "snap",
+      "name": "round-made",
+      "expect": "mochi's page lists the new round"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-*-run"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "round-*-last-words",
+              "text": "Last: Done"
+            }
+          },
+          {
+            "see": {
+              "key": "task-*",
+              "label": "Docs check"
+            }
+          }
+        ]
+      },
+      "within": 20,
+      "expect": "Run now made a task and it finished"
+    },
+    {
+      "do": "snap",
+      "name": "run-now",
+      "expect": "The round says it last went Done"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-*-open"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "task-round",
+              "label": "From the round Docs check, run by hand"
+            }
+          },
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Docs check"
+            }
+          },
+          {
+            "see": {
+              "key": "task-workspace",
+              "text": "acme-api"
+            }
+          },
+          {
+            "see": {
+              "key": "task-cat",
+              "label": "mochi"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "The task is mochi's, in acme-api, and says where it came from"
+    },
+    {
+      "do": "snap",
+      "name": "task-from-round",
+      "expect": "The task says it is from the round Docs check"
+    },
+    {
+      "do": "key",
+      "key": "cmd+3"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "rounds-title"
+        }
+      },
+      "within": 15,
+      "expect": "⌘3 opens Rounds"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-*-history"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-*-history-list",
+          "label": "History of Docs check"
+        }
+      },
+      "within": 15,
+      "expect": "The history opens"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-*-last-words",
+          "text": "Done"
+        }
+      },
+      "within": 15,
+      "expect": "The history says Done"
+    },
+    {
+      "do": "snap",
+      "name": "history",
+      "expect": "The card with its history: Run now, Done"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-*-switch"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-*-switch",
+          "label": "Docs check is off"
+        }
+      },
+      "within": 15,
+      "expect": "The switch is off"
+    },
+    {
+      "do": "snap",
+      "name": "off",
+      "expect": "The round is off"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-*-menu"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitem",
+        "name": "Remove…"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "button",
+          "label_is": "Remove",
+          "in": {
+            "key": "remove-round-dialog"
+          }
+        }
+      },
+      "within": 15,
+      "expect": "Removing asks first"
+    },
+    {
+      "do": "snap",
+      "name": "remove-asks",
+      "expect": "The panel says the tasks it made stay"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "Remove",
+        "in": {
+          "key": "remove-round-dialog"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "rounds-empty"
+            }
+          },
+          {
+            "see": {
+              "key": "task-*",
+              "label": "Docs check"
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "The round is gone and its task is still in the sidebar"
+    },
+    {
+      "do": "snap",
+      "name": "removed",
+      "expect": "No rounds; the task stays"
+    }
+  ]
+}
