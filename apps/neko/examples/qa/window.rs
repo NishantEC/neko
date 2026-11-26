@@ -285,7 +285,7 @@ pub fn run(r: &mut Run) -> Result<(), String> {
     let notify_log = r.places.work.join("notify.jsonl");
     let (tx, rx) = mpsc::channel::<String>();
     let launched = Instant::now();
-    let (mut child, pid, dock_name): (Option<std::process::Child>, u32, String) = match std::env::var_os("NEKO_QA_BUNDLE").map(PathBuf::from).filter(|_| r.s.bundle) {
+    let (mut child, pid, dock_name): (Option<std::process::Child>, u32, String) = match std::env::var_os("NEKO_QA_BUNDLE").map(PathBuf::from).filter(|_| r.s.bundle || std::env::var_os("NEKO_QA_ALL_BUNDLE").is_some()) {
         // A development bundle (scripts/build-app.sh --dev into the run's own folder, renamed "Neko QA.app" so its Dock item is
         // told apart from any other Neko): only a bundle gets notifications, the Dock badge, the link and a proper Dock item.
         // `open -n -g` starts a new copy in the background; its PID is found by the exact path of its executable.
@@ -294,8 +294,16 @@ pub fn run(r: &mut Run) -> Result<(), String> {
             let out = r.places.work.join("app.out");
             std::fs::write(&out, "").map_err(|e| e.to_string())?;
             let mut c = Command::new("open");
-            c.args(["-n", "-g"]).arg(&bundle).arg("--stdout").arg(&out).arg("--stderr").arg(&out);
-            for (k, v) in [("RUNE_OPEN_INACTIVE", "1".into()), ("RUNE_DIRS_ROOT", rune_root.display().to_string()), ("NEKO_DATA_DIR", r.places.data.display().to_string()), ("NEKO_NOTIFY_LOG", notify_log.display().to_string())] {
+            // `-g` keeps it in the background only where the scenario asks for an inactive window.
+            c.arg("-n");
+            if r.s.inactive {
+                c.arg("-g");
+            }
+            c.arg(&bundle).arg("--stdout").arg(&out).arg("--stderr").arg(&out);
+            if r.s.inactive {
+                c.arg("--env").arg("RUNE_OPEN_INACTIVE=1");
+            }
+            for (k, v) in [("RUNE_DIRS_ROOT", rune_root.display().to_string()), ("NEKO_DATA_DIR", r.places.data.display().to_string()), ("NEKO_NOTIFY_LOG", notify_log.display().to_string())] {
                 c.arg("--env").arg(format!("{k}={v}"));
             }
             c.arg("--args").arg("--window-script").arg(&script_path);
@@ -317,10 +325,13 @@ pub fn run(r: &mut Run) -> Result<(), String> {
             // The bare binary, hard-linked under its own name (its Dock item and process are told apart from any other Neko).
             let bin = r.places.work.join(NAME);
             std::fs::hard_link(&app, &bin).or_else(|_| std::fs::copy(&app, &bin).map(|_| ())).map_err(|e| format!("{}: {e}", bin.display()))?;
-            let mut ch = Command::new(&bin)
+            let mut cmd = Command::new(&bin);
+            if r.s.inactive {
+                cmd.env("RUNE_OPEN_INACTIVE", "1");
+            }
+            let mut ch = cmd
                 .arg("--window-script")
                 .arg(&script_path)
-                .env("RUNE_OPEN_INACTIVE", "1")
                 .env("RUNE_DIRS_ROOT", &rune_root)
                 .env("NEKO_DATA_DIR", &r.places.data)
                 .env("NEKO_DAEMON_BIN", &r.o.daemon)
@@ -361,7 +372,9 @@ pub fn run(r: &mut Run) -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(100));
     }
     let appeared = launched.elapsed().as_secs_f64();
-    let launch_step = Step { n: 0, v: json!({"do": "launch", "expect": "The window opens on screen, without taking focus"}) };
+    // An inactive window (the scenario asks, e.g. notifications) must not take focus. The others open active, as a person (and
+    // VoiceOver) uses the window: an inactive window's accessibility tree does not follow its changes (docs/knowledge/qa.md).
+    let launch_step = Step { n: 0, v: json!({"do": "launch", "expect": if r.s.inactive { "The window opens on screen, without taking focus" } else { "The window opens on screen" }}) };
     let Some((id, x, y, w, h, _, _)) = win else {
         r.outcome(&launch_step, Some(false), "no window on screen within 20 s".into(), appeared, None);
         stop(&mut child, pid);
@@ -371,8 +384,8 @@ pub fn run(r: &mut Run) -> Result<(), String> {
     let on_display = x + w > 0.0 && y + h > 0.0;
     r.outcome(
         &launch_step,
-        Some(on_display && !frontmost),
-        if !on_display { format!("the window is off every display at {x},{y}") } else if frontmost { "the app took focus".into() } else { String::new() },
+        Some(on_display && !(r.s.inactive && frontmost)),
+        if !on_display { format!("the window is off every display at {x},{y}") } else if r.s.inactive && frontmost { "the app took focus".into() } else { String::new() },
         appeared,
         None,
     );

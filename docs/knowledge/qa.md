@@ -35,12 +35,16 @@ and anything still running from its folder) and removes the folder. Anything lef
 - **`--window`.** `run.sh` builds a development bundle with `scripts/build-app.sh --dev "$NEKO_TARGET/qa-bundle"` (never the
   owner's `bundle-dev`) and renames it `Neko QA.app`, so its Dock item reads "Neko QA" and is found by that label (the owner's
   copies read "Neko" or "Neko Dev"). Only a bundle gets notifications, the Dock badge, the link and a proper Dock item. It is
-  started with `open -n -g` and `--env RUNE_OPEN_INACTIVE=1` (no focus taken; checked), `RUNE_DIRS_ROOT`,
-  `NEKO_DATA_DIR` and `NEKO_NOTIFY_LOG` in the run's folder (`RUNE_DIRS_ROOT` already keeps the prefs there); its PID is found by the exact path of its executable and it is stopped
-  by that PID. Only scenarios that need it (`"bundle": true`: notifications, the badge, links) use the bundle. The others run the
-  bare binary, hard-linked as `neko-qa-win` (its own Dock item), because in the bundle the window's accessibility tree, which the
-  word checks and presses read, went empty a few seconds after launch while a window script replayed (2026-11-26, cause not
-  found; see the QA report). The owner's copy and data are never touched. The
+  started with `open -n` and `--env` for `RUNE_DIRS_ROOT`, `NEKO_DATA_DIR` and `NEKO_NOTIFY_LOG` in the run's folder; its PID is
+  found by the exact path of its executable and it is stopped by that PID. Only scenarios that need it (`"bundle": true`:
+  notifications, the badge, links) use the bundle; `NEKO_QA_ALL_BUNDLE=1` forces it for every window run. The others run the bare
+  binary, hard-linked as `neko-qa-win` (its own Dock item), because under a window script the bundle's accessibility tree read
+  empty through System Events even with the window active (2026-11-26, cause not found). The owner's copy and data are never
+  touched.
+- **Active, not inactive.** Window runs open the window active (it takes focus while the run lasts), because that is how a person,
+  and VoiceOver, uses it: an inactive window's accessibility tree does not follow its changes (below). Only a scenario that needs
+  Neko not in front (`"inactive": true`, the notifications scenario) opens it with `RUNE_OPEN_INACTIVE` and `open -g`, and checks
+  it took no focus; that scenario answers by keyboard, never by reading the tree. The
   scenario becomes a `--window-script` that Rune replays on the wall clock (typing, keys, taps on fixed keys). Waits become pauses.
   Script marks tell the driver to capture the window (`screencapture -l`, that window only, even behind others), to check an
   expectation by what the window says to assistive technology (`scripts/qa/ax-texts.js`), or to press a control whose key is made
@@ -83,7 +87,33 @@ unless `ring: false`), `title`, `daemon`, `file`, `no_file`, `sh`, `git_same`, `
 - The folder panel is never shown (see above). Real-window clicks on fixed keys go through Rune's script input, not the system's
   pointer: the system's event path is not exercised.
 - Reading the window's accessibility tree takes seconds, so window runs leave long pauses after presses and checks.
-- Pressing by accessible name depends on the window's accessibility tree being current. Where controls that are on screen are
-  missing from it (seen in the 2026-11-26 runs), the scenario answers by keyboard instead (Needs you, Return) and the gap is
-  reported as an app defect.
 - A real window run cannot click the system's notification permission prompt: it records it and needs the person once.
+
+## Finding: an inactive window's accessibility tree goes stale (Rune at 53f6d36)
+
+Measured on 2026-11-26 with the bare binary, a temporary data folder, a window script that types a task at about 10 s, and
+`RUNE_A11Y_LOG=1` (Rune logs each activation and each tree update it sends):
+
+| Window | Assistive client first asks | What happened |
+| --- | --- | --- |
+| inactive (`RUNE_OPEN_INACTIVE`, behind the frontmost app) | at 6 s, after the app connected | Rune sent 1 to 3 nodes every frame and never the task opening (dozens of nodes); the tree stayed on Home while the window drew the task |
+| inactive | at 3 s, before the app connected | the window stopped advancing: still "Starting Neko…", the script's typing not shown |
+| active | at 3 s | the tree followed: the task's controls were there |
+| inactive | at 12 s, nothing changed after | the tree was right (it was built at activation) |
+
+Neko's code is not involved: it never touches the tree root, and the same build behaves differently by window state alone. In
+Rune, updates go out only from `a11y_turn` at the end of a turn, and `RuntimeCore::a11y_update` returns nothing while
+`paint.drawn.len() != tree.nodes.len()`; an inactive window that commits without painting every node (Rune's covered path,
+`covered_frame`, lands frames without painting and marks live content not visible) never sends its structural changes. That is the
+likely cause; we did not patch Rune to prove it.
+
+**Real VoiceOver users** work in the active window, where the tree follows (the third row): they are not affected while Neko is in
+front. Someone using VoiceOver in another app while Neko works in the background gets a stale tree for Neko until its window
+becomes active again (whether it catches up at once on activation was not measured).
+
+**The rig** opens window runs active (above). **Upstream report (not filed):** "rune 53f6d36, macOS: with a window opened inactive
+(`RUNE_OPEN_INACTIVE`) and behind another app's window, once an assistive client activates the AccessKit adapter, structural changes
+to the view are never sent (`RUNE_A11Y_LOG` shows only 1-3 node updates per frame); if activation happens before the app's first
+data arrives, the window stops advancing until it is activated. Expected: the accessibility tree follows the view in any window
+state, as it does in an active window. Suspected: `a11y_update`'s early return when `paint.drawn` and `tree.nodes` differ, together
+with frames that commit without painting while covered." Narrowest workaround for Neko: none needed in the app; the rig runs active.

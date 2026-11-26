@@ -62,6 +62,10 @@ their position and selected state, lists and fields are labelled, each page has 
 landmarks exist. Reduce Motion goes to rune-ui's theme (`Theme::with_reduced_motion`); the system's light/dark is read every frame
 (`tests/structure.rs` switches it live).
 
+In a real window the tree follows the view while the window is active. Behind another app (inactive), Rune at 53f6d36 stops
+sending its structural changes once an assistive client is attached: see "Finding" in `docs/knowledge/qa.md`. VoiceOver users in
+Neko's window are not affected; the rig's window runs open active for that reason.
+
 ## The link
 
 The supervisor thread reads `daemon.json` and `token`, opens a `Link`, and pushes `Connected`, each message, then `Lost` into the

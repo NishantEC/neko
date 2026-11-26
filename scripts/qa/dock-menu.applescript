@@ -16,11 +16,15 @@ on run argv
 			end considering
 			if found is missing value then return "NO DOCK ITEM"
 			perform action "AXShowMenu" of found
-			delay 0.8
+			-- The menu can take a moment to fill: read it until it has items, for up to two seconds.
 			set names to {}
-			try
-				set names to name of every menu item of menu 1 of found
-			end try
+			repeat 8 times
+				delay 0.25
+				try
+					set names to name of every menu item of menu 1 of found
+				end try
+				if (count of names) > 0 then exit repeat
+			end repeat
 			key code 53
 		end tell
 	end tell

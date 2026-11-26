@@ -18,6 +18,8 @@ pub struct Scenario {
     pub headless: bool,
     /// Whether its window runs need the development bundle (notifications, the Dock badge, links).
     pub bundle: bool,
+    /// Whether its window opens without focus (`RUNE_OPEN_INACTIVE`): only where the scenario needs Neko not in front.
+    pub inactive: bool,
     /// The window's size in points.
     pub size: (f32, f32),
     /// Folders made before the app starts, by name (`$files/NAME`).
@@ -119,6 +121,7 @@ pub fn load(path: &Path, places: &Places) -> Result<Scenario, String> {
         window: v["window"].as_bool().unwrap_or(false),
         headless: v["headless"].as_bool().unwrap_or(true),
         bundle: v["bundle"].as_bool().unwrap_or(false),
+        inactive: v["inactive"].as_bool().unwrap_or(false),
         size,
         files,
         claude_settings: v["setup"]["claude_settings"].as_object().map(|o| Value::Object(o.clone())),
