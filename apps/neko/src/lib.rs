@@ -9,7 +9,9 @@ pub mod icons;
 pub mod link;
 pub mod menu;
 pub mod scenes;
+pub mod settings_view;
 pub mod state;
+pub mod task_view;
 /// rune-ui's components, copied in by the `rune-ui` CLI (`rune-ui.lock`); never edited here (docs/knowledge/rune-ui-in-neko.md).
 pub mod ui;
 pub mod view;
@@ -23,6 +25,8 @@ use state::{App, Daemon};
 
 /// The prefs store for the window's frame (`~/Library/Application Support/dev.neko.app/prefs.json`), apart from the daemon's data.
 pub const PREFS_ID: &str = "dev.neko.app";
+/// The last folder chosen for a new task, in the same prefs.
+pub const FOLDER_KEY: &str = "last-folder";
 
 thread_local! {
     /// The window's width as the last layout saw it (written by the view, read by `poll`).
@@ -67,7 +71,9 @@ fn init() -> App {
     let (now_ms, utc_offset_s) = state::system_clock();
     let saved = SAVED.with(Cell::get);
     let width = Some(saved.map_or(window_place::DEFAULT.0, |f| f.w.max(window_place::MIN.0)) as f32);
-    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, ..App::default() }
+    // The folder chosen last time, if it is still there.
+    let folder = rune::prefs::Prefs::open(PREFS_ID).get::<String>(FOLDER_KEY).filter(|f| std::path::Path::new(f).is_dir());
+    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, folder, ..App::default() }
 }
 
 /// New Task: Home with the keyboard in the composer.
@@ -83,13 +89,22 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         new_task(s, tx);
         return true;
     }
+    if ev.is_command(',') && !(m.shift || m.alt || m.ctrl) {
+        s.open_settings();
+        tx.instant();
+        return true;
+    }
     if rune_kit::shell::is_sidebar_toggle(ev) || (ev.is_command('s') && m.ctrl && !(m.shift || m.alt)) {
         s.toggle_sidebar();
         tx.instant();
         return true;
     }
     if ev.key == Key::Escape && !(m.cmd || m.shift || m.alt || m.ctrl) {
-        // Escape gives focus back: nothing keeps the keyboard.
+        // Escape stops the open task's agent while it works; otherwise it gives focus back.
+        if !s.settings_open && s.open_is_working() {
+            s.stop();
+            return true;
+        }
         s.draft.focused = false;
         tx.blur();
         return true;
@@ -100,6 +115,9 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 /// Each frame: what the link brought, the clock, the width, the window's title and frame, the menu.
 pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     let mut changed = s.drain_link();
+    if let Some((words, urgent)) = s.announce.take() {
+        tx.announce(words, if urgent { rune::LiveRegion::Assertive } else { rune::LiveRegion::Polite });
+    }
     let (now, offset) = (s.clock)();
     if now / 60_000 != s.now_ms / 60_000 {
         changed = true;

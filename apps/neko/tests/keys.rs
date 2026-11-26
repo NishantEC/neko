@@ -27,15 +27,15 @@ fn tab_reaches_every_control_once_in_reading_order() {
     }
     assert_eq!(
         seen,
-        ["sidebar-hide", "new-task", "home", "task-task_00000000000000000000000004", "task-task_00000000000000000000000001", "composer-input"],
-        "each list is one stop; the empty composer's Send is off"
+        ["sidebar-hide", "new-task", "home", "task-task_00000000000000000000000004", "task-task_00000000000000000000000001", "composer-input", "folder-chip"],
+        "each list is one stop; the empty composer's Send is off; the folder chip follows the words"
     );
     // Round once, the focus is back on the first control; Shift+Tab walks back the same way, wrapping.
     assert_eq!(focus(&rt).as_deref(), Some("sidebar-hide"));
     tab(&mut rt, true);
-    assert_eq!(focus(&rt).as_deref(), Some("composer-input"));
+    assert_eq!(focus(&rt).as_deref(), Some("folder-chip"));
     tab(&mut rt, true);
-    assert_eq!(focus(&rt).as_deref(), Some("task-task_00000000000000000000000001"));
+    assert_eq!(focus(&rt).as_deref(), Some("composer-input"));
 }
 
 #[test]
@@ -83,4 +83,71 @@ fn command_n_and_control_command_s() {
     assert!(rt.elements().iter().all(|e| e.key.as_deref() != Some("sidebar")));
     press(&mut rt, Key::Command('s'), Mods { cmd: true, ctrl: true, ..Mods::default() });
     assert!(rt.state.sidebar_shown(), "and shows it again");
+}
+
+/// Every Tab stop of a scene, once round.
+fn stops(rt: &mut rune::Runtime<neko_app::state::App>) -> Vec<String> {
+    let mut seen = Vec::new();
+    for _ in 0..60 {
+        tab(rt, false);
+        let Some(k) = focus(rt) else { continue };
+        if seen.first() == Some(&k) {
+            break;
+        }
+        assert!(!seen.contains(&k), "{k} reached twice: {seen:?}");
+        seen.push(k);
+    }
+    seen
+}
+
+#[test]
+fn the_task_view_is_reached_in_reading_order() {
+    let mut rt = runtime((1200.0, 800.0), false, scene("task-done"));
+    let s = stops(&mut rt);
+    let at = |k: &str| s.iter().position(|x| x == k).unwrap_or_else(|| panic!("{k} is not reached: {s:?}"));
+    assert!(at("copy-task-message") < at("worked-run_1-trigger"), "the person's words, then the fold: {s:?}");
+    assert!(at("worked-run_1-trigger") < at("reply-input"), "{s:?}");
+    assert!(s.iter().any(|k| k.starts_with("copy-part-")), "the answer has its copy button: {s:?}");
+    // Return opens the fold where it has focus; its steps are then reached too.
+    while focus(&rt).as_deref() != Some("worked-run_1-trigger") {
+        tab(&mut rt, false);
+    }
+    press(&mut rt, Key::Enter, Mods::default());
+    assert!(rt.state.is_open("worked-run_1"));
+    settle(&mut rt);
+    let s = stops(&mut rt);
+    assert!(s.iter().any(|k| k == "part-2-trigger"), "a tool line inside the fold: {s:?}");
+}
+
+#[test]
+fn a_request_is_answered_from_the_keyboard_and_escape_denies() {
+    let mut rt = runtime((1200.0, 800.0), false, scene("task-needs-you"));
+    let s = stops(&mut rt);
+    let allow = s.iter().position(|k| k.ends_with("-allow")).expect("Allow once is reached");
+    assert!(s[allow + 1].ends_with("-always") && s[allow + 2].ends_with("-deny"), "the default answer first: {s:?}");
+    let mut rt = runtime((1200.0, 800.0), false, scene("task-needs-you-destructive"));
+    let s = stops(&mut rt);
+    assert!(!s.iter().any(|k| k.ends_with("-always")), "no Always for a destructive step: {s:?}");
+    assert!(s.iter().any(|k| k.ends_with("-allow")) && s.iter().any(|k| k.ends_with("-deny")));
+}
+
+#[test]
+fn escape_stops_a_working_task_and_the_composer_shows_stop() {
+    let mut rt = runtime((1200.0, 800.0), false, scene("task-working"));
+    assert!(rt.state.open_is_working());
+    let stop = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("reply-submit")).expect("the composer's button");
+    assert_eq!(stop.label.as_deref(), Some("Stop"), "Send becomes Stop while it works");
+    // No daemon in this test: pressing Escape asks to stop (the request has nowhere to go), and takes the key.
+    press(&mut rt, Key::Escape, Mods::default());
+    assert!(rt.state.open_is_working(), "the state changes only when the daemon says so");
+}
+
+#[test]
+fn command_comma_opens_settings() {
+    let mut rt = runtime((1200.0, 800.0), false, scene("tasks-home"));
+    press(&mut rt, Key::Command(','), Mods { cmd: true, ..Mods::default() });
+    assert!(rt.state.settings_open);
+    assert_eq!(rt.state.window_title(), "Settings");
+    settle(&mut rt);
+    assert!(rt.elements().iter().any(|e| e.key.as_deref() == Some("settings-title")));
 }

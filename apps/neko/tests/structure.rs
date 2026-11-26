@@ -1,5 +1,6 @@
 //! Every scene, at every window shape, in light and dark: nothing cut off that is not meant to be, no two controls on top of each
-//! other, the header band on the traffic lights' centre line, Figtree everywhere, and the sidebar folded at 760.
+//! other, the header band on the traffic lights' centre line, Figtree everywhere (code in the system's monospaced face), and the
+//! sidebar folded at 760.
 
 mod support;
 use support::*;
@@ -27,18 +28,21 @@ fn every_scene_holds_the_structure_rules() {
                         && !text.trim().is_empty()
                     {
                         let family = style.family.clone().unwrap_or_default();
-                        assert!(family.to_lowercase().contains("figtree"), "{at}: {text:?} is set in {family:?}, not Figtree");
+                        // Code, commands and tool input are set in the system's monospaced face (rune-ui's `mono`); all else is Figtree.
+                        let ok = family.to_lowercase().contains("figtree") || family == ".SF NS Mono";
+                        assert!(ok, "{at}: {text:?} is set in {family:?}, not Figtree (or the system's monospaced face for code)");
                     }
                 }
-                // Controls never sit on one another (a hit area and the control it holds are one).
-                let controls: Vec<_> = els.iter().filter(|e| e.focusable && e.rect[2] > 0.0 && e.rect[3] > 0.0).collect();
+                // Controls never sit on one another where they can be seen (a hit area and the control it holds are one; a control
+                // scrolled out of its viewport is judged by what is left visible).
+                let controls: Vec<_> = els.iter().filter(|e| e.focusable && e.visible[2] > 0.5 && e.visible[3] > 0.5).collect();
                 for (i, a) in controls.iter().enumerate() {
                     for b in &controls[i + 1..] {
                         if a.path.starts_with(&b.path) || b.path.starts_with(&a.path) {
                             continue;
                         }
-                        let [ax, ay, aw, ah] = a.rect;
-                        let [bx, by, bw, bh] = b.rect;
+                        let [ax, ay, aw, ah] = a.visible;
+                        let [bx, by, bw, bh] = b.visible;
                         let overlap = (ax + aw).min(bx + bw) - ax.max(bx) > 0.5 && (ay + ah).min(by + bh) - ay.max(by) > 0.5;
                         assert!(!overlap, "{at}: {:?} and {:?} overlap", a.key, b.key);
                     }

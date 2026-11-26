@@ -61,6 +61,8 @@ fn item(id: &'static str, title: &'static str, menu: Option<&'static str>, key: 
 pub fn model(sidebar: bool, full_screen: bool) -> Vec<Item> {
     vec![
         Item { keys_first: false, ..item("neko-about", "About Neko", None, None) },
+        // After About in the app menu, where Mac apps keep it.
+        item("neko-settings", "Settings…", None, Some("cmd+,")),
         item("neko-new-task", "New Task", Some("File"), Some("cmd+n")),
         Item { separator: true, ..item("neko-file-sep", "", Some("File"), None) },
         item("neko-close-window", "Close Window", Some("File"), Some("cmd+w")),
@@ -73,6 +75,10 @@ pub fn model(sidebar: bool, full_screen: bool) -> Vec<Item> {
 fn action(id: &str) -> fn(&mut App, &mut Tx) {
     match id {
         "neko-about" => |_, _| crate::about::show(),
+        "neko-settings" => |s, tx| {
+            s.open_settings();
+            tx.instant();
+        },
         "neko-new-task" => |s, tx| crate::new_task(s, tx),
         "neko-close-window" => |_, tx| tx.close_window(),
         "neko-sidebar" => |s, tx| {
@@ -95,7 +101,8 @@ pub fn items(model: &[Item]) -> Vec<MenuItem<App>> {
             if i.separator {
                 return MenuItem::separator().menu(i.menu.unwrap_or("File"));
             }
-            let mut m = if i.menu.is_none() { MenuItem::about(i.title, action(i.id)) } else { MenuItem::new(i.title, action(i.id)) };
+            // In the app menu: About replaces AppKit's own; anything else follows it (Rune's default place).
+            let mut m = if i.id == "neko-about" { MenuItem::about(i.title, action(i.id)) } else { MenuItem::new(i.title, action(i.id)) };
             m = m.id(i.id);
             if let Some(menu) = i.menu {
                 m = m.menu(menu);
@@ -204,7 +211,7 @@ mod tests {
         let lines: Vec<String> = model(true, false).iter().filter(|i| !i.separator).map(|i| format!("{} / {} / {}", i.menu.unwrap_or("Neko"), i.title, i.key.unwrap_or("-"))).collect();
         assert_eq!(
             lines,
-            ["Neko / About Neko / -", "File / New Task / cmd+n", "File / Close Window / cmd+w", "View / Hide Sidebar / ctrl+cmd+s", "View / Enter Full Screen / ctrl+cmd+f", "Help / Neko Help / -"]
+            ["Neko / About Neko / -", "Neko / Settings… / cmd+,", "File / New Task / cmd+n", "File / Close Window / cmd+w", "View / Hide Sidebar / ctrl+cmd+s", "View / Enter Full Screen / ctrl+cmd+f", "Help / Neko Help / -"]
         );
         let folded = model(false, true);
         assert!(folded.iter().any(|i| i.title == "Show Sidebar") && folded.iter().any(|i| i.title == "Exit Full Screen"), "titles follow the window");

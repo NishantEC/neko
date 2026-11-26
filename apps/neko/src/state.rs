@@ -1,7 +1,11 @@
 //! What the window holds, and what each thing the person or the daemon does changes in it. No drawing here and no I/O: the link
 //! is reached only through [`App::send`].
 
-use neko_protocol::{Change, Reply, Request, ServerMessage, Task, TaskId};
+use std::collections::{HashMap, HashSet};
+
+use neko_protocol::{
+    Change, Decision, Part, PartBody, Permission, PermissionId, PermissionMode, Reply, Request, Run, RunStatus, RuntimeInfo, ServerMessage, Settings, Task, TaskId, Transcript, UsageTotal,
+};
 use rune::TextEdit;
 
 use crate::link::{Conn, Incoming};
@@ -54,6 +58,91 @@ pub struct App {
     /// Until when (seconds of the window's clock) the raw menu fix-ups keep running after a menu change.
     pub menu_fix_until: f64,
     pub handle: Option<rune::AppHandle<App>>,
+    /// Each task's runs, parts and requests, as the daemon last said (loaded when the task is opened, kept by events).
+    pub books: HashMap<TaskId, Book>,
+    /// The words in each task's own composer.
+    pub replies: HashMap<TaskId, TextEdit>,
+    /// Folds the person opened (by key).
+    pub open_folds: HashSet<String>,
+    /// Whether the task's conversation shows its newest content (it reports this).
+    pub at_bottom: bool,
+    /// The folder Home's composer will give a new task (None: a scratch folder).
+    pub folder: Option<String>,
+    /// Settings (⌘,) shows instead of the content.
+    pub settings_open: bool,
+    /// The agent CLIs and the settings, as the daemon last said.
+    pub runtimes: Option<(Vec<RuntimeInfo>, Settings)>,
+    /// Today's usage, for the foot of the sidebar.
+    pub day: Option<UsageTotal>,
+    /// The task whose words stream to this window.
+    pub watching: Option<TaskId>,
+    /// Requests sent and what their reply is for.
+    pub asked: HashMap<u64, Asked>,
+    /// Something to say to assistive technology at the next frame (the words, and whether it interrupts).
+    pub announce: Option<(String, bool)>,
+}
+
+/// What a sent request's reply is for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Asked {
+    /// A follow-up: its words go back in the box if it is refused.
+    FollowUp(TaskId, String),
+    Other,
+}
+
+/// A task's transcript as the window holds it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Book {
+    pub runs: Vec<Run>,
+    pub parts: Vec<Part>,
+    pub permissions: HashMap<PermissionId, Permission>,
+    /// The daemon's whole transcript arrived (until then, events only add to what is there).
+    pub loaded: bool,
+}
+
+impl Book {
+    pub fn from(t: Transcript) -> Book {
+        Book { runs: t.runs, parts: t.parts, permissions: t.permissions.into_iter().map(|p| (p.id.clone(), p)).collect(), loaded: true }
+    }
+
+    fn run(&mut self, r: Run) {
+        match self.runs.iter_mut().find(|x| x.id == r.id) {
+            Some(x) => *x = r,
+            None => {
+                self.runs.push(r);
+                self.runs.sort_by(|a, b| (a.started_ms, &a.id.0).cmp(&(b.started_ms, &b.id.0)));
+            }
+        }
+    }
+
+    fn part(&mut self, p: Part) {
+        match self.parts.iter_mut().find(|x| x.id == p.id) {
+            Some(x) => *x = p,
+            None => {
+                let at = self.parts.iter().position(|x| x.seq > p.seq).unwrap_or(self.parts.len());
+                self.parts.insert(at, p);
+            }
+        }
+    }
+
+    fn delta(&mut self, part: &neko_protocol::PartId, more: &str) {
+        if let Some(p) = self.parts.iter_mut().find(|x| &x.id == part) {
+            match &mut p.body {
+                PartBody::Agent { text, .. } | PartBody::Thinking { text, .. } => text.push_str(more),
+                _ => {}
+            }
+        }
+    }
+
+    /// The run in progress, if any.
+    pub fn running(&self) -> Option<&Run> {
+        self.runs.iter().rev().find(|r| r.status == RunStatus::Running)
+    }
+
+    /// What the task's runs cost so far, as reported (None when none reported a cost).
+    pub fn cost(&self) -> Option<f64> {
+        self.runs.iter().filter_map(|r| r.usage.as_ref().and_then(|u| u.cost_usd)).fold(None, |a, c| Some(a.unwrap_or(0.0) + c))
+    }
 }
 
 /// The real clock: now and the local offset.
@@ -84,8 +173,25 @@ impl Default for App {
             full_screen: false,
             menu_fix_until: 0.0,
             handle: None,
+            books: HashMap::new(),
+            replies: HashMap::new(),
+            open_folds: HashSet::new(),
+            at_bottom: true,
+            folder: None,
+            settings_open: false,
+            runtimes: None,
+            day: None,
+            watching: None,
+            asked: HashMap::new(),
+            announce: None,
         }
     }
+}
+
+/// Local midnight of the day `now_ms` is in, in milliseconds since the epoch.
+pub fn midnight(now_ms: i64, utc_offset_s: i64) -> i64 {
+    let local = now_ms / 1000 + utc_offset_s;
+    (local.div_euclid(86_400) * 86_400 - utc_offset_s) * 1000
 }
 
 impl App {
@@ -94,9 +200,120 @@ impl App {
         self.open.as_ref().and_then(|id| self.tasks.iter().find(|t| &t.id == id))
     }
 
-    /// What the window's title says: the open task's title, else "Neko".
+    /// What the window's title says: the open task's title, Settings, else "Neko".
     pub fn window_title(&self) -> String {
+        if self.settings_open {
+            return "Settings".to_owned();
+        }
         self.open_task().map_or_else(|| "Neko".to_owned(), |t| t.title.clone())
+    }
+
+    /// The open task's transcript.
+    pub fn book(&self) -> Option<&Book> {
+        self.open.as_ref().and_then(|id| self.books.get(id))
+    }
+
+    /// Whether the open task's agent is at work.
+    pub fn open_is_working(&self) -> bool {
+        self.open_task().is_some_and(|t| t.status.is_active()) || self.book().is_some_and(|b| b.running().is_some())
+    }
+
+    /// The open task's composer.
+    pub fn reply_mut(&mut self) -> &mut TextEdit {
+        let id = self.open.clone().unwrap_or(TaskId(String::new()));
+        self.replies.entry(id).or_default()
+    }
+
+    pub fn reply_box(&self) -> Option<&TextEdit> {
+        self.open.as_ref().and_then(|id| self.replies.get(id))
+    }
+
+    /// Opens or shuts a fold.
+    pub fn flip(&mut self, key: &str) {
+        if !self.open_folds.remove(key) {
+            self.open_folds.insert(key.to_owned());
+        }
+    }
+
+    pub fn is_open(&self, key: &str) -> bool {
+        self.open_folds.contains(key)
+    }
+
+    /// Asks for the open task's transcript and its streaming words.
+    fn follow_open(&mut self) {
+        let want = self.open.clone();
+        if self.watching != want {
+            self.send(Request::WatchTask { task: want.clone() });
+            self.watching = want.clone();
+        }
+        if let Some(id) = want {
+            self.send(Request::GetTranscript { task: id });
+        }
+    }
+
+    /// Return in a task's composer: the words continue the conversation.
+    pub fn follow_up(&mut self) {
+        let Some(task) = self.open.clone() else { return };
+        let words = self.reply_box().map(|r| r.text.clone()).unwrap_or_default();
+        if words.trim().is_empty() || self.open_is_working() {
+            return;
+        }
+        if let Some(id) = self.send(Request::FollowUp { task: task.clone(), words: words.clone() }) {
+            self.asked.insert(id, Asked::FollowUp(task.clone(), words));
+            self.replies.insert(task, TextEdit::default());
+            self.at_bottom = true;
+        }
+    }
+
+    /// Stop (the composer's button, Escape): the open task's agent stops.
+    pub fn stop(&mut self) {
+        if let Some(task) = self.open.clone() {
+            self.send(Request::StopTask { task });
+        }
+    }
+
+    /// An answer to a permission request.
+    pub fn decide(&mut self, permission: &PermissionId, decision: Decision) {
+        self.send(Request::AnswerPermission { permission: permission.clone(), decision });
+    }
+
+    /// The folder new tasks get (None: a scratch folder). Remembered for the next launch in the real window.
+    pub fn choose_folder(&mut self, folder: Option<String>) {
+        self.folder = folder.clone();
+        if self.persist {
+            let _ = std::thread::Builder::new().name("neko-prefs".into()).spawn(move || {
+                let mut prefs = rune::prefs::Prefs::open(crate::PREFS_ID);
+                let _ = match folder {
+                    Some(f) => prefs.set(crate::FOLDER_KEY, &f),
+                    None => prefs.set(crate::FOLDER_KEY, &String::new()),
+                };
+            });
+        }
+    }
+
+    /// Settings (⌘,).
+    pub fn open_settings(&mut self) {
+        self.settings_open = true;
+        self.send(Request::ListRuntimes);
+    }
+
+    pub fn set_permission_mode(&mut self, mode: PermissionMode) {
+        if let Some((_, s)) = &self.runtimes {
+            let settings = Settings { permission_mode: mode, ..s.clone() };
+            self.send(Request::SetSettings { settings });
+        }
+    }
+
+    pub fn set_runtime(&mut self, id: &str) {
+        if let Some((_, s)) = &self.runtimes {
+            let settings = Settings { runtime: id.to_owned(), ..s.clone() };
+            self.send(Request::SetSettings { settings });
+        }
+    }
+
+    fn ask_day(&mut self) {
+        let from = midnight(self.now_ms, self.utc_offset_s);
+        self.send(Request::DayUsage { from_ms: from });
     }
 
     /// Whether the sidebar shows: the person's choice, else wide windows only.
@@ -119,16 +336,21 @@ impl App {
 
     pub fn go_home(&mut self) {
         self.open = None;
+        self.settings_open = false;
+        self.follow_open();
     }
 
     /// New Task (⌘N, the sidebar's button): Home, with the keyboard in the composer.
     pub fn go_home_and_focus(&mut self) {
-        self.open = None;
+        self.go_home();
         self.draft.focused = true;
     }
 
     pub fn open_task_id(&mut self, id: &TaskId) {
         self.open = Some(id.clone());
+        self.settings_open = false;
+        self.at_bottom = true;
+        self.follow_open();
     }
 
     /// Sends a request; None when there is no daemon to send it to.
@@ -142,7 +364,7 @@ impl App {
         if words.trim().is_empty() || self.creating.is_some() {
             return;
         }
-        match self.send(Request::CreateTask { words: words.clone() }) {
+        match self.send(Request::CreateTask { words: words.clone(), folder: self.folder.clone() }) {
             Some(id) => {
                 self.creating = Some((id, words));
                 self.draft = TextEdit::default();
@@ -166,6 +388,11 @@ impl App {
                 self.daemon = Daemon::Connected;
                 self.send(Request::Subscribe);
                 self.send(Request::ListTasks);
+                self.send(Request::ListRuntimes);
+                self.ask_day();
+                // A new connection watches nothing yet.
+                self.watching = None;
+                self.follow_open();
             }
             Incoming::Lost(why) => {
                 self.daemon = Daemon::Lost(why);
@@ -176,13 +403,98 @@ impl App {
                     self.draft = TextEdit::new(&words);
                 }
             }
-            Incoming::Message(ServerMessage::Event { change: Change::TaskCreated { task }, .. }) => self.upsert(task),
+            Incoming::Message(ServerMessage::Event { change, .. }) => self.change(change),
             Incoming::Message(ServerMessage::Reply { id, reply }) => self.reply(id, reply),
+        }
+    }
+
+    /// A change the daemon pushed.
+    pub fn change(&mut self, change: Change) {
+        match change {
+            Change::TaskCreated { task } => self.upsert(task),
+            Change::TaskUpdated { task } => {
+                let before = self.tasks.iter().find(|t| t.id == task.id).map(|t| t.status);
+                if before != Some(task.status) {
+                    self.say_status(&task);
+                }
+                self.upsert(task);
+            }
+            Change::RunChanged { run } => {
+                let ended = run.status != RunStatus::Running;
+                self.books.entry(run.task.clone()).or_default().run(run);
+                if ended {
+                    self.ask_day();
+                }
+            }
+            Change::PartChanged { part } => self.books.entry(part.task.clone()).or_default().part(part),
+            Change::PartDelta { task, part, text } => {
+                if let Some(b) = self.books.get_mut(&task) {
+                    b.delta(&part, &text);
+                }
+            }
+            Change::PermissionChanged { permission } => {
+                self.books.entry(permission.task.clone()).or_default().permissions.insert(permission.id.clone(), permission);
+            }
+            Change::SettingsChanged { settings } => {
+                if let Some((_, s)) = &mut self.runtimes {
+                    *s = settings;
+                }
+            }
+        }
+    }
+
+    /// Tells assistive technology what a task's new state means, when it matters.
+    fn say_status(&mut self, task: &Task) {
+        use neko_protocol::TaskStatus as S;
+        let words = match task.status {
+            S::NeedsYou => Some((format!("Neko needs you: {}", task.title), true)),
+            S::Done => Some((format!("Neko finished: {}", task.title), false)),
+            S::Failed => Some((format!("Neko could not finish: {}", task.title), false)),
+            S::Stopped => Some((format!("Stopped: {}", task.title), false)),
+            _ => None,
+        };
+        if let Some(w) = words {
+            self.announce = Some(w);
         }
     }
 
     fn reply(&mut self, id: u64, reply: Reply) {
         let mine = self.creating.as_ref().is_some_and(|(c, _)| *c == id);
+        let asked = self.asked.remove(&id);
+        match reply {
+            Reply::Transcript { transcript } => {
+                let id = transcript.task.id.clone();
+                self.upsert(transcript.task.clone());
+                // Words that streamed in between are in the stored part or arrive as deltas after it: the whole replaces.
+                self.books.insert(id, Book::from(transcript));
+                return;
+            }
+            Reply::Runtimes { runtimes, settings } => {
+                self.runtimes = Some((runtimes, settings));
+                return;
+            }
+            Reply::Settings { settings } => {
+                if let Some((_, s)) = &mut self.runtimes {
+                    *s = settings;
+                }
+                return;
+            }
+            Reply::DayUsage { usage } => {
+                self.day = Some(usage);
+                return;
+            }
+            Reply::Error { message, .. } if matches!(asked, Some(Asked::FollowUp(..))) => {
+                if let Some(Asked::FollowUp(task, words)) = asked {
+                    let r = self.replies.entry(task).or_default();
+                    if r.text.is_empty() {
+                        *r = TextEdit::new(&words);
+                    }
+                }
+                self.notice = Some(message);
+                return;
+            }
+            _ => {}
+        }
         match reply {
             Reply::Tasks { tasks } => {
                 // A list answers from the store, so it replaces what the window had (a task made meanwhile comes as an event).
@@ -193,7 +505,10 @@ impl App {
             Reply::Task { task } => {
                 if mine {
                     self.creating = None;
-                    self.open = Some(task.id.clone());
+                    let id = task.id.clone();
+                    self.upsert(task);
+                    self.open_task_id(&id);
+                    return;
                 }
                 self.upsert(task);
             }
@@ -205,7 +520,7 @@ impl App {
                 }
                 self.notice = Some(message);
             }
-            Reply::Error { .. } | Reply::Hello { .. } | Reply::Subscribed { .. } => {}
+            _ => {}
         }
     }
 
@@ -242,7 +557,7 @@ mod tests {
     use neko_protocol::TaskStatus;
 
     fn task(id: &str, ms: i64) -> Task {
-        Task { id: TaskId(id.into()), workspace: "default".into(), words: format!("words of {id}"), title: id.into(), created_ms: ms, status: TaskStatus::New }
+        Task { id: TaskId(id.into()), workspace: "default".into(), words: format!("words of {id}"), title: id.into(), created_ms: ms, status: TaskStatus::New, folder: None }
     }
 
     #[test]

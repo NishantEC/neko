@@ -165,6 +165,7 @@ Written by `scripts/licenses.py`. Each crate's own licence files go into the bun
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 |
 | profiling | 1.0.18 | MIT OR Apache-2.0 |
 | psm | 0.1.32 | MIT OR Apache-2.0 |
+| pulldown-cmark | 0.13.6 | MIT |
 | pxfm | 0.1.30 | BSD-3-Clause OR Apache-2.0 |
 | quick-error | 2.0.1 | MIT/Apache-2.0 |
 | quote | 1.0.47 | MIT OR Apache-2.0 |
@@ -175,6 +176,7 @@ Written by `scripts/licenses.py`. Each crate's own licence files go into the bun
 | read-fonts | 0.41.0 | MIT OR Apache-2.0 |
 | renderdoc-sys | 1.1.0 | MIT OR Apache-2.0 |
 | resvg | 0.45.1 | Apache-2.0 OR MIT |
+| rfd | 0.17.2 | MIT |
 | rgb | 0.8.53 | MIT |
 | roxmltree | 0.20.0 | MIT OR Apache-2.0 |
 | rune | 0.0.1 | MIT |
@@ -191,8 +193,8 @@ Written by `scripts/licenses.py`. Each crate's own licence files go into the bun
 | rune-taffy | 0.0.1 | MIT |
 | rune-text | 0.0.1 | MIT |
 | rune-tiny-skia-path | 0.11.4 | BSD-3-Clause |
-| rune-ui-style | 0.8.0 | MIT |
-| rune-ui-themes | 0.8.0 | MIT |
+| rune-ui-style | 0.8.1 | MIT |
+| rune-ui-themes | 0.8.1 | MIT |
 | rusqlite | 0.37.0 | MIT |
 | rustc-demangle | 0.1.28 | MIT/Apache-2.0 |
 | rustc-hash | 1.1.0 | Apache-2.0/MIT |
@@ -243,6 +245,7 @@ Written by `scripts/licenses.py`. Each crate's own licence files go into the bun
 | tracing-core | 0.1.36 | MIT |
 | tungstenite | 0.30.0 | MIT OR Apache-2.0 |
 | typenum | 1.20.1 | MIT OR Apache-2.0 |
+| unicase | 2.10.0 | MIT OR Apache-2.0 |
 | unicode-ident | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 |
 | unicode-segmentation | 1.13.3 | MIT OR Apache-2.0 |
 | unicode-width | 0.2.3 | MIT OR Apache-2.0 |

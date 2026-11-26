@@ -21,8 +21,9 @@ name = "neko"
 path = "src/main.rs"
 
 [dependencies]
-rune = { git = "https://github.com/anomalyco/rune", rev = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2" }
-rune-kit = { git = "https://github.com/anomalyco/rune", rev = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2" }
+# `native-file-dialog`: the Mac's open panel for the folder a task works in (rfd, MIT).
+rune = { git = "https://github.com/anomalyco/rune", rev = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2", features = ["native-file-dialog"] }
+rune-kit = { git = "https://github.com/anomalyco/rune", rev = "53f6d36a96439d357a6f2a2560383d7b9e9ec9c2", features = ["markdown"] }
 rune-ui-style = { git = "https://github.com/NishantEC/rune-ui", tag = "v0.8.1" } # privacy-ok: rune-ui's public repository (a dependency)
 rune-ui-themes = { git = "https://github.com/NishantEC/rune-ui", tag = "v0.8.1" } # privacy-ok: rune-ui's public repository (a dependency)
 neko-protocol = { path = "../../crates/neko-protocol", features = ["ws"] }
