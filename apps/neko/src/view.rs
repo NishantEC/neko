@@ -133,8 +133,9 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     // A warm window ground, the sidebar an inset panel on it, the content on paper.
     let mut root = row().key(ROOT).w_full().h_full().fill(t.c.surface.bg).color(t.ink());
     if shown {
-        // Raised: while it comes in it paints above the content, never under it.
-        root = root.child(crate::sidebar::panel(&t, crate::sidebar::sidebar(s, &t, lights, &mut layer)).raise());
+        // Above the content beside it (while it comes in it paints over it, never under it), but under a dialog's scrim: `raise` put
+        // it above the whole window, so an open dialog left the sidebar undimmed.
+        root = root.child(crate::sidebar::panel(&t, crate::sidebar::sidebar(s, &t, lights, &mut layer)).paint_order(1));
     }
     let page = if s.settings_open {
         crate::settings_view::settings_view(s, &t)
@@ -289,6 +290,16 @@ fn task_menu(s: &App, t: &Theme, task: &neko_protocol::Task, layer: &mut Vec<El>
 
 /// The panels that ask or say something: rename a workspace, remove one, remove a task, and why something was not done.
 fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
+    let first = layer.len();
+    dialogs_open(s, t, layer);
+    // rune-ui's scrim is the page's ink at half strength: in dark that is a light fog. A dialog dims the window, so in dark it is black.
+    if t.dark && layer.len() > first {
+        let scrim = layer.remove(first);
+        layer.insert(first, scrim.fill(rune::Color::BLACK.alpha(0.55)));
+    }
+}
+
+fn dialogs_open(s: &App, t: &Theme, layer: &mut Vec<El>) {
     if let Some((id, edit)) = &s.renaming {
         let name = s.workspace_of(id).map_or_else(String::new, |w| w.name.clone());
         let field = Input::new("rename-input", edit, |s: &mut App| &mut s.renaming.as_mut().expect("renaming").1).name("Name").on_submit(|s: &mut App| s.finish_rename()).build(t);

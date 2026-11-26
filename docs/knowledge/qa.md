@@ -77,6 +77,16 @@ on; `window: false` leaves a step to headless. Selectors match an element's `key
 (text, label or description), `role`, `focused`, `in` (an ancestor). Checks: `see`, `gone`, `count`, `focus` (with a drawn ring
 unless `ring: false`), `title`, `daemon`, `file`, `no_file`, `sh`, `git_same`, `all`, `any`.
 
+## House (the app's design)
+
+The scenarios run unchanged on House except one expectation: the run card is no longer titled "Changes", it reads "miso changed 2
+files" (`git-worktree`, "The run card shows the changes"). The band still has the workspace's name (`task-workspace`) and the
+folder line, which is quieter and drops its branch under 900 points. The rig found one crash House had introduced (Home's old cat
+picker stack underflowed with no cats yet), now gone with the picker's rewrite.
+
+Defect 10 (opening Review cross-faded the conversation and Review, both drawn at once) is checked by `apps/neko/tests/page_swap.rs`,
+which takes frames while the swap moves, not by a rig step: the rig's pictures are taken after things settle, so they cannot see it.
+
 ## What it cannot do (and why)
 
 - Rune's `--script` and `--window-script` replay on a clock: they cannot wait for an event. Headless runs use the driver; window
