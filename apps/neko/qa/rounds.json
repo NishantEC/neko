@@ -1,7 +1,7 @@
 {
   "name": "rounds",
   "title": "Rounds: make one, run it now, see where its task came from, switch it off, remove it",
-  "about": "From mochi's page, New round for mochi… makes a round that runs only on Run now in the acme-api workspace. Run now makes an ordinary task: it appears under acme-api, is mochi's, and says it came from the round. The round's history shows how it ended. Switching the round off is said on its card. Removing it asks first; its task stays.",
+  "about": "New round… on the Rounds page, with mochi picked, makes a round that runs only on Run now in the acme-api workspace. Run now makes an ordinary task: it appears under acme-api, is mochi's, and says it came from the round. The round's history shows how it ended. Switching the round off is said on its card. Removing it asks first; its task stays.",
   "cli": [
     "fake"
   ],
@@ -32,25 +32,23 @@
       "expect": "acme-api is a workspace"
     },
     {
-      "do": "click",
-      "on": {
-        "key": "cat-cat_mochi"
-      }
+      "do": "key",
+      "key": "cmd+3"
     },
     {
       "do": "wait",
       "until": {
         "see": {
-          "key": "cat-new-round"
+          "key": "rounds-new-empty"
         }
       },
       "within": 15,
-      "expect": "mochi's page offers New round for mochi…"
+      "expect": "Rounds says what it is and offers New round…"
     },
     {
       "do": "click",
       "on": {
-        "key": "cat-new-round"
+        "key": "rounds-new-empty"
       }
     },
     {
@@ -62,6 +60,30 @@
       },
       "within": 15,
       "expect": "The New round panel opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-cat"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-cat-menu-item*",
+          "label": "mochi"
+        }
+      },
+      "within": 15,
+      "expect": "The cat menu opens above the panel"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-cat-menu-item*",
+        "label": "mochi"
+      }
     },
     {
       "do": "click",
@@ -90,10 +112,21 @@
       }
     },
     {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-workspace-menu-item*",
+          "label": "acme-api"
+        }
+      },
+      "within": 15,
+      "expect": "The workspace menu opens"
+    },
+    {
       "do": "click",
       "on": {
-        "role": "menuitem",
-        "name": "acme-api"
+        "key": "round-workspace-menu-item*",
+        "label": "acme-api"
       }
     },
     {
@@ -136,12 +169,12 @@
         }
       },
       "within": 15,
-      "expect": "The round is on mochi's page"
+      "expect": "The round is on the Rounds page"
     },
     {
       "do": "snap",
       "name": "round-made",
-      "expect": "mochi's page lists the new round"
+      "expect": "The Rounds page lists the new round"
     },
     {
       "do": "click",
@@ -241,7 +274,7 @@
     {
       "do": "click",
       "on": {
-        "key": "round-*-history"
+        "key": "round-*-history-trigger"
       }
     },
     {

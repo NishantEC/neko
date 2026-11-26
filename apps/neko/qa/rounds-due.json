@@ -1,7 +1,7 @@
 {
   "name": "rounds-due",
   "title": "Rounds: a time comes while the app is open, the next is skipped while a request waits, pause all holds it",
-  "about": "In ask mode a round (every 6 hours, made from mochi's page) is made due by moving the scheduler's clock (a debug daemon with NEKO_DEBUG_CLOCK=1). Its task starts by itself and its step waits in Needs you, exactly as a task made by hand would. The next time comes while that request waits: it is skipped, with its reason. Pause all holds the third time. After the request is denied, letting rounds go on and a fourth time makes a second task.",
+  "about": "In ask mode a round (every 6 hours, mochi's) is made due by moving the scheduler's clock (a debug daemon with NEKO_DEBUG_CLOCK=1). Its task starts by itself and its step waits in Needs you, exactly as a task made by hand would. The next time comes while that request waits: it is skipped, with its reason. Pause all holds the third time. After the request is denied, letting rounds go on and a fourth time makes a second task.",
   "cli": [
     "fake"
   ],
@@ -36,25 +36,23 @@
       "secs": 0.5
     },
     {
-      "do": "click",
-      "on": {
-        "key": "cat-cat_mochi"
-      }
+      "do": "key",
+      "key": "cmd+3"
     },
     {
       "do": "wait",
       "until": {
         "see": {
-          "key": "cat-new-round"
+          "key": "rounds-new-empty"
         }
       },
       "within": 15,
-      "expect": "mochi's page offers New round for mochi…"
+      "expect": "Rounds says what it is and offers New round…"
     },
     {
       "do": "click",
       "on": {
-        "key": "cat-new-round"
+        "key": "rounds-new-empty"
       }
     },
     {
@@ -66,6 +64,30 @@
       },
       "within": 15,
       "expect": "The New round panel opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-cat"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-cat-menu-item*",
+          "label": "mochi"
+        }
+      },
+      "within": 15,
+      "expect": "The cat menu opens above the panel"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-cat-menu-item*",
+        "label": "mochi"
+      }
     },
     {
       "do": "click",
