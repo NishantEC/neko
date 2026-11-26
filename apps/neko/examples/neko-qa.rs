@@ -349,11 +349,58 @@ fn qa_state() -> App {
     App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: neko_app::state::system_clock, home, width: Some(size.0), persist: true, workspace, folded, ..App::default() }
 }
 
+/// A poster that posts nothing: it writes what would have been posted, as `NEKO_NOTIFY_LOG` has it (`notify::System` logs the same).
+struct LogPoster(PathBuf);
+
+impl LogPoster {
+    fn write(&self, event: Value) {
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&self.0) {
+            let _ = writeln!(f, "{event}");
+        }
+    }
+}
+
+impl neko_app::notify::Poster for LogPoster {
+    fn post(&self, n: &neko_app::notify::Note) {
+        let buttons: Vec<String> = n
+            .buttons
+            .iter()
+            .map(|b| match b {
+                neko_app::notify::Button::Action { label, .. } => (*label).to_owned(),
+                neko_app::notify::Button::Reply { label, .. } => format!("reply: {label}"),
+            })
+            .collect();
+        self.write(json!({"post": n.id, "title": n.title, "body": n.body, "buttons": buttons, "posted": true}));
+    }
+    fn withdraw(&self, ids: &[String]) {
+        self.write(json!({"withdraw": ids}));
+    }
+}
+
+/// `{{utc+N}}` in a step's words: the UTC time of day N minutes from now, as HH:MM (for a time the daemon, started with `TZ=UTC`, reads).
+fn with_times(text: &str) -> String {
+    let mut out = text.to_owned();
+    while let Some(at) = out.find("{{utc+") {
+        let Some(end) = out[at..].find("}}") else { break };
+        let minutes: i64 = out[at + 6..at + end].parse().unwrap_or(0);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+        let m = (now / 60 + minutes).rem_euclid(24 * 60);
+        out.replace_range(at..at + end + 2, &format!("{:02}:{:02}", m / 60, m % 60));
+    }
+    out
+}
+
 fn new_app(r: &Run) -> Runtime<App> {
     let _ = FIRST.set((r.s.size, std::env::var("HOME").ok()));
     let mut rt = neko_app::app().init(qa_state).headless_runtime(r.s.size, Env::new(false, 2.0));
     let conn = neko_app::link::Conn::start(r.places.data.clone(), None, || {});
-    rt.update(move |s, _| s.link_started(conn));
+    // Nothing reaches the system: what the app would post goes to the run's own log, in the form the window runs' log has, so the
+    // same checks (`notified`, `withdrawn`, `posts`) read it.
+    let log = r.places.work.join("notify.jsonl");
+    rt.update(move |s, _| {
+        s.notifier = neko_app::notify::Notifier::new(Box::new(LogPoster(log)));
+        s.link_started(conn);
+    });
     rt
 }
 
@@ -449,6 +496,9 @@ impl Headless<'_> {
                 }
             }
             return Err(why.join("; and "));
+        }
+        if c.get("notified").is_some() || c.get("withdrawn").is_some() || c.get("posts").is_some() {
+            return window::check_notify_log(self.r, c);
         }
         if let Some(sel) = c.get("see") {
             let rt = rt.ok_or("the app is not running")?;
@@ -559,7 +609,7 @@ impl Headless<'_> {
                 return self.snap(&step.stem()).map(Some);
             }
             "click" => self.click(&v["on"])?,
-            "type" => self.key(KeyEvent { key: Key::Text(v["text"].as_str().unwrap_or("").to_owned()), mods: Mods::default() })?,
+            "type" => self.key(KeyEvent { key: Key::Text(with_times(v["text"].as_str().unwrap_or(""))), mods: Mods::default() })?,
             "key" => {
                 let n = v["times"].as_u64().unwrap_or(1);
                 for _ in 0..n {

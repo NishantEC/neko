@@ -1,0 +1,414 @@
+{
+  "name": "briefing",
+  "title": "Briefing: what happened while the person was away, answered in place, marked read",
+  "about": "In ask mode a round (every day, a minute from now, mochi's or the first cat's) starts by itself and finishes; a task finishes; a second task waits on a request. The Briefing (⌘4) lists the finished tasks with the first sentence of their answers, the round's line, and the waiting request first, as a Needs you card. The request is answered from the Briefing; Mark as read (⌘↩) says the person is caught up and when the next briefing is; Home's line is gone; a new finished task makes it come back. Nothing here calls a model: the fake CLI answers, and the briefing is made from the daemon's own records.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "TZ": "UTC"
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-mode-1"
+        }
+      },
+      "within": 15,
+      "expect": "Settings opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-mode-1"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 0.5
+    },
+    {
+      "do": "key",
+      "key": "cmd+3"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "rounds-new-empty"
+        }
+      },
+      "within": 15,
+      "expect": "Rounds offers New round…"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "rounds-new-empty"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-name-input"
+        }
+      },
+      "within": 15,
+      "expect": "The New round panel opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-name-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Docs check"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-words-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check the docs for broken links [fake:plain]"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-kind-0"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-time"
+      }
+    },
+    {
+      "do": "key",
+      "key": "cmd+a"
+    },
+    {
+      "do": "type",
+      "text": "{{utc+1}}"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-save"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-*-run"
+        }
+      },
+      "within": 15,
+      "expect": "The round is made, due at the next minute"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Rename the label [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Rename the label"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "expect": "The first task finishes"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Run the tests [fake:hook-shell]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "perm-*-allow"
+        }
+      },
+      "within": 15,
+      "expect": "The second task waits on a request"
+    },
+    {
+      "do": "key",
+      "key": "cmd+3"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-*-last-words",
+          "text": "done"
+        }
+      },
+      "within": 150,
+      "expect": "The round started by itself at its minute and finished"
+    },
+    {
+      "do": "key",
+      "key": "cmd+4"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "briefing-title",
+              "text": "Since"
+            }
+          },
+          {
+            "see": {
+              "key": "briefing-summary",
+              "text": "2 finished, 1 needs you"
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "The Briefing counts what happened: 2 finished, 1 needs you"
+    },
+    {
+      "do": "snap",
+      "name": "briefing",
+      "expect": "The Briefing: the request first, then what finished, the round, the totals"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "briefing-needs"
+            }
+          },
+          {
+            "see": {
+              "key": "briefing-task-*-answer",
+              "text": "Hello from the fake Claude Code."
+            }
+          },
+          {
+            "count": {
+              "of": {
+                "key": "briefing-task-*-answer"
+              },
+              "is": 2
+            }
+          },
+          {
+            "see": {
+              "key": "briefing-round-*-what",
+              "text": "Docs check ran"
+            }
+          },
+          {
+            "see": {
+              "key": "briefing-totals-tasks",
+              "text": "2 tasks finished"
+            }
+          },
+          {
+            "see": {
+              "key": "briefing-totals-note",
+              "text": "API-equivalent, not charged on a subscription."
+            }
+          }
+        ]
+      },
+      "expect": "The right items in the right sections, with the first sentence of each answer, the round's line and the totals with the cost note"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "need-*-allow"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "key": "need-*-allow"
+        }
+      },
+      "within": 10,
+      "expect": "The request is answered from the Briefing and leaves it"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "briefing-summary",
+          "text": "3 finished"
+        }
+      },
+      "within": 20,
+      "expect": "The answered task goes on and finishes: 3 finished"
+    },
+    {
+      "do": "key",
+      "key": "cmd+return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "briefing-caught-up"
+        }
+      },
+      "within": 10,
+      "expect": "Mark as read (⌘↩): the page says the person is caught up"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "text": "Your next briefing is"
+            }
+          },
+          {
+            "gone": {
+              "key": "briefing-read"
+            }
+          }
+        ]
+      },
+      "expect": "It says when the next briefing is"
+    },
+    {
+      "do": "snap",
+      "name": "caught-up",
+      "expect": "You're caught up, and the page says when the next briefing is"
+    },
+    {
+      "do": "key",
+      "key": "cmd+1"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "key": "home-briefing"
+        }
+      },
+      "expect": "Home has no briefing line once it is read"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Look at the docs again [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Look at the docs again"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "expect": "A new task finishes"
+    },
+    {
+      "do": "key",
+      "key": "cmd+1"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "home-briefing-words",
+          "text": "While you were away: 1 finished"
+        }
+      },
+      "within": 10,
+      "expect": "Home's quiet line comes back"
+    },
+    {
+      "do": "snap",
+      "name": "home-line",
+      "expect": "While you were away: 1 finished, with Open briefing"
+    }
+  ]
+}

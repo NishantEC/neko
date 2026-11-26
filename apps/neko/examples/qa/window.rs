@@ -695,8 +695,8 @@ fn notify_events(r: &Run) -> Vec<Value> {
 }
 
 /// `notified` {title, body, buttons}: a post like that was made; `badge` n: the last badge count; `withdrawn`: a post was taken back;
-/// `posts` {max}: no more than that many were posted. A post the system refused while it asks the person for permission says so.
-fn check_notify_log(r: &Run, c: &Value) -> Result<(), String> {
+/// `posts` {max, titled?}: no more than that many were posted (only those whose title starts with `titled`, when given). A post the system refused while it asks the person for permission says so.
+pub(crate) fn check_notify_log(r: &Run, c: &Value) -> Result<(), String> {
     let ev = notify_events(r);
     let posts: Vec<&Value> = ev.iter().filter(|e| e.get("post").is_some()).collect();
     if let Some(n) = c.get("notified") {
@@ -719,10 +719,12 @@ fn check_notify_log(r: &Run, c: &Value) -> Result<(), String> {
     if c.get("withdrawn").is_some() && !ev.iter().any(|e| e.get("withdraw").is_some()) {
         return Err("no notification was taken back".into());
     }
-    if let Some(max) = c["posts"]["max"].as_u64()
-        && posts.len() as u64 > max
-    {
-        return Err(format!("{} notifications were posted (at most {max})", posts.len()));
+    if let Some(max) = c["posts"]["max"].as_u64() {
+        // `titled` counts only the posts whose title starts so (the morning briefing's, say).
+        let n = posts.iter().filter(|p| c["posts"]["titled"].as_str().is_none_or(|t| p["title"].as_str().is_some_and(|x| x.starts_with(t)))).count() as u64;
+        if n > max {
+            return Err(format!("{n} notifications were posted (at most {max})"));
+        }
     }
     Ok(())
 }

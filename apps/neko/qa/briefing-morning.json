@@ -1,0 +1,211 @@
+{
+  "name": "briefing-morning",
+  "title": "Briefing: the morning notification comes once, with the right counts",
+  "about": "One task finishes and one ends with a question. The morning time is set to three hours from now (Settings ▸ Briefing) and the scheduler's clock is moved to just after it (a debug daemon with NEKO_DEBUG_CLOCK=1): the app posts one notification, \"Your briefing: 1 finished, 1 needs you\", logged through its notification log (nothing reaches the system). Moving the clock on again the same day posts no second one. Opening the Briefing from the notification's link route shows the page. The briefing is made from the daemon's records: no model is called.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_DEBUG_CLOCK": "1",
+      "TZ": "UTC"
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check the docs [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Check the docs"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "expect": "The first task finishes"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Rename the button [fake:question]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "needs-you-count",
+          "text": "1"
+        }
+      },
+      "within": 15,
+      "expect": "The second task ends with a question: it needs the person"
+    },
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-page-4"
+        }
+      },
+      "within": 15,
+      "expect": "Settings opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-page-4"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "briefing-morning-time"
+        }
+      },
+      "within": 15,
+      "expect": "Settings ▸ Briefing shows the morning time"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "briefing-morning-time"
+      }
+    },
+    {
+      "do": "key",
+      "key": "cmd+a"
+    },
+    {
+      "do": "type",
+      "text": "{{utc+180}}"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "briefing-morning-save"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 1
+    },
+    {
+      "do": "snap",
+      "name": "settings-briefing",
+      "expect": "The morning time is set three hours from now"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "posts": {
+          "max": 0,
+          "titled": "Your briefing"
+        }
+      },
+      "expect": "Nothing is posted before the morning"
+    },
+    {
+      "do": "clock",
+      "minutes": 182
+    },
+    {
+      "do": "wait",
+      "until": {
+        "notified": {
+          "title": "Your briefing: 1 finished, 1 needs you"
+        }
+      },
+      "within": 20,
+      "expect": "At the morning time the app posts one notification with the counts"
+    },
+    {
+      "do": "clock",
+      "minutes": 190
+    },
+    {
+      "do": "sleep",
+      "secs": 2
+    },
+    {
+      "do": "clock",
+      "minutes": 300
+    },
+    {
+      "do": "sleep",
+      "secs": 2
+    },
+    {
+      "do": "assert",
+      "that": {
+        "posts": {
+          "max": 1,
+          "titled": "Your briefing"
+        }
+      },
+      "expect": "Moving past it again the same day posts no second one"
+    },
+    {
+      "do": "key",
+      "key": "cmd+4"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "briefing-summary",
+          "text": "1 finished, 1 needs you"
+        }
+      },
+      "within": 10,
+      "expect": "The Briefing says the same counts as the notification"
+    },
+    {
+      "do": "snap",
+      "name": "briefing",
+      "expect": "The Briefing the notification opens"
+    }
+  ]
+}
