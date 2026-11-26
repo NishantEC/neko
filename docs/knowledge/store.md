@@ -13,6 +13,10 @@
   all). `title` is the first line with words, spaces collapsed, cut at a word before 80 characters. `status` is the newest run's: `new`, `working`, `needs_you`, `done`,
   `failed`, `stopped`, `interrupted`.
 - Version 2 (S1) adds where a task works, `runs`, `usage`, `parts`, `permissions` and `settings`: see `transcript.md`.
+- Version 5 (undo) adds `checkpoints (id, task_id, run_id, kind, place, work, shadow, ref, commit_id, tree, head, files, bytes,
+  took_ms, made_ms, state)`: one row per checkpoint (`start`, `end`, `before_undo`, `before_redo`; kept in the `repo` or a
+  `shadow` repository; `kept` or `removed`), and on `runs` where its undo stands: `undo_state`, `undo_why`, `undo_files`,
+  `undo_added`, `undo_removed`, `undo_committed`. Removing a task removes its rows. See `undo.md`.
 - `events (seq, at_ms, workspace_id, subject, kind, data)`. One row per change, in the same transaction as the change.
   `seq` is the revision the daemon pushes. Triggers refuse `UPDATE` and `DELETE` on it.
 
@@ -34,5 +38,5 @@ Ids are `task_` and 26 base-32 characters: 48 bits of time, 80 random bits (the 
 ## Tests
 
 `crates/neko-core/tests/workspaces.rs`: the migration from version 3, adding, renaming, removing, a missing folder, locating,
-reordering, the tidy rule on real repositories. `crates/neko-core/tests/store.rs`: create and list, refusals, reopen, migration and the newer-version refusal, the append-only
-log, two connections.
+reordering, the tidy rule on real repositories. `crates/neko-core/tests/store.rs`: create and list, refusals, reopen, migration and the newer-version refusal, the migration to
+version 5 with a run from version 4, the append-only log, two connections.

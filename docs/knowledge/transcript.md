@@ -23,6 +23,10 @@ What a task said and did, stored so a restart loses nothing. `crates/neko-core/s
 The task's own words are its first message; a follow-up is a person part. A run that finishes with words ending in a question
 mark (nothing pending, no step after them) leaves its task `asked` rather than `done` (`conductor::ends_with_question`). Every change also appends an event row, as in S0.
 
+A run's `undo` (store version 5) says where its checkpoints stand: being taken, not available and why, applied, undone, no
+longer redoable, or removed; and what the run itself changed. The run card counts that, not the branch so far. An undone run's
+steps stay readable, its "Worked for" line marked "undone". See `undo.md`.
+
 ## Writing words
 
 Words reach the screens at once, as `part_delta` events to screens watching the task. They are written to disk at most every 3

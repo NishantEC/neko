@@ -20,6 +20,8 @@ crates, all at the same rev). `add` brought `base`, `icons`, `agent` and `font_i
 The polish round moved to v0.9.0: both git dependencies on `tag = "v0.9.0"`, `rune-ui update`, then `rune-ui add task`. The CLI is
 built from the tag in `$NEKO_TARGET/rune-ui-src` into `$NEKO_TARGET/cli`.
 
+The undo slice added `diff` with the same CLI (`rune-ui add diff`).
+
 Workspaces added `dropdown_menu`, `dialog`, `alert_dialog`, `input`, `segmented_control` and `select` (the last is installed but not
 used; see below) with the same CLI.
 
@@ -78,6 +80,17 @@ From the workspaces slice:
 - `popup::Row::shortcut` sets its keys in Inter, which Neko's "Figtree everywhere" rule refuses; Move up and Move down show no
   keys. Ask: the shortcut in the theme's face (or its keys font from the theme).
 - No sortable list: reordering workspaces is by keyboard and menu only. Ask: a drag-to-reorder helper for a column of rows.
+
+From the undo slice (`diff` added with the CLI):
+
+- `Diff` draws its lines as plain text: they cannot be selected. Ask: `Diff::selectable(bool)` passing `.selectable(true)` to each
+  line's words (and one `selection_group` over the lines). Neko offers Copy diff in each open file's foot instead.
+- `Diff`'s header counts the lines it is given, so a folded file (no lines yet) or a cut one shows the wrong `+n −n`. Neko gives a
+  folded file that many empty marks. Ask: `Diff::stats(added, removed)` to set the counts.
+- `Diff` has no place for a file's actions or note (renamed from, binary, Show all, Copy path, Reveal). Neko appends a foot row to
+  the built slab. Ask: `Diff::foot(El)` or `actions(..)`, and a `binary`/`note` line style.
+- `Task` (the run card) has one primary action only. Neko appends a row with Review and Undo to the built card. Ask:
+  `Task::secondary(words, f)` or an actions row.
 
 Still open from S0: `SidebarItem` rows outside a list are `role("link")`.
 

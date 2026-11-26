@@ -1,6 +1,6 @@
 # The protocol (S1, 2026-11-26)
 
-`crates/neko-protocol` is the contract between a screen and the daemon. Version 6 (Needs you).
+`crates/neko-protocol` is the contract between a screen and the daemon. Version 7 (undo).
 
 ## Shape
 
@@ -35,6 +35,11 @@
 | `watch_task {task?}` | `ok`; this connection now gets that task's streaming words |
 | `list_runtimes` | `runtimes {runtimes, settings}` |
 | `set_settings {settings}` | `settings {settings}`, or `bad_request` for a runtime Neko cannot run |
+| `get_diff {task, run?}` | `diff {diff}`: the run's files between its checkpoints (no run: the whole task), with counts, no lines; `refused` with no checkpoints |
+| `get_diff_file {task, run?, path, full?}` | `diff_file {file}`: one file's lines, cut at 1,000 (`full`: 50,000) |
+| `undo_run {task, run, anyway?}`, `redo_run {…}` | `ok`; `changed_since {files}` (nothing written; `anyway` goes ahead after keeping the folder as a checkpoint); `refused` with the line why (not the run offered, committed, mid-merge, a locked index); `busy` while it runs |
+| `undo_storage` | `undo_storage {storage}`: bytes in Neko's undo folder, checkpoints, tasks |
+| `clear_undo` | `ok`, or `busy` while any task works |
 | `day_usage {from_ms}` | `day_usage {usage}`: what runs started since then reported |
 
 Before `hello`, any request gets `error hello_first`. Something unparseable gets `error bad_request`; an unknown type is refused,
@@ -53,7 +58,9 @@ keeps everything by id, so nothing doubles.
 - The JSON shapes are pinned by `tests/round_trip.rs`. A change to a shape is a new version. Version 4 added the task status
   `asked`: the run finished and its last words end in a question mark, so it is the person's turn (not working; a follow-up
   answers it). Version 5 added workspaces: a task's `workspace` names one, `create_task` takes a workspace instead of a folder. Version 6 added Needs you: `list_needs`, `needs_changed`, a notice's `failure`
-  kind, and `answering` on a follow-up.
+  kind, and `answering` on a follow-up. Version 7 added undo: a run's `undo` (state, why not, its own changes, committed), the
+  diff requests, undo, redo, the storage figure and clearing it. Each change to a run's undo is a `run_changed` with the run whole.
+  `neko_protocol::undo::offers` says which run may be undone or redone, for both ends.
 - `DaemonInfo` (`daemon.json`) is part of the contract: `{pid, port, protocol, version}`.
 - `client::find(dir)` reads `daemon.json` and `token`. `client::Client` is blocking (tests, tools). `client::Link` runs on its own
   thread and hands replies and events to a callback (the app).

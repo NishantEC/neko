@@ -36,6 +36,8 @@ The earlier project left 72 worktrees from 84 tasks. Now, after every run (`work
 - Anything with work in it is kept. When git cannot say, nothing is deleted.
 - A follow-up makes the folder again (`workplace::reopen`): the worktree on its branch, or a new branch from where it began.
 
+A tidied worktree takes its undo checkpoints with it (`undo.md`): Neko's refs for that task go from the repository.
+
 Measured (`crates/neko-daemon/tests/workspaces.rs`): after 20 finished tasks (10 in a repository, 10 in General), 0 worktree
 folders, 0 scratch folders, 0 `neko/` branches, and git lists only the person's own checkout. A task that edited files keeps its
 worktree.
@@ -56,7 +58,8 @@ in a scratch folder, refuse the removal in plain words with Reveal in Finder: no
 - **Composer:** a pop-up menu in its footer (General, the workspaces, "Add folder…"), remembered (`last-workspace`). ⌘N starts a
   task in the workspace of the task in view.
 - **Task band:** the workspace's name, then the folder and branch. **Window title:** "<task title> — <workspace name>".
-- **Settings ▸ Workspaces:** each workspace with its folder and task count; Rename…, Reveal in Finder (or Locate…), Remove….
+- **Settings ▸ Workspaces:** each workspace with its folder and task count; Rename…, Reveal in Finder (or Locate…), Remove…;
+  then "Storage used by undo" and "Clear undo history…" (`undo.md`).
 
 ## Reordering
 

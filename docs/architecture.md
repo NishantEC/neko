@@ -60,7 +60,8 @@ its agent at once: in a scratch folder (General), in its own git worktree on `ne
 directly in a plain folder. Each run has its own thread and runs under the run guard. Its events become stored parts and pushed
 changes; words stream to screens at once and reach the disk every few seconds. Risky steps wait for the person in the task. One
 run at a time per task; tasks run side by side. See `docs/knowledge/runtimes.md`, `permissions.md`, `run-guard.md`,
-`transcript.md`. After each run an empty worktree or scratch folder is tidied away; one with work in it is kept.
+`transcript.md`. After each run an empty worktree or scratch folder is tidied away; one with work in it is kept. A checkpoint at each run's start and
+end lets the person review, undo and redo it (`docs/knowledge/undo.md`).
 
 ## The app
 

@@ -9,7 +9,8 @@ Type a task on Home, pick its workspace in the composer, press Return: the agent
 are quiet lines that fold. Settings offers three permission modes: follow Claude Code's own rules, ask before risky steps
 (enforced by Neko), or full access; a step that waits shows in the task for Allow once, Always allow or Deny. Stop stops it at
 once, a follow-up continues the same conversation, a finished run folds behind one "Worked for" line, and a run card shows what
-changed when something did. An empty worktree is tidied away after its run; one with work in it is never deleted. Needs you (⌘2) lists everything waiting for you, oldest first, answered in place: a step to
+changed when something did, with Review (the run's diff, file by file) and Undo or Redo: files go back to how they were before
+the run, from a checkpoint Neko keeps under its own git refs (or a shadow repository for a folder that is not one). An empty worktree is tidied away after its run; one with work in it is never deleted. Needs you (⌘2) lists everything waiting for you, oldest first, answered in place: a step to
 allow, a question to reply to, a failure you can fix. The installed app posts a Mac notification when a task starts needing you
 or finishes, and the Dock icon shows the count. Quit and
 relaunch: the workspaces and the whole transcript are still there. This page changes as each slice ships, and only describes what is built.
