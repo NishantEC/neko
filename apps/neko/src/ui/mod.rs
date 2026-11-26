@@ -30,6 +30,7 @@ pub mod segmented_control;
 pub mod select;
 pub mod shimmer;
 pub mod sidebar;
+pub mod switch;
 pub mod task;
 pub mod tool;
 pub mod tooltip;

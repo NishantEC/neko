@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use neko_protocol::{
-    Changes, GENERAL, Part, PartBody, PartId, Permission, PermissionId, PermissionMode, PermissionState, Pricing, Run, RunId, RunStatus, RuntimeInfo, Settings, Task, TaskId, TaskStatus, Tone,
+    Changes, FailureKind, GENERAL, Need, NeedsItem, Part, PartBody, PartId, Permission, PermissionId, PermissionMode, PermissionState, Pricing, Run, RunId, RunStatus, RuntimeInfo, Settings, Task, TaskId, TaskStatus, Tone,
     ToolState, Usage, Workspace,
 };
 use rune::TextEdit;
@@ -48,6 +48,13 @@ pub const SCENES: &[Scene] = &[
     ("task-remove", task_remove),
     ("task-remove-refused", task_remove_refused),
     ("settings-workspaces", settings_workspaces),
+    ("needs-you", needs_you),
+    ("needs-you-answering", needs_you_answering),
+    ("needs-you-empty", needs_you_empty),
+    ("settings-notifications", settings_notifications),
+    ("settings-notifications-not-asked", settings_notifications_not_asked),
+    ("settings-notifications-denied", settings_notifications_denied),
+    ("settings-notifications-unavailable", settings_notifications_unavailable),
 ];
 
 /// A task made `minutes_ago` before the fixed clock.
@@ -145,6 +152,124 @@ fn with_workspaces(s: &mut App) {
     tasks.push(more("ws_scripts", "/Users/example/old-scripts", "Port the backup script to the new server", 9 * 24 * 60, TaskStatus::Done));
     tasks.sort_by_key(|t| std::cmp::Reverse(t.created_ms));
     s.tasks = tasks;
+    let retry = s.tasks.iter().find(|t| t.title.starts_with("Answer the question about the retry limit")).cloned().expect("the sample task");
+    s.needs = vec![permission_item(s, &retry, "Run a command", "cargo test --package acme-api retry", false, 30)];
+    s.needs_loaded = true;
+}
+
+fn ago(s: &App, minutes: i64) -> i64 {
+    s.now_ms - minutes * 60_000
+}
+
+fn permission_item(s: &App, task: &Task, title: &str, detail: &str, destructive: bool, minutes: i64) -> NeedsItem {
+    let p = Permission {
+        id: PermissionId(format!("perm_{}", task.id.0)),
+        task: task.id.clone(),
+        run: RunId("run_1".into()),
+        tool: "Bash".into(),
+        title: title.into(),
+        why: "Commands can change anything on this Mac.".into(),
+        detail: detail.into(),
+        destructive,
+        state: PermissionState::Pending,
+        asked_ms: ago(s, minutes),
+        answered_ms: None,
+    };
+    NeedsItem { id: format!("perm:{}", p.id.0), task: task.id.clone(), workspace: task.workspace.clone(), title: task.title.clone(), since_ms: p.asked_ms, need: Need::Permission { permission: p } }
+}
+
+/// Every kind of item, in three workspaces, in the daemon's order (the workspace waiting longest first, oldest first inside it).
+fn needs_you(s: &mut App) {
+    with_workspaces(s);
+    let find = |s: &App, start: &str| s.tasks.iter().find(|t| t.title.starts_with(start)).cloned().expect("the sample task");
+    let tidy = find(s, "Tidy the Downloads");
+    let notes = find(s, "Draft the release notes");
+    let nightly = find(s, "Find out why the nightly build");
+    let retry = find(s, "Answer the question about the retry limit");
+    let hero = find(s, "Make the hero image load faster");
+    let failure = |s: &App, t: &Task, kind: FailureKind, text: &str, next: &str, command: Option<&str>, minutes: i64| NeedsItem {
+        id: format!("failure:part_{}", t.id.0),
+        task: t.id.clone(),
+        workspace: t.workspace.clone(),
+        title: t.title.clone(),
+        since_ms: ago(s, minutes),
+        need: Need::Failure { failure: kind, text: text.into(), next: Some(next.into()), command: command.map(str::to_owned) },
+    };
+    s.needs = vec![
+        failure(s, &tidy, FailureKind::NotSignedIn, "Claude Code is not signed in.", "Run `claude auth login` in Terminal, then send a follow-up.", Some("claude auth login"), 3 * 24 * 60),
+        NeedsItem {
+            id: format!("question:run_{}", notes.id.0),
+            task: notes.id.clone(),
+            workspace: notes.workspace.clone(),
+            title: notes.title.clone(),
+            since_ms: ago(s, 12),
+            need: Need::Question { run: RunId(format!("run_{}", notes.id.0)), question: "The notes cover the sidebar and the composer. Should I also mention the new keyboard shortcuts, or keep them for 0.3?".into() },
+        },
+        failure(s, &nightly, FailureKind::UsageLimit, "Claude Code has reached its usage limit.", "It resets at 17:00. Send a follow-up then to carry on.", None, 2 * 60),
+        permission_item(s, &retry, "Run a command", "cargo test --package acme-api retry", false, 30),
+        permission_item(s, &hero, "Run a command that deletes or overwrites", "rm -rf public/images/old-hero", true, 5),
+    ];
+    for t in &mut s.tasks {
+        if [&notes.id].contains(&&t.id) {
+            t.status = TaskStatus::Asked;
+        } else if [&tidy.id, &nightly.id].contains(&&t.id) {
+            t.status = TaskStatus::Failed;
+        } else if [&retry.id, &hero.id].contains(&&t.id) {
+            t.status = TaskStatus::NeedsYou;
+        }
+    }
+    s.open_needs();
+}
+
+/// One answered (gone at once), and an answer being typed to the question.
+fn needs_you_answering(s: &mut App) {
+    needs_you(s);
+    let first = s.needs[0].id.clone();
+    s.needs_hidden.insert(first);
+    let q = s.needs[1].id.clone();
+    let mut edit = TextEdit::new("Keep them for 0.3");
+    edit.focused = true;
+    s.needs_replies.insert(q, edit);
+}
+
+fn needs_you_empty(s: &mut App) {
+    with_workspaces(s);
+    s.needs.clear();
+    for t in &mut s.tasks {
+        if t.status == TaskStatus::NeedsYou {
+            t.status = TaskStatus::Working;
+        }
+    }
+    s.open_needs();
+}
+
+fn settings_notifications_with(s: &mut App, a: crate::notify::Allowed) {
+    settings(s);
+    s.settings_page = 2;
+    s.allowed.store(match a {
+        crate::notify::Allowed::Unknown => 0,
+        crate::notify::Allowed::NotAsked => 1,
+        crate::notify::Allowed::Granted => 2,
+        crate::notify::Allowed::Denied => 3,
+        crate::notify::Allowed::Unavailable => 4,
+    }, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn settings_notifications(s: &mut App) {
+    settings_notifications_with(s, crate::notify::Allowed::Granted);
+}
+
+fn settings_notifications_not_asked(s: &mut App) {
+    settings_notifications_with(s, crate::notify::Allowed::NotAsked);
+    s.notifier.switches.finished = false;
+}
+
+fn settings_notifications_denied(s: &mut App) {
+    settings_notifications_with(s, crate::notify::Allowed::Denied);
+}
+
+fn settings_notifications_unavailable(s: &mut App) {
+    settings_notifications_with(s, crate::notify::Allowed::Unavailable);
 }
 
 fn workspaces(s: &mut App) {

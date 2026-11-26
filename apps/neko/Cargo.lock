@@ -1739,6 +1739,7 @@ dependencies = [
 name = "neko-app"
 version = "0.1.0"
 dependencies = [
+ "block2 0.6.2",
  "libc",
  "neko-protocol",
  "objc2 0.6.5",
@@ -1746,6 +1747,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "rune",
  "rune-kit",
+ "rune-notify",
  "rune-ui-style",
  "rune-ui-themes",
  "serde",
@@ -2949,6 +2951,22 @@ dependencies = [
 name = "rune-motion"
 version = "0.1.0"
 source = "git+https://github.com/anomalyco/rune?rev=53f6d36a96439d357a6f2a2560383d7b9e9ec9c2#53f6d36a96439d357a6f2a2560383d7b9e9ec9c2"
+
+[[package]]
+name = "rune-notify"
+version = "0.0.1"
+source = "git+https://github.com/anomalyco/rune?rev=53f6d36a96439d357a6f2a2560383d7b9e9ec9c2#53f6d36a96439d357a6f2a2560383d7b9e9ec9c2"
+dependencies = [
+ "async-channel",
+ "async-io",
+ "block2 0.6.2",
+ "futures-lite",
+ "objc2 0.6.5",
+ "windows",
+ "windows-core",
+ "windows-registry",
+ "zbus",
+]
 
 [[package]]
 name = "rune-spell"

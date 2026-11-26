@@ -188,6 +188,7 @@ Written by `scripts/licenses.py`. Each crate's own licence files go into the bun
 | rune-kit | 0.0.1 | MIT |
 | rune-media | 0.0.1 | MIT |
 | rune-motion | 0.1.0 | MIT |
+| rune-notify | 0.0.1 | MIT |
 | rune-spell | 0.0.1 | MIT |
 | rune-staging | 0.0.1 | MIT |
 | rune-taffy | 0.0.1 | MIT |

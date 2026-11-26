@@ -37,6 +37,13 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>dev.neko.app</string>
+      <key>CFBundleURLSchemes</key><array><string>neko</string></array>
+    </dict>
+  </array>
   <key>NSHumanReadableCopyright</key><string>Copyright © 2026 The Neko authors. Released under the MIT License.</string>
 </dict>
 </plist>

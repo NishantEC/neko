@@ -4,10 +4,13 @@
 
 pub mod about;
 pub mod clock;
+pub mod deeplink;
 pub mod dock;
 pub mod icons;
 pub mod link;
 pub mod menu;
+pub mod needs_view;
+pub mod notify;
 pub mod scenes;
 pub mod settings_view;
 pub mod state;
@@ -77,7 +80,10 @@ fn init() -> App {
     let prefs = rune::prefs::Prefs::open(PREFS_ID);
     let workspace = prefs.get::<String>(WORKSPACE_KEY).filter(|w| !w.is_empty()).unwrap_or_else(|| neko_protocol::GENERAL.to_owned());
     let folded = prefs.get::<Vec<String>>(FOLDED_KEY).unwrap_or_default().into_iter().collect();
-    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, workspace, folded, home: std::env::var("HOME").ok(), ..App::default() }
+    // The real window posts real notifications; everything else keeps the recorder `App::default` gives.
+    let mut notifier = notify::Notifier::new(Box::new(notify::System));
+    notifier.switches = prefs.get::<notify::Switches>(notify::SWITCHES_KEY).unwrap_or_default();
+    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, workspace, folded, home: std::env::var("HOME").ok(), notifier, ..App::default() }
 }
 
 /// New Task (⌘N): Home with the keyboard in the composer, in the workspace of the task in view.
@@ -111,6 +117,15 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         new_task(s, tx);
         return true;
     }
+    if (ev.is_command('1') || ev.is_command('2')) && !(m.shift || m.alt || m.ctrl) {
+        if ev.is_command('1') {
+            s.go_home();
+        } else {
+            s.open_needs();
+        }
+        tx.instant();
+        return true;
+    }
     if ev.is_command(',') && !(m.shift || m.alt || m.ctrl) {
         s.open_settings();
         tx.instant();
@@ -132,6 +147,10 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             s.stop();
             return true;
         }
+        if s.needs_open {
+            s.leave_needs();
+            return true;
+        }
         s.draft.focused = false;
         tx.blur();
         return true;
@@ -148,8 +167,16 @@ pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 let _ = tx.reveal_path(&path);
             }
             state::Effect::PickFolder(pick) => pick_folder(s, pick, tx),
+            state::Effect::Front => {
+                if s.persist {
+                    rune_notify::bring_to_front();
+                }
+            }
         }
         changed = true;
+    }
+    if let Some(key) = s.focus_next.take() {
+        tx.focus(key, true);
     }
     if let Some((words, urgent)) = s.announce.take() {
         tx.announce(words, if urgent { rune::LiveRegion::Assertive } else { rune::LiveRegion::Polite });
@@ -173,6 +200,21 @@ pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         s.title_set = title;
     }
     if s.persist {
+        // Whether Neko is in front decides what is worth a notification; coming back to it (from System Settings, say) reads
+        // the permission again.
+        let front = rune_notify::app_focused();
+        if front && !s.front {
+            s.read_allowed_soon();
+        }
+        s.front = front;
+        let badge = s.badge_count();
+        if s.badge_set != Some(badge)
+            && let Some(w) = &s.window_handle
+        {
+            let words = if badge == 1 { "1 thing needs you".to_owned() } else { format!("{badge} things need you") };
+            w.set_taskbar(rune::Taskbar::new().badge(badge, words));
+            s.badge_set = Some(badge);
+        }
         let (write, again) = s.window.look(t, window_place::current(s.full_screen));
         if let Some(f) = write {
             save_window(f);
@@ -242,11 +284,18 @@ pub fn spec() -> rune::AppSpec<App> {
 /// The app with its titlebar and menus, before it runs.
 pub fn app() -> rune::App<App> {
     // Tab reaches every control, not only fields and lists, whatever the Mac's own Keyboard Navigation setting says.
-    let mut app = rune::App::new(spec()).standard_menus().tab_visits_controls(true).titlebar(rune::Titlebar::new(view::BAND));
+    let mut app = rune::App::new(spec()).standard_menus().tab_visits_controls(true).titlebar(rune::Titlebar::new(view::BAND)).on_open_url(open_url);
     for item in menu::items(&menu::model(true, false)) {
         app = app.menu_item(item);
     }
     app
+}
+
+/// A link the system opened with Neko (`neko://task/<id>`, from a notification, a browser or `open`): the task, in front.
+fn open_url(s: &mut App, link: &str, tx: &mut Tx) {
+    if s.open_link(link) {
+        tx.instant();
+    }
 }
 
 /// The app for a test's headless runtime: [`headless_state`], whatever the process's arguments.
@@ -291,13 +340,30 @@ pub fn run() {
     SAVED.with(|c| c.set(saved));
     let app = app().keep_running().on_window(window_place::remember).on_close(flush_window).on_quit(flush_window);
     let handle = app.handle();
+    // A click on one of Neko's notifications, from any thread: installed now, so the click that launched the app arrives too.
+    let clicks = app.handle();
+    rune_notify::on_click(move |c: rune_notify::Click| {
+        let action = c.action().map(str::to_owned);
+        let typed = action.as_deref().and_then(|a| c.input(a)).map(str::to_owned);
+        let info: Vec<(String, String)> = c.info.iter().filter(|(k, _)| !k.starts_with("rune.")).cloned().collect();
+        clicks.update(move |s: &mut App, tx| {
+            s.clicked(action, typed, info);
+            tx.instant();
+        });
+    });
     let mut started = false;
     // Nothing before the first frame waits for the daemon: the window opens with what it can show by itself, and the link (find or
     // start the daemon, connect, hello, the first lists) starts after the first frame, off the UI thread (`start_link`).
-    let app = app.on_ready(move |_| {
+    let app = app.on_ready(move |window: &rune::WindowHandle| {
         if std::mem::replace(&mut started, true) {
             return;
         }
+        // The Dock badge is the window's; whether Neko may post is asked of the system now (never of the person).
+        let w = window.clone();
+        handle.update(move |s: &mut App, _| {
+            s.window_handle = Some(w);
+            s.read_allowed_soon();
+        });
         let Some(dir) = data_dir() else { return };
         start_link(&handle, dir, link::daemon_binary());
     });

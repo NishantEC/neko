@@ -68,6 +68,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     }
     let page = if s.settings_open {
         crate::settings_view::settings_view(s, &t)
+    } else if s.needs_open {
+        crate::needs_view::needs_view(s, &t)
     } else {
         match s.open_task() {
             Some(_) => crate::task_view::task_view(s, &t, &mut layer),
@@ -82,6 +84,9 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
 fn main_label(s: &App) -> String {
     if s.settings_open {
         return "Settings".to_owned();
+    }
+    if s.needs_open {
+        return "Needs you".to_owned();
     }
     s.open_task().map_or_else(|| "Home".to_owned(), |t| t.title.clone())
 }
@@ -102,8 +107,16 @@ fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     // A sidebar row that acts: the same alignment as Home and the tasks, as Mail's and Notes' sidebars have.
     let new = SidebarItem::new("new-task", "New task").icon(&icons::COMPOSE).on_press(|s: &mut App| s.new_task_here()).build(t).role("button");
     let new = Tooltip::new("New task").keys("⌘N").wrap(new);
-    let home = SidebarItem::new("home", "Home").icon(&crate::ui::icons::HOME).selected(s.open.is_none() && !s.settings_open).on_press(|s: &mut App| s.go_home()).build(t);
-    let mut body = col().w_full().px(t.space.at(2.0)).gap(t.space.at(1.0)).child(new).child(home);
+    let home = SidebarItem::new("home", "Home").icon(&crate::ui::icons::HOME).selected(s.open.is_none() && !s.settings_open && !s.needs_open).on_press(|s: &mut App| s.go_home()).build(t);
+    let home = Tooltip::new("Home").keys("⌘1").wrap(home);
+    // Everything waiting for the person, with how many (the same count as the Dock's).
+    let n = s.visible_needs().len();
+    let mut needs = SidebarItem::new("needs-you", "Needs you").icon(&crate::ui::icons::INBOX).selected(s.needs_open).on_press(|s: &mut App| s.open_needs());
+    if n > 0 {
+        needs = needs.count(n).description(if n == 1 { "1 waiting".to_owned() } else { format!("{n} waiting") });
+    }
+    let needs = Tooltip::new("Needs you").keys("⌘2").wrap(needs.build(t));
+    let mut body = col().w_full().px(t.space.at(2.0)).gap(t.space.at(1.0)).child(new).child(home).child(needs);
     // Every section and row is one list for the keys: Up and Down move through sections and rows, a typed name goes to it, Tab
     // stops once (on the open task, else the first section). A section's own buttons are Tab stops of their own.
     let mut sections = col().key("workspaces").role("list").label("Workspaces").w_full().gap(t.space.at(1.0)).pt(t.space.at(2.0)).focus_group();
@@ -125,7 +138,7 @@ fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
 
 /// What a section's header says about its workspace, after its name.
 fn section_state(s: &App, w: &Workspace) -> String {
-    let busy = s.busy_in(&w.id);
+    let busy = s.needs_in(&w.id);
     let mut parts = Vec::new();
     if !w.is_active() {
         parts.push("Earlier, removed workspace".to_owned());
@@ -133,7 +146,7 @@ fn section_state(s: &App, w: &Workspace) -> String {
         parts.push("Folder not found".to_owned());
     }
     if busy > 0 {
-        parts.push(format!("{busy} need{} you or working", if busy == 1 { "s" } else { "" }));
+        parts.push(format!("{busy} need{} you", if busy == 1 { "s" } else { "" }));
     }
     parts.join(", ")
 }
@@ -143,7 +156,7 @@ fn section_state(s: &App, w: &Workspace) -> String {
 fn section(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
     let id = w.id.clone();
     let folded = s.folded.contains(&w.id);
-    let busy = s.busy_in(&w.id);
+    let busy = s.needs_in(&w.id);
     let key = format!("ws-{}", w.id);
     let chevron = glyph(if folded { &crate::ui::icons::CHEVRON_RIGHT } else { &crate::ui::icons::CHEVRON_DOWN }, t.control.icon_sm, t.ink_faint());
     let mut head = row()

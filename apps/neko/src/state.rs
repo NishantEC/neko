@@ -4,12 +4,13 @@
 use std::collections::{HashMap, HashSet};
 
 use neko_protocol::{
-    Change, Decision, ErrorCode, GENERAL, Part, PartBody, Permission, PermissionId, PermissionMode, Reply, Request, Run, RunStatus, RuntimeInfo, ServerMessage, Settings, Task, TaskId,
-    Transcript, Workspace,
+    Change, Decision, ErrorCode, GENERAL, Need, NeedsItem, Part, PartBody, Permission, PermissionId, PermissionMode, Reply, Request, Run, RunStatus, RuntimeInfo, ServerMessage, Settings,
+    Task, TaskId, Transcript, Workspace,
 };
 use rune::TextEdit;
 
 use crate::link::{Conn, Incoming};
+use crate::notify::{self, ClickDo, Here, Notifier, Switches};
 use crate::window_place;
 
 /// Under this window width the sidebar folds by itself (points).
@@ -37,6 +38,8 @@ pub enum Effect {
     /// The Mac's folder panel, for a new workspace (`select`: the composer picks it) or for a workspace's folder that moved.
     PickFolder(Pick),
     Reveal(String),
+    /// Bring the window forward (a notification or a link opened a task).
+    Front,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -146,6 +149,36 @@ pub struct App {
     pub slow_after: std::time::Duration,
     /// The slow line was drawn (so the frame that crosses the wait redraws once).
     pub slow_shown: bool,
+    /// What waits for the person, oldest first, grouped by workspace: the daemon's list, replaced whole each time it changes.
+    pub needs: Vec<NeedsItem>,
+    /// The daemon's list has arrived.
+    pub needs_loaded: bool,
+    /// The Needs you list shows instead of the content (⌘2).
+    pub needs_open: bool,
+    /// The task the person came from to the list (Escape goes back to it).
+    pub needs_back: Option<TaskId>,
+    /// Items answered here, hidden at once until the daemon's list drops them (or a refusal brings one back).
+    pub needs_hidden: HashSet<String>,
+    /// The words in each question's reply box, by item.
+    pub needs_replies: HashMap<String, TextEdit>,
+    /// One quiet line over the list ("That was already answered.").
+    pub needs_notice: Option<String>,
+    /// The element to focus at the next frame (the next item after one is answered).
+    pub focus_next: Option<String>,
+    /// The notification model and its poster (a recorder everywhere but the real window).
+    pub notifier: Notifier,
+    /// Neko is the frontmost app with its window focused (the real window reads it every frame).
+    pub front: bool,
+    /// Whether the system lets Neko post ([`notify::Allowed`]'s code), written by the system's answer on another thread.
+    pub allowed: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// A task a link or a notification asked for before the daemon's list arrived.
+    pub pending_link: Option<TaskId>,
+    /// Clicks on a notification that came before the daemon answered (one may have launched the app): done once it does.
+    pub pending_clicks: Vec<ClickDo>,
+    /// The main window, for the Dock badge (the real window only).
+    pub window_handle: Option<rune::WindowHandle>,
+    /// The count the Dock icon shows now.
+    pub badge_set: Option<u32>,
 }
 
 /// The picker's last line: a folder the person adds as a workspace, there and then.
@@ -164,6 +197,8 @@ pub enum Asked {
     /// A change to a workspace (rename, remove, locate, move): a refusal is said in a panel.
     Workspace,
     RemoveTask(TaskId),
+    /// An answer from the Needs you list or a notification: a refusal says so plainly.
+    Answer { item: String, task: TaskId, from_notification: bool },
     Other,
 }
 
@@ -224,6 +259,20 @@ impl Book {
     }
 }
 
+/// The key of an item's row in the Needs you list.
+pub fn need_key(item: &str) -> String {
+    format!("need-{item}")
+}
+
+/// What is left, in words, after an item leaves the list.
+fn left_words(n: usize) -> String {
+    match n {
+        0 => "Nothing needs you now.".to_owned(),
+        1 => "1 thing needs you.".to_owned(),
+        n => format!("{n} things need you."),
+    }
+}
+
 /// The real clock: now and the local offset.
 pub fn system_clock() -> (i64, i64) {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
@@ -280,6 +329,21 @@ impl Default for App {
             waiting_since: None,
             slow_after: SLOW_AFTER,
             slow_shown: false,
+            needs: Vec::new(),
+            needs_loaded: false,
+            needs_open: false,
+            needs_back: None,
+            needs_hidden: HashSet::new(),
+            needs_replies: HashMap::new(),
+            needs_notice: None,
+            focus_next: None,
+            notifier: Notifier::default(),
+            front: true,
+            allowed: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
+            pending_link: None,
+            pending_clicks: Vec::new(),
+            window_handle: None,
+            badge_set: None,
         }
     }
 }
@@ -296,10 +360,13 @@ impl App {
         self.open.as_ref().and_then(|id| self.tasks.iter().find(|t| &t.id == id))
     }
 
-    /// What the window's title says: the open task's title and its workspace's name, Settings, else "Neko".
+    /// What the window's title says: the open task's title and its workspace's name, Settings, Needs you, else "Neko".
     pub fn window_title(&self) -> String {
         if self.settings_open {
             return "Settings".to_owned();
+        }
+        if self.needs_open {
+            return "Needs you".to_owned();
         }
         match self.open_task() {
             Some(t) => match self.workspace_of(&t.workspace) {
@@ -324,10 +391,204 @@ impl App {
         self.tasks.iter().filter(|t| t.workspace == id).collect()
     }
 
-    /// How many of the workspace's tasks need the person or are working (the sidebar's quiet count).
-    pub fn busy_in(&self, id: &str) -> usize {
-        use neko_protocol::TaskStatus as S;
-        self.tasks.iter().filter(|t| t.workspace == id && matches!(t.status, S::Working | S::NeedsYou | S::Asked)).count()
+    /// How many things in the workspace need the person (the sidebar's quiet count): the daemon's items there.
+    pub fn needs_in(&self, id: &str) -> usize {
+        self.visible_needs().iter().filter(|i| i.workspace == id).count()
+    }
+
+    /// The items the list shows: the daemon's, less those answered here and not yet gone from its list.
+    pub fn visible_needs(&self) -> Vec<&NeedsItem> {
+        self.needs.iter().filter(|i| !self.needs_hidden.contains(&i.id)).collect()
+    }
+
+    /// The count on the Dock icon: everything waiting, while its switch is on.
+    pub fn badge_count(&self) -> u32 {
+        if self.notifier.switches.badge { self.visible_needs().len() as u32 } else { 0 }
+    }
+
+    /// Whether the system lets Neko post, as it last said.
+    pub fn allowed(&self) -> notify::Allowed {
+        notify::Allowed::from_code(self.allowed.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
+    /// Where the person is, for the notifications.
+    pub fn here(&self) -> Here {
+        let looking = !self.settings_open && !self.needs_open;
+        Here { front: self.front, task: self.open.clone().filter(|_| looking), needs_view: self.needs_open }
+    }
+
+    /// The Needs you list (⌘2, the sidebar's row), with the keyboard on its first item.
+    pub fn open_needs(&mut self) {
+        if !self.needs_open {
+            self.needs_back = self.open.clone().filter(|_| !self.settings_open);
+        }
+        self.open = None;
+        self.context_open = false;
+        self.settings_open = false;
+        self.needs_open = true;
+        self.needs_notice = None;
+        self.follow_open();
+        self.focus_next = self.visible_needs().first().map(|i| need_key(&i.id));
+    }
+
+    /// Escape in the list: back to the task the person came from, else Home.
+    pub fn leave_needs(&mut self) {
+        match self.needs_back.take().filter(|t| self.tasks.iter().any(|x| &x.id == t)) {
+            Some(t) => self.open_task_id(&t),
+            None => self.go_home(),
+        }
+    }
+
+    /// The daemon's list, as it is now.
+    fn set_needs(&mut self, items: Vec<NeedsItem>) {
+        let before = self.visible_needs().len();
+        self.needs = items;
+        self.needs_loaded = true;
+        let live: HashSet<String> = self.needs.iter().map(|i| i.id.clone()).collect();
+        self.needs_hidden.retain(|h| live.contains(h));
+        self.needs_replies.retain(|k, _| live.contains(k));
+        let here = self.here();
+        self.notifier.needs(&self.needs, &here);
+        let after = self.visible_needs().len();
+        if self.needs_open && after < before {
+            self.announce = Some((left_words(after), false));
+        }
+    }
+
+    /// Hides an answered item at once and gives the keyboard to the next one (or the one before it, at the end).
+    fn answered(&mut self, item: &str) {
+        let shown: Vec<String> = self.visible_needs().iter().map(|i| i.id.clone()).collect();
+        let at = shown.iter().position(|i| i == item);
+        self.needs_hidden.insert(item.to_owned());
+        self.needs_notice = None;
+        if let Some(at) = at {
+            let next = shown.get(at + 1).or_else(|| at.checked_sub(1).and_then(|b| shown.get(b)));
+            self.focus_next = next.map(|n| need_key(n));
+            self.announce = Some((left_words(shown.len() - 1), false));
+        }
+    }
+
+    /// An answer to a request in the list: the same request the task's own control sends.
+    pub fn answer_need(&mut self, item: &str, decision: Decision) {
+        let Some((task, perm)) = self.needs.iter().find(|i| i.id == item).and_then(|i| if let Need::Permission { permission } = &i.need { Some((i.task.clone(), permission.id.clone())) } else { None }) else { return };
+        if let Some(id) = self.send(Request::AnswerPermission { permission: perm, decision }) {
+            self.asked.insert(id, Asked::Answer { item: item.to_owned(), task, from_notification: false });
+            self.answered(item);
+        }
+    }
+
+    /// The words in a question's reply box: a follow-up that answers that run's question (refused if it was answered already).
+    pub fn reply_need(&mut self, item: &str) {
+        let Some((task, run)) = self.needs.iter().find(|i| i.id == item).and_then(|i| if let Need::Question { run, .. } = &i.need { Some((i.task.clone(), run.clone())) } else { None }) else { return };
+        let words = self.needs_replies.get(item).map(|r| r.text.clone()).unwrap_or_default();
+        if words.trim().is_empty() {
+            return;
+        }
+        if let Some(id) = self.send(Request::FollowUp { task: task.clone(), words, answering: Some(run) }) {
+            self.asked.insert(id, Asked::Answer { item: item.to_owned(), task, from_notification: false });
+            self.needs_replies.remove(item);
+            self.answered(item);
+        }
+    }
+
+    /// Opening an item: its task, where it waits (the newest part).
+    pub fn open_need(&mut self, item: &str) {
+        if let Some(task) = self.needs.iter().find(|i| i.id == item).map(|i| i.task.clone()) {
+            self.open_task_id(&task);
+        }
+    }
+
+    /// The reply box of a question in the list.
+    pub fn need_reply_mut(&mut self, item: &str) -> &mut TextEdit {
+        self.needs_replies.entry(item.to_owned()).or_default()
+    }
+
+    /// A click on one of Neko's notifications (from `rune-notify`, any thread, handed here through the app's handle).
+    pub fn clicked(&mut self, action: Option<String>, typed: Option<String>, info: Vec<(String, String)>) {
+        let what = notify::read_click(action.as_deref(), typed.as_deref(), &info);
+        self.act_on(what);
+    }
+
+    fn act_on(&mut self, what: ClickDo) {
+        if !matches!(what, ClickDo::Open(_) | ClickDo::Nothing) && self.daemon != Daemon::Connected {
+            self.pending_clicks.push(what);
+            return;
+        }
+        match what {
+            ClickDo::Open(task) => {
+                self.effects.push(Effect::Front);
+                self.go_to_task(task);
+            }
+            ClickDo::Answer { task, permission, decision } => {
+                let item = format!("perm:{}", permission.0);
+                if let Some(id) = self.send(Request::AnswerPermission { permission, decision }) {
+                    self.asked.insert(id, Asked::Answer { item: item.clone(), task, from_notification: true });
+                    self.needs_hidden.insert(item);
+                }
+            }
+            ClickDo::Reply { task, run, words } => {
+                let item = format!("question:{}", run.0);
+                if let Some(id) = self.send(Request::FollowUp { task: task.clone(), words, answering: Some(run) }) {
+                    self.asked.insert(id, Asked::Answer { item: item.clone(), task, from_notification: true });
+                    self.needs_hidden.insert(item);
+                }
+            }
+            ClickDo::Nothing => {}
+        }
+    }
+
+    /// A link the system opened with Neko (`neko://task/<id>`). Anything else is ignored. True when it was one of Neko's.
+    pub fn open_link(&mut self, link: &str) -> bool {
+        let Some(task) = crate::deeplink::parse(link) else { return false };
+        self.effects.push(Effect::Front);
+        self.go_to_task(task);
+        true
+    }
+
+    /// Opens a task a link or a notification named: now if the window knows it, once the list arrives if it does not yet, and
+    /// Home with a quiet line if it is gone.
+    fn go_to_task(&mut self, task: TaskId) {
+        if self.tasks.iter().any(|t| t.id == task) {
+            self.open_task_id(&task);
+        } else if !self.tasks_loaded {
+            self.pending_link = Some(task);
+        } else {
+            self.go_home();
+            self.notice = Some("That task is not in Neko any more.".to_owned());
+        }
+    }
+
+    /// The switches on Settings ▸ Notifications, remembered for the next launch in the real window.
+    pub fn set_switches(&mut self, sw: Switches) {
+        self.notifier.switches = sw;
+        if self.persist {
+            let _ = std::thread::Builder::new().name("neko-prefs".into()).spawn(move || {
+                let _ = rune::prefs::Prefs::open(crate::PREFS_ID).set(notify::SWITCHES_KEY, &sw);
+            });
+        }
+    }
+
+    /// "Send a test notification" (the system asks the person first, the first time).
+    pub fn send_test(&mut self) {
+        self.notifier.test();
+        self.read_allowed_soon();
+    }
+
+    /// Asks the system again whether Neko may post (the real window only; it never asks the person).
+    pub fn read_allowed_soon(&self) {
+        if self.persist {
+            notify::read_allowed(self.allowed.clone());
+        }
+    }
+
+    /// The newest run's last words in a task, when the window has them.
+    fn last_words(&self, task: &TaskId) -> Option<String> {
+        let b = self.books.get(task)?;
+        let run = b.runs.last()?;
+        b.parts.iter().rev().find_map(|p| match &p.body {
+            PartBody::Agent { text, .. } if p.run.as_ref() == Some(&run.id) && !text.trim().is_empty() => Some(text.clone()),
+            _ => None,
+        })
     }
 
     /// The sections of the sidebar: General, the person's workspaces, then the removed ones that still have tasks. Before the
@@ -590,6 +851,7 @@ impl App {
     /// Settings (⌘,).
     pub fn open_settings(&mut self) {
         self.settings_open = true;
+        self.needs_open = false;
         self.send(Request::ListRuntimes);
     }
 
@@ -629,6 +891,7 @@ impl App {
         self.open = None;
         self.context_open = false;
         self.settings_open = false;
+        self.needs_open = false;
         self.follow_open();
     }
 
@@ -642,6 +905,8 @@ impl App {
         self.open = Some(id.clone());
         self.context_open = false;
         self.settings_open = false;
+        self.needs_open = false;
+        self.notifier.opened(id);
         self.at_bottom = true;
         self.follow_open();
     }
@@ -716,11 +981,15 @@ impl App {
                 self.send(Request::ListTasks);
                 self.send(Request::ListWorkspaces);
                 self.send(Request::ListRuntimes);
+                self.send(Request::ListNeeds);
                 // A new connection watches nothing yet.
                 self.watching = None;
                 self.follow_open();
                 if std::mem::take(&mut self.queued) {
                     self.submit();
+                }
+                for c in std::mem::take(&mut self.pending_clicks) {
+                    self.act_on(c);
                 }
             }
             Incoming::Lost(why) => {
@@ -746,6 +1015,13 @@ impl App {
                 let before = self.tasks.iter().find(|t| t.id == task.id).map(|t| t.status);
                 if before != Some(task.status) {
                     self.say_status(&task);
+                }
+                // A run finished with nothing asked: "Done" (a question or a failure to act on is an item of the list instead).
+                if task.status == neko_protocol::TaskStatus::Done && before.is_some_and(neko_protocol::TaskStatus::is_active) {
+                    let words = self.last_words(&task.id);
+                    let here = self.here();
+                    let title = neko_protocol::title::title(&task.title);
+                    self.notifier.finished(&task.id, &title, words.as_deref(), &here);
                 }
                 self.upsert(task);
             }
@@ -786,7 +1062,7 @@ impl App {
                     *s = settings;
                 }
             }
-            Change::NeedsChanged { .. } => {}
+            Change::NeedsChanged { items } => self.set_needs(items),
         }
     }
 
@@ -828,6 +1104,27 @@ impl App {
                 return;
             }
             Reply::DayUsage { .. } => return,
+            Reply::Needs { items } => {
+                self.set_needs(items);
+                return;
+            }
+            Reply::Error { code, message } if matches!(asked, Some(Asked::Answer { .. })) => {
+                let Some(Asked::Answer { item, task, from_notification }) = asked else { return };
+                if code == ErrorCode::AlreadyAnswered {
+                    if from_notification && !self.front {
+                        let title = self.tasks.iter().find(|t| t.id == task).map_or_else(|| "Neko".to_owned(), |t| t.title.clone());
+                        self.notifier.stale(&task, &title);
+                    } else {
+                        self.needs_notice = Some("That was already answered.".to_owned());
+                        self.announce = Some(("That was already answered.".to_owned(), false));
+                    }
+                } else {
+                    // Not answered: the item comes back, with why.
+                    self.needs_hidden.remove(&item);
+                    self.needs_notice = Some(message);
+                }
+                return;
+            }
             Reply::Workspaces { workspaces } => {
                 self.workspaces.clear();
                 for w in workspaces {
@@ -876,6 +1173,9 @@ impl App {
                 // A list answers from the store, so it replaces what the window had (a task made meanwhile comes as an event).
                 for t in tasks {
                     self.upsert(t);
+                }
+                if let Some(t) = self.pending_link.take() {
+                    self.go_to_task(t);
                 }
             }
             Reply::Task { task } => {

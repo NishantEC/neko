@@ -198,6 +198,13 @@ files = [
 ]
 
 [[item]]
+name = "switch"
+version = "0.5.0"
+files = [
+  { target = "src/ui/switch.rs", sha256 = "ec8172f0860274040da559330deae6c1880ceca115dde1b0593af2342bceb518" },
+]
+
+[[item]]
 name = "task"
 version = "0.9.0"
 files = [

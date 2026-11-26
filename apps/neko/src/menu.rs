@@ -3,7 +3,7 @@
 //! * Neko: **About Neko**, Services, Hide Neko ⌘H, Hide Others ⌥⌘H, Show All, Quit Neko ⌘Q
 //! * File: **New Task ⌘N**, **Close Window ⌘W**
 //! * Edit: Undo ⌘Z, Redo ⇧⌘Z, Cut, Copy, Paste, Select All, then AppKit's Start Dictation and Emoji & Symbols ⌃⌘Space
-//! * View: **Hide Sidebar / Show Sidebar ⌃⌘S**, **Enter / Exit Full Screen ⌃⌘F**
+//! * View: **Home ⌘1**, **Needs You ⌘2**, **Hide Sidebar / Show Sidebar ⌃⌘S**, **Enter / Exit Full Screen ⌃⌘F**
 //! * Window: Minimize ⌘M, Zoom, Bring All to Front, the window list
 //! * Help: **Neko Help** (the public README), registered as the help menu so macOS adds its search field
 //!
@@ -66,6 +66,9 @@ pub fn model(sidebar: bool, full_screen: bool) -> Vec<Item> {
         item("neko-new-task", "New Task", Some("File"), Some("cmd+n")),
         Item { separator: true, ..item("neko-file-sep", "", Some("File"), None) },
         item("neko-close-window", "Close Window", Some("File"), Some("cmd+w")),
+        item("neko-home", "Home", Some("View"), Some("cmd+1")),
+        item("neko-needs", "Needs You", Some("View"), Some("cmd+2")),
+        Item { separator: true, ..item("neko-view-sep", "", Some("View"), None) },
         item("neko-sidebar", if sidebar { "Hide Sidebar" } else { "Show Sidebar" }, Some("View"), Some("ctrl+cmd+s")),
         Item { keys_first: false, ..item("neko-full-screen", if full_screen { "Exit Full Screen" } else { "Enter Full Screen" }, Some("View"), Some("ctrl+cmd+f")) },
         Item { keys_first: false, ..item("neko-help", "Neko Help", Some("Help"), None) },
@@ -80,6 +83,14 @@ fn action(id: &str) -> fn(&mut App, &mut Tx) {
             tx.instant();
         },
         "neko-new-task" => |s, tx| crate::new_task(s, tx),
+        "neko-home" => |s, tx| {
+            s.go_home();
+            tx.instant();
+        },
+        "neko-needs" => |s, tx| {
+            s.open_needs();
+            tx.instant();
+        },
         "neko-close-window" => |_, tx| tx.close_window(),
         "neko-sidebar" => |s, tx| {
             s.toggle_sidebar();
@@ -211,7 +222,7 @@ mod tests {
         let lines: Vec<String> = model(true, false).iter().filter(|i| !i.separator).map(|i| format!("{} / {} / {}", i.menu.unwrap_or("Neko"), i.title, i.key.unwrap_or("-"))).collect();
         assert_eq!(
             lines,
-            ["Neko / About Neko / -", "Neko / Settings… / cmd+,", "File / New Task / cmd+n", "File / Close Window / cmd+w", "View / Hide Sidebar / ctrl+cmd+s", "View / Enter Full Screen / ctrl+cmd+f", "Help / Neko Help / -"]
+            ["Neko / About Neko / -", "Neko / Settings… / cmd+,", "File / New Task / cmd+n", "File / Close Window / cmd+w", "View / Home / cmd+1", "View / Needs You / cmd+2", "View / Hide Sidebar / ctrl+cmd+s", "View / Enter Full Screen / ctrl+cmd+f", "Help / Neko Help / -"]
         );
         let folded = model(false, true);
         assert!(folded.iter().any(|i| i.title == "Show Sidebar") && folded.iter().any(|i| i.title == "Exit Full Screen"), "titles follow the window");
