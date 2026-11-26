@@ -128,6 +128,7 @@ fn card(s: &App, t: &Theme, r: &Round, i: usize, n: usize, layer: &mut Vec<El>) 
     let controls = row().key(format!("round-{id}-controls")).gap(t.space.at(2.5)).center_y().child(switch).child(run).child(menu);
     let head = row()
         .w_full()
+        .h(t.control.md)
         .gap(t.space.at(3.0))
         .center_y()
         .child(text(r.name.clone()).key(format!("round-{id}-name")).role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0).shrink().grow(1.0))
@@ -170,7 +171,8 @@ pub fn cards(s: &App, t: &Theme, key: &str, label: &str, rounds: &[&Round], laye
 pub fn rounds_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let n = s.rounds.len();
     let mut page = col().key("rounds").w_full().max_w(COLUMN).gap(t.space.at(6.0));
-    let new = Button::new("rounds-new", "New round…").size(Size::Sm).on_press(|s: &mut App| s.start_new_round(None)).build(t);
+    // One primary action at a time: while every round is paused, Resume is it and New round… steps back.
+    let new = Button::new("rounds-new", "New round…").variant(if s.rounds_paused && n > 0 { ButtonVariant::Secondary } else { ButtonVariant::Default }).size(Size::Sm).on_press(|s: &mut App| s.start_new_round(None)).build(t);
     let mut head = row().w_full().gap(t.space.at(3.0)).center_y().child(text("Rounds").key("rounds-title").role("heading").level(1).font(weight(t.ty.xl, t.ty.medium)).color(t.ink()));
     if n > 0 {
         head = head.child(text(if n == 1 { "1 round".to_owned() } else { format!("{n} rounds") }).key("rounds-count").font(tabular(t.ty.base)).color(t.ink_faint()));

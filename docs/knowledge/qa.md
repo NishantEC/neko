@@ -19,6 +19,15 @@ run waits for `~/.agents/bin/machine-ok` to say OK, makes a temporary folder (da
 folders), starts a real `neko-daemon` there, and afterwards checks that every process it started is gone (by the PIDs it recorded,
 and anything still running from its folder) and removes the folder. Anything left is stopped by PID and fails the run.
 
+## The rounds scenarios
+
+`rounds` makes a round from the Rounds page (mochi, acme-api, Run now only), runs it now, checks the task is mochi's in acme-api and
+says where it came from, opens the history, switches the round off and removes it (the task stays). `rounds-due` starts the daemon
+with `NEKO_DEBUG_CLOCK=1` and moves the scheduler's clock with the `clock` step (`{"do": "clock", "minutes": 361}`, which sends
+`debug_clock`): the round starts by itself and its step waits in Needs you (ask mode); the next time is skipped with its reason;
+pause all holds the third; after the request is denied a later time makes a second task. The step works only against a debug
+daemon started with that variable; a release daemon refuses it (`rounds.md`).
+
 ## How it drives and records
 
 - **Headless (default).** `apps/neko/examples/neko-qa.rs` builds the real app (`neko_app::app()`: its view, state, keys, `poll`
@@ -71,7 +80,7 @@ and anything still running from its folder) and removes the folder. Anything lef
 `apps/neko/qa/*.json`, one per journey: `name`, `title`, `about`, `cli`, `window`, `size`, `setup` (folders, optionally git; the
 fake's Claude Code settings; daemon environment) and `steps`. A step is an action (`click` on a selector, `type`, `key`
 (`cmd+n`, `shift+tab`), `sleep`, `snap`, `choose-folder`, `add-workspace`, `tab-to` (Tab until a control has focus, checking a
-focus ring at every stop), `allow-until`, `quit-app`, `start-app`, `stop-daemon`, `start-daemon`, `remove`, `git-record`, `run` (a command in the run's folder: an edit by hand), `stale-answer`) or a
+focus ring at every stop), `allow-until`, `quit-app`, `start-app`, `stop-daemon`, `start-daemon`, `remove`, `git-record`, `run` (a command in the run's folder: an edit by hand), `stale-answer`, `clock`) or a
 check (`wait` with a deadline, `assert`). A step with `expect` is an expectation in the report; `soft` records a failure and goes
 on; `window: false` leaves a step to headless. Selectors match an element's `key` (with `*`), `text`, `label`, `label_is`, `name`
 (text, label or description), `role`, `focused`, `in` (an ancestor). Checks: `see`, `gone`, `count`, `focus` (with a drawn ring

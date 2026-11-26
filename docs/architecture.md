@@ -48,7 +48,7 @@ daemon pushes an event for every change. See `docs/knowledge/protocol.md`.
 
 SQLite, bundled, in WAL mode, at `neko.sqlite3` in the data folder. One row per entity: `workspaces` (General and the folders the
 person added), `tasks`, `runs`, `parts`,
-`permissions`, `usage`, `settings`. Every change
+`permissions`, `usage`, `settings`, `cats`, `rounds` and its `round_runs`. Every change
 also appends one row to `events`, in the same transaction. Triggers refuse any update or delete of an event. The schema version
 is SQLite's `user_version`; migrations run in order from version 1. Logic never reads the clock or makes an id itself: both are
 handed in. See `docs/knowledge/store.md`.
@@ -62,6 +62,12 @@ changes; words stream to screens at once and reach the disk every few seconds. R
 run at a time per task; tasks run side by side. See `docs/knowledge/runtimes.md`, `permissions.md`, `run-guard.md`,
 `transcript.md`. After each run an empty worktree or scratch folder is tidied away; one with work in it is kept. A checkpoint at each run's start and
 end lets the person review, undo and redo it (`docs/knowledge/undo.md`).
+
+## Rounds
+
+A round is a cat's standing work that starts by itself. One daemon thread (`neko-rounds`) sleeps until the next due time (no timer
+when no round is on), makes each due time an ordinary task and starts it through the same path as a task the person makes, so the
+permission mode, the cat's rules, the run guard and Undo apply unchanged. See `docs/knowledge/rounds.md`.
 
 ## The app
 

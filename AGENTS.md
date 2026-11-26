@@ -60,6 +60,7 @@ ships in `NOTICE` and `THIRD_PARTY_LICENSES/`.
 - [Undo](docs/knowledge/undo.md) — checkpoints at each run's start and end, the exact git commands, Review, Undo and Redo, limits, housekeeping.
 - [Cats](docs/knowledge/cats.md) — named agents with standing rules, which cat gets a task, how rules reach Claude Code, what they can never do.
 - [Workspaces](docs/knowledge/workspaces.md) — folders the person added, General, removing, a missing folder, the tidy rule, Remove task.
+- [Rounds](docs/knowledge/rounds.md) — a cat's work that starts by itself: schedules and daylight saving, missed times, overlap, the brakes, the scheduler, the test clock.
 - [The QA rig](docs/knowledge/qa.md) — `scripts/qa/run.sh`: scripted journeys of the real app on a real daemon, recorded, with a verdict.
 
 ## Showing a change

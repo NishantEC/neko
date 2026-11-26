@@ -37,6 +37,14 @@ Raised surfaces (a busy cat's tile, the open sidebar row, a receipt, a request, 
 light; in dark they sit one small step above the page and are lit from above (an inner top edge and a faint gradient), not lifted
 by a lighter fill.
 
+## Rounds
+
+A round is a raised card (the same material and corner as a Needs you card) led by its cat's 44 point portrait; the switch, Run now and
+the menu sit at the card's top right. "Next:" is the identity teal while the round will run, amber when something stops it ("Turned
+itself off", "mochi is retired", "Folder missing"), the ink while it is only paused or off. One primary button at a time: New round…
+is the page's, and while every round is paused Resume rounds is, with New round… stepping back to secondary. The icon is Neko's own
+(`icons::ROUNDS`, two arrows chasing round); a task a round made carries it, small, before its line in the sidebar.
+
 ## Faces
 
 The daemon gives each cat one of eight face ids (`neko_protocol::cats::FACES`); a new cat gets the first no active cat has, so a

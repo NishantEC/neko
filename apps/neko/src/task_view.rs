@@ -431,11 +431,7 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let empty = Book::default();
     let book = s.book().unwrap_or(&empty);
     // The task's own words first (their text keyed "task-words", as in S0).
-    let mut items = Vec::new();
-    if let Some(from) = from_round(s, t, task) {
-        items.push(from);
-    }
-    items.push(turn::person(s, t, "task-message", "task-words", &task.words));
+    let mut items = vec![turn::person(s, t, "task-message", "task-words", &task.words)];
     if book.loaded && book.runs.is_empty() && book.parts.is_empty() && task.status == neko_protocol::TaskStatus::New {
         items.push(status_line(s, t, task));
     }
@@ -486,13 +482,14 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     if let Some(n) = &s.notice {
         foot = foot.child(text(n.clone()).key("reply-notice").role("status").font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0));
     }
+    // Where the task came from stays in sight above the conversation (which scrolls to its newest words), not in it.
+    let from = from_round(s, t, task).map(|line| row().w_full().justify_center().px(inset).pt(t.space.at(2.0)).child(col().w_full().max_w(COLUMN).child(line)));
+    let mut page = col().key("task").w_full().grow(1.0).min_h(0.0).items_center();
+    if let Some(strip) = from {
+        page = page.child(strip);
+    }
     crate::view::page_swap(
-        col()
-            .key("task")
-            .w_full()
-            .grow(1.0)
-            .min_h(0.0)
-            .items_center()
+        page
             .child(col().w_full().grow(1.0).min_h(0.0).child(conversation))
             .child(row().w_full().justify_center().px(inset).pt(t.space.at(2.0)).pb(t.space.at(5.0)).child(foot)),
     )

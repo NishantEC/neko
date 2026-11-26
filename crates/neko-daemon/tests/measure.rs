@@ -61,6 +61,31 @@ fn idle_and_a_five_minute_run() {
 }
 
 #[test]
+#[ignore = "a measurement: about a minute and a half"]
+fn idle_with_rounds_on_and_off() {
+    let d = Daemon::start("measure-rounds");
+    let pid = d.child.id() as i32;
+    let mut c = d.client();
+    c.request(Request::Subscribe).unwrap();
+    std::thread::sleep(Duration::from_secs(3));
+    let (cpu0, _, _) = usage(pid);
+    std::thread::sleep(Duration::from_secs(30));
+    let (cpu1, _, _) = usage(pid);
+    println!("idle, 30 s, no round: {} ms CPU ({:.3}%)", cpu1 - cpu0, (cpu1 - cpu0) as f64 / 300.0);
+    // A round that is on, due in a day, and one that is off: the scheduler sleeps until the next due time (at most five minutes).
+    let make = |c: &mut neko_protocol::client::Client, name: &str, on: bool| {
+        c.request(Request::CreateRound { name: name.into(), words: "Check [fake:plain]".into(), cat: "cat_mochi".into(), workspace: None, schedule: neko_protocol::Schedule::Every { hours: 24 }, on }).unwrap()
+    };
+    make(&mut c, "Docs check", true);
+    make(&mut c, "Off round", false);
+    std::thread::sleep(Duration::from_secs(3));
+    let (cpu2, _, _) = usage(pid);
+    std::thread::sleep(Duration::from_secs(30));
+    let (cpu3, _, _) = usage(pid);
+    println!("idle, 30 s, one round on (due in a day), one off: {} ms CPU ({:.3}%)", cpu3 - cpu2, (cpu3 - cpu2) as f64 / 300.0);
+}
+
+#[test]
 #[ignore = "a measurement: about a minute"]
 fn idle_with_a_screen_and_two_workspaces() {
     let d = Daemon::start("measure-idle");

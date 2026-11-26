@@ -21,6 +21,11 @@
   retired_ms)` (`name_key` is the name without case, unique), `cat_id` on `tasks`, and `cat_id` and `rules_hash` on `runs`. Its
   migration makes the starter cats when there are tasks and gives each task one, oldest first, by the least-busy rule. A store
   with no cats gets the starters at open, with no event. See `cats.md`.
+- Version 7 (rounds) adds `rounds (id, name, words, cat_id, workspace_id, schedule, enabled, anchor_ms, cursor_ms, fail_streak,
+  brake_note, created_ms, changed_ms)` (`schedule` is the protocol's JSON; `cursor_ms` is the last due time dealt with),
+  `round_runs (id, round_id, due_ms, at_ms, kind, task_id, reason, ended)` (the last 50 per round; removed with the round), and on
+  `tasks` `round_id`, `round_due_ms`, `round_name`. The pause is `settings.rounds_paused`. A due time's task, history line and
+  cursor are one transaction. See `rounds.md`.
 - `events (seq, at_ms, workspace_id, subject, kind, data)`. One row per change, in the same transaction as the change.
   `seq` is the revision the daemon pushes. Triggers refuse `UPDATE` and `DELETE` on it.
 
@@ -44,4 +49,4 @@ Ids are `task_` and 26 base-32 characters: 48 bits of time, 80 random bits (the 
 `crates/neko-core/tests/workspaces.rs`: the migration from version 3, adding, renaming, removing, a missing folder, locating,
 reordering, the tidy rule on real repositories. `crates/neko-core/tests/store.rs`: create and list, refusals, reopen, migration and the newer-version refusal, the migration to
 version 5 with a run from version 4, the append-only log, two connections. `crates/neko-core/tests/cats.rs`: the migration to
-version 6 from a version-5 store made in the test.
+version 6 from a version-5 store made in the test. `crates/neko-core/tests/rounds.rs`: the scheduler's logic with time handed in, and the migration to version 7 from a version-6 store made in the test.
