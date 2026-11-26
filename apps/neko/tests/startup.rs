@@ -47,21 +47,30 @@ impl Folder {
     }
 }
 
+/// The PID a daemon wrote in `daemon.json` (read directly: a daemon of another protocol version is still found), else the slow
+/// script's, written before it waits (the same process once it runs the daemon).
+fn pid_in(dir: &Path) -> Option<i32> {
+    let json = std::fs::read_to_string(dir.join("data/daemon.json")).ok();
+    let from_json = json.and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok()).and_then(|v| v.get("pid").and_then(|p| p.as_i64())).map(|p| p as i32);
+    from_json.or_else(|| std::fs::read_to_string(dir.join("slow.pid")).ok().and_then(|p| p.trim().parse().ok()))
+}
+
 impl Drop for Folder {
     fn drop(&mut self) {
-        // The daemon by the PID it wrote, else the slow script by the PID it wrote before waiting (the same process once it runs
-        // the daemon): so a failed test leaves nothing that starts later.
-        let pid = neko_protocol::client::find(&self.0.join("data")).ok().map(|(i, _)| i.pid as i32).or_else(|| std::fs::read_to_string(self.0.join("slow.pid")).ok().and_then(|p| p.trim().parse().ok()));
-        if let Some(pid) = pid {
-            // SAFETY: the daemon this test's app started, by the PID it wrote.
-            unsafe { libc::kill(pid, libc::SIGTERM) };
-            let end = Instant::now() + Duration::from_secs(10);
-            // SAFETY: signal 0 only asks whether the process exists.
-            while unsafe { libc::kill(pid, 0) } == 0 && Instant::now() < end {
-                std::thread::sleep(Duration::from_millis(20));
+        // A few times: if a test ends without letting go of its link, the link may start the daemon again and make the folder again.
+        for _ in 0..4 {
+            if let Some(pid) = pid_in(&self.0) {
+                // SAFETY: a process this test's app started, by the PID it wrote.
+                unsafe { libc::kill(pid, libc::SIGTERM) };
+                let end = Instant::now() + Duration::from_secs(10);
+                // SAFETY: signal 0 only asks whether the process exists.
+                while unsafe { libc::kill(pid, 0) } == 0 && Instant::now() < end {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
             }
+            let _ = std::fs::remove_dir_all(&self.0);
+            std::thread::sleep(Duration::from_millis(700));
         }
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -131,7 +140,8 @@ fn the_first_frame_does_not_wait_for_a_slow_daemon_and_a_task_typed_meanwhile_is
     assert_eq!(rt.state.open_task().unwrap().words, "Tidy the notes [fake:plain]");
     assert!(!rt.state.queued && rt.state.draft.text.is_empty());
     assert!(rt.state.tasks_loaded);
-    rt.update(|s, _| s.conn = None);
+    // Let go of the link now (a runtime's state is not dropped with it), so it starts nothing more.
+    rt.state.conn = None;
 }
 
 #[test]
@@ -153,5 +163,6 @@ fn a_daemon_that_does_not_start_gets_a_calm_line_with_retry() {
     settle(&mut rt);
     assert!(rt.state.waiting_since.is_some_and(|at| at.elapsed() < Duration::from_millis(400)), "Retry starts the wait over");
     assert!(!has(&rt, "daemon-slow"), "and the line goes until the wait is long again");
-    rt.update(|s, _| s.conn = None);
+    // Let go of the link now (a runtime's state is not dropped with it), so it starts nothing more.
+    rt.state.conn = None;
 }
