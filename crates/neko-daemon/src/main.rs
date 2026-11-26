@@ -6,6 +6,7 @@
 
 mod files;
 mod http;
+mod runs;
 mod server;
 
 use std::path::PathBuf;
@@ -26,6 +27,8 @@ fn default_data_dir() -> Option<PathBuf> {
 }
 
 fn main() -> ExitCode {
+    // As a run's guardian (`--neko-run-guard`), this binary only guards: it never opens the store or the network.
+    neko_core::guard::run_if_requested();
     let mut data_dir = None;
     let mut port = 0u16;
     let mut args = std::env::args().skip(1);

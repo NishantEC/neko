@@ -1,102 +1,16 @@
 //! The real daemon binary on a temporary data folder: the token, loopback only, pushed events, one instance per folder, and a
 //! clean shutdown. Every daemon a test starts is stopped by its PID when the test ends, pass or fail.
 
+mod support;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream, UdpSocket};
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::path::Path;
+use std::time::Duration;
 
 use neko_protocol::client::{Client, find};
+use support::*;
 use neko_protocol::{Change, ErrorCode, Reply, Request, ServerMessage, files};
-
-fn temp_dir(name: &str) -> PathBuf {
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    // The test's name keeps parallel tests apart; the time keeps runs apart.
-    let dir = std::env::temp_dir().join(format!("neko-daemon-test-{name}-{}-{nanos}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
-}
-
-/// A daemon this test started, stopped (by its PID) and its folder removed on drop.
-struct Daemon {
-    child: Child,
-    dir: PathBuf,
-    keep_dir: bool,
-}
-
-fn spawn(dir: &Path) -> Child {
-    Command::new(env!("CARGO_BIN_EXE_neko-daemon")).arg("--data-dir").arg(dir).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap()
-}
-
-impl Daemon {
-    fn start(name: &str) -> Daemon {
-        Daemon::start_in(temp_dir(name))
-    }
-
-    fn start_in(dir: PathBuf) -> Daemon {
-        let child = spawn(&dir);
-        let d = Daemon { child, dir, keep_dir: false };
-        d.wait_ready();
-        d
-    }
-
-    fn wait_ready(&self) {
-        let until = Instant::now() + Duration::from_secs(20);
-        while Instant::now() < until {
-            if let Ok((info, _)) = find(&self.dir)
-                && info.pid == self.child.id()
-            {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        panic!("the daemon did not start");
-    }
-
-    fn port(&self) -> u16 {
-        find(&self.dir).unwrap().0.port
-    }
-
-    fn token(&self) -> String {
-        find(&self.dir).unwrap().1
-    }
-
-    fn client(&self) -> Client {
-        Client::connect(self.port(), &self.token(), "test").unwrap()
-    }
-
-    fn signal(&self, sig: i32) {
-        // SAFETY: signals the child this test spawned, by its PID.
-        unsafe { libc::kill(self.child.id() as i32, sig) };
-    }
-
-    /// Sends SIGTERM and waits for the exit status.
-    fn stop(&mut self) -> std::process::ExitStatus {
-        self.signal(libc::SIGTERM);
-        let until = Instant::now() + Duration::from_secs(10);
-        loop {
-            if let Some(status) = self.child.try_wait().unwrap() {
-                return status;
-            }
-            assert!(Instant::now() < until, "the daemon did not stop on SIGTERM");
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-}
-
-impl Drop for Daemon {
-    fn drop(&mut self) {
-        if self.child.try_wait().ok().flatten().is_none() {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
-        }
-        if !self.keep_dir {
-            let _ = std::fs::remove_dir_all(&self.dir);
-        }
-    }
-}
 
 /// A raw HTTP request; returns the status line.
 fn http(port: u16, lines: &[String]) -> String {
@@ -150,20 +64,22 @@ fn changes_are_pushed_to_subscribed_screens() {
     let Reply::Subscribed { revision } = watcher.request(Request::Subscribe).unwrap() else { panic!("subscribe") };
     assert_eq!(revision, 0);
     let mut writer = d.client();
-    let Reply::Task { task } = writer.request(Request::CreateTask { words: "Fix the build".into() }).unwrap() else { panic!("create") };
+    let Reply::Task { task } = writer.request(Request::CreateTask { words: "Fix the build".into(), folder: None }).unwrap() else { panic!("create") };
     let event = watcher.next_event(Duration::from_secs(5)).unwrap().expect("an event");
     assert_eq!(event, ServerMessage::Event { revision: 1, change: Change::TaskCreated { task: task.clone() } });
     assert!(writer.next_event(Duration::from_millis(200)).unwrap().is_none(), "a screen that did not subscribe gets no events");
+    // The task's agent starts by itself (the fake CLI here), so its status moves on; the task is the same one.
     let Reply::Tasks { tasks } = watcher.request(Request::ListTasks).unwrap() else { panic!("list") };
-    assert_eq!(tasks, vec![task.clone()]);
-    assert_eq!(watcher.request(Request::GetTask { task: task.id.clone() }).unwrap(), Reply::Task { task });
+    assert_eq!(tasks.iter().map(|t| (&t.id, &t.words)).collect::<Vec<_>>(), vec![(&task.id, &task.words)]);
+    let Reply::Task { task: got } = watcher.request(Request::GetTask { task: task.id.clone() }).unwrap() else { panic!("get") };
+    assert_eq!((got.id, got.words), (task.id, task.words));
 }
 
 #[test]
 fn bad_requests_get_reasons() {
     let d = Daemon::start("errors");
     let mut c = d.client();
-    let empty = c.request(Request::CreateTask { words: "   ".into() }).unwrap();
+    let empty = c.request(Request::CreateTask { words: "   ".into(), folder: None }).unwrap();
     assert!(matches!(empty, Reply::Error { code: ErrorCode::InvalidWords, .. }), "{empty:?}");
     let missing = c.request(Request::GetTask { task: neko_protocol::TaskId("task_none".into()) }).unwrap();
     assert!(matches!(missing, Reply::Error { code: ErrorCode::NotFound, .. }), "{missing:?}");
@@ -186,7 +102,7 @@ fn a_second_daemon_for_the_same_folder_is_refused() {
 fn it_shuts_down_cleanly_and_the_data_survives() {
     let mut d = Daemon::start("shutdown");
     let mut c = d.client();
-    let Reply::Task { task } = c.request(Request::CreateTask { words: "Keep this".into() }).unwrap() else { panic!("create") };
+    let Reply::Task { task } = c.request(Request::CreateTask { words: "Keep this".into(), folder: None }).unwrap() else { panic!("create") };
     let status = d.stop();
     assert!(status.success(), "SIGTERM is a clean exit: {status:?}");
     assert!(!d.dir.join(files::DAEMON).exists(), "the address file is removed");
@@ -197,7 +113,7 @@ fn it_shuts_down_cleanly_and_the_data_survives() {
     drop(d);
     let again = Daemon::start_in(dir);
     let Reply::Tasks { tasks } = again.client().request(Request::ListTasks).unwrap() else { panic!("list") };
-    assert_eq!(tasks, vec![task], "the task is still there after a restart");
+    assert_eq!(tasks.iter().map(|t| (&t.id, &t.words)).collect::<Vec<_>>(), vec![(&task.id, &task.words)], "the task is still there after a restart");
 }
 
 #[test]

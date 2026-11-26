@@ -12,12 +12,14 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
+use neko_core::runtime::Runtime;
 use neko_core::{Core, NewTaskError, RandomIds, SystemClock};
 use neko_protocol::pump::{self, Flow, Out, Wake};
-use neko_protocol::{Change, ClientMessage, DaemonInfo, ErrorCode, PROTOCOL_VERSION, Reply, Request, ServerMessage, files};
+use neko_protocol::{Change, ClientMessage, DaemonInfo, ErrorCode, PROTOCOL_VERSION, Reply, Request, ServerMessage, TaskId, files};
 use tungstenite::WebSocket;
 use tungstenite::protocol::Role;
 
+use crate::runs::{self, Runs};
 use crate::{files as dfiles, http};
 
 pub enum StartError {
@@ -37,18 +39,21 @@ struct Conn {
     tx: Sender<Out>,
     wake: Wake,
     subscribed: bool,
+    /// The task whose words this screen wants as they stream.
+    watching: Option<TaskId>,
 }
 
-/// What every connection's thread shares.
-struct Shared {
-    core: Mutex<Core>,
+/// What every connection's thread, and every run's, shares.
+pub struct Shared {
+    pub core: Mutex<Core>,
     conns: Mutex<HashMap<u64, Conn>>,
     token: String,
     port: u16,
     stopping: AtomicBool,
+    pub runs: Runs,
 }
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
@@ -62,10 +67,20 @@ impl Shared {
     }
 
     /// Pushes a change to every subscribed connection. Called with the core locked, so events leave in revision order.
-    fn broadcast(&self, msg: &ServerMessage) {
+    pub fn broadcast(&self, msg: &ServerMessage) {
         let text = msg.to_json();
         for c in lock(&self.conns).values().filter(|c| c.subscribed) {
             let _ = c.tx.send(Out::Text(text.clone()));
+            c.wake.wake();
+        }
+    }
+
+    /// Pushes streaming words to the subscribed connections watching `task`.
+    pub fn stream(&self, task: &TaskId, msg: &ServerMessage) {
+        let mut text = None;
+        for c in lock(&self.conns).values().filter(|c| c.subscribed && c.watching.as_ref() == Some(task)) {
+            let t = text.get_or_insert_with(|| msg.to_json());
+            let _ = c.tx.send(Out::Text(t.clone()));
             c.wake.wake();
         }
     }
@@ -96,10 +111,22 @@ pub fn run(dir: &Path, port: u16) -> Result<(), StartError> {
         Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
     }
     let token = dfiles::token(dir)?;
-    let core = Core::open(&dir.join(files::STORE), Box::new(SystemClock), Box::new(RandomIds))?;
+    let mut core = Core::open(&dir.join(files::STORE), Box::new(SystemClock), Box::new(RandomIds))?;
+    // Runs the last daemon left running were cut off: they are interrupted, and say so.
+    runs::recover(&mut core);
     let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port)))?;
     let port = listener.local_addr()?.port();
-    let shared = Arc::new(Shared { core: Mutex::new(core), conns: Mutex::new(HashMap::new()), token, port, stopping: AtomicBool::new(false) });
+    // The run guard is this binary (`--neko-run-guard`). `NEKO_CLAUDE_BIN` points at another `claude` (tests use the fake).
+    let guard = std::env::current_exe()?;
+    let claude_bin = std::env::var_os("NEKO_CLAUDE_BIN").filter(|b| !b.is_empty()).map(std::path::PathBuf::from);
+    let runtimes: Vec<Arc<dyn Runtime>> = vec![Arc::new(neko_core::claude::ClaudeRuntime::new(claude_bin, guard))];
+    let runs = Runs::new(runtimes, dir.to_path_buf());
+    let shared = Arc::new(Shared { core: Mutex::new(core), conns: Mutex::new(HashMap::new()), token, port, stopping: AtomicBool::new(false), runs });
+    // Find the agent CLIs once now, off the main thread, so the first task and Settings do not wait for it.
+    let warm = shared.clone();
+    let _ = std::thread::Builder::new().name("neko-detect".into()).spawn(move || {
+        warm.runs.detections(Duration::from_secs(0));
+    });
     dfiles::write_info(dir, &DaemonInfo { pid: std::process::id(), port, protocol: PROTOCOL_VERSION, version: env!("CARGO_PKG_VERSION").to_owned() })?;
     eprintln!("neko-daemon {}: listening on 127.0.0.1:{port} for {}", env!("CARGO_PKG_VERSION"), dir.display());
 
@@ -149,7 +176,7 @@ fn stop(shared: &Shared) {
 }
 
 /// One connection: its request head, then the hello answer or a WebSocket session.
-fn serve(mut stream: TcpStream, id: u64, shared: &Shared) {
+fn serve(mut stream: TcpStream, id: u64, shared: &Arc<Shared>) {
     if shared.stopping.load(Ordering::SeqCst) {
         return;
     }
@@ -171,10 +198,10 @@ fn serve(mut stream: TcpStream, id: u64, shared: &Shared) {
     }
 }
 
-fn session(stream: TcpStream, id: u64, shared: &Shared) {
+fn session(stream: TcpStream, id: u64, shared: &Arc<Shared>) {
     let Ok((wake, wake_rx)) = pump::wake_pair() else { return };
     let (tx, rx) = mpsc::channel();
-    lock(&shared.conns).insert(id, Conn { tx: tx.clone(), wake: wake.clone(), subscribed: false });
+    lock(&shared.conns).insert(id, Conn { tx: tx.clone(), wake: wake.clone(), subscribed: false, watching: None });
     if shared.stopping.load(Ordering::SeqCst) {
         let _ = tx.send(Out::Close);
     }
@@ -190,7 +217,7 @@ fn session(stream: TcpStream, id: u64, shared: &Shared) {
 }
 
 /// The reply to one message, the id it answers, and whether the connection goes on.
-fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Shared) -> (u64, Reply, Flow) {
+fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) -> (u64, Reply, Flow) {
     let msg: ClientMessage = match serde_json::from_str(text) {
         Ok(m) => m,
         Err(e) => {
@@ -219,17 +246,79 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Shared) -> (u64
             Ok(None) => Reply::error(ErrorCode::NotFound, "There is no such task."),
             Err(e) => internal(e),
         },
-        Request::CreateTask { words } => {
-            let mut core = lock(&shared.core);
-            match core.create_task(&words) {
-                Ok((task, revision)) => {
-                    shared.broadcast(&ServerMessage::Event { revision, change: Change::TaskCreated { task: task.clone() } });
+        Request::CreateTask { words, folder } => {
+            let made = {
+                let mut core = lock(&shared.core);
+                let made = core.create_task_in(&words, folder.as_deref().filter(|f| !f.trim().is_empty()));
+                if let Ok((task, revision)) = &made {
+                    shared.broadcast(&ServerMessage::Event { revision: *revision, change: Change::TaskCreated { task: task.clone() } });
+                }
+                made
+            };
+            match made {
+                Ok((task, _)) => {
+                    // The agent starts by itself; how it goes arrives as events.
+                    let _ = runs::start(shared, task.clone(), None);
                     Reply::Task { task }
                 }
                 Err(e @ (NewTaskError::Empty | NewTaskError::TooLong)) => Reply::error(ErrorCode::InvalidWords, e.to_string()),
                 Err(e) => Reply::error(ErrorCode::Internal, e.to_string()),
             }
         }
+        Request::GetTranscript { task } => {
+            let core = lock(&shared.core);
+            let s = &core.store;
+            match (s.get_task(&task), s.runs_of(&task), s.parts_of(&task), s.permissions_of(&task)) {
+                (Ok(Some(task)), Ok(runs), Ok(parts), Ok(permissions)) => Reply::Transcript { transcript: neko_protocol::Transcript { task, runs, parts, permissions } },
+                (Ok(None), ..) => Reply::error(ErrorCode::NotFound, "There is no such task."),
+                (Err(e), ..) | (_, Err(e), ..) | (_, _, Err(e), _) | (.., Err(e)) => internal(e),
+            }
+        }
+        Request::FollowUp { task, words } => {
+            if words.len() > neko_protocol::MAX_WORDS_BYTES {
+                return (id, Reply::error(ErrorCode::InvalidWords, "That is too long to send. Put the long part in a file."), Flow::Continue);
+            }
+            let found = lock(&shared.core).store.get_task(&task);
+            match found {
+                Ok(Some(t)) => runs::follow_up(shared, t, words),
+                Ok(None) => Reply::error(ErrorCode::NotFound, "There is no such task."),
+                Err(e) => internal(e),
+            }
+        }
+        Request::StopTask { task } => runs::stop(shared, &task),
+        Request::AnswerPermission { permission, decision } => runs::answer(shared, &permission, decision),
+        Request::WatchTask { task } => {
+            if let Some(c) = lock(&shared.conns).get_mut(&conn) {
+                c.watching = task;
+            }
+            Reply::Ok
+        }
+        Request::ListRuntimes => {
+            let runtimes = shared.runs.infos(Duration::from_secs(10));
+            match lock(&shared.core).store.settings() {
+                Ok(settings) => Reply::Runtimes { runtimes, settings },
+                Err(e) => internal(e),
+            }
+        }
+        Request::SetSettings { settings } => {
+            let known = shared.runs.runtimes.iter().any(|r| r.id() == settings.runtime);
+            if !known {
+                return (id, Reply::error(ErrorCode::BadRequest, format!("Neko cannot run {} yet.", settings.runtime)), Flow::Continue);
+            }
+            let mut core = lock(&shared.core);
+            let now = core.now();
+            match core.store.set_settings(&settings, now) {
+                Ok(revision) => {
+                    shared.broadcast(&ServerMessage::Event { revision, change: Change::SettingsChanged { settings: settings.clone() } });
+                    Reply::Settings { settings }
+                }
+                Err(e) => internal(e),
+            }
+        }
+        Request::DayUsage { from_ms } => match lock(&shared.core).store.day_usage(from_ms) {
+            Ok(usage) => Reply::DayUsage { usage },
+            Err(e) => internal(e),
+        },
         Request::Subscribe => {
             // The core stays locked while the connection is marked, so no change falls between the revision and the first event.
             let core = lock(&shared.core);
