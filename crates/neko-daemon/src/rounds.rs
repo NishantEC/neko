@@ -93,7 +93,7 @@ pub fn stopping(shared: &Shared) {
     shared.rounds.poke();
 }
 
-fn env(shared: &Shared) -> Env<'static> {
+pub(crate) fn env(shared: &Shared) -> Env<'static> {
     Env { now: shared.rounds.now(), zone: &SystemZone }
 }
 
@@ -116,18 +116,34 @@ fn watch(shared: &Arc<Shared>) {
             // The core stays locked while events leave, so they go out in revision order.
             let mut core = lock(&shared.core);
             let e = env(shared);
-            match core.tick_rounds(e) {
+            let (started, rounds_wake) = match core.tick_rounds(e) {
                 Ok(tick) => {
                     for (revision, change) in tick.events {
                         shared.broadcast(&ServerMessage::Event { revision, change });
                     }
-                    (tick.started, tick.wake_at_ms.map(|t| (t - e.now).max(0)))
+                    (tick.started, tick.wake_at_ms)
                 }
                 Err(e) => {
                     eprintln!("neko-daemon: rounds: {e}");
                     (Vec::new(), None)
                 }
-            }
+            };
+            // The morning notification (docs/knowledge/briefing.md): the same thread, the same clock, the same timer.
+            let morning_wake = match core.morning(e, shared.screens()) {
+                Ok(m) => {
+                    if let Some(counts) = m.due {
+                        let revision = core.store.revision().unwrap_or(0);
+                        shared.broadcast(&ServerMessage::Event { revision, change: Change::BriefingDue { counts } });
+                    }
+                    m.wake_at_ms
+                }
+                Err(e) => {
+                    eprintln!("neko-daemon: briefing: {e}");
+                    None
+                }
+            };
+            let wake = [rounds_wake, morning_wake].into_iter().flatten().min();
+            (started, wake.map(|t| (t - e.now).max(0)))
         };
         for task in started {
             let _ = runs::start(shared, task, None);

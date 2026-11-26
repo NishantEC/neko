@@ -1526,6 +1526,8 @@ impl App {
                 }
             }
             Change::RoundsPaused { paused } => self.rounds_paused = paused,
+            // The Briefing's page and its notification come with the app's own commit.
+            Change::BriefingChanged { .. } | Change::BriefingSettingsChanged { .. } | Change::BriefingDue { .. } => {}
         }
     }
 

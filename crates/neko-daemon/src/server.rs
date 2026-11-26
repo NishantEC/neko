@@ -55,6 +55,8 @@ pub struct Shared {
     needs: NeedsWatch,
     /// The rounds scheduler's clock and thread (docs/knowledge/rounds.md).
     pub rounds: crate::rounds::Hub,
+    /// The briefing screens were last told (docs/knowledge/briefing.md).
+    pub briefing_last: Mutex<Option<neko_protocol::Briefing>>,
 }
 
 /// Keeps "Needs you" (docs/knowledge/needs-you.md) pushed: a change to a task's state, a request or a task's removal marks it, and
@@ -91,7 +93,20 @@ impl Shared {
             // A round's task changed: the scheduler looks at how it ended (and at the three-failures brake).
             self.rounds.poke();
         }
-        if let ServerMessage::Event { change: Change::TaskUpdated { .. } | Change::PermissionChanged { .. } | Change::TaskRemoved { .. } | Change::CatUpdated { .. }, .. } = msg {
+        if let ServerMessage::Event {
+            change:
+                Change::TaskCreated { .. }
+                | Change::TaskUpdated { .. }
+                | Change::PermissionChanged { .. }
+                | Change::TaskRemoved { .. }
+                | Change::CatUpdated { .. }
+                | Change::RunChanged { .. }
+                | Change::RoundUpdated { .. }
+                | Change::RoundRemoved { .. }
+                | Change::BriefingSettingsChanged { .. },
+            ..
+        } = msg
+        {
             *lock(&self.needs.dirty) = true;
             self.needs.wake.notify_one();
         }
@@ -129,13 +144,16 @@ fn watch_needs(shared: Arc<Shared>) {
         *lock(&shared.needs.dirty) = false;
         // The core stays locked while the list is pushed, so it leaves in order with the changes around it.
         let core = lock(&shared.core);
-        let Ok(items) = neko_core::needs::derive(&core.store) else { continue };
-        let mut last = lock(&shared.needs.last);
-        if *last != items {
-            *last = items.clone();
-            let revision = core.store.revision().unwrap_or(0);
-            shared.broadcast(&ServerMessage::Event { revision, change: Change::NeedsChanged { items } });
+        if let Ok(items) = neko_core::needs::derive(&core.store) {
+            let mut last = lock(&shared.needs.last);
+            if *last != items {
+                *last = items.clone();
+                let revision = core.store.revision().unwrap_or(0);
+                shared.broadcast(&ServerMessage::Event { revision, change: Change::NeedsChanged { items } });
+            }
         }
+        // The briefing is made of the same records (and more), so it is looked at after the same changes.
+        crate::briefing::push_if_changed(&shared, &core);
     }
 }
 
@@ -176,7 +194,7 @@ pub fn run(dir: &Path, port: u16) -> Result<(), StartError> {
     let runs = Runs::new(runtimes, dir.to_path_buf());
     let first = neko_core::needs::derive(&core.store).unwrap_or_default();
     let needs = NeedsWatch { dirty: Mutex::new(false), wake: Condvar::new(), last: Mutex::new(first) };
-    let shared = Arc::new(Shared { core: Mutex::new(core), conns: Mutex::new(HashMap::new()), token, port, stopping: AtomicBool::new(false), runs, needs, rounds: crate::rounds::Hub::new() });
+    let shared = Arc::new(Shared { core: Mutex::new(core), conns: Mutex::new(HashMap::new()), token, port, stopping: AtomicBool::new(false), runs, needs, rounds: crate::rounds::Hub::new(), briefing_last: Mutex::new(None) });
     let for_needs = shared.clone();
     std::thread::Builder::new().name("neko-needs".into()).spawn(move || watch_needs(for_needs))?;
     crate::folders::spawn(shared.clone())?;
@@ -574,6 +592,10 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
             Ok(items) => Reply::Needs { items },
             Err(e) => internal(e),
         },
+        Request::GetBriefing { from_ms, to_ms } => crate::briefing::get(shared, from_ms, to_ms),
+        Request::MarkBriefingRead => crate::briefing::mark_read(shared),
+        Request::GetBriefingSettings => crate::briefing::settings(shared),
+        Request::SetBriefingSettings { settings } => crate::briefing::set_settings(shared, settings),
         Request::GetDiff { task, run } => crate::undo::diff(shared, &task, run),
         Request::GetDiffFile { task, run, path, full } => crate::undo::diff_file(shared, &task, run, &path, full),
         Request::UndoRun { task, run, anyway } => crate::undo::undo_run(shared, &task, &run, anyway, false),
@@ -593,6 +615,8 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
                         c.subscribed = true;
                     }
                     crate::folders::screen_subscribed();
+                    // A morning notification that waited for a screen is due now.
+                    shared.rounds.poke();
                     Reply::Subscribed { revision }
                 }
                 Err(e) => internal(e),

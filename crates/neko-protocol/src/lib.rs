@@ -14,12 +14,14 @@ use serde::{Deserialize, Serialize};
 pub mod client;
 #[cfg(feature = "ws")]
 pub mod pump;
+pub mod briefing;
 pub mod cats;
 pub mod rounds;
 pub mod schedule;
 pub mod title;
 pub mod undo;
 
+pub use briefing::{Briefing, BriefingCounts, BriefingSettings};
 pub use cats::Cat;
 pub use rounds::{Round, RoundRun, RoundStatus, TaskRound};
 pub use schedule::Schedule;
@@ -32,8 +34,9 @@ pub use undo::{DiffFile, DiffPatch, DiffSummary, FileStatus, Offer, RunUndo, Und
 /// follow-up may say which question it answers). 7: undo (a run's checkpoints and where its undo stands; a run's changes as a diff,
 /// per file; undo, redo; the storage undo uses, and clearing it). 8: cats (named agents with standing rules; every task has one; a
 /// run records its cat and the version of its rules; "Needs you" items name the cat). 9: rounds (a cat's standing work that starts
-/// by itself: its schedule, its history, pause all; a task says which round made it and when it was due).
-pub const PROTOCOL_VERSION: u32 = 9;
+/// by itself: its schedule, its history, pause all; a task says which round made it and when it was due). 10: the Briefing (what
+/// happened while the person was away, derived by the daemon; mark it read; the morning time; an event when it is due).
+pub const PROTOCOL_VERSION: u32 = 10;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -571,6 +574,19 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         offset_ms: Option<i64>,
     },
+    /// What happened in a window: from the person's last "mark read" (the first time, the last 24 hours) up to now. A window may be
+    /// given (`from_ms` inclusive, `to_ms` exclusive; either may be left out), for tests and tools.
+    GetBriefing {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from_ms: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to_ms: Option<i64>,
+    },
+    /// The person has read the briefing: its next window starts now. Answers with the new briefing.
+    MarkBriefingRead,
+    /// The morning time and whether the notification is posted.
+    GetBriefingSettings,
+    SetBriefingSettings { settings: BriefingSettings },
     /// Forget a task: its record goes, and its worktree or scratch folder when nothing unsaved is in it. Refused while it runs and
     /// when its folder holds unsaved work.
     RemoveTask { task: TaskId },
@@ -722,6 +738,8 @@ pub enum Reply {
     UndoStorage { storage: UndoStorage },
     Cats { cats: Vec<Cat> },
     Cat { cat: Cat },
+    Briefing { briefing: Briefing },
+    BriefingSettings { settings: BriefingSettings },
     /// Every round, and whether all are paused.
     Rounds { rounds: Vec<Round>, paused: bool },
     Round { round: Round },
@@ -766,6 +784,13 @@ pub enum Change {
     RoundRemoved { round: String },
     /// Every round was paused, or let go on. The rounds follow as `round_updated`.
     RoundsPaused { paused: bool },
+    /// The briefing's content changed: the whole briefing for the current window (derived, never stored; sent only when it differs,
+    /// apart from the moment it was made).
+    BriefingChanged { briefing: Briefing },
+    BriefingSettingsChanged { settings: BriefingSettings },
+    /// It is the morning time and the window has news: the screen posts the notification. Sent once a day at most, and not stored
+    /// (`revision` is the last stored change). A daemon with no screen connected keeps it until one is, for that day.
+    BriefingDue { counts: BriefingCounts },
 }
 
 /// What the daemon sends.

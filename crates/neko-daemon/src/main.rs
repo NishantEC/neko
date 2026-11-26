@@ -4,6 +4,7 @@
 //! folder's `token` file (mode 0600). SIGTERM, SIGINT or SIGHUP shut it down cleanly: connections are closed, the store is
 //! checkpointed and `daemon.json` is removed. See docs/architecture.md.
 
+mod briefing;
 mod files;
 mod folders;
 mod hook;

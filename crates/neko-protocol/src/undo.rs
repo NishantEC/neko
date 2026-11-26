@@ -135,22 +135,27 @@ pub struct UndoStorage {
 }
 
 /// What a run's card can do.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Action {
     Undo,
     Redo,
 }
 
 /// What a run's card shows for undo.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Offer {
     /// Review opens the run's diff.
+    #[serde(default)]
     pub review: bool,
     /// Undo or Redo, and whether it can be pressed now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<(Action, bool)>,
     /// One quiet line for the special cases.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line: Option<String>,
     /// The run's changes are not in the folder now: its steps are marked "undone".
+    #[serde(default)]
     pub undone: bool,
 }
 
