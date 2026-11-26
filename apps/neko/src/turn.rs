@@ -147,23 +147,26 @@ pub fn turn_head(t: &Theme, r: &Run, name: &str, face: &str, waiting: bool) -> E
         .child(text(doing).font(t.ty.sm).color(ink).a11y_hidden())
 }
 
-/// The live line: the cat's small ringed portrait and what it is doing, with the step it is on. The ring carries the motion; the
-/// words hold still.
-pub fn live_line(t: &Theme, r: &Run, name: &str, face: &str, thinking: bool, steps: usize) -> El {
+/// The live line: what the cat is doing now, with the step it is on. The turn's head already shows who (portrait, name, ring), so
+/// this line never repeats them: it is one quiet line with the turning mark a running step has. Its name for assistive technology
+/// still says who ("miso is thinking").
+pub fn live_line(t: &Theme, r: &Run, name: &str, thinking: bool, steps: usize) -> El {
     let doing = if thinking { "thinking" } else { "working" };
     let label = format!("{name} is {doing}");
-    let words = if steps > 0 { format!("{label} · step {}", steps + 1) } else { label.clone() };
+    let seen = if thinking { "Thinking…" } else { "Working…" };
+    let words = if steps > 0 { format!("{seen} · step {}", steps + 1) } else { seen.to_owned() };
     row()
         .key(format!("run-{}-working", r.id.0))
         .role("status")
         .label(label)
         .w_full()
         .h(t.control.lg)
-        .gap(t.space.at(2.0))
+        // A step's own inset and gap (rune-ui's FoldLine), so the mark and the words sit under the steps' marks and words.
+        .pl(t.space.at(1.5))
+        .gap(t.metrics.gap)
         .center_y()
-        .ml(-(crate::faces::ringed(20.0) - t.control.icon) / 2.0)
-        .child(portrait_in(t, face, 20.0, Some(TaskStatus::Working), t.c.page.bg))
-        .child(text(words).font(weight(t.ty.base, t.ty.medium)).color(t.c.accent.fg).a11y_hidden())
+        .child(row().size(t.control.icon, t.control.icon).center().child(mark(t, ToolState::Running)))
+        .child(text(words).font(t.ty.base).color(t.ink_muted()).a11y_hidden())
 }
 
 /// A permission request, led by the cat that asks: its portrait with the needs-you dot, "miso asks", what it wants to do and why,

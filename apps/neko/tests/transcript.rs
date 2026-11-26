@@ -78,8 +78,9 @@ fn empty_thoughts_show_nothing_and_thinking_shows_one_live_line() {
     let rt = runtime((1200.0, 800.0), false, scene("task-thinking"));
     let live = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("run-run_1-working")).expect("the live line");
     assert_eq!(live.label.as_deref(), Some("miso is thinking"), "the task's cat, by name");
-    assert!(texts(&rt).iter().any(|t| t.starts_with("miso is thinking")), "the live line says who thinks: {:?}", texts(&rt));
-    assert!(!texts(&rt).iter().any(|t| t.contains("is working")), "one live line");
+    // The head already shows the cat (portrait, name, ring): the line under it says only what is happening, never the cat again.
+    assert!(texts(&rt).iter().any(|t| t.starts_with("Thinking…")), "the live line says what is happening: {:?}", texts(&rt));
+    assert!(!texts(&rt).iter().any(|t| t.contains("is thinking") || t.contains("is working") || t.starts_with("Working…")), "one live line, and the cat's name once: {:?}", texts(&rt));
 }
 
 #[test]

@@ -308,7 +308,7 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
         let tool_running = parts.iter().any(|p| matches!(&p.body, PartBody::Tool { state: ToolState::Running, .. }));
         if !streaming && !waiting && !tool_running {
             let steps = parts.iter().filter(|p| matches!(p.body, PartBody::Tool { .. })).count();
-            out.push(turn::live_line(t, r, &w.name, &w.face, book.thinking, steps));
+            out.push(turn::live_line(t, r, &w.name, book.thinking, steps));
         }
         return out.into_iter().fold(turn, Message::child).build(t);
     }

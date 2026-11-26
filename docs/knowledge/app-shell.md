@@ -114,7 +114,7 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   under a second is not shown. A command that exited non-zero keeps the finished mark with "exit 1" beside it; the red mark is
   only for a tool that could not run; a denied step says "Denied".
 - **Thinking**: a thought with no words shows nothing. While the agent thinks and nothing else arrives, one live line says
-  "miso is thinking" beside the cat's small ringed portrait (the ring turns; still under Reduce Motion); while it waits on something else, "miso is working", with the step it is on. A thought with words
+  "Thinking…" beside the turning mark a running step has (still under Reduce Motion); while it waits on something else, "Working…", with the step it is on. The line never shows the cat again (the turn's head already has its portrait, name and ring); its name for assistive technology still says who ("miso is thinking"). A thought with words
   folds as "Thought for 12s" ("Thought" under a second).
 - **Finished runs fold** behind one "Worked for 29s" line (or "Stopped after", "Interrupted after"), in every run of a task; its
   final answer and any notice stay open. The person can open it; the choice lasts for that run while the app is open. A run with
