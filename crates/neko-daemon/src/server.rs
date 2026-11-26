@@ -76,12 +76,12 @@ impl Shared {
         }
     }
 
-    /// Pushes a change to every subscribed connection. Called with the core locked, so events leave in revision order.
     /// Whether any screen is subscribed (the folder watcher runs only then).
     pub fn screens(&self) -> bool {
         lock(&self.conns).values().any(|c| c.subscribed)
     }
 
+    /// Pushes a change to every subscribed connection. Called with the core locked, so events leave in revision order.
     pub fn broadcast(&self, msg: &ServerMessage) {
         if let ServerMessage::Event { change: Change::TaskUpdated { .. } | Change::PermissionChanged { .. } | Change::TaskRemoved { .. } | Change::CatUpdated { .. }, .. } = msg {
             *lock(&self.needs.dirty) = true;
