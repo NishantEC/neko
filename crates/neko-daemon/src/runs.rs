@@ -72,11 +72,13 @@ pub struct Runs {
     pub limits: Limits,
     /// Hook helpers waiting for an answer, by their request id.
     pub hooks: Mutex<HashMap<String, Sender<(Answer, String)>>>,
+    /// Run threads still alive (a run's last writes come after it is released): shutdown waits for them before the checkpoint.
+    pub threads: Arc<AtomicU64>,
 }
 
 impl Runs {
     pub fn new(runtimes: Vec<Arc<dyn Runtime>>, data_dir: PathBuf) -> Runs {
-        Runs { runtimes, active: Mutex::new(HashMap::new()), found: Mutex::new(None), data_dir, limits: Limits::from_env(), hooks: Mutex::new(HashMap::new()) }
+        Runs { runtimes, active: Mutex::new(HashMap::new()), found: Mutex::new(None), data_dir, limits: Limits::from_env(), hooks: Mutex::new(HashMap::new()), threads: Arc::new(AtomicU64::new(0)) }
     }
 
     /// What was found of each runtime, read again when older than `fresh`.
@@ -191,11 +193,15 @@ pub fn start(shared: &Arc<Shared>, task: Task, words: Option<String>) -> Result<
     }
     let s = shared.clone();
     let id = task.id.clone();
+    let threads = shared.runs.threads.clone();
+    threads.fetch_add(1, Ordering::SeqCst);
     let spawned = std::thread::Builder::new().name(format!("neko-run-{}", workplace::short_id(&task.id))).spawn(move || {
         run(&s, &task, words, &cancelled);
         release(&s, &task.id, &cancelled);
+        s.runs.threads.fetch_sub(1, Ordering::SeqCst);
     });
     if spawned.is_err() {
+        threads.fetch_sub(1, Ordering::SeqCst);
         lock(&shared.runs.active).remove(&id);
         return Err(Reply::error(ErrorCode::Internal, "Neko could not start a thread for this run."));
     }
@@ -213,8 +219,10 @@ fn release(shared: &Shared, task: &TaskId, mine: &Arc<AtomicBool>) {
 
 fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc<AtomicBool>) {
     // Where it works: prepared once, then the same for every follow-up.
-    let place = match lock(&shared.core).store.place(&task.id) {
-        Ok(Some(p)) => Ok(p),
+    let stored = lock(&shared.core).store.place(&task.id);
+    let place = match stored {
+        // Its folder may have been tidied away after the last run: it comes back first.
+        Ok(Some(p)) => workplace::reopen(&shared.runs.data_dir, &task.id, &p).map(|()| p),
         _ => workplace::prepare(&shared.runs.data_dir, &task.id, task.folder.as_deref()),
     };
     let place: Place = match place {
@@ -275,6 +283,8 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
     let book = Arc::new(Mutex::new(book));
     let finish = |outcome: Outcome| {
         let changes = workplace::changes(&place);
+        // A worktree or scratch folder with nothing in it goes now, before a follow-up can start (it makes it again).
+        workplace::tidy(&shared.runs.data_dir, &task.id, &place);
         release(shared, &task.id, cancelled);
         let mut b = lock(&book);
         let mut core = lock(&shared.core);
@@ -435,6 +445,37 @@ pub fn answer(shared: &Shared, perm: &PermissionId, d: Decision) -> Reply {
         Err(AnswerError::NotFound) => Reply::error(ErrorCode::NotFound, "There is no such request."),
         Err(AnswerError::Settled) => Reply::error(ErrorCode::AlreadyAnswered, "This request was already answered."),
         Err(AnswerError::Store(e)) => Reply::error(ErrorCode::Internal, e.to_string()),
+    }
+}
+
+/// Removes a task: refused while its agent works, and when its folder holds unsaved work (nothing is deleted then).
+pub fn remove_task(shared: &Shared, task: &TaskId) -> Reply {
+    if lock(&shared.runs.active).contains_key(task) {
+        return Reply::error(ErrorCode::Busy, "Neko is working on this task. Stop it first.");
+    }
+    match lock(&shared.core).store.get_task(task) {
+        Ok(Some(_)) => {}
+        Ok(None) => return Reply::error(ErrorCode::NotFound, "There is no such task."),
+        Err(e) => return Reply::error(ErrorCode::Internal, e.to_string()),
+    }
+    let place = lock(&shared.core).store.place(task).ok().flatten();
+    if let Some(p) = &place
+        && let Err(why) = workplace::remove_place(&shared.runs.data_dir, task, p)
+    {
+        return Reply::error(ErrorCode::UnsavedWork, why);
+    }
+    let mut core = lock(&shared.core);
+    // A run may have started meanwhile (a follow-up from another screen): then nothing is removed.
+    if lock(&shared.runs.active).contains_key(task) {
+        return Reply::error(ErrorCode::Busy, "Neko is working on this task. Stop it first.");
+    }
+    let now = core.now();
+    match core.store.delete_task(task, now) {
+        Ok(revision) => {
+            shared.broadcast(&ServerMessage::Event { revision, change: Change::TaskRemoved { task: task.clone() } });
+            Reply::Ok
+        }
+        Err(e) => Reply::error(ErrorCode::Internal, e.to_string()),
     }
 }
 

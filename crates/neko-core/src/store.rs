@@ -10,13 +10,19 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::title::title;
 
-/// The id of the workspace every task lives in until workspaces have their own slice.
-pub const DEFAULT_WORKSPACE: &str = "default";
+/// The id of General, the built-in workspace with no folder (`neko_protocol::GENERAL`).
+pub const DEFAULT_WORKSPACE: &str = neko_protocol::GENERAL;
+
+/// One migration: SQL, or SQL then a step that needs code (reading folders on disk).
+enum Migration {
+    Sql(&'static str),
+    Then(&'static str, fn(&rusqlite::Transaction<'_>) -> rusqlite::Result<()>),
+}
 
 /// Each migration, in order: the store's `user_version` is how many have run.
-const MIGRATIONS: &[&str] = &[
+const MIGRATIONS: &[Migration] = &[
     // 1: workspaces, tasks and the event log.
-    "CREATE TABLE workspaces (
+    Migration::Sql("CREATE TABLE workspaces (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         created_ms INTEGER NOT NULL
@@ -39,9 +45,9 @@ const MIGRATIONS: &[&str] = &[
         data TEXT NOT NULL
     );
     CREATE TRIGGER events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
-    CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;",
+    CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;"),
     // 2: tasks run (S1). Where a task works, its runs, the transcript's parts, permission requests, each run's usage, settings.
-    "ALTER TABLE tasks ADD COLUMN folder TEXT;
+    Migration::Sql("ALTER TABLE tasks ADD COLUMN folder TEXT;
     ALTER TABLE tasks ADD COLUMN workdir TEXT;
     ALTER TABLE tasks ADD COLUMN branch TEXT;
     ALTER TABLE tasks ADD COLUMN base_commit TEXT;
@@ -104,10 +110,20 @@ const MIGRATIONS: &[&str] = &[
     CREATE TABLE settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
-    );",
+    );"),
     // 3: how full the conversation's context was at a run's last call, and the model's window, as reported.
-    "ALTER TABLE usage ADD COLUMN context_tokens INTEGER;
-    ALTER TABLE usage ADD COLUMN context_window INTEGER;",
+    Migration::Sql("ALTER TABLE usage ADD COLUMN context_tokens INTEGER;
+    ALTER TABLE usage ADD COLUMN context_window INTEGER;"),
+    // 4: workspaces (docs/knowledge/workspaces.md). The default row becomes General; each folder tasks were made in becomes a
+    // workspace of its own, and those tasks move into it.
+    Migration::Then(
+        "ALTER TABLE workspaces ADD COLUMN folder TEXT;
+        ALTER TABLE workspaces ADD COLUMN removed_ms INTEGER;
+        ALTER TABLE workspaces ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
+        UPDATE workspaces SET name = 'General', position = 0 WHERE id = 'default';
+        CREATE UNIQUE INDEX workspaces_by_folder ON workspaces(folder) WHERE folder IS NOT NULL;",
+        crate::workspaces::migrate_task_folders,
+    ),
 ];
 
 /// The schema version this build writes.
@@ -168,6 +184,11 @@ const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, 
 impl Store {
     /// Opens the store at `path` (made if missing), in WAL mode, and runs any migration it lacks.
     pub fn open(path: &Path) -> Result<Store, StoreError> {
+        Self::open_at(path, SCHEMA_VERSION)
+    }
+
+    /// [`Store::open`], migrating no further than `version`: tests build a store as an older Neko left it, then open it.
+    pub fn open_at(path: &Path, version: i64) -> Result<Store, StoreError> {
         let conn = Connection::open(path)?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
@@ -175,7 +196,7 @@ impl Store {
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.pragma_update(None, "journal_size_limit", 8 * 1024 * 1024)?;
         let mut store = Store { conn };
-        store.migrate()?;
+        store.migrate(version.min(SCHEMA_VERSION))?;
         Ok(store)
     }
 
@@ -184,31 +205,30 @@ impl Store {
         Ok(self.conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
     }
 
-    fn migrate(&mut self) -> Result<(), StoreError> {
+    fn migrate(&mut self, upto: i64) -> Result<(), StoreError> {
         let found = self.version()?;
         if found > SCHEMA_VERSION {
             return Err(StoreError::Newer { found, known: SCHEMA_VERSION });
         }
-        for (i, sql) in MIGRATIONS.iter().enumerate().skip(found as usize) {
+        for (i, m) in MIGRATIONS.iter().enumerate().take(upto.max(0) as usize).skip(found as usize) {
             let tx = self.conn.transaction()?;
-            tx.execute_batch(sql)?;
+            match m {
+                Migration::Sql(sql) => tx.execute_batch(sql)?,
+                Migration::Then(sql, then) => {
+                    tx.execute_batch(sql)?;
+                    then(&tx)?;
+                }
+            }
             tx.pragma_update(None, "user_version", (i + 1) as i64)?;
             tx.commit()?;
         }
         Ok(())
     }
 
-    /// Makes the default workspace if it is not there yet.
+    /// Makes General if it is not there yet.
     pub fn ensure_default_workspace(&self, now_ms: i64) -> Result<(), StoreError> {
-        self.conn.execute("INSERT OR IGNORE INTO workspaces (id, name, created_ms) VALUES (?1, 'Home', ?2)", params![DEFAULT_WORKSPACE, now_ms])?;
+        self.conn.execute("INSERT OR IGNORE INTO workspaces (id, name, created_ms, position) VALUES (?1, 'General', ?2, 0)", params![DEFAULT_WORKSPACE, now_ms])?;
         Ok(())
-    }
-
-    /// The workspaces' ids, in the order they were made.
-    pub fn workspaces(&self) -> Result<Vec<String>, StoreError> {
-        let mut st = self.conn.prepare("SELECT id FROM workspaces ORDER BY created_ms, id")?;
-        let rows = st.query_map([], |r| r.get(0))?;
-        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// Stores a task and its `task_created` event in one transaction. Returns the task and the event's sequence number.
@@ -230,6 +250,13 @@ impl Store {
     pub fn list_tasks(&self, workspace: &str) -> Result<Vec<Task>, StoreError> {
         let mut st = self.conn.prepare_cached(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE workspace_id = ?1 ORDER BY created_ms DESC, id DESC"))?;
         let rows = st.query_map([workspace], task_of)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Every task of every workspace, newest first.
+    pub fn all_tasks(&self) -> Result<Vec<Task>, StoreError> {
+        let mut st = self.conn.prepare_cached(&format!("SELECT {TASK_COLUMNS} FROM tasks ORDER BY created_ms DESC, id DESC"))?;
+        let rows = st.query_map([], task_of)?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 

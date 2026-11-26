@@ -156,6 +156,11 @@ pub fn run(dir: &Path, port: u16) -> Result<(), StartError> {
     for h in workers {
         let _ = h.join();
     }
+    // A run that is finishing writes its last rows now: wait a moment for it (a long run goes on; a restart marks it interrupted).
+    let until = std::time::Instant::now() + Duration::from_secs(2);
+    while shared.runs.threads.load(Ordering::SeqCst) > 0 && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(10));
+    }
     if let Err(e) = lock(&shared.core).store.checkpoint() {
         eprintln!("neko-daemon: checkpoint at shutdown failed: {e}");
     }
@@ -217,6 +222,29 @@ fn session(stream: TcpStream, id: u64, shared: &Arc<Shared>) {
     lock(&shared.conns).remove(&id);
 }
 
+/// A refused change to a workspace, as a reply.
+fn workspace_error(e: neko_core::WorkspaceError) -> Reply {
+    use neko_core::WorkspaceError as W;
+    let code = match &e {
+        W::NotFound => ErrorCode::NotFound,
+        W::Folder(_) => ErrorCode::InvalidFolder,
+        W::Refused(_) => ErrorCode::Refused,
+        W::Store(_) => ErrorCode::Internal,
+    };
+    Reply::error(code, e.to_string())
+}
+
+/// A workspace changed: every screen hears it, and the asker gets the row. Called with the core locked, so events leave in order.
+fn one_workspace(shared: &Shared, done: Result<(neko_protocol::Workspace, u64), neko_core::WorkspaceError>) -> Reply {
+    match done {
+        Ok((workspace, revision)) => {
+            shared.broadcast(&ServerMessage::Event { revision, change: Change::WorkspaceUpdated { workspace: workspace.clone() } });
+            Reply::Workspace { workspace, existed: false }
+        }
+        Err(e) => workspace_error(e),
+    }
+}
+
 /// The reply to one message, the id it answers, and whether the connection goes on.
 fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) -> (u64, Reply, Flow) {
     let msg: ClientMessage = match serde_json::from_str(text) {
@@ -238,7 +266,7 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
             Reply::Hello { daemon: env!("CARGO_PKG_VERSION").to_owned(), protocol: PROTOCOL_VERSION, workspace: neko_core::DEFAULT_WORKSPACE.to_owned() }
         }
         _ if !*said_hello => Reply::error(ErrorCode::HelloFirst, "Say hello first."),
-        Request::ListTasks => match lock(&shared.core).store.list_tasks(neko_core::DEFAULT_WORKSPACE) {
+        Request::ListTasks => match lock(&shared.core).store.all_tasks() {
             Ok(tasks) => Reply::Tasks { tasks },
             Err(e) => internal(e),
         },
@@ -247,10 +275,10 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
             Ok(None) => Reply::error(ErrorCode::NotFound, "There is no such task."),
             Err(e) => internal(e),
         },
-        Request::CreateTask { words, folder } => {
+        Request::CreateTask { words, workspace } => {
             let made = {
                 let mut core = lock(&shared.core);
-                let made = core.create_task_in(&words, folder.as_deref().filter(|f| !f.trim().is_empty()));
+                let made = core.create_task_in(&words, workspace.as_deref());
                 if let Ok((task, revision)) = &made {
                     shared.broadcast(&ServerMessage::Event { revision: *revision, change: Change::TaskCreated { task: task.clone() } });
                 }
@@ -263,7 +291,70 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
                     Reply::Task { task }
                 }
                 Err(e @ (NewTaskError::Empty | NewTaskError::TooLong)) => Reply::error(ErrorCode::InvalidWords, e.to_string()),
+                Err(e @ NewTaskError::NoWorkspace) => Reply::error(ErrorCode::NotFound, e.to_string()),
+                Err(e @ (NewTaskError::Removed(_) | NewTaskError::FolderMissing(_))) => Reply::error(ErrorCode::Refused, e.to_string()),
                 Err(e) => Reply::error(ErrorCode::Internal, e.to_string()),
+            }
+        }
+        Request::RemoveTask { task } => runs::remove_task(shared, &task),
+        Request::ListWorkspaces => match lock(&shared.core).workspaces() {
+            Ok(workspaces) => Reply::Workspaces { workspaces },
+            Err(e) => internal(e),
+        },
+        Request::AddWorkspace { folder } => {
+            let mut core = lock(&shared.core);
+            match core.add_workspace(&folder) {
+                Ok(added) => {
+                    if let Some(revision) = added.revision {
+                        let change = if added.restored { Change::WorkspaceUpdated { workspace: added.workspace.clone() } } else { Change::WorkspaceAdded { workspace: added.workspace.clone() } };
+                        shared.broadcast(&ServerMessage::Event { revision, change });
+                    }
+                    Reply::Workspace { workspace: added.workspace, existed: added.existed }
+                }
+                Err(e) => workspace_error(e),
+            }
+        }
+        Request::RenameWorkspace { workspace, name } => {
+            let mut core = lock(&shared.core);
+            let done = core.rename_workspace(&workspace, &name);
+            one_workspace(shared, done)
+        }
+        Request::RemoveWorkspace { workspace } => {
+            let mut core = lock(&shared.core);
+            let done = core.remove_workspace(&workspace);
+            one_workspace(shared, done)
+        }
+        Request::LocateWorkspace { workspace, folder } => {
+            let mut core = lock(&shared.core);
+            let done = core.locate_workspace(&workspace, &folder);
+            if let Ok((w, _)) = &done
+                && let Some(f) = &w.folder
+            {
+                // Worktrees of its tasks find the moved repository again.
+                let trees: Vec<std::path::PathBuf> = core.store.list_tasks(&workspace).unwrap_or_default().iter().map(|t| neko_core::workplace::worktree_root(&shared.runs.data_dir, &t.id)).collect();
+                neko_core::workplace::repair(std::path::Path::new(f), &trees);
+            }
+            if done.is_ok() {
+                // Its tasks' folder followed it: screens get them again.
+                if let Ok(tasks) = core.store.list_tasks(&workspace) {
+                    let revision = core.store.revision().unwrap_or(0);
+                    for task in tasks {
+                        shared.broadcast(&ServerMessage::Event { revision, change: Change::TaskUpdated { task } });
+                    }
+                }
+            }
+            one_workspace(shared, done)
+        }
+        Request::MoveWorkspace { workspace, to } => {
+            let mut core = lock(&shared.core);
+            match core.move_workspace(&workspace, to as usize) {
+                Ok((changed, revision)) => {
+                    for workspace in changed {
+                        shared.broadcast(&ServerMessage::Event { revision, change: Change::WorkspaceUpdated { workspace } });
+                    }
+                    Reply::Ok
+                }
+                Err(e) => workspace_error(e),
             }
         }
         Request::GetTranscript { task } => {
@@ -296,7 +387,7 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
         }
         Request::ListRuntimes => {
             // The newest task's chosen folder: its own Claude Code settings count in the line Settings shows.
-            let folder = lock(&shared.core).store.list_tasks(neko_core::DEFAULT_WORKSPACE).ok().and_then(|t| t.into_iter().find_map(|t| t.folder));
+            let folder = lock(&shared.core).store.all_tasks().ok().and_then(|t| t.into_iter().find_map(|t| t.folder));
             let runtimes = shared.runs.infos(Duration::from_secs(10), folder.as_deref().map(std::path::Path::new));
             match lock(&shared.core).store.settings() {
                 Ok(settings) => Reply::Runtimes { runtimes, settings },

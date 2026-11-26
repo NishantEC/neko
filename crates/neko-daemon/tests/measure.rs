@@ -34,7 +34,7 @@ fn idle_and_a_five_minute_run() {
     println!("idle, 60 s, one screen subscribed: {} ms CPU ({:.3}%), resident {} KB -> {} KB", cpu1 - cpu0, (cpu1 - cpu0) as f64 / 600.0, rss0, rss1);
 
     let (cpu_a, w_a, _) = usage(pid);
-    let Reply::Task { task } = c.request(Request::CreateTask { words: "Write a lot [fake:long:300]".into(), folder: None }).unwrap() else { panic!("create") };
+    let Reply::Task { task } = c.request(Request::CreateTask { words: "Write a lot [fake:long:300]".into(), workspace: None }).unwrap() else { panic!("create") };
     c.request(Request::WatchTask { task: Some(task.id.clone()) }).unwrap();
     let t0 = Instant::now();
     let mut deltas = 0u64;

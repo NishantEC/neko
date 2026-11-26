@@ -28,10 +28,10 @@ fn pinned<T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug>(value: 
 fn requests_round_trip_with_their_ids() {
     pinned(ClientMessage { id: 0, request: Request::Hello { client: "neko-app".into(), protocol: 1 } }, r#"{"id":0,"type":"hello","client":"neko-app","protocol":1}"#);
     pinned(ClientMessage { id: 1, request: Request::ListTasks }, r#"{"id":1,"type":"list_tasks"}"#);
-    pinned(ClientMessage { id: 2, request: Request::CreateTask { words: "Fix the build".into(), folder: None } }, r#"{"id":2,"type":"create_task","words":"Fix the build"}"#);
+    pinned(ClientMessage { id: 2, request: Request::CreateTask { words: "Fix the build".into(), workspace: None } }, r#"{"id":2,"type":"create_task","words":"Fix the build"}"#);
     pinned(
-        ClientMessage { id: 2, request: Request::CreateTask { words: "Fix the build".into(), folder: Some("/Users/example/acme-api".into()) } },
-        r#"{"id":2,"type":"create_task","words":"Fix the build","folder":"/Users/example/acme-api"}"#,
+        ClientMessage { id: 2, request: Request::CreateTask { words: "Fix the build".into(), workspace: Some("ws_1".into()) } },
+        r#"{"id":2,"type":"create_task","words":"Fix the build","workspace":"ws_1"}"#,
     );
     pinned(ClientMessage { id: 3, request: Request::GetTask { task: TaskId("task_1".into()) } }, r#"{"id":3,"type":"get_task","task":"task_1"}"#);
     pinned(ClientMessage { id: 4, request: Request::Subscribe }, r#"{"id":4,"type":"subscribe"}"#);
@@ -65,9 +65,60 @@ fn every_error_code_has_a_stable_name() {
         (ErrorCode::AlreadyAnswered, "already_answered"),
         (ErrorCode::Busy, "busy"),
         (ErrorCode::Internal, "internal"),
+        (ErrorCode::InvalidFolder, "invalid_folder"),
+        (ErrorCode::Refused, "refused"),
+        (ErrorCode::UnsavedWork, "unsaved_work"),
     ] {
         pinned(code, &format!("\"{name}\""));
     }
+}
+
+fn workspace() -> Workspace {
+    Workspace { id: "ws_1".into(), name: "acme-api".into(), folder: Some("/Users/example/acme-api".into()), created_ms: 1_764_000_000_000, removed_ms: None, position: 1, missing: false }
+}
+
+#[test]
+fn workspace_requests_round_trip() {
+    pinned(ClientMessage { id: 1, request: Request::ListWorkspaces }, r#"{"id":1,"type":"list_workspaces"}"#);
+    pinned(ClientMessage { id: 2, request: Request::AddWorkspace { folder: "/Users/example/acme-api".into() } }, r#"{"id":2,"type":"add_workspace","folder":"/Users/example/acme-api"}"#);
+    pinned(
+        ClientMessage { id: 3, request: Request::RenameWorkspace { workspace: "ws_1".into(), name: "Acme API".into() } },
+        r#"{"id":3,"type":"rename_workspace","workspace":"ws_1","name":"Acme API"}"#,
+    );
+    pinned(ClientMessage { id: 4, request: Request::RemoveWorkspace { workspace: "ws_1".into() } }, r#"{"id":4,"type":"remove_workspace","workspace":"ws_1"}"#);
+    pinned(
+        ClientMessage { id: 5, request: Request::LocateWorkspace { workspace: "ws_1".into(), folder: "/Users/example/code/acme-api".into() } },
+        r#"{"id":5,"type":"locate_workspace","workspace":"ws_1","folder":"/Users/example/code/acme-api"}"#,
+    );
+    pinned(ClientMessage { id: 6, request: Request::MoveWorkspace { workspace: "ws_1".into(), to: 0 } }, r#"{"id":6,"type":"move_workspace","workspace":"ws_1","to":0}"#);
+    pinned(ClientMessage { id: 7, request: Request::RemoveTask { task: TaskId("task_1".into()) } }, r#"{"id":7,"type":"remove_task","task":"task_1"}"#);
+}
+
+#[test]
+fn workspace_replies_and_events_round_trip() {
+    let w = r#"{"id":"ws_1","name":"acme-api","folder":"/Users/example/acme-api","created_ms":1764000000000,"position":1}"#;
+    pinned(ServerMessage::Reply { id: 1, reply: Reply::Workspaces { workspaces: vec![workspace()] } }, &format!(r#"{{"kind":"reply","id":1,"reply":{{"type":"workspaces","workspaces":[{w}]}}}}"#));
+    pinned(ServerMessage::Reply { id: 2, reply: Reply::Workspace { workspace: workspace(), existed: false } }, &format!(r#"{{"kind":"reply","id":2,"reply":{{"type":"workspace","workspace":{w}}}}}"#));
+    pinned(
+        ServerMessage::Reply { id: 2, reply: Reply::Workspace { workspace: workspace(), existed: true } },
+        &format!(r#"{{"kind":"reply","id":2,"reply":{{"type":"workspace","workspace":{w},"existed":true}}}}"#),
+    );
+    pinned(ServerMessage::Event { revision: 9, change: Change::WorkspaceAdded { workspace: workspace() } }, &format!(r#"{{"kind":"event","revision":9,"change":{{"type":"workspace_added","workspace":{w}}}}}"#));
+    let gone = Workspace { removed_ms: Some(1_764_000_100_000), missing: true, ..workspace() };
+    pinned(
+        ServerMessage::Event { revision: 10, change: Change::WorkspaceUpdated { workspace: gone } },
+        r#"{"kind":"event","revision":10,"change":{"type":"workspace_updated","workspace":{"id":"ws_1","name":"acme-api","folder":"/Users/example/acme-api","created_ms":1764000000000,"removed_ms":1764000100000,"position":1,"missing":true}}}"#,
+    );
+    let general = Workspace { id: GENERAL.into(), name: "General".into(), folder: None, created_ms: 1, removed_ms: None, position: 0, missing: false };
+    pinned(general, r#"{"id":"default","name":"General","created_ms":1,"position":0}"#);
+    pinned(ServerMessage::Event { revision: 11, change: Change::TaskRemoved { task: TaskId("task_1".into()) } }, r#"{"kind":"event","revision":11,"change":{"type":"task_removed","task":"task_1"}}"#);
+    let mut t = task();
+    t.workspace = "ws_1".into();
+    t.folder = Some("/Users/example/acme-api".into());
+    pinned(
+        t,
+        r#"{"id":"task_01HZX3J0000000000000000000","workspace":"ws_1","words":"Rename the sidebar label\nand check ENG-123","title":"Rename the sidebar label","created_ms":1764000000000,"status":"new","folder":"/Users/example/acme-api"}"#,
+    );
 }
 
 #[test]

@@ -62,7 +62,8 @@ fn tasks_survive_closing_and_reopening() {
     };
     let c = core(&path);
     assert_eq!(c.store.list_tasks("default").unwrap(), vec![made]);
-    assert_eq!(c.store.workspaces().unwrap(), vec!["default".to_owned()], "the default workspace is made once");
+    let ws: Vec<String> = c.store.list_workspaces().unwrap().into_iter().map(|w| w.id).collect();
+    assert_eq!(ws, vec!["default".to_owned()], "General is made once");
 }
 
 #[test]
@@ -70,16 +71,16 @@ fn migrations_run_once_from_version_one_and_a_newer_store_is_left_alone() {
     let (path, _g) = temp();
     let s = Store::open(&path).unwrap();
     assert_eq!(s.version().unwrap(), SCHEMA_VERSION);
-    assert_eq!(SCHEMA_VERSION, 3);
+    assert_eq!(SCHEMA_VERSION, 4);
     let mode: String = s.connection().query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
     assert_eq!(mode, "wal");
     drop(s);
     let s = Store::open(&path).unwrap();
-    assert_eq!(s.version().unwrap(), 3, "opening again changes nothing");
+    assert_eq!(s.version().unwrap(), 4, "opening again changes nothing");
     s.connection().pragma_update(None, "user_version", 99).unwrap();
     drop(s);
     match Store::open(&path) {
-        Err(StoreError::Newer { found: 99, known: 3 }) => {}
+        Err(StoreError::Newer { found: 99, known: 4 }) => {}
         Err(e) => panic!("wrong error: {e}"),
         Ok(_) => panic!("a store from a newer Neko must not be opened"),
     }

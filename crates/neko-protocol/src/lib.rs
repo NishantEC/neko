@@ -18,8 +18,9 @@ pub mod title;
 
 /// The version of this contract. A screen and a daemon talk only when theirs are equal. 2: tasks run (S1). 3: three permission
 /// modes, the context window, a command's exit code, Claude Code's own rules in words. 4: a task can be `asked` (its run ended with
-/// a question for the person).
-pub const PROTOCOL_VERSION: u32 = 4;
+/// a question for the person). 5: workspaces (a task is made in one; list, add, rename, remove, locate and move them; remove a
+/// task).
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -74,10 +75,45 @@ pub enum TaskStatus {
     Asked,
 }
 
+/// The id of General: the built-in workspace with no folder. Its tasks work in a scratch folder of their own.
+pub const GENERAL: &str = "default";
+
+/// A folder the person added, with a name (docs/knowledge/workspaces.md). General is the one with no folder.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Workspace {
+    /// `default` for General, else `ws_` and 26 letters and digits.
+    pub id: String,
+    pub name: String,
+    /// The folder, absolute and with links resolved. None: General.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    pub created_ms: i64,
+    /// When the person removed it: it is then listed only for its tasks, and no new task can be made in it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub removed_ms: Option<i64>,
+    /// Its place in the sidebar (General is always first).
+    pub position: i64,
+    /// Its folder was not there when the daemon last looked.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub missing: bool,
+}
+
+impl Workspace {
+    pub fn is_general(&self) -> bool {
+        self.id == GENERAL
+    }
+
+    /// Not removed: a new task can be made in it (when its folder is there).
+    pub fn is_active(&self) -> bool {
+        self.removed_ms.is_none()
+    }
+}
+
 /// A task as a screen sees it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub id: TaskId,
+    /// The workspace it was made in; never changes.
     pub workspace: String,
     /// The person's words, exactly as sent.
     pub words: String,
@@ -86,7 +122,7 @@ pub struct Task {
     /// Milliseconds since the Unix epoch.
     pub created_ms: i64,
     pub status: TaskStatus,
-    /// The folder the person chose for it; None: a scratch folder of its own.
+    /// Its workspace's folder when it was made; None: a scratch folder of its own (General).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
 }
@@ -363,14 +399,28 @@ pub struct Transcript {
 pub enum Request {
     /// The first request: who the screen is and which contract it speaks.
     Hello { client: String, protocol: u32 },
-    /// Every task of the default workspace, newest first.
+    /// Every task of every workspace, newest first.
     ListTasks,
-    /// A new task from the person's words, in `folder` (None: a scratch folder). Its agent starts by itself.
+    /// A new task from the person's words, in `workspace` (None: General). Its agent starts by itself.
     CreateTask {
         words: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        folder: Option<String>,
+        workspace: Option<String>,
     },
+    /// Forget a task: its record goes, and its worktree or scratch folder when nothing unsaved is in it. Refused while it runs and
+    /// when its folder holds unsaved work.
+    RemoveTask { task: TaskId },
+    /// Every workspace, General first, then in the person's order; removed ones last.
+    ListWorkspaces,
+    /// Add a folder as a workspace. A folder already added is answered with its workspace (restored if it was removed).
+    AddWorkspace { folder: String },
+    RenameWorkspace { workspace: String, name: String },
+    /// Remove a workspace from the list. Nothing on disk is touched; its tasks stay readable.
+    RemoveWorkspace { workspace: String },
+    /// The workspace's folder moved: here it is now.
+    LocateWorkspace { workspace: String, folder: String },
+    /// Put a workspace at `to` among the workspaces the person added and has not removed (0 is first, after General).
+    MoveWorkspace { workspace: String, to: u32 },
     /// One task. (`task`, not `id`: the message's own `id` is the request's.)
     GetTask { task: TaskId },
     /// Push an event for every change from now on.
@@ -422,6 +472,13 @@ pub enum ErrorCode {
     Busy,
     /// The store failed; the words say how.
     Internal,
+    /// The folder is not there, not a folder, or cannot be read.
+    InvalidFolder,
+    /// Not allowed for this workspace or task (General cannot be removed; a removed workspace takes no new task); the words say
+    /// why.
+    Refused,
+    /// The task's folder holds work that is not saved (uncommitted changes, or files in its scratch folder): nothing is deleted.
+    UnsavedWork,
 }
 
 /// The daemon's answer to one request.
@@ -437,6 +494,13 @@ pub enum Reply {
     Runtimes { runtimes: Vec<RuntimeInfo>, settings: Settings },
     Settings { settings: Settings },
     DayUsage { usage: UsageTotal },
+    Workspaces { workspaces: Vec<Workspace> },
+    /// One workspace; `existed` when the folder added was already one.
+    Workspace {
+        workspace: Workspace,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        existed: bool,
+    },
     /// Done; the change arrives as events.
     Ok,
     Error { code: ErrorCode, message: String },
@@ -448,6 +512,11 @@ pub enum Reply {
 pub enum Change {
     TaskCreated { task: Task },
     TaskUpdated { task: Task },
+    /// The task was removed (`remove_task`).
+    TaskRemoved { task: TaskId },
+    WorkspaceAdded { workspace: Workspace },
+    /// Renamed, removed, restored, located or moved: the whole row as it is now.
+    WorkspaceUpdated { workspace: Workspace },
     RunChanged { run: Run },
     /// A part was added or replaced whole.
     PartChanged { part: Part },

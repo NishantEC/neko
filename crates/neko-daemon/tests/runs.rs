@@ -45,8 +45,13 @@ fn task_is(id: &TaskId, s: TaskStatus) -> impl FnMut(&Change) -> bool {
     move |c| matches!(c, Change::TaskUpdated { task } if task.id == id && task.status == s)
 }
 
+/// A task in `folder`'s workspace (added first; None: General).
 fn create(c: &mut Client, words: &str, folder: Option<&Path>) -> Task {
-    match c.request(Request::CreateTask { words: words.into(), folder: folder.map(|f| f.to_string_lossy().into_owned()) }).unwrap() {
+    let workspace = folder.map(|f| match c.request(Request::AddWorkspace { folder: f.to_string_lossy().into_owned() }).unwrap() {
+        Reply::Workspace { workspace, .. } => workspace.id,
+        r => panic!("add workspace: {r:?}"),
+    });
+    match c.request(Request::CreateTask { words: words.into(), workspace }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("create: {r:?}"),
     }
@@ -104,7 +109,7 @@ fn a_task_runs_streams_and_its_transcript_is_stored() {
     assert_eq!((u.input_tokens, u.output_tokens, u.cached_tokens, u.cost_usd), (1200, 340, 5000, Some(0.0123)));
     assert_eq!((u.pricing, u.reported_by.as_str()), (Pricing::ApiEquivalent, "Claude Code"), "the fake says it is a subscription");
     assert!(run.workdir.contains("/scratch/"), "no folder: a scratch folder of its own: {}", run.workdir);
-    assert!(Path::new(&run.workdir).is_dir());
+    assert!(!Path::new(&run.workdir).exists(), "nothing was written there, so the scratch folder was tidied away after the run");
     let Reply::DayUsage { usage } = c.request(Request::DayUsage { from_ms: 0 }).unwrap() else { panic!("day usage") };
     assert_eq!((usage.runs, usage.cost_usd, usage.api_equivalent), (1, Some(0.0123), true));
 }
@@ -315,7 +320,17 @@ fn failures_are_calm_notices_with_what_to_do_next() {
     check(&mut c, "[fake:crash]", None, "stopped unexpectedly (exit code 3). It said: fatal: the fake fell over", "follow-up");
     check(&mut c, "[fake:limit]", None, "usage limit", "It resets at ");
     check(&mut c, "[fake:signin]", None, "is not signed in", "claude auth login");
-    check(&mut c, "Hi", Some(Path::new("/nonexistent/acme")), "is gone", "another folder");
+    // A plain folder that went away after the task was made: the follow-up says so.
+    let outside = temp_dir("gone-folder");
+    let notes = outside.join("notes");
+    std::fs::create_dir_all(&notes).unwrap();
+    let task = create(&mut c, "Hi [fake:plain]", Some(&notes));
+    events_until(&mut c, "done", task_is(&task.id, TaskStatus::Done));
+    std::fs::remove_dir_all(&outside).unwrap();
+    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "Again".into() }).unwrap(), Reply::Ok);
+    events_until(&mut c, "failed", task_is(&task.id, TaskStatus::Failed));
+    let n = notices(&transcript(&mut c, &task.id));
+    assert!(n.last().is_some_and(|n| n.0.contains("is gone") && n.1.as_deref().is_some_and(|x| x.contains("another folder"))), "{n:?}");
 }
 
 #[test]
