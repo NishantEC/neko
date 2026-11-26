@@ -60,8 +60,8 @@ ships in `NOTICE` and `THIRD_PARTY_LICENSES/`.
 
 ## Showing a change
 
-`scripts/show.sh` builds the current source, quits the development copy of Neko if it is open, and opens the new build with the
-same development data folder, so tasks made while trying one build are still there in the next. After a change is published, run
+`scripts/show.sh` builds the current source as a development bundle (`build-app.sh --dev`: the debug build, named "Neko Dev",
+its own bundle id), quits the development copy of Neko if it is open, and opens the new build with the same development data folder, so tasks made while trying one build are still there in the next. After a change is published, run
 it so the person sees the latest build without doing anything. It never touches an installed Neko or its data.
 
 ## The gate

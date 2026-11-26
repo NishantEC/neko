@@ -39,10 +39,19 @@ if [[ "${1:-}" == "--quit" ]]; then
 fi
 
 mkdir -p "$data"
-CARGO_TARGET_DIR="$target/core" cargo build --manifest-path "$root/Cargo.toml" -p neko-daemon
-CARGO_TARGET_DIR="$target/app" cargo build --manifest-path "$root/apps/neko/Cargo.toml"
+# A real bundle, so notifications, the Dock badge and neko:// links work in what the person sees. It is the development bundle:
+# its own name and bundle id, the debug build, never installed.
+app="$("$root/scripts/build-app.sh" --dev | tail -n 1)"
+exe="$app/Contents/MacOS/neko"
 quit_open_copy
-NEKO_DATA_DIR="$data" NEKO_DAEMON_BIN="$target/core/debug/neko-daemon" RUNE_PREFS_DIR="$data/prefs" \
-  nohup "$target/app/debug/neko" >"$data/app.log" 2>&1 &
-echo $! >"$pid_file"
+/usr/bin/open -n -g "$app" --env "NEKO_DATA_DIR=$data" --env "RUNE_PREFS_DIR=$data/prefs"
+# `open` does not say which process it started: find it by its exact executable path (read only; nothing is signalled here).
+pid=""
+for _ in $(seq 1 50); do
+  pid="$(/bin/ps -axo pid=,comm= | awk -v exe="$exe" '$2 == exe { print $1 }' | tail -n 1)"
+  [[ -n "$pid" ]] && break
+  sleep 0.1
+done
+if [[ -z "$pid" ]]; then echo "Neko did not start" >&2; exit 1; fi
+echo "$pid" >"$pid_file"
 echo "Neko is open (data: $data)"

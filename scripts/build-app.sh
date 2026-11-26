@@ -1,33 +1,42 @@
 #!/bin/bash
 # Builds Neko.app: the app and the daemon beside it, signed ad hoc, with the version and commit in Info.plist.
 #
-#   scripts/build-app.sh [OUT_DIR]   (default: $NEKO_TARGET/bundle; prints the bundle's path)
+#   scripts/build-app.sh [OUT_DIR]         (default: $NEKO_TARGET/bundle; prints the bundle's path)
+#   scripts/build-app.sh --dev [OUT_DIR]   a development bundle: the debug build, named "Neko Dev" with its own bundle id, so it
+#                                          has its own notification permission and never stands in for an installed Neko
+#                                          (default: $NEKO_TARGET/bundle-dev)
 #
 # Nothing is installed: scripts/install.sh does that.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 target="${NEKO_TARGET:-$HOME/Library/Caches/neko/target}"
-out="${1:-$target/bundle}"
+profile=release; bundle_id=dev.neko.app; bundle_name=Neko; default_out="$target/bundle"
+if [[ "${1:-}" == "--dev" ]]; then
+  shift
+  profile=debug; bundle_id=dev.neko.app.dev; bundle_name="Neko Dev"; default_out="$target/bundle-dev"
+fi
+out="${1:-$default_out}"
 version="$(sed -nE 's/^version = "([^"]+)"/\1/p' "$root/apps/neko/Cargo.toml" | head -n 1)"
 commit="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo unknown)"
 if [[ -n "$(git -C "$root" status --porcelain 2>/dev/null)" ]]; then commit="$commit-dirty"; fi
 
-CARGO_TARGET_DIR="$target/core" cargo build --release --manifest-path "$root/Cargo.toml" -p neko-daemon
-CARGO_TARGET_DIR="$target/app" cargo build --release --manifest-path "$root/apps/neko/Cargo.toml"
+flag=(); [[ "$profile" == release ]] && flag=(--release)
+CARGO_TARGET_DIR="$target/core" cargo build ${flag[@]+"${flag[@]}"} --manifest-path "$root/Cargo.toml" -p neko-daemon
+CARGO_TARGET_DIR="$target/app" cargo build ${flag[@]+"${flag[@]}"} --manifest-path "$root/apps/neko/Cargo.toml"
 
 app="$out/Neko.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp "$target/app/release/neko" "$app/Contents/MacOS/neko"
-cp "$target/core/release/neko-daemon" "$app/Contents/MacOS/neko-daemon"
+cp "$target/app/$profile/neko" "$app/Contents/MacOS/neko"
+cp "$target/core/$profile/neko-daemon" "$app/Contents/MacOS/neko-daemon"
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>dev.neko.app</string>
-  <key>CFBundleName</key><string>Neko</string>
-  <key>CFBundleDisplayName</key><string>Neko</string>
+  <key>CFBundleIdentifier</key><string>$bundle_id</string>
+  <key>CFBundleName</key><string>$bundle_name</string>
+  <key>CFBundleDisplayName</key><string>$bundle_name</string>
   <key>CFBundleExecutable</key><string>neko</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$version</string>
@@ -40,7 +49,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleURLTypes</key>
   <array>
     <dict>
-      <key>CFBundleURLName</key><string>dev.neko.app</string>
+      <key>CFBundleURLName</key><string>$bundle_id</string>
       <key>CFBundleURLSchemes</key><array><string>neko</string></array>
     </dict>
   </array>
