@@ -136,8 +136,10 @@ hooks given with `--settings` as the documentation says. Tests give it a HOME of
 
 ## Still not sure: check on a real run
 
-1. `onFailure: "block"` and exec form `args` in a `--settings` hook (the measured runs used a plain `command`). If `onFailure`
-   were refused, the whole `--settings` value might be ignored; the `hook_no_verdict` stop does not depend on it.
+1. ~~`onFailure: "block"` and exec form `args` in a `--settings` hook.~~ Measured on 2.1.331 with Neko's exact hook shape: the
+   helper was started with `args` as its arguments (no shell); a deny blocked the step and an allow let it run; and with a helper
+   that did not exist, the step was **blocked** ("failed; blocking because onFailure is "block""), not run. So this mode fails
+   closed in Claude Code itself; the `hook_no_verdict` stop stays as a second guard.
 2. That an invalid `--settings` value is refused loudly rather than ignored.
 3. Whether a mod or plugin that approves calls (`tool.check`) can approve a call the hook denied in this setup.
 4. `--permission-mode default` is not in 2.1.331's list of choices; it worked, but may be an alias that goes away (`manual`?).
