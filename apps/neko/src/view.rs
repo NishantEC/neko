@@ -148,9 +148,17 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
             None => crate::home_view::home(s, &t, &mut layer),
         }
     };
+    let page = page_swap(page);
     let content = col().key("content").role("main").label(main_label(s)).grow(1.0).min_w(0.0).h_full().fill(t.c.page.bg).child(content_band(s, &t, if shown { 0.0 } else { lights }, &mut layer)).child(page);
     dialogs(s, &t, &mut layer);
     crate::ui::base::overlay_root(root.child(content), layer)
+}
+
+/// How a page of the content (Home, a task's conversation, Review, a cat's page, Needs you, Settings) comes and goes: it fades in, and when another page replaces it, it is gone in
+/// that frame. Rune's default fades a removed element out over a quarter second, so two pages that swap in one press were both
+/// drawn, one over the other, until it ended.
+pub fn page_swap(page: El) -> El {
+    page.transition(rune::Transition::opacity()).transition_motion(rune::Curve::tween(0.18, rune::Easing::EASE_OUT), rune::Anim::INSTANT)
 }
 
 fn main_label(s: &App) -> String {
@@ -252,7 +260,7 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
         );
     }
     if !narrow
-        && let Some(place) = task_folder(s, t)
+        && let Some(place) = task_folder(s, t, room)
     {
         band = band.child(place);
     }
@@ -424,7 +432,7 @@ pub fn working_folder(s: &App) -> Option<(String, Option<String>)> {
 
 /// The task's folder, once and quietly, at the band's right: the path shortened with `~` (cut in its middle when long), the branch
 /// beside it, and Reveal in Finder.
-fn task_folder(s: &App, t: &Theme) -> Option<El> {
+fn task_folder(s: &App, t: &Theme, room: f32) -> Option<El> {
     let (folder, branch) = working_folder(s)?;
     let shown = crate::task_view::show_path(&folder, "", s.home.as_deref());
     let label = match &branch {
@@ -441,10 +449,10 @@ fn task_folder(s: &App, t: &Theme) -> Option<El> {
         .gap(t.space.at(1.5))
         .center_y()
         .child(glyph(&crate::ui::icons::FOLDER, t.control.icon_sm, t.ink_faint()))
-        // The title gives way first; the path is cut in its middle to a width that leaves the branch whole.
-        .child(text(shown).key("task-folder-path").font(t.ty.sm).color(t.ink_muted()).truncate_middle().min_w(0.0).shrink().max_w(if s.sidebar_shown() { 320.0 } else { 150.0 }).a11y_hidden());
+        // The title leads: the path is quiet (the small step, the faintest ink that reads) and short, cut in its middle.
+        .child(text(shown).key("task-folder-path").font(t.ty.xs).color(t.ink_faint()).truncate_middle().min_w(0.0).shrink().max_w(if room < 900.0 { 112.0 } else if s.sidebar_shown() { 168.0 } else { 220.0 }).a11y_hidden());
     if let Some(b) = branch {
-        place = place.child(glyph(&crate::ui::icons::COMMIT, t.control.icon_sm, t.ink_faint())).child(text(b).key("task-folder-branch").font(crate::ui::agent::mono(t, t.ty.sm)).color(t.ink_muted()).truncate_middle().max_w(160.0).a11y_hidden());
+        place = place.child(glyph(&crate::ui::icons::COMMIT, t.control.icon_sm, t.ink_faint())).child(text(b).key("task-folder-branch").font(crate::ui::agent::mono(t, t.ty.xs)).color(t.ink_faint()).truncate_middle().max_w(if room < 900.0 { 96.0 } else { 112.0 }).a11y_hidden());
     }
     let reveal: PressTx<App> = Rc::new(move |_: &mut App, tx: &mut rune::Tx| {
         let _ = tx.reveal_path(&folder);

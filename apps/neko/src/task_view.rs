@@ -409,7 +409,8 @@ fn context_ring(s: &App, t: &Theme, book: &Book, layer: &mut Vec<El>) -> Option<
 pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let Some(task) = s.open_task() else { return el() };
     if let Some(r) = s.review.as_ref().filter(|r| r.task == task.id) {
-        return col().key("task").w_full().grow(1.0).min_h(0.0).child(crate::review_view::review_view(s, t, r));
+        // A page of its own: the conversation it replaces goes at once (never a fade over Review), and this one fades in on a clean page.
+        return crate::view::page_swap(col().key("task-review").w_full().grow(1.0).min_h(0.0).child(crate::review_view::review_view(s, t, r)));
     }
     let empty = Book::default();
     let book = s.book().unwrap_or(&empty);
@@ -465,14 +466,16 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     if let Some(n) = &s.notice {
         foot = foot.child(text(n.clone()).key("reply-notice").role("status").font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0));
     }
-    col()
-        .key("task")
-        .w_full()
-        .grow(1.0)
-        .min_h(0.0)
-        .items_center()
-        .child(col().w_full().grow(1.0).min_h(0.0).child(conversation))
-        .child(row().w_full().justify_center().px(inset).pt(t.space.at(2.0)).pb(t.space.at(5.0)).child(foot))
+    crate::view::page_swap(
+        col()
+            .key("task")
+            .w_full()
+            .grow(1.0)
+            .min_h(0.0)
+            .items_center()
+            .child(col().w_full().grow(1.0).min_h(0.0).child(conversation))
+            .child(row().w_full().justify_center().px(inset).pt(t.space.at(2.0)).pb(t.space.at(5.0)).child(foot)),
+    )
 }
 
 /// S0's quiet line for a task no agent has started.

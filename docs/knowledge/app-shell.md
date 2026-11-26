@@ -51,7 +51,7 @@ The model is pure and tested (`menu.rs`): no key is taken twice.
 ## Keyboard
 
 - Tab goes once round every control in reading order: Hide sidebar, New task, Home, the workspaces list (one stop), each
-  section's own buttons, Add workspace…, the cats (one stop), New cat…, the cat picker, the composer, the workspace picker, each cat's tile in the house. In a task: copy buttons, fold lines, request answers, then the composer and its context ring.
+  section's own buttons, Add workspace…, the cats (one stop), New cat…, the composer, the cat picker and the workspace picker in its footer, each cat's tile in the house. In a task: copy buttons, fold lines, request answers, then the composer and its context ring.
   `App::tab_visits_controls(true)` makes this so whatever the Mac's Keyboard Navigation setting is.
 - In the workspaces list the arrow keys move through section headers and rows (`focus_group`), a typed name goes to it, Return
   opens a row or folds a section; Left and Right fold and open; ⌥⌘↑ and ⌥⌘↓ move a section (`workspaces.md`).
@@ -146,8 +146,17 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   are announced (`Tx::announce`).
 - **Home's workspace picker** is a pop-up menu in the composer's footer: General, the workspaces, "Add folder…" (the Mac's open
   panel, Rune's `native-file-dialog`, rfd). The choice is kept in the prefs (`last-workspace`). See `workspaces.md`.
-- **The task's band** leads with its cat's portrait (a press opens the cat's page), then the title, the run counter ("Step 4", or
-  "5 steps · 2m 14s"), the folder and branch, and a menu with All changes and Remove task….
+- **The task's band** leads with its cat's portrait (a press opens the cat's page), then the title (18 points, semibold: it leads
+  and gets the room first), the run counter ("Step 4", or "5 steps · 2m 14s"), the workspace's name, the folder and branch, and a
+  menu with All changes and Remove task…. The folder line is the quietest thing in the band: 12 points in the faintest ink that
+  still reads, the path cut in its middle to 168 points (220 with the sidebar folded), the branch to 112.
+- **Page changes are cuts, then a fade in.** A page that replaces another (Home, a task's conversation, Review, a cat's page, Needs
+  you, Settings) is gone in that frame and the new one fades in on a clean page (`view::page_swap`). Rune fades a removed element
+  out over a quarter second by default, so the conversation and Review were drawn one over the other when Review opened
+  (QA defect 10); `tests/page_swap.rs` takes frames while the swap moves and fails if both are drawn.
+- **Review's file headers** are Neko's own card (`review_view::file_card`, lines drawn as rune-ui's Diff draws them): the path and
+  the file's figures in the receipt's form (12 points, a file that only gained lines shows no "−0"). An upstream ask: a figures
+  slot on Diff.
 - **Settings** has three pages, Agents, Workspaces and Notifications, switched by rune-ui's SegmentedControl.
 
 ## Not done yet
