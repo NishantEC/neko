@@ -67,4 +67,4 @@ By keyboard (⌥⌘↑ / ⌥⌘↓ on a header) and the menu's Move up / Move do
 
 ## Not here yet, on purpose
 
-Per-workspace rules and instructions, per-workspace permissions, cats, connections, a dashboard on Home, dragging to reorder.
+Per-workspace rules and instructions, per-workspace permissions, connections, a dashboard on Home, dragging to reorder.

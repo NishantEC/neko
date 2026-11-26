@@ -97,8 +97,8 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   the answer, requests, the card, the composer. Surfaces (fold lines' hover, the card, a request, the composer) start on the edge;
   an open "Worked for" shows its steps after it on the same edge, not indented (tested at both window shapes).
 - **The conversation** is rune-ui's Conversation: pinned to the newest content until the person scrolls up, then a "Jump to
-  latest" pill. The person's words are a Message at the right; its copy button shows on hover or focus and takes no room while hidden. The agent's
-  ("Neko") are Markdown on the page, no bubble, selectable; only a run's final answer has a copy button.
+  latest" pill. The person's words are a Message at the right; its copy button shows on hover or focus and takes no room while hidden. The cat's
+  (led by the cat's face and name, `cats.md`) are Markdown on the page, no bubble, selectable; only a run's final answer has a copy button.
 - **Steps** are quiet single lines that fold, built on rune-ui's FoldLine. A shell step is its command, on one line, cut in its
   middle past 72 characters (the whole command is in the fold); other tools read as phrases ("Read src/app.rs", "Edited
   ~/notes.md", "Searched for “Settings”"). Paths inside the task's folder are relative; under home they start `~/`. A duration

@@ -17,6 +17,10 @@
   took_ms, made_ms, state)`: one row per checkpoint (`start`, `end`, `before_undo`, `before_redo`; kept in the `repo` or a
   `shadow` repository; `kept` or `removed`), and on `runs` where its undo stands: `undo_state`, `undo_why`, `undo_files`,
   `undo_added`, `undo_removed`, `undo_committed`. Removing a task removes its rows. See `undo.md`.
+- Version 6 (cats) adds `cats (id, name, name_key, face, purpose, rules, previous_rules, rules_saved_ms, workspace_id, created_ms,
+  retired_ms)` (`name_key` is the name without case, unique), `cat_id` on `tasks`, and `cat_id` and `rules_hash` on `runs`. Its
+  migration makes the starter cats when there are tasks and gives each task one, oldest first, by the least-busy rule. A store
+  with no cats gets the starters at open, with no event. See `cats.md`.
 - `events (seq, at_ms, workspace_id, subject, kind, data)`. One row per change, in the same transaction as the change.
   `seq` is the revision the daemon pushes. Triggers refuse `UPDATE` and `DELETE` on it.
 
@@ -39,4 +43,5 @@ Ids are `task_` and 26 base-32 characters: 48 bits of time, 80 random bits (the 
 
 `crates/neko-core/tests/workspaces.rs`: the migration from version 3, adding, renaming, removing, a missing folder, locating,
 reordering, the tidy rule on real repositories. `crates/neko-core/tests/store.rs`: create and list, refusals, reopen, migration and the newer-version refusal, the migration to
-version 5 with a run from version 4, the append-only log, two connections.
+version 5 with a run from version 4, the append-only log, two connections. `crates/neko-core/tests/cats.rs`: the migration to
+version 6 from a version-5 store made in the test.

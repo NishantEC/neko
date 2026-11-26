@@ -34,8 +34,12 @@ Detection runs `claude --version` and `claude auth status --json`. From the seco
 
 ```text
 claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages
-       --permission-prompt-tool stdio [--permission-mode default] [--settings <hook JSON>] [--resume <session>]
+       --permission-prompt-tool stdio [--permission-mode default] [--settings <hook JSON>]
+       [--append-system-prompt <the cat's block> --system-prompt-snapshot off] [--resume <session>]
 ```
+
+- The task's cat reaches the agent as `--append-system-prompt`, one argument, on every run; `--system-prompt-snapshot off` makes a
+  resumed run take rules edited since. It changes no other flag (`cats.md`).
 
 - It runs in the task's folder, under the run guard (`run-guard.md`), with PATH set as above. "Ask before risky steps" adds
   `NEKO_HOOK_PORT` and `NEKO_HOOK_SECRET`; nothing else is added.
@@ -119,7 +123,7 @@ and its last stderr line when it is plain words), a failure the CLI reported, 30
 `crates/neko-core/src/bin/neko-fake-claude.rs` speaks the same protocol from scripts picked by `[fake:NAME]` in the words: plain,
 long, thinking, tools, permission, destructive, outside, slow, spawn, spawn-stay, crash, limit, signin, stall, hook-shell,
 hook-twice, hook-read, hook-destructive, hook-no-verdict, real (empty thinking, words between tools, a long path, a check that
-exits 1), and a resumed conversation. Like Claude Code it reads `permissions.allow` from `$HOME/.claude/settings.json` and runs the `PreToolUse`
+exits 1), and a resumed conversation. `NEKO_FAKE_RECORD` names a file it appends its arguments and every stdin line to. Like Claude Code it reads `permissions.allow` from `$HOME/.claude/settings.json` and runs the `PreToolUse`
 hooks given with `--settings` as the documentation says. Tests give it a HOME of their own. No test runs the real CLI.
 
 ## What the first real run confirmed (Claude Code 2.1.331)
@@ -151,3 +155,5 @@ hooks given with `--settings` as the documentation says. Tests give it a HOME of
 10. Not signed in: the result or stderr mentions `/login` or "not logged in".
 11. `auth status --json`: the `authMethod` values for an API key and for Bedrock or Vertex.
 12. A run stopped by SIGKILL resumes cleanly with `--resume`.
+13. `--append-system-prompt` with `--system-prompt-snapshot off` on a resumed run: the edited rules are what the model sees, and
+    the person's own CLAUDE.md and settings still apply.

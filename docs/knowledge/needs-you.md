@@ -23,6 +23,8 @@ same after a restart (tested). A notice written before version 6 has no kind; it
   task's state changes, a request changes or a task is removed (a few at once are taken together), and pushes only a list that
   differs.
 - Order: oldest first, grouped by workspace. The workspace whose item waited longest comes first.
+- Each item carries its task's cat and the cat's name (`cats.md`); the list leads with them ("miso asks"), and a rename pushes the
+  list again.
 - An item's id is stable while it waits: `perm:<id>`, `question:<run id>`, `failure:<part id>`.
 - A question is the last paragraph of the run's words, without Markdown's marks, cut to the sentences at its end that fit 200
   characters.
@@ -70,13 +72,13 @@ the system.
 When each is posted:
 
 - An item the app has not seen before, while "When a task needs you" is on, unless Neko is in front and the person is in that task
-  or in the list. Title: the task's title. Body: what is asked, at most 140 characters.
+  or in the list. Title: the task's title. Body: the cat and what is asked ("miso asks: …"), at most 140 characters.
   - A request: "Run a command: cargo test", with Allow once (first), Always allow and Deny as actions. A destructive request has no
     actions: its notification only opens the task.
-  - A question: the question, with a reply field ("Answer Neko", Send).
-  - A failure: its words. No actions.
+  - A question: "mochi asks: " and the question, with a reply field ("Your answer", Send).
+  - A failure: "tofu could not go on: " and its words. No actions.
 - A run that finished done (status from working to done), while "When a task finishes" is on, unless Neko is in front on that task:
-  "Done: " and the first line of the answer.
+  the cat's name, " is done: " and the first line of the answer ("tofu is done: …").
 - A stale action or reply: "That was already answered."
 
 Rules:
