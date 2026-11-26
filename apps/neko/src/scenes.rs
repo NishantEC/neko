@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use neko_protocol::{
-    Changes, Part, PartBody, PartId, Permission, PermissionId, PermissionMode, PermissionState, Pricing, Run, RunId, RunStatus, RuntimeInfo, Settings, Task, TaskId, TaskStatus, Tone, ToolState,
-    Usage,
+    Changes, GENERAL, Part, PartBody, PartId, Permission, PermissionId, PermissionMode, PermissionState, Pricing, Run, RunId, RunStatus, RuntimeInfo, Settings, Task, TaskId, TaskStatus, Tone,
+    ToolState, Usage, Workspace,
 };
 use rune::TextEdit;
 
@@ -38,6 +38,16 @@ pub const SCENES: &[Scene] = &[
     ("settings-ask", settings_ask),
     ("settings-full-access", settings_full),
     ("settings-signed-out", settings_signed_out),
+    ("workspaces", workspaces),
+    ("workspaces-folded", workspaces_folded),
+    ("workspace-picker", workspace_picker),
+    ("workspace-menu", workspace_menu),
+    ("workspace-rename", workspace_rename),
+    ("workspace-remove", workspace_remove),
+    ("workspace-task", workspace_task),
+    ("task-remove", task_remove),
+    ("task-remove-refused", task_remove_refused),
+    ("settings-workspaces", settings_workspaces),
 ];
 
 /// A task made `minutes_ago` before the fixed clock.
@@ -68,9 +78,141 @@ fn home_typed(s: &mut App) {
 }
 
 fn home_folder(s: &mut App) {
-    s.tasks = sample_tasks();
+    with_workspaces(s);
     s.draft = TextEdit::new("Find out why the nightly build is slow");
-    s.folder = Some("/Users/example/acme-api".into());
+    s.workspace = "ws_acme".into();
+}
+
+fn ws(id: &str, name: &str, folder: Option<&str>, position: i64) -> Workspace {
+    Workspace { id: id.into(), name: name.into(), folder: folder.map(str::to_owned), created_ms: position, removed_ms: None, position, missing: false }
+}
+
+/// General, three workspaces (one with a long name, one whose folder is not found) and one removed, with tasks in each.
+pub fn sample_workspaces() -> Vec<Workspace> {
+    let mut gone = ws("ws_scripts", "old-scripts", Some("/Users/example/old-scripts"), 5);
+    gone.removed_ms = Some(7);
+    let mut notes = ws("ws_notes", "notes", Some("/Users/example/notes"), 4);
+    notes.missing = true;
+    vec![
+        ws(GENERAL, "General", None, 0),
+        ws("ws_acme", "acme-api", Some("/Users/example/acme-api"), 1),
+        ws("ws_web", "Acme marketing website redesign for the spring launch", Some("/Users/example/Projects/acme-marketing-website-redesign-2026"), 2),
+        notes,
+        gone,
+    ]
+}
+
+fn with_workspaces(s: &mut App) {
+    s.workspaces = sample_workspaces();
+    s.tasks_loaded = true;
+    let mut tasks = sample_tasks();
+    tasks[0].workspace = GENERAL.into();
+    tasks[1].workspace = "ws_acme".into();
+    tasks[1].folder = Some("/Users/example/acme-api".into());
+    tasks[2].workspace = "ws_acme".into();
+    tasks[2].folder = Some("/Users/example/acme-api".into());
+    tasks[3].workspace = GENERAL.into();
+    let mut n = 10;
+    let mut more = |ws: &str, folder: &str, words: &str, minutes: i64, status: TaskStatus| {
+        n += 1;
+        let mut t = task(n, words, minutes);
+        t.workspace = ws.into();
+        t.folder = Some(folder.into());
+        t.status = status;
+        t
+    };
+    tasks.push(more("ws_acme", "/Users/example/acme-api", "Answer the question about the retry limit before the release goes out to every customer", 30, TaskStatus::NeedsYou));
+    let web = "/Users/example/Projects/acme-marketing-website-redesign-2026";
+    for (i, words) in [
+        "Make the hero image load faster on phones",
+        "Check every page for broken links",
+        "Write the pricing page copy",
+        "Move the blog to the new layout",
+        "Add the spring launch banner",
+        "Tidy the footer links",
+        "Fix the contact form on Safari",
+        "Compress the case study images",
+        "Draft the press page",
+        "Translate the home page into French",
+        "Set up the redirects from the old site",
+    ]
+    .iter()
+    .enumerate()
+    {
+        tasks.push(more("ws_web", web, words, 60 + i as i64 * 90, if i == 0 { TaskStatus::Working } else { TaskStatus::Done }));
+    }
+    tasks.push(more("ws_notes", "/Users/example/notes", "Sort the meeting notes from last week into folders by project", 2 * 24 * 60, TaskStatus::Done));
+    tasks.push(more("ws_scripts", "/Users/example/old-scripts", "Port the backup script to the new server", 9 * 24 * 60, TaskStatus::Done));
+    tasks.sort_by_key(|t| std::cmp::Reverse(t.created_ms));
+    s.tasks = tasks;
+}
+
+fn workspaces(s: &mut App) {
+    with_workspaces(s);
+    s.workspace = "ws_acme".into();
+}
+
+fn workspaces_folded(s: &mut App) {
+    workspaces(s);
+    s.folded = ["ws_web".to_owned(), "ws_scripts".to_owned()].into_iter().collect();
+}
+
+fn workspace_picker(s: &mut App) {
+    workspaces(s);
+    s.picker_open = true;
+}
+
+fn workspace_menu(s: &mut App) {
+    workspaces_folded(s);
+    s.menu_open = Some("ws-menu-ws_acme".into());
+}
+
+fn workspace_rename(s: &mut App) {
+    workspaces_folded(s);
+    s.start_rename("ws_acme");
+}
+
+fn workspace_remove(s: &mut App) {
+    workspaces_folded(s);
+    s.confirm = Some(crate::state::Confirm::RemoveWorkspace("ws_acme".into()));
+}
+
+fn workspace_task(s: &mut App) {
+    with_workspaces(s);
+    let id = s.tasks.iter().find(|t| t.title.starts_with("Rename the Settings")).map(|t| t.id.clone()).expect("the sample task");
+    let task = s.tasks.iter().find(|t| t.id == id).cloned().expect("the sample task");
+    let at = start(s);
+    let mut sc = Script::new(&task, "run_1", at);
+    sc.person(&task.words);
+    steps(&mut sc);
+    sc.say(ANSWER, true);
+    let mut book = Book { runs: vec![run("run_1", &task, RunStatus::Done, at, 29)], loaded: true, ..Book::default() };
+    book.parts.extend(sc.parts);
+    s.tasks.iter_mut().filter(|t| t.id == id).for_each(|t| t.status = TaskStatus::Done);
+    s.books.insert(id.clone(), book);
+    s.open = Some(id);
+}
+
+fn task_remove(s: &mut App) {
+    workspace_task(s);
+    let id = s.open.clone().expect("open");
+    s.confirm = Some(crate::state::Confirm::RemoveTask(id));
+}
+
+fn task_remove_refused(s: &mut App) {
+    workspace_task(s);
+    s.refusal = Some(crate::state::Refusal {
+        title: "Neko kept this task".into(),
+        words: "This task's worktree has changes that are not committed. Neko deletes nothing with unsaved work.".into(),
+        reveal: Some("/Users/example/Library/Application Support/neko/worktrees/x7k2m9qa".into()),
+    });
+}
+
+fn settings_workspaces(s: &mut App) {
+    with_workspaces(s);
+    s.settings_open = true;
+    s.settings_page = 1;
+    s.runtimes = Some(agents(true, PermissionMode::Follow));
 }
 
 fn tasks_home(s: &mut App) {

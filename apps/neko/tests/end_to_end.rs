@@ -146,7 +146,7 @@ fn a_task_streams_asks_stops_and_its_transcript_survives_a_restart() {
     let id = task.id.clone();
     rt.update(move |s, _| s.open_task_id(&id));
     until(&mut rt, "the first task's transcript", |rt| rt.state.books.get(&task.id).is_some_and(|b| b.loaded) && on_screen(rt, "The tests pass."));
-    assert_eq!(rt.state.window_title(), "Run the tests [fake:permission]", "the window's title follows the task");
+    assert_eq!(rt.state.window_title(), "Run the tests [fake:permission] — General", "the window's title follows the task and names its workspace");
 
     rt.update(|s, _| s.conn = None);
     // SAFETY: as above.

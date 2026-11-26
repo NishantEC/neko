@@ -10,6 +10,13 @@ files = [
 ]
 
 [[item]]
+name = "alert_dialog"
+version = "0.5.0"
+files = [
+  { target = "src/ui/alert_dialog.rs", sha256 = "c5312fd9412108d8e9d3c2c2d6ed48b9dd75edef1e3739ba8852be4d4371fac1" },
+]
+
+[[item]]
 name = "badge"
 version = "0.5.0"
 files = [
@@ -52,6 +59,20 @@ files = [
 ]
 
 [[item]]
+name = "dialog"
+version = "0.5.0"
+files = [
+  { target = "src/ui/dialog.rs", sha256 = "0003820e550ad2a462886c4ab983396e2b0b69a5ecc4ef63ab60c40cc5b2512f" },
+]
+
+[[item]]
+name = "dropdown_menu"
+version = "0.6.0"
+files = [
+  { target = "src/ui/dropdown_menu.rs", sha256 = "94b7cb4ea7aa7864a52de4e9abf460a397703d97dddb837e260964d3765073b5" },
+]
+
+[[item]]
 name = "empty"
 version = "0.5.0"
 files = [
@@ -83,6 +104,13 @@ name = "icons"
 version = "0.8.0"
 files = [
   { target = "src/ui/icons.rs", sha256 = "82fffd9c9ca5b7cbbc30440a72a68f4399e2a961642c82fe738bbab27fef4d7f" },
+]
+
+[[item]]
+name = "input"
+version = "0.5.0"
+files = [
+  { target = "src/ui/input.rs", sha256 = "eadd71e6ef1b47c9fd301480b71f16a0241d3e23231bff869df77a254d6cd459" },
 ]
 
 [[item]]
@@ -139,6 +167,20 @@ name = "scroll_area"
 version = "0.5.0"
 files = [
   { target = "src/ui/scroll_area.rs", sha256 = "2c5d866422c96c346a029efcfe55651f8aba4198a03aa51759d3f17db8babe75" },
+]
+
+[[item]]
+name = "segmented_control"
+version = "0.8.0"
+files = [
+  { target = "src/ui/segmented_control.rs", sha256 = "ee8c1c5861cf90455f46d6ee63146683dbcc3181091a16cf9bba5e0aafa1c844" },
+]
+
+[[item]]
+name = "select"
+version = "0.6.0"
+files = [
+  { target = "src/ui/select.rs", sha256 = "1bb06200d8eaf55351631b742ac58d141e730b593329cc046663ac3611a19ed3" },
 ]
 
 [[item]]

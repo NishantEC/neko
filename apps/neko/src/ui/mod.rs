@@ -4,16 +4,20 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod agent;
+pub mod alert_dialog;
 pub mod badge;
 pub mod base;
 pub mod button;
 pub mod confirmation;
 pub mod context;
 pub mod conversation;
+pub mod dialog;
+pub mod dropdown_menu;
 pub mod empty;
 pub mod font_figtree;
 pub mod font_inter;
 pub mod icons;
+pub mod input;
 pub mod kbd;
 pub mod message;
 pub mod popup;
@@ -22,6 +26,8 @@ pub mod radio_group;
 pub mod reasoning;
 pub mod response;
 pub mod scroll_area;
+pub mod segmented_control;
+pub mod select;
 pub mod shimmer;
 pub mod sidebar;
 pub mod task;

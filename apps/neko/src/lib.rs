@@ -25,8 +25,10 @@ use state::{App, Daemon};
 
 /// The prefs store for the window's frame (`~/Library/Application Support/dev.neko.app/prefs.json`), apart from the daemon's data.
 pub const PREFS_ID: &str = "dev.neko.app";
-/// The last folder chosen for a new task, in the same prefs.
-pub const FOLDER_KEY: &str = "last-folder";
+/// The workspace chosen last for a new task (its id), in the same prefs.
+pub const WORKSPACE_KEY: &str = "last-workspace";
+/// The sidebar's folded workspace sections (their ids), in the same prefs.
+pub const FOLDED_KEY: &str = "folded-workspaces";
 
 thread_local! {
     /// The window's width as the last layout saw it (written by the view, read by `poll`).
@@ -71,15 +73,35 @@ fn init() -> App {
     let (now_ms, utc_offset_s) = state::system_clock();
     let saved = SAVED.with(Cell::get);
     let width = Some(saved.map_or(window_place::DEFAULT.0, |f| f.w.max(window_place::MIN.0)) as f32);
-    // The folder chosen last time, if it is still there.
-    let folder = rune::prefs::Prefs::open(PREFS_ID).get::<String>(FOLDER_KEY).filter(|f| std::path::Path::new(f).is_dir());
-    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, folder, home: std::env::var("HOME").ok(), ..App::default() }
+    // The workspace chosen last time (checked against the daemon's list when it arrives) and the folded sections.
+    let prefs = rune::prefs::Prefs::open(PREFS_ID);
+    let workspace = prefs.get::<String>(WORKSPACE_KEY).filter(|w| !w.is_empty()).unwrap_or_else(|| neko_protocol::GENERAL.to_owned());
+    let folded = prefs.get::<Vec<String>>(FOLDED_KEY).unwrap_or_default().into_iter().collect();
+    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, workspace, folded, home: std::env::var("HOME").ok(), ..App::default() }
 }
 
-/// New Task: Home with the keyboard in the composer.
+/// New Task (⌘N): Home with the keyboard in the composer, in the workspace of the task in view.
 pub fn new_task(s: &mut App, tx: &mut Tx) {
-    s.go_home_and_focus();
+    s.new_task_here();
     tx.instant();
+}
+
+/// The Mac's folder panel: a folder to add as a workspace, or where a workspace's folder is now.
+pub fn pick_folder(s: &App, pick: state::Pick, tx: &mut Tx) {
+    let (title, start) = match &pick {
+        state::Pick::Add { .. } => ("Add a folder as a workspace", None),
+        state::Pick::Locate(id) => ("Where is this workspace's folder now?", s.workspace_of(id).and_then(|w| w.folder.as_deref()).and_then(|f| std::path::Path::new(f).parent()).filter(|p| p.is_dir()).map(PathBuf::from)),
+    };
+    let options = rune::FileDialogOptions { title: title.into(), directory: start, ..Default::default() };
+    tx.open_folder(options, move |s: &mut App, answer: rune::FileDialogResult, _: &mut Tx| {
+        if let Ok(Some(path)) = answer {
+            let path = path.to_string_lossy().into_owned();
+            match &pick {
+                state::Pick::Add { select } => s.add_workspace(path, *select),
+                state::Pick::Locate(id) => s.locate(id, path),
+            }
+        }
+    });
 }
 
 /// Keys no control took.
@@ -120,6 +142,15 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 /// Each frame: what the link brought, the clock, the width, the window's title and frame, the menu.
 pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     let mut changed = s.drain_link();
+    for e in std::mem::take(&mut s.effects) {
+        match e {
+            state::Effect::Reveal(path) => {
+                let _ = tx.reveal_path(&path);
+            }
+            state::Effect::PickFolder(pick) => pick_folder(s, pick, tx),
+        }
+        changed = true;
+    }
     if let Some((words, urgent)) = s.announce.take() {
         tx.announce(words, if urgent { rune::LiveRegion::Assertive } else { rune::LiveRegion::Polite });
     }

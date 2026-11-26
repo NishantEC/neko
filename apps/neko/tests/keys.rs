@@ -27,13 +27,13 @@ fn tab_reaches_every_control_once_in_reading_order() {
     }
     assert_eq!(
         seen,
-        ["sidebar-hide", "new-task", "home", "task-task_00000000000000000000000004", "task-task_00000000000000000000000001", "composer-input", "folder-chip"],
-        "each list is one stop; the empty composer's Send is off; the folder chip follows the words"
+        ["sidebar-hide", "new-task", "home", "ws-default", "ws-default-new", "add-workspace", "composer-input", "workspace-picker"],
+        "the sections and their rows are one stop; a section's New task is its own; the empty composer's Send is off; the picker follows the words"
     );
     // Round once, the focus is back on the first control; Shift+Tab walks back the same way, wrapping.
     assert_eq!(focus(&rt).as_deref(), Some("sidebar-hide"));
     tab(&mut rt, true);
-    assert_eq!(focus(&rt).as_deref(), Some("folder-chip"));
+    assert_eq!(focus(&rt).as_deref(), Some("workspace-picker"));
     tab(&mut rt, true);
     assert_eq!(focus(&rt).as_deref(), Some("composer-input"));
 }
@@ -44,7 +44,9 @@ fn the_arrows_move_in_the_list_and_return_opens() {
     for _ in 0..4 {
         tab(&mut rt, false);
     }
-    assert_eq!(focus(&rt).as_deref(), Some("task-task_00000000000000000000000004"));
+    assert_eq!(focus(&rt).as_deref(), Some("ws-default"), "with no task open, the list's stop is the first section");
+    press(&mut rt, Key::Down, Mods::default());
+    assert_eq!(focus(&rt).as_deref(), Some("task-task_00000000000000000000000004"), "Down goes from a section to its first row");
     press(&mut rt, Key::Down, Mods::default());
     assert_eq!(focus(&rt).as_deref(), Some("task-task_00000000000000000000000003"), "Down moves to the next row");
     assert_eq!(rt.state.open, None, "moving does not open");
@@ -52,6 +54,48 @@ fn the_arrows_move_in_the_list_and_return_opens() {
     assert_eq!(rt.state.open.as_ref().map(|t| t.0.as_str()), Some("task_00000000000000000000000003"), "Return opens the row");
     press(&mut rt, Key::Escape, Mods::default());
     assert_eq!(focus(&rt), None, "Escape gives the focus back");
+}
+
+#[test]
+fn the_keys_move_through_sections_fold_them_and_type_to_select() {
+    let mut rt = runtime((1200.0, 800.0), false, scene("workspaces"));
+    while focus(&rt).as_deref() != Some("ws-default") {
+        tab(&mut rt, false);
+    }
+    // General has two tasks; then acme-api's header.
+    for _ in 0..3 {
+        press(&mut rt, Key::Down, Mods::default());
+    }
+    assert_eq!(focus(&rt).as_deref(), Some("ws-ws_acme"), "Down crosses from one section into the next");
+    press(&mut rt, Key::Left, Mods::default());
+    assert!(rt.state.folded.contains("ws_acme"), "Left folds a section");
+    press(&mut rt, Key::Down, Mods::default());
+    assert_eq!(focus(&rt).as_deref(), Some("ws-ws_web"), "a folded section's rows are passed over");
+    press(&mut rt, Key::Up, Mods::default());
+    press(&mut rt, Key::Right, Mods::default());
+    assert!(!rt.state.folded.contains("ws_acme"), "Right opens it again");
+    press(&mut rt, Key::Enter, Mods::default());
+    assert!(rt.state.folded.contains("ws_acme"), "Return folds it too");
+    press(&mut rt, Key::Text("n".into()), Mods::default());
+    assert_eq!(focus(&rt).as_deref(), Some("ws-ws_notes"), "typing a name goes to it");
+    assert!(rt.state.can_move("ws_web", -1) && !rt.state.can_move("ws_acme", -1), "Move up is there for all but the first");
+}
+
+#[test]
+fn the_section_button_starts_a_task_there_and_command_n_follows_the_task_in_view() {
+    let mut rt = runtime((1200.0, 800.0), false, scene("workspace-task"));
+    assert_eq!(rt.state.window_title(), "Rename the Settings button to Preferences across the app — acme-api");
+    rt.update(|s, _| s.choose_workspace(neko_protocol::GENERAL));
+    press(&mut rt, Key::Command('n'), Mods { cmd: true, ..Mods::default() });
+    assert_eq!((rt.state.open.as_ref(), rt.state.workspace.as_str()), (None, "ws_acme"), "⌘N: a new task in the workspace of the task in view");
+    assert_eq!(focus(&rt).as_deref(), Some("composer-input"));
+    click(&mut rt, "ws-ws_web-new");
+    assert_eq!(rt.state.workspace, "ws_web", "a section's New task picks its workspace");
+    click(&mut rt, "workspace-picker");
+    assert!(rt.state.picker_open);
+    settle(&mut rt);
+    let rows: Vec<String> = rt.elements().into_iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("workspace-menu-item"))).filter_map(|e| e.label).collect();
+    assert!(rows.iter().any(|r| r == "General") && rows.iter().any(|r| r == "Add folder…") && !rows.iter().any(|r| r.contains("old-scripts")), "{rows:?}");
 }
 
 #[test]

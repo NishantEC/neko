@@ -4,7 +4,8 @@
 use std::collections::{HashMap, HashSet};
 
 use neko_protocol::{
-    Change, Decision, Part, PartBody, Permission, PermissionId, PermissionMode, Reply, Request, Run, RunStatus, RuntimeInfo, ServerMessage, Settings, Task, TaskId, Transcript,
+    Change, Decision, ErrorCode, GENERAL, Part, PartBody, Permission, PermissionId, PermissionMode, Reply, Request, Run, RunStatus, RuntimeInfo, ServerMessage, Settings, Task, TaskId,
+    Transcript, Workspace,
 };
 use rune::TextEdit;
 
@@ -26,9 +27,60 @@ pub enum Daemon {
     Absent,
 }
 
+/// How many of a workspace's tasks the sidebar shows before "Show more".
+pub const SECTION_ROWS: usize = 8;
+
+/// Something only the window's transaction can do (the folder panel, the Finder), asked from a handler that has none (a menu row,
+/// the picker); `lib.rs`'s `poll` does it at the next frame.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Effect {
+    /// The Mac's folder panel, for a new workspace (`select`: the composer picks it) or for a workspace's folder that moved.
+    PickFolder(Pick),
+    Reveal(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Pick {
+    Add { select: bool },
+    Locate(String),
+}
+
+/// A question the window is asking before it acts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Confirm {
+    RemoveWorkspace(String),
+    RemoveTask(TaskId),
+}
+
+/// Why something was not done, in a small panel: the words, and a folder to reveal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Refusal {
+    pub title: String,
+    pub words: String,
+    pub reveal: Option<String>,
+}
+
 pub struct App {
-    /// The default workspace's tasks, newest first, as the daemon last said.
+    /// Every task of every workspace, newest first, as the daemon last said.
     pub tasks: Vec<Task>,
+    /// The workspaces: General first, then the person's order, then the removed ones (as the daemon last said).
+    pub workspaces: Vec<Workspace>,
+    /// The workspace Home's composer makes the next task in (General's id by default). Remembered for the next launch.
+    pub workspace: String,
+    /// The composer's workspace picker is open.
+    pub picker_open: bool,
+    /// Sections of the sidebar the person folded, by workspace id. Remembered for the next launch.
+    pub folded: HashSet<String>,
+    /// Sections showing every task, not only the newest [`SECTION_ROWS`].
+    pub show_all: HashSet<String>,
+    /// The menu that is open (a workspace's, by `ws-menu-<id>`, or the task's, `task-more`).
+    pub menu_open: Option<String>,
+    /// Renaming a workspace: its id and the name being typed.
+    pub renaming: Option<(String, TextEdit)>,
+    pub confirm: Option<Confirm>,
+    pub refusal: Option<Refusal>,
+    /// What `poll` does at the next frame.
+    pub effects: Vec<Effect>,
     /// The open task; None is Home.
     pub open: Option<TaskId>,
     /// The words in Home's composer.
@@ -66,10 +118,10 @@ pub struct App {
     pub open_folds: HashSet<String>,
     /// Whether the task's conversation shows its newest content (it reports this).
     pub at_bottom: bool,
-    /// The folder Home's composer will give a new task (None: a scratch folder).
-    pub folder: Option<String>,
     /// Settings (⌘,) shows instead of the content.
     pub settings_open: bool,
+    /// Which of Settings' pages shows (`settings_view::PAGES`).
+    pub settings_page: usize,
     /// The agent CLIs and the settings, as the daemon last said.
     pub runtimes: Option<(Vec<RuntimeInfo>, Settings)>,
     /// The person's home folder, so paths under it read `~/…` (None: shown whole).
@@ -96,6 +148,9 @@ pub struct App {
     pub slow_shown: bool,
 }
 
+/// The picker's last line: a folder the person adds as a workspace, there and then.
+pub const ADD_FOLDER: &str = "Add folder…";
+
 /// How long the app waits for its daemon before a calm line says so, with Retry.
 pub const SLOW_AFTER: std::time::Duration = std::time::Duration::from_secs(6);
 
@@ -104,6 +159,11 @@ pub const SLOW_AFTER: std::time::Duration = std::time::Duration::from_secs(6);
 pub enum Asked {
     /// A follow-up: its words go back in the box if it is refused.
     FollowUp(TaskId, String),
+    /// A folder added as a workspace; `select`: the composer makes the next task there.
+    AddWorkspace { select: bool },
+    /// A change to a workspace (rename, remove, locate, move): a refusal is said in a panel.
+    Workspace,
+    RemoveTask(TaskId),
     Other,
 }
 
@@ -174,6 +234,16 @@ impl Default for App {
     fn default() -> Self {
         App {
             tasks: Vec::new(),
+            workspaces: Vec::new(),
+            workspace: GENERAL.to_owned(),
+            picker_open: false,
+            folded: HashSet::new(),
+            show_all: HashSet::new(),
+            menu_open: None,
+            renaming: None,
+            confirm: None,
+            refusal: None,
+            effects: Vec::new(),
             open: None,
             draft: TextEdit::default(),
             daemon: Daemon::Absent,
@@ -196,8 +266,8 @@ impl Default for App {
             replies: HashMap::new(),
             open_folds: HashSet::new(),
             at_bottom: true,
-            folder: None,
             settings_open: false,
+            settings_page: 0,
             runtimes: None,
             home: None,
             reveals: HashMap::new(),
@@ -226,12 +296,221 @@ impl App {
         self.open.as_ref().and_then(|id| self.tasks.iter().find(|t| &t.id == id))
     }
 
-    /// What the window's title says: the open task's title, Settings, else "Neko".
+    /// What the window's title says: the open task's title and its workspace's name, Settings, else "Neko".
     pub fn window_title(&self) -> String {
         if self.settings_open {
             return "Settings".to_owned();
         }
-        self.open_task().map_or_else(|| "Neko".to_owned(), |t| t.title.clone())
+        match self.open_task() {
+            Some(t) => match self.workspace_of(&t.workspace) {
+                Some(w) => format!("{} — {}", t.title, w.name),
+                None => t.title.clone(),
+            },
+            None => "Neko".to_owned(),
+        }
+    }
+
+    pub fn workspace_of(&self, id: &str) -> Option<&Workspace> {
+        self.workspaces.iter().find(|w| w.id == id)
+    }
+
+    /// The workspace Home's composer makes the next task in (General until the list arrives).
+    pub fn chosen(&self) -> Option<&Workspace> {
+        self.workspace_of(&self.workspace)
+    }
+
+    /// The workspace's tasks, newest first.
+    pub fn tasks_in(&self, id: &str) -> Vec<&Task> {
+        self.tasks.iter().filter(|t| t.workspace == id).collect()
+    }
+
+    /// How many of the workspace's tasks need the person or are working (the sidebar's quiet count).
+    pub fn busy_in(&self, id: &str) -> usize {
+        use neko_protocol::TaskStatus as S;
+        self.tasks.iter().filter(|t| t.workspace == id && matches!(t.status, S::Working | S::NeedsYou | S::Asked)).count()
+    }
+
+    /// The sections of the sidebar: General, the person's workspaces, then the removed ones that still have tasks. Before the
+    /// daemon's list arrives, General alone.
+    pub fn sections(&self) -> Vec<Workspace> {
+        if self.workspaces.is_empty() {
+            return vec![Workspace { id: GENERAL.into(), name: "General".into(), folder: None, created_ms: 0, removed_ms: None, position: 0, missing: false }];
+        }
+        self.workspaces.iter().filter(|w| w.is_active() || self.tasks.iter().any(|t| t.workspace == w.id)).cloned().collect()
+    }
+
+    /// The composer's picker: each workspace a new task can be made in (one line each, the same name told apart by its folder),
+    /// then "Add folder…".
+    pub fn picker_options(&self) -> Vec<(String, Option<String>)> {
+        let live: Vec<&Workspace> = if self.workspaces.is_empty() { Vec::new() } else { self.workspaces.iter().filter(|w| w.is_active()).collect() };
+        let mut out: Vec<(String, Option<String>)> = Vec::new();
+        if live.is_empty() {
+            out.push(("General".into(), Some(GENERAL.into())));
+        }
+        for w in &live {
+            let twins = live.iter().filter(|x| x.name == w.name).count() > 1;
+            let mut label = w.name.clone();
+            if twins && let Some(f) = &w.folder {
+                label = format!("{} ({})", w.name, crate::task_view::show_path(f, "", self.home.as_deref()));
+            }
+            if w.missing {
+                label = format!("{label} (not found)");
+            }
+            out.push((label, Some(w.id.clone())));
+        }
+        out.push((ADD_FOLDER.into(), None));
+        out
+    }
+
+    /// A choice in the picker, by its words.
+    pub fn pick(&mut self, label: &str) {
+        self.picker_open = false;
+        match self.picker_options().into_iter().find(|(l, _)| l == label).and_then(|(_, id)| id) {
+            Some(id) => self.choose_workspace(&id),
+            None if label == ADD_FOLDER => self.effects.push(Effect::PickFolder(Pick::Add { select: true })),
+            None => {}
+        }
+    }
+
+    /// The workspace new tasks go to, remembered for the next launch in the real window.
+    pub fn choose_workspace(&mut self, id: &str) {
+        self.workspace = id.to_owned();
+        if self.persist {
+            let id = id.to_owned();
+            let _ = std::thread::Builder::new().name("neko-prefs".into()).spawn(move || {
+                let _ = rune::prefs::Prefs::open(crate::PREFS_ID).set(crate::WORKSPACE_KEY, &id);
+            });
+        }
+    }
+
+    /// Folds or opens a workspace's section, remembered for the next launch.
+    pub fn toggle_fold(&mut self, id: &str) {
+        if !self.folded.remove(id) {
+            self.folded.insert(id.to_owned());
+        }
+        self.save_folded();
+    }
+
+    pub fn set_folded(&mut self, id: &str, folded: bool) {
+        if folded != self.folded.contains(id) {
+            self.toggle_fold(id);
+        }
+    }
+
+    fn save_folded(&self) {
+        if self.persist {
+            let mut list: Vec<String> = self.folded.iter().cloned().collect();
+            list.sort();
+            let _ = std::thread::Builder::new().name("neko-prefs".into()).spawn(move || {
+                let _ = rune::prefs::Prefs::open(crate::PREFS_ID).set(crate::FOLDED_KEY, &list);
+            });
+        }
+    }
+
+    /// New task in this workspace (a section's button): Home, the picker on it, the keyboard in the composer.
+    pub fn new_task_in(&mut self, id: &str) {
+        self.choose_workspace(id);
+        self.go_home_and_focus();
+    }
+
+    /// ⌘N: a new task in the workspace of the task in view (when it can take one), else in the workspace chosen last.
+    pub fn new_task_here(&mut self) {
+        if let Some(w) = self.open_task().and_then(|t| self.workspace_of(&t.workspace)).filter(|w| w.is_active()).map(|w| w.id.clone()) {
+            self.choose_workspace(&w);
+        }
+        self.go_home_and_focus();
+    }
+
+    /// Adds a folder as a workspace (from the folder panel).
+    pub fn add_workspace(&mut self, folder: String, select: bool) {
+        if let Some(id) = self.send(Request::AddWorkspace { folder }) {
+            self.asked.insert(id, Asked::AddWorkspace { select });
+        }
+    }
+
+    fn workspace_request(&mut self, r: Request) {
+        if let Some(id) = self.send(r) {
+            self.asked.insert(id, Asked::Workspace);
+        }
+    }
+
+    pub fn start_rename(&mut self, id: &str) {
+        self.menu_open = None;
+        if let Some(w) = self.workspace_of(id) {
+            let mut edit = TextEdit::new(&w.name);
+            edit.focused = true;
+            self.renaming = Some((id.to_owned(), edit));
+        }
+    }
+
+    /// Save in the rename panel.
+    pub fn finish_rename(&mut self) {
+        if let Some((id, edit)) = self.renaming.take() {
+            let name = edit.text.trim().to_owned();
+            if !name.is_empty() && self.workspace_of(&id).is_some_and(|w| w.name != name) {
+                self.workspace_request(Request::RenameWorkspace { workspace: id, name });
+            }
+        }
+    }
+
+    pub fn ask_remove_workspace(&mut self, id: &str) {
+        self.menu_open = None;
+        self.confirm = Some(Confirm::RemoveWorkspace(id.to_owned()));
+    }
+
+    pub fn ask_remove_task(&mut self, id: &TaskId) {
+        self.menu_open = None;
+        self.confirm = Some(Confirm::RemoveTask(id.clone()));
+    }
+
+    /// The answer to the open question: go ahead.
+    pub fn confirmed(&mut self) {
+        match self.confirm.take() {
+            Some(Confirm::RemoveWorkspace(id)) => {
+                if self.workspace == id {
+                    self.choose_workspace(GENERAL);
+                }
+                self.workspace_request(Request::RemoveWorkspace { workspace: id });
+            }
+            Some(Confirm::RemoveTask(task)) => {
+                if let Some(id) = self.send(Request::RemoveTask { task: task.clone() }) {
+                    self.asked.insert(id, Asked::RemoveTask(task));
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// Up (-1) or down (1) among the workspaces the person added: the keyboard's move and the menu's Move up / Move down.
+    pub fn move_workspace(&mut self, id: &str, by: i32) {
+        self.menu_open = None;
+        let order: Vec<&str> = self.workspaces.iter().filter(|w| !w.is_general() && w.is_active()).map(|w| w.id.as_str()).collect();
+        let Some(at) = order.iter().position(|w| *w == id) else { return };
+        let to = at as i32 + by;
+        if to < 0 || to >= order.len() as i32 {
+            return;
+        }
+        self.workspace_request(Request::MoveWorkspace { workspace: id.to_owned(), to: to as u32 });
+    }
+
+    /// Whether the workspace can move up (-1) or down (1).
+    pub fn can_move(&self, id: &str, by: i32) -> bool {
+        let order: Vec<&str> = self.workspaces.iter().filter(|w| !w.is_general() && w.is_active()).map(|w| w.id.as_str()).collect();
+        order.iter().position(|w| *w == id).is_some_and(|at| {
+            let to = at as i32 + by;
+            to >= 0 && to < order.len() as i32
+        })
+    }
+
+    pub fn locate(&mut self, id: &str, folder: String) {
+        self.workspace_request(Request::LocateWorkspace { workspace: id.to_owned(), folder });
+    }
+
+    /// Adds or replaces a workspace, keeping General first, then the person's order, then the removed ones.
+    fn upsert_workspace(&mut self, w: Workspace) {
+        self.workspaces.retain(|x| x.id != w.id);
+        self.workspaces.push(w);
+        self.workspaces.sort_by_key(|w| (!w.is_general(), w.removed_ms.is_some(), w.position, w.removed_ms.unwrap_or(0), w.created_ms));
     }
 
     /// The open task's transcript.
@@ -306,20 +585,6 @@ impl App {
     /// An answer to a permission request.
     pub fn decide(&mut self, permission: &PermissionId, decision: Decision) {
         self.send(Request::AnswerPermission { permission: permission.clone(), decision });
-    }
-
-    /// The folder new tasks get (None: a scratch folder). Remembered for the next launch in the real window.
-    pub fn choose_folder(&mut self, folder: Option<String>) {
-        self.folder = folder.clone();
-        if self.persist {
-            let _ = std::thread::Builder::new().name("neko-prefs".into()).spawn(move || {
-                let mut prefs = rune::prefs::Prefs::open(crate::PREFS_ID);
-                let _ = match folder {
-                    Some(f) => prefs.set(crate::FOLDER_KEY, &f),
-                    None => prefs.set(crate::FOLDER_KEY, &String::new()),
-                };
-            });
-        }
     }
 
     /// Settings (⌘,).
@@ -414,7 +679,8 @@ impl App {
         if words.trim().is_empty() || self.creating.is_some() {
             return;
         }
-        match self.send(Request::CreateTask { words: words.clone(), folder: self.folder.clone() }) {
+        let workspace = Some(self.workspace.clone()).filter(|w| w != GENERAL);
+        match self.send(Request::CreateTask { words: words.clone(), workspace }) {
             Some(id) => {
                 self.creating = Some((id, words));
                 self.draft = TextEdit::default();
@@ -448,6 +714,7 @@ impl App {
                 self.waiting_since = None;
                 self.send(Request::Subscribe);
                 self.send(Request::ListTasks);
+                self.send(Request::ListWorkspaces);
                 self.send(Request::ListRuntimes);
                 // A new connection watches nothing yet.
                 self.watching = None;
@@ -481,6 +748,23 @@ impl App {
                     self.say_status(&task);
                 }
                 self.upsert(task);
+            }
+            Change::TaskRemoved { task } => {
+                self.tasks.retain(|t| t.id != task);
+                self.books.remove(&task);
+                self.replies.remove(&task);
+                if self.open.as_ref() == Some(&task) {
+                    self.go_home();
+                }
+                if self.confirm == Some(Confirm::RemoveTask(task)) {
+                    self.confirm = None;
+                }
+            }
+            Change::WorkspaceAdded { workspace } | Change::WorkspaceUpdated { workspace } => {
+                if !workspace.is_active() && self.workspace == workspace.id {
+                    self.workspace = GENERAL.to_owned();
+                }
+                self.upsert_workspace(workspace);
             }
             Change::RunChanged { run } => self.books.entry(run.task.clone()).or_default().run(run),
             Change::PartChanged { part } => self.books.entry(part.task.clone()).or_default().part(part),
@@ -543,6 +827,36 @@ impl App {
                 return;
             }
             Reply::DayUsage { .. } => return,
+            Reply::Workspaces { workspaces } => {
+                self.workspaces.clear();
+                for w in workspaces {
+                    self.upsert_workspace(w);
+                }
+                // The choice remembered from last time holds while its workspace takes new tasks.
+                if !self.chosen().is_some_and(Workspace::is_active) {
+                    self.workspace = GENERAL.to_owned();
+                }
+                return;
+            }
+            Reply::Workspace { workspace, .. } => {
+                let id = workspace.id.clone();
+                self.upsert_workspace(workspace);
+                if matches!(asked, Some(Asked::AddWorkspace { select: true })) {
+                    self.choose_workspace(&id);
+                }
+                self.folded.remove(&id);
+                return;
+            }
+            Reply::Error { code, message } if matches!(asked, Some(Asked::RemoveTask(_))) => {
+                let Some(Asked::RemoveTask(task)) = asked else { return };
+                let reveal = (code == ErrorCode::UnsavedWork).then(|| self.place_of(&task)).flatten();
+                self.refusal = Some(Refusal { title: "Neko kept this task".into(), words: message, reveal });
+                return;
+            }
+            Reply::Error { message, .. } if matches!(asked, Some(Asked::Workspace | Asked::AddWorkspace { .. })) => {
+                self.refusal = Some(Refusal { title: "Neko could not do that".into(), words: message, reveal: None });
+                return;
+            }
             Reply::Error { message, .. } if matches!(asked, Some(Asked::FollowUp(..))) => {
                 if let Some(Asked::FollowUp(task, words)) = asked {
                     let r = self.replies.entry(task).or_default();
@@ -585,6 +899,12 @@ impl App {
         }
     }
 
+    /// Where a task works: its newest run's folder, else the folder it was made in.
+    pub fn place_of(&self, task: &TaskId) -> Option<String> {
+        let run = self.books.get(task).and_then(|b| b.runs.iter().rev().find(|r| !r.workdir.is_empty()).map(|r| r.workdir.clone()));
+        run.or_else(|| self.tasks.iter().find(|t| &t.id == task).and_then(|t| t.folder.clone()))
+    }
+
     /// Everything waiting in the link's inbox. True when something changed.
     pub fn drain_link(&mut self) -> bool {
         let got = self.conn.as_ref().map(Conn::drain).unwrap_or_default();
@@ -593,13 +913,6 @@ impl App {
             self.take(i);
         }
         any
-    }
-
-    /// Today's tasks and the earlier ones, in the local calendar.
-    pub fn grouped(&self) -> (Vec<&Task>, Vec<&Task>) {
-        let day = |ms: i64| (ms / 1000 + self.utc_offset_s).div_euclid(86_400);
-        let today = day(self.now_ms);
-        self.tasks.iter().partition(|t| day(t.created_ms) >= today)
     }
 
     /// "Good morning", "Good afternoon" or "Good evening", by the local hour.
@@ -684,13 +997,70 @@ mod tests {
     }
 
     #[test]
-    fn today_is_the_local_calendar_day() {
+    fn the_greeting_follows_the_local_hour() {
         // 2026-11-26 10:00 UTC, in a zone 5 hours behind: 05:00 local.
-        let now = 1_795_687_200_000;
-        let a = App { now_ms: now, utc_offset_s: -5 * 3600, tasks: vec![task("now", now), task("local-yesterday", now - 6 * 3_600_000)], ..App::default() };
-        let (today, earlier) = a.grouped();
-        assert_eq!(today.len(), 1);
-        assert_eq!(earlier[0].title, "local-yesterday");
+        let a = App { now_ms: 1_795_687_200_000, utc_offset_s: -5 * 3600, ..App::default() };
         assert_eq!(a.greeting(), "Good morning");
     }
+
+    fn ws(id: &str, name: &str, position: i64) -> Workspace {
+        Workspace { id: id.into(), name: name.into(), folder: (id != GENERAL).then(|| format!("/Users/example/{name}")), created_ms: position, removed_ms: None, position, missing: false }
+    }
+
+    fn with_workspaces() -> App {
+        let mut a = App::default();
+        a.take(Incoming::Message(ServerMessage::Reply { id: 1, reply: Reply::Workspaces { workspaces: vec![ws("ws_b", "acme-web", 2), ws(GENERAL, "General", 0), ws("ws_a", "acme-api", 1)] } }));
+        a
+    }
+
+    #[test]
+    fn workspaces_keep_general_first_and_the_persons_order() {
+        let mut a = with_workspaces();
+        assert_eq!(a.workspaces.iter().map(|w| w.name.as_str()).collect::<Vec<_>>(), ["General", "acme-api", "acme-web"]);
+        let mut gone = ws("ws_a", "acme-api", 1);
+        gone.removed_ms = Some(9);
+        a.change(Change::WorkspaceUpdated { workspace: gone });
+        assert_eq!(a.workspaces.iter().map(|w| w.name.as_str()).collect::<Vec<_>>(), ["General", "acme-web", "acme-api"], "removed ones go last");
+        assert!(a.sections().iter().all(|w| w.id != "ws_a"), "a removed workspace with no tasks has no section");
+        let mut t = task("t", 1);
+        t.workspace = "ws_a".into();
+        a.change(Change::TaskCreated { task: t });
+        assert!(a.sections().iter().any(|w| w.id == "ws_a"), "its tasks stay readable under it");
+        assert_eq!(a.picker_options().iter().map(|o| o.0.as_str()).collect::<Vec<_>>(), ["General", "acme-web", ADD_FOLDER], "no new task in a removed workspace");
+    }
+
+    #[test]
+    fn the_picker_chooses_where_the_next_task_goes_and_command_n_follows_the_task_in_view() {
+        let mut a = with_workspaces();
+        assert_eq!(a.workspace, GENERAL);
+        a.pick("acme-web");
+        assert_eq!(a.workspace, "ws_b");
+        a.pick(ADD_FOLDER);
+        assert_eq!(a.effects, [Effect::PickFolder(Pick::Add { select: true })], "Add folder… opens the folder panel");
+        let mut t = task("t", 1);
+        t.workspace = "ws_a".into();
+        t.title = "Fix the build".into();
+        a.change(Change::TaskCreated { task: t });
+        a.open_task_id(&TaskId("t".into()));
+        assert_eq!(a.window_title(), "Fix the build — acme-api");
+        a.new_task_here();
+        assert_eq!((a.workspace.as_str(), a.open.as_ref()), ("ws_a", None), "⌘N: a new task in the workspace of the task in view");
+        // Two workspaces with one name are told apart by their folders.
+        a.change(Change::WorkspaceAdded { workspace: Workspace { folder: Some("/Users/example/old/acme-web".into()), ..ws("ws_c", "acme-web", 3) } });
+        let labels: Vec<String> = a.picker_options().into_iter().map(|o| o.0).collect();
+        assert!(labels.contains(&"acme-web (/Users/example/acme-web)".to_owned()) && labels.contains(&"acme-web (/Users/example/old/acme-web)".to_owned()), "{labels:?}");
+    }
+
+    #[test]
+    fn a_removed_task_leaves_the_window_and_a_refusal_says_why() {
+        let mut a = with_workspaces();
+        a.change(Change::TaskCreated { task: task("t", 1) });
+        a.open_task_id(&TaskId("t".into()));
+        a.change(Change::TaskRemoved { task: TaskId("t".into()) });
+        assert!(a.tasks.is_empty() && a.open.is_none());
+        a.asked.insert(4, Asked::RemoveTask(TaskId("u".into())));
+        a.take(Incoming::Message(ServerMessage::Reply { id: 4, reply: Reply::error(ErrorCode::UnsavedWork, "This task's worktree has changes that are not committed.") }));
+        assert!(a.refusal.as_ref().is_some_and(|r| r.words.contains("not committed")));
+    }
+
 }

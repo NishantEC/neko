@@ -1,5 +1,6 @@
-//! Settings (⌘,): one page. "Agents": each agent CLI Neko knows, as found on this Mac, which one new tasks use, and how much a
-//! task's agent may do without asking. Neko asks for no API key: it uses the CLIs already installed and signed in.
+//! Settings (⌘,): two pages. "Agents": each agent CLI Neko knows, as found on this Mac, which one new tasks use, and how much a
+//! task's agent may do without asking. Neko asks for no API key: it uses the CLIs already installed and signed in. "Workspaces":
+//! the folders the person added, with Rename, Reveal in Finder and Remove.
 
 use neko_protocol::{PermissionMode, RuntimeInfo};
 use rune::{El, col, row, text};
@@ -13,7 +14,11 @@ use crate::ui::badge::Badge;
 use crate::ui::base::{Theme, Tone, glyph, paint};
 use crate::ui::icons;
 use crate::ui::radio_group::RadioGroup;
+use crate::ui::button::Button;
+use crate::ui::segmented_control::SegmentedControl;
 use crate::view::COLUMN;
+use rune_ui_style::{ButtonVariant, Size};
+use std::rc::Rc;
 
 /// What Settings says about full access, plainly.
 pub const FULL_ACCESS_WARNING: &str =
@@ -63,9 +68,23 @@ fn agent_card(t: &Theme, r: &RuntimeInfo) -> El {
     card
 }
 
+/// Settings' pages, in the order the switch shows them.
+pub const PAGES: [&str; 2] = ["Agents", "Workspaces"];
+
 pub fn settings_view(s: &App, t: &Theme) -> El {
     let mut page = col().key("settings").w_full().max_w(COLUMN).gap(t.space.at(6.0));
-    page = page.child(text("Settings").key("settings-title").role("heading").level(1).font(weight(t.ty.xl, t.ty.medium)).color(t.ink()));
+    let switch = SegmentedControl::<App>::new("settings-page", "Settings page", &PAGES, s.settings_page.min(PAGES.len() - 1)).size(Size::Sm).on_change(|s: &mut App, i| s.settings_page = i).build(t);
+    page = page.child(
+        row()
+            .w_full()
+            .gap(t.space.at(4.0))
+            .center_y()
+            .child(text("Settings").key("settings-title").role("heading").level(1).font(weight(t.ty.xl, t.ty.medium)).color(t.ink()).grow(1.0))
+            .child(switch),
+    );
+    if s.settings_page == 1 {
+        return wrap(t, page.child(workspaces_page(s, t)));
+    }
     let mut agents = col().key("settings-agents").w_full().gap(t.space.at(3.0)).child(text("Agents").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())).child(
         text("Neko uses the agent CLIs already installed and signed in on this Mac. It asks for no API key and never stores one.").font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0),
     );
@@ -152,6 +171,74 @@ pub fn settings_view(s: &App, t: &Theme) -> El {
         }
     }
     wrap(t, page.child(agents))
+}
+
+/// The Workspaces page: each workspace with its folder and how many tasks it has, and what can be done to it.
+fn workspaces_page(s: &App, t: &Theme) -> El {
+    let mut part = col().key("settings-workspaces").w_full().gap(t.space.at(3.0)).child(text("Workspaces").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())).child(
+        text("Folders you added. A new task works in the one you choose; in General each task gets a scratch folder of its own. Removing a workspace takes it off the list only: nothing on disk is touched.")
+            .font(t.ty.base)
+            .color(t.ink_muted())
+            .wrap()
+            .min_w(0.0),
+    );
+    for w in s.workspaces.iter().filter(|w| w.is_active()) {
+        let key = format!("settings-ws-{}", w.id);
+        let n = s.tasks_in(&w.id).len();
+        let count = match n {
+            0 => "No tasks yet".to_owned(),
+            1 => "1 task".to_owned(),
+            n => format!("{n} tasks"),
+        };
+        let folder = match &w.folder {
+            Some(f) => crate::task_view::show_path(f, "", s.home.as_deref()),
+            None => "No folder: each task gets a scratch folder of its own".to_owned(),
+        };
+        let mut head = row().w_full().gap(t.space.at(2.0)).center_y().child(text(w.name.clone()).role("heading").level(3).font(weight(t.ty.md, t.ty.medium)).color(t.ink()).truncate().min_w(0.0).shrink());
+        if w.missing {
+            head = head.child(Badge::new(format!("{key}-missing"), "Folder not found").tone(Tone::Warning).dot().build(t));
+        }
+        let facts = col()
+            .grow(1.0)
+            .min_w(0.0)
+            .gap(t.space.at(1.0))
+            .child(head)
+            .child(text(folder).key(format!("{key}-folder")).font(t.ty.sm).color(t.ink_muted()).truncate_middle().min_w(0.0).help(w.folder.clone().unwrap_or_default()))
+            .child(text(count).key(format!("{key}-count")).font(t.ty.sm).color(t.ink_faint()));
+        let mut card = paint(row().key(key.clone()).role("group").label(w.name.clone()).w_full().padding(t.metrics.inset).gap(t.space.at(3.0)).center_y().radius(t.radius.xl).round_as(t), &t.mat.slab.base).child(facts);
+        if !w.is_general() {
+            let mut actions = row().gap(t.space.at(1.5)).center_y();
+            let id = w.id.clone();
+            actions = actions.child(Button::new(format!("{key}-rename"), "Rename…").variant(ButtonVariant::Secondary).size(Size::Sm).on_press(move |s: &mut App| s.start_rename(&id)).build(t));
+            if w.missing {
+                let id = w.id.clone();
+                let locate: Rc<dyn Fn(&mut App, &mut rune::Tx)> = Rc::new(move |s: &mut App, tx: &mut rune::Tx| crate::pick_folder(s, crate::state::Pick::Locate(id.clone()), tx));
+                actions = actions.child(Button::<App>::new(format!("{key}-locate"), "Locate…").variant(ButtonVariant::Secondary).size(Size::Sm).build(t).on_press_tx(move |s: &mut App, tx: &mut rune::Tx| locate(s, tx)));
+            } else if let Some(f) = w.folder.clone() {
+                actions = actions.child(Button::<App>::new(format!("{key}-reveal"), "Reveal in Finder").variant(ButtonVariant::Secondary).size(Size::Sm).build(t).on_press_tx(move |_: &mut App, tx: &mut rune::Tx| {
+                    let _ = tx.reveal_path(&f);
+                }));
+            }
+            let id = w.id.clone();
+            actions = actions.child(Button::new(format!("{key}-remove"), "Remove…").variant(ButtonVariant::Secondary).size(Size::Sm).on_press(move |s: &mut App| s.ask_remove_workspace(&id)).build(t));
+            card = card.child(actions);
+        }
+        part = part.child(card);
+    }
+    let add = Button::<App>::new("settings-add-workspace", "Add workspace…").variant(ButtonVariant::Secondary).size(Size::Sm).build(t).on_press_tx(|s: &mut App, tx: &mut rune::Tx| crate::pick_folder(s, crate::state::Pick::Add { select: false }, tx));
+    part = part.child(row().child(add));
+    let removed: Vec<&str> = s.workspaces.iter().filter(|w| !w.is_active()).map(|w| w.name.as_str()).collect();
+    if !removed.is_empty() {
+        part = part.child(
+            text(format!("Removed: {}. Their tasks stay readable in the sidebar. Add a folder again to bring its workspace back.", removed.join(", ")))
+                .key("settings-ws-removed")
+                .font(t.ty.sm)
+                .color(t.ink_faint())
+                .wrap()
+                .min_w(0.0),
+        );
+    }
+    part
 }
 
 fn wrap(t: &Theme, page: El) -> El {

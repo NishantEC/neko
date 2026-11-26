@@ -118,7 +118,7 @@ fn the_first_frame_does_not_wait_for_a_slow_daemon_and_a_task_typed_meanwhile_is
     // The window shows what it can by itself: the sidebar's quiet placeholder, Home and its composer.
     assert_eq!(rt.state.daemon, Daemon::Starting);
     assert_eq!(text_of(&rt, "connection").as_deref(), Some("Starting Neko…"));
-    assert_eq!(text_of(&rt, "today-none").as_deref(), Some("Loading…"), "not \"No tasks yet\" before the list arrives");
+    assert_eq!(text_of(&rt, "ws-default-none").as_deref(), Some("Loading…"), "not \"No tasks yet\" before the list arrives");
     click(&mut rt, "composer-input");
     press(&mut rt, Key::Text("Tidy the notes [fake:plain]".into()), Mods::default());
     press(&mut rt, Key::Enter, Mods::default());
