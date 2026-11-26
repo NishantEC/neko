@@ -8,7 +8,7 @@
     },
     "radius": {
       "$type": "number",
-      "$value": 12
+      "$value": 9.6
     },
     "density": {
       "$type": "number",

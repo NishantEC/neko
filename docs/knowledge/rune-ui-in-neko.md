@@ -23,7 +23,7 @@ crates, all at the same rev). `add` brought `base`, `icons`, `agent` and `font_i
   copies the lock does not know. Fix a component upstream, then `rune-ui update`.
 - What a component lacks is added on the built `El` in Neko's own code, never in the copy: the task rows are `SidebarItem`s with
   `.role("option")`, `.position_in_set`, `.focus_selected` and an `on_key` added after `build`.
-- **Theme:** `apps/neko/themes/neko.json` is rune-ui's default with radius 12, continuous corners, Figtree, type scale 1.00,
+- **Theme:** `apps/neko/themes/neko.json` is rune-ui's default with a base radius of 9.6 (drawn as 12: continuous corners are drawn 1.25 times larger), continuous corners, Figtree, type scale 1.00,
   Comfortable density (1.0), shadow 1.0 (elevation as the default) and material 100% (texture 1.0). Loaded with
   `Theme::from_json`, given Reduce Motion every frame.
 - **Fonts:** `AppSpec::fonts` = `rune_ui_style::fonts::install(ui::FONTS)` (Figtree and Inter). Every visible text is Figtree
