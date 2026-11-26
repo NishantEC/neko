@@ -14,6 +14,7 @@ fn task() -> Task {
         status: TaskStatus::New,
         folder: None,
         cat: "cat_miso".into(),
+        round: None,
     }
 }
 
@@ -389,5 +390,5 @@ fn cats_round_trip() {
     let json = serde_json::to_string(&r).unwrap();
     assert!(json.ends_with(r#""cat":"cat_miso","rules_hash":"cbf29ce484222325"}"#), "{json}");
     pinned(PartBody::RulesChanged { cat: c(), name: "miso".into() }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso"}"#);
-    assert_eq!(PROTOCOL_VERSION, 8);
+    assert_eq!(PROTOCOL_VERSION, 9);
 }

@@ -8,10 +8,10 @@ publish.workspace = true
 
 [features]
 # The WebSocket link both ends use: the daemon's side of a connection and a screen's client.
-ws = ["dep:tungstenite", "dep:libc"]
+ws = ["dep:tungstenite"]
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
 tungstenite = { workspace = true, optional = true }
-libc = { workspace = true, optional = true }
+libc.workspace = true

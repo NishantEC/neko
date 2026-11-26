@@ -175,7 +175,7 @@ fn task(n: u32, words: &str, minutes_ago: i64) -> Task {
     let title = words.lines().next().unwrap_or("").to_owned();
     // Each sample task has one of the starter cats, in turn.
     let cat = ["cat_miso", "cat_mochi", "cat_tofu"][n as usize % 3].to_owned();
-    Task { id: TaskId(format!("task_{n:026}")), workspace: "default".into(), words: words.into(), title, created_ms: now - minutes_ago * 60_000, status: TaskStatus::New, folder: None, cat }
+    Task { id: TaskId(format!("task_{n:026}")), workspace: "default".into(), words: words.into(), title, created_ms: now - minutes_ago * 60_000, status: TaskStatus::New, folder: None, cat, round: None }
 }
 
 /// Four tasks: three from today and one from earlier in the week, each in a different state.

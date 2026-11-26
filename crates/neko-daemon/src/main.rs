@@ -8,6 +8,7 @@ mod files;
 mod folders;
 mod hook;
 mod http;
+mod rounds;
 mod runs;
 mod server;
 mod undo;

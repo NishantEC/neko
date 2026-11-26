@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use neko_protocol::{Task, TaskId, TaskStatus};
+use neko_protocol::{Task, TaskId, TaskRound, TaskStatus};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::title::title;
@@ -174,6 +174,40 @@ const MIGRATIONS: &[Migration] = &[
         ALTER TABLE runs ADD COLUMN rules_hash TEXT;",
         crate::cats::migrate_tasks,
     ),
+    // 7: rounds (docs/knowledge/rounds.md). A row per round with where its schedule has got to (`cursor_ms`: the last due time dealt
+    // with), a bounded history per round, and on a task the round that made it and the time it was due. Removing a round removes
+    // its history, never its tasks.
+    Migration::Sql("CREATE TABLE rounds (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        words TEXT NOT NULL,
+        cat_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        schedule TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        anchor_ms INTEGER NOT NULL,
+        cursor_ms INTEGER NOT NULL,
+        fail_streak INTEGER NOT NULL DEFAULT 0,
+        brake_note TEXT,
+        created_ms INTEGER NOT NULL,
+        changed_ms INTEGER NOT NULL
+    );
+    CREATE TABLE round_runs (
+        id TEXT PRIMARY KEY,
+        round_id TEXT NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+        due_ms INTEGER,
+        at_ms INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        task_id TEXT,
+        reason TEXT,
+        ended TEXT
+    );
+    CREATE INDEX round_runs_by_round ON round_runs(round_id, at_ms DESC);
+    CREATE INDEX round_runs_open ON round_runs(ended) WHERE ended IS NULL;
+    ALTER TABLE tasks ADD COLUMN round_id TEXT;
+    ALTER TABLE tasks ADD COLUMN round_due_ms INTEGER;
+    ALTER TABLE tasks ADD COLUMN round_name TEXT;
+    CREATE INDEX tasks_by_round ON tasks(round_id) WHERE round_id IS NOT NULL;"),
 ];
 
 /// The schema version this build writes.
@@ -227,10 +261,36 @@ fn task_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         created_ms: row.get(5)?,
         folder: row.get(6)?,
         cat: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
+        round: row.get::<_, Option<String>>(8)?.map(|id| -> rusqlite::Result<TaskRound> {
+            Ok(TaskRound { id, name: row.get::<_, Option<String>>(10)?.unwrap_or_default(), due_ms: row.get(9)? })
+        }).transpose()?,
     })
 }
 
-const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id";
+const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name";
+
+/// Writes a new task and its `task_created` event inside `tx`. Returns the event's sequence number.
+pub(crate) fn insert_task(tx: &rusqlite::Transaction<'_>, task: &Task) -> Result<u64, StoreError> {
+    tx.execute(
+        &format!("INSERT INTO tasks ({TASK_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"),
+        params![
+            task.id.0,
+            task.workspace,
+            task.words,
+            task.title,
+            status_name(task.status),
+            task.created_ms,
+            task.folder,
+            task.cat,
+            task.round.as_ref().map(|r| &r.id),
+            task.round.as_ref().and_then(|r| r.due_ms),
+            task.round.as_ref().map(|r| &r.name)
+        ],
+    )?;
+    let data = serde_json::json!({ "title": task.title, "cat": task.cat, "round": task.round.as_ref().map(|r| &r.id) }).to_string();
+    tx.execute("INSERT INTO events (at_ms, workspace_id, subject, kind, data) VALUES (?1, ?2, ?3, 'task_created', ?4)", params![task.created_ms, task.workspace, task.id.0, data])?;
+    Ok(tx.last_insert_rowid() as u64)
+}
 
 impl Store {
     /// Opens the store at `path` (made if missing), in WAL mode, and runs any migration it lacks.
@@ -284,15 +344,9 @@ impl Store {
 
     /// Stores a task for `cat` and its `task_created` event in one transaction. Returns the task and the event's sequence number.
     pub fn create_task(&mut self, id: &TaskId, workspace: &str, words: &str, folder: Option<&str>, cat: &str, now_ms: i64) -> Result<(Task, u64), StoreError> {
-        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New, folder: folder.map(str::to_owned), cat: cat.to_owned() };
+        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New, folder: folder.map(str::to_owned), cat: cat.to_owned(), round: None };
         let tx = self.conn.transaction()?;
-        tx.execute(
-            &format!("INSERT INTO tasks ({TASK_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"),
-            params![task.id.0, task.workspace, task.words, task.title, status_name(task.status), task.created_ms, task.folder, task.cat],
-        )?;
-        let data = serde_json::json!({ "title": task.title, "cat": task.cat }).to_string();
-        tx.execute("INSERT INTO events (at_ms, workspace_id, subject, kind, data) VALUES (?1, ?2, ?3, 'task_created', ?4)", params![now_ms, workspace, task.id.0, data])?;
-        let seq = tx.last_insert_rowid() as u64;
+        let seq = insert_task(&tx, &task)?;
         tx.commit()?;
         Ok((task, seq))
     }

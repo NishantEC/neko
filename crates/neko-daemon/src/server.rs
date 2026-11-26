@@ -53,6 +53,8 @@ pub struct Shared {
     pub runs: Runs,
     /// "Needs you": the list screens were last told, and whether a change may have altered it.
     needs: NeedsWatch,
+    /// The rounds scheduler's clock and thread (docs/knowledge/rounds.md).
+    pub rounds: crate::rounds::Hub,
 }
 
 /// Keeps "Needs you" (docs/knowledge/needs-you.md) pushed: a change to a task's state, a request or a task's removal marks it, and
@@ -83,6 +85,12 @@ impl Shared {
 
     /// Pushes a change to every subscribed connection. Called with the core locked, so events leave in revision order.
     pub fn broadcast(&self, msg: &ServerMessage) {
+        if let ServerMessage::Event { change: Change::TaskUpdated { task }, .. } = msg
+            && task.round.is_some()
+        {
+            // A round's task changed: the scheduler looks at how it ended (and at the three-failures brake).
+            self.rounds.poke();
+        }
         if let ServerMessage::Event { change: Change::TaskUpdated { .. } | Change::PermissionChanged { .. } | Change::TaskRemoved { .. } | Change::CatUpdated { .. }, .. } = msg {
             *lock(&self.needs.dirty) = true;
             self.needs.wake.notify_one();
@@ -168,10 +176,11 @@ pub fn run(dir: &Path, port: u16) -> Result<(), StartError> {
     let runs = Runs::new(runtimes, dir.to_path_buf());
     let first = neko_core::needs::derive(&core.store).unwrap_or_default();
     let needs = NeedsWatch { dirty: Mutex::new(false), wake: Condvar::new(), last: Mutex::new(first) };
-    let shared = Arc::new(Shared { core: Mutex::new(core), conns: Mutex::new(HashMap::new()), token, port, stopping: AtomicBool::new(false), runs, needs });
+    let shared = Arc::new(Shared { core: Mutex::new(core), conns: Mutex::new(HashMap::new()), token, port, stopping: AtomicBool::new(false), runs, needs, rounds: crate::rounds::Hub::new() });
     let for_needs = shared.clone();
     std::thread::Builder::new().name("neko-needs".into()).spawn(move || watch_needs(for_needs))?;
     crate::folders::spawn(shared.clone())?;
+    crate::rounds::spawn(shared.clone())?;
     // Find the agent CLIs once now, off the main thread, so the first task and Settings do not wait for it.
     let warm = shared.clone();
     let _ = std::thread::Builder::new().name("neko-detect".into()).spawn(move || {
@@ -228,6 +237,7 @@ fn stop(shared: &Shared) {
     // Pending requests never hold the stop up: runs end through their guards and write their words (docs/knowledge/run-guard.md).
     crate::runs::stop_all(shared);
     crate::folders::stopping();
+    crate::rounds::stopping(shared);
     *lock(&shared.needs.dirty) = true;
     shared.needs.wake.notify_one();
     for c in lock(&shared.conns).values() {
@@ -422,6 +432,15 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
         Request::RestoreCatRules { cat } => one_cat(shared, |c| c.restore_cat_rules(&cat)),
         Request::RetireCat { cat } => one_cat(shared, |c| c.retire_cat(&cat)),
         Request::BringBackCat { cat } => one_cat(shared, |c| c.bring_back_cat(&cat)),
+        Request::ListRounds => crate::rounds::list(shared),
+        Request::CreateRound { name, words, cat, workspace, schedule, on } => crate::rounds::create(shared, &name, &words, &cat, workspace.as_deref(), &schedule, on),
+        Request::UpdateRound { round, name, words, cat, workspace, schedule } => crate::rounds::update(shared, &round, &name, &words, &cat, workspace.as_deref(), &schedule),
+        Request::SetRoundOn { round, on } => crate::rounds::set_on(shared, &round, on),
+        Request::RemoveRound { round } => crate::rounds::remove(shared, &round),
+        Request::RunRoundNow { round } => crate::rounds::run_now(shared, &round),
+        Request::SetRoundsPaused { paused } => crate::rounds::set_paused(shared, paused),
+        Request::RoundHistory { round } => crate::rounds::history(shared, &round),
+        Request::DebugClock { offset_ms } => crate::rounds::debug_clock(shared, offset_ms),
         Request::ListWorkspaces => match lock(&shared.core).workspaces() {
             Ok(workspaces) => Reply::Workspaces { workspaces },
             Err(e) => internal(e),

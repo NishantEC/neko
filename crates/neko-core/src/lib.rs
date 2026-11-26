@@ -14,6 +14,7 @@ pub mod history;
 pub mod needs;
 pub mod policy;
 pub mod records;
+pub mod rounds;
 pub mod runtime;
 pub mod store;
 pub mod title;
@@ -128,6 +129,12 @@ impl Core {
     /// [`Core::create_task_in`] for a cat: `cat` when picked, else the workspace's default cat, else the least busy
     /// ([`cats::choose`]).
     pub fn create_task_for(&mut self, words: &str, workspace: Option<&str>, cat: Option<&str>) -> Result<(Task, u64), NewTaskError> {
+        let (id, w, cat, now) = self.plan_task(words, workspace, cat)?;
+        self.store.create_task(&id, &w.id, words, w.folder.as_deref(), &cat.id, now).map_err(|e| NewTaskError::Store(e.to_string()))
+    }
+
+    /// The checks before any task is made, and its id: the workspace (there, not removed, its folder found) and the cat.
+    pub(crate) fn plan_task(&mut self, words: &str, workspace: Option<&str>, cat: Option<&str>) -> Result<(TaskId, Workspace, neko_protocol::Cat, i64), NewTaskError> {
         if words.trim().is_empty() {
             return Err(NewTaskError::Empty);
         }
@@ -145,7 +152,7 @@ impl Core {
         let cat = self.cat_for(&w.id, cat).map_err(NewTaskError::Cat)?;
         let now = self.clock.now_ms();
         let id = TaskId(format!("task_{}", self.ids.next_id(now)));
-        self.store.create_task(&id, &w.id, words, w.folder.as_deref(), &cat.id, now).map_err(|e| NewTaskError::Store(e.to_string()))
+        Ok((id, w, cat, now))
     }
 
     /// Every workspace, with whether its folder is there now.

@@ -15,10 +15,14 @@ pub mod client;
 #[cfg(feature = "ws")]
 pub mod pump;
 pub mod cats;
+pub mod rounds;
+pub mod schedule;
 pub mod title;
 pub mod undo;
 
 pub use cats::Cat;
+pub use rounds::{Round, RoundRun, RoundStatus, TaskRound};
+pub use schedule::Schedule;
 pub use undo::{DiffFile, DiffPatch, DiffSummary, FileStatus, Offer, RunUndo, UndoState, UndoStorage};
 
 /// The version of this contract. A screen and a daemon talk only when theirs are equal. 2: tasks run (S1). 3: three permission
@@ -27,8 +31,9 @@ pub use undo::{DiffFile, DiffPatch, DiffSummary, FileStatus, Offer, RunUndo, Und
 /// task). 6: "Needs you" (the items waiting for the person, listed and pushed whole; a failure's notice says what kind it is; a
 /// follow-up may say which question it answers). 7: undo (a run's checkpoints and where its undo stands; a run's changes as a diff,
 /// per file; undo, redo; the storage undo uses, and clearing it). 8: cats (named agents with standing rules; every task has one; a
-/// run records its cat and the version of its rules; "Needs you" items name the cat).
-pub const PROTOCOL_VERSION: u32 = 8;
+/// run records its cat and the version of its rules; "Needs you" items name the cat). 9: rounds (a cat's standing work that starts
+/// by itself: its schedule, its history, pause all; a task says which round made it and when it was due).
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -135,6 +140,9 @@ pub struct Task {
     pub folder: Option<String>,
     /// The cat doing it (a [`Cat`]'s id). Set when the task is made; changed only while no run has started.
     pub cat: String,
+    /// The round that made it and the time it was due; None for a task the person made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub round: Option<TaskRound>,
 }
 
 /// Where a run stands.
@@ -523,6 +531,46 @@ pub enum Request {
     RetireCat { cat: String },
     /// Bring a retired cat back. Refused when [`cats::MAX_ACTIVE`] are active.
     BringBackCat { cat: String },
+    /// Every round, in the order they were made, and whether every round is paused.
+    ListRounds,
+    /// A new round. `workspace` None is General. It is on unless `on` is false.
+    CreateRound {
+        name: String,
+        words: String,
+        cat: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<String>,
+        schedule: Schedule,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        on: bool,
+    },
+    /// Change a round whole (the screen sends every field). A new schedule counts from now.
+    UpdateRound {
+        round: String,
+        name: String,
+        words: String,
+        cat: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<String>,
+        schedule: Schedule,
+    },
+    /// Turn a round on or off. Turning one on that the brake turned off clears the brake and counts from now.
+    SetRoundOn { round: String, on: bool },
+    /// Remove a round. Its past tasks stay.
+    RemoveRound { round: String },
+    /// Run a round now, whatever its schedule says (also while it is off or every round is paused). Refused while its last task is
+    /// still working or waiting for the person.
+    RunRoundNow { round: String },
+    /// Pause every round at once, or let them go on. Kept across restarts.
+    SetRoundsPaused { paused: bool },
+    /// A round's last runs, newest first, at most [`rounds::HISTORY_KEPT`].
+    RoundHistory { round: String },
+    /// Debug builds only, and only with `NEKO_DEBUG_CLOCK=1` in the daemon's environment: moves the rounds scheduler's clock forward
+    /// by `offset_ms` from the real one (None: back to real time). Any other daemon refuses it. For the QA rig.
+    DebugClock {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        offset_ms: Option<i64>,
+    },
     /// Forget a task: its record goes, and its worktree or scratch folder when nothing unsaved is in it. Refused while it runs and
     /// when its folder holds unsaved work.
     RemoveTask { task: TaskId },
@@ -674,6 +722,11 @@ pub enum Reply {
     UndoStorage { storage: UndoStorage },
     Cats { cats: Vec<Cat> },
     Cat { cat: Cat },
+    /// Every round, and whether all are paused.
+    Rounds { rounds: Vec<Round>, paused: bool },
+    Round { round: Round },
+    /// A round's history, newest first.
+    RoundRuns { runs: Vec<RoundRun> },
     /// Done; the change arrives as events.
     Ok,
     Error { code: ErrorCode, message: String },
@@ -707,6 +760,12 @@ pub enum Change {
     CatAdded { cat: Cat },
     /// Renamed, a new face, purpose, default workspace or rules, retired or brought back: the whole cat as it is now.
     CatUpdated { cat: Cat },
+    RoundAdded { round: Round },
+    /// Changed in any way (edited, switched, run, skipped, braked, a new next time): the whole round as it is now.
+    RoundUpdated { round: Round },
+    RoundRemoved { round: String },
+    /// Every round was paused, or let go on. The rounds follow as `round_updated`.
+    RoundsPaused { paused: bool },
 }
 
 /// What the daemon sends.
@@ -744,6 +803,14 @@ pub mod files {
     pub const WORKTREES: &str = "worktrees";
     /// Undo's own folder: a shadow repository per task whose folder is not a git repository, and temporary index files.
     pub const UNDO: &str = "undo";
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
 }
 
 impl ClientMessage {

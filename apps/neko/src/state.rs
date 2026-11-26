@@ -1472,6 +1472,7 @@ impl App {
             }
             Change::NeedsChanged { items } => self.set_needs(items),
             Change::CatAdded { cat } | Change::CatUpdated { cat } => self.upsert_cat(cat),
+            Change::RoundAdded { .. } | Change::RoundUpdated { .. } | Change::RoundRemoved { .. } | Change::RoundsPaused { .. } => {}
         }
     }
 
@@ -1726,7 +1727,7 @@ mod tests {
     use neko_protocol::TaskStatus;
 
     fn task(id: &str, ms: i64) -> Task {
-        Task { id: TaskId(id.into()), workspace: "default".into(), words: format!("words of {id}"), title: id.into(), created_ms: ms, status: TaskStatus::New, folder: None, cat: "cat_miso".into() }
+        Task { id: TaskId(id.into()), workspace: "default".into(), words: format!("words of {id}"), title: id.into(), created_ms: ms, status: TaskStatus::New, folder: None, cat: "cat_miso".into(), round: None }
     }
 
     #[test]
