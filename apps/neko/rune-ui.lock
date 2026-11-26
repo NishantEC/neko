@@ -38,6 +38,13 @@ files = [
 ]
 
 [[item]]
+name = "context"
+version = "0.6.0"
+files = [
+  { target = "src/ui/context.rs", sha256 = "39aa85cc922dc4cadd80f105d0a72f33571a00356f91af66f71cabc85a47f050" },
+]
+
+[[item]]
 name = "conversation"
 version = "0.8.0"
 files = [
