@@ -259,6 +259,10 @@ pub struct App {
     pub review: Option<Review>,
     /// How much room undo takes (Settings ▸ Workspaces), as the daemon last said.
     pub undo_storage: Option<UndoStorage>,
+    /// Each finished run's files with their own counts, for its receipt: asked once per run that changed something.
+    pub receipts: HashMap<RunId, DiffSummary>,
+    /// The runs whose files were asked for (each is asked once).
+    pub receipts_asked: HashSet<RunId>,
 }
 
 impl Review {
@@ -289,6 +293,8 @@ pub enum Asked {
     Undo { task: TaskId, run: RunId, redo: bool },
     /// A review's file list, or one file's lines.
     Diff,
+    /// A run's files for its receipt.
+    Receipt,
     /// A change to a cat: a refusal is said in a panel. `open`: the cat made opens its page.
     Cat { open: bool },
     ClearUndo,
@@ -446,6 +452,8 @@ impl Default for App {
             badge_set: None,
             review: None,
             undo_storage: None,
+            receipts: HashMap::new(),
+            receipts_asked: HashSet::new(),
         }
     }
 }
@@ -511,6 +519,11 @@ impl App {
     }
 
     /// A task's cat's name ("Neko" until the cats arrive).
+    /// A cat's face id (the first face for a cat not known yet, as the portrait draws an unknown one).
+    pub fn cat_face(&self, id: &str) -> &str {
+        self.cat(id).map_or("", |c| c.face.as_str())
+    }
+
     pub fn cat_name(&self, task: &Task) -> String {
         self.cat(&task.cat).map_or_else(|| "Neko".to_owned(), |c| c.name.clone())
     }
@@ -1039,6 +1052,25 @@ impl App {
         }
     }
 
+    /// Asks once for the files of each finished run of the open task that changed something, so its receipt can list them with
+    /// their counts. Without the daemon nothing is asked (and nothing is marked asked).
+    pub fn ask_receipts(&mut self) {
+        let Some(book) = self.book() else { return };
+        let want: Vec<(TaskId, RunId)> = book
+            .runs
+            .iter()
+            .filter(|r| r.status != RunStatus::Running && r.undo.as_ref().is_some_and(neko_protocol::RunUndo::changed))
+            .filter(|r| !self.receipts_asked.contains(&r.id) && !self.receipts.contains_key(&r.id))
+            .map(|r| (r.task.clone(), r.id.clone()))
+            .collect();
+        for (task, run) in want {
+            if let Some(id) = self.send(Request::GetDiff { task, run: Some(run.clone()) }) {
+                self.asked.insert(id, Asked::Receipt);
+                self.receipts_asked.insert(run);
+            }
+        }
+    }
+
     /// Back to the conversation.
     pub fn close_review(&mut self) {
         self.review = None;
@@ -1500,6 +1532,12 @@ impl App {
                     // Not answered: the item comes back, with why.
                     self.needs_hidden.remove(&item);
                     self.needs_notice = Some(message);
+                }
+                return;
+            }
+            Reply::Diff { diff } if matches!(asked, Some(Asked::Receipt)) => {
+                if let Some(run) = diff.run.clone() {
+                    self.receipts.insert(run, diff);
                 }
                 return;
             }

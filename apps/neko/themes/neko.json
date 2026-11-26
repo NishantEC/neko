@@ -1,6 +1,6 @@
 {
   "name": "neko",
-  "description": "Neko's theme for rune-ui surfaces: rune-ui's default with radius 12, continuous corners, Figtree, type scale 1.00, Comfortable density, shadow 1.0, material 100%, the default neutral and accent.",
+  "description": "Neko's theme (House): warm paper on a warm window ground, deep warm charcoal in dark, one identity colour (a deep teal, in the blue ramp's place until the theme file has an identity ramp) for focus and work, comfortable density, radius 9.6, continuous corners, Figtree.",
   "base": {
     "spacing": {
       "$type": "number",
@@ -34,55 +34,55 @@
         "$value": "#ffffff"
       },
       "25": {
-        "$value": "#fafaf9"
+        "$value": "#fbf8f3"
       },
       "50": {
-        "$value": "#f5f5f4"
+        "$value": "#f6f2eb"
       },
       "100": {
-        "$value": "#eeeeed"
+        "$value": "#eee8df"
       },
       "150": {
-        "$value": "#e6e6e5"
+        "$value": "#e6dfd4"
       },
       "200": {
-        "$value": "#dadada"
+        "$value": "#d9d1c5"
       },
       "300": {
-        "$value": "#c2c2c5"
+        "$value": "#c1b8aa"
       },
       "400": {
-        "$value": "#a0a0a6"
+        "$value": "#a89e92"
       },
       "500": {
-        "$value": "#85858d"
+        "$value": "#8a8074"
       },
       "600": {
-        "$value": "#6c6c75"
+        "$value": "#655c52"
       },
       "700": {
-        "$value": "#57575e"
+        "$value": "#4f4840"
       },
       "750": {
-        "$value": "#45454b"
+        "$value": "#423b34"
       },
       "800": {
-        "$value": "#36363b"
+        "$value": "#342e29"
       },
       "850": {
-        "$value": "#29292d"
+        "$value": "#2a2521"
       },
       "900": {
-        "$value": "#232327"
+        "$value": "#24201c"
       },
       "925": {
-        "$value": "#1c1c1f"
+        "$value": "#1d1a17"
       },
       "950": {
-        "$value": "#151517"
+        "$value": "#161412"
       },
       "975": {
-        "$value": "#0f0f11"
+        "$value": "#100e0c"
       },
       "1000": {
         "$value": "#000000"
@@ -90,37 +90,37 @@
     },
     "blue": {
       "50": {
-        "$value": "#f0f6fe"
+        "$value": "#eef8f6"
       },
       "100": {
-        "$value": "#dbe9ff"
+        "$value": "#d3eeea"
       },
       "200": {
-        "$value": "#bbd6ff"
+        "$value": "#a9ddd5"
       },
       "300": {
-        "$value": "#90bcfe"
+        "$value": "#8fd3c9"
       },
       "400": {
-        "$value": "#5c9eff"
+        "$value": "#6cc2b6"
       },
       "500": {
-        "$value": "#3082f6"
+        "$value": "#3f9a8f"
       },
       "600": {
-        "$value": "#1069da"
+        "$value": "#2b7a71"
       },
       "700": {
-        "$value": "#0252b3"
+        "$value": "#215f58"
       },
       "800": {
-        "$value": "#013e8b"
+        "$value": "#1a4a45"
       },
       "900": {
-        "$value": "#012b63"
+        "$value": "#133632"
       },
       "950": {
-        "$value": "#011d47"
+        "$value": "#0c2421"
       }
     },
     "green": {
@@ -270,7 +270,7 @@
             "$value": "{neutral.1000} / 0.03"
           },
           "fg": {
-            "$value": "{neutral.500}"
+            "$value": "{neutral.600}"
           }
         },
         "primary": {
@@ -291,7 +291,7 @@
         },
         "accent": {
           "bg": {
-            "$value": "{blue.500} / 0.12"
+            "$value": "{blue.600} / 0.12"
           },
           "fg": {
             "$value": "{blue.700}"
@@ -299,7 +299,7 @@
         },
         "input": {
           "bg": {
-            "$value": "{neutral.1000} / 0.05"
+            "$value": "{neutral.1000} / 0.045"
           },
           "fg": {
             "$value": "{neutral.925}"
@@ -362,10 +362,10 @@
           }
         },
         "line": {
-          "$value": "{neutral.1000} / 0.07"
+          "$value": "{neutral.1000} / 0.08"
         },
         "ring": {
-          "$value": "{neutral.500}"
+          "$value": "{blue.600}"
         }
       },
       "state": {
@@ -422,7 +422,7 @@
       "number": {
         "$type": "number",
         "elevation": {
-          "$value": 1.0
+          "$value": 1.1
         },
         "well-blur": {
           "$value": 3.0
@@ -440,15 +440,15 @@
         "$type": "color",
         "page": {
           "bg": {
-            "$value": "{neutral.950}"
+            "$value": "{neutral.925}"
           },
           "fg": {
-            "$value": "{neutral.100}"
+            "$value": "{neutral.50}"
           }
         },
         "surface": {
           "bg": {
-            "$value": "{neutral.925}"
+            "$value": "{neutral.975}"
           },
           "fg": {
             "$value": "{neutral.100}"
@@ -467,7 +467,7 @@
             "$value": "{neutral.0} / 0.06"
           },
           "fg": {
-            "$value": "{neutral.400}"
+            "$value": "{neutral.300}"
           }
         },
         "subtle": {
@@ -475,7 +475,7 @@
             "$value": "{neutral.0} / 0.04"
           },
           "fg": {
-            "$value": "{neutral.600}"
+            "$value": "{neutral.400}"
           }
         },
         "primary": {
@@ -504,7 +504,7 @@
         },
         "input": {
           "bg": {
-            "$value": "{neutral.0} / 0.06"
+            "$value": "{neutral.0} / 0.055"
           },
           "fg": {
             "$value": "{neutral.100}"
@@ -570,7 +570,7 @@
           "$value": "{neutral.0} / 0.08"
         },
         "ring": {
-          "$value": "{neutral.500}"
+          "$value": "{blue.400}"
         }
       },
       "state": {
@@ -627,7 +627,7 @@
       "number": {
         "$type": "number",
         "elevation": {
-          "$value": 3.2
+          "$value": 3.4
         },
         "well-blur": {
           "$value": 3.0

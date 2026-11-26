@@ -8,31 +8,22 @@
 
 use std::rc::Rc;
 
-use neko_protocol::{Part, PartBody, Permission, PermissionState, Pricing, Run, RunStatus, Task, Tone as NoticeTone, ToolState};
+use neko_protocol::{Part, PartBody, PermissionState, Pricing, Run, RunStatus, Task, Tone as NoticeTone, ToolState};
 use rune::{El, Tx, col, el, row, text};
-use rune_ui_style::{tabular, weight};
-
-use crate::ui::base::Shape;
+use rune_ui_style::weight;
 
 use crate::state::{App, Book};
-use crate::ui::agent::{FoldLine, PressTx, Status, elapsed, icon_button, mono};
-use crate::ui::badge::Badge;
-use crate::ui::base::{ButtonVariant, Size};
-use crate::ui::button::Button;
-use neko_protocol::undo::{self, Action, Offer};
-use crate::ui::base::{Theme, Tone, glyph, paint};
-use crate::ui::confirmation::{Confirmation, Decision};
+use crate::turn;
+use crate::ui::agent::{FoldLine, PressTx, elapsed, icon_button, mono};
+use crate::ui::base::{Theme, glyph};
 use crate::ui::context::{Context, Usage as Meter};
 use crate::ui::conversation::Conversation;
 use crate::ui::icons;
-use crate::ui::message::{self, BLOCK_GAP, Message};
+use crate::ui::message::{BLOCK_GAP, Message};
 use crate::ui::prompt_input::{Phase, PromptInput};
-use crate::ui::reasoning::Reasoning;
 use crate::ui::response::Response;
-use crate::ui::shimmer::Shimmer;
-use crate::ui::task as card;
-use crate::ui::tool::{Tool, ToolCall};
 use crate::view::COLUMN;
+use neko_protocol::undo::{self, Offer};
 
 /// The context window assumed when the CLI did not report one.
 pub const ASSUMED_WINDOW: u64 = 200_000;
@@ -46,19 +37,6 @@ fn copy(t: &Theme, key: &str, words: String) -> El {
     icon_button(t, &format!("copy-{key}"), "Copy", &icons::COPY, None, false, Some(press))
 }
 
-/// The person's words, at the right; their copy button shows only while the pointer is over them or the keyboard is in them, and
-/// takes no room while hidden (rune-ui's `reveal_actions`).
-fn person(s: &App, t: &Theme, key: &str, words_key: &str, words: &str) -> El {
-    let said = message::words(t, words.to_owned()).key(words_key.to_owned()).selectable(true);
-    let k = key.to_owned();
-    Message::user(key.to_owned(), "You")
-        .child(said)
-        .actions(row().child(copy(t, key, words.to_owned())))
-        .reveal_actions(s.reveal(key), move |s: &mut App| s.reveals.entry(k.clone()).or_default())
-        .column(COLUMN)
-        .build(t)
-}
-
 /// The agent's words as Markdown on the page: rune-ui's `Response`, selectable once whole. Interim words (`muted`) are in the second
 /// ink, quieter than the answer. Only a run's final answer (`last`) has a copy button, right under it.
 fn answer(t: &Theme, key: &str, words: &str, streaming: bool, last: bool, muted: bool) -> El {
@@ -67,10 +45,6 @@ fn answer(t: &Theme, key: &str, words: &str, streaming: bool, last: bool, muted:
         return col().key(key.to_owned()).w_full().gap(t.space.at(BLOCK_GAP)).child(body).child(row().child(copy(t, key, words.to_owned())));
     }
     body
-}
-
-fn secs(p: &Part) -> f64 {
-    p.ended_ms.map_or(0.0, |e| (e - p.at_ms).max(0) as f64 / 1000.0)
 }
 
 /// `s` with its middle cut to fit `max` characters.
@@ -137,79 +111,6 @@ pub fn phrase(name: &str, summary: &str, input: &str, running: bool, workdir: &s
     cut_middle(words.trim(), LINE_CHARS)
 }
 
-/// A tool call: rune-ui's `Tool`, its line Neko's phrase, its note a command's exit code, a step the person denied neutral.
-fn tool_line(s: &App, t: &Theme, key: &str, p: &Part, workdir: &str) -> Option<El> {
-    let PartBody::Tool { name, summary, input, output, state, exit, .. } = &p.body else { return None };
-    let status = match state {
-        ToolState::Running => Status::Running,
-        ToolState::Done => Status::Done,
-        ToolState::Failed => Status::Error,
-        ToolState::Denied => Status::Denied,
-    };
-    let failed = *state == ToolState::Failed;
-    let call = ToolCall {
-        name: name.clone(),
-        summary: summary.clone(),
-        status,
-        secs: (*state != ToolState::Running && p.ended_ms.is_some()).then(|| secs(p)),
-        input: input.clone(),
-        output: if failed { None } else { output.clone().filter(|o| !o.is_empty()) },
-        error: failed.then(|| output.clone().filter(|o| !o.is_empty()).unwrap_or_else(|| "It did not finish.".to_owned())),
-    };
-    let mut tool = Tool::<App>::new(key.to_owned(), &call, s.is_open(key)).label(phrase(name, summary, input, *state == ToolState::Running, workdir, s.home.as_deref()));
-    if let (ToolState::Done, Some(code)) = (state, exit) {
-        tool = tool.note(format!("exit {code}"));
-    }
-    let k = key.to_owned();
-    Some(tool.on_toggle(move |s: &mut App| s.flip(&k)).build(t))
-}
-
-/// A thought: rune-ui's `Reasoning` ("Thinking…" live, "Thought for 12s" folding to its words). A thought with no words is no step:
-/// it is left out, so it neither counts nor folds (Claude Code sends none today; the live line says "Thinking…").
-fn thought(s: &App, t: &Theme, key: &str, p: &Part) -> Option<El> {
-    let PartBody::Thinking { text: words, done } = &p.body else { return None };
-    if words.trim().is_empty() {
-        return None;
-    }
-    let k = key.to_owned();
-    Some(Reasoning::new(key.to_owned(), !*done, secs(p), s.is_open(key)).text(words.clone()).on_toggle(move |s: &mut App| s.flip(&k)).build(t))
-}
-
-/// A permission request: rune-ui's `Confirmation`, with why Neko asks under it; a destructive one has no default answer and no
-/// "Always". Answered, it is one quiet line.
-fn request(t: &Theme, p: &Permission) -> El {
-    let key = format!("perm-{}", p.id.0);
-    let decision = match p.state {
-        PermissionState::Pending => Decision::Pending,
-        PermissionState::Allowed => Decision::AllowedOnce,
-        PermissionState::AlwaysAllowed => Decision::AlwaysAllowed,
-        PermissionState::Denied => Decision::Denied,
-        PermissionState::Expired => Decision::Expired,
-    };
-    if decision != Decision::Pending {
-        return Confirmation::<App>::new(key, p.title.clone(), decision).build(t);
-    }
-    let id = p.id.clone();
-    Confirmation::<App>::new(key, p.title.clone(), decision)
-        .detail(p.detail.clone())
-        .why(format!("Neko asks because {}", lower_first(&p.why)))
-        .destructive(p.destructive)
-        .on_decide(move |s: &mut App, d| {
-            let answer = match d {
-                Decision::AllowedOnce => neko_protocol::Decision::AllowOnce,
-                Decision::AlwaysAllowed => neko_protocol::Decision::AlwaysAllow,
-                _ => neko_protocol::Decision::Deny,
-            };
-            s.decide(&id, answer);
-        })
-        .build(t)
-}
-
-fn lower_first(s: &str) -> String {
-    let mut c = s.chars();
-    c.next().map(|f| f.to_lowercase().collect::<String>() + c.as_str()).unwrap_or_default()
-}
-
 /// A notice: what happened, and what to do next.
 fn notice(t: &Theme, p: &Part) -> Option<El> {
     let PartBody::Notice { tone, text: words, next, .. } = &p.body else { return None };
@@ -258,20 +159,14 @@ fn rules_changed(t: &Theme, p: &Part) -> Option<El> {
     )
 }
 
-/// Who did a run: its cat's face and name, at the head of the turn (in place of "Neko").
-fn turn_head(t: &Theme, r: &Run, name: &str, face: &str) -> El {
-    row()
-        .key(format!("turn-{}-cat", r.id.0))
-        .w_full()
-        .gap(t.space.at(1.5))
-        .center_y()
-        .child(crate::faces::face(t, face, t.control.icon))
-        .child(text(name.to_owned()).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_muted()).a11y_hidden())
-}
-
 /// What undo offers for a run (docs/knowledge/undo.md), from all of its task's runs.
 pub fn offer_of(book: &Book, r: &Run) -> Offer {
     book.runs.iter().position(|x| x.id == r.id).map(|i| undo::offers(&book.runs).swap_remove(i)).unwrap_or_default()
+}
+
+/// The band's run counter (`turn::counter`).
+pub fn run_counter(s: &App, t: &Theme) -> Option<El> {
+    turn::counter(s, t)
 }
 
 /// What a run itself changed: between its checkpoints when it has them, else what its branch changed (from before undo).
@@ -281,90 +176,6 @@ fn own_changes(r: &Run) -> Option<neko_protocol::Changes> {
         _ => r.changes,
     }
     .filter(|c| c.files > 0)
-}
-
-/// Review and Undo (or Redo) under a card's facts; Undo off, with the card's note saying why, when it cannot be pressed now.
-fn undo_row(r: &Run, o: &Offer, t: &Theme) -> Option<El> {
-    if !o.review && o.action.is_none() {
-        return None;
-    }
-    let mut row_el = row().key(format!("run-{}-actions", r.id.0)).gap(t.space.at(2.0)).center_y();
-    if o.review {
-        let (task, run) = (r.task.clone(), r.id.clone());
-        row_el = row_el.child(Button::new(format!("run-{}-review", r.id.0), "Review").variant(ButtonVariant::Secondary).size(Size::Sm).icon(&icons::FILE_CODE).on_press(move |s: &mut App| s.open_review(&task, Some(run.clone()))).build(t));
-    }
-    if let Some((action, enabled)) = o.action {
-        let run = r.id.clone();
-        let (words, icon, redo) = match action {
-            Action::Undo => ("Undo", &icons::RESTORE, false),
-            Action::Redo => ("Redo", &icons::RETRY, true),
-        };
-        row_el = row_el.child(Button::new(format!("run-{}-{}", r.id.0, words.to_lowercase()), words).variant(ButtonVariant::Secondary).size(Size::Sm).icon(icon).disabled(!enabled).on_press(move |s: &mut App| s.undo(&run, redo)).build(t));
-    }
-    Some(row_el)
-}
-
-/// The run card, only when a run has something to show beyond time: files changed, a branch, a failure, or something undo says.
-/// rune-ui's `Task` with only the facts Neko has (no checks, no money, no time: the run's line has it), its note the one quiet
-/// line about undo, and Review and Undo under it.
-fn run_card(t: &Theme, r: &Run, o: &Offer) -> Option<El> {
-    let changed = own_changes(r);
-    let failed = r.status == RunStatus::Failed;
-    if changed.is_none() && r.branch.is_none() && !failed && o.line.is_none() && !o.review {
-        return None;
-    }
-    let status = match r.status {
-        RunStatus::Running => Status::Running,
-        RunStatus::Done => Status::Done,
-        RunStatus::Failed => Status::Error,
-        // rune-ui's statuses have no "Stopped": its pill would say "Skipped" (an upstream ask). Neko keeps its own pill for these.
-        RunStatus::Stopped | RunStatus::Interrupted => return Some(stopped_card(t, r, changed, o)),
-    };
-    // A short title, not the task's again (the band has it): what the card is about.
-    let title = if failed { "Could not finish" } else if changed.is_some() { "Changes" } else { "Branch" };
-    let mut card = card::Run::new(title, status);
-    if let Some(c) = changed {
-        card = card.changes(c.files as usize, c.added as usize, c.removed as usize);
-    }
-    if let Some(b) = &r.branch {
-        card = card.branch(b.clone());
-    }
-    if let Some(line) = &o.line {
-        card = card.note(line.clone());
-    }
-    let mut built = card::Task::<App>::new(format!("run-{}", r.id.0), &card).build(t);
-    if let Some(actions) = undo_row(r, o, t) {
-        built = built.child(actions);
-    }
-    Some(built)
-}
-
-/// A stopped or interrupted run's card, in the look of rune-ui's `Task` with the right word on its pill.
-fn stopped_card(t: &Theme, r: &Run, changed: Option<neko_protocol::Changes>, o: &Offer) -> El {
-    let word = if r.status == RunStatus::Stopped { "Stopped" } else { "Interrupted" };
-    let fact = |icon, words: El| row().gap(t.space.at(1.5)).center_y().child(glyph(icon, t.control.icon_sm, t.ink_faint())).child(words);
-    let figures = |s: String| text(s).font(tabular(t.ty.sm)).color(t.ink_muted());
-    let mut facts = row().key(format!("run-{}-facts", r.id.0)).grow(1.0).min_w(0.0).gap(t.space.at(5.0)).flex_wrap().center_y();
-    if let Some(c) = changed {
-        let changes = row()
-            .gap(t.space.at(1.5))
-            .child(figures(format!("{} file{}", c.files, if c.files == 1 { "" } else { "s" })))
-            .child(text(format!("+{}", c.added)).font(tabular(t.ty.sm)).color(t.c.success.fg))
-            .child(text(format!("\u{2212}{}", c.removed)).font(tabular(t.ty.sm)).color(t.c.danger.fg));
-        facts = facts.child(fact(&icons::FILE, changes));
-    }
-    if let Some(b) = &r.branch {
-        facts = facts.child(fact(&icons::COMMIT, text(b.clone()).font(mono(t, t.ty.sm)).color(t.ink_muted()).truncate_middle().min_w(0.0).shrink()));
-    }
-    let head = row().w_full().gap(t.space.at(3.0)).center_y().child(Badge::new(format!("run-{}-status", r.id.0), word).tone(Tone::Neutral).dot().build(t)).child(facts);
-    let mut card = paint(col().key(format!("run-{}", r.id.0)).role("group").label(format!("Run: {word}")).w_full().padding(t.metrics.inset).gap(t.space.at(3.0)).radius(t.radius.xl).round_as(t), &t.mat.slab.base).child(head);
-    if let Some(line) = &o.line {
-        card = card.child(text(line.clone()).key(format!("run-{}-note", r.id.0)).font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0));
-    }
-    if let Some(actions) = undo_row(r, o, t) {
-        card = card.child(actions);
-    }
-    card
 }
 
 /// What the transcript is made of, in order.
@@ -413,13 +224,25 @@ fn quiet_line(p: &Part) -> bool {
     matches!(p.body, PartBody::Thinking { .. } | PartBody::Tool { .. })
 }
 
+/// Who did a run: its own cat (a task keeps one), else the task's; its name and face.
+pub struct Who {
+    pub name: String,
+    pub face: String,
+}
+
+fn who(s: &App, r: &Run, task: &Task) -> Who {
+    let cat = s.cat(r.cat.as_deref().unwrap_or(&task.cat)).or_else(|| s.cat(&task.cat));
+    cat.map_or_else(|| Who { name: "Neko".to_owned(), face: String::new() }, |c| Who { name: c.name.clone(), face: c.face.clone() })
+}
+
 /// One part as drawn in a run: a step, words on the way (`muted`, or the final answer when `last`), a request, a notice.
-fn part_el(s: &App, t: &Theme, book: &Book, r: &Run, p: &Part, streaming: bool, last: bool, muted: bool) -> Option<El> {
+#[allow(clippy::too_many_arguments)]
+fn part_el(s: &App, t: &Theme, book: &Book, r: &Run, w: &Who, p: &Part, streaming: bool, last: bool, muted: bool) -> Option<El> {
     let key = format!("part-{}", p.seq);
     match &p.body {
-        PartBody::Thinking { .. } => thought(s, t, &key, p),
-        PartBody::Tool { .. } => tool_line(s, t, &key, p, &r.workdir),
-        PartBody::Permission { permission } => book.permissions.get(permission).map(|perm| request(t, perm)),
+        PartBody::Thinking { .. } => turn::thought(s, t, &key, p),
+        PartBody::Tool { .. } => turn::step(s, t, &key, p, &r.workdir),
+        PartBody::Permission { permission } => book.permissions.get(permission).map(|perm| turn::request(t, perm, &w.name, &w.face)),
         PartBody::Agent { text: words, .. } if words.trim().is_empty() => None,
         PartBody::Agent { text: words, .. } => Some(answer(t, &key, words, streaming, last, muted)),
         PartBody::Notice { .. } => notice(t, p),
@@ -427,17 +250,38 @@ fn part_el(s: &App, t: &Theme, book: &Book, r: &Run, p: &Part, streaming: bool, 
     }
 }
 
+/// Consecutive steps hang on one rail; everything else stands on the reading edge.
+fn group_steps(t: &Theme, tagged: Vec<(bool, El)>) -> Vec<El> {
+    let mut out = Vec::new();
+    let mut steps: Vec<El> = Vec::new();
+    for (step, e) in tagged {
+        if step {
+            steps.push(e);
+            continue;
+        }
+        if !steps.is_empty() {
+            out.push(turn::rail(t, std::mem::take(&mut steps)));
+        }
+        out.push(e);
+    }
+    if !steps.is_empty() {
+        out.push(turn::rail(t, steps));
+    }
+    out
+}
+
 /// Parts in order. Words with a step after them are interim (`muted`); `last_at` is the final answer.
-fn lay_out(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], streaming_at: Option<usize>, last_at: Option<usize>) -> Vec<El> {
+fn lay_out(s: &App, t: &Theme, book: &Book, r: &Run, w: &Who, parts: &[&Part], streaming_at: Option<usize>, last_at: Option<usize>) -> Vec<El> {
     let last_step = parts.iter().rposition(|p| quiet_line(p));
-    parts
+    let tagged: Vec<(bool, El)> = parts
         .iter()
         .enumerate()
         .filter_map(|(i, p)| {
             let interim = last_step.is_some_and(|l| i < l) && Some(i) != last_at;
-            part_el(s, t, book, r, p, Some(i) == streaming_at, Some(i) == last_at, interim)
+            part_el(s, t, book, r, w, p, Some(i) == streaming_at, Some(i) == last_at, interim).map(|e| (quiet_line(p), e))
         })
-        .collect()
+        .collect();
+    group_steps(t, tagged)
 }
 
 /// What a finished run's line says: how long it worked, or how it ended.
@@ -451,48 +295,32 @@ fn worked_words(r: &Run) -> String {
     }
 }
 
-/// The live line: "Thinking…" while the agent thinks and nothing else arrives, "Working…" while it waits on something else.
-fn live_line(t: &Theme, r: &Run, thinking: bool, name: &str) -> El {
-    let words = if thinking { "Thinking…" } else { "Working…" };
-    row()
-        .key(format!("run-{}-working", r.id.0))
-        .role("status")
-        .label(if thinking { format!("{name} is thinking") } else { format!("{name} is working") })
-        .w_full()
-        .h(t.control.md)
-        .pl(t.space.at(1.5))
-        .gap(t.metrics.gap)
-        .center_y()
-        .child(row().size(t.control.icon, t.control.icon).center().child(glyph(&icons::SPARKLE, t.control.icon, t.ink_faint())))
-        .child(Shimmer::new(format!("run-{}-shimmer", r.id.0), words).build(t).a11y_hidden())
-}
-
 /// One run, as one turn of the agent's (rune-ui's rhythm: its blocks [`BLOCK_GAP`] apart). While it works: its steps and words as
 /// they come, and the live line. Once it ends: one "Worked for" fold that opens to its steps on the page's own edge (`indent(false)`),
 /// the final answer, notices, and the card if it earns one.
 fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &Task) -> El {
-    // The run's own cat (a task keeps one), else the task's.
-    let cat = s.cat(r.cat.as_deref().unwrap_or(&task.cat)).or_else(|| s.cat(&task.cat));
-    let (name, face) = cat.map_or_else(|| ("Neko".to_owned(), String::new()), |c| (c.name.clone(), c.face.clone()));
-    let turn = Message::assistant(format!("turn-{}", r.id.0), name.clone()).column(COLUMN).child(turn_head(t, r, &name, &face));
+    let w = who(s, r, task);
+    let turn = Message::assistant(format!("turn-{}", r.id.0), w.name.clone()).column(COLUMN).child(turn::turn_head(t, r, &w.name, &w.face));
     if r.status == RunStatus::Running {
         let streaming = parts.last().is_some_and(|p| matches!(&p.body, PartBody::Agent { done: false, .. }) || matches!(&p.body, PartBody::Thinking { done: false, text } if !text.trim().is_empty()));
-        let mut out = lay_out(s, t, book, r, parts, if streaming { Some(parts.len() - 1) } else { None }, None);
+        let mut out = lay_out(s, t, book, r, &w, parts, if streaming { Some(parts.len() - 1) } else { None }, None);
         let waiting = parts.iter().any(|p| matches!(&p.body, PartBody::Permission { permission } if book.permissions.get(permission).is_some_and(|x| x.state == PermissionState::Pending)));
         let tool_running = parts.iter().any(|p| matches!(&p.body, PartBody::Tool { state: ToolState::Running, .. }));
         if !streaming && !waiting && !tool_running {
-            out.push(live_line(t, r, book.thinking, &name));
+            let steps = parts.iter().filter(|p| matches!(p.body, PartBody::Tool { .. })).count();
+            out.push(turn::live_line(t, r, &w.name, &w.face, book.thinking, steps));
         }
         return out.into_iter().fold(turn, Message::child).build(t);
     }
     // The final answer is the words after the last step; notices stay in sight; everything else folds.
     let tail_from = parts.iter().rposition(|p| !matches!(p.body, PartBody::Agent { .. } | PartBody::Notice { .. })).map_or(0, |i| i + 1);
     let (work, tail) = parts.split_at(tail_from);
-    let work: Vec<&Part> = work.iter().copied().filter(|p| part_el(s, t, book, r, p, false, false, false).is_some() && !matches!(p.body, PartBody::Notice { .. })).collect();
+    let work: Vec<&Part> = work.iter().copied().filter(|p| part_el(s, t, book, r, &w, p, false, false, false).is_some() && !matches!(p.body, PartBody::Notice { .. })).collect();
     let key = format!("worked-{}", r.id.0);
     let offer = offer_of(book, r);
     let mut out = Vec::new();
-    let lead = row().size(t.control.icon, t.control.icon).center().child(glyph(&icons::CLOCK, t.control.icon, t.ink_faint()));
+    let mark = el().size(7.0, 7.0).radius(3.5).border(1.2, t.ink_faint()).a11y_hidden();
+    let lead = row().size(t.control.icon, t.control.icon).center().child(mark);
     if work.is_empty() {
         // Nothing to open: one quiet line with the time.
         let words = if offer.undone { format!("{} · undone", worked_words(r)) } else { worked_words(r) };
@@ -512,18 +340,19 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
             line = line.meta(m);
         }
         // Inside the fold every word is interim: quieter than the answer.
-        let steps = if s.is_open(&key) { vec![col().key(format!("{key}-steps")).w_full().gap(t.space.at(BLOCK_GAP)).children(lay_out_folded(s, t, book, r, &work))] } else { Vec::new() };
+        let steps = if s.is_open(&key) { vec![col().key(format!("{key}-steps")).w_full().gap(t.space.at(BLOCK_GAP)).children(lay_out_folded(s, t, book, r, &w, &work))] } else { Vec::new() };
         out.push(line.build(t, steps));
     }
     let tail_last = tail.iter().rposition(|p| matches!(&p.body, PartBody::Agent { text, .. } if !text.trim().is_empty()));
-    out.extend(lay_out(s, t, book, r, tail, None, tail_last));
-    out.extend(run_card(t, r, &offer));
+    out.extend(lay_out(s, t, book, r, &w, tail, None, tail_last));
+    out.extend(turn::receipt(s, t, r, parts, &offer, own_changes(r), &w.name, &w.face));
     out.into_iter().fold(turn, Message::child).build(t)
 }
 
 /// A finished run's folded work: steps, and words that are all interim.
-fn lay_out_folded(s: &App, t: &Theme, book: &Book, r: &Run, work: &[&Part]) -> Vec<El> {
-    work.iter().filter_map(|p| part_el(s, t, book, r, p, false, false, true)).collect()
+fn lay_out_folded(s: &App, t: &Theme, book: &Book, r: &Run, w: &Who, work: &[&Part]) -> Vec<El> {
+    let tagged = work.iter().filter_map(|p| part_el(s, t, book, r, w, p, false, false, true).map(|e| (quiet_line(p), e))).collect();
+    group_steps(t, tagged)
 }
 
 /// What the task's runs used, for the context ring: the context the newest run held against its window, and the tokens and cost
@@ -585,13 +414,13 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let empty = Book::default();
     let book = s.book().unwrap_or(&empty);
     // The task's own words first (their text keyed "task-words", as in S0).
-    let mut items = vec![person(s, t, "task-message", "task-words", &task.words)];
+    let mut items = vec![turn::person(s, t, "task-message", "task-words", &task.words)];
     if book.loaded && book.runs.is_empty() && book.parts.is_empty() && task.status == neko_protocol::TaskStatus::New {
         items.push(status_line(s, t, task));
     }
     for b in blocks(book) {
         match b {
-            Block::Person(p) => items.push(person(s, t, &format!("part-{}", p.seq), &format!("part-{}-words", p.seq), p.body.text())),
+            Block::Person(p) => items.push(turn::person(s, t, &format!("part-{}", p.seq), &format!("part-{}-words", p.seq), p.body.text())),
             Block::Loose(p) => items.extend(notice(t, p).or_else(|| rules_changed(t, p))),
             Block::Run(r, parts) => items.push(run_block(s, t, book, r, &parts, task)),
         }
@@ -622,7 +451,13 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     if let Some(ring) = context_ring(s, t, book, layer) {
         composer = composer.tool(ring);
     }
-    let composer = composer.build(t);
+    // The composer carries the cat's portrait at its left, in the margin, so the field keeps the reading edge.
+    let mut composer = col().w_full().child(composer.build(t));
+    // Where the margin has room for it (not in a narrow window, where the column fills the width).
+    let margin = s.width.unwrap_or(1200.0) - if s.sidebar_shown() { crate::view::SIDEBAR + 2.0 * crate::sidebar::INSET } else { 0.0 } - COLUMN;
+    if margin / 2.0 >= 32.0 + t.space.at(3.0) + inset {
+        composer = composer.child(crate::faces::portrait(t, s.cat_face(&task.cat), 32.0).absolute(-(32.0 + t.space.at(3.0)), t.space.at(2.0)));
+    }
     let mut foot = col().key("reply-area").w_full().max_w(COLUMN).gap(t.space.at(2.0)).child(composer);
     if let Some(line) = crate::view::slow_line(s, t) {
         foot = foot.child(line);

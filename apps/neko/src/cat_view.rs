@@ -1,14 +1,14 @@
 //! A cat's page (docs/knowledge/cats.md): its face and name, Rename and Retire, its face, purpose and default workspace, its
-//! standing rules with Save, Revert and Restore previous, and its tasks (working, needs you, recent). Plain on purpose: the
-//! redesign restyles it.
+//! standing rules with Save, Revert and Restore previous, and its tasks (working, needs you, recent). Where a cat's character lives:
+//! its portrait large on a wash of its own ground, its name at display size, the faces to choose from as portraits.
 
 use neko_protocol::{Cat, Task};
-use rune::{El, col, row, text};
+use rune::{El, col, el, row, text};
 use rune_ui_style::{ButtonVariant, Size, weight};
 
 use crate::state::App;
 use crate::ui::agent::chip;
-use crate::ui::base::{Theme, glyph};
+use crate::ui::base::{Shape, States, Theme, glyph, paint_state};
 use crate::ui::button::Button;
 use crate::ui::dropdown_menu::{DropdownMenu, DropdownMenuItem};
 use crate::ui::input::Input;
@@ -34,18 +34,38 @@ fn picker(s: &App, t: &Theme, layer: &mut Vec<El>, key: &str, name: &str, face: 
     menu_named(menu, t, layer, name, open)
 }
 
-fn face_picker(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
-    let chip_el = chip(t, "cat-face", None)
-        .role("button")
-        .label(format!("Face: {}", crate::faces::words(&c.face)))
-        .child(crate::faces::face(t, &c.face, t.control.icon_sm))
-        .child(text(crate::faces::words(&c.face)).font(t.ty.sm).color(t.ink()).a11y_hidden());
-    let mut menu = DropdownMenu::new("cat-face-menu").min_width(180.0).label("Face");
-    for (id, icon, words) in crate::faces::ALL {
-        let (cat, face) = (c.id.clone(), (*id).to_owned());
-        menu = menu.item(DropdownMenuItem::new(*words).icon(icon).checked(c.face == *id).on_select(move |s: &mut App| s.set_cat_face(&cat, &face)));
+/// The faces as a row of portraits to choose from: one Tab stop, the arrows move, Return or Space picks; the cat's own is ringed.
+fn face_picker(t: &Theme, c: &Cat) -> El {
+    let n = crate::faces::COATS.len();
+    let mut swatches = row().key("cat-face").role("radiogroup").label("Face").gap(t.space.at(2.0)).flex_wrap().focus_group();
+    for (i, coat) in crate::faces::COATS.iter().enumerate() {
+        let on = c.face == coat.id;
+        let (cat, face) = (c.id.clone(), coat.id.to_owned());
+        let size = 44.0;
+        let ring = 3.0;
+        let mut sw = col()
+            .key(format!("cat-face-{}", coat.id))
+            .role("radio")
+            .label(coat.words)
+            .checked(on)
+            .position_in_set(i + 1, n)
+            .focusable(true)
+            .focus_selected(on)
+            .press_on_return()
+            .gap(t.space.at(1.0))
+            .items_center()
+            .padding(ring)
+            .radius(crate::faces::radius(size) + ring)
+            .round_as(t);
+        sw = paint_state(sw, &t.mat.row, States::default());
+        let mut frame = el().size(size + 2.0 * ring, size + 2.0 * ring).radius(crate::faces::radius(size) + ring).padding(ring);
+        if on {
+            frame = frame.border(2.0, t.c.ring);
+        }
+        sw = sw.child(frame.child(crate::faces::portrait(t, coat.id, size))).child(text(coat.words).font(weight(t.ty.xs, if on { t.ty.semibold } else { t.ty.regular })).color(if on { t.ink() } else { t.ink_muted() }).a11y_hidden());
+        swatches = swatches.child(sw.on_press(move |s: &mut App| s.set_cat_face(&cat, &face)));
     }
-    picker(s, t, layer, "cat-face-menu", "Faces", chip_el, menu)
+    swatches
 }
 
 fn workspace_picker(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
@@ -91,19 +111,20 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
     let draft = s.cat_drafts.get(&c.id).cloned().unwrap_or_else(|| crate::state::CatDraft::of(c));
     let unsaved = draft.unsaved(c);
     let id = c.id.clone();
-    let head = row()
-        .w_full()
-        .gap(t.space.at(3.0))
+    let st = match state {
+        crate::state::CatState::Working(_) => Some(neko_protocol::TaskStatus::Working),
+        crate::state::CatState::NeedsYou => Some(neko_protocol::TaskStatus::NeedsYou),
+        crate::state::CatState::Napping => None,
+    };
+    let ink = match state {
+        crate::state::CatState::Working(_) => t.c.accent.fg,
+        crate::state::CatState::NeedsYou => t.c.warning.fg,
+        crate::state::CatState::Napping => t.ink_faint(),
+    };
+    let ground = rune_ui_style::hex(crate::faces::coat(&c.face).ground);
+    let actions = row()
+        .gap(t.space.at(2.0))
         .center_y()
-        .child(crate::faces::face(t, &c.face, 28.0))
-        .child(
-            col()
-                .grow(1.0)
-                .min_w(0.0)
-                .gap(t.space.at(0.5))
-                .child(text(c.name.clone()).key("cat-title").role("heading").level(1).font(weight(t.ty.xl, t.ty.medium)).color(t.ink()).truncate().min_w(0.0))
-                .child(text(capital(&state.words())).key("cat-state").role("status").font(t.ty.sm).color(t.ink_faint())),
-        )
         .child({
             let id = id.clone();
             Button::new("cat-rename", "Rename…").variant(ButtonVariant::Secondary).size(Size::Sm).on_press(move |s: &mut App| s.start_rename_cat(&id)).build(t)
@@ -113,14 +134,40 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
             let last = s.active_cats().len() <= 1;
             Button::new("cat-retire", "Retire…").variant(ButtonVariant::Ghost).size(Size::Sm).disabled(last || !c.is_active()).on_press(move |s: &mut App| s.ask_retire_cat(&id)).build(t)
         });
-    let facts = row()
+    let mut said = capital(&state.words());
+    if !c.is_active() {
+        said = "Retired: takes no new tasks".to_owned();
+    }
+    let who = col()
+        .grow(1.0)
+        .min_w(0.0)
+        .pt(t.space.at(6.0))
+        .gap(t.space.at(1.0))
+        .child(text(c.name.clone()).key("cat-title").role("heading").level(1).font(t.ty.xxl).color(t.ink()).truncate().min_w(0.0))
+        .child(text(said).key("cat-state").role("status").font(weight(t.ty.base, t.ty.semibold)).color(ink));
+    let who = match c.purpose.as_ref().filter(|p| !p.is_empty()) {
+        Some(p) => who.child(text(p.clone()).key("cat-purpose-line").font(weight(t.ty.lg, t.ty.regular)).color(t.ink_muted()).wrap().min_w(0.0).pt(t.space.at(1.0))),
+        None => who,
+    };
+    // The hero: the portrait large, on a wash of its own ground, the name at display size, what it is doing, and its two actions.
+    let hero = row()
+        .key("cat-hero")
+        .w_full()
+        .padding(t.space.at(5.0))
+        .gap(t.space.at(5.0))
+        .items_start()
+        .radius(t.radius.xl + t.space.at(5.0) - 8.0)
+        .round_as(t)
+        .fill(rune_ui_style::mix(t.c.page.bg, ground, if t.dark { 0.12 } else { 0.16 }))
+        .child(crate::faces::portrait_in(t, &c.face, 112.0, st, rune_ui_style::mix(t.c.page.bg, ground, if t.dark { 0.12 } else { 0.16 })))
+        .child(who)
+        .child(actions);
+    let facts = col()
         .key("cat-facts")
         .w_full()
-        .gap(t.space.at(4.0))
-        .center_y()
-        .flex_wrap()
-        .child(row().gap(t.space.at(2.0)).center_y().child(text("Face").font(t.ty.sm).color(t.ink_muted())).child(face_picker(s, t, c, layer)))
-        .child(row().gap(t.space.at(2.0)).center_y().child(text("Default workspace").font(t.ty.sm).color(t.ink_muted())).child(workspace_picker(s, t, c, layer)));
+        .gap(t.space.at(5.0))
+        .child(col().w_full().gap(t.space.at(2.5)).child(label(t, "Face")).child(face_picker(t, c)))
+        .child(row().gap(t.space.at(3.0)).center_y().child(label(t, "Default workspace")).child(workspace_picker(s, t, c, layer)));
     let purpose = {
         let id = id.clone();
         let save = id.clone();
@@ -185,7 +232,7 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
         .w_full()
         .max_w(COLUMN)
         .gap(t.space.at(6.0))
-        .child(head)
+        .child(hero)
         .child(facts)
         .child(col().w_full().gap(t.space.at(2.0)).child(label(t, "Purpose")).child(purpose))
         .child(rules)

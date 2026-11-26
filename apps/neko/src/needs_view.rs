@@ -14,7 +14,7 @@ use rune_ui_style::{ButtonVariant, Size, weight};
 
 use crate::state::{App, Daemon, need_key};
 use crate::ui::agent::{PressTx, icon_button, mono, return_presses};
-use crate::ui::base::{Shape, States, Theme, glyph, paint, paint_state};
+use crate::ui::base::{Shape, States, Theme, paint, paint_state};
 use crate::ui::button::Button;
 use crate::ui::icons;
 use crate::ui::input::Input;
@@ -122,35 +122,26 @@ fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, pos: usize, n
     let key = need_key(&item.id);
     let since = waited(item.since_ms, s.now_ms);
     let asked = what(item);
-    let (mark, ink) = match &item.need {
-        Need::Failure { .. } => (&icons::CIRCLE_X, t.c.danger.fg),
-        _ => (&icons::WARNING, t.c.warning.fg),
-    };
-    // Led by the cat: its face and what it says ("miso asks").
-    let face = s.cat(&item.cat).map_or_else(String::new, |c| c.face.clone());
+    // Led by the cat: its portrait with its dot, and what it says ("miso asks", "miso could not go on"), and how long ago.
+    let failed = matches!(item.need, Need::Failure { .. });
+    let face = s.cat_face(&item.cat).to_owned();
     let says = match &item.need {
         Need::Permission { .. } => format!("{} asks", item.cat_name),
         Need::Question { .. } => format!("{} has a question", item.cat_name),
         Need::Failure { .. } => format!("{} could not go on", item.cat_name),
     };
-    let lead = row()
+    let lead = crate::faces::portrait_in(t, &face, 44.0, Some(if failed { neko_protocol::TaskStatus::Failed } else { neko_protocol::TaskStatus::NeedsYou }), crate::view::raised_fill(t));
+    let who = row()
         .key(format!("{key}-cat"))
         .w_full()
-        .gap(t.metrics.gap)
+        .gap(t.space.at(1.5))
         .center_y()
-        .child(row().size(t.control.icon, t.control.icon).center().child(crate::faces::face(t, &face, t.control.icon)))
-        .child(text(says.clone()).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_muted()).truncate().min_w(0.0).a11y_hidden());
-    let head = row()
-        .w_full()
-        .gap(t.metrics.gap)
-        .center_y()
-        .child(row().size(t.control.icon, t.control.icon).center().child(glyph(mark, t.control.icon, ink)))
-        .child(text(item.title.clone()).key(format!("{key}-title")).font(weight(t.ty.base, t.ty.medium)).color(t.ink()).truncate().min_w(0.0).shrink())
-        .child(row().grow(1.0).min_w(t.space.at(3.0)))
-        // How long it has waited, never cut; the workspace is the group's heading over it (and in the row's description).
+        .child(text(says.clone()).font(weight(t.ty.sm, t.ty.semibold)).color(if failed { t.c.danger.fg } else { t.c.warning.fg }).truncate().min_w(0.0).shrink().a11y_hidden())
+        .child(text("·").font(t.ty.sm).color(t.ink_faint()).a11y_hidden())
         .child(text(since.clone()).key(format!("{key}-when")).font(rune_ui_style::tabular(t.ty.sm)).color(t.ink_faint()).a11y_hidden());
-    let indent = t.control.icon + t.metrics.gap;
-    let mut body = col().w_full().pl(indent).gap(t.space.at(2.5)).child(text(asked.clone()).key(format!("{key}-what")).font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0).a11y_hidden());
+    let head = text(item.title.clone()).key(format!("{key}-title")).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0);
+    let body = col().w_full().gap(t.space.at(2.5));
+    let mut body = body.child(text(asked.clone()).key(format!("{key}-what")).font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0).a11y_hidden());
     let id = item.id.clone();
     let open = {
         let id = id.clone();
@@ -167,7 +158,7 @@ fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, pos: usize, n
                     .color(t.ink())
                     .truncate_middle()
                     .min_w(0.0)
-                    .max_w(COLUMN - indent - 2.0 * t.metrics.inset),
+                    .max_w(COLUMN - 44.0 - 3.0 * t.space.at(4.0)),
             );
             let destructive = permission.destructive;
             let (a, b, c) = (id.clone(), id.clone(), id.clone());
@@ -207,7 +198,7 @@ fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, pos: usize, n
     let description = format!("{workspace}, waiting {since}");
     let default = default_of(item);
     let mine = item.id.clone();
-    let mut r = col()
+    let r = col()
         .key(key)
         .role("listitem")
         .label(label)
@@ -215,12 +206,13 @@ fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, pos: usize, n
         .position_in_set(pos, n)
         .focusable(true)
         .w_full()
-        .padding(t.metrics.inset)
-        .gap(t.space.at(2.0))
-        .radius(t.radius.xl)
+        .padding(t.space.at(4.0))
+        .radius(t.radius.xl + 4.0)
         .round_as(t);
-    r = paint_state(r, &t.mat.row, States::default()).child(lead).child(head).child(body);
-    r.on_key(move |s: &mut App, ev: &KeyEvent, tx: &mut Tx| row_keys(s, ev, tx, &mine, before.as_deref(), after.as_deref(), default))
+    let main = col().grow(1.0).min_w(0.0).gap(t.space.at(1.5)).child(who).child(head).child(body);
+    paint_state(crate::turn::settling(crate::view::raised(t, r)), &t.mat.row, States::default())
+        .child(row().w_full().gap(t.space.at(4.0)).items_start().child(lead).child(main))
+        .on_key(move |s: &mut App, ev: &KeyEvent, tx: &mut Tx| row_keys(s, ev, tx, &mine, before.as_deref(), after.as_deref(), default))
 }
 
 /// How long the empty line waits before it fades in: an answered item's exit (seconds).
@@ -256,7 +248,7 @@ pub fn needs_view(s: &App, t: &Theme) -> El {
     }
     for (ws, list) in groups {
         let name = s.workspace_of(&ws).map_or_else(|| if ws == neko_protocol::GENERAL { "General".to_owned() } else { "Workspace".to_owned() }, |w| w.name.clone());
-        let mut rows = col().key(format!("needs-list-{ws}")).role("list").label(format!("Waiting in {name}")).w_full().gap(t.space.at(2.0));
+        let mut rows = col().key(format!("needs-list-{ws}")).role("list").label(format!("Waiting in {name}")).w_full().gap(t.space.at(3.0));
         let m = list.len();
         for (j, (i, item)) in list.into_iter().enumerate() {
             let before = i.checked_sub(1).map(|b| keys[b].clone());

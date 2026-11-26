@@ -4,27 +4,23 @@
 //! the window. The lights' room comes from Rune (`Cx::titlebar_inset`, zero in full screen). Everything drawn here comes from
 //! rune-ui's copies (`crate::ui`) and the theme file; the only colours are the theme's.
 
-use rune::{Cx, El, col, el, row, text};
+use rune::{Color, Cx, El, Shadow, col, el, row, text};
 use rune_ui_style::weight;
 
 use std::rc::Rc;
 
-use neko_protocol::{TaskStatus, Workspace};
-use rune::{Key, KeyEvent};
+use neko_protocol::TaskStatus;
 use rune_ui_style::ButtonVariant;
 
 use crate::icons;
-use crate::state::{App, Confirm, Daemon, Effect, Pick, SECTION_ROWS};
-use crate::ui::agent::{PressTx, Status, chip, icon_button, mark};
+use crate::state::{App, Confirm, Effect};
+use crate::ui::agent::{PressTx, Status, icon_button};
 use crate::ui::alert_dialog::AlertDialog;
 use crate::ui::base::{Shape, Size, States, Theme, glyph, paint, paint_state};
 use crate::ui::button::Button;
 use crate::ui::dialog::Dialog;
 use crate::ui::dropdown_menu::{DropdownMenu, DropdownMenuItem};
 use crate::ui::input::Input;
-use crate::ui::kbd::Kbd;
-use crate::ui::prompt_input::{Phase, PromptInput};
-use crate::ui::sidebar::SidebarItem;
 use crate::ui::tooltip::Tooltip;
 
 /// The header band's height, shared by the sidebar and the content.
@@ -41,12 +37,84 @@ thread_local! {
     pub static LOOK: std::cell::Cell<(bool, bool)> = const { std::cell::Cell::new((false, false)) };
 }
 
-/// The theme file (`themes/neko.json`): rune-ui's default with Neko's knobs.
+/// The theme file (`themes/neko.json`): House's warm paper on a warm window ground, deep warm charcoal in dark, and one identity
+/// colour (a deep teal) for focus and work.
 pub const THEME: &str = include_str!("../themes/neko.json");
 
-/// The theme in the system's appearance, with the person's Reduce Motion.
+/// House's type scale, step by step: (size, line height, weight, tracking). The theme file has no knob for each step yet (an
+/// upstream ask, docs/knowledge/design.md), so the view sets them here.
+pub const TYPE_SCALE: [(&str, f32, f32, f32, f32); 7] = [
+    ("xs", 12.0, 16.0, 400.0, 0.0),
+    ("sm", 13.0, 18.0, 400.0, 0.0),
+    ("base", 15.0, 21.0, 400.0, 0.0),
+    ("md", 15.0, 23.0, 400.0, 0.0),
+    ("lg", 18.0, 24.0, 600.0, -0.2),
+    ("xl", 24.0, 30.0, 600.0, -0.4),
+    ("xxl", 40.0, 46.0, 700.0, -1.2),
+];
+
+/// The theme in the system's appearance, with the person's Reduce Motion and House's type scale.
 pub fn theme(dark: bool, reduced_motion: bool) -> Theme {
-    Theme::from_json(THEME, dark).expect("themes/neko.json is valid (tested)").with_reduced_motion(reduced_motion)
+    let mut t = Theme::from_json(THEME, dark).expect("the theme file is valid (tested)").with_reduced_motion(reduced_motion);
+    let base = t.ty.base;
+    for (step, size, line_height, w, tracking) in TYPE_SCALE {
+        let style = rune::TextStyle { size, line_height, weight: w, ..base }.tracking(tracking);
+        match step {
+            "xs" => t.ty.xs = style,
+            "sm" => t.ty.sm = style,
+            "base" => t.ty.base = style,
+            "md" => t.ty.md = style,
+            "lg" => t.ty.lg = style,
+            "xl" => t.ty.xl = style,
+            _ => t.ty.xxl = style,
+        }
+    }
+    t
+}
+
+/// The fill of a raised surface: the floating surface in light; in dark, a small step above the page, so the light from above (its
+/// top edge and a faint gradient, [`raised`]) does the lifting rather than a lighter fill.
+pub fn raised_fill(t: &Theme) -> Color {
+    if t.dark { rune_ui_style::mix(t.c.page.bg, Color::WHITE, 0.05) } else { t.c.floating.bg }
+}
+
+/// A raised surface (a busy cat's tile, the open sidebar row, a receipt, a card that asks): the theme's raised material, lit from
+/// above in dark.
+pub fn raised(t: &Theme, e: El) -> El {
+    let e = paint(e, &t.mat.raised.base).fill(raised_fill(t));
+    if t.dark {
+        e.gradient(Color::WHITE.alpha(0.035), Color::WHITE.alpha(0.0)).box_shadow(Shadow { y: 1.0, inset: true, color: Color::WHITE.alpha(0.09), ..Shadow::default() })
+    } else {
+        e
+    }
+}
+
+/// A well: a surface pressed into the page (the person's words, a receipt's files, Home's lists).
+pub fn well(t: &Theme, e: El) -> El {
+    paint(e, &t.mat.well.base)
+}
+
+/// How long ago, in a few words ("12 min", "3 h", "2 days").
+pub fn since(s: &App, ms: i64) -> String {
+    crate::needs_view::waited(ms, s.now_ms)
+}
+
+/// The colour a task's state is drawn in, or none for a state that needs no colour (done, new, stopped). Work is the identity
+/// colour; waiting on the person amber; a failure red.
+pub fn state_ink(t: &Theme, st: TaskStatus) -> Option<Color> {
+    match st {
+        TaskStatus::Working => Some(t.c.accent.fg),
+        TaskStatus::NeedsYou | TaskStatus::Asked => Some(t.c.warning.fg),
+        TaskStatus::Failed => Some(t.c.danger.fg),
+        _ => None,
+    }
+}
+
+/// The tasks that are live: working first, then those that need the person, newest first inside each.
+pub fn live_tasks(s: &App) -> Vec<&neko_protocol::Task> {
+    let mut v: Vec<&neko_protocol::Task> = s.tasks.iter().filter(|t| matches!(t.status, TaskStatus::Working | TaskStatus::NeedsYou | TaskStatus::Asked)).collect();
+    v.sort_by_key(|t| (t.status != TaskStatus::Working, std::cmp::Reverse(t.created_ms)));
+    v
 }
 
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
@@ -62,10 +130,11 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     }
     let shown = s.sidebar_shown();
     let mut layer = Vec::new();
-    let mut root = row().key(ROOT).w_full().h_full().fill(t.c.page.bg).color(t.ink());
+    // A warm window ground, the sidebar an inset panel on it, the content on paper.
+    let mut root = row().key(ROOT).w_full().h_full().fill(t.c.surface.bg).color(t.ink());
     if shown {
         // Raised: while it comes in it paints above the content, never under it.
-        root = root.child(sidebar(s, &t, lights, &mut layer).raise()).child(el().w(1.0).h_full().fill(t.c.line));
+        root = root.child(crate::sidebar::panel(&t, crate::sidebar::sidebar(s, &t, lights, &mut layer)).raise());
     }
     let page = if s.settings_open {
         crate::settings_view::settings_view(s, &t)
@@ -76,10 +145,10 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     } else {
         match s.open_task() {
             Some(_) => crate::task_view::task_view(s, &t, &mut layer),
-            None => home(s, &t, &mut layer),
+            None => crate::home_view::home(s, &t, &mut layer),
         }
     };
-    let content = col().key("content").role("main").label(main_label(s)).grow(1.0).min_w(0.0).h_full().child(content_band(s, &t, if shown { 0.0 } else { lights }, &mut layer)).child(page);
+    let content = col().key("content").role("main").label(main_label(s)).grow(1.0).min_w(0.0).h_full().fill(t.c.page.bg).child(content_band(s, &t, if shown { 0.0 } else { lights }, &mut layer)).child(page);
     dialogs(s, &t, &mut layer);
     crate::ui::base::overlay_root(root.child(content), layer)
 }
@@ -98,275 +167,14 @@ fn main_label(s: &App) -> String {
 }
 
 /// The room the traffic lights take at the band's left, and a little air after them.
-fn lights_room(lights: f32) -> El {
+pub fn lights_room(lights: f32) -> El {
     el().w(if lights > 0.0 { lights + 8.0 } else { 12.0 }).h_full()
 }
 
-fn toggle_button(t: &Theme, shown: bool) -> El {
+pub fn toggle_button(t: &Theme, shown: bool) -> El {
     let (key, words) = if shown { ("sidebar-hide", "Hide sidebar") } else { ("sidebar-show", "Show sidebar") };
     let b = Button::new(key, words).variant(ButtonVariant::Ghost).size(Size::Sm).icon_only(&icons::SIDEBAR).on_press(|s: &mut App| s.toggle_sidebar()).build(t);
     Tooltip::new(words).keys("⌃⌘S").wrap(b)
-}
-
-fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
-    let band = row().key("sidebar-band").w_full().h(BAND).center_y().pr(8.0).window_drag().child(lights_room(lights)).child(row().grow(1.0).h_full()).child(toggle_button(t, true));
-    // A sidebar row that acts: the same alignment as Home and the tasks, as Mail's and Notes' sidebars have.
-    let new = SidebarItem::new("new-task", "New task").icon(&icons::COMPOSE).on_press(|s: &mut App| s.new_task_here()).build(t).role("button");
-    let new = Tooltip::new("New task").keys("⌘N").wrap(new);
-    let home = SidebarItem::new("home", "Home").icon(&crate::ui::icons::HOME).selected(s.open.is_none() && !s.settings_open && !s.needs_open && s.open_cat.is_none()).on_press(|s: &mut App| s.go_home()).build(t);
-    let home = Tooltip::new("Home").keys("⌘1").wrap(home);
-    // Everything waiting for the person, with how many (the same count as the Dock's).
-    let n = s.visible_needs().len();
-    let mut needs = SidebarItem::new("needs-you", "Needs you").icon(&crate::ui::icons::INBOX).selected(s.needs_open).on_press(|s: &mut App| s.open_needs());
-    if n > 0 {
-        needs = needs.count(n).description(if n == 1 { "1 waiting".to_owned() } else { format!("{n} waiting") });
-    }
-    let needs = Tooltip::new("Needs you").keys("⌘2").wrap(needs.build(t));
-    let mut body = col().w_full().px(t.space.at(2.0)).gap(t.space.at(1.0)).child(new).child(home).child(needs);
-    // Every section and row is one list for the keys: Up and Down move through sections and rows, a typed name goes to it, Tab
-    // stops once (on the open task, else the first section). A section's own buttons are Tab stops of their own.
-    let mut sections = col().key("workspaces").role("list").label("Workspaces").w_full().gap(t.space.at(1.0)).pt(t.space.at(2.0)).focus_group();
-    for w in s.sections() {
-        sections = sections.child(section(s, t, &w, layer));
-    }
-    body = body.child(sections);
-    let add: PressTx<App> = Rc::new(|s: &mut App, tx: &mut rune::Tx| crate::pick_folder(s, Pick::Add { select: false }, tx));
-    let add = SidebarItem::<App>::new("add-workspace", "Add workspace…").icon(&icons::FOLDER_PLUS).build(t).role("button").on_press_tx(move |s: &mut App, tx: &mut rune::Tx| add(s, tx));
-    body = body.child(add).child(cats_section(s, t));
-    let list = col().key("sidebar-scroll").w_full().grow(1.0).min_h(0.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(body.pb(t.space.at(4.0)));
-    let mut column = paint(col().key("sidebar").role("navigation").label("Sidebar").w(SIDEBAR).h_full(), &t.mat.slab.base).child(band).child(list);
-    // No money at the foot: what runs cost is in the task's context ring, for whoever opens it.
-    if let Some(line) = connection_line(s, t) {
-        column = column.child(row().w_full().px(t.space.at(4.0)).py(t.space.at(3.0)).child(line));
-    }
-    column
-}
-
-/// The sidebar's Cats: each active cat with its face and what it is doing (napping, working on N, needs you), its page on a press;
-/// then New cat….
-fn cats_section(s: &App, t: &Theme) -> El {
-    let head = row().h(t.control.sm).pl(t.metrics.gap).center_y().child(text("Cats").key("cats-heading").role("heading").level(2).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_faint()));
-    let cats = s.active_cats();
-    let n = cats.len();
-    let mut list = col().key("cats").role("listbox").label("Cats").w_full().gap(1.0).focus_group();
-    for (i, c) in cats.into_iter().enumerate() {
-        let id = c.id.clone();
-        let state = s.cat_state(&c.id);
-        let mut item = SidebarItem::new(format!("cat-{}", c.id), c.name.clone())
-            .lead(crate::faces::face(t, &c.face, t.control.icon))
-            .list_row(i + 1, n)
-            .description(state.words())
-            .selected(s.open_cat.as_deref() == Some(c.id.as_str()))
-            .on_press(move |s: &mut App| s.open_cat_page(&id));
-        if let crate::state::CatState::Working(k) = state {
-            item = item.count(k);
-        }
-        let mut built = item.build(t);
-        if state == crate::state::CatState::NeedsYou {
-            built = built.child(glyph(&crate::ui::icons::WARNING, t.control.icon_sm, t.c.warning.fg));
-        }
-        list = list.child(built);
-    }
-    let new = SidebarItem::new("new-cat", "New cat…").icon(&crate::ui::icons::PLUS).on_press(|s: &mut App| s.start_new_cat()).build(t).role("button");
-    col().key("cats-section").role("group").label("Cats").w_full().gap(1.0).pt(t.space.at(3.0)).child(head).child(list).child(new)
-}
-
-/// What a section's header says about its workspace, after its name.
-fn section_state(s: &App, w: &Workspace) -> String {
-    let busy = s.needs_in(&w.id);
-    let mut parts = Vec::new();
-    if !w.is_active() {
-        parts.push("Earlier, removed workspace".to_owned());
-    } else if w.missing {
-        parts.push("Folder not found".to_owned());
-    }
-    if busy > 0 {
-        parts.push(format!("{busy} need{} you", if busy == 1 { "s" } else { "" }));
-    }
-    parts.join(", ")
-}
-
-/// One workspace in the sidebar: its header (fold, name, a quiet count; New task and its menu on hover or focus), what is wrong
-/// with it, and its tasks, newest first, with "Show more" after eight.
-fn section(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
-    let id = w.id.clone();
-    let folded = s.folded.contains(&w.id);
-    let busy = s.needs_in(&w.id);
-    let key = format!("ws-{}", w.id);
-    let chevron = glyph(if folded { &crate::ui::icons::CHEVRON_RIGHT } else { &crate::ui::icons::CHEVRON_DOWN }, t.control.icon_sm, t.ink_faint());
-    let mut head = row()
-        .key(key.clone())
-        .role("button")
-        .label(w.name.clone())
-        .expanded(!folded)
-        .focusable(true)
-        .w_full()
-        .h(t.metrics.row)
-        .pl(t.metrics.gap)
-        .pr(t.space.at(1.0))
-        .gap(t.space.at(1.5))
-        .center_y()
-        .radius(t.radius.md)
-        .round_as(t)
-        .hover_group();
-    let said = section_state(s, w);
-    if !said.is_empty() {
-        head = head.description(said);
-    }
-    head = paint_state(head, &t.mat.row, States::default());
-    head = head.child(chevron).child(text(w.name.clone()).font(weight(t.ty.sm, t.ty.medium)).color(if w.is_active() { t.ink_muted() } else { t.ink_faint() }).grow(1.0).truncate().min_w(0.0).a11y_hidden());
-    if w.is_active() {
-        let here = id.clone();
-        let new: PressTx<App> = Rc::new(move |s: &mut App, _: &mut rune::Tx| s.new_task_in(&here));
-        let new = icon_button(t, &format!("{key}-new"), &format!("New task in {}", w.name), &crate::ui::icons::PLUS, None, w.missing, Some(new)).group_opacity(0.0, 1.0);
-        head = head.child(new);
-        if w.is_general() {
-            // Room where the others have their menu, so every count lines up at the right.
-            head = head.child(el().w(t.control.sm).h(t.control.sm));
-        } else {
-            head = head.child(workspace_menu(s, t, w, layer));
-        }
-    }
-    // The quiet count sits last, at the same place in every section.
-    head = head.child(
-        row()
-            .w(t.space.at(5.0))
-            .justify_end()
-            .child(text(if busy > 0 { busy.to_string() } else { String::new() }).key(format!("{key}-count")).font(rune_ui_style::tabular(t.ty.sm)).color(t.ink_faint()).a11y_hidden()),
-    );
-    let toggle = id.clone();
-    let keys = id.clone();
-    head = head.on_press(move |s: &mut App| s.toggle_fold(&toggle)).on_key(move |s: &mut App, ev: &KeyEvent, _| section_key(s, &keys, ev));
-    let mut sec = col().key(format!("{key}-section")).role("group").label(w.name.clone()).w_full().gap(1.0).child(head);
-    if w.is_active() && w.missing {
-        let here = id.clone();
-        let locate: PressTx<App> = Rc::new(move |s: &mut App, tx: &mut rune::Tx| crate::pick_folder(s, Pick::Locate(here.clone()), tx));
-        let gone = id.clone();
-        let indent = t.metrics.gap + t.control.icon_sm + t.space.at(1.5);
-        let line = col()
-            .key(format!("{key}-missing"))
-            .w_full()
-            .pl(indent - t.space.at(2.0))
-            .gap(0.0)
-            .child(row().pl(t.space.at(2.0)).h(t.control.sm).center_y().child(text("Folder not found").role("status").font(t.ty.sm).color(t.ink_faint())))
-            .child(
-                row()
-                    .gap(t.space.at(1.0))
-                    .center_y()
-                    .child(Button::<App>::new(format!("{key}-locate"), "Locate…").variant(ButtonVariant::Ghost).size(Size::Sm).build(t).on_press_tx(move |s: &mut App, tx: &mut rune::Tx| locate(s, tx)))
-                    .child(Button::new(format!("{key}-remove"), "Remove").variant(ButtonVariant::Ghost).size(Size::Sm).on_press(move |s: &mut App| s.ask_remove_workspace(&gone)).build(t)),
-            );
-        sec = sec.child(line);
-    }
-    if !w.is_active() {
-        let indent = t.metrics.gap + t.control.icon_sm + t.space.at(1.5);
-        sec = sec.child(row().key(format!("{key}-removed")).w_full().pl(indent).h(t.control.sm).center_y().child(text("Earlier, removed workspace").font(t.ty.sm).color(t.ink_faint()).truncate().min_w(0.0)));
-    }
-    if folded {
-        return sec;
-    }
-    let tasks = s.tasks_in(&w.id);
-    if tasks.is_empty() {
-        // Before the daemon's list arrives: a quiet placeholder, not "No tasks yet".
-        let waiting = s.daemon != Daemon::Absent && !s.tasks_loaded;
-        let none = text(if waiting { "Loading…" } else { "No tasks yet" }).key(format!("{key}-none")).font(t.ty.sm).color(t.ink_faint());
-        return sec.child(row().h(t.metrics.row).pl(t.metrics.gap + t.control.icon_sm + t.space.at(1.5)).center_y().child(none));
-    }
-    let all = s.show_all.contains(&w.id) || tasks.len() <= SECTION_ROWS + 1;
-    let shown: Vec<&&neko_protocol::Task> = if all { tasks.iter().collect() } else { tasks.iter().take(SECTION_ROWS).collect() };
-    let mut list = col().key(format!("{key}-list")).role("listbox").label(format!("Tasks in {}", w.name)).w_full().gap(1.0);
-    let n = shown.len();
-    for (i, task) in shown.into_iter().enumerate() {
-        let open = s.open.as_ref() == Some(&task.id);
-        let tid = task.id.clone();
-        let (status, word) = status_mark(task.status);
-        let cat = s.cat(&task.cat);
-        let said = cat.map_or_else(|| word.to_owned(), |c| format!("{}, {}", c.name, word.to_lowercase()));
-        // The open task is selected, and the list's Tab stop; Return opens a row. Its cat's face sits at the row's end.
-        let mut row_el = SidebarItem::new(format!("task-{}", task.id.0), task.title.clone())
-            .lead(mark(t, status, t.control.icon))
-            .list_row(i + 1, n)
-            .description(said)
-            .selected(open)
-            .on_press(move |s: &mut App| s.open_task_id(&tid))
-            .build(t);
-        if let Some(c) = cat {
-            row_el = row_el.child(crate::faces::face(t, &c.face, t.control.icon_sm));
-        }
-        list = list.child(row_el);
-    }
-    sec = sec.child(list);
-    if tasks.len() > SECTION_ROWS + 1 {
-        let more = id.clone();
-        let words = if all { "Show fewer".to_owned() } else { format!("Show {} more", tasks.len() - SECTION_ROWS) };
-        let toggle_more = SidebarItem::new(format!("{key}-more"), words)
-            .icon(if all { &crate::ui::icons::CHEVRON_UP } else { &crate::ui::icons::CHEVRON_DOWN })
-            .on_press(move |s: &mut App| {
-                if !s.show_all.remove(&more) {
-                    s.show_all.insert(more.clone());
-                }
-            })
-            .build(t)
-            .role("button");
-        sec = sec.child(toggle_more);
-    }
-    sec
-}
-
-/// Keys on a section's header: Left folds it, Right opens it, ⌥⌘↑ and ⌥⌘↓ move it.
-fn section_key(s: &mut App, id: &str, ev: &KeyEvent) -> bool {
-    let m = ev.mods;
-    match ev.key {
-        Key::Up | Key::Down if m.alt && m.cmd && !m.shift && !m.ctrl => {
-            s.move_workspace(id, if ev.key == Key::Up { -1 } else { 1 });
-            true
-        }
-        Key::Left if !(m.alt || m.cmd || m.shift || m.ctrl) && !s.folded.contains(id) => {
-            s.set_folded(id, true);
-            true
-        }
-        Key::Right if !(m.alt || m.cmd || m.shift || m.ctrl) && s.folded.contains(id) => {
-            s.set_folded(id, false);
-            true
-        }
-        _ => false,
-    }
-}
-
-/// A workspace's menu: Rename, Reveal in Finder, Locate (when its folder is not found), Move up and down, Remove.
-fn workspace_menu(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
-    let key = format!("ws-menu-{}", w.id);
-    let open = s.menu_open.as_deref() == Some(key.as_str());
-    let k = key.clone();
-    let face: PressTx<App> = Rc::new(move |s: &mut App, _: &mut rune::Tx| s.menu_open = if s.menu_open.as_deref() == Some(k.as_str()) { None } else { Some(k.clone()) });
-    let trigger = icon_button(t, &format!("ws-{}-menu", w.id), &format!("{} options", w.name), &crate::ui::icons::MORE, None, false, Some(face)).expanded(open);
-    // Shown on hover or focus, and while its menu is open.
-    let trigger = if open { trigger } else { trigger.group_opacity(0.0, 1.0) };
-    let (a, b, c, d, e, f) = (w.id.clone(), w.id.clone(), w.id.clone(), w.id.clone(), w.id.clone(), w.id.clone());
-    let folder = w.folder.clone().unwrap_or_default();
-    let mut menu = DropdownMenu::new(key)
-        .trigger(trigger)
-        .open(open)
-        .min_width(200.0)
-        .on_close(|s: &mut App| s.menu_open = None)
-        .item(DropdownMenuItem::new("Rename…").on_select(move |s: &mut App| s.start_rename(&a)))
-        .item(DropdownMenuItem::new("Reveal in Finder").disabled(w.missing).on_select(move |s: &mut App| {
-            s.menu_open = None;
-            s.effects.push(Effect::Reveal(folder.clone()));
-        }));
-    if w.missing {
-        menu = menu.item(DropdownMenuItem::new("Locate…").on_select(move |s: &mut App| {
-            s.menu_open = None;
-            s.effects.push(Effect::PickFolder(Pick::Locate(b.clone())));
-        }));
-    }
-    menu = menu
-        .separator()
-        .item(DropdownMenuItem::new("Move up").disabled(!s.can_move(&w.id, -1)).on_select(move |s: &mut App| s.move_workspace(&c, -1)))
-        .item(DropdownMenuItem::new("Move down").disabled(!s.can_move(&w.id, 1)).on_select(move |s: &mut App| s.move_workspace(&d, 1)))
-        .danger_item(DropdownMenuItem::new("Remove…").on_select(move |s: &mut App| s.ask_remove_workspace(&e)));
-    let _ = f;
-    menu_named(menu, t, layer, &format!("{} options", w.name), open)
 }
 
 /// The mark a task's row shows for its state (rune-ui's step marks: a spinner while it works, the warning while it needs you), and
@@ -381,17 +189,6 @@ pub fn status_mark(s: TaskStatus) -> (Status, &'static str) {
         TaskStatus::Stopped => (Status::Skipped, "Stopped"),
         TaskStatus::Interrupted => (Status::Skipped, "Interrupted"),
     }
-}
-
-/// A quiet line at the sidebar's foot while the daemon is not there.
-fn connection_line(s: &App, t: &Theme) -> Option<El> {
-    let words = match &s.daemon {
-        _ if s.daemon_slow() => "Neko has not started",
-        Daemon::Starting => "Starting Neko…",
-        Daemon::Lost(_) => "Reconnecting to Neko…",
-        Daemon::Connected | Daemon::Absent => return None,
-    };
-    Some(text(words).key("connection").role("status").font(t.ty.sm).color(t.ink_faint()))
 }
 
 /// The calm line when the daemon has not answered for a few seconds, with Retry (under the composer, Home's or the task's).
@@ -416,54 +213,50 @@ pub const NARROW_BAND: f32 = 700.0;
 /// The least room the band's title keeps before anything else does.
 pub const TITLE_MIN: f32 = 140.0;
 
-/// The content's band: the sidebar's button when it is folded, and the open task's title.
+/// The content's band: the sidebar's button when it is folded; in a task, its cat (a press opens the cat's page), its title, the
+/// run counter, its folder and branch with Reveal in Finder, and its menu.
 fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
-    let mut band = row().key("content-band").w_full().h(BAND).center_y().px(12.0).gap(t.space.at(2.0)).window_drag();
+    let mut band = row().key("content-band").w_full().h(BAND).center_y().px(12.0).gap(t.space.at(2.5)).window_drag();
     if !s.sidebar_shown() {
         band = band.child(lights_room(lights).w(if lights > 0.0 { (lights - 4.0).max(0.0) } else { 0.0 })).child(toggle_button(t, false));
     }
-    if let Some(task) = s.open_task().filter(|_| !s.settings_open) {
-        // The title always wins the room: in a narrow content area the folder line goes first and the workspace's name shortens.
-        let room = s.width.map_or(f32::MAX, |w| w - if s.sidebar_shown() { SIDEBAR + 1.0 } else { 0.0 });
-        let narrow = room < NARROW_BAND;
-        band = band.child(text(task.title.clone()).key("band-title").role("heading").level(1).font(weight(t.ty.base, t.ty.medium)).color(t.ink()).truncate().min_w(TITLE_MIN).shrink());
-        band = band.child(row().grow(1.0).min_w(t.space.at(4.0)).h_full());
-        // Who does it: the cat's face and name; a press opens its page.
-        if let Some(c) = s.cat(&task.cat) {
-            let id = c.id.clone();
-            band = band.child(
-                chip(t, "task-cat", None)
-                    .role("button")
-                    .label(format!("Cat: {}", c.name))
-                    .focusable(true)
-                    .child(crate::faces::face(t, &c.face, t.control.icon_sm))
-                    .child(text(c.name.clone()).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_muted()).truncate().max_w(120.0).min_w(0.0).a11y_hidden())
-                    .on_press(move |s: &mut App| s.open_cat_page(&id)),
-            );
-        }
-        if let Some(w) = s.workspace_of(&task.workspace) {
-            band = band.child(
-                text(w.name.clone())
-                    .key("task-workspace")
-                    .role("note")
-                    .label(format!("Workspace: {}", w.name))
-                    .font(weight(t.ty.sm, t.ty.medium))
-                    .color(t.ink_muted())
-                    .truncate()
-                    // With room, the folder path (cut in its middle) gives way before the workspace's name does.
-                    .min_w(if narrow { 0.0 } else { 72.0 })
-                    .shrink()
-                    .max_w(if narrow { 110.0 } else { 180.0 }),
-            );
-        }
-        if !narrow
-            && let Some(place) = task_folder(s, t)
-        {
-            band = band.child(place);
-        }
-        band = band.child(task_menu(s, t, task, layer));
+    let Some(task) = s.open_task().filter(|_| !s.settings_open && !s.needs_open && s.page_cat().is_none()) else { return band };
+    if let Some(c) = s.cat(&task.cat) {
+        let id = c.id.clone();
+        let st = (task.status == TaskStatus::Working).then_some(TaskStatus::Working);
+        let face = row().key("task-cat").role("button").label(format!("Cat: {}", c.name)).help(format!("Open {}'s page", c.name)).focusable(true).padding(2.0).radius(t.radius.md).round_as(t);
+        band = band.child(paint_state(face, &t.mat.row, States::default()).child(crate::faces::portrait_in(t, &c.face, 24.0, st, t.c.page.bg)).on_press(move |s: &mut App| s.open_cat_page(&id)));
     }
-    band
+    // The title always wins the room: in a narrow content area the folder line goes first and the workspace's name shortens.
+    let room = s.width.map_or(f32::MAX, |w| w - if s.sidebar_shown() { SIDEBAR + 2.0 * crate::sidebar::INSET + 1.0 } else { 0.0 });
+    let narrow = room < NARROW_BAND;
+    band = band.child(text(task.title.clone()).key("band-title").role("heading").level(1).font(weight(t.ty.lg, t.ty.semibold)).color(t.ink()).truncate().min_w(TITLE_MIN).shrink());
+    band = band.child(row().grow(1.0).min_w(t.space.at(4.0)).h_full());
+    let wide = s.width.unwrap_or(1200.0) >= 1000.0;
+    if let Some(c) = crate::task_view::run_counter(s, t).filter(|_| wide) {
+        band = band.child(c);
+    }
+    if let Some(w) = s.workspace_of(&task.workspace) {
+        band = band.child(
+            text(w.name.clone())
+                .key("task-workspace")
+                .role("note")
+                .label(format!("Workspace: {}", w.name))
+                .font(weight(t.ty.sm, t.ty.medium))
+                .color(t.ink_muted())
+                .truncate()
+                // With room, the folder path (cut in its middle) gives way before the workspace's name does.
+                .min_w(if narrow { 0.0 } else { 72.0 })
+                .shrink()
+                .max_w(if narrow { 110.0 } else { 180.0 }),
+        );
+    }
+    if !narrow
+        && let Some(place) = task_folder(s, t)
+    {
+        band = band.child(place);
+    }
+    band.child(task_menu(s, t, task, layer))
 }
 
 /// The task's menu at the band's right: Remove task…, off while its agent works.
@@ -589,7 +382,17 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
             Some(n) => (format!("Rename {n}"), "Its tasks keep it; the new name shows everywhere, and reaches the agent from the next run.".to_owned(), "cat-rename".to_owned()),
             None => ("New cat".to_owned(), "A name of up to 40 characters, not another cat's. You can give it a face, a purpose and standing rules on its page.".to_owned(), "new-cat".to_owned()),
         };
-        Dialog::new("cat-name", title).description(words).child(field).footer(vec![cancel, save]).width(400.0).open(true).return_focus(back).on_close(|s: &mut App| s.naming = None).build(t, layer);
+        let mut dialog = Dialog::new("cat-name", title).description(words);
+        if renaming.is_none() {
+            // The face a new cat gets: the first no active cat has (docs/knowledge/cats.md).
+            let taken: Vec<&str> = s.active_cats().iter().map(|c| c.face.as_str()).collect();
+            let face = neko_protocol::cats::FACES.iter().find(|f| !taken.contains(f)).copied().unwrap_or(neko_protocol::cats::FACES[0]);
+            let said = format!("It gets the {} face. You can change it on its page.", crate::faces::words(face));
+            dialog = dialog.child(
+                row().key("cat-name-face").role("note").label(said.clone()).w_full().gap(t.space.at(3.0)).center_y().child(crate::faces::portrait(t, face, 40.0)).child(text(said).font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0).shrink().a11y_hidden()),
+            );
+        }
+        dialog.child(field).footer(vec![cancel, save]).width(400.0).open(true).return_focus(back).on_close(|s: &mut App| s.naming = None).build(t, layer);
     }
     if let Some(r) = &s.refusal {
         let mut buttons = Vec::new();
@@ -647,97 +450,6 @@ fn task_folder(s: &App, t: &Theme) -> Option<El> {
         let _ = tx.reveal_path(&folder);
     });
     Some(place.child(icon_button(t, "task-folder-reveal", "Reveal in Finder", &crate::ui::icons::FOLDER_OPEN, None, false, Some(reveal))))
-}
-
-fn home(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
-    let greeting = col()
-        .w_full()
-        .gap(t.space.at(2.0))
-        .items_center()
-        .child(text(s.greeting()).key("greeting").role("heading").level(1).font(weight(t.ty.xxl, t.ty.medium)).color(t.ink()))
-        .child(text("What should Neko do?").key("greeting-sub").font(t.ty.md).color(t.ink_muted()));
-    let composer = PromptInput::new("composer", &s.draft, |s: &mut App| &mut s.draft)
-        .placeholder("Describe a task")
-        .spellcheck(true)
-        .tool(workspace_picker(s, t, layer))
-        .tool(cat_picker(s, t, layer))
-        .phase(if s.creating.is_some() { Phase::Disabled } else { Phase::Ready })
-        .on_submit(|s: &mut App| s.submit())
-        .build(t);
-    let hint = row()
-        .key("composer-hint")
-        .gap(t.space.at(1.5))
-        .center_y()
-        .child(Kbd::new("hint-return", "Return").build(t))
-        .child(text("to add it").font(t.ty.sm).color(t.ink_faint()))
-        .child(el().w(t.space.at(2.0)))
-        .child(Kbd::new("hint-newline", "Shift Return").build(t))
-        .child(text("for a new line").font(t.ty.sm).color(t.ink_faint()));
-    let mut stack = col().key("home").w_full().max_w(COLUMN).gap(t.space.at(6.0)).items_center().child(greeting).child(col().w_full().gap(t.space.at(3.0)).items_center().child(composer).child(hint));
-    if let Some(line) = slow_line(s, t) {
-        stack = stack.child(line);
-    }
-    if let Some(n) = &s.notice {
-        stack = stack.child(text(n.clone()).key("notice").role("status").font(t.ty.sm).color(t.ink_muted()).wrap().align(rune::Align::Center));
-    }
-    // A little above the middle, where the eye lands.
-    col().w_full().grow(1.0).min_h(0.0).items_center().justify_center().px(t.space.at(8.0)).pb(BAND * 1.5).child(stack)
-}
-
-/// Where a new task goes: a pop-up menu in the composer's footer (as a Mac pop-up button is: the current choice checked), with
-/// General, the workspaces and "Add folder…". (rune-ui's Select is not used: its options do not say their place in the list.)
-fn workspace_picker(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
-    let options = s.picker_options();
-    let current = options.iter().find(|o| o.1.as_deref() == Some(s.workspace.as_str())).map_or_else(|| "General".to_owned(), |o| o.0.clone());
-    let name = s.chosen().map_or_else(|| "General".to_owned(), |w| w.name.clone());
-    let help = match s.chosen().and_then(|w| w.folder.clone()) {
-        Some(f) => crate::task_view::show_path(&f, "", s.home.as_deref()),
-        None => "General: each task gets a scratch folder of its own".to_owned(),
-    };
-    let missing = s.chosen().is_some_and(|w| w.missing);
-    let face = chip(t, "workspace-picker", None)
-        .role("button")
-        .label(format!("Workspace: {name}"))
-        .help(help)
-        .expanded(s.picker_open)
-        .focusable(true)
-        .child(glyph(if s.chosen().is_some_and(|w| w.folder.is_some()) { &crate::ui::icons::FOLDER } else { &icons::COMPOSE }, t.control.icon_sm, if missing { t.c.warning.fg } else { t.ink_muted() }))
-        .child(text(name).font(t.ty.sm).color(t.ink()).truncate().max_w(200.0).min_w(0.0).a11y_hidden())
-        .child(glyph(&crate::ui::icons::CHEVRON_UP_DOWN, t.control.icon_sm, t.ink_faint()))
-        .on_press(|s: &mut App| s.picker_open = !s.picker_open);
-    let mut menu = DropdownMenu::new("workspace-menu").trigger(face).open(s.picker_open).min_width(260.0).on_close(|s: &mut App| s.picker_open = false).label("New task in");
-    for (label, id) in options {
-        let pick = label.clone();
-        let row = DropdownMenuItem::new(label.clone()).on_select(move |s: &mut App| s.pick(&pick));
-        menu = match id {
-            Some(_) => menu.item(row.checked(label == current)),
-            None => menu.separator().item(row.icon(&icons::FOLDER_PLUS)),
-        };
-    }
-    row().key("workspace").center_y().child(menu_named(menu, t, layer, "Workspaces", s.picker_open))
-}
-
-/// Who the new task goes to: "Any cat" (the workspace's default cat, else the least busy) or a cat, remembered per workspace. A
-/// pop-up menu beside the workspace picker, the current choice checked.
-fn cat_picker(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
-    let picked = s.cat_pick().and_then(|id| s.cat(id));
-    let name = picked.map_or_else(|| "Any cat".to_owned(), |c| c.name.clone());
-    let mut face = chip(t, "cat-picker", None).role("button").label(format!("Cat: {name}")).help("Who does the next task").expanded(s.cat_picker_open).focusable(true);
-    face = match picked {
-        Some(c) => face.child(crate::faces::face(t, &c.face, t.control.icon_sm)),
-        None => face.child(glyph(&crate::faces::SNOW, t.control.icon_sm, t.ink_faint())),
-    };
-    let face = face
-        .child(text(name).font(t.ty.sm).color(t.ink()).truncate().max_w(140.0).min_w(0.0).a11y_hidden())
-        .child(glyph(&crate::ui::icons::CHEVRON_UP_DOWN, t.control.icon_sm, t.ink_faint()))
-        .on_press(|s: &mut App| s.cat_picker_open = !s.cat_picker_open);
-    let mut menu = DropdownMenu::new("cat-menu").trigger(face).open(s.cat_picker_open).min_width(220.0).on_close(|s: &mut App| s.cat_picker_open = false).label("New task for");
-    menu = menu.item(DropdownMenuItem::new("Any cat").checked(picked.is_none()).on_select(|s: &mut App| s.pick_cat(None))).separator();
-    for c in s.active_cats() {
-        let id = c.id.clone();
-        menu = menu.item(DropdownMenuItem::new(c.name.clone()).checked(picked.is_some_and(|p| p.id == c.id)).on_select(move |s: &mut App| s.pick_cat(Some(id.clone()))));
-    }
-    row().key("cat").center_y().child(menu_named(menu, t, layer, "Cats", s.cat_picker_open))
 }
 
 /// A rune-ui DropdownMenu, its open surface named for assistive technology (the kit's own leaves the modal surface unnamed; the

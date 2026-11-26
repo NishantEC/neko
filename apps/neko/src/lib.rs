@@ -8,6 +8,7 @@ pub mod clock;
 pub mod deeplink;
 pub mod dock;
 pub mod faces;
+pub mod home_view;
 pub mod icons;
 pub mod link;
 pub mod menu;
@@ -16,8 +17,10 @@ pub mod notify;
 pub mod review_view;
 pub mod scenes;
 pub mod settings_view;
+pub mod sidebar;
 pub mod state;
 pub mod task_view;
+pub mod turn;
 /// rune-ui's components, copied in by the `rune-ui` CLI (`rune-ui.lock`); never edited here (docs/knowledge/rune-ui-in-neko.md).
 pub mod ui;
 pub mod view;
@@ -179,6 +182,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 /// Each frame: what the link brought, the clock, the width, the window's title and frame, the menu.
 pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     let mut changed = s.drain_link();
+    s.ask_receipts();
     for e in std::mem::take(&mut s.effects) {
         match e {
             state::Effect::Reveal(path) => {

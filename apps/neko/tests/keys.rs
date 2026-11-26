@@ -17,7 +17,7 @@ fn focus(rt: &rune::Runtime<neko_app::state::App>) -> Option<String> {
 fn tab_reaches_every_control_once_in_reading_order() {
     let mut rt = runtime((1200.0, 800.0), false, scene("tasks-home"));
     let mut seen = Vec::new();
-    for _ in 0..14 {
+    for _ in 0..20 {
         tab(&mut rt, false);
         let Some(k) = focus(&rt) else { continue };
         if seen.first() == Some(&k) {
@@ -27,15 +27,31 @@ fn tab_reaches_every_control_once_in_reading_order() {
     }
     assert_eq!(
         seen,
-        ["sidebar-hide", "new-task", "home", "needs-you", "ws-default", "ws-default-new", "add-workspace", "cat-cat_miso", "new-cat", "composer-input", "workspace-picker", "cat-picker"],
-        "Home, then Needs you; the sections and their rows are one stop; a section's New task is its own; the cats are one stop, then New cat; the empty composer's Send is off; the pickers follow the words"
+        [
+            "sidebar-hide",
+            "new-task",
+            "home",
+            "needs-you",
+            "ws-default",
+            "ws-default-new",
+            "add-workspace",
+            "cat-cat_miso",
+            "new-cat",
+            "cat-picker",
+            "composer-input",
+            "workspace-picker",
+            "cat-tile-cat_miso",
+            "cat-tile-cat_mochi",
+            "cat-tile-cat_tofu"
+        ],
+        "Home, then Needs you; the sections and their rows are one stop; a section's New task is its own; the cats are one stop, then New cat; the cat picker at the composer's left, the words, the workspace picker in its footer (the empty composer's Send is off); then each cat's tile in the house"
     );
     // Round once, the focus is back on the first control; Shift+Tab walks back the same way, wrapping.
     assert_eq!(focus(&rt).as_deref(), Some("sidebar-hide"));
     tab(&mut rt, true);
-    assert_eq!(focus(&rt).as_deref(), Some("cat-picker"));
+    assert_eq!(focus(&rt).as_deref(), Some("cat-tile-cat_tofu"));
     tab(&mut rt, true);
-    assert_eq!(focus(&rt).as_deref(), Some("workspace-picker"));
+    assert_eq!(focus(&rt).as_deref(), Some("cat-tile-cat_mochi"));
 }
 
 #[test]

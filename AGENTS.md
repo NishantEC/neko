@@ -51,6 +51,7 @@ ships in `NOTICE` and `THIRD_PARTY_LICENSES/`.
 - [The protocol](docs/knowledge/protocol.md) — requests, replies and events as JSON, versioned at hello, the WebSocket pump.
 - [The app shell](docs/knowledge/app-shell.md) — the band, folding, the window's frame, menus, keyboard, accessibility, the link.
 - [rune-ui in Neko](docs/knowledge/rune-ui-in-neko.md) — installing with the CLI, never editing copies, the theme, licences, upstream asks.
+- [Design: House](docs/knowledge/design.md) — the one design: type scale, colour and contrast, the cats' faces, `NEKO_CAT_ART` (dev builds only), motion.
 - [Runtimes](docs/knowledge/runtimes.md) — the agent contract, how Claude Code is found and run, the fake CLI, what is not sure yet.
 - [Permissions](docs/knowledge/permissions.md) — what goes ahead, what asks, request states, "always" scoped to the task.
 - [The run guard](docs/knowledge/run-guard.md) — nothing a run starts outlives it; the limits; the known gap.

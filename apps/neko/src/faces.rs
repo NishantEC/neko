@@ -1,62 +1,368 @@
-//! The cats' faces (docs/knowledge/cats.md): one small drawing per face id the daemon knows (`neko_protocol::cats::FACES`), on
-//! rune-ui's 16 point grid in `currentColor`, so each takes the ink it is given. Plain on purpose: the redesign replaces them.
+//! The cats' portraits (docs/knowledge/cats.md, docs/knowledge/design.md): one drawn face per face id the daemon knows
+//! (`neko_protocol::cats::FACES`), each on a ground colour of its own, so eight cats are told apart by colour at 20 points and by
+//! their markings at 76.
+//!
+//! A portrait is a continuous-corner square: the ground, the cat's head and shoulders cut by its foot, a hairline and a soft shadow.
+//! [`portrait_in`] puts it in its state: a turning ring while the cat works (still under Reduce Motion), a dot at its foot when it
+//! needs the person or could not go on.
+//!
+//! Development builds only: when `NEKO_CAT_ART` names a folder holding `<face>.png` (`ginger.png`, `calico.png`, …), that picture is
+//! drawn in place of the face. No artwork ships with Neko; a release build never reads the variable.
 
-use rune::{El, Icon};
+use std::cell::RefCell;
+use std::collections::HashMap;
 
-use crate::ui::base::{Theme, glyph};
+use neko_protocol::TaskStatus;
+use rune::{Color, El, LineCap, Path, Pixels, Shadow, Shape, el};
+use rune_ui_style::hex;
 
-/// A cat's head: two ears, a round face, two eyes and a small nose. Every face starts from it.
-macro_rules! head {
-    ($marks:literal) => {
-        concat!(
-            r#"<path d="M3.1 6.6 3.5 2.4l2.9 2.1a6.4 6.4 0 0 1 3.2 0l2.9-2.1.4 4.2c.4.8.6 1.6.6 2.5 0 2.7-2.4 4.6-5.5 4.6S2.5 11.8 2.5 9.1c0-.9.2-1.7.6-2.5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>"#,
-            $marks,
-            r#"<circle cx="6" cy="8.4" r=".85" fill="currentColor"/><circle cx="10" cy="8.4" r=".85" fill="currentColor"/><path d="M7.4 10.2h1.2L8 10.9z" fill="currentColor" stroke="currentColor" stroke-width=".6" stroke-linejoin="round"/>"#
-        )
-    };
+use crate::ui::base::Theme;
+
+/// How a face is drawn: its ground, coat, inner ear, muzzle, markings and eyes.
+pub struct Coat {
+    pub id: &'static str,
+    /// The face's name in words ("Ginger").
+    pub words: &'static str,
+    /// The portrait's ground: the colour that tells cats apart at a glance.
+    pub ground: &'static str,
+    coat: &'static str,
+    ear: &'static str,
+    muzzle: &'static str,
+    eyes: (&'static str, &'static str),
+    marks: Marks,
+    /// The silhouette: how high the ear tips reach (lower is taller), how much wider the cheeks are, and whether the cheeks are
+    /// ruffed (a long coat's tufts).
+    ears: f32,
+    cheeks: f32,
+    ruff: bool,
 }
 
-pub static TABBY: Icon = Icon { name: "neko-face-tabby", view: 16.0, body: head!(r#"<path d="M6.9 4.9v1.3M8 4.6v1.6M9.1 4.9v1.3" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>"#) };
-pub static GINGER: Icon = Icon { name: "neko-face-ginger", view: 16.0, body: head!(r#"<path d="M1.2 9.6h2.3M1.5 11.1l2.1-.6M14.8 9.6h-2.3M14.5 11.1l-2.1-.6" fill="none" stroke="currentColor" stroke-width=".9" stroke-linecap="round"/>"#) };
-pub static TUXEDO: Icon = Icon { name: "neko-face-tuxedo", view: 16.0, body: head!(r#"<path d="M6.2 14.8 8 13.9l1.8.9v-1.9l-1.8.9-1.8-.9z" fill="currentColor"/>"#) };
-pub static CALICO: Icon = Icon { name: "neko-face-calico", view: 16.0, body: head!(r#"<path d="M3.4 6.2 3.7 3l2.4 1.8C4.9 5 4 5.5 3.4 6.2z" fill="currentColor"/><circle cx="11.4" cy="11" r="1" fill="currentColor" fill-opacity=".45"/>"#) };
-pub static SIAMESE: Icon = Icon { name: "neko-face-siamese", view: 16.0, body: head!(r#"<ellipse cx="8" cy="10.4" rx="2.4" ry="1.7" fill="currentColor" fill-opacity=".35"/>"#) };
-pub static VOID: Icon = Icon { name: "neko-face-void", view: 16.0, body: head!(r#"<path d="M3.1 6.6 3.5 2.4l2.9 2.1a6.4 6.4 0 0 1 3.2 0l2.9-2.1.4 4.2c.4.8.6 1.6.6 2.5 0 2.7-2.4 4.6-5.5 4.6S2.5 11.8 2.5 9.1c0-.9.2-1.7.6-2.5z" fill="currentColor" fill-opacity=".4"/>"#) };
-pub static SNOW: Icon = Icon { name: "neko-face-snow", view: 16.0, body: head!("") };
-pub static SMOKE: Icon = Icon { name: "neko-face-smoke", view: 16.0, body: head!(r#"<path d="M3.1 6.6 3.5 2.4l2.9 2.1a6.4 6.4 0 0 1 3.2 0l2.9-2.1.4 4.2c.4.8.6 1.6.6 2.5 0 2.7-2.4 4.6-5.5 4.6S2.5 11.8 2.5 9.1c0-.9.2-1.7.6-2.5z" fill="currentColor" fill-opacity=".18"/><path d="M1.4 10h2M14.6 10h-2" fill="none" stroke="currentColor" stroke-width=".9" stroke-linecap="round"/>"#) };
+/// The markings that make a face itself.
+#[derive(Clone, Copy)]
+enum Marks {
+    /// An M on the forehead and stripes on the cheeks, in `.0`.
+    Tabby(&'static str),
+    /// Forehead and cheek stripes in `.0`.
+    Stripes(&'static str),
+    /// A white blaze, muzzle and bib on a dark coat.
+    Tuxedo,
+    /// An orange patch over one ear and a black one over the other.
+    Patches,
+    /// Dark points: ears and a mask.
+    Points(&'static str),
+    /// Nothing: a solid coat.
+    Plain,
+}
 
-/// Each face id with its drawing and its name in words, in the daemon's order.
-pub const ALL: &[(&str, &Icon, &str)] = &[
-    ("tabby", &TABBY, "Tabby"),
-    ("ginger", &GINGER, "Ginger"),
-    ("tuxedo", &TUXEDO, "Tuxedo"),
-    ("calico", &CALICO, "Calico"),
-    ("siamese", &SIAMESE, "Siamese"),
-    ("void", &VOID, "Black"),
-    ("snow", &SNOW, "White"),
-    ("smoke", &SMOKE, "Grey"),
+/// Every face the daemon knows, in its order.
+pub const COATS: &[Coat] = &[
+    Coat { id: "tabby", words: "Tabby", ground: "#a9cfe6", coat: "#a08a72", ear: "#e6b3a4", muzzle: "#e3d6c4", eyes: ("#d9a23a", "#d9a23a"), marks: Marks::Tabby("#5d4c3c"), ears: 5.0, cheeks: 0.8, ruff: true },
+    Coat { id: "ginger", words: "Ginger", ground: "#2f9c94", coat: "#ec9a4e", ear: "#f6c6a3", muzzle: "#f8e1c6", eyes: ("#93c24c", "#93c24c"), marks: Marks::Stripes("#c26a26"), ears: 5.0, cheeks: 0.3, ruff: false },
+    Coat { id: "tuxedo", words: "Tuxedo", ground: "#e48a6c", coat: "#2a292d", ear: "#5b4a4c", muzzle: "#f6f2ec", eyes: ("#cdd64c", "#cdd64c"), marks: Marks::Tuxedo, ears: 4.6, cheeks: 0.0, ruff: false },
+    Coat { id: "calico", words: "Calico", ground: "#f3abba", coat: "#f8f2e9", ear: "#f0b8b4", muzzle: "#fffaf3", eyes: ("#e0a23c", "#e0a23c"), marks: Marks::Patches, ears: 5.6, cheeks: 0.2, ruff: false },
+    Coat { id: "siamese", words: "Siamese", ground: "#bba8ea", coat: "#f1e5d1", ear: "#5a4034", muzzle: "#f1e5d1", eyes: ("#5aa8e8", "#5aa8e8"), marks: Marks::Points("#5a4034"), ears: 2.6, cheeks: -1.0, ruff: false },
+    Coat { id: "void", words: "Black", ground: "#8fb27f", coat: "#29262c", ear: "#54474f", muzzle: "#36323a", eyes: ("#d8d24c", "#d8d24c"), marks: Marks::Plain, ears: 3.8, cheeks: -0.5, ruff: false },
+    Coat { id: "snow", words: "White", ground: "#7894c6", coat: "#fcf9f4", ear: "#f3b5b3", muzzle: "#ffffff", eyes: ("#62a9ea", "#e3a33f"), marks: Marks::Plain, ears: 8.2, cheeks: 1.8, ruff: true },
+    Coat { id: "smoke", words: "Grey", ground: "#e4b23e", coat: "#9ba1a9", ear: "#d8c3c3", muzzle: "#cdd0d5", eyes: ("#d98f3a", "#d98f3a"), marks: Marks::Plain, ears: 6.8, cheeks: 1.2, ruff: false },
 ];
 
-/// The drawing of a face id (an unknown one gets the plain head).
-pub fn icon(face: &str) -> &'static Icon {
-    ALL.iter().find(|(id, ..)| *id == face).map_or(&SNOW, |(_, i, _)| i)
+/// The coat of a face id; an unknown id (a face a newer daemon knows) gets the first.
+pub fn coat(face: &str) -> &'static Coat {
+    COATS.iter().find(|c| c.id == face).unwrap_or(&COATS[0])
 }
 
 /// A face's name in words ("Tabby").
 pub fn words(face: &str) -> &'static str {
-    ALL.iter().find(|(id, ..)| *id == face).map_or("Cat", |(.., w)| w)
+    COATS.iter().find(|c| c.id == face).map_or("Cat", |c| c.words)
 }
 
-/// A face, drawn at `size` in the second ink. Hidden from assistive technology: the cat's name says who it is.
-pub fn face(t: &Theme, face: &str, size: f32) -> El {
-    glyph(icon(face), size, t.ink_muted())
+/// An ellipse as SVG path data (four cubic arcs).
+fn ellipse(cx: f32, cy: f32, rx: f32, ry: f32) -> String {
+    let (kx, ky) = (rx * 0.5523, ry * 0.5523);
+    let (l, r, t, b) = (cx - rx, cx + rx, cy - ry, cy + ry);
+    format!(
+        "M{l} {cy} C{l} {} {} {t} {cx} {t} C{} {t} {r} {} {r} {cy} C{r} {} {} {b} {cx} {b} C{} {b} {l} {} {l} {cy} Z",
+        cy - ky,
+        cx - kx,
+        cx + kx,
+        cy - ky,
+        cy + ky,
+        cx + kx,
+        cx - kx,
+        cy + ky
+    )
+}
+
+// The drawing, on a 48 point square: shoulders cut by the foot, the head a little above the middle.
+const SHOULDERS: &str = "M5 48 C6 39.5 13.5 35 24 35 C34.5 35 42 39.5 43 48 Z";
+const NOSE: &str = "M22.3 26.5 L25.7 26.5 Q25 28.1 24 28.5 Q23 28.1 22.3 26.5 Z";
+const MOUTH: &str = "M24 28.5 Q24 30.3 21.9 30.7 M24 28.5 Q24 30.3 26.1 30.7";
+const WHISKERS: &str = "M16.6 28.6 L8.6 27.6 M16.8 30.2 L9.2 31.4 M31.4 28.6 L39.4 27.6 M31.2 30.2 L38.8 31.4";
+
+/// The head's outline: ear tips at `e` (the tips' height), cheeks `c` wider than the plain head on each side.
+fn head(e: f32, c: f32) -> String {
+    format!(
+        "M{} 20 L11.6 {} Q12.1 {e} 13.5 {} L19.6 11.1 Q24 10.1 28.4 11.1 L34.5 {} Q35.9 {e} 36.4 {} L{} 20 Q{} 24 {} 28.6 Q37 36.2 24 36.6 Q11 36.2 {} 28.6 Q{} 24 {} 20 Z",
+        10.5 - c * 0.4,
+        e + 1.6,
+        e + 0.9,
+        e + 0.9,
+        e + 1.6,
+        37.5 + c * 0.4,
+        40.0 + c,
+        39.0 + c,
+        9.0 - c,
+        8.0 - c,
+        10.5 - c * 0.4
+    )
+}
+
+/// The inner ears, following the tips.
+fn inner_ears(e: f32) -> String {
+    format!("M13.3 {} L18.1 12.4 Q15.3 13.6 13.9 15.6 Z M34.7 {} L29.9 12.4 Q32.7 13.6 34.1 15.6 Z", e + 3.7, e + 3.7)
+}
+
+/// A long coat's ruff: tufts at the cheeks.
+fn ruff(c: f32) -> String {
+    let (l, r) = (8.6 - c, 39.4 + c);
+    format!("M{} 25 L{} 27.4 L{} 28.2 L{} 30.2 L{} 30 Z M{} 25 L{} 27.4 L{} 28.2 L{} 30.2 L{} 30 Z", l + 0.6, l - 2.4, l - 0.4, l - 1.8, l + 1.6, r - 0.6, r + 2.4, r + 0.4, r + 1.8, r - 1.6)
+}
+
+/// A face, drawn at `size`: Neko's own vector, no artwork. Each face has its own silhouette (tall ears and a narrow head for the
+/// siamese, small ears and a broad ruffed head for the white long coat), its own markings and its own eyes. Finer marks (whiskers,
+/// eye highlights and rims) only where they can be seen.
+pub fn drawing(face: &str, size: f32) -> El {
+    let c = coat(face);
+    let fur = hex(c.coat);
+    let dark_coat = fur.luminance() < 0.08;
+    let edge = if dark_coat { rune_ui_style::mix(fur, Color::WHITE, 0.18) } else { rune_ui_style::mix(fur, Color::BLACK, 0.38) };
+    let body = rune_ui_style::mix(fur, Color::BLACK, if dark_coat { 0.2 } else { 0.08 });
+    let ink = hex("#231c19");
+    let outline = head(c.ears, c.cheeks);
+    let fine = size >= 36.0;
+    let mut s = Shape::new().view_box(48.0, 48.0).fill_svg(SHOULDERS, body);
+    s = match c.marks {
+        // The tuxedo's bib, and a light chest on the striped coats, under the head.
+        Marks::Tuxedo => s.fill_svg("M16.6 48 Q17.6 39 24 37 Q30.4 39 31.4 48 Z", hex(c.muzzle)),
+        Marks::Tabby(_) | Marks::Stripes(_) => s.fill_svg("M19 48 Q19.6 40 24 38 Q28.4 40 29 48 Z", hex(c.muzzle).alpha(0.85)),
+        _ => s,
+    };
+    s = s.stroke_svg(SHOULDERS, 0.8, LineCap::Round, edge.alpha(0.6));
+    if c.ruff {
+        s = s.fill_svg(&ruff(c.cheeks), fur).stroke_svg(&ruff(c.cheeks), 0.7, LineCap::Round, edge);
+    }
+    s = s.fill_svg(&outline, fur);
+    let e = c.ears;
+    match c.marks {
+        Marks::Patches => {
+            s = s
+                .fill_svg(&format!("M10.6 19.6 L11.6 {} Q12.1 {e} 13.5 {} L19.6 11.1 Q19.2 16.4 15.4 19.4 Q12.8 21 10.6 19.6 Z", e + 1.6, e + 0.9), hex("#e7964a"))
+                .fill_svg(&format!("M28.4 11.1 L34.5 {} Q35.9 {e} 36.4 {} L37.2 15.2 Q33 16.8 29.4 14.6 Z", e + 0.9, e + 1.6), hex("#2e2a28"))
+                .fill_svg(&ellipse(31.4, 33.0, 2.0, 1.5), hex("#e7964a").alpha(0.9));
+        }
+        Marks::Points(p) => {
+            s = s
+                .fill_svg(&format!("M11.6 {} Q12.1 {e} 13.5 {} L19.6 11.1 Q16 13 12.2 15.8 Z M36.4 {} Q35.9 {e} 34.5 {} L28.4 11.1 Q32 13 35.8 15.8 Z", e + 1.6, e + 0.9, e + 1.6, e + 0.9), hex(p))
+                .fill_svg(&ellipse(24.0, 27.4, 7.4, 6.8), hex(p).alpha(0.92));
+        }
+        _ => {}
+    }
+    s = s.fill_svg(&inner_ears(e), hex(c.ear));
+    // The muzzle: two cheeks and a chin, lighter than the coat (the siamese's mask and a solid dark coat stay as they are).
+    if !matches!(c.marks, Marks::Points(_) | Marks::Plain) || matches!(face, "snow" | "smoke") {
+        let m = hex(c.muzzle);
+        s = s.fill_svg(&ellipse(21.0, 29.6, 3.9, 3.1), m).fill_svg(&ellipse(27.0, 29.6, 3.9, 3.1), m).fill_svg(&ellipse(24.0, 31.6, 2.6, 2.0), m);
+    }
+    match c.marks {
+        Marks::Tabby(m) => {
+            let m = hex(m);
+            s = s
+                .stroke_svg("M19.4 16.6 L21 12.8 L24 15.6 L27 12.8 L28.6 16.6", 1.3, LineCap::Round, m)
+                .stroke_svg("M24 17.4 L24 19.2", 1.1, LineCap::Round, m)
+                .stroke_svg("M10.2 22.6 L14.6 23.4 M10 25.4 L14 25.6 M37.8 22.6 L33.4 23.4 M38 25.4 L34 25.6", 1.1, LineCap::Round, m)
+                .stroke_svg("M14 41 Q16 43 15.4 46 M34 41 Q32 43 32.6 46", 1.2, LineCap::Round, m.alpha(0.7));
+        }
+        Marks::Stripes(m) => {
+            let m = hex(m);
+            s = s
+                .stroke_svg("M24 12.4 L24 17 M20.9 12.9 L21.5 16.3 M27.1 12.9 L26.5 16.3", 1.3, LineCap::Round, m)
+                .stroke_svg("M10.2 22.6 L14.6 23.4 M10 25.4 L14 25.6 M37.8 22.6 L33.4 23.4 M38 25.4 L34 25.6", 1.1, LineCap::Round, m);
+        }
+        Marks::Tuxedo => {
+            s = s.fill_svg("M24 15.4 Q22.4 21 19.6 26.4 Q24 25 28.4 26.4 Q25.6 21 24 15.4 Z", hex(c.muzzle));
+        }
+        _ => {}
+    }
+    s = s.stroke_svg(&outline, 0.9, LineCap::Round, edge);
+    // The eyes: an iris, a slit pupil, a rim and a highlight. A siamese's are a little almond; a white long coat's rounder.
+    let (rx, ry) = match face {
+        "siamese" => (2.9, 2.5),
+        "snow" | "smoke" => (2.8, 3.1),
+        _ => (2.7, 3.0),
+    };
+    for (cx, iris) in [(18.3, c.eyes.0), (29.7, c.eyes.1)] {
+        s = s.fill_svg(&ellipse(cx, 22.4, rx, ry), hex(iris)).fill_svg(&ellipse(cx, 22.6, 0.95, ry - 0.7), ink);
+        if fine {
+            s = s.stroke_svg(&ellipse(cx, 22.4, rx, ry), 0.5, LineCap::Round, ink.alpha(0.55)).fill_svg(&ellipse(cx + 0.9, 21.3, 0.75, 0.75), Color::WHITE.alpha(0.9));
+        }
+    }
+    s = s.fill_svg(NOSE, hex("#e7868a")).stroke_svg(MOUTH, 0.8, LineCap::Round, if dark_coat { edge } else { rune_ui_style::mix(fur, ink, 0.6) });
+    if size >= 40.0 {
+        s = s.stroke_svg(WHISKERS, 0.55, LineCap::Round, if dark_coat { Color::WHITE.alpha(0.55) } else { ink.alpha(0.35) });
+    }
+    el().size(size, size).shape(s).a11y_hidden()
+}
+
+thread_local! {
+    static ART: RefCell<Option<HashMap<&'static str, Pixels>>> = const { RefCell::new(None) };
+}
+
+/// The development override: `NEKO_CAT_ART/<face>.png` for each face that has one. Empty in a release build.
+fn load_art() -> HashMap<&'static str, Pixels> {
+    let mut out = HashMap::new();
+    if !cfg!(debug_assertions) {
+        return out;
+    }
+    let Some(dir) = std::env::var_os("NEKO_CAT_ART").filter(|d| !d.is_empty()) else { return out };
+    let dir = std::path::PathBuf::from(dir);
+    for c in COATS {
+        let Ok(bytes) = std::fs::read(dir.join(format!("{}.png", c.id))) else { continue };
+        let Ok(img) = rune::image::png_rgba8(&bytes) else { continue };
+        let (w, h) = img.dimensions();
+        let p = Pixels::new();
+        p.set(w, h, img.into_raw());
+        out.insert(c.id, p);
+    }
+    out
+}
+
+fn art(face: &str) -> Option<Pixels> {
+    ART.with(|a| a.borrow_mut().get_or_insert_with(load_art).get(face).cloned())
+}
+
+/// The corner radius of a portrait of `size`: a continuous-corner square, about a fifth of its side.
+pub fn radius(size: f32) -> f32 {
+    (size * 0.24).round()
+}
+
+/// A cat's portrait: its ground, its face (or the development art), a hairline and a soft two-layer shadow. Hidden from assistive
+/// technology: the row, turn or tile it sits in says the cat's name.
+pub fn portrait(t: &Theme, face: &str, size: f32) -> El {
+    let r = radius(size);
+    let mut p = el().size(size, size).radius(r).fill(hex(coat(face).ground)).gradient(Color::WHITE.alpha(0.16), Color::WHITE.alpha(0.0)).clip_rounded(r);
+    p = match art(face) {
+        Some(px) => p.pixels(&px),
+        None => p.child(drawing(face, size)),
+    };
+    let edge = if t.dark { Color::WHITE.alpha(0.14) } else { Color::BLACK.alpha(0.10) };
+    let mut p = p.border(if size < 24.0 { 0.5 } else { 1.0 }, edge);
+    if size >= 24.0 {
+        p = p
+            .box_shadow(Shadow { y: 1.0, blur: 2.0, color: Color::BLACK.alpha(if t.dark { 0.45 } else { 0.10 }), ..Shadow::default() })
+            .box_shadow(Shadow { y: size * 0.06, blur: size * 0.18, spread: -size * 0.04, color: Color::BLACK.alpha(if t.dark { 0.5 } else { 0.14 }), ..Shadow::default() });
+    }
+    p.a11y_hidden()
+}
+
+/// A circle as a path.
+fn circle(cx: f32, cy: f32, r: f32) -> Path {
+    Path::from_svg(&ellipse(cx, cy, r, r))
+}
+
+/// A third of a circle from twelve o'clock, as a path (the working ring's moving arc).
+fn arc(cx: f32, cy: f32, r: f32) -> Path {
+    let k = 0.5523 * r;
+    let (x1, y1) = (cx + r, cy);
+    let a = 30f32.to_radians();
+    let (x2, y2) = (cx + r * a.cos(), cy + r * a.sin());
+    let k2 = r * 4.0 / 3.0 * (a / 4.0).tan();
+    Path::new().move_to([cx, cy - r]).cubic_to([cx + k, cy - r], [cx + r, cy - k], [x1, y1]).cubic_to([x1, y1 + k2], [x2 + k2 * a.sin(), y2 - k2 * a.cos()], [x2, y2])
+}
+
+/// The room a portrait of `size` takes in its state: the ring's gap and stroke on each side.
+pub fn ringed(size: f32) -> f32 {
+    let (gap, stroke) = ring_metrics(size);
+    size + 2.0 * (gap + stroke)
+}
+
+/// The ring's gap and stroke at a portrait size: at least 2.5 points of stroke at every size, so it reads at 20.
+fn ring_metrics(size: f32) -> (f32, f32) {
+    ((size * 0.06).clamp(2.0, 5.0).round(), (size * 0.04).clamp(2.5, 3.5))
+}
+
+/// The colour of a portrait's state dot: amber for needs you, red for could not go on. In light the amber is taken a step deeper
+/// than the theme's solid, and in dark the red a step lighter, so each dot reaches 3:1 on every surface (tests/contrast.rs).
+pub fn dot(t: &Theme, failed: bool) -> Color {
+    match (failed, t.dark) {
+        (true, false) => t.c.danger.solid,
+        (true, true) => rune_ui_style::mix(t.c.danger.solid, t.c.danger.fg, 0.35),
+        (false, true) => t.c.warning.solid,
+        (false, false) => rune_ui_style::mix(t.c.warning.solid, t.c.warning.fg, 0.32),
+    }
+}
+
+/// A portrait in its state: a calm turning ring in the identity colour while the cat works (a still arc under Reduce Motion), a
+/// dot at its foot when it needs the person (amber) or could not go on (red). `under` is the surface it sits on (the dot's ring).
+/// It takes the same room in every state ([`ringed`]), so nothing moves when the state changes.
+pub fn portrait_in(t: &Theme, face: &str, size: f32, st: Option<TaskStatus>, under: Color) -> El {
+    let (gap, stroke) = ring_metrics(size);
+    let outer = ringed(size);
+    let mut b = el().size(outer, outer).child(portrait(t, face, size).absolute(gap + stroke, gap + stroke));
+    match st {
+        Some(TaskStatus::Working) => {
+            let c = t.c.ring;
+            let r = outer / 2.0 - stroke / 2.0;
+            let track = Shape::new().stroke_path(&circle(outer / 2.0, outer / 2.0, r), stroke, LineCap::Round, c.alpha(if t.dark { 0.28 } else { 0.22 }));
+            let sweep = Shape::new().stroke_path(&arc(outer / 2.0, outer / 2.0, r), stroke, LineCap::Round, c);
+            let mut moving = el().size(outer, outer).shape(sweep).absolute(0.0, 0.0);
+            if !t.reduced_motion {
+                moving = moving.looping(rune::LoopSpec::rotation(2.4));
+            }
+            b = b.child(el().size(outer, outer).shape(track).absolute(0.0, 0.0)).child(moving);
+        }
+        Some(s) => {
+            let solid = match s {
+                TaskStatus::NeedsYou | TaskStatus::Asked => Some(dot(t, false)),
+                TaskStatus::Failed => Some(dot(t, true)),
+                _ => None,
+            };
+            if let Some(c) = solid {
+                let d = (size * 0.3).round().clamp(9.0, 18.0);
+                let ring = if size < 32.0 { 1.5 } else { 2.0 };
+                b = b.child(el().size(d, d).radius(d / 2.0).fill(c).box_shadow(Shadow { spread: ring, color: under, ..Shadow::default() }).absolute(outer - d - 1.0, outer - d - 1.0));
+            }
+        }
+        None => {}
+    }
+    b.a11y_hidden()
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
-    fn every_face_the_daemon_knows_is_drawn_once() {
-        let ids: Vec<&str> = super::ALL.iter().map(|(id, ..)| *id).collect();
+    fn every_face_the_daemon_knows_is_drawn_once_on_its_own_ground() {
+        let ids: Vec<&str> = COATS.iter().map(|c| c.id).collect();
         assert_eq!(ids, neko_protocol::cats::FACES);
+        // Told apart at 20 points: no two grounds are the same colour, and no two are near each other in hue and lightness.
+        for (i, a) in COATS.iter().enumerate() {
+            for b in &COATS[i + 1..] {
+                let (x, y) = (hex(a.ground), hex(b.ground));
+                let e = rune::color::srgb_encode;
+                let d = ((e(x.r) - e(y.r)).powi(2) + (e(x.g) - e(y.g)).powi(2) + (e(x.b) - e(y.b)).powi(2)).sqrt();
+                assert!(d > 0.12, "{} and {} have grounds too alike ({d:.3})", a.id, b.id);
+            }
+        }
+        assert_eq!(coat("a-face-from-a-newer-daemon").id, "tabby", "an unknown face is still drawn");
+    }
+
+    #[test]
+    fn the_ring_reads_at_small_sizes_and_takes_the_same_room_in_every_state() {
+        for size in [20.0, 24.0, 28.0] {
+            let (_, stroke) = ring_metrics(size);
+            assert!(stroke >= 2.5, "the ring at {size} is {stroke}");
+        }
+        assert_eq!(ringed(28.0), 28.0 + 2.0 * (2.0 + 2.5));
     }
 }

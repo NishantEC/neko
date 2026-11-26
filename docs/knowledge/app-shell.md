@@ -9,8 +9,12 @@
 | --- | --- |
 | `lib.rs` | `run()`: headless runs return first; then the menu prep, the saved frame, the Dock registration, `rune::run_windows`. `poll` drains the link, follows the width, sets the title, keeps the frame, replaces the menu. `on_key`: ⌘N, ⌃⌘S, Escape. |
 | `state.rs` | `App` and what each event changes. No drawing, no I/O. |
-| `view.rs` | The window: sidebar (workspace sections, each task's state as its mark), content band, Home and its workspace picker, the panels that ask (rename, remove). |
-| `task_view.rs` | The task view: the conversation, steps, permission requests, run cards, the composer and its context ring. |
+| `view.rs` | The window: the warm ground, the theme and its type scale, the content band, the panels that ask (rename, remove, retire, undo anyway, new cat). |
+| `sidebar.rs` | The inset sidebar panel: New task, Home, Needs you, workspace sections of two-line task rows led by each cat's portrait, the Cats section. |
+| `home_view.rs` | Home: the greeting, the composer with its cat and workspace pickers, the house of cats, Needs you and In progress. |
+| `task_view.rs`, `turn.rs` | The task view: the conversation, turns led by their cat, steps on a rail, requests led by the asking cat, the receipt, the composer and its context ring. |
+| `faces.rs` | The cats' portraits: a drawn face per face id on its own ground, the working ring and state dots (`design.md`). |
+| `cat_view.rs`, `review_view.rs` | A cat's page; Review. |
 | `settings_view.rs` | Settings (⌘,): the agent CLIs, which one new tasks use, the permission mode, workspaces, notifications. |
 | `needs_view.rs` | Needs you (⌘2): one list of what waits for the person, answered in place (`needs-you.md`). |
 | `notify.rs`, `deeplink.rs` | The notification model and its poster (a recorder outside the real window); `neko://task/<id>`. |
@@ -47,7 +51,7 @@ The model is pure and tested (`menu.rs`): no key is taken twice.
 ## Keyboard
 
 - Tab goes once round every control in reading order: Hide sidebar, New task, Home, the workspaces list (one stop), each
-  section's own buttons, Add workspace…, the composer, the workspace picker. In a task: copy buttons, fold lines, request answers, then the composer and its context ring.
+  section's own buttons, Add workspace…, the cats (one stop), New cat…, the cat picker, the composer, the workspace picker, each cat's tile in the house. In a task: copy buttons, fold lines, request answers, then the composer and its context ring.
   `App::tab_visits_controls(true)` makes this so whatever the Mac's Keyboard Navigation setting is.
 - In the workspaces list the arrow keys move through section headers and rows (`focus_group`), a typed name goes to it, Return
   opens a row or folds a section; Left and Right fold and open; ⌥⌘↑ and ⌥⌘↓ move a section (`workspaces.md`).
@@ -102,21 +106,22 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   the answer, requests, the card, the composer. Surfaces (fold lines' hover, the card, a request, the composer) start on the edge;
   an open "Worked for" shows its steps after it on the same edge, not indented (tested at both window shapes).
 - **The conversation** is rune-ui's Conversation: pinned to the newest content until the person scrolls up, then a "Jump to
-  latest" pill. The person's words are a Message at the right; its copy button shows on hover or focus and takes no room while hidden. The cat's
+  latest" pill. The person's words are a soft well at the right (`turn::person`); its copy button shows on hover or focus and takes no room while hidden. The cat's
   (led by the cat's face and name, `cats.md`) are Markdown on the page, no bubble, selectable; only a run's final answer has a copy button.
-- **Steps** are quiet single lines that fold, built on rune-ui's FoldLine. A shell step is its command, on one line, cut in its
+- **Steps** are quiet single lines that fold, built on rune-ui's FoldLine, hung on a hairline rail in the margin with neutral marks (a tick in the third ink, a dash for denied). A shell step is its command, on one line, cut in its
   middle past 72 characters (the whole command is in the fold); other tools read as phrases ("Read src/app.rs", "Edited
   ~/notes.md", "Searched for “Settings”"). Paths inside the task's folder are relative; under home they start `~/`. A duration
   under a second is not shown. A command that exited non-zero keeps the finished mark with "exit 1" beside it; the red mark is
   only for a tool that could not run; a denied step says "Denied".
 - **Thinking**: a thought with no words shows nothing. While the agent thinks and nothing else arrives, one live line says
-  "Thinking…" (rune-ui's shimmer, still under Reduce Motion); while it waits on something else, "Working…". A thought with words
+  "miso is thinking" beside the cat's small ringed portrait (the ring turns; still under Reduce Motion); while it waits on something else, "miso is working", with the step it is on. A thought with words
   folds as "Thought for 12s" ("Thought" under a second).
 - **Finished runs fold** behind one "Worked for 29s" line (or "Stopped after", "Interrupted after"), in every run of a task; its
   final answer and any notice stay open. The person can open it; the choice lasts for that run while the app is open. A run with
   nothing to fold shows the same line without a chevron. The live run is always open.
-- **The run card** shows only when the run changed files, has a branch, or failed: its state, files with + and −, the branch. No
-  duration (the line has it) and no money.
+- **The receipt** shows only when the run changed files, has a branch, failed, or undo has something to say: the cat and the sentence
+  ("miso changed 3 files", + and −), each file with its own counts (the run's diff, asked once, `App::receipts`), the undo line,
+  the branch, Review, Undo or Redo, Reveal in Finder and Copy branch. No duration (the line has it) and no money.
 - **The context ring** sits in the composer's footer: rune-ui's Context with its ring face, named "Context 31% used, 61.4k of 200k
   tokens", reached by Tab, opened by Return, Space or a press. Its popover is the kit's: context used and window, tokens in, out
   and cached, the cost when reported, and "API-equivalent, as Claude Code reports it. Not charged on a subscription." only for a
@@ -132,16 +137,17 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   sidebar's Needs you row.
 - **The band** keeps the task's title: in a content area under 700 points (the smallest window with the sidebar shown) the folder
   line is left out and the workspace's name shortens first; the title keeps at least 140 points.
-- The sidebar row's mark is rune-ui's step mark on `SidebarItem::lead`: hollow (new), a spinner (working), warning (needs you:
-  a request waits, or the run ended with a question for the person), check (done), cross (failed), slash (stopped or
-  interrupted); the row's description says it in words. When the run ended with a question the composer says "Answer Neko's
+- A sidebar row leads with its cat's portrait in its state: a turning ring while it works, an amber dot when it needs the person
+  (a request waits, or the run ended with a question), a red dot when it failed; under the title, "miso · working · 12 min". The
+  row's description says the cat and the state in words. When the run ended with a question the composer says "Answer miso's
   question".
 - **The task's folder** shows once, quietly, at the band's right: the newest run's working folder (else the chosen folder),
   shortened with `~` and cut in its middle, the branch beside it, and a Reveal in Finder button (`Tx::reveal_path`). The window title follows the task. Finishing, failing and needing you
   are announced (`Tx::announce`).
 - **Home's workspace picker** is a pop-up menu in the composer's footer: General, the workspaces, "Add folder…" (the Mac's open
   panel, Rune's `native-file-dialog`, rfd). The choice is kept in the prefs (`last-workspace`). See `workspaces.md`.
-- **The task's band** shows its workspace's name before the folder, and a menu with Remove task….
+- **The task's band** leads with its cat's portrait (a press opens the cat's page), then the title, the run counter ("Step 4", or
+  "5 steps · 2m 14s"), the folder and branch, and a menu with All changes and Remove task….
 - **Settings** has three pages, Agents, Workspaces and Notifications, switched by rune-ui's SegmentedControl.
 
 ## Not done yet

@@ -58,7 +58,9 @@ fn agent_card(t: &Theme, r: &RuntimeInfo) -> El {
     if r.found && !r.supported {
         facts.push(format!("This Neko cannot run {} yet", r.name));
     }
-    let mut card = paint(col().key(key.clone()).role("group").label(format!("{}: {word}", r.name)).w_full().padding(t.metrics.inset).gap(t.space.at(2.5)).radius(t.radius.xl).round_as(t), &t.mat.slab.base).child(head);
+    let frame = col().key(key.clone()).role("group").label(format!("{}: {word}", r.name)).w_full().padding(t.metrics.inset).gap(t.space.at(2.5)).radius(t.radius.xl).round_as(t);
+    let frame = paint(frame, &t.mat.slab.base);
+    let mut card = frame.child(head);
     if !facts.is_empty() {
         card = card.child(text(facts.join(" · ")).key(format!("{key}-facts")).font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0));
     }
@@ -205,19 +207,26 @@ fn cats_page(s: &App, t: &Theme) -> El {
             1 => "1 task".to_owned(),
             n => format!("{n} tasks"),
         };
-        let state = if c.is_active() { s.cat_state(&c.id).words() } else { "retired".to_owned() };
-        let mut head = row().w_full().gap(t.space.at(2.0)).center_y().child(crate::faces::face(t, &c.face, t.control.icon)).child(text(c.name.clone()).role("heading").level(3).font(weight(t.ty.md, t.ty.medium)).color(t.ink()).truncate().min_w(0.0).shrink());
+        let state = s.cat_state(&c.id).words();
+        let mut head = row().w_full().gap(t.space.at(2.0)).center_y().child(text(c.name.clone()).role("heading").level(3).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0).shrink());
         if !c.is_active() {
             head = head.child(Badge::new(format!("{key}-retired"), "Retired").tone(Tone::Neutral).dot().build(t));
         }
-        let facts = col().grow(1.0).min_w(0.0).gap(t.space.at(1.0)).child(head).child(text(format!("{} · {count}", capital(&state))).key(format!("{key}-facts")).font(t.ty.sm).color(t.ink_faint()));
+        let facts = col().grow(1.0).min_w(0.0).gap(t.space.at(1.0)).child(head).child(text(if c.is_active() { format!("{} · {count}", capital(&state)) } else { count }).key(format!("{key}-facts")).font(t.ty.sm).color(t.ink_faint()));
         let id = c.id.clone();
         let action = if c.is_active() {
             Button::new(format!("{key}-open"), "Open").variant(ButtonVariant::Secondary).size(Size::Sm).on_press(move |s: &mut App| s.open_cat_page(&id)).build(t)
         } else {
             Button::new(format!("{key}-back"), "Bring back").variant(ButtonVariant::Secondary).size(Size::Sm).on_press(move |s: &mut App| s.bring_back_cat(&id)).build(t)
         };
-        part = part.child(paint(row().key(key.clone()).role("group").label(c.name.clone()).w_full().padding(t.metrics.inset).gap(t.space.at(3.0)).center_y().radius(t.radius.xl).round_as(t), &t.mat.slab.base).child(facts).child(action));
+        let st = match s.cat_state(&c.id) {
+            crate::state::CatState::Working(_) if c.is_active() => Some(neko_protocol::TaskStatus::Working),
+            crate::state::CatState::NeedsYou if c.is_active() => Some(neko_protocol::TaskStatus::NeedsYou),
+            _ => None,
+        };
+        let face = crate::faces::portrait_in(t, &c.face, 40.0, st, t.c.surface.bg);
+        let face = if c.is_active() { face } else { face.opacity(0.55) };
+        part = part.child(paint(row().key(key.clone()).role("group").label(c.name.clone()).w_full().padding(t.space.at(3.0)).gap(t.space.at(3.0)).center_y().radius(t.radius.xl).round_as(t), &t.mat.slab.base).child(face).child(facts).child(action));
     }
     part
 }

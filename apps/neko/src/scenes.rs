@@ -21,6 +21,7 @@ pub const SCENES: &[Scene] = &[
     ("task-open", task_open),
     ("tasks-home", tasks_home),
     ("task-working", task_working),
+    ("task-working-live", task_working_live),
     ("task-needs-you", task_needs_you),
     ("task-needs-you-destructive", task_needs_you_destructive),
     ("task-done", task_done),
@@ -77,6 +78,9 @@ pub const SCENES: &[Scene] = &[
     ("cat-picker", cat_picker),
     ("task-rules-changed", task_rules_changed),
     ("settings-cats", settings_cats),
+    ("home-house", home_house),
+    ("home-many", home_many),
+    ("home-new-cat", home_new_cat),
 ];
 
 /// The starter cats as a new install has them, each with one placeholder purpose; mochi has standing rules and an earlier version.
@@ -464,6 +468,64 @@ fn tasks_home(s: &mut App) {
     s.tasks = sample_tasks();
 }
 
+/// Six cats, the three starters and three more a person made, each with a face of its own.
+pub fn six_cats() -> Vec<Cat> {
+    let mut cats = sample_cats();
+    for (id, name, face, purpose) in [("cat_nori", "nori", "void", "Keeps the servers tidy."), ("cat_yuzu", "yuzu", "siamese", "Answers the support inbox."), ("cat_sesame", "sesame", "smoke", "Looks into slow builds.")] {
+        let mut c = cats[0].clone();
+        (c.id, c.name, c.face, c.purpose) = (id.into(), name.into(), face.into(), Some(purpose.into()));
+        cats.push(c);
+    }
+    cats
+}
+
+/// Home in a house of six with work under way: three busy (two working, one waiting on the person), three free.
+fn home_house(s: &mut App) {
+    with_workspaces(s);
+    s.cats = six_cats();
+    let mut busy = |title: &str, cat: &str| {
+        if let Some(t) = s.tasks.iter_mut().find(|t| t.title.starts_with(title)) {
+            t.cat = cat.into();
+        }
+    };
+    busy("Draft the release notes", "cat_miso");
+    busy("Make the hero image load", "cat_sesame");
+    busy("Answer the question about the retry limit", "cat_yuzu");
+    let retry = s.tasks.iter().find(|t| t.title.starts_with("Answer the question about the retry limit")).cloned().expect("the sample task");
+    s.needs = vec![permission_item(s, &retry, "Run a command", "cargo test --package acme-api retry", false, 30)];
+}
+
+/// Home with most of the house busy: the house folds to one row of small tiles and the lists say what each cat is on.
+fn home_many(s: &mut App) {
+    home_house(s);
+    let more = [("Check every page for broken links", "cat_nori"), ("Write the pricing page copy", "cat_mochi")];
+    for (title, cat) in more {
+        if let Some(t) = s.tasks.iter_mut().find(|t| t.title.starts_with(title)) {
+            t.cat = cat.into();
+            t.status = TaskStatus::Working;
+        }
+    }
+}
+
+/// Making a cat: the dialog says which face it will get.
+fn home_new_cat(s: &mut App) {
+    s.tasks = sample_tasks();
+    s.naming = Some((None, TextEdit::default()));
+}
+
+/// A run's files for its receipt, each with its own counts (the run's totals: 42 added, 7 removed).
+fn receipt_files(s: &mut App, run: &str, n: usize) {
+    let all = [("src/toolbar.rs", 24, 4), ("src/menu.rs", 9, 2), ("docs/preferences.md", 3, 1), ("tests/labels.rs", 6, 0)];
+    let take: Vec<_> = all.iter().take(n).collect();
+    let mut files: Vec<DiffFile> = take.iter().map(|(p, a, r)| diff_file(p, FileStatus::Modified, *a, *r)).collect();
+    // The rest of the totals goes to the first file, so the files add up to the run's figures.
+    let (a, r): (u32, u32) = (files.iter().map(|f| f.added).sum(), files.iter().map(|f| f.removed).sum());
+    files[0].added += 42 - a.min(42);
+    files[0].removed += 7 - r.min(7);
+    let task = s.tasks[1].id.clone();
+    s.receipts.insert(RunId(run.into()), DiffSummary { task, run: Some(RunId(run.into())), root: String::new(), files, added: 42, removed: 7 });
+}
+
 fn task_open(s: &mut App) {
     s.tasks = sample_tasks();
     s.open = Some(s.tasks[1].id.clone());
@@ -603,6 +665,19 @@ fn task_working(s: &mut App) {
     open_with(s, TaskStatus::Working, vec![r], vec![sc]);
 }
 
+/// A run in progress, in the sidebar's company: a thought, three steps, the answer streaming.
+fn task_working_live(s: &mut App) {
+    let task = &sample_tasks()[1];
+    let mut sc = Script::new(task, "run_1", start(s));
+    sc.think("The button is drawn in the toolbar and named again in the menu. I will find every place the old label appears first.", 4);
+    sc.tool("Grep", "Settings", "{\n  \"pattern\": \"Settings\"\n}", "src/toolbar.rs:12\nsrc/menu.rs:48", ToolState::Done, 1);
+    sc.tool("Edit", "src/toolbar.rs", "{\n  \"file_path\": \"src/toolbar.rs\"\n}", "The file was edited.", ToolState::Done, 2);
+    sc.tool("Edit", "src/menu.rs", "{\n  \"file_path\": \"src/menu.rs\"\n}", "The file was edited.", ToolState::Done, 2);
+    sc.say("I renamed the button in the toolbar and the menu item. Now I am checking that the old label appears", false);
+    let r = run("run_1", task, RunStatus::Running, start(s), 0);
+    open_with(s, TaskStatus::Working, vec![r], vec![sc]);
+}
+
 fn task_needs_you(s: &mut App) {
     let task = &sample_tasks()[1];
     let mut sc = Script::new(task, "run_1", start(s));
@@ -635,6 +710,7 @@ fn task_done(s: &mut App) {
     let sc = done_script(s, task);
     let r = run("run_1", task, RunStatus::Done, start(s), 134);
     open_with(s, TaskStatus::Done, vec![r], vec![sc]);
+    receipt_files(s, "run_1", 3);
 }
 
 fn task_done_open(s: &mut App) {
@@ -853,6 +929,7 @@ fn task_undo(s: &mut App) {
     let sc = done_script(s, task);
     let r = with_undo(run("run_1", task, RunStatus::Done, start(s), 134), UndoState::Applied, 4);
     open_with(s, TaskStatus::Done, vec![r], vec![sc]);
+    receipt_files(s, "run_1", 4);
 }
 
 fn task_undone(s: &mut App) {

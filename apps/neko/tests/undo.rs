@@ -117,7 +117,7 @@ fn review_undo_redo_and_the_follow_up_tells_the_agent() {
     // Review: the run's three files.
     press_on(&mut rt, &format!("run-{}-review", run.0));
     until(&mut rt, "the review's files", |rt| has(rt, "diff-2") && !has(rt, "diff-3"));
-    assert!(on_screen(&rt, "Changes in this run"));
+    assert!(on_screen(&rt, "miso's changes in this run"), "the heading names the cat whose changes they are");
     press_on(&mut rt, "diff-0-trigger");
     until(&mut rt, "a file's lines", |rt| on_screen(rt, "file 0"));
     press(&mut rt, Key::Escape, Mods::default());

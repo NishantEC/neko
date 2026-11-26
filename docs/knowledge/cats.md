@@ -94,14 +94,21 @@ and `rules_hash`; a Needs-you item carries `cat` and `cat_name`.
 
 ## The app
 
-- Sidebar: a Cats section under the workspaces, each active cat with its face and what it is doing (napping, working on N, needs
-  you), then New cat….
-- A cat's page: face and name, Rename… and Retire… (asks first), face and default workspace pickers, purpose, the rules editor
-  (rune-ui's Textarea) with Save, Revert, "Unsaved changes" and Restore previous rules, then its tasks: working, needs you, recent.
-- The composer: a cat picker beside the workspace picker ("Any cat" by default).
-- A task's band shows its cat (a press opens its page); its sidebar row ends with the face and says the cat; each turn is led by
-  the cat's face and name; the composer says "Reply to miso".
-- Needs you items say "miso asks", "miso has a question", "miso could not go on". Notifications: "miso asks: …", "tofu is done: …".
+How it looks is in `design.md`.
+
+- Sidebar: a Cats section under the workspaces, each active cat with its portrait in its state and what it is doing (napping,
+  working on N, needs you; a napping cat with a purpose shows it), then New cat….
+- Home: the composer's cat picker at its left (the picked cat's portrait, or the free cats' for "Any cat"); the house below it,
+  each cat as a tile; a napping cat's tile addresses the composer to it.
+- A cat's page: its portrait large on a wash of its own ground, its name, what it is doing, Rename… and Retire… (asks first); the
+  faces as a row of portraits to choose from, the default workspace picker, purpose, the rules editor (rune-ui's Textarea) with
+  Save, Revert, "Unsaved changes" and Restore previous rules, then its tasks: working, needs you, recent.
+- New cat…: the dialog shows the face it will get.
+- A task's band starts with its cat's portrait (a press opens its page); its sidebar row starts with the portrait and says the cat;
+  each turn is led by the cat's portrait and name; a request is led by the cat that asks; the receipt names it; the composer says
+  "Reply to miso".
+- Needs you items are cards led by the asking cat: "miso asks", "miso has a question", "miso could not go on". Notifications:
+  "miso asks: …", "tofu is done: …".
 
 ## Not here yet, on purpose
 

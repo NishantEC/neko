@@ -78,8 +78,8 @@ fn empty_thoughts_show_nothing_and_thinking_shows_one_live_line() {
     let rt = runtime((1200.0, 800.0), false, scene("task-thinking"));
     let live = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("run-run_1-working")).expect("the live line");
     assert_eq!(live.label.as_deref(), Some("miso is thinking"), "the task's cat, by name");
-    assert!(texts(&rt).iter().any(|t| t == "Thinking…"));
-    assert!(!texts(&rt).iter().any(|t| t == "Working…"), "one live line");
+    assert!(texts(&rt).iter().any(|t| t.starts_with("miso is thinking")), "the live line says who thinks: {:?}", texts(&rt));
+    assert!(!texts(&rt).iter().any(|t| t.contains("is working")), "one live line");
 }
 
 #[test]
@@ -139,7 +139,8 @@ fn copy_is_for_final_answers_and_the_persons_words_on_hover() {
 
 #[test]
 fn the_persons_copy_shows_on_hover_and_on_focus() {
-    let mut rt = runtime((1200.0, 800.0), false, scene("task-done"));
+    // A short conversation, so the person's words and the room under them are in sight (a long one opens at its end).
+    let mut rt = runtime((1200.0, 800.0), false, scene("task-talked"));
     let [x, y, w, h] = rect(&rt, "task-message-bubble");
     rt.pointer_move(x + w / 2.0, y + h / 2.0);
     settle(&mut rt);
