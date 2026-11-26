@@ -134,7 +134,7 @@ fn two_workspaces_and_general_are_all_where_they_were_after_a_restart() {
     assert_eq!(workspaces(&mut c).iter().map(|w| w.name.as_str()).collect::<Vec<_>>(), ["General", "acme-api", "notes"]);
     assert_eq!(tasks(&mut c), before_tasks, "every task is in its workspace, as it was");
     // A follow-up in the repository's task works again, though its empty worktree was tidied away after the first run.
-    assert_eq!(c.request(Request::FollowUp { task: a.id.clone(), words: "Once more".into() }).unwrap(), Reply::Ok);
+    assert_eq!(c.request(Request::FollowUp { task: a.id.clone(), words: "Once more".into(), answering: None }).unwrap(), Reply::Ok);
     let ok = events_until(&mut c, "the follow-up runs", |ch| matches!(ch, Change::TaskUpdated { task } if task.id == a.id && matches!(task.status, TaskStatus::Done | TaskStatus::Failed)));
     assert!(matches!(ok.last(), Some(Change::TaskUpdated { task }) if task.status == TaskStatus::Done), "{ok:?}");
     drop(c);

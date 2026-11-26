@@ -136,7 +136,7 @@ fn an_unknown_request_is_refused_not_guessed() {
 fn the_requests_that_run_a_task_round_trip() {
     let t = || TaskId("task_1".into());
     pinned(ClientMessage { id: 5, request: Request::GetTranscript { task: t() } }, r#"{"id":5,"type":"get_transcript","task":"task_1"}"#);
-    pinned(ClientMessage { id: 6, request: Request::FollowUp { task: t(), words: "And the tests".into() } }, r#"{"id":6,"type":"follow_up","task":"task_1","words":"And the tests"}"#);
+    pinned(ClientMessage { id: 6, request: Request::FollowUp { task: t(), words: "And the tests".into(), answering: None } }, r#"{"id":6,"type":"follow_up","task":"task_1","words":"And the tests"}"#);
     pinned(ClientMessage { id: 7, request: Request::StopTask { task: t() } }, r#"{"id":7,"type":"stop_task","task":"task_1"}"#);
     pinned(
         ClientMessage { id: 8, request: Request::AnswerPermission { permission: PermissionId("perm_1".into()), decision: Decision::AlwaysAllow } },
@@ -197,9 +197,12 @@ fn runs_parts_and_permissions_round_trip() {
     );
     pinned(part(5, PartBody::Permission { permission: PermissionId("perm_1".into()) }), r#"{"id":"part_5","task":"task_1","run":"run_1","seq":5,"at_ms":1,"body":{"kind":"permission","permission":"perm_1"}}"#);
     pinned(
-        part(6, PartBody::Notice { tone: Tone::Error, text: "Claude Code is not signed in.".into(), next: Some("Run claude".into()) }),
-        r#"{"id":"part_6","task":"task_1","run":"run_1","seq":6,"at_ms":1,"body":{"kind":"notice","tone":"error","text":"Claude Code is not signed in.","next":"Run claude"}}"#,
+        part(6, PartBody::Notice { tone: Tone::Error, text: "Claude Code is not signed in.".into(), next: Some("Run claude".into()), failure: Some(FailureKind::NotSignedIn) }),
+        r#"{"id":"part_6","task":"task_1","run":"run_1","seq":6,"at_ms":1,"body":{"kind":"notice","tone":"error","text":"Claude Code is not signed in.","next":"Run claude","failure":"not_signed_in"}}"#,
     );
+    // A notice stored before version 6 has no failure kind: it still reads.
+    let old: PartBody = serde_json::from_str(r#"{"kind":"notice","tone":"error","text":"It stopped.","next":"Try again"}"#).unwrap();
+    assert_eq!(old, PartBody::Notice { tone: Tone::Error, text: "It stopped.".into(), next: Some("Try again".into()), failure: None });
     let perm = Permission {
         id: PermissionId("perm_1".into()),
         task: TaskId("task_1".into()),
@@ -243,4 +246,51 @@ fn transcripts_runtimes_and_usage_round_trip() {
     );
     pinned(UsageTotal { runs: 2, input_tokens: 3, output_tokens: 4, cost_usd: Some(0.5), api_equivalent: true }, r#"{"runs":2,"input_tokens":3,"output_tokens":4,"cost_usd":0.5,"api_equivalent":true}"#);
     pinned(ServerMessage::Reply { id: 3, reply: Reply::Ok }, r#"{"kind":"reply","id":3,"reply":{"type":"ok"}}"#);
+}
+
+fn perm() -> Permission {
+    Permission {
+        id: PermissionId("perm_1".into()),
+        task: TaskId("task_1".into()),
+        run: RunId("run_1".into()),
+        tool: "Bash".into(),
+        title: "Run a command".into(),
+        why: "Commands can change anything on this Mac.".into(),
+        detail: "cargo test".into(),
+        destructive: false,
+        state: PermissionState::Pending,
+        asked_ms: 3,
+        answered_ms: None,
+    }
+}
+
+#[test]
+fn needs_you_round_trips() {
+    pinned(ClientMessage { id: 1, request: Request::ListNeeds }, r#"{"id":1,"type":"list_needs"}"#);
+    pinned(
+        ClientMessage { id: 2, request: Request::FollowUp { task: TaskId("task_1".into()), words: "On main.".into(), answering: Some(RunId("run_1".into())) } },
+        r#"{"id":2,"type":"follow_up","task":"task_1","words":"On main.","answering":"run_1"}"#,
+    );
+    let item = |id: &str, need: Need| NeedsItem { id: id.into(), task: TaskId("task_1".into()), workspace: "ws_1".into(), title: "Fix the build".into(), since_ms: 5, need };
+    let head = |id: &str| format!(r#"{{"id":"{id}","task":"task_1","workspace":"ws_1","title":"Fix the build","since_ms":5,"need":"#);
+    let p = r#"{"id":"perm_1","task":"task_1","run":"run_1","tool":"Bash","title":"Run a command","why":"Commands can change anything on this Mac.","detail":"cargo test","destructive":false,"state":"pending","asked_ms":3}"#;
+    pinned(item("perm:perm_1", Need::Permission { permission: perm() }), &format!(r#"{}{{"kind":"permission","permission":{p}}}}}"#, head("perm:perm_1")));
+    pinned(
+        item("question:run_1", Need::Question { run: RunId("run_1".into()), question: "Which branch should it go on?".into() }),
+        &format!(r#"{}{{"kind":"question","run":"run_1","question":"Which branch should it go on?"}}}}"#, head("question:run_1")),
+    );
+    let failure = Need::Failure { failure: FailureKind::NotSignedIn, text: "Claude Code is not signed in.".into(), next: Some("Run `claude auth login` in Terminal.".into()), command: Some("claude auth login".into()) };
+    pinned(
+        item("failure:part_6", failure),
+        &format!(r#"{}{{"kind":"failure","failure":"not_signed_in","text":"Claude Code is not signed in.","next":"Run `claude auth login` in Terminal.","command":"claude auth login"}}}}"#, head("failure:part_6")),
+    );
+    for (k, name) in [(FailureKind::NotInstalled, "not_installed"), (FailureKind::NotSignedIn, "not_signed_in"), (FailureKind::UsageLimit, "usage_limit"), (FailureKind::FolderMissing, "folder_missing")] {
+        pinned(k, &format!("\"{name}\""));
+    }
+    pinned(ServerMessage::Reply { id: 1, reply: Reply::Needs { items: Vec::new() } }, r#"{"kind":"reply","id":1,"reply":{"type":"needs","items":[]}}"#);
+    pinned(
+        ServerMessage::Event { revision: 12, change: Change::NeedsChanged { items: vec![item("question:run_1", Need::Question { run: RunId("run_1".into()), question: "Shall I?".into() })] } },
+        &format!(r#"{{"kind":"event","revision":12,"change":{{"type":"needs_changed","items":[{}{{"kind":"question","run":"run_1","question":"Shall I?"}}}}]}}}}"#, head("question:run_1")),
+    );
+    assert_eq!(PROTOCOL_VERSION, 6, "Needs you is version 6");
 }

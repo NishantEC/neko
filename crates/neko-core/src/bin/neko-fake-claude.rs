@@ -18,6 +18,7 @@
 //! | `crash` | Says something on stderr and exits with code 3. |
 //! | `limit` | The account's usage limit is reached. |
 //! | `signin` | Not signed in. |
+//! | `question` | Answers with a question for the person (the task is then theirs to answer). |
 //! | `stall` | Starts, then says nothing. |
 //! | `hook-shell` | Runs `cargo test` (asking, unless the person's settings allow `Bash`), then says whether it ran and why not. |
 //! | `hook-twice` | Runs `cargo test`, then `cargo build`. |
@@ -411,6 +412,11 @@ impl Fake {
                 self.think_empty();
                 self.say("There are uncommitted changes, so I left them as they are.\n\n- `notes.txt` is new and untracked\n- `neko/x7k2m9qa` is one commit ahead", 4, Duration::from_millis(5));
                 self.result("There are uncommitted changes.", false);
+            }
+            "question" => {
+                let text = "I found the button in four places.\n\nShould I rename all four to **Preferences**, or keep Settings?";
+                self.say(text, 4, Duration::from_millis(10));
+                self.result(text, false);
             }
             "crash" => {
                 eprintln!("fatal: the fake fell over");

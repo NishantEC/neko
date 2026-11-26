@@ -13,7 +13,7 @@ use neko_core::conductor::{self, AnswerError, Out, RunBook, Who};
 use neko_core::runtime::{Answer, Control, Detection, Failure, HookLink, Outcome, Runtime, StartSpec};
 use neko_core::workplace::{self, PlaceError};
 use neko_core::{Core, Place};
-use neko_protocol::{Change, Decision, ErrorCode, PermissionId, PermissionMode, Pricing, Reply, RuntimeInfo, ServerMessage, Task, TaskId, TaskStatus, Tone};
+use neko_protocol::{Change, Decision, ErrorCode, FailureKind, PermissionId, PermissionMode, Pricing, Reply, RuntimeInfo, ServerMessage, Task, TaskId, TaskStatus, Tone};
 
 use crate::server::{Shared, lock};
 
@@ -169,10 +169,10 @@ pub fn push(shared: &Shared, task: &TaskId, outs: Vec<Out>, control: Option<&Arc
     }
 }
 
-/// A notice outside a run, and the task's new status.
-fn fail_before_run(shared: &Shared, task: &Task, text: String, next: Option<String>) {
+/// A notice outside a run, and the task's new status. `failure`: the kind the person can act on, if it is one ("Needs you").
+fn fail_before_run(shared: &Shared, task: &Task, text: String, next: Option<String>, failure: Option<FailureKind>) {
     let mut core = lock(&shared.core);
-    if let Ok(outs) = conductor::standalone_notice(&mut core, task, Tone::Error, text, next) {
+    if let Ok(outs) = conductor::standalone_notice(&mut core, task, Tone::Error, text, next, failure) {
         push(shared, &task.id, outs, None);
     }
     let now = core.now();
@@ -232,11 +232,11 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
                 person(shared, &task.id, w);
             }
             release(shared, &task.id, cancelled);
-            return fail_before_run(shared, task, format!("The folder {f} is gone."), Some("Put it back, or start a new task with another folder.".into()));
+            return fail_before_run(shared, task, format!("The folder {f} is gone."), Some("Put it back, or start a new task with another folder.".into()), Some(FailureKind::FolderMissing));
         }
         Err(PlaceError::Other(why)) => {
             release(shared, &task.id, cancelled);
-            return fail_before_run(shared, task, why, Some("Try again, or start a new task without a folder.".into()));
+            return fail_before_run(shared, task, why, Some("Try again, or start a new task without a folder.".into()), None);
         }
     };
     {
@@ -250,7 +250,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
             person(shared, &task.id, w);
         }
         release(shared, &task.id, cancelled);
-        return fail_before_run(shared, task, format!("Neko cannot run {} yet.", settings.runtime), Some("Choose Claude Code in Settings (⌘,), then send a follow-up.".into()));
+        return fail_before_run(shared, task, format!("Neko cannot run {} yet.", settings.runtime), Some("Choose Claude Code in Settings (⌘,), then send a follow-up.".into()), None);
     };
     let detected = shared.runs.detections(Duration::from_secs(60)).remove(runtime.id()).unwrap_or_default();
     let who = Who {
@@ -278,7 +278,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
     };
     let Ok(book) = begun else {
         release(shared, &task.id, cancelled);
-        return fail_before_run(shared, task, "Neko could not write to its store.".into(), None);
+        return fail_before_run(shared, task, "Neko could not write to its store.".into(), None, None);
     };
     let book = Arc::new(Mutex::new(book));
     let finish = |outcome: Outcome| {
@@ -484,7 +484,7 @@ pub fn recover(core: &mut Core) {
     let Ok(tasks) = core.store.interrupt_leftovers(core.now()) else { return };
     for t in tasks {
         if let Ok(Some(task)) = core.store.get_task(&t) {
-            let _ = conductor::standalone_notice(core, &task, Tone::Warning, "Neko stopped while this was running. What was written is kept.".into(), Some("Send a follow-up to carry on.".into()));
+            let _ = conductor::standalone_notice(core, &task, Tone::Warning, "Neko stopped while this was running. What was written is kept.".into(), Some("Send a follow-up to carry on.".into()), None);
         }
     }
 }

@@ -212,7 +212,7 @@ fn lower_first(s: &str) -> String {
 
 /// A notice: what happened, and what to do next.
 fn notice(t: &Theme, p: &Part) -> Option<El> {
-    let PartBody::Notice { tone, text: words, next } = &p.body else { return None };
+    let PartBody::Notice { tone, text: words, next, .. } = &p.body else { return None };
     let (icon, ink) = match tone {
         NoticeTone::Error => (&icons::CIRCLE_X, t.c.danger.fg),
         NoticeTone::Warning => (&icons::WARNING, t.c.warning.fg),

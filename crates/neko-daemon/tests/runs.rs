@@ -141,7 +141,7 @@ fn always_allow_lasts_for_the_task_only_and_destructive_steps_are_never_always()
     assert_eq!(c.request(Request::AnswerPermission { permission: p.id, decision: Decision::AlwaysAllow }).unwrap(), Reply::Ok);
     events_until(&mut c, "done", task_is(&task.id, TaskStatus::Done));
     // The same kind of step in the same task goes ahead.
-    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "Again [fake:permission]".into() }).unwrap(), Reply::Ok);
+    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "Again [fake:permission]".into(), answering: None }).unwrap(), Reply::Ok);
     let changes = events_until(&mut c, "done again", task_is(&task.id, TaskStatus::Done));
     assert!(!changes.iter().any(|ch| matches!(ch, Change::PermissionChanged { .. })), "not asked again in this task");
     // Another task asks.
@@ -158,7 +158,7 @@ fn always_allow_lasts_for_the_task_only_and_destructive_steps_are_never_always()
     assert_eq!(c.request(Request::AnswerPermission { permission: p.id.clone(), decision: Decision::AlwaysAllow }).unwrap(), Reply::Ok);
     events_until(&mut c, "done", task_is(&rm.id, TaskStatus::Done));
     assert_eq!(transcript(&mut c, &rm.id).permissions[0].state, PermissionState::Allowed);
-    c.request(Request::FollowUp { task: rm.id.clone(), words: "[fake:destructive]".into() }).unwrap();
+    c.request(Request::FollowUp { task: rm.id.clone(), words: "[fake:destructive]".into(), answering: None }).unwrap();
     pending(&events_until(&mut c, "asked again", task_is(&rm.id, TaskStatus::NeedsYou)));
     c.request(Request::StopTask { task: rm.id.clone() }).unwrap();
     events_until(&mut c, "stopped", task_is(&rm.id, TaskStatus::Stopped));
@@ -195,7 +195,7 @@ fn a_follow_up_continues_the_same_conversation() {
     let task = create(&mut c, "Hello [fake:plain]", None);
     events_until(&mut c, "done", task_is(&task.id, TaskStatus::Done));
     let first = transcript(&mut c, &task.id).runs[0].session.clone().unwrap();
-    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "Tell me what I said.".into() }).unwrap(), Reply::Ok);
+    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "Tell me what I said.".into(), answering: None }).unwrap(), Reply::Ok);
     events_until(&mut c, "done again", task_is(&task.id, TaskStatus::Done));
     let t = transcript(&mut c, &task.id);
     assert_eq!(t.runs.len(), 2);
@@ -327,7 +327,7 @@ fn failures_are_calm_notices_with_what_to_do_next() {
     let task = create(&mut c, "Hi [fake:plain]", Some(&notes));
     events_until(&mut c, "done", task_is(&task.id, TaskStatus::Done));
     std::fs::remove_dir_all(&outside).unwrap();
-    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "Again".into() }).unwrap(), Reply::Ok);
+    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "Again".into(), answering: None }).unwrap(), Reply::Ok);
     events_until(&mut c, "failed", task_is(&task.id, TaskStatus::Failed));
     let n = notices(&transcript(&mut c, &task.id));
     assert!(n.last().is_some_and(|n| n.0.contains("is gone") && n.1.as_deref().is_some_and(|x| x.contains("another folder"))), "{n:?}");
@@ -414,7 +414,7 @@ fn when_the_daemon_dies_the_run_dies_with_it_and_a_restart_marks_it_interrupted(
     assert!(agent_words(&t).contains("still here"), "what was written is kept: {:?}", agent_words(&t));
     assert!(notices(&t).iter().any(|(text, next)| text.contains("Neko stopped while this was running") && next.as_deref() == Some("Send a follow-up to carry on.")));
     let session = t.runs[0].session.clone().unwrap();
-    c.request(Request::FollowUp { task: task.id.clone(), words: "Carry on".into() }).unwrap();
+    c.request(Request::FollowUp { task: task.id.clone(), words: "Carry on".into(), answering: None }).unwrap();
     events_until(&mut c, "done", task_is(&task.id, TaskStatus::Done));
     let t = transcript(&mut c, &task.id);
     assert_eq!(t.runs[1].session.as_deref(), Some(session.as_str()), "the follow-up resumed the CLI's session");
@@ -430,9 +430,9 @@ fn a_run_that_ends_with_a_question_leaves_the_task_with_the_person() {
     let task = create(&mut c, "Hello [fake:plain]", None);
     events_until(&mut c, "done", task_is(&task.id, TaskStatus::Done));
     // The fake repeats the follow-up's words last, so its answer ends with this question.
-    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "Which branch should it go on?".into() }).unwrap(), Reply::Ok);
+    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "Which branch should it go on?".into(), answering: None }).unwrap(), Reply::Ok);
     events_until(&mut c, "the person's turn", task_is(&task.id, TaskStatus::Asked));
     assert!(!TaskStatus::Asked.is_active(), "not working: a follow-up answers it");
-    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "On main.".into() }).unwrap(), Reply::Ok);
+    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "On main.".into(), answering: None }).unwrap(), Reply::Ok);
     events_until(&mut c, "done after the answer", task_is(&task.id, TaskStatus::Done));
 }

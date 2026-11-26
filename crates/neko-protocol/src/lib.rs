@@ -19,8 +19,9 @@ pub mod title;
 /// The version of this contract. A screen and a daemon talk only when theirs are equal. 2: tasks run (S1). 3: three permission
 /// modes, the context window, a command's exit code, Claude Code's own rules in words. 4: a task can be `asked` (its run ended with
 /// a question for the person). 5: workspaces (a task is made in one; list, add, rename, remove, locate and move them; remove a
-/// task).
-pub const PROTOCOL_VERSION: u32 = 5;
+/// task). 6: "Needs you" (the items waiting for the person, listed and pushed whole; a failure's notice says what kind it is; a
+/// follow-up may say which question it answers).
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -257,8 +258,63 @@ pub enum PartBody {
     },
     /// A request for permission, by its id.
     Permission { permission: PermissionId },
-    /// Something Neko says: a failure, an interruption. `next` is what to do about it.
-    Notice { tone: Tone, text: String, #[serde(default, skip_serializing_if = "Option::is_none")] next: Option<String> },
+    /// Something Neko says: a failure, an interruption. `next` is what to do about it. `failure` says which failure the person can
+    /// act on it was (signing in, the usage limit, a missing folder or CLI); None for anything else.
+    Notice {
+        tone: Tone,
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        next: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failure: Option<FailureKind>,
+    },
+}
+
+/// A failure the person can do something about (docs/knowledge/needs-you.md). Every other failure is a notice only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureKind {
+    /// The agent CLI is not installed.
+    NotInstalled,
+    NotSignedIn,
+    UsageLimit,
+    /// The folder the task works in is gone.
+    FolderMissing,
+}
+
+/// What a "Needs you" item waits for.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Need {
+    /// A pending permission request, whole.
+    Permission { permission: Permission },
+    /// The run ended with a question: its last words, shortened to a line or two. A follow-up that names this run answers it.
+    Question { run: RunId, question: String },
+    /// The run failed for a reason the person can act on: the notice's words, what to do next, and the one line to copy (a
+    /// sign-in or install command) when there is one.
+    Failure {
+        failure: FailureKind,
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        next: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
+    },
+}
+
+/// One thing waiting for the person, derived by the daemon from what it stores (permissions, runs, notices). The list is oldest
+/// first, grouped by workspace.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NeedsItem {
+    /// Stable while it waits: `perm:<id>`, `question:<run id>`, `failure:<part id>`.
+    pub id: String,
+    pub task: TaskId,
+    pub workspace: String,
+    /// The task's title.
+    pub title: String,
+    /// Since when it has waited (ms since the epoch).
+    pub since_ms: i64,
+    pub need: Need,
 }
 
 /// One piece of a task's transcript, in order.
@@ -427,8 +483,14 @@ pub enum Request {
     Subscribe,
     /// A task's runs, parts and permission requests.
     GetTranscript { task: TaskId },
-    /// Words in the task's composer: they continue the same conversation.
-    FollowUp { task: TaskId, words: String },
+    /// Words in the task's composer: they continue the same conversation. With `answering`, they answer the question that run
+    /// ended with, and are refused (`already_answered`) unless the task still waits on it.
+    FollowUp {
+        task: TaskId,
+        words: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        answering: Option<RunId>,
+    },
     /// Stop the task's running agent.
     StopTask { task: TaskId },
     /// Answer a permission request. A request already answered is refused.
@@ -443,6 +505,8 @@ pub enum Request {
     SetSettings { settings: Settings },
     /// What runs started since `from_ms` used.
     DayUsage { from_ms: i64 },
+    /// Everything waiting for the person now ("Needs you").
+    ListNeeds,
 }
 
 /// A request and the id its reply will carry.
@@ -501,6 +565,8 @@ pub enum Reply {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         existed: bool,
     },
+    /// What waits for the person, oldest first, grouped by workspace.
+    Needs { items: Vec<NeedsItem> },
     /// Done; the change arrives as events.
     Ok,
     Error { code: ErrorCode, message: String },
@@ -528,6 +594,9 @@ pub enum Change {
     /// Whether the agent is thinking right now (no words arrive while it does); sent only to screens watching the task, never
     /// stored.
     Activity { task: TaskId, thinking: bool },
+    /// What waits for the person changed: the whole list as it is now (it is derived, never stored; `revision` is the change that
+    /// caused it).
+    NeedsChanged { items: Vec<NeedsItem> },
 }
 
 /// What the daemon sends.

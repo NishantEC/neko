@@ -9,13 +9,13 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
 use neko_core::runtime::Runtime;
 use neko_core::{Core, NewTaskError, RandomIds, SystemClock};
 use neko_protocol::pump::{self, Flow, Out, Wake};
-use neko_protocol::{Change, ClientMessage, DaemonInfo, ErrorCode, PROTOCOL_VERSION, Reply, Request, ServerMessage, TaskId, files};
+use neko_protocol::{Change, ClientMessage, DaemonInfo, ErrorCode, NeedsItem, PROTOCOL_VERSION, Reply, Request, ServerMessage, TaskId, TaskStatus, files};
 use tungstenite::WebSocket;
 use tungstenite::protocol::Role;
 
@@ -51,6 +51,16 @@ pub struct Shared {
     pub port: u16,
     stopping: AtomicBool,
     pub runs: Runs,
+    /// "Needs you": the list screens were last told, and whether a change may have altered it.
+    needs: NeedsWatch,
+}
+
+/// Keeps "Needs you" (docs/knowledge/needs-you.md) pushed: a change to a task's state, a request or a task's removal marks it, and
+/// its own thread derives the list again from the store and pushes it whole when it differs.
+struct NeedsWatch {
+    dirty: Mutex<bool>,
+    wake: Condvar,
+    last: Mutex<Vec<NeedsItem>>,
 }
 
 pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -68,6 +78,10 @@ impl Shared {
 
     /// Pushes a change to every subscribed connection. Called with the core locked, so events leave in revision order.
     pub fn broadcast(&self, msg: &ServerMessage) {
+        if let ServerMessage::Event { change: Change::TaskUpdated { .. } | Change::PermissionChanged { .. } | Change::TaskRemoved { .. }, .. } = msg {
+            *lock(&self.needs.dirty) = true;
+            self.needs.wake.notify_one();
+        }
         let text = msg.to_json();
         for c in lock(&self.conns).values().filter(|c| c.subscribed) {
             let _ = c.tx.send(Out::Text(text.clone()));
@@ -82,6 +96,32 @@ impl Shared {
             let t = text.get_or_insert_with(|| msg.to_json());
             let _ = c.tx.send(Out::Text(t.clone()));
             c.wake.wake();
+        }
+    }
+}
+
+/// The "Needs you" thread: after each marked change (a few at once are taken together), the list again, pushed when it changed.
+fn watch_needs(shared: Arc<Shared>) {
+    loop {
+        {
+            let mut dirty = lock(&shared.needs.dirty);
+            while !*dirty {
+                dirty = shared.needs.wake.wait(dirty).unwrap_or_else(std::sync::PoisonError::into_inner);
+            }
+        }
+        if shared.stopping.load(Ordering::SeqCst) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+        *lock(&shared.needs.dirty) = false;
+        // The core stays locked while the list is pushed, so it leaves in order with the changes around it.
+        let core = lock(&shared.core);
+        let Ok(items) = neko_core::needs::derive(&core.store) else { continue };
+        let mut last = lock(&shared.needs.last);
+        if *last != items {
+            *last = items.clone();
+            let revision = core.store.revision().unwrap_or(0);
+            shared.broadcast(&ServerMessage::Event { revision, change: Change::NeedsChanged { items } });
         }
     }
 }
@@ -121,7 +161,11 @@ pub fn run(dir: &Path, port: u16) -> Result<(), StartError> {
     let claude_bin = std::env::var_os("NEKO_CLAUDE_BIN").filter(|b| !b.is_empty()).map(std::path::PathBuf::from);
     let runtimes: Vec<Arc<dyn Runtime>> = vec![Arc::new(neko_core::claude::ClaudeRuntime::new(claude_bin, guard))];
     let runs = Runs::new(runtimes, dir.to_path_buf());
-    let shared = Arc::new(Shared { core: Mutex::new(core), conns: Mutex::new(HashMap::new()), token, port, stopping: AtomicBool::new(false), runs });
+    let first = neko_core::needs::derive(&core.store).unwrap_or_default();
+    let needs = NeedsWatch { dirty: Mutex::new(false), wake: Condvar::new(), last: Mutex::new(first) };
+    let shared = Arc::new(Shared { core: Mutex::new(core), conns: Mutex::new(HashMap::new()), token, port, stopping: AtomicBool::new(false), runs, needs });
+    let for_needs = shared.clone();
+    std::thread::Builder::new().name("neko-needs".into()).spawn(move || watch_needs(for_needs))?;
     // Find the agent CLIs once now, off the main thread, so the first task and Settings do not wait for it.
     let warm = shared.clone();
     let _ = std::thread::Builder::new().name("neko-detect".into()).spawn(move || {
@@ -173,6 +217,8 @@ pub fn run(dir: &Path, port: u16) -> Result<(), StartError> {
 /// Closes every connection and wakes the accept loop so it can end.
 fn stop(shared: &Shared) {
     shared.stopping.store(true, Ordering::SeqCst);
+    *lock(&shared.needs.dirty) = true;
+    shared.needs.wake.notify_one();
     for c in lock(&shared.conns).values() {
         let _ = c.tx.send(Out::Close);
         c.wake.wake();
@@ -366,12 +412,29 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
                 (Err(e), ..) | (_, Err(e), ..) | (_, _, Err(e), _) | (.., Err(e)) => internal(e),
             }
         }
-        Request::FollowUp { task, words } => {
+        Request::FollowUp { task, words, answering } => {
             if words.len() > neko_protocol::MAX_WORDS_BYTES {
                 return (id, Reply::error(ErrorCode::InvalidWords, "That is too long to send. Put the long part in a file."), Flow::Continue);
             }
             let found = lock(&shared.core).store.get_task(&task);
             match found {
+                Ok(Some(t)) if answering.is_some() => {
+                    // An answer to a question: only while the task still waits on that run's question (another screen, or a
+                    // notification, may have answered it).
+                    let newest = lock(&shared.core).store.runs_of(&t.id).ok().and_then(|mut r| r.pop()).map(|r| r.id);
+                    if t.status != TaskStatus::Asked || newest != answering {
+                        Reply::error(ErrorCode::AlreadyAnswered, "That was already answered.")
+                    } else if words.trim().is_empty() {
+                        Reply::error(ErrorCode::InvalidWords, "Type an answer first.")
+                    } else {
+                        match runs::start(shared, t, Some(words)) {
+                            Ok(()) => Reply::Ok,
+                            // Another answer started a run first.
+                            Err(Reply::Error { code: ErrorCode::Busy, .. }) => Reply::error(ErrorCode::AlreadyAnswered, "That was already answered."),
+                            Err(r) => r,
+                        }
+                    }
+                }
                 Ok(Some(t)) => runs::follow_up(shared, t, words),
                 Ok(None) => Reply::error(ErrorCode::NotFound, "There is no such task."),
                 Err(e) => internal(e),
@@ -409,6 +472,10 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
                 Err(e) => internal(e),
             }
         }
+        Request::ListNeeds => match neko_core::needs::derive(&lock(&shared.core).store) {
+            Ok(items) => Reply::Needs { items },
+            Err(e) => internal(e),
+        },
         Request::DayUsage { from_ms } => match lock(&shared.core).store.day_usage(from_ms) {
             Ok(usage) => Reply::DayUsage { usage },
             Err(e) => internal(e),

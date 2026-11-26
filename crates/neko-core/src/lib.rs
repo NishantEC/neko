@@ -8,6 +8,7 @@ pub mod clock;
 pub mod conductor;
 pub mod find;
 pub mod guard;
+pub mod needs;
 pub mod policy;
 pub mod records;
 pub mod runtime;

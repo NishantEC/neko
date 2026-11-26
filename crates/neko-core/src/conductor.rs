@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use neko_protocol::{
-    Change, Changes, Decision, Part, PartBody, PartId, Permission, PermissionId, PermissionMode, PermissionState, Pricing, Run, RunId, RunStatus, Task, TaskId, TaskStatus, Tone, ToolState, Usage,
+    Change, Changes, Decision, FailureKind, Part, PartBody, PartId, Permission, PermissionId, PermissionMode, PermissionState, Pricing, Run, RunId, RunStatus, Task, TaskId, TaskStatus, Tone, ToolState, Usage,
 };
 
 use crate::policy::{self, Verdict};
@@ -436,7 +436,7 @@ impl RunBook {
         if let Outcome::Failed(f) = &outcome {
             let (text, next) = notice(&self.who, f);
             self.run.reason = Some(text.clone());
-            out.extend(self.new_part(core, PartBody::Notice { tone: Tone::Error, text, next }, now, true)?);
+            out.extend(self.new_part(core, PartBody::Notice { tone: Tone::Error, text, next, failure: failure_kind(f) }, now, true)?);
         }
         if outcome == Outcome::Stopped {
             self.run.reason = Some("You stopped it.".to_owned());
@@ -458,6 +458,18 @@ pub fn ends_with_question(parts: &[Part], run: &RunId) -> bool {
     match last.map(|p| &p.body) {
         Some(PartBody::Agent { text, .. }) => text.trim_end().trim_end_matches(['*', '_', '"', '\'', ')', ']', '`', '\u{201D}', '\u{2019}']).ends_with('?'),
         _ => false,
+    }
+}
+
+/// Which failures the person can act on (docs/knowledge/needs-you.md): they are listed in "Needs you". Every other failure is a
+/// notice in the task only.
+pub fn failure_kind(f: &Failure) -> Option<FailureKind> {
+    match f {
+        Failure::NotInstalled => Some(FailureKind::NotInstalled),
+        Failure::NotSignedIn => Some(FailureKind::NotSignedIn),
+        Failure::UsageLimit { .. } => Some(FailureKind::UsageLimit),
+        Failure::FolderGone => Some(FailureKind::FolderMissing),
+        Failure::Crashed { .. } | Failure::Reported(_) | Failure::TimedOut | Failure::Stalled | Failure::HookMissing | Failure::Unchecked { .. } => None,
     }
 }
 
@@ -499,10 +511,11 @@ pub fn notice(who: &Who, f: &Failure) -> (String, Option<String>) {
     }
 }
 
-/// A notice on its own, outside any run (the runtime could not start). Stored as a part; returns the changes.
-pub fn standalone_notice(core: &mut Core, task: &Task, tone: Tone, text: String, next: Option<String>) -> Result<Vec<Out>, StoreError> {
+/// A notice on its own, outside any run (the runtime could not start). Stored as a part; returns the changes. `failure`: the kind
+/// of failure the person can act on, if it is one.
+pub fn standalone_notice(core: &mut Core, task: &Task, tone: Tone, text: String, next: Option<String>, failure: Option<FailureKind>) -> Result<Vec<Out>, StoreError> {
     let now = core.now();
-    let part = Part { id: PartId(core.new_id("part")), task: task.id.clone(), run: None, seq: core.store.next_part_seq(&task.id)?, at_ms: now, ended_ms: Some(now), body: PartBody::Notice { tone, text, next } };
+    let part = Part { id: PartId(core.new_id("part")), task: task.id.clone(), run: None, seq: core.store.next_part_seq(&task.id)?, at_ms: now, ended_ms: Some(now), body: PartBody::Notice { tone, text, next, failure } };
     let rev = core.store.insert_part(&part, now)?;
     Ok(vec![Out::Change(rev, Change::PartChanged { part })])
 }

@@ -278,6 +278,13 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Every request still waiting, in any task, oldest first ("Needs you").
+    pub fn pending_permissions(&self) -> Result<Vec<Permission>, StoreError> {
+        let mut st = self.conn.prepare_cached(&format!("SELECT {PERMISSION_COLUMNS} FROM permissions WHERE state = 'pending' ORDER BY asked_ms, id"))?;
+        let rows = st.query_map([], permission_of)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// The rules the person answered "Always allow" for, in this task only.
     pub fn always_rules(&self, task: &TaskId) -> Result<Vec<String>, StoreError> {
         let mut st = self.conn.prepare_cached("SELECT rule FROM permissions WHERE task_id = ?1 AND state = 'always_allowed'")?;

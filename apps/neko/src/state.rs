@@ -568,7 +568,7 @@ impl App {
         if words.trim().is_empty() || self.open_is_working() {
             return;
         }
-        if let Some(id) = self.send(Request::FollowUp { task: task.clone(), words: words.clone() }) {
+        if let Some(id) = self.send(Request::FollowUp { task: task.clone(), words: words.clone(), answering: None }) {
             self.asked.insert(id, Asked::FollowUp(task.clone(), words));
             self.replies.insert(task, TextEdit::default());
             self.at_bottom = true;
@@ -786,6 +786,7 @@ impl App {
                     *s = settings;
                 }
             }
+            Change::NeedsChanged { .. } => {}
         }
     }
 

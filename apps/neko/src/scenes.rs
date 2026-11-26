@@ -285,7 +285,7 @@ impl Script {
     }
 
     fn notice(&mut self, tone: Tone, words: &str, next: &str) -> &mut Self {
-        self.part(PartBody::Notice { tone, text: words.into(), next: Some(next.into()) }, 0, true)
+        self.part(PartBody::Notice { tone, text: words.into(), next: Some(next.into()), failure: None }, 0, true)
     }
 }
 
