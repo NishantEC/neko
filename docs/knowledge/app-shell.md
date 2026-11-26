@@ -62,9 +62,10 @@ their position and selected state, lists and fields are labelled, each page has 
 landmarks exist. Reduce Motion goes to rune-ui's theme (`Theme::with_reduced_motion`); the system's light/dark is read every frame
 (`tests/structure.rs` switches it live).
 
-In a real window the tree follows the view while the window is active. Behind another app (inactive), Rune at 53f6d36 stops
-sending its structural changes once an assistive client is attached: see "Finding" in `docs/knowledge/qa.md`. VoiceOver users in
-Neko's window are not affected; the rig's window runs open active for that reason.
+In a real window, Rune at 53f6d36 stops sending structural changes to the tree once an assistive client is attached: at once in
+an inactive window behind another app, and after enough change in an active one (new list rows, a request card in a long
+conversation, an open menu's items). See "Finding" in `docs/knowledge/qa.md`. Not fixed: it needs Rune (an upstream report is
+drafted there).
 
 ## The link
 

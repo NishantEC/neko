@@ -89,7 +89,7 @@ unless `ring: false`), `title`, `daemon`, `file`, `no_file`, `sh`, `git_same`, `
 - Reading the window's accessibility tree takes seconds, so window runs leave long pauses after presses and checks.
 - A real window run cannot click the system's notification permission prompt: it records it and needs the person once.
 
-## Finding: an inactive window's accessibility tree goes stale (Rune at 53f6d36)
+## Finding: the real window's accessibility tree goes stale (Rune at 53f6d36)
 
 Measured on 2026-11-26 with the bare binary, a temporary data folder, a window script that types a task at about 10 s, and
 `RUNE_A11Y_LOG=1` (Rune logs each activation and each tree update it sends):
@@ -98,22 +98,32 @@ Measured on 2026-11-26 with the bare binary, a temporary data folder, a window s
 | --- | --- | --- |
 | inactive (`RUNE_OPEN_INACTIVE`, behind the frontmost app) | at 6 s, after the app connected | Rune sent 1 to 3 nodes every frame and never the task opening (dozens of nodes); the tree stayed on Home while the window drew the task |
 | inactive | at 3 s, before the app connected | the window stopped advancing: still "Starting Neko…", the script's typing not shown |
-| active | at 3 s | the tree followed: the task's controls were there |
+| active | at 3 s | after one task opened the tree followed: the task's controls were there |
 | inactive | at 12 s, nothing changed after | the tree was right (it was built at activation) |
 
-Neko's code is not involved: it never touches the tree root, and the same build behaves differently by window state alone. In
-Rune, updates go out only from `a11y_turn` at the end of a turn, and `RuntimeCore::a11y_update` returns nothing while
-`paint.drawn.len() != tree.nodes.len()`; an inactive window that commits without painting every node (Rune's covered path,
-`covered_frame`, lands frames without painting and marks live content not visible) never sends its structural changes. That is the
-likely cause; we did not patch Rune to prove it.
+And in the full window runs with the window **active** (2026-11-26 17:00 UTC): first-task, git-worktree and context passed, but
+ask-mode (the second request's buttons, after the conversation had scrolled), workspaces (the sidebar still said "No tasks yet"
+after three tasks) and workspace-picker (an open menu's items) read a stale tree too. So it is not only inactive windows: after a
+while, structural changes stop reaching the tree in an active window as well.
 
-**Real VoiceOver users** work in the active window, where the tree follows (the third row): they are not affected while Neko is in
-front. Someone using VoiceOver in another app while Neko works in the background gets a stale tree for Neko until its window
-becomes active again (whether it catches up at once on activation was not measured).
+Neko's code is not involved as far as we can tell: it never touches the tree root, and the same build behaves differently by window
+state and by how much has changed. In Rune, updates go out only from `a11y_turn` at the end of a turn;
+`RuntimeCore::a11y_update` returns nothing while `paint.drawn.len() != tree.nodes.len()`, and takes a "scrolled only" shortcut
+when its stamp says only scroll offsets and text fills moved. An inactive window that commits without painting every node (Rune's
+covered path, `covered_frame`, lands frames without painting and marks live content not visible) never sends its structural
+changes; content that grows inside a scroll view pinned to its bottom may be taken for a scroll. Those are the likely causes; we did
+not patch Rune to prove them.
 
-**The rig** opens window runs active (above). **Upstream report (not filed):** "rune 53f6d36, macOS: with a window opened inactive
-(`RUNE_OPEN_INACTIVE`) and behind another app's window, once an assistive client activates the AccessKit adapter, structural changes
-to the view are never sent (`RUNE_A11Y_LOG` shows only 1-3 node updates per frame); if activation happens before the app's first
-data arrives, the window stops advancing until it is activated. Expected: the accessibility tree follows the view in any window
-state, as it does in an active window. Suspected: `a11y_update`'s early return when `paint.drawn` and `tree.nodes` differ, together
-with frames that commit without painting while covered." Narrowest workaround for Neko: none needed in the app; the rig runs active.
+**Real VoiceOver users** are likely affected: in an active window, after enough change (a long conversation, more tasks), VoiceOver
+would read controls that are gone and miss new ones (a permission request's answers, new sidebar rows, menu items). This is not
+fixed: it needs Rune.
+
+**The rig** opens window runs active (above), which is how people use the window, and keeps the failures it sees as evidence.
+**Upstream report (not filed):** "rune 53f6d36, macOS (AccessKit SubclassingAdapter): once an assistive client has activated the
+adapter, structural changes to the view stop being sent. With a window opened inactive (`RUNE_OPEN_INACTIVE`) behind another app,
+`RUNE_A11Y_LOG` shows only 1-3 node updates per frame and the tree never shows the new screen; if activation happens before the
+app's first data arrives, the window stops advancing until it is activated. In an active window it happens later: new rows in a list,
+a permission card added to a conversation that sticks to its bottom, an open dropdown menu's items, are missing from the tree while
+drawn. Expected: the tree follows the view in every window state. Suspected: `a11y_update`'s early return when `paint.drawn` and
+`tree.nodes` differ (frames that commit without painting), and the `scrolled_only` shortcut taking growth in a stick-to-bottom
+scroll view for a scroll." Narrowest workaround for Neko: none in the app at this rev (no public way to force a full tree).

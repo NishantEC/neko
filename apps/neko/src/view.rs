@@ -450,7 +450,8 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
                     .font(weight(t.ty.sm, t.ty.medium))
                     .color(t.ink_muted())
                     .truncate()
-                    .min_w(0.0)
+                    // With room, the folder path (cut in its middle) gives way before the workspace's name does.
+                    .min_w(if narrow { 0.0 } else { 72.0 })
                     .shrink()
                     .max_w(if narrow { 110.0 } else { 180.0 }),
             );
@@ -629,6 +630,8 @@ fn task_folder(s: &App, t: &Theme) -> Option<El> {
     };
     let mut place = row()
         .key("task-folder")
+        .min_w(0.0)
+        .shrink()
         .role("group")
         .label(label)
         .help(folder.clone())
@@ -636,7 +639,7 @@ fn task_folder(s: &App, t: &Theme) -> Option<El> {
         .center_y()
         .child(glyph(&crate::ui::icons::FOLDER, t.control.icon_sm, t.ink_faint()))
         // The title gives way first; the path is cut in its middle to a width that leaves the branch whole.
-        .child(text(shown).key("task-folder-path").font(t.ty.sm).color(t.ink_muted()).truncate_middle().max_w(if s.sidebar_shown() { 320.0 } else { 150.0 }).a11y_hidden());
+        .child(text(shown).key("task-folder-path").font(t.ty.sm).color(t.ink_muted()).truncate_middle().min_w(0.0).shrink().max_w(if s.sidebar_shown() { 320.0 } else { 150.0 }).a11y_hidden());
     if let Some(b) = branch {
         place = place.child(glyph(&crate::ui::icons::COMMIT, t.control.icon_sm, t.ink_faint())).child(text(b).key("task-folder-branch").font(crate::ui::agent::mono(t, t.ty.sm)).color(t.ink_muted()).truncate_middle().max_w(160.0).a11y_hidden());
     }
