@@ -16,7 +16,7 @@ use crate::ui::agent::{FoldLine, PressTx, caption, elapsed, icon_button, mono, p
 use crate::ui::base::{Shape, Theme, glyph};
 use crate::ui::button::Button;
 use crate::ui::icons;
-use crate::ui::message::BLOCK_GAP;
+use crate::ui::message::{Bubble, Message};
 use crate::view::{COLUMN, raised, well};
 
 /// How a card that arrives settles in: up eight points and in, on the theme's settle (a fade alone under Reduce Motion).
@@ -24,29 +24,21 @@ pub fn settling(e: El) -> El {
     e.transition(Transition::offset(0.0, 8.0).combined(Transition::opacity()))
 }
 
-/// The person's words: a soft well at the right. Copy shows under them while the pointer is over them or the keyboard is in them,
-/// and takes no room while hidden (it stays in the Tab order, as rune-ui's Message does it).
+/// The person's words: rune-ui's `Message` with the well bubble at the right. Copy shows under them while the pointer is over them or
+/// the keyboard is in them, and takes no room while hidden (it stays in the Tab order).
 pub fn person(s: &App, t: &Theme, key: &str, words_key: &str, words: &str) -> El {
     let said = text(words.to_owned()).key(words_key.to_owned()).font(t.ty.md).color(t.ink()).wrap().min_w(0.0).selectable(true);
-    let bubble = well(t, col().key(format!("{key}-bubble")).px(t.space.at(4.0)).py(t.space.at(2.5)).max_w(COLUMN * 0.8).min_w(0.0).radius(t.radius.xl).round_as(t)).child(said);
     let w = words.to_owned();
     let press: PressTx<App> = Rc::new(move |_: &mut App, tx: &mut Tx| tx.copy(w.clone()));
     let copy = icon_button(t, &format!("copy-{key}"), "Copy", &icons::COPY, None, false, Some(press));
-    let shown = s.reveal(key).shown();
-    let slot = row().key(format!("{key}-actions-slot"));
-    let slot = if shown { slot.pt(t.space.at(BLOCK_GAP)).w_full().justify_end().child(copy) } else { slot.absolute(0.0, 0.0).size(0.0, 0.0).clip_rounded(0.0).child(copy) };
-    let (a, b) = (key.to_owned(), key.to_owned());
-    col()
-        .key(key.to_owned())
-        .role("article")
-        .label("You said")
-        .w_full()
-        .max_w(COLUMN)
-        .items_end()
-        .child(bubble)
-        .child(slot)
-        .on_hover_change(move |s: &mut App, inside: bool, _: &mut Tx| s.reveals.entry(a.clone()).or_default().hovered = inside)
-        .on_focus_within_change(move |s: &mut App, within: bool, _: &mut Tx| s.reveals.entry(b.clone()).or_default().focused = within)
+    let at = key.to_owned();
+    Message::user(key.to_owned(), "You")
+        .bubble(Bubble::Well)
+        .column(COLUMN)
+        .child(said)
+        .actions(copy)
+        .reveal_actions(s.reveal(key), move |s: &mut App| s.reveals.entry(at.clone()).or_default())
+        .build(t)
 }
 
 /// A neutral step mark: the state's shape in the third ink (a tick, a dash, a turning ring), never a colour; red only for a tool
