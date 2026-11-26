@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 use neko_protocol::{
-    Change, Decision, Part, PartBody, Permission, PermissionId, PermissionMode, Reply, Request, Run, RunStatus, RuntimeInfo, ServerMessage, Settings, Task, TaskId, Transcript, UsageTotal,
+    Change, Decision, Part, PartBody, Permission, PermissionId, PermissionMode, Reply, Request, Run, RunStatus, RuntimeInfo, ServerMessage, Settings, Task, TaskId, Transcript,
 };
 use rune::TextEdit;
 
@@ -72,8 +72,10 @@ pub struct App {
     pub settings_open: bool,
     /// The agent CLIs and the settings, as the daemon last said.
     pub runtimes: Option<(Vec<RuntimeInfo>, Settings)>,
-    /// Today's usage, for the foot of the sidebar.
-    pub day: Option<UsageTotal>,
+    /// The person's home folder, so paths under it read `~/…` (None: shown whole).
+    pub home: Option<String>,
+    /// The context ring's panel is open (in the open task's composer).
+    pub context_open: bool,
     /// The task whose words stream to this window.
     pub watching: Option<TaskId>,
     /// Requests sent and what their reply is for.
@@ -182,7 +184,8 @@ impl Default for App {
             folder: None,
             settings_open: false,
             runtimes: None,
-            day: None,
+            home: None,
+            context_open: false,
             watching: None,
             asked: HashMap::new(),
             announce: None,
@@ -313,11 +316,6 @@ impl App {
         }
     }
 
-    fn ask_day(&mut self) {
-        let from = midnight(self.now_ms, self.utc_offset_s);
-        self.send(Request::DayUsage { from_ms: from });
-    }
-
     /// Whether the sidebar shows: the person's choice, else wide windows only.
     pub fn sidebar_shown(&self) -> bool {
         self.sidebar_choice.unwrap_or(self.width.is_none_or(|w| w >= FOLD_BELOW))
@@ -338,6 +336,7 @@ impl App {
 
     pub fn go_home(&mut self) {
         self.open = None;
+        self.context_open = false;
         self.settings_open = false;
         self.follow_open();
     }
@@ -350,6 +349,7 @@ impl App {
 
     pub fn open_task_id(&mut self, id: &TaskId) {
         self.open = Some(id.clone());
+        self.context_open = false;
         self.settings_open = false;
         self.at_bottom = true;
         self.follow_open();
@@ -391,7 +391,6 @@ impl App {
                 self.send(Request::Subscribe);
                 self.send(Request::ListTasks);
                 self.send(Request::ListRuntimes);
-                self.ask_day();
                 // A new connection watches nothing yet.
                 self.watching = None;
                 self.follow_open();
@@ -421,13 +420,7 @@ impl App {
                 }
                 self.upsert(task);
             }
-            Change::RunChanged { run } => {
-                let ended = run.status != RunStatus::Running;
-                self.books.entry(run.task.clone()).or_default().run(run);
-                if ended {
-                    self.ask_day();
-                }
-            }
+            Change::RunChanged { run } => self.books.entry(run.task.clone()).or_default().run(run),
             Change::PartChanged { part } => self.books.entry(part.task.clone()).or_default().part(part),
             Change::PartDelta { task, part, text } => {
                 if let Some(b) = self.books.get_mut(&task) {
@@ -486,10 +479,7 @@ impl App {
                 }
                 return;
             }
-            Reply::DayUsage { usage } => {
-                self.day = Some(usage);
-                return;
-            }
+            Reply::DayUsage { .. } => return,
             Reply::Error { message, .. } if matches!(asked, Some(Asked::FollowUp(..))) => {
                 if let Some(Asked::FollowUp(task, words)) = asked {
                     let r = self.replies.entry(task).or_default();

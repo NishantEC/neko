@@ -39,6 +39,12 @@ fn every_scene_reads_well_to_assistive_technology() {
                     assert!(named, "{at}: a list without a name");
                 }
             }
+            // A modal panel (the context ring's) hides the page from assistive technology by design: it is named, and the page's
+            // own rules hold again once it closes.
+            if let Some((_, m)) = all.iter().find(|(_, n)| has(n, "states", "modal")) {
+                assert!(!str_of(m, "name").trim().is_empty(), "{at}: a modal panel without a name: {m}");
+                continue;
+            }
             let h1 = all.iter().filter(|(_, n)| str_of(n, "role") == "heading" && n.get("level").and_then(|v| v.as_u64()) == Some(1)).count();
             assert_eq!(h1, 1, "{at}: one main heading");
             assert!(all.iter().any(|(_, n)| str_of(n, "role") == "main"), "{at}: a main landmark");

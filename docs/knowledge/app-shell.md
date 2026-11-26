@@ -9,8 +9,8 @@
 | --- | --- |
 | `lib.rs` | `run()`: headless runs return first; then the menu prep, the saved frame, the Dock registration, `rune::run_windows`. `poll` drains the link, follows the width, sets the title, keeps the frame, replaces the menu. `on_key`: ⌘N, ⌃⌘S, Escape. |
 | `state.rs` | `App` and what each event changes. No drawing, no I/O. |
-| `view.rs` | The window: sidebar (each task's state as its mark, today's usage at its foot), content band, Home and its folder chip. |
-| `task_view.rs` | The task view: the conversation, steps, permission requests, run cards, the composer. |
+| `view.rs` | The window: sidebar (each task's state as its mark), content band, Home and its folder chip. |
+| `task_view.rs` | The task view: the conversation, steps, permission requests, run cards, the composer and its context ring. |
 | `settings_view.rs` | Settings (⌘,): the agent CLIs, which one new tasks use, the permission mode. |
 | `link.rs` | The supervisor thread: find or start the daemon, connect, reconnect, an inbox the window drains. |
 | `window_place.rs` | Where the window was: frame from placement, restore onto the displays there are now, write once still. |
@@ -43,7 +43,7 @@ The model is pure and tested (`menu.rs`): no key is taken twice.
 ## Keyboard
 
 - Tab goes once round every control in reading order: Hide sidebar, New task, Home, each task list (one stop each), the composer,
-  the folder chip. In a task: copy buttons, fold lines, request answers, then the composer.
+  the folder chip. In a task: copy buttons, fold lines, request answers, then the composer and its context ring.
   `App::tab_visits_controls(true)` makes this so whatever the Mac's Keyboard Navigation setting is.
 - In a task list the arrow keys move (`focus_group`), Return opens the row.
 - In the composer Return sends, Shift+Return makes a new line. Escape gives focus back.
@@ -67,19 +67,34 @@ window asks `subscribe` and `list_tasks`. Words sent while the daemon is away st
 
 `NEKO_DATA_DIR`, else `~/Library/Application Support/neko`. Headless runs and tests never touch it, nor the prefs, nor the Dock.
 
-## The Task view (S1)
+## The Task view (S1, revised after the first real run)
 
+- **One reading column.** Every block (the person's words aside, at the right) shares one left edge and one width: steps, words,
+  the answer, requests, the card, the composer. Surfaces (fold lines' hover, the card, a request, the composer) start on the edge;
+  an open "Worked for" shows its steps after it on the same edge, not indented (tested at both window shapes).
 - **The conversation** is rune-ui's Conversation: pinned to the newest content until the person scrolls up, then a "Jump to
-  latest" pill. The person's words are a Message at the right; the agent's ("Neko") are Markdown on the page, no bubble,
-  selectable, with a copy button.
-- **Steps** (thinking, tool calls) are quiet single lines that fold (Reasoning, Tool), grouped tighter than messages. While a run
-  works they show as they happen, with a "Working…" shimmer when nothing streams. When it ends they fold behind one
-  "Worked for 2m 14s" line (agent's FoldLine); its last words stay open.
+  latest" pill. The person's words are a Message at the right with a copy button that shows on hover or focus. The agent's
+  ("Neko") are Markdown on the page, no bubble, selectable; only a run's final answer has a copy button.
+- **Steps** are quiet single lines that fold, built on rune-ui's FoldLine. A shell step is its command, on one line, cut in its
+  middle past 72 characters (the whole command is in the fold); other tools read as phrases ("Read src/app.rs", "Edited
+  ~/notes.md", "Searched for “Settings”"). Paths inside the task's folder are relative; under home they start `~/`. A duration
+  under a second is not shown. A command that exited non-zero keeps the finished mark with "exit 1" beside it; the red mark is
+  only for a tool that could not run; a denied step says "Denied".
+- **Thinking**: a thought with no words shows nothing. While the agent thinks and nothing else arrives, one live line says
+  "Thinking…" (rune-ui's shimmer, still under Reduce Motion); while it waits on something else, "Working…". A thought with words
+  folds as "Thought for 12s" ("Thought" under a second).
+- **Finished runs fold** behind one "Worked for 29s" line (or "Stopped after", "Interrupted after"), in every run of a task; its
+  final answer and any notice stay open. The person can open it; the choice lasts for that run while the app is open. A run with
+  nothing to fold shows the same line without a chevron. The live run is always open.
+- **The run card** shows only when the run changed files, has a branch, or failed: its state, files with + and −, the branch. No
+  duration (the line has it) and no money.
+- **The context ring** sits in the composer's footer: rune-ui's Context (a small bar and the share; a ring is an upstream ask),
+  named "Context 31% used", reached by Tab, opened by Return or a press. Its panel is Neko's own (`ctx-panel`): context used,
+  tokens in, out and cached for the task, and the cost as reported with how to read it. Escape closes it and focus goes back to
+  the ring. Nothing else in the app shows money; the sidebar's foot no longer has a day total.
 - **Permission requests**: see `permissions.md`.
-- **The run card** (Neko's own; rune-ui's Task card always shows checks and a dollar figure): status, files changed with + and −
-  from git, the branch, duration, and the cost as reported (`transcript.md`), plus the task's total after more than one run.
 - **The composer** (`reply`): Return sends a follow-up; while it works Send is Stop and Escape stops (also when the focus is
-  elsewhere in the task).
+  elsewhere in the task; with the context panel open, Escape closes it first).
 - The sidebar row's mark: hollow (new), dot (working), warning (needs you), check (done), cross (failed), slash (stopped or
   interrupted); the row's description says it in words. The window title follows the task. Finishing, failing and needing you
   are announced (`Tx::announce`).

@@ -111,7 +111,9 @@ fn a_task_streams_asks_stops_and_its_transcript_survives_a_restart() {
     click(&mut rt, &allow);
     until(&mut rt, "the run to finish after Allow once", |rt| status(rt) == Some(TaskStatus::Done));
     until(&mut rt, "the answer on the page", |rt| on_screen(rt, "The tests pass."));
-    assert!(rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("run-") && k.ends_with("-facts"))), "the run card");
+    assert!(rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("worked-"))), "the run's one line");
+    assert!(!rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("run-") && k.ends_with("-facts"))), "a scratch run that changed nothing has no card");
+    assert!(!rt.elements().into_iter().filter_map(|e| e.text).any(|t| t.contains('$')), "no money on screen");
     assert_eq!(shown(&rt, "task-words").as_deref(), Some(words), "the task's words are the first message");
 
     // A second task streams; Escape stops it.

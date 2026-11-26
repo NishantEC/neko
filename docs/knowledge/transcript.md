@@ -8,9 +8,15 @@ What a task said and did, stored so a restart loses nothing. `crates/neko-core/s
 - `runs`: one start of an agent: runtime, model, status (`running`, `done`, `failed`, `stopped`, `interrupted`), start, end,
   the CLI's conversation id, folder, branch, reason, and changes (files, lines added, removed).
 - `usage`: one line per run, as the CLI reported it: tokens in, out, cached, the cost if it gave one, the model, how to read the
-  cost (`charged`, `api_equivalent`, `unknown`), and who reported it.
+  cost (`charged`, `api_equivalent`, `unknown`), who reported it, and (store version 3) the context the run's last model call held
+  and the model's window when reported.
 - `parts`: the transcript in order (`seq` per task). A part is the person's words, the agent's words, thinking, a tool call (its
-  state, a short input and output), a permission request, or a notice. The body is JSON in one column.
+  state, a short input and output, and a command's exit code when it ran and exited non-zero), a permission request, or a
+  notice. The body is JSON in one column.
+- A tool call's state: `running`, `done` (also a command that exited non-zero: it ran), `failed` (it could not run, was cut off or
+  timed out), `denied` (the person said no, or no one answered).
+- Thinking with no words (all Claude Code sends today) stores no part. Whether the agent is thinking reaches watching screens as
+  `activity` events, never stored.
 - `permissions`: see `permissions.md`.
 - `settings`: key and value (the runtime new tasks use, the permission mode).
 
@@ -29,6 +35,7 @@ conversation with `--resume`.
 
 ## Cost
 
-Only what the CLI reported, labelled with who reported it. Under a subscription login the figure is an API-equivalent price, not
-money charged, and the app says so. With no cost reported, the run card shows tokens; with neither, nothing. The sidebar's foot
-shows today's total.
+Only what the CLI reported, labelled with who reported it. Nothing about money is on screen until the person opens the context
+ring in a task's composer: its panel shows how full the context is (the newest run's, against the reported window or an assumed
+200K, said so), the task's tokens in, out and cached, and the cost as reported with how to read it ("API-equivalent, as Claude
+Code reports it. Not charged on a subscription."). The run card and the sidebar show no money.

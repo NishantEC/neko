@@ -58,7 +58,7 @@ pub fn fixed_clock() -> (i64, i64) {
 /// The state of a picture or a test: no daemon, no prefs, the fixed clock.
 pub fn headless_state() -> App {
     let (now_ms, utc_offset_s) = fixed_clock();
-    App { now_ms, utc_offset_s, clock: fixed_clock, ..App::default() }
+    App { now_ms, utc_offset_s, clock: fixed_clock, home: Some("/Users/example".into()), ..App::default() }
 }
 
 fn init() -> App {
@@ -73,7 +73,7 @@ fn init() -> App {
     let width = Some(saved.map_or(window_place::DEFAULT.0, |f| f.w.max(window_place::MIN.0)) as f32);
     // The folder chosen last time, if it is still there.
     let folder = rune::prefs::Prefs::open(PREFS_ID).get::<String>(FOLDER_KEY).filter(|f| std::path::Path::new(f).is_dir());
-    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, folder, ..App::default() }
+    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, folder, home: std::env::var("HOME").ok(), ..App::default() }
 }
 
 /// New Task: Home with the keyboard in the composer.
@@ -100,7 +100,12 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         return true;
     }
     if ev.key == Key::Escape && !(m.cmd || m.shift || m.alt || m.ctrl) {
-        // Escape stops the open task's agent while it works; otherwise it gives focus back.
+        // Escape closes the context panel first (focus goes back to its ring); then it stops the open task's agent while it
+        // works; otherwise it gives focus back.
+        if s.context_open {
+            s.context_open = false;
+            return true;
+        }
         if !s.settings_open && s.open_is_working() {
             s.stop();
             return true;

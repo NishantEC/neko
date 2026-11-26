@@ -11,11 +11,11 @@ use std::rc::Rc;
 
 use neko_protocol::TaskStatus;
 use rune::Icon;
-use rune_ui_style::{ButtonVariant, tabular};
+use rune_ui_style::ButtonVariant;
 
 use crate::icons;
 use crate::state::{App, Daemon};
-use crate::ui::agent::{PressTx, chip, icon_button, money, tokens};
+use crate::ui::agent::{PressTx, chip, icon_button};
 use crate::ui::base::{Size, Theme, glyph, paint};
 use crate::ui::button::Button;
 use crate::ui::kbd::Kbd;
@@ -61,16 +61,17 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     if shown {
         root = root.child(sidebar(s, &t, lights)).child(el().w(1.0).h_full().fill(t.c.line));
     }
+    let mut layer = Vec::new();
     let page = if s.settings_open {
         crate::settings_view::settings_view(s, &t)
     } else {
         match s.open_task() {
-            Some(_) => crate::task_view::task_view(s, &t),
+            Some(_) => crate::task_view::task_view(s, &t, &mut layer),
             None => home(s, &t),
         }
     };
     let content = col().key("content").role("main").label(main_label(s)).grow(1.0).min_w(0.0).h_full().child(content_band(s, &t, if shown { 0.0 } else { lights })).child(page);
-    crate::ui::base::overlay_root(root.child(content), Vec::new())
+    crate::ui::base::overlay_root(root.child(content), layer)
 }
 
 fn main_label(s: &App) -> String {
@@ -105,23 +106,11 @@ fn sidebar(s: &App, t: &Theme, lights: f32) -> El {
     }
     let list = col().key("sidebar-scroll").w_full().grow(1.0).min_h(0.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(body.pb(t.space.at(4.0)));
     let mut column = paint(col().key("sidebar").role("navigation").label("Sidebar").w(SIDEBAR).h_full(), &t.mat.slab.base).child(band).child(list);
+    // No money at the foot: what runs cost is in the task's context ring, for whoever opens it.
     if let Some(line) = connection_line(s, t) {
-        column = column.child(row().w_full().px(t.space.at(4.0)).py(t.space.at(3.0)).child(line));
-    } else if let Some(line) = day_line(s, t) {
         column = column.child(row().w_full().px(t.space.at(4.0)).py(t.space.at(3.0)).child(line));
     }
     column
-}
-
-/// Today's usage at the sidebar's foot, as reported: the cost when a run reported one (and how to read it), else the tokens.
-fn day_line(s: &App, t: &Theme) -> Option<El> {
-    let d = s.day.as_ref().filter(|d| d.runs > 0)?;
-    let (words, label) = match d.cost_usd {
-        Some(c) if d.api_equivalent => (format!("Today {} · API-equivalent", money(c)), format!("Today's runs: {} at API prices, as reported. A subscription is not charged per call.", money(c))),
-        Some(c) => (format!("Today {}", money(c)), format!("Today's runs cost {}, as reported.", money(c))),
-        None => (format!("Today {} tokens", tokens(d.input_tokens + d.output_tokens)), format!("Today's runs used {} tokens, as reported.", tokens(d.input_tokens + d.output_tokens))),
-    };
-    Some(text(words).key("day-usage").role("status").label(label).font(tabular(t.ty.sm)).color(t.ink_faint()).truncate().min_w(0.0))
 }
 
 /// The quiet mark a task's row shows for its state.

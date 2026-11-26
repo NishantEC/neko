@@ -5,13 +5,15 @@ is away: code, browsers, files, spreadsheets, documents and creative apps, along
 
 **Status: slice S1, a task runs.** Neko is being rebuilt from an empty repository (begun 2026-11-26). Type a task on Home,
 optionally pick a folder, press Return: the agent starts by itself and its words stream into the task. Thinking and tool calls
-are quiet lines that fold. A risky step waits in the task for Allow once, Always allow or Deny. Stop stops it at once, a
-follow-up continues the same conversation, and a run card says what changed, how long it took and what it cost. Quit and
+are quiet lines that fold. Settings offers three permission modes: follow Claude Code's own rules, ask before risky steps
+(enforced by Neko), or full access; a step that waits shows in the task for Allow once, Always allow or Deny. Stop stops it at
+once, a follow-up continues the same conversation, a finished run folds behind one "Worked for" line, and a run card shows what
+changed when something did. Quit and
 relaunch: the whole transcript is still there. This page changes as each slice ships, and only describes what is built.
 
 **No API key.** Neko uses the agent CLIs already installed and signed in on your Mac, as child processes. Today that is Claude
-Code (`claude`); Settings (⌘,) shows which CLIs were found. Costs are shown as the CLI reports them; under a subscription they are
-API-equivalent prices, not money charged. A task in a git repository works in its own worktree on its own branch; nothing is
+Code (`claude`); Settings (⌘,) shows which CLIs were found. The context ring in a task's composer opens to its tokens and the
+cost as the CLI reports it; under a subscription that is an API-equivalent price, not money charged. Nothing else shows money. A task in a git repository works in its own worktree on its own branch; nothing is
 merged or pushed.
 
 ## What it will be

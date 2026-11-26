@@ -17,8 +17,8 @@ cd apps/neko && <cli> init --git https://github.com/NishantEC/rune-ui --tag v0.8
 `init` wrote the `rune`, `rune-kit`, `rune-ui-style`, `rune-ui-themes` dependencies and Rune's `[patch.crates-io]` table (eight
 crates, all at the same rev). `add` brought `base`, `icons`, `agent` and `font_inter` along.
 
-S1 added `response`, `reasoning` (with `shimmer`), `tool`, `confirmation`, `badge` and `radio_group` with the same CLI (`rune-ui add
-…`); `response` turned on rune-kit's `markdown` feature (pulldown-cmark, MIT). Rune's `native-file-dialog` feature brings rfd (MIT).
+S1 added `response`, `reasoning` (with `shimmer`), `tool`, `confirmation`, `badge`, `radio_group` and, after the first real run,
+`context` with the same CLI (`rune-ui add …`); `response` turned on rune-kit's `markdown` feature (pulldown-cmark, MIT). Rune's `native-file-dialog` feature brings rfd (MIT).
 
 ## Rules
 
@@ -41,6 +41,22 @@ Responding". `dock::register_on_main_thread` asks for a symbol image on the main
 only (tested by reading `lib.rs`).
 
 ## What rune-ui cannot do here (for upstream)
+
+S1, after the first real run:
+
+- `Context` draws a bar, not a ring; it always shows a dollar figure in its panel, with no "not reported" and no line saying how
+  to read the cost; its share is input + output + cache over the limit, not how full the context is now. Asks: a ring face
+  (`Context::ring()`), `Usage::context` separate from the token totals, `cost: Option<f64>`, and a `note(String)` line under the
+  cost. Neko passes the context held as `input` (so the share is right), never shows Context's own panel, and draws its own.
+- `Context`'s trigger does not open on Return (Space only); Neko adds the key on the built element.
+- `Tool` always shows the tool's name before its summary and a duration under a second ("0.0s"); it has no "exit N" or "denied"
+  state. Asks: a label override, `secs` hidden under one second, and a `meta(String)`. Neko builds its step lines from
+  `FoldLine`, `mark`, `caption` and `pre`.
+- `Reasoning` says "Thought for 0s" under a second and folds open to nothing when the thought is empty. Asks: hide the duration
+  under a second, and draw nothing for an empty finished thought.
+- `FoldLine` indents its open body; a column with one edge wants `indent(false)`. Neko draws the open body after the line.
+- `Message` has no way to show its actions only on hover; Neko uses Rune's `hover_group` and `group_opacity` on the built
+  elements, and the hidden row still takes its height.
 
 S1:
 
