@@ -695,7 +695,7 @@ fn task_interrupted(s: &mut App) {
     r.reason = Some("Neko stopped while this was running.".into());
     r.usage = None;
     let mut loose = Script::new(task, "none", start(s) + 60_000);
-    loose.notice(Tone::Warning, "Neko stopped while this was running. What was written is kept.", "Send a follow-up to carry on.");
+    loose.notice(Tone::Warning, "Neko was quit while this was running. Everything it said is kept.", "Send a follow-up to carry on.");
     for p in &mut loose.parts {
         p.run = None;
         p.seq += 100;

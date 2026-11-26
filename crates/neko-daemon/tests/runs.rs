@@ -412,7 +412,7 @@ fn when_the_daemon_dies_the_run_dies_with_it_and_a_restart_marks_it_interrupted(
     assert_eq!(t.task.status, TaskStatus::Interrupted);
     assert_eq!(t.runs[0].status, RunStatus::Interrupted);
     assert!(agent_words(&t).contains("still here"), "what was written is kept: {:?}", agent_words(&t));
-    assert!(notices(&t).iter().any(|(text, next)| text.contains("Neko stopped while this was running") && next.as_deref() == Some("Send a follow-up to carry on.")));
+    assert!(notices(&t).iter().any(|(text, next)| text.contains("Neko stopped unexpectedly while this was running") && text.contains("may be missing") && next.as_deref() == Some("Send a follow-up to carry on.")));
     let session = t.runs[0].session.clone().unwrap();
     c.request(Request::FollowUp { task: task.id.clone(), words: "Carry on".into(), answering: None }).unwrap();
     events_until(&mut c, "done", task_is(&task.id, TaskStatus::Done));

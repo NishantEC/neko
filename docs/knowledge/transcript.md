@@ -35,8 +35,11 @@ seconds and when their part ends. A measured 5-minute fake run is in the S1 repo
 ## A restart
 
 At start the daemon marks every run still `running` as `interrupted`, its task too, expires its pending requests, closes its open
-parts (keeping every word written) and adds a notice: "Neko stopped while this was running." A follow-up resumes the CLI's
-conversation with `--resume`.
+parts (keeping every word written) and adds a notice: "Neko stopped unexpectedly while this was running. Its last few seconds of
+words may be missing." (words reach the disk every few seconds, so a crash can lose the newest). A clean stop (SIGTERM, quitting)
+loses nothing: every run's agent ends through its run guard, waiting requests are told no, every streamed word is written, and the
+runs are marked interrupted at once with "Neko was quit while this was running. Everything it said is kept." The daemon exits
+within a second (`tests/shutdown.rs`). A follow-up resumes the CLI's conversation with `--resume`.
 
 ## Cost
 
