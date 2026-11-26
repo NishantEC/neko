@@ -1,0 +1,172 @@
+{
+  "name": "first-task",
+  "title": "A first task from Home",
+  "about": "An empty app. The person types a task of two lines on Home and presses Return. The task appears in the sidebar and opens; the agent's answer streams in; when the run ends it folds behind one \"Worked for\" line; the task's title is its first line.",
+  "cli": [
+    "fake"
+  ],
+  "window": true,
+  "steps": [
+    {
+      "do": "snap",
+      "name": "home-empty",
+      "expect": "Home greets the person and the sidebar has no tasks yet"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "greeting"
+            }
+          },
+          {
+            "see": {
+              "text": "No tasks yet"
+            }
+          }
+        ]
+      },
+      "expect": "The greeting is shown and the sidebar says \"No tasks yet\""
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Write a haiku about miso"
+    },
+    {
+      "do": "key",
+      "key": "shift+return"
+    },
+    {
+      "do": "type",
+      "text": "Keep it short [fake:long:8]"
+    },
+    {
+      "do": "snap",
+      "name": "typed",
+      "expect": "The words are in the composer"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Write a haiku about miso",
+          "in": {
+            "key": "today-list"
+          }
+        }
+      },
+      "within": 5,
+      "expect": "The task appears in the sidebar under Today"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "Write a haiku about miso"
+        }
+      },
+      "within": 5,
+      "expect": "The task opens; the band shows its title"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "word1"
+        }
+      },
+      "within": 5,
+      "expect": "The agent's words start to stream in"
+    },
+    {
+      "do": "snap",
+      "name": "streaming",
+      "expect": "Words stream while the run works; the composer offers Stop"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "key": "reply-*",
+          "name": "Stop"
+        }
+      },
+      "expect": "While it works, the composer's button is Stop"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Worked for"
+        }
+      },
+      "within": 15,
+      "expect": "When the run ends it folds behind one \"Worked for\" line",
+      "window_pause": 9
+    },
+    {
+      "do": "snap",
+      "name": "done",
+      "expect": "The finished task: the answer stays open under its \"Worked for\" line"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "title": "Write a haiku about miso"
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Write a haiku about miso",
+              "in": {
+                "key": "today-list"
+              }
+            }
+          },
+          {
+            "gone": {
+              "text": "Keep it short",
+              "in": {
+                "key": "today-list"
+              }
+            }
+          },
+          {
+            "gone": {
+              "text": "Keep it short",
+              "in": {
+                "key": "content-band"
+              }
+            }
+          }
+        ]
+      },
+      "expect": "The title is the first line only, in the window, the band and the sidebar"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "text": "$"
+        }
+      },
+      "expect": "No money is on screen"
+    }
+  ]
+}

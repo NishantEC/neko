@@ -1,0 +1,154 @@
+{
+  "name": "keyboard",
+  "title": "The first-task journey by keyboard only",
+  "about": "Tab moves through the window's controls with a focus ring at every stop; the task is typed and sent with Return; a second task is made with Command-N; the arrow keys move between tasks in the sidebar and Return opens one; Escape gives focus back.",
+  "cli": [
+    "fake"
+  ],
+  "steps": [
+    {
+      "do": "tab-to",
+      "on": {
+        "key": "composer-input"
+      },
+      "expect": "Tab reaches Home's composer, with a focus ring at every stop"
+    },
+    {
+      "do": "type",
+      "text": "Plan the week for mochi [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Worked for"
+        }
+      },
+      "expect": "Return sends it; the task opens and finishes"
+    },
+    {
+      "do": "snap",
+      "name": "first-done",
+      "expect": "The first task, sent by keyboard"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "focus": {
+          "key": "reply-input"
+        }
+      },
+      "soft": true,
+      "expect": "After sending, the keyboard is in the task's composer"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "focus": {
+          "key": "composer-input"
+        }
+      },
+      "soft": true,
+      "expect": "Command-N goes Home with the keyboard in the composer (ring drawn)"
+    },
+    {
+      "do": "type",
+      "text": "Feed tofu at noon [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Feed tofu"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "expect": "The second task opens and finishes"
+    },
+    {
+      "do": "tab-to",
+      "on": {
+        "role": "option"
+      },
+      "back": true,
+      "max": 25,
+      "expect": "Shift-Tab reaches the task list, with a ring at every stop"
+    },
+    {
+      "do": "snap",
+      "name": "list-focused",
+      "expect": "The task list has focus"
+    },
+    {
+      "do": "key",
+      "key": "down"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "focus": {
+          "role": "option",
+          "label": "Plan the week"
+        }
+      },
+      "soft": true,
+      "expect": "Down moves to the other task"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "Plan the week"
+        }
+      },
+      "within": 5,
+      "expect": "Return opens it"
+    },
+    {
+      "do": "snap",
+      "name": "opened-by-keyboard",
+      "expect": "Opened from the list by keyboard"
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "focused": true,
+          "role": "option"
+        }
+      },
+      "soft": true,
+      "expect": "Escape gives focus back"
+    }
+  ]
+}

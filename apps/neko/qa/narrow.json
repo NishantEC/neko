@@ -1,0 +1,115 @@
+{
+  "name": "narrow",
+  "title": "The first task in the smallest window",
+  "about": "At 760 by 560 points the sidebar is folded. The first-task journey works; the sidebar can be shown and hidden again with the band's button.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    760,
+    560
+  ],
+  "steps": [
+    {
+      "do": "snap",
+      "name": "narrow-home",
+      "expect": "Home at the smallest size, sidebar folded"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "gone": {
+              "key": "sidebar"
+            }
+          },
+          {
+            "see": {
+              "key": "sidebar-show"
+            }
+          }
+        ]
+      },
+      "expect": "The sidebar is folded and the band offers Show sidebar"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Water the plants [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Water the plants"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "expect": "The task opens and finishes in the narrow window"
+    },
+    {
+      "do": "snap",
+      "name": "narrow-task",
+      "expect": "The task at the smallest size"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "sidebar-show"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Water the plants"
+        }
+      },
+      "expect": "Show sidebar shows it, with the task"
+    },
+    {
+      "do": "sleep",
+      "secs": 0.6
+    },
+    {
+      "do": "snap",
+      "name": "narrow-sidebar",
+      "expect": "The sidebar shown in the narrow window"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "sidebar-hide"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "key": "sidebar"
+        }
+      },
+      "expect": "Hide sidebar folds it again"
+    }
+  ]
+}

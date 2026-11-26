@@ -1,0 +1,117 @@
+{
+  "name": "git-worktree",
+  "title": "A task in a git repository works in its own worktree",
+  "about": "The person picks a git repository as the task's folder. The task runs on its own branch in its own worktree; the person's checkout (HEAD, branch, status) is the same afterwards; the band shows the folder and branch; the run card shows the changed files.",
+  "cli": [
+    "fake"
+  ],
+  "window": true,
+  "setup": {
+    "files": {
+      "acme-api": {
+        "git": true,
+        "files": {
+          "README.md": "# Acme\nA small project.\n",
+          "src/main.rs": "fn main() {}\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "git-record",
+      "repo": "$files/acme-api",
+      "as": "before"
+    },
+    {
+      "do": "choose-folder",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "folder-chip",
+          "label": "acme-api"
+        }
+      },
+      "expect": "The folder chip names the repository"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Tidy the README [fake:tools]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "allow-until",
+      "until": {
+        "see": {
+          "name": "Worked for"
+        }
+      },
+      "within": 15,
+      "snap_first": true,
+      "expect": "The run edits in its worktree (its edit asked and allowed) and finishes"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "task-folder",
+          "label": "on branch neko/"
+        }
+      },
+      "expect": "The band shows the working folder and its neko/ branch"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "name": "Changes"
+        }
+      },
+      "expect": "The run card shows the changes"
+    },
+    {
+      "do": "snap",
+      "name": "worktree-done",
+      "expect": "Folder, branch and the run card with changed files"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "git_same": "before"
+      },
+      "expect": "The person's checkout is untouched: same HEAD, branch and status"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "git -C files/acme-api worktree list",
+          "has": "[neko/"
+        }
+      },
+      "expect": "The work happened in a worktree on a neko/ branch"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "git -C files/acme-api worktree list --porcelain | sed -n 's/^worktree //p' | tail -n 1 | xargs -I{} git -C {} status --porcelain",
+          "has": "README.md"
+        }
+      },
+      "expect": "The worktree holds the agent's change"
+    }
+  ]
+}

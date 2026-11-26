@@ -1,0 +1,229 @@
+{
+  "name": "ask-mode",
+  "title": "Ask before risky steps",
+  "about": "Settings is switched to \"Ask before risky steps\". A task runs two shell commands: the first request is allowed once and the command runs; the second is denied, shows as Denied and the agent carries on. A follow-up asks again; \"Always allow\" for cargo means the second cargo command is not asked about.",
+  "cli": [
+    "fake"
+  ],
+  "window": true,
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-mode-1"
+        }
+      },
+      "expect": "Settings opens and lists the permission modes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-mode-1"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 0.5
+    },
+    {
+      "do": "snap",
+      "name": "ask-mode-chosen",
+      "expect": "\"Ask before risky steps\" is chosen"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Run the checks [fake:hook-twice]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "perm-*-allow"
+        }
+      },
+      "within": 10,
+      "expect": "A request appears in the task and waits"
+    },
+    {
+      "do": "snap",
+      "name": "first-request",
+      "expect": "The request: Allow once, Always allow, Deny, and why Neko asks"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "role": "option",
+          "label": "Run the checks",
+          "name": "Needs you"
+        }
+      },
+      "soft": true,
+      "expect": "The sidebar row says the task needs you"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "perm-*-allow"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "label": "Allowed once"
+            }
+          },
+          {
+            "see": {
+              "key": "perm-*-allow"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "Allow once: the first command runs and a second request appears"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "perm-*-deny"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "text": "Tested and built."
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for",
+              "role": "button"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "After Deny the agent carries on and finishes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Worked for",
+        "role": "button"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 0.5
+    },
+    {
+      "do": "snap",
+      "name": "denied",
+      "expect": "The opened run shows the denied step as Denied"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "name": "Denied"
+        }
+      },
+      "expect": "The denied step says Denied"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Run them again [fake:hook-twice]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "perm-*-allow"
+        }
+      },
+      "within": 10,
+      "expect": "The follow-up asks about cargo again"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "perm-*-always"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "count": {
+          "of": {
+            "text": "Tested and built."
+          },
+          "is": 2
+        }
+      },
+      "within": 10,
+      "expect": "With Always allow the run finishes"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "gone": {
+              "key": "perm-*-allow"
+            }
+          },
+          {
+            "count": {
+              "of": {
+                "label": "Always allowed"
+              },
+              "is": 1
+            }
+          }
+        ]
+      },
+      "expect": "The second cargo command was not asked about"
+    },
+    {
+      "do": "snap",
+      "name": "always",
+      "expect": "Always allowed, no second request"
+    }
+  ]
+}

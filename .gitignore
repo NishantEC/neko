@@ -7,3 +7,5 @@
 # Local agent worktrees and scratch.
 /.claude/worktrees/
 /.worktrees/
+# QA results stay outside the repository (scripts/qa refuse an output path inside it).
+/neko-qa/

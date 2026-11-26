@@ -1,0 +1,153 @@
+{
+  "name": "stop",
+  "title": "Stop ends a run at once, by the button and by Escape",
+  "about": "A slow run is stopped with the composer's Stop button; it ends within about a second, the task says it stopped, and a follow-up continues it. A second slow task is stopped with Escape.",
+  "cli": [
+    "fake"
+  ],
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Count slowly [fake:slow]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "slow1"
+        }
+      },
+      "within": 10,
+      "expect": "The slow run streams"
+    },
+    {
+      "do": "snap",
+      "name": "working",
+      "expect": "The run works; the composer's button is Stop"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-submit"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Stopped after"
+        }
+      },
+      "within": 1.5,
+      "expect": "Stop ends the run within about a second; its line says \"Stopped after\""
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "role": "option",
+          "label": "Count slowly",
+          "name": "Stopped"
+        }
+      },
+      "soft": true,
+      "expect": "The sidebar row says the task stopped"
+    },
+    {
+      "do": "snap",
+      "name": "stopped",
+      "expect": "The stopped task"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Carry on please"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "I remember our conversation"
+        }
+      },
+      "within": 10,
+      "expect": "A follow-up continues the stopped task"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Count slowly again [fake:slow]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Count slowly again"
+            }
+          },
+          {
+            "see": {
+              "text": "slow1"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "A second slow task streams"
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Stopped after"
+        }
+      },
+      "within": 1.5,
+      "expect": "Escape stops it within about a second"
+    },
+    {
+      "do": "snap",
+      "name": "escape-stopped",
+      "expect": "Stopped by Escape"
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "name": "follow-up",
+  "title": "A follow-up continues the same conversation",
+  "about": "A finished task gets a reply. The reply starts a second run that resumes the same Claude Code conversation (the fake says so when it is resumed), in the same task.",
+  "cli": [
+    "fake"
+  ],
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Say hello to tofu [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Worked for"
+        }
+      },
+      "expect": "The first run finishes"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "Hello from the fake"
+        }
+      },
+      "expect": "The first answer is on the page"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "And what did I ask?"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "count": {
+          "of": {
+            "name": "Worked for",
+            "role": "status"
+          },
+          "min": 2
+        }
+      },
+      "expect": "A second run starts and finishes in the same task"
+    },
+    {
+      "do": "snap",
+      "name": "two-runs",
+      "expect": "Both runs are in one conversation"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "I remember our conversation"
+        }
+      },
+      "expect": "The second run resumed the same conversation (no new session)"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "count": {
+          "of": {
+            "role": "option",
+            "in": {
+              "key": "today-list"
+            }
+          },
+          "is": 1
+        }
+      },
+      "expect": "Still one task in the sidebar"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "key": "part-*-words",
+          "text": "And what did I ask?"
+        }
+      },
+      "expect": "The reply is shown as the person's words"
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "name": "follow-rules",
+  "title": "Following Claude Code's own rules",
+  "about": "The person's Claude Code settings allow Bash. In the default mode, \"Follow Claude Code's own rules\", Neko asks nothing for a shell command those rules allow, and Settings says what the rules allow.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "claude_settings": {
+      "permissions": {
+        "allow": [
+          "Bash",
+          "Edit",
+          "Write"
+        ]
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Run the tests [fake:hook-shell]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "The tests pass."
+        }
+      },
+      "within": 10,
+      "expect": "The command runs without a request"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "key": "perm-*"
+        }
+      },
+      "expect": "No request was shown"
+    },
+    {
+      "do": "snap",
+      "name": "no-request",
+      "expect": "The finished run, nothing asked"
+    },
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-rules",
+          "label": "Bash"
+        }
+      },
+      "expect": "Settings says the person's rules allow Bash, under Permissions"
+    },
+    {
+      "do": "snap",
+      "name": "settings-rules",
+      "expect": "Settings with the rules line"
+    }
+  ]
+}

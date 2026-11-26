@@ -1,0 +1,145 @@
+{
+  "name": "real-smoke",
+  "title": "One tiny real task through the installed Claude Code",
+  "about": "Real model calls (the cheapest model). In \"Ask before risky steps\", in a temporary folder: create hello.txt containing the word hi, then say done. Each request is allowed once. The file exists and the transcript shows the step. Then a one-line follow-up.",
+  "cli": [
+    "real"
+  ],
+  "setup": {
+    "files": {
+      "scratch": {
+        "files": {}
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-mode-1"
+        }
+      },
+      "expect": "Settings opens and lists the permission modes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-mode-1"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 0.5
+    },
+    {
+      "do": "snap",
+      "name": "ask-mode-chosen",
+      "expect": "\"Ask before risky steps\" is chosen"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "choose-folder",
+      "path": "$files/scratch"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Create a file named hello.txt in this folder containing the word hi, then say done. Do nothing else."
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "allow-until",
+      "until": {
+        "see": {
+          "name": "Worked for"
+        }
+      },
+      "within": 240,
+      "snap_first": true,
+      "expect": "The run asks, is allowed once, and finishes"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "file": {
+          "path": "$files/scratch/hello.txt",
+          "has": "hi"
+        }
+      },
+      "expect": "hello.txt exists and holds hi"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Worked for",
+        "role": "button"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 0.5
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "name": "hello.txt"
+        }
+      },
+      "expect": "The transcript shows the step that wrote hello.txt"
+    },
+    {
+      "do": "snap",
+      "name": "real-done",
+      "expect": "The real run, opened"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Reply with the single word: ok"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "allow-until",
+      "until": {
+        "count": {
+          "of": {
+            "name": "Worked for"
+          },
+          "min": 2
+        }
+      },
+      "within": 180,
+      "expect": "The follow-up finishes in the same task"
+    },
+    {
+      "do": "snap",
+      "name": "real-follow-up",
+      "expect": "The follow-up's answer"
+    }
+  ]
+}

@@ -1,0 +1,169 @@
+{
+  "name": "restart",
+  "title": "Quit mid-conversation and start again",
+  "about": "While a run works the app quits and the daemon stops. Both start again: the transcript is intact, the interrupted run is marked, and a follow-up resumes the conversation.",
+  "cli": [
+    "fake"
+  ],
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Hello [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Worked for"
+        }
+      },
+      "expect": "A first run finishes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Now count slowly [fake:slow]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "slow1"
+        }
+      },
+      "within": 10,
+      "expect": "A second run is working"
+    },
+    {
+      "do": "quit-app"
+    },
+    {
+      "do": "stop-daemon"
+    },
+    {
+      "do": "start-daemon"
+    },
+    {
+      "do": "start-app"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Hello"
+        }
+      },
+      "within": 15,
+      "expect": "After the restart the task is in the sidebar"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Hello"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "text": "Hello from the fake"
+            }
+          },
+          {
+            "see": {
+              "text": "Now count slowly"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "The transcript is intact: both messages and the first answer"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "slow1"
+        }
+      },
+      "soft": true,
+      "expect": "The words the person saw stream before the quit are kept"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "name": "Interrupted after"
+        }
+      },
+      "expect": "The interrupted run is marked"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "name": "Neko stopped while this was running"
+        }
+      },
+      "soft": true,
+      "expect": "A notice says Neko stopped while it ran"
+    },
+    {
+      "do": "snap",
+      "name": "after-restart",
+      "expect": "The task after the restart"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Are you still there?"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "I remember our conversation"
+        }
+      },
+      "within": 10,
+      "expect": "A follow-up resumes the conversation"
+    },
+    {
+      "do": "snap",
+      "name": "resumed",
+      "expect": "Resumed after the restart"
+    }
+  ]
+}

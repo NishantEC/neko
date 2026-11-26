@@ -1,0 +1,134 @@
+{
+  "name": "destructive",
+  "title": "A destructive command asks with no default",
+  "about": "In \"Ask before risky steps\" the agent wants to run git reset --hard. The request has the destructive form: Allow once and Deny only, no Always and no default answer, so Return does nothing. Escape denies it.",
+  "cli": [
+    "fake"
+  ],
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-mode-1"
+        }
+      },
+      "expect": "Settings opens and lists the permission modes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-mode-1"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 0.5
+    },
+    {
+      "do": "snap",
+      "name": "ask-mode-chosen",
+      "expect": "\"Ask before risky steps\" is chosen"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Tidy the branch [fake:hook-destructive]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "perm-*-allow"
+        }
+      },
+      "within": 10,
+      "expect": "The destructive request appears"
+    },
+    {
+      "do": "snap",
+      "name": "destructive-request",
+      "expect": "The destructive form: Allow once (danger), Deny"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "gone": {
+              "key": "perm-*-always"
+            }
+          },
+          {
+            "see": {
+              "key": "perm-*-deny"
+            }
+          }
+        ]
+      },
+      "expect": "No \"Always allow\" for a destructive step"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "sleep",
+      "secs": 1.0
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "key": "perm-*-allow"
+        }
+      },
+      "expect": "Return does nothing: the request still waits"
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "I left the branch alone"
+        }
+      },
+      "within": 5,
+      "expect": "Escape denies it and the agent carries on"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "label": "Denied"
+        }
+      },
+      "expect": "The request reads Denied"
+    },
+    {
+      "do": "snap",
+      "name": "denied",
+      "expect": "Denied by Escape"
+    }
+  ]
+}

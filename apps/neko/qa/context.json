@@ -1,0 +1,167 @@
+{
+  "name": "context",
+  "title": "The context ring and its popover",
+  "about": "After a run, nothing about money is on screen. The context ring in the composer opens its popover with tokens and the cost as reported, and the note for a subscription; Escape closes it and gives focus back to the ring.",
+  "cli": [
+    "fake"
+  ],
+  "window": true,
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Say hello [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Worked for"
+        }
+      },
+      "expect": "The run finishes"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "ctx-trigger"
+        }
+      },
+      "expect": "The context ring is in the composer"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "text": "$"
+        }
+      },
+      "expect": "Before the popover, no money is on screen"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "ctx-trigger"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "ctx-panel"
+        }
+      },
+      "expect": "The ring opens its popover"
+    },
+    {
+      "do": "snap",
+      "name": "popover",
+      "expect": "Context used, tokens in, out and cached, the cost"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "text": "$",
+              "in": {
+                "key": "ctx-panel"
+              }
+            }
+          },
+          {
+            "see": {
+              "key": "ctx-note",
+              "text": "Not charged on a subscription"
+            }
+          }
+        ]
+      },
+      "expect": "The popover shows the reported cost and the subscription note"
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "key": "ctx-panel"
+        }
+      },
+      "expect": "Escape closes the popover"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "focus": {
+          "key": "ctx-trigger"
+        },
+        "ring": false
+      },
+      "expect": "Focus goes back to the ring"
+    },
+    {
+      "do": "tab-to",
+      "on": {
+        "key": "ctx-trigger"
+      },
+      "max": 25,
+      "window": false,
+      "expect": "Tab reaches the ring, with a focus ring at every stop"
+    },
+    {
+      "do": "key",
+      "key": "return",
+      "window": false
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "ctx-panel"
+        }
+      },
+      "window": false,
+      "expect": "Return opens the popover from the keyboard"
+    },
+    {
+      "do": "key",
+      "key": "escape",
+      "window": false
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "key": "ctx-panel"
+        }
+      },
+      "window": false,
+      "expect": "Escape closes it again"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "focus": {
+          "key": "ctx-trigger"
+        }
+      },
+      "soft": true,
+      "window": false,
+      "expect": "Focus is back on the ring, with its focus ring drawn"
+    }
+  ]
+}

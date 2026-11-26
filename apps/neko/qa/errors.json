@@ -1,0 +1,210 @@
+{
+  "name": "errors",
+  "title": "Calm notices when the CLI cannot run",
+  "about": "The usage limit, not signed in, the task's folder gone, and Claude Code not installed: each shows a calm notice in the task saying what to do next.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "files": {
+      "notes": {
+        "files": {
+          "notes.md": "Notes\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check the limit [fake:limit]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "has reached its usage limit"
+        }
+      },
+      "within": 10,
+      "expect": "Usage limit: a calm notice with when it resets"
+    },
+    {
+      "do": "snap",
+      "name": "limit",
+      "expect": "The usage-limit notice"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check the login [fake:signin]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "is not signed in"
+        }
+      },
+      "within": 10,
+      "expect": "Not signed in: a calm notice with the sign-in command"
+    },
+    {
+      "do": "snap",
+      "name": "signin",
+      "expect": "The not-signed-in notice"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "choose-folder",
+      "path": "$files/notes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Read the notes [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Worked for"
+        }
+      },
+      "within": 10,
+      "expect": "A task in a plain folder runs"
+    },
+    {
+      "do": "remove",
+      "path": "$files/notes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Again please"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "The folder this task works in is gone"
+        }
+      },
+      "within": 10,
+      "expect": "The folder gone: a calm notice"
+    },
+    {
+      "do": "snap",
+      "name": "folder-gone",
+      "expect": "The folder-gone notice"
+    },
+    {
+      "do": "stop-daemon"
+    },
+    {
+      "do": "start-daemon",
+      "env": {
+        "NEKO_CLAUDE_BIN": "$work/nowhere/claude"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "daemon": "connected"
+      },
+      "within": 15
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "folder-clear"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Say hello"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "is not installed on this Mac"
+        }
+      },
+      "within": 10,
+      "expect": "Not installed: a calm notice with the install line"
+    },
+    {
+      "do": "snap",
+      "name": "not-installed",
+      "expect": "The not-installed notice"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "text": "{\""
+        }
+      },
+      "expect": "No raw JSON on screen"
+    }
+  ]
+}
