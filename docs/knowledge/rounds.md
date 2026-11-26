@@ -24,7 +24,7 @@ Status says whether it will run by itself, and if not why: `scheduled`, `manual`
 | `daily {at}` | Every day at HH:MM (24-hour). |
 | `weekdays {days, at}` | On chosen days (mon … sun) at HH:MM. |
 | `every {hours}` | Every N hours, 1 to 24, of real time, counted from an **anchor**: when the round was made, turned on, or its schedule changed. The first run is N hours after the anchor. |
-| `manual` | Never by itself: only Run now. |
+| `manual` | Never by itself: only Run now. A manual round is always on (it has nothing to switch, so its card has no switch) and the three-failures brake does not apply to it. |
 
 Why these and not cron: a person picks from four plain choices; no expression to get wrong. Why "every N hours" counts from the
 anchor (as Calendar's and Reminders' repeats count from their start): "every 6 hours" has no natural wall-clock grid, and an
@@ -106,6 +106,7 @@ is skipped and recorded: "The last run is still working." or "The last run is wa
   time that passes is a skipped line ("Every round was paused."); nothing is caught up after.
 - **Run now** works whatever the switch, the pause or the schedule say, and is refused (`busy`) while the last task is unfinished
   and (`refused`) for a retired cat or a missing folder.
+- **A manual round** is always on: making or editing a round to manual turns it on, and the brake counts only rounds that start by themselves.
 - **Removing a round** removes its history and never its tasks; they keep their `round` mark and name.
 
 ## History
@@ -115,6 +116,8 @@ Per round the last 50 lines (`round_runs`), newest first: due time (None for Run
 `removed`; None while it works). The end is written when the task's status settles (`settle_rounds`).
 
 ## The app
+
+Results read as short plain phrases, never a sentence inside a sentence: "Last: done, today at 09:00", "Last: skipped today at 13:45, the last run is still working", "Last: could not finish, today at 09:00", "Last: missed today at 09:00, Neko was not running, or this Mac was asleep" (`rounds::last_words`, tested for every outcome). The band's step chip and the run's fold both count a run's tool calls (`turn::step_count`).
 
 The Rounds page (⌘3, View ▸ Rounds, the sidebar row under Needs you): a card per round led by its cat's portrait: name, "mochi ·
 Weekdays at 09:00", "Next: tomorrow 09:00" or why not ("Paused", "Off", "mochi is retired", "Folder missing"), "Last: Done · today

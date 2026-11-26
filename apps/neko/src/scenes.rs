@@ -1160,7 +1160,7 @@ fn with_rounds(s: &mut App) {
     working.status = TaskStatus::Working;
     working.round = Some(TaskRound { id: notes.id.clone(), name: notes.name.clone(), due_ms: Some(s.now_ms - 90 * 60_000) });
     docs.last = Some(line(&docs, 1, Some(nine(s, 0)), nine(s, 0), RunKind::Started, Some(&done), Some(RunEnd::Done), None));
-    notes.last = Some(line(&notes, 2, Some(s.now_ms - 20 * 60_000), s.now_ms - 20 * 60_000, RunKind::Skipped, None, None, Some("The last run is still working.")));
+    notes.last = Some(line(&notes, 2, Some(s.now_ms - 20 * 60_000), s.now_ms - 20 * 60_000, RunKind::Skipped, None, None, Some("The last run is still working")));
     s.tasks.push(done);
     s.tasks.push(working);
     s.tasks.sort_by_key(|t| std::cmp::Reverse(t.created_ms));
@@ -1190,9 +1190,9 @@ fn rounds_history(s: &mut App) {
         vec![
             line(&docs, 1, Some(nine(s, 0)), nine(s, 0), RunKind::Started, Some(&done), Some(RunEnd::Done), None),
             line(&docs, 2, Some(nine(s, -1)), nine(s, -1), RunKind::Started, Some(&done), Some(RunEnd::Failed), None),
-            line(&docs, 3, Some(nine(s, -2)), nine(s, -2), RunKind::Skipped, None, None, Some("Every round was paused.")),
+            line(&docs, 3, Some(nine(s, -2)), nine(s, -2), RunKind::Skipped, None, None, Some("Every round was paused")),
             line(&docs, 4, Some(nine(s, -5)), nine(s, -3) + HOUR, RunKind::Started, Some(&done), Some(RunEnd::Done), None),
-            line(&docs, 5, Some(nine(s, -6)), nine(s, -3) + HOUR, RunKind::Missed, None, None, Some("Missed: Neko was not running, or this Mac was asleep.")),
+            line(&docs, 5, Some(nine(s, -6)), nine(s, -3) + HOUR, RunKind::Missed, None, None, Some("Neko was not running, or this Mac was asleep")),
         ],
     );
 }
@@ -1293,6 +1293,8 @@ fn task_from_round(s: &mut App) {
     let r = run("run_1", &task, RunStatus::Done, start(s), 134);
     s.books.insert(id.clone(), Book { runs: vec![r], loaded: true, parts: sc.parts, ..Book::default() });
     s.open = Some(id);
+    // The run changed files: its receipt lists each with its figures, as an ordinary task's does.
+    receipt_files(s, "run_1", 3);
 }
 
 fn cat_page_rounds(s: &mut App) {

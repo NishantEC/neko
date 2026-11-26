@@ -6,7 +6,7 @@ use neko_protocol::{GENERAL, Round, RoundStatus, TaskStatus};
 use rune::{El, col, el, row, text};
 use rune_ui_style::{ButtonVariant, Size, tabular, weight};
 
-use crate::rounds::{KINDS, RoundForm, first_run_words, line_words, schedule_words, when, when_at, why_not};
+use crate::rounds::{KINDS, RoundForm, first_run_words, last_words, line_words, schedule_words, when, why_not};
 use crate::state::App;
 use crate::ui::agent::{FoldLine, chip, icon_button};
 use crate::ui::base::{Shape, Theme, glyph};
@@ -51,10 +51,8 @@ fn last_line(s: &App, t: &Theme, r: &Round) -> Option<El> {
     let l = r.last.as_ref()?;
     let zone = s.zone();
     let status = l.task.as_ref().and_then(|id| s.task_status(id));
-    let said = line_words(l, status).trim_end_matches('.').to_owned();
-    let at = when_at(l.at_ms, s.now_ms, &*zone);
     let mut line = row().key(format!("round-{}-last", r.id)).w_full().gap(t.space.at(2.0)).center_y().min_w(0.0);
-    line = line.child(text(format!("Last: {said} · {at}")).key(format!("round-{}-last-words", r.id)).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0).shrink());
+    line = line.child(text(last_words(l, status, s.now_ms, &*zone)).key(format!("round-{}-last-words", r.id)).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0).shrink());
     if let Some(id) = l.task.clone().filter(|id| s.tasks.iter().any(|x| &x.id == id)) {
         line = line.child(Button::new(format!("round-{}-open", r.id), "Open task").variant(ButtonVariant::Link).size(Size::Sm).on_press(move |s: &mut App| s.open_task_id(&id)).build(t));
     }
@@ -85,7 +83,7 @@ fn history(s: &App, t: &Theme, r: &Round) -> El {
         }
         body.push(list);
     }
-    let lead = row().size(t.control.icon, t.control.icon).center().child(el().size(7.0, 7.0).radius(3.5).border(1.2, t.ink_faint())).a11y_hidden();
+    let lead = glyph(&crate::ui::icons::CLOCK, t.control.icon, t.ink_faint()).a11y_hidden();
     FoldLine::<App>::new(format!("round-{}-history", r.id), "History", open).lead(lead).on_toggle(move |s: &mut App| s.toggle_round_history(&id)).build(t, body)
 }
 
@@ -125,7 +123,12 @@ fn card(s: &App, t: &Theme, r: &Round, i: usize, n: usize, layer: &mut Vec<El>) 
             DropdownMenuItem::new("Remove…").danger(true).on_select(move |s: &mut App| s.ask_remove_round(&id))
         });
     let menu = menu_named(menu, t, layer, "Round options", open);
-    let controls = row().key(format!("round-{id}-controls")).gap(t.space.at(2.5)).center_y().child(switch).child(run).child(menu);
+    // A manual round has nothing to switch: it runs when Run now is pressed.
+    let mut controls = row().key(format!("round-{id}-controls")).gap(t.space.at(2.5)).center_y();
+    if r.schedule.is_automatic() {
+        controls = controls.child(switch);
+    }
+    let controls = controls.child(run).child(menu);
     let head = row()
         .w_full()
         .h(t.control.md)

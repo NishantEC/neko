@@ -175,7 +175,7 @@
       "until": {
         "see": {
           "key": "round-*-last-words",
-          "text": "Needs you"
+          "text": "waiting for you"
         }
       },
       "within": 15,
@@ -241,7 +241,7 @@
       "until": {
         "see": {
           "key": "round-*-last-words",
-          "text": "Every round was paused"
+          "text": "every round was paused"
         }
       },
       "within": 20,

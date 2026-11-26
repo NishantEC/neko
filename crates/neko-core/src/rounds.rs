@@ -381,6 +381,7 @@ impl Core {
         if self.store.round_rows()?.len() >= rounds::MAX_ROUNDS {
             return Err(RoundError::Refused(format!("Neko keeps at most {} rounds. Remove one first.", rounds::MAX_ROUNDS)));
         }
+        let enabled = on || !schedule.is_automatic();
         let row = RoundRow {
             id: self.new_id("round"),
             name,
@@ -388,7 +389,8 @@ impl Core {
             cat,
             workspace: w.id,
             schedule,
-            enabled: on,
+            // A manual round has nothing to switch: it is always on, and runs when the person presses Run now.
+            enabled,
             anchor_ms: env.now,
             cursor_ms: env.now,
             fail_streak: 0,
@@ -419,6 +421,10 @@ impl Core {
         }
         row.name = name;
         row.words = words.to_owned();
+        if !schedule.is_automatic() {
+            row.enabled = true;
+            row.brake_note = None;
+        }
         row.cat = cat;
         row.workspace = w.id;
         row.schedule = schedule;
@@ -527,11 +533,11 @@ impl Core {
             let mut task = None;
             if env.now - latest > CATCH_UP_MS {
                 let n = dues.len();
-                let why = if n == 1 { "Missed: Neko was not running, or this Mac was asleep.".to_owned() } else { format!("Missed {n} times: Neko was not running, or this Mac was asleep.") };
+                let why = if n == 1 { "Neko was not running, or this Mac was asleep".to_owned() } else { format!("{n} times passed while Neko was not running or this Mac was asleep") };
                 lines.push(line(self, latest, RunKind::Missed, Some(why)));
             } else {
                 if earlier > 0 {
-                    let why = format!("Missed {} while Neko was not running or this Mac was asleep. It ran once, for the latest.", times(earlier));
+                    let why = format!("{} passed while Neko was not running or this Mac was asleep; it ran once, for the latest", times(earlier));
                     lines.push(line(self, dues[0], RunKind::Missed, Some(why)));
                 }
                 let skip = if paused {
@@ -595,7 +601,8 @@ impl Core {
                 _ => {}
             }
             let mut notice = None;
-            if end == RunEnd::Failed && row.fail_streak >= BRAKE_AFTER && row.enabled {
+            // The brake is for rounds that start by themselves: a manual round only runs when the person presses Run now.
+            if end == RunEnd::Failed && row.fail_streak >= BRAKE_AFTER && row.enabled && row.schedule.is_automatic() {
                 let note = format!("Turned itself off after {BRAKE_AFTER} failed runs in a row. Turn it back on when it is fixed.");
                 row.enabled = false;
                 row.brake_note = Some(note.clone());

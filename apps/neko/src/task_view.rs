@@ -342,7 +342,8 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
         let words = if offer.undone { format!("{} · undone", worked_words(r)) } else { worked_words(r) };
         out.push(row().key(key).role("status").label(words.clone()).w_full().h(t.control.md).pl(t.space.at(1.5)).gap(t.metrics.gap).center_y().child(lead).child(text(words).font(t.ty.base).color(t.ink_muted()).a11y_hidden()));
     } else {
-        let n = work.iter().filter(|p| quiet_line(p)).count();
+        // The same count as the band's chip: tool calls (a thought is not a step).
+        let n = turn::step_count(parts.iter().copied());
         let k = key.clone();
         let mut line = FoldLine::<App>::new(key.clone(), worked_words(r), s.is_open(&key)).lead(lead).indent(false).on_toggle(move |s: &mut App| s.flip(&k));
         // An undone run's steps stay readable, marked "undone".
@@ -483,7 +484,10 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
         foot = foot.child(text(n.clone()).key("reply-notice").role("status").font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0));
     }
     // Where the task came from stays in sight above the conversation (which scrolls to its newest words), not in it.
-    let from = from_round(s, t, task).map(|line| row().w_full().justify_center().px(inset).pt(t.space.at(2.0)).child(col().w_full().max_w(COLUMN).child(line)));
+    // It has the page's own ground and a hairline under it, and is drawn above the conversation, so nothing shows through it.
+    let from = from_round(s, t, task).map(|line| {
+        row().key("task-round-strip").w_full().justify_center().px(inset).pt(t.space.at(2.0)).pb(t.space.at(2.0)).fill(t.c.page.bg).border_sides([0.0, 0.0, 0.0, 1.0], t.c.line).paint_order(1).child(col().w_full().max_w(COLUMN).child(line))
+    });
     let mut page = col().key("task").w_full().grow(1.0).min_h(0.0).items_center();
     if let Some(strip) = from {
         page = page.child(strip);

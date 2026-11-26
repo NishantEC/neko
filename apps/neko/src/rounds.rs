@@ -127,6 +127,7 @@ pub fn when(ms: i64, now_ms: i64, zone: &dyn Zone) -> String {
     match at.day_number - now.day_number {
         0 => format!("today {at_time}"),
         1 => format!("tomorrow {at_time}"),
+        -1 => format!("yesterday {at_time}"),
         2..=6 => format!("{} {at_time}", at.weekday.name()),
         _ => {
             const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -173,26 +174,56 @@ pub fn why_not(r: &Round) -> Option<String> {
     }
 }
 
-/// How a history line ended, in a word.
-pub fn end_word(end: Option<RunEnd>, task: Option<TaskStatus>) -> &'static str {
-    match (end, task) {
-        (Some(RunEnd::Done), _) => "Done",
-        (Some(RunEnd::Asked), _) => "Asked a question",
-        (Some(RunEnd::Failed), _) => "Failed",
-        (Some(RunEnd::Stopped), _) => "Stopped",
-        (Some(RunEnd::Interrupted), _) => "Interrupted",
-        (Some(RunEnd::Removed), _) => "Task removed",
-        (None, Some(TaskStatus::NeedsYou | TaskStatus::Asked)) => "Needs you",
-        (None, _) => "Working",
+/// How a history line came out, in two plain parts: the short phrase ("done", "could not finish", "skipped", "missed") and, for a
+/// skip or a miss, why (lower case, no full stop: "the last run is still working").
+pub fn outcome(l: &RoundRun, task: Option<TaskStatus>) -> (&'static str, Option<String>) {
+    let why = l.reason.as_deref().map(|r| {
+        let r = r.trim().trim_end_matches('.');
+        // A sentence's first word goes lower case; a name (a cat's, Neko) keeps its capital.
+        match r.split_once(' ') {
+            Some((first, rest)) if ["The", "Every", "It", "A", "An", "This"].contains(&first) => format!("{} {rest}", first.to_lowercase()),
+            _ => r.to_owned(),
+        }
+    });
+    match l.kind {
+        RunKind::Skipped => ("skipped", why.or_else(|| Some("it was not run".to_owned()))),
+        RunKind::Missed => ("missed", why),
+        RunKind::Started => (
+            match (l.end, task) {
+                (Some(RunEnd::Done), _) => "done",
+                (Some(RunEnd::Asked), _) => "asked a question",
+                (Some(RunEnd::Failed), _) => "could not finish",
+                (Some(RunEnd::Stopped), _) => "stopped",
+                (Some(RunEnd::Interrupted), _) => "was interrupted",
+                (Some(RunEnd::Removed), _) => "its task was removed",
+                (None, Some(TaskStatus::NeedsYou | TaskStatus::Asked)) => "waiting for you",
+                (None, _) => "working",
+            },
+            None,
+        ),
     }
 }
 
-/// A history line as one sentence: "Done", "Skipped: The last run is still working.", "Missed: …".
+/// A history line for the list in a card: "Done", "Skipped, the last run is still working".
 pub fn line_words(l: &RoundRun, task: Option<TaskStatus>) -> String {
-    match l.kind {
-        RunKind::Started => end_word(l.end, task).to_owned(),
-        RunKind::Skipped => format!("Skipped: {}", l.reason.as_deref().unwrap_or("not run")),
-        RunKind::Missed => l.reason.clone().unwrap_or_else(|| "Missed".to_owned()),
+    let (head, why) = outcome(l, task);
+    let mut c = head.chars();
+    let head = c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default();
+    match why {
+        Some(w) => format!("{head}, {w}"),
+        None => head,
+    }
+}
+
+/// A card's last-result line: "Last: done, today at 09:00", "Last: skipped today at 13:45, the last run is still working". The time is
+/// when the run started, or the time that was skipped or missed.
+pub fn last_words(l: &RoundRun, task: Option<TaskStatus>, now_ms: i64, zone: &dyn Zone) -> String {
+    let (head, why) = outcome(l, task);
+    let at = when_at(l.due_ms.filter(|_| l.kind != RunKind::Started).unwrap_or(l.at_ms), now_ms, zone);
+    match (l.kind, why) {
+        (RunKind::Started, _) => format!("Last: {head}, {at}"),
+        (_, Some(w)) => format!("Last: {head} {at}, {w}"),
+        (_, None) => format!("Last: {head} {at}"),
     }
 }
 
@@ -336,6 +367,38 @@ mod tests {
         assert_eq!(schedule_words(&Schedule::Every { hours: 1 }), "Every hour");
         assert_eq!(schedule_words(&Schedule::Every { hours: 6 }), "Every 6 hours");
         assert_eq!(schedule_words(&Schedule::Manual), "Only when you press Run now");
+    }
+
+    #[test]
+    fn every_outcome_of_a_round_reads_as_a_short_plain_phrase() {
+        let z = Fixed(0);
+        let now = at(26, 14, 5);
+        let line = |kind, end, reason: Option<&str>, due: Option<i64>, at_ms| RoundRun { id: "r".into(), round: "x".into(), due_ms: due, at_ms, kind, task: None, reason: reason.map(str::to_owned), end };
+        let started = |end| line(RunKind::Started, end, None, Some(at(26, 9, 0)), at(26, 9, 0));
+        let said = |l: &RoundRun, t| (last_words(l, t, now, &z), line_words(l, t));
+        assert_eq!(said(&started(Some(RunEnd::Done)), None), ("Last: done, today at 09:00".to_owned(), "Done".to_owned()));
+        assert_eq!(said(&started(Some(RunEnd::Failed)), None).0, "Last: could not finish, today at 09:00");
+        assert_eq!(said(&started(Some(RunEnd::Asked)), None).0, "Last: asked a question, today at 09:00");
+        assert_eq!(said(&started(Some(RunEnd::Stopped)), None).0, "Last: stopped, today at 09:00");
+        assert_eq!(said(&started(Some(RunEnd::Interrupted)), None).0, "Last: was interrupted, today at 09:00");
+        assert_eq!(said(&started(Some(RunEnd::Removed)), None).0, "Last: its task was removed, today at 09:00");
+        assert_eq!(said(&started(None), Some(TaskStatus::Working)).0, "Last: working, today at 09:00");
+        assert_eq!(said(&started(None), Some(TaskStatus::NeedsYou)).0, "Last: waiting for you, today at 09:00");
+        let skipped = line(RunKind::Skipped, None, Some("The last run is still working."), Some(at(26, 13, 45)), at(26, 13, 45) + 400);
+        assert_eq!(said(&skipped, None), ("Last: skipped today at 13:45, the last run is still working".to_owned(), "Skipped, the last run is still working".to_owned()));
+        let paused = line(RunKind::Skipped, None, Some("Every round was paused."), Some(at(25, 9, 0)), at(25, 9, 0));
+        assert_eq!(said(&paused, None).0, "Last: skipped yesterday at 09:00, every round was paused");
+        let retired = line(RunKind::Skipped, None, Some("mochi is retired."), Some(at(26, 9, 0)), at(26, 9, 0));
+        assert_eq!(said(&retired, None).0, "Last: skipped today at 09:00, mochi is retired");
+        let missed = line(RunKind::Missed, None, Some("Neko was not running, or this Mac was asleep"), Some(at(26, 9, 0)), at(26, 11, 0));
+        assert_eq!(said(&missed, None), ("Last: missed today at 09:00, Neko was not running, or this Mac was asleep".to_owned(), "Missed, Neko was not running, or this Mac was asleep".to_owned()));
+        for (l, t) in [(&skipped, None), (&paused, None), (&missed, None), (&started(Some(RunEnd::Done)), None)] {
+            let (a, b) = said(l, t);
+            for s in [a, b] {
+                assert!(!s.contains("..") && !s.contains(".,") && !s.contains(" ,") && !s.ends_with('.'), "{s}");
+                assert!(s.matches("kipped").count() <= 1 && s.matches("issed").count() <= 1, "a word twice: {s}");
+            }
+        }
     }
 
     #[test]

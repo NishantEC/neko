@@ -422,11 +422,16 @@ pub fn receipt(s: &App, t: &Theme, r: &Run, parts: &[&Part], o: &Offer, changed:
     Some(settling(raised(t, card)))
 }
 
+/// How many steps a run took: its tool calls. The band's chip and the run's own fold both count this, so they agree.
+pub fn step_count<'a>(parts: impl Iterator<Item = &'a Part>) -> usize {
+    parts.filter(|p| matches!(p.body, PartBody::Tool { .. })).count()
+}
+
 /// The band's run counter: while a run works, the step it is on; once it ends, how many steps and how long.
 pub fn counter(s: &App, t: &Theme) -> Option<El> {
     let book = s.book()?;
     let r = book.runs.last()?;
-    let n = book.parts.iter().filter(|p| p.run.as_ref() == Some(&r.id) && matches!(p.body, PartBody::Tool { .. })).count();
+    let n = step_count(book.parts.iter().filter(|p| p.run.as_ref() == Some(&r.id)));
     let running = r.status == RunStatus::Running;
     let words = if running {
         format!("Step {}", n + 1)

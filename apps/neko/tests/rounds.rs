@@ -45,7 +45,7 @@ fn a_round_card_says_its_schedule_its_next_time_and_how_it_last_went() {
     let all = texts(&rt);
     assert!(all.contains("Docs check: mochi, Weekdays at 09:00"), "{all}");
     assert!(all.contains("Next: tomorrow 09:00"), "{all}");
-    assert!(all.contains("Last: Done · today at 09:00"), "{all}");
+    assert!(all.contains("Last: done, today at 09:00"), "{all}");
     assert!(all.contains("Every 6 hours") && all.contains("Only when you press Run now"), "{all}");
     for key in ["rounds-pause", "rounds-new"] {
         assert!(has_key(&rt, key), "{key}");
@@ -75,8 +75,8 @@ fn the_history_opens_in_the_card() {
     let rt = runtime((1200.0, 800.0), false, scene("rounds-history"));
     let all = texts(&rt);
     assert!(all.contains("History of Docs check"), "{all}");
-    assert!(all.contains("Skipped: Every round was paused."), "{all}");
-    assert!(all.contains("Missed: Neko was not running"), "{all}");
+    assert!(all.contains("Skipped, every round was paused"), "{all}");
+    assert!(all.contains("Missed, Neko was not running"), "{all}");
 }
 
 #[test]
@@ -255,4 +255,46 @@ fn a_run_with_no_steps_shows_only_its_time() {
     settle(&mut rt);
     let all = texts(&rt);
     assert!(!all.contains("0 steps"), "{all}");
+}
+
+/// The step count the band's chip says and the one the run's fold says, from the elements of a scene.
+fn step_counts(rt: &Runtime<App>) -> (Option<String>, Option<String>) {
+    let all = rt.elements();
+    let chip = all.iter().find(|e| e.key.as_deref() == Some("run-counter")).and_then(|e| e.label.clone());
+    let fold = all.iter().filter_map(|e| e.text.clone()).find(|t| t.ends_with(" steps") || t.ends_with(" step") || t.contains(" steps ·") || t.contains(" step ·"));
+    (chip, fold)
+}
+
+fn first_number(s: &str) -> Option<u32> {
+    s.split_whitespace().next().and_then(|w| w.parse().ok())
+}
+
+#[test]
+fn the_bands_chip_and_the_runs_fold_count_the_same_steps() {
+    for name in ["task-from-round", "task-done", "task-real-run"] {
+        let rt = runtime((1200.0, 800.0), false, scene(name));
+        let (chip, fold) = step_counts(&rt);
+        let (chip, fold) = (chip.unwrap_or_else(|| panic!("{name}: no chip")), fold.unwrap_or_else(|| panic!("{name}: no fold count")));
+        assert_eq!(first_number(&chip), first_number(&fold), "{name}: the chip says {chip:?}, the fold says {fold:?}");
+    }
+}
+
+#[test]
+fn a_manual_round_has_no_switch_and_no_line_repeating_its_schedule() {
+    let rt = runtime((1200.0, 800.0), false, scene("rounds"));
+    let manual = rt.state.rounds.iter().find(|r| !r.schedule.is_automatic()).expect("a manual round").id.clone();
+    let auto = rt.state.rounds.iter().find(|r| r.schedule.is_automatic()).expect("a scheduled round").id.clone();
+    assert!(!has_key(&rt, &format!("round-{manual}-switch")), "nothing to switch");
+    assert!(has_key(&rt, &format!("round-{manual}-run")), "Run now stays");
+    assert!(!has_key(&rt, &format!("round-{manual}-next")), "no second line saying it runs only when pressed");
+    assert!(has_key(&rt, &format!("round-{auto}-switch")), "a scheduled round has its switch");
+    assert!(texts(&rt).contains("Only when you press Run now"));
+}
+
+#[test]
+fn a_task_from_a_round_lists_its_files_with_their_figures_and_its_line_has_its_own_ground() {
+    let rt = runtime((1200.0, 800.0), false, scene("task-from-round"));
+    let all = texts(&rt);
+    assert!(all.contains("src/toolbar.rs") && all.contains("src/menu.rs") && all.contains("docs/preferences.md"), "every file, as an ordinary task's receipt lists them: {all}");
+    assert!(has_key(&rt, "task-round-strip"));
 }

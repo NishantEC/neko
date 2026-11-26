@@ -145,7 +145,7 @@ fn a_time_more_than_a_day_old_is_recorded_as_missed_not_run() {
     assert!(c.tick_rounds(env(sunday + CATCH_UP_MS + 1)).unwrap().started.is_empty());
     let h = c.round_history(&r.id).unwrap();
     assert_eq!((h.len(), h[0].kind, h[0].due_ms), (1, RunKind::Missed, Some(sunday)));
-    assert!(h[0].reason.as_deref().unwrap().contains("Missed"));
+    assert!(h[0].reason.as_deref().unwrap().contains("Neko was not running"));
     assert!(c.tick_rounds(env(sunday + CATCH_UP_MS + 2)).unwrap().started.is_empty());
     assert_eq!(c.round_history(&r.id).unwrap().len(), 1, "recorded once");
     // A long gap with many times due: the latest is what counts, so a week-long sleep ending just after a 09:00 runs once.
@@ -413,6 +413,27 @@ fn a_restart_in_the_middle_neither_runs_a_time_twice_nor_loses_one() {
     // The task and the history line are written together: a time with a task always has its line.
     let h = c.round_history(&id).unwrap();
     assert!(h.iter().filter(|l| l.kind == RunKind::Started).all(|l| l.task.is_some()));
+}
+
+#[test]
+fn a_manual_round_is_always_on_and_the_brake_leaves_it_alone() {
+    let d = dir();
+    let mut c = open(&d);
+    let (r, _) = c.create_round("By hand", "x", "cat_miso", None, &Schedule::Manual, false, env(0)).unwrap();
+    assert!(r.on, "it has nothing to switch");
+    // Run now three times and fail each: still on.
+    for i in 0..3 {
+        let (_, task, _) = c.run_round_now(&r.id, env(1000 + i)).unwrap();
+        finish(&mut c, &task.id, TaskStatus::Failed);
+        c.settle_rounds(env(2000 + i)).unwrap();
+    }
+    let view = c.round(&r.id, env(5000)).unwrap();
+    assert_eq!((view.on, view.status), (true, RoundStatus::Manual));
+    // A round that was off and is then made manual is on.
+    let id = daily(&mut c, "09:00", 0);
+    c.set_round_on(&id, false, env(1)).unwrap();
+    let (v, _) = c.update_round(&id, "Docs check", "x", "cat_mochi", None, &Schedule::Manual, env(2)).unwrap();
+    assert!(v.on && v.status == RoundStatus::Manual);
 }
 
 #[test]

@@ -1,7 +1,7 @@
 {
   "name": "rounds",
   "title": "Rounds: make one, run it now, see where its task came from, switch it off, remove it",
-  "about": "New round… on the Rounds page, with mochi picked, makes a round that runs only on Run now in the acme-api workspace. Run now makes an ordinary task: it appears under acme-api, is mochi's, and says it came from the round. The round's history shows how it ended. Switching the round off is said on its card. Removing it asks first; its task stays.",
+  "about": "New round… on the Rounds page, with mochi picked, makes a round (every 6 hours, in the acme-api workspace). Run now makes an ordinary task: it appears under acme-api, is mochi's, and says it came from the round. The round's history shows how it ended. Switching the round off is said on its card. Removing it asks first; its task stays.",
   "cli": [
     "fake"
   ],
@@ -132,7 +132,7 @@
     {
       "do": "click",
       "on": {
-        "key": "round-kind-3"
+        "key": "round-kind-2"
       }
     },
     {
@@ -142,18 +142,18 @@
     {
       "do": "snap",
       "name": "new-round",
-      "expect": "The panel: name, words, mochi, acme-api, Run now only, and what that means"
+      "expect": "The panel: name, words, mochi, acme-api, every 6 hours, and what that means"
     },
     {
       "do": "wait",
       "until": {
         "see": {
           "key": "round-first",
-          "text": "never starts by itself"
+          "text": "then every 6 hours"
         }
       },
       "within": 15,
-      "expect": "It says a manual round never starts by itself"
+      "expect": "It says when the first run will be"
     },
     {
       "do": "click",
@@ -189,7 +189,7 @@
           {
             "see": {
               "key": "round-*-last-words",
-              "text": "Last: Done"
+              "text": "Last: done"
             }
           },
           {
@@ -293,11 +293,11 @@
       "until": {
         "see": {
           "key": "round-*-last-words",
-          "text": "Done"
+          "text": "Last: done"
         }
       },
       "within": 15,
-      "expect": "The history says Done"
+      "expect": "The card says the last run is done"
     },
     {
       "do": "snap",
