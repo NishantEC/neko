@@ -3,10 +3,16 @@
 An operating system for agents. Anything a person does on a computer, Neko and its cats can do, and keep doing while the person
 is away: code, browsers, files, spreadsheets, documents and creative apps, alongside the person or on their own.
 
-**Status: slice S0, a walking skeleton.** Neko is being rebuilt from an empty repository (begun 2026-11-26). What runs today: a
-calm Mac app with a sidebar and Home. Type a task and press Return; the daemon stores it, it appears under Today and opens with
-your words and a line saying no cat is working on it yet. There is no agent yet. Quit and relaunch: the window is where it was
-and the task is still there. This page changes as each slice ships, and only describes what is built.
+**Status: slice S1, a task runs.** Neko is being rebuilt from an empty repository (begun 2026-11-26). Type a task on Home,
+optionally pick a folder, press Return: the agent starts by itself and its words stream into the task. Thinking and tool calls
+are quiet lines that fold. A risky step waits in the task for Allow once, Always allow or Deny. Stop stops it at once, a
+follow-up continues the same conversation, and a run card says what changed, how long it took and what it cost. Quit and
+relaunch: the whole transcript is still there. This page changes as each slice ships, and only describes what is built.
+
+**No API key.** Neko uses the agent CLIs already installed and signed in on your Mac, as child processes. Today that is Claude
+Code (`claude`); Settings (⌘,) shows which CLIs were found. Costs are shown as the CLI reports them; under a subscription they are
+API-equivalent prices, not money charged. A task in a git repository works in its own worktree on its own branch; nothing is
+merged or pushed.
 
 ## What it will be
 
@@ -19,8 +25,8 @@ and the task is still there. This page changes as each slice ships, and only des
 
 ## How it is built
 
-- A Rust daemon holds the tasks, the store, permissions and the cost ledger, and runs Neko's own agent behind one contract, so the
-  agent can be replaced without the rest changing.
+- A Rust daemon holds the tasks, the store, permissions and the cost ledger, and runs agents behind one contract, so the agent can
+  be replaced without the rest changing.
 - Screens are thin clients over the daemon's requests and events. On the desktop they are drawn with
   [Rune](https://github.com/anomalyco/rune), using components from [rune-ui](https://github.com/NishantEC/rune-ui). <!-- privacy-ok: the project's own public repository -->
 - Standards where they exist: MCP for tools, `SKILL.md`, `AGENTS.md`, git worktrees.
@@ -30,9 +36,9 @@ and the task is still there. This page changes as each slice ships, and only des
 You need macOS and Rust (stable, 1.89 or later).
 
 ```sh
-scripts/run.sh          # build from source and open Neko against a throwaway data folder (removed afterwards)
+scripts/run.sh          # build from source and open Neko against a throwaway data folder (removed afterwards); tasks run your real CLI
 scripts/check.sh        # the gate: lints and every test, in both workspaces
-scripts/snap.sh         # headless pictures of every screen, into /tmp/neko-s0/
+scripts/snap.sh [DIR]   # headless pictures of every screen, into DIR (default /tmp/neko-s0/)
 scripts/build-app.sh    # Neko.app (the daemon inside), signed ad hoc
 scripts/install.sh      # the gate, then Neko.app into /Applications
 ```

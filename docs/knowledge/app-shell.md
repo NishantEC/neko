@@ -9,7 +9,9 @@
 | --- | --- |
 | `lib.rs` | `run()`: headless runs return first; then the menu prep, the saved frame, the Dock registration, `rune::run_windows`. `poll` drains the link, follows the width, sets the title, keeps the frame, replaces the menu. `on_key`: ⌘N, ⌃⌘S, Escape. |
 | `state.rs` | `App` and what each event changes. No drawing, no I/O. |
-| `view.rs` | The window: sidebar, content band, Home, the task view. |
+| `view.rs` | The window: sidebar (each task's state as its mark, today's usage at its foot), content band, Home and its folder chip. |
+| `task_view.rs` | The task view: the conversation, steps, permission requests, run cards, the composer. |
+| `settings_view.rs` | Settings (⌘,): the agent CLIs, which one new tasks use, the permission mode. |
 | `link.rs` | The supervisor thread: find or start the daemon, connect, reconnect, an inbox the window drains. |
 | `window_place.rs` | Where the window was: frame from placement, restore onto the displays there are now, write once still. |
 | `menu.rs`, `about.rs`, `dock.rs` | The menu bar, the About panel, the Dock registration. |
@@ -40,11 +42,12 @@ The model is pure and tested (`menu.rs`): no key is taken twice.
 
 ## Keyboard
 
-- Tab goes once round every control in reading order: Hide sidebar, New task, Home, each task list (one stop each), the composer.
+- Tab goes once round every control in reading order: Hide sidebar, New task, Home, each task list (one stop each), the composer,
+  the folder chip. In a task: copy buttons, fold lines, request answers, then the composer.
   `App::tab_visits_controls(true)` makes this so whatever the Mac's Keyboard Navigation setting is.
 - In a task list the arrow keys move (`focus_group`), Return opens the row.
 - In the composer Return sends, Shift+Return makes a new line. Escape gives focus back.
-- ⌘N goes Home with the keyboard in the composer.
+- ⌘N goes Home with the keyboard in the composer. ⌘, opens Settings (Neko ▸ Settings…).
 
 ## Accessibility
 
@@ -63,6 +66,25 @@ window asks `subscribe` and `list_tasks`. Words sent while the daemon is away st
 ## Data folder
 
 `NEKO_DATA_DIR`, else `~/Library/Application Support/neko`. Headless runs and tests never touch it, nor the prefs, nor the Dock.
+
+## The Task view (S1)
+
+- **The conversation** is rune-ui's Conversation: pinned to the newest content until the person scrolls up, then a "Jump to
+  latest" pill. The person's words are a Message at the right; the agent's ("Neko") are Markdown on the page, no bubble,
+  selectable, with a copy button.
+- **Steps** (thinking, tool calls) are quiet single lines that fold (Reasoning, Tool), grouped tighter than messages. While a run
+  works they show as they happen, with a "Working…" shimmer when nothing streams. When it ends they fold behind one
+  "Worked for 2m 14s" line (agent's FoldLine); its last words stay open.
+- **Permission requests**: see `permissions.md`.
+- **The run card** (Neko's own; rune-ui's Task card always shows checks and a dollar figure): status, files changed with + and −
+  from git, the branch, duration, and the cost as reported (`transcript.md`), plus the task's total after more than one run.
+- **The composer** (`reply`): Return sends a follow-up; while it works Send is Stop and Escape stops (also when the focus is
+  elsewhere in the task).
+- The sidebar row's mark: hollow (new), dot (working), warning (needs you), check (done), cross (failed), slash (stopped or
+  interrupted); the row's description says it in words. The window title follows the task. Finishing, failing and needing you
+  are announced (`Tx::announce`).
+- **Home's folder chip** opens the Mac's open panel (Rune's `native-file-dialog`, rfd); the choice is kept in the prefs
+  (`last-folder`) and dropped if the folder is gone. Without a folder a task gets a scratch folder.
 
 ## Not done in S0
 

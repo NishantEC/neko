@@ -1,15 +1,15 @@
 # Architecture
 
 Neko is two programs on one Mac: a daemon that owns the data, and an app that draws it. This page describes what is built
-now (slice S0). It changes as each slice ships.
+now (slice S1). It changes as each slice ships.
 
 ## The crates
 
 | Crate | Workspace | What it is |
 | --- | --- | --- |
 | `crates/neko-protocol` | root | The requests, replies and events between a screen and the daemon, as JSON. With the `ws` feature, the WebSocket link both ends use. |
-| `crates/neko-core` | root | The store and its records: workspaces, tasks and the event log, in SQLite. |
-| `crates/neko-daemon` | root | The `neko-daemon` binary. It owns one data folder and serves the protocol. |
+| `crates/neko-core` | root | The store and its records (tasks, runs, parts, permissions, usage, the event log), the agent contract and the Claude Code runtime, the run guard, the permission policy, worktrees. Also `neko-fake-claude`, the fake CLI tests use (never shipped). |
+| `crates/neko-daemon` | root | The `neko-daemon` binary. It owns one data folder, serves the protocol and runs tasks. As `--neko-run-guard` it is a run's guardian. |
 | `apps/neko` | its own | The desktop app, drawn with Rune and rune-ui. |
 
 The app has its own Cargo workspace. Rune needs a `[patch.crates-io]` table, and that table must not reach the daemon's
@@ -46,13 +46,25 @@ daemon pushes an event for every change. See `docs/knowledge/protocol.md`.
 
 ## The store
 
-SQLite, bundled, in WAL mode, at `neko.sqlite3` in the data folder. One row per entity: `workspaces`, `tasks`. Every change
+SQLite, bundled, in WAL mode, at `neko.sqlite3` in the data folder. One row per entity: `workspaces`, `tasks`, `runs`, `parts`,
+`permissions`, `usage`, `settings`. Every change
 also appends one row to `events`, in the same transaction. Triggers refuse any update or delete of an event. The schema version
 is SQLite's `user_version`; migrations run in order from version 1. Logic never reads the clock or makes an id itself: both are
 handed in. See `docs/knowledge/store.md`.
+
+## Running a task
+
+The daemon runs the agent CLIs installed and signed in on the Mac (Claude Code today); it asks for no API key. A new task starts
+its agent at once: in a scratch folder, in its own git worktree on `neko/<short id>` when the chosen folder is a repository, or
+directly in a plain folder. Each run has its own thread and runs under the run guard. Its events become stored parts and pushed
+changes; words stream to screens at once and reach the disk every few seconds. Risky steps wait for the person in the task. One
+run at a time per task; tasks run side by side. See `docs/knowledge/runtimes.md`, `permissions.md`, `run-guard.md`,
+`transcript.md`.
 
 ## The app
 
 A sidebar and the content beside it, under one 52 point header band on the traffic lights' line. Home has a greeting and a
 composer. Return sends the words to the daemon; the new task opens in the task view. Components come from rune-ui, copied in
-by its CLI. See `docs/knowledge/app-shell.md` and `docs/knowledge/rune-ui-in-neko.md`.
+by its CLI. The task view shows the conversation with the agent, permission requests, a run card, and a composer that sends
+follow-ups and stops the run. Settings (⌘,) lists the agent CLIs. See `docs/knowledge/app-shell.md` and
+`docs/knowledge/rune-ui-in-neko.md`.

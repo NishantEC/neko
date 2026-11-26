@@ -1,4 +1,4 @@
-# The store (S0, 2026-11-26)
+# The store (S1, 2026-11-26)
 
 `crates/neko-core`. SQLite through `rusqlite` with the `bundled` feature, at `<data>/neko.sqlite3`.
 
@@ -6,8 +6,9 @@
 
 - `workspaces (id, name, created_ms)`. One default workspace, id `default`, named Home, made at first open.
 - `tasks (id, workspace_id, words, title, status, created_ms)`. `words` are the person's words exactly as sent (whitespace and
-  all). `title` is the first line with words, spaces collapsed, cut at a word before 80 characters. `status` is `new`: no agent
-  exists yet.
+  all). `title` is the first line with words, spaces collapsed, cut at a word before 80 characters. `status` is the newest run's: `new`, `working`, `needs_you`, `done`,
+  `failed`, `stopped`, `interrupted`.
+- Version 2 (S1) adds where a task works, `runs`, `usage`, `parts`, `permissions` and `settings`: see `transcript.md`.
 - `events (seq, at_ms, workspace_id, subject, kind, data)`. One row per change, in the same transaction as the change.
   `seq` is the revision the daemon pushes. Triggers refuse `UPDATE` and `DELETE` on it.
 

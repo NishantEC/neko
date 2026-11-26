@@ -17,6 +17,9 @@ cd apps/neko && <cli> init --git https://github.com/NishantEC/rune-ui --tag v0.8
 `init` wrote the `rune`, `rune-kit`, `rune-ui-style`, `rune-ui-themes` dependencies and Rune's `[patch.crates-io]` table (eight
 crates, all at the same rev). `add` brought `base`, `icons`, `agent` and `font_inter` along.
 
+S1 added `response`, `reasoning` (with `shimmer`), `tool`, `confirmation`, `badge` and `radio_group` with the same CLI (`rune-ui add
+…`); `response` turned on rune-kit's `markdown` feature (pulldown-cmark, MIT). Rune's `native-file-dialog` feature brings rfd (MIT).
+
 ## Rules
 
 - **Never hand-edit a copy.** `tests/rune_ui.rs` hashes every file the lock lists and fails on drift, and fails on a file among the
@@ -38,6 +41,18 @@ Responding". `dock::register_on_main_thread` asks for a symbol image on the main
 only (tested by reading `lib.rs`).
 
 ## What rune-ui cannot do here (for upstream)
+
+S1:
+
+- `Response` has no `selectable(bool)`: Neko builds the same Markdown with `Response::style` and turns selection on itself.
+- `Confirmation` has no place for why it asks, and no destructive form (no default answer, no Always allow). Neko puts the why
+  under it, and draws destructive requests itself in the same look.
+- `Task` (run card) always shows checks passed and a dollar figure; it needs optional facts (no checks, tokens instead of cost, a
+  branch, a note line). Neko draws its own card.
+- `SidebarItem` takes only a static icon in the row's ink; a status mark (a spinner, a coloured warning) wants a `lead(El)`.
+- `RadioGroup` options' descriptions wrap at a narrow width even when the column is wide.
+
+S0:
 
 - Hit areas (`hit(<key>)`) are unnamed buttons in the accessibility tree.
 - `SidebarItem` rows are `role("link")` with `checked` for the current page; a list of choosable rows wants `option` with
