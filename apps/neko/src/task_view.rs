@@ -300,7 +300,7 @@ fn worked_words(r: &Run) -> String {
 /// the final answer, notices, and the card if it earns one.
 fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &Task) -> El {
     let w = who(s, r, task);
-    let turn = Message::assistant(format!("turn-{}", r.id.0), w.name.clone()).column(COLUMN).child(turn::turn_head(t, r, &w.name, &w.face));
+    let turn = Message::assistant(format!("turn-{}", r.id.0), w.name.clone()).column(COLUMN).child(turn::turn_head(t, r, &w.name, &w.face, r.status == RunStatus::Running && s.pending_request().is_some()));
     if r.status == RunStatus::Running {
         let streaming = parts.last().is_some_and(|p| matches!(&p.body, PartBody::Agent { done: false, .. }) || matches!(&p.body, PartBody::Thinking { done: false, text } if !text.trim().is_empty()));
         let mut out = lay_out(s, t, book, r, &w, parts, if streaming { Some(parts.len() - 1) } else { None }, None);

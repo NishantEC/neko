@@ -451,8 +451,9 @@ fn task_folder(s: &App, t: &Theme, room: f32) -> Option<El> {
         .child(glyph(&crate::ui::icons::FOLDER, t.control.icon_sm, t.ink_faint()))
         // The title leads: the path is quiet (the small step, the faintest ink that reads) and short, cut in its middle.
         .child(text(shown).key("task-folder-path").font(t.ty.xs).color(t.ink_faint()).truncate_middle().min_w(0.0).shrink().max_w(if room < 900.0 { 112.0 } else if s.sidebar_shown() { 168.0 } else { 220.0 }).a11y_hidden());
-    if let Some(b) = branch {
-        place = place.child(glyph(&crate::ui::icons::COMMIT, t.control.icon_sm, t.ink_faint())).child(text(b).key("task-folder-branch").font(crate::ui::agent::mono(t, t.ty.xs)).color(t.ink_faint()).truncate_middle().max_w(if room < 900.0 { 96.0 } else { 112.0 }).a11y_hidden());
+    // Under 900 points the branch has no room to be read whole (the receipt names it too): the path stays, quietly.
+    if let Some(b) = branch.filter(|_| room >= 900.0) {
+        place = place.child(glyph(&crate::ui::icons::COMMIT, t.control.icon_sm, t.ink_faint())).child(text(b).key("task-folder-branch").font(crate::ui::agent::mono(t, t.ty.xs)).color(t.ink_faint()).truncate_middle().max_w(112.0).a11y_hidden());
     }
     let reveal: PressTx<App> = Rc::new(move |_: &mut App, tx: &mut rune::Tx| {
         let _ = tx.reveal_path(&folder);

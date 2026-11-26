@@ -118,9 +118,11 @@ pub fn rail(t: &Theme, steps: Vec<El>) -> El {
     col().w_full().gap(1.0).ml(-t.space.at(3.0)).pl(t.space.at(3.0) - 1.0).border_sides([0.0, 0.0, 0.0, 1.0], t.c.line).children(steps)
 }
 
-/// The turn's head: the cat's portrait (32, ringed while it works), its name, and how the run stands.
-pub fn turn_head(t: &Theme, r: &Run, name: &str, face: &str) -> El {
+/// The turn's head: the cat's portrait (32, ringed while it works), its name, and how the run stands. `waiting`: a request of this
+/// run waits for the person, so the head says so (as the sidebar's row does) instead of "working".
+pub fn turn_head(t: &Theme, r: &Run, name: &str, face: &str, waiting: bool) -> El {
     let (st, doing) = match r.status {
+        RunStatus::Running if waiting => (Some(TaskStatus::NeedsYou), "needs you"),
         RunStatus::Running => (Some(TaskStatus::Working), "working"),
         RunStatus::Failed => (Some(TaskStatus::Failed), "could not finish"),
         RunStatus::Stopped => (None, "stopped"),
@@ -128,6 +130,7 @@ pub fn turn_head(t: &Theme, r: &Run, name: &str, face: &str) -> El {
         RunStatus::Done => (None, "done"),
     };
     let ink = match r.status {
+        RunStatus::Running if waiting => t.c.warning.fg,
         RunStatus::Running => t.c.accent.fg,
         RunStatus::Failed => t.c.danger.fg,
         _ => t.ink_faint(),
