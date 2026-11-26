@@ -120,6 +120,7 @@ impl RunBook {
             reason: None,
             usage: None,
             changes: None,
+            undo: None,
         };
         let mut out = Vec::new();
         let rev = core.store.insert_run(&run, now)?;
@@ -131,6 +132,13 @@ impl RunBook {
         }
         out.extend(book.task_status(core, TaskStatus::Working, now)?);
         Ok((book, out))
+    }
+
+    /// Writes the run's own fields and reads back where its undo stands (the daemon keeps that), so what is pushed is whole.
+    fn write_run(&mut self, core: &mut Core, now: i64) -> Result<u64, StoreError> {
+        let rev = core.store.update_run(&self.run, now)?;
+        self.run.undo = core.store.get_run(&self.run.id)?.and_then(|r| r.undo);
+        Ok(rev)
     }
 
     fn task_status(&self, core: &mut Core, s: TaskStatus, now: i64) -> Result<Vec<Out>, StoreError> {
@@ -260,7 +268,7 @@ impl RunBook {
                     self.run.session = session;
                 }
                 self.run.model = model.or(self.run.model.take());
-                let rev = core.store.update_run(&self.run, now)?;
+                let rev = self.write_run(core, now)?;
                 out.push(Out::Change(rev, Change::RunChanged { run: self.run.clone() }));
             }
             AgentEvent::TextDelta(t) => out.extend(self.words(core, t, false, now)?),
@@ -317,7 +325,7 @@ impl RunBook {
                 if self.run.model.is_none() {
                     self.run.model = r.model;
                 }
-                let rev = core.store.update_run(&self.run, now)?;
+                let rev = self.write_run(core, now)?;
                 out.push(Out::Change(rev, Change::RunChanged { run: self.run.clone() }));
             }
             AgentEvent::Finished(o) => out.extend(self.finish(core, o, None, now)?),
@@ -444,7 +452,7 @@ impl RunBook {
         self.run.status = status;
         self.run.ended_ms = Some(now);
         self.run.changes = changes;
-        let rev = core.store.update_run(&self.run, now)?;
+        let rev = self.write_run(core, now)?;
         out.push(Out::Change(rev, Change::RunChanged { run: self.run.clone() }));
         out.extend(self.task_status(core, task_status, now)?);
         Ok(out)

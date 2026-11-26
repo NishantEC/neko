@@ -441,6 +441,7 @@ fn run(id: &str, task: &Task, status: RunStatus, started: i64, secs: i64) -> Run
             context_window: Some(200_000),
         }),
         changes: (status == RunStatus::Done).then_some(Changes { files: 3, added: 42, removed: 7 }),
+        undo: None,
     }
 }
 

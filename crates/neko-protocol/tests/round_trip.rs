@@ -174,6 +174,7 @@ fn run() -> Run {
         reason: None,
         usage: Some(Usage { input_tokens: 12, output_tokens: 34, cached_tokens: 56, cost_usd: Some(0.25), model: Some("claude-x".into()), pricing: Pricing::ApiEquivalent, reported_by: "Claude Code".into(), context_tokens: Some(48_000), context_window: Some(200_000) }),
         changes: Some(Changes { files: 2, added: 10, removed: 3 }),
+        undo: None,
     }
 }
 
@@ -292,5 +293,38 @@ fn needs_you_round_trips() {
         ServerMessage::Event { revision: 12, change: Change::NeedsChanged { items: vec![item("question:run_1", Need::Question { run: RunId("run_1".into()), question: "Shall I?".into() })] } },
         &format!(r#"{{"kind":"event","revision":12,"change":{{"type":"needs_changed","items":[{}{{"kind":"question","run":"run_1","question":"Shall I?"}}}}]}}}}"#, head("question:run_1")),
     );
-    assert_eq!(PROTOCOL_VERSION, 6, "Needs you is version 6");
+}
+
+#[test]
+fn undo_round_trips() {
+    let t = || TaskId("task_1".into());
+    let r = || RunId("run_1".into());
+    pinned(ClientMessage { id: 1, request: Request::GetDiff { task: t(), run: Some(r()) } }, r#"{"id":1,"type":"get_diff","task":"task_1","run":"run_1"}"#);
+    pinned(ClientMessage { id: 2, request: Request::GetDiff { task: t(), run: None } }, r#"{"id":2,"type":"get_diff","task":"task_1"}"#);
+    pinned(
+        ClientMessage { id: 3, request: Request::GetDiffFile { task: t(), run: Some(r()), path: "src/lib.rs".into(), full: true } },
+        r#"{"id":3,"type":"get_diff_file","task":"task_1","run":"run_1","path":"src/lib.rs","full":true}"#,
+    );
+    pinned(ClientMessage { id: 4, request: Request::UndoRun { task: t(), run: r(), anyway: false } }, r#"{"id":4,"type":"undo_run","task":"task_1","run":"run_1"}"#);
+    pinned(ClientMessage { id: 5, request: Request::RedoRun { task: t(), run: r(), anyway: true } }, r#"{"id":5,"type":"redo_run","task":"task_1","run":"run_1","anyway":true}"#);
+    pinned(ClientMessage { id: 6, request: Request::UndoStorage }, r#"{"id":6,"type":"undo_storage"}"#);
+    pinned(ClientMessage { id: 7, request: Request::ClearUndo }, r#"{"id":7,"type":"clear_undo"}"#);
+    let file = DiffFile { path: "docs/start.md".into(), old_path: Some("docs/guide.md".into()), status: FileStatus::Renamed, added: 1, removed: 0, binary: false, old_size: None, new_size: None, old_mode: None, new_mode: None };
+    let logo = DiffFile { path: "logo.png".into(), old_path: None, status: FileStatus::Modified, added: 0, removed: 0, binary: true, old_size: Some(6), new_size: Some(8), old_mode: Some("100644".into()), new_mode: Some("100755".into()) };
+    pinned(
+        Reply::Diff { diff: DiffSummary { task: t(), run: Some(r()), files: vec![file, logo], added: 1, removed: 0 } },
+        r#"{"type":"diff","diff":{"task":"task_1","run":"run_1","files":[{"path":"docs/start.md","old_path":"docs/guide.md","status":"renamed","added":1,"removed":0},{"path":"logo.png","status":"modified","added":0,"removed":0,"binary":true,"old_size":6,"new_size":8,"old_mode":"100644","new_mode":"100755"}],"added":1,"removed":0}}"#,
+    );
+    pinned(Reply::DiffFile { file: DiffPatch { path: "a.rs".into(), lines: vec!["@@ -1 +1 @@".into(), "-a".into(), "+b".into()], total: 3, cut: false } }, r#"{"type":"diff_file","file":{"path":"a.rs","lines":["@@ -1 +1 @@","-a","+b"],"total":3}}"#);
+    pinned(Reply::ChangedSince { files: vec!["README.md".into()] }, r#"{"type":"changed_since","files":["README.md"]}"#);
+    pinned(Reply::UndoStorage { storage: UndoStorage { bytes: 1200, checkpoints: 4, tasks: 2 } }, r#"{"type":"undo_storage","storage":{"bytes":1200,"checkpoints":4,"tasks":2}}"#);
+    let mut with = run();
+    with.undo = Some(RunUndo { state: UndoState::Unavailable, why: Some("the repository is in the middle of a merge".into()), changes: None, committed: false });
+    let json = serde_json::to_string(&with).unwrap();
+    assert!(json.ends_with(r#""undo":{"state":"unavailable","why":"the repository is in the middle of a merge"}}"#), "{json}");
+    pinned(RunUndo { state: UndoState::Applied, why: None, changes: Some(Changes { files: 1, added: 2, removed: 3 }), committed: true }, r#"{"state":"applied","changes":{"files":1,"added":2,"removed":3},"committed":true}"#);
+    for (s, name) in [(UndoState::Taking, "taking"), (UndoState::Undone, "undone"), (UndoState::Dropped, "dropped"), (UndoState::Removed, "removed")] {
+        assert_eq!(serde_json::to_string(&s).unwrap(), format!("\"{name}\""));
+    }
+    assert_eq!(PROTOCOL_VERSION, 7);
 }

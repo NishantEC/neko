@@ -74,11 +74,25 @@ pub struct Runs {
     pub hooks: Mutex<HashMap<String, Sender<(Answer, String)>>>,
     /// Run threads still alive (a run's last writes come after it is released): shutdown waits for them before the checkpoint.
     pub threads: Arc<AtomicU64>,
+    /// Tasks whose run is being undone or redone: no run starts meanwhile.
+    pub undoing: Mutex<std::collections::HashSet<TaskId>>,
+    /// What one checkpoint may take (docs/knowledge/undo.md).
+    pub undo_limits: neko_core::checkpoint::Limits,
 }
 
 impl Runs {
     pub fn new(runtimes: Vec<Arc<dyn Runtime>>, data_dir: PathBuf) -> Runs {
-        Runs { runtimes, active: Mutex::new(HashMap::new()), found: Mutex::new(None), data_dir, limits: Limits::from_env(), hooks: Mutex::new(HashMap::new()), threads: Arc::new(AtomicU64::new(0)) }
+        Runs {
+            runtimes,
+            active: Mutex::new(HashMap::new()),
+            found: Mutex::new(None),
+            data_dir,
+            limits: Limits::from_env(),
+            hooks: Mutex::new(HashMap::new()),
+            threads: Arc::new(AtomicU64::new(0)),
+            undoing: Mutex::new(Default::default()),
+            undo_limits: neko_core::checkpoint::Limits::from_env(),
+        }
     }
 
     /// What was found of each runtime, read again when older than `fresh`.
@@ -189,6 +203,9 @@ pub fn start(shared: &Arc<Shared>, task: Task, words: Option<String>) -> Result<
         if active.contains_key(&task.id) {
             return Err(Reply::error(ErrorCode::Busy, "Neko is already working on this task."));
         }
+        if lock(&shared.runs.undoing).contains(&task.id) {
+            return Err(Reply::error(ErrorCode::Busy, "Neko is undoing a run of this task. Send it again in a moment."));
+        }
         active.insert(task.id.clone(), Active { control: None, book: None, cancelled: cancelled.clone(), secret: None });
     }
     let s = shared.clone();
@@ -281,10 +298,14 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
         return fail_before_run(shared, task, "Neko could not write to its store.".into(), None, None);
     };
     let book = Arc::new(Mutex::new(book));
+    let run_id = lock(&book).run.id.clone();
     let finish = |outcome: Outcome| {
         let changes = workplace::changes(&place);
+        // The end checkpoint, before anything can be tidied away or a follow-up start (docs/knowledge/undo.md).
+        crate::undo::at_end(shared, &task.id, &run_id);
         // A worktree or scratch folder with nothing in it goes now, before a follow-up can start (it makes it again).
-        workplace::tidy(&shared.runs.data_dir, &task.id, &place);
+        let tidied = workplace::tidy(&shared.runs.data_dir, &task.id, &place);
+        crate::undo::after_run(shared, &task.id, matches!(tidied, workplace::Tidied::Removed { .. }) && place.branch.is_some());
         release(shared, &task.id, cancelled);
         let mut b = lock(&book);
         let mut core = lock(&shared.core);
@@ -310,7 +331,16 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
         a.secret = hook.as_ref().map(|h| h.secret.clone());
         a.book = Some(book.clone());
     }
-    let spec = StartSpec { words: words.clone().unwrap_or_else(|| task.words.clone()), workdir: PathBuf::from(&place.workdir), resume, mode: settings.permission_mode, hook };
+    // Undo (docs/knowledge/undo.md): runs the person undid cannot be redone after this one starts, and the agent hears first that
+    // they were undone. Then the start checkpoint, before the agent can touch anything.
+    let told = crate::undo::before_run(shared, &task.id);
+    crate::undo::at_start(shared, &task.id, &run_id, &place);
+    let said = words.clone().unwrap_or_else(|| task.words.clone());
+    let said = match told {
+        Some(line) => format!("{line}\n\n{said}"),
+        None => said,
+    };
+    let spec = StartSpec { words: said, workdir: PathBuf::from(&place.workdir), resume, mode: settings.permission_mode, hook };
     let started = match runtime.start(spec) {
         Ok(s) => s,
         Err(f) => return finish(Outcome::Failed(f)),
@@ -464,6 +494,8 @@ pub fn remove_task(shared: &Shared, task: &TaskId) -> Reply {
     {
         return Reply::error(ErrorCode::UnsavedWork, why);
     }
+    // Its checkpoints go with it: Neko's refs in the repository, its shadow repository.
+    crate::undo::forget_task(shared, task, place.as_ref());
     let mut core = lock(&shared.core);
     // A run may have started meanwhile (a follow-up from another screen): then nothing is removed.
     if lock(&shared.runs.active).contains_key(task) {

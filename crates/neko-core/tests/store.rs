@@ -71,19 +71,67 @@ fn migrations_run_once_from_version_one_and_a_newer_store_is_left_alone() {
     let (path, _g) = temp();
     let s = Store::open(&path).unwrap();
     assert_eq!(s.version().unwrap(), SCHEMA_VERSION);
-    assert_eq!(SCHEMA_VERSION, 4);
+    assert_eq!(SCHEMA_VERSION, 5);
     let mode: String = s.connection().query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
     assert_eq!(mode, "wal");
     drop(s);
     let s = Store::open(&path).unwrap();
-    assert_eq!(s.version().unwrap(), 4, "opening again changes nothing");
+    assert_eq!(s.version().unwrap(), 5, "opening again changes nothing");
     s.connection().pragma_update(None, "user_version", 99).unwrap();
     drop(s);
     match Store::open(&path) {
-        Err(StoreError::Newer { found: 99, known: 4 }) => {}
+        Err(StoreError::Newer { found: 99, known: 5 }) => {}
         Err(e) => panic!("wrong error: {e}"),
         Ok(_) => panic!("a store from a newer Neko must not be opened"),
     }
+}
+
+/// Version 5 (undo): a store as version 4 left it, with a finished run, opens with that run whole and no undo of its own; a
+/// checkpoint row and a run's undo state are then stored, read back, and go with their task.
+#[test]
+fn version_5_adds_checkpoints_and_a_run_s_undo() {
+    let (path, _g) = temp();
+    {
+        let s = Store::open_at(&path, 4).unwrap();
+        assert_eq!(s.version().unwrap(), 4);
+        let c = s.connection();
+        c.execute("INSERT INTO workspaces (id, name, created_ms, position) VALUES ('default', 'General', 1, 0)", []).unwrap();
+        c.execute("INSERT INTO tasks (id, workspace_id, words, title, status, created_ms) VALUES ('task_1', 'default', 'Tidy', 'Tidy', 'done', 1)", []).unwrap();
+        c.execute("INSERT INTO runs (id, task_id, runtime, status, started_ms, ended_ms, workdir, files, added, removed) VALUES ('run_1', 'task_1', 'claude', 'done', 1, 2, '/Users/example/acme-api', 2, 5, 1)", []).unwrap();
+    }
+    let mut s = Store::open(&path).unwrap();
+    assert_eq!(s.version().unwrap(), 5);
+    let run = s.get_run(&neko_protocol::RunId("run_1".into())).unwrap().unwrap();
+    assert_eq!(run.undo, None, "a run from before undo has none");
+    assert_eq!(run.changes, Some(neko_protocol::Changes { files: 2, added: 5, removed: 1 }));
+    let cp = neko_core::history::Checkpoint {
+        id: "cp_1".into(),
+        task: neko_protocol::TaskId("task_1".into()),
+        run: run.id.clone(),
+        kind: "start".into(),
+        place: neko_core::checkpoint::Kind::Repo,
+        work: "/Users/example/acme-api".into(),
+        shadow: None,
+        refname: "refs/neko/checkpoints/task_1/run_1/start".into(),
+        commit: "c0ffee".into(),
+        tree: "7ree".into(),
+        head: Some("abc".into()),
+        files: 12,
+        bytes: 345,
+        took_ms: 20,
+        made_ms: 3,
+        state: "kept".into(),
+    };
+    s.insert_checkpoint(&cp, 3).unwrap();
+    assert_eq!(s.checkpoints_of(&cp.task).unwrap(), vec![cp.clone()]);
+    let u = neko_protocol::RunUndo { state: neko_protocol::UndoState::Undone, why: None, changes: Some(neko_protocol::Changes { files: 1, added: 2, removed: 0 }), committed: false };
+    let (r, _) = s.set_run_undo(&run.id, &u, 4).unwrap();
+    assert_eq!(r.undo, Some(u));
+    s.remove_checkpoints(&["cp_1".into()], 5).unwrap();
+    assert_eq!(s.kept_checkpoints().unwrap(), vec![]);
+    s.delete_task(&cp.task, 6).unwrap();
+    let left: i64 = s.connection().query_row("SELECT COUNT(*) FROM checkpoints", [], |r| r.get(0)).unwrap();
+    assert_eq!(left, 0, "a removed task's checkpoint rows go with it");
 }
 
 #[test]

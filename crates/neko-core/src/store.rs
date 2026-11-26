@@ -124,6 +124,33 @@ const MIGRATIONS: &[Migration] = &[
         CREATE UNIQUE INDEX workspaces_by_folder ON workspaces(folder) WHERE folder IS NOT NULL;",
         crate::workspaces::migrate_task_folders,
     ),
+    // 5: undo (docs/knowledge/undo.md). A row per checkpoint, and where each run's undo stands.
+    Migration::Sql("CREATE TABLE checkpoints (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES tasks(id),
+        run_id TEXT NOT NULL REFERENCES runs(id),
+        kind TEXT NOT NULL,
+        place TEXT NOT NULL,
+        work TEXT NOT NULL,
+        shadow TEXT,
+        ref TEXT NOT NULL,
+        commit_id TEXT NOT NULL,
+        tree TEXT NOT NULL,
+        head TEXT,
+        files INTEGER NOT NULL,
+        bytes INTEGER NOT NULL,
+        took_ms INTEGER NOT NULL,
+        made_ms INTEGER NOT NULL,
+        state TEXT NOT NULL
+    );
+    CREATE INDEX checkpoints_by_task ON checkpoints(task_id, made_ms);
+    CREATE INDEX checkpoints_by_run ON checkpoints(run_id, kind);
+    ALTER TABLE runs ADD COLUMN undo_state TEXT;
+    ALTER TABLE runs ADD COLUMN undo_why TEXT;
+    ALTER TABLE runs ADD COLUMN undo_files INTEGER;
+    ALTER TABLE runs ADD COLUMN undo_added INTEGER;
+    ALTER TABLE runs ADD COLUMN undo_removed INTEGER;
+    ALTER TABLE runs ADD COLUMN undo_committed INTEGER;"),
 ];
 
 /// The schema version this build writes.

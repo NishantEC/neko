@@ -3,11 +3,13 @@
 //! Logic here never reads the system clock or makes a random id itself: a [`Clock`] and an [`Ids`] are handed in, so the tests
 //! run the same every time. The daemon hands in [`SystemClock`] and [`RandomIds`].
 
+pub mod checkpoint;
 pub mod claude;
 pub mod clock;
 pub mod conductor;
 pub mod find;
 pub mod guard;
+pub mod history;
 pub mod needs;
 pub mod policy;
 pub mod records;

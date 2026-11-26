@@ -219,6 +219,7 @@ impl Store {
         let workspace: String = tx.query_row("SELECT workspace_id FROM tasks WHERE id = ?1", [&id.0], |r| r.get(0)).optional()?.unwrap_or_else(|| DEFAULT_WORKSPACE.to_owned());
         tx.execute("DELETE FROM usage WHERE run_id IN (SELECT id FROM runs WHERE task_id = ?1)", [&id.0])?;
         tx.execute("DELETE FROM permissions WHERE task_id = ?1", [&id.0])?;
+        tx.execute("DELETE FROM checkpoints WHERE task_id = ?1", [&id.0])?;
         tx.execute("DELETE FROM parts WHERE task_id = ?1", [&id.0])?;
         tx.execute("DELETE FROM runs WHERE task_id = ?1", [&id.0])?;
         tx.execute("DELETE FROM tasks WHERE id = ?1", [&id.0])?;

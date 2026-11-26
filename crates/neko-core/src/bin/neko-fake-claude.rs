@@ -329,6 +329,40 @@ impl Fake {
                 self.say("I read the README, changed one word and listed the sources.", 3, Duration::from_millis(20));
                 self.result("Done.", false);
             }
+            "edit" => {
+                // Every kind of change undo must take back: an edit, a new file in a new folder, a deletion, a rename, a binary.
+                let p = |rel: &str| format!("{cwd}/{rel}");
+                if let Ok(t) = std::fs::read_to_string(p("README.md")) {
+                    let _ = std::fs::write(p("README.md"), t.replace("small", "tidy"));
+                }
+                let _ = std::fs::create_dir_all(p("src/retry"));
+                let _ = std::fs::write(p("src/retry/mod.rs"), "pub fn attempts() -> u32 {\n    3\n}\n");
+                let _ = std::fs::remove_file(p("OLD.md"));
+                let _ = std::fs::rename(p("docs/guide.md"), p("docs/start.md"));
+                let _ = std::fs::write(p("logo.png"), [0x89, b'P', b'N', b'G', 7, 7, 7, 7]);
+                self.tool("Edit", json!({"file_path": p("README.md"), "old_string":"small","new_string":"tidy"}), false, "The file was edited.");
+                self.tool("Write", json!({"file_path": p("src/retry/mod.rs")}), false, "Wrote the file.");
+                self.say("I edited the README, added the retry module, removed OLD.md and moved the guide.", 3, Duration::from_millis(10));
+                self.result("Done.", false);
+            }
+            "commit" => {
+                let _ = std::fs::write(format!("{cwd}/CHANGELOG.md"), "# Changes\n\n- Retry failed pages\n");
+                let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&cwd).args(["-c", "user.name=Asha", "-c", "user.email=asha@example.com", "-c", "commit.gpgsign=false"]).args(args).status();
+                let _ = git(&["add", "CHANGELOG.md"]);
+                let _ = git(&["commit", "--quiet", "-m", "Add a changelog"]);
+                self.tool("Bash", json!({"command":"git commit -m 'Add a changelog'"}), false, "1 file changed");
+                self.say("I committed a changelog.", 2, Duration::from_millis(10));
+                self.result("Done.", false);
+            }
+            "many" => {
+                let n: usize = arg.parse().unwrap_or(50);
+                for i in 0..n {
+                    let _ = std::fs::create_dir_all(format!("{cwd}/many"));
+                    let _ = std::fs::write(format!("{cwd}/many/{i}.txt"), format!("file {i}\n"));
+                }
+                self.say(&format!("I wrote {n} files."), 2, Duration::from_millis(10));
+                self.result("Done.", false);
+            }
             "permission" => {
                 let ran = self.tool("Bash", json!({"command":"cargo test","description":"Run the tests"}), true, "test result: ok. 12 passed");
                 self.say(if ran { "The tests pass." } else { "Okay, I did not run the tests." }, 2, Duration::from_millis(20));

@@ -15,13 +15,17 @@ pub mod client;
 #[cfg(feature = "ws")]
 pub mod pump;
 pub mod title;
+pub mod undo;
+
+pub use undo::{DiffFile, DiffPatch, DiffSummary, FileStatus, Offer, RunUndo, UndoState, UndoStorage};
 
 /// The version of this contract. A screen and a daemon talk only when theirs are equal. 2: tasks run (S1). 3: three permission
 /// modes, the context window, a command's exit code, Claude Code's own rules in words. 4: a task can be `asked` (its run ended with
 /// a question for the person). 5: workspaces (a task is made in one; list, add, rename, remove, locate and move them; remove a
 /// task). 6: "Needs you" (the items waiting for the person, listed and pushed whole; a failure's notice says what kind it is; a
-/// follow-up may say which question it answers).
-pub const PROTOCOL_VERSION: u32 = 6;
+/// follow-up may say which question it answers). 7: undo (a run's checkpoints and where its undo stands; a run's changes as a diff,
+/// per file; undo, redo; the storage undo uses, and clearing it).
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -211,6 +215,10 @@ pub struct Run {
     pub usage: Option<Usage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub changes: Option<Changes>,
+    /// Where its undo stands: its checkpoints, what it changed itself, undone or not (docs/knowledge/undo.md). None for a run that
+    /// never started its agent, and for runs from before protocol 7.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undo: Option<RunUndo>,
 }
 
 /// A tool call's state.
@@ -507,6 +515,42 @@ pub enum Request {
     DayUsage { from_ms: i64 },
     /// Everything waiting for the person now ("Needs you").
     ListNeeds,
+    /// What a run changed, between its start and end checkpoints: the files, with their counts (no lines yet). No run: the whole
+    /// task, from its first run's start to where its newest run left the folder ("All changes").
+    GetDiff {
+        task: TaskId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run: Option<RunId>,
+    },
+    /// One file's lines of that diff (paged per file). `full`: all of them, not cut at [`undo::CUT_LINES`].
+    GetDiffFile {
+        task: TaskId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run: Option<RunId>,
+        path: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        full: bool,
+    },
+    /// Put the task's files back as they were before `run`. Refused unless it is the run [`undo::offers`] offers Undo for. When
+    /// files changed since the run ended the answer is `changed_since` with them, and nothing is touched; `anyway` then saves
+    /// the folder as it is as a checkpoint of its own first, and undoes.
+    UndoRun {
+        task: TaskId,
+        run: RunId,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        anyway: bool,
+    },
+    /// Put the undone run's changes back, with the same check.
+    RedoRun {
+        task: TaskId,
+        run: RunId,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        anyway: bool,
+    },
+    /// How much room undo takes (Settings ▸ Workspaces).
+    UndoStorage,
+    /// Remove every checkpoint: the hidden refs in repositories and Neko's shadow repositories. No run can be undone after.
+    ClearUndo,
 }
 
 /// A request and the id its reply will carry.
@@ -567,6 +611,13 @@ pub enum Reply {
     },
     /// What waits for the person, oldest first, grouped by workspace.
     Needs { items: Vec<NeedsItem> },
+    /// A run's (or a task's) changes, file by file.
+    Diff { diff: DiffSummary },
+    /// One file's lines.
+    DiffFile { file: DiffPatch },
+    /// Undo or redo did nothing: these files changed since (paths in the task's folder). Asking again with `anyway` goes ahead.
+    ChangedSince { files: Vec<String> },
+    UndoStorage { storage: UndoStorage },
     /// Done; the change arrives as events.
     Ok,
     Error { code: ErrorCode, message: String },
@@ -632,6 +683,8 @@ pub mod files {
     pub const SCRATCH: &str = "scratch";
     /// Git worktrees of tasks in a repository, one per task.
     pub const WORKTREES: &str = "worktrees";
+    /// Undo's own folder: a shadow repository per task whose folder is not a git repository, and temporary index files.
+    pub const UNDO: &str = "undo";
 }
 
 impl ClientMessage {

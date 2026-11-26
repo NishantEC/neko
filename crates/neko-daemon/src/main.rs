@@ -9,6 +9,7 @@ mod hook;
 mod http;
 mod runs;
 mod server;
+mod undo;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

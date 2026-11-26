@@ -23,6 +23,11 @@ pub struct Place {
     pub plain: bool,
 }
 
+/// Appends one event row in `tx` (the same transaction as the change it records).
+pub(crate) fn log_event(tx: &Transaction<'_>, now_ms: i64, subject: &str, kind: &str, data: serde_json::Value) -> Result<u64, StoreError> {
+    log(tx, now_ms, subject, kind, data)
+}
+
 fn log(tx: &Transaction<'_>, now_ms: i64, subject: &str, kind: &str, data: serde_json::Value) -> Result<u64, StoreError> {
     tx.execute(
         "INSERT INTO events (at_ms, workspace_id, subject, kind, data) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -32,7 +37,8 @@ fn log(tx: &Transaction<'_>, now_ms: i64, subject: &str, kind: &str, data: serde
 }
 
 const RUN_COLUMNS: &str = "r.id, r.task_id, r.runtime, r.model, r.status, r.started_ms, r.ended_ms, r.session, r.workdir, r.branch, r.reason, r.files, r.added, r.removed, \
-    u.input_tokens, u.output_tokens, u.cached_tokens, u.cost_usd, u.model, u.pricing, u.reported_by, u.context_tokens, u.context_window";
+    u.input_tokens, u.output_tokens, u.cached_tokens, u.cost_usd, u.model, u.pricing, u.reported_by, u.context_tokens, u.context_window, \
+    r.undo_state, r.undo_why, r.undo_files, r.undo_added, r.undo_removed, r.undo_committed";
 
 fn run_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Run> {
     let changes = match (row.get::<_, Option<u32>>(11)?, row.get::<_, Option<u32>>(12)?, row.get::<_, Option<u32>>(13)?) {
@@ -67,6 +73,7 @@ fn run_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Run> {
         reason: row.get(10)?,
         usage,
         changes,
+        undo: crate::history::undo_of(row, 23)?,
     })
 }
 

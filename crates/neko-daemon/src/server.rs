@@ -476,6 +476,12 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
             Ok(items) => Reply::Needs { items },
             Err(e) => internal(e),
         },
+        Request::GetDiff { task, run } => crate::undo::diff(shared, &task, run),
+        Request::GetDiffFile { task, run, path, full } => crate::undo::diff_file(shared, &task, run, &path, full),
+        Request::UndoRun { task, run, anyway } => crate::undo::undo_run(shared, &task, &run, anyway, false),
+        Request::RedoRun { task, run, anyway } => crate::undo::undo_run(shared, &task, &run, anyway, true),
+        Request::UndoStorage => crate::undo::storage(shared),
+        Request::ClearUndo => crate::undo::clear(shared),
         Request::DayUsage { from_ms } => match lock(&shared.core).store.day_usage(from_ms) {
             Ok(usage) => Reply::DayUsage { usage },
             Err(e) => internal(e),
