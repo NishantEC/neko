@@ -9,7 +9,7 @@ use neko_core::checkpoint::{self, Folder, Kind, Refusal};
 use neko_core::history::{self, Checkpoint};
 use neko_core::{Core, Place};
 use neko_protocol::undo::{self, Action};
-use neko_protocol::{Change, DiffPatch, DiffSummary, ErrorCode, Reply, Run, RunId, RunUndo, ServerMessage, TaskId, Tone, UndoState, UndoStorage};
+use neko_protocol::{Change, DiffPatch, DiffSource, DiffSummary, ErrorCode, Overview, Reply, Run, RunId, RunUndo, ServerMessage, TaskId, Tone, UndoState, UndoStorage};
 
 use crate::server::{Shared, lock};
 
@@ -235,24 +235,67 @@ fn ends(shared: &Shared, task: &TaskId, run: Option<&RunId>) -> Result<(String, 
     }
 }
 
-/// A run's (or the task's) changes, file by file.
-pub fn diff(shared: &Shared, task: &TaskId, run: Option<RunId>) -> Reply {
-    let (a, b, f, root) = match ends(shared, task, run.as_ref()) {
-        Ok(e) => e,
-        Err(r) => return r,
+/// What is uncommitted in the task's folder now: the folder as it is against the newest commit of its branch. Only a folder in a git
+/// repository has that (a task's own checkout, or a chosen folder that is a repository with commits); with the folder (the trees are
+/// read from it) and where the paths are.
+fn uncommitted_ends(shared: &Shared, task: &TaskId) -> Result<(String, String, Folder, String), Reply> {
+    let place = lock(&shared.core).store.place(task).ok().flatten();
+    let Some(place) = place else { return Err(refused("There is no folder for this thread yet.")) };
+    let f = if place.branch.is_some() && place.repo.is_some() {
+        Folder { kind: Kind::Repo, work: neko_core::workplace::worktree_root(&shared.runs.data_dir, task), shadow: None }
+    } else {
+        Folder { kind: Kind::Repo, work: PathBuf::from(&place.workdir), shadow: None }
     };
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    if !f.work.is_dir() {
+        return Err(refused("The thread's folder is gone, so nothing is waiting to be committed."));
+    }
+    match checkpoint::head(&f, until) {
+        Ok(Some(_)) => {}
+        _ => return Err(refused("This folder is not a git repository with commits, so there is nothing to compare with.")),
+    }
+    let tmp = checkpoint::tmp_dir(&shared.runs.data_dir);
+    match checkpoint::tree_now(&f, &tmp, &shared.runs.undo_limits) {
+        Ok(now) => {
+            let root = f.work.to_string_lossy().into_owned();
+            Ok(("HEAD^{tree}".to_owned(), now, f, root))
+        }
+        Err(e) => Err(refused(format!("Neko could not read the folder: {e}."))),
+    }
+}
+
+/// The two trees a diff is between, for any source.
+fn trees(shared: &Shared, task: &TaskId, run: Option<&RunId>, source: DiffSource) -> Result<(String, String, Folder, String), Reply> {
+    match (source, run) {
+        (DiffSource::Uncommitted, _) => uncommitted_ends(shared, task),
+        (DiffSource::Run, Some(r)) => ends(shared, task, Some(r)),
+        (DiffSource::Run | DiffSource::Thread, _) => ends(shared, task, None),
+    }
+}
+
+fn summary(shared: &Shared, task: &TaskId, run: Option<RunId>, source: DiffSource) -> Result<DiffSummary, Reply> {
+    let (a, b, f, root) = trees(shared, task, run.as_ref(), source)?;
     match checkpoint::files(&f, &a, &b) {
         Ok(files) => {
             let (added, removed) = (files.iter().map(|x| x.added).sum(), files.iter().map(|x| x.removed).sum());
-            Reply::Diff { diff: DiffSummary { task: task.clone(), run, root, files, added, removed } }
+            let run = if source == DiffSource::Run { run } else { None };
+            Ok(DiffSummary { task: task.clone(), run, source, root, files, added, removed })
         }
-        Err(e) => refused(format!("Neko could not read the changes: {e}.")),
+        Err(e) => Err(refused(format!("Neko could not read the changes: {e}."))),
+    }
+}
+
+/// A run's, the thread's, or the folder's uncommitted changes, file by file.
+pub fn diff(shared: &Shared, task: &TaskId, run: Option<RunId>, source: DiffSource) -> Reply {
+    match summary(shared, task, run, source) {
+        Ok(diff) => Reply::Diff { diff },
+        Err(r) => r,
     }
 }
 
 /// One file's lines, cut at [`undo::CUT_LINES`] unless `full` (then at [`undo::ALL_LINES`]).
-pub fn diff_file(shared: &Shared, task: &TaskId, run: Option<RunId>, path: &str, full: bool) -> Reply {
-    let (a, b, f, _) = match ends(shared, task, run.as_ref()) {
+pub fn diff_file(shared: &Shared, task: &TaskId, run: Option<RunId>, source: DiffSource, path: &str, full: bool) -> Reply {
+    let (a, b, f, _) = match trees(shared, task, run.as_ref(), source) {
         Ok(e) => e,
         Err(r) => return r,
     };
@@ -275,6 +318,25 @@ pub fn diff_file(shared: &Shared, task: &TaskId, run: Option<RunId>, path: &str,
         }
         Err(e) => refused(format!("Neko could not read the changes: {e}.")),
     }
+}
+
+/// A thread's right pane in one reply: its folder and branch (the newest run's, else the one chosen), everything its runs changed,
+/// and what is uncommitted now.
+pub fn overview(shared: &Shared, task: &TaskId) -> Reply {
+    let (folder, branch) = {
+        let core = lock(&shared.core);
+        let runs = core.store.runs_of(task).unwrap_or_default();
+        match runs.iter().rev().find(|r| !r.workdir.is_empty()) {
+            Some(r) => (Some(r.workdir.clone()), r.branch.clone()),
+            None => match core.store.place(task).ok().flatten() {
+                Some(p) => ((!p.workdir.is_empty()).then(|| p.workdir.clone()), p.branch.clone()),
+                None => (None, None),
+            },
+        }
+    };
+    let changes = summary(shared, task, None, DiffSource::Thread).ok();
+    let uncommitted = uncommitted_ends(shared, task).ok().and_then(|(a, b, f, _)| checkpoint::changes(&f, &a, &b).ok());
+    Reply::Overview { overview: Overview { task: task.clone(), folder, branch, changes, uncommitted } }
 }
 
 /// Undo (or redo, `redo`) a run: only the one [`undo::offers`] offers. Never while the task works, one at a time per task.

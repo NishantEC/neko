@@ -27,7 +27,7 @@ pub use cats::Cat;
 pub use plugins::{Access, AccessMode, Approval, Check, FieldKind, FieldValue, Manifest, Plugin, PluginAsk, PluginKind, PluginState, SettingField};
 pub use rounds::{Round, RoundRun, RoundStatus, TaskRound};
 pub use schedule::Schedule;
-pub use undo::{DiffFile, DiffPatch, DiffSummary, FileStatus, Offer, RunUndo, UndoState, UndoStorage};
+pub use undo::{DiffFile, DiffPatch, DiffSource, DiffSummary, FileStatus, Offer, Overview, RunUndo, UndoState, UndoStorage};
 
 /// The version of this contract. A screen and a daemon talk only when theirs are equal. 2: tasks run (S1). 3: three permission
 /// modes, the context window, a command's exit code, Claude Code's own rules in words. 4: a task can be `asked` (its run ended with
@@ -42,7 +42,8 @@ pub use undo::{DiffFile, DiffPatch, DiffSummary, FileStatus, Offer, RunUndo, Und
 /// item asks for the approval). 12: threads (what a thread last said and is doing, read and unread). 13: subagents (a task may belong to another, with a number; a status Waiting; a card and a wake note
 /// in the transcript; a request from a subagent says who asked; a setting that gives runs the person's own MCP servers). 14: a new thread needs no cat (`create_task` takes `in_folder` and `from_branch`
 /// instead, a task's `cat` is optional, `set_task_cat` is gone, `list_branches` says where a thread can start from).
-pub const PROTOCOL_VERSION: u32 = 14;
+/// 15: the right pane (a diff has a source: a run, the thread, or what is uncommitted in the folder now; a thread's overview in one reply).
+pub const PROTOCOL_VERSION: u32 = 15;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -827,6 +828,10 @@ pub enum Request {
         task: TaskId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         run: Option<RunId>,
+        /// Which changes: `run` (the default; with no `run` it means the thread, as it did before version 14), `thread`, or
+        /// `uncommitted` (the folder now against its branch's newest commit).
+        #[serde(default, skip_serializing_if = "undo::DiffSource::is_run")]
+        source: undo::DiffSource,
     },
     /// One file's lines of that diff (paged per file). `full`: all of them, not cut at [`undo::CUT_LINES`].
     GetDiffFile {
@@ -836,7 +841,12 @@ pub enum Request {
         path: String,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         full: bool,
+        #[serde(default, skip_serializing_if = "undo::DiffSource::is_run")]
+        source: undo::DiffSource,
     },
+    /// A thread's right pane in one reply: its folder and branch, what all its runs changed, and what is uncommitted now. The
+    /// screen asks again when a run of the thread (or of one of its subagents) changes.
+    GetOverview { task: TaskId },
     /// Put the task's files back as they were before `run`. Refused unless it is the run [`undo::offers`] offers Undo for. When
     /// files changed since the run ended the answer is `changed_since` with them, and nothing is touched; `anyway` then saves
     /// the folder as it is as a checkpoint of its own first, and undoes.
@@ -935,6 +945,8 @@ pub enum Reply {
     Diff { diff: DiffSummary },
     /// One file's lines.
     DiffFile { file: DiffPatch },
+    /// A thread's overview (`get_overview`).
+    Overview { overview: Overview },
     /// Undo or redo did nothing: these files changed since (paths in the task's folder). Asking again with `anyway` goes ahead.
     ChangedSince { files: Vec<String> },
     UndoStorage { storage: UndoStorage },

@@ -98,17 +98,57 @@ pub struct DiffFile {
     pub new_mode: Option<String>,
 }
 
+/// Which changes a diff is of.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffSource {
+    /// One run: its start checkpoint against its end one. (Asked with no run it means [`DiffSource::Thread`], as before version 14.)
+    #[default]
+    Run,
+    /// Everything the thread's runs changed: its first run's start against where its newest run left the folder.
+    Thread,
+    /// What is in the folder now and not committed: the folder as it is against the newest commit of its branch. Only a folder
+    /// in a git repository has one.
+    Uncommitted,
+}
+
+impl DiffSource {
+    pub fn is_run(&self) -> bool {
+        *self == DiffSource::Run
+    }
+}
+
 /// A run's changes (or the task's, with no run), file by file.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiffSummary {
     pub task: TaskId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<RunId>,
+    /// Which changes these are (the one the screen asked for).
+    #[serde(default, skip_serializing_if = "DiffSource::is_run")]
+    pub source: DiffSource,
     /// The folder the paths are in (the worktree's top folder, or the plain folder).
     pub root: String,
     pub files: Vec<DiffFile>,
     pub added: u32,
     pub removed: u32,
+}
+
+/// A thread's right pane in one reply.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Overview {
+    pub task: TaskId,
+    /// The folder the newest run worked in, or the one chosen for the thread; `None` when it has none yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// What all the thread's runs changed (its files, with their counts); `None` when no run has a checkpoint pair yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changes: Option<DiffSummary>,
+    /// What is uncommitted in the folder now; `None` when the folder is not in a git repository or is gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uncommitted: Option<Changes>,
 }
 
 /// One file's lines: a unified diff's hunks, each line with its mark first (`@`, `+`, `-`, a space, or `\`).

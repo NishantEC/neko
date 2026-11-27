@@ -154,7 +154,7 @@ fn run_review_undo_redo_and_the_agent_is_told() {
     assert!(refs.contains(&format!("refs/neko/checkpoints/{}/{}/start", task.id.0, run.id.0)));
 
     // Review: exactly the run's change.
-    let Reply::Diff { diff } = c.request(Request::GetDiff { task: task.id.clone(), run: Some(run.id.clone()) }).unwrap() else { panic!("no diff") };
+    let Reply::Diff { diff } = c.request(Request::GetDiff { task: task.id.clone(), run: Some(run.id.clone()), source: DiffSource::Run }).unwrap() else { panic!("no diff") };
     let by = |p: &str| diff.files.iter().find(|f| f.path == p).unwrap_or_else(|| panic!("{p} in {:?}", diff.files)).clone();
     assert_eq!(by("README.md").status, FileStatus::Modified);
     assert_eq!((by("README.md").added, by("README.md").removed), (1, 1));
@@ -163,10 +163,28 @@ fn run_review_undo_redo_and_the_agent_is_told() {
     assert_eq!(by("docs/start.md").old_path.as_deref(), Some("docs/guide.md"));
     assert!(by("logo.png").binary);
     assert_eq!((by("logo.png").old_size, by("logo.png").new_size), (Some(6), Some(8)));
-    let Reply::DiffFile { file } = c.request(Request::GetDiffFile { task: task.id.clone(), run: Some(run.id.clone()), path: "README.md".into(), full: false }).unwrap() else { panic!("no file") };
+    let Reply::DiffFile { file } = c.request(Request::GetDiffFile { task: task.id.clone(), run: Some(run.id.clone()), path: "README.md".into(), full: false, source: DiffSource::Run }).unwrap() else { panic!("no file") };
     assert_eq!(file.lines, vec!["@@ -1,2 +1,2 @@", " # Acme", "-A small project.", "+A tidy project."]);
-    let Reply::Diff { diff: all } = c.request(Request::GetDiff { task: task.id.clone(), run: None }).unwrap() else { panic!("no diff") };
+    let Reply::Diff { diff: all } = c.request(Request::GetDiff { task: task.id.clone(), run: None, source: DiffSource::Thread }).unwrap() else { panic!("no diff") };
     assert_eq!(all.files, diff.files, "one run: all changes are its changes");
+    assert_eq!((all.source, diff.source), (DiffSource::Thread, DiffSource::Run));
+    // The right pane's other sources: the folder now against its branch's newest commit (the run committed nothing, so it is the
+    // run's own change), and the thread's overview in one reply.
+    let Reply::Diff { diff: loose } = c.request(Request::GetDiff { task: task.id.clone(), run: None, source: DiffSource::Uncommitted }).unwrap() else { panic!("no uncommitted diff") };
+    assert_eq!(loose.source, DiffSource::Uncommitted);
+    let paths = |d: &DiffSummary| d.files.iter().map(|f| f.path.clone()).collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(paths(&loose), paths(&diff), "uncommitted: what the run left in its worktree");
+    let Reply::DiffFile { file: loose_file } =
+        c.request(Request::GetDiffFile { task: task.id.clone(), run: None, path: "README.md".into(), full: false, source: DiffSource::Uncommitted }).unwrap()
+    else {
+        panic!("no uncommitted file")
+    };
+    assert_eq!(loose_file.lines, vec!["@@ -1,2 +1,2 @@", " # Acme", "-A small project.", "+A tidy project."]);
+    let Reply::Overview { overview } = c.request(Request::GetOverview { task: task.id.clone() }).unwrap() else { panic!("no overview") };
+    assert_eq!(overview.folder.as_deref(), Some(run.workdir.as_str()));
+    assert_eq!(overview.branch, run.branch);
+    assert_eq!(overview.changes.as_ref().map(|c| c.files.len()), Some(5), "{overview:?}");
+    assert_eq!(overview.uncommitted.map(|c| c.files), Some(5));
 
     // Undo: the files as they were before the run; nothing of the person's moved.
     let changed = files(&tree);
@@ -239,7 +257,7 @@ fn a_run_that_committed_is_not_undone_and_its_diff_stays_readable() {
     let head = git(Path::new(&run.workdir), &["rev-parse", "HEAD"]);
     assert_eq!(undo(&mut c, &task.id, &run.id, false), Reply::error(ErrorCode::Refused, LINE_COMMITTED));
     assert_eq!(git(Path::new(&run.workdir), &["rev-parse", "HEAD"]), head, "no commit moved");
-    let Reply::Diff { diff } = c.request(Request::GetDiff { task: task.id.clone(), run: Some(run.id.clone()) }).unwrap() else { panic!("no diff") };
+    let Reply::Diff { diff } = c.request(Request::GetDiff { task: task.id.clone(), run: Some(run.id.clone()), source: DiffSource::Run }).unwrap() else { panic!("no diff") };
     assert_eq!(diff.files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), vec!["CHANGELOG.md"]);
 }
 
@@ -272,6 +290,13 @@ fn a_plain_folder_is_undone_through_the_shadow_repository_and_nothing_is_written
     let run = last_run(&mut c, &task.id);
     assert_eq!(run.undo.as_ref().unwrap().changes.map(|c| c.files), Some(5));
     assert!(!notes.join(".git").exists(), "no repository in the person's folder");
+    // No branch to compare with: Uncommitted is refused in words, and the overview has the thread's changes and no uncommitted figure.
+    let Reply::Error { code, message } = c.request(Request::GetDiff { task: task.id.clone(), run: None, source: DiffSource::Uncommitted }).unwrap() else { panic!("a plain folder has nothing uncommitted") };
+    assert_eq!(code, ErrorCode::Refused);
+    assert!(message.contains("not a git repository"), "{message}");
+    let Reply::Overview { overview } = c.request(Request::GetOverview { task: task.id.clone() }).unwrap() else { panic!("no overview") };
+    assert_eq!((overview.changes.map(|c| c.files.len()), overview.uncommitted), (Some(5), None));
+    assert!(!notes.join(".git").exists(), "asking wrote nothing into the folder");
     let shadow = d.dir.join("undo").join(format!("{}.git", &task.id.0[task.id.0.len() - 8..].to_lowercase()));
     assert!(shadow.join("HEAD").is_file(), "the shadow repository is in Neko's data folder");
     assert_eq!(undo(&mut c, &task.id, &run.id, false), Reply::Ok);

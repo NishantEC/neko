@@ -282,7 +282,7 @@ fn set_status(shared: &Shared, task: &Task, status: TaskStatus) {
 fn files_of(shared: &Arc<Shared>, task: &Task) -> Vec<String> {
     let run = lock(&shared.core).store.runs_of(&task.id).ok().and_then(|mut r| r.pop()).map(|r| r.id);
     let Some(run) = run else { return Vec::new() };
-    match crate::undo::diff(shared, &task.id, Some(run)) {
+    match crate::undo::diff(shared, &task.id, Some(run), neko_protocol::DiffSource::Run) {
         Reply::Diff { diff } => {
             let mut v: Vec<String> = diff.files.iter().take(30).map(file_line).collect();
             if diff.files.len() > 30 {

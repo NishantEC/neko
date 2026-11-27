@@ -105,12 +105,16 @@ impl CatState {
     }
 }
 
-/// A run's changes (or the task's, with no run), open in place of the conversation (docs/knowledge/undo.md).
+/// What the pane's Changes tab shows (docs/knowledge/undo.md): a run's changes, the thread's, or what is uncommitted in its folder.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Review {
+    /// The thread (a kitten's changes are the thread's).
     pub task: TaskId,
-    /// None: all of the task's changes.
+    pub source: neko_protocol::DiffSource,
+    /// The run, for the source `Run`.
     pub run: Option<RunId>,
+    /// The files must be asked for again (a run of the thread ended).
+    pub stale: bool,
     /// The run the person opened it from: "This run" goes back to it.
     pub from: Option<RunId>,
     pub summary: Option<DiffSummary>,
@@ -307,8 +311,8 @@ pub struct App {
 }
 
 impl Review {
-    pub fn new(task: TaskId, run: Option<RunId>, from: Option<RunId>) -> Review {
-        Review { task, run, from, summary: None, error: None, patches: HashMap::new(), open: HashSet::new() }
+    pub fn new(task: TaskId, source: neko_protocol::DiffSource, run: Option<RunId>, from: Option<RunId>) -> Review {
+        Review { task, source, run, stale: false, from, summary: None, error: None, patches: HashMap::new(), open: HashSet::new() }
     }
 }
 
@@ -1161,8 +1165,8 @@ impl App {
     pub fn open_review(&mut self, task: &TaskId, run: Option<RunId>) {
         let from = run.clone().or_else(|| self.review.as_ref().filter(|r| &r.task == task).and_then(|r| r.from.clone()));
         self.menu_open = None;
-        self.review = Some(Review::new(task.clone(), run.clone(), from));
-        if let Some(id) = self.send(Request::GetDiff { task: task.clone(), run }) {
+        self.review = Some(Review::new(task.clone(), if run.is_some() { neko_protocol::DiffSource::Run } else { neko_protocol::DiffSource::Thread }, run.clone(), from));
+        if let Some(id) = self.send(Request::GetDiff { task: task.clone(), run: run.clone(), source: if run.is_some() { neko_protocol::DiffSource::Run } else { neko_protocol::DiffSource::Thread } }) {
             self.asked.insert(id, Asked::Diff);
         }
     }
@@ -1179,7 +1183,7 @@ impl App {
             .map(|r| (r.task.clone(), r.id.clone()))
             .collect();
         for (task, run) in want {
-            if let Some(id) = self.send(Request::GetDiff { task, run: Some(run.clone()) }) {
+            if let Some(id) = self.send(Request::GetDiff { task, run: Some(run.clone()), source: neko_protocol::DiffSource::Run }) {
                 self.asked.insert(id, Asked::Receipt);
                 self.receipts_asked.insert(run);
             }
@@ -1213,7 +1217,7 @@ impl App {
     }
 
     fn ask_lines(&mut self, task: TaskId, run: Option<RunId>, path: &str, full: bool) {
-        if let Some(id) = self.send(Request::GetDiffFile { task, run, path: path.to_owned(), full }) {
+        if let Some(id) = self.send(Request::GetDiffFile { task, source: if run.is_some() { neko_protocol::DiffSource::Run } else { neko_protocol::DiffSource::Thread }, run, path: path.to_owned(), full }) {
             self.asked.insert(id, Asked::Diff);
         }
     }

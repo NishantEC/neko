@@ -783,7 +783,7 @@ fn receipt_files(s: &mut App, run: &str, n: usize) {
     files[0].added += 42 - a.min(42);
     files[0].removed += 7 - r.min(7);
     let task = s.tasks[1].id.clone();
-    s.receipts.insert(RunId(run.into()), DiffSummary { task, run: Some(RunId(run.into())), root: String::new(), files, added: 42, removed: 7 });
+    s.receipts.insert(RunId(run.into()), DiffSummary { task, run: Some(RunId(run.into())), source: neko_protocol::DiffSource::Run, root: String::new(), files, added: 42, removed: 7 });
 }
 
 fn task_open(s: &mut App) {
@@ -1286,10 +1286,10 @@ fn review_files() -> Vec<DiffFile> {
 
 fn review_with(s: &mut App, run: Option<&str>, open: &[&str]) {
     let task = s.tasks[1].id.clone();
-    let mut r = crate::state::Review::new(task.clone(), run.map(|r| RunId(r.into())), Some(RunId("run_1".into())));
+    let mut r = crate::state::Review::new(task.clone(), if run.is_some() { neko_protocol::DiffSource::Run } else { neko_protocol::DiffSource::Thread }, run.map(|r| RunId(r.into())), Some(RunId("run_1".into())));
     let files = review_files();
     let (added, removed) = (files.iter().map(|f| f.added).sum(), files.iter().map(|f| f.removed).sum());
-    r.summary = Some(DiffSummary { task, run: r.run.clone(), root: "/Users/example/Library/Application Support/neko/worktrees/x7k2m9qa".into(), files, added, removed });
+    r.summary = Some(DiffSummary { task, run: r.run.clone(), source: r.source, root: "/Users/example/Library/Application Support/neko/worktrees/x7k2m9qa".into(), files, added, removed });
     let toolbar = [
         "@@ -9,8 +9,9 @@ use crate::ui::button::Button;",
         " ",

@@ -335,10 +335,10 @@ fn needs_you_round_trips() {
 fn undo_round_trips() {
     let t = || TaskId("task_1".into());
     let r = || RunId("run_1".into());
-    pinned(ClientMessage { id: 1, request: Request::GetDiff { task: t(), run: Some(r()) } }, r#"{"id":1,"type":"get_diff","task":"task_1","run":"run_1"}"#);
-    pinned(ClientMessage { id: 2, request: Request::GetDiff { task: t(), run: None } }, r#"{"id":2,"type":"get_diff","task":"task_1"}"#);
+    pinned(ClientMessage { id: 1, request: Request::GetDiff { task: t(), run: Some(r()), source: DiffSource::Run } }, r#"{"id":1,"type":"get_diff","task":"task_1","run":"run_1"}"#);
+    pinned(ClientMessage { id: 2, request: Request::GetDiff { task: t(), run: None, source: DiffSource::Run } }, r#"{"id":2,"type":"get_diff","task":"task_1"}"#);
     pinned(
-        ClientMessage { id: 3, request: Request::GetDiffFile { task: t(), run: Some(r()), path: "src/lib.rs".into(), full: true } },
+        ClientMessage { id: 3, request: Request::GetDiffFile { task: t(), run: Some(r()), path: "src/lib.rs".into(), full: true, source: DiffSource::Run } },
         r#"{"id":3,"type":"get_diff_file","task":"task_1","run":"run_1","path":"src/lib.rs","full":true}"#,
     );
     pinned(ClientMessage { id: 4, request: Request::UndoRun { task: t(), run: r(), anyway: false } }, r#"{"id":4,"type":"undo_run","task":"task_1","run":"run_1"}"#);
@@ -348,8 +348,20 @@ fn undo_round_trips() {
     let file = DiffFile { path: "docs/start.md".into(), old_path: Some("docs/guide.md".into()), status: FileStatus::Renamed, added: 1, removed: 0, binary: false, old_size: None, new_size: None, old_mode: None, new_mode: None };
     let logo = DiffFile { path: "logo.png".into(), old_path: None, status: FileStatus::Modified, added: 0, removed: 0, binary: true, old_size: Some(6), new_size: Some(8), old_mode: Some("100644".into()), new_mode: Some("100755".into()) };
     pinned(
-        Reply::Diff { diff: DiffSummary { task: t(), run: Some(r()), root: "/Users/example/acme-api".into(), files: vec![file, logo], added: 1, removed: 0 } },
+        Reply::Diff { diff: DiffSummary { task: t(), run: Some(r()), source: DiffSource::Run, root: "/Users/example/acme-api".into(), files: vec![file, logo], added: 1, removed: 0 } },
         r#"{"type":"diff","diff":{"task":"task_1","run":"run_1","root":"/Users/example/acme-api","files":[{"path":"docs/start.md","old_path":"docs/guide.md","status":"renamed","added":1,"removed":0},{"path":"logo.png","status":"modified","added":0,"removed":0,"binary":true,"old_size":6,"new_size":8,"old_mode":"100644","new_mode":"100755"}],"added":1,"removed":0}}"#,
+    );
+    pinned(ClientMessage { id: 20, request: Request::GetDiff { task: t(), run: None, source: DiffSource::Thread } }, r#"{"id":20,"type":"get_diff","task":"task_1","source":"thread"}"#);
+    pinned(ClientMessage { id: 21, request: Request::GetDiff { task: t(), run: None, source: DiffSource::Uncommitted } }, r#"{"id":21,"type":"get_diff","task":"task_1","source":"uncommitted"}"#);
+    pinned(
+        ClientMessage { id: 22, request: Request::GetDiffFile { task: t(), run: None, path: "a.rs".into(), full: false, source: DiffSource::Uncommitted } },
+        r#"{"id":22,"type":"get_diff_file","task":"task_1","path":"a.rs","source":"uncommitted"}"#,
+    );
+    pinned(ClientMessage { id: 23, request: Request::GetOverview { task: t() } }, r#"{"id":23,"type":"get_overview","task":"task_1"}"#);
+    let changes = Changes { files: 1, added: 3, removed: 1 };
+    pinned(
+        Reply::Overview { overview: Overview { task: t(), folder: Some("/Users/example/acme-api".into()), branch: Some("neko/4f2a".into()), changes: None, uncommitted: Some(changes) } },
+        r#"{"type":"overview","overview":{"task":"task_1","folder":"/Users/example/acme-api","branch":"neko/4f2a","uncommitted":{"files":1,"added":3,"removed":1}}}"#,
     );
     pinned(Reply::DiffFile { file: DiffPatch { path: "a.rs".into(), lines: vec!["@@ -1 +1 @@".into(), "-a".into(), "+b".into()], total: 3, cut: false } }, r#"{"type":"diff_file","file":{"path":"a.rs","lines":["@@ -1 +1 @@","-a","+b"],"total":3}}"#);
     pinned(Reply::ChangedSince { files: vec!["README.md".into()] }, r#"{"type":"changed_since","files":["README.md"]}"#);
@@ -427,7 +439,7 @@ fn cats_round_trip() {
     let json = serde_json::to_string(&r).unwrap();
     assert!(json.ends_with(r#""cat":"cat_miso","rules_hash":"cbf29ce484222325"}"#), "{json}");
     pinned(PartBody::RulesChanged { cat: c(), name: "miso".into() }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso"}"#);
-    assert_eq!(PROTOCOL_VERSION, 14);
+    assert_eq!(PROTOCOL_VERSION, 15);
     // A thread with no cat writes none; one that chose its place writes the choice; an old screen's task (a cat, no choice) still reads.
     let mut t = task();
     t.cat = None;

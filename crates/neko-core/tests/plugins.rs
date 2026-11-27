@@ -276,7 +276,7 @@ fn the_migration_from_store_seven_adds_plugins_and_changes_nothing_else() {
     assert_eq!((core.store.version().unwrap(), SCHEMA_VERSION), (11, 11));
     assert_eq!(core.store.all_tasks().unwrap().len(), 1);
     assert!(core.plugins().unwrap().is_empty());
-    assert_eq!(PROTOCOL_VERSION, 14);
+    assert_eq!(PROTOCOL_VERSION, 15);
     assert_eq!(add(&mut core, PASTE).len(), 1);
 }
 
