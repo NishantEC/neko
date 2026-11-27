@@ -47,10 +47,11 @@ pub fn theme(dark: bool, reduced_motion: bool) -> Theme {
     Theme::from_json(THEME, dark).expect("the theme file is valid (tested)").with_reduced_motion(reduced_motion)
 }
 
-/// The fill of a raised surface: the floating surface in light; in dark, a small step above the page, so the light from above (its
-/// top edge and a faint gradient, [`raised`]) does the lifting rather than a lighter fill.
+/// The fill of a raised surface: the floating surface in light; in dark, a small step above the sidebar's panel (which is itself a
+/// step above the ground), so the light from above (its top edge and a faint gradient, [`raised`]) does the lifting rather than a
+/// lighter fill.
 pub fn raised_fill(t: &Theme) -> Color {
-    if t.dark { rune_ui_style::mix(t.c.page.bg, Color::WHITE, 0.05) } else { t.c.floating.bg }
+    if t.dark { rune_ui_style::mix(t.c.surface.bg, Color::WHITE, 0.105) } else { t.c.floating.bg }
 }
 
 /// A raised surface (a busy cat's tile, the open sidebar row, a receipt, a card that asks): the theme's raised material, lit from

@@ -593,7 +593,7 @@
         "$type": "color",
         "page": {
           "bg": {
-            "$value": "{neutral.925}"
+            "$value": "{neutral.975}"
           },
           "fg": {
             "$value": "{neutral.50}"
