@@ -1,8 +1,12 @@
-//! rune-ui registry: dialog 0.10.0 Copied into your app by `rune-ui add dialog`; yours to change. Needs: button.
+//! rune-ui registry: dialog 0.11.0 Copied into your app by `rune-ui add dialog`; yours to change. Needs: button.
 //!
 //! A modal panel over a scrim: the **floating** material at the dialog's radius, a title, a description, a body, a footer of buttons, a
 //! close button in its corner. Behaviour is Rune's `El::modal`: focus is trapped inside, the page behind is inert, Escape and a press
 //! outside call `on_close`. The app owns whether it is open; `panel` draws it in place (galleries, a confirmation inline).
+//!
+//! **A scrolling body** (`scroll_body(true)`): the header and the footer stay where they are and the body between them scrolls when
+//! the panel would be taller than the window leaves it (or than `max_height`, in points, when given). Without it the panel grows to
+//! its content, as before.
 //!
 //! ```ignore
 //! Dialog::new("rename", "Rename project").description("A new name for the placeholder project.").child(input)
@@ -11,7 +15,7 @@
 
 use std::rc::Rc;
 
-use rune::{El, col, el, row, text};
+use rune::{El, ScrollSpec, col, el, row, text};
 use rune_ui_style::{ButtonVariant, weight};
 
 use super::base::{Press, Shape, Theme, paint};
@@ -27,13 +31,15 @@ pub struct Dialog<S: 'static> {
     width: f32,
     open: bool,
     outside: bool,
+    scroll: bool,
+    max_h: Option<f32>,
     return_to: Option<String>,
     close: Option<Press<S>>,
 }
 
 impl<S: 'static> Dialog<S> {
     pub fn new(key: impl Into<String>, title: impl Into<String>) -> Dialog<S> {
-        Dialog { key: key.into(), title: title.into(), description: None, body: Vec::new(), footer: Vec::new(), width: 440.0, open: false, outside: true, return_to: None, close: None }
+        Dialog { key: key.into(), title: title.into(), description: None, body: Vec::new(), footer: Vec::new(), width: 440.0, open: false, outside: true, scroll: false, max_h: None, return_to: None, close: None }
     }
 
     pub fn description(mut self, d: impl Into<String>) -> Self {
@@ -68,6 +74,18 @@ impl<S: 'static> Dialog<S> {
         self
     }
 
+    /// The body scrolls between a fixed header and a fixed footer when the panel is too tall for the window.
+    pub fn scroll_body(mut self, on: bool) -> Self {
+        self.scroll = on;
+        self
+    }
+
+    /// The most the panel is tall, in points (with `scroll_body`, the body scrolls past it).
+    pub fn max_height(mut self, h: f32) -> Self {
+        self.max_h = Some(h);
+        self
+    }
+
     /// The key of what opened it: focus goes back there when it closes.
     pub fn return_focus(mut self, key: impl Into<String>) -> Self {
         self.return_to = Some(key.into());
@@ -95,9 +113,22 @@ impl<S: 'static> Dialog<S> {
             p = p.description(d.clone());
         }
         p = paint(p, &rune_ui_style::Recipe::new().fill(t.c.floating.bg).shadows(&t.elevation.lg).shadow(rune::Shadow { spread: 1.0, color: t.c.line, ..rune::Shadow::default() }));
-        p = p.child(top).children(std::mem::take(&mut self.body));
+        if self.scroll {
+            p = p.shrink().min_h(0.0);
+        }
+        if let Some(h) = self.max_h {
+            p = p.max_h(h);
+        }
+        p = p.child(top);
+        p = if self.scroll {
+            p.child(col().key(format!("{}-body", self.key)).w_full().shrink().min_h(0.0).gap(t.metrics.stack - 4.0).scroll(ScrollSpec { stick_bottom: false }).children(std::mem::take(&mut self.body)))
+        } else {
+            p.children(std::mem::take(&mut self.body))
+        };
         if !self.footer.is_empty() {
-            p = p.child(row().key(format!("{}-footer", self.key)).w_full().gap(t.space.at(2.0)).justify_end().pt(t.space.at(1.0)).children(std::mem::take(&mut self.footer)));
+            let foot = row().key(format!("{}-footer", self.key)).w_full().gap(t.space.at(2.0)).justify_end().children(std::mem::take(&mut self.footer));
+            // With a scrolling body a hairline marks where the body ends and the footer, which does not move, begins.
+            p = p.child(if self.scroll { foot.pt(t.space.at(3.0)).border_sides([1.0, 0.0, 0.0, 0.0], t.c.line) } else { foot.pt(t.space.at(1.0)) });
         }
         p
     }
@@ -111,6 +142,7 @@ impl<S: 'static> Dialog<S> {
         let close = self.close.clone();
         let outside = self.outside;
         let return_to = self.return_to.clone();
+        let scroll = self.scroll;
         let mut panel = self.panel(t);
         if let Some(k) = return_to {
             panel = panel.focus_return(k);
@@ -119,6 +151,10 @@ impl<S: 'static> Dialog<S> {
             panel = panel.modal(outside, move |s: &mut S| f(s));
         }
         layer.push(el().key(format!("{key}-scrim")).absolute(0.0, 0.0).w_full().h_full().fill(t.scrim()).a11y_hidden());
-        layer.push(el().key(format!("{key}-layer")).absolute(0.0, 0.0).w_full().h_full().padding(t.space.at(4.0)).center().child(panel));
+        layer.push(if scroll {
+            col().key(format!("{key}-layer")).absolute(0.0, 0.0).w_full().h_full().padding(t.space.at(4.0)).justify_center().items_center().child(panel)
+        } else {
+            el().key(format!("{key}-layer")).absolute(0.0, 0.0).w_full().h_full().padding(t.space.at(4.0)).center().child(panel)
+        });
     }
 }

@@ -1,4 +1,4 @@
-//! rune-ui registry: icons 0.8.0 A small set of 16 point glyphs on one 1.5 stroke, drawn in `currentColor` so a control recolours
+//! rune-ui registry: icons 0.11.0 A small set of 16 point glyphs on one 1.5 stroke, drawn in `currentColor` so a control recolours
 //! them per state. Replace or extend with your app's own set. `rune-ui init` copies it.
 
 use rune::Icon;
@@ -73,3 +73,15 @@ glyph!(COMMIT, "commit", r#"<circle cx="8" cy="8" r="2.6" fill="none" stroke="cu
 glyph!(AT, "at", r#"<circle cx="8" cy="8" r="2.4" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.4 6v2.6c0 1 .7 1.7 1.6 1.7s1.6-.9 1.6-2.3a5.6 5.6 0 1 0-2.2 4.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 glyph!(SLASH, "slash", r#"<rect x="2.6" y="2.6" width="10.8" height="10.8" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9.6 5 6.4 11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#);
 glyph!(BUG, "bug", r#"<rect x="5" y="5" width="6" height="8" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.3 5.2 5.4 3.4M9.7 5.2l.9-1.8M5 8.4H2.8M13.2 8.4H11M5.2 11.2l-1.8 1M10.8 11.2l1.8 1M8 8v4.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>"#);
+
+// 0.11.0: a plug (an integration or plugin), a double chevron (the rest of a row that did not fit), the side panels (a sidebar or a
+// right pane that opens and closes), and the modifier keys, which `Kbd` draws itself so they look the same in every font.
+glyph!(PLUG, "plug", r#"<path d="M6 2.5v3M10 2.5v3M4.5 5.5h7v2.2a3.5 3.5 0 0 1-7 0ZM8 11.2v2.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+glyph!(CHEVRONS_RIGHT, "chevrons-right", r#"<path d="M3.8 4.5 7.3 8l-3.5 3.5M8.6 4.5 12.1 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+glyph!(PANEL_LEFT, "panel-left", r#"<rect x="2.5" y="3" width="11" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.3 3.2v9.6" fill="none" stroke="currentColor" stroke-width="1.5"/>"#);
+glyph!(PANEL_RIGHT, "panel-right", r#"<rect x="2.5" y="3" width="11" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9.7 3.2v9.6" fill="none" stroke="currentColor" stroke-width="1.5"/>"#);
+glyph!(KEY_COMMAND, "key-command", r#"<path d="M5.5 5.5h5v5h-5ZM5.5 5.5V4A1.5 1.5 0 1 0 4 5.5h1.5M10.5 5.5V4A1.5 1.5 0 1 1 12 5.5h-1.5M5.5 10.5V12A1.5 1.5 0 1 1 4 10.5h1.5M10.5 10.5V12A1.5 1.5 0 1 0 12 10.5h-1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>"#);
+glyph!(KEY_OPTION, "key-option", r#"<path d="M3 4.5h3l4 7.5h3M9.5 4.5H13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+glyph!(KEY_SHIFT, "key-shift", r#"<path d="M8 3 13 8.4h-2.6V13H5.6V8.4H3Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>"#);
+glyph!(KEY_RETURN, "key-return", r#"<path d="M12.5 4.5v3.4A1.6 1.6 0 0 1 10.9 9.5H3.8M6.3 6.9 3.7 9.5l2.6 2.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);
+glyph!(KEY_CONTROL, "key-control", r#"<path d="M4 10.2 8 5.8l4 4.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#);

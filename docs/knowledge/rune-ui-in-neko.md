@@ -1,6 +1,6 @@
-# rune-ui in Neko (S0, 2026-11-26; v0.10.0 since 2026-11-27)
+# rune-ui in Neko (S0, 2026-11-26; v0.11.0 since 2026-11-27)
 
-rune-ui v0.10.0, on Rune `53f6d36a96439d357a6f2a2560383d7b9e9ec9c2`. Its components are copied into `apps/neko/src/ui/` by its CLI
+rune-ui v0.11.0, on Rune `53f6d36a96439d357a6f2a2560383d7b9e9ec9c2`. Its components are copied into `apps/neko/src/ui/` by its CLI
 and recorded in `apps/neko/rune-ui.lock`.
 
 ## Installing
@@ -23,6 +23,16 @@ built from the tag in `$NEKO_TARGET/rune-ui-src` into `$NEKO_TARGET/cli`.
 0.10.0 (2026-11-27): both git dependencies on `tag = "v0.10.0"`, `rune-ui update` (a three-way merge into the copies; `.rune-ui/base`
 keeps what was last written), then `rune-ui add portrait receipt reorder`. Rune itself is taken with `default-features = false` (see
 "Licences"). `receipt` and `reorder` are installed and not used yet (below).
+
+0.11.0 (2026-11-27): both git dependencies on `tag = "v0.11.0"` (the CLI built from the tag into `$NEKO_TARGET/cli`), `rune-ui update`
+(five copies merged: `dialog`, `icons`, `kbd`, `sidebar`, `textarea`; nothing of Neko's was in them), then `rune-ui add tabs split`.
+Nothing else broke: the 0.11 breaking changes are `CommandItem` (Neko has no Command yet) and the tab strip's one Tab stop. `toast`
+and `command` are not installed (nothing uses them until the slices that need them), so there is no `ToastHost` to poll yet; the slice
+that adds toasts adds `ToastHost::poll` to `poll` in `lib.rs`. `rune-ui diff --check` says "no drift".
+
+What 0.11 let Neko drop: the plug glyph it drew itself (`icons::PLUGIN`; `ui::icons::PLUG` is the kit's), the Add-server sheet's own
+150 point scroll for a long list of servers (`Dialog::scroll_body(true)`: the header and the buttons stay, the body scrolls), and
+the JSON field is `Textarea::mono(true)`.
 
 The undo slice added `diff` with the same CLI (`rune-ui add diff`).
 
@@ -74,7 +84,10 @@ only (tested by reading `lib.rs`).
 
 ## What rune-ui cannot do here (for upstream)
 
-Neko tried each of these on 0.10.0 and kept its own, because the render got worse. Each says what would let it go.
+Neko tried each of these on 0.10.0 and kept its own, because the render got worse. Each says what would let it go. 0.11.0 answers the
+first two and the thread row's trailing slot (`SidebarItem::subtitle_el`, `trail_swap`, `indent`, `Split`); Neko still draws its rows
+itself (`sidebar::face_row`, `thread_row`), because moving them is a change to files the next slice also edits, and it is made on its
+own when the renders can be compared.
 
 - **The Cattains' and threads' two-line rows** (`sidebar::face_row`, `thread_row`): `SidebarItem::subtitle` is plain words in one ink. Neko's second line is
   parts in their own inks (the state word in its colour, the round's mark before it). Ask: `SidebarItem::subtitle_el(El)`.

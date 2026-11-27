@@ -1,4 +1,4 @@
-//! rune-ui registry: textarea 0.10.0 Copied into your app by `rune-ui add textarea`; yours to change.
+//! rune-ui registry: textarea 0.11.0 Copied into your app by `rune-ui add textarea`; yours to change.
 //!
 //! Several lines on the **well** material, `rows` tall at first and growing with the text to `max_rows`. Focus rings the well; invalid
 //! rings it in the danger colour. Editing is Rune's `text_input`.
@@ -8,13 +8,16 @@
 //! bytes, are counted. The limit is soft, so a pasted text is never silently cut; `hard_limit(true)` makes it firm: what would pass
 //! the limit is taken out again as it is typed or pasted.
 //!
+//! **Mono** (`mono(true)`): the text in a monospaced face (the theme's own when it is monospaced, the system's otherwise), for
+//! code, logs and prompts that are read as code.
+//!
 //! ```ignore
 //! Textarea::new("notes", &s.notes, |s: &mut App| &mut s.notes).placeholder("Notes").rows(3, 8).build(t)
 //! ```
 
 use std::rc::Rc;
 
-use rune::{El, TextEdit, col, row, text};
+use rune::{El, Family, TextEdit, TextStyle, col, row, text};
 use rune_ui_style::tabular;
 
 use super::base::{Shape, State, Theme, paint, recipes, resolve, states};
@@ -32,12 +35,13 @@ pub struct Textarea<'a, S: 'static> {
     pinned: Option<State>,
     limit: Option<usize>,
     hard: bool,
+    mono: bool,
 }
 
 impl<'a, S: 'static> Textarea<'a, S> {
     pub fn new(key: impl Into<String>, edit: &'a TextEdit, access: impl for<'b> Fn(&'b mut S) -> &'b mut TextEdit + 'static) -> Textarea<'a, S> {
         let key = key.into();
-        Textarea { name: key.clone(), key, edit, access: Rc::new(access), placeholder: String::new(), rows: (3, 10), width: None, invalid: false, disabled: false, pinned: None, limit: None, hard: false }
+        Textarea { name: key.clone(), key, edit, access: Rc::new(access), placeholder: String::new(), rows: (3, 10), width: None, invalid: false, disabled: false, pinned: None, limit: None, hard: false, mono: false }
     }
 
     pub fn name(mut self, n: impl Into<String>) -> Self {
@@ -70,6 +74,12 @@ impl<'a, S: 'static> Textarea<'a, S> {
     /// With a limit: keep to it. What would go past it is taken out as it is typed or pasted (the excess just before the caret).
     pub fn hard_limit(mut self, on: bool) -> Self {
         self.hard = on;
+        self
+    }
+
+    /// The text in a monospaced face, a little smaller so it sits level with the words around it.
+    pub fn mono(mut self, on: bool) -> Self {
+        self.mono = on;
         self
     }
 
@@ -107,7 +117,8 @@ impl<'a, S: 'static> Textarea<'a, S> {
             None => well.w_full(),
         };
         let access = self.access.clone();
-        let mut input = rune::text_input(self.edit, t.ty.base)
+        let style = if self.mono { mono_style(t, t.ty.base) } else { t.ty.base };
+        let mut input = rune::text_input(self.edit, style)
             .key(format!("{}-input", self.key))
             .w_full()
             .color(parts.label.resolve(st))
@@ -135,6 +146,12 @@ impl<'a, S: 'static> Textarea<'a, S> {
             None => well,
         }
     }
+}
+
+/// `style` in a monospaced face: the theme's own font when it is monospaced, the platform's otherwise.
+fn mono_style(t: &Theme, style: TextStyle) -> TextStyle {
+    let family = if t.font.mono { t.font.family } else { Family::SystemMono };
+    TextStyle { family, size: (style.size * 0.93 * 2.0).round() / 2.0, ..style }
 }
 
 /// Takes what is past `limit` characters out of `e`: the excess just before the caret first (what was typed or pasted), then from

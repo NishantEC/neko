@@ -1,4 +1,4 @@
-//! rune-ui registry: sidebar 0.10.0 Copied into your app by `rune-ui add sidebar`; yours to change.
+//! rune-ui registry: sidebar 0.11.0 Copied into your app by `rune-ui add sidebar`; yours to change.
 //!
 //! An app's side column: a header, groups of rows under quiet labels, a footer. A row is an icon, its words and an optional count;
 //! it washes on hover and takes the selected wash and the first ink when it is the current page. The column sits on the slab colour.
@@ -11,6 +11,12 @@
 //! second line (`subtitle`), a count and a trailing element (`trail`: a pill, a button), and can sit raised when it is the current
 //! one (`selected_style(Selected::Raised)`: the raised material, with its own focus ring). A row can be a button instead of a link
 //! (`button`), and a count is read out ("Count 3", or the words given to `count_label`).
+//!
+//! **Rows with parts (0.11).** The second line can be an element (`subtitle_el`: words in their own inks, a mark before them; give
+//! the words assistive technology should read to `description`). `unread(true)` sets the title in the first ink at semibold. The
+//! trailing slot can swap under the pointer (`trail_swap(width, rest, hover)`: an age gives way to a menu button while the pointer
+//! or focus is on the row; `rest` is hidden from assistive technology, `hover` keeps its own role and Tab stop). `indent(n)` sets a
+//! nested row in by `n` steps of 16 points. Heights follow the theme's density: a line is `metrics.row`, two lines 16 more.
 //!
 //! ```ignore
 //! SidebarItem::new("t1", "Fix the login test").image(portrait).subtitle("Working · 2 min").count(3).trail(pill)
@@ -25,6 +31,9 @@ use rune::{El, Icon, col, row, text};
 use rune_ui_style::{tabular, weight};
 
 use super::base::{Press, Shape, State, States, Theme, glyph, paint, paint_state};
+
+/// How far a nested row is set in per level.
+pub const INDENT: f32 = 16.0;
 
 /// How the current row looks.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -44,7 +53,11 @@ pub struct SidebarItem<S: 'static> {
     lead: Option<El>,
     image: Option<El>,
     subtitle: Option<String>,
+    subtitle_el: Option<El>,
+    unread: bool,
+    indent: usize,
     trail: Option<El>,
+    swap: Option<(f32, El, El)>,
     selected_style: Selected,
     button: bool,
     count_label: Option<String>,
@@ -58,7 +71,7 @@ pub struct SidebarItem<S: 'static> {
 
 impl<S: 'static> SidebarItem<S> {
     pub fn new(key: impl Into<String>, label: impl Into<String>) -> SidebarItem<S> {
-        SidebarItem { key: key.into(), label: label.into(), icon: None, lead: None, image: None, subtitle: None, trail: None, selected_style: Selected::Wash, button: false, count_label: None, count: None, list: None, description: None, selected: false, pinned: None, press: None }
+        SidebarItem { key: key.into(), label: label.into(), icon: None, lead: None, image: None, subtitle: None, subtitle_el: None, unread: false, indent: 0, trail: None, swap: None, selected_style: Selected::Wash, button: false, count_label: None, count: None, list: None, description: None, selected: false, pinned: None, press: None }
     }
 
     pub fn icon(mut self, i: &'static Icon) -> Self {
@@ -83,6 +96,33 @@ impl<S: 'static> SidebarItem<S> {
     /// technology reads it after the name.
     pub fn subtitle(mut self, words: impl Into<String>) -> Self {
         self.subtitle = Some(words.into());
+        self
+    }
+
+    /// The second line as an element: words in their own inks, a mark before them. It is hidden from assistive technology like the
+    /// image, so say what it shows in `description`. Replaces `subtitle`.
+    pub fn subtitle_el(mut self, e: El) -> Self {
+        self.subtitle_el = Some(e);
+        self
+    }
+
+    /// The title in the first ink at semibold; assistive technology reads "Unread" after the name.
+    pub fn unread(mut self, on: bool) -> Self {
+        self.unread = on;
+        self
+    }
+
+    /// Sets the row in by `levels` steps of 16 points (a thread under its project, a subagent under its parent).
+    pub fn indent(mut self, levels: usize) -> Self {
+        self.indent = levels;
+        self
+    }
+
+    /// A trailing slot `width` points wide that shows `rest` (an age, a mark) until the pointer is on the row or focus is inside it,
+    /// then `hover` (a menu button) in its place. `rest` is hidden from assistive technology; `hover` keeps its name, role and Tab stop,
+    /// and Tab to it shows it. Pinned to Hover or Focus (`state`), the slot shows `hover`.
+    pub fn trail_swap(mut self, width: f32, rest: El, hover: El) -> Self {
+        self.swap = Some((width, rest, hover));
         self
     }
 
@@ -153,11 +193,11 @@ impl<S: 'static> SidebarItem<S> {
         if raised {
             st.selected = false;
         }
-        let two_lines = self.image.is_some() || self.subtitle.is_some();
-        let ink = if self.selected { t.ink() } else { t.ink_muted() };
+        let two_lines = self.image.is_some() || self.subtitle.is_some() || self.subtitle_el.is_some();
+        let ink = if self.selected || self.unread { t.ink() } else { t.ink_muted() };
         let role = if self.list.is_some() { "option" } else if self.button { "button" } else { "link" };
         let height = if two_lines { t.metrics.row + t.space.at(4.0) } else { t.metrics.row };
-        let mut r = row().key(self.key).role(role).label(self.label.clone()).focusable(true).w_full().h(height).px(t.metrics.gap).gap(t.metrics.gap).center_y().radius(t.radius.md).round_as(t);
+        let mut r = row().key(self.key).role(role).label(self.label.clone()).focusable(true).w_full().h(height).px(t.metrics.gap).pl(t.metrics.gap + INDENT * self.indent as f32).gap(t.metrics.gap).center_y().radius(t.radius.md).round_as(t);
         match self.list {
             Some((position, size)) => r = r.position_in_set(position, size).focus_selected(self.selected).press_on_return(),
             None if self.selected && !self.button => r = r.checked(true),
@@ -166,6 +206,9 @@ impl<S: 'static> SidebarItem<S> {
         // What assistive technology reads after the name: the app's words, the second line, the count.
         let mut said: Vec<String> = Vec::new();
         said.extend(self.description);
+        if self.unread {
+            said.push("Unread".to_owned());
+        }
         said.extend(self.subtitle.clone());
         if let Some(n) = self.count {
             said.push(self.count_label.clone().unwrap_or_else(|| format!("Count {n}")));
@@ -182,16 +225,32 @@ impl<S: 'static> SidebarItem<S> {
         } else if let Some(i) = self.icon {
             r = r.child(glyph(i, icon, ink));
         }
-        let title = text(self.label).font(weight(t.ty.base, if self.selected { if two_lines { t.ty.semibold } else { t.ty.medium } } else { t.ty.regular })).color(ink).truncate().min_w(0.0).a11y_hidden();
-        r = match self.subtitle {
-            Some(sub) => r.child(col().grow(1.0).shrink().min_w(0.0).child(title).child(text(sub).font(t.ty.sm).color(t.ink_faint()).truncate().min_w(0.0).a11y_hidden())),
-            None => r.child(title.grow(1.0)),
+        let title = text(self.label).font(weight(t.ty.base, if self.unread { t.ty.semibold } else if self.selected { if two_lines { t.ty.semibold } else { t.ty.medium } } else { t.ty.regular })).color(ink).truncate().min_w(0.0).a11y_hidden();
+        r = match (self.subtitle_el, self.subtitle) {
+            (Some(e), _) => r.child(col().grow(1.0).shrink().min_w(0.0).child(title).child(row().min_w(0.0).clip_rounded(0.0).a11y_hidden().child(e))),
+            (None, Some(sub)) => r.child(col().grow(1.0).shrink().min_w(0.0).child(title).child(text(sub).font(t.ty.sm).color(t.ink_faint()).truncate().min_w(0.0).a11y_hidden())),
+            (None, None) => r.child(title.grow(1.0)),
         };
         if let Some(n) = self.count {
             r = r.child(text(n.to_string()).font(tabular(t.ty.sm)).color(t.ink_faint()).a11y_hidden());
         }
         if let Some(e) = self.trail {
             r = r.child(e);
+        }
+        if let Some((w, rest, hover)) = self.swap {
+            let h = t.control.md;
+            let pinned = matches!(self.pinned, Some(State::Hover | State::FocusVisible));
+            let at = |e: El| row().absolute(0.0, 0.0).w(w).h(h).justify_end().center_y().child(e);
+            let mut slot = row().size(w, h);
+            if pinned {
+                slot = slot.child(at(hover));
+            } else {
+                slot = slot.child(at(rest.a11y_hidden()).group_opacity(1.0, 0.0)).child(at(hover).group_opacity(0.0, 1.0));
+            }
+            r = r.child(slot);
+            if !pinned {
+                r = r.hover_group();
+            }
         }
         if let Some(f) = self.press {
             r = r.on_press(move |s: &mut S| f(s));

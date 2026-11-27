@@ -60,9 +60,9 @@ files = [
 
 [[item]]
 name = "dialog"
-version = "0.10.0"
+version = "0.11.0"
 files = [
-  { target = "src/ui/dialog.rs", sha256 = "270afad3a126bd498e9d22198be44dae1193dbeaa3df8bffcc2c8866029621b8" },
+  { target = "src/ui/dialog.rs", sha256 = "3d9dfe42f5c1b19e4ed13e3c8dffc4ca7e3578b0f97ae9b75d3b1da90cffa45b" },
 ]
 
 [[item]]
@@ -110,7 +110,7 @@ files = [
 name = "icons"
 version = "0.8.0"
 files = [
-  { target = "src/ui/icons.rs", sha256 = "82fffd9c9ca5b7cbbc30440a72a68f4399e2a961642c82fe738bbab27fef4d7f" },
+  { target = "src/ui/icons.rs", sha256 = "41ede2958876d002a8f4c7ba6e870f13bd5a1ee7743393aeb9d3a8f5b48fafed" },
 ]
 
 [[item]]
@@ -122,9 +122,9 @@ files = [
 
 [[item]]
 name = "kbd"
-version = "0.10.0"
+version = "0.11.0"
 files = [
-  { target = "src/ui/kbd.rs", sha256 = "c94146b813cd37bed8eea113f241a4a7072657e9bc22bbb1347f31d96fbc7a80" },
+  { target = "src/ui/kbd.rs", sha256 = "13e0c638c947b3cd15ca67d640a635eb9e5f6a179e7a5139af67e00b903cc64b" },
 ]
 
 [[item]]
@@ -220,9 +220,16 @@ files = [
 
 [[item]]
 name = "sidebar"
-version = "0.10.0"
+version = "0.11.0"
 files = [
-  { target = "src/ui/sidebar.rs", sha256 = "0bffb4994c3c3677eddb069ab86e9261ff1875d31ded644526e2d993b85bf9ed" },
+  { target = "src/ui/sidebar.rs", sha256 = "ad622b74498c832e6502a95b21d8f35d3a07e058af907b854c43ab7859a93405" },
+]
+
+[[item]]
+name = "split"
+version = "0.11.0"
+files = [
+  { target = "src/ui/split.rs", sha256 = "68c5f57858374382c5d24b41989da8c31e12fcef4ff51432661cb27e2f1df53a" },
 ]
 
 [[item]]
@@ -230,6 +237,13 @@ name = "switch"
 version = "0.5.0"
 files = [
   { target = "src/ui/switch.rs", sha256 = "ec8172f0860274040da559330deae6c1880ceca115dde1b0593af2342bceb518" },
+]
+
+[[item]]
+name = "tabs"
+version = "0.11.0"
+files = [
+  { target = "src/ui/tabs.rs", sha256 = "41a249b7ff04fe7dfc4b3a9e180b3e1b9e096839858cc144f99b62c5dd8b6d54" },
 ]
 
 [[item]]
@@ -241,9 +255,9 @@ files = [
 
 [[item]]
 name = "textarea"
-version = "0.10.0"
+version = "0.11.0"
 files = [
-  { target = "src/ui/textarea.rs", sha256 = "39fe8982dc0283e8633f06b21a4f1448b6cbc866ef13e762ae9a8f774107d9a2" },
+  { target = "src/ui/textarea.rs", sha256 = "76ee92d1504f207a8f561030f35b8a30ca190d136b29ec248c0380e5e3faf9a1" },
 ]
 
 [[item]]

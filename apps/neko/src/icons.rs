@@ -30,13 +30,6 @@ pub static FOLDER_PLUS: Icon = Icon {
     body: r#"<path d="M13.5 8V6.3c0-.8-.7-1.5-1.5-1.5H8L6.4 3H4c-.8 0-1.5.7-1.5 1.5v7c0 .8.7 1.5 1.5 1.5h4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/><path d="M12 10v4M10 12h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#,
 };
 
-/// A plug: two prongs, a rounded body and its cable. Plugins (rune-ui's set has none).
-pub static PLUGIN: Icon = Icon {
-    name: "neko-plugin",
-    view: 16.0,
-    body: r#"<path d="M6 1.75v2.5M10 1.75v2.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M4.25 4.25h7.5v2.5a3.75 3.75 0 0 1-7.5 0z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 10.5v3.75" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#,
-};
-
 /// A sun rising over a line: the Briefing, what happened while you were away.
 pub static BRIEFING: Icon = Icon {
     name: "neko-briefing",

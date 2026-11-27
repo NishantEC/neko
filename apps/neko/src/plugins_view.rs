@@ -25,7 +25,7 @@ use crate::ui::select::Select;
 use crate::ui::switch::Switch;
 use crate::ui::textarea::Textarea;
 use crate::view::well;
-use crate::{icons, ui};
+use crate::ui;
 
 fn h2(t: &Theme, words: &str) -> El {
     text(words.to_owned()).role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())
@@ -53,7 +53,7 @@ pub fn tile_ink(t: &Theme) -> rune::Color {
 /// portrait takes (the Needs you card), and `activity` puts the amber dot on its corner.
 pub fn tile(t: &Theme, key: &str, size: f32, activity: Activity, ringed: bool, under: rune::Color) -> El {
     let ground = tile_ground(t);
-    let face = row().size(size, size).center().child(glyph(&icons::PLUGIN, size * 0.46, tile_ink(t)));
+    let face = row().size(size, size).center().child(glyph(&ui::icons::PLUG, size * 0.46, tile_ink(t)));
     Portrait::new(key, "Plugin", size).face(face).ground(ground).state(activity).ringed(ringed).under(under).decorative(true).build(t)
 }
 
@@ -132,7 +132,7 @@ fn add_buttons(t: &Theme) -> El {
 pub fn page(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let mut part = col().key("settings-plugins").w_full().gap(t.space.at(3.0)).child(h2(t, "Plugins")).child(own_mcp_switch(s, t));
     if s.plugins.is_empty() {
-        let empty = Empty::new("plugins-empty", &icons::PLUGIN, "No plugins yet")
+        let empty = Empty::new("plugins-empty", &ui::icons::PLUG, "No plugins yet")
             .description("A plugin gives your cats more tools, like searching your docs or filing a ticket. None come with Neko: you add each one, and it runs only after you approve exactly what it will run.")
             .action(add_buttons(t))
             .build(t);
@@ -536,7 +536,7 @@ fn found(t: &Theme, list: &[neko_protocol::plugins::Parsed]) -> El {
                     .radius(t.radius.lg)
                     .round_as(t),
             )
-            .child(row().size(t.control.icon, t.ty.base.line_height).center().child(glyph(&icons::PLUGIN, t.control.icon, t.ink_muted())))
+            .child(row().size(t.control.icon, t.ty.base.line_height).center().child(glyph(&ui::icons::PLUG, t.control.icon, t.ink_muted())))
             .child(lines),
         );
     }
@@ -554,6 +554,7 @@ pub fn dialog(s: &App, t: &Theme, layer: &mut Vec<El>) {
         .name("Server JSON")
         .placeholder("{\"mcpServers\": {\"acme-docs\": {\"command\": \"npx\", \"args\": [\"-y\", \"@acme/docs-server\"]}}}")
         .rows(4, 5)
+        .mono(true)
         .invalid(bad)
         .build(t);
     let mut body = col().key("plugin-add-form").w_full().gap(t.space.at(3.0)).child(area);
@@ -573,8 +574,7 @@ pub fn dialog(s: &App, t: &Theme, layer: &mut Vec<El>) {
             body = body.child(note_line(t, "plugin-error", &ui::icons::CIRCLE_X, t.c.danger.fg, why));
         }
         Reading::Found(list) => {
-            // Many servers scroll inside the sheet, so Add never leaves the window.
-            body = body.child(found(t, list).max_h(150.0).scroll(rune::ScrollSpec { stick_bottom: false }));
+            body = body.child(found(t, list));
             let notes: Vec<&String> = list.iter().flat_map(|p| p.notes.iter()).take(4).collect();
             for (i, n) in notes.into_iter().enumerate() {
                 body = body.child(note_line(t, &format!("plugin-note-{i}"), &ui::icons::INFO, t.ink_muted(), n));
@@ -592,6 +592,8 @@ pub fn dialog(s: &App, t: &Theme, layer: &mut Vec<El>) {
         .child(body)
         .footer(vec![cancel, add])
         .width(560.0)
+        // Many servers scroll between the header and the buttons, so Add never leaves the window.
+        .scroll_body(true)
         .open(true)
         .return_focus("plugins-add-json")
         .on_close(|s: &mut App| s.close_add_json())
@@ -623,7 +625,7 @@ pub fn cat_section(s: &App, t: &Theme, c: &Cat) -> El {
         let id = p.id.clone();
         let face = row().key(format!("cat-plugin-{}", p.id)).role("button").label(format!("{}: open in Settings", p.name)).position_in_set(i + 1, mine.len()).focusable(true).gap(t.space.at(2.5)).center_y().h(t.control.md).px(t.space.at(1.0)).radius(t.radius.md).round_as(t);
         let face = rune_ui_style::paint_state(face, &t.mat.row, ui::base::States::default())
-            .child(glyph(&icons::PLUGIN, t.control.icon, t.ink_muted()))
+            .child(glyph(&ui::icons::PLUG, t.control.icon, t.ink_muted()))
             .child(text(p.name.clone()).font(weight(t.ty.base, t.ty.medium)).color(t.ink()).truncate().min_w(0.0).shrink().a11y_hidden())
             .child(text(if p.version == "0" { String::new() } else { p.version.clone() }).font(tabular(t.ty.xs)).color(t.ink_faint()).a11y_hidden())
             .on_press(move |s: &mut App| s.open_plugins(Some(&id)));
