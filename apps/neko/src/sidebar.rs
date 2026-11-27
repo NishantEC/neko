@@ -14,7 +14,7 @@ use rune_ui_style::{ButtonVariant, tabular, weight};
 use crate::icons;
 use crate::state::{App, CatState, Daemon, Effect, Pick, SECTION_ROWS};
 use crate::ui::agent::{PressTx, icon_button};
-use crate::ui::base::{Shape, Size, States, Theme, glyph, paint_state};
+use crate::ui::base::{Delta, Shape, Size, States, Theme, glyph, paint_state};
 use crate::ui::button::Button;
 use crate::ui::dropdown_menu::{DropdownMenu, DropdownMenuItem};
 use crate::ui::sidebar::SidebarItem;
@@ -27,12 +27,33 @@ pub const INSET: f32 = 8.0;
 const PANEL_RADIUS: f32 = 14.0;
 /// A task's or a cat's portrait in a row.
 const FACE: f32 = 28.0;
-/// A two-line row's height.
-const ROW: f32 = 52.0;
 
-/// The panel's colour: a step lighter than the window's ground in light, a step above the page in dark.
+/// The sidebar's one vertical rhythm, in steps of the theme's spacing unit (docs/knowledge/design.md, "Sidebar rhythm"). Every
+/// gap between stacked rows is `ROW_GAP`; a section's header is one control high and sits `ROW_GAP` over its own rows; sections
+/// are `SECTION_GAP` apart, and the groups (the nav, the workspaces with Add workspace…, the Cats) `GROUP_GAP` apart.
+pub const ROW_GAP_STEPS: f32 = 0.5;
+pub const SECTION_GAP_STEPS: f32 = 3.0;
+pub const GROUP_GAP_STEPS: f32 = 5.0;
+
+/// A one-line row's height (nav rows, Add workspace…, New cat…, Show more).
+pub fn row_1(t: &Theme) -> f32 {
+    t.metrics.row
+}
+
+/// A two-line row's height (a task, a cat): the one-line row and one more step either side.
+pub fn row_2(t: &Theme) -> f32 {
+    t.metrics.row + t.space.at(4.0)
+}
+
+/// A section header's height: a control high, because its New task and menu buttons are.
+pub fn header(t: &Theme) -> f32 {
+    t.control.sm
+}
+
+/// The panel's colour: in light a step lighter than the window's ground; in dark the window's ground lifted a fixed step (the
+/// page and the ground are one colour in dark, so the lift is taken from the ground, never from the page).
 pub fn panel_bg(t: &Theme) -> Color {
-    if t.dark { rune_ui_style::mix(t.c.page.bg, Color::WHITE, 0.035) } else { rune_ui_style::mix(t.c.page.bg, t.c.surface.bg, 0.35) }
+    if t.dark { rune_ui_style::mix(t.c.surface.bg, Color::WHITE, 0.088) } else { rune_ui_style::mix(t.c.page.bg, t.c.surface.bg, 0.35) }
 }
 
 /// The sidebar as an inset panel on the window's ground: a hairline, a soft shadow, lit from above in dark.
@@ -81,15 +102,17 @@ pub fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
         rounds = rounds.description(if rounds_n == 1 { "1 round".to_owned() } else { format!("{rounds_n} rounds") });
     }
     let rounds = Tooltip::new("Rounds").keys("⌘3").wrap(rounds.build(t));
-    let mut body = col().w_full().px(t.space.at(2.0)).gap(t.space.at(1.0)).child(new).child(home).child(briefing).child(needs).child(rounds);
-    let mut sections = col().key("workspaces").role("list").label("Workspaces").w_full().gap(t.space.at(1.0)).pt(t.space.at(3.0)).focus_group();
+    let row_gap = t.space.at(ROW_GAP_STEPS);
+    let nav = col().key("nav").w_full().gap(row_gap).child(new).child(home).child(briefing).child(needs).child(rounds);
+    let mut sections = col().key("workspaces").role("list").label("Workspaces").w_full().gap(t.space.at(SECTION_GAP_STEPS)).focus_group();
     for w in s.sections() {
         sections = sections.child(section(s, t, &w, layer));
     }
-    body = body.child(sections);
     let add: PressTx<App> = Rc::new(|s: &mut App, tx: &mut rune::Tx| crate::pick_folder(s, Pick::Add { select: false }, tx));
     let add = SidebarItem::<App>::new("add-workspace", "Add workspace…").icon(&icons::FOLDER_PLUS).button(true).build(t).on_press_tx(move |s: &mut App, tx: &mut rune::Tx| add(s, tx));
-    body = body.child(add).child(cats_section(s, t));
+    // The workspaces and Add workspace… are one group: the button sits a row gap under the list, as a row sits under a row.
+    let workspaces = col().key("workspace-group").w_full().pt(t.space.at(GROUP_GAP_STEPS)).gap(row_gap).child(sections).child(add);
+    let body = col().w_full().px(t.space.at(2.0)).child(nav).child(workspaces).child(cats_section(s, t));
     let list = col().key("sidebar-scroll").w_full().grow(1.0).min_h(0.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(body.pb(t.space.at(4.0)));
     let mut column = col().key("sidebar").role("navigation").label("Sidebar").w_full().h_full().child(band).child(list);
     // No money at the foot: what runs cost is in the task's context ring, for whoever opens it.
@@ -126,7 +149,7 @@ fn face_row(t: &Theme, key: String, title: &str, description: String, face: &str
         .focus_selected(selected)
         .press_on_return()
         .w_full()
-        .h(ROW)
+        .h(row_2(t))
         .pl(t.space.at(1.0))
         .pr(t.space.at(2.0))
         .gap(t.space.at(2.0))
@@ -179,10 +202,10 @@ pub fn task_row(s: &App, t: &Theme, task: &Task, i: usize, n: usize, open: bool)
 /// The house's cats: each active cat with its portrait in its state and what it is doing (napping, working on 2, needs you); its
 /// page on a press. Then New cat….
 fn cats_section(s: &App, t: &Theme) -> El {
-    let head = row().h(t.control.sm).pl(t.metrics.gap).center_y().child(text("Cats").key("cats-heading").role("heading").level(2).font(weight(t.ty.sm, t.ty.semibold)).color(t.ink_muted()));
+    let head = row().key("cats-head").w_full().h(header(t)).pl(t.metrics.gap).center_y().child(text("Cats").key("cats-heading").role("heading").level(2).font(weight(t.ty.sm, t.ty.semibold)).color(t.ink_muted()));
     let cats = s.active_cats();
     let n = cats.len();
-    let mut list = col().key("cats").role("listbox").label("Cats").w_full().gap(1.0).focus_group();
+    let mut list = col().key("cats").role("listbox").label("Cats").w_full().gap(t.space.at(ROW_GAP_STEPS)).focus_group();
     for (i, c) in cats.into_iter().enumerate() {
         let id = c.id.clone();
         let state = s.cat_state(&c.id);
@@ -199,7 +222,7 @@ fn cats_section(s: &App, t: &Theme) -> El {
         list = list.child(face_row(t, format!("cat-{}", c.id), &c.name, state.words(), &c.face, st, meta_line(t, parts), i, n, selected).on_press(move |s: &mut App| s.open_cat_page(&id)));
     }
     let new = SidebarItem::new("new-cat", "New cat…").icon(&crate::ui::icons::PLUS).button(true).on_press(|s: &mut App| s.start_new_cat()).build(t);
-    col().key("cats-section").role("group").label("Cats").w_full().gap(1.0).pt(t.space.at(4.0)).child(head).child(list).child(new)
+    col().key("cats-section").role("group").label("Cats").w_full().gap(t.space.at(ROW_GAP_STEPS)).pt(t.space.at(GROUP_GAP_STEPS)).child(head).child(list).child(new)
 }
 
 /// What a section's header says about its workspace, after its name.
@@ -232,7 +255,7 @@ fn section(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
         .expanded(!folded)
         .focusable(true)
         .w_full()
-        .h(t.metrics.row)
+        .h(header(t))
         .pl(t.metrics.gap)
         .pr(t.space.at(1.0))
         .gap(t.space.at(1.5))
@@ -244,7 +267,12 @@ fn section(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
     if !said.is_empty() {
         head = head.description(said);
     }
-    head = paint_state(head, &t.mat.row, States::default());
+    // A header is a label, not a row: no wash under the pointer (it read as the selected row), only the focus ring for the keys. The
+    // buttons that appear on hover are its pointer feedback.
+    let mut label = t.mat.row.clone();
+    label.hover = Delta::new();
+    label.pressed = Delta::new();
+    head = paint_state(head, &label, States::default());
     head = head.child(chevron).child(text(w.name.clone()).font(weight(t.ty.sm, t.ty.semibold)).color(if w.is_active() { t.ink_muted() } else { t.ink_faint() }).grow(1.0).truncate().min_w(0.0).a11y_hidden());
     if w.is_active() {
         let here = id.clone();
@@ -263,7 +291,7 @@ fn section(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
     let toggle = id.clone();
     let keys = id.clone();
     head = head.on_press(move |s: &mut App| s.toggle_fold(&toggle)).on_key(move |s: &mut App, ev: &KeyEvent, _| section_key(s, &keys, ev));
-    let mut sec = col().key(format!("{key}-section")).role("group").label(w.name.clone()).w_full().gap(1.0).child(head);
+    let mut sec = col().key(format!("{key}-section")).role("group").label(w.name.clone()).w_full().gap(t.space.at(ROW_GAP_STEPS)).child(head);
     let indent = t.metrics.gap + t.control.icon_sm + t.space.at(1.5);
     if w.is_active() && w.missing {
         let here = id.clone();
@@ -303,11 +331,11 @@ fn section(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
         // Before the daemon's list arrives: a quiet placeholder, not "No tasks yet".
         let waiting = s.daemon != Daemon::Absent && !s.tasks_loaded;
         let none = text(if waiting { "Loading…" } else { "No tasks yet" }).key(format!("{key}-none")).font(t.ty.sm).color(t.ink_faint());
-        return sec.child(row().h(t.metrics.row).pl(indent).center_y().child(none));
+        return sec.child(row().h(row_1(t)).pl(indent).center_y().child(none));
     }
     let all = s.show_all.contains(&w.id) || tasks.len() <= SECTION_ROWS + 1;
     let shown: Vec<&&Task> = if all { tasks.iter().collect() } else { tasks.iter().take(SECTION_ROWS).collect() };
-    let mut list = col().key(format!("{key}-list")).role("listbox").label(format!("Tasks in {}", w.name)).w_full().gap(1.0);
+    let mut list = col().key(format!("{key}-list")).role("listbox").label(format!("Tasks in {}", w.name)).w_full().gap(t.space.at(ROW_GAP_STEPS));
     let n = shown.len();
     for (i, task) in shown.into_iter().enumerate() {
         list = list.child(task_row(s, t, task, i, n, s.open.as_ref() == Some(&task.id)));

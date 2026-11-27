@@ -38,9 +38,36 @@ branch", no branch name); what undo has to say about it is one quiet line under 
 who answers is in the band and in its placeholder. Opening a page (Briefing, Needs you) puts the keyboard on its first item
 without drawing the focus ring; the ring shows once a key moves focus, as in Mac apps.
 
+**One ground in dark.** The window has one dark ground (`neutral.975`): the theme's `page.bg` and `surface.bg` are the same colour in
+dark, so the content area is not a lighter slab beside the sidebar; the sidebar's panel is what floats on the ground (it reads as an
+overlay, lifted a fixed step: `sidebar::panel_bg`, the ground mixed 8.8% toward white, taken from the ground, never from the page).
+In light the page stays a lighter paper on the warmer ground, which is how Mac apps read in light; a lighter page there also holds
+the content in a clear area beside the panel, so light is unchanged.
+
 Raised surfaces (a busy cat's tile, the open sidebar row, a receipt, a request, a Needs you card) are the floating surface in
-light; in dark they sit one small step above the page and are lit from above (an inner top edge and a faint gradient), not lifted
-by a lighter fill.
+light; in dark they sit a small step above the panel (`view::raised_fill`, the ground mixed 10.5% toward white) and are lit from
+above (an inner top edge and a faint gradient), not lifted by a lighter fill. Wells and the composer are the theme's translucent
+`input.bg` over the ground.
+
+## Sidebar rhythm
+
+One vertical rhythm for the whole sidebar, in steps of the theme's 4 point unit (`sidebar.rs`: `ROW_GAP_STEPS`, `SECTION_GAP_STEPS`,
+`GROUP_GAP_STEPS`, `row_1`, `row_2`, `header`; measured from the laid-out tree by `tests/sidebar_rhythm.rs`):
+
+| What | Value |
+| --- | --- |
+| A one-line row (New task, Home, Briefing, Needs you, Rounds, Add workspace…, New cat…, Show more) | 36 (`metrics.row`) |
+| A two-line row (a task, a cat) | 52 (a row and one step either side) |
+| A section header (a workspace, Cats) | 32 (`control.sm`: its New task and menu buttons are this high) |
+| Gap between any two stacked rows, a header and its first row, a list and Add workspace… or New cat… | 2 (half a step) |
+| Gap between workspace sections | 12 (3 steps) |
+| Gap between groups (the nav, the workspaces with Add workspace…, the Cats) | 20 (5 steps) |
+
+So a header sits 2 points over its own rows and 12 under the section above: it belongs to what is below it. Add workspace… and
+New cat… are rows like the others, a row gap under their list. A section header is a label, not a row: it has no wash at rest, under
+the pointer or when pressed (only the keyboard's focus ring), because a wash on a full-width pill reads as the selected row. The
+earlier build gave headers the row material, so a header the pointer rested on after a click (to fold or open it) looked selected,
+and its pill ran into the first task row under it (a 1 point gap).
 
 ## Rounds
 
