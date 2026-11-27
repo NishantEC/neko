@@ -10,7 +10,7 @@
 //! from assistive technology: the row's description says the state in words ([`crate::threads::state_words`]).
 
 use neko_protocol::{Task, ThreadStatus};
-use rune::{Color, El, Shadow, el};
+use rune::{Color, El, Shadow, col, el};
 
 use crate::ui::base::{Theme, spinner_in};
 use crate::ui::portrait::{DOT_CONTRAST, RING_CONTRAST, seen_on};
@@ -19,6 +19,8 @@ use crate::ui::portrait::{DOT_CONTRAST, RING_CONTRAST, seen_on};
 pub const SLOT: f32 = 16.0;
 /// The ring's size.
 pub const MARK: f32 = 12.0;
+/// How far down the slot the mark is: the title's line, in a 52 point row.
+const TOP: f32 = 10.0;
 /// The dots' size: lighter than the ring, because a filled disc weighs more than a thin arc.
 const DOT: f32 = 8.0;
 
@@ -60,11 +62,13 @@ pub fn ink(t: &Theme, mark: Mark, under: Color) -> Option<Color> {
 /// The mark in its slot, `key` its own key (unique on the page). `under` is the surface the row sits on.
 pub fn status_mark(t: &Theme, key: &str, task: &Task, under: Color) -> El {
     let mark = mark_of(task);
+    // The mark sits on the title's line, not between the two lines: its slot is the row's height with the mark `TOP` down.
     let slot = el().key(key.to_owned()).size(SLOT, SLOT).center().a11y_hidden();
+    let place = |mark: El| col().w(SLOT).h_full().child(slot.clone().child(mark).mt(TOP));
     match (mark, ink(t, mark, under)) {
-        (Mark::Working, Some(c)) => slot.child(spinner_in(t, MARK, c, "").a11y_hidden()),
-        (Mark::NeedsYou | Mark::Failed, Some(c)) => slot.child(el().size(DOT, DOT).radius(DOT / 2.0).fill(c).box_shadow(Shadow { spread: 1.0, color: under, ..Shadow::default() })),
-        _ => slot,
+        (Mark::Working, Some(c)) => place(spinner_in(t, MARK, c, "").a11y_hidden()),
+        (Mark::NeedsYou | Mark::Failed, Some(c)) => place(el().size(DOT, DOT).radius(DOT / 2.0).fill(c).box_shadow(Shadow { spread: 1.0, color: under, ..Shadow::default() })),
+        _ => place(el().size(1.0, 1.0)),
     }
 }
 

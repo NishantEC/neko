@@ -523,6 +523,7 @@ pub(crate) fn sparse(s: &mut App) {
     t.folder = Some("/Users/example/acme-api".into());
     t.cat = "cat_miso".into();
     t.status = TaskStatus::Done;
+    t.latest_line = "Two changes were merged and one waits for a review.".into();
     s.tasks = vec![t];
 }
 
