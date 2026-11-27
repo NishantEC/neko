@@ -203,10 +203,23 @@ enum Block<'a> {
 
 fn blocks<'a>(book: &'a Book) -> Vec<Block<'a>> {
     let mut out: Vec<Block<'a>> = Vec::new();
+    // Words the person steered into a run while it worked (stored with no run, at a time the run was going) stand after the run's
+    // block, not inside it: a run is one block, with one fold and one key.
+    let mut held: Vec<&'a Part> = Vec::new();
+    let inside = |p: &Part| book.runs.iter().any(|r| r.started_ms <= p.at_ms && r.ended_ms.is_none_or(|e| p.at_ms <= e));
     for p in &book.parts {
         if let PartBody::Person { .. } = p.body {
-            out.push(Block::Person(p));
+            if p.run.is_none() && inside(p) {
+                held.push(p);
+            } else {
+                out.extend(held.drain(..).map(Block::Person));
+                out.push(Block::Person(p));
+            }
             continue;
+        }
+        let same_run = matches!((out.last(), p.run.as_ref()), (Some(Block::Run(r, _)), Some(id)) if &r.id == id);
+        if !same_run {
+            out.extend(held.drain(..).map(Block::Person));
         }
         // The rules line and the note that a report woke the thread stand before their run, outside its fold.
         if let PartBody::RulesChanged { .. } | PartBody::Wake { .. } = p.body {
@@ -222,6 +235,7 @@ fn blocks<'a>(book: &'a Book) -> Vec<Block<'a>> {
             _ => out.push(Block::Run(run, vec![p])),
         }
     }
+    out.extend(held.drain(..).map(Block::Person));
     // A run that has said nothing yet still shows (working, or its line).
     for r in &book.runs {
         if !out.iter().any(|b| matches!(b, Block::Run(x, _) if x.id == r.id)) {

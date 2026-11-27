@@ -1,0 +1,186 @@
+{
+  "name": "queue",
+  "title": "Option-Return queues; both run in order after the turn; Discard drops one",
+  "about": "A thread works. Two messages sent with Option-Return wait above the composer and reach nothing; Discard on the second drops it; when the turn ends the first starts the next run (resumed), in order, and the discarded one never runs.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Start the work [fake:work:7:step=1000]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Step 1 of the work"
+        }
+      },
+      "within": 30,
+      "expect": "The agent works"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Second message"
+    },
+    {
+      "do": "key",
+      "key": "alt+return"
+    },
+    {
+      "do": "type",
+      "text": "Third message"
+    },
+    {
+      "do": "key",
+      "key": "alt+return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "waiting-0",
+              "name": "Queued: Second message"
+            }
+          },
+          {
+            "see": {
+              "key": "waiting-1",
+              "name": "Queued: Third message"
+            }
+          }
+        ]
+      },
+      "within": 5,
+      "expect": "Both wait above the composer as Queued",
+      "window": false
+    },
+    {
+      "do": "snap",
+      "name": "queued",
+      "expect": "Two Queued rows, each with Send now, Edit and Discard"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "grep -c '\"stdin\":{\"message\"' fake-record.jsonl || true",
+          "is": "1"
+        }
+      },
+      "expect": "Nothing but the first words has reached the CLI",
+      "window": false
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "waiting-1-discard"
+      },
+      "window": false
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "gone": {
+              "key": "waiting-1"
+            }
+          },
+          {
+            "see": {
+              "key": "waiting-0"
+            }
+          }
+        ]
+      },
+      "within": 5,
+      "expect": "Discard drops the second",
+      "window": false
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "You said: Second message"
+        }
+      },
+      "within": 40,
+      "expect": "When the turn ends the queued message starts the next run"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "reply-submit",
+              "name": "Send"
+            }
+          },
+          {
+            "gone": {
+              "key": "waiting"
+            }
+          }
+        ]
+      },
+      "within": 30,
+      "expect": "Nothing is left waiting and the agent is done"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "gone": {
+              "text": "Third message"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep -c '\"stdin\":{\"message\"' fake-record.jsonl || true",
+              "is": "2"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep -c 'resume' fake-record.jsonl || true",
+              "is": "1"
+            }
+          }
+        ]
+      },
+      "expect": "The discarded message never ran; two runs, the second resumed"
+    },
+    {
+      "do": "snap",
+      "name": "after",
+      "expect": "The queued message's run shows in the conversation"
+    }
+  ]
+}

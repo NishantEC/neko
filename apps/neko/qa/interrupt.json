@@ -1,0 +1,128 @@
+{
+  "name": "interrupt",
+  "title": "Command-Return interrupts: the new words run at once, resumable",
+  "about": "A long job works. Command-Return with new words sends the CLI's interrupt request; the run folds as Interrupted, the words start a new run at once in the same conversation (resumed), and the thread ends done. The record has the interrupt request and exactly one resume.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "A long job [fake:work:120]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Step 3 of the work"
+        }
+      },
+      "within": 30,
+      "expect": "The job works"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Change of plan"
+    },
+    {
+      "do": "snap",
+      "name": "typed",
+      "expect": "Words typed while it works: the mode beside Send, the key hints under the box"
+    },
+    {
+      "do": "key",
+      "key": "cmd+return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "You said: Change of plan"
+        }
+      },
+      "within": 20,
+      "expect": "The new words run at once, long before the job's 120 seconds"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "reply-submit",
+              "name": "Send"
+            }
+          },
+          {
+            "gone": {
+              "key": "waiting"
+            }
+          }
+        ]
+      },
+      "within": 30,
+      "expect": "The thread ends and nothing waits"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "name": "Interrupted after"
+        }
+      },
+      "expect": "The first run folds as Interrupted after a time"
+    },
+    {
+      "do": "snap",
+      "name": "interrupted",
+      "expect": "The Interrupted fold, then the answer to the new words"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep -c '\"subtype\":\"interrupt\"' fake-record.jsonl || true",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep -c 'resume' fake-record.jsonl || true",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep -c '\"stdin\":{\"message\"' fake-record.jsonl || true",
+              "is": "2"
+            }
+          }
+        ]
+      },
+      "expect": "One interrupt request, one resume, two user messages in all"
+    }
+  ]
+}

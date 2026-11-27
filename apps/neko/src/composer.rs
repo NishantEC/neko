@@ -99,7 +99,10 @@ impl App {
         let mode = self.open_is_running().then(|| mode.unwrap_or_else(|| self.return_mode()));
         if let Some(id) = self.send(Request::FollowUp { task: task.clone(), words: words.clone(), answering: None, mode }) {
             self.asked.insert(id, Asked::FollowUp(task.clone(), words));
-            self.replies.insert(task, rune::TextEdit::default());
+            // The keyboard stays in the box: the next message can follow at once.
+            let mut empty = rune::TextEdit::default();
+            empty.focused = true;
+            self.replies.insert(task, empty);
             self.composer.recall = None;
             self.composer.mode_open = false;
             self.at_bottom = true;
@@ -190,6 +193,20 @@ impl App {
     }
 }
 
+/// What Return with these modifiers sends as. `None`: the key is not ours (the text field takes it). `Some(None)`: send, with no mode
+/// (nothing runs, so every mode just sends). While the agent works: Return steers, ⌥Return queues, ⌘Return interrupts (Settings can
+/// swap the first two). At rest ⌘Return sends, as Return does; ⌥Return stays a new line, as it is in every text field.
+pub fn mode_of(cmd: bool, alt: bool, running: bool, queue_first: bool) -> Option<Option<SendMode>> {
+    let (first, second) = if queue_first { (SendMode::Queue, SendMode::Steer) } else { (SendMode::Steer, SendMode::Queue) };
+    match (cmd, alt, running) {
+        (false, false, true) => Some(Some(first)),
+        (true, false, true) => Some(Some(SendMode::Interrupt)),
+        (false, true, true) => Some(Some(second)),
+        (true, false, false) => Some(None),
+        _ => None,
+    }
+}
+
 /// The keys that choose how words reach the agent, read before the text field sees them (the wrapper round the composer).
 pub fn key_preview(s: &mut App, k: &KeyEvent, tx: &mut Tx) -> bool {
     let m = k.mods;
@@ -198,15 +215,7 @@ pub fn key_preview(s: &mut App, k: &KeyEvent, tx: &mut Tx) -> bool {
             if !s.has_words() || s.pending_request().is_some() {
                 return false;
             }
-            let running = s.open_is_running();
-            let mode = match (m.cmd, m.alt, running) {
-                (false, false, true) => Some(s.return_mode()),
-                (true, false, true) => Some(SendMode::Interrupt),
-                (false, true, true) => Some(s.option_return_mode()),
-                // At rest ⌘Return sends, as Return does; ⌥Return stays a new line, as it is in every text field.
-                (true, false, false) => None,
-                _ => return false,
-            };
+            let Some(mode) = mode_of(m.cmd, m.alt, s.open_is_running(), s.queue_first()) else { return false };
             if !tx.key_repeat() {
                 s.send_words(mode);
             }
@@ -232,7 +241,7 @@ pub fn placeholder(s: &App, task: &Task, asking: bool) -> String {
     if asking {
         "Waiting for your answer above. Escape denies it.".to_owned()
     } else if task.status == TaskStatus::Waiting {
-        "The agent is waiting on its kittens. Say something to wake it.".to_owned()
+        "The agent is waiting on its kittens. Say something to wake it, or press Escape to stop.".to_owned()
     } else if s.open_is_running() {
         format!("{ret} ({alt})")
     } else if task.status == TaskStatus::Asked {
@@ -524,6 +533,26 @@ mod tests {
         assert_eq!(running_for(2 * 60_000 + 5, 0), "2m");
         assert_eq!(running_for(65 * 60_000, 0), "1h 5m");
         assert_eq!(running_for(60 * 60_000, 0), "1h");
+    }
+
+    #[test]
+    fn return_steers_option_return_queues_and_command_return_interrupts_while_it_works() {
+        assert_eq!(mode_of(false, false, true, false), Some(Some(SendMode::Steer)));
+        assert_eq!(mode_of(false, true, true, false), Some(Some(SendMode::Queue)));
+        assert_eq!(mode_of(true, false, true, false), Some(Some(SendMode::Interrupt)));
+        // Settings swap the first two; interrupt is always ⌘Return.
+        assert_eq!(mode_of(false, false, true, true), Some(Some(SendMode::Queue)));
+        assert_eq!(mode_of(false, true, true, true), Some(Some(SendMode::Steer)));
+        assert_eq!(mode_of(true, false, true, true), Some(Some(SendMode::Interrupt)));
+        // Both modifiers are no mode of ours.
+        assert_eq!(mode_of(true, true, true, false), None);
+    }
+
+    #[test]
+    fn at_rest_command_return_sends_and_option_return_stays_a_new_line() {
+        assert_eq!(mode_of(true, false, false, false), Some(None));
+        assert_eq!(mode_of(false, true, false, false), None);
+        assert_eq!(mode_of(false, false, false, false), None, "plain Return at rest is the composer's own submit");
     }
 
     #[test]

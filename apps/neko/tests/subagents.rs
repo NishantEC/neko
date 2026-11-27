@@ -231,7 +231,7 @@ fn the_waiting_line_names_the_live_subagents_as_links_that_open_them() {
 fn a_waiting_thread_can_be_stopped_like_a_working_one() {
     let rt = runtime((1200.0, 800.0), false, scene("subagents-waiting"));
     assert!(rt.state.open_is_working(), "Stop and Escape reach a thread that rests on its subagents");
-    assert_eq!(str_of(&node(&rt, "reply-input"), "placeholder"), "The agent is waiting on its kittens. Press Escape to stop.");
+    assert_eq!(str_of(&node(&rt, "reply-input"), "placeholder"), "The agent is waiting on its kittens. Say something to wake it, or press Escape to stop.");
     assert_eq!(str_of(&node(&rt, "reply-submit"), "name"), "Stop", "its composer offers Stop");
 }
 

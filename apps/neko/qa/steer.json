@@ -1,0 +1,130 @@
+{
+  "name": "steer",
+  "title": "Return while the agent works steers it",
+  "about": "A thread works. Words typed and sent with Return reach the running agent at its next step: the row above the composer says Steered until the fake reads them, the agent's words show it read them, and the same single process took both messages (no second run).",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Do the work [fake:work:14:step=2500]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Step 1 of the work"
+        }
+      },
+      "within": 30,
+      "expect": "The agent works"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Also check the docs"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "waiting-0",
+          "name": "Steered, waiting to be read: Also check the docs"
+        }
+      },
+      "within": 5,
+      "expect": "The row above the composer says Steered until the agent's next step reads it",
+      "window": false
+    },
+    {
+      "do": "snap",
+      "name": "steered",
+      "expect": "A Steered row above the composer, no actions on it"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "key": "waiting-0-discard"
+        }
+      },
+      "expect": "A steered message cannot be taken back",
+      "window": false
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "text": "Reading your message: Also check the docs"
+            }
+          },
+          {
+            "gone": {
+              "key": "waiting"
+            }
+          }
+        ]
+      },
+      "within": 20,
+      "expect": "The next step read it and the row went"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "reply-submit",
+          "name": "Send"
+        }
+      },
+      "within": 40,
+      "expect": "The work ends"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep -c '\"stdin\":{\"message\"' fake-record.jsonl || true",
+              "is": "2"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep -c '\"argv\"' fake-record.jsonl || true",
+              "is": "1"
+            }
+          }
+        ]
+      },
+      "expect": "Both messages reached one CLI process: two user messages, one start"
+    }
+  ]
+}

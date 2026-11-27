@@ -13,6 +13,7 @@
 //! | `destructive` | Asks to run `rm -rf build`. |
 //! | `outside` | Asks to read `/etc/hosts`. |
 //! | `slow` | A word every 200 ms for ten minutes (to be stopped). |
+//! | `work:SECS[:step=MS][:deaf]` | SECS seconds (default 6) of steps, each its own message, MS apart (default 250). A user message that arrives meanwhile is read at the next step ("Reading your message: …") and, like every message sent to the CLI, gets a result of its own at the end. A `control_request` `interrupt` ends the turn at once with the CLI's interrupted result; `deaf` does not hear it. |
 //! | `spawn:PIDFILE` | Starts a grandchild in its own process group (`sleep 600`), writes its pid to PIDFILE, answers, ends. |
 //! | `spawn-stay:PIDFILE` | The same, then keeps streaming until stopped. |
 //! | `crash` | Says something on stderr and exits with code 3. |
@@ -482,10 +483,16 @@ impl Fake {
                 // `work:SECS` (default 6): a step every quarter second, each its own message. A message the person sends meanwhile is read
                 // at the next step ("Reading your message: …") and gets its own result at the end, as a message sent to the CLI does. An
                 // interrupt ends the turn at once; `work:SECS:deaf` does not hear it.
-                let (secs, deaf) = match arg.split_once(':') {
-                    Some((n, flag)) => (n.parse::<u64>().unwrap_or(6), flag == "deaf"),
-                    None => (arg.parse::<u64>().unwrap_or(6), false),
-                };
+                // `work:SECS:step=MS` makes the quiet between steps MS long (250 by default): time to see what waits.
+                let mut parts = arg.split(':');
+                let secs = parts.next().and_then(|n| n.parse::<u64>().ok()).unwrap_or(6);
+                let (mut deaf, mut step_ms) = (false, 250u64);
+                for p in parts {
+                    match p.strip_prefix("step=") {
+                        Some(ms) => step_ms = ms.parse().unwrap_or(250),
+                        None => deaf = deaf || p == "deaf",
+                    }
+                }
                 let until = Instant::now() + Duration::from_secs(secs);
                 let mut read = 0usize;
                 let mut i = 0u32;
@@ -498,7 +505,7 @@ impl Fake {
                     read += taken.len();
                     let text = if taken.is_empty() { format!("Step {i} of the work. ") } else { format!("Reading your message: {} ", taken.join(" | ")) };
                     self.say(&text, 1, Duration::from_millis(0));
-                    for _ in 0..5 {
+                    for _ in 0..(step_ms / 50).max(1) {
                         std::thread::sleep(Duration::from_millis(50));
                         if self.listen(true, deaf) {
                             return self.interrupted();
