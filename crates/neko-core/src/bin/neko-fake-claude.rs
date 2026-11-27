@@ -712,7 +712,10 @@ fn keep(v: &Value) {
     if let Some(r) = std::env::var_os("NEKO_FAKE_RECORD").filter(|r| !r.is_empty())
         && let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(r)
     {
-        let _ = writeln!(f, "{v}");
+        // One write per line: `writeln!` on a File writes each formatted piece separately, and several fakes (a parent and its
+        // kittens) append to the same record at once, so their pieces interleaved and broke lines. A single append write is not split.
+        let line = format!("{v}\n");
+        let _ = f.write_all(line.as_bytes());
     }
 }
 

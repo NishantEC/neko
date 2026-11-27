@@ -1,0 +1,104 @@
+{
+  "name": "real-kittens",
+  "title": "A real thread starts two kittens, rests, and is woken by their reports",
+  "about": "Real model calls (the cheapest model). In a temporary folder with three small files, the person asks for two things to be checked in parallel with subagents. The real Claude Code should call Neko's start_subagent twice through the real MCP hop, end its turn (the thread shows Waiting on its kittens), and be resumed with the reports, then answer with both results. This is the one check of the subagent wake that only the real CLI can make.",
+  "cli": [
+    "real"
+  ],
+  "setup": {
+    "files": {
+      "scratch": {
+        "files": {
+          "alpha.txt": "one",
+          "beta.txt": "two",
+          "gamma.md": "three"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "choose-folder",
+      "path": "$files/scratch"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Use two subagents in parallel: one counts the .txt files in this folder, the other lists the names of the .md files. Do not do the work yourself. When both have reported, answer in one line with both results."
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "allow-until",
+      "until": {
+        "see": {
+          "key": "subagent-card-2"
+        }
+      },
+      "within": 180,
+      "snap_first": true,
+      "expect": "The real agent starts two kittens through Neko's tool"
+    },
+    {
+      "do": "snap",
+      "name": "kittens-started",
+      "expect": "Two kitten cards in the conversation"
+    },
+    {
+      "do": "allow-until",
+      "until": {
+        "all": [
+          {
+            "count": {
+              "of": {
+                "key": "turn-*",
+                "role": "article"
+              },
+              "min": 2
+            }
+          },
+          {
+            "gone": {
+              "key": "waiting-line"
+            }
+          },
+          {
+            "gone": {
+              "key": "run-*-working"
+            }
+          }
+        ]
+      },
+      "within": 300,
+      "expect": "Both kittens report and the thread is woken for a second turn that finishes"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "gamma",
+          "in": {
+            "key": "turn-*"
+          }
+        }
+      },
+      "expect": "The woken answer carries the .md kitten's result (gamma.md)"
+    },
+    {
+      "do": "snap",
+      "name": "kittens-woken",
+      "expect": "The thread after the wake, with both results"
+    }
+  ]
+}
