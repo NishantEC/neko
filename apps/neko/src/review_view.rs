@@ -150,20 +150,9 @@ pub fn review_view(s: &App, t: &Theme, r: &Review) -> El {
                 .build(t),
         );
     }
-    // Whose work it is: the run's cat (else the task's), its portrait beside the heading.
-    let task = s.tasks.iter().find(|x| x.id == r.task);
-    let run_cat = r.run.as_ref().and_then(|id| s.books.get(&r.task).and_then(|b| b.runs.iter().find(|x| &x.id == id))).and_then(|x| x.cat.clone());
-    let cat = run_cat.or_else(|| task.map(|x| x.cat.clone())).and_then(|id| s.cat(&id).cloned());
-    let heading = match (&cat, r.run.is_some()) {
-        (Some(c), true) => format!("{}'s changes in this run", c.name),
-        (Some(c), false) => format!("Everything {} changed in this thread", c.name),
-        (None, true) => "Changes in this run".to_owned(),
-        (None, false) => "All changes in this thread".to_owned(),
-    };
+    // A thread's changes are not any cat's: the heading says what they are, and no face leads it.
+    let heading = if r.run.is_some() { "Changes in this run".to_owned() } else { "All changes in this thread".to_owned() };
     let mut title = row().w_full().gap(t.space.at(3.0)).center_y();
-    if let Some(c) = &cat {
-        title = title.child(crate::faces::portrait(t, "review-cat-face", &c.face, 32.0));
-    }
     title = title.child(text(heading).key("review-title").role("heading").level(2).font(weight(t.ty.xl, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0));
     let mut page = col().key("review").w_full().max_w(COLUMN).gap(t.space.at(3.0)).child(top).child(title);
     // Whether the run's changes are in the folder now.

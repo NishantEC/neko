@@ -76,7 +76,7 @@ pub fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     let band = row().key("sidebar-band").w_full().h(BAND - 2.0 * INSET).center_y().pr(INSET).window_drag().child(lights_room((lights - INSET).max(0.0))).child(row().grow(1.0).h_full()).child(toggle_button(t, true));
     // New thread is where the person starts: the row is selected while its composer (Home, until it is its own page) is what shows.
     let at_home = s.open.is_none() && !s.settings_open && !s.needs_open && !s.rounds_open && !s.briefing_open && s.open_cat.is_none();
-    let new = SidebarItem::new("new-thread", "New thread").icon(&icons::COMPOSE).selected(at_home).on_press(|s: &mut App| s.new_task_here()).build(t);
+    let new = SidebarItem::new("new-thread", "New thread").icon(&icons::COMPOSE).selected(at_home).on_press(|s: &mut App| s.new_thread_here()).build(t);
     let new = Tooltip::new("New thread").keys("⌘N").wrap(new);
     // Everything waiting for the person, with how many (the same count as the Dock's).
     let n = s.visible_needs().len();
@@ -316,7 +316,7 @@ fn cattains(s: &App, t: &Theme, layer: &mut Vec<El>) -> Option<El> {
 /// Threads: a header with View and New thread, then the threads in groups (a project's, or the one list), then Add project….
 fn threads_section(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let view = view_menu(s, t, layer);
-    let new: PressTx<App> = Rc::new(|s: &mut App, _: &mut rune::Tx| s.new_task_here());
+    let new: PressTx<App> = Rc::new(|s: &mut App, _: &mut rune::Tx| s.new_thread_here());
     let new = icon_button(t, "threads-new", "New thread", &crate::ui::icons::PLUS, None, false, Some(new));
     let head = row()
         .key("threads-head")
@@ -478,7 +478,7 @@ fn group(s: &App, t: &Theme, g: &threads::Group<'_>, layer: &mut Vec<El>) -> El 
     head = head.child(chevron).child(text(g.name.clone()).font(weight(t.ty.sm, t.ty.medium)).color(if w.is_active() { t.ink_muted() } else { t.ink_faint() }).grow(1.0).truncate().min_w(0.0).a11y_hidden());
     if w.is_active() {
         let here = id.clone();
-        let new: PressTx<App> = Rc::new(move |s: &mut App, _: &mut rune::Tx| s.new_task_in(&here));
+        let new: PressTx<App> = Rc::new(move |s: &mut App, _: &mut rune::Tx| s.new_thread_in(&here));
         let new = icon_button(t, &format!("{key}-new"), &format!("New thread in {}", g.name), &crate::ui::icons::PLUS, None, w.missing, Some(new)).group_opacity(0.0, 1.0);
         head = head.child(new);
         if w.is_general() {

@@ -91,13 +91,13 @@ fn facts(t: &Theme, key: &str, item: &BriefingTask) -> Option<El> {
     any.then_some(r)
 }
 
-/// One finished task: its cat's portrait, who and how it ended and when, the title, the first sentence of the answer, the files, and
+/// One finished thread: how it ended and when, the title, the first sentence of the answer, the files, and
 /// the actions the run's card offers.
 fn finished_row(s: &App, t: &Theme, item: &BriefingTask, pos: usize, n: usize, before: Option<String>, after: Option<String>) -> El {
     let key = task_key(&item.task);
     let zone = s.zone();
     let failed = item.end == FinishedEnd::Failed;
-    let says = format!("{} {}", item.cat_name, words::end_words(item.end));
+    let says = words::end_words(item.end).to_owned();
     let when = words::when(item.ended_ms, s.now_ms, &*zone);
     let (task, run) = (item.task.clone(), item.run.clone());
     let open = {
@@ -150,8 +150,10 @@ fn finished_row(s: &App, t: &Theme, item: &BriefingTask, pos: usize, n: usize, b
     }
     let id = item.task.clone();
     let r = row().key(key.clone()).role("listitem").label(label).description(when).position_in_set(pos, n).focusable(true).w_full().px(t.space.at(4.0)).py(t.space.at(3.5)).gap(t.space.at(3.5)).items_start();
+    // A thread has no cat to lead it; one a cat was given before (or a round made) keeps the cat's face.
+    let lead = (!item.cat.is_empty()).then(|| portrait(t, &format!("{key}-face"), s.cat_face(&item.cat), 40.0));
     paint_state(r, &t.mat.row, States::default())
-        .child(portrait(t, &format!("{key}-face"), s.cat_face(&item.cat), 40.0))
+        .children(lead)
         .child(body)
         .on_key(move |s: &mut App, ev: &KeyEvent, tx: &mut Tx| row_keys(s, ev, tx, &id, before.as_deref(), after.as_deref()))
 }
@@ -190,7 +192,7 @@ fn working_row(s: &App, t: &Theme, w: &BriefingWorking, i: usize, n: usize) -> E
         .key(key.clone())
         .role("listitem")
         .label(w.title.clone())
-        .description(format!("{}, working, {}", w.cat_name, crate::needs_view::waited(w.since_ms, s.now_ms)))
+        .description(format!("working, {}", crate::needs_view::waited(w.since_ms, s.now_ms)))
         .position_in_set(i, n)
         .focusable(true)
         .press_on_return()
@@ -199,15 +201,20 @@ fn working_row(s: &App, t: &Theme, w: &BriefingWorking, i: usize, n: usize) -> E
         .py(t.space.at(2.5))
         .gap(t.space.at(3.0))
         .center_y();
+    let lead = if w.cat.is_empty() {
+        row().key(format!("{key}-face")).size(20.0, 20.0).center().child(crate::ui::base::spinner_in(t, 14.0, t.c.accent.fg, "").a11y_hidden())
+    } else {
+        portrait_in(t, &format!("{key}-face"), s.cat_face(&w.cat), 32.0, Some(TaskStatus::Working), t.c.input.bg)
+    };
     paint_state(r, &t.mat.row, States::default())
-        .child(portrait_in(t, &format!("{key}-face"), s.cat_face(&w.cat), 32.0, Some(TaskStatus::Working), t.c.input.bg))
+        .child(lead)
         .child(
             col()
                 .grow(1.0)
                 .min_w(0.0)
                 .gap(2.0)
                 .child(text(w.title.clone()).font(weight(t.ty.base, t.ty.medium)).color(t.ink()).truncate().min_w(0.0).a11y_hidden())
-                .child(text(format!("{} · working for {}", w.cat_name, crate::needs_view::waited(w.since_ms, s.now_ms))).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0).a11y_hidden()),
+                .child(text(format!("Working for {}", crate::needs_view::waited(w.since_ms, s.now_ms))).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0).a11y_hidden()),
         )
         .on_press(move |s: &mut App| s.open_task_id(&id))
 }

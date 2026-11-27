@@ -1,7 +1,7 @@
 {
   "name": "first-task",
-  "title": "A first thread from Home",
-  "about": "An empty app. The person types a thread of two lines on Home and presses Return. The thread appears in the sidebar and opens; the agent's answer streams in; when the run ends it folds behind one \"Worked for\" line; the thread's title is its first line.",
+  "title": "A first thread from New thread",
+  "about": "An empty app. The person types a thread of two lines on New thread and presses Return. The thread appears in the sidebar and opens; the agent's answer streams in; when the run ends it folds behind one \"Worked for\" line; the thread's title is its first line.",
   "cli": [
     "fake"
   ],
@@ -9,8 +9,8 @@
   "steps": [
     {
       "do": "snap",
-      "name": "home-empty",
-      "expect": "Home greets the person and the sidebar says where threads will appear"
+      "name": "new-thread-empty",
+      "expect": "New thread asks what to work on and the sidebar says where threads will appear"
     },
     {
       "do": "assert",
@@ -18,7 +18,8 @@
         "all": [
           {
             "see": {
-              "key": "greeting"
+              "key": "new-thread-headline",
+              "text": "What should we work on?"
             }
           },
           {
@@ -28,7 +29,7 @@
           }
         ]
       },
-      "expect": "The greeting is shown and the sidebar says \"Threads you start appear here\""
+      "expect": "The question is shown and the sidebar says \"Threads you start appear here\""
     },
     {
       "do": "click",

@@ -288,11 +288,11 @@ impl Notifier {
     }
 
     /// A run finished with nothing asked: "Done" and the first line of its answer.
-    pub fn finished(&mut self, task: &TaskId, title: &str, cat: &str, answer: Option<&str>, here: &Here) {
+    pub fn finished(&mut self, task: &TaskId, title: &str, answer: Option<&str>, here: &Here) {
         if !self.switches.finished || !wanted(here, task, false) {
             return;
         }
-        self.poster.post(&done_note(task, title, cat, answer));
+        self.poster.post(&done_note(task, title, answer));
         self.posted.insert(task.clone(), Shown::Said);
     }
 
@@ -375,15 +375,18 @@ pub fn short(s: &str, max: usize) -> String {
     format!("{}…", cut[..at].trim_end())
 }
 
-/// The notification for an item: the task's title, the cat and what is asked in short ("miso asks: …"), and its actions.
+/// The notification for an item: the thread's title, then "Needs you: …" with what is asked in short, and its actions. No cat is named
+/// (docs/knowledge/needs-you.md): the thread is the person's, whoever its agent is.
 pub fn note_for(item: &NeedsItem) -> Note {
     let mut info = if item.task.0.is_empty() { vec![("item".to_owned(), item.id.clone())] } else { link_info(&item.task, Some(&item.id)) };
     let (body, buttons) = match &item.need {
         Need::Permission { permission: p } => {
             info.push(("permission".into(), p.id.0.clone()));
-            // A subagent has no name: its number asks.
-            let asker = item.subagent.as_deref().map_or_else(|| item.cat_name.clone(), crate::subagents::name);
-            let body = short(&format!("{asker} asks: {}: {}", p.title, p.detail), BODY_CHARS);
+            // A subagent's request says which one asks: its number.
+            let body = match item.subagent.as_deref() {
+                Some(n) => short(&format!("Needs you: {} asks: {}: {}", crate::subagents::name(n), p.title, p.detail), BODY_CHARS),
+                None => short(&format!("Needs you: {}: {}", p.title, p.detail), BODY_CHARS),
+            };
             if p.destructive {
                 // The destructive form has no default and never confirms from a banner: the notification only opens the task.
                 info.push(("destructive".into(), "1".into()));
@@ -399,9 +402,9 @@ pub fn note_for(item: &NeedsItem) -> Note {
         }
         Need::Question { run, question } => {
             info.push(("run".into(), run.0.clone()));
-            (short(&format!("{} asks: {question}", item.cat_name), BODY_CHARS), vec![Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }])
+            (short(&format!("Needs you: {question}"), BODY_CHARS), vec![Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }])
         }
-        Need::Failure { text, .. } => (short(&format!("{} could not go on: {text}", item.cat_name), BODY_CHARS), Vec::new()),
+        Need::Failure { text, .. } => (short(&format!("Failed: {text}"), BODY_CHARS), Vec::new()),
         // Approving a plugin is never done from a banner: the notification only opens the list.
         Need::Plugin { ask } => {
             info.push(("plugin".into(), ask.plugin.clone()));
@@ -411,11 +414,11 @@ pub fn note_for(item: &NeedsItem) -> Note {
     Note { id: note_id(&key_of(item)), title: item.title.clone(), body, info, buttons }
 }
 
-/// "tofu is done", with the first line of the answer when there is one.
-pub fn done_note(task: &TaskId, title: &str, cat: &str, answer: Option<&str>) -> Note {
+/// "Done", with the first line of the answer when there is one.
+pub fn done_note(task: &TaskId, title: &str, answer: Option<&str>) -> Note {
     let body = match answer.and_then(first_line) {
-        Some(a) => short(&format!("{cat} is done: {a}"), BODY_CHARS),
-        None => format!("{cat} is done"),
+        Some(a) => short(&format!("Done: {a}"), BODY_CHARS),
+        None => "Done".to_owned(),
     };
     Note { id: note_id(task), title: title.to_owned(), body, info: link_info(task, None), buttons: Vec::new() }
 }
@@ -593,7 +596,7 @@ mod tests {
         let sent = r.take();
         let p = posted(&sent);
         assert_eq!(p.len(), 1);
-        assert_eq!((p[0].id.as_str(), p[0].title.as_str(), p[0].body.as_str()), ("neko.task.task_00000000000000000000000001", "Run the tests", "miso asks: Run a command: cargo test"));
+        assert_eq!((p[0].id.as_str(), p[0].title.as_str(), p[0].body.as_str()), ("neko.task.task_00000000000000000000000001", "Run the tests", "Needs you: Run a command: cargo test"));
         assert_eq!(
             p[0].buttons,
             vec![Button::Action { id: ALLOW_ONCE, label: "Allow once" }, Button::Action { id: ALWAYS_ALLOW, label: "Always allow" }, Button::Action { id: DENY, label: "Deny" }],
@@ -605,9 +608,9 @@ mod tests {
         let d = note_for(&perm(T2, true));
         assert!(d.buttons.is_empty(), "a destructive request's notification only opens the thread: {d:?}");
         let q = note_for(&question(T2));
-        assert_eq!((q.body.as_str(), &q.buttons[..]), ("mochi asks: Should I rename all four?", &[Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }][..]));
+        assert_eq!((q.body.as_str(), &q.buttons[..]), ("Needs you: Should I rename all four?", &[Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }][..]));
         let f = note_for(&failure(T2));
-        assert_eq!((f.body.as_str(), f.buttons.len()), ("tofu could not go on: Claude Code is not signed in.", 0));
+        assert_eq!((f.body.as_str(), f.buttons.len()), ("Failed: Claude Code is not signed in.", 0));
     }
 
     #[test]
@@ -651,10 +654,10 @@ mod tests {
         n.switches.needs = false;
         n.needs(&[perm(T1, false)], &away());
         assert!(r.take().is_empty(), "needs off");
-        n.finished(&TaskId(T2.into()), "Draft the notes", "tofu", Some("I drafted them.\n\nMore."), &away());
-        assert_eq!(posted(&r.take())[0].body, "tofu is done: I drafted them.");
+        n.finished(&TaskId(T2.into()), "Draft the notes", Some("I drafted them.\n\nMore."), &away());
+        assert_eq!(posted(&r.take())[0].body, "Done: I drafted them.");
         n.switches.finished = false;
-        n.finished(&TaskId(T2.into()), "Draft the notes", "tofu", None, &away());
+        n.finished(&TaskId(T2.into()), "Draft the notes", None, &away());
         assert!(r.take().is_empty(), "finished off");
         n.switches.needs = true;
         n.needs(&[perm(T1, false)], &away());
@@ -666,12 +669,12 @@ mod tests {
     fn a_finished_run_says_done_with_its_first_line_unless_the_person_is_in_that_task() {
         let (mut n, r) = notifier();
         let here = Here { front: true, task: Some(TaskId(T1.into())), needs_view: true, ..Here::default() };
-        n.finished(&TaskId(T1.into()), "Draft the notes", "miso", Some("Done."), &here);
+        n.finished(&TaskId(T1.into()), "Draft the notes", Some("Done."), &here);
         assert!(r.take().is_empty(), "the person is looking at it");
-        n.finished(&TaskId(T2.into()), "Draft the notes", "tofu", Some("## I renamed **the button**\n\n- and more"), &here);
+        n.finished(&TaskId(T2.into()), "Draft the notes", Some("## I renamed **the button**\n\n- and more"), &here);
         let sent = r.take();
-        assert_eq!(posted(&sent)[0].body, "tofu is done: I renamed the button", "the list shows needs only, so a finished thread is news");
-        assert_eq!(done_note(&TaskId(T2.into()), "x", "tofu", None).body, "tofu is done");
+        assert_eq!(posted(&sent)[0].body, "Done: I renamed the button", "the list shows needs only, so a finished thread is news");
+        assert_eq!(done_note(&TaskId(T2.into()), "x", None).body, "Done");
         assert_eq!(first_line("\n\n  \n- `cargo test` passes"), Some("cargo test passes".into()));
     }
 

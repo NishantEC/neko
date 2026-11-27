@@ -96,7 +96,7 @@ fn opening_a_thread_reads_it_at_once() {
 fn a_working_thread_keeps_its_place_while_it_streams_and_moves_when_it_ends() {
     let mut a = neko_app::state::App::default();
     let mk = |id: &str, activity: i64| {
-        let mut t = Task::blank(TaskId(id.into()), "default", "w", id, 1, "cat_miso");
+        let mut t = Task::blank(TaskId(id.into()), "default", "w", id, 1, None);
         t.activity_ms = activity;
         t.last_read_ms = activity;
         t
@@ -127,7 +127,7 @@ fn a_working_thread_keeps_its_place_while_it_streams_and_moves_when_it_ends() {
 fn what_arrives_in_the_open_thread_is_read_only_while_neko_is_in_front() {
     let mut a = neko_app::state::App::default();
     let mk = |activity: i64| {
-        let mut t = Task::blank(TaskId("t".into()), "default", "w", "t", 1, "cat_miso");
+        let mut t = Task::blank(TaskId("t".into()), "default", "w", "t", 1, None);
         t.last_read_ms = 5;
         t.activity_ms = activity;
         t

@@ -134,7 +134,7 @@ fn check(scene: &str, dark: bool) {
 
 #[test]
 fn the_sidebar_keeps_one_rhythm() {
-    for scene in ["sparse-home", "sparse-working", "sparse-needs-you", "sparse-two-tasks", "workspaces", "workspaces-folded", "home-house"] {
+    for scene in ["sparse-new-thread", "sparse-working", "sparse-needs-you", "sparse-two-tasks", "workspaces", "workspaces-folded", "sidebar-cattains"] {
         for dark in [false, true] {
             check(scene, dark);
         }
@@ -146,7 +146,7 @@ fn the_sidebar_keeps_one_rhythm() {
 /// checked in a render with the pointer over it, not here).
 #[test]
 fn a_section_header_has_no_fill_at_rest() {
-    let sc = scenes().iter().find(|s| s.0 == "sparse-home").expect("the scene").1;
+    let sc = scenes().iter().find(|s| s.0 == "sparse-new-thread").expect("the scene").1;
     for dark in [false, true] {
         let mut rt = runtime((1200.0, 800.0), dark, sc);
         let fill = |rt: &rune::Runtime<neko_app::state::App>| rt.elements().into_iter().find(|e| e.key.as_deref() == Some("ws-ws_acme")).expect("the header").fill;

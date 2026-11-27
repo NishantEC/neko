@@ -18,9 +18,15 @@ use crate::state::{App, Book};
 pub type Scene = (&'static str, fn(&mut App));
 
 pub const SCENES: &[Scene] = &[
-    ("empty-home", |_| {}),
-    ("home-typed", |s| { home_typed(s); finish(s) }),
-    ("home-folder", |s| { home_folder(s); finish(s) }),
+    ("new-thread", |_| {}),
+    ("new-thread-typed", |s| { new_thread_typed(s); finish(s) }),
+    ("new-thread-folder", |s| { new_thread_folder(s); finish(s) }),
+    ("new-thread-in-folder", |s| { new_thread_in_folder(s); finish(s) }),
+    ("new-thread-place-menu", |s| { new_thread_place_menu(s); finish(s) }),
+    ("new-thread-branch-menu", |s| { new_thread_branch_menu(s); finish(s) }),
+    ("new-thread-adding", |s| { new_thread_adding(s); finish(s) }),
+    ("new-thread-started", |s| { new_thread_started(s); finish(s) }),
+    ("new-thread-busy", |s| { new_thread_busy(s); finish(s) }),
     ("task-open", |s| { task_open(s); finish(s) }),
     ("tasks-home", |s| { tasks_home(s); finish(s) }),
     ("task-working", |s| { task_working(s); finish(s) }),
@@ -78,11 +84,8 @@ pub const SCENES: &[Scene] = &[
     ("cat-page-editing", |s| { cat_page_editing(s); finish(s) }),
     ("cat-new", |s| { cat_new(s); finish(s) }),
     ("cat-retire", |s| { cat_retire(s); finish(s) }),
-    ("cat-picker", |s| { cat_picker(s); finish(s) }),
     ("task-rules-changed", |s| { task_rules_changed(s); finish(s) }),
     ("settings-cats", |s| { settings_cats(s); finish(s) }),
-    ("home-house", |s| { home_house(s); finish(s) }),
-    ("home-many", |s| { home_many(s); finish(s) }),
     ("rounds-empty", |s| { rounds_empty(s); finish(s) }),
     ("rounds", |s| { rounds(s); finish(s) }),
     ("rounds-history", |s| { rounds_history(s); finish(s) }),
@@ -98,8 +101,8 @@ pub const SCENES: &[Scene] = &[
     ("round-cat-menu", |s| { round_cat_menu(s); finish(s) }),
     ("task-from-round", |s| { task_from_round(s); finish(s) }),
     ("cat-page-rounds", |s| { cat_page_rounds(s); finish(s) }),
-    ("home-next-round", |s| { home_next_round(s); finish(s) }),
-    ("sparse-home", |s| { sparse_home(s); finish(s) }),
+    ("sidebar-cattains", |s| { sidebar_cattains(s); finish(s) }),
+    ("sparse-new-thread", |s| { sparse_new_thread(s); finish(s) }),
     ("sparse-empty", |s| { sparse_empty(s); finish(s) }),
     ("sparse-status", |s| { sparse_status(s); finish(s) }),
     ("threads-ungrouped", |s| { threads_ungrouped(s); finish(s) }),
@@ -251,18 +254,15 @@ fn cat_retire(s: &mut App) {
     s.ask_retire_cat("cat_mochi");
 }
 
-fn cat_picker(s: &mut App) {
-    with_workspaces(s);
-    s.draft = TextEdit::new("Tidy the release notes");
-    s.cat_picks.insert(GENERAL.into(), "cat_mochi".into());
-    s.cat_picker_open = true;
-}
-
 /// A follow-up after its cat's rules changed: one quiet line before the run that used the new ones.
 fn task_rules_changed(s: &mut App) {
     task_follow_up(s);
     let id = s.open.clone().expect("open");
-    let cat = s.tasks.iter().find(|t| t.id == id).map(|t| t.cat.clone()).expect("the thread");
+    // This task was given miso, so miso's rules go with its runs.
+    if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id) {
+        t.cat = Some("cat_miso".into());
+    }
+    let cat = s.tasks.iter().find(|t| t.id == id).and_then(|t| t.cat.clone()).expect("the thread");
     let name = s.cat(&cat).map(|c| c.name.clone()).expect("its cat");
     if let Some(b) = s.books.get_mut(&id) {
         let at = b.parts.iter().position(|p| p.run.as_ref().is_some_and(|r| r.0 == "run_2")).expect("the second run");
@@ -286,9 +286,8 @@ fn settings_cats(s: &mut App) {
 fn task(n: u32, words: &str, minutes_ago: i64) -> Task {
     let (now, _) = crate::fixed_clock();
     let title = words.lines().next().unwrap_or("").to_owned();
-    // Each sample task has one of the starter cats, in turn.
-    let cat = ["cat_miso", "cat_mochi", "cat_tofu"][n as usize % 3].to_owned();
-    Task::blank(TaskId(format!("task_{n:026}")), "default", words, &title, now - minutes_ago * 60_000, &cat)
+    // A sample thread has no cat, as a thread the person starts has none; a scene that shows a cat's work gives it one.
+    Task::blank(TaskId(format!("task_{n:026}")), "default", words, &title, now - minutes_ago * 60_000, None)
 }
 
 /// Four tasks: three from today and one from earlier in the week, each in a different state.
@@ -306,15 +305,62 @@ pub fn sample_tasks() -> Vec<Task> {
     t
 }
 
-fn home_typed(s: &mut App) {
+fn new_thread_typed(s: &mut App) {
     s.draft = TextEdit::new("Rename the Settings button to Preferences across the app");
     s.draft.focused = true;
 }
 
-fn home_folder(s: &mut App) {
+/// A project that is a repository: its branches are known, so the chips for where the thread works and where it starts show.
+fn git_project(s: &mut App) {
+    s.workspace = "ws_acme".into();
+    s.new_thread.branches.insert(
+        "ws_acme".into(),
+        crate::new_thread::BranchList { git: true, current: Some("main".into()), names: vec!["main".into(), "release-2".into(), "sidebar-rework".into()] },
+    );
+}
+
+fn new_thread_folder(s: &mut App) {
     with_workspaces(s);
     s.draft = TextEdit::new("Find out why the nightly build is slow");
-    s.workspace = "ws_acme".into();
+    git_project(s);
+}
+
+fn new_thread_in_folder(s: &mut App) {
+    new_thread_folder(s);
+    s.new_thread.in_folder = true;
+}
+
+fn new_thread_place_menu(s: &mut App) {
+    new_thread_folder(s);
+    s.new_thread.place_open = true;
+}
+
+fn new_thread_branch_menu(s: &mut App) {
+    new_thread_folder(s);
+    s.new_thread.from_branch = Some("release-2".into());
+    s.new_thread.branch_open = true;
+}
+
+/// A folder chosen from the menu a moment ago: the chip names it already, the project is not made yet.
+fn new_thread_adding(s: &mut App) {
+    with_workspaces(s);
+    s.draft = TextEdit::new("Look at the footer on small screens");
+    s.begin_adding("/Users/example/Projects/acme-web");
+}
+
+/// After ⌘Return: the thread is in the sidebar, the box is empty and ready, and one quiet line says it started.
+fn new_thread_started(s: &mut App) {
+    new_thread_folder(s);
+    s.draft = TextEdit::default();
+    s.draft.focused = true;
+    s.notice = Some("Started Find out why the nightly build is slow".into());
+}
+
+/// A busy window: the sample threads in the sidebar, the briefing's line under the chips.
+fn new_thread_busy(s: &mut App) {
+    with_workspaces(s);
+    git_project(s);
+    briefing::home_briefing(s);
 }
 
 fn ws(id: &str, name: &str, folder: Option<&str>, position: i64) -> Workspace {
@@ -399,8 +445,8 @@ fn ago(s: &App, minutes: i64) -> i64 {
 }
 
 /// A cat's name as the sample data has it.
-fn cat_name(s: &App, id: &str) -> String {
-    s.cat(id).map_or_else(|| "Neko".to_owned(), |c| c.name.clone())
+fn cat_name(s: &App, id: &Option<String>) -> String {
+    id.as_deref().map(|id| s.cat(id).map_or_else(|| "Neko".to_owned(), |c| c.name.clone())).unwrap_or_default()
 }
 
 fn permission_item(s: &App, task: &Task, title: &str, detail: &str, destructive: bool, minutes: i64) -> NeedsItem {
@@ -417,7 +463,7 @@ fn permission_item(s: &App, task: &Task, title: &str, detail: &str, destructive:
         asked_ms: ago(s, minutes),
         answered_ms: None,
     };
-    NeedsItem { id: format!("perm:{}", p.id.0), task: task.id.clone(), workspace: task.workspace.clone(), title: task.title.clone(), cat: task.cat.clone(), cat_name: cat_name(s, &task.cat), since_ms: p.asked_ms, need: Need::Permission { permission: p }, subagent: None }
+    NeedsItem { id: format!("perm:{}", p.id.0), task: task.id.clone(), workspace: task.workspace.clone(), title: task.title.clone(), cat: task.cat.clone().unwrap_or_default(), cat_name: cat_name(s, &task.cat), since_ms: p.asked_ms, need: Need::Permission { permission: p }, subagent: None }
 }
 
 /// Every kind of item, in three workspaces, in the daemon's order (the workspace waiting longest first, oldest first inside it).
@@ -434,7 +480,7 @@ fn needs_you(s: &mut App) {
         task: t.id.clone(),
         workspace: t.workspace.clone(),
         title: t.title.clone(),
-        cat: t.cat.clone(),
+        cat: t.cat.clone().unwrap_or_default(),
         cat_name: cat_name(s, &t.cat),
         since_ms: ago(s, minutes),
         need: Need::Failure { failure: kind, text: text.into(), next: Some(next.into()), command: command.map(str::to_owned) }, subagent: None
@@ -446,7 +492,7 @@ fn needs_you(s: &mut App) {
             task: notes.id.clone(),
             workspace: notes.workspace.clone(),
             title: notes.title.clone(),
-            cat: notes.cat.clone(),
+            cat: notes.cat.clone().unwrap_or_default(),
             cat_name: cat_name(s, &notes.cat),
             since_ms: ago(s, 12),
             need: Need::Question { run: RunId(format!("run_{}", notes.id.0)), question: "The notes cover the sidebar and the composer. Should I also mention the new keyboard shortcuts, or keep them for 0.3?".into() }, subagent: None
@@ -532,13 +578,30 @@ pub(crate) fn sparse(s: &mut App) {
     let mut t = task(30, "What changed this week?", 26 * 60);
     t.workspace = "ws_acme".into();
     t.folder = Some("/Users/example/acme-api".into());
-    t.cat = "cat_miso".into();
+    t.cat = Some("cat_miso".into());
     t.status = TaskStatus::Done;
     t.latest_line = "Two changes were merged and one waits for a review.".into();
     s.tasks = vec![t];
 }
 
-fn sparse_home(s: &mut App) {
+/// Cats at work: three of six have a task (given them before threads needed none, or by a round), one of them waiting on the person.
+/// The sidebar lists them under the nav as Cattains.
+fn sidebar_cattains(s: &mut App) {
+    with_workspaces(s);
+    s.cats = six_cats();
+    let mut busy = |title: &str, cat: &str| {
+        if let Some(t) = s.tasks.iter_mut().find(|t| t.title.starts_with(title)) {
+            t.cat = Some(cat.into());
+        }
+    };
+    busy("Draft the release notes", "cat_miso");
+    busy("Make the hero image load", "cat_sesame");
+    busy("Answer the question about the retry limit", "cat_yuzu");
+    let retry = s.tasks.iter().find(|t| t.title.starts_with("Answer the question about the retry limit")).cloned().expect("the sample thread");
+    s.needs = vec![permission_item(s, &retry, "Run a command", "cargo test --package acme-api retry", false, 30)];
+}
+
+fn sparse_new_thread(s: &mut App) {
     sparse(s);
 }
 
@@ -588,7 +651,7 @@ fn sparse_task_of(s: &mut App, n: u32, words: &str, minutes: i64, cat: &str, sta
     let mut t = task(n, words, minutes);
     t.workspace = "ws_acme".into();
     t.folder = Some("/Users/example/acme-api".into());
-    t.cat = cat.into();
+    t.cat = Some(cat.into());
     t.status = status;
     s.tasks.push(t.clone());
     t
@@ -710,33 +773,6 @@ pub fn six_cats() -> Vec<Cat> {
 }
 
 /// Home in a house of six with work under way: three busy (two working, one waiting on the person), three free.
-fn home_house(s: &mut App) {
-    with_workspaces(s);
-    s.cats = six_cats();
-    let mut busy = |title: &str, cat: &str| {
-        if let Some(t) = s.tasks.iter_mut().find(|t| t.title.starts_with(title)) {
-            t.cat = cat.into();
-        }
-    };
-    busy("Draft the release notes", "cat_miso");
-    busy("Make the hero image load", "cat_sesame");
-    busy("Answer the question about the retry limit", "cat_yuzu");
-    let retry = s.tasks.iter().find(|t| t.title.starts_with("Answer the question about the retry limit")).cloned().expect("the sample thread");
-    s.needs = vec![permission_item(s, &retry, "Run a command", "cargo test --package acme-api retry", false, 30)];
-}
-
-/// Home with most of the house busy: the house folds to one row of small tiles and the lists say what each cat is on.
-fn home_many(s: &mut App) {
-    home_house(s);
-    let more = [("Check every page for broken links", "cat_nori"), ("Write the pricing page copy", "cat_mochi")];
-    for (title, cat) in more {
-        if let Some(t) = s.tasks.iter_mut().find(|t| t.title.starts_with(title)) {
-            t.cat = cat.into();
-            t.status = TaskStatus::Working;
-        }
-    }
-}
-
 /// A run's files for its receipt, each with its own counts (the run's totals: 42 added, 7 removed).
 fn receipt_files(s: &mut App, run: &str, n: usize) {
     let all = [("src/toolbar.rs", 24, 4), ("src/menu.rs", 9, 2), ("docs/preferences.md", 3, 1), ("tests/labels.rs", 6, 0)];
@@ -848,7 +884,7 @@ fn run(id: &str, task: &Task, status: RunStatus, started: i64, secs: i64) -> Run
         }),
         changes: (status == RunStatus::Done).then_some(Changes { files: 3, added: 42, removed: 7 }),
         undo: None,
-        cat: Some(task.cat.clone()),
+        cat: task.cat.clone(),
         rules_hash: Some(neko_protocol::cats::rules_hash("")),
     }
 }
@@ -1356,12 +1392,12 @@ fn with_rounds(s: &mut App) {
     done.title = "Docs check".into();
     done.workspace = "ws_acme".into();
     done.folder = Some("/Users/example/acme-api".into());
-    done.cat = "cat_mochi".into();
+    done.cat = Some("cat_mochi".into());
     done.status = TaskStatus::Done;
     done.round = Some(TaskRound { id: docs.id.clone(), name: docs.name.clone(), due_ms: Some(nine(s, 0)) });
     let mut working = task(41, "Draft the release notes from this week's merged changes.", 90);
     working.title = "Release notes".into();
-    working.cat = "cat_miso".into();
+    working.cat = Some("cat_miso".into());
     working.status = TaskStatus::Working;
     working.round = Some(TaskRound { id: notes.id.clone(), name: notes.name.clone(), due_ms: Some(s.now_ms - 90 * 60_000) });
     docs.last = Some(line(&docs, 1, Some(nine(s, 0)), nine(s, 0), RunKind::Started, Some(&done), Some(RunEnd::Done), None));
@@ -1507,6 +1543,3 @@ fn cat_page_rounds(s: &mut App) {
     s.open_cat_page("cat_mochi");
 }
 
-fn home_next_round(s: &mut App) {
-    with_rounds(s);
-}

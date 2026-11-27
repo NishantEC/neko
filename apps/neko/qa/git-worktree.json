@@ -103,7 +103,7 @@
       "do": "assert",
       "that": {
         "see": {
-          "text": "miso changed 2 files"
+          "text": "Changed 2 files"
         }
       },
       "expect": "The run card shows the changes"

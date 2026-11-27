@@ -6,11 +6,10 @@
 use std::rc::Rc;
 
 use neko_protocol::undo::{Action, Offer};
-use neko_protocol::{DiffFile, Part, PartBody, Permission, PermissionState, Run, RunStatus, TaskStatus, ToolState};
+use neko_protocol::{DiffFile, Part, PartBody, Permission, PermissionState, Run, RunStatus, ToolState};
 use rune::{El, Key, KeyEvent, Transition, Tx, col, el, row, text};
 use rune_ui_style::{ButtonVariant, Size, tabular, weight};
 
-use crate::faces::{portrait, portrait_in};
 use crate::state::App;
 use crate::ui::agent::{FoldLine, Marks, PressTx, Status, caption, elapsed, icon_button, mark_with, mono, pre, return_presses, took};
 use crate::ui::reasoning::Reasoning;
@@ -108,41 +107,8 @@ pub fn rail(t: &Theme, steps: Vec<El>) -> El {
     col().w_full().gap(1.0).ml(-t.space.at(3.0)).pl(t.space.at(3.0) - 1.0).border_sides([0.0, 0.0, 0.0, 1.0], t.c.line).children(steps)
 }
 
-/// The turn's head: the cat's portrait (32, ringed while it works), its name, and how the run stands. `waiting`: a request of this
-/// run waits for the person, so the head says so (as the sidebar's row does) instead of "working". `undone`: its changes were
-/// undone, so a finished run says "undone", not "done".
-pub fn turn_head(t: &Theme, r: &Run, name: &str, face: &str, waiting: bool, undone: bool) -> El {
-    let (st, doing) = match r.status {
-        RunStatus::Running if waiting => (Some(TaskStatus::NeedsYou), "needs you"),
-        RunStatus::Running => (Some(TaskStatus::Working), "working"),
-        RunStatus::Failed => (Some(TaskStatus::Failed), "could not finish"),
-        RunStatus::Stopped => (None, "stopped"),
-        RunStatus::Interrupted => (None, "was interrupted"),
-        // A run whose changes were undone is not "done": the files are as they were before it.
-        RunStatus::Done if undone => (None, "undone"),
-        RunStatus::Done => (None, "done"),
-    };
-    let ink = match r.status {
-        RunStatus::Running if waiting => t.c.warning.fg,
-        RunStatus::Running => t.c.accent.fg,
-        RunStatus::Failed => t.c.danger.fg,
-        _ => t.ink_faint(),
-    };
-    row()
-        .key(format!("turn-{}-cat", r.id.0))
-        .w_full()
-        .gap(t.space.at(2.5))
-        .center_y()
-        // The portrait's ring sits in the margin, so the portrait itself starts on the reading edge.
-        .ml(-(crate::faces::ringed(32.0) - 32.0) / 2.0)
-        .child(portrait_in(t, &format!("turn-{}-face", r.id.0), face, 32.0, st, t.c.page.bg))
-        .child(text(name.to_owned()).font(weight(t.ty.base, t.ty.semibold)).color(t.ink()).a11y_hidden())
-        .child(text(doing).font(t.ty.sm).color(ink).a11y_hidden())
-}
-
-/// The live line: what the cat is doing now, with the step it is on. The turn's head already shows who (portrait, name, ring), so
-/// this line never repeats them: it is one quiet line with the turning mark a running step has. Its name for assistive technology
-/// still says who ("miso is thinking").
+/// The live line: what the agent is doing now, with the step it is on: one quiet line with the turning mark a running step has. Its
+/// name for assistive technology says who ("The agent is thinking").
 pub fn live_line(t: &Theme, r: &Run, name: &str, thinking: bool, steps: usize) -> El {
     let doing = if thinking { "thinking" } else { "working" };
     let label = format!("{name} is {doing}");
@@ -162,11 +128,11 @@ pub fn live_line(t: &Theme, r: &Run, name: &str, thinking: bool, steps: usize) -
         .child(text(words).font(t.ty.base).color(t.ink_muted()).a11y_hidden())
 }
 
-/// A permission request, led by the cat that asks: its portrait with the needs-you dot, "miso asks", what it wants to do and why,
-/// the exact command, and the three answers (two for what cannot be taken back). The same keys and words as rune-ui's
+/// A permission request, led by a small amber mark: "The agent asks" (or "Kitten 1 asks"), what it wants to do and why, the exact
+/// command, and the three answers (two for what cannot be taken back). The same keys and words as rune-ui's
 /// Confirmation: Tab reaches each answer, Return or Space gives it, Escape anywhere denies; the destructive form has no Always and
 /// Return gives no answer. Answered, it is one quiet line in the third ink.
-pub fn request(t: &Theme, p: &Permission, name: &str, face: &str) -> El {
+pub fn request(t: &Theme, p: &Permission, name: &str) -> El {
     let key = format!("perm-{}", p.id.0);
     if p.state != PermissionState::Pending {
         // rune-ui's `Confirmation::answered_marks(Marks::Neutral)` draws the same line with the mark at the icon's full size; a step's
@@ -215,12 +181,13 @@ pub fn request(t: &Theme, p: &Permission, name: &str, face: &str) -> El {
     }
     answers = answers.child(answer("deny", "Deny", ButtonVariant::Ghost, neko_protocol::Decision::Deny));
     let asks = if destructive { format!("{name} asks to do something that cannot be undone") } else { format!("{name} asks") };
-    // A subagent has no face: its asks are led by its number alone (`face` empty).
-    let mut head = row().w_full().gap(t.space.at(3.0)).items_start();
-    if !face.is_empty() {
-        head = head.child(portrait_in(t, &format!("{key}-face"), face, 32.0, Some(TaskStatus::NeedsYou), crate::view::raised_fill(t)));
-    }
-    let head = head
+    // A small mark leads it: amber for what needs the person, red when what is asked cannot be taken back.
+    let mark_ink = if destructive { t.c.danger.fg } else { t.c.warning.fg };
+    let head = row()
+        .w_full()
+        .gap(t.space.at(2.5))
+        .items_start()
+        .child(row().key(format!("{key}-mark")).size(t.control.icon, t.control.icon).center().child(el().size(8.0, 8.0).radius(4.0).fill(mark_ink)).a11y_hidden())
         .child(
             col()
                 .grow(1.0)
@@ -231,8 +198,7 @@ pub fn request(t: &Theme, p: &Permission, name: &str, face: &str) -> El {
                 .child(text(p.title.clone()).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()).wrap().min_w(0.0)),
         );
     let mut body = col().w_full().gap(t.space.at(3.0)).child(head);
-    let indent = if face.is_empty() { 0.0 } else { crate::faces::ringed(32.0) + t.space.at(3.0) };
-    let mut detail = col().w_full().pl(indent).gap(t.space.at(3.0));
+    let mut detail = col().w_full().pl(t.control.icon + t.space.at(2.5)).gap(t.space.at(3.0));
     if !p.why.is_empty() {
         detail = detail.child(text(format!("{name} asks because {}", lower_first(&p.why))).key(format!("{key}-why")).font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0));
     }
@@ -312,7 +278,7 @@ const RECEIPT_FILES: usize = 5;
 /// says): the cat and the sentence ("miso changed 3 files", +42 −7), the files each with its counts in a well, the quiet undo line,
 /// and the branch, Review, Undo or Redo, Reveal in Finder and Copy branch.
 #[allow(clippy::too_many_arguments)]
-pub fn receipt(s: &App, t: &Theme, r: &Run, parts: &[&Part], o: &Offer, changed: Option<neko_protocol::Changes>, name: &str, face: &str) -> Option<El> {
+pub fn receipt(s: &App, t: &Theme, r: &Run, parts: &[&Part], o: &Offer, changed: Option<neko_protocol::Changes>, name: &str) -> Option<El> {
     let failed = r.status == RunStatus::Failed;
     let key = format!("run-{}", r.id.0);
     // A card is earned by changed files or a failure. A run that changed nothing gets no card: no "worked on a branch", no branch
@@ -321,27 +287,36 @@ pub fn receipt(s: &App, t: &Theme, r: &Run, parts: &[&Part], o: &Offer, changed:
         return o.line.clone().map(|line| text(line).key(format!("{key}-note")).role("note").font(t.ty.sm).color(t.ink_faint()).wrap().min_w(0.0));
     }
     let files = |n: u32| format!("{n} file{}", if n == 1 { "" } else { "s" });
+    // A thread's agent has no name: the sentence starts with its verb. A subagent's starts with its number ("Kitten 1 changed 3 files").
+    let who = |verb: String| {
+        if name.is_empty() {
+            let mut c = verb.chars();
+            c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+        } else {
+            format!("{name} {verb}")
+        }
+    };
     let sentence = match (r.status, changed) {
-        (RunStatus::Failed, _) => format!("{name} could not finish"),
-        (RunStatus::Stopped, Some(c)) => format!("{name} stopped after changing {}", files(c.files)),
-        (RunStatus::Stopped, None) => format!("{name} stopped"),
-        (RunStatus::Interrupted, Some(c)) => format!("{name} was interrupted after changing {}", files(c.files)),
-        (RunStatus::Interrupted, None) => format!("{name} was interrupted"),
-        (_, Some(c)) if o.undone => format!("{name} changed {}, now undone", files(c.files)),
-        (_, Some(c)) => format!("{name} changed {}", files(c.files)),
-        _ => format!("{name} finished"),
+        (RunStatus::Failed, _) => who("could not finish".to_owned()),
+        (RunStatus::Stopped, Some(c)) => who(format!("stopped after changing {}", files(c.files))),
+        (RunStatus::Stopped, None) => who("stopped".to_owned()),
+        (RunStatus::Interrupted, Some(c)) => who(format!("was interrupted after changing {}", files(c.files))),
+        (RunStatus::Interrupted, None) => who("was interrupted".to_owned()),
+        (_, Some(c)) if o.undone => who(format!("changed {}, now undone", files(c.files))),
+        (_, Some(c)) => who(format!("changed {}", files(c.files))),
+        _ => who("finished".to_owned()),
     };
     let pad = t.space.at(1.5);
     let mut facts = row().key(format!("{key}-facts")).gap(t.space.at(2.0)).center_y();
     if let Some(c) = changed {
         facts = facts.label(format!("{}, {} lines added, {} removed", files(c.files), c.added, c.removed)).role("note").children(figures(t, c.added, c.removed, weight(t.ty.sm, t.ty.semibold)));
     }
-    let mut head = row().w_full().px(t.space.at(2.5)).h(t.control.lg + 8.0).gap(t.space.at(2.5)).center_y();
-    // A subagent has no face (`face` empty): its card is led by the sentence.
-    if !face.is_empty() {
-        head = head.child(portrait(t, &format!("{key}-face"), face, 24.0));
-    }
-    let head = head
+    let head = row()
+        .w_full()
+        .px(t.space.at(2.5))
+        .h(t.control.lg + 8.0)
+        .gap(t.space.at(2.5))
+        .center_y()
         .child(text(sentence.clone()).role("heading").level(3).font(weight(t.ty.base, t.ty.semibold)).color(if failed { t.c.danger.fg } else if o.undone { t.ink_muted() } else { t.ink() }).grow(1.0).truncate().min_w(0.0))
         .child(facts);
     let mut card = col().key(key.clone()).role("group").label(sentence).w_full().gap(0.0).child(head);

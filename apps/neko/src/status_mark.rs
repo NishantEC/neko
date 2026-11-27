@@ -83,7 +83,7 @@ mod tests {
     use neko_protocol::{TaskId, TaskStatus};
 
     fn task() -> Task {
-        Task::blank(TaskId("t".into()), "default", "w", "t", 1, "cat_miso")
+        Task::blank(TaskId("t".into()), "default", "w", "t", 1, None)
     }
 
     #[test]

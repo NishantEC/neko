@@ -1,7 +1,7 @@
 {
   "name": "cats",
-  "title": "Cats: who does a thread, their rules, new and retired cats",
-  "about": "Three starter cats exist. A thread for Any cat goes to one of them. Picking mochi makes the thread mochi's everywhere. Rules written on mochi's page reach the agent once and verbatim on the next run, with a line saying they changed. The sidebar lists only the cats at work (Cattains); New cat… in Settings ▸ Cats makes a fourth. Retire asks first; a retired cat takes no new thread and its threads stay readable; Bring back from Settings.",
+  "title": "Cats: standing rules, new and retired cats",
+  "about": "Three starter cats exist and none is at work: the sidebar has no Cattains section, and a thread has no cat. Rules written on mochi's page are saved. New cat… in Settings ▸ Cats makes a fourth, and it is not at work either. Retire asks first, its page goes quiet, and Settings ▸ Cats offers Bring back. (What a cat's rules do to a run is covered by the daemon's and the app's tests: only work a cat was given, such as a round's, carries them.)",
   "cli": [
     "fake"
   ],
@@ -61,155 +61,9 @@
       "expect": "No cat is at work: the sidebar has no Cattains section"
     },
     {
-      "do": "key",
-      "key": "cmd+n"
-    },
-    {
       "do": "click",
       "on": {
-        "key": "composer-input"
-      }
-    },
-    {
-      "do": "type",
-      "text": "Plan the week [fake:plain]"
-    },
-    {
-      "do": "key",
-      "key": "return"
-    },
-    {
-      "do": "wait",
-      "until": {
-        "all": [
-          {
-            "see": {
-              "key": "band-title",
-              "text": "Plan the week"
-            }
-          },
-          {
-            "see": {
-              "name": "Worked for"
-            }
-          }
-        ]
-      },
-      "expect": "A thread for Any cat runs"
-    },
-    {
-      "do": "assert",
-      "that": {
-        "see": {
-          "key": "task-cat"
-        }
-      },
-      "expect": "It has a cat in its header"
-    },
-    {
-      "do": "key",
-      "key": "cmd+n"
-    },
-    {
-      "do": "click",
-      "on": {
-        "key": "cat-picker"
-      }
-    },
-    {
-      "do": "click",
-      "on": {
-        "role": "menuitemcheckbox",
-        "label": "mochi"
-      }
-    },
-    {
-      "do": "wait",
-      "until": {
-        "see": {
-          "key": "cat-picker",
-          "label": "mochi"
-        }
-      },
-      "expect": "The composer's picker says mochi"
-    },
-    {
-      "do": "click",
-      "on": {
-        "key": "composer-input"
-      }
-    },
-    {
-      "do": "type",
-      "text": "Feed the fish [fake:question]"
-    },
-    {
-      "do": "key",
-      "key": "return"
-    },
-    {
-      "do": "wait",
-      "until": {
-        "see": {
-          "key": "band-title",
-          "text": "Feed the fish"
-        }
-      }
-    },
-    {
-      "do": "wait",
-      "until": {
-        "all": [
-          {
-            "see": {
-              "key": "task-cat",
-              "label": "mochi"
-            }
-          },
-          {
-            "see": {
-              "text": "mochi",
-              "in": {
-                "key": "turn-*-cat"
-              }
-            }
-          },
-          {
-            "see": {
-              "role": "option",
-              "label": "mochi",
-              "name": "needs you"
-            }
-          }
-        ]
-      },
-      "within": 10,
-      "expect": "The thread is mochi's in the header and the turn, and mochi's Cattains row says it needs the person"
-    },
-    {
-      "do": "key",
-      "key": "cmd+2"
-    },
-    {
-      "do": "wait",
-      "until": {
-        "see": {
-          "name": "mochi has a question"
-        }
-      },
-      "within": 10,
-      "expect": "Needs you says mochi has a question"
-    },
-    {
-      "do": "snap",
-      "name": "mochi-needs",
-      "expect": "mochi in Needs you"
-    },
-    {
-      "do": "click",
-      "on": {
-        "key": "cat-cat_*",
-        "label": "mochi"
+        "key": "settings-cat-cat_mochi-open"
       }
     },
     {
@@ -261,48 +115,6 @@
       "do": "snap",
       "name": "mochi-page",
       "expect": "mochi's page with its rules"
-    },
-    {
-      "do": "click",
-      "on": {
-        "role": "option",
-        "label": "Feed the fish"
-      }
-    },
-    {
-      "do": "click",
-      "on": {
-        "key": "reply-input"
-      }
-    },
-    {
-      "do": "type",
-      "text": "Tuesday works [fake:plain]"
-    },
-    {
-      "do": "key",
-      "key": "return"
-    },
-    {
-      "do": "wait",
-      "until": {
-        "see": {
-          "key": "rules-changed-*"
-        }
-      },
-      "within": 10,
-      "expect": "The follow-up shows a line that mochi's rules changed"
-    },
-    {
-      "do": "wait",
-      "until": {
-        "sh": {
-          "run": "python3 -c \"import json; l=[json.loads(x) for x in open('fake-record.jsonl') if x.startswith('{\\\"argv')]; print(sum(a.count('QA-RULE-7: Answer in one short paragraph.') for a in l[-1]['argv']))\"",
-          "is": "1"
-        }
-      },
-      "within": 10,
-      "expect": "The CLI received the rules block exactly once, verbatim"
     },
     {
       "do": "key",
@@ -428,40 +240,6 @@
       }
     },
     {
-      "do": "assert",
-      "that": {
-        "see": {
-          "role": "option",
-          "label": "Feed the fish"
-        }
-      },
-      "expect": "mochi's threads stay readable in the sidebar"
-    },
-    {
-      "do": "key",
-      "key": "cmd+n"
-    },
-    {
-      "do": "click",
-      "on": {
-        "key": "cat-picker"
-      }
-    },
-    {
-      "do": "assert",
-      "that": {
-        "gone": {
-          "role": "menuitemcheckbox",
-          "label": "mochi"
-        }
-      },
-      "expect": "A retired cat takes no new thread: the picker does not offer mochi"
-    },
-    {
-      "do": "key",
-      "key": "escape"
-    },
-    {
       "do": "key",
       "key": "cmd+,"
     },
@@ -500,31 +278,6 @@
         }
       },
       "within": 5
-    },
-    {
-      "do": "key",
-      "key": "cmd+n"
-    },
-    {
-      "do": "click",
-      "on": {
-        "key": "cat-picker"
-      }
-    },
-    {
-      "do": "wait",
-      "until": {
-        "see": {
-          "role": "menuitemcheckbox",
-          "label": "mochi"
-        }
-      },
-      "within": 5,
-      "expect": "After Bring back the picker offers mochi again"
-    },
-    {
-      "do": "key",
-      "key": "escape"
     }
   ]
 }

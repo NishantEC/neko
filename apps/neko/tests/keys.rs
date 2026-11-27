@@ -33,36 +33,31 @@ fn tab_reaches_every_control_once_in_reading_order() {
             "needs-you",
             "briefing",
             "rounds",
-            "cat-cat_mochi",
             "threads-view-button",
             "threads-new",
             "ws-default",
             "ws-default-new",
             "add-project",
             "composer-input",
-            "cat-picker",
-            "workspace-picker",
-            "cat-tile-cat_miso",
-            "cat-tile-cat_mochi",
-            "cat-tile-cat_tofu"
+            "workspace-picker"
         ],
-        "New thread, then Needs you, the Briefing and Rounds; the Cattains (only the cats at work: here mochi) are one stop; Threads' View and New thread are their own; the groups and their rows are one stop; a group's New thread is its own; there is no New cat…; the words, then the cat picker and the project picker in the composer's footer (the empty composer's Send is off); then each cat's tile in the house"
+        "New thread, then Needs you, the Briefing and Rounds (no thread has a cat, so no Cattains stop); Threads' View and New thread are their own; the groups and their rows are one stop; a group's New thread is its own; there is no New cat…; the words, then the project chip under the composer (the empty composer's Send is off, and No project offers no worktree or branch); no house, no cat tiles"
     );
     // Round once, the focus is back on the first control; Shift+Tab walks back the same way, wrapping.
     assert_eq!(focus(&rt).as_deref(), Some("sidebar-hide"));
     tab(&mut rt, true);
-    assert_eq!(focus(&rt).as_deref(), Some("cat-tile-cat_tofu"));
+    assert_eq!(focus(&rt).as_deref(), Some("workspace-picker"));
     tab(&mut rt, true);
-    assert_eq!(focus(&rt).as_deref(), Some("cat-tile-cat_mochi"));
+    assert_eq!(focus(&rt).as_deref(), Some("composer-input"));
 }
 
 #[test]
 fn the_arrows_move_in_the_list_and_return_opens() {
     let mut rt = runtime((1200.0, 800.0), false, scene("tasks-home"));
-    for _ in 0..9 {
+    for _ in 0..8 {
         tab(&mut rt, false);
     }
-    assert_eq!(focus(&rt).as_deref(), Some("ws-default"), "with no thread open, the list's stop is the first section (after the Cattains' stop)");
+    assert_eq!(focus(&rt).as_deref(), Some("ws-default"), "with no thread open, the list's stop is the first section");
     press(&mut rt, Key::Down, Mods::default());
     assert_eq!(focus(&rt).as_deref(), Some("thread-task_00000000000000000000000004"), "Down goes from a section to its first row");
     press(&mut rt, Key::Down, Mods::default());

@@ -49,13 +49,13 @@ pub fn summary(b: &Briefing, now_ms: i64, zone: &dyn Zone) -> String {
     format!("Nothing happened since {since}.")
 }
 
-/// How a finished task ended, after its cat's name.
+/// How a finished thread ended, as a phrase on its own ("Finished", "Could not finish").
 pub fn end_words(e: FinishedEnd) -> &'static str {
     match e {
-        FinishedEnd::Done => "finished",
-        FinishedEnd::Failed => "could not finish",
-        FinishedEnd::Stopped => "was stopped",
-        FinishedEnd::Interrupted => "was interrupted",
+        FinishedEnd::Done => "Finished",
+        FinishedEnd::Failed => "Could not finish",
+        FinishedEnd::Stopped => "Stopped",
+        FinishedEnd::Interrupted => "Interrupted",
     }
 }
 
@@ -128,18 +128,17 @@ pub fn note_body(b: &Briefing) -> String {
             Need::Failure { text, .. } => text.clone(),
             Need::Plugin { ask } => crate::plugins::note_words(ask),
         };
-        // A plugin's item belongs to no cat: its words stand alone.
+        // A plugin's item belongs to no thread: its words stand alone.
         if matches!(n.need, Need::Plugin { .. }) {
             return what;
         }
-        let verb = match n.need {
-            Need::Failure { .. } => "could not go on",
-            _ => "asks",
+        return match n.need {
+            Need::Failure { .. } => format!("{} \u{b7} Failed: {what}", n.title),
+            _ => format!("{} \u{b7} Needs you: {what}", n.title),
         };
-        return format!("{} {verb}: {what}", n.cat_name);
     }
     match b.finished.first() {
-        Some(t) => format!("{} {}: {}", t.cat_name, end_words(t.end), t.title),
+        Some(t) => format!("{} \u{b7} {}", t.title, end_words(t.end)),
         None => String::new(),
     }
 }
@@ -210,7 +209,7 @@ impl App {
         if !self.briefing_open {
             self.briefing_back = self.open.clone().filter(|_| !self.settings_open && !self.needs_open && !self.rounds_open);
         }
-        self.go_home();
+        self.go_new_thread();
         self.briefing_open = true;
         self.notifier.briefing_opened();
         // The window may have been away: what happened since is asked for again.
@@ -223,7 +222,7 @@ impl App {
     pub fn leave_briefing(&mut self) {
         match self.briefing_back.take().filter(|t| self.tasks.iter().any(|x| &x.id == t)) {
             Some(t) => self.open_task_id(&t),
-            None => self.go_home(),
+            None => self.go_new_thread(),
         }
     }
 

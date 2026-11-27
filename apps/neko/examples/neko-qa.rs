@@ -666,8 +666,41 @@ impl Headless<'_> {
                 }
                 self.pump();
                 self.rt()?.resolve_file_dialog(Some(PathBuf::from(&path))).map_err(|e| format!("the folder panel: {e:?}"))?;
+                if v["send"].as_bool() == Some(true) {
+                    // One frame runs the panel's answer (the app asks the daemon to add the folder), and nothing hears the daemon's
+                    // reply before the send below.
+                    self.rt()?.frame(0.0);
+                    // The folder race: Return at once, before a frame has heard the daemon make the folder a project. The words are
+                    // already in the composer; the app's own submit holds them until the project is there.
+                    self.rt()?.update(|s, _| s.submit());
+                }
                 self.pump();
                 self.pump();
+            }
+            "daemon" => {
+                // A request straight to the daemon, as a screen would send it (a round made for a cat, for a scenario that needs a
+                // task that has one: a thread the person starts has none). The app hears the change by itself.
+                use neko_protocol::{Reply, Request};
+                // `$name` in the request is what an earlier step kept (`save_as`): the id of the round or task the daemon answered with.
+                let mut text = v["request"].to_string();
+                for (k, id) in &self.marks {
+                    text = text.replace(&format!("${k}"), id);
+                }
+                let request: Request = serde_json::from_str(&text).map_err(|e| format!("the request: {e}"))?;
+                let (info, token) = neko_protocol::client::find(&self.r.places.data).map_err(|e| e.to_string())?;
+                let mut c = neko_protocol::client::Client::connect(info.port, &token, "neko-qa").map_err(|e| e.to_string())?;
+                let reply = c.request(request).map_err(|e| e.to_string())?;
+                c.close();
+                if let Some(name) = v["save_as"].as_str() {
+                    let got = serde_json::to_value(&reply).map_err(|e| e.to_string())?;
+                    let id = got["round"]["id"].as_str().or_else(|| got["task"]["id"].as_str()).ok_or(format!("no id in the reply {reply:?}"))?;
+                    self.marks.insert(name.to_owned(), id.to_owned());
+                }
+                match (&reply, v["expect_error"].as_bool() == Some(true)) {
+                    (Reply::Error { message, .. }, true) => self.r.say(&format!("refused: {message}")),
+                    (Reply::Error { .. }, false) | (_, true) => return Err(format!("the daemon answered {reply:?}")),
+                    _ => self.r.say("the daemon took the request"),
+                }
             }
             "git-record" => {
                 let repo = v["repo"].as_str().unwrap_or("").to_owned();

@@ -84,7 +84,7 @@ fn a_subagent_is_never_a_row_in_the_sidebar_and_the_thread_says_what_it_waits_on
     let rt = runtime((1200.0, 800.0), false, scene("task-working"));
     assert!(!texts(&rt).iter().any(|t| t.contains("subagent")));
     let mut rt = runtime((1200.0, 800.0), false, scene("subagents-waiting"));
-    rt.update(|s, _| s.go_home());
+    rt.update(|s, _| s.go_new_thread());
     settle(&mut rt);
     assert!(!names(&rt).contains("Check links"), "a subagent is not on Home: {}", names(&rt));
 }
@@ -223,7 +223,7 @@ fn the_waiting_line_names_the_live_subagents_as_links_that_open_them() {
 fn a_waiting_thread_can_be_stopped_like_a_working_one() {
     let rt = runtime((1200.0, 800.0), false, scene("subagents-waiting"));
     assert!(rt.state.open_is_working(), "Stop and Escape reach a thread that rests on its subagents");
-    assert_eq!(str_of(&node(&rt, "reply-input"), "placeholder"), "miso is waiting on its kittens. Press Escape to stop.");
+    assert_eq!(str_of(&node(&rt, "reply-input"), "placeholder"), "The agent is waiting on its kittens. Press Escape to stop.");
     assert_eq!(str_of(&node(&rt, "reply-submit"), "name"), "Stop", "its composer offers Stop");
 }
 
@@ -269,7 +269,7 @@ fn a_subagents_request_is_answered_in_place_and_says_who_asks() {
     let rt = runtime((1200.0, 800.0), false, scene("subagent-asks"));
     let t = texts(&rt);
     assert!(t.iter().any(|x| x == "Kitten 1 asks"), "{t:?}");
-    assert!(!t.iter().any(|x| x == "miso asks"), "not the cat's name");
+    assert!(!t.iter().any(|x| x == "The agent asks"), "the kitten asks, not the agent");
     for k in ["allow", "always", "deny"] {
         assert!(rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|key| key.starts_with("perm-") && key.ends_with(&format!("-{k}")))), "{k}");
     }
@@ -291,8 +291,7 @@ fn needs_you_reads_subagent_1_asks_with_the_thread_as_its_quiet_line_and_opens_t
     assert!(has_key(&rt, "subagent-readonly"));
     // Its notification: the number asks, not a cat.
     let note = neko_app::notify::note_for(&item);
-    assert!(note.body.starts_with("Kitten 1 asks: "), "{}", note.body);
-    assert!(!note.body.contains("miso"));
+    assert!(note.body.starts_with("Needs you: Kitten 1 asks: "), "{}", note.body);
 }
 
 #[test]

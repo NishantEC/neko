@@ -1,0 +1,178 @@
+{
+  "name": "new-thread-in-folder",
+  "title": "New thread in a repository: In the folder makes no worktree",
+  "about": "A git project offers \"New worktree\" (the default) and a branch to start from. Choosing \"In the folder\" hides the branch chip, and the thread works in the person's own checkout: no worktree is made, no neko/ branch exists, and the run's folder is the project's.",
+  "cli": [
+    "fake"
+  ],
+  "window": false,
+  "setup": {
+    "files": {
+      "acme-api": {
+        "git": true,
+        "files": {
+          "README.md": "# Acme\nA small project.\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "add-workspace",
+      "path": "$files/acme-api",
+      "window": false
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "button",
+          "label_is": "acme-api"
+        }
+      },
+      "within": 10,
+      "expect": "The repository is a project"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "workspace-picker"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitemcheckbox",
+        "label": "acme-api"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "place-picker",
+              "label": "New worktree"
+            }
+          },
+          {
+            "see": {
+              "key": "branch-picker",
+              "label": "main"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "A repository offers New worktree and the branch it starts from (main)"
+    },
+    {
+      "do": "snap",
+      "name": "worktree-chips",
+      "expect": "The chips for a repository"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "place-picker"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitemcheckbox",
+        "label": "In the folder"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "place-picker",
+              "label": "In the folder"
+            }
+          },
+          {
+            "gone": {
+              "key": "branch-picker"
+            }
+          }
+        ]
+      },
+      "expect": "In the folder: the branch chip goes (the checkout's own branch is where it works)"
+    },
+    {
+      "do": "snap",
+      "name": "in-folder",
+      "expect": "The chips with In the folder chosen"
+    },
+    {
+      "do": "git-record",
+      "repo": "$files/acme-api",
+      "as": "before"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Look at the README [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Worked for"
+        }
+      },
+      "within": 15,
+      "expect": "The run finishes"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "git -C files/acme-api worktree list | wc -l | tr -d ' '",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "git -C files/acme-api branch --list 'neko/*'",
+              "is": ""
+            }
+          },
+          {
+            "git_same": "before"
+          },
+          {
+            "no_file": "$data/worktrees"
+          }
+        ]
+      },
+      "expect": "No worktree and no neko/ branch were made, and the checkout is as it was"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "key": "task-workspace",
+          "label": "Project: acme-api"
+        }
+      },
+      "expect": "The thread is in acme-api"
+    }
+  ]
+}

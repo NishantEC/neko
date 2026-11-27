@@ -183,6 +183,16 @@ pub fn wake_note(s: &App, t: &Theme, p: &Part) -> Option<El> {
     Some(note)
 }
 
+/// What a thread that rests on its subagents waits on, in words ("Waiting on Kitten 1 and Kitten 2"): None when it is not resting.
+/// The run that ended before it says this on its own line, so it never reads "done" while its kittens work.
+pub fn waiting_words(s: &App, task: &Task) -> Option<String> {
+    if task.status != TaskStatus::Waiting || task.subagent.is_some() {
+        return None;
+    }
+    let names: Vec<String> = s.live_subagents(&task.id).iter().filter_map(|x| x.subagent_name()).collect();
+    Some(if names.is_empty() { "Reading the reports".to_owned() } else { format!("Waiting on {}", names_sentence(&names)) })
+}
+
 /// The conversation's last line while the open thread waits: what it waits on, each name a link that opens that subagent.
 pub fn waiting_line(s: &App, t: &Theme, task: &Task) -> Option<El> {
     if task.status != TaskStatus::Waiting || task.subagent.is_some() {

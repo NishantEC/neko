@@ -1,0 +1,114 @@
+{
+  "name": "no-cat",
+  "title": "A thread has no cat: no cat block reaches the agent",
+  "about": "A thread started from New thread has no cat. The fake CLI records what it was given: its system text holds what Neko tells every agent about subagents and no <neko-cat> block, whatever rules the cats have. A task a cat was given (a round made for it, run now) still carries its cat's block.",
+  "cli": [
+    "fake"
+  ],
+  "window": false,
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "daemon",
+      "request": {
+        "type": "save_cat_rules",
+        "cat": "cat_miso",
+        "rules": "QA-RULE-9: Use British spelling."
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Plan the week [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Worked for"
+        }
+      },
+      "within": 15,
+      "expect": "A thread with no cat runs"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "gone": {
+              "key": "task-cat"
+            }
+          },
+          {
+            "file": {
+              "path": "$work/fake-record.jsonl",
+              "has": "--append-system-prompt"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep -c 'neko-cat' fake-record.jsonl || true",
+              "is": "0"
+            }
+          }
+        ]
+      },
+      "expect": "The record has the system text for subagents and no cat block; the thread shows no cat"
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_round",
+        "name": "Notes",
+        "words": "Tidy the notes [fake:plain]",
+        "cat": "cat_miso",
+        "schedule": {
+          "kind": "every",
+          "hours": 24
+        },
+        "on": false
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "sidebar"
+        }
+      }
+    },
+    {
+      "do": "key",
+      "key": "cmd+3"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Notes"
+        }
+      },
+      "within": 10,
+      "expect": "The round for miso is on the Rounds page"
+    },
+    {
+      "do": "snap",
+      "name": "round",
+      "expect": "The round"
+    }
+  ]
+}

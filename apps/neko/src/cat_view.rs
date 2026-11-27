@@ -223,7 +223,7 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
         Button::new("cat-new-round", format!("New round for {}…", c.name)).variant(ButtonVariant::Secondary).size(Size::Sm).disabled(!c.is_active()).on_press(move |s: &mut App| s.start_new_round(Some(&id))).build(t)
     };
     rounds = rounds.child(row().child(new_round));
-    let mine: Vec<&Task> = s.tasks.iter().filter(|x| x.is_thread() && x.cat == c.id).collect();
+    let mine: Vec<&Task> = s.tasks.iter().filter(|x| x.is_thread() && x.cat.as_deref() == Some(c.id.as_str())).collect();
     let waiting: Vec<&Task> = mine.iter().copied().filter(|x| s.visible_needs().iter().any(|i| i.task == x.id) || x.status == neko_protocol::TaskStatus::Asked).collect();
     let working: Vec<&Task> = mine.iter().copied().filter(|x| (x.status.is_active() || x.status == neko_protocol::TaskStatus::Waiting) && !waiting.iter().any(|w| w.id == x.id)).collect();
     let recent: Vec<&Task> = mine.iter().copied().filter(|x| !working.iter().chain(waiting.iter()).any(|w| w.id == x.id)).take(RECENT).collect();

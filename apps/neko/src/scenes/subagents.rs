@@ -9,12 +9,12 @@ use crate::state::{App, Book};
 
 const FOLDER: &str = "/Users/example/acme-api";
 
-/// "Fix login", in acme-api, miso's.
+/// "Fix login", in acme-api.
 fn thread(status: TaskStatus) -> Task {
     let mut t = task(30, "Fix login\n\nThe sign-in page turns away a valid password once the session has expired. Check the links and the images on it while you are in there.", 14);
     t.workspace = "ws_acme".into();
     t.folder = Some(FOLDER.into());
-    t.cat = "cat_miso".into();
+    t.cat = None;
     t.status = status;
     t
 }
@@ -208,7 +208,7 @@ pub fn needs(s: &mut App) {
     stage(s, th.clone(), vec![a.clone(), b]);
     let mut item = permission_item(s, &a, "Run a command", "npx linkcheck docs/", false, 4);
     item.title = th.title.clone();
-    item.cat = th.cat.clone();
+    item.cat = th.cat.clone().unwrap_or_default();
     item.cat_name = cat_name(s, &th.cat);
     item.subagent = Some("1".into());
     s.needs.push(item);

@@ -1,7 +1,7 @@
 {
   "name": "cat-rules-cannot-skip-checks",
   "title": "A cat's rules cannot skip a permission check",
-  "about": "In ask mode, miso's rules tell the agent to skip permission checks. A shell command is still asked about, and Deny holds.",
+  "about": "In ask mode, miso's rules tell the agent to skip permission checks. A round made for miso and run now is a task that carries them. A shell command is still asked about, and Deny holds.",
   "cli": [
     "fake"
   ],
@@ -88,35 +88,43 @@
       "expect": "miso's rules say to skip checks"
     },
     {
-      "do": "key",
-      "key": "cmd+n"
+      "do": "daemon",
+      "request": {
+        "type": "create_round",
+        "name": "Run the tests",
+        "words": "Run the tests [fake:hook-shell]",
+        "cat": "cat_miso",
+        "schedule": {
+          "kind": "manual"
+        },
+        "on": true
+      },
+      "save_as": "round"
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "run_round_now",
+        "round": "$round"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Run the tests"
+        }
+      },
+      "within": 10,
+      "expect": "The round's task is in the sidebar"
     },
     {
       "do": "click",
       "on": {
-        "key": "cat-picker"
+        "role": "option",
+        "label": "Run the tests"
       }
-    },
-    {
-      "do": "click",
-      "on": {
-        "role": "menuitemcheckbox",
-        "label": "miso"
-      }
-    },
-    {
-      "do": "click",
-      "on": {
-        "key": "composer-input"
-      }
-    },
-    {
-      "do": "type",
-      "text": "Run the tests [fake:hook-shell]"
-    },
-    {
-      "do": "key",
-      "key": "return"
     },
     {
       "do": "wait",

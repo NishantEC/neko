@@ -105,9 +105,6 @@ impl CatState {
     }
 }
 
-/// The prefs key of the cat picked last in each workspace.
-pub const CAT_PICKS_KEY: &str = "cat-picks";
-
 /// A run's changes (or the task's, with no run), open in place of the conversation (docs/knowledge/undo.md).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Review {
@@ -138,10 +135,6 @@ pub struct App {
     pub tasks: Vec<Task>,
     /// Every cat: the active ones first, then the retired (as the daemon last said).
     pub cats: Vec<Cat>,
-    /// The cat picked in Home's composer for each workspace (the last explicit choice there). Remembered for the next launch.
-    pub cat_picks: HashMap<String, String>,
-    /// The composer's cat picker is open.
-    pub cat_picker_open: bool,
     /// The cat whose page shows instead of the content.
     pub open_cat: Option<String>,
     /// Each cat page's purpose and rules as the person is editing them (Save sends them; Revert puts the saved ones back).
@@ -150,10 +143,12 @@ pub struct App {
     pub naming: Option<(Option<String>, TextEdit)>,
     /// The workspaces: General first, then the person's order, then the removed ones (as the daemon last said).
     pub workspaces: Vec<Workspace>,
-    /// The workspace Home's composer makes the next task in (General's id by default). Remembered for the next launch.
+    /// The workspace New thread makes the next task in (General's id by default). Remembered for the next launch.
     pub workspace: String,
-    /// The composer's workspace picker is open.
+    /// The project chip's menu is open.
     pub picker_open: bool,
+    /// What New thread asks beyond the project: where the thread works and the branch it starts from (`new_thread.rs`).
+    pub new_thread: crate::new_thread::NewThread,
     /// Sections of the sidebar the person folded, by workspace id. Remembered for the next launch.
     pub folded: HashSet<String>,
     /// Sections showing every task, not only the newest [`SECTION_ROWS`].
@@ -173,9 +168,9 @@ pub struct App {
     pub refusal: Option<Refusal>,
     /// What `poll` does at the next frame.
     pub effects: Vec<Effect>,
-    /// The open task; None is Home.
+    /// The open task; None is New thread.
     pub open: Option<TaskId>,
-    /// The words in Home's composer.
+    /// The words in New thread's composer.
     pub draft: TextEdit,
     pub daemon: Daemon,
     pub conn: Option<Conn>,
@@ -450,8 +445,7 @@ impl Default for App {
         App {
             tasks: Vec::new(),
             cats: Vec::new(),
-            cat_picks: HashMap::new(),
-            cat_picker_open: false,
+            new_thread: crate::new_thread::NewThread::default(),
             open_cat: None,
             cat_drafts: HashMap::new(),
             naming: None,
@@ -587,11 +581,6 @@ impl App {
         self.cats.iter().find(|c| c.id == id)
     }
 
-    /// The cat Home's composer gives the next task to (None: "Any cat", the daemon chooses).
-    pub fn cat_pick(&self) -> Option<&str> {
-        self.cat_picks.get(&self.workspace).map(String::as_str).filter(|id| self.cat(id).is_some_and(Cat::is_active))
-    }
-
     /// Adds or replaces a cat, keeping the daemon's order (active first, oldest first; then the retired).
     fn upsert_cat(&mut self, cat: Cat) {
         // A page's fields follow a change saved elsewhere, unless the person has unsaved words in them.
@@ -619,13 +608,14 @@ impl App {
         self.cat(id).map_or("", |c| c.face.as_str())
     }
 
-    pub fn cat_name(&self, task: &Task) -> String {
-        self.cat(&task.cat).map_or_else(|| "Neko".to_owned(), |c| c.name.clone())
+    /// The name of the cat a task was given, when it has one (a thread has none: the words then say "the agent").
+    pub fn cat_of(&self, task: &Task) -> Option<&Cat> {
+        task.cat.as_deref().and_then(|c| self.cat(c))
     }
 
     /// The tasks a cat has at work now (working, waiting on a request, or asked a question), newest first.
     pub fn cat_work(&self, id: &str) -> Vec<&Task> {
-        let mut v: Vec<&Task> = self.tasks.iter().filter(|t| t.is_thread() && t.cat == id && (t.status.is_active() || t.status == neko_protocol::TaskStatus::Asked)).collect();
+        let mut v: Vec<&Task> = self.tasks.iter().filter(|t| t.is_thread() && t.cat.as_deref() == Some(id) && (t.status.is_active() || t.status == neko_protocol::TaskStatus::Asked)).collect();
         v.sort_by_key(|t| std::cmp::Reverse(t.created_ms));
         v
     }
@@ -635,24 +625,9 @@ impl App {
         if self.visible_needs().iter().any(|i| i.cat == id) {
             return CatState::NeedsYou;
         }
-        match self.tasks.iter().filter(|t| t.is_thread() && t.cat == id && t.status.is_active()).count() {
+        match self.tasks.iter().filter(|t| t.is_thread() && t.cat.as_deref() == Some(id) && t.status.is_active()).count() {
             0 => CatState::Napping,
             n => CatState::Working(n),
-        }
-    }
-
-    /// "Any cat" (None) or a cat for the next task in the chosen workspace, remembered for that workspace.
-    pub fn pick_cat(&mut self, cat: Option<String>) {
-        self.cat_picker_open = false;
-        match cat {
-            Some(c) => self.cat_picks.insert(self.workspace.clone(), c),
-            None => self.cat_picks.remove(&self.workspace),
-        };
-        if self.persist {
-            let picks = self.cat_picks.clone();
-            let _ = std::thread::Builder::new().name("neko-prefs".into()).spawn(move || {
-                let _ = rune::prefs::Prefs::open(crate::PREFS_ID).set(CAT_PICKS_KEY, &picks);
-            });
         }
     }
 
@@ -831,7 +806,7 @@ impl App {
         }
         match self.needs_back.take().filter(|t| self.tasks.iter().any(|x| &x.id == t)) {
             Some(t) => self.open_task_id(&t),
-            None => self.go_home(),
+            None => self.go_new_thread(),
         }
     }
 
@@ -966,7 +941,7 @@ impl App {
         } else if !self.tasks_loaded {
             self.pending_link = Some(task);
         } else {
-            self.go_home();
+            self.go_new_thread();
             self.notice = Some("That thread is not in Neko any more.".to_owned());
         }
     }
@@ -1050,7 +1025,13 @@ impl App {
 
     /// The workspace new tasks go to, remembered for the next launch in the real window.
     pub fn choose_workspace(&mut self, id: &str) {
+        if self.workspace != id {
+            // Another project: back to a worktree from its own branch (the safe default).
+            self.new_thread.in_folder = false;
+            self.new_thread.from_branch = None;
+        }
         self.workspace = id.to_owned();
+        self.ask_branches();
         if self.persist {
             let id = id.to_owned();
             let _ = std::thread::Builder::new().name("neko-prefs".into()).spawn(move || {
@@ -1083,24 +1064,29 @@ impl App {
         }
     }
 
-    /// New task in this workspace (a section's button): Home, the picker on it, the keyboard in the composer.
-    pub fn new_task_in(&mut self, id: &str) {
+    /// New thread in this workspace (a section's button): the screen, the project chosen, the keyboard in the composer.
+    pub fn new_thread_in(&mut self, id: &str) {
         self.choose_workspace(id);
-        self.go_home_and_focus();
+        self.go_new_thread_and_focus();
     }
 
-    /// ⌘N: a new task in the workspace of the task in view (when it can take one), else in the workspace chosen last.
-    pub fn new_task_here(&mut self) {
+    /// ⌘N: a new thread in the workspace of the thread in view (when it can take one), else in the workspace chosen last.
+    pub fn new_thread_here(&mut self) {
         if let Some(w) = self.open_task().and_then(|t| self.workspace_of(&t.workspace)).filter(|w| w.is_active()).map(|w| w.id.clone()) {
             self.choose_workspace(&w);
         }
-        self.go_home_and_focus();
+        self.go_new_thread_and_focus();
     }
 
     /// Adds a folder as a workspace (from the folder panel).
     pub fn add_workspace(&mut self, folder: String, select: bool) {
+        let chosen = folder.clone();
         if let Some(id) = self.send(Request::AddWorkspace { folder }) {
             self.asked.insert(id, Asked::AddWorkspace { select });
+            // The chip names the folder from now, and a send waits for the project (the folder race).
+            if select {
+                self.begin_adding(&chosen);
+            }
         }
     }
 
@@ -1156,9 +1142,8 @@ impl App {
             Some(Confirm::UndoAnyway { task, run, redo, .. }) => self.send_undo(task, run, redo, true),
             Some(Confirm::RetireCat(id)) => {
                 if self.open_cat.as_deref() == Some(id.as_str()) {
-                    self.go_home();
+                    self.go_new_thread();
                 }
-                self.cat_picks.retain(|_, c| *c != id);
                 self.cat_request(Request::RetireCat { cat: id }, false);
             }
             Some(Confirm::ClearUndo) => {
@@ -1429,7 +1414,7 @@ impl App {
         self.width = Some(w);
     }
 
-    pub fn go_home(&mut self) {
+    pub fn go_new_thread(&mut self) {
         self.open = None;
         self.open_cat = None;
         self.review = None;
@@ -1442,9 +1427,10 @@ impl App {
     }
 
     /// New Task (⌘N, the sidebar's button): Home, with the keyboard in the composer.
-    pub fn go_home_and_focus(&mut self) {
-        self.go_home();
+    pub fn go_new_thread_and_focus(&mut self) {
+        self.go_new_thread();
         self.draft.focused = true;
+        self.ask_branches();
     }
 
     pub fn open_task_id(&mut self, id: &TaskId) {
@@ -1527,32 +1513,8 @@ impl App {
         self.conn.as_ref().and_then(|c| c.send(r))
     }
 
-    /// Return in the composer: the words go to the daemon. They leave the box at once and come back if the daemon refuses them.
-    pub fn submit(&mut self) {
-        let words = self.draft.text.clone();
-        if words.trim().is_empty() || self.creating.is_some() {
-            return;
-        }
-        let workspace = Some(self.workspace.clone()).filter(|w| w != GENERAL);
-        let cat = self.cat_pick().map(str::to_owned);
-        match self.send(Request::CreateTask { words: words.clone(), workspace, cat }) {
-            Some(id) => {
-                self.creating = Some((id, words));
-                self.draft = TextEdit::default();
-                self.notice = None;
-                self.queued = false;
-            }
-            // The link is coming up: the words stay in the box and go as soon as the daemon answers.
-            None if self.conn.is_some() => {
-                self.queued = true;
-                self.notice = Some("Neko is starting. Your thread is sent as soon as it is ready.".to_owned());
-            }
-            None => self.notice = Some("Neko is not running. Your words are kept.".to_owned()),
-        }
-    }
-
     /// Adds or replaces a task, keeping newest first.
-    fn upsert(&mut self, mut task: Task) {
+    pub(crate) fn upsert(&mut self, mut task: Task) {
         // One short line, whatever the store holds (a title kept from before titles were cut): the sidebar, the band and the
         // window's title all read this.
         task.title = neko_protocol::title::title(&task.title);
@@ -1588,7 +1550,8 @@ impl App {
                 self.watching = None;
                 self.follow_open();
                 if std::mem::take(&mut self.queued) {
-                    self.submit();
+                    let background = std::mem::take(&mut self.new_thread.queued_background);
+                    self.start_thread(background);
                 }
                 for c in std::mem::take(&mut self.pending_clicks) {
                     self.act_on(c);
@@ -1599,7 +1562,13 @@ impl App {
                 self.daemon = Daemon::Lost(why);
                 self.waiting_since.get_or_insert_with(std::time::Instant::now);
                 // An answer that will never come: the words go back in the box.
+                self.folder_failed();
                 if let Some((_, words)) = self.creating.take()
+                    && self.draft.text.is_empty()
+                {
+                    self.draft = TextEdit::new(&words);
+                }
+                if let Some(words) = self.new_thread.background.drain().map(|(_, w)| w).next()
                     && self.draft.text.is_empty()
                 {
                     self.draft = TextEdit::new(&words);
@@ -1625,8 +1594,7 @@ impl App {
                     let words = self.last_words(&task.id);
                     let here = self.here();
                     let title = neko_protocol::title::title(&task.title);
-                    let cat = self.cat_name(&task);
-                    self.notifier.finished(&task.id, &title, &cat, words.as_deref(), &here);
+                    self.notifier.finished(&task.id, &title, words.as_deref(), &here);
                 }
                 let id = task.id.clone();
                 self.upsert(task);
@@ -1640,7 +1608,7 @@ impl App {
                 self.books.remove(&task);
                 self.replies.remove(&task);
                 if self.open.as_ref() == Some(&task) {
-                    self.go_home();
+                    self.go_new_thread();
                 }
                 if self.confirm == Some(Confirm::RemoveTask(task)) {
                     self.confirm = None;
@@ -1706,12 +1674,11 @@ impl App {
     /// Tells assistive technology what a task's new state means, when it matters.
     fn say_status(&mut self, task: &Task) {
         use neko_protocol::TaskStatus as S;
-        let cat = self.cat_name(task);
         let words = match task.status {
-            S::NeedsYou => Some((format!("{cat} needs you: {}", task.title), true)),
-            S::Asked => Some((format!("{cat} has a question for you: {}", task.title), true)),
-            S::Done => Some((format!("{cat} finished: {}", task.title), false)),
-            S::Failed => Some((format!("{cat} could not finish: {}", task.title), false)),
+            S::NeedsYou => Some((format!("{} needs you", task.title), true)),
+            S::Asked => Some((format!("{} has a question for you", task.title), true)),
+            S::Done => Some((format!("{} is done", task.title), false)),
+            S::Failed => Some((format!("{} could not finish", task.title), false)),
             S::Stopped => Some((format!("Stopped: {}", task.title), false)),
             _ => None,
         };
@@ -1724,6 +1691,21 @@ impl App {
         let mine = self.creating.as_ref().is_some_and(|(c, _)| *c == id);
         let asked = self.asked.remove(&id);
         let Some(reply) = self.plugin_reply(&asked, reply) else { return };
+        if self.new_thread_reply(&reply) {
+            return;
+        }
+        // A thread started with ⌘Return: it is in the sidebar; the screen stays.
+        if self.is_background(id) {
+            match reply {
+                Reply::Task { task } => {
+                    self.background_answered(id);
+                    self.background_started(task);
+                }
+                Reply::Error { message, .. } => self.background_refused(id, message),
+                _ => {}
+            }
+            return;
+        }
         match reply {
             Reply::Transcript { transcript } => {
                 let id = transcript.task.id.clone();
@@ -1906,13 +1888,14 @@ impl App {
                 if !self.chosen().is_some_and(Workspace::is_active) {
                     self.workspace = GENERAL.to_owned();
                 }
+                self.ask_branches();
                 return;
             }
             Reply::Workspace { workspace, .. } => {
                 let id = workspace.id.clone();
                 self.upsert_workspace(workspace);
                 if matches!(asked, Some(Asked::AddWorkspace { select: true })) {
-                    self.choose_workspace(&id);
+                    self.folder_added(&id);
                 }
                 self.folded.remove(&id);
                 return;
@@ -1924,6 +1907,9 @@ impl App {
                 return;
             }
             Reply::Error { message, .. } if matches!(asked, Some(Asked::Workspace | Asked::AddWorkspace { .. })) => {
+                if matches!(asked, Some(Asked::AddWorkspace { select: true })) {
+                    self.folder_failed();
+                }
                 self.refusal = Some(Refusal { title: "Neko could not do that".into(), words: message, reveal: None });
                 return;
             }
@@ -1989,15 +1975,6 @@ impl App {
         }
         any
     }
-
-    /// "Good morning", "Good afternoon" or "Good evening", by the local hour.
-    pub fn greeting(&self) -> &'static str {
-        match crate::clock::local_hour(self.now_ms, self.utc_offset_s) {
-            5..=11 => "Good morning",
-            12..=17 => "Good afternoon",
-            _ => "Good evening",
-        }
-    }
 }
 
 #[cfg(test)]
@@ -2005,7 +1982,7 @@ mod tests {
     use super::*;
 
     fn task(id: &str, ms: i64) -> Task {
-        Task::blank(TaskId(id.into()), "default", &format!("words of {id}"), id, ms, "cat_miso")
+        Task::blank(TaskId(id.into()), "default", &format!("words of {id}"), id, ms, None)
     }
 
     #[test]
@@ -2070,13 +2047,6 @@ mod tests {
         assert!(!a.sidebar_shown(), "crossing the edge gives it back to the rule");
     }
 
-    #[test]
-    fn the_greeting_follows_the_local_hour() {
-        // 2026-11-26 10:00 UTC, in a zone 5 hours behind: 05:00 local.
-        let a = App { now_ms: 1_795_687_200_000, utc_offset_s: -5 * 3600, ..App::default() };
-        assert_eq!(a.greeting(), "Good morning");
-    }
-
     fn ws(id: &str, name: &str, position: i64) -> Workspace {
         Workspace { id: id.into(), name: name.into(), folder: (id != GENERAL).then(|| format!("/Users/example/{name}")), created_ms: position, removed_ms: None, position, missing: false }
     }
@@ -2117,7 +2087,7 @@ mod tests {
         a.change(Change::TaskCreated { task: t });
         a.open_task_id(&TaskId("t".into()));
         assert_eq!(a.window_title(), "Fix the build — acme-api");
-        a.new_task_here();
+        a.new_thread_here();
         assert_eq!((a.workspace.as_str(), a.open.as_ref()), ("ws_a", None), "⌘N: a new thread in the project of the thread in view");
         // Two workspaces with one name are told apart by their folders.
         a.change(Change::WorkspaceAdded { workspace: Workspace { folder: Some("/Users/example/old/acme-web".into()), ..ws("ws_c", "acme-web", 3) } });

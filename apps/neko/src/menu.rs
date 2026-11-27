@@ -84,9 +84,9 @@ fn action(id: &str) -> fn(&mut App, &mut Tx) {
             s.open_settings();
             tx.instant();
         },
-        "neko-new-task" => |s, tx| crate::new_task(s, tx),
+        "neko-new-task" => |s, tx| crate::new_thread(s, tx),
         "neko-home" => |s, tx| {
-            s.go_home();
+            s.go_new_thread();
             tx.instant();
         },
         "neko-needs" => |s, tx| {

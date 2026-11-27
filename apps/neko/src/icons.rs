@@ -50,3 +50,10 @@ pub static LIST: Icon = Icon {
     view: 16.0,
     body: r#"<path d="M2.75 4.25h10.5M2.75 8h7.5M2.75 11.75h4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#,
 };
+
+/// A line that forks: the branch a new thread starts from.
+pub static BRANCH: Icon = Icon {
+    name: "neko-branch",
+    view: 16.0,
+    body: r#"<circle cx="4.75" cy="3.75" r="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="4.75" cy="12.25" r="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="11.25" cy="5.75" r="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4.75 5.25v5.5M11.25 7.25c0 2.4-2 3.1-4.6 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#,
+};

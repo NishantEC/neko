@@ -6,7 +6,17 @@ use neko_protocol::undo::{Action, Offer};
 use neko_protocol::{BriefingSettings, Changes, GENERAL, Need, NeedsItem, RunId, Task, TaskStatus};
 use rune::TextEdit;
 
-use super::{HOUR, cat_name, permission_item, settings, task, with_workspaces};
+use super::{HOUR, permission_item, settings, task, with_workspaces};
+
+/// The sample cat of a sample thread: none for "" (a thread the person started has no cat), else the cat's id.
+fn opt(cat: &str) -> Option<String> {
+    (!cat.is_empty()).then(|| cat.to_owned())
+}
+
+/// Its name, as the daemon says it: empty for no cat.
+fn cat_name(s: &App, cat: &str) -> String {
+    opt(cat).map(|c| super::cat_name(s, &Some(c))).unwrap_or_default()
+}
 use crate::state::App;
 
 /// Eight in the morning, on the scenes' day: a briefing is read when the person sits down.
@@ -47,7 +57,7 @@ fn finished(s: &App, d: Done<'_>) -> (Task, BriefingTask) {
     let mut t = task(d.n, d.title, 60);
     t.title = d.title.into();
     t.workspace = d.ws.into();
-    t.cat = d.cat.into();
+    t.cat = opt(d.cat);
     t.folder = (d.ws != GENERAL).then(|| "/Users/example/acme-api".to_owned());
     t.status = match d.end {
         FinishedEnd::Done => TaskStatus::Done,
@@ -94,7 +104,7 @@ fn working_task(s: &App, n: u32, cat: &str, ws: &str, title: &str, minutes: i64)
     let mut t = task(n, title, minutes);
     t.title = title.into();
     t.workspace = ws.into();
-    t.cat = cat.into();
+    t.cat = opt(cat);
     t.status = TaskStatus::Working;
     t.folder = (ws != GENERAL).then(|| "/Users/example/acme-api".to_owned());
     let w = BriefingWorking { task: t.id.clone(), workspace: ws.into(), title: title.into(), cat: cat.into(), cat_name: cat_name(s, cat), since_ms: s.now_ms - minutes * 60_000 };
@@ -146,47 +156,47 @@ fn full_morning(s: &mut App, workspaces: bool) {
     let done = |n, cat, ws, title, ended, answer, changes, branch, o| Done { n, cat, ws, title, end: FinishedEnd::Done, ended, answer: Some(answer), changes, branch, offer: o };
     let (t1, f1) = finished(
         s,
-        done(51, "cat_miso", a, "Rename the Settings button to Preferences across the app", at_time(s, 0, 2, 14), "Renamed the button and its menu item, and kept ⌘, as the shortcut.", ch(3, 42, 7), Some("neko/4f9a1c"), offer(true, Some((Action::Undo, true)), false)),
+        done(51, "", a, "Rename the Settings button to Preferences across the app", at_time(s, 0, 2, 14), "Renamed the button and its menu item, and kept ⌘, as the shortcut.", ch(3, 42, 7), Some("neko/4f9a1c"), offer(true, Some((Action::Undo, true)), false)),
     );
-    let (t2, f2) = finished(s, done(52, "cat_mochi", w, "Docs check", at_time(s, 0, 6, 1), "Found two broken links in the install guide and fixed both.", ch(1, 2, 2), Some("neko/docs-links"), offer(true, Some((Action::Undo, true)), false)));
+    let (t2, f2) = finished(s, done(52, "", w, "Docs check", at_time(s, 0, 6, 1), "Found two broken links in the install guide and fixed both.", ch(1, 2, 2), Some("neko/docs-links"), offer(true, Some((Action::Undo, true)), false)));
     let (t3, f3) = finished(
         s,
-        Done { n: 53, cat: "cat_tofu", ws: a, title: "Find out why the nightly build of acme-api is slow", end: FinishedEnd::Failed, ended: at_time(s, -1, 23, 40), answer: Some("The test run timed out after 30 minutes."), changes: None, branch: None, offer: offer(false, None, false) },
+        Done { n: 53, cat: "", ws: a, title: "Find out why the nightly build of acme-api is slow", end: FinishedEnd::Failed, ended: at_time(s, -1, 23, 40), answer: Some("The test run timed out after 30 minutes."), changes: None, branch: None, offer: offer(false, None, false) },
     );
     let (t4, f4) = finished(
         s,
-        Done { n: 54, cat: "cat_miso", ws: g, title: "Tidy the Downloads folder into Archive and Screenshots", end: FinishedEnd::Stopped, ended: at_time(s, -1, 21, 5), answer: Some("I had moved the screenshots when you stopped me."), changes: None, branch: None, offer: offer(false, None, false) },
+        Done { n: 54, cat: "", ws: g, title: "Tidy the Downloads folder into Archive and Screenshots", end: FinishedEnd::Stopped, ended: at_time(s, -1, 21, 5), answer: Some("I had moved the screenshots when you stopped me."), changes: None, branch: None, offer: offer(false, None, false) },
     );
     let (t5, f5) = finished(
         s,
-        Done { n: 55, cat: "cat_mochi", ws: a, title: "Compress the case study images", end: FinishedEnd::Interrupted, ended: at_time(s, 0, 3, 0), answer: Some("Neko stopped while this ran."), changes: None, branch: None, offer: offer(false, None, false) },
+        Done { n: 55, cat: "", ws: a, title: "Compress the case study images", end: FinishedEnd::Interrupted, ended: at_time(s, 0, 3, 0), answer: Some("Neko stopped while this ran."), changes: None, branch: None, offer: offer(false, None, false) },
     );
     let (t6, f6) = finished(
         s,
-        done(56, "cat_tofu", w, "Write the pricing page copy", at_time(s, -1, 19, 30), "Drafted three versions of the copy and put the shortest one first.", ch(2, 30, 4), Some("neko/pricing-copy"), offer(true, Some((Action::Redo, true)), true)),
+        done(56, "", w, "Write the pricing page copy", at_time(s, -1, 19, 30), "Drafted three versions of the copy and put the shortest one first.", ch(2, 30, 4), Some("neko/pricing-copy"), offer(true, Some((Action::Redo, true)), true)),
     );
-    let (working, wk) = working_task(s, 57, "cat_tofu", a, "Port the backup script to the new server", 14);
+    let (working, wk) = working_task(s, 57, "", a, "Port the backup script to the new server", 14);
     let docs = round_line(s, "docs", "Docs check", w, "cat_mochi", RoundOutcome::Ran, Some(at_time(s, 0, 6, 0)), at_time(s, 0, 6, 0), Some(&t2), None);
     let audit = round_line(s, "audit", "Dependency audit", a, "cat_tofu", RoundOutcome::Skipped, Some(at_time(s, 0, 4, 0)), at_time(s, 0, 4, 0), None, Some("The last run is still working."));
     let links = round_line(s, "links", "Link check", g, "cat_miso", RoundOutcome::Missed, Some(at_time(s, 0, 2, 0)), at_time(s, 0, 7, 55), None, Some("Neko was not running, or this Mac was asleep"));
     let backup = round_line(s, "backup", "Backup test", a, "cat_tofu", RoundOutcome::Braked, None, at_time(s, -1, 22, 30), None, Some("Turned itself off after 3 failed runs in a row."));
     let mut q_task = task(58, "Draft the release notes for 0.2 and send them to Lee for a read", 300);
     q_task.workspace = a.into();
-    q_task.cat = "cat_mochi".into();
+    q_task.cat = None;
     q_task.status = TaskStatus::Asked;
     let question = NeedsItem {
         id: format!("question:run_{}", q_task.id.0),
         task: q_task.id.clone(),
         workspace: a.into(),
         title: q_task.title.clone(),
-        cat: "cat_mochi".into(),
-        cat_name: cat_name(s, "cat_mochi"),
+        cat: "".into(),
+        cat_name: cat_name(s, ""),
         since_ms: at_time(s, 0, 3, 10),
         need: Need::Question { run: RunId(format!("run_{}", q_task.id.0)), question: "The notes cover the sidebar and the composer. Should I also mention the new keyboard shortcuts, or keep them for 0.3?".into() }, subagent: None
     };
     let mut p_task = task(59, "Answer the question about the retry limit before the release goes out", 300);
     p_task.workspace = w.into();
-    p_task.cat = "cat_tofu".into();
+    p_task.cat = None;
     p_task.status = TaskStatus::NeedsYou;
     let request = permission_item(s, &p_task, "Run a command", "cargo test --package acme-api retry", false, 80);
     let needs = vec![question, request];
@@ -215,7 +225,7 @@ pub fn sparse_briefing(s: &mut App) {
     let ended = at_time(s, -1, 19, 2);
     let (t, f) = finished(
         s,
-        Done { n: 30, cat: "cat_miso", ws: "ws_acme", title: "What changed this week?", end: FinishedEnd::Done, ended, answer: Some("Nine commits landed this week, all in acme-api. Nothing is waiting for review."), changes: None, branch: None, offer: offer(false, None, false) },
+        Done { n: 30, cat: "", ws: "ws_acme", title: "What changed this week?", end: FinishedEnd::Done, ended, answer: Some("Nine commits landed this week, all in acme-api. Nothing is waiting for review."), changes: None, branch: None, offer: offer(false, None, false) },
     );
     s.tasks = vec![t];
     let mut b = empty_briefing(s);
@@ -300,7 +310,7 @@ pub fn briefing_morning_off(s: &mut App) {
 
 pub fn home_briefing(s: &mut App) {
     full_morning(s, false);
-    s.go_home();
+    s.go_new_thread();
 }
 
 pub fn settings_briefing(s: &mut App) {

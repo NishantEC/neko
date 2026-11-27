@@ -242,14 +242,9 @@ impl App {
         self.rounds.iter().filter(|r| r.cat == cat).collect()
     }
 
-    /// The soonest round that will run by itself: for Home's quiet line.
-    pub fn next_round(&self) -> Option<&Round> {
-        self.rounds.iter().filter(|r| r.next_due_ms.is_some()).min_by_key(|r| r.next_due_ms)
-    }
-
     /// The Rounds page (⌘3, the sidebar's row).
     pub fn open_rounds(&mut self) {
-        self.go_home();
+        self.go_new_thread();
         self.rounds_open = true;
     }
 
@@ -259,9 +254,9 @@ impl App {
         }
     }
 
-    /// New round… (the page's button, a cat's page): a blank form for `cat` (else the cat chosen in Home's composer, else the first).
+    /// New round… (the page's button, a cat's page): a blank form for `cat` (else the first active cat).
     pub fn start_new_round(&mut self, cat: Option<&str>) {
-        let cat = cat.map(str::to_owned).or_else(|| self.cat_pick().map(str::to_owned)).or_else(|| self.active_cats().first().map(|c| c.id.clone())).unwrap_or_default();
+        let cat = cat.map(str::to_owned).or_else(|| self.active_cats().first().map(|c| c.id.clone())).unwrap_or_default();
         let ws = if self.chosen().is_some_and(neko_protocol::Workspace::is_active) { self.workspace.clone() } else { GENERAL.to_owned() };
         self.menu_open = None;
         self.round_form = Some(RoundForm::blank(&cat, &ws));

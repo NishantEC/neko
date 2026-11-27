@@ -199,18 +199,6 @@ fn removing_a_round_asks_first() {
 }
 
 #[test]
-fn home_says_which_round_is_next_and_nothing_when_there_is_none() {
-    let rt = runtime((1200.0, 800.0), false, scene("home-next-round"));
-    assert!(texts(&rt).contains("Next round: miso, Release notes, today 18:35"), "{}", texts(&rt));
-    let mut rt = runtime((1200.0, 800.0), false, scene("home-next-round"));
-    rt.update(|s, _| s.rounds.clear());
-    settle(&mut rt);
-    assert!(!has_key(&rt, "home-next-round"));
-    let rt = runtime((1200.0, 800.0), false, scene("empty-home"));
-    assert!(!has_key(&rt, "home-next-round"));
-}
-
-#[test]
 fn a_task_a_round_made_says_so_and_links_back() {
     let rt = runtime((1200.0, 800.0), false, scene("task-from-round"));
     assert!(texts(&rt).contains("From the round Docs check, due today at 09:00"), "{}", texts(&rt));

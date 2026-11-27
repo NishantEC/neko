@@ -127,7 +127,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     } else {
         match s.open_task() {
             Some(_) => crate::task_view::task_view(s, &t, &mut layer),
-            None => crate::home_view::home(s, &t, &mut layer),
+            None => crate::new_thread_view::new_thread(s, &t, &mut layer),
         }
     };
     let page = page_swap(page);
@@ -211,8 +211,9 @@ pub const NARROW_BAND: f32 = 700.0;
 /// The least room the band's title keeps before anything else does.
 pub const TITLE_MIN: f32 = 140.0;
 
-/// The content's band: the sidebar's button when it is folded; in a task, its cat (a press opens the cat's page), its title, the
-/// run counter, its folder and branch with Reveal in Finder, and its menu.
+/// The content's band: the sidebar's button when it is folded; in a task, its title, the run counter, its project, its folder and
+/// branch with Reveal in Finder, and its menu. A task a cat was given (before threads needed none, or by a round) names the cat in
+/// words, quietly, after the title: no face leads the band.
 fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     let mut band = row().key("content-band").w_full().h(BAND).center_y().px(12.0).gap(t.space.at(2.5)).window_drag();
     if !s.sidebar_shown() {
@@ -220,12 +221,6 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     }
     let Some(task) = s.open_task().filter(|_| !s.settings_open && !s.needs_open && !s.rounds_open && !s.briefing_open && s.page_cat().is_none()) else { return band };
     let sub = task.subagent.is_some();
-    if let Some(c) = s.cat(&task.cat).filter(|_| !sub) {
-        let id = c.id.clone();
-        let st = (task.status == TaskStatus::Working).then_some(TaskStatus::Working);
-        let face = row().key("task-cat").role("button").label(format!("Cat: {}", c.name)).help(format!("Open {}'s page", c.name)).focusable(true).padding(2.0).radius(t.radius.md).round_as(t);
-        band = band.child(paint_state(face, &t.mat.row, States::default()).child(crate::faces::portrait_in(t, "task-cat-face", &c.face, 24.0, st, t.c.page.bg)).on_press(move |s: &mut App| s.open_cat_page(&id)));
-    }
     // The title always wins the room: in a narrow content area the folder line goes first and the workspace's name shortens.
     let room = s.width.map_or(f32::MAX, |w| w - if s.sidebar_shown() { SIDEBAR + 2.0 * crate::sidebar::INSET + 1.0 } else { 0.0 });
     let narrow = room < NARROW_BAND;
@@ -235,6 +230,11 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     } else {
         band.child(text(task.title.clone()).key("band-title").role("heading").level(1).font(weight(t.ty.lg, t.ty.semibold)).color(t.ink()).truncate().min_w(TITLE_MIN).shrink())
     };
+    if let Some(c) = s.cat_of(task).filter(|_| !sub) {
+        let id = c.id.clone();
+        let face = row().key("task-cat").role("button").label(format!("Cat: {}", c.name)).help(format!("Open {}'s page", c.name)).focusable(true).px(t.space.at(1.5)).h(t.control.sm).center_y().radius(t.radius.md).round_as(t);
+        band = band.child(paint_state(face, &t.mat.row, States::default()).child(text(c.name.clone()).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_muted()).a11y_hidden()).on_press(move |s: &mut App| s.open_cat_page(&id)));
+    }
     band = band.child(row().grow(1.0).min_w(t.space.at(4.0)).h_full());
     let wide = s.width.unwrap_or(1200.0) >= 1000.0;
     if let Some(c) = crate::task_view::run_counter(s, t).filter(|_| wide) {
@@ -351,14 +351,14 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
         }
         Some(Confirm::RetireCat(id)) => {
             let name = s.cat(id).map_or_else(String::new, |c| c.name.clone());
-            let n = s.tasks.iter().filter(|x| x.is_thread() && &x.cat == id).count();
+            let n = s.tasks.iter().filter(|x| x.is_thread() && x.cat.as_deref() == Some(id.as_str())).count();
             let tasks = match n {
                 0 => String::new(),
                 1 => format!(" Its thread stays readable, still {name}'s."),
                 n => format!(" Its {n} threads stay readable, still {name}'s."),
             };
             AlertDialog::new("retire-cat", format!("Retire {name}?"))
-                .description(format!("{name} takes no new threads after this, and no project's new threads go to it.{tasks} You can bring {name} back from Settings ▸ Cats."))
+                .description(format!("{name} takes no new work after this, and its rounds stop running.{tasks} You can bring {name} back from Settings ▸ Cats."))
                 .destructive()
                 .cancel("Cancel", |s: &mut App| s.confirm = None)
                 .action("Retire", |s: &mut App| s.confirmed())

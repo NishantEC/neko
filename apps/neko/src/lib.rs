@@ -10,11 +10,12 @@ pub mod clock;
 pub mod deeplink;
 pub mod dock;
 pub mod faces;
-pub mod home_view;
 pub mod icons;
 pub mod link;
 pub mod menu;
 pub mod needs_view;
+pub mod new_thread;
+pub mod new_thread_view;
 pub mod notify;
 pub mod plugins;
 pub mod plugins_view;
@@ -99,17 +100,15 @@ fn init() -> App {
     let workspace = prefs.get::<String>(WORKSPACE_KEY).filter(|w| !w.is_empty()).unwrap_or_else(|| neko_protocol::GENERAL.to_owned());
     let folded = prefs.get::<Vec<String>>(FOLDED_KEY).unwrap_or_default().into_iter().collect();
     let grouping = threads::Grouping::from_key(&prefs.get::<String>(GROUPING_KEY).unwrap_or_default());
-    // The cat picked last in each workspace (a retired or missing one counts as "Any cat").
-    let cat_picks = prefs.get::<std::collections::HashMap<String, String>>(state::CAT_PICKS_KEY).unwrap_or_default();
     // The real window posts real notifications; everything else keeps the recorder `App::default` gives.
     let mut notifier = notify::Notifier::new(Box::new(notify::System));
     notifier.switches = prefs.get::<notify::Switches>(notify::SWITCHES_KEY).unwrap_or_default();
-    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, workspace, folded, grouping, cat_picks, home: std::env::var("HOME").ok(), notifier, ..App::default() }
+    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, workspace, folded, grouping, home: std::env::var("HOME").ok(), notifier, ..App::default() }
 }
 
 /// New Task (⌘N): Home with the keyboard in the composer, in the workspace of the task in view.
-pub fn new_task(s: &mut App, tx: &mut Tx) {
-    s.new_task_here();
+pub fn new_thread(s: &mut App, tx: &mut Tx) {
+    s.new_thread_here();
     tx.instant();
 }
 
@@ -139,12 +138,12 @@ pub fn pick_folder(s: &App, pick: state::Pick, tx: &mut Tx) {
 pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     let m = ev.mods;
     if ev.is_command('n') && !(m.shift || m.alt || m.ctrl) {
-        new_task(s, tx);
+        new_thread(s, tx);
         return true;
     }
     if (ev.is_command('1') || ev.is_command('2') || ev.is_command('3') || ev.is_command('4')) && !(m.shift || m.alt || m.ctrl) {
         if ev.is_command('1') {
-            s.go_home();
+            s.go_new_thread();
         } else if ev.is_command('2') {
             s.open_needs();
         } else if ev.is_command('3') {

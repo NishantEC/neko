@@ -240,19 +240,21 @@ fn quiet_line(p: &Part) -> bool {
     matches!(p.body, PartBody::Thinking { .. } | PartBody::Tool { .. })
 }
 
-/// Who did a run: its own cat (a task keeps one), else the task's; its name and face.
+/// Who did a run, in words. A thread's agent has no name or face (docs/knowledge/threads.md): `name` is empty, and what needs a
+/// subject says "the agent". A subagent has its number.
 pub struct Who {
     pub name: String,
-    pub face: String,
 }
 
-fn who(s: &App, r: &Run, task: &Task) -> Who {
-    // A subagent has a number, no name and no face.
-    if let Some(n) = task.subagent_name() {
-        return Who { name: n, face: String::new() };
+impl Who {
+    /// For a sentence's subject: "The agent", or the subagent's number.
+    pub fn subject(&self) -> String {
+        if self.name.is_empty() { "The agent".to_owned() } else { self.name.clone() }
     }
-    let cat = s.cat(r.cat.as_deref().unwrap_or(&task.cat)).or_else(|| s.cat(&task.cat));
-    cat.map_or_else(|| Who { name: "Neko".to_owned(), face: String::new() }, |c| Who { name: c.name.clone(), face: c.face.clone() })
+}
+
+fn who(task: &Task) -> Who {
+    Who { name: task.subagent_name().unwrap_or_default() }
 }
 
 /// One part as drawn in a run: a step, words on the way (`muted`, or the final answer when `last`), a request, a notice.
@@ -262,7 +264,7 @@ fn part_el(s: &App, t: &Theme, book: &Book, r: &Run, w: &Who, p: &Part, streamin
     match &p.body {
         PartBody::Thinking { .. } => turn::thought(s, t, &key, p),
         PartBody::Tool { .. } => turn::step(s, t, &key, p, &r.workdir),
-        PartBody::Permission { permission } => book.permissions.get(permission).map(|perm| turn::request(t, perm, &w.name, &w.face)),
+        PartBody::Permission { permission } => book.permissions.get(permission).map(|perm| turn::request(t, perm, &w.subject())),
         PartBody::Agent { text: words, .. } if words.trim().is_empty() => None,
         PartBody::Agent { text: words, .. } => Some(answer(t, &key, words, streaming, last, muted)),
         PartBody::Notice { .. } => notice(t, p),
@@ -347,10 +349,10 @@ fn worked_words(r: &Run) -> String {
 /// they come, and the live line. Once it ends: one "Worked for" fold that opens to its steps on the page's own edge (`indent(false)`),
 /// the final answer, notices, and the card if it earns one.
 fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &Task) -> El {
-    let w = who(s, r, task);
-    let turn = Message::assistant(format!("turn-{}", r.id.0), w.name.clone()).column(COLUMN);
-    // A subagent's turns have no head: it has no name or face, and the band says whose conversation this is.
-    let turn = if task.subagent.is_some() { turn } else { turn.header(turn::turn_head(t, r, &w.name, &w.face, r.status == RunStatus::Running && s.pending_request().is_some(), offer_of(book, r).undone)) };
+    let w = who(task);
+    // No turn has a head (a portrait and "done"): the words are the agent's, as in any agent app. What a run is doing is its live
+    // line, then its fold; what a thread rests on is the line that ends the conversation.
+    let turn = Message::assistant(format!("turn-{}", r.id.0), w.subject()).column(COLUMN);
     if r.status == RunStatus::Running {
         let streaming = parts.last().is_some_and(|p| matches!(&p.body, PartBody::Agent { done: false, .. }) || matches!(&p.body, PartBody::Thinking { done: false, text } if !text.trim().is_empty()));
         let mut out = lay_out(s, t, book, r, &w, parts, if streaming { Some(parts.len() - 1) } else { None }, None);
@@ -358,7 +360,7 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
         let tool_running = parts.iter().any(|p| matches!(&p.body, PartBody::Tool { state: ToolState::Running, .. }));
         if !streaming && !waiting && !tool_running {
             let steps = parts.iter().filter(|p| matches!(p.body, PartBody::Tool { .. })).count();
-            out.push(turn::live_line(t, r, &w.name, book.thinking, steps));
+            out.push(turn::live_line(t, r, &w.subject(), book.thinking, steps));
         }
         return out.into_iter().fold(turn, Message::child).build(t);
     }
@@ -368,11 +370,16 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
     let work: Vec<&Part> = work.iter().copied().filter(|p| part_el(s, t, book, r, &w, p, false, false, false).is_some() && !matches!(p.body, PartBody::Notice { .. })).collect();
     let key = format!("worked-{}", r.id.0);
     let offer = offer_of(book, r);
+    // The newest run of a thread that rests on its subagents says so on its own line, never "done": the thread is not.
+    let resting = book.runs.last().is_some_and(|x| x.id == r.id).then(|| crate::subagents_view::waiting_words(s, task)).flatten();
     let mut out = Vec::new();
     let lead = crate::ui::agent::hollow_dot(t, t.control.icon);
     if work.is_empty() {
         // Nothing to open: one quiet line with the time.
-        let words = if offer.undone { format!("{} · undone", worked_words(r)) } else { worked_words(r) };
+        let mut words = if offer.undone { format!("{} · undone", worked_words(r)) } else { worked_words(r) };
+        if let Some(w) = &resting {
+            words = format!("{words} · {w}");
+        }
         out.push(row().key(key).role("status").label(words.clone()).w_full().h(t.control.md).pl(t.space.at(1.5)).gap(t.metrics.gap).center_y().child(lead).child(text(words).font(t.ty.base).color(t.ink_muted()).a11y_hidden()));
     } else {
         // The same count as the band's chip: tool calls (a thought is not a step).
@@ -386,6 +393,11 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
             (None, true) => Some("undone".to_owned()),
             (st, false) => st,
         };
+        let meta = match (meta, &resting) {
+            (Some(m), Some(w)) => Some(format!("{m} · {w}")),
+            (None, Some(w)) => Some(w.clone()),
+            (m, None) => m,
+        };
         if let Some(m) = meta {
             line = line.meta(m);
         }
@@ -398,7 +410,7 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
     out.extend(crate::subagents_view::card_stack(s, t, &started));
     let tail_last = tail.iter().rposition(|p| matches!(&p.body, PartBody::Agent { text, .. } if !text.trim().is_empty()));
     out.extend(lay_out(s, t, book, r, &w, tail, None, tail_last));
-    out.extend(turn::receipt(s, t, r, parts, &offer, own_changes(r), &w.name, &w.face));
+    out.extend(turn::receipt(s, t, r, parts, &offer, own_changes(r), &w.name));
     out.into_iter().fold(turn, Message::child).build(t)
 }
 
@@ -491,18 +503,17 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     // first, and Stop comes back as soon as the request is answered.
     let asking = working && s.pending_request().is_some();
     let reply = s.reply_box().cloned().unwrap_or_default();
-    let cat = s.cat_name(task);
     let mut composer = PromptInput::new("reply", &reply, |s: &mut App| s.reply_mut())
         .placeholder(if asking {
-            format!("{cat} is waiting for your answer above. Escape denies it.")
+            "Waiting for your answer above. Escape denies it.".to_owned()
         } else if task.status == neko_protocol::TaskStatus::Waiting {
-            format!("{cat} is waiting on its kittens. Press Escape to stop.")
+            "The agent is waiting on its kittens. Press Escape to stop.".to_owned()
         } else if working {
-            format!("{cat} is working. Press Escape to stop.")
+            "The agent is working. Press Escape to stop.".to_owned()
         } else if task.status == neko_protocol::TaskStatus::Asked {
-            format!("Answer {cat}'s question")
+            "Answer the question".to_owned()
         } else {
-            format!("Reply to {cat}")
+            "Message the agent".to_owned()
         })
         .spellcheck(true)
         .phase(if working && !asking { Phase::Streaming } else { Phase::Ready })
@@ -544,14 +555,14 @@ fn status_line(s: &App, t: &Theme, task: &Task) -> El {
     row()
         .key("task-status")
         .role("status")
-        .label(format!("No cat is working on this yet. Added {added}."))
+        .label(format!("The agent has not started yet. Added {added}."))
         .w_full()
         .gap(t.space.at(2.0))
         .center_y()
         .justify_end()
         .pr(t.space.at(2.0))
         .child(glyph(&icons::CIRCLE, t.control.icon_sm, t.ink_faint()))
-        .child(text("No cat is working on this yet").font(t.ty.sm).color(t.ink_muted()).a11y_hidden())
+        .child(text("The agent has not started yet").font(t.ty.sm).color(t.ink_muted()).a11y_hidden())
         .child(text(format!("· Added {added}")).font(t.ty.sm).color(t.ink_faint()).a11y_hidden())
 }
 

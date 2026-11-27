@@ -81,10 +81,10 @@ fn empty_thoughts_show_nothing_and_thinking_shows_one_live_line() {
     assert!(!texts(&rt).iter().any(|t| t.starts_with("Thought")), "no fold that opens to nothing");
     let rt = runtime((1200.0, 800.0), false, scene("task-thinking"));
     let live = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("run-run_1-working")).expect("the live line");
-    assert_eq!(live.label.as_deref(), Some("miso is thinking"), "the thread's cat, by name");
-    // The head already shows the cat (portrait, name, ring): the line under it says only what is happening, never the cat again.
+    assert_eq!(live.label.as_deref(), Some("The agent is thinking"), "an agent has no name");
+    // No head leads the turn: the live line says what is happening, and for assistive technology who does it.
     assert!(texts(&rt).iter().any(|t| t.starts_with("Thinking…")), "the live line says what is happening: {:?}", texts(&rt));
-    assert!(!texts(&rt).iter().any(|t| t.contains("is thinking") || t.contains("is working") || t.starts_with("Working…")), "one live line, and the cat's name once: {:?}", texts(&rt));
+    assert!(!texts(&rt).iter().any(|t| t.contains("is thinking") || t.contains("is working") || t.starts_with("Working…")), "one live line: {:?}", texts(&rt));
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn a_run_that_ends_with_a_question_says_needs_you() {
     assert!(node.to_string().contains("needs you"), "the row says it needs you, not done: {node}");
     assert!(!rt.state.open_is_working(), "it is not working: the person can answer");
     assert!(row.rect[2] > 0.0);
-    assert!(rt.accessibility_json().to_string().contains("Answer miso's question"), "the composer asks for the cat's answer");
+    assert!(rt.accessibility_json().to_string().contains("Answer the question"), "the composer asks for the answer");
 }
 
 #[test]

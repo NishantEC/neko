@@ -214,7 +214,7 @@ mod tests {
     use neko_protocol::{TaskId, TaskStatus};
 
     fn t(id: &str, activity: i64) -> Task {
-        let mut t = Task::blank(TaskId(id.into()), "default", "words", id, 1, "cat_miso");
+        let mut t = Task::blank(TaskId(id.into()), "default", "words", id, 1, None);
         t.activity_ms = activity;
         t.last_read_ms = activity;
         t

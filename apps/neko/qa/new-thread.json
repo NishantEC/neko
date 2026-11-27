@@ -1,0 +1,261 @@
+{
+  "name": "new-thread",
+  "title": "New thread: one question, the composer, and a thread in the project chosen",
+  "about": "The app opens on \"What should we work on?\" with the composer and a Project chip: no greeting, no house, no cat picker. A folder chosen from the chip names the project at once. Return starts the thread and opens it, in that project's group. Then the folder race: choosing \"Add folder…\" and pressing Return before the daemon has made the folder a project still starts the thread in that project, not in No project.",
+  "cli": [
+    "fake"
+  ],
+  "window": false,
+  "setup": {
+    "files": {
+      "acme-site": {
+        "files": {
+          "index.html": "<p>hi</p>\n"
+        }
+      },
+      "acme-api": {
+        "git": true,
+        "files": {
+          "README.md": "# Acme\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "snap",
+      "name": "new-thread",
+      "expect": "The start screen: the question, the composer and the Project chip"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "new-thread-headline",
+              "text": "What should we work on?"
+            }
+          },
+          {
+            "see": {
+              "key": "composer-input"
+            }
+          },
+          {
+            "see": {
+              "key": "workspace-picker",
+              "label": "No project"
+            }
+          },
+          {
+            "gone": {
+              "key": "greeting"
+            }
+          },
+          {
+            "gone": {
+              "key": "cat-picker"
+            }
+          },
+          {
+            "gone": {
+              "key": "house"
+            }
+          },
+          {
+            "gone": {
+              "key": "place-picker"
+            }
+          }
+        ]
+      },
+      "expect": "No greeting, no house, no cat picker; no worktree chip for No project"
+    },
+    {
+      "do": "choose-folder",
+      "path": "$files/acme-site",
+      "window": false
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "workspace-picker",
+              "label": "acme-site"
+            }
+          },
+          {
+            "see": {
+              "key": "new-thread-headline",
+              "text": "What should we work on in acme-site?"
+            }
+          }
+        ]
+      },
+      "window": false,
+      "expect": "The folder is the project, and the question names it"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "key": "place-picker"
+        }
+      },
+      "window": false,
+      "expect": "A folder that is not a repository offers no worktree or branch"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Draft the page [fake:plain]"
+    },
+    {
+      "do": "snap",
+      "name": "typed",
+      "expect": "The words in the composer, the project named under it"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Draft the page"
+            }
+          },
+          {
+            "see": {
+              "key": "task-workspace",
+              "label": "Project: acme-site"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "The thread opens, in acme-site"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Worked for"
+        }
+      },
+      "within": 15,
+      "expect": "The run ends"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "role": "option",
+              "label": "Draft the page",
+              "in": {
+                "role": "group",
+                "label_is": "acme-site"
+              }
+            }
+          },
+          {
+            "gone": {
+              "key": "task-cat"
+            }
+          },
+          {
+            "gone": {
+              "key": "turn-*-face"
+            }
+          }
+        ]
+      },
+      "expect": "Its row is in the acme-site group; no cat and no portrait lead the thread or its turn"
+    },
+    {
+      "do": "snap",
+      "name": "thread",
+      "expect": "The thread: the words are the agent's, with no head"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Race to the repository [fake:plain]"
+    },
+    {
+      "do": "choose-folder",
+      "path": "$files/acme-api",
+      "send": true,
+      "window": false
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "Race to the repository"
+        }
+      },
+      "within": 10,
+      "window": false,
+      "expect": "The thread opens: the send waited for the folder to become a project"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "task-workspace",
+              "label": "Project: acme-api"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Race to the repository",
+              "in": {
+                "role": "group",
+                "label_is": "acme-api"
+              }
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Race to the repository",
+              "in": {
+                "key": "ws-default-list"
+              }
+            }
+          }
+        ]
+      },
+      "window": false,
+      "expect": "The folder race: the thread is in acme-api, not in No project"
+    }
+  ]
+}

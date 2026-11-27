@@ -106,18 +106,26 @@ fn a_cat_with_rules_does_a_task_and_its_edited_rules_reach_the_next_run() {
     click(&mut rt, "cat-save");
     until(&mut rt, "the rules saved", |rt| rt.state.page_cat().is_some_and(|c| c.rules == "Answer in one short paragraph."));
 
-    // A task for pip, picked in the composer.
-    press(&mut rt, Key::Command('n'), Mods { cmd: true, ..Mods::default() });
+    // A thread the person starts has no cat (the composer has no cat picker any more). Work a cat has comes as a round: made for pip and
+    // run now, it is a task that carries pip's rules.
     let p = pip.clone();
-    rt.update(move |s, _| s.pick_cat(Some(p.clone())));
-    type_in(&mut rt, "composer-input", "Tidy the notes [fake:plain]");
-    press(&mut rt, Key::Enter, Mods::default());
+    rt.update(move |s, _| {
+        s.send(neko_protocol::Request::CreateRound { name: "Notes".into(), words: "Tidy the notes [fake:plain]".into(), cat: p, workspace: None, schedule: neko_protocol::Schedule::Every { hours: 24 }, on: false });
+    });
+    until(&mut rt, "the round", |rt| rt.state.rounds.len() == 1);
+    let round = rt.state.rounds[0].id.clone();
+    rt.update(move |s, _| {
+        s.send(neko_protocol::Request::RunRoundNow { round });
+    });
+    until(&mut rt, "its task", |rt| rt.state.tasks.iter().any(|t| t.round.is_some()));
+    let id = rt.state.tasks.iter().find(|t| t.round.is_some()).unwrap().id.clone();
+    rt.update(move |s, _| s.open_task_id(&id));
     until(&mut rt, "the thread to finish", |rt| rt.state.open_task().is_some_and(|t| t.status == TaskStatus::Done));
     let task = rt.state.open_task().unwrap().clone();
-    assert_eq!(task.cat, pip, "the thread is pip's");
+    assert_eq!(task.cat.as_deref(), Some(pip.as_str()), "the task is pip's");
     let band = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("task-cat")).expect("the cat in the thread's band");
     assert_eq!(band.label.as_deref(), Some("Cat: pip"));
-    assert!(has_key(&rt, |k| k.starts_with("turn-") && k.ends_with("-cat")), "the turn is led by the cat");
+    assert!(!has_key(&rt, |k| k.starts_with("turn-") && (k.ends_with("-cat") || k.ends_with("-face"))), "no turn is led by a face");
     let got = blocks(&record);
     assert_eq!(got.len(), 1);
     // The cat's block, verbatim, then what Neko tells every agent about subagents (the daemon's tests hold its exact words).

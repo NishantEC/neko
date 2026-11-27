@@ -120,30 +120,31 @@ fn row_keys(s: &mut App, ev: &KeyEvent, tx: &mut Tx, item: &str, before: Option<
     }
 }
 
+/// The room a card's mark takes at its left.
+const LEAD: f32 = 20.0;
+
 /// One item: its task's title, where and how long it has waited, what is asked, and its answers.
 pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, pos: usize, n: usize, before: Option<String>, after: Option<String>) -> El {
     let key = need_key(&item.id);
     let since = waited(item.since_ms, s.now_ms);
     let asked = what(item);
-    // Led by the cat: its portrait with its dot, and what it says ("miso asks", "miso could not go on"), and how long ago.
+    // Led by a small mark, not a face: amber for what needs the person, red for what could not go on (a plug for a plugin). What it
+    // says is "The agent asks", or "Kitten 1 asks" when a subagent did, and how long ago.
     let failed = matches!(item.need, Need::Failure { .. });
-    let face = s.cat_face(&item.cat).to_owned();
     let says = match &item.need {
         Need::Permission { .. } => match &item.subagent {
             Some(n) => format!("{} asks", crate::subagents::name(n)),
-            None => format!("{} asks", item.cat_name),
+            None => "The agent asks".to_owned(),
         },
-        Need::Question { .. } => format!("{} has a question", item.cat_name),
-        Need::Failure { .. } => format!("{} could not go on", item.cat_name),
+        Need::Question { .. } => "The agent has a question".to_owned(),
+        Need::Failure { .. } => "The agent could not go on".to_owned(),
         Need::Plugin { ask } => if ask.changed { "A plugin changed" } else { "A plugin asks" }.to_owned(),
     };
     let lead = if let Need::Plugin { .. } = &item.need {
-        crate::plugins_view::tile(t, &format!("{key}-face"), 44.0, crate::ui::portrait::Activity::NeedsYou, true, crate::view::raised_fill(t))
-    } else if let Some(n) = &item.subagent {
-        // A subagent has no face: its number on the same quiet ground a plugin has.
-        crate::subagents_view::tile(t, &format!("{key}-face"), 44.0, n, crate::view::raised_fill(t))
+        el().key(format!("{key}-mark")).size(LEAD, LEAD).center().child(crate::ui::base::glyph(&crate::icons::PLUGIN, t.control.icon, crate::plugins_view::tile_ink(t))).a11y_hidden()
     } else {
-        crate::faces::portrait_in(t, &format!("{key}-face"), &face, 44.0, Some(if failed { neko_protocol::TaskStatus::Failed } else { neko_protocol::TaskStatus::NeedsYou }), crate::view::raised_fill(t))
+        let ink = if failed { t.c.danger.fg } else { t.c.warning.fg };
+        el().key(format!("{key}-mark")).size(LEAD, LEAD).center().child(el().size(8.0, 8.0).radius(4.0).fill(ink)).a11y_hidden()
     };
     let who = row()
         .key(format!("{key}-cat"))
@@ -182,7 +183,7 @@ pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, po
                     .color(t.ink())
                     .truncate_middle()
                     .min_w(0.0)
-                    .max_w(COLUMN - 44.0 - 3.0 * t.space.at(4.0)),
+                    .max_w(COLUMN - LEAD - 3.0 * t.space.at(4.0)),
             );
             let destructive = permission.destructive;
             let (a, b, c) = (id.clone(), id.clone(), id.clone());
@@ -198,7 +199,7 @@ pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, po
             let reply = s.needs_replies.get(&item.id).cloned().unwrap_or_default();
             let (a, b, c) = (id.clone(), id.clone(), id.clone());
             let empty = reply.text.trim().is_empty();
-            let field = Input::new(format!("{key}-reply"), &reply, move |s: &mut App| s.need_reply_mut(&a)).name(format!("Answer to {}", item.title)).placeholder(format!("Answer {}", item.cat_name)).on_submit(move |s: &mut App| s.reply_need(&b)).build(t);
+            let field = Input::new(format!("{key}-reply"), &reply, move |s: &mut App| s.need_reply_mut(&a)).name(format!("Answer to {}", item.title)).placeholder("Answer the question").on_submit(move |s: &mut App| s.reply_need(&b)).build(t);
             controls = controls.child(row().grow(1.0).min_w(200.0).child(field)).child(
                 Button::<App>::new(format!("{key}-send"), "Send").size(Size::Sm).disabled(empty).on_press(move |s: &mut App| s.reply_need(&c)).build(t),
             );
@@ -243,7 +244,7 @@ pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, po
         .round_as(t);
     let main = col().grow(1.0).min_w(0.0).gap(t.space.at(1.5)).child(who).child(head).child(body);
     paint_state(crate::turn::settling(crate::view::raised(t, r)), &t.mat.row, States::default())
-        .child(row().w_full().gap(t.space.at(4.0)).items_start().child(lead).child(main))
+        .child(row().w_full().gap(t.space.at(2.0)).items_start().child(lead).child(main))
         .on_key(move |s: &mut App, ev: &KeyEvent, tx: &mut Tx| row_keys(s, ev, tx, &mine, before.as_deref(), after.as_deref(), default))
 }
 

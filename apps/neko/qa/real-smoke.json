@@ -1,7 +1,7 @@
 {
   "name": "real-smoke",
   "title": "One tiny real thread through the installed Claude Code",
-  "about": "Real model calls (the cheapest model). In \"Ask before risky steps\", in a temporary folder: create hello.txt containing the word hi, then say done. Each request is allowed once. The file exists and the transcript shows the step. Then a one-line follow-up.",
+  "about": "Real model calls (the cheapest model). In \"Ask before risky steps\", in a temporary folder (a thread has no cat, so no cat rule goes with it): create hello.txt containing the word hi, then say done. Each request is allowed once. The file exists and the transcript shows the step. Then a one-line follow-up.",
   "cli": [
     "real"
   ],
@@ -43,83 +43,7 @@
     },
     {
       "do": "key",
-      "key": "cmd+,"
-    },
-    {
-      "do": "click",
-      "on": {
-        "name": "Cats",
-        "in": {
-          "key": "settings-page"
-        }
-      }
-    },
-    {
-      "do": "click",
-      "on": {
-        "key": "settings-cat-cat_miso-open"
-      }
-    },
-    {
-      "do": "wait",
-      "until": {
-        "see": {
-          "key": "cat-rules"
-        }
-      }
-    },
-    {
-      "do": "click",
-      "on": {
-        "key": "cat-rules-input"
-      }
-    },
-    {
-      "do": "type",
-      "text": "End every answer with the word meow."
-    },
-    {
-      "do": "click",
-      "on": {
-        "key": "cat-save"
-      }
-    },
-    {
-      "do": "wait",
-      "until": {
-        "all": [
-          {
-            "gone": {
-              "key": "cat-unsaved"
-            }
-          },
-          {
-            "see": {
-              "key": "cat-rules-input",
-              "text": "End every answer with the word meow"
-            }
-          }
-        ]
-      },
-      "within": 5,
-      "expect": "miso's rule is saved"
-    },
-    {
-      "do": "key",
       "key": "cmd+n"
-    },
-    {
-      "do": "click",
-      "on": {
-        "key": "cat-picker"
-      }
-    },
-    {
-      "do": "click",
-      "on": {
-        "role": "menuitemcheckbox",
-        "label": "miso"
-      }
     },
     {
       "do": "choose-folder",
@@ -159,18 +83,6 @@
         }
       },
       "expect": "hello.txt exists and holds hi"
-    },
-    {
-      "do": "assert",
-      "that": {
-        "see": {
-          "text": "meow",
-          "in": {
-            "key": "turn-*"
-          }
-        }
-      },
-      "expect": "The real answer ends with meow: the cat's rule reached the real CLI (and --system-prompt-snapshot off was accepted)"
     },
     {
       "do": "click",

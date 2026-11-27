@@ -1,0 +1,155 @@
+{
+  "name": "new-thread-background",
+  "title": "New thread: ⌘Return starts a thread and keeps the screen open",
+  "about": "⌘Return starts the thread without opening it: the screen stays on \"What should we work on?\" with an empty box and one quiet line saying it started. A second ⌘Return does the same. Both threads run, and both are in the sidebar.",
+  "cli": [
+    "fake"
+  ],
+  "window": false,
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "First errand [fake:long:4]"
+    },
+    {
+      "do": "key",
+      "key": "cmd+return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "notice",
+              "text": "Started First errand"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "First errand",
+              "in": {
+                "key": "ws-default-list"
+              }
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "The first thread is in the sidebar and the screen says it started"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "new-thread-headline"
+            }
+          },
+          {
+            "gone": {
+              "key": "band-title"
+            }
+          }
+        ]
+      },
+      "expect": "The start screen stays: no thread opened"
+    },
+    {
+      "do": "type",
+      "text": "Second errand [fake:long:4]"
+    },
+    {
+      "do": "snap",
+      "name": "second-typed",
+      "expect": "The box took the second thread's words at once"
+    },
+    {
+      "do": "key",
+      "key": "cmd+return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "notice",
+              "text": "Started Second errand"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Second errand",
+              "in": {
+                "key": "ws-default-list"
+              }
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "The second thread is in the sidebar"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "new-thread-headline"
+            }
+          },
+          {
+            "gone": {
+              "key": "band-title"
+            }
+          },
+          {
+            "count": {
+              "of": {
+                "role": "option",
+                "in": {
+                  "key": "ws-default-list"
+                }
+              },
+              "is": 2
+            }
+          }
+        ]
+      },
+      "expect": "The screen is still the start screen; two threads"
+    },
+    {
+      "do": "snap",
+      "name": "two-started",
+      "expect": "Two threads at work, the start screen open"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "count": {
+          "of": {
+            "role": "option",
+            "label": "working",
+            "in": {
+              "key": "ws-default-list"
+            }
+          },
+          "is": 0
+        }
+      },
+      "within": 20,
+      "expect": "Both finish by themselves"
+    }
+  ]
+}

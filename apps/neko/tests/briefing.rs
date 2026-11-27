@@ -69,9 +69,9 @@ fn a_full_morning_says_its_sections_in_order_each_in_its_words() {
         "Since yesterday 18:00",
         "6 finished, 2 needs you",
         "Renamed the button and its menu item, and kept ⌘, as the shortcut.",
-        "tofu could not finish",
-        "miso was stopped",
-        "mochi was interrupted",
+        "Could not finish",
+        "Stopped",
+        "Interrupted",
         "Undone",
         "Docs check ran",
         "Dependency audit was skipped",
@@ -202,9 +202,9 @@ fn home_has_one_quiet_line_when_there_is_news_and_nothing_otherwise() {
     let rt = runtime((1200.0, 800.0), false, scene("home-briefing"));
     assert!(texts(&rt).contains("While you were away: 6 finished, 2 needs you"));
     assert!(has_key(&rt, "home-briefing") && has_key(&rt, "home-briefing-open"));
-    for name in ["briefing-empty", "briefing-caught-up", "empty-home"] {
+    for name in ["briefing-empty", "briefing-caught-up", "new-thread"] {
         let mut rt = runtime((1200.0, 800.0), false, scene(name));
-        rt.update(|s, _| s.go_home());
+        rt.update(|s, _| s.go_new_thread());
         settle(&mut rt);
         assert!(!has_key(&rt, "home-briefing"), "{name}: nothing to say");
     }
@@ -301,13 +301,13 @@ fn until(rt: &mut Runtime<App>, what: &str, ok: impl Fn(&Runtime<App>) -> bool) 
 
 fn make_task(rt: &mut Runtime<App>, words: &'static str) {
     rt.update(move |s, _| {
-        s.go_home();
+        s.go_new_thread();
         s.draft = rune::TextEdit::new(words);
         s.submit();
     });
     until(rt, "the thread to be made", |rt| rt.state.creating.is_none() && rt.state.tasks.iter().any(|t| t.words == words));
     // A new task opens in the task view: the person is back on Home.
-    rt.update(|s, _| s.go_home());
+    rt.update(|s, _| s.go_new_thread());
 }
 
 fn posts(sent: &[Sent]) -> Vec<&neko_app::notify::Note> {
@@ -375,7 +375,7 @@ fn the_whole_flow_against_a_real_daemon() {
     until(&mut rt, "caught up", |rt| rt.state.briefing.as_ref().is_some_and(|b| b.read_ms.is_some() && b.finished.is_empty()) && has_key(rt, "briefing-caught-up"));
     assert!(texts(&rt).contains("You're caught up"));
     assert!(!has_key(&rt, "briefing-read"));
-    rt.update(|s, _| s.go_home());
+    rt.update(|s, _| s.go_new_thread());
     settle(&mut rt);
     assert!(!has_key(&rt, "home-briefing"), "read: nothing to say on Home");
 
