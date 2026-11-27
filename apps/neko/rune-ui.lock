@@ -268,6 +268,13 @@ files = [
 ]
 
 [[item]]
+name = "toast"
+version = "0.11.0"
+files = [
+  { target = "src/ui/toast.rs", sha256 = "2584744aeb84b2ac9d3a6a25f770d30db62a1c9fddacd77ab2c9612a9f10f1a6" },
+]
+
+[[item]]
 name = "tool"
 version = "0.10.0"
 files = [

@@ -40,6 +40,7 @@ pub mod switch;
 pub mod tabs;
 pub mod task;
 pub mod textarea;
+pub mod toast;
 pub mod tool;
 pub mod tooltip;
 
