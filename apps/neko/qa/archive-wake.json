@@ -1,0 +1,215 @@
+{
+  "name": "archive-wake",
+  "title": "Archive takes a thread out of the lists; a message wakes it and it runs and is back in its group",
+  "about": "A finished thread is archived from its row's menu: a toast with Undo says so and the row leaves the list (no fold). View ▸ Show archived adds an Archived fold at the end, which is where it is found until Search exists. Opening it and sending a message wakes it: it runs, the fold goes (nothing is archived now) and the thread is a row of its group again.",
+  "cli": [
+    "fake"
+  ],
+  "steps": [
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_task",
+        "words": "Sleepy thread [fake:plain]"
+      },
+      "save_as": "sleepy"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "option",
+              "label": "Sleepy thread",
+              "name": "unread"
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Sleepy thread",
+              "name": "working"
+            }
+          }
+        ]
+      },
+      "within": 20,
+      "expect": "The thread finishes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label": "Options for Sleepy thread"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitem",
+        "label_is": "Archive"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "status",
+              "label_is": "Archived"
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Sleepy thread"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "Archive says so in a toast with Undo, and the thread leaves the list"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "gone": {
+              "key": "ws-default-settled"
+            }
+          },
+          {
+            "gone": {
+              "key": "archived-fold"
+            }
+          }
+        ]
+      },
+      "expect": "It is not in a Settled fold either, and no Archived fold is there until it is asked for"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "threads-view-button"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitemcheckbox",
+        "label_is": "Show archived"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "archived-fold"
+        }
+      },
+      "within": 5,
+      "expect": "View ▸ Show archived adds the Archived fold"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "archived-fold"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Sleepy thread"
+        }
+      },
+      "within": 5,
+      "expect": "Opened, the archived thread is a row"
+    },
+    {
+      "do": "snap",
+      "name": "archived",
+      "expect": "The Archived fold open, holding the thread"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Sleepy thread"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "Sleepy thread"
+        }
+      },
+      "expect": "It opens like any thread"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Are you awake? [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "count": {
+          "of": {
+            "name": "Worked for",
+            "role": "status"
+          },
+          "min": 2
+        }
+      },
+      "within": 25,
+      "expect": "The message woke it: a second run starts and finishes"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "key": "archived-fold"
+        }
+      },
+      "within": 10,
+      "expect": "Nothing is archived now: the Archived fold is gone"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "order": [
+          {
+            "role": "button",
+            "label_is": "No project"
+          },
+          {
+            "role": "option",
+            "label": "Sleepy thread"
+          }
+        ]
+      },
+      "expect": "The thread is a row of its group again"
+    },
+    {
+      "do": "snap",
+      "name": "awake",
+      "expect": "Back in its group"
+    }
+  ]
+}

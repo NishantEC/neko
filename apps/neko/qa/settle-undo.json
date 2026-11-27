@@ -1,0 +1,322 @@
+{
+  "name": "settle-undo",
+  "title": "Settle puts a thread in its group's Settled fold with an Undo toast; Undo and the toast's timing; settling again by key",
+  "about": "Two finished threads in No project. The open one is settled with ⌘⇧S: a toast says so with Undo (a polite status), the thread leaves the list and the group ends in a closed Settled fold that says 1 thread, and the thread stays open. ⌘Z takes it back: the fold is gone and the thread is back in its place, above the older one. Settled again, the toast goes by itself after five seconds and the fold stays; pressing the fold opens it in place; ⌘⇧S on the settled thread brings it back with no toast.",
+  "cli": [
+    "fake"
+  ],
+  "steps": [
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_task",
+        "words": "Older thread [fake:plain]"
+      },
+      "save_as": "older"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Older thread",
+          "name": "unread"
+        }
+      },
+      "within": 20,
+      "expect": "The older thread finishes"
+    },
+    {
+      "do": "sleep",
+      "secs": 1.2
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_task",
+        "words": "Newer thread [fake:plain]"
+      },
+      "save_as": "newer"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Newer thread",
+          "name": "unread"
+        }
+      },
+      "within": 20,
+      "expect": "The newer thread finishes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Newer thread"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Newer thread"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Newer thread",
+              "name": "working"
+            }
+          }
+        ]
+      },
+      "within": 20,
+      "expect": "The newer thread is open and its run has ended (a thread still working cannot be settled)"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "order": [
+          {
+            "role": "option",
+            "label": "Newer thread"
+          },
+          {
+            "role": "option",
+            "label": "Older thread"
+          }
+        ]
+      },
+      "expect": "Newest activity first"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "key": "ws-default-settled"
+        }
+      },
+      "expect": "Nothing is settled: no Settled fold"
+    },
+    {
+      "do": "key",
+      "key": "cmd+shift+s"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "status",
+              "label_is": "Settled"
+            }
+          },
+          {
+            "see": {
+              "key": "ws-default-settled"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "Settling says so in a toast with Undo, and the group ends in a Settled fold"
+    },
+    {
+      "do": "snap",
+      "name": "settled",
+      "expect": "The toast at the bottom, the fold under the group"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "role": "button",
+              "label_is": "Undo"
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Newer thread"
+            }
+          },
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Newer thread"
+            }
+          },
+          {
+            "see": {
+              "role": "button",
+              "label_is": "Settled",
+              "name": "1 thread"
+            }
+          }
+        ]
+      },
+      "expect": "Undo is offered, the thread is out of the list but still open, and the fold counts it"
+    },
+    {
+      "do": "key",
+      "key": "cmd+z"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "gone": {
+              "key": "ws-default-settled"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Newer thread"
+            }
+          },
+          {
+            "gone": {
+              "role": "status",
+              "label_is": "Settled"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "⌘Z takes it back: no fold, no toast, the thread is listed again"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "order": [
+          {
+            "role": "option",
+            "label": "Newer thread"
+          },
+          {
+            "role": "option",
+            "label": "Older thread"
+          }
+        ]
+      },
+      "expect": "Back in its place, above the older thread"
+    },
+    {
+      "do": "key",
+      "key": "cmd+shift+s"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "status",
+          "label_is": "Settled"
+        }
+      },
+      "within": 10,
+      "expect": "Settled again"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "role": "status",
+          "label_is": "Settled"
+        }
+      },
+      "within": 12,
+      "expect": "The toast goes by itself after about five seconds"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "ws-default-settled"
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Newer thread"
+            }
+          }
+        ]
+      },
+      "expect": "The thread stays settled when the toast is gone"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "ws-default-settled"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Newer thread"
+        }
+      },
+      "within": 5,
+      "expect": "Pressing the fold opens it: the settled thread is a row in place"
+    },
+    {
+      "do": "snap",
+      "name": "fold-open",
+      "expect": "The Settled fold open under its group"
+    },
+    {
+      "do": "key",
+      "key": "cmd+shift+s"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "key": "ws-default-settled"
+        }
+      },
+      "within": 10,
+      "expect": "⌘⇧S on a settled thread brings it back: no fold"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "role": "option",
+              "label": "Newer thread"
+            }
+          },
+          {
+            "gone": {
+              "role": "status",
+              "label_is": "Settled"
+            }
+          }
+        ]
+      },
+      "expect": "Bringing it back needs no Undo"
+    }
+  ]
+}

@@ -409,7 +409,10 @@ impl App {
     /// A run of a thread (or of a kitten of it) changed: the overview and the Changes tab are asked again once the run is not working.
     pub fn pane_run_changed(&mut self, run: &Run, had_changes: bool) {
         let root = self.root_of(&run.task);
-        if run.status == RunStatus::Running {
+        // A run that works says nothing yet, until its end checkpoint is written: that is when its changes can be read, a moment
+        // before the run is marked done. Asking then, and not before, keeps Overview from showing what it saw while the run was
+        // still writing.
+        if run.status == RunStatus::Running && !run.undo.as_ref().is_some_and(neko_protocol::RunUndo::ready) {
             return;
         }
         self.pane.stale.insert(root.clone());

@@ -1,0 +1,180 @@
+{
+  "name": "auto-settle",
+  "title": "A week idle settles a thread by itself, never a pinned one or one that needs the person",
+  "about": "Three finished or waiting threads: one left idle, one pinned, one that ends with a question. The scheduler's clock (a debug daemon) is moved on eight days. The idle thread is settled by the housekeeping and the sidebar shows it in the Settled fold; the pinned thread stays in Pinned; the thread that needs the person stays listed and still needs the person.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_DEBUG_CLOCK": "1"
+    }
+  },
+  "steps": [
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_task",
+        "words": "Idle thread [fake:plain]"
+      },
+      "save_as": "idle"
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_task",
+        "words": "Pinned thread [fake:plain]"
+      },
+      "save_as": "pinned"
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_task",
+        "words": "Asking thread [fake:question]"
+      },
+      "save_as": "asking"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "option",
+              "label": "Idle thread",
+              "name": "unread"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Pinned thread",
+              "name": "unread"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Asking thread",
+              "name": "needs you"
+            }
+          }
+        ]
+      },
+      "within": 25,
+      "expect": "All three are at rest: two finished, one waiting for the person"
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "pin_task",
+        "task": "$pinned",
+        "pinned": true
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "pinned-section"
+        }
+      },
+      "within": 10,
+      "expect": "The pinned thread is in Pinned"
+    },
+    {
+      "do": "snap",
+      "name": "before",
+      "expect": "Pinned at the top, the idle and the asking threads in No project"
+    },
+    {
+      "do": "clock",
+      "minutes": 11520
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "ws-default-settled"
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Idle thread"
+            }
+          }
+        ]
+      },
+      "within": 20,
+      "expect": "A week on, the idle thread is in the Settled fold"
+    },
+    {
+      "do": "snap",
+      "name": "after",
+      "expect": "The idle thread settled; Pinned and the asking thread untouched"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "role": "button",
+              "label_is": "Settled",
+              "name": "1 thread"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Pinned thread"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Asking thread",
+              "name": "needs you"
+            }
+          },
+          {
+            "see": {
+              "key": "pinned-section"
+            }
+          }
+        ]
+      },
+      "expect": "Only the idle one settled: the pinned thread is still pinned and the thread that needs the person is still listed, needing the person"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "order": [
+          {
+            "key": "pinned-section"
+          },
+          {
+            "role": "option",
+            "label": "Pinned thread"
+          },
+          {
+            "role": "button",
+            "label_is": "No project"
+          },
+          {
+            "role": "option",
+            "label": "Asking thread"
+          },
+          {
+            "key": "ws-default-settled"
+          }
+        ]
+      },
+      "expect": "In the order: Pinned, then the group, then its fold"
+    }
+  ]
+}

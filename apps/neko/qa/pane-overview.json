@@ -81,10 +81,25 @@
             "see": {
               "key": "run-*-undo"
             }
+          },
+          {
+            "see": {
+              "key": "pane-changes-figures",
+              "label": "5 files changed"
+            }
+          },
+          {
+            "count": {
+              "of": {
+                "key": "pane-file-*"
+              },
+              "is": 5
+            }
           }
         ]
       },
-      "expect": "The run card offers Review and Undo"
+      "expect": "The run card offers Review and Undo, and Overview has read the run's end (5 files)",
+      "within": 15
     },
     {
       "do": "snap",

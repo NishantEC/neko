@@ -242,26 +242,7 @@ pub fn thread_row(s: &App, t: &Theme, task: &Task, i: usize, n: usize, open: boo
     }
     let words = col().grow(1.0).min_w(0.0).gap(1.0).child(first).child(second);
     let mark = crate::status_mark::status_mark(t, &format!("{key}-mark"), task, under(t, open));
-    // ⌘⇧P and ⌘⇧S on a focused row act on that row (the same keys act on the thread in view when no row has focus: `lib.rs`).
-    let acts = task.id.clone();
-    r.child(mark).child(words).on_press(move |s: &mut App| s.open_task_id(&tid)).on_key(move |s: &mut App, ev: &KeyEvent, _| row_key(s, &acts, ev))
-}
-
-/// Keys on a thread's row: ⌘⇧P pins it or takes the pin off, ⌘⇧S settles it or brings it back.
-fn row_key(s: &mut App, id: &neko_protocol::TaskId, ev: &KeyEvent) -> bool {
-    let m = ev.mods;
-    if !(m.cmd && m.shift) || m.alt || m.ctrl {
-        return false;
-    }
-    if ev.is_command('p') {
-        s.toggle_pin(id);
-        true
-    } else if ev.is_command('s') {
-        s.toggle_settle(id);
-        true
-    } else {
-        false
-    }
+    r.child(mark).child(words).on_press(move |s: &mut App| s.open_task_id(&tid))
 }
 
 /// A thread's menu: Pin, Settle, Mark as unread (or read), Archive, Remove thread…. Shown on hover; ⌘⇧P and ⌘⇧S do the first two.

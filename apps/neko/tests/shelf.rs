@@ -237,6 +237,21 @@ fn a_thread_that_works_cannot_be_settled_and_the_toast_says_why() {
 }
 
 #[test]
+fn the_keys_work_with_a_row_clicked_and_with_the_composer_focused() {
+    // A person opens a thread by clicking its row (the row has focus), or has the keyboard in the composer.
+    let mut rt = runtime((1200.0, 800.0), false, scene("threads-pinned"));
+    let id = id_of(&rt, "Write the pricing page");
+    click(&mut rt, &format!("thread-{}", id.0));
+    press(&mut rt, Key::Command('p'), cmd_shift());
+    assert_eq!(rt.state.toasts.items().map(|(_, s)| s.title.clone()).collect::<Vec<_>>(), ["Unpinned"], "after a click on the row");
+    rt.update(|s, _| s.toasts.clear());
+    rt.update(|s, _| s.reply_mut().focused = true);
+    settle(&mut rt);
+    press(&mut rt, Key::Command('p'), cmd_shift());
+    assert_eq!(rt.state.toasts.items().map(|(_, s)| s.title.clone()).collect::<Vec<_>>(), ["Unpinned"], "with the composer focused");
+}
+
+#[test]
 fn alt_digits_and_cmd_alt_arrows_move_between_threads_in_the_order_they_are_drawn() {
     let mut rt = runtime((1200.0, 800.0), false, scene("threads-settled"));
     let order = rt.state.thread_order();

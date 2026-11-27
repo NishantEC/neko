@@ -212,7 +212,8 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         tx.instant();
         return true;
     }
-    // Pin and settle the thread in view (⌘⇧P, ⌘⇧S); on a focused row of the sidebar they act on that row (`sidebar::thread_row`).
+    // Pin and settle the thread in view (⌘⇧P, ⌘⇧S), whatever has focus: the focus moves when a row leaves the list, so it must not
+    // decide which thread a key acts on. Another thread is pinned or settled from its row's menu.
     if m.cmd && m.shift && !(m.alt || m.ctrl) && (ev.is_command('p') || ev.is_command('s')) && let Some(id) = s.thread_in_view() {
         if ev.is_command('p') {
             s.toggle_pin(&id);
