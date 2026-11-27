@@ -108,7 +108,8 @@ fn kittens(s: &App, t: &Theme, root: &TaskId) -> Option<El> {
         let who = name(&of.number);
         let word = card_word(k.status);
         let depth = of.number.matches('.').count() as f32;
-        let model = s.books.get(&k.id).and_then(|b| b.runs.last()).and_then(|r| r.model.clone());
+        // The model the run reported (the one that did most of its work, else the one it began on); nothing while that is not known.
+        let model = s.books.get(&k.id).and_then(|b| b.runs.last()).and_then(|r| r.usage.as_ref().and_then(|u| u.model.clone()).or_else(|| r.model.clone())).filter(|m| !m.trim().is_empty());
         let mut facts: Vec<String> = Vec::new();
         facts.extend(model);
         facts.push("Shared folder".to_owned());
@@ -348,9 +349,12 @@ fn kitten_body(s: &App, t: &Theme, kitten: &TaskId, layer: &mut Vec<El>) -> El {
     let fold = crate::ui::agent::FoldLine::<App>::new("pane-kitten-brief", "Brief", open).lead(crate::ui::agent::hollow_dot(t, t.control.icon)).on_toggle(|s: &mut App| s.pane.brief_open = !s.pane.brief_open);
     let brief = if open { vec![text(task.words.clone()).key("pane-kitten-brief-words").font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0).selectable(true).pl(t.space.at(1.5))] } else { Vec::new() };
     top = top.child(fold.build(t, brief));
-    // A finished kitten's report comes first: its final words, in the second ink.
-    if !live
-        && let Some(words) = s.books.get(kitten).and_then(|b| b.parts.iter().rev().find_map(|p| if let neko_protocol::PartBody::Agent { text, .. } = &p.body { Some(text.clone()).filter(|x| !x.trim().is_empty()) } else { None }))
+    // A finished kitten's report comes first: its final words, in the second ink. They are said once: the conversation below leaves
+    // them out (its last words are the report, never a second copy).
+    let book = s.books.get(kitten);
+    let report = if live { None } else { book.and_then(|b| b.parts.iter().rev().find(|p| matches!(&p.body, neko_protocol::PartBody::Agent { text, .. } if !text.trim().is_empty()))) };
+    if let Some(p) = report
+        && let neko_protocol::PartBody::Agent { text: words, .. } = &p.body
     {
         top = top.child(
             col()
@@ -360,10 +364,19 @@ fn kitten_body(s: &App, t: &Theme, kitten: &TaskId, layer: &mut Vec<El>) -> El {
                 .w_full()
                 .gap(t.space.at(1.0))
                 .child(heading(t, "pane-kitten-report-heading", "Report", None))
-                .child(crate::ui::response::Response::new("pane-kitten-report-words", words).selectable(true).muted(true).column(crate::view::COLUMN).build(t)),
+                .child(crate::ui::response::Response::new("pane-kitten-report-words", words.clone()).selectable(true).muted(true).column(crate::view::COLUMN).build(t)),
         );
     }
-    let book = s.books.get(kitten);
+    let without_report;
+    let book = match (book, report) {
+        (Some(b), Some(r)) => {
+            let mut c = b.clone();
+            c.parts.retain(|p| p.id != r.id);
+            without_report = c;
+            Some(&without_report)
+        }
+        (b, _) => b,
+    };
     let items = match book {
         Some(b) if b.loaded || !b.parts.is_empty() => crate::task_view::kitten_items(s, t, task, b),
         _ => vec![text("Reading what it did…").key("pane-kitten-loading").role("status").font(t.ty.sm).color(t.ink_faint())],

@@ -375,6 +375,11 @@ impl App {
         let Some(root) = self.pane_root() else { return };
         match self.tab_of(&root) {
             Tab::Overview => {
+                // The kittens' rows say which model each one ran on: that is in their runs, so their transcripts are read once.
+                let kittens: Vec<TaskId> = self.tasks.iter().filter(|t| t.subagent.as_ref().is_some_and(|o| o.root == root)).map(|t| t.id.clone()).collect();
+                for k in kittens {
+                    self.ask_kitten_book(&k);
+                }
                 if (!self.pane.overview.contains_key(&root) || self.pane.stale.contains(&root)) && !self.pane.asked.contains(&root) && self.send(Request::GetOverview { task: root.clone() }).is_some() {
                     self.pane.stale.remove(&root);
                     self.pane.asked.insert(root);
