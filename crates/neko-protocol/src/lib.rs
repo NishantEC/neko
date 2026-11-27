@@ -39,8 +39,9 @@ pub use undo::{DiffFile, DiffPatch, DiffSummary, FileStatus, Offer, RunUndo, Und
 /// by itself: its schedule, its history, pause all; a task says which round made it and when it was due). 10: the Briefing (what
 /// happened while the person was away, derived by the daemon; mark it read; the morning time; an event when it is due). 11: plugins (MCP
 /// servers first: added by pasting JSON or from a folder, approved by digest, set up in Settings, left to chosen cats; a "Needs you"
-/// item asks for the approval).
-pub const PROTOCOL_VERSION: u32 = 12;
+/// item asks for the approval). 12: threads (what a thread last said and is doing, read and unread). 13: subagents (a task may belong to another, with a number; a status Waiting; a card and a wake note
+/// in the transcript; a request from a subagent says who asked; a setting that gives runs the person's own MCP servers).
+pub const PROTOCOL_VERSION: u32 = 13;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -93,6 +94,9 @@ pub enum TaskStatus {
     /// The run finished with a question for the person (its last words end in a question mark, nothing pending): their turn. Not
     /// working; a follow-up answers it.
     Asked,
+    /// No run, and the thread waits on its subagents: one is queued or working, or its report has not been read yet. The daemon wakes
+    /// the thread when a report arrives (docs/knowledge/subagents.md).
+    Waiting,
 }
 
 /// The id of General: the built-in workspace with no folder. Its tasks work in a scratch folder of their own.
@@ -170,6 +174,9 @@ pub struct Task {
     /// `thread_status`; the list is [`NeedsItem`]s.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub needs_you: bool,
+    /// Set when this task is a subagent of another: whose it is and its number. A subagent is not listed as a thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent: Option<SubagentOf>,
 }
 
 /// The longest a thread's `latest_line` is, in characters.
@@ -183,6 +190,8 @@ pub enum ThreadStatus {
     Working,
     /// The last run failed and the person has not opened the thread since.
     Failed,
+    /// No run, and the thread waits on its subagents (docs/knowledge/subagents.md).
+    Waiting,
     /// None of the above.
     #[default]
     Idle,
@@ -208,12 +217,43 @@ impl Task {
             failure_line: String::new(),
             thread_status: ThreadStatus::Idle,
             needs_you: false,
+            subagent: None,
         }
     }
 
     /// Something happened since the person last opened it.
     pub fn unread(&self) -> bool {
         self.activity_ms > self.last_read_ms
+    }
+}
+
+/// What makes a task a subagent (docs/knowledge/subagents.md): numbered under the thread that started it, no name, no face.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubagentOf {
+    /// The task (a thread or another subagent) that started it, and that its report wakes.
+    pub parent: TaskId,
+    /// `1`, `2`, or `1.2` for the second subagent of Subagent 1: the thread's own counter, a dot for each level down.
+    pub number: String,
+    /// The top-level thread it belongs to.
+    pub root: TaskId,
+}
+
+impl SubagentOf {
+    /// How deep it is: `1` is 1, `1.2` is 2.
+    pub fn depth(&self) -> usize {
+        self.number.split('.').count()
+    }
+}
+
+impl Task {
+    /// Whether it is a thread of its own (the sidebar lists these), not a subagent.
+    pub fn is_thread(&self) -> bool {
+        self.subagent.is_none()
+    }
+
+    /// "Subagent 1.2" for a subagent.
+    pub fn subagent_name(&self) -> Option<String> {
+        self.subagent.as_ref().map(|s| format!("Subagent {}", s.number))
     }
 }
 
@@ -370,6 +410,22 @@ pub enum PartBody {
     /// The cat's standing rules changed since the task's last run: this run is the first with the new ones. `name` is the cat's
     /// name then.
     RulesChanged { cat: String, name: String },
+    /// A subagent was started here: the card in the conversation. Its state is the task's own (`subagent`).
+    Subagent { subagent: TaskId, number: String, title: String },
+    /// The thread was woken by a subagent's report: the centred note, and what the report carried. `status` is `done`, `failed`,
+    /// `stopped`, `interrupted` or `asked`.
+    Wake {
+        number: String,
+        title: String,
+        status: String,
+        /// Its final words, shortened to 16 KB.
+        summary: String,
+        /// Files it changed, with counts ("src/auth.rs +12 -3").
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        files: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        branch: Option<String>,
+    },
 }
 
 /// A failure the person can do something about (docs/knowledge/needs-you.md). Every other failure is a notice only.
@@ -423,6 +479,9 @@ pub struct NeedsItem {
     /// Since when it has waited (ms since the epoch).
     pub since_ms: i64,
     pub need: Need,
+    /// The subagent's number when the item is its own ("1.2"): then `title` is the thread's, and the item reads "Subagent 1.2 asks".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent: Option<String>,
 }
 
 /// One piece of a task's transcript, in order.
@@ -505,6 +564,10 @@ pub struct Settings {
     /// The runtime new tasks use ("claude").
     pub runtime: String,
     pub permission_mode: PermissionMode,
+    /// Also give runs the MCP servers in the person's own Claude Code settings. Off by default: a run gets only Neko's own tool and
+    /// the plugins the person approved (docs/knowledge/subagents.md).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub own_mcp: bool,
 }
 
 /// An agent CLI Neko knows, as found on this Mac.
@@ -987,6 +1050,8 @@ impl PartBody {
         match self {
             PartBody::Person { text } | PartBody::Agent { text, .. } | PartBody::Thinking { text, .. } | PartBody::Notice { text, .. } => text,
             PartBody::Tool { summary, .. } => summary,
+            PartBody::Wake { summary, .. } => summary,
+            PartBody::Subagent { title, .. } => title,
             PartBody::Permission { .. } | PartBody::RulesChanged { .. } => "",
         }
     }

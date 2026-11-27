@@ -1,0 +1,184 @@
+{
+  "name": "subagents-stop",
+  "title": "Stop on a waiting thread stops its subagents too",
+  "about": "A thread starts two subagents that run until stopped and rests. The composer offers Stop while it waits; Stop ends both subagents and the thread, within a few seconds, and no resumed run is started. The rig's end check proves no process is left.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check two things [fake:delegate] mcp neko start_subagent {\"title\":\"Check links\",\"prompt\":\"Look at the links [fake:slow]\"} ; mcp neko start_subagent {\"title\":\"Check images\",\"prompt\":\"Look at the images [fake:slow]\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "subagent-card-1",
+              "name": "Working"
+            }
+          },
+          {
+            "see": {
+              "key": "subagent-card-2",
+              "name": "Working"
+            }
+          }
+        ]
+      },
+      "within": 40,
+      "expect": "Both subagents work"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Check two",
+          "name": "waiting"
+        }
+      },
+      "within": 30,
+      "expect": "The thread waits"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "waiting-line"
+        }
+      },
+      "within": 10,
+      "expect": "The conversation ends on the waiting line"
+    },
+    {
+      "do": "snap",
+      "name": "waiting",
+      "expect": "Waiting on two subagents, the composer offers Stop"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-submit"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "subagent-card-1",
+              "name": "Stopped"
+            }
+          },
+          {
+            "see": {
+              "key": "subagent-card-2",
+              "name": "Stopped"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "Both subagents stop within a few seconds"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Check two",
+          "name": "stopped"
+        }
+      },
+      "within": 10,
+      "expect": "The thread says it stopped"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "key": "waiting-line"
+        }
+      },
+      "expect": "Nothing is waited on any more"
+    },
+    {
+      "do": "snap",
+      "name": "stopped",
+      "expect": "Both cards say Stopped"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "subagent-open-1"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "crumb-subagent",
+          "text": "Subagent 1"
+        }
+      },
+      "within": 10,
+      "expect": "Subagent 1 opens in the main view"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "name": "Stopped after"
+        }
+      },
+      "expect": "Its own run says it stopped"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "key": "subagent-stop"
+        }
+      },
+      "expect": "No Stop button on a stopped subagent"
+    },
+    {
+      "do": "snap",
+      "name": "subagent",
+      "expect": "The stopped subagent, read-only"
+    },
+    {
+      "do": "sleep",
+      "secs": 3
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "grep -c -e \"--resume\" $work/fake-record.jsonl || true",
+          "is": "0"
+        }
+      },
+      "expect": "No resumed run was started"
+    }
+  ]
+}

@@ -69,6 +69,13 @@ A round is a cat's standing work that starts by itself. One daemon thread (`neko
 when no round is on), makes each due time an ordinary task and starts it through the same path as a task the person makes, so the
 permission mode, the cat's rules, the run guard and Undo apply unchanged. See `docs/knowledge/rounds.md`.
 
+## Subagents
+
+A thread can start numbered subagents through Neko's own MCP tool, end its turn and rest with no process; each subagent's report
+wakes it with `--resume`. Every run is handed `neko-daemon --mcp`, a stdio MCP server that forwards its tool calls to the daemon over
+loopback with a secret made for that run, and `--strict-mcp-config`. One daemon thread (`neko-subagents`) queues (3 per thread, 4
+runs across the daemon), batches wakes over 2 seconds and holds back while the account's limit is reached. See `docs/knowledge/subagents.md`.
+
 ## The Briefing
 
 What happened while the person was away is derived by the daemon from the records above, never written by a model and never stored apart from where the

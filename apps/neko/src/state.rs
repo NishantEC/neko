@@ -303,6 +303,8 @@ pub struct App {
     pub briefing_open: bool,
     /// The task the person came from to the Briefing (Escape goes back to it).
     pub briefing_back: Option<TaskId>,
+    /// The subagents whose own transcript was asked for (once each), so a card has its live line after a restart.
+    pub sub_asked: HashSet<TaskId>,
     /// The morning time and whether its notification is posted, as the daemon last said.
     pub briefing_settings: Option<BriefingSettings>,
     /// The morning time being typed in Settings ▸ Briefing.
@@ -535,6 +537,7 @@ impl Default for App {
             briefing: None,
             briefing_open: false,
             briefing_back: None,
+            sub_asked: HashSet::new(),
             briefing_settings: None,
             briefing_time: TextEdit::default(),
         }
@@ -568,10 +571,13 @@ impl App {
             return "Briefing".to_owned();
         }
         match self.open_task() {
-            Some(t) => match self.workspace_of(&t.workspace) {
-                Some(w) => format!("{} — {}", t.title, w.name),
-                None => t.title.clone(),
-            },
+            Some(t) => {
+                let title = if t.subagent.is_some() { self.crumb_words(t) } else { t.title.clone() };
+                match self.workspace_of(&t.workspace) {
+                    Some(w) => format!("{title} — {}", w.name),
+                    None => title,
+                }
+            }
             None => "Neko".to_owned(),
         }
     }
@@ -619,7 +625,7 @@ impl App {
 
     /// The tasks a cat has at work now (working, waiting on a request, or asked a question), newest first.
     pub fn cat_work(&self, id: &str) -> Vec<&Task> {
-        let mut v: Vec<&Task> = self.tasks.iter().filter(|t| t.cat == id && (t.status.is_active() || t.status == neko_protocol::TaskStatus::Asked)).collect();
+        let mut v: Vec<&Task> = self.tasks.iter().filter(|t| t.is_thread() && t.cat == id && (t.status.is_active() || t.status == neko_protocol::TaskStatus::Asked)).collect();
         v.sort_by_key(|t| std::cmp::Reverse(t.created_ms));
         v
     }
@@ -629,7 +635,7 @@ impl App {
         if self.visible_needs().iter().any(|i| i.cat == id) {
             return CatState::NeedsYou;
         }
-        match self.tasks.iter().filter(|t| t.cat == id && t.status.is_active()).count() {
+        match self.tasks.iter().filter(|t| t.is_thread() && t.cat == id && t.status.is_active()).count() {
             0 => CatState::Napping,
             n => CatState::Working(n),
         }
@@ -770,7 +776,7 @@ impl App {
 
     /// The workspace's tasks, newest first.
     pub fn tasks_in(&self, id: &str) -> Vec<&Task> {
-        self.tasks.iter().filter(|t| t.workspace == id).collect()
+        self.tasks.iter().filter(|t| t.is_thread() && t.workspace == id).collect()
     }
 
     /// How many things in the workspace need the person (the sidebar's quiet count): the daemon's items there.
@@ -1305,7 +1311,7 @@ impl App {
 
     /// Whether the open task's agent is at work.
     pub fn open_is_working(&self) -> bool {
-        self.open_task().is_some_and(|t| t.status.is_active()) || self.book().is_some_and(|b| b.running().is_some())
+        self.open_task().is_some_and(|t| t.status.is_active() || t.status == neko_protocol::TaskStatus::Waiting) || self.book().is_some_and(|b| b.running().is_some())
     }
 
     /// The open task's composer.
@@ -1386,6 +1392,14 @@ impl App {
     pub fn set_permission_mode(&mut self, mode: PermissionMode) {
         if let Some((_, s)) = &self.runtimes {
             let settings = Settings { permission_mode: mode, ..s.clone() };
+            self.send(Request::SetSettings { settings });
+        }
+    }
+
+    /// Settings ▸ Plugins: whether runs also get the person's own Claude Code MCP servers (the other settings stay as they are).
+    pub fn set_own_mcp(&mut self, on: bool) {
+        if let Some((_, s)) = &self.runtimes {
+            let settings = Settings { own_mcp: on, ..s.clone() };
             self.send(Request::SetSettings { settings });
         }
     }
@@ -1602,11 +1616,12 @@ impl App {
             Change::TaskCreated { task } => self.upsert(task),
             Change::TaskUpdated { task } => {
                 let before = self.tasks.iter().find(|t| t.id == task.id).map(|t| t.status);
-                if before != Some(task.status) {
+                // A subagent finishing is not news: its thread says it, when the thread is done (its requests still reach Needs you).
+                if before != Some(task.status) && task.is_thread() {
                     self.say_status(&task);
                 }
                 // A run finished with nothing asked: "Done" (a question or a failure to act on is an item of the list instead).
-                if task.status == neko_protocol::TaskStatus::Done && before.is_some_and(neko_protocol::TaskStatus::is_active) {
+                if task.is_thread() && task.status == neko_protocol::TaskStatus::Done && before.is_some_and(neko_protocol::TaskStatus::is_active) {
                     let words = self.last_words(&task.id);
                     let here = self.here();
                     let title = neko_protocol::title::title(&task.title);
@@ -1712,9 +1727,11 @@ impl App {
         match reply {
             Reply::Transcript { transcript } => {
                 let id = transcript.task.id.clone();
+                let id_for_lines = id.clone();
                 self.upsert(transcript.task.clone());
                 // Words that streamed in between are in the stored part or arrive as deltas after it: the whole replaces.
                 self.books.insert(id, Book::from(transcript));
+                self.ask_subagent_lines(&id_for_lines);
                 return;
             }
             Reply::Runtimes { runtimes, settings } => {

@@ -21,6 +21,7 @@ fn task() -> Task {
         failure_line: String::new(),
         thread_status: ThreadStatus::Idle,
         needs_you: false,
+        subagent: None,
     }
 }
 
@@ -177,7 +178,7 @@ fn the_requests_that_run_a_task_round_trip() {
     pinned(ClientMessage { id: 9, request: Request::WatchTask { task: None } }, r#"{"id":9,"type":"watch_task"}"#);
     pinned(ClientMessage { id: 10, request: Request::ListRuntimes }, r#"{"id":10,"type":"list_runtimes"}"#);
     pinned(
-        ClientMessage { id: 11, request: Request::SetSettings { settings: Settings { runtime: "claude".into(), permission_mode: PermissionMode::Full } } },
+        ClientMessage { id: 11, request: Request::SetSettings { settings: Settings { runtime: "claude".into(), permission_mode: PermissionMode::Full, own_mcp: false } } },
         r#"{"id":11,"type":"set_settings","settings":{"runtime":"claude","permission_mode":"full"}}"#,
     );
     for (m, name) in [(PermissionMode::Follow, "follow"), (PermissionMode::Ask, "ask"), (PermissionMode::Full, "full")] {
@@ -305,7 +306,7 @@ fn needs_you_round_trips() {
         ClientMessage { id: 2, request: Request::FollowUp { task: TaskId("task_1".into()), words: "On main.".into(), answering: Some(RunId("run_1".into())) } },
         r#"{"id":2,"type":"follow_up","task":"task_1","words":"On main.","answering":"run_1"}"#,
     );
-    let item = |id: &str, need: Need| NeedsItem { id: id.into(), task: TaskId("task_1".into()), workspace: "ws_1".into(), title: "Fix the build".into(), cat: "cat_tofu".into(), cat_name: "tofu".into(), since_ms: 5, need };
+    let item = |id: &str, need: Need| NeedsItem { id: id.into(), task: TaskId("task_1".into()), workspace: "ws_1".into(), title: "Fix the build".into(), cat: "cat_tofu".into(), cat_name: "tofu".into(), since_ms: 5, need, subagent: None };
     let head = |id: &str| format!(r#"{{"id":"{id}","task":"task_1","workspace":"ws_1","title":"Fix the build","cat":"cat_tofu","cat_name":"tofu","since_ms":5,"need":"#);
     let p = r#"{"id":"perm_1","task":"task_1","run":"run_1","tool":"Bash","title":"Run a command","why":"Commands can change anything on this Mac.","detail":"cargo test","destructive":false,"state":"pending","asked_ms":3}"#;
     pinned(item("perm:perm_1", Need::Permission { permission: perm() }), &format!(r#"{}{{"kind":"permission","permission":{p}}}}}"#, head("perm:perm_1")));
@@ -418,5 +419,31 @@ fn cats_round_trip() {
     let json = serde_json::to_string(&r).unwrap();
     assert!(json.ends_with(r#""cat":"cat_miso","rules_hash":"cbf29ce484222325"}"#), "{json}");
     pinned(PartBody::RulesChanged { cat: c(), name: "miso".into() }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso"}"#);
-    assert_eq!(PROTOCOL_VERSION, 12);
+    assert_eq!(PROTOCOL_VERSION, 13);
+}
+
+#[test]
+fn subagents_have_their_own_shapes_and_the_old_ones_do_not_change() {
+    // A thread has no `subagent`; a subagent says whose it is and its number.
+    let t = task();
+    assert!(!serde_json::to_string(&t).unwrap().contains("subagent"));
+    let mut s = task();
+    s.subagent = Some(SubagentOf { parent: TaskId("task_1".into()), number: "1.2".into(), root: TaskId("task_0".into()) });
+    let json = serde_json::to_string(&s).unwrap();
+    assert!(json.ends_with(r#""subagent":{"parent":"task_1","number":"1.2","root":"task_0"}}"#), "{json}");
+    let back: Task = serde_json::from_str(&json).unwrap();
+    assert_eq!((back.subagent.as_ref().unwrap().depth(), back.subagent_name().as_deref(), back.is_thread()), (2, Some("Subagent 1.2"), false));
+    assert_eq!(SubagentOf { parent: TaskId("p".into()), number: "1".into(), root: TaskId("p".into()) }.depth(), 1);
+    pinned(TaskStatus::Waiting, "\"waiting\"");
+    pinned(PartBody::Subagent { subagent: TaskId("task_2".into()), number: "1".into(), title: "Check links".into() }, r#"{"kind":"subagent","subagent":"task_2","number":"1","title":"Check links"}"#);
+    pinned(
+        PartBody::Wake { number: "1".into(), title: "Check links".into(), status: "done".into(), summary: "Fixed 2.".into(), files: vec!["a.rs +1 -0".into()], branch: Some("neko/x".into()) },
+        r#"{"kind":"wake","number":"1","title":"Check links","status":"done","summary":"Fixed 2.","files":["a.rs +1 -0"],"branch":"neko/x"}"#,
+    );
+    pinned(PartBody::Wake { number: "2".into(), title: "T".into(), status: "failed".into(), summary: String::new(), files: vec![], branch: None }, r#"{"kind":"wake","number":"2","title":"T","status":"failed","summary":""}"#);
+    // The setting that gives runs the person's own MCP servers is written only when it is on.
+    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false }, r#"{"runtime":"claude","permission_mode":"follow"}"#);
+    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: true }, r#"{"runtime":"claude","permission_mode":"follow","own_mcp":true}"#);
+    let old: Settings = serde_json::from_str(r#"{"runtime":"claude","permission_mode":"ask"}"#).unwrap();
+    assert!(!old.own_mcp, "a screen from before the setting sends none");
 }

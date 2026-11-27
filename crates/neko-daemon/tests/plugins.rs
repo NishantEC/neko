@@ -88,6 +88,11 @@ impl Rig {
     }
 }
 
+/// The plugins a run was given: the servers in its config other than Neko's own.
+fn served(run: &(Vec<String>, Option<Value>)) -> Vec<String> {
+    run.1.as_ref().and_then(|c| c["content"]["mcpServers"].as_object()).map(|m| m.keys().filter(|k| *k != "neko").cloned().collect()).unwrap_or_default()
+}
+
 /// An `mcpServers` paste for the fake server, called `name`, with `ACME_TOKEN` set to a secret.
 fn paste(name: &str, extra_args: &[&str]) -> String {
     let mut args: Vec<String> = extra_args.iter().map(|a| (*a).to_owned()).collect();
@@ -163,7 +168,7 @@ fn pending(changes: &[Change]) -> Permission {
 }
 
 fn set_mode(c: &mut Client, m: PermissionMode) {
-    let s = Settings { runtime: "claude".into(), permission_mode: m };
+    let s = Settings { runtime: "claude".into(), permission_mode: m, own_mcp: false };
     assert_eq!(c.request(Request::SetSettings { settings: s.clone() }).unwrap(), Reply::Settings { settings: s });
 }
 
@@ -387,7 +392,7 @@ fn a_run_gets_its_approved_plugins_in_a_config_of_its_own_and_the_file_goes_with
     let (before, _) = run_plugin_task(&mut c, "acme-docs", None, Decision::AllowOnce);
     let runs = r.runs();
     assert_eq!(runs.len(), 1);
-    assert!(!runs[0].0.iter().any(|a| a == "--mcp-config") && runs[0].1.is_none(), "an unapproved plugin never reaches a run: {:?}", runs[0].0);
+    assert!(served(&runs[0]).is_empty(), "an unapproved plugin never reaches a run: {:?}", runs[0].1);
     assert!(transcript(&mut c, &before.id).parts.iter().any(|p| matches!(&p.body, PartBody::Agent { text, .. } if text.contains("was not available"))));
     approve(&mut c, &p);
     let (task, asked) = run_plugin_task(&mut c, "acme-docs", None, Decision::AllowOnce);
@@ -400,7 +405,7 @@ fn a_run_gets_its_approved_plugins_in_a_config_of_its_own_and_the_file_goes_with
     assert_eq!(runs.len(), 2);
     let (argv, config) = &runs[1];
     let at = argv.iter().position(|a| a == "--mcp-config").expect("the run's config is passed");
-    assert!(!argv.iter().any(|a| a == "--strict-mcp-config"), "the person's own MCP servers stay");
+    assert!(argv.iter().any(|a| a == "--strict-mcp-config"), "a run has only the servers Neko gave it, not the person's own");
     let file = Path::new(&argv[at + 1]);
     assert!(file.starts_with(r.d.dir.join("plugins-run")), "{file:?}");
     let config = config.as_ref().expect("the config was read");
@@ -409,7 +414,9 @@ fn a_run_gets_its_approved_plugins_in_a_config_of_its_own_and_the_file_goes_with
     assert_eq!(server["type"], "stdio");
     assert_eq!(server["command"], fake_mcp().to_string_lossy().as_ref());
     assert_eq!(server["env"]["ACME_TOKEN"], SECRET, "the secret is in the server's env, for this run");
-    assert_eq!(config["content"]["mcpServers"].as_object().unwrap().len(), 1);
+    // Neko's own server is there too, before the plugins (docs/knowledge/subagents.md).
+    assert_eq!(config["content"]["mcpServers"].as_object().unwrap().len(), 2);
+    assert_eq!(config["content"]["mcpServers"]["neko"]["args"], json!(["--mcp"]));
     // The step shows the tool's own name, and it ran.
     let t = transcript(&mut c, &task.id);
     assert!(t.parts.iter().any(|p| matches!(&p.body, PartBody::Tool { name, state: ToolState::Done, .. } if name == "mcp__acme-docs__search")), "{:#?}", t.parts);
@@ -455,7 +462,7 @@ fn a_manifest_that_changed_is_left_out_of_runs_and_asks_again() {
     let p = add(&mut c, &paste("acme-docs", &[]));
     let a = approve(&mut c, &p);
     run_plugin_task(&mut c, "acme-docs", None, Decision::AllowOnce);
-    assert!(r.runs()[0].1.is_some(), "approved: handed over");
+    assert_eq!(served(&r.runs()[0]), ["acme-docs"], "approved: handed over");
     let mut m = a.manifest.clone();
     m.mcp.args.push("--changed".into());
     let Reply::Plugin { plugin: changed } = c.request(Request::UpdatePluginManifest { plugin: a.id.clone(), manifest: m }).unwrap() else { panic!() };
@@ -466,7 +473,7 @@ fn a_manifest_that_changed_is_left_out_of_runs_and_asks_again() {
     let (t, asked) = run_plugin_task(&mut c, "acme-docs", None, Decision::AllowOnce);
     assert!(asked.is_none(), "there is no such tool: nothing asks");
     let runs = r.runs();
-    assert!(runs[1].1.is_none() && !runs[1].0.iter().any(|a| a == "--mcp-config"), "a changed plugin never reaches a run");
+    assert!(served(&runs[1]).is_empty(), "a changed plugin never reaches a run");
     assert!(transcript(&mut c, &t.id).parts.iter().any(|p| matches!(&p.body, PartBody::Agent { text, .. } if text.contains("was not available"))));
     // Approved again, it is back.
     approve(&mut c, &changed);
@@ -489,13 +496,13 @@ fn a_plugin_folders_file_changing_is_a_changed_manifest_before_the_next_run() {
     let Reply::Plugin { plugin } = c.request(Request::AddPluginFolder { folder: folder.to_string_lossy().into_owned() }).unwrap() else { panic!() };
     approve(&mut c, &plugin);
     run_plugin_task(&mut c, "folder-docs", None, Decision::AllowOnce);
-    assert!(r.runs()[0].1.is_some());
+    assert_eq!(served(&r.runs()[0]), ["folder-docs"]);
     // The file changes on disk; a screen watching hears of it by itself.
     write(&["--evil"]);
     let heard = events_until(&mut c, "the plugin to be changed", |ch| matches!(ch, Change::PluginUpdated { plugin } if plugin.approval == Approval::Changed));
     assert!(heard.iter().any(|ch| matches!(ch, Change::NeedsChanged { .. })) || needs(&mut c).iter().any(|i| matches!(&i.need, Need::Plugin { ask } if ask.changed)));
     run_plugin_task(&mut c, "folder-docs", None, Decision::AllowOnce);
-    assert!(r.runs()[1].1.is_none(), "a changed file is a plugin that does not run");
+    assert!(served(&r.runs()[1]).is_empty(), "a changed file is a plugin that does not run");
 }
 
 #[test]
@@ -509,23 +516,25 @@ fn which_cats_may_use_a_plugin_decides_who_gets_it() {
     run_plugin_task(&mut c, "acme-docs", Some("cat_miso"), Decision::AllowOnce);
     run_plugin_task(&mut c, "acme-docs", Some("cat_tofu"), Decision::AllowOnce);
     let runs = r.runs();
-    assert!(runs[0].1.is_some(), "miso may");
-    assert!(runs[1].1.is_none(), "tofu may not");
+    assert_eq!(served(&runs[0]), ["acme-docs"], "miso may");
+    assert!(served(&runs[1]).is_empty(), "tofu may not");
     // Off is off for every cat.
     c.request(Request::SetPluginEnabled { plugin: p.id.clone(), on: false }).unwrap();
     run_plugin_task(&mut c, "acme-docs", Some("cat_miso"), Decision::AllowOnce);
-    assert!(r.runs()[2].1.is_none());
+    assert!(served(&r.runs()[2]).is_empty());
     assert!(matches!(c.request(Request::SetPluginAccess { plugin: p.id.clone(), access: Access { mode: AccessMode::Only, cats: vec!["cat_nobody".into()] } }).unwrap(), Reply::Error { code: ErrorCode::Refused, .. }));
 }
 
 #[test]
-fn a_run_with_no_plugins_has_no_config_and_no_flag() {
+fn a_run_with_no_plugins_has_only_nekos_own_server() {
     let r = rig("plugins-none", &[]);
     let mut c = r.client();
     let task = create(&mut c, "Hello", None);
     events_until(&mut c, "done", task_is(&task.id, TaskStatus::Done));
     let runs = r.runs();
-    assert!(!runs[0].0.iter().any(|a| a == "--mcp-config") && runs[0].1.is_none());
+    assert!(runs[0].0.iter().any(|a| a == "--mcp-config"), "Neko's own server is in every run's config");
+    assert!(served(&runs[0]).is_empty(), "and no plugin");
+    assert_eq!(runs[0].1.as_ref().unwrap()["content"]["mcpServers"].as_object().unwrap().keys().collect::<Vec<_>>(), ["neko"]);
     assert!(!r.d.dir.join("plugins-run").exists() || std::fs::read_dir(r.d.dir.join("plugins-run")).unwrap().count() == 0);
 }
 

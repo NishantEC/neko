@@ -120,7 +120,9 @@ fn a_cat_with_rules_does_a_task_and_its_edited_rules_reach_the_next_run() {
     assert!(has_key(&rt, |k| k.starts_with("turn-") && k.ends_with("-cat")), "the turn is led by the cat");
     let got = blocks(&record);
     assert_eq!(got.len(), 1);
-    assert_eq!(got[0], "<neko-cat>\nYou are pip, one of the person's cats in Neko.\n\nYour standing rules, from the person:\nAnswer in one short paragraph.\n</neko-cat>");
+    // The cat's block, verbatim, then what Neko tells every agent about subagents (the daemon's tests hold its exact words).
+    let block = "<neko-cat>\nYou are pip, one of the person's cats in Neko.\n\nYour standing rules, from the person:\nAnswer in one short paragraph.\n</neko-cat>";
+    assert!(got[0].starts_with(&format!("{block}\n\n")), "{}", got[0]);
 
     // Edit the rules from the task's band, then follow up.
     click(&mut rt, "task-cat");
@@ -142,7 +144,7 @@ fn a_cat_with_rules_does_a_task_and_its_edited_rules_reach_the_next_run() {
     until(&mut rt, "the follow-up to finish with the quiet line", |rt| rt.state.books.get(&task.id).is_some_and(|b| b.runs.len() == 2 && b.runs[1].status == neko_protocol::RunStatus::Done) && has_key(rt, |k| k.starts_with("rules-changed-")));
     let got = blocks(&record);
     assert_eq!(got.len(), 2, "one block per run");
-    assert!(got[1].ends_with("Answer in one short paragraph. Use British spelling.\n</neko-cat>"), "{}", got[1]);
+    assert!(got[1].contains("Answer in one short paragraph. Use British spelling.\n</neko-cat>\n\n"), "{}", got[1]);
 
     rt.update(|s, _| s.conn = None);
     if let Some(pid) = folder.pid.take() {

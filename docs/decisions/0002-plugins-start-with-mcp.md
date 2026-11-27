@@ -50,4 +50,8 @@ web address. Each is later, and none changes the approval model above.
 
 - Neko has a second place a person can add something that runs, so "Needs you" gains a kind that belongs to no task.
 - Every plugin tool goes through the same permission modes as any tool, so "Ask before risky steps" asks about a plugin's tools too.
-- Claude Code keeps the person's own MCP servers (`--strict-mcp-config` is not passed): Neko adds to Claude Code and takes nothing away.
+- ~~Claude Code keeps the person's own MCP servers.~~ **Changed 2026-11-27 (subagents):** every run is passed `--strict-mcp-config`, so a run has
+  only Neko's own server and the plugins the person approved; Settings ▸ Plugins can give the person's own servers back. Why: the real
+  CLI measured about 480 tools from one person's own servers in every run, which slows runs and is not what Neko configured; Neko's own
+  tool for subagents must be one of very few tools for the agent to use it reliably. The default of "no surprises" now means "the
+  tools the app shows". See `docs/knowledge/subagents.md`.

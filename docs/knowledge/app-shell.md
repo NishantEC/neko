@@ -20,6 +20,7 @@
 | `rounds.rs`, `rounds_view.rs` | Rounds (⌘3): the words for schedules and times, the New round / Edit panel's form; the page of cards and the panel (`rounds.md`). |
 | `briefing.rs`, `briefing_view.rs` | The Briefing (⌘4): the words for a window, a round line and the totals, the state it keeps; the page (`briefing.md`). |
 | `plugins.rs`, `plugins_view.rs` | Plugins: the words for a state, a check and an ask; the Add sheet's state, read live with the daemon's own `parse_mcp_json`; Settings ▸ Plugins, the Add sheet, the approval block Needs you shares, a cat's plugins (`plugins.md`). |
+| `subagents.rs`, `subagents_view.rs` | Subagents: which tasks are one, what a thread's row says, the card, the wake note, the waiting line, the read-only foot, the breadcrumb ("Subagents in the app"). |
 | `needs_view.rs` | Needs you (⌘2): one list of what waits for the person, answered in place (`needs-you.md`). |
 | `notify.rs`, `deeplink.rs` | The notification model and its poster (a recorder outside the real window); `neko://task/<id>`. |
 | `link.rs` | The supervisor thread: find or start the daemon, connect, reconnect, an inbox the window drains. |
@@ -171,6 +172,22 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
 - **A secret** is held only while it is typed, sent once and dropped; Change is its own state (`Ui.changing`), so a stray edit event never turns a set secret back into a field. Tested: the value is in no accessibility name, text or description.
 - **Needs you** gives a plugin the plug tile (with the amber dot) in place of a cat's portrait, groups it under "Plugins", has no Open task (it has Open in Settings), and Approve and Decline answer nothing on Return (Space presses), as on a destructive request. Its notification has no buttons, is made only while Neko is not in front, and a click opens the list at the card.
 - **A tool step** of a plugin reads "acme-docs · search", never `mcp__acme-docs__search`.
+
+## Subagents in the app
+
+A subagent is a task (`Task.subagent`: its parent, its number, the thread at the top) and never a thread. `subagents.rs` holds the words and the state, `subagents_view.rs` the drawing.
+
+- **Not listed.** The sidebar (`tasks_in`, the Cattains), Home's lists, a cat's page and counts, and every notification skip tasks with `subagent`; a subagent finishing says nothing (its thread's end does), but its permission request reaches Needs you like any other. When a subagent is open its thread's row is the chosen one.
+- **The thread's row** keeps the portrait and says what it waits on in place of its state word: "Waiting on Subagent 1" (one live subagent and the thread waiting), "Subagent 1 working", "N subagents working", or "Reading the reports" (waiting, none live). The description keeps the state ("miso, waiting, 2 subagents working"). A waiting thread's portrait wears the still ring (`faces::portrait_in`); Waiting is not active, so it is not in the Cattains, but it is in Home's In progress.
+- **The card** stands where `PartBody::Subagent` is: one raised card, a row (`subagent-card-<number>`) per subagent, `Subagent 1`, its title, its state at the right (Queued, Working, Needs you, Waiting, Done, Failed, Stopped, Interrupted, Has a question), "Shared folder" and its last line (the newest agent words' first line, else the newest step, from the transcript parts this window has of it; a thread's transcript asks once for the transcripts of its subagents it has not read, `ask_subagent_lines`), and Open (`subagent-open-<number>`, name "Open Subagent 1"). Subagent parts with only Neko's own tool steps between them are one card. In a finished run the cards are outside the "Worked for" fold, after it.
+- **The wake note** (`PartBody::Wake`) stands before the run it started, outside its fold: "Woken by Subagent 1 · done" with a hairline each side, then a closed fold "Report from Subagent 1" (key `wake-report-<seq>`, its button `…-trigger`) holding the summary, the files and the branch.
+- **The waiting line** (`waiting-line`) is the last line of a waiting thread: "Waiting on Subagent 1 and Subagent 2" with each name a link (`waiting-link-<number>`) to that subagent; "Reading the reports" when none is live. The composer of a waiting thread offers Stop, and Stop (or Escape) stops the thread and its subagents.
+- **A subagent opened** has no composer: a quiet line (`subagent-readonly`) "This is Subagent 1's own conversation, to read. Say what you want changed in Fix login.", Back (`subagent-back`, to its thread; to its parent for a deeper one) and, while it works, Stop (`subagent-stop`, "Stop Subagent 1"). Its turns have no cat head and its requests read "Subagent 1 asks" with no portrait, answered in place. Escape goes back to the thread (it denies a waiting request first) and never stops the subagent.
+- **The band** reads `Fix login / Subagent 1` (deeper, `Fix login / Subagent 1 / Subagent 1.2`): `band-title` is the heading (its name the whole breadcrumb), `crumb-thread` a button to the thread, `crumb-subagent` plain words; there is no cat and no task menu (a subagent leaves with its thread). The window's title is the same breadcrumb.
+- **Needs you** reads "Subagent 1 asks" led by the number on a quiet tile, "in Fix login" as its second line and "Open Subagent 1"; the notification's body starts "Subagent 1 asks:".
+- **Settings ▸ Plugins** starts with the switch `own-mcp`, "Also give runs my own Claude Code MCP servers", off by default, which sends `SetSettings` with `own_mcp` toggled and the other fields kept, and one line saying what on and off mean.
+
+Scenes: `subagents-cards`, `subagents-wake`, `subagents-wake-open`, `subagents-waiting`, `subagent-view`, `subagent-asks`, `needs-subagent` (`tests/subagents.rs` holds them).
 
 ## Not done yet
 

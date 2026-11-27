@@ -26,6 +26,18 @@ Nothing an agent starts outlives its run. `crates/neko-core/src/guard.rs`.
 A run may take 30 minutes. A run that says nothing for 5 minutes stops (time waiting for the person does not count). Both end
 the run as failed with the reason. Tests shorten them with `NEKO_RUN_LIMIT_MS` and `NEKO_RUN_STALL_MS`.
 
+## Subagents
+
+Each subagent is its own run with its own guardian and its own process group, so nothing above changes. Stop on a thread stops the run
+it has and every subagent under it, at any depth (`subagents.md`): each one's guardian then ends its processes within the same
+second. A thread that rests (no run, only Waiting) has no process at all, which is the point of waking by `--resume`. The tests count
+the processes of the daemon's folder before and after a Stop of two working subagents and require none (`crates/neko-daemon/tests/subagents.rs`,
+and the rig's own end check in the four subagent scenarios). Neko's own MCP server (`neko-daemon --mcp`) is a child of the CLI, so it is in
+the CLI's tree and dies with it.
+
+The limits that keep a thread from starting too much: 3 subagents of a thread running, 4 runs across the daemon, 24 unfinished per
+thread, depth 3. The 30 minutes and 5 minutes of silence above apply to each subagent's run on its own.
+
 ## Tests
 
 `crates/neko-core/tests/guard.rs` (the run ends; the run is stopped) and `crates/neko-daemon/tests/runs.rs` (the daemon is

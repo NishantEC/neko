@@ -197,11 +197,13 @@ const RIGHT_WORKING: f32 = 46.0;
 #[allow(clippy::too_many_arguments)]
 pub fn thread_row(s: &App, t: &Theme, task: &Task, i: usize, n: usize, open: bool, prefix: &str, indent: f32, project: Option<&str>, layer: &mut Vec<El>) -> El {
     let key = format!("{prefix}-{}", task.id.0);
-    let need = s.visible_needs().into_iter().find(|x| x.task == task.id);
-    let line = threads::second_line(task, need);
+    // A request of one of its subagents is the thread's to show: "Needs you: Run a command · Subagent 1".
+    let need = s.visible_needs().into_iter().find(|x| x.task == task.id || s.tasks.iter().any(|u| u.id == x.task && u.subagent.as_ref().is_some_and(|o| o.root == task.id)));
+    let line = threads::second_line(task, need, s.thread_line(task).as_deref());
     let state = threads::state_words(task);
     let age = threads::age(s.now_ms, s.utc_offset_s, task.activity_ms.max(task.created_ms));
-    let working = task.thread_status == neko_protocol::ThreadStatus::Working;
+    // The right side says the state the mark says: "Working" only while the mark is the working ring, never beside an amber dot.
+    let working = crate::status_mark::mark_of(task) == crate::status_mark::Mark::Working;
     let description = format!("{}{}{}", if state.is_empty() { String::new() } else { format!("{state}. ") }, line.spoken(), if project.is_some_and(|p| !p.is_empty()) { format!(", in {}", project.unwrap_or_default()) } else { String::new() });
     let tid = task.id.clone();
     let r = row_frame(t, key.clone(), &task.title, format!("{description}, {}", if working { "working".to_owned() } else { age.clone() }), i, n, open, indent);
@@ -284,7 +286,7 @@ fn cattains(s: &App, t: &Theme, layer: &mut Vec<El>) -> Option<El> {
         let tasks = s.cat_work(&c.id);
         let needs: Vec<&NeedsItem> = s.visible_needs().into_iter().filter(|i| i.cat == c.id).collect();
         let (st, ink, said, line) = if let Some(first) = needs.first() {
-            let line = if tasks.len() >= 2 { format!("needs you · {} threads", tasks.len()) } else { format!("needs you: {}", threads::need_words(&first.need)) };
+            let line = if tasks.len() >= 2 { format!("needs you · {} threads", tasks.len()) } else { format!("needs you: {}", threads::need_words(first)) };
             (TaskStatus::NeedsYou, t.c.warning.fg, line.clone(), line)
         } else if tasks.len() >= 2 {
             let line = format!("working on {}", tasks.len());
@@ -303,7 +305,7 @@ fn cattains(s: &App, t: &Theme, layer: &mut Vec<El>) -> Option<El> {
         crew = crew.child(face_row(t, format!("cat-{}", c.id), &c.name, said, &c.face, Some(st), meta, 0, n, open).on_press(move |s: &mut App| s.open_cat_page(&id)));
         if tasks.len() >= 2 {
             for (i, task) in tasks.iter().enumerate() {
-                crew = crew.child(thread_row(s, t, task, i + 1, n, s.open.as_ref() == Some(&task.id), "cattain-thread", t.space.at(3.0), None, layer));
+                crew = crew.child(thread_row(s, t, task, i + 1, n, s.row_is_open(task), "cattain-thread", t.space.at(3.0), None, layer));
             }
         }
         list = list.child(crew);
@@ -385,7 +387,7 @@ fn rows(s: &App, t: &Theme, g: &threads::Group<'_>, key: &str, name: &str, proje
     let n = shown.len();
     for (i, task) in shown.into_iter().enumerate() {
         let from = if project { None } else { Some(s.workspace_of(&task.workspace).map_or_else(String::new, |w| s.project_name(w))) };
-        list = list.child(thread_row(s, t, task, i, n, s.open.as_ref() == Some(&task.id), "thread", 0.0, from.as_deref(), layer));
+        list = list.child(thread_row(s, t, task, i, n, s.row_is_open(task), "thread", 0.0, from.as_deref(), layer));
     }
     let more = if g.threads.len() > SECTION_ROWS + 1 {
         let id = g.id.clone();

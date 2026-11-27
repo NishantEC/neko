@@ -276,7 +276,7 @@ pub fn plugin_add_refused(s: &mut App) {
 // ---- Needs you ------------------------------------------------------------------------------------------------------------------------------
 
 fn plugin_item(s: &App, p: &Plugin, minutes: i64) -> NeedsItem {
-    NeedsItem { id: format!("plugin:{}", p.id), task: neko_protocol::TaskId(String::new()), workspace: String::new(), title: p.name.clone(), cat: String::new(), cat_name: String::new(), since_ms: ago(s, minutes), need: Need::Plugin { ask: ask_of(p) } }
+    NeedsItem { id: format!("plugin:{}", p.id), task: neko_protocol::TaskId(String::new()), workspace: String::new(), title: p.name.clone(), cat: String::new(), cat_name: String::new(), since_ms: ago(s, minutes), need: Need::Plugin { ask: ask_of(p) }, subagent: None }
 }
 
 /// The approval card among the other things that wait.

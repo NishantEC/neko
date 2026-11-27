@@ -110,6 +110,9 @@ impl Mapper {
             "result" => self.result(&v, &mut out),
             "rate_limit_event" => {
                 let info = &v["rate_limit_info"];
+                if let Some(status) = s(&info["status"]) {
+                    out.push(Said::Event(AgentEvent::RateLimit { status: status.to_owned(), resets_at: info["resetsAt"].as_i64() }));
+                }
                 if s(&info["status"]) == Some("rejected") {
                     self.limit = Some(info["resetsAt"].as_i64().map(reset_words));
                 }
@@ -421,6 +424,8 @@ pub fn action(tool: &str, input: &Value, workdir: &str) -> Action {
         "WebFetch" => Action::Network { target: field(input, &["url"]).unwrap_or("").to_owned() },
         "WebSearch" => Action::Network { target: format!("a web search: {}", field(input, &["query"]).unwrap_or("")) },
         t if INTERNAL_TOOLS.contains(&t) => Action::Internal { tool: t.to_owned() },
+        // Neko's own tools (docs/knowledge/subagents.md) only record work in Neko's own state, so they go ahead in every mode.
+        t if t.starts_with("mcp__neko__") => Action::Internal { tool: t.to_owned() },
         t if neko_protocol::plugins::mcp_tool(t).is_some() => {
             let (server, tool) = neko_protocol::plugins::mcp_tool(t).unwrap_or_default();
             Action::Mcp { server: server.to_owned(), tool: tool.to_owned(), input: shorten(&input.to_string(), 400) }
@@ -531,10 +536,12 @@ mod tests {
             r#"{"type":"system","subtype":"status","status":"requesting"}"#,
             r#"{"type":"system","subtype":"commands_changed","commands":["a","b"]}"#,
             r#"{"type":"system","subtype":"informational","level":"info","content":"Something to note"}"#,
-            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}"#,
         ]);
         assert!(said.is_empty(), "{said:?}");
         assert!(m.noise.is_empty());
+        // The account's limit news is the daemon's (it holds back what it starts by itself); the transcript hears nothing of it.
+        let said = feed(&mut m, &[r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}"#, r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1900000000}}"#]);
+        assert_eq!(events(&said), vec![AgentEvent::RateLimit { status: "allowed".into(), resets_at: None }, AgentEvent::RateLimit { status: "rejected".into(), resets_at: Some(1_900_000_000) }]);
         let said = feed(&mut m, &[
             r#"{"type":"system","subtype":"thinking_tokens","estimated_tokens":120,"estimated_tokens_delta":40}"#,
             r#"{"type":"system","subtype":"informational","level":"warning","tag":"hook_no_verdict","content":"A hook gave no usable answer, so it didn't check this action.","hook_no_verdict":{"hook_event":"PreToolUse","tool_use_id":"toolu_1"}}"#,

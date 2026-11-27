@@ -208,8 +208,8 @@ fn blocks<'a>(book: &'a Book) -> Vec<Block<'a>> {
             out.push(Block::Person(p));
             continue;
         }
-        // The rules line stands before its run, outside its fold.
-        if let PartBody::RulesChanged { .. } = p.body {
+        // The rules line and the note that a report woke the thread stand before their run, outside its fold.
+        if let PartBody::RulesChanged { .. } | PartBody::Wake { .. } = p.body {
             out.push(Block::Loose(p));
             continue;
         }
@@ -247,6 +247,10 @@ pub struct Who {
 }
 
 fn who(s: &App, r: &Run, task: &Task) -> Who {
+    // A subagent has a number, no name and no face.
+    if let Some(n) = task.subagent_name() {
+        return Who { name: n, face: String::new() };
+    }
     let cat = s.cat(r.cat.as_deref().unwrap_or(&task.cat)).or_else(|| s.cat(&task.cat));
     cat.map_or_else(|| Who { name: "Neko".to_owned(), face: String::new() }, |c| Who { name: c.name.clone(), face: c.face.clone() })
 }
@@ -262,7 +266,7 @@ fn part_el(s: &App, t: &Theme, book: &Book, r: &Run, w: &Who, p: &Part, streamin
         PartBody::Agent { text: words, .. } if words.trim().is_empty() => None,
         PartBody::Agent { text: words, .. } => Some(answer(t, &key, words, streaming, last, muted)),
         PartBody::Notice { .. } => notice(t, p),
-        PartBody::Person { .. } | PartBody::RulesChanged { .. } => None,
+        PartBody::Person { .. } | PartBody::RulesChanged { .. } | PartBody::Subagent { .. } | PartBody::Wake { .. } => None,
     }
 }
 
@@ -289,14 +293,42 @@ fn group_steps(t: &Theme, tagged: Vec<(bool, El)>) -> Vec<El> {
 /// Parts in order. Words with a step after them are interim (`muted`); `last_at` is the final answer.
 fn lay_out(s: &App, t: &Theme, book: &Book, r: &Run, w: &Who, parts: &[&Part], streaming_at: Option<usize>, last_at: Option<usize>) -> Vec<El> {
     let last_step = parts.iter().rposition(|p| quiet_line(p));
-    let tagged: Vec<(bool, El)> = parts
-        .iter()
-        .enumerate()
-        .filter_map(|(i, p)| {
-            let interim = last_step.is_some_and(|l| i < l) && Some(i) != last_at;
-            part_el(s, t, book, r, w, p, Some(i) == streaming_at, Some(i) == last_at, interim).map(|e| (quiet_line(p), e))
-        })
-        .collect();
+    let one = |i: usize, p: &Part| {
+        let interim = last_step.is_some_and(|l| i < l) && Some(i) != last_at;
+        part_el(s, t, book, r, w, p, Some(i) == streaming_at, Some(i) == last_at, interim).map(|e| (quiet_line(p), e))
+    };
+    let mut tagged: Vec<(bool, El)> = Vec::new();
+    let mut i = 0;
+    while i < parts.len() {
+        let p = parts[i];
+        if !matches!(p.body, PartBody::Subagent { .. }) {
+            tagged.extend(one(i, p));
+            i += 1;
+            continue;
+        }
+        // Subagents started one after another are one card with a row each; only Neko's own tool steps (the calls that started
+        // them) may stand between them. Those steps follow the card.
+        let (mut group, mut last, mut j) = (vec![p], i, i + 1);
+        while j < parts.len() {
+            match &parts[j].body {
+                PartBody::Subagent { .. } => {
+                    group.push(parts[j]);
+                    last = j;
+                }
+                PartBody::Tool { name, .. } if name.starts_with("mcp__neko__") => {}
+                _ => break,
+            }
+            j += 1;
+        }
+        if let Some(card) = crate::subagents_view::card_stack(s, t, &group) {
+            tagged.push((false, card));
+        }
+        for k in (i + 1..last).filter(|&k| !matches!(parts[k].body, PartBody::Subagent { .. })) {
+            tagged.extend(one(k, parts[k]));
+        }
+        j = last + 1;
+        i = j;
+    }
     group_steps(t, tagged)
 }
 
@@ -316,7 +348,9 @@ fn worked_words(r: &Run) -> String {
 /// the final answer, notices, and the card if it earns one.
 fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &Task) -> El {
     let w = who(s, r, task);
-    let turn = Message::assistant(format!("turn-{}", r.id.0), w.name.clone()).column(COLUMN).header(turn::turn_head(t, r, &w.name, &w.face, r.status == RunStatus::Running && s.pending_request().is_some(), offer_of(book, r).undone));
+    let turn = Message::assistant(format!("turn-{}", r.id.0), w.name.clone()).column(COLUMN);
+    // A subagent's turns have no head: it has no name or face, and the band says whose conversation this is.
+    let turn = if task.subagent.is_some() { turn } else { turn.header(turn::turn_head(t, r, &w.name, &w.face, r.status == RunStatus::Running && s.pending_request().is_some(), offer_of(book, r).undone)) };
     if r.status == RunStatus::Running {
         let streaming = parts.last().is_some_and(|p| matches!(&p.body, PartBody::Agent { done: false, .. }) || matches!(&p.body, PartBody::Thinking { done: false, text } if !text.trim().is_empty()));
         let mut out = lay_out(s, t, book, r, &w, parts, if streaming { Some(parts.len() - 1) } else { None }, None);
@@ -359,6 +393,9 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
         let steps = if s.is_open(&key) { vec![col().key(format!("{key}-steps")).w_full().gap(t.space.at(BLOCK_GAP)).children(lay_out_folded(s, t, book, r, &w, &work))] } else { Vec::new() };
         out.push(line.build(t, steps));
     }
+    // The subagents it started stay in sight, as one card, outside the fold.
+    let started: Vec<&Part> = parts.iter().copied().filter(|p| matches!(p.body, PartBody::Subagent { .. })).collect();
+    out.extend(crate::subagents_view::card_stack(s, t, &started));
     let tail_last = tail.iter().rposition(|p| matches!(&p.body, PartBody::Agent { text, .. } if !text.trim().is_empty()));
     out.extend(lay_out(s, t, book, r, &w, tail, None, tail_last));
     out.extend(turn::receipt(s, t, r, parts, &offer, own_changes(r), &w.name, &w.face));
@@ -440,10 +477,12 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     for b in blocks(book) {
         match b {
             Block::Person(p) => items.push(turn::person(s, t, &format!("part-{}", p.seq), &format!("part-{}-words", p.seq), p.body.text())),
-            Block::Loose(p) => items.extend(notice(t, p).or_else(|| rules_changed(t, p))),
+            Block::Loose(p) => items.extend(notice(t, p).or_else(|| rules_changed(t, p)).or_else(|| crate::subagents_view::wake_note(s, t, p)).or_else(|| crate::subagents_view::card_stack(s, t, &[p]))),
             Block::Run(r, parts) => items.push(run_block(s, t, book, r, &parts, task)),
         }
     }
+    // A thread resting on its subagents ends on what it waits for.
+    items.extend(crate::subagents_view::waiting_line(s, t, task));
     // One reading column: the conversation's content and the composer have the same width and left edge.
     let inset = t.metrics.inset;
     let conversation = Conversation::<App>::new("transcript", s.at_bottom).column(COLUMN + 2.0 * inset).children(items).on_at_bottom(|s: &mut App, at| s.at_bottom = at).build(t);
@@ -456,6 +495,8 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let mut composer = PromptInput::new("reply", &reply, |s: &mut App| s.reply_mut())
         .placeholder(if asking {
             format!("{cat} is waiting for your answer above. Escape denies it.")
+        } else if task.status == neko_protocol::TaskStatus::Waiting {
+            format!("{cat} is waiting on its subagents. Press Escape to stop.")
         } else if working {
             format!("{cat} is working. Press Escape to stop.")
         } else if task.status == neko_protocol::TaskStatus::Asked {
@@ -472,7 +513,9 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     }
     // The composer stands alone: who will answer is already in the band and in its placeholder ("Reply to miso").
     let composer = col().w_full().child(composer.build(t));
-    let mut foot = col().key("reply-area").w_full().max_w(COLUMN).gap(t.space.at(2.0)).child(composer);
+    let mut foot = col().key("reply-area").w_full().max_w(COLUMN).gap(t.space.at(2.0));
+    // A subagent is read, not talked to: no composer, a quiet line and the way back (and Stop while it works).
+    foot = if task.subagent.is_some() { foot.child(crate::subagents_view::readonly_foot(s, t, task)) } else { foot.child(composer) };
     if let Some(line) = crate::view::slow_line(s, t) {
         foot = foot.child(line);
     }

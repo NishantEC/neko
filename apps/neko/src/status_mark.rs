@@ -4,6 +4,7 @@
 //! - **Needs you:** an amber dot, over everything else (it is the flag the person acts on).
 //! - **Failed:** a red dot, until the thread is opened.
 //! - **Working:** a small turning ring segment in the identity teal (a still arc under Reduce Motion).
+//! - **Waiting** (on subagents): the same ring held still, in the second ink: the thread is not busy.
 //! - **Idle:** nothing; the slot is kept so titles line up.
 //!
 //! Every colour is taken toward its strong ink until it reaches its contrast against the surface the row sits on. The mark is hidden
@@ -30,6 +31,7 @@ pub enum Mark {
     NeedsYou,
     Failed,
     Working,
+    Waiting,
     Idle,
 }
 
@@ -41,6 +43,7 @@ pub fn mark_of(task: &Task) -> Mark {
         match task.thread_status {
             ThreadStatus::Failed => Mark::Failed,
             ThreadStatus::Working => Mark::Working,
+            ThreadStatus::Waiting => Mark::Waiting,
             ThreadStatus::Idle => Mark::Idle,
         }
     }
@@ -55,6 +58,7 @@ pub fn ink(t: &Theme, mark: Mark, under: Color) -> Option<Color> {
             let id = t.identity();
             Some(seen_on(id.solid, id.fg, under, RING_CONTRAST))
         }
+        Mark::Waiting => Some(seen_on(t.ink_muted(), t.ink(), under, RING_CONTRAST)),
         Mark::Idle => None,
     }
 }
@@ -67,6 +71,7 @@ pub fn status_mark(t: &Theme, key: &str, task: &Task, under: Color) -> El {
     let place = |mark: El| col().w(SLOT).h_full().child(slot.clone().child(mark).mt(TOP));
     match (mark, ink(t, mark, under)) {
         (Mark::Working, Some(c)) => place(spinner_in(t, MARK, c, "").a11y_hidden()),
+        (Mark::Waiting, Some(c)) => place(crate::subagents_view::still_ring_in(MARK, c).a11y_hidden()),
         (Mark::NeedsYou | Mark::Failed, Some(c)) => place(el().size(DOT, DOT).radius(DOT / 2.0).fill(c).box_shadow(Shadow { spread: 1.0, color: under, ..Shadow::default() })),
         _ => place(el().size(1.0, 1.0)),
     }
@@ -92,6 +97,9 @@ mod tests {
         assert_eq!(mark_of(&t), Mark::Failed);
         t.needs_you = true;
         assert_eq!(mark_of(&t), Mark::NeedsYou, "the amber dot replaces the other marks");
+        t.needs_you = false;
+        t.thread_status = ThreadStatus::Waiting;
+        assert_eq!(mark_of(&t), Mark::Waiting, "no run, its subagents work: the ring, still");
     }
 
     #[test]
@@ -100,7 +108,7 @@ mod tests {
         for dark in [false, true] {
             let t = crate::view::theme(dark, false);
             let under = crate::sidebar::panel_bg(&t);
-            for (mark, min) in [(Mark::NeedsYou, DOT_CONTRAST), (Mark::Failed, DOT_CONTRAST), (Mark::Working, RING_CONTRAST)] {
+            for (mark, min) in [(Mark::NeedsYou, DOT_CONTRAST), (Mark::Failed, DOT_CONTRAST), (Mark::Working, RING_CONTRAST), (Mark::Waiting, RING_CONTRAST)] {
                 let c = ink(&t, mark, under).expect("a colour");
                 assert!(rune_ui_style::contrast(c, under) >= min, "{mark:?} dark={dark}");
             }

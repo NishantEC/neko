@@ -425,14 +425,13 @@ impl Drop for RunFiles {
 /// The plugins a run of `cat` gets: approved exactly as they are now (a folder's file is read again first), on, set up and open to the
 /// cat. Their servers, with their settings put in (secrets read from the Keychain now and written only here), go into one file made
 /// for this run alone: its folder 0700, the file 0600.
-pub fn for_run(shared: &Arc<Shared>, data_dir: &Path, cat: &str, run: &str) -> RunFiles {
+pub fn for_run(shared: &Arc<Shared>, data_dir: &Path, cat: &str, run: &str, own_server: &Path) -> RunFiles {
     let mut files = RunFiles { dir: None, config: None, names: Vec::new(), left_out: Vec::new() };
     refresh_all(shared);
-    let candidates = match lock(&shared.core).plugins_for(cat) {
-        Ok(c) => c,
-        Err(_) => return files,
-    };
-    let mut servers: Vec<(String, Target)> = Vec::new();
+    let candidates = lock(&shared.core).plugins_for(cat).unwrap_or_default();
+    // Neko's own server is in every run, first: `neko-daemon --mcp`. It carries nothing secret; the run's secret is in the
+    // environment of the CLI that starts it (docs/knowledge/subagents.md).
+    let mut servers: Vec<(String, Target)> = vec![(neko_core::subagents::SERVER.to_owned(), Target::Stdio(mcp::Launch { program: own_server.to_string_lossy().into_owned(), args: vec!["--mcp".to_owned()], env: BTreeMap::new() }))];
     for p in candidates {
         let secrets = match read_secrets(shared, &p) {
             Ok(s) => s,
@@ -443,9 +442,6 @@ pub fn for_run(shared: &Arc<Shared>, data_dir: &Path, cat: &str, run: &str) -> R
         };
         let Ok(stored) = lock(&shared.core).store.plugin_values(&p.id) else { continue };
         servers.push((p.name.clone(), mcp::target(&p, &stored, &secrets)));
-    }
-    if servers.is_empty() {
-        return files;
     }
     let root = data_dir.join(RUN_FILES);
     let dir = root.join(run);
@@ -460,7 +456,7 @@ pub fn for_run(shared: &Arc<Shared>, data_dir: &Path, cat: &str, run: &str) -> R
     match written {
         Ok(file) => {
             files.config = Some(file);
-            files.names = servers.into_iter().map(|(n, _)| n).collect();
+            files.names = servers.into_iter().map(|(n, _)| n).filter(|n| n != neko_core::subagents::SERVER).collect();
         }
         Err(e) => files.left_out.push(format!("Plugins were left out of this run: Neko could not write their settings ({e}).")),
     }

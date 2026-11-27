@@ -71,6 +71,16 @@ every other tool; nothing about a plugin lets a step through that another tool w
   plugin asks again. Whether a cat has the plugin at all is its own matter (`plugins.md`: which cats).
 - Tested with the fake CLI and the real daemon in every mode (`crates/neko-daemon/tests/plugins.rs`).
 
+## Neko's own tools
+
+`mcp__neko__*` (`subagents.md`) are Neko's tools for the agent: start, list and stop its own subagents. They only record work in Neko's
+state, so `stream::action` makes them `Action::Internal` and they go ahead in every mode (a `can_use_tool` for one is allowed at once;
+the hook says nothing). What a subagent then does is asked about like anything else.
+
+A **subagent never has more permission than its thread**: the mode is the one setting every run reads. Its "Always allow" answers are
+scoped to its own task, so they start empty. Its requests are stored under its own task, answered in its view or in Needs you ("Subagent
+1 asks", under its thread's title), and a stop of the thread expires them.
+
 ## A request
 
 A stored row (`permissions`): what it wants (title), why Neko asks, the exact command or path, whether it is destructive, its

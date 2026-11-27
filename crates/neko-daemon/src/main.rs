@@ -9,10 +9,12 @@ mod files;
 mod folders;
 mod hook;
 mod http;
+mod mcp_server;
 mod plugins;
 mod rounds;
 mod runs;
 mod server;
+mod subagents;
 mod undo;
 
 use std::path::PathBuf;
@@ -38,6 +40,10 @@ fn main() -> ExitCode {
     // As a run's `PreToolUse` hook (`--hook`), it asks the daemon about one step and prints the decision.
     if std::env::args().nth(1).as_deref() == Some("--hook") {
         return hook::helper();
+    }
+    // As a run's own MCP server (`--mcp`), it is Neko's tools for the agent: subagents (docs/knowledge/subagents.md).
+    if std::env::args().nth(1).as_deref() == Some("--mcp") {
+        return mcp_server::serve();
     }
     let mut data_dir = None;
     let mut port = 0u16;

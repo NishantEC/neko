@@ -53,7 +53,9 @@ fn every_scene_reads_well_to_assistive_technology() {
             }
             // The open task is the chosen row.
             if let Some(open) = &rt.state.open {
-                let row = all.iter().find(|(_, n)| str_of(n, "key") == format!("thread-{}", open.0)).map(|(_, n)| n.clone());
+                // A subagent has no row of its own: its thread's row is the chosen one.
+                let id = rt.state.tasks.iter().find(|t| &t.id == open).and_then(|t| t.subagent.as_ref().map(|s| s.root.clone())).unwrap_or_else(|| open.clone());
+                let row = all.iter().find(|(_, n)| str_of(n, "key") == format!("thread-{}", id.0)).map(|(_, n)| n.clone());
                 if size.0 >= 1000.0 {
                     assert!(row.is_some_and(|r| has(&r, "states", "selected")), "{at}: the open thread's row is selected");
                 }

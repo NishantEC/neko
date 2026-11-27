@@ -1,0 +1,89 @@
+{
+  "name": "subagents-poll",
+  "title": "The subagents tool never blocks",
+  "about": "A thread starts one subagent that runs until stopped, then asks for the subagents' state twenty times. The tool answers at once each time (the record's MCP calls are twenty and every one took under a second), the thread ends its turn and waits, and Stop ends it all.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check one thing [fake:delegate] mcp neko start_subagent {\"title\":\"Check links\",\"prompt\":\"Look at the links [fake:slow]\"} ; poll 20"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "polled 20 times"
+        }
+      },
+      "within": 40,
+      "expect": "The thread ends its turn quickly, having polled twenty times"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "python3 -c 'import json\nL=[json.loads(l) for l in open(\"$work/fake-record.jsonl\")]\nm=[l[\"mcp_call\"] for l in L if \"mcp_call\" in l and l[\"mcp_call\"].get(\"tool\",\"\").endswith(\"subagents\")]\nok=len(m)==20 and all(x.get(\"ms\",9999)<1000 for x in m)\nprint(\"ok\" if ok else (\"bad %d %s\" % (len(m),max([x.get(\"ms\",0) for x in m] or [0]))))'",
+          "is": "ok"
+        }
+      },
+      "expect": "Twenty calls to the subagents tool, each answered in under a second"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Check one",
+          "name": "waiting"
+        }
+      },
+      "within": 20,
+      "expect": "The thread waits on the subagent"
+    },
+    {
+      "do": "snap",
+      "name": "waiting",
+      "expect": "Waiting on the subagent after the polls"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-submit"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Check one",
+          "name": "stopped"
+        }
+      },
+      "within": 10,
+      "expect": "Stop ends the thread and its subagent"
+    },
+    {
+      "do": "snap",
+      "name": "stopped",
+      "expect": "Stopped"
+    }
+  ]
+}

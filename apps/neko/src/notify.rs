@@ -381,7 +381,9 @@ pub fn note_for(item: &NeedsItem) -> Note {
     let (body, buttons) = match &item.need {
         Need::Permission { permission: p } => {
             info.push(("permission".into(), p.id.0.clone()));
-            let body = short(&format!("{} asks: {}: {}", item.cat_name, p.title, p.detail), BODY_CHARS);
+            // A subagent has no name: its number asks.
+            let asker = item.subagent.as_deref().map_or_else(|| item.cat_name.clone(), crate::subagents::name);
+            let body = short(&format!("{asker} asks: {}: {}", p.title, p.detail), BODY_CHARS);
             if p.destructive {
                 // The destructive form has no default and never confirms from a banner: the notification only opens the task.
                 info.push(("destructive".into(), "1".into()));
@@ -549,11 +551,11 @@ mod tests {
             asked_ms: 1,
             answered_ms: None,
         };
-        NeedsItem { id: format!("perm:{}", p.id.0), task: p.task.clone(), workspace: "default".into(), title: "Run the tests".into(), cat: "cat_miso".into(), cat_name: "miso".into(), since_ms: 1, need: Need::Permission { permission: p } }
+        NeedsItem { id: format!("perm:{}", p.id.0), task: p.task.clone(), workspace: "default".into(), title: "Run the tests".into(), cat: "cat_miso".into(), cat_name: "miso".into(), since_ms: 1, need: Need::Permission { permission: p }, subagent: None }
     }
 
     fn question(task: &str) -> NeedsItem {
-        NeedsItem { id: format!("question:{task}"), task: TaskId(task.into()), workspace: "default".into(), title: "Rename the button".into(), cat: "cat_mochi".into(), cat_name: "mochi".into(), since_ms: 2, need: Need::Question { run: RunId("run_2".into()), question: "Should I rename all four?".into() } }
+        NeedsItem { id: format!("question:{task}"), task: TaskId(task.into()), workspace: "default".into(), title: "Rename the button".into(), cat: "cat_mochi".into(), cat_name: "mochi".into(), since_ms: 2, need: Need::Question { run: RunId("run_2".into()), question: "Should I rename all four?".into() }, subagent: None }
     }
 
     fn failure(task: &str) -> NeedsItem {
@@ -565,7 +567,7 @@ mod tests {
             cat: "cat_tofu".into(),
             cat_name: "tofu".into(),
             since_ms: 3,
-            need: Need::Failure { failure: FailureKind::NotSignedIn, text: "Claude Code is not signed in.".into(), next: None, command: Some("claude auth login".into()) },
+            need: Need::Failure { failure: FailureKind::NotSignedIn, text: "Claude Code is not signed in.".into(), next: None, command: Some("claude auth login".into()) }, subagent: None
         }
     }
 

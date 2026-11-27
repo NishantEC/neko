@@ -129,13 +129,19 @@ pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, po
     let failed = matches!(item.need, Need::Failure { .. });
     let face = s.cat_face(&item.cat).to_owned();
     let says = match &item.need {
-        Need::Permission { .. } => format!("{} asks", item.cat_name),
+        Need::Permission { .. } => match &item.subagent {
+            Some(n) => format!("{} asks", crate::subagents::name(n)),
+            None => format!("{} asks", item.cat_name),
+        },
         Need::Question { .. } => format!("{} has a question", item.cat_name),
         Need::Failure { .. } => format!("{} could not go on", item.cat_name),
         Need::Plugin { ask } => if ask.changed { "A plugin changed" } else { "A plugin asks" }.to_owned(),
     };
     let lead = if let Need::Plugin { .. } = &item.need {
         crate::plugins_view::tile(t, &format!("{key}-face"), 44.0, crate::ui::portrait::Activity::NeedsYou, true, crate::view::raised_fill(t))
+    } else if let Some(n) = &item.subagent {
+        // A subagent has no face: its number on the same quiet ground a plugin has.
+        crate::subagents_view::tile(t, &format!("{key}-face"), 44.0, n, crate::view::raised_fill(t))
     } else {
         crate::faces::portrait_in(t, &format!("{key}-face"), &face, 44.0, Some(if failed { neko_protocol::TaskStatus::Failed } else { neko_protocol::TaskStatus::NeedsYou }), crate::view::raised_fill(t))
     };
@@ -147,7 +153,11 @@ pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, po
         .child(text(says.clone()).font(weight(t.ty.sm, t.ty.semibold)).color(if failed { t.c.danger.fg } else { t.c.warning.fg }).truncate().min_w(0.0).shrink().a11y_hidden())
         .child(text("·").font(t.ty.sm).color(t.ink_faint()).a11y_hidden())
         .child(text(since.clone()).key(format!("{key}-when")).font(rune_ui_style::tabular(t.ty.sm)).color(t.ink_faint()).a11y_hidden());
-    let head = text(item.title.clone()).key(format!("{key}-title")).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0);
+    // A subagent's ask is led by its number; the thread it works for is the quiet second line.
+    let head = match &item.subagent {
+        Some(_) => text(format!("in {}", item.title)).key(format!("{key}-title")).font(t.ty.base).color(t.ink_muted()).truncate().min_w(0.0),
+        None => text(item.title.clone()).key(format!("{key}-title")).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0),
+    };
     let body = col().w_full().gap(t.space.at(2.5));
     // A plugin's card shows what will run in its own block, not as a sentence.
     let mut body = if matches!(item.need, Need::Plugin { .. }) { body } else { body.child(text(asked.clone()).key(format!("{key}-what")).font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0).a11y_hidden()) };
@@ -157,7 +167,8 @@ pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, po
         if matches!(item.need, Need::Plugin { .. }) {
             answer(t, format!("{key}-open"), "Open in Settings", ButtonVariant::Ghost, true, move |s: &mut App| s.open_need_in_settings(&id))
         } else {
-            answer(t, format!("{key}-open"), "Open thread", ButtonVariant::Ghost, true, move |s: &mut App| s.open_need(&id))
+            let words = item.subagent.as_deref().map_or_else(|| "Open thread".to_owned(), crate::subagents::name);
+            answer(t, format!("{key}-open"), &if item.subagent.is_some() { format!("Open {words}") } else { words }, ButtonVariant::Ghost, true, move |s: &mut App| s.open_need(&id))
         }
     };
     let mut controls = row().key(format!("{key}-answers")).w_full().gap(t.space.at(2.0)).center_y().flex_wrap();

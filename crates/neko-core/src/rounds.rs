@@ -489,6 +489,7 @@ impl Core {
             failure_line: String::new(),
             thread_status: neko_protocol::ThreadStatus::Idle,
             needs_you: false,
+            subagent: None,
         })
     }
 

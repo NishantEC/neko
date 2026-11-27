@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use neko_protocol::{Task, TaskId, TaskRound, TaskStatus};
+use neko_protocol::{SubagentOf, Task, TaskId, TaskRound, TaskStatus};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::title::title;
@@ -250,6 +250,27 @@ const MIGRATIONS: &[Migration] = &[
         UPDATE tasks SET last_read_ms = activity_ms;",
         migrate_latest_lines,
     ),
+    // 10: subagents (docs/knowledge/subagents.md). A task may belong to another: its parent, its number ("1", "1.2") and the thread at
+    // the top. And the reports that wake a thread: one row per subagent that ended, `pending` until the thread read it.
+    Migration::Sql("ALTER TABLE tasks ADD COLUMN parent_id TEXT;
+    ALTER TABLE tasks ADD COLUMN sub_number TEXT;
+    ALTER TABLE tasks ADD COLUMN root_id TEXT;
+    CREATE INDEX tasks_by_parent ON tasks(parent_id) WHERE parent_id IS NOT NULL;
+    CREATE INDEX tasks_by_root ON tasks(root_id) WHERE root_id IS NOT NULL;
+    CREATE TABLE wakes (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        subagent_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        files TEXT NOT NULL,
+        branch TEXT,
+        state TEXT NOT NULL,
+        created_ms INTEGER NOT NULL,
+        delivered_ms INTEGER
+    );
+    CREATE INDEX wakes_by_task ON wakes(task_id, state);
+    CREATE INDEX wakes_by_subagent ON wakes(subagent_id);"),
 ];
 
 /// Migration 9's step: each task's `latest_line` from its newest agent words.
@@ -310,7 +331,7 @@ pub(crate) fn status_of<T: serde::de::DeserializeOwned>(name: &str) -> rusqlite:
 }
 
 /// A task as stored. What the daemon derives (`thread_status`, `needs_you`, `failure_line`) is filled by [`Store::derived`].
-fn task_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
+pub(crate) fn task_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     Ok(Task {
         id: TaskId(row.get(0)?),
         workspace: row.get(1)?,
@@ -329,15 +350,19 @@ fn task_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         failure_line: String::new(),
         thread_status: neko_protocol::ThreadStatus::Idle,
         needs_you: false,
+        subagent: match (row.get::<_, Option<String>>(14)?, row.get::<_, Option<String>>(15)?, row.get::<_, Option<String>>(16)?) {
+            (Some(parent), Some(number), Some(root)) => Some(SubagentOf { parent: TaskId(parent), number, root: TaskId(root) }),
+            _ => None,
+        },
     })
 }
 
-const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name, last_read_ms, activity_ms, latest_line";
+pub(crate) const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name, last_read_ms, activity_ms, latest_line, parent_id, sub_number, root_id";
 
 /// Writes a new task and its `task_created` event inside `tx`. Returns the event's sequence number.
 pub(crate) fn insert_task(tx: &rusqlite::Transaction<'_>, task: &Task) -> Result<u64, StoreError> {
     tx.execute(
-        &format!("INSERT INTO tasks ({TASK_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)"),
+        &format!("INSERT INTO tasks ({TASK_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"),
         params![
             task.id.0,
             task.workspace,
@@ -352,10 +377,13 @@ pub(crate) fn insert_task(tx: &rusqlite::Transaction<'_>, task: &Task) -> Result
             task.round.as_ref().map(|r| &r.name),
             task.last_read_ms,
             task.activity_ms,
-            task.latest_line
+            task.latest_line,
+            task.subagent.as_ref().map(|s| &s.parent.0),
+            task.subagent.as_ref().map(|s| &s.number),
+            task.subagent.as_ref().map(|s| &s.root.0)
         ],
     )?;
-    let data = serde_json::json!({ "title": task.title, "cat": task.cat, "round": task.round.as_ref().map(|r| &r.id) }).to_string();
+    let data = serde_json::json!({ "title": task.title, "cat": task.cat, "round": task.round.as_ref().map(|r| &r.id), "subagent": task.subagent.as_ref().map(|s| &s.number) }).to_string();
     tx.execute("INSERT INTO events (at_ms, workspace_id, subject, kind, data) VALUES (?1, ?2, ?3, 'task_created', ?4)", params![task.created_ms, task.workspace, task.id.0, data])?;
     Ok(tx.last_insert_rowid() as u64)
 }
@@ -412,7 +440,7 @@ impl Store {
 
     /// Stores a task for `cat` and its `task_created` event in one transaction. Returns the task and the event's sequence number.
     pub fn create_task(&mut self, id: &TaskId, workspace: &str, words: &str, folder: Option<&str>, cat: &str, now_ms: i64) -> Result<(Task, u64), StoreError> {
-        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New, folder: folder.map(str::to_owned), cat: cat.to_owned(), round: None, last_read_ms: now_ms, activity_ms: now_ms, latest_line: String::new(), failure_line: String::new(), thread_status: neko_protocol::ThreadStatus::Idle, needs_you: false };
+        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New, folder: folder.map(str::to_owned), cat: cat.to_owned(), round: None, last_read_ms: now_ms, activity_ms: now_ms, latest_line: String::new(), failure_line: String::new(), thread_status: neko_protocol::ThreadStatus::Idle, needs_you: false, subagent: None };
         let tx = self.conn.transaction()?;
         let seq = insert_task(&tx, &task)?;
         tx.commit()?;
@@ -452,7 +480,8 @@ impl Store {
             t.failure_line = crate::thread::failure_line(n.body.text());
         }
         t.thread_status = crate::thread::thread_status(t.status, t.last_read_ms, t.activity_ms);
-        t.needs_you = crate::thread::needs_you(t.status, actionable);
+        let subagent_asks = t.subagent.is_none() && self.conn.query_row("SELECT 1 FROM permissions p JOIN tasks s ON s.id = p.task_id WHERE s.root_id = ?1 AND p.state = 'pending' LIMIT 1", [&t.id.0], |_| Ok(())).optional()?.is_some();
+        t.needs_you = crate::thread::needs_you(t.status, actionable, subagent_asks);
         Ok(t)
     }
 

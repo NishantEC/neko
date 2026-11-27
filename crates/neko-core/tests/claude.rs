@@ -92,7 +92,12 @@ fn a_stalled_cli_can_be_stopped() {
     let dir = Temp::new("stall");
     let s = claude_on_fake().start(spec("[fake:stall]", &dir.0)).unwrap();
     until("it starts", T, || matches!(s.events.recv_timeout(Duration::from_millis(50)), Ok(AgentEvent::Started { .. })));
-    assert!(s.events.recv_timeout(Duration::from_millis(300)).is_err(), "then nothing");
+    // The account's limit news comes with every start; nothing else does.
+    let mut news = Vec::new();
+    while let Ok(e) = s.events.recv_timeout(Duration::from_millis(300)) {
+        news.push(e);
+    }
+    assert!(news.iter().all(|e| matches!(e, AgentEvent::RateLimit { status, .. } if status == "allowed")), "then nothing but that: {news:?}");
     s.control.stop();
     assert_eq!(finished(&drain(&s, Duration::from_secs(2), |_, _| None)), &Outcome::Stopped);
 }

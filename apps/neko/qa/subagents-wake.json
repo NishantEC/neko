@@ -1,0 +1,186 @@
+{
+  "name": "subagents-wake",
+  "title": "A thread starts two subagents, rests, and one wake reads both reports",
+  "about": "The person asks a thread to check two things. The fake CLI starts two subagents through Neko's own MCP server and ends its turn. Two cards appear; the thread rests as Waiting (its row says two subagents work; the conversation ends on \"Waiting on Subagent 1 and Subagent 2\"); both subagents run; then both reports wake the thread once (\"Woken by Subagent 1 · done\", \"Woken by Subagent 2 · done\"), its final words read both reports and the thread is Done. The sidebar lists one row, never a subagent. The record shows one resumed start with one message holding two <neko-wake> reports.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check two things [fake:delegate] mcp neko start_subagent {\"title\":\"Check links\",\"prompt\":\"Look at the links [fake:long:4]\"} ; mcp neko start_subagent {\"title\":\"Check images\",\"prompt\":\"Look at the images [fake:long:4]\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "subagent-card-1"
+            }
+          },
+          {
+            "see": {
+              "key": "subagent-card-2"
+            }
+          }
+        ]
+      },
+      "within": 30,
+      "expect": "Two cards, Subagent 1 and Subagent 2, appear in the conversation"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Check two",
+          "name": "2 subagents working"
+        }
+      },
+      "within": 30,
+      "expect": "The thread rests: its sidebar row says two subagents work"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Check two",
+          "name": "waiting"
+        }
+      },
+      "within": 20,
+      "expect": "The row's description says the thread is waiting once it has ended its turn"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "key": "waiting-line",
+          "name": "Waiting on Subagent 1 and Subagent 2"
+        }
+      },
+      "expect": "The conversation ends on \"Waiting on Subagent 1 and Subagent 2\""
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "key": "waiting-link-1",
+          "name": "Subagent 1"
+        }
+      },
+      "expect": "Each name is a link"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "count": {
+          "of": {
+            "role": "option"
+          },
+          "is": 1
+        }
+      },
+      "expect": "The sidebar lists one row only, no subagent"
+    },
+    {
+      "do": "snap",
+      "name": "waiting",
+      "expect": "Two cards, the thread waiting, its row"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "text": "Woken by Subagent 1 · done"
+            }
+          },
+          {
+            "see": {
+              "text": "Woken by Subagent 2 · done"
+            }
+          }
+        ]
+      },
+      "within": 60,
+      "expect": "Both reports wake the thread: two notes"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "I read 2"
+        }
+      },
+      "within": 30,
+      "expect": "The thread's final words read both reports"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Check two",
+          "name": "done"
+        }
+      },
+      "within": 20,
+      "expect": "The thread ends Done"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "count": {
+          "of": {
+            "role": "option"
+          },
+          "is": 1
+        }
+      },
+      "expect": "Still one row in the sidebar"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "key": "waiting-line"
+        }
+      },
+      "expect": "The waiting line is gone"
+    },
+    {
+      "do": "snap",
+      "name": "woken",
+      "expect": "The notes and the final words"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "python3 -c 'import json\nL=[json.loads(l) for l in open(\"$work/fake-record.jsonl\")]\nr=[l for l in L if \"argv\" in l and \"--resume\" in l[\"argv\"]]\nw=[l for l in L if \"stdin\" in l and \"<neko-wake\" in json.dumps(l)]\nok=len(r)==1 and r[0][\"argv\"][r[0][\"argv\"].index(\"--resume\")+1].startswith(\"fake-\") and len(w)==1 and json.dumps(w[0]).count(\"<neko-wake\")==2\nprint(\"ok\" if ok else (\"bad %d %d\" % (len(r),len(w))))'",
+          "is": "ok"
+        }
+      },
+      "expect": "One resumed start, with one message holding two <neko-wake> reports"
+    }
+  ]
+}

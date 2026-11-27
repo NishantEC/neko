@@ -66,6 +66,20 @@ recorded config had the server with the secret in `env`, that Claude Code was gi
 (`run` step): Needs you asks again showing the change, the next task does not get the server (its tool fails at once and nothing asks),
 approving the new manifest brings it back and the third task's server has the changed argument.
 
+## The subagent scenarios
+
+All four start the daemon with `NEKO_FAKE_RECORD` and use the fake CLI's `[fake:delegate]` script: the steps after the tag, one line apart by ` ; `, are played through Neko's real MCP server (`start_subagent`, `poll N`), and each subagent's own words pick its script (`[fake:long:4]` streams four seconds, `[fake:slow]` runs until stopped).
+
+`subagents-wake`: a thread starts two subagents and ends its turn. Two cards appear; the thread's row says two subagents work and that it is waiting; the conversation ends on "Waiting on Subagent 1 and Subagent 2" with a link each; the sidebar has one row. Both reports wake the thread once: two notes ("Woken by Subagent N · done"), final words reading both, the thread Done, no waiting line left. The record has exactly one `--resume` start and one message holding two `<neko-wake>` reports.
+
+`subagents-stop`: two subagents that run until stopped. The composer of the waiting thread offers Stop; one press ends both subagents and the thread within seconds, nothing is waited on, an opened subagent says it stopped and has no Stop, and no resumed run was started. The rig's end check proves no process is left.
+
+`subagents-restart`: one subagent that runs until stopped; the app quits, the daemon stops, both start again. The subagent reads Interrupted with its words kept, the thread is woken by "Woken by Subagent 1 · interrupted", ends Done, and the record's wake message says `status="interrupted"`.
+
+`subagents-poll`: one subagent that runs until stopped, then twenty calls of the subagents tool. The record has twenty MCP calls, each under a second, so the tool never blocks; the thread ends its turn at once and waits; Stop ends it.
+
+The band of a subagent is a row (key `band-title`, its name the whole breadcrumb), so selectors for it use `label` or `name`, not `text`; the thread's final words are matched on "I read 2" because Markdown isolates the "(s)".
+
 ## How it drives and records
 
 - **Headless (default).** `apps/neko/examples/neko-qa.rs` builds the real app (`neko_app::app()`: its view, state, keys, `poll`

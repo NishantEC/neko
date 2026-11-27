@@ -1,0 +1,183 @@
+{
+  "name": "subagents-restart",
+  "title": "The app and the daemon restart while a subagent works: the thread is woken with an interrupted report",
+  "about": "A thread starts one subagent that runs until stopped and rests. The app quits and the daemon stops; both start again. The subagent is marked Interrupted with its words kept, and the thread is woken by its report (\"Woken by Subagent 1 · interrupted\") and ends Done. The record has the resumed start whose message says status=\"interrupted\".",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check one thing [fake:delegate] mcp neko start_subagent {\"title\":\"Check links\",\"prompt\":\"Look at the links [fake:slow]\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "subagent-card-1",
+          "name": "Working"
+        }
+      },
+      "within": 40,
+      "expect": "The subagent works"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "waiting-line"
+        }
+      },
+      "within": 20,
+      "expect": "The thread waits on it"
+    },
+    {
+      "do": "sleep",
+      "secs": 2
+    },
+    {
+      "do": "quit-app"
+    },
+    {
+      "do": "stop-daemon"
+    },
+    {
+      "do": "start-daemon"
+    },
+    {
+      "do": "start-app"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Check one"
+        }
+      },
+      "within": 30,
+      "expect": "After the restart the thread is in the sidebar"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Check one"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Woken by Subagent 1 · interrupted"
+        }
+      },
+      "within": 60,
+      "expect": "The thread is woken by the interrupted report"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "I read 1"
+        }
+      },
+      "within": 30,
+      "expect": "Its final words read the report"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Check one",
+          "name": "done"
+        }
+      },
+      "within": 20,
+      "expect": "The thread ends Done"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "count": {
+          "of": {
+            "role": "option"
+          },
+          "is": 1
+        }
+      },
+      "expect": "One row in the sidebar"
+    },
+    {
+      "do": "snap",
+      "name": "woken",
+      "expect": "The thread, woken"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "subagent-open-1"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "crumb-subagent",
+          "text": "Subagent 1"
+        }
+      },
+      "within": 10,
+      "expect": "Subagent 1 opens"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "name": "Interrupted after"
+        }
+      },
+      "expect": "It shows Interrupted"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "slow1"
+        }
+      },
+      "expect": "Its words are kept"
+    },
+    {
+      "do": "snap",
+      "name": "subagent",
+      "expect": "The interrupted subagent"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "python3 -c 'import json\nL=[json.loads(l) for l in open(\"$work/fake-record.jsonl\")]\nr=[l for l in L if \"argv\" in l and \"--resume\" in l[\"argv\"]]\nw=[l for l in L if \"stdin\" in l and \"<neko-wake\" in json.dumps(l)]\nok=len(r)>=1 and any(\"status=\\\"interrupted\\\"\" in str(l) for l in w)\nprint(\"ok\" if ok else (\"bad %d %d\" % (len(r),len(w))))'",
+          "is": "ok"
+        }
+      },
+      "expect": "The resumed start's message says status=\"interrupted\""
+    }
+  ]
+}

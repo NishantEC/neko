@@ -1,18 +1,20 @@
 //! What a thread is doing, for a sidebar row (docs/knowledge/threads.md). Derived here and nowhere else, from what the store holds,
-//! so every screen sees the same answer after a restart. [`thread_status`] and [`needs_you`] are the one place a later status
-//! (Waiting on subagents) is added.
+//! so every screen sees the same answer after a restart. [`thread_status`] and [`needs_you`] are the one place a status is added;
+//! Waiting (on subagents, docs/knowledge/subagents.md) is the newest.
 
 use neko_protocol::{LATEST_LINE_CHARS, TaskStatus, ThreadStatus};
 
-/// Working, Failed or Idle. Needs you is a flag beside it ([`needs_you`]), not a value.
+/// Working, Waiting, Failed or Idle. Needs you is a flag beside it ([`needs_you`]), not a value.
 ///
 /// - **Working:** a run is going (the agent is at work, also while it waits for the person to answer a request).
+/// - **Waiting:** no run, and the thread waits on its subagents (the daemon sets the task's status to `Waiting` then).
 /// - **Failed:** the last run failed and the person has not opened the thread since (`last_read_ms` is older than the activity
 ///   that ended the run).
 /// - **Idle:** anything else.
 pub fn thread_status(status: TaskStatus, last_read_ms: i64, activity_ms: i64) -> ThreadStatus {
     match status {
         TaskStatus::Working | TaskStatus::NeedsYou => ThreadStatus::Working,
+        TaskStatus::Waiting => ThreadStatus::Waiting,
         TaskStatus::Failed if last_read_ms < activity_ms => ThreadStatus::Failed,
         _ => ThreadStatus::Idle,
     }
@@ -20,8 +22,12 @@ pub fn thread_status(status: TaskStatus, last_read_ms: i64, activity_ms: i64) ->
 
 /// Whether something waits for the person in the thread: a request (the run is waiting on it), a run that ended with a question,
 /// or a failure the person can act on (`actionable_failure`: not signed in, the usage limit, the folder or the CLI missing). The
-/// same three things `needs::derive` lists.
-pub fn needs_you(status: TaskStatus, actionable_failure: bool) -> bool {
+/// same three things `needs::derive` lists, and `subagent_asks`: one of its subagents has a request waiting (the run of a thread that
+/// waits on subagents has ended, so its own status cannot say it).
+pub fn needs_you(status: TaskStatus, actionable_failure: bool, subagent_asks: bool) -> bool {
+    if subagent_asks {
+        return true;
+    }
     match status {
         TaskStatus::NeedsYou | TaskStatus::Asked => true,
         TaskStatus::Failed => actionable_failure,
@@ -72,6 +78,7 @@ mod tests {
     fn the_status_is_working_while_a_run_goes_and_failed_until_opened() {
         assert_eq!(thread_status(TaskStatus::Working, 0, 5), ThreadStatus::Working);
         assert_eq!(thread_status(TaskStatus::NeedsYou, 0, 5), ThreadStatus::Working);
+        assert_eq!(thread_status(TaskStatus::Waiting, 0, 5), ThreadStatus::Waiting, "no run, its subagents work");
         assert_eq!(thread_status(TaskStatus::Failed, 4, 5), ThreadStatus::Failed);
         assert_eq!(thread_status(TaskStatus::Failed, 5, 5), ThreadStatus::Idle, "opened after it failed");
         for s in [TaskStatus::New, TaskStatus::Done, TaskStatus::Stopped, TaskStatus::Interrupted, TaskStatus::Asked] {
@@ -81,12 +88,15 @@ mod tests {
 
     #[test]
     fn needs_you_is_a_flag_for_a_request_a_question_or_a_failure_to_act_on() {
-        assert!(needs_you(TaskStatus::NeedsYou, false));
-        assert!(needs_you(TaskStatus::Asked, false));
-        assert!(needs_you(TaskStatus::Failed, true));
-        assert!(!needs_you(TaskStatus::Failed, false));
-        assert!(!needs_you(TaskStatus::Working, false));
-        assert!(!needs_you(TaskStatus::Done, true));
+        assert!(needs_you(TaskStatus::NeedsYou, false, false));
+        assert!(needs_you(TaskStatus::Asked, false, false));
+        assert!(needs_you(TaskStatus::Failed, true, false));
+        assert!(!needs_you(TaskStatus::Failed, false, false));
+        assert!(!needs_you(TaskStatus::Working, false, false));
+        assert!(!needs_you(TaskStatus::Done, true, false));
+        assert!(needs_you(TaskStatus::Waiting, false, true), "a subagent's request makes its waiting thread need the person");
+        assert!(needs_you(TaskStatus::Working, false, true));
+        assert!(!needs_you(TaskStatus::Waiting, false, false));
     }
 
     #[test]

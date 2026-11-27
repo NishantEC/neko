@@ -91,11 +91,11 @@ fn task_list(t: &Theme, key: &str, heading: &str, tasks: &[&Task], open: Option<
     let n = tasks.len();
     let mut list = col().key(format!("cat-{key}-list")).role("listbox").label(heading.to_owned()).w_full().gap(1.0).focus_group();
     for (i, task) in tasks.iter().enumerate() {
-        let (status, word) = status_mark(task.status);
+        let (_, word) = status_mark(task.status);
         let id = task.id.clone();
         list = list.child(
             SidebarItem::new(format!("cat-{key}-{}", task.id.0), task.title.clone())
-                .lead(crate::ui::agent::mark(t, status, t.control.icon))
+                .lead(if task.status == neko_protocol::TaskStatus::Waiting { crate::subagents_view::still_ring(t, t.control.icon) } else { crate::ui::agent::mark(t, status_mark(task.status).0, t.control.icon) })
                 .list_row(i + 1, n)
                 .description(word)
                 .selected(open == Some(&task.id))
@@ -223,9 +223,9 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
         Button::new("cat-new-round", format!("New round for {}…", c.name)).variant(ButtonVariant::Secondary).size(Size::Sm).disabled(!c.is_active()).on_press(move |s: &mut App| s.start_new_round(Some(&id))).build(t)
     };
     rounds = rounds.child(row().child(new_round));
-    let mine: Vec<&Task> = s.tasks.iter().filter(|x| x.cat == c.id).collect();
+    let mine: Vec<&Task> = s.tasks.iter().filter(|x| x.is_thread() && x.cat == c.id).collect();
     let waiting: Vec<&Task> = mine.iter().copied().filter(|x| s.visible_needs().iter().any(|i| i.task == x.id) || x.status == neko_protocol::TaskStatus::Asked).collect();
-    let working: Vec<&Task> = mine.iter().copied().filter(|x| x.status.is_active() && !waiting.iter().any(|w| w.id == x.id)).collect();
+    let working: Vec<&Task> = mine.iter().copied().filter(|x| (x.status.is_active() || x.status == neko_protocol::TaskStatus::Waiting) && !waiting.iter().any(|w| w.id == x.id)).collect();
     let recent: Vec<&Task> = mine.iter().copied().filter(|x| !working.iter().chain(waiting.iter()).any(|w| w.id == x.id)).take(RECENT).collect();
     let mut tasks = col().key("cat-tasks").w_full().gap(t.space.at(5.0));
     if mine.is_empty() {

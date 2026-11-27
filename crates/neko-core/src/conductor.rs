@@ -151,6 +151,12 @@ impl RunBook {
         Ok((book, out))
     }
 
+    /// The card for a subagent this run just started, where its tool was called.
+    pub fn subagent_card(&mut self, core: &mut Core, sub: &Task, now: i64) -> Result<Vec<Out>, StoreError> {
+        let Some(of) = &sub.subagent else { return Ok(Vec::new()) };
+        self.new_part(core, PartBody::Subagent { subagent: sub.id.clone(), number: of.number.clone(), title: sub.title.clone() }, now, true)
+    }
+
     /// The plugins this run's agent was given: a request for one of their tools says it is a plugin.
     pub fn set_plugins(&mut self, names: Vec<String>) {
         self.plugins = names;
@@ -355,6 +361,8 @@ impl RunBook {
                     }
                 }
             }
+            // Limit news is the daemon's (it holds back what it starts by itself); the transcript has nothing to say of it.
+            AgentEvent::RateLimit { .. } => {}
             AgentEvent::Usage(r) => {
                 self.run.usage = Some(Usage {
                     input_tokens: r.input_tokens,
@@ -562,6 +570,19 @@ pub fn notice(who: &Who, f: &Failure) -> (String, Option<String>) {
             }),
         ),
     }
+}
+
+/// The notes that say a thread was woken, one for each report, stored in its transcript (in the run that reads them, when there is one).
+pub fn wake_notes(core: &mut Core, task: &TaskId, run: Option<&RunId>, wakes: &[crate::subagents::WakeRow]) -> Result<Vec<Out>, StoreError> {
+    let mut out = Vec::new();
+    for w in wakes {
+        let now = core.now();
+        let body = PartBody::Wake { number: w.number.clone(), title: w.title.clone(), status: w.status.clone(), summary: w.summary.clone(), files: w.files.clone(), branch: w.branch.clone() };
+        let part = Part { id: PartId(core.new_id("part")), task: task.clone(), run: run.cloned(), seq: core.store.next_part_seq(task)?, at_ms: now, ended_ms: Some(now), body };
+        let rev = core.store.insert_part(&part, now)?;
+        out.push(Out::Change(rev, Change::PartChanged { part }));
+    }
+    Ok(out)
 }
 
 /// A notice on its own, outside any run (the runtime could not start). Stored as a part; returns the changes. `failure`: the kind

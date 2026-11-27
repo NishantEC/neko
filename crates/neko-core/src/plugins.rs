@@ -358,7 +358,8 @@ impl Core {
     }
 
     fn name_taken(&self, name: &str, except: Option<&str>) -> Result<bool, PluginError> {
-        Ok(self.store.plugin_rows()?.iter().any(|r| r.manifest.name.eq_ignore_ascii_case(name) && Some(r.id.as_str()) != except))
+        // `neko` is Neko's own server in every run (docs/knowledge/subagents.md): no plugin takes it.
+        Ok(name.eq_ignore_ascii_case(crate::subagents::SERVER) || self.store.plugin_rows()?.iter().any(|r| r.manifest.name.eq_ignore_ascii_case(name) && Some(r.id.as_str()) != except))
     }
 
     /// Adds the servers of a paste, or a folder's manifest, all or none. Each waits for approval; nothing runs. A paste's secrets are
@@ -370,7 +371,11 @@ impl Core {
         let mut names = Vec::new();
         for p in &found {
             if self.name_taken(&p.manifest.name, None)? || names.contains(&p.manifest.name.to_lowercase()) {
-                return Err(PluginError::Refused(format!("There is already a plugin called {}. Remove it first, or rename this server.", p.manifest.name)));
+                return Err(PluginError::Refused(if p.manifest.name.eq_ignore_ascii_case(crate::subagents::SERVER) {
+                    "The name neko is Neko's own: every run has a server of that name. Rename this server.".to_owned()
+                } else {
+                    format!("There is already a plugin called {}. Remove it first, or rename this server.", p.manifest.name)
+                }));
             }
             names.push(p.manifest.name.to_lowercase());
         }

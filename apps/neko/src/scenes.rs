@@ -145,6 +145,13 @@ pub const SCENES: &[Scene] = &[
     ("needs-you-plugin-changed", |s| { plugins::needs_you_plugin_changed(s); finish(s) }),
     ("needs-you-plugin-web", |s| { plugins::needs_you_plugin_web(s); finish(s) }),
     ("needs-you-plugin-only", |s| { plugins::needs_you_plugin_only(s); finish(s) }),
+    ("subagents-cards", subagents::cards),
+    ("subagents-wake", subagents::wake),
+    ("subagents-wake-open", subagents::wake_open),
+    ("subagents-waiting", subagents::waiting),
+    ("subagent-view", subagents::view),
+    ("subagent-asks", subagents::asks),
+    ("needs-subagent", subagents::needs),
     ("task-plugin", |s| { plugins::task_plugin(s); finish(s) }),
     ("task-plugin-request", |s| { plugins::task_plugin_request(s); finish(s) }),
     ("cat-page-plugins", |s| { plugins::cat_page_plugins(s); finish(s) }),
@@ -154,20 +161,24 @@ pub const SCENES: &[Scene] = &[
 
 mod briefing;
 mod plugins;
+mod subagents;
 
 /// What the daemon works out about each task, worked out here for placeholder data (the app never derives it for a real one):
 /// the thread's status, the Needs you flag, why it failed and what it last said. A scene sets `status`, and anything it wants
 /// different afterwards (an unread thread: `last_read_ms`).
 pub fn finish(s: &mut App) {
     let failing: Vec<TaskId> = s.needs.iter().filter(|i| matches!(i.need, Need::Failure { .. })).map(|i| i.task.clone()).collect();
+    // A subagent's request makes its thread need the person, as the daemon works it out.
+    let subagent_asks: Vec<TaskId> = s.needs.iter().filter(|i| i.subagent.is_some()).filter_map(|i| s.tasks.iter().find(|t| t.id == i.task).and_then(|t| t.subagent.as_ref().map(|o| o.root.clone()))).collect();
     let mut i = 0;
     for t in &mut s.tasks {
         t.thread_status = match t.status {
             TaskStatus::Working | TaskStatus::NeedsYou => neko_protocol::ThreadStatus::Working,
+            TaskStatus::Waiting => neko_protocol::ThreadStatus::Waiting,
             TaskStatus::Failed if t.last_read_ms < t.activity_ms => neko_protocol::ThreadStatus::Failed,
             _ => neko_protocol::ThreadStatus::Idle,
         };
-        t.needs_you = matches!(t.status, TaskStatus::NeedsYou | TaskStatus::Asked) || (t.status == TaskStatus::Failed && failing.contains(&t.id));
+        t.needs_you = matches!(t.status, TaskStatus::NeedsYou | TaskStatus::Asked) || (t.status == TaskStatus::Failed && failing.contains(&t.id)) || subagent_asks.contains(&t.id);
         if t.status == TaskStatus::Failed && t.failure_line.is_empty() {
             t.failure_line = "Claude Code is not signed in.".into();
         }
@@ -406,7 +417,7 @@ fn permission_item(s: &App, task: &Task, title: &str, detail: &str, destructive:
         asked_ms: ago(s, minutes),
         answered_ms: None,
     };
-    NeedsItem { id: format!("perm:{}", p.id.0), task: task.id.clone(), workspace: task.workspace.clone(), title: task.title.clone(), cat: task.cat.clone(), cat_name: cat_name(s, &task.cat), since_ms: p.asked_ms, need: Need::Permission { permission: p } }
+    NeedsItem { id: format!("perm:{}", p.id.0), task: task.id.clone(), workspace: task.workspace.clone(), title: task.title.clone(), cat: task.cat.clone(), cat_name: cat_name(s, &task.cat), since_ms: p.asked_ms, need: Need::Permission { permission: p }, subagent: None }
 }
 
 /// Every kind of item, in three workspaces, in the daemon's order (the workspace waiting longest first, oldest first inside it).
@@ -426,7 +437,7 @@ fn needs_you(s: &mut App) {
         cat: t.cat.clone(),
         cat_name: cat_name(s, &t.cat),
         since_ms: ago(s, minutes),
-        need: Need::Failure { failure: kind, text: text.into(), next: Some(next.into()), command: command.map(str::to_owned) },
+        need: Need::Failure { failure: kind, text: text.into(), next: Some(next.into()), command: command.map(str::to_owned) }, subagent: None
     };
     s.needs = vec![
         failure(s, &tidy, FailureKind::NotSignedIn, "Claude Code is not signed in.", "Run `claude auth login` in Terminal, then send a follow-up.", Some("claude auth login"), 3 * 24 * 60),
@@ -438,7 +449,7 @@ fn needs_you(s: &mut App) {
             cat: notes.cat.clone(),
             cat_name: cat_name(s, &notes.cat),
             since_ms: ago(s, 12),
-            need: Need::Question { run: RunId(format!("run_{}", notes.id.0)), question: "The notes cover the sidebar and the composer. Should I also mention the new keyboard shortcuts, or keep them for 0.3?".into() },
+            need: Need::Question { run: RunId(format!("run_{}", notes.id.0)), question: "The notes cover the sidebar and the composer. Should I also mention the new keyboard shortcuts, or keep them for 0.3?".into() }, subagent: None
         },
         failure(s, &nightly, FailureKind::UsageLimit, "Claude Code has reached its usage limit.", "It resets at 17:00. Send a follow-up then to carry on.", None, 2 * 60),
         permission_item(s, &retry, "Run a command", "cargo test --package acme-api retry", false, 30),
@@ -1020,7 +1031,7 @@ fn agents(signed_in: bool, mode: PermissionMode) -> (Vec<RuntimeInfo>, Settings)
                 rules: None,
             },
         ],
-        Settings { runtime: "claude".into(), permission_mode: mode },
+        Settings { runtime: "claude".into(), permission_mode: mode, own_mcp: false },
     )
 }
 

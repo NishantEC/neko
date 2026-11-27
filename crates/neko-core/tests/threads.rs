@@ -157,7 +157,7 @@ fn a_store_from_before_threads_opens_with_every_task_read_and_its_last_line_kept
     }
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch("ALTER TABLE tasks DROP COLUMN last_read_ms; ALTER TABLE tasks DROP COLUMN activity_ms; ALTER TABLE tasks DROP COLUMN latest_line; PRAGMA user_version = 8;").unwrap();
+        conn.execute_batch("DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN sub_number; ALTER TABLE tasks DROP COLUMN root_id; ALTER TABLE tasks DROP COLUMN last_read_ms; ALTER TABLE tasks DROP COLUMN activity_ms; ALTER TABLE tasks DROP COLUMN latest_line; PRAGMA user_version = 8;").unwrap();
     }
     assert_eq!(Store::open_at(&path, 8).unwrap().version().unwrap(), 8);
     let core = open(&d);

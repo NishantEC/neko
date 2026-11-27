@@ -210,7 +210,7 @@ fn cats_page(s: &App, t: &Theme) -> El {
     part = part.child(row().child(Button::new("settings-new-cat", "New cat…").variant(ButtonVariant::Secondary).size(Size::Sm).icon(&crate::ui::icons::PLUS).on_press(|s: &mut App| s.start_new_cat()).build(t)));
     for c in &s.cats {
         let key = format!("settings-cat-{}", c.id);
-        let n = s.tasks.iter().filter(|x| x.cat == c.id).count();
+        let n = s.tasks.iter().filter(|x| x.is_thread() && x.cat == c.id).count();
         let count = match n {
             0 => "No threads yet".to_owned(),
             1 => "1 thread".to_owned(),

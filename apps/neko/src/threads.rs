@@ -69,24 +69,32 @@ impl Line {
     }
 }
 
-/// What a request or question says, short, for "Needs you: …".
-pub fn need_words(n: &Need) -> String {
+/// What a request or question says, short, for "Needs you: …". A subagent's request says whose it is ("Run a command · Subagent 1").
+pub fn need_words(item: &NeedsItem) -> String {
+    let n = &item.need;
     match n {
-        Need::Permission { permission } => permission.title.clone(),
+        Need::Permission { permission } => match &item.subagent {
+            Some(number) => format!("{} · {}", permission.title, crate::subagents::name(number)),
+            None => permission.title.clone(),
+        },
         Need::Question { .. } => "a question".to_owned(),
         Need::Failure { .. } => "could not go on".to_owned(),
         Need::Plugin { .. } => "a plugin".to_owned(),
     }
 }
 
-/// The line under a thread's title: the first that applies of Needs you, Failed, then the agent's latest line (Waiting on subagents
-/// and "n subagents working" come before the latest line when subagents exist). A thread that has said nothing yet says what it is.
-pub fn second_line(task: &Task, need: Option<&NeedsItem>) -> Line {
+/// The line under a thread's title: the first that applies of Needs you, Failed, what it waits on ("Waiting on Subagent 1", "2
+/// subagents working": `subagents`, from [`App::thread_line`]), then the agent's latest line. A thread that has said nothing yet says
+/// what it is.
+pub fn second_line(task: &Task, need: Option<&NeedsItem>, subagents: Option<&str>) -> Line {
     if task.needs_you {
-        return Line::NeedsYou(need.map_or_else(|| "waiting for you".to_owned(), |n| need_words(&n.need)));
+        return Line::NeedsYou(need.map_or_else(|| "waiting for you".to_owned(), |n| need_words(n)));
     }
     if task.thread_status == ThreadStatus::Failed {
         return Line::Failed(if task.failure_line.is_empty() { "the last run did not finish".to_owned() } else { task.failure_line.clone() });
+    }
+    if let Some(w) = subagents {
+        return Line::Quiet(w.to_owned());
     }
     if !task.latest_line.is_empty() {
         return Line::Quiet(task.latest_line.clone());
@@ -113,6 +121,7 @@ pub fn state_words(task: &Task) -> String {
     match task.thread_status {
         ThreadStatus::Working => parts.push("working"),
         ThreadStatus::Failed => parts.push("failed"),
+        ThreadStatus::Waiting => parts.push("waiting"),
         ThreadStatus::Idle => {}
     }
     match task.status {
@@ -181,12 +190,12 @@ impl App {
     /// grouped: one list, with no heading of its own.
     pub fn thread_groups(&self) -> Vec<Group<'_>> {
         match self.grouping {
-            Grouping::None => vec![Group { id: ALL.to_owned(), name: "Threads".to_owned(), workspace: None, threads: self.ordered(self.tasks.iter().collect()) }],
+            Grouping::None => vec![Group { id: ALL.to_owned(), name: "Threads".to_owned(), workspace: None, threads: self.ordered(self.tasks.iter().filter(|t| t.is_thread()).collect()) }],
             Grouping::Project => self
                 .sections()
                 .into_iter()
                 .map(|w| {
-                    let threads = self.ordered(self.tasks.iter().filter(|t| t.workspace == w.id).collect());
+                    let threads = self.ordered(self.tasks.iter().filter(|t| t.is_thread() && t.workspace == w.id).collect());
                     Group { id: w.id.clone(), name: self.project_name(&w), workspace: self.workspaces.iter().find(|x| x.id == w.id), threads }
                 })
                 .collect(),
@@ -250,17 +259,18 @@ mod tests {
     fn the_second_line_is_the_first_that_applies() {
         let mut task = t("a", 1);
         task.latest_line = "Renamed the label.".into();
-        assert_eq!(second_line(&task, None), Line::Quiet("Renamed the label.".into()));
+        assert_eq!(second_line(&task, None, None), Line::Quiet("Renamed the label.".into()));
+        assert_eq!(second_line(&task, None, Some("Waiting on Subagent 1")), Line::Quiet("Waiting on Subagent 1".into()), "what it waits on comes before its last words");
         task.thread_status = ThreadStatus::Failed;
         task.failure_line = "Claude Code stopped unexpectedly.".into();
-        assert_eq!(second_line(&task, None), Line::Failed("Claude Code stopped unexpectedly.".into()));
+        assert_eq!(second_line(&task, None, Some("2 subagents working")), Line::Failed("Claude Code stopped unexpectedly.".into()));
         task.needs_you = true;
-        assert_eq!(second_line(&task, None), Line::NeedsYou("waiting for you".into()), "Needs you comes before Failed");
+        assert_eq!(second_line(&task, None, None), Line::NeedsYou("waiting for you".into()), "Needs you comes before Failed");
         let mut quiet = t("b", 1);
-        assert_eq!(second_line(&quiet, None), Line::Quiet("Not started".into()));
+        assert_eq!(second_line(&quiet, None, None), Line::Quiet("Not started".into()));
         quiet.status = TaskStatus::Working;
         quiet.thread_status = ThreadStatus::Working;
-        assert_eq!(second_line(&quiet, None), Line::Quiet("Working…".into()));
+        assert_eq!(second_line(&quiet, None, None), Line::Quiet("Working…".into()));
     }
 
     #[test]
@@ -271,5 +281,8 @@ mod tests {
         task.thread_status = ThreadStatus::Working;
         task.needs_you = true;
         assert_eq!(state_words(&task), "needs you, working, unread");
+        task.thread_status = ThreadStatus::Waiting;
+        task.needs_you = false;
+        assert_eq!(state_words(&task), "waiting, unread");
     }
 }

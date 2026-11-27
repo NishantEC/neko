@@ -130,7 +130,7 @@ fn add_buttons(t: &Theme) -> El {
 }
 
 pub fn page(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
-    let mut part = col().key("settings-plugins").w_full().gap(t.space.at(3.0)).child(h2(t, "Plugins"));
+    let mut part = col().key("settings-plugins").w_full().gap(t.space.at(3.0)).child(h2(t, "Plugins")).child(own_mcp_switch(s, t));
     if s.plugins.is_empty() {
         let empty = Empty::new("plugins-empty", &icons::PLUGIN, "No plugins yet")
             .description("A plugin gives your cats more tools, like searching your docs or filing a ticket. None come with Neko: you add each one, and it runs only after you approve exactly what it will run.")
@@ -154,6 +154,15 @@ pub fn page(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
             .wrap()
             .min_w(0.0),
     )
+}
+
+/// The switch at the top of the page: whether a run also gets the MCP servers in the person's own Claude Code settings. Off by default.
+fn own_mcp_switch(s: &App, t: &Theme) -> El {
+    let on = s.runtimes.as_ref().is_some_and(|(_, st)| st.own_mcp);
+    crate::ui::switch::Switch::<App>::new("own-mcp", "Also give runs my own Claude Code MCP servers", on)
+        .help("Off: a run gets only Neko's own tool and the plugins you approved, which keeps runs quick. On: runs also load the MCP servers in your Claude Code settings.")
+        .on_toggle(move |s: &mut App| s.set_own_mcp(!on))
+        .build(t)
 }
 
 /// One plugin: who it is and where it stands, what an approval lets run while it waits, its settings, who may use it, and its test.

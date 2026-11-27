@@ -1,7 +1,7 @@
 # Plugins (2026-11-27)
 
 What Neko is extended with. The first kind of plugin is an MCP server. This slice is the host and that one kind: no plugin comes with
-Neko, none is installed by it and none is written in the repository, not even as an example. Protocol 11, store 8. Why MCP first,
+Neko, none is installed by it and none is written in the repository, not even as an example. Protocol 11, store 8 (the config a run gets now also holds Neko's own server and is strict about the person's own servers: below, `subagents.md`). Why MCP first,
 why digests and why nothing is bundled: `docs/decisions/0002-plugins-start-with-mcp.md`.
 
 ## The model
@@ -152,10 +152,12 @@ When a task's run starts (`runs.rs`, after the start checkpoint and the cat's ru
 2. takes the plugins that are **approved exactly as they are now, on, set up, and open to the task's cat** (`Plugin::runs_for`);
 3. reads each one's secrets from the Keychain; a plugin whose secret cannot be read is left out with a warning notice in the task
    ("acme-docs was left out of this run. The Keychain no longer has Acme token. Set it again in Settings.");
-4. writes one config for this run: `<data folder>/plugins-run/<run id>/mcp.json`, the folder 0700 and the file 0600:
+4. writes one config for this run: `<data folder>/plugins-run/<run id>/mcp.json`, the folder 0700 and the file 0600. Neko's own server
+   `neko` (`neko-daemon --mcp`, `subagents.md`) is first in it, in every run, with no secret in it:
 
 ```json
-{"mcpServers": {"acme-docs": {"type": "stdio", "command": "node", "args": ["server.js"], "env": {"ACME_TOKEN": "…"}},
+{"mcpServers": {"neko": {"type": "stdio", "command": "/Applications/Neko.app/Contents/MacOS/neko-daemon", "args": ["--mcp"]},
+                "acme-docs": {"type": "stdio", "command": "node", "args": ["server.js"], "env": {"ACME_TOKEN": "…"}},
                 "web": {"type": "http", "url": "https://example.com/mcp", "headers": {"X-Key": "…"}}}}
 ```
 
@@ -164,12 +166,15 @@ When a task's run starts (`runs.rs`, after the start checkpoint and the cat's ru
 
 The file and its folder are removed when the run function returns, however the run ends (done, stopped, failed, interrupted by a
 quit, a failed start); a daemon that was killed leaves one behind, and the next one sweeps `plugins-run/` at start. A run whose cat has
-no plugin gets no file and no flag.
+no plugin gets a file with `neko` alone.
 
-**Not `--strict-mcp-config`.** Claude Code's flag would hide the MCP servers in the person's own Claude Code settings. Neko adds to
-what Claude Code does by itself and takes nothing away: the default is no surprises. The cost is that a server of the person's own
-with the same name as a plugin is Claude Code's to resolve. Plugins and the person's servers show their names in a permission request
-(below).
+**`--strict-mcp-config`, unless the person asks for their own servers.** Claude Code reads MCP servers from the person's own settings as
+well as from `--mcp-config`. The plugin host first left that alone ("add to what Claude Code does, take nothing away"). The probe of
+2026-11-27 measured what it costs: one account's own settings held about 25 servers and 480 tools, which every run loaded, which slows
+a run and gives it tools Neko did not choose. So each run is started with `--strict-mcp-config` and has exactly Neko's own server and
+the plugins the person approved. Settings ▸ Plugins has "Also give runs my own Claude Code MCP servers" (`Settings.own_mcp`, off by
+default) for a person who wants the old behaviour; then a server of theirs with a plugin's name is Claude Code's to resolve, and
+`neko` is a name no plugin may take. Plugins and the person's servers show their names in a permission request (below).
 
 A plugin reached by a web address goes into the config as `type` `http` (or `sse`), `url` and `headers`.
 
@@ -265,14 +270,14 @@ config did not give a server called SERVER there is no such tool and the call fa
   per-run config; a folder's file changing, going, not parsing; the migration from store 7; the check against the fake server (healthy,
   paged, no list, environment, hangs and what it started is gone, crash, garbage, refusal, a slow list, a program that is not there).
 - `crates/neko-core/src/policy.rs`, `claude/mod.rs`, `claude/stream.rs`: a plugin's tool asks by name and "always" is that tool alone;
-  `--mcp-config` is added and nothing else changes, never `--strict-mcp-config`; a tool's name is read as a server's.
+  `--mcp-config` is added and nothing else changes; `--strict-mcp-config` goes with it unless the person's own servers are asked for; a tool's name is read as a server's.
 - `crates/neko-daemon/tests/plugins.rs`, with the real daemon, the fake CLI and the fake server: adding runs nothing and waits in "Needs
   you"; a folder; a secret is in the test store and in no file of the data folder or the daemon's log; a check lists tools and only an
   approved plugin is run; a check that fails says why (crash, garbage, refusal, hang, a missing program, a web server); a stop during a
   hanging check stops within a second and leaves nothing running while another connection is answered at once; a run gets its config
-  (the server, the secret in `env`, no `--strict-mcp-config`), its tool asks by name, and the file and folder are gone after;
+  (Neko's own server and the plugin, the secret in `env`, `--strict-mcp-config`), its tool asks by name, and the file and folder are gone after;
   the same in "Ask before risky steps" (allow, deny, always, and full access); a changed manifest is left out and asks again; a folder's
-  file changing is noticed by a watching screen; which cats; a run with no plugins has no file or flag; removing deletes the secrets;
+  file changing is noticed by a watching screen; which cats; a run with no plugins has a config with `neko` alone; removing deletes the secrets;
   a killed daemon's config is swept.
 
 ## What is not here yet
@@ -288,8 +293,9 @@ config did not give a server called SERVER there is no such tool and the call fa
 
 None of this ran against the real thing: no test or scene starts the real `claude`, a real MCP server or the login keychain.
 
-1. That Claude Code 2.1.331 reads `--mcp-config <file>` of exactly the shape above (`type` `stdio`, `http` or `sse`; `command`, `args`,
-   `env`; `url`, `headers`) and adds it to the person's own servers without `--strict-mcp-config`.
+1. ~~That Claude Code 2.1.331 reads `--mcp-config <file>` of this shape.~~ Confirmed by the 2026-11-27 probe for `stdio` with `--strict-mcp-config`
+   (the server `connected`, its tools `mcp__<name>__<tool>`, a missing program shown as status `failed` with no message in `mcp_server_errors`).
+   Not yet for `http` and `sse`.
 2. That a tool of such a server arrives as `can_use_tool` (and in the hook) named `mcp__<name>__<tool>` with the name unchanged (plugin
    names use only the characters Claude Code keeps).
 3. That an MCP tool's `tool_result` and a denied call read like any other (the transcript shows them as tool steps).

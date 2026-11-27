@@ -215,11 +215,12 @@ pub fn request(t: &Theme, p: &Permission, name: &str, face: &str) -> El {
     }
     answers = answers.child(answer("deny", "Deny", ButtonVariant::Ghost, neko_protocol::Decision::Deny));
     let asks = if destructive { format!("{name} asks to do something that cannot be undone") } else { format!("{name} asks") };
-    let head = row()
-        .w_full()
-        .gap(t.space.at(3.0))
-        .items_start()
-        .child(portrait_in(t, &format!("{key}-face"), face, 32.0, Some(TaskStatus::NeedsYou), crate::view::raised_fill(t)))
+    // A subagent has no face: its asks are led by its number alone (`face` empty).
+    let mut head = row().w_full().gap(t.space.at(3.0)).items_start();
+    if !face.is_empty() {
+        head = head.child(portrait_in(t, &format!("{key}-face"), face, 32.0, Some(TaskStatus::NeedsYou), crate::view::raised_fill(t)));
+    }
+    let head = head
         .child(
             col()
                 .grow(1.0)
@@ -230,7 +231,7 @@ pub fn request(t: &Theme, p: &Permission, name: &str, face: &str) -> El {
                 .child(text(p.title.clone()).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()).wrap().min_w(0.0)),
         );
     let mut body = col().w_full().gap(t.space.at(3.0)).child(head);
-    let indent = crate::faces::ringed(32.0) + t.space.at(3.0);
+    let indent = if face.is_empty() { 0.0 } else { crate::faces::ringed(32.0) + t.space.at(3.0) };
     let mut detail = col().w_full().pl(indent).gap(t.space.at(3.0));
     if !p.why.is_empty() {
         detail = detail.child(text(format!("{name} asks because {}", lower_first(&p.why))).key(format!("{key}-why")).font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0));
@@ -335,13 +336,12 @@ pub fn receipt(s: &App, t: &Theme, r: &Run, parts: &[&Part], o: &Offer, changed:
     if let Some(c) = changed {
         facts = facts.label(format!("{}, {} lines added, {} removed", files(c.files), c.added, c.removed)).role("note").children(figures(t, c.added, c.removed, weight(t.ty.sm, t.ty.semibold)));
     }
-    let head = row()
-        .w_full()
-        .px(t.space.at(2.5))
-        .h(t.control.lg + 8.0)
-        .gap(t.space.at(2.5))
-        .center_y()
-        .child(portrait(t, &format!("{key}-face"), face, 24.0))
+    let mut head = row().w_full().px(t.space.at(2.5)).h(t.control.lg + 8.0).gap(t.space.at(2.5)).center_y();
+    // A subagent has no face (`face` empty): its card is led by the sentence.
+    if !face.is_empty() {
+        head = head.child(portrait(t, &format!("{key}-face"), face, 24.0));
+    }
+    let head = head
         .child(text(sentence.clone()).role("heading").level(3).font(weight(t.ty.base, t.ty.semibold)).color(if failed { t.c.danger.fg } else if o.undone { t.ink_muted() } else { t.ink() }).grow(1.0).truncate().min_w(0.0))
         .child(facts);
     let mut card = col().key(key.clone()).role("group").label(sentence).w_full().gap(0.0).child(head);

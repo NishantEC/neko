@@ -275,7 +275,48 @@ pub fn portrait_in(t: &Theme, key: &str, face: &str, size: f32, st: Option<TaskS
         Some(TaskStatus::Failed) => Activity::Failed,
         _ => Activity::None,
     };
-    tile(t, key, face, size, activity, true, under)
+    let tile = tile(t, key, face, size, activity, true, under);
+    // A thread that waits on its subagents: the working ring, held still, in the second ink (design.md).
+    if st == Some(TaskStatus::Waiting) {
+        let (_, stroke) = crate::ui::portrait::ring_metrics(size);
+        let outer = ringed(size);
+        let r = outer / 2.0 - stroke / 2.0;
+        let ink = crate::ui::portrait::seen_on(t.ink_muted(), t.ink(), under, crate::ui::portrait::RING_CONTRAST);
+        let track = Shape::new().stroke_path(&still_circle(outer / 2.0, r), stroke, LineCap::Round, ink.alpha(if t.dark { 0.28 } else { 0.22 }));
+        let sweep = Shape::new().stroke_path(&still_arc(outer / 2.0, r, 120.0), stroke, LineCap::Round, ink);
+        return tile.child(el().size(outer, outer).shape(track).absolute(0.0, 0.0)).child(el().key(format!("{key}-still")).size(outer, outer).shape(sweep).absolute(0.0, 0.0));
+    }
+    tile
+}
+
+/// A circle as a path (four cubic arcs).
+fn still_circle(c: f32, r: f32) -> rune::Path {
+    let k = 0.5523 * r;
+    rune::Path::new()
+        .move_to([c, c - r])
+        .cubic_to([c + k, c - r], [c + r, c - k], [c + r, c])
+        .cubic_to([c + r, c + k], [c + k, c + r], [c, c + r])
+        .cubic_to([c - k, c + r], [c - r, c + k], [c - r, c])
+        .cubic_to([c - r, c - k], [c - k, c - r], [c, c - r])
+        .close()
+}
+
+/// An arc of `sweep` degrees clockwise from twelve o'clock.
+fn still_arc(c: f32, r: f32, sweep: f32) -> rune::Path {
+    let pieces = (sweep / 60.0).ceil().max(1.0) as usize;
+    let step = (sweep / pieces as f32).to_radians();
+    let k = 4.0 / 3.0 * (step / 4.0).tan() * r;
+    let at = |a: f32| (c + r * a.sin(), c - r * a.cos());
+    let tangent = |a: f32| (a.cos(), a.sin());
+    let (x0, y0) = at(0.0);
+    let mut p = rune::Path::new().move_to([x0, y0]);
+    for i in 0..pieces {
+        let (a, b) = (step * i as f32, step * (i + 1) as f32);
+        let ((x1, y1), (x2, y2)) = (at(a), at(b));
+        let ((tx1, ty1), (tx2, ty2)) = (tangent(a), tangent(b));
+        p = p.cubic_to([x1 + k * tx1, y1 + k * ty1], [x2 - k * tx2, y2 - k * ty2], [x2, y2]);
+    }
+    p
 }
 
 fn tile(t: &Theme, key: &str, face: &str, size: f32, activity: Activity, ringed: bool, under: Color) -> El {

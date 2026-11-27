@@ -19,6 +19,9 @@ const MAX_HEAD: usize = 16 * 1024;
 /// Where a run's hook helper asks (docs/knowledge/permissions.md).
 pub const HOOK_PATH: &str = "/v1/hook";
 
+/// Where a run's own MCP server asks (docs/knowledge/subagents.md).
+pub const MCP_PATH: &str = "/v1/mcp";
+
 /// The longest hook body read (a tool's input, as Claude Code sends it).
 pub const MAX_HOOK_BODY: usize = 1024 * 1024;
 
@@ -30,6 +33,8 @@ pub enum Asked {
     Upgrade(String),
     /// A hook helper's question: the secret it carries and the body's length. The run checks the secret.
     Hook { secret: String, length: usize },
+    /// A run's own MCP server's call: the same, with the run's secret.
+    Mcp { secret: String, length: usize },
 }
 
 /// Why a head was refused, as the status sent back.
@@ -78,6 +83,14 @@ pub fn check(head: &[u8], port: u16, token: &str) -> Result<Asked, Refused> {
         let Some(secret) = bearer.filter(|b| !b.is_empty()) else { return Err(Refused::Unauthorized) };
         let length = header("content-length").and_then(|l| l.parse::<usize>().ok()).filter(|l| *l <= MAX_HOOK_BODY).ok_or(Refused::Bad)?;
         return Ok(Asked::Hook { secret: secret.to_owned(), length });
+    }
+    if req.path == Some(MCP_PATH) {
+        if req.method != Some("POST") {
+            return Err(Refused::NotFound);
+        }
+        let Some(secret) = bearer.filter(|b| !b.is_empty()) else { return Err(Refused::Unauthorized) };
+        let length = header("content-length").and_then(|l| l.parse::<usize>().ok()).filter(|l| *l <= MAX_HOOK_BODY).ok_or(Refused::Bad)?;
+        return Ok(Asked::Mcp { secret: secret.to_owned(), length });
     }
     if !bearer.is_some_and(|b| same_token(b, token)) {
         return Err(Refused::Unauthorized);
@@ -156,6 +169,16 @@ mod tests {
         assert_eq!(check(&head(&[base[0], "Host: evil.example.com:4000", base[2], base[3]]), 4000, TOKEN), Err(Refused::Forbidden));
         assert_eq!(check(&head(&[base[0], base[1], base[2], base[3], "Origin: https://example.com"]), 4000, TOKEN), Err(Refused::Forbidden), "a web page");
         assert_eq!(check(&head(&["GET /v1/hook HTTP/1.1", base[1], base[2]]), 4000, TOKEN), Err(Refused::NotFound));
+    }
+
+    #[test]
+    fn a_runs_mcp_server_posts_with_its_runs_secret_and_a_length() {
+        let base = ["POST /v1/mcp HTTP/1.1", "Host: 127.0.0.1:4000", "Authorization: Bearer s3cret", "Content-Length: 12"];
+        assert_eq!(check(&head(&base), 4000, TOKEN), Ok(Asked::Mcp { secret: "s3cret".into(), length: 12 }));
+        assert_eq!(check(&head(&base[..3]), 4000, TOKEN), Err(Refused::Bad), "no length");
+        assert_eq!(check(&head(&[base[0], base[1], base[3]]), 4000, TOKEN), Err(Refused::Unauthorized), "no secret");
+        assert_eq!(check(&head(&[base[0], "Host: evil.example.com:4000", base[2], base[3]]), 4000, TOKEN), Err(Refused::Forbidden));
+        assert_eq!(check(&head(&["GET /v1/mcp HTTP/1.1", base[1], base[2]]), 4000, TOKEN), Err(Refused::NotFound));
     }
 
     #[test]

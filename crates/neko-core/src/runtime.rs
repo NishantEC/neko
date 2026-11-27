@@ -83,7 +83,29 @@ pub struct StartSpec {
     /// A file of MCP servers for this run alone (the plugins that go to the task's cat): handed on as `--mcp-config`. Written by the
     /// daemon with mode 0600 and removed when the run ends; the CLI keeps its own MCP servers too (docs/knowledge/plugins.md).
     pub mcp_config: Option<PathBuf>,
+    /// How Neko's own MCP server (`neko-daemon --mcp`, named in `mcp_config`) reaches the daemon: set in the CLI's environment, so
+    /// the server it starts inherits it. Never in argv or in the config file.
+    pub mcp: Option<McpLink>,
+    /// Also load the MCP servers in the person's own Claude Code settings. Off: `--strict-mcp-config`, so the run has only what
+    /// `mcp_config` names.
+    pub own_mcp: bool,
 }
+
+/// What a run's own MCP server needs to reach the daemon (docs/knowledge/subagents.md).
+#[derive(Clone, PartialEq, Eq)]
+pub struct McpLink {
+    pub port: u16,
+    pub secret: String,
+}
+
+impl std::fmt::Debug for McpLink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "McpLink {{ port: {}, secret: <hidden> }}", self.port)
+    }
+}
+
+pub const MCP_PORT_ENV: &str = "NEKO_MCP_PORT";
+pub const MCP_SECRET_ENV: &str = "NEKO_MCP_SECRET";
 
 /// How a run's `PreToolUse` hook helper (`neko-daemon --hook`) reaches the daemon: its loopback port and the run's own secret,
 /// handed to the CLI's environment for that run only (docs/knowledge/permissions.md).
@@ -191,6 +213,9 @@ pub enum AgentEvent {
     /// A hook gave Claude Code no usable verdict, and it ran the call unchecked (it fails open).
     Unchecked { tool_use: Option<String> },
     Usage(Reported),
+    /// The account's limit news: `status` is as the CLI said it (`allowed`, `allowed_warning`, `rejected`…), `resets_at` seconds
+    /// since the epoch when it said. The daemon holds back runs it starts by itself while the limit is reached.
+    RateLimit { status: String, resets_at: Option<i64> },
     /// The last event.
     Finished(Outcome),
 }

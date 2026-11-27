@@ -228,7 +228,7 @@ fn two_tasks_run_at_once_and_one_task_runs_once() {
 
 /// Settings: "Ask before risky steps".
 fn ask_before_risky_steps(c: &mut Client) {
-    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Ask };
+    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Ask, own_mcp: false };
     assert_eq!(c.request(Request::SetSettings { settings: s.clone() }).unwrap(), Reply::Settings { settings: s });
 }
 
@@ -370,14 +370,14 @@ fn settings_list_the_agents_and_full_access_asks_nothing() {
     let d = Daemon::start("settings");
     let mut c = watcher(&d);
     let Reply::Runtimes { runtimes, settings } = c.request(Request::ListRuntimes).unwrap() else { panic!("runtimes") };
-    assert_eq!(settings, Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow }, "a new install follows Claude Code's own rules");
+    assert_eq!(settings, Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false }, "a new install follows Claude Code's own rules");
     let claude = &runtimes[0];
     assert_eq!((claude.id.as_str(), claude.found, claude.version.as_deref(), claude.signed_in), ("claude", true, Some("9.9.9"), Some(true)));
     assert_eq!(claude.login.as_deref(), Some("Claude subscription (Max)"));
     assert!(runtimes.iter().any(|r| r.id == "codex" && !r.supported && r.install.contains("codex")));
-    let full = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Full };
+    let full = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Full, own_mcp: false };
     assert_eq!(c.request(Request::SetSettings { settings: full.clone() }).unwrap(), Reply::Settings { settings: full });
-    let refused = c.request(Request::SetSettings { settings: Settings { runtime: "codex".into(), permission_mode: PermissionMode::Ask } }).unwrap();
+    let refused = c.request(Request::SetSettings { settings: Settings { runtime: "codex".into(), permission_mode: PermissionMode::Ask, own_mcp: false } }).unwrap();
     assert!(matches!(refused, Reply::Error { code: ErrorCode::BadRequest, .. }));
     let task = create(&mut c, "[fake:destructive]", None);
     let changes = events_until(&mut c, "done", task_is(&task.id, TaskStatus::Done));

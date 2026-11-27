@@ -39,6 +39,23 @@ pub struct Active {
     pub cancelled: Arc<AtomicBool>,
     /// The secret this run's hook helper carries ("Ask before risky steps" only).
     pub secret: Option<String>,
+    /// The secret this run's own MCP server (`neko-daemon --mcp`) carries: every run has one (docs/knowledge/subagents.md).
+    pub mcp_secret: Option<String>,
+}
+
+/// A run, as its MCP server reaches it.
+pub struct McpRun {
+    pub task: TaskId,
+    pub book: Arc<Mutex<RunBook>>,
+    pub control: Option<Arc<dyn Control>>,
+}
+
+/// The running run whose own MCP server carries `secret`.
+pub fn by_mcp_secret(shared: &Shared, secret: &str) -> Option<McpRun> {
+    lock(&shared.runs.active).iter().find_map(|(task, a)| match (&a.mcp_secret, &a.book) {
+        (Some(s), Some(b)) if crate::files::same_token(s, secret) => Some(McpRun { task: task.clone(), book: b.clone(), control: a.control.clone() }),
+        _ => None,
+    })
 }
 
 /// A run, as its hook helper reaches it.
@@ -197,6 +214,15 @@ fn fail_before_run(shared: &Shared, task: &Task, text: String, next: Option<Stri
 
 /// Starts the task's agent on `words` (None: the task's own words, for its first run). Refused when one is already running.
 pub fn start(shared: &Arc<Shared>, task: Task, words: Option<String>) -> Result<(), Reply> {
+    start_with(shared, task, words, None)
+}
+
+/// Wakes a thread with the reports of its subagents: a run that resumes its conversation and is told them (no words of the person's).
+pub fn start_wake(shared: &Arc<Shared>, task: Task, wakes: Vec<neko_core::subagents::WakeRow>) -> Result<(), Reply> {
+    start_with(shared, task, None, Some(wakes))
+}
+
+fn start_with(shared: &Arc<Shared>, task: Task, words: Option<String>, wake: Option<Vec<neko_core::subagents::WakeRow>>) -> Result<(), Reply> {
     let cancelled = Arc::new(AtomicBool::new(false));
     {
         let mut active = lock(&shared.runs.active);
@@ -206,15 +232,17 @@ pub fn start(shared: &Arc<Shared>, task: Task, words: Option<String>) -> Result<
         if lock(&shared.runs.undoing).contains(&task.id) {
             return Err(Reply::error(ErrorCode::Busy, "Neko is undoing a run of this thread. Send it again in a moment."));
         }
-        active.insert(task.id.clone(), Active { control: None, book: None, cancelled: cancelled.clone(), secret: None });
+        active.insert(task.id.clone(), Active { control: None, book: None, cancelled: cancelled.clone(), secret: None, mcp_secret: None });
     }
     let s = shared.clone();
     let id = task.id.clone();
     let threads = shared.runs.threads.clone();
     threads.fetch_add(1, Ordering::SeqCst);
     let spawned = std::thread::Builder::new().name(format!("neko-run-{}", workplace::short_id(&task.id))).spawn(move || {
-        run(&s, &task, words, &cancelled);
+        run(&s, &task, words, wake, &cancelled);
         release(&s, &task.id, &cancelled);
+        // A thread that rests while its subagents work is Waiting; a subagent that ended leaves its report (docs/knowledge/subagents.md).
+        crate::subagents::ended(&s, &task.id);
         s.runs.threads.fetch_sub(1, Ordering::SeqCst);
     });
     if spawned.is_err() {
@@ -234,12 +262,15 @@ fn release(shared: &Shared, task: &TaskId, mine: &Arc<AtomicBool>) {
     }
 }
 
-fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc<AtomicBool>) {
-    // Where it works: prepared once, then the same for every follow-up.
-    let stored = lock(&shared.core).store.place(&task.id);
+fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Vec<neko_core::subagents::WakeRow>>, cancelled: &Arc<AtomicBool>) {
+    // Where it works: prepared once, then the same for every follow-up. A subagent works where its thread works (the thread's own
+    // folder, which that thread made and keeps): `owner` is the task whose folder it is.
+    let owner = task.subagent.as_ref().map_or_else(|| task.id.clone(), |s| s.root.clone());
+    let stored = lock(&shared.core).store.place(&owner);
     let place = match stored {
         // Its folder may have been tidied away after the last run: it comes back first.
-        Ok(Some(p)) => workplace::reopen(&shared.runs.data_dir, &task.id, &p).map(|()| p),
+        Ok(Some(p)) => workplace::reopen(&shared.runs.data_dir, &owner, &p).map(|()| p),
+        _ if task.subagent.is_some() => Err(PlaceError::Other("The thread this subagent belongs to has no folder to work in.".into())),
         _ => workplace::prepare(&shared.runs.data_dir, &task.id, task.folder.as_deref()),
     };
     let place: Place = match place {
@@ -261,7 +292,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
         let now = core.now();
         let _ = core.store.set_place(&task.id, &place, now);
     }
-    let settings = lock(&shared.core).store.settings().unwrap_or(neko_protocol::Settings { runtime: "claude".into(), permission_mode: Default::default() });
+    let settings = lock(&shared.core).store.settings().unwrap_or(neko_protocol::Settings { runtime: "claude".into(), permission_mode: Default::default(), own_mcp: false });
     let Some(runtime) = shared.runs.runtimes.iter().find(|r| r.id() == settings.runtime).cloned() else {
         if let Some(w) = &words {
             person(shared, &task.id, w);
@@ -299,6 +330,10 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
             book
         })
     };
+    // A wake: the reports are read by this run, so each leaves its note in the transcript and is settled.
+    if let (Ok(book), Some(wakes)) = (&begun, &wake) {
+        crate::subagents::delivered(shared, task, Some(&book.run.id), wakes);
+    }
     let Ok(book) = begun else {
         release(shared, &task.id, cancelled);
         return fail_before_run(shared, task, "Neko could not write to its store.".into(), None, None);
@@ -309,8 +344,9 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
         let changes = workplace::changes(&place);
         // The end checkpoint, before anything can be tidied away or a follow-up start (docs/knowledge/undo.md).
         crate::undo::at_end(shared, &task.id, &run_id);
-        // A worktree or scratch folder with nothing in it goes now, before a follow-up can start (it makes it again).
-        let tidied = workplace::tidy(&shared.runs.data_dir, &task.id, &place);
+        // A worktree or scratch folder with nothing in it goes now, before a follow-up can start (it makes it again). Not while a
+        // subagent still works in it, and never a subagent's: the folder is its thread's.
+        let tidied = if task.subagent.is_some() || crate::subagents::has_live_subagents(shared, &task.id) { workplace::Tidied::Kept } else { workplace::tidy(&shared.runs.data_dir, &task.id, &place) };
         crate::undo::after_run(shared, &task.id, matches!(tidied, workplace::Tidied::Removed { .. }) && place.branch.is_some());
         release(shared, &task.id, cancelled);
         let mut b = lock(&book);
@@ -341,16 +377,33 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
     // they were undone. Then the start checkpoint, before the agent can touch anything.
     let told = crate::undo::before_run(shared, &task.id);
     crate::undo::at_start(shared, &task.id, &run_id, &place);
-    let said = words.clone().unwrap_or_else(|| task.words.clone());
+    let said = match &wake {
+        Some(wakes) => neko_core::subagents::wake_message(wakes),
+        None => words.clone().unwrap_or_else(|| task.words.clone()),
+    };
     let said = match told {
         Some(line) => format!("{line}\n\n{said}"),
         None => said,
     };
-    // The cat's block is text for the agent only: the mode and the hook above are the same whatever it says.
-    let instructions = cat.as_ref().map(neko_core::cats::block);
+    // The cat's block is text for the agent only: the mode and the hook above are the same whatever it says. After it, what Neko tells
+    // every agent about subagents, and a subagent's own few lines (docs/knowledge/subagents.md).
+    let cat_block = cat.as_ref().map(neko_core::cats::block);
+    let thread_title = task.subagent.as_ref().and_then(|s| lock(&shared.core).store.get_task(&s.root).ok().flatten()).map(|t| t.title);
+    let instructions = Some(neko_core::subagents::instructions(cat_block.as_deref(), task.subagent.as_ref().zip(thread_title.as_deref()).map(|(s, t)| (s.number.as_str(), t))));
+    // This run's own MCP server finds the daemon with a secret made for this run alone.
+    let mcp_helper = std::env::var_os("NEKO_MCP_HELPER").filter(|h| !h.is_empty()).map(PathBuf::from).or_else(|| std::env::current_exe().ok()).unwrap_or_default();
+    let Some(mcp_secret) = crate::files::random_hex(32).ok() else {
+        return finish(Outcome::Failed(Failure::Crashed { code: None, words: "Neko could not make a secret for this run's tools.".into() }));
+    };
+    if !neko_core::find::executable(&mcp_helper) {
+        return finish(Outcome::Failed(Failure::Crashed { code: None, words: "Neko could not find its own tool server, so the run did not start.".into() }));
+    }
+    if let Some(a) = lock(&shared.runs.active).get_mut(&task.id) {
+        a.mcp_secret = Some(mcp_secret.clone());
+    }
     // The plugins this cat may use, approved as they are now, in a config for this run alone; it goes when this function returns, which
     // is when the run ends (docs/knowledge/plugins.md). A plugin's tool asks through the same route as every other tool.
-    let plugin_files = crate::plugins::for_run(shared, &shared.runs.data_dir, &cat.as_ref().map_or_else(|| task.cat.clone(), |c| c.id.clone()), &run_id.0);
+    let plugin_files = crate::plugins::for_run(shared, &shared.runs.data_dir, &cat.as_ref().map_or_else(|| task.cat.clone(), |c| c.id.clone()), &run_id.0, &mcp_helper);
     {
         let mut b = lock(&book);
         b.set_plugins(plugin_files.names.clone());
@@ -361,7 +414,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
             }
         }
     }
-    let spec = StartSpec { words: said, workdir: PathBuf::from(&place.workdir), resume, mode: settings.permission_mode, hook, instructions, mcp_config: plugin_files.config.clone() };
+    let spec = StartSpec { words: said, workdir: PathBuf::from(&place.workdir), resume, mode: settings.permission_mode, hook, instructions, mcp_config: plugin_files.config.clone(), mcp: Some(neko_core::runtime::McpLink { port: shared.port, secret: mcp_secret }), own_mcp: settings.own_mcp };
     let started = match runtime.start(spec) {
         Ok(s) => s,
         Err(f) => return finish(Outcome::Failed(f)),
@@ -429,6 +482,9 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
                 });
                 return;
             }
+            Some(neko_core::runtime::AgentEvent::RateLimit { status, resets_at }) => {
+                crate::subagents::rate_limit(shared, &status, resets_at);
+            }
             Some(neko_core::runtime::AgentEvent::Unchecked { tool_use }) => {
                 // Claude Code ran a step our hook could not check. Asking before risky steps, that run stops now.
                 if settings.permission_mode == PermissionMode::Ask && limit.is_none() {
@@ -484,13 +540,15 @@ pub fn follow_up(shared: &Arc<Shared>, task: Task, words: String) -> Reply {
 }
 
 /// Stops the task's agent. Fine when none is running.
-pub fn stop(shared: &Shared, task: &TaskId) -> Reply {
+pub fn stop(shared: &Arc<Shared>, task: &TaskId) -> Reply {
     if let Some(a) = lock(&shared.runs.active).get(task) {
         a.cancelled.store(true, Ordering::SeqCst);
         if let Some(c) = &a.control {
             c.stop();
         }
     }
+    // Everything it started stops with it, and a thread that only waits is stopped (docs/knowledge/subagents.md).
+    crate::subagents::stop_tree(shared, task);
     Reply::Ok
 }
 
@@ -520,11 +578,29 @@ pub fn remove_task(shared: &Shared, task: &TaskId) -> Reply {
     if lock(&shared.runs.active).contains_key(task) {
         return Reply::error(ErrorCode::Busy, "Neko is working on this thread. Stop it first.");
     }
-    match lock(&shared.core).store.get_task(task) {
-        Ok(Some(_)) => {}
+    let found = match lock(&shared.core).store.get_task(task) {
+        Ok(Some(t)) => t,
         Ok(None) => return Reply::error(ErrorCode::NotFound, "There is no such thread."),
         Err(e) => return Reply::error(ErrorCode::Internal, e.to_string()),
+    };
+    if found.subagent.is_some() {
+        return Reply::error(ErrorCode::Refused, "A subagent goes with its thread. Remove the thread to remove it.");
     }
+    // Its subagents go with it, once none of them works (their folder is the thread's).
+    let below = lock(&shared.core).store.subagents_of(task).unwrap_or_default();
+    if below.iter().any(|t| lock(&shared.runs.active).contains_key(&t.id) || neko_core::subagents::is_live(t.status) && t.status != TaskStatus::Waiting) {
+        return Reply::error(ErrorCode::Busy, "A subagent of this thread is still working. Stop the thread first.");
+    }
+    for t in &below {
+        crate::undo::forget_task(shared, &t.id, None);
+        let mut core = lock(&shared.core);
+        let now = core.now();
+        let _ = core.store.delete_wakes_of_task(&t.id);
+        if let Ok(revision) = core.store.delete_task(&t.id, now) {
+            shared.broadcast(&ServerMessage::Event { revision, change: Change::TaskRemoved { task: t.id.clone() } });
+        }
+    }
+    let _ = lock(&shared.core).store.delete_wakes_of_task(task);
     let place = lock(&shared.core).store.place(task).ok().flatten();
     if let Some(p) = &place
         && let Err(why) = workplace::remove_place(&shared.runs.data_dir, task, p)

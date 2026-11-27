@@ -147,7 +147,7 @@ fn only_a_failure_the_person_can_act_on_needs_them() {
 }
 
 fn item(id: &str, ws: &str, since: i64) -> NeedsItem {
-    NeedsItem { id: id.into(), task: TaskId(format!("task_{id}")), workspace: ws.into(), title: id.into(), cat: "cat_miso".into(), cat_name: "miso".into(), since_ms: since, need: Need::Question { run: neko_protocol::RunId("r".into()), question: "?".into() } }
+    NeedsItem { id: id.into(), task: TaskId(format!("task_{id}")), workspace: ws.into(), title: id.into(), cat: "cat_miso".into(), cat_name: "miso".into(), since_ms: since, need: Need::Question { run: neko_protocol::RunId("r".into()), question: "?".into() }, subagent: None }
 }
 
 #[test]

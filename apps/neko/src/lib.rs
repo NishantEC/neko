@@ -26,6 +26,8 @@ pub mod settings_view;
 pub mod sidebar;
 pub mod state;
 pub mod status_mark;
+pub mod subagents;
+pub mod subagents_view;
 pub mod task_view;
 pub mod threads;
 pub mod turn;
@@ -194,6 +196,11 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             && let Some(p) = s.pending_request()
         {
             s.decide(&p, neko_protocol::Decision::Deny);
+            return true;
+        }
+        // A subagent is read, never stopped by a stray Escape (it has a Stop button): Escape goes back to the thread.
+        if !s.settings_open && !s.rounds_open && s.open_subagent().is_some() {
+            s.open_parent();
             return true;
         }
         if !s.settings_open && s.open_is_working() {

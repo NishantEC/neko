@@ -35,22 +35,29 @@ Detection runs `claude --version` and `claude auth status --json`. From the seco
 ```text
 claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages
        --permission-prompt-tool stdio [--permission-mode default] [--settings <hook JSON>]
-       [--mcp-config <this run's plugins>] [--append-system-prompt <the cat's block> --system-prompt-snapshot off] [--resume <session>]
+       --mcp-config <Neko's own server and this run's plugins> [--strict-mcp-config] --append-system-prompt <the cat's block and the subagent paragraph> --system-prompt-snapshot off [--resume <session>]
 ```
 
 - The task's cat reaches the agent as `--append-system-prompt`, one argument, on every run; `--system-prompt-snapshot off` makes a
   resumed run take rules edited since. It changes no other flag (`cats.md`).
 
-- The plugins the task's cat may use (`plugins.md`) reach Claude Code as `--mcp-config <file>`: one JSON file of `mcpServers` made for
-  this run alone (`<data>/plugins-run/<run id>/mcp.json`, mode 0600 in a 0700 folder), removed when the run ends. A run with none gets no
-  flag. Neko does **not** pass `--strict-mcp-config`: the MCP servers in the person's own Claude Code settings stay, as the rest of their
-  settings do. The secret settings of a plugin are in the file's `env` and `headers` for the length of the run, read from the Keychain
-  when the run starts. A plugin's tool is `mcp__<plugin>__<tool>` and asks through the same route as every tool (`permissions.md`).
+- Every run gets `--mcp-config <file>`: one JSON file of `mcpServers` made for this run alone (`<data>/plugins-run/<run id>/mcp.json`,
+  mode 0600 in a 0700 folder), removed when the run ends. It has Neko's own server `neko` first (`neko-daemon --mcp`, `subagents.md`) and
+  then the plugins the task's cat may use (`plugins.md`). The secret settings of a plugin are in the file's `env` and `headers` for the
+  length of the run, read from the Keychain when the run starts. A plugin's tool is `mcp__<plugin>__<tool>` and asks through the same
+  route as every tool (`permissions.md`).
+- **`--strict-mcp-config` is passed** unless Settings ▸ Plugins has "Also give runs my own Claude Code MCP servers" on (`Settings.own_mcp`,
+  off by default). Without it the CLI also loads the MCP servers in the person's own settings (measured: about 25 servers, 480 tools),
+  which slows every run and gives it tools Neko did not choose. This changes the plugin host's first choice (`plugins.md`).
+- Every run's system text (`--append-system-prompt`) is the cat's block, then the subagent paragraph, then, for a subagent, three lines
+  about itself (`subagents.md`): one argument, the same bytes on every run.
+- `NEKO_MCP_PORT` and `NEKO_MCP_SECRET` are in the CLI's environment on every run: how its `neko` server finds the daemon
+  (`subagents.md`). Nothing secret is in argv or the config file.
 - `NEKO_CLAUDE_MODEL` in the daemon's environment adds `--model <name>` (the QA rig sets `haiku` for real runs,
   `docs/knowledge/qa.md`). Unset or empty, no `--model` is passed and the CLI's own default applies. The fake reports the model
   it was given (`tests/model.rs`).
 - It runs in the task's folder, under the run guard (`run-guard.md`), with PATH set as above. "Ask before risky steps" adds
-  `NEKO_HOOK_PORT` and `NEKO_HOOK_SECRET`; nothing else is added.
+  `NEKO_HOOK_PORT` and `NEKO_HOOK_SECRET`; every run adds `NEKO_MCP_PORT` and `NEKO_MCP_SECRET`; nothing else is added.
 - The permission mode decides the rest (`permissions.md`): following Claude Code's own rules adds neither `--permission-mode` nor
   `--settings`; asking before risky steps adds `--permission-mode default` and the `PreToolUse` hook; full access adds
   `--permission-mode default`. Neko never passes `--setting-sources`, so the person's own settings, hooks and MCP servers apply.
@@ -66,7 +73,10 @@ claude -p --input-format stream-json --output-format stream-json --verbose --inc
 - The `result` line ends a turn: usage, `total_cost_usd`, the model from `modelUsage`, and whether it failed. How full the context
   is comes from the last top-level `assistant` message's `usage` (input, cache read and cache written); the window from
   `modelUsage[…].contextWindow` when it is there. Once every message sent has its result, Neko closes stdin and the CLI ends.
-- A follow-up after a run is a new run with `--resume` and the conversation id the last run reported.
+- A follow-up after a run is a new run with `--resume` and the conversation id the last run reported. So is a wake: a thread that rests
+  while its subagents work is resumed with their reports as one user message (`subagents.md`).
+- A `rate_limit_event` becomes `AgentEvent::RateLimit {status, resets_at}`; the daemon holds back what it starts by itself while the
+  status is not `allowed` or `allowed_warning` (`subagents.md`). `rejected` still ends the run as a usage limit.
 
 ## The hook, measured on Claude Code 2.1.331
 
@@ -130,8 +140,8 @@ and its last stderr line when it is plain words), a failure the CLI reported, 30
 
 `crates/neko-core/src/bin/neko-fake-claude.rs` speaks the same protocol from scripts picked by `[fake:NAME]` in the words: plain,
 long, thinking, tools, permission, destructive, outside, slow, spawn, spawn-stay, crash, limit, signin, stall, hook-shell,
-hook-twice, hook-read, hook-destructive, hook-no-verdict, plugin-tool:SERVER:TOOL, real (empty thinking, words between tools, a long path, a check that
-exits 1), and a resumed conversation. `NEKO_FAKE_RECORD` names a file it appends its arguments, the content of every `--mcp-config` file it was given (read at start, since the file goes with the run) and every stdin line to. `plugin-tool:SERVER:TOOL` calls `mcp__SERVER__TOOL` through the permission route, or fails at once with "No such tool available" when the config gave no such server. Like Claude Code it reads `permissions.allow` from `$HOME/.claude/settings.json` and runs the `PreToolUse`
+hook-twice, hook-read, hook-destructive, hook-no-verdict, delegate (the lines after it, played through the MCP servers `--mcp-config` named, really started: `mcp SERVER TOOL {json}`, `poll N`, `stay N`; steps may also be one line apart by ` ; `), woken (a message that begins `<neko-wake`), plugin-tool:SERVER:TOOL, real (empty thinking, words between tools, a long path, a check that
+exits 1), and a resumed conversation. `NEKO_FAKE_RECORD` names a file it appends its arguments, the content of every `--mcp-config` file it was given (read at start, since the file goes with the run) every stdin line and, for `delegate`, every MCP tool call it made (`{"mcp_call": {server, tool, ms, error, text}}`) to. `plugin-tool:SERVER:TOOL` calls `mcp__SERVER__TOOL` through the permission route, or fails at once with "No such tool available" when the config gave no such server. Like Claude Code it reads `permissions.allow` from `$HOME/.claude/settings.json` and runs the `PreToolUse`
 hooks given with `--settings` as the documentation says. Tests give it a HOME of their own. No test runs the real CLI.
 
 ## Plugins on a real run: not sure yet

@@ -26,6 +26,7 @@
 //! | `hook-destructive` | Runs `git reset --hard HEAD~1`. |
 //! | `real` | The shapes a real run showed: empty thinking, several words between tools, a long absolute path, a check that exits 1. |
 //! | `plugin-tool:SERVER:TOOL` | Calls the tool `mcp__SERVER__TOOL` (asking, as Claude Code would about an MCP tool), then says whether it ran. When `--mcp-config` did not give a server called SERVER there is no such tool: the call fails at once, asking nothing. |
+//! | `mcp` (or `delegate`) | Plays the lines after the tag through the MCP servers `--mcp-config` gave, really started (stdio, with this process's environment): `mcp SERVER TOOL {json}` calls `mcp__SERVER__TOOL` (asking first, as Claude Code does) and reads the server's answer, `poll N` calls `mcp__neko__subagents` N times, `stay N` keeps streaming N seconds. Steps are one per line, or several on one line apart by ` ; ` (what stands before the tag is the person's words). Then it ends its turn. A message that begins `<neko-wake` is answered by saying which reports it read. |
 //! | `hook-no-verdict` | Says a hook gave no usable answer for `cargo test`, then runs it anyway, as Claude Code does (it fails open). |
 //!
 //! `NEKO_FAKE_RECORD` names a file it appends what it was given to, one JSON line each: `{"argv": [...]}` when it starts, then
@@ -171,6 +172,82 @@ fn run_hook(h: &Hook, input: &Value) -> Hooked {
     }
 }
 
+/// An MCP server from `--mcp-config`, started as Claude Code starts it: a child process speaking JSON-RPC lines on its stdio.
+struct McpServer {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    lines: std::io::BufReader<std::process::ChildStdout>,
+    next: u64,
+    tools: Vec<String>,
+}
+
+impl McpServer {
+    fn start(spec: &Value) -> Option<McpServer> {
+        use std::process::{Command, Stdio};
+        let mut c = Command::new(spec["command"].as_str()?);
+        c.args(spec["args"].as_array().into_iter().flatten().filter_map(|a| a.as_str())).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+        for (k, v) in spec["env"].as_object().into_iter().flatten() {
+            if let Some(v) = v.as_str() {
+                c.env(k, v);
+            }
+        }
+        let mut child = c.spawn().ok()?;
+        let stdin = child.stdin.take()?;
+        let lines = std::io::BufReader::new(child.stdout.take()?);
+        let mut s = McpServer { child, stdin, lines, next: 1, tools: Vec::new() };
+        // As the real CLI does: a probe a server may refuse, the handshake, then the tools.
+        let _ = s.request("server/discover", json!({}));
+        let init = s.request("initialize", json!({"protocolVersion":"2025-11-25","capabilities":{"roots":{"listChanged":true}},"clientInfo":{"name":"claude-code","version":"9.9.9"}}))?;
+        init.get("result")?;
+        s.send(&json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
+        let list = s.request("tools/list", json!({}))?;
+        s.tools = list["result"]["tools"].as_array().into_iter().flatten().filter_map(|t| t["name"].as_str().map(str::to_owned)).collect();
+        Some(s)
+    }
+
+    fn send(&mut self, v: &Value) {
+        let _ = writeln!(self.stdin, "{v}");
+        let _ = self.stdin.flush();
+    }
+
+    /// One request and its answer (answers to other ids are skipped).
+    fn request(&mut self, method: &str, params: Value) -> Option<Value> {
+        let id = self.next;
+        self.next += 1;
+        self.send(&json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}));
+        loop {
+            let mut line = String::new();
+            if self.lines.read_line(&mut line).ok()? == 0 {
+                return None;
+            }
+            let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+            if v["id"] == json!(id) {
+                return Some(v);
+            }
+        }
+    }
+
+    /// A tool call: what the server answered, and whether it was an error.
+    fn call(&mut self, tool: &str, args: &Value, tool_use_id: &str) -> (String, bool) {
+        if !self.tools.iter().any(|t| t == tool) {
+            return (format!("Error: No such tool available: {tool}"), true);
+        }
+        match self.request("tools/call", json!({"name": tool, "arguments": args, "_meta": {"claudecode/toolUseId": tool_use_id, "progressToken": 2}})) {
+            Some(v) if v.get("error").is_some() => (format!("MCP error: {}", v["error"]["message"].as_str().unwrap_or("")), true),
+            Some(v) => (v["result"]["content"].as_array().into_iter().flatten().filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join("
+"), v["result"]["isError"].as_bool().unwrap_or(false)),
+            None => ("MCP server closed".to_owned(), true),
+        }
+    }
+}
+
+impl Drop for McpServer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 struct Fake {
     hooks: Vec<Hook>,
     allowed: Vec<String>,
@@ -183,6 +260,9 @@ struct Fake {
     n: u32,
     /// The names of the MCP servers `--mcp-config` gave.
     mcp: Vec<String>,
+    /// What `--mcp-config` said about each, and the ones started so far.
+    mcp_specs: std::collections::HashMap<String, Value>,
+    servers: std::collections::HashMap<String, McpServer>,
 }
 
 impl Fake {
@@ -230,6 +310,20 @@ impl Fake {
 
     /// The same, and why it did not run. With `fails`, it ran and exited 1, as a shell check does.
     fn tool_why(&mut self, name: &str, input: Value, ask: bool, result: &str, fails: bool) -> (bool, String) {
+        let (tool_id, ran, why) = self.gate(name, input, ask);
+        let (content, error) = match (ran, fails) {
+            (false, _) if why.is_empty() => ("The person denied this.".to_owned(), true),
+            (false, _) => (format!("PreToolUse:{name} hook error: {why}"), true),
+            (true, true) => (format!("Exit code 1\n{result}"), true),
+            (true, false) => (result.to_owned(), false),
+        };
+        out(json!({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":tool_id,"is_error":error,"content":content}]},"parent_tool_use_id":null,"session_id":self.session}));
+        (ran, why)
+    }
+
+    /// Announces a tool call and settles whether it runs: the hooks, then the person's own rules, then Neko's answer. Returns the
+    /// call's id, whether it runs and, when not, why.
+    fn gate(&mut self, name: &str, input: Value, ask: bool) -> (String, bool, String) {
         let tool_id = self.id("toolu");
         let msg = self.message();
         out(json!({"type":"assistant","message":{"id":msg,"model":model(),"content":[{"type":"tool_use","id":tool_id,"name":name,"input":input}],"usage":{"input_tokens":6,"cache_read_input_tokens":14_000,"cache_creation_input_tokens":800,"output_tokens":40}},"parent_tool_use_id":null,"session_id":self.session}));
@@ -262,14 +356,36 @@ impl Fake {
                 if self.wait_answer(&req) { (true, String::new()) } else { (false, "The person denied this.".to_owned()) }
             }
         };
-        let (content, error) = match (ran, fails) {
-            (false, _) if why.is_empty() => ("The person denied this.".to_owned(), true),
-            (false, _) => (format!("PreToolUse:{name} hook error: {why}"), true),
-            (true, true) => (format!("Exit code 1\n{result}"), true),
-            (true, false) => (result.to_owned(), false),
+        (tool_id, ran, why)
+    }
+
+    /// A call to an MCP server's tool, the way Claude Code makes it: announced, asked about, then really sent to the server over its
+    /// stdio, and the server's own words are the result. Returns what the server said (None when the call did not run).
+    fn mcp_call(&mut self, server: &str, tool: &str, args: Value) -> Option<String> {
+        let name = format!("mcp__{server}__{tool}");
+        let (tool_id, ran, why) = self.gate(&name, args.clone(), true);
+        let (content, error, said) = if !ran {
+            (if why.is_empty() { "The person denied this.".to_owned() } else { format!("PreToolUse:{name} hook error: {why}") }, true, None)
+        } else if let Some(srv) = self.server(server) {
+            let began = Instant::now();
+            let (text, is_error) = srv.call(tool, &args, &tool_id);
+            keep(&json!({"mcp_call": {"server": server, "tool": tool, "ms": began.elapsed().as_millis() as u64, "error": is_error, "text": text}}));
+            (text.clone(), is_error, Some(text))
+        } else {
+            (format!("Error: No such tool available: {name}"), true, None)
         };
         out(json!({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":tool_id,"is_error":error,"content":content}]},"parent_tool_use_id":null,"session_id":self.session}));
-        (ran, why)
+        said
+    }
+
+    /// The server `name` from `--mcp-config`, started now if it was not (stdio only), its handshake done.
+    fn server(&mut self, name: &str) -> Option<&mut McpServer> {
+        if !self.servers.contains_key(name) {
+            let spec = self.mcp_specs.get(name)?.clone();
+            let s = McpServer::start(&spec)?;
+            self.servers.insert(name.to_owned(), s);
+        }
+        self.servers.get_mut(name)
     }
 
     /// Thinking as Claude Code 2.1.331 sends it: a block with no words, only a signature.
@@ -305,7 +421,7 @@ impl Fake {
     }
 
     fn play(&mut self, words: &str) {
-        let (script, arg) = pick(words);
+        let (script, arg) = if words.trim_start().starts_with("<neko-wake") { ("woken".to_owned(), String::new()) } else { pick(words) };
         let cwd = self.cwd.clone();
         match script.as_str() {
             "long" => {
@@ -457,6 +573,50 @@ impl Fake {
                 self.say(&words, 2, Duration::from_millis(10));
                 self.result(&words, false);
             }
+            "mcp" | "delegate" => {
+                let mut reports = Vec::new();
+                let mut stay = 0u64;
+                for line in steps_of(words) {
+                    let line = line.as_str();
+                    if let Some(rest) = line.strip_prefix("mcp ") {
+                        let mut p = rest.splitn(3, ' ');
+                        let (Some(server), Some(tool)) = (p.next(), p.next()) else { continue };
+                        let args = serde_json::from_str::<Value>(p.next().unwrap_or("{}")).unwrap_or(json!({}));
+                        reports.push(self.mcp_call(server, tool, args).unwrap_or_else(|| "(did not run)".to_owned()));
+                    } else if let Some(n) = line.strip_prefix("poll ") {
+                        let n: u32 = n.trim().parse().unwrap_or(10);
+                        let mut slowest = 0u128;
+                        for _ in 0..n {
+                            let began = Instant::now();
+                            self.mcp_call("neko", "subagents", json!({}));
+                            slowest = slowest.max(began.elapsed().as_millis());
+                        }
+                        reports.push(format!("polled {n} times, slowest {slowest} ms"));
+                    } else if let Some(n) = line.strip_prefix("stay ") {
+                        stay = n.trim().parse().unwrap_or(0);
+                    }
+                }
+                let until = Instant::now() + Duration::from_secs(stay);
+                while Instant::now() < until {
+                    self.say("working on my own part ", 1, Duration::from_millis(0));
+                    std::thread::sleep(Duration::from_millis(300));
+                }
+                let text = format!("Done with my calls: {} call(s). {}", reports.len(), reports.last().cloned().unwrap_or_default());
+                self.say(&text, 3, Duration::from_millis(10));
+                self.result(&text, false);
+            }
+            "woken" => {
+                let n = words.matches("<neko-wake").count();
+                let mut seen = Vec::new();
+                for chunk in words.split("<neko-wake").skip(1) {
+                    let attr = |k: &str| chunk.split(&format!("{k}=\"")).nth(1).and_then(|r| r.split('"').next()).unwrap_or("?").to_owned();
+                    let first = chunk.split("<summary>").nth(1).and_then(|s| s.lines().next()).unwrap_or("").trim().to_owned();
+                    seen.push(format!("Subagent {} {}: {}", attr("id"), attr("status"), first));
+                }
+                let text = format!("I read {n} report(s). {}", seen.join(" | "));
+                self.say(&text, 3, Duration::from_millis(10));
+                self.result(&text, false);
+            }
             "hook-no-verdict" => {
                 let tool_id = self.id("toolu");
                 let msg = self.message();
@@ -522,6 +682,20 @@ fn pick(words: &str) -> (String, String) {
     }
 }
 
+/// The steps of a `delegate` script: one per line, and also several on one line apart by ` ; ` (a composer takes one line). A step may
+/// follow the script's own tag (`[fake:delegate] mcp neko start_subagent {...}`); text after the tag in a later step is left alone.
+fn steps_of(words: &str) -> Vec<String> {
+    words
+        .lines()
+        .flat_map(|l| l.split(" ; "))
+        .map(|p| {
+            // The script's own tag ends the person's words in front of it: what follows the tag is a step.
+            let at = ["[fake:delegate]", "[fake:mcp]"].iter().filter_map(|t| p.find(t).map(|i| i + t.len())).min();
+            at.map_or(p, |i| &p[i..]).trim().to_owned()
+        })
+        .collect()
+}
+
 /// A grandchild in its own process group, as an agent's shell command would be, its pid written to `pidfile`.
 fn spawn_grandchild(pidfile: &str) {
     use std::os::unix::process::CommandExt;
@@ -560,6 +734,7 @@ fn main() {
     keep(&json!({ "argv": args }));
     // The MCP config files given, read now: the run's own copy goes when the run ends.
     let mut mcp = Vec::new();
+    let mut mcp_specs = std::collections::HashMap::new();
     for (i, a) in args.iter().enumerate() {
         if a == "--mcp-config"
             && let Some(path) = args.get(i + 1)
@@ -568,6 +743,7 @@ fn main() {
             let content = serde_json::from_str::<Value>(&text).unwrap_or(Value::String(text));
             if let Some(m) = content["mcpServers"].as_object() {
                 mcp.extend(m.keys().cloned());
+                mcp_specs.extend(m.iter().map(|(k, v)| (k.clone(), v.clone())));
             }
             keep(&json!({ "mcp_config": { "path": path, "content": content } }));
         }
@@ -588,7 +764,7 @@ fn main() {
     });
     let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
     let session = resume.clone().unwrap_or_else(|| format!("fake-{}-{}", std::process::id(), now_s()));
-    let mut fake = Fake { hooks: hooks_from(settings.as_deref()), allowed: allowed_by_settings(), session: session.clone(), resumed: resume.is_some(), cwd: cwd.clone(), input: rx, queued: Vec::new(), n: 0, mcp };
+    let mut fake = Fake { hooks: hooks_from(settings.as_deref()), allowed: allowed_by_settings(), session: session.clone(), resumed: resume.is_some(), cwd: cwd.clone(), input: rx, queued: Vec::new(), n: 0, mcp, mcp_specs, servers: Default::default() };
     let mut started = false;
     loop {
         let v = if fake.queued.is_empty() {
@@ -626,5 +802,23 @@ fn main() {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::steps_of;
+
+    #[test]
+    fn a_delegate_script_reads_lines_and_semicolons_alike() {
+        let one = "Check two things [fake:delegate] mcp neko start_subagent {\"title\":\"A\",\"prompt\":\"look [fake:long:2]\"} ; mcp neko start_subagent {\"title\":\"B\"} ; stay 1";
+        let steps = steps_of(one);
+        assert_eq!(steps.len(), 3, "{steps:?}");
+        assert_eq!(steps[0], "mcp neko start_subagent {\"title\":\"A\",\"prompt\":\"look [fake:long:2]\"}", "the words before the tag are not a step");
+        assert_eq!(steps[1], "mcp neko start_subagent {\"title\":\"B\"}");
+        assert_eq!(steps[2], "stay 1");
+        // The newline form still works.
+        let lines = steps_of("[fake:delegate]\nmcp neko start_subagent {\"title\":\"A\"}\npoll 3");
+        assert_eq!(lines, ["", "mcp neko start_subagent {\"title\":\"A\"}", "poll 3"]);
     }
 }

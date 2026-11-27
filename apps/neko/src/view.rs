@@ -82,13 +82,14 @@ pub fn state_ink(t: &Theme, st: TaskStatus) -> Option<Color> {
         TaskStatus::Working => Some(t.c.accent.fg),
         TaskStatus::NeedsYou | TaskStatus::Asked => Some(t.c.warning.fg),
         TaskStatus::Failed => Some(t.c.danger.fg),
+        // A thread that waits is not busy: the second ink, still.
         _ => None,
     }
 }
 
 /// The tasks that are live: working first, then those that need the person, newest first inside each.
 pub fn live_tasks(s: &App) -> Vec<&neko_protocol::Task> {
-    let mut v: Vec<&neko_protocol::Task> = s.tasks.iter().filter(|t| matches!(t.status, TaskStatus::Working | TaskStatus::NeedsYou | TaskStatus::Asked)).collect();
+    let mut v: Vec<&neko_protocol::Task> = s.tasks.iter().filter(|t| t.is_thread() && matches!(t.status, TaskStatus::Working | TaskStatus::NeedsYou | TaskStatus::Asked | TaskStatus::Waiting)).collect();
     v.sort_by_key(|t| (t.status != TaskStatus::Working, std::cmp::Reverse(t.created_ms)));
     v
 }
@@ -178,6 +179,8 @@ pub fn status_mark(s: TaskStatus) -> (Status, &'static str) {
     match s {
         TaskStatus::New => (Status::Pending, "New"),
         TaskStatus::Working => (Status::Running, "Working"),
+        // Drawn as the still ring (`subagents_view::status_glyph`): the kit has no mark for it.
+        TaskStatus::Waiting => (Status::Pending, "Waiting"),
         TaskStatus::NeedsYou | TaskStatus::Asked => (Status::Waiting, "Needs you"),
         TaskStatus::Done => (Status::Done, "Done"),
         TaskStatus::Failed => (Status::Error, "Failed"),
@@ -216,7 +219,8 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
         band = band.child(lights_room(lights).w(if lights > 0.0 { (lights - 4.0).max(0.0) } else { 0.0 })).child(toggle_button(t, false));
     }
     let Some(task) = s.open_task().filter(|_| !s.settings_open && !s.needs_open && !s.rounds_open && !s.briefing_open && s.page_cat().is_none()) else { return band };
-    if let Some(c) = s.cat(&task.cat) {
+    let sub = task.subagent.is_some();
+    if let Some(c) = s.cat(&task.cat).filter(|_| !sub) {
         let id = c.id.clone();
         let st = (task.status == TaskStatus::Working).then_some(TaskStatus::Working);
         let face = row().key("task-cat").role("button").label(format!("Cat: {}", c.name)).help(format!("Open {}'s page", c.name)).focusable(true).padding(2.0).radius(t.radius.md).round_as(t);
@@ -225,7 +229,12 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     // The title always wins the room: in a narrow content area the folder line goes first and the workspace's name shortens.
     let room = s.width.map_or(f32::MAX, |w| w - if s.sidebar_shown() { SIDEBAR + 2.0 * crate::sidebar::INSET + 1.0 } else { 0.0 });
     let narrow = room < NARROW_BAND;
-    band = band.child(text(task.title.clone()).key("band-title").role("heading").level(1).font(weight(t.ty.lg, t.ty.semibold)).color(t.ink()).truncate().min_w(TITLE_MIN).shrink());
+    band = if sub {
+        // A subagent's band says whose conversation it is: `Fix login / Subagent 1`, the thread's title a way back.
+        band.child(crate::subagents_view::crumb(s, t, task, narrow))
+    } else {
+        band.child(text(task.title.clone()).key("band-title").role("heading").level(1).font(weight(t.ty.lg, t.ty.semibold)).color(t.ink()).truncate().min_w(TITLE_MIN).shrink())
+    };
     band = band.child(row().grow(1.0).min_w(t.space.at(4.0)).h_full());
     let wide = s.width.unwrap_or(1200.0) >= 1000.0;
     if let Some(c) = crate::task_view::run_counter(s, t).filter(|_| wide) {
@@ -251,7 +260,8 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     {
         band = band.child(place);
     }
-    band.child(task_menu(s, t, task, layer))
+    // A subagent is removed with its thread, never alone: it has no menu.
+    if sub { band } else { band.child(task_menu(s, t, task, layer)) }
 }
 
 /// The task's menu at the band's right: Remove task…, off while its agent works.
@@ -341,7 +351,7 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
         }
         Some(Confirm::RetireCat(id)) => {
             let name = s.cat(id).map_or_else(String::new, |c| c.name.clone());
-            let n = s.tasks.iter().filter(|x| &x.cat == id).count();
+            let n = s.tasks.iter().filter(|x| x.is_thread() && &x.cat == id).count();
             let tasks = match n {
                 0 => String::new(),
                 1 => format!(" Its thread stays readable, still {name}'s."),

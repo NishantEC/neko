@@ -59,6 +59,8 @@ pub struct Shared {
     pub briefing_last: Mutex<Option<neko_protocol::Briefing>>,
     /// Plugins: where their secrets are kept and which are being checked (docs/knowledge/plugins.md).
     pub plugins: crate::plugins::Hub,
+    /// Subagents: the limits, the queue and the wakes (docs/knowledge/subagents.md).
+    pub subagents: crate::subagents::Hub,
 }
 
 /// Keeps "Needs you" (docs/knowledge/needs-you.md) pushed: a change to a task's state, a request or a task's removal marks it, and
@@ -192,6 +194,8 @@ pub fn run(dir: &Path, port: u16) -> Result<(), StartError> {
     let mut core = Core::open(&dir.join(files::STORE), Box::new(SystemClock), Box::new(RandomIds))?;
     // Runs the last daemon left running were cut off: they are interrupted, and say so.
     runs::recover(&mut core);
+    // Subagents the last daemon cut off leave their reports, so their threads are woken (docs/knowledge/subagents.md).
+    crate::subagents::recover(&mut core);
     let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port)))?;
     let port = listener.local_addr()?.port();
     // The run guard is this binary (`--neko-run-guard`). `NEKO_CLAUDE_BIN` points at another `claude` (tests use the fake).
@@ -201,12 +205,13 @@ pub fn run(dir: &Path, port: u16) -> Result<(), StartError> {
     let runs = Runs::new(runtimes, dir.to_path_buf());
     let first = neko_core::needs::derive(&core.store).unwrap_or_default();
     let needs = NeedsWatch { dirty: Mutex::new(false), wake: Condvar::new(), last: Mutex::new(first) };
-    let shared = Arc::new(Shared { core: Mutex::new(core), conns: Mutex::new(HashMap::new()), token, port, stopping: AtomicBool::new(false), runs, needs, rounds: crate::rounds::Hub::new(), briefing_last: Mutex::new(None), plugins: crate::plugins::Hub::new() });
+    let shared = Arc::new(Shared { core: Mutex::new(core), conns: Mutex::new(HashMap::new()), token, port, stopping: AtomicBool::new(false), runs, needs, rounds: crate::rounds::Hub::new(), briefing_last: Mutex::new(None), plugins: crate::plugins::Hub::new(), subagents: crate::subagents::Hub::new() });
     let for_needs = shared.clone();
     std::thread::Builder::new().name("neko-needs".into()).spawn(move || watch_needs(for_needs))?;
     crate::folders::spawn(shared.clone())?;
     crate::rounds::spawn(shared.clone())?;
     crate::plugins::spawn(shared.clone())?;
+    crate::subagents::spawn(shared.clone())?;
     // Find the agent CLIs once now, off the main thread, so the first task and Settings do not wait for it.
     let warm = shared.clone();
     let _ = std::thread::Builder::new().name("neko-detect".into()).spawn(move || {
@@ -271,6 +276,7 @@ fn stop(shared: &Shared) {
     crate::folders::stopping();
     crate::rounds::stopping(shared);
     crate::plugins::stopping();
+    crate::subagents::stopping(shared);
     *lock(&shared.needs.dirty) = true;
     shared.needs.wake.notify_one();
     for c in lock(&shared.conns).values() {
@@ -296,12 +302,31 @@ fn serve(mut stream: TcpStream, id: u64, shared: &Arc<Shared>) {
             let _ = http::hello(&mut stream);
         }
         Ok(http::Asked::Hook { secret, length }) => crate::hook::serve(shared, stream, &secret, length),
+        Ok(http::Asked::Mcp { secret, length }) => serve_mcp(shared, stream, &secret, length),
         Ok(http::Asked::Upgrade(key)) => {
             if http::accept_upgrade(&mut stream, &key).is_ok() && stream.set_read_timeout(None).is_ok() && stream.set_nonblocking(true).is_ok() {
                 session(stream, id, shared);
             }
         }
     }
+}
+
+/// One call from a run's own MCP server (`POST /v1/mcp`): the run is found by its secret, the tool answers at once.
+fn serve_mcp(shared: &Arc<Shared>, mut stream: TcpStream, secret: &str, length: usize) {
+    use std::io::Read;
+    let mut body = vec![0u8; length];
+    if stream.read_exact(&mut body).is_err() {
+        return;
+    }
+    let Some(run) = runs::by_mcp_secret(shared, secret) else {
+        let _ = http::refuse(&mut stream, &http::Refused::Unauthorized);
+        return;
+    };
+    let reply = match serde_json::from_slice::<serde_json::Value>(&body) {
+        Ok(v) => crate::subagents::handle(shared, &run, &v),
+        Err(_) => serde_json::json!({"text": "Neko could not read that call.", "error": true}),
+    };
+    let _ = http::respond(&mut stream, "200 OK", "application/json", &reply.to_string());
 }
 
 fn session(stream: TcpStream, id: u64, shared: &Arc<Shared>) {
@@ -579,6 +604,8 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
             }
             let found = lock(&shared.core).store.get_task(&task);
             match found {
+                // A subagent takes no messages yet: it is read, not talked to (docs/knowledge/subagents.md).
+                Ok(Some(t)) if t.subagent.is_some() => Reply::error(ErrorCode::Refused, "A subagent takes no messages yet. Say it in the thread."),
                 Ok(Some(t)) if answering.is_some() => {
                     // An answer to a question: only while the task still waits on that run's question (another screen, or a
                     // notification, may have answered it).
