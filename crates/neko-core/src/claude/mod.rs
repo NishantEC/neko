@@ -233,7 +233,7 @@ impl Runtime for ClaudeRuntime {
             let _ = child.wait();
             return Err(Failure::Crashed { code: None, words: "Claude Code started without its pipes.".into() });
         };
-        let session = Arc::new(Session { stdin: Mutex::new(Some(stdin)), stopper, stopped: AtomicBool::new(false), sent: AtomicU32::new(0), asks: Mutex::new(Default::default()) });
+        let session = Arc::new(Session { stdin: Mutex::new(Some(stdin)), stopper, stopped: AtomicBool::new(false), interrupted: AtomicBool::new(false), sent: AtomicU32::new(0), asks: Mutex::new(Default::default()) });
         let (tx, rx) = mpsc::channel();
         // The first line asks the CLI to set up its control channel, as the Agent SDK does; then the words.
         let _ = session.write(&json!({"type": "control_request", "request_id": "neko-init", "request": {"subtype": "initialize", "hooks": {}}}));
@@ -278,7 +278,7 @@ impl Runtime for ClaudeRuntime {
             // Let the stderr reader take the last words.
             std::thread::sleep(Duration::from_millis(30));
             let tail = String::from_utf8_lossy(&tail.lock().unwrap_or_else(std::sync::PoisonError::into_inner)).into_owned();
-            let outcome = outcome(&mapper, s.stopped.load(Ordering::SeqCst), status.and_then(|st| st.code()), status.is_some_and(|st| st.success()), &tail);
+            let outcome = outcome(&mapper, s.stopped.load(Ordering::SeqCst) || s.interrupted.load(Ordering::SeqCst), status.and_then(|st| st.code()), status.is_some_and(|st| st.success()), &tail);
             let _ = tx.send(AgentEvent::Finished(outcome));
         });
         let control: Arc<dyn Control> = session;
@@ -316,6 +316,8 @@ struct Session {
     stdin: Mutex<Option<ChildStdin>>,
     stopper: Stopper,
     stopped: AtomicBool,
+    /// The person interrupted the turn: its result is not a failure, and stdin closes right after it.
+    interrupted: AtomicBool,
     /// User messages sent; when every one has its result, stdin closes and the CLI ends.
     sent: AtomicU32,
     /// Requests waiting for an answer: their input and tool-use id.
@@ -352,8 +354,9 @@ impl Session {
                 let _ = self.write(&json!({"type": "control_response", "response": {"subtype": "error", "request_id": request, "error": format!("Neko does not handle {subtype}")}}));
             }
             Said::TurnEnded { .. } => {
-                // Every message sent has had its answer: the CLI may end.
-                if self.sent.fetch_sub(1, Ordering::SeqCst) <= 1 {
+                // Every message sent has had its answer: the CLI may end. An interrupted turn ends the run whatever else was sent
+                // (the words that interrupted it start a run of their own).
+                if self.sent.fetch_sub(1, Ordering::SeqCst) <= 1 || self.interrupted.load(Ordering::SeqCst) {
                     self.sent.store(0, Ordering::SeqCst);
                     self.close_stdin();
                 }
@@ -387,7 +390,22 @@ impl Control for Session {
         self.stopped.store(true, Ordering::SeqCst);
         self.stopper.stop();
     }
+
+    /// The CLI's own interrupt (`control_request` `interrupt`, as the Agent SDK sends it): it ends the turn it is on and answers with
+    /// the turn's `result`; the session stays resumable. Neko then closes stdin, so the process ends. A CLI that does not end the turn
+    /// in time is stopped by the daemon (`INTERRUPT_GRACE`), and the conversation is resumed all the same.
+    fn interrupt(&self) {
+        if self.interrupted.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let id = INTERRUPTS.fetch_add(1, Ordering::SeqCst);
+        if self.write(&json!({"type": "control_request", "request_id": format!("neko-interrupt-{id}"), "request": {"subtype": "interrupt"}})).is_err() {
+            self.stop();
+        }
+    }
 }
+
+static INTERRUPTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Where the fake CLI for tests is, when a test asks: beside the running test binary's own target folder.
 pub fn fake_cli_beside(exe: &Path) -> Option<PathBuf> {

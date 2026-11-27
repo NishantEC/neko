@@ -75,7 +75,7 @@ fn a_question_is_answered_from_the_list_once() {
     let items = needs_until(&mut c, "the question", |i| !i.is_empty());
     let Need::Question { run, question } = items[0].need.clone() else { panic!("{items:?}") };
     assert_eq!(question, "Should I rename all four to Preferences, or keep Settings?");
-    let answer = |c: &mut Client, run: &RunId| c.request(Request::FollowUp { task: task.id.clone(), words: "All four.".into(), answering: Some(run.clone()) }).unwrap();
+    let answer = |c: &mut Client, run: &RunId| c.request(Request::FollowUp { task: task.id.clone(), words: "All four.".into(), answering: Some(run.clone()), mode: None }).unwrap();
     assert_eq!(code(answer(&mut c, &RunId("run_another".into()))), Some(ErrorCode::AlreadyAnswered), "an answer to another run's question is stale");
     assert_eq!(answer(&mut c, &run), Reply::Ok);
     assert_eq!(code(answer(&mut c, &run)), Some(ErrorCode::AlreadyAnswered), "a second answer is refused, not sent to the agent");
@@ -139,7 +139,7 @@ fn a_folder_gone_before_the_run_is_listed() {
         std::thread::sleep(Duration::from_millis(50));
     }
     std::fs::remove_dir_all(&outside).unwrap();
-    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "Again".into(), answering: None }).unwrap(), Reply::Ok);
+    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "Again".into(), answering: None, mode: None }).unwrap(), Reply::Ok);
     let items = needs_until(&mut c, "the missing folder", |i| !i.is_empty());
     assert_eq!((items[0].workspace.as_str(), &items[0].task), (ws.as_str(), &task.id));
     assert!(matches!(&items[0].need, Need::Failure { failure: FailureKind::FolderMissing, command: None, .. }), "{items:?}");

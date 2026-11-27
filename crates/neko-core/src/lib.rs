@@ -16,6 +16,7 @@ pub mod needs;
 pub mod mcp;
 pub mod plugins;
 pub mod policy;
+pub mod queue;
 pub mod records;
 pub mod rounds;
 pub mod runtime;

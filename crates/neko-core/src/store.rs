@@ -276,6 +276,16 @@ const MIGRATIONS: &[Migration] = &[
     // the branch a worktree starts from.
     Migration::Sql("ALTER TABLE tasks ADD COLUMN in_folder INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE tasks ADD COLUMN from_branch TEXT;"),
+    // 12: steer, queue, interrupt (docs/knowledge/composer.md). The messages waiting above a thread's composer: queued (held for the
+    // next run), steered (written into the running agent, not read yet) and interrupting (a new turn starts with them).
+    Migration::Sql("CREATE TABLE queued (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        words TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        at_ms INTEGER NOT NULL
+    );
+    CREATE INDEX queued_by_task ON queued(task_id);"),
 ];
 
 /// Migration 9's step: each task's `latest_line` from its newest agent words.

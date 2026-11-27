@@ -170,7 +170,7 @@ fn an_unknown_request_is_refused_not_guessed() {
 fn the_requests_that_run_a_task_round_trip() {
     let t = || TaskId("task_1".into());
     pinned(ClientMessage { id: 5, request: Request::GetTranscript { task: t() } }, r#"{"id":5,"type":"get_transcript","task":"task_1"}"#);
-    pinned(ClientMessage { id: 6, request: Request::FollowUp { task: t(), words: "And the tests".into(), answering: None } }, r#"{"id":6,"type":"follow_up","task":"task_1","words":"And the tests"}"#);
+    pinned(ClientMessage { id: 6, request: Request::FollowUp { task: t(), words: "And the tests".into(), answering: None, mode: None } }, r#"{"id":6,"type":"follow_up","task":"task_1","words":"And the tests"}"#);
     pinned(ClientMessage { id: 7, request: Request::StopTask { task: t() } }, r#"{"id":7,"type":"stop_task","task":"task_1"}"#);
     pinned(
         ClientMessage { id: 8, request: Request::AnswerPermission { permission: PermissionId("perm_1".into()), decision: Decision::AlwaysAllow } },
@@ -180,7 +180,7 @@ fn the_requests_that_run_a_task_round_trip() {
     pinned(ClientMessage { id: 9, request: Request::WatchTask { task: None } }, r#"{"id":9,"type":"watch_task"}"#);
     pinned(ClientMessage { id: 10, request: Request::ListRuntimes }, r#"{"id":10,"type":"list_runtimes"}"#);
     pinned(
-        ClientMessage { id: 11, request: Request::SetSettings { settings: Settings { runtime: "claude".into(), permission_mode: PermissionMode::Full, own_mcp: false } } },
+        ClientMessage { id: 11, request: Request::SetSettings { settings: Settings { runtime: "claude".into(), permission_mode: PermissionMode::Full, own_mcp: false, queue_first: false } } },
         r#"{"id":11,"type":"set_settings","settings":{"runtime":"claude","permission_mode":"full"}}"#,
     );
     for (m, name) in [(PermissionMode::Follow, "follow"), (PermissionMode::Ask, "ask"), (PermissionMode::Full, "full")] {
@@ -274,7 +274,7 @@ fn runs_parts_and_permissions_round_trip() {
 
 #[test]
 fn transcripts_runtimes_and_usage_round_trip() {
-    let transcript = Transcript { task: task(), runs: vec![run()], parts: Vec::new(), permissions: Vec::new() };
+    let transcript = Transcript { task: task(), runs: vec![run()], parts: Vec::new(), permissions: Vec::new(), queued: Vec::new() };
     let back: Reply = serde_json::from_str(&serde_json::to_string(&Reply::Transcript { transcript: transcript.clone() }).unwrap()).unwrap();
     assert_eq!(back, Reply::Transcript { transcript });
     pinned(
@@ -305,7 +305,7 @@ fn perm() -> Permission {
 fn needs_you_round_trips() {
     pinned(ClientMessage { id: 1, request: Request::ListNeeds }, r#"{"id":1,"type":"list_needs"}"#);
     pinned(
-        ClientMessage { id: 2, request: Request::FollowUp { task: TaskId("task_1".into()), words: "On main.".into(), answering: Some(RunId("run_1".into())) } },
+        ClientMessage { id: 2, request: Request::FollowUp { task: TaskId("task_1".into()), words: "On main.".into(), answering: Some(RunId("run_1".into())), mode: None } },
         r#"{"id":2,"type":"follow_up","task":"task_1","words":"On main.","answering":"run_1"}"#,
     );
     let item = |id: &str, need: Need| NeedsItem { id: id.into(), task: TaskId("task_1".into()), workspace: "ws_1".into(), title: "Fix the build".into(), cat: "cat_tofu".into(), cat_name: "tofu".into(), since_ms: 5, need, subagent: None };
@@ -472,8 +472,26 @@ fn subagents_have_their_own_shapes_and_the_old_ones_do_not_change() {
     );
     pinned(PartBody::Wake { number: "2".into(), title: "T".into(), status: "failed".into(), summary: String::new(), files: vec![], branch: None }, r#"{"kind":"wake","number":"2","title":"T","status":"failed","summary":""}"#);
     // The setting that gives runs the person's own MCP servers is written only when it is on.
-    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false }, r#"{"runtime":"claude","permission_mode":"follow"}"#);
-    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: true }, r#"{"runtime":"claude","permission_mode":"follow","own_mcp":true}"#);
+    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: false }, r#"{"runtime":"claude","permission_mode":"follow"}"#);
+    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: true, queue_first: false }, r#"{"runtime":"claude","permission_mode":"follow","own_mcp":true}"#);
     let old: Settings = serde_json::from_str(r#"{"runtime":"claude","permission_mode":"ask"}"#).unwrap();
     assert!(!old.own_mcp, "a screen from before the setting sends none");
+}
+
+#[test]
+fn steer_queue_and_interrupt_round_trip() {
+    let t = || TaskId("task_1".into());
+    pinned(ClientMessage { id: 6, request: Request::FollowUp { task: t(), words: "And the tests".into(), answering: None, mode: Some(SendMode::Queue) } }, r#"{"id":6,"type":"follow_up","task":"task_1","words":"And the tests","mode":"queue"}"#);
+    pinned(ClientMessage { id: 6, request: Request::FollowUp { task: t(), words: "Stop".into(), answering: None, mode: Some(SendMode::Interrupt) } }, r#"{"id":6,"type":"follow_up","task":"task_1","words":"Stop","mode":"interrupt"}"#);
+    pinned(ClientMessage { id: 7, request: Request::SendQueuedNow { task: t(), queued: QueuedId("queued_1".into()) } }, r#"{"id":7,"type":"send_queued_now","task":"task_1","queued":"queued_1"}"#);
+    pinned(ClientMessage { id: 8, request: Request::DiscardQueued { task: t(), queued: QueuedId("queued_1".into()) } }, r#"{"id":8,"type":"discard_queued","task":"task_1","queued":"queued_1"}"#);
+    let q = Queued { id: QueuedId("queued_1".into()), task: t(), words: "Next".into(), kind: QueuedKind::Steered, at_ms: 5 };
+    pinned(q.clone(), r#"{"id":"queued_1","task":"task_1","words":"Next","kind":"steered","at_ms":5}"#);
+    pinned(
+        ServerMessage::Event { revision: 3, change: Change::QueueChanged { task: t(), queued: vec![q] } },
+        r#"{"kind":"event","revision":3,"change":{"type":"queue_changed","task":"task_1","queued":[{"id":"queued_1","task":"task_1","words":"Next","kind":"steered","at_ms":5}]}}"#,
+    );
+    // Queue-first is written only when on, and a screen from before it sends none.
+    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: true }, r#"{"runtime":"claude","permission_mode":"follow","queue_first":true}"#);
+    pinned(QueuedKind::Interrupting, "\"interrupting\"");
 }

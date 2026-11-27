@@ -801,7 +801,7 @@ impl Headless<'_> {
                     other => return Err(format!("get_transcript: {other:?}")),
                 };
                 let asked = runs.iter().rev().nth(1).ok_or("the thread has no earlier run")?.id.clone();
-                let reply = c.request(Request::FollowUp { task: task.id, words: v["words"].as_str().unwrap_or("Again").to_owned(), answering: Some(asked) }).map_err(|e| e.to_string())?;
+                let reply = c.request(Request::FollowUp { task: task.id, words: v["words"].as_str().unwrap_or("Again").to_owned(), answering: Some(asked), mode: None }).map_err(|e| e.to_string())?;
                 c.close();
                 match reply {
                     Reply::Error { message, .. } => self.r.say(&format!("refused: {message}")),

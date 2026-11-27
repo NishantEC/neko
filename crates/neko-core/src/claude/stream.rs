@@ -175,6 +175,7 @@ impl Mapper {
             "message_start" => {
                 self.close_open(out);
                 self.current = s(&e["message"]["id"]).map(str::to_owned);
+                out.push(Said::Event(AgentEvent::StepBegan));
             }
             "content_block_start" => {
                 let i = e["index"].as_u64().unwrap_or(0);
@@ -217,7 +218,10 @@ impl Mapper {
                     }));
                 }
             }
-            "message_stop" => self.close_open(out),
+            "message_stop" => {
+                self.close_open(out);
+                out.push(Said::Event(AgentEvent::StepEnded));
+            }
             _ => {}
         }
     }

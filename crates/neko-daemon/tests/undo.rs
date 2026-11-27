@@ -200,7 +200,7 @@ fn run_review_undo_redo_and_the_agent_is_told() {
     assert_eq!(undo(&mut c, &task.id, &run.id, false), Reply::Ok);
 
     // The follow-up tells the agent, and the undone run can no longer be redone.
-    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "Carry on".into(), answering: None }).unwrap(), Reply::Ok);
+    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "Carry on".into(), answering: None, mode: None }).unwrap(), Reply::Ok);
     wait_status(&mut c, &task.id, &[TaskStatus::Done, TaskStatus::Failed]);
     let t = transcript(&mut c, &task.id);
     let said: Vec<&str> = t.parts.iter().filter_map(|p| if let PartBody::Agent { text, .. } = &p.body { Some(text.as_str()) } else { None }).collect();
@@ -325,7 +325,7 @@ fn housekeeping_prunes_old_checkpoints_removes_tidied_ones_and_clears_on_request
 
     // Two runs: everything older than the newest run's pair goes when the task finishes (here at once).
     let task = run_task(&mut c, "Tidy the project [fake:edit]", Some(&w));
-    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "[fake:many:3]".into(), answering: None }).unwrap(), Reply::Ok);
+    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "[fake:many:3]".into(), answering: None, mode: None }).unwrap(), Reply::Ok);
     wait_status(&mut c, &task.id, &[TaskStatus::Done]);
     let t = transcript(&mut c, &task.id);
     assert_eq!(t.runs[0].undo.as_ref().unwrap().state, UndoState::Removed, "the older run's checkpoints were pruned");
@@ -340,7 +340,7 @@ fn housekeeping_prunes_old_checkpoints_removes_tidied_ones_and_clears_on_request
     assert_eq!((storage.checkpoints, storage.tasks), (0, 0));
 
     // Removing a task removes its refs.
-    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "[fake:many:2]".into(), answering: None }).unwrap(), Reply::Ok);
+    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "[fake:many:2]".into(), answering: None, mode: None }).unwrap(), Reply::Ok);
     wait_status(&mut c, &task.id, &[TaskStatus::Done]);
     assert_eq!(neko_refs(&task.id), 2);
     // Its worktree holds uncommitted files: the person commits them, so the task may go.

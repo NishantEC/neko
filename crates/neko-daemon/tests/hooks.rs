@@ -63,7 +63,7 @@ fn pending(changes: &[Change]) -> Permission {
 }
 
 fn set_mode(c: &mut Client, m: PermissionMode) {
-    let s = Settings { runtime: "claude".into(), permission_mode: m, own_mcp: false };
+    let s = Settings { runtime: "claude".into(), permission_mode: m, own_mcp: false, queue_first: false };
     assert_eq!(c.request(Request::SetSettings { settings: s.clone() }).unwrap(), Reply::Settings { settings: s });
 }
 
@@ -225,7 +225,7 @@ fn the_run_ending_while_a_step_waits_expires_it() {
     let late = c.request(Request::AnswerPermission { permission: p.id, decision: Decision::AllowOnce }).unwrap();
     assert!(matches!(late, Reply::Error { code: ErrorCode::AlreadyAnswered, .. }), "{late:?}");
     // The task takes a follow-up at once: nothing of the old run is left waiting.
-    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "[fake:hook-read]".into(), answering: None }).unwrap(), Reply::Ok);
+    assert_eq!(c.request(Request::FollowUp { task: task.id.clone(), words: "[fake:hook-read]".into(), answering: None, mode: None }).unwrap(), Reply::Ok);
     events_until(&mut c, "the follow-up done", task_is(&task.id, TaskStatus::Done));
 }
 

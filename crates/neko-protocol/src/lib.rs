@@ -43,7 +43,8 @@ pub use undo::{DiffFile, DiffPatch, DiffSource, DiffSummary, FileStatus, Offer, 
 /// in the transcript; a request from a subagent says who asked; a setting that gives runs the person's own MCP servers). 14: a new thread needs no cat (`create_task` takes `in_folder` and `from_branch`
 /// instead, a task's `cat` is optional, `set_task_cat` is gone, `list_branches` says where a thread can start from).
 /// 15: the right pane (a diff has a source: a run, the thread, or what is uncommitted in the folder now; a thread's overview in one reply).
-pub const PROTOCOL_VERSION: u32 = 15;
+/// 16: steer, queue, interrupt (`follow_up` takes a `mode`; the messages waiting above a composer are a list the daemon keeps, in the transcript and in `queue_changed`; `send_queued_now`, `discard_queued`; a setting swaps Return and Option-Return).
+pub const PROTOCOL_VERSION: u32 = 16;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -77,6 +78,10 @@ id_type!(
 id_type!(
     /// A permission request (`perm_` …).
     PermissionId
+);
+id_type!(
+    /// A message waiting above a thread's composer (`queued_` …).
+    QueuedId
 );
 
 /// Where a task stands: the state of its newest run, or new when none ever ran.
@@ -582,6 +587,10 @@ pub struct Settings {
     /// the plugins the person approved (docs/knowledge/subagents.md).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub own_mcp: bool,
+    /// While the agent works, Return queues the words and ⌥Return steers them (version 16). Off: Return steers, ⌥Return queues. The
+    /// screen reads it to choose the mode it sends; the daemon never reads it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub queue_first: bool,
 }
 
 /// An agent CLI Neko knows, as found on this Mac.
@@ -632,6 +641,45 @@ pub struct Transcript {
     pub runs: Vec<Run>,
     pub parts: Vec<Part>,
     pub permissions: Vec<Permission>,
+    /// The messages waiting above the composer now, oldest first (version 16).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queued: Vec<Queued>,
+}
+
+/// How words typed while the agent works reach it (version 16).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SendMode {
+    /// Into the running agent's open input: it reads them at its next step. Today's behaviour, and the default.
+    #[default]
+    Steer,
+    /// The daemon keeps them and sends them as the next run when this one ends.
+    Queue,
+    /// The turn is stopped and the words start a new turn at once.
+    Interrupt,
+}
+
+/// What a message above the composer is doing (version 16).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueuedKind {
+    /// Held by the daemon; the next run starts with it when this one ends well.
+    Queued,
+    /// Sent into the running agent, which has not read it yet. It cannot be taken back.
+    Steered,
+    /// The turn is being stopped; a new one starts with these words.
+    Interrupting,
+}
+
+/// A message waiting above a thread's composer, until it is read, sent or discarded (version 16).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Queued {
+    pub id: QueuedId,
+    pub task: TaskId,
+    pub words: String,
+    pub kind: QueuedKind,
+    /// Milliseconds since the Unix epoch.
+    pub at_ms: i64,
 }
 
 /// What a screen asks.
@@ -801,7 +849,16 @@ pub enum Request {
         words: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         answering: Option<RunId>,
+        /// How the words reach an agent that is working (version 16); none is `steer`. With no run going every mode starts one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<SendMode>,
     },
+    /// Send a waiting message now: into the running agent, or as a new run when none is going (version 16). Replies `ok`, or
+    /// `not_found` when it was already sent or discarded.
+    SendQueuedNow { task: TaskId, queued: QueuedId },
+    /// Take a waiting message back (Discard, or Edit, which puts its words in the composer) (version 16). Replies `ok`, or `not_found`
+    /// when it was already sent. A steered message cannot be taken back: `refused`.
+    DiscardQueued { task: TaskId, queued: QueuedId },
     /// Stop the task's running agent.
     StopTask { task: TaskId },
     /// The person opened the thread: it is read as of now. Replies `task`.
@@ -1011,6 +1068,8 @@ pub enum Change {
     /// Approved, declined, changed, switched, set up, checked, left to other cats: the whole plugin as it is now.
     PluginUpdated { plugin: Plugin },
     PluginRemoved { plugin: String },
+    /// The messages waiting above a thread's composer changed: the whole list as it is now, oldest first (version 16).
+    QueueChanged { task: TaskId, queued: Vec<Queued> },
 }
 
 /// What the daemon sends.

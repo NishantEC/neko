@@ -301,7 +301,7 @@ impl RunBook {
     pub fn on(&mut self, core: &mut Core, ev: AgentEvent, now: i64) -> Result<Vec<Out>, StoreError> {
         let mut out = Vec::new();
         // Anything else that arrives ends the thinking screens show.
-        let thinks = matches!(ev, AgentEvent::ThinkingStarted | AgentEvent::ThinkingDelta(_) | AgentEvent::Usage(_) | AgentEvent::Unchecked { .. } | AgentEvent::Started { .. });
+        let thinks = matches!(ev, AgentEvent::ThinkingStarted | AgentEvent::ThinkingDelta(_) | AgentEvent::Usage(_) | AgentEvent::Unchecked { .. } | AgentEvent::Started { .. } | AgentEvent::StepBegan | AgentEvent::StepEnded);
         if self.thinking && !thinks {
             self.thinking = false;
             out.push(Out::Activity { thinking: false });
@@ -313,7 +313,7 @@ impl RunBook {
                     out.push(Out::Activity { thinking: true });
                 }
             }
-            AgentEvent::Unchecked { .. } => {}
+            AgentEvent::Unchecked { .. } | AgentEvent::StepBegan | AgentEvent::StepEnded => {}
             AgentEvent::Started { session, model } => {
                 if session.is_some() {
                     self.run.session = session;
@@ -492,6 +492,7 @@ impl RunBook {
             Outcome::Done if ends_with_question(&core.store.parts_of(&self.task)?, &self.run.id) => (RunStatus::Done, TaskStatus::Asked),
             Outcome::Done => (RunStatus::Done, TaskStatus::Done),
             Outcome::Stopped => (RunStatus::Stopped, TaskStatus::Stopped),
+            Outcome::Interrupted => (RunStatus::Interrupted, TaskStatus::Interrupted),
             Outcome::Failed(_) => (RunStatus::Failed, TaskStatus::Failed),
         };
         if let Outcome::Failed(f) = &outcome {
@@ -501,6 +502,9 @@ impl RunBook {
         }
         if outcome == Outcome::Stopped {
             self.run.reason = Some("You stopped it.".to_owned());
+        }
+        if outcome == Outcome::Interrupted {
+            self.run.reason = Some("You interrupted it with a new message.".to_owned());
         }
         self.run.status = status;
         self.run.ended_ms = Some(now);

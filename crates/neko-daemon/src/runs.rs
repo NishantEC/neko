@@ -41,6 +41,12 @@ pub struct Active {
     pub secret: Option<String>,
     /// The secret this run's own MCP server (`neko-daemon --mcp`) carries: every run has one (docs/knowledge/subagents.md).
     pub mcp_secret: Option<String>,
+    /// The person interrupted this run's turn: the run ends as interrupted, and the words that did it start the next (`queue.rs`).
+    pub interrupting: bool,
+    /// A model call is going now (between `StepBegan` and `StepEnded`).
+    pub open_step: bool,
+    /// Steered messages not read yet; the flag says whether the next call to begin has them (a call already going does not).
+    pub steers: Vec<(neko_protocol::QueuedId, bool)>,
 }
 
 /// A run, as its MCP server reaches it.
@@ -232,7 +238,7 @@ fn start_with(shared: &Arc<Shared>, task: Task, words: Option<String>, wake: Opt
         if lock(&shared.runs.undoing).contains(&task.id) {
             return Err(Reply::error(ErrorCode::Busy, "Neko is undoing a run of this thread. Send it again in a moment."));
         }
-        active.insert(task.id.clone(), Active { control: None, book: None, cancelled: cancelled.clone(), secret: None, mcp_secret: None });
+        active.insert(task.id.clone(), Active { control: None, book: None, cancelled: cancelled.clone(), secret: None, mcp_secret: None, interrupting: false, open_step: false, steers: Vec::new() });
     }
     let s = shared.clone();
     let id = task.id.clone();
@@ -241,8 +247,12 @@ fn start_with(shared: &Arc<Shared>, task: Task, words: Option<String>, wake: Opt
     let spawned = std::thread::Builder::new().name(format!("neko-run-{}", workplace::short_id(&task.id))).spawn(move || {
         run(&s, &task, words, wake, &cancelled);
         release(&s, &task.id, &cancelled);
-        // A thread that rests while its subagents work is Waiting; a subagent that ended leaves its report (docs/knowledge/subagents.md).
-        crate::subagents::ended(&s, &task.id);
+        // Words that waited for this run to end start the next one (docs/knowledge/composer.md); then the run is not the last one yet.
+        // Otherwise a thread that rests while its subagents work is Waiting; a subagent that ended leaves its report
+        // (docs/knowledge/subagents.md).
+        if !crate::queue::after_run(&s, &task.id) {
+            crate::subagents::ended(&s, &task.id);
+        }
         s.runs.threads.fetch_sub(1, Ordering::SeqCst);
     });
     if spawned.is_err() {
@@ -292,7 +302,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
         let now = core.now();
         let _ = core.store.set_place(&task.id, &place, now);
     }
-    let settings = lock(&shared.core).store.settings().unwrap_or(neko_protocol::Settings { runtime: "claude".into(), permission_mode: Default::default(), own_mcp: false });
+    let settings = lock(&shared.core).store.settings().unwrap_or(neko_protocol::Settings { runtime: "claude".into(), permission_mode: Default::default(), own_mcp: false, queue_first: false });
     let Some(runtime) = shared.runs.runtimes.iter().find(|r| r.id() == settings.runtime).cloned() else {
         if let Some(w) = &words {
             person(shared, &task.id, w);
@@ -476,11 +486,22 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
             Some(neko_core::runtime::AgentEvent::Finished(o)) => {
                 drop(b);
                 // A run the limits ended failed with that reason, not "stopped".
+                // One the person ended to say something else is interrupted, not stopped (unless they also pressed Stop).
+                let interrupted = lock(&shared.runs.active).get(&task.id).is_some_and(|a| a.interrupting) && !cancelled.load(Ordering::SeqCst);
                 finish(match (limit.take(), o) {
                     (Some(f), Outcome::Stopped) => Outcome::Failed(f),
+                    (None, Outcome::Stopped) if interrupted => Outcome::Interrupted,
                     (_, o) => o,
                 });
                 return;
+            }
+            Some(neko_core::runtime::AgentEvent::StepBegan) => {
+                drop(b);
+                crate::queue::step_began(shared, &task.id);
+            }
+            Some(neko_core::runtime::AgentEvent::StepEnded) => {
+                drop(b);
+                crate::queue::step_ended(shared, &task.id);
             }
             Some(neko_core::runtime::AgentEvent::RateLimit { status, resets_at }) => {
                 crate::subagents::rate_limit(shared, &status, resets_at);
@@ -514,28 +535,6 @@ fn person(shared: &Shared, task: &TaskId, words: &str) {
     let mut core = lock(&shared.core);
     if let Ok(outs) = conductor::person_part(&mut core, task, words) {
         push(shared, task, outs, None);
-    }
-}
-
-/// Words in a task's composer: steer the running agent, or start a new run that resumes the conversation.
-pub fn follow_up(shared: &Arc<Shared>, task: Task, words: String) -> Reply {
-    if words.trim().is_empty() {
-        return Reply::error(ErrorCode::InvalidWords, "Type something first.");
-    }
-    let control = lock(&shared.runs.active).get(&task.id).map(|a| a.control.clone());
-    match control {
-        Some(Some(c)) => match c.steer(&words) {
-            Ok(()) => {
-                person(shared, &task.id, &words);
-                Reply::Ok
-            }
-            Err(e) => Reply::error(ErrorCode::Busy, e.0),
-        },
-        Some(None) => Reply::error(ErrorCode::Busy, "Neko is still starting this thread's agent."),
-        None => match start(shared, task, Some(words)) {
-            Ok(()) => Reply::Ok,
-            Err(r) => r,
-        },
     }
 }
 
@@ -601,6 +600,7 @@ pub fn remove_task(shared: &Shared, task: &TaskId) -> Reply {
         }
     }
     let _ = lock(&shared.core).store.delete_wakes_of_task(task);
+    let _ = lock(&shared.core).store.delete_queue_of_task(task);
     let place = lock(&shared.core).store.place(task).ok().flatten();
     if let Some(p) = &place
         && let Err(why) = workplace::remove_place(&shared.runs.data_dir, task, p)
@@ -638,6 +638,8 @@ pub fn interrupted_at_quit(core: &mut Core) {
 }
 
 fn interrupt(core: &mut Core, words: &str) {
+    // What was being read or interrupted is settled first; queued messages stay for the person.
+    crate::queue::settle_at_stop(core);
     let Ok(tasks) = core.store.interrupt_leftovers(core.now()) else { return };
     for t in tasks {
         if let Ok(Some(task)) = core.store.get_task(&t) {
@@ -671,13 +673,14 @@ pub fn send_transcript(shared: &Shared, conn: u64, reply_id: u64, task: &TaskId)
         let s = &core.store;
         match (s.get_task(task), s.runs_of(task), s.parts_of(task), s.permissions_of(task)) {
             (Ok(Some(t)), Ok(runs), Ok(mut parts), Ok(permissions)) => {
+                let queued = s.queued_of(task).unwrap_or_default();
                 if let Some(open) = held.as_ref().and_then(|b| b.open_part()) {
                     match parts.iter_mut().find(|p| p.id == open.id) {
                         Some(p) => *p = open.clone(),
                         None => parts.push(open.clone()),
                     }
                 }
-                Reply::Transcript { transcript: neko_protocol::Transcript { task: t, runs, parts, permissions } }
+                Reply::Transcript { transcript: neko_protocol::Transcript { task: t, runs, parts, permissions, queued } }
             }
             (Ok(None), ..) => Reply::error(ErrorCode::NotFound, "There is no such thread."),
             (Err(e), ..) | (_, Err(e), ..) | (_, _, Err(e), _) | (.., Err(e)) => Reply::error(ErrorCode::Internal, e.to_string()),

@@ -622,12 +622,21 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
             let core = lock(&shared.core);
             let s = &core.store;
             match (s.get_task(&task), s.runs_of(&task), s.parts_of(&task), s.permissions_of(&task)) {
-                (Ok(Some(task)), Ok(runs), Ok(parts), Ok(permissions)) => Reply::Transcript { transcript: neko_protocol::Transcript { task, runs, parts, permissions } },
+                (Ok(Some(task)), Ok(runs), Ok(parts), Ok(permissions)) => Reply::Transcript { transcript: neko_protocol::Transcript { queued: s.queued_of(&task.id).unwrap_or_default(), task, runs, parts, permissions } },
                 (Ok(None), ..) => Reply::error(ErrorCode::NotFound, "There is no such thread."),
                 (Err(e), ..) | (_, Err(e), ..) | (_, _, Err(e), _) | (.., Err(e)) => internal(e),
             }
         }
-        Request::FollowUp { task, words, answering } => {
+        Request::SendQueuedNow { task, queued } => {
+            let found = lock(&shared.core).store.get_task(&task);
+            match found {
+                Ok(Some(t)) => crate::queue::send_now(shared, t, &queued),
+                Ok(None) => Reply::error(ErrorCode::NotFound, "There is no such thread."),
+                Err(e) => internal(e),
+            }
+        }
+        Request::DiscardQueued { task, queued } => crate::queue::discard(shared, &task, &queued),
+        Request::FollowUp { task, words, answering, mode } => {
             if words.len() > neko_protocol::MAX_WORDS_BYTES {
                 return (id, Reply::error(ErrorCode::InvalidWords, "That is too long to send. Put the long part in a file."), Flow::Continue);
             }
@@ -652,7 +661,7 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
                         }
                     }
                 }
-                Ok(Some(t)) => runs::follow_up(shared, t, words),
+                Ok(Some(t)) => crate::queue::send(shared, t, words, mode.unwrap_or_default()),
                 Ok(None) => Reply::error(ErrorCode::NotFound, "There is no such thread."),
                 Err(e) => internal(e),
             }

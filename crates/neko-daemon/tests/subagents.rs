@@ -108,7 +108,7 @@ fn create(c: &mut Client, words: &str) -> Task {
 }
 
 fn set_mode(c: &mut Client, m: PermissionMode) {
-    let s = Settings { runtime: "claude".into(), permission_mode: m, own_mcp: false };
+    let s = Settings { runtime: "claude".into(), permission_mode: m, own_mcp: false, queue_first: false };
     assert_eq!(c.request(Request::SetSettings { settings: s.clone() }).unwrap(), Reply::Settings { settings: s });
 }
 
@@ -396,7 +396,7 @@ fn a_subagent_is_read_not_talked_to_and_goes_with_its_thread() {
         tr.runs.len() == 2 && task(&mut c, &t.id).status == TaskStatus::Done
     });
     let sub = subagents(&mut c, &t.id).remove(0);
-    match c.request(Request::FollowUp { task: sub.id.clone(), words: "More".into(), answering: None }).unwrap() {
+    match c.request(Request::FollowUp { task: sub.id.clone(), words: "More".into(), answering: None, mode: None }).unwrap() {
         Reply::Error { code: ErrorCode::Refused, message } => assert!(message.contains("takes no messages yet"), "{message}"),
         r => panic!("{r:?}"),
     }
@@ -424,7 +424,7 @@ fn a_reached_limit_holds_back_the_wake_until_it_resets() {
 fn the_user_can_have_runs_keep_their_own_mcp_servers() {
     let r = rig("own-mcp", &[]);
     let mut c = r.client();
-    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: true };
+    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: true, queue_first: false };
     assert_eq!(c.request(Request::SetSettings { settings: s.clone() }).unwrap(), Reply::Settings { settings: s });
     let t = create(&mut c, "Hello [fake:plain]");
     until("done", || task(&mut c, &t.id).status == TaskStatus::Done);

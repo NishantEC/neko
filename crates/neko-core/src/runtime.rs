@@ -147,6 +147,9 @@ pub enum Action {
 pub enum Outcome {
     Done,
     Stopped,
+    /// The person interrupted the turn (⌘Return with new words): the run ended on purpose and a new one starts with the words. The
+    /// daemon makes this of a `Stopped` it asked for; a runtime reports `Stopped`.
+    Interrupted,
     Failed(Failure),
 }
 
@@ -216,6 +219,11 @@ pub enum AgentEvent {
     /// The account's limit news: `status` is as the CLI said it (`allowed`, `allowed_warning`, `rejected`…), `resets_at` seconds
     /// since the epoch when it said. The daemon holds back runs it starts by itself while the limit is reached.
     RateLimit { status: String, resets_at: Option<i64> },
+    /// The agent began a new model call (a message of its own, not a subagent's): everything the person wrote to it before the call
+    /// began is in it. With [`AgentEvent::StepEnded`], what tells the daemon that a steered message was read.
+    StepBegan,
+    /// That model call is over.
+    StepEnded,
     /// The last event.
     Finished(Outcome),
 }
@@ -239,6 +247,12 @@ pub trait Control: Send + Sync {
     fn answer(&self, id: &str, answer: Answer) -> Result<(), ControlError>;
     /// Stops it now. The event stream ends with [`Outcome::Stopped`] within a second. Calling it twice is harmless.
     fn stop(&self);
+    /// Ends the turn that is running, keeping the conversation resumable (the CLI's own interrupt where it has one). The stream ends
+    /// with [`Outcome::Stopped`] soon after: within a few seconds at most, because a CLI that does not answer is stopped. The default
+    /// is [`Control::stop`]. Calling it twice is harmless.
+    fn interrupt(&self) {
+        self.stop();
+    }
 }
 
 /// A started run: its control and its events.

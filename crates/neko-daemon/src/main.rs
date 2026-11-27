@@ -11,6 +11,7 @@ mod hook;
 mod http;
 mod mcp_server;
 mod plugins;
+mod queue;
 mod rounds;
 mod runs;
 mod server;

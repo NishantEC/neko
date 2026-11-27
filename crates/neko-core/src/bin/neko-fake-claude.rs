@@ -257,6 +257,8 @@ struct Fake {
     input: Receiver<Value>,
     /// Lines that arrived while a script waited for something else.
     queued: Vec<Value>,
+    /// Words the person sent while a script was working: the next step reads them (`work`).
+    steered: Vec<String>,
     n: u32,
     /// The names of the MCP servers `--mcp-config` gave.
     mcp: Vec<String>,
@@ -420,6 +422,38 @@ impl Fake {
         }));
     }
 
+    /// Reads what the person sent while a script works, without waiting: words are kept for the next step (`steered`), an interrupt
+    /// is answered and returns true (a `deaf` fake says nothing and goes on, like a CLI that does not take it).
+    fn listen(&mut self, fold: bool, deaf: bool) -> bool {
+        while let Ok(v) = self.input.try_recv() {
+            match v["type"].as_str() {
+                Some("control_request") if v["request"]["subtype"] == "interrupt" => {
+                    if !deaf {
+                        out(json!({"type":"control_response","response":{"subtype":"success","request_id":v["request_id"],"response":{}}}));
+                        return true;
+                    }
+                }
+                Some("control_request") => out(json!({"type":"control_response","response":{"subtype":"success","request_id":v["request_id"],"response":{}}})),
+                Some("user") if fold => self.steered.push(match &v["message"]["content"] {
+                    Value::String(s) => s.clone(),
+                    Value::Array(a) => a.iter().filter_map(|p| p["text"].as_str()).collect(),
+                    _ => String::new(),
+                }),
+                _ => self.queued.push(v),
+            }
+        }
+        false
+    }
+
+    /// The turn ends the way the CLI ends one the person interrupted: an error result, the conversation intact.
+    fn interrupted(&mut self) {
+        out(json!({
+            "type":"result","subtype":"error_during_execution","is_error":true,"duration_ms":900,"num_turns":1,"result":"[Request interrupted by user]",
+            "session_id":self.session,"total_cost_usd":0.004,"usage":{"input_tokens":900,"output_tokens":60},
+            "modelUsage":{ model(): {"inputTokens":900,"outputTokens":60,"contextWindow":200000}},"permission_denials":[]
+        }));
+    }
+
     fn play(&mut self, words: &str) {
         let (script, arg) = if words.trim_start().starts_with("<neko-wake") { ("woken".to_owned(), String::new()) } else { pick(words) };
         let cwd = self.cwd.clone();
@@ -433,6 +467,9 @@ impl Fake {
                 let mut i = 0u64;
                 while Instant::now() < until {
                     i += 1;
+                    if self.listen(false, false) {
+                        return self.interrupted();
+                    }
                     let piece = if i % 12 == 0 { format!("word{i}.\n\n") } else { format!("word{i} ") };
                     out(json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":piece}},"parent_tool_use_id":null}));
                     std::thread::sleep(Duration::from_millis(50));
@@ -440,6 +477,43 @@ impl Fake {
                 out(json!({"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null}));
                 out(json!({"type":"assistant","message":{"id":id,"content":[{"type":"text","text":"(long)"}]},"parent_tool_use_id":null}));
                 self.result("(long)", false);
+            }
+            "work" => {
+                // `work:SECS` (default 6): a step every quarter second, each its own message. A message the person sends meanwhile is read
+                // at the next step ("Reading your message: …") and gets its own result at the end, as a message sent to the CLI does. An
+                // interrupt ends the turn at once; `work:SECS:deaf` does not hear it.
+                let (secs, deaf) = match arg.split_once(':') {
+                    Some((n, flag)) => (n.parse::<u64>().unwrap_or(6), flag == "deaf"),
+                    None => (arg.parse::<u64>().unwrap_or(6), false),
+                };
+                let until = Instant::now() + Duration::from_secs(secs);
+                let mut read = 0usize;
+                let mut i = 0u32;
+                while Instant::now() < until {
+                    i += 1;
+                    if self.listen(true, deaf) {
+                        return self.interrupted();
+                    }
+                    let taken = std::mem::take(&mut self.steered);
+                    read += taken.len();
+                    let text = if taken.is_empty() { format!("Step {i} of the work. ") } else { format!("Reading your message: {} ", taken.join(" | ")) };
+                    self.say(&text, 1, Duration::from_millis(0));
+                    for _ in 0..5 {
+                        std::thread::sleep(Duration::from_millis(50));
+                        if self.listen(true, deaf) {
+                            return self.interrupted();
+                        }
+                    }
+                }
+                // What came in during the last quarter second is read now.
+                let taken = std::mem::take(&mut self.steered);
+                read += taken.len();
+                let text = if taken.is_empty() { "The work is finished.".to_owned() } else { format!("Reading your message: {} The work is finished.", taken.join(" | ")) };
+                self.say(&text, 1, Duration::from_millis(0));
+                self.result(&text, false);
+                for _ in 0..read {
+                    self.result("(your message)", false);
+                }
             }
             "thinking" => {
                 self.think("The person wants a short answer. I will check the folder first and keep it brief.");
@@ -514,6 +588,9 @@ impl Fake {
                 out(json!({"type":"stream_event","event":{"type":"message_start","message":{"id":id}},"parent_tool_use_id":null}));
                 out(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}},"parent_tool_use_id":null}));
                 for i in 0..3000 {
+                    if self.listen(false, false) {
+                        return self.interrupted();
+                    }
                     out(json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":format!("slow{i} ")}},"parent_tool_use_id":null}));
                     std::thread::sleep(Duration::from_millis(200));
                 }
@@ -767,7 +844,7 @@ fn main() {
     });
     let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
     let session = resume.clone().unwrap_or_else(|| format!("fake-{}-{}", std::process::id(), now_s()));
-    let mut fake = Fake { hooks: hooks_from(settings.as_deref()), allowed: allowed_by_settings(), session: session.clone(), resumed: resume.is_some(), cwd: cwd.clone(), input: rx, queued: Vec::new(), n: 0, mcp, mcp_specs, servers: Default::default() };
+    let mut fake = Fake { hooks: hooks_from(settings.as_deref()), allowed: allowed_by_settings(), session: session.clone(), resumed: resume.is_some(), cwd: cwd.clone(), input: rx, queued: Vec::new(), steered: Vec::new(), n: 0, mcp, mcp_specs, servers: Default::default() };
     let mut started = false;
     loop {
         let v = if fake.queued.is_empty() {

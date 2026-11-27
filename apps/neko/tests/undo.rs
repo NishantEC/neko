@@ -144,7 +144,7 @@ fn review_undo_redo_and_the_follow_up_tells_the_agent() {
     // The follow-up: the agent hears first that its changes were undone.
     let task = rt.state.open_task().unwrap().id.clone();
     rt.update(move |s, _| {
-        s.send(Request::FollowUp { task, words: "Carry on".into(), answering: None });
+        s.send(Request::FollowUp { task, words: "Carry on".into(), answering: None, mode: None });
     });
     until(&mut rt, "the agent's answer", |rt| on_screen(rt, "the person undid the changes of your last run"));
     until(&mut rt, "the redo dropped", |rt| matches!(state(rt), Some(UndoState::Dropped | UndoState::Removed)));

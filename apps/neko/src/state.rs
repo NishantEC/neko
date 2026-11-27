@@ -377,11 +377,13 @@ pub struct Book {
     pub loaded: bool,
     /// The agent is thinking now (the daemon says so as it happens; never stored).
     pub thinking: bool,
+    /// What waits above the composer: queued, steered and interrupting messages (protocol 15), oldest first.
+    pub queued: Vec<neko_protocol::Queued>,
 }
 
 impl Book {
     pub fn from(t: Transcript) -> Book {
-        Book { runs: t.runs, parts: t.parts, permissions: t.permissions.into_iter().map(|p| (p.id.clone(), p)).collect(), loaded: true, thinking: false }
+        Book { runs: t.runs, parts: t.parts, permissions: t.permissions.into_iter().map(|p| (p.id.clone(), p)).collect(), loaded: true, thinking: false, queued: t.queued }
     }
 
     fn run(&mut self, r: Run) {
@@ -859,7 +861,7 @@ impl App {
         if words.trim().is_empty() {
             return;
         }
-        if let Some(id) = self.send(Request::FollowUp { task: task.clone(), words, answering: Some(run) }) {
+        if let Some(id) = self.send(Request::FollowUp { task: task.clone(), words, answering: Some(run), mode: None }) {
             self.asked.insert(id, Asked::Answer { item: item.to_owned(), task, from_notification: false });
             self.needs_replies.remove(item);
             self.answered(item);
@@ -910,7 +912,7 @@ impl App {
             }
             ClickDo::Reply { task, run, words } => {
                 let item = format!("question:{}", run.0);
-                if let Some(id) = self.send(Request::FollowUp { task: task.clone(), words, answering: Some(run) }) {
+                if let Some(id) = self.send(Request::FollowUp { task: task.clone(), words, answering: Some(run), mode: None }) {
                     self.asked.insert(id, Asked::Answer { item: item.clone(), task, from_notification: true });
                     self.needs_hidden.insert(item);
                 }
@@ -1321,7 +1323,7 @@ impl App {
         if words.trim().is_empty() || self.open_is_working() {
             return;
         }
-        if let Some(id) = self.send(Request::FollowUp { task: task.clone(), words: words.clone(), answering: None }) {
+        if let Some(id) = self.send(Request::FollowUp { task: task.clone(), words: words.clone(), answering: None, mode: None }) {
             self.asked.insert(id, Asked::FollowUp(task.clone(), words));
             self.replies.insert(task, TextEdit::default());
             self.at_bottom = true;
@@ -1650,6 +1652,7 @@ impl App {
             Change::BriefingChanged { briefing } => self.set_briefing(briefing),
             Change::BriefingSettingsChanged { settings } => self.set_briefing_settings(settings),
             Change::BriefingDue { counts } => self.briefing_due(&counts),
+            Change::QueueChanged { task, queued } => self.books.entry(task).or_default().queued = queued,
         }
     }
 

@@ -134,7 +134,7 @@ fn two_workspaces_and_general_are_all_where_they_were_after_a_restart() {
     assert_eq!(workspaces(&mut c).iter().map(|w| w.name.as_str()).collect::<Vec<_>>(), ["General", "acme-api", "notes"]);
     assert_eq!(tasks(&mut c), before_tasks, "every task is in its workspace, as it was");
     // A follow-up in the repository's task works again, though its empty worktree was tidied away after the first run.
-    assert_eq!(c.request(Request::FollowUp { task: a.id.clone(), words: "Once more".into(), answering: None }).unwrap(), Reply::Ok);
+    assert_eq!(c.request(Request::FollowUp { task: a.id.clone(), words: "Once more".into(), answering: None, mode: None }).unwrap(), Reply::Ok);
     let ok = events_until(&mut c, "the follow-up runs", |ch| matches!(ch, Change::TaskUpdated { task } if task.id == a.id && matches!(task.status, TaskStatus::Done | TaskStatus::Failed)));
     assert!(matches!(ok.last(), Some(Change::TaskUpdated { task }) if task.status == TaskStatus::Done), "{ok:?}");
     drop(c);
@@ -219,7 +219,7 @@ fn twenty_finished_tasks_leave_no_folders_behind_and_work_is_kept() {
     assert_eq!(tasks(&mut c).len(), 20, "the tasks themselves stay");
 
     // A task that edits files keeps its worktree.
-    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Ask, own_mcp: false };
+    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Ask, own_mcp: false, queue_first: false };
     c.request(Request::SetSettings { settings: s }).unwrap();
     let work = create(&mut c, "Tidy the README [fake:tools]", Some(&acme));
     all_done(&mut c, std::slice::from_ref(&work.id));
@@ -233,7 +233,7 @@ fn removing_a_task_refuses_unsaved_work_and_keeps_commits_on_the_branch() {
     let r = repo(&outside.0);
     let d = Daemon::start("ws-rm-task");
     let mut c = watcher(&d);
-    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Ask, own_mcp: false };
+    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Ask, own_mcp: false, queue_first: false };
     c.request(Request::SetSettings { settings: s }).unwrap();
     let acme = add(&mut c, &r);
     let work = create(&mut c, "Tidy the README [fake:tools]", Some(&acme));
