@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-/// One scenario, with every `$work`, `$files`, `$home` and `$data` already replaced by the run's folders.
+/// One scenario, with every `$work`, `$files`, `$home`, `$data` and `$fake_mcp` already replaced by the run's folders and tools.
 pub struct Scenario {
     pub name: String,
     pub title: String,
@@ -80,13 +80,20 @@ pub struct Places {
     pub files: PathBuf,
     pub home: PathBuf,
     pub data: PathBuf,
+    /// The fake MCP server `neko-fake-mcp`, beside the fake CLI (`$fake_mcp`): what a plugin scenario's server is.
+    pub fake_mcp: PathBuf,
 }
 
 fn substitute(v: &mut Value, p: &Places) {
     match v {
         Value::String(s) => {
             let w = p.work.to_string_lossy();
-            *s = s.replace("$files", &p.files.to_string_lossy()).replace("$home", &p.home.to_string_lossy()).replace("$data", &p.data.to_string_lossy()).replace("$work", &w);
+            *s = s
+                .replace("$files", &p.files.to_string_lossy())
+                .replace("$home", &p.home.to_string_lossy())
+                .replace("$data", &p.data.to_string_lossy())
+                .replace("$fake_mcp", &p.fake_mcp.to_string_lossy())
+                .replace("$work", &w);
         }
         Value::Array(a) => a.iter_mut().for_each(|x| substitute(x, p)),
         Value::Object(o) => o.values_mut().for_each(|x| substitute(x, p)),
