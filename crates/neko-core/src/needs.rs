@@ -24,14 +24,16 @@ pub const QUESTION_CHARS: usize = 200;
 pub fn derive(store: &Store) -> Result<Vec<NeedsItem>, StoreError> {
     let tasks: HashMap<_, Task> = store.all_tasks()?.into_iter().map(|t| (t.id.clone(), t)).collect();
     let names: HashMap<String, String> = store.list_cats()?.into_iter().map(|c| (c.id, c.name)).collect();
-    let cat_name = |t: &Task| names.get(&t.cat).cloned().unwrap_or_else(|| "Neko".to_owned());
+    // A thread with no cat has neither an id nor a name here (version 14).
+    let cat_name = |t: &Task| t.cat.as_ref().map(|c| names.get(c).cloned().unwrap_or_else(|| "Neko".to_owned())).unwrap_or_default();
+    let cat_id = |t: &Task| t.cat.clone().unwrap_or_default();
     // A subagent's request is shown under its thread's title and says which subagent asks.
     let shown = |t: &Task| t.subagent.as_ref().and_then(|s| tasks.get(&s.root)).map_or_else(|| t.title.clone(), |r| r.title.clone());
     let who = |t: &Task| t.subagent.as_ref().map(|s| s.number.clone());
     let mut items = Vec::new();
     for p in store.pending_permissions()? {
         let Some(t) = tasks.get(&p.task) else { continue };
-        items.push(NeedsItem { id: format!("perm:{}", p.id.0), task: t.id.clone(), workspace: t.workspace.clone(), title: shown(t), cat: t.cat.clone(), cat_name: cat_name(t), since_ms: p.asked_ms, need: Need::Permission { permission: p }, subagent: who(t) });
+        items.push(NeedsItem { id: format!("perm:{}", p.id.0), task: t.id.clone(), workspace: t.workspace.clone(), title: shown(t), cat: cat_id(t), cat_name: cat_name(t), since_ms: p.asked_ms, need: Need::Permission { permission: p }, subagent: who(t) });
     }
     // A subagent's question or failure is its thread's to read (its report wakes it): only its requests wait for the person.
     for t in tasks.values().filter(|t| t.subagent.is_none()) {
@@ -46,7 +48,7 @@ pub fn derive(store: &Store) -> Result<Vec<NeedsItem>, StoreError> {
                     continue;
                 };
                 let since = run.ended_ms.unwrap_or(run.started_ms);
-                items.push(NeedsItem { id: format!("question:{}", run.id.0), task: t.id.clone(), workspace: t.workspace.clone(), title: t.title.clone(), cat: t.cat.clone(), cat_name: cat_name(t), since_ms: since, need: Need::Question { run: run.id, question: question_of(words) }, subagent: None });
+                items.push(NeedsItem { id: format!("question:{}", run.id.0), task: t.id.clone(), workspace: t.workspace.clone(), title: t.title.clone(), cat: cat_id(t), cat_name: cat_name(t), since_ms: since, need: Need::Question { run: run.id, question: question_of(words) }, subagent: None });
             }
             TaskStatus::Failed => {
                 // The newest error notice says why the last attempt failed.
@@ -58,7 +60,7 @@ pub fn derive(store: &Store) -> Result<Vec<NeedsItem>, StoreError> {
                     task: t.id.clone(),
                     workspace: t.workspace.clone(),
                     title: t.title.clone(),
-                    cat: t.cat.clone(),
+                    cat: cat_id(t),
                     cat_name: cat_name(t),
                     since_ms: part.at_ms,
                     need: Need::Failure { failure: kind, text: text.clone(), next: next.clone(), command: next.as_deref().and_then(command_of) },

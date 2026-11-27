@@ -40,8 +40,9 @@ pub use undo::{DiffFile, DiffPatch, DiffSummary, FileStatus, Offer, RunUndo, Und
 /// happened while the person was away, derived by the daemon; mark it read; the morning time; an event when it is due). 11: plugins (MCP
 /// servers first: added by pasting JSON or from a folder, approved by digest, set up in Settings, left to chosen cats; a "Needs you"
 /// item asks for the approval). 12: threads (what a thread last said and is doing, read and unread). 13: subagents (a task may belong to another, with a number; a status Waiting; a card and a wake note
-/// in the transcript; a request from a subagent says who asked; a setting that gives runs the person's own MCP servers).
-pub const PROTOCOL_VERSION: u32 = 13;
+/// in the transcript; a request from a subagent says who asked; a setting that gives runs the person's own MCP servers). 14: a new thread needs no cat (`create_task` takes `in_folder` and `from_branch`
+/// instead, a task's `cat` is optional, `set_task_cat` is gone, `list_branches` says where a thread can start from).
+pub const PROTOCOL_VERSION: u32 = 14;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -149,8 +150,16 @@ pub struct Task {
     /// Its workspace's folder when it was made; None: a scratch folder of its own (General).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
-    /// The cat doing it (a [`Cat`]'s id). Set when the task is made; changed only while no run has started.
-    pub cat: String,
+    /// The cat whose rules go with it (a [`Cat`]'s id), when it has one (version 14). A thread the person starts has none; a task made
+    /// before version 14, or by a round, keeps the cat it was given, and that never changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cat: Option<String>,
+    /// The person chose to work in the project's own folder, not in a worktree of its own (version 14).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub in_folder: bool,
+    /// The branch its worktree started from, when the person chose one (version 14); else it began on the commit the checkout is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_branch: Option<String>,
     /// The round that made it and the time it was due; None for a task the person made.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub round: Option<TaskRound>,
@@ -200,7 +209,7 @@ pub enum ThreadStatus {
 impl Task {
     /// A task as it is at birth, made by the person: new, in a scratch folder, read. Tests and the app's placeholder data start
     /// here; the daemon fills the rest from what is stored.
-    pub fn blank(id: TaskId, workspace: &str, words: &str, title: &str, created_ms: i64, cat: &str) -> Task {
+    pub fn blank(id: TaskId, workspace: &str, words: &str, title: &str, created_ms: i64, cat: Option<&str>) -> Task {
         Task {
             id,
             workspace: workspace.to_owned(),
@@ -209,7 +218,9 @@ impl Task {
             created_ms,
             status: TaskStatus::New,
             folder: None,
-            cat: cat.to_owned(),
+            cat: cat.map(str::to_owned),
+            in_folder: false,
+            from_branch: None,
             round: None,
             last_read_ms: created_ms,
             activity_ms: created_ms,
@@ -473,8 +484,10 @@ pub struct NeedsItem {
     pub workspace: String,
     /// The task's title.
     pub title: String,
-    /// The task's cat, and its name ("miso asks…").
+    /// The task's cat and its name; both empty for a thread that has none (version 14: the app does not say them).
+    #[serde(default)]
     pub cat: String,
+    #[serde(default)]
     pub cat_name: String,
     /// Since when it has waited (ms since the epoch).
     pub since_ms: i64,
@@ -628,17 +641,21 @@ pub enum Request {
     Hello { client: String, protocol: u32 },
     /// Every task of every workspace, newest first.
     ListTasks,
-    /// A new task from the person's words, in `workspace` (None: General), for `cat` (None: the workspace's default cat, else the
-    /// least busy). Its agent starts by itself.
+    /// A new task from the person's words, in `workspace` (None: General). It has no cat (version 14). In a git project it works in a
+    /// worktree of its own, from `from_branch` when given (else from the commit the checkout is on); `in_folder` works in the
+    /// project's folder itself instead. Its agent starts by itself.
     CreateTask {
         words: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workspace: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        in_folder: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        cat: Option<String>,
+        from_branch: Option<String>,
     },
-    /// Give a task to another cat. Refused once a run has started.
-    SetTaskCat { task: TaskId, cat: String },
+    /// The branches a new thread in this project can start from (version 14): whether its folder is a git repository, the branch the
+    /// checkout is on, and the local branches.
+    ListBranches { workspace: String },
     /// Every cat: the active ones first (oldest first), then the retired.
     ListCats,
     /// A new cat. No face: the first of [`cats::FACES`] no active cat has.
@@ -904,6 +921,16 @@ pub enum Reply {
     },
     /// What waits for the person, oldest first, grouped by workspace.
     Needs { items: Vec<NeedsItem> },
+    /// Where a new thread in a project can start from. `git` is false for a folder that is not a repository (or has no commit yet):
+    /// then there is no branch to choose and no worktree. `current` is the branch the checkout is on (None: detached).
+    Branches {
+        workspace: String,
+        git: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        current: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        branches: Vec<String>,
+    },
     /// A run's (or a task's) changes, file by file.
     Diff { diff: DiffSummary },
     /// One file's lines.

@@ -5,6 +5,7 @@ mod support;
 use neko_core::conductor::{RunBook, Who};
 use neko_core::needs::derive;
 use neko_core::runtime::{Action, AgentEvent, Outcome};
+use neko_core::store::SCHEMA_VERSION;
 use neko_core::subagents::{self, MAX_DEPTH, MAX_LIVE_PER_THREAD, WakeRow};
 use neko_core::{Core, FixedClock, Place, SequentialIds};
 use neko_protocol::{Need, PermissionMode, Pricing, Task, TaskId, TaskStatus};
@@ -28,7 +29,7 @@ fn subagents_are_numbered_under_their_parent_and_belong_to_the_thread_at_the_top
     assert_eq!((number(&a), number(&b)), ("1".to_owned(), "2".to_owned()));
     assert_eq!(a.status, TaskStatus::New, "not started: queued");
     assert_eq!((a.words.as_str(), a.title.as_str()), ("Look at the links.", "Check links"), "the prompt is its words");
-    assert_eq!((a.workspace.as_str(), a.cat.as_str()), (thread.workspace.as_str(), thread.cat.as_str()));
+    assert_eq!((a.workspace.as_str(), a.cat.as_deref()), (thread.workspace.as_str(), thread.cat.as_deref()));
     let (c, _) = core.create_subagent(&a.id, "Read one file", "Read it.").unwrap();
     let (e, _) = core.create_subagent(&a.id, "Read another", "Read it.").unwrap();
     assert_eq!((number(&c), number(&e)), ("1.1".to_owned(), "1.2".to_owned()), "a dot for each level down");
@@ -164,13 +165,13 @@ fn the_migration_from_store_nine_adds_subagents_and_changes_nothing_else() {
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch(
-            "DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; \
+            "ALTER TABLE tasks DROP COLUMN in_folder; ALTER TABLE tasks DROP COLUMN from_branch; DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; \
              ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN sub_number; ALTER TABLE tasks DROP COLUMN root_id; PRAGMA user_version = 9;",
         )
         .unwrap();
     }
     let core = open(&d);
-    assert_eq!(core.store.version().unwrap(), 10);
+    assert_eq!(core.store.version().unwrap(), SCHEMA_VERSION);
     let tasks = core.store.all_tasks().unwrap();
     assert_eq!(tasks.len(), 1);
     assert!(tasks[0].subagent.is_none(), "an old task is a thread");

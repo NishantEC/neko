@@ -480,7 +480,9 @@ impl Core {
             created_ms: now,
             status: TaskStatus::New,
             folder: w.folder,
-            cat: cat.id,
+            cat: cat.map(|c| c.id),
+            in_folder: false,
+            from_branch: None,
             round: Some(TaskRound { id: r.id.clone(), name: r.name.clone(), due_ms }),
             // A round's task is unread until the person opens it.
             last_read_ms: 0,

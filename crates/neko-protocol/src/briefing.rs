@@ -54,7 +54,10 @@ pub struct BriefingTask {
     pub task: TaskId,
     pub workspace: String,
     pub title: String,
+    /// Its cat and the cat's name; both empty for a thread that has none (version 14).
+    #[serde(default)]
     pub cat: String,
+    #[serde(default)]
     pub cat_name: String,
     /// When its last run in the window ended.
     pub ended_ms: i64,
@@ -80,7 +83,9 @@ pub struct BriefingWorking {
     pub task: TaskId,
     pub workspace: String,
     pub title: String,
+    #[serde(default)]
     pub cat: String,
+    #[serde(default)]
     pub cat_name: String,
     pub since_ms: i64,
 }

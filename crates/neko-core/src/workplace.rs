@@ -1,9 +1,10 @@
 //! Where a task works (docs/knowledge/runtimes.md, "Where it works").
 //!
 //! - No folder chosen: a fresh scratch folder of its own, under the data folder.
-//! - A folder in a git repository: its own worktree on its own branch, `neko/<short id>`, from the commit the checkout is on. The
-//!   person's checkout is never touched; nothing is merged or pushed.
-//! - A folder that is not a repository: the task works there directly, and its first edit asks.
+//! - A folder in a git repository: its own worktree on its own branch, `neko/<short id>`, from the commit the checkout is on, or from
+//!   the branch the person chose ([`Placement::from_branch`]). The person's checkout is never touched; nothing is merged or pushed.
+//! - A folder that is not a repository, or one the person chose to work in itself ([`Placement::in_folder`]): the task works there
+//!   directly, and its first edit asks.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -21,6 +22,51 @@ pub enum PlaceError {
     Gone(String),
     /// Something else, in words.
     Other(String),
+}
+
+/// What the person chose about where a thread works, beyond its folder (docs/knowledge/threads.md, "New thread").
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Placement {
+    /// Work in the project's folder itself, even a repository, not in a worktree of its own.
+    pub in_folder: bool,
+    /// The branch a worktree starts from (a local branch of the repository); None: the commit the checkout is on.
+    pub from_branch: Option<String>,
+}
+
+/// Whether `name` can be a branch name Neko hands to git: not empty, no option-like start, none of git's forbidden characters.
+pub fn branch_name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 200
+        && !name.starts_with(['-', '/', '.'])
+        && !name.ends_with(['/', '.'])
+        && !name.contains("..")
+        && !name.contains("@{")
+        && !name.ends_with(".lock")
+        && !name.chars().any(|c| c.is_control() || matches!(c, ' ' | '~' | '^' | ':' | '?' | '*' | '[' | '\\'))
+}
+
+/// Where a new thread in a folder can start from: whether it is a repository with a commit, the branch the checkout is on, and the
+/// local branches (the current one first, then by name).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Branches {
+    pub git: bool,
+    pub current: Option<String>,
+    pub names: Vec<String>,
+}
+
+pub fn branches(folder: &Path) -> Branches {
+    if !folder.is_dir() || git_out(folder, &["rev-parse", "--verify", "HEAD"]).is_none() {
+        return Branches::default();
+    }
+    let current = git_out(folder, &["symbolic-ref", "--quiet", "--short", "HEAD"]).filter(|b| !b.is_empty());
+    let mut names: Vec<String> = git_out(folder, &["for-each-ref", "--format=%(refname:short)", "--sort=refname", "refs/heads/"]).map(|o| o.lines().map(str::to_owned).filter(|l| !l.is_empty() && branch_name_ok(l)).collect()).unwrap_or_default();
+    if let Some(c) = &current
+        && let Some(at) = names.iter().position(|n| n == c)
+    {
+        let c = names.remove(at);
+        names.insert(0, c);
+    }
+    Branches { git: true, current, names }
 }
 
 /// The part of a task's id that names its branch and folders: its last eight characters, lower case (the random part).
@@ -45,7 +91,7 @@ fn git_out(dir: &Path, args: &[&str]) -> Option<String> {
 }
 
 /// Makes (or finds again) the place a task works in.
-pub fn prepare(data_dir: &Path, task: &TaskId, folder: Option<&str>) -> Result<Place, PlaceError> {
+pub fn prepare(data_dir: &Path, task: &TaskId, folder: Option<&str>, how: &Placement) -> Result<Place, PlaceError> {
     let short = short_id(task);
     let Some(folder) = folder else {
         let dir = data_dir.join(files::SCRATCH).join(&short);
@@ -56,8 +102,17 @@ pub fn prepare(data_dir: &Path, task: &TaskId, folder: Option<&str>) -> Result<P
     if !chosen.is_dir() {
         return Err(PlaceError::Gone(folder.to_owned()));
     }
+    if how.in_folder {
+        // The person chose the folder itself, repository or not: it works there directly.
+        return Ok(Place { workdir: folder.to_owned(), plain: true, ..Place::default() });
+    }
     let root = git_out(chosen, &["rev-parse", "--show-toplevel"]).map(PathBuf::from);
-    let base = root.as_ref().and_then(|_| git_out(chosen, &["rev-parse", "--verify", "HEAD"]));
+    // The commit the worktree starts from: the chosen branch's tip, else the commit the checkout is on.
+    let start = how.from_branch.as_deref().filter(|b| branch_name_ok(b)).map_or_else(|| "HEAD".to_owned(), |b| format!("refs/heads/{b}^{{commit}}"));
+    let base = root.as_ref().and_then(|_| git_out(chosen, &["rev-parse", "--verify", &start]));
+    if root.is_some() && base.is_none() && how.from_branch.is_some() && git_out(chosen, &["rev-parse", "--verify", "HEAD"]).is_some() {
+        return Err(PlaceError::Other(format!("Neko could not find the branch {} in {folder}.", how.from_branch.as_deref().unwrap_or_default())));
+    }
     let (Some(root), Some(base)) = (root, base) else {
         // Not a repository (or one with no commit yet): it works there directly.
         return Ok(Place { workdir: folder.to_owned(), plain: true, ..Place::default() });

@@ -157,7 +157,7 @@ fn a_store_from_before_threads_opens_with_every_task_read_and_its_last_line_kept
     }
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch("DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN sub_number; ALTER TABLE tasks DROP COLUMN root_id; ALTER TABLE tasks DROP COLUMN last_read_ms; ALTER TABLE tasks DROP COLUMN activity_ms; ALTER TABLE tasks DROP COLUMN latest_line; PRAGMA user_version = 8;").unwrap();
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN in_folder; ALTER TABLE tasks DROP COLUMN from_branch; DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN sub_number; ALTER TABLE tasks DROP COLUMN root_id; ALTER TABLE tasks DROP COLUMN last_read_ms; ALTER TABLE tasks DROP COLUMN activity_ms; ALTER TABLE tasks DROP COLUMN latest_line; PRAGMA user_version = 8;").unwrap();
     }
     assert_eq!(Store::open_at(&path, 8).unwrap().version().unwrap(), 8);
     let core = open(&d);
@@ -167,4 +167,27 @@ fn a_store_from_before_threads_opens_with_every_task_read_and_its_last_line_kept
     assert!(!all[0].unread());
     assert_eq!(all[0].latest_line, "All fixed.");
     assert!(all[0].activity_ms >= all[0].created_ms);
+}
+
+#[test]
+fn a_store_from_before_new_thread_keeps_every_cat_as_history_and_chooses_nothing_new() {
+    let d = dir();
+    let path = d.0.join("neko.sqlite3");
+    {
+        let mut core = open(&d);
+        // A task a cat had been given before version 14, and one the person made now.
+        core.create_task_for("Tidy the docs", None, Some("cat_tofu")).unwrap();
+        core.create_task("Fix the build").unwrap();
+    }
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN in_folder; ALTER TABLE tasks DROP COLUMN from_branch; PRAGMA user_version = 10;").unwrap();
+    }
+    let core = open(&d);
+    assert_eq!(core.store.version().unwrap(), neko_core::store::SCHEMA_VERSION);
+    let all = core.store.all_tasks().unwrap();
+    let by = |w: &str| all.iter().find(|t| t.words == w).unwrap();
+    assert_eq!(by("Tidy the docs").cat.as_deref(), Some("cat_tofu"), "it keeps its cat, as history");
+    assert_eq!(by("Fix the build").cat, None);
+    assert!(all.iter().all(|t| !t.in_folder && t.from_branch.is_none()), "no old task chose a place");
 }

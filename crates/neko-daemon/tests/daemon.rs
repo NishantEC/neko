@@ -64,7 +64,7 @@ fn changes_are_pushed_to_subscribed_screens() {
     let Reply::Subscribed { revision } = watcher.request(Request::Subscribe).unwrap() else { panic!("subscribe") };
     assert_eq!(revision, 0);
     let mut writer = d.client();
-    let Reply::Task { task } = writer.request(Request::CreateTask { words: "Fix the build".into(), workspace: None, cat: None }).unwrap() else { panic!("create") };
+    let Reply::Task { task } = writer.request(Request::CreateTask { words: "Fix the build".into(), workspace: None, in_folder: false, from_branch: None }).unwrap() else { panic!("create") };
     let event = watcher.next_event(Duration::from_secs(5)).unwrap().expect("an event");
     assert_eq!(event, ServerMessage::Event { revision: 1, change: Change::TaskCreated { task: task.clone() } });
     assert!(writer.next_event(Duration::from_millis(200)).unwrap().is_none(), "a screen that did not subscribe gets no events");
@@ -79,7 +79,7 @@ fn changes_are_pushed_to_subscribed_screens() {
 fn bad_requests_get_reasons() {
     let d = Daemon::start("errors");
     let mut c = d.client();
-    let empty = c.request(Request::CreateTask { words: "   ".into(), workspace: None, cat: None }).unwrap();
+    let empty = c.request(Request::CreateTask { words: "   ".into(), workspace: None, in_folder: false, from_branch: None }).unwrap();
     assert!(matches!(empty, Reply::Error { code: ErrorCode::InvalidWords, .. }), "{empty:?}");
     let missing = c.request(Request::GetTask { task: neko_protocol::TaskId("task_none".into()) }).unwrap();
     assert!(matches!(missing, Reply::Error { code: ErrorCode::NotFound, .. }), "{missing:?}");
@@ -102,7 +102,7 @@ fn a_second_daemon_for_the_same_folder_is_refused() {
 fn it_shuts_down_cleanly_and_the_data_survives() {
     let mut d = Daemon::start("shutdown");
     let mut c = d.client();
-    let Reply::Task { task } = c.request(Request::CreateTask { words: "Keep this".into(), workspace: None, cat: None }).unwrap() else { panic!("create") };
+    let Reply::Task { task } = c.request(Request::CreateTask { words: "Keep this".into(), workspace: None, in_folder: false, from_branch: None }).unwrap() else { panic!("create") };
     let status = d.stop();
     assert!(status.success(), "SIGTERM is a clean exit: {status:?}");
     assert!(!d.dir.join(files::DAEMON).exists(), "the address file is removed");

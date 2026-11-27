@@ -147,7 +147,7 @@ fn the_first_window_is_the_last_24_hours_and_marking_read_moves_it() {
 }
 
 #[test]
-fn finished_shows_each_way_a_task_ends_led_by_its_cat_with_its_first_sentence() {
+fn finished_shows_each_way_a_task_ends_with_its_first_sentence() {
     let d = dir();
     let mut core = open(&d);
     let t0 = at(2026, 11, 27, 0, 0);
@@ -172,7 +172,7 @@ fn finished_shows_each_way_a_task_ends_led_by_its_cat_with_its_first_sentence() 
     assert_eq!(t.changes, Some(Changes { files: 3, added: 40, removed: 5 }));
     assert_eq!(t.branch.as_deref(), Some("neko/abc"));
     assert_eq!(t.run, run);
-    assert!(!t.cat.is_empty() && !t.cat_name.is_empty(), "led by its cat");
+    assert!(t.cat.is_empty() && t.cat_name.is_empty(), "a thread has no cat to lead it (protocol 14)");
     assert_eq!(by("Crash").end, FinishedEnd::Failed);
     assert_eq!(by("Stopped by hand").end, FinishedEnd::Stopped);
     assert_eq!(by("Stopped by hand").answer.as_deref(), Some("I got as far as the tests."));
@@ -355,7 +355,7 @@ fn a_store_from_before_the_briefing_opens_with_its_defaults_and_needs_no_migrati
         seed(&mut core, &d, Seed::done("Old", "Done.", 1_764_000_100_000));
         core.store.connection().execute("DELETE FROM settings WHERE key LIKE 'briefing_%'", []).unwrap();
     }
-    assert_eq!(SCHEMA_VERSION, 10, "the briefing keeps its marks in `settings`: no table, no migration (the eighth migration is plugins', the ninth threads', the tenth subagents')");
+    assert_eq!(SCHEMA_VERSION, 11, "the briefing keeps its marks in `settings`: no table, no migration (the eighth migration is plugins', the ninth threads', the tenth subagents', the eleventh new thread's)");
     let store = Store::open(&path).unwrap();
     assert_eq!((store.briefing_read_ms().unwrap(), store.briefing_settings().unwrap()), (None, BriefingSettings::default()));
 }

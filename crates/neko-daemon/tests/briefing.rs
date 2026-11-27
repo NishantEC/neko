@@ -43,7 +43,7 @@ fn briefing(c: &mut Client) -> Briefing {
 }
 
 fn task(c: &mut Client, words: &str) -> Task {
-    match c.request(Request::CreateTask { words: words.into(), workspace: None, cat: Some("cat_miso".into()) }).unwrap() {
+    match c.request(Request::CreateTask { words: words.into(), workspace: None, in_folder: false, from_branch: None }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("create_task: {r:?}"),
     }
@@ -96,7 +96,7 @@ fn what_finished_is_in_the_briefing_with_its_first_sentence_and_marking_it_read_
     let t = finished_task(&mut c, "Check the docs [fake:plain]");
     let b = wait_for("the briefing to list it", || Some(briefing(&mut c)).filter(|b| !b.finished.is_empty()));
     let item = &b.finished[0];
-    assert_eq!((item.task.clone(), item.end, item.cat_name.as_str()), (t.id.clone(), FinishedEnd::Done, "miso"));
+    assert_eq!((item.task.clone(), item.end, item.cat_name.as_str()), (t.id.clone(), FinishedEnd::Done, ""), "a thread has no cat to name");
     assert_eq!(item.answer.as_deref(), Some("Hello from the fake Claude Code."), "plain text, the first sentence");
     assert!(b.totals.cost_usd.is_some() && b.totals.api_equivalent, "the fake reports a cost, as Claude Code does: {:?}", b.totals);
     assert_eq!(b.counts().headline(), "1 finished");

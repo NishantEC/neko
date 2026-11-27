@@ -271,7 +271,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
         // Its folder may have been tidied away after the last run: it comes back first.
         Ok(Some(p)) => workplace::reopen(&shared.runs.data_dir, &owner, &p).map(|()| p),
         _ if task.subagent.is_some() => Err(PlaceError::Other("The thread this subagent belongs to has no folder to work in.".into())),
-        _ => workplace::prepare(&shared.runs.data_dir, &task.id, task.folder.as_deref()),
+        _ => workplace::prepare(&shared.runs.data_dir, &task.id, task.folder.as_deref(), &workplace::Placement { in_folder: task.in_folder, from_branch: task.from_branch.clone() }),
     };
     let place: Place = match place {
         Ok(p) => p,
@@ -320,7 +320,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
     let cat = {
         let core = lock(&shared.core);
         let id = core.store.get_task(&task.id).ok().flatten().map_or_else(|| task.cat.clone(), |t| t.cat);
-        core.store.get_cat(&id).ok().flatten()
+        id.and_then(|id| core.store.get_cat(&id).ok().flatten())
     };
     let begun = {
         let mut core = lock(&shared.core);
@@ -403,7 +403,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
     }
     // The plugins this cat may use, approved as they are now, in a config for this run alone; it goes when this function returns, which
     // is when the run ends (docs/knowledge/plugins.md). A plugin's tool asks through the same route as every other tool.
-    let plugin_files = crate::plugins::for_run(shared, &shared.runs.data_dir, &cat.as_ref().map_or_else(|| task.cat.clone(), |c| c.id.clone()), &run_id.0, &mcp_helper);
+    let plugin_files = crate::plugins::for_run(shared, &shared.runs.data_dir, &cat.as_ref().map_or_else(|| task.cat.clone().unwrap_or_default(), |c| c.id.clone()), &run_id.0, &mcp_helper);
     {
         let mut b = lock(&book);
         b.set_plugins(plugin_files.names.clone());

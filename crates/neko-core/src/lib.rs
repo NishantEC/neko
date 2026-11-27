@@ -45,8 +45,10 @@ pub enum NewTaskError {
     Removed(String),
     /// The workspace's folder is not there.
     FolderMissing(String),
-    /// The cat picked cannot take it (retired, not there), or no cat is at work.
+    /// The cat given cannot take it (retired, not there).
     Cat(CatError),
+    /// The branch to start from is not a name Neko hands to git.
+    Branch(String),
     Store(String),
 }
 
@@ -59,6 +61,7 @@ impl std::fmt::Display for NewTaskError {
             NewTaskError::Removed(name) => write!(f, "{name} was removed from Neko, so no new thread can be made in it. Add its folder again, or choose another project."),
             NewTaskError::FolderMissing(name) => write!(f, "The folder of {name} was not found. Locate it in the sidebar, or choose another project."),
             NewTaskError::Cat(e) => write!(f, "{e}"),
+            NewTaskError::Branch(b) => write!(f, "{b} is not a branch name Neko can start from."),
             NewTaskError::Store(e) => write!(f, "The thread could not be saved: {e}"),
         }
     }
@@ -121,7 +124,7 @@ impl Core {
     }
 
     /// Stores a task with the person's exact words, in General, and the event that says so. Returns the task and the event's
-    /// revision.
+    /// revision. It has no cat.
     pub fn create_task(&mut self, words: &str) -> Result<(Task, u64), NewTaskError> {
         self.create_task_in(words, None)
     }
@@ -132,15 +135,25 @@ impl Core {
         self.create_task_for(words, workspace, None)
     }
 
-    /// [`Core::create_task_in`] for a cat: `cat` when picked, else the workspace's default cat, else the least busy
-    /// ([`cats::choose`]).
+    /// [`Core::create_task_in`] given `cat` (an active cat's id) when there is one. The daemon never passes one for a thread the
+    /// person starts (version 14); a cat's tasks are made by the code that owns the cat.
     pub fn create_task_for(&mut self, words: &str, workspace: Option<&str>, cat: Option<&str>) -> Result<(Task, u64), NewTaskError> {
-        let (id, w, cat, now) = self.plan_task(words, workspace, cat)?;
-        self.store.create_task(&id, &w.id, words, w.folder.as_deref(), &cat.id, now).map_err(|e| NewTaskError::Store(e.to_string()))
+        self.create_task_placed(words, workspace, cat, &workplace::Placement::default())
     }
 
-    /// The checks before any task is made, and its id: the workspace (there, not removed, its folder found) and the cat.
-    pub(crate) fn plan_task(&mut self, words: &str, workspace: Option<&str>, cat: Option<&str>) -> Result<(TaskId, Workspace, neko_protocol::Cat, i64), NewTaskError> {
+    /// [`Core::create_task_for`] with what the person chose about where it works ([`workplace::Placement`]): the project's folder
+    /// itself, or the branch its worktree starts from.
+    pub fn create_task_placed(&mut self, words: &str, workspace: Option<&str>, cat: Option<&str>, how: &workplace::Placement) -> Result<(Task, u64), NewTaskError> {
+        if let Some(b) = how.from_branch.as_deref().filter(|b| !workplace::branch_name_ok(b)) {
+            return Err(NewTaskError::Branch(b.to_owned()));
+        }
+        let (id, w, cat, now) = self.plan_task(words, workspace, cat)?;
+        self.store.create_task(&id, &w.id, words, w.folder.as_deref(), cat.as_ref().map(|c| c.id.as_str()), how, now).map_err(|e| NewTaskError::Store(e.to_string()))
+    }
+
+    /// The checks before any task is made, and its id: the workspace (there, not removed, its folder found) and the cat, when one
+    /// is given.
+    pub(crate) fn plan_task(&mut self, words: &str, workspace: Option<&str>, cat: Option<&str>) -> Result<(TaskId, Workspace, Option<neko_protocol::Cat>, i64), NewTaskError> {
         if words.trim().is_empty() {
             return Err(NewTaskError::Empty);
         }
@@ -155,7 +168,7 @@ impl Core {
         if workspaces::with_missing(w.clone()).missing {
             return Err(NewTaskError::FolderMissing(w.name));
         }
-        let cat = self.cat_for(&w.id, cat).map_err(NewTaskError::Cat)?;
+        let cat = cat.filter(|c| !c.is_empty()).map(|c| self.active_cat(c)).transpose().map_err(NewTaskError::Cat)?;
         let now = self.clock.now_ms();
         let id = TaskId(format!("task_{}", self.ids.next_id(now)));
         Ok((id, w, cat, now))

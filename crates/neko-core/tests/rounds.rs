@@ -95,7 +95,7 @@ fn a_due_time_makes_an_ordinary_task_marked_as_the_rounds() {
     let t = c.tick_rounds(env(at(2026, 11, 27, 9, 0) + 400)).unwrap();
     assert_eq!(t.started.len(), 1);
     let task = &t.started[0];
-    assert_eq!((task.title.as_str(), task.cat.as_str(), task.workspace.as_str(), task.status), ("Docs check", "cat_mochi", "default", TaskStatus::New));
+    assert_eq!((task.title.as_str(), task.cat.as_deref().unwrap_or_default(), task.workspace.as_str(), task.status), ("Docs check", "cat_mochi", "default", TaskStatus::New));
     assert_eq!(task.words, "Check the docs for broken links");
     let from = task.round.as_ref().unwrap();
     assert_eq!((from.id.as_str(), from.name.as_str(), from.due_ms), (id.as_str(), "Docs check", Some(at(2026, 11, 27, 9, 0))));
@@ -463,12 +463,12 @@ fn the_migration_from_store_six_adds_rounds_and_changes_nothing_else() {
     // A store as the last Neko left it: version 6, no rounds.
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch("DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN sub_number; ALTER TABLE tasks DROP COLUMN root_id; ALTER TABLE tasks DROP COLUMN last_read_ms; ALTER TABLE tasks DROP COLUMN activity_ms; ALTER TABLE tasks DROP COLUMN latest_line; DROP TABLE plugin_values; DROP TABLE plugins; DROP TABLE round_runs; DROP TABLE rounds; DROP INDEX tasks_by_round; ALTER TABLE tasks DROP COLUMN round_id; ALTER TABLE tasks DROP COLUMN round_due_ms; ALTER TABLE tasks DROP COLUMN round_name; PRAGMA user_version = 6;").unwrap();
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN in_folder; ALTER TABLE tasks DROP COLUMN from_branch; DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN sub_number; ALTER TABLE tasks DROP COLUMN root_id; ALTER TABLE tasks DROP COLUMN last_read_ms; ALTER TABLE tasks DROP COLUMN activity_ms; ALTER TABLE tasks DROP COLUMN latest_line; DROP TABLE plugin_values; DROP TABLE plugins; DROP TABLE round_runs; DROP TABLE rounds; DROP INDEX tasks_by_round; ALTER TABLE tasks DROP COLUMN round_id; ALTER TABLE tasks DROP COLUMN round_due_ms; ALTER TABLE tasks DROP COLUMN round_name; PRAGMA user_version = 6;").unwrap();
     }
     assert_eq!(Store::open_at(&path, 6).unwrap().version().unwrap(), 6);
     let mut core = Core::open(&path, Box::new(FixedClock::new(1_764_000_100_000, 1000)), Box::new(SequentialIds::default())).unwrap();
-    assert_eq!(core.store.version().unwrap(), 10, "every migration after 6 ran: rounds' own is the seventh");
-    assert_eq!(SCHEMA_VERSION, 10);
+    assert_eq!(core.store.version().unwrap(), 11, "every migration after 6 ran: rounds' own is the seventh");
+    assert_eq!(SCHEMA_VERSION, 11);
     let tasks = core.store.all_tasks().unwrap();
     assert_eq!((tasks.len(), tasks[0].title.as_str(), tasks[0].round.clone()), (1, "Rename the sidebar label", None));
     assert!(core.rounds(env(0)).unwrap().0.is_empty());

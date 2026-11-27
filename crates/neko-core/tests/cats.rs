@@ -1,13 +1,13 @@
-//! Cats in the store (docs/knowledge/cats.md): the starters, the name rules, the limits, choosing a cat for a task, the rules and
-//! their previous version, retiring and bringing back, a run's rules version and the line when it changed, and the migration from
-//! version 5.
+//! Cats in the store (docs/knowledge/cats.md): the starters, the name rules, the limits, that a thread has no cat (version 14), the
+//! rules and their previous version, retiring and bringing back, a run's rules version and the line when it changed, and the
+//! migration from version 5.
 
 use neko_core::conductor::{RunBook, Who};
 use neko_core::runtime::Outcome;
 use neko_core::store::SCHEMA_VERSION;
 use neko_core::{CatError, Core, FixedClock, NewTaskError, Place, SequentialIds, Store};
 use neko_protocol::cats::{MAX_ACTIVE, MAX_RULES, STARTERS, rules_hash};
-use neko_protocol::{PartBody, PermissionMode, Pricing, TaskId, TaskStatus};
+use neko_protocol::{PartBody, PermissionMode, Pricing, TaskId};
 
 struct Gone(std::path::PathBuf);
 impl Drop for Gone {
@@ -34,7 +34,7 @@ fn names(c: &Core) -> Vec<String> {
 }
 
 fn cat_of(c: &Core, t: &TaskId) -> String {
-    c.store.get_task(t).unwrap().unwrap().cat
+    c.store.get_task(t).unwrap().unwrap().cat.unwrap_or_default()
 }
 
 #[test]
@@ -96,48 +96,23 @@ fn at_most_sixteen_are_active_and_at_least_one_stays() {
 }
 
 #[test]
-fn a_task_goes_to_the_picked_cat_else_the_workspace_default_else_the_least_busy() {
+fn a_thread_has_no_cat_and_nothing_gives_it_one() {
     let d = dir();
     let mut c = open(&d);
     std::fs::create_dir_all(d.0.join("acme-api")).unwrap();
     let ws = c.add_workspace(&d.0.join("acme-api").to_string_lossy()).unwrap().workspace;
-    // Picked.
-    let (t, _) = c.create_task_for("Picked", None, Some("cat_tofu")).unwrap();
-    assert_eq!(t.cat, "cat_tofu");
-    // Least busy, ties to the one given a task least recently: never-used miso, then mochi, then tofu's turn has passed.
-    let (a, _) = c.create_task("A").unwrap();
-    let (b, _) = c.create_task("B").unwrap();
-    let (e, _) = c.create_task("C").unwrap();
-    assert_eq!((a.cat.as_str(), b.cat.as_str(), e.cat.as_str()), ("cat_miso", "cat_mochi", "cat_tofu"));
-    // Fewest working first: miso and mochi are busy now.
-    let now = c.now();
-    c.store.set_task_status(&a.id, TaskStatus::Working, now).unwrap();
-    c.store.set_task_status(&b.id, TaskStatus::NeedsYou, now).unwrap();
-    assert_eq!(c.create_task("D").unwrap().0.cat, "cat_tofu");
-    assert_eq!(c.create_task("E").unwrap().0.cat, "cat_tofu", "still the only one not working");
-    // A workspace's default wins over the least busy, in that workspace only.
+    // Several in a row, in either project: none has a cat (the starters stay idle, as they were not asked for).
+    for i in 0..4 {
+        assert_eq!(c.create_task(&format!("Task {i}")).unwrap().0.cat, None);
+    }
+    // A cat's default project no longer assigns anything.
     c.set_cat_workspace("cat_miso", Some(&ws.id)).unwrap();
-    assert_eq!(c.create_task_in("F", Some(&ws.id)).unwrap().0.cat, "cat_miso");
-    assert_eq!(c.create_task("G").unwrap().0.cat, "cat_tofu");
-    // A retired cat takes no new task, picked or by default.
+    assert_eq!(c.create_task_in("In the project", Some(&ws.id)).unwrap().0.cat, None);
+    // A cat can still be given on purpose by the code that owns it (a round): it must be there and active.
+    assert_eq!(c.create_task_for("Given", None, Some("cat_tofu")).unwrap().0.cat.as_deref(), Some("cat_tofu"));
     c.retire_cat("cat_miso").unwrap();
-    assert_ne!(c.create_task_in("H", Some(&ws.id)).unwrap().0.cat, "cat_miso");
     assert!(matches!(c.create_task_for("I", None, Some("cat_miso")), Err(NewTaskError::Cat(CatError::Refused(w))) if w.contains("retired")));
     assert!(matches!(c.create_task_for("J", None, Some("cat_nobody")), Err(NewTaskError::Cat(CatError::NotFound))));
-    // Its past tasks keep it.
-    assert_eq!(cat_of(&c, &a.id), "cat_miso");
-}
-
-#[test]
-fn the_same_store_always_chooses_the_same_cat() {
-    let picks = |d: &Gone| {
-        let mut c = open(d);
-        (0..7).map(|i| c.create_task(&format!("Task {i}")).unwrap().0.cat).collect::<Vec<_>>()
-    };
-    let (d1, d2) = (dir(), dir());
-    let first = picks(&d1);
-    assert_eq!(first, picks(&d2));
-    assert_eq!(first, ["cat_miso", "cat_mochi", "cat_tofu", "cat_miso", "cat_mochi", "cat_tofu", "cat_miso"]);
 }
 
 #[test]
@@ -171,7 +146,7 @@ fn retired_cats_keep_their_tasks_and_come_back() {
     assert_eq!(cat_of(&c, &t.id), "cat_mochi", "its tasks stay its own");
     let (back, _) = c.bring_back_cat("cat_mochi").unwrap();
     assert!(back.is_active());
-    assert_eq!(c.create_task_for("More", None, Some("cat_mochi")).unwrap().0.cat, "cat_mochi");
+    assert_eq!(c.create_task_for("More", None, Some("cat_mochi")).unwrap().0.cat.as_deref(), Some("cat_mochi"));
 }
 
 fn who() -> Who {
@@ -180,7 +155,7 @@ fn who() -> Who {
 
 fn run(c: &mut Core, d: &Gone, t: &TaskId, words: &str) {
     let place = Place { workdir: d.0.join("w").to_string_lossy().into_owned(), ..Place::default() };
-    let cat = c.store.get_cat(&c.store.get_task(t).unwrap().unwrap().cat).unwrap();
+    let cat = c.store.get_cat(&c.store.get_task(t).unwrap().unwrap().cat.unwrap_or_default()).unwrap();
     let (mut b, _) = RunBook::begin(c, t, who(), place, PermissionMode::Follow, None, Some(words), cat.as_ref()).unwrap();
     let now = c.now();
     b.finish(c, Outcome::Done, None, now).unwrap();
@@ -212,17 +187,6 @@ fn a_run_records_its_rules_version_and_one_line_says_when_they_changed() {
     let at = parts.iter().position(|p| matches!(p.body, PartBody::RulesChanged { .. })).unwrap();
     assert_eq!(parts[at + 1].body, PartBody::Person { text: "Once more".into() });
     assert_eq!(parts[at].run, parts[at + 1].run);
-}
-
-#[test]
-fn a_tasks_cat_changes_only_before_its_first_run() {
-    let d = dir();
-    let mut c = open(&d);
-    let t = c.create_task_for("Fix it", None, Some("cat_miso")).unwrap().0.id;
-    assert_eq!(c.set_task_cat(&t, "cat_tofu").unwrap().0.cat, "cat_tofu");
-    run(&mut c, &d, &t, "Fix it");
-    assert!(matches!(c.set_task_cat(&t, "cat_miso"), Err(CatError::Refused(w)) if w.contains("tofu")));
-    assert_eq!(cat_of(&c, &t), "cat_tofu");
 }
 
 #[test]

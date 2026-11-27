@@ -150,7 +150,10 @@ fn task_is(id: &TaskId, s: TaskStatus) -> impl FnMut(&Change) -> bool {
 }
 
 fn create(c: &mut Client, words: &str, cat: Option<&str>) -> Task {
-    match c.request(Request::CreateTask { words: words.into(), workspace: None, cat: cat.map(str::to_owned) }).unwrap() {
+    if let Some(cat) = cat {
+        return support::task_of_cat(c, words, cat);
+    }
+    match c.request(Request::CreateTask { words: words.into(), workspace: None, in_folder: false, from_branch: None }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("create: {r:?}"),
     }

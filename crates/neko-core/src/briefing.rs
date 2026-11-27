@@ -172,6 +172,8 @@ impl Store {
         let tasks: HashMap<TaskId, Task> = self.all_tasks()?.into_iter().map(|t| (t.id.clone(), t)).collect();
         let cats: HashMap<String, String> = self.list_cats()?.into_iter().map(|c| (c.id, c.name)).collect();
         let cat_name = |id: &str| cats.get(id).cloned().unwrap_or_else(|| "Neko".to_owned());
+        // A thread with no cat (version 14) has an empty id and an empty name.
+        let task_cat = |c: &Option<String>| -> (String, String) { c.as_ref().map(|c| (c.clone(), cat_name(c))).unwrap_or_default() };
 
         // Finished: the newest run of a task that ended in the window; not for a task that waits for the person or is working again.
         let mut finished: Vec<BriefingTask> = Vec::new();
@@ -200,8 +202,8 @@ impl Store {
                 task: id,
                 workspace: task.workspace.clone(),
                 title: task.title.clone(),
-                cat: task.cat.clone(),
-                cat_name: cat_name(&task.cat),
+                cat: task_cat(&task.cat).0,
+                cat_name: task_cat(&task.cat).1,
                 ended_ms: run.ended_ms.unwrap_or(to),
                 end,
                 answer,
@@ -245,7 +247,7 @@ impl Store {
         let mut working = Vec::new();
         for t in tasks.values().filter(|t| matches!(t.status, TaskStatus::Working | TaskStatus::New)) {
             let since = self.runs_of(&t.id)?.last().map(|r| r.started_ms).unwrap_or(t.created_ms);
-            working.push(BriefingWorking { task: t.id.clone(), workspace: t.workspace.clone(), title: t.title.clone(), cat: t.cat.clone(), cat_name: cat_name(&t.cat), since_ms: since });
+            working.push(BriefingWorking { task: t.id.clone(), workspace: t.workspace.clone(), title: t.title.clone(), cat: task_cat(&t.cat).0, cat_name: task_cat(&t.cat).1, since_ms: since });
         }
         working.sort_by(|a, b| (a.since_ms, &a.task).cmp(&(b.since_ms, &b.task)));
 

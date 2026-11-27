@@ -41,7 +41,10 @@ fn task_is(id: &TaskId, s: TaskStatus) -> impl FnMut(&Change) -> bool {
 }
 
 fn create(c: &mut Client, words: &str, cat: Option<&str>) -> Task {
-    match c.request(Request::CreateTask { words: words.into(), workspace: None, cat: cat.map(str::to_owned) }).unwrap() {
+    if let Some(cat) = cat {
+        return task_of_cat(c, words, cat);
+    }
+    match c.request(Request::CreateTask { words: words.into(), workspace: None, in_folder: false, from_branch: None }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("create: {r:?}"),
     }
@@ -113,14 +116,15 @@ fn cats_are_listed_made_changed_and_retired_through_the_protocol() {
     assert_eq!(cat(c.request(Request::SetCatFace { cat: pip.id.clone(), face: "snow".into() }).unwrap()).face, "snow");
     assert_eq!(cat(c.request(Request::SetCatPurpose { cat: pip.id.clone(), purpose: String::new() }).unwrap()).purpose, None);
     assert_eq!(cat(c.request(Request::SetCatWorkspace { cat: pip.id.clone(), workspace: Some(GENERAL.into()) }).unwrap()).workspace.as_deref(), Some(GENERAL));
-    // General's new tasks now go to Pip.
-    assert_eq!(create(&mut c, "Hello [fake:plain]", None).cat, pip.id);
+    // A cat's default project assigns nothing (protocol 14): a thread the person starts has no cat.
+    assert_eq!(create(&mut c, "Hello [fake:plain]", None).cat, None);
     let saved = cat(c.request(Request::SaveCatRules { cat: pip.id.clone(), rules: "One".into() }).unwrap());
     assert_eq!(saved.previous_rules.as_deref(), Some(""));
     assert_eq!(cat(c.request(Request::RestoreCatRules { cat: pip.id.clone() }).unwrap()).rules, "");
     let retired = cat(c.request(Request::RetireCat { cat: pip.id.clone() }).unwrap());
     assert!(retired.retired_ms.is_some());
-    assert_eq!(code(c.request(Request::CreateTask { words: "x".into(), workspace: None, cat: Some(pip.id.clone()) }).unwrap()), Some(ErrorCode::Refused));
+    // A retired cat takes no work: not even a round made for it.
+    assert_eq!(code(c.request(Request::CreateRound { name: "x".into(), words: "x".into(), cat: pip.id.clone(), workspace: None, schedule: Schedule::Every { hours: 24 }, on: false }).unwrap()), Some(ErrorCode::Refused));
     assert!(cat(c.request(Request::BringBackCat { cat: pip.id.clone() }).unwrap()).is_active());
     for id in ["cat_miso", "cat_mochi", "cat_tofu"] {
         cat(c.request(Request::RetireCat { cat: id.into() }).unwrap());
@@ -138,7 +142,7 @@ fn a_cats_rules_reach_the_cli_once_per_run_verbatim_and_the_persons_words_stay_t
     cat(c.request(Request::SaveCatRules { cat: "cat_tofu".into(), rules: rules.into() }).unwrap());
     let words = "  Tidy the README\n\n  please [fake:plain]  ";
     let task = create(&mut c, words, Some("cat_tofu"));
-    assert_eq!(task.cat, "cat_tofu");
+    assert_eq!(task.cat.as_deref(), Some("cat_tofu"));
     events_until(&mut c, "done", task_is(&task.id, TaskStatus::Done));
     let s = starts(&record);
     let runs: Vec<_> = s.iter().filter(|(a, _)| a.iter().any(|x| x == "-p")).collect();
@@ -155,6 +159,29 @@ fn a_cats_rules_reach_the_cli_once_per_run_verbatim_and_the_persons_words_stay_t
     assert!(t.parts.iter().all(|p| !p.body.text().contains("neko-cat")), "the block is not part of the transcript");
     assert_eq!(t.runs[0].cat.as_deref(), Some("cat_tofu"));
     assert_eq!(t.runs[0].rules_hash.as_deref(), Some(cats::rules_hash(rules).as_str()));
+}
+
+#[test]
+fn a_thread_with_no_cat_is_handed_no_cat_block_and_its_words_untouched() {
+    let (d, record) = daemon("cats-none", &[]);
+    let mut c = watcher(&d);
+    // The cats' rules exist, and none of them is for this thread: nothing assigns a cat (protocol 14).
+    cat(c.request(Request::SaveCatRules { cat: "cat_miso".into(), rules: "Use British spelling.".into() }).unwrap());
+    let words = "Tidy the README [fake:plain]";
+    let task = create(&mut c, words, None);
+    assert_eq!(task.cat, None);
+    events_until(&mut c, "done", task_is(&task.id, TaskStatus::Done));
+    let s = starts(&record);
+    let runs: Vec<_> = s.iter().filter(|(a, _)| a.iter().any(|x| x == "-p")).collect();
+    assert_eq!(runs.len(), 1);
+    let (args, said) = runs[0];
+    // What every agent is told about subagents is still appended; no cat's block is, and the snapshot flag goes with the text.
+    assert_eq!(appended(args), [neko_core::subagents::PARAGRAPH]);
+    assert!(args.iter().all(|a| !a.contains("neko-cat")), "no cat block anywhere in the arguments");
+    assert_eq!(said, &[words.to_owned()]);
+    let t = transcript(&mut c, &task.id);
+    assert_eq!((t.runs[0].cat.clone(), t.runs[0].rules_hash.clone()), (None, None));
+    assert!(t.parts.iter().all(|p| !matches!(p.body, PartBody::RulesChanged { .. })), "no rules, so no line about them changing");
 }
 
 #[test]

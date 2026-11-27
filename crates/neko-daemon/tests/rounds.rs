@@ -125,7 +125,7 @@ fn run_now_makes_an_ordinary_task_that_says_where_it_came_from_and_the_history_s
     let Reply::Round { round: r } = r else { panic!("{r:?}") };
     assert_eq!(r.status, RoundStatus::Manual);
     let Reply::Task { task } = c.request(Request::RunRoundNow { round: r.id.clone() }).unwrap() else { panic!("run now") };
-    assert_eq!((task.title.as_str(), task.cat.as_str(), task.workspace.as_str()), ("Docs check", "cat_mochi", GENERAL));
+    assert_eq!((task.title.as_str(), task.cat.as_deref().unwrap_or_default(), task.workspace.as_str()), ("Docs check", "cat_mochi", GENERAL));
     assert_eq!(task.round.clone().map(|r| (r.id, r.name, r.due_ms)), Some((r.id.clone(), "Docs check".into(), None)));
     let done = wait_for("the task to finish", || tasks_of(&mut c, &r.id).into_iter().find(|t| t.status == TaskStatus::Done));
     let Reply::Transcript { transcript } = c.request(Request::GetTranscript { task: done.id.clone() }).unwrap() else { panic!("transcript") };
@@ -150,7 +150,7 @@ fn a_round_becomes_due_and_starts_by_itself_and_an_unattended_step_that_would_as
     let due = task.round.as_ref().unwrap().due_ms.unwrap();
     assert!(due > r.created_ms && due <= r.created_ms + 61 * MIN + 5_000, "due an hour after it was made");
     // The same step waits for the person, as it does in a task the person made: the permission mode is the one in Settings.
-    let attended = match c.request(Request::CreateTask { words: "Run the tests [fake:hook-shell]".into(), workspace: None, cat: Some("cat_mochi".into()) }).unwrap() {
+    let attended = match c.request(Request::CreateTask { words: "Run the tests [fake:hook-shell]".into(), workspace: None, in_folder: false, from_branch: None }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("{r:?}"),
     };
@@ -170,6 +170,7 @@ fn a_round_becomes_due_and_starts_by_itself_and_an_unattended_step_that_would_as
     let (unattended, by_hand) = (perm(&task.id), perm(&attended.id));
     assert_eq!((unattended.state, unattended.tool.as_str(), unattended.title.as_str(), unattended.destructive), (PermissionState::Pending, by_hand.tool.as_str(), by_hand.title.as_str(), by_hand.destructive));
     assert_eq!(asked.iter().find(|i| i.task == task.id).unwrap().cat_name, "mochi");
+    assert_eq!(asked.iter().find(|i| i.task == attended.id).unwrap().cat_name, "", "a thread the person started has no cat");
     // Nothing answers it for the person: it is still pending a moment later, and the task still waits.
     std::thread::sleep(Duration::from_millis(1500));
     assert!(matches!(c.request(Request::GetTask { task: task.id.clone() }).unwrap(), Reply::Task { task } if task.status == TaskStatus::NeedsYou));

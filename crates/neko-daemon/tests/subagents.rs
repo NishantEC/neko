@@ -101,7 +101,7 @@ fn transcript(c: &mut Client, id: &TaskId) -> Transcript {
 }
 
 fn create(c: &mut Client, words: &str) -> Task {
-    match c.request(Request::CreateTask { words: words.into(), workspace: None, cat: None }).unwrap() {
+    match c.request(Request::CreateTask { words: words.into(), workspace: None, in_folder: false, from_branch: None }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("create: {r:?}"),
     }
@@ -169,7 +169,7 @@ fn a_thread_starts_two_subagents_rests_with_no_process_and_is_woken_once_for_bot
     assert_eq!(subs[1].subagent.as_ref().unwrap().parent, t.id);
     assert_eq!(subs[0].title, "Check links");
     // Subagents are not threads: the thread's own fields are untouched and they share its workspace and cat.
-    assert_eq!((subs[0].workspace.as_str(), subs[0].cat.as_str()), (t.workspace.as_str(), t.cat.as_str()));
+    assert_eq!((subs[0].workspace.as_str(), subs[0].cat.as_deref()), (t.workspace.as_str(), t.cat.as_deref()));
     until("the thread to be woken and finish", || {
         let tr = transcript(&mut c, &t.id);
         tr.runs.len() == 2 && tr.runs[1].status == RunStatus::Done

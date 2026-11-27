@@ -13,7 +13,9 @@ fn task() -> Task {
         created_ms: 1_764_000_000_000,
         status: TaskStatus::New,
         folder: None,
-        cat: "cat_miso".into(),
+        cat: Some("cat_miso".into()),
+        in_folder: false,
+        from_branch: None,
         round: None,
         last_read_ms: 1_764_000_000_000,
         activity_ms: 1_764_000_000_000,
@@ -37,9 +39,9 @@ fn pinned<T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug>(value: 
 fn requests_round_trip_with_their_ids() {
     pinned(ClientMessage { id: 0, request: Request::Hello { client: "neko-app".into(), protocol: 1 } }, r#"{"id":0,"type":"hello","client":"neko-app","protocol":1}"#);
     pinned(ClientMessage { id: 1, request: Request::ListTasks }, r#"{"id":1,"type":"list_tasks"}"#);
-    pinned(ClientMessage { id: 2, request: Request::CreateTask { words: "Fix the build".into(), workspace: None, cat: None } }, r#"{"id":2,"type":"create_task","words":"Fix the build"}"#);
+    pinned(ClientMessage { id: 2, request: Request::CreateTask { words: "Fix the build".into(), workspace: None, in_folder: false, from_branch: None } }, r#"{"id":2,"type":"create_task","words":"Fix the build"}"#);
     pinned(
-        ClientMessage { id: 2, request: Request::CreateTask { words: "Fix the build".into(), workspace: Some("ws_1".into()), cat: None } },
+        ClientMessage { id: 2, request: Request::CreateTask { words: "Fix the build".into(), workspace: Some("ws_1".into()), in_folder: false, from_branch: None } },
         r#"{"id":2,"type":"create_task","words":"Fix the build","workspace":"ws_1"}"#,
     );
     pinned(ClientMessage { id: 3, request: Request::GetTask { task: TaskId("task_1".into()) } }, r#"{"id":3,"type":"get_task","task":"task_1"}"#);
@@ -395,11 +397,17 @@ fn cats_round_trip() {
     pinned(ClientMessage { id: 9, request: Request::RestoreCatRules { cat: c() } }, r#"{"id":9,"type":"restore_cat_rules","cat":"cat_miso"}"#);
     pinned(ClientMessage { id: 10, request: Request::RetireCat { cat: c() } }, r#"{"id":10,"type":"retire_cat","cat":"cat_miso"}"#);
     pinned(ClientMessage { id: 11, request: Request::BringBackCat { cat: c() } }, r#"{"id":11,"type":"bring_back_cat","cat":"cat_miso"}"#);
-    pinned(ClientMessage { id: 12, request: Request::SetTaskCat { task: TaskId("task_1".into()), cat: c() } }, r#"{"id":12,"type":"set_task_cat","task":"task_1","cat":"cat_miso"}"#);
+    // A new thread takes no cat (version 14): where it works is its own choice, and each is written only when it is made.
     pinned(
-        ClientMessage { id: 13, request: Request::CreateTask { words: "Fix it".into(), workspace: None, cat: Some(c()) } },
-        r#"{"id":13,"type":"create_task","words":"Fix it","cat":"cat_miso"}"#,
+        ClientMessage { id: 13, request: Request::CreateTask { words: "Fix it".into(), workspace: Some("ws_1".into()), in_folder: true, from_branch: Some("next".into()) } },
+        r#"{"id":13,"type":"create_task","words":"Fix it","workspace":"ws_1","in_folder":true,"from_branch":"next"}"#,
     );
+    pinned(ClientMessage { id: 14, request: Request::ListBranches { workspace: "ws_1".into() } }, r#"{"id":14,"type":"list_branches","workspace":"ws_1"}"#);
+    pinned(
+        ServerMessage::Reply { id: 14, reply: Reply::Branches { workspace: "ws_1".into(), git: true, current: Some("main".into()), branches: vec!["main".into(), "next".into()] } },
+        r#"{"kind":"reply","id":14,"reply":{"type":"branches","workspace":"ws_1","git":true,"current":"main","branches":["main","next"]}}"#,
+    );
+    pinned(ServerMessage::Reply { id: 15, reply: Reply::Branches { workspace: "default".into(), git: false, current: None, branches: Vec::new() } }, r#"{"kind":"reply","id":15,"reply":{"type":"branches","workspace":"default","git":false}}"#);
     let j = r#"{"id":"cat_miso","name":"miso","face":"ginger","purpose":"Keeps the docs tidy.","rules":"- Use British spelling.","rules_hash":"HASH","previous_rules":"","rules_saved_ms":9,"workspace":"ws_1","created_ms":1}"#.replace("HASH", &cats::rules_hash("- Use British spelling."));
     pinned(Reply::Cat { cat: cat() }, &format!(r#"{{"type":"cat","cat":{j}}}"#));
     pinned(Reply::Cats { cats: vec![cat()] }, &format!(r#"{{"type":"cats","cats":[{j}]}}"#));
@@ -419,7 +427,17 @@ fn cats_round_trip() {
     let json = serde_json::to_string(&r).unwrap();
     assert!(json.ends_with(r#""cat":"cat_miso","rules_hash":"cbf29ce484222325"}"#), "{json}");
     pinned(PartBody::RulesChanged { cat: c(), name: "miso".into() }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso"}"#);
-    assert_eq!(PROTOCOL_VERSION, 13);
+    assert_eq!(PROTOCOL_VERSION, 14);
+    // A thread with no cat writes none; one that chose its place writes the choice; an old screen's task (a cat, no choice) still reads.
+    let mut t = task();
+    t.cat = None;
+    t.in_folder = true;
+    t.from_branch = Some("next".into());
+    let json = serde_json::to_string(&t).unwrap();
+    assert!(!json.contains("\"cat\"") && json.contains(r#""in_folder":true,"from_branch":"next""#), "{json}");
+    assert_eq!(serde_json::from_str::<Task>(&json).unwrap(), t);
+    let old: Task = serde_json::from_str(r#"{"id":"task_1","workspace":"default","words":"w","title":"t","created_ms":1,"status":"new","cat":"cat_miso"}"#).unwrap();
+    assert_eq!((old.cat.as_deref(), old.in_folder, old.from_branch), (Some("cat_miso"), false, None));
 }
 
 #[test]

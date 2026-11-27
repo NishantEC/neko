@@ -248,7 +248,7 @@ fn a_worktree_with_nothing_in_it_is_tidied_with_its_branch_and_comes_back_for_a_
     let t = Temp::new("tidy-clean");
     let (repo, data) = repo(&t);
     let id = task(1);
-    let p = workplace::prepare(&data, &id, Some(&s(&repo))).unwrap();
+    let p = workplace::prepare(&data, &id, Some(&s(&repo)), &Default::default()).unwrap();
     assert!(Path::new(&p.workdir).is_dir());
     assert_eq!(workplace::tidy(&data, &id, &p), Tidied::Removed { branch: true });
     assert!(!workplace::worktree_root(&data, &id).exists());
@@ -267,7 +267,7 @@ fn tidying_never_deletes_work() {
     let cases: [(&str, bool, bool); 3] = [("uncommitted", true, false), ("commit", false, true), ("both", true, true)];
     for (n, (what, dirty, commit)) in cases.iter().enumerate() {
         let id = task(10 + n as u32);
-        let p = workplace::prepare(&data, &id, Some(&s(&repo))).unwrap();
+        let p = workplace::prepare(&data, &id, Some(&s(&repo)), &Default::default()).unwrap();
         let tree = Path::new(&p.workdir);
         if *commit {
             std::fs::write(tree.join("done.txt"), "work\n").unwrap();
@@ -305,8 +305,8 @@ fn an_empty_scratch_folder_is_tidied_and_one_with_files_is_kept() {
     let t = Temp::new("scratch");
     let data = t.0.join("data");
     let (a, b) = (task(20), task(21));
-    let pa = workplace::prepare(&data, &a, None).unwrap();
-    let pb = workplace::prepare(&data, &b, None).unwrap();
+    let pa = workplace::prepare(&data, &a, None, &Default::default()).unwrap();
+    let pb = workplace::prepare(&data, &b, None, &Default::default()).unwrap();
     std::fs::write(Path::new(&pb.workdir).join("report.md"), "kept\n").unwrap();
     assert_eq!(workplace::tidy(&data, &a, &pa), Tidied::Removed { branch: false });
     assert!(!Path::new(&pa.workdir).exists());
@@ -317,9 +317,66 @@ fn an_empty_scratch_folder_is_tidied_and_one_with_files_is_kept() {
     // A plain folder is the person's own: never touched.
     let plain = t.0.join("notes");
     std::fs::create_dir_all(&plain).unwrap();
-    let pp = workplace::prepare(&data, &task(22), Some(&s(&plain))).unwrap();
+    let pp = workplace::prepare(&data, &task(22), Some(&s(&plain)), &Default::default()).unwrap();
     assert!(pp.plain);
     assert_eq!(workplace::tidy(&data, &task(22), &pp), Tidied::Nothing);
     assert!(workplace::remove_place(&data, &task(22), &pp).is_ok());
     assert!(plain.is_dir());
+}
+
+#[test]
+fn a_thread_can_start_from_a_chosen_branch_or_work_in_the_folder_itself() {
+    let t = Temp::new("placement");
+    let (repo, data) = repo(&t);
+    // A second branch with one more commit, while the checkout stays on main.
+    git(&repo, &["switch", "-q", "-c", "release/2"]);
+    std::fs::write(repo.join("NOTES.md"), "second\n").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "second"]);
+    let tip = git(&repo, &["rev-parse", "release/2"]);
+    git(&repo, &["switch", "-q", "main"]);
+    let main_tip = git(&repo, &["rev-parse", "main"]);
+
+    // What the chip offers: the checkout's branch first, then the rest by name.
+    let b = workplace::branches(&repo);
+    assert_eq!((b.git, b.current.as_deref(), b.names.as_slice()), (true, Some("main"), ["main".to_owned(), "release/2".to_owned()].as_slice()));
+    assert_eq!(workplace::branches(&t.0), workplace::Branches::default(), "a folder that is not a repository offers nothing");
+    assert_eq!(workplace::branches(&t.0.join("nowhere")), workplace::Branches::default());
+
+    // Nothing chosen: a worktree on the commit the checkout is on.
+    let a = workplace::prepare(&data, &task(30), Some(&s(&repo)), &Default::default()).unwrap();
+    assert_eq!((a.base_commit.as_deref(), a.plain), (Some(main_tip.as_str()), false));
+    // A branch chosen: the worktree starts from its tip, on its own `neko/` branch, and the person's checkout is untouched.
+    let how = workplace::Placement { in_folder: false, from_branch: Some("release/2".into()) };
+    let b = workplace::prepare(&data, &task(31), Some(&s(&repo)), &how).unwrap();
+    assert_eq!((b.base_commit.as_deref(), b.plain), (Some(tip.as_str()), false));
+    assert!(b.branch.as_deref().unwrap().starts_with("neko/"));
+    assert!(Path::new(&b.workdir).join("NOTES.md").is_file(), "the chosen branch's files are there");
+    assert_eq!(git(&repo, &["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+    // A branch that is not there, and a name git would take for an option, are refused in words.
+    let gone = workplace::Placement { in_folder: false, from_branch: Some("nope".into()) };
+    assert!(matches!(workplace::prepare(&data, &task(32), Some(&s(&repo)), &gone), Err(workplace::PlaceError::Other(w)) if w.contains("nope")));
+    assert!(!workplace::branch_name_ok("--upload-pack=x") && !workplace::branch_name_ok("a b") && !workplace::branch_name_ok("") && workplace::branch_name_ok("release/2"));
+
+    // In the folder: no worktree, no `neko/` branch; it works where the person's checkout is, and its first edit asks.
+    let before = git(&repo, &["worktree", "list"]);
+    let f = workplace::prepare(&data, &task(33), Some(&s(&repo)), &workplace::Placement { in_folder: true, from_branch: None }).unwrap();
+    assert_eq!((f.workdir.as_str(), f.plain, f.branch.clone()), (s(&repo).as_str(), true, None));
+    assert_eq!(git(&repo, &["worktree", "list"]), before, "no worktree was made");
+    assert!(!workplace::worktree_root(&data, &task(33)).exists());
+    // Nothing of the person's is tidied away, and removing the thread leaves the folder.
+    assert_eq!(workplace::tidy(&data, &task(33), &f), Tidied::Nothing);
+    assert!(workplace::remove_place(&data, &task(33), &f).is_ok());
+    assert!(repo.join("README.md").is_file());
+
+    // The choice is stored with the thread.
+    let mut c = core(&t.0.join("neko.sqlite3"));
+    let w = c.add_workspace(&s(&repo)).unwrap().workspace;
+    let made = c.create_task_placed("Look at it", Some(&w.id), None, &workplace::Placement { in_folder: false, from_branch: Some("release/2".into()) }).unwrap().0;
+    assert_eq!((made.in_folder, made.from_branch.as_deref(), made.cat), (false, Some("release/2"), None));
+    let same = c.store.get_task(&made.id).unwrap().unwrap();
+    assert_eq!((same.in_folder, same.from_branch.as_deref()), (false, Some("release/2")));
+    let inside = c.create_task_placed("Edit it", Some(&w.id), None, &workplace::Placement { in_folder: true, from_branch: None }).unwrap().0;
+    assert!(c.store.get_task(&inside.id).unwrap().unwrap().in_folder);
+    assert!(matches!(c.create_task_placed("Bad", Some(&w.id), None, &workplace::Placement { in_folder: false, from_branch: Some("-x".into()) }), Err(NewTaskError::Branch(_))));
 }

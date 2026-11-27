@@ -12,7 +12,7 @@ fn a_transcript_asked_mid_stream_holds_every_word_so_far_and_the_stream_continue
     let d = Daemon::start("transcript-live");
     let mut c = d.client();
     assert!(matches!(c.request(Request::Subscribe).unwrap(), Reply::Subscribed { .. }));
-    let task = match c.request(Request::CreateTask { words: "Count slowly [fake:slow]".into(), workspace: None, cat: None }).unwrap() {
+    let task = match c.request(Request::CreateTask { words: "Count slowly [fake:slow]".into(), workspace: None, in_folder: false, from_branch: None }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("create: {r:?}"),
     };

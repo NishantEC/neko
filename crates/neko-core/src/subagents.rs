@@ -100,7 +100,7 @@ impl Store {
     /// A subagent's own row: the thread's workspace, folder and cat, the prompt as its words, not yet started.
     pub fn insert_subagent(&mut self, id: &TaskId, parent: &Task, number: &str, title: &str, prompt: &str, now_ms: i64) -> Result<(Task, u64), StoreError> {
         let root = parent.subagent.as_ref().map_or_else(|| parent.id.clone(), |s| s.root.clone());
-        let mut task = Task::blank(id.clone(), &parent.workspace, prompt, title, now_ms, &parent.cat);
+        let mut task = Task::blank(id.clone(), &parent.workspace, prompt, title, now_ms, parent.cat.as_deref());
         task.folder = parent.folder.clone();
         task.subagent = Some(SubagentOf { parent: parent.id.clone(), number: number.to_owned(), root });
         let tx = self.conn.transaction()?;

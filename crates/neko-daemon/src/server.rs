@@ -362,6 +362,13 @@ fn session(stream: TcpStream, id: u64, shared: &Arc<Shared>) {
             crate::runs::send_transcript(shared, id, reply_id, &task);
             return Flow::Continue;
         }
+        // The branches of a project's folder come from git: answered on a thread of its own, so this connection never waits for it.
+        if said_hello
+            && let Ok(ClientMessage { id: reply_id, request: Request::ListBranches { workspace } }) = serde_json::from_str::<ClientMessage>(&text)
+        {
+            spawn_branches(shared, id, reply_id, workspace);
+            return Flow::Continue;
+        }
         // A plugin request that may wait on the Keychain, a folder or a server is answered on a thread of its own, so this connection (and
         // a stop) never waits for it.
         if said_hello
@@ -376,6 +383,26 @@ fn session(stream: TcpStream, id: u64, shared: &Arc<Shared>) {
         flow
     });
     lock(&shared.conns).remove(&id);
+}
+
+/// Where a new thread in `workspace` can start from, said on a thread of its own: git is asked about the project's folder.
+fn spawn_branches(shared: &Arc<Shared>, conn: u64, reply_id: u64, workspace: String) {
+    let s = shared.clone();
+    let spawned = std::thread::Builder::new().name("neko-branches".into()).spawn(move || {
+        let folder = lock(&s.core).store.get_workspace(&workspace);
+        let reply = match folder {
+            Ok(Some(w)) => {
+                let b = w.folder.as_deref().map(|f| neko_core::workplace::branches(std::path::Path::new(f))).unwrap_or_default();
+                Reply::Branches { workspace, git: b.git, current: b.current, branches: b.names }
+            }
+            Ok(None) => Reply::error(ErrorCode::NotFound, "That project is not there any more."),
+            Err(e) => Reply::error(ErrorCode::Internal, e.to_string()),
+        };
+        s.send_to(conn, &ServerMessage::Reply { id: reply_id, reply });
+    });
+    if spawned.is_err() {
+        shared.send_to(conn, &ServerMessage::Reply { id: reply_id, reply: Reply::error(ErrorCode::Internal, "Neko could not start a thread for this.") });
+    }
 }
 
 /// A refused change to a workspace, as a reply.
@@ -477,10 +504,10 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
             Ok(None) => Reply::error(ErrorCode::NotFound, "There is no such thread."),
             Err(e) => internal(e),
         },
-        Request::CreateTask { words, workspace, cat } => {
+        Request::CreateTask { words, workspace, in_folder, from_branch } => {
             let made = {
                 let mut core = lock(&shared.core);
-                let made = core.create_task_for(&words, workspace.as_deref(), cat.as_deref());
+                let made = core.create_task_placed(&words, workspace.as_deref(), None, &neko_core::workplace::Placement { in_folder, from_branch });
                 if let Ok((task, revision)) = &made {
                     shared.broadcast(&ServerMessage::Event { revision: *revision, change: Change::TaskCreated { task: task.clone() } });
                 }
@@ -494,25 +521,12 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
                 }
                 Err(e @ (NewTaskError::Empty | NewTaskError::TooLong)) => Reply::error(ErrorCode::InvalidWords, e.to_string()),
                 Err(e @ NewTaskError::NoWorkspace) => Reply::error(ErrorCode::NotFound, e.to_string()),
-                Err(e @ (NewTaskError::Removed(_) | NewTaskError::FolderMissing(_))) => Reply::error(ErrorCode::Refused, e.to_string()),
+                Err(e @ (NewTaskError::Removed(_) | NewTaskError::FolderMissing(_) | NewTaskError::Branch(_))) => Reply::error(ErrorCode::Refused, e.to_string()),
                 Err(NewTaskError::Cat(e)) => cat_error(e),
                 Err(e) => Reply::error(ErrorCode::Internal, e.to_string()),
             }
         }
         Request::RemoveTask { task } => runs::remove_task(shared, &task),
-        Request::SetTaskCat { task, cat } => {
-            if lock(&shared.runs.active).contains_key(&task) {
-                return (id, Reply::error(ErrorCode::Refused, "This thread has started, so its cat stays."), Flow::Continue);
-            }
-            let mut core = lock(&shared.core);
-            match core.set_task_cat(&task, &cat) {
-                Ok((task, revision)) => {
-                    shared.broadcast(&ServerMessage::Event { revision, change: Change::TaskUpdated { task: task.clone() } });
-                    Reply::Task { task }
-                }
-                Err(e) => cat_error(e),
-            }
-        }
         Request::ListCats => match lock(&shared.core).cats() {
             Ok(cats) => Reply::Cats { cats },
             Err(e) => internal(e),
@@ -688,6 +702,7 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
         | Request::SetPluginEnabled { .. }
         | Request::SetPluginAccess { .. }) => crate::plugins::quick(shared, &r).unwrap_or_else(|| Reply::error(ErrorCode::BadRequest, "Not a plugin request.")),
         // Answered on their own threads (`session`); never reached here.
+        Request::ListBranches { .. } => Reply::error(ErrorCode::Internal, "A branch request reached the wrong place."),
         Request::AddMcpJson { .. } | Request::AddPluginFolder { .. } | Request::SetPluginSetting { .. } | Request::TestPlugin { .. } | Request::RemovePlugin { .. } => Reply::error(ErrorCode::Internal, "A plugin request reached the wrong place."),
         Request::GetBriefing { from_ms, to_ms } => crate::briefing::get(shared, from_ms, to_ms),
         Request::MarkBriefingRead => crate::briefing::mark_read(shared),

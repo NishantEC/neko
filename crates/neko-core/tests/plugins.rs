@@ -269,14 +269,14 @@ fn the_migration_from_store_seven_adds_plugins_and_changes_nothing_else() {
     }
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch("DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN sub_number; ALTER TABLE tasks DROP COLUMN root_id; DROP TABLE plugin_values; DROP TABLE plugins; ALTER TABLE tasks DROP COLUMN last_read_ms; ALTER TABLE tasks DROP COLUMN activity_ms; ALTER TABLE tasks DROP COLUMN latest_line; PRAGMA user_version = 7;").unwrap();
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN in_folder; ALTER TABLE tasks DROP COLUMN from_branch; DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN sub_number; ALTER TABLE tasks DROP COLUMN root_id; DROP TABLE plugin_values; DROP TABLE plugins; ALTER TABLE tasks DROP COLUMN last_read_ms; ALTER TABLE tasks DROP COLUMN activity_ms; ALTER TABLE tasks DROP COLUMN latest_line; PRAGMA user_version = 7;").unwrap();
     }
     assert_eq!(Store::open_at(&path, 7).unwrap().version().unwrap(), 7);
     let mut core = Core::open(&path, Box::new(FixedClock::new(1_764_000_100_000, 1000)), Box::new(SequentialIds::default())).unwrap();
-    assert_eq!((core.store.version().unwrap(), SCHEMA_VERSION), (10, 10));
+    assert_eq!((core.store.version().unwrap(), SCHEMA_VERSION), (11, 11));
     assert_eq!(core.store.all_tasks().unwrap().len(), 1);
     assert!(core.plugins().unwrap().is_empty());
-    assert_eq!(PROTOCOL_VERSION, 13);
+    assert_eq!(PROTOCOL_VERSION, 14);
     assert_eq!(add(&mut core, PASTE).len(), 1);
 }
 

@@ -51,7 +51,7 @@ fn create(c: &mut Client, words: &str, folder: Option<&Path>) -> Task {
         Reply::Workspace { workspace, .. } => workspace.id,
         r => panic!("add workspace: {r:?}"),
     });
-    match c.request(Request::CreateTask { words: words.into(), workspace, cat: None }).unwrap() {
+    match c.request(Request::CreateTask { words: words.into(), workspace, in_folder: false, from_branch: None }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("create: {r:?}"),
     }

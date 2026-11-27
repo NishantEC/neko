@@ -42,7 +42,7 @@ fn add(c: &mut Client, folder: &Path) -> Workspace {
 }
 
 fn create(c: &mut Client, words: &str, workspace: Option<&Workspace>) -> Task {
-    match c.request(Request::CreateTask { words: words.into(), workspace: workspace.map(|w| w.id.clone()), cat: None }).unwrap() {
+    match c.request(Request::CreateTask { words: words.into(), workspace: workspace.map(|w| w.id.clone()), in_folder: false, from_branch: None }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("create: {r:?}"),
     }
@@ -169,7 +169,7 @@ fn removing_a_workspace_and_a_missing_folder() {
     events_until(&mut c, "removed", |ch| matches!(ch, Change::WorkspaceUpdated { workspace } if workspace.id == acme.id && workspace.removed_ms.is_some()));
     assert_eq!(std::fs::read_to_string(acme_dir.join("README.md")).unwrap(), "kept\n", "nothing on disk is touched");
     assert!(tasks(&mut c).iter().any(|x| x.id == t.id), "its task stays readable");
-    assert!(matches!(c.request(Request::CreateTask { words: "After".into(), workspace: Some(acme.id.clone()), cat: None }).unwrap(), Reply::Error { code: ErrorCode::Refused, .. }));
+    assert!(matches!(c.request(Request::CreateTask { words: "After".into(), workspace: Some(acme.id.clone()), in_folder: false, from_branch: None }).unwrap(), Reply::Error { code: ErrorCode::Refused, .. }));
     assert!(matches!(c.request(Request::RemoveWorkspace { workspace: GENERAL.into() }).unwrap(), Reply::Error { code: ErrorCode::Refused, .. }));
     assert!(matches!(c.request(Request::RenameWorkspace { workspace: GENERAL.into(), name: "Mine".into() }).unwrap(), Reply::Error { code: ErrorCode::Refused, .. }));
     assert!(matches!(c.request(Request::AddWorkspace { folder: "/nonexistent/acme".into() }).unwrap(), Reply::Error { code: ErrorCode::InvalidFolder, .. }));
@@ -179,7 +179,7 @@ fn removing_a_workspace_and_a_missing_folder() {
     let moved = outside.0.join("moved");
     std::fs::rename(&other_dir, &moved).unwrap();
     assert!(workspaces(&mut c).iter().any(|w| w.id == other.id && w.missing), "folder not found");
-    match c.request(Request::CreateTask { words: "Hi".into(), workspace: Some(other.id.clone()), cat: None }).unwrap() {
+    match c.request(Request::CreateTask { words: "Hi".into(), workspace: Some(other.id.clone()), in_folder: false, from_branch: None }).unwrap() {
         Reply::Error { code: ErrorCode::Refused, message } => assert!(message.contains("was not found"), "{message}"),
         r => panic!("{r:?}"),
     }
@@ -260,5 +260,64 @@ fn removing_a_task_refuses_unsaved_work_and_keeps_commits_on_the_branch() {
     assert_eq!(c.request(Request::RemoveTask { task: plain.id.clone() }).unwrap(), Reply::Ok);
     assert_eq!(tasks(&mut c).len(), 0);
     assert_eq!(folders_in(&d.dir.join(files::SCRATCH)), 0);
+    let _ = git(&r, &["worktree", "prune"]);
+}
+
+fn create_placed(c: &mut Client, words: &str, workspace: &Workspace, in_folder: bool, from_branch: Option<&str>) -> Reply {
+    c.request(Request::CreateTask { words: words.into(), workspace: Some(workspace.id.clone()), in_folder, from_branch: from_branch.map(str::to_owned) }).unwrap()
+}
+
+fn run_of(c: &mut Client, task: &TaskId) -> Run {
+    match c.request(Request::GetTranscript { task: task.clone() }).unwrap() {
+        Reply::Transcript { transcript } => transcript.runs.into_iter().next().expect("a run"),
+        r => panic!("transcript: {r:?}"),
+    }
+}
+
+#[test]
+fn a_new_thread_says_where_it_can_start_from_and_can_work_in_the_folder_itself_or_from_a_chosen_branch() {
+    let outside = Outside(temp_dir("ws-place-outside").canonicalize().unwrap());
+    let r = repo(&outside.0);
+    git(&r, &["branch", "release-2"]);
+    let notes = outside.0.join("notes");
+    std::fs::create_dir_all(&notes).unwrap();
+    let d = Daemon::start("ws-place");
+    let mut c = watcher(&d);
+    let acme = add(&mut c, &r);
+    let plain = add(&mut c, &notes);
+
+    // Where a thread can start from: a repository says its branches (the checkout's first), anything else says there are none.
+    let asked = |c: &mut Client, w: &str| c.request(Request::ListBranches { workspace: w.into() }).unwrap();
+    assert_eq!(asked(&mut c, &acme.id), Reply::Branches { workspace: acme.id.clone(), git: true, current: Some("main".into()), branches: vec!["main".into(), "release-2".into()] });
+    assert_eq!(asked(&mut c, &plain.id), Reply::Branches { workspace: plain.id.clone(), git: false, current: None, branches: Vec::new() });
+    assert_eq!(asked(&mut c, GENERAL), Reply::Branches { workspace: GENERAL.into(), git: false, current: None, branches: Vec::new() });
+    assert!(matches!(asked(&mut c, "ws_nobody"), Reply::Error { code: ErrorCode::NotFound, .. }));
+
+    // A branch that is not a branch name is refused before anything is made.
+    assert!(matches!(create_placed(&mut c, "x", &acme, false, Some("--upload-pack=x")), Reply::Error { code: ErrorCode::Refused, .. }));
+    assert_eq!(tasks(&mut c).len(), 0);
+
+    // In the folder: the run works in the person's own checkout; no worktree, no `neko/` branch.
+    let Reply::Task { task: inside } = create_placed(&mut c, "Look here [fake:plain]", &acme, true, None) else { panic!("in the folder") };
+    assert!(inside.in_folder && inside.cat.is_none());
+    all_done(&mut c, std::slice::from_ref(&inside.id));
+    let run = run_of(&mut c, &inside.id);
+    assert_eq!((run.workdir.as_str(), run.branch.clone()), (r.to_string_lossy().as_ref(), None));
+    assert_eq!(folders_in(&d.dir.join(files::WORKTREES)), 0);
+    assert_eq!(git(&r, &["branch", "--list", "neko/*"]), "");
+    assert_eq!(git(&r, &["worktree", "list"]).lines().count(), 1);
+
+    // From a branch: its own worktree, and a branch of its own from the chosen one's tip.
+    let tip = git(&r, &["rev-parse", "release-2"]);
+    let Reply::Task { task: from } = create_placed(&mut c, "Look there [fake:plain]", &acme, false, Some("release-2")) else { panic!("from a branch") };
+    assert_eq!(from.from_branch.as_deref(), Some("release-2"));
+    all_done(&mut c, std::slice::from_ref(&from.id));
+    let run = run_of(&mut c, &from.id);
+    assert!(run.branch.as_deref().is_some_and(|b| b.starts_with("neko/")), "{run:?}");
+    assert!(run.workdir.contains(files::WORKTREES), "{run:?}");
+    // The stored thread says what was chosen, after a fresh read.
+    let again = tasks(&mut c).into_iter().find(|t| t.id == from.id).unwrap();
+    assert_eq!((again.in_folder, again.from_branch.as_deref(), again.cat), (false, Some("release-2"), None));
+    assert_eq!(git(&r, &["rev-parse", "release-2"]), tip, "the person's branch did not move");
     let _ = git(&r, &["worktree", "prune"]);
 }

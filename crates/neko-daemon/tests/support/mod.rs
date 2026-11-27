@@ -124,3 +124,19 @@ impl Drop for Daemon {
     }
 }
 
+
+/// A task that has a cat. A thread the person starts has none (protocol 14), so one comes the way such a task still does: from a
+/// round, run now. The round's words are the task's words.
+pub fn task_of_cat(c: &mut Client, words: &str, cat: &str) -> neko_protocol::Task {
+    use neko_protocol::{Reply, Request, Schedule};
+    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let round = match c.request(Request::CreateRound { name: format!("Round {n}"), words: words.into(), cat: cat.into(), workspace: None, schedule: Schedule::Every { hours: 24 }, on: false }).unwrap() {
+        Reply::Round { round } => round,
+        r => panic!("create_round: {r:?}"),
+    };
+    match c.request(Request::RunRoundNow { round: round.id }).unwrap() {
+        Reply::Task { task } => task,
+        r => panic!("run_round_now: {r:?}"),
+    }
+}

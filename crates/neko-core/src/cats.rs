@@ -4,14 +4,12 @@
 //!   optional purpose line (200 characters), standing rules (Markdown, 16 KB) with one previous version kept, and an optional
 //!   default workspace. At most 16 are active; at least one always is.
 //! - Three starter cats (miso, mochi, tofu) are made on first open. They are ordinary cats.
-//! - Every task has exactly one cat, set when it is made ([`choose`]): the one picked, else the workspace's default cat, else the
-//!   active cat with the fewest tasks working now, ties going to the one given a task least recently. A task's cat changes only
-//!   while no run has started.
+//! - A thread has no cat (version 14). Nothing assigns one: the picked, workspace-default and least-busy rules are gone. A task made
+//!   before keeps the cat it was given, and a round's task has its round's cat; their runs still carry that cat's rules.
 //! - A cat's rules reach the agent as one block ([`block`]) on every run of its tasks. They are words for the agent and nothing
 //!   more: they never change the permission mode, the hook or any flag Neko passes.
 
 use neko_protocol::cats::{self, Cat, FACES, MAX_ACTIVE, MAX_NAME, MAX_PURPOSE, MAX_RULES, STARTERS};
-use neko_protocol::{Task, TaskId};
 use rusqlite::{OptionalExtension, Transaction, params};
 
 use crate::records::log_event;
@@ -113,30 +111,22 @@ pub fn block(cat: &Cat) -> String {
     b
 }
 
-/// One cat as [`choose`] weighs it.
+/// One starter cat as migration 6 weighs it, when it gives the tasks that already existed a cat. Nothing else chooses a cat for a
+/// task any more (threads need none, version 14): this is only that migration's history.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Candidate {
-    pub id: String,
-    pub created_ms: i64,
+struct Candidate {
+    id: String,
+    created_ms: i64,
     /// Its tasks working right now (working, or waiting on a request).
-    pub working: u32,
+    working: u32,
     /// When it was last given a task (None: never).
-    pub last_used_ms: Option<i64>,
-    pub workspace: Option<String>,
+    last_used_ms: Option<i64>,
 }
 
-/// The least busy of `cats`: the fewest tasks working now, then the one given a task least recently (never comes first), then
-/// the oldest, then by id. The same cats always give the same answer.
-pub fn least_busy(cats: &[Candidate]) -> Option<&Candidate> {
+/// The least busy of `cats`: the fewest tasks working now, then the one given a task least recently (never comes first), then the
+/// oldest, then by id.
+fn least_busy(cats: &[Candidate]) -> Option<&Candidate> {
     cats.iter().min_by(|a, b| (a.working, a.last_used_ms.unwrap_or(i64::MIN), a.created_ms, &a.id).cmp(&(b.working, b.last_used_ms.unwrap_or(i64::MIN), b.created_ms, &b.id)))
-}
-
-/// Which active cat a new task in `workspace` goes to when none is picked: the workspace's default cat (the least busy of them,
-/// if several), else the least busy of all.
-pub fn choose<'a>(active: &'a [Candidate], workspace: &str) -> Option<&'a Candidate> {
-    let defaults: Vec<Candidate> = active.iter().filter(|c| c.workspace.as_deref() == Some(workspace)).cloned().collect();
-    let pick = if defaults.is_empty() { least_busy(active) } else { least_busy(&defaults) }?;
-    active.iter().find(|c| c.id == pick.id)
 }
 
 fn insert_starters(tx: &Transaction<'_>, created_ms: i64) -> rusqlite::Result<()> {
@@ -150,9 +140,9 @@ fn insert_starters(tx: &Transaction<'_>, created_ms: i64) -> rusqlite::Result<()
 }
 
 /// Migration 6's step: when there are tasks, the starter cats are made (as old as the oldest task) and every task goes to one,
-/// oldest first, by the rule a new task follows. No workspace has a default cat yet, so it is the least busy: a task still marked
-/// working counts as busy, and ties go to the cat given a task least recently. No clock and no randomness: the same store gives
-/// the same answer every time.
+/// oldest first, by the rule a new task followed then. No workspace had a default cat yet, so it is the least busy: a task still
+/// marked working counts as busy, and ties go to the cat given a task least recently. No clock and no randomness: the same store
+/// gives the same answer every time.
 pub(crate) fn migrate_tasks(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     let tasks: Vec<(String, i64, String)> = {
         let mut st = tx.prepare("SELECT id, created_ms, status FROM tasks ORDER BY created_ms, id")?;
@@ -160,7 +150,7 @@ pub(crate) fn migrate_tasks(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     };
     let Some(oldest) = tasks.first().map(|t| t.1) else { return Ok(()) };
     insert_starters(tx, oldest)?;
-    let mut cats: Vec<Candidate> = STARTERS.iter().map(|(id, ..)| Candidate { id: (*id).to_owned(), created_ms: oldest, working: 0, last_used_ms: None, workspace: None }).collect();
+    let mut cats: Vec<Candidate> = STARTERS.iter().map(|(id, ..)| Candidate { id: (*id).to_owned(), created_ms: oldest, working: 0, last_used_ms: None }).collect();
     for (task, created, status) in tasks {
         let Some(pick) = least_busy(&cats).map(|c| c.id.clone()) else { break };
         tx.execute("UPDATE tasks SET cat_id = ?2 WHERE id = ?1", params![task, pick])?;
@@ -203,18 +193,6 @@ impl Store {
         Ok(())
     }
 
-    /// The active cats as [`choose`] weighs them.
-    pub fn cat_candidates(&self) -> Result<Vec<Candidate>, StoreError> {
-        let mut st = self.conn.prepare_cached(
-            "SELECT c.id, c.created_ms, c.workspace_id,
-                (SELECT COUNT(*) FROM tasks t WHERE t.cat_id = c.id AND t.status IN ('working', 'needs_you')),
-                (SELECT MAX(t.created_ms) FROM tasks t WHERE t.cat_id = c.id)
-             FROM cats c WHERE c.retired_ms IS NULL ORDER BY c.created_ms, c.id",
-        )?;
-        let rows = st.query_map([], |r| Ok(Candidate { id: r.get(0)?, created_ms: r.get(1)?, workspace: r.get(2)?, working: r.get(3)?, last_used_ms: r.get(4)? }))?;
-        Ok(rows.collect::<Result<_, _>>()?)
-    }
-
     /// A new cat and its event.
     pub fn insert_cat(&mut self, c: &Cat, now_ms: i64) -> Result<u64, StoreError> {
         let tx = self.conn.transaction()?;
@@ -238,16 +216,6 @@ impl Store {
         let c = tx.query_row(&format!("SELECT {CAT_COLUMNS} FROM cats WHERE id = ?1"), [&c.id], cat_of)?;
         tx.commit()?;
         Ok((c, seq))
-    }
-
-    /// Gives a task to another cat, with its event.
-    pub fn set_task_cat(&mut self, task: &TaskId, cat: &str, now_ms: i64) -> Result<(Task, u64), StoreError> {
-        let tx = self.conn.transaction()?;
-        tx.execute("UPDATE tasks SET cat_id = ?2 WHERE id = ?1", params![task.0, cat])?;
-        let seq = log_event(&tx, now_ms, &task.0, "task_cat", serde_json::json!({ "cat": cat }))?;
-        tx.commit()?;
-        let t = self.get_task(task)?.ok_or(StoreError::Sqlite(rusqlite::Error::QueryReturnedNoRows))?;
-        Ok((t, seq))
     }
 }
 
@@ -401,57 +369,19 @@ impl Core {
         self.write(&cat, "cat_brought_back")
     }
 
-    /// The cat a new task in `workspace` goes to: `picked` (it must be active), else the workspace's default cat, else the least
-    /// busy.
-    pub fn cat_for(&self, workspace: &str, picked: Option<&str>) -> Result<Cat, CatError> {
-        if let Some(id) = picked.filter(|p| !p.is_empty()) {
-            let cat = self.cat(id)?;
-            if !cat.is_active() {
-                return Err(CatError::Refused(format!("{} is retired and takes no new threads. Bring it back from Settings, or pick another cat.", cat.name)));
-            }
-            return Ok(cat);
+    /// A cat a task may be given (a round's cat): it must be there and active. Threads the person starts have none.
+    pub fn active_cat(&self, id: &str) -> Result<Cat, CatError> {
+        let cat = self.cat(id)?;
+        if !cat.is_active() {
+            return Err(CatError::Refused(format!("{} is retired and takes no new threads. Bring it back from Settings, or pick another cat.", cat.name)));
         }
-        let active = self.store.cat_candidates()?;
-        let pick = choose(&active, workspace).ok_or_else(|| CatError::Refused("No cat is at work. Bring one back from Settings.".into()))?;
-        self.cat(&pick.id)
-    }
-
-    /// Gives a task to another active cat, only while no run of it has started.
-    pub fn set_task_cat(&mut self, task: &TaskId, cat: &str) -> Result<(Task, u64), CatError> {
-        let t = self.store.get_task(task)?.ok_or_else(|| CatError::Refused("There is no such thread.".into()))?;
-        let c = self.cat_for(&t.workspace, Some(cat))?;
-        if !self.store.runs_of(task)?.is_empty() {
-            return Err(CatError::Refused(format!("{} has already started on this thread, so it stays theirs.", self.store.get_cat(&t.cat)?.map_or_else(|| "A cat".to_owned(), |c| c.name))));
-        }
-        let now = self.now();
-        Ok(self.store.set_task_cat(task, &c.id, now)?)
+        Ok(cat)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn cand(id: &str, working: u32, last: Option<i64>, ws: Option<&str>) -> Candidate {
-        Candidate { id: id.into(), created_ms: 1, working, last_used_ms: last, workspace: ws.map(str::to_owned) }
-    }
-
-    #[test]
-    fn the_least_busy_wins_then_the_least_recently_used() {
-        let cats = [cand("cat_a", 1, Some(5), None), cand("cat_b", 0, Some(9), None), cand("cat_c", 0, Some(7), None)];
-        assert_eq!(least_busy(&cats).unwrap().id, "cat_c", "fewest working, then least recently given a thread");
-        let fresh = [cand("cat_a", 0, Some(1), None), cand("cat_b", 0, None, None)];
-        assert_eq!(least_busy(&fresh).unwrap().id, "cat_b", "never used comes first");
-        let tie = [cand("cat_b", 0, None, None), cand("cat_a", 0, None, None)];
-        assert_eq!(least_busy(&tie).unwrap().id, "cat_a", "then by id: always the same answer");
-    }
-
-    #[test]
-    fn a_workspace_default_wins_over_the_least_busy() {
-        let cats = [cand("cat_a", 0, None, None), cand("cat_b", 3, Some(9), Some("ws_1")), cand("cat_c", 1, Some(2), Some("ws_1"))];
-        assert_eq!(choose(&cats, "ws_1").unwrap().id, "cat_c");
-        assert_eq!(choose(&cats, "default").unwrap().id, "cat_a");
-    }
 
     #[test]
     fn the_block_names_the_cat_and_carries_its_words_verbatim_and_nothing_else() {
