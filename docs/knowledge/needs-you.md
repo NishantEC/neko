@@ -51,6 +51,8 @@ The app holds no list of its own. It hides an item it answered at once, until th
 
 ## The list (⌘2)
 
+A plugin's card (`plugins.md`, `app-shell.md`) is led by a plug, in a group headed "Plugins", shows the exact command and what the plugin is handed, and has Approve, Decline and Open in Settings; its notification has no buttons.
+
 A row under Home in the sidebar, with the count. ⌘1 is Home. View has both, with their keys.
 
 - One column. A group per workspace, its name as a small heading. Each item: a mark, the task's title, how long it has waited,

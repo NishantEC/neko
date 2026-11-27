@@ -222,6 +222,15 @@ task or workspace or cat: its `task`, `workspace`, `cat` and `cat_name` are empt
 is since the manifest became what it is now. Approve and Decline are `approve_plugin` (naming the digest on the card) and
 `decline_plugin`.
 
+## In the app
+
+Settings ▸ Plugins (⌘, then the sixth page): the plugins with their state in words, Add MCP server… (a sheet that reads the paste live with
+`parse_mcp_json` and shows names only, never a value) and Add plugin folder…, and per plugin its switch, its declared settings as fields (a
+secret is a masked field and then "Set" with Change and Remove, never shown again), which cats may use it, Test with its result, and Remove
+(asks first). "Needs you" shows a plugin as a plug (no cat) in a group of its own, with the exact command, what it is handed and Approve and
+Decline, no default key and no button on its notification. A cat's page lists the plugins it may use, and a plugin's tool step reads
+"acme-docs · search". Details and keys: `app-shell.md`, `design.md`.
+
 ## Requests and events
 
 See `protocol.md`. Requests that may wait on something outside the daemon (`add_mcp_json`, `add_plugin_folder`, `set_plugin_setting`,
