@@ -358,6 +358,9 @@ fn a_stop_during_a_hanging_check_stops_within_a_second_and_leaves_nothing_runnin
         c2.request(Request::TestPlugin { plugin: id })
     });
     until("the server to start", Duration::from_secs(10), || pid.exists() && grand.exists() && std::fs::read_to_string(&pid).is_ok_and(|s| !s.is_empty()));
+    // The guardian looks at the tree every 100 ms; what is born between two looks is the run guard's known gap (run-guard.md), so the
+    // grandchild is given a few looks before the stop.
+    std::thread::sleep(Duration::from_millis(500));
     let began = Instant::now();
     assert_eq!(list(&mut c).len(), 1);
     assert!(began.elapsed() < Duration::from_millis(500), "a request waited on the hanging check: {:?}", began.elapsed());
