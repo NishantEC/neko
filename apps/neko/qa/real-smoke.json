@@ -43,13 +43,21 @@
     },
     {
       "do": "key",
-      "key": "cmd+n"
+      "key": "cmd+,"
     },
     {
       "do": "click",
       "on": {
-        "key": "cat-cat_*",
-        "label": "miso"
+        "name": "Cats",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-cat-cat_miso-open"
       }
     },
     {

@@ -34,11 +34,10 @@ fn tab_reaches_every_control_once_in_reading_order() {
             "briefing",
             "needs-you",
             "rounds",
+            "cat-cat_mochi",
             "ws-default",
             "ws-default-new",
             "add-workspace",
-            "cat-cat_miso",
-            "new-cat",
             "composer-input",
             "cat-picker",
             "workspace-picker",
@@ -46,7 +45,7 @@ fn tab_reaches_every_control_once_in_reading_order() {
             "cat-tile-cat_mochi",
             "cat-tile-cat_tofu"
         ],
-        "Home, then the Briefing, then Needs you, then Rounds; the sections and their rows are one stop; a section's New task is its own; the cats are one stop, then New cat; the words, then the cat picker and the workspace picker in the composer's footer (the empty composer's Send is off); then each cat's tile in the house"
+        "Home, then the Briefing, then Needs you, then Rounds; the Cattains (only the cats at work: here mochi) are one stop; the sections and their rows are one stop; a section's New task is its own; there is no New cat…; the words, then the cat picker and the workspace picker in the composer's footer (the empty composer's Send is off); then each cat's tile in the house"
     );
     // Round once, the focus is back on the first control; Shift+Tab walks back the same way, wrapping.
     assert_eq!(focus(&rt).as_deref(), Some("sidebar-hide"));
@@ -59,10 +58,10 @@ fn tab_reaches_every_control_once_in_reading_order() {
 #[test]
 fn the_arrows_move_in_the_list_and_return_opens() {
     let mut rt = runtime((1200.0, 800.0), false, scene("tasks-home"));
-    for _ in 0..7 {
+    for _ in 0..8 {
         tab(&mut rt, false);
     }
-    assert_eq!(focus(&rt).as_deref(), Some("ws-default"), "with no task open, the list's stop is the first section");
+    assert_eq!(focus(&rt).as_deref(), Some("ws-default"), "with no task open, the list's stop is the first section (after the Cattains' stop)");
     press(&mut rt, Key::Down, Mods::default());
     assert_eq!(focus(&rt).as_deref(), Some("task-task_00000000000000000000000004"), "Down goes from a section to its first row");
     press(&mut rt, Key::Down, Mods::default());
@@ -107,8 +106,8 @@ fn the_section_button_starts_a_task_there_and_command_n_follows_the_task_in_view
     press(&mut rt, Key::Command('n'), Mods { cmd: true, ..Mods::default() });
     assert_eq!((rt.state.open.as_ref(), rt.state.workspace.as_str()), (None, "ws_acme"), "⌘N: a new task in the workspace of the task in view");
     assert_eq!(focus(&rt).as_deref(), Some("composer-input"));
-    click(&mut rt, "ws-ws_web-new");
-    assert_eq!(rt.state.workspace, "ws_web", "a section's New task picks its workspace");
+    click(&mut rt, "ws-default-new");
+    assert_eq!(rt.state.workspace, neko_protocol::GENERAL, "a section's New task picks its workspace");
     click(&mut rt, "workspace-picker");
     assert!(rt.state.picker_open);
     settle(&mut rt);

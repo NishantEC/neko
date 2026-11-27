@@ -1,5 +1,6 @@
 //! The sidebar's one vertical rhythm (docs/knowledge/design.md, "Sidebar rhythm"), measured from the laid-out tree so it cannot drift:
-//! one row height, one row gap, a header that sits closer to its own rows than to the section above, one value between groups.
+//! one row height, one row gap, a header that sits closer to its own rows than to the section above, one value between groups (the
+//! nav, the Cattains when a cat is at work, the workspaces).
 
 mod support;
 use neko_app::sidebar::{GROUP_GAP_STEPS, ROW_GAP_STEPS, SECTION_GAP_STEPS, header, row_1, row_2};
@@ -74,7 +75,6 @@ fn check(scene: &str, dark: bool) {
         .collect();
     sections.sort_by(|a, b| a.1.total_cmp(&b.1));
     assert!(!sections.is_empty(), "{at}: the sidebar shows workspaces");
-    near(sections[0].1 - bottom(&r, "rounds"), group_gap, &format!("{at}: nav to the workspaces"));
     for (head, _, _) in &sections {
         near(height(&r, head), header(&t), &format!("{at}: header {head} height"));
     }
@@ -104,25 +104,34 @@ fn check(scene: &str, dark: bool) {
     near(top(&r, "add-workspace") - last.2, row_gap, &format!("{at}: Add workspace… under the last section"));
     near(height(&r, "add-workspace"), row_1(&t), &format!("{at}: Add workspace… height"));
 
-    // The Cats: a group gap under Add workspace…, a header a control high, rows a row gap apart, New cat… a row gap under them.
-    near(top(&r, "cats-head") - bottom(&r, "add-workspace"), group_gap, &format!("{at}: workspaces to Cats"));
-    near(height(&r, "cats-head"), header(&t), &format!("{at}: Cats header height"));
-    let mut cats: Vec<(String, f32, f32)> = r.iter().filter(|(k, _)| is_row(k, "cat-cat_")).map(|(k, v)| (k.clone(), v[1], v[1] + v[3])).collect();
-    cats.sort_by(|a, b| a.1.total_cmp(&b.1));
-    near(cats[0].1 - bottom(&r, "cats-head"), row_gap, &format!("{at}: the Cats header to its first row"));
-    for c in &cats {
-        near(c.2 - c.1, row_2(&t), &format!("{at}: cat row {} height", c.0));
+    // The Cattains (only when a cat is at work): a group gap under the nav and over the workspaces, a header a control high, then the
+    // cats and, under a cat with several tasks, its tasks: all rows of two lines, a row gap apart. Add workspace… is the last thing.
+    let cattains = r.contains_key("cattains-section");
+    if cattains {
+        near(top(&r, "cattains-head") - bottom(&r, "rounds"), group_gap, &format!("{at}: nav to the Cattains"));
+        near(sections[0].1 - bottom(&r, "cattains-section"), group_gap, &format!("{at}: Cattains to the workspaces"));
+        near(height(&r, "cattains-head"), header(&t), &format!("{at}: Cattains header height"));
+        let mut crew: Vec<(String, f32, f32)> = r.iter().filter(|(k, _)| is_row(k, "cat-cat_") || is_row(k, "cattain-task-task_")).map(|(k, v)| (k.clone(), v[1], v[1] + v[3])).collect();
+        crew.sort_by(|a, b| a.1.total_cmp(&b.1));
+        assert!(!crew.is_empty(), "{at}: the Cattains list cats");
+        near(crew[0].1 - bottom(&r, "cattains-head"), row_gap, &format!("{at}: the Cattains header to its first row"));
+        for c in &crew {
+            near(c.2 - c.1, row_2(&t), &format!("{at}: Cattains row {} height", c.0));
+        }
+        for w in crew.windows(2) {
+            near(w[1].1 - w[0].2, row_gap, &format!("{at}: gap between Cattains rows {} and {}", w[0].0, w[1].0));
+        }
+        near(top(&r, "cattains-head") + header(&t) + row_gap, crew[0].1, &format!("{at}: the section is its header and its rows"));
+    } else {
+        near(sections[0].1 - bottom(&r, "rounds"), group_gap, &format!("{at}: nav to the workspaces"));
+        assert!(!r.contains_key("cattains-head") && !r.contains_key("cattains"), "{at}: no cat at work, no section, no header");
     }
-    for w in cats.windows(2) {
-        near(w[1].1 - w[0].2, row_gap, &format!("{at}: gap between cat rows {} and {}", w[0].0, w[1].0));
-    }
-    near(top(&r, "new-cat") - cats.last().expect("a cat").2, row_gap, &format!("{at}: New cat… under the last cat"));
-    near(height(&r, "new-cat"), row_1(&t), &format!("{at}: New cat… height"));
+    assert!(!r.contains_key("new-cat") && !r.contains_key("cats-head"), "{at}: the sidebar has no New cat… and no Cats section");
 }
 
 #[test]
 fn the_sidebar_keeps_one_rhythm() {
-    for scene in ["sparse-home", "workspaces", "workspaces-folded", "home-house"] {
+    for scene in ["sparse-home", "sparse-working", "sparse-needs-you", "sparse-two-tasks", "workspaces", "workspaces-folded", "home-house"] {
         for dark in [false, true] {
             check(scene, dark);
         }

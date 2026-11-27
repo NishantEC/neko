@@ -86,10 +86,16 @@ fn a_cat_with_rules_does_a_task_and_its_edited_rules_reach_the_next_run() {
     });
     until(&mut rt, "the app to start the daemon, connect and list the starter cats", |rt| rt.state.daemon == Daemon::Connected && rt.state.cats.len() == 3 && rt.state.cats[0].id == "cat_miso");
     folder.pid = neko_protocol::client::find(&dir).ok().map(|(i, _)| i.pid as i32);
-    assert!(has_key(&rt, |k| k == "cat-cat_tofu"), "the sidebar lists the cats");
+    assert!(!has_key(&rt, |k| k == "cat-cat_tofu" || k == "cattains-section" || k == "new-cat"), "no cat is at work: the sidebar lists none and has no New cat…");
 
-    // New cat…: name it, and its page opens.
-    click(&mut rt, "new-cat");
+    // New cat… (Settings > Cats is where cats are made): name it, and its page opens.
+    rt.update(|s, _| {
+        s.settings_open = true;
+        s.settings_page = 3;
+    });
+    settle(&mut rt);
+    assert!(has_key(&rt, |k| k == "settings-cat-cat_tofu"), "Settings lists every cat");
+    click(&mut rt, "settings-new-cat");
     type_in(&mut rt, "cat-name-input", "pip");
     press(&mut rt, Key::Enter, Mods::default());
     until(&mut rt, "pip's page", |rt| rt.state.page_cat().is_some_and(|c| c.name == "pip"));

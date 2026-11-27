@@ -607,6 +607,13 @@ impl App {
         self.cat(&task.cat).map_or_else(|| "Neko".to_owned(), |c| c.name.clone())
     }
 
+    /// The tasks a cat has at work now (working, waiting on a request, or asked a question), newest first.
+    pub fn cat_work(&self, id: &str) -> Vec<&Task> {
+        let mut v: Vec<&Task> = self.tasks.iter().filter(|t| t.cat == id && (t.status.is_active() || t.status == neko_protocol::TaskStatus::Asked)).collect();
+        v.sort_by_key(|t| std::cmp::Reverse(t.created_ms));
+        v
+    }
+
     /// What a cat is doing now: something of it waits for the person, it works on some tasks, or it naps.
     pub fn cat_state(&self, id: &str) -> CatState {
         if self.visible_needs().iter().any(|i| i.cat == id) {

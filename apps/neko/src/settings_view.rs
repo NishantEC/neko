@@ -206,6 +206,8 @@ fn cats_page(s: &App, t: &Theme) -> El {
             .wrap()
             .min_w(0.0),
     );
+    // Cats are made here (the sidebar lists only the cats at work): name it, and its page opens.
+    part = part.child(row().child(Button::new("settings-new-cat", "New cat…").variant(ButtonVariant::Secondary).size(Size::Sm).icon(&crate::ui::icons::PLUS).on_press(|s: &mut App| s.start_new_cat()).build(t)));
     for c in &s.cats {
         let key = format!("settings-cat-{}", c.id);
         let n = s.tasks.iter().filter(|x| x.cat == c.id).count();

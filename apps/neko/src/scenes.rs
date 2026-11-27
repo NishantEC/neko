@@ -83,7 +83,6 @@ pub const SCENES: &[Scene] = &[
     ("settings-cats", settings_cats),
     ("home-house", home_house),
     ("home-many", home_many),
-    ("home-new-cat", home_new_cat),
     ("rounds-empty", rounds_empty),
     ("rounds", rounds),
     ("rounds-history", rounds_history),
@@ -101,8 +100,11 @@ pub const SCENES: &[Scene] = &[
     ("cat-page-rounds", cat_page_rounds),
     ("home-next-round", home_next_round),
     ("sparse-home", sparse_home),
+    ("sparse-working", sparse_working),
+    ("sparse-needs-you", sparse_needs_you),
+    ("sparse-two-tasks", sparse_two_tasks),
     ("sparse-task", sparse_task),
-    ("sparse-briefing", briefing::sparse_briefing),
+    ("briefing-sparse", briefing::sparse_briefing),
     ("briefing", briefing::briefing),
     ("briefing-finished", briefing::briefing_finished),
     ("briefing-empty", briefing::briefing_empty),
@@ -189,8 +191,11 @@ fn cat_page_editing(s: &mut App) {
     d.rules.focused = true;
 }
 
+/// Making a cat, from Settings > Cats (the only place): the dialog says which face it will get.
 fn cat_new(s: &mut App) {
     with_workspaces(s);
+    s.settings_open = true;
+    s.settings_page = 3;
     s.start_new_cat();
     if let Some((_, e)) = &mut s.naming {
         *e = TextEdit::new("pip");
@@ -483,6 +488,37 @@ fn sparse_home(s: &mut App) {
     sparse(s);
 }
 
+/// A task of the sparse house's workspace, in this state, given to this cat.
+fn sparse_task_of(s: &mut App, n: u32, words: &str, minutes: i64, cat: &str, status: TaskStatus) -> Task {
+    let mut t = task(n, words, minutes);
+    t.workspace = "ws_acme".into();
+    t.folder = Some("/Users/example/acme-api".into());
+    t.cat = cat.into();
+    t.status = status;
+    s.tasks.push(t.clone());
+    t
+}
+
+/// One cat at work: mochi on the release notes. The Cattains show it, the others nap and are not listed.
+fn sparse_working(s: &mut App) {
+    sparse(s);
+    sparse_task_of(s, 31, "Draft the release notes for 0.2", 12, "cat_mochi", TaskStatus::Working);
+}
+
+/// One cat waiting on the person: tofu asks to run a command.
+fn sparse_needs_you(s: &mut App) {
+    sparse(s);
+    let t = sparse_task_of(s, 32, "Find out why the nightly build is slow", 30, "cat_tofu", TaskStatus::NeedsYou);
+    s.needs = vec![permission_item(s, &t, "Run a command", "cargo test --package acme-api retry", false, 4)];
+}
+
+/// One cat with two tasks at work: its tasks nest under it.
+fn sparse_two_tasks(s: &mut App) {
+    sparse(s);
+    sparse_task_of(s, 33, "Tidy the Downloads folder", 25, "cat_miso", TaskStatus::Working);
+    sparse_task_of(s, 34, "Check every page for broken links", 9, "cat_miso", TaskStatus::Working);
+}
+
 /// The sparse house with its one task open: a short answer, no files changed, so no receipt.
 fn sparse_task(s: &mut App) {
     sparse(s);
@@ -604,12 +640,6 @@ fn home_many(s: &mut App) {
             t.status = TaskStatus::Working;
         }
     }
-}
-
-/// Making a cat: the dialog says which face it will get.
-fn home_new_cat(s: &mut App) {
-    s.tasks = sample_tasks();
-    s.naming = Some((None, TextEdit::default()));
 }
 
 /// A run's files for its receipt, each with its own counts (the run's totals: 42 added, 7 removed).

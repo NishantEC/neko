@@ -29,14 +29,18 @@
       "secs": 0.5
     },
     {
-      "do": "key",
-      "key": "cmd+n"
+      "do": "click",
+      "on": {
+        "name": "Cats",
+        "in": {
+          "key": "settings-page"
+        }
+      }
     },
     {
       "do": "click",
       "on": {
-        "key": "cat-cat_*",
-        "label": "miso"
+        "key": "settings-cat-cat_miso-open"
       }
     },
     {

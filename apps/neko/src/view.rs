@@ -399,7 +399,7 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
         let save = Button::new("cat-name-save", if renaming.is_some() { "Rename" } else { "Make cat" }).disabled(edit.text.trim().is_empty()).on_press(|s: &mut App| s.finish_naming()).build(t);
         let (title, words, back) = match &renaming {
             Some(n) => (format!("Rename {n}"), "Its tasks keep it; the new name shows everywhere, and reaches the agent from the next run.".to_owned(), "cat-rename".to_owned()),
-            None => ("New cat".to_owned(), "A name of up to 40 characters, not another cat's. You can give it a face, a purpose and standing rules on its page.".to_owned(), "new-cat".to_owned()),
+            None => ("New cat".to_owned(), "A name of up to 40 characters, not another cat's. You can give it a face, a purpose and standing rules on its page.".to_owned(), "settings-new-cat".to_owned()),
         };
         let mut dialog = Dialog::new("cat-name", title).description(words);
         if renaming.is_none() {

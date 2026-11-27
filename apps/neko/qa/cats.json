@@ -1,7 +1,7 @@
 {
   "name": "cats",
   "title": "Cats: who does a task, their rules, new and retired cats",
-  "about": "Three starter cats exist. A task for Any cat goes to one of them. Picking mochi makes the task mochi's everywhere. Rules written on mochi's page reach the agent once and verbatim on the next run, with a line saying they changed. New cat… makes a fourth. Retire asks first; a retired cat takes no new task and its tasks stay readable; Bring back from Settings.",
+  "about": "Three starter cats exist. A task for Any cat goes to one of them. Picking mochi makes the task mochi's everywhere. Rules written on mochi's page reach the agent once and verbatim on the next run, with a line saying they changed. The sidebar lists only the cats at work (Cattains); New cat… in Settings ▸ Cats makes a fourth. Retire asks first; a retired cat takes no new task and its tasks stay readable; Bring back from Settings.",
   "cli": [
     "fake"
   ],
@@ -12,31 +12,57 @@
   },
   "steps": [
     {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cats",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
       "do": "wait",
       "until": {
         "all": [
           {
             "see": {
-              "key": "cat-cat_*",
+              "key": "settings-cat-*",
               "label": "miso"
             }
           },
           {
             "see": {
-              "key": "cat-cat_*",
+              "key": "settings-cat-*",
               "label": "mochi"
             }
           },
           {
             "see": {
-              "key": "cat-cat_*",
+              "key": "settings-cat-*",
               "label": "tofu"
             }
           }
         ]
       },
       "within": 10,
-      "expect": "The three starter cats are in the sidebar"
+      "expect": "Settings > Cats lists the three starter cats"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "key": "cattains-section"
+        }
+      },
+      "expect": "No cat is at work: the sidebar has no Cattains section"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
     },
     {
       "do": "click",
@@ -279,9 +305,22 @@
       "expect": "The CLI received the rules block exactly once, verbatim"
     },
     {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
       "do": "click",
       "on": {
-        "key": "new-cat"
+        "name": "Cats",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-new-cat"
       }
     },
     {
@@ -306,18 +345,40 @@
       "do": "wait",
       "until": {
         "see": {
+          "key": "cat-title",
+          "text": "nori"
+        }
+      },
+      "within": 5,
+      "expect": "New cat… in Settings makes a fourth cat, nori, and its page opens"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
           "key": "cat-cat_*",
           "label": "nori"
         }
       },
-      "within": 5,
-      "expect": "New cat… makes a fourth cat, nori"
+      "expect": "nori is napping: not in the Cattains"
+    },
+    {
+      "do": "key",
+      "key": "cmd+,"
     },
     {
       "do": "click",
       "on": {
-        "key": "cat-cat_*",
-        "label": "mochi"
+        "name": "Cats",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-cat-cat_mochi-open"
       }
     },
     {

@@ -1,13 +1,13 @@
-//! The sidebar (docs/knowledge/app-shell.md, docs/knowledge/design.md): an inset panel on the window's warm ground. New task, Home and
-//! Needs you; each workspace as a section of its tasks, each task a two-line row led by its cat's portrait in its state; then the
-//! house's cats, each with what it is doing; New cat….
+//! The sidebar (docs/knowledge/app-shell.md, docs/knowledge/design.md): an inset panel on the window's warm ground. New task, Home,
+//! Briefing, Needs you and Rounds; then the Cattains (the cats at work now, each with what it is doing; absent when none is); then
+//! each workspace as a section of its tasks, each task a two-line row led by its cat's portrait in its state; Add workspace….
 //!
 //! Every section and row is one list for the keys: Up and Down move through sections and rows, a typed name goes to it, Tab stops
 //! once (on the open task, else the first section). A section's own buttons are Tab stops of their own.
 
 use std::rc::Rc;
 
-use neko_protocol::{Task, TaskStatus, Workspace};
+use neko_protocol::{Need, NeedsItem, Task, TaskStatus, Workspace};
 use rune::{Color, El, Key, KeyEvent, Shadow, col, el, row, text};
 use rune_ui_style::{ButtonVariant, tabular, weight};
 
@@ -112,7 +112,13 @@ pub fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     let add = SidebarItem::<App>::new("add-workspace", "Add workspace…").icon(&icons::FOLDER_PLUS).button(true).build(t).on_press_tx(move |s: &mut App, tx: &mut rune::Tx| add(s, tx));
     // The workspaces and Add workspace… are one group: the button sits a row gap under the list, as a row sits under a row.
     let workspaces = col().key("workspace-group").w_full().pt(t.space.at(GROUP_GAP_STEPS)).gap(row_gap).child(sections).child(add);
-    let body = col().w_full().px(t.space.at(2.0)).child(nav).child(workspaces).child(cats_section(s, t));
+    // The Cattains (the cats at work) sit under the nav, above the workspaces, as Capy puts its Captains; with none at work there is
+    // no section at all.
+    let mut body = col().w_full().px(t.space.at(2.0)).child(nav);
+    if let Some(c) = cattains(s, t) {
+        body = body.child(c);
+    }
+    let body = body.child(workspaces);
     let list = col().key("sidebar-scroll").w_full().grow(1.0).min_h(0.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(body.pb(t.space.at(4.0)));
     let mut column = col().key("sidebar").role("navigation").label("Sidebar").w_full().h_full().child(band).child(list);
     // No money at the foot: what runs cost is in the task's context ring, for whoever opens it.
@@ -137,7 +143,7 @@ fn under(t: &Theme, selected: bool) -> Color {
 /// Kept here, not a `SidebarItem` with `.image` and `.subtitle`: that second line is plain words, and this one is parts in their own
 /// inks (the state word in its colour, the round's mark before it). Upstream ask: a second line given as an element.
 #[allow(clippy::too_many_arguments)]
-fn face_row(t: &Theme, key: String, title: &str, description: String, face: &str, st: Option<TaskStatus>, meta: El, i: usize, n: usize, selected: bool) -> El {
+fn face_row(t: &Theme, key: String, title: &str, description: String, face: &str, st: Option<TaskStatus>, meta: El, i: usize, n: usize, selected: bool, indent: f32) -> El {
     let mut r = row()
         .key(key.clone())
         .role("option")
@@ -148,7 +154,6 @@ fn face_row(t: &Theme, key: String, title: &str, description: String, face: &str
         .position_in_set(i + 1, n)
         .focus_selected(selected)
         .press_on_return()
-        .w_full()
         .h(row_2(t))
         .pl(t.space.at(1.0))
         .pr(t.space.at(2.0))
@@ -156,6 +161,8 @@ fn face_row(t: &Theme, key: String, title: &str, description: String, face: &str
         .center_y()
         .radius(t.radius.lg)
         .round_as(t);
+    // A nested row (a cat's task under the cat) steps in: the same row, narrower, so its pebble and its hit area start further in.
+    r = if indent > 0.0 { r.ml(indent).w(SIDEBAR - 2.0 * t.space.at(2.0) - indent) } else { r.w_full() };
     // The row material gives hover and the focus ring in both states; the open row is raised under it.
     r = paint_state(if selected { raised(t, r) } else { r }, &t.mat.row, States::default());
     let words = col()
@@ -182,6 +189,13 @@ fn meta_line(t: &Theme, parts: Vec<(String, Color, bool)>) -> El {
 
 /// A task's row: its cat's portrait in its state, the title, and "miso · working · 12 min".
 pub fn task_row(s: &App, t: &Theme, task: &Task, i: usize, n: usize, open: bool) -> El {
+    task_row_in(s, t, task, i, n, open, "task", 0.0)
+}
+
+/// A task's row under `prefix` (its key is `<prefix>-<id>`: a task shows in its workspace and, while its cat has several at work,
+/// under the cat), stepped in by `indent`.
+#[allow(clippy::too_many_arguments)]
+fn task_row_in(s: &App, t: &Theme, task: &Task, i: usize, n: usize, open: bool, prefix: &str, indent: f32) -> El {
     let (_, word) = status_mark(task.status);
     let name = s.cat_name(task);
     let ink = state_ink(t, task.status);
@@ -196,33 +210,59 @@ pub fn task_row(s: &App, t: &Theme, task: &Task, i: usize, n: usize, open: bool)
     } else {
         (meta, "")
     };
-    face_row(t, format!("task-{}", task.id.0), &task.title, format!("{name}, {}{from}", word.to_lowercase()), s.cat_face(&task.cat), Some(task.status), meta, i, n, open).on_press(move |s: &mut App| s.open_task_id(&tid))
+    face_row(t, format!("{prefix}-{}", task.id.0), &task.title, format!("{name}, {}{from}", word.to_lowercase()), s.cat_face(&task.cat), Some(task.status), meta, i, n, open, indent).on_press(move |s: &mut App| s.open_task_id(&tid))
 }
 
-/// The house's cats: each active cat with its portrait in its state and what it is doing (napping, working on 2, needs you); its
-/// page on a press. Then New cat….
-fn cats_section(s: &App, t: &Theme) -> El {
-    let head = row().key("cats-head").w_full().h(header(t)).pl(t.metrics.gap).center_y().child(text("Cats").key("cats-heading").role("heading").level(2).font(weight(t.ty.sm, t.ty.semibold)).color(t.ink_muted()));
-    let cats = s.active_cats();
-    let n = cats.len();
-    let mut list = col().key("cats").role("listbox").label("Cats").w_full().gap(t.space.at(ROW_GAP_STEPS)).focus_group();
-    for (i, c) in cats.into_iter().enumerate() {
-        let id = c.id.clone();
-        let state = s.cat_state(&c.id);
-        let (st, ink) = match state {
-            CatState::Napping => (None, t.ink_faint()),
-            CatState::Working(_) => (Some(TaskStatus::Working), t.c.accent.fg),
-            CatState::NeedsYou => (Some(TaskStatus::NeedsYou), t.c.warning.fg),
-        };
-        let mut parts = vec![(state.words(), ink, st.is_some())];
-        if let Some(p) = c.purpose.as_ref().filter(|p| !p.is_empty() && st.is_none()) {
-            parts = vec![(p.clone(), t.ink_faint(), false)];
-        }
-        let selected = s.open_cat.as_deref() == Some(c.id.as_str());
-        list = list.child(face_row(t, format!("cat-{}", c.id), &c.name, state.words(), &c.face, st, meta_line(t, parts), i, n, selected).on_press(move |s: &mut App| s.open_cat_page(&id)));
+/// What a cat's request says, short: "Run a command", "a question", "could not go on".
+fn need_words(n: &Need) -> String {
+    match n {
+        Need::Permission { permission } => permission.title.clone(),
+        Need::Question { .. } => "a question".to_owned(),
+        Need::Failure { .. } => "could not go on".to_owned(),
+        Need::Plugin { .. } => "a plugin".to_owned(),
     }
-    let new = SidebarItem::new("new-cat", "New cat…").icon(&crate::ui::icons::PLUS).button(true).on_press(|s: &mut App| s.start_new_cat()).build(t);
-    col().key("cats-section").role("group").label("Cats").w_full().gap(t.space.at(ROW_GAP_STEPS)).pt(t.space.at(GROUP_GAP_STEPS)).child(head).child(list).child(new)
+}
+
+/// The Cattains: only the cats at work now (a task working, a request or a question waiting for the person). Each is a two-line
+/// row, its portrait in its state, its name and one line of what it is doing: the working task's title, "needs you: Run a
+/// command", or "working on 2" with its tasks nested under it. A napping cat is not here; cats are made and edited in
+/// Settings > Cats. With no cat at work the section is absent.
+fn cattains(s: &App, t: &Theme) -> Option<El> {
+    let at_work: Vec<&neko_protocol::Cat> = s.active_cats().into_iter().filter(|c| s.cat_state(&c.id) != CatState::Napping).collect();
+    if at_work.is_empty() {
+        return None;
+    }
+    let head = row().key("cattains-head").w_full().h(header(t)).pl(t.metrics.gap).center_y().child(text("Cattains").key("cattains-heading").role("heading").level(2).font(weight(t.ty.sm, t.ty.semibold)).color(t.ink_muted()));
+    let mut list = col().key("cattains").role("list").label("Cattains").w_full().gap(t.space.at(ROW_GAP_STEPS)).focus_group();
+    for c in at_work {
+        let tasks = s.cat_work(&c.id);
+        let needs: Vec<&NeedsItem> = s.visible_needs().into_iter().filter(|i| i.cat == c.id).collect();
+        let (st, ink, said, line) = if let Some(first) = needs.first() {
+            let line = if tasks.len() >= 2 { format!("needs you · {} tasks", tasks.len()) } else { format!("needs you: {}", need_words(&first.need)) };
+            (TaskStatus::NeedsYou, t.c.warning.fg, line.clone(), line)
+        } else if tasks.len() >= 2 {
+            let line = format!("working on {}", tasks.len());
+            (TaskStatus::Working, t.c.accent.fg, line.clone(), line)
+        } else {
+            let title = tasks.first().map_or_else(String::new, |x| x.title.clone());
+            (TaskStatus::Working, t.ink_muted(), format!("working on {title}"), title)
+        };
+        let id = c.id.clone();
+        let open = s.open_cat.as_deref() == Some(c.id.as_str());
+        let n = 1 + if tasks.len() >= 2 { tasks.len() } else { 0 };
+        let strong = ink != t.ink_muted();
+        let meta = meta_line(t, vec![(line, ink, strong)]);
+        // One list per cat: the cat, then (when it has several) its tasks as options of the same list, in the order they are drawn.
+        let mut crew = col().key(format!("cattain-{}", c.id)).role("listbox").label(c.name.clone()).w_full().gap(t.space.at(ROW_GAP_STEPS));
+        crew = crew.child(face_row(t, format!("cat-{}", c.id), &c.name, said, &c.face, Some(st), meta, 0, n, open, 0.0).on_press(move |s: &mut App| s.open_cat_page(&id)));
+        if tasks.len() >= 2 {
+            for (i, task) in tasks.iter().enumerate() {
+                crew = crew.child(task_row_in(s, t, task, i + 1, n, s.open.as_ref() == Some(&task.id), "cattain-task", t.space.at(3.0)));
+            }
+        }
+        list = list.child(crew);
+    }
+    Some(col().key("cattains-section").role("group").label("Cattains").w_full().gap(t.space.at(ROW_GAP_STEPS)).pt(t.space.at(GROUP_GAP_STEPS)).child(head).child(list))
 }
 
 /// What a section's header says about its workspace, after its name.
