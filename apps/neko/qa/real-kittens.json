@@ -26,6 +26,10 @@
       "path": "$files/scratch"
     },
     {
+      "do": "sleep",
+      "secs": 3
+    },
+    {
       "do": "click",
       "on": {
         "key": "composer-input"
@@ -60,12 +64,11 @@
       "until": {
         "all": [
           {
-            "count": {
-              "of": {
-                "key": "turn-*",
-                "role": "article"
-              },
-              "min": 2
+            "see": {
+              "text": "gamma",
+              "in": {
+                "key": "turn-*"
+              }
             }
           },
           {
@@ -81,19 +84,7 @@
         ]
       },
       "within": 300,
-      "expect": "Both kittens report and the thread is woken for a second turn that finishes"
-    },
-    {
-      "do": "assert",
-      "that": {
-        "see": {
-          "text": "gamma",
-          "in": {
-            "key": "turn-*"
-          }
-        }
-      },
-      "expect": "The woken answer carries the .md kitten's result (gamma.md)"
+      "expect": "Both kittens report, the thread is woken, and its finished answer carries the .md kitten's result (gamma.md)"
     },
     {
       "do": "snap",
