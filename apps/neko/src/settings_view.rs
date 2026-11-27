@@ -74,7 +74,7 @@ fn agent_card(t: &Theme, r: &RuntimeInfo) -> El {
 }
 
 /// Settings' pages, in the order the switch shows them.
-pub const PAGES: [&str; 6] = ["Agents", "Workspaces", "Notifications", "Cats", "Briefing", "Plugins"];
+pub const PAGES: [&str; 6] = ["Agents", "Projects", "Notifications", "Cats", "Briefing", "Plugins"];
 
 pub fn settings_view(s: &App, t: &Theme, layer: &mut Vec<rune::El>) -> El {
     let mut page = col().key("settings").w_full().max_w(COLUMN).gap(t.space.at(6.0));
@@ -122,8 +122,8 @@ pub fn settings_view(s: &App, t: &Theme, layer: &mut Vec<rune::El>) -> El {
             let options: Vec<(&str, Option<&str>)> = names.iter().map(|n| (n.as_str(), None)).collect();
             let chosen = usable.iter().position(|r| r.id == settings.runtime);
             let ids: Vec<String> = usable.iter().map(|r| r.id.clone()).collect();
-            agents = agents.child(text("New tasks use").role("heading").level(3).font(weight(t.ty.base, t.ty.medium)).color(t.ink()).pt(t.space.at(2.0))).child(
-                RadioGroup::<App>::new("settings-runtime", "New tasks use", &options, chosen)
+            agents = agents.child(text("New threads use").role("heading").level(3).font(weight(t.ty.base, t.ty.medium)).color(t.ink()).pt(t.space.at(2.0))).child(
+                RadioGroup::<App>::new("settings-runtime", "New threads use", &options, chosen)
                     .on_change(move |s: &mut App, i| {
                         if let Some(id) = ids.get(i) {
                             s.set_runtime(id);
@@ -135,11 +135,11 @@ pub fn settings_view(s: &App, t: &Theme, layer: &mut Vec<rune::El>) -> El {
             let modes = [
                 (
                     "Follow Claude Code's own rules",
-                    Some("Neko adds nothing. What your Claude Code settings allow runs without asking, as in Terminal. Anything Claude Code would ask about is asked in the task."),
+                    Some("Neko adds nothing. What your Claude Code settings allow runs without asking, as in Terminal. Anything Claude Code would ask about is asked in the thread."),
                 ),
                 (
                     "Ask before risky steps",
-                    Some("Neko asks before every command, any change outside the task's folder and the internet, whatever your Claude Code settings allow. Reading, and editing in the task's own folder, go ahead."),
+                    Some("Neko asks before every command, any change outside the thread's folder and the internet, whatever your Claude Code settings allow. Reading, and editing in the thread's own folder, go ahead."),
                 ),
                 ("Full access", Some("Everything goes ahead without asking.")),
             ];
@@ -200,7 +200,7 @@ pub fn settings_view(s: &App, t: &Theme, layer: &mut Vec<rune::El>) -> El {
 /// Settings ▸ Cats: every cat, the ones at work with Open, the retired ones with Bring back (docs/knowledge/cats.md).
 fn cats_page(s: &App, t: &Theme) -> El {
     let mut part = col().key("settings-cats").w_full().gap(t.space.at(3.0)).child(text("Cats").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())).child(
-        text("The cats who do your tasks, each with its own standing rules. A retired cat keeps its tasks readable and takes no new ones until you bring it back. At most 16 are at work at once.")
+        text("The cats who do your threads, each with its own standing rules. A retired cat keeps its threads readable and takes no new ones until you bring it back. At most 16 are at work at once.")
             .font(t.ty.base)
             .color(t.ink_muted())
             .wrap()
@@ -212,9 +212,9 @@ fn cats_page(s: &App, t: &Theme) -> El {
         let key = format!("settings-cat-{}", c.id);
         let n = s.tasks.iter().filter(|x| x.cat == c.id).count();
         let count = match n {
-            0 => "No tasks yet".to_owned(),
-            1 => "1 task".to_owned(),
-            n => format!("{n} tasks"),
+            0 => "No threads yet".to_owned(),
+            1 => "1 thread".to_owned(),
+            n => format!("{n} threads"),
         };
         let state = s.cat_state(&c.id).words();
         let mut head = row().w_full().gap(t.space.at(2.0)).center_y().child(text(c.name.clone()).role("heading").level(3).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0).shrink());
@@ -246,8 +246,8 @@ fn capital(s: &str) -> String {
 }
 
 fn workspaces_page(s: &App, t: &Theme) -> El {
-    let mut part = col().key("settings-workspaces").w_full().gap(t.space.at(3.0)).child(text("Workspaces").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())).child(
-        text("Folders you added. A new task works in the one you choose; in General each task gets a scratch folder of its own. Removing a workspace takes it off the list only: nothing on disk is touched.")
+    let mut part = col().key("settings-workspaces").w_full().gap(t.space.at(3.0)).child(text("Projects").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())).child(
+        text("Folders you added. A new thread works in the one you choose; in No project each thread gets a scratch folder of its own. Removing a project takes it off the list only: nothing on disk is touched.")
             .font(t.ty.base)
             .color(t.ink_muted())
             .wrap()
@@ -257,13 +257,13 @@ fn workspaces_page(s: &App, t: &Theme) -> El {
         let key = format!("settings-ws-{}", w.id);
         let n = s.tasks_in(&w.id).len();
         let count = match n {
-            0 => "No tasks yet".to_owned(),
-            1 => "1 task".to_owned(),
-            n => format!("{n} tasks"),
+            0 => "No threads yet".to_owned(),
+            1 => "1 thread".to_owned(),
+            n => format!("{n} threads"),
         };
         let folder = match &w.folder {
             Some(f) => crate::task_view::show_path(f, "", s.home.as_deref()),
-            None => "No folder: each task gets a scratch folder of its own".to_owned(),
+            None => "No folder: each thread gets a scratch folder of its own".to_owned(),
         };
         let mut head = row().w_full().gap(t.space.at(2.0)).center_y().child(text(w.name.clone()).role("heading").level(3).font(weight(t.ty.md, t.ty.medium)).color(t.ink()).truncate().min_w(0.0).shrink());
         if w.missing {
@@ -297,12 +297,12 @@ fn workspaces_page(s: &App, t: &Theme) -> El {
         part = part.child(card);
     }
     part = part.child(undo_storage(s, t));
-    let add = Button::<App>::new("settings-add-workspace", "Add workspace…").variant(ButtonVariant::Secondary).size(Size::Sm).build(t).on_press_tx(|s: &mut App, tx: &mut rune::Tx| crate::pick_folder(s, crate::state::Pick::Add { select: false }, tx));
+    let add = Button::<App>::new("settings-add-workspace", "Add project…").variant(ButtonVariant::Secondary).size(Size::Sm).build(t).on_press_tx(|s: &mut App, tx: &mut rune::Tx| crate::pick_folder(s, crate::state::Pick::Add { select: false }, tx));
     part = part.child(row().child(add));
     let removed: Vec<&str> = s.workspaces.iter().filter(|w| !w.is_active()).map(|w| w.name.as_str()).collect();
     if !removed.is_empty() {
         part = part.child(
-            text(format!("Removed: {}. Their tasks stay readable in the sidebar. Add a folder again to bring its workspace back.", removed.join(", ")))
+            text(format!("Removed: {}. Their threads stay readable in the sidebar. Add a folder again to bring its project back.", removed.join(", ")))
                 .key("settings-ws-removed")
                 .font(t.ty.sm)
                 .color(t.ink_faint())
@@ -319,7 +319,7 @@ fn undo_storage(s: &App, t: &Theme) -> El {
         None => "Storage used by undo: reading…".to_owned(),
         Some(u) if u.checkpoints == 0 => "Storage used by undo: none. No run has a checkpoint now.".to_owned(),
         Some(u) => format!(
-            "Storage used by undo: {} in Neko's folder, {} checkpoint{} in {} task{}. Checkpoints of a git repository are kept in the repository itself.",
+            "Storage used by undo: {} in Neko's folder, {} checkpoint{} in {} thread{}. Checkpoints of a git repository are kept in the repository itself.",
             crate::review_view::size_words(u.bytes),
             u.checkpoints,
             if u.checkpoints == 1 { "" } else { "s" },
@@ -390,12 +390,12 @@ fn notifications_page(s: &App, t: &Theme) -> El {
         .label("Notify me")
         .w_full()
         .gap(t.space.at(1.0))
-        .child(Switch::<App>::new("notify-needs", "When a task needs you", sw.needs).help("A request to answer, a question, or a failure you can fix.").on_toggle(|s: &mut App| {
+        .child(Switch::<App>::new("notify-needs", "When a thread needs you", sw.needs).help("A request to answer, a question, or a failure you can fix.").on_toggle(|s: &mut App| {
             let mut w = s.notifier.switches;
             w.needs = !w.needs;
             s.set_switches(w);
         }).build(t))
-        .child(Switch::<App>::new("notify-finished", "When a task finishes", sw.finished).help("“Done”, with the first line of the answer.").on_toggle(|s: &mut App| {
+        .child(Switch::<App>::new("notify-finished", "When a thread finishes", sw.finished).help("“Done”, with the first line of the answer.").on_toggle(|s: &mut App| {
             let mut w = s.notifier.switches;
             w.finished = !w.finished;
             s.set_switches(w);
@@ -407,7 +407,7 @@ fn notifications_page(s: &App, t: &Theme) -> El {
         }).build(t));
     part = part.child(switches);
     part = part.child(
-        text("Neko tells you only when it is not in front, or you are in another task. It never plays a sound of its own, and Focus decides what shows. The morning briefing has its own page, Briefing.")
+        text("Neko tells you only when it is not in front, or you are in another thread. It never plays a sound of its own, and Focus decides what shows. The morning briefing has its own page, Briefing.")
             .key("settings-notify-rules")
             .font(t.ty.sm)
             .color(t.ink_faint())

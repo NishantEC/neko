@@ -105,7 +105,7 @@ fn review_undo_redo_and_the_follow_up_tells_the_agent() {
     folder.pid = neko_protocol::client::find(&dir.join("data")).ok().map(|(i, _)| i.pid as i32);
     let n = notes.to_string_lossy().into_owned();
     rt.update(move |s, _| s.add_workspace(n, true));
-    until(&mut rt, "the workspace to be chosen", |rt| rt.state.chosen().is_some_and(|w| w.folder.is_some()));
+    until(&mut rt, "the project to be chosen", |rt| rt.state.chosen().is_some_and(|w| w.folder.is_some()));
 
     click(&mut rt, "composer-input");
     press(&mut rt, Key::Text("Write three files [fake:many:3]".into()), Mods::default());

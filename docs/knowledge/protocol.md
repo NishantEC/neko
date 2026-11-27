@@ -1,6 +1,6 @@
 # The protocol (S1, 2026-11-26)
 
-`crates/neko-protocol` is the contract between a screen and the daemon. Version 11 (plugins).
+`crates/neko-protocol` is the contract between a screen and the daemon. Version 12 (threads). The words the app shows say thread and project; the field and message names below keep `task` and `workspace` (`threads.md`).
 
 ## Shape
 
@@ -31,6 +31,7 @@
 | `follow_up {task, words, answering?}` | `ok`; a running agent gets the words, else a new run resumes the conversation. `busy` while it starts. With `answering` (a run): only while the task is still `asked` on that run, else `already_answered` |
 | `list_needs` | `needs {items}`: what waits for the person, oldest first, grouped by workspace (`needs-you.md`) |
 | `stop_task {task}` | `ok`, also when nothing runs |
+| `mark_read {task}`, `mark_unread {task}` | `task {task}` (whole, with its new `last_read_ms`), or `not_found`. Nothing changes, and nothing is pushed, when the thread is already so |
 | `answer_permission {permission, decision}` | `ok`, or `already_answered` (answered or expired) |
 | `watch_task {task?}` | `ok`; this connection now gets that task's streaming words |
 | `list_runtimes` | `runtimes {runtimes, settings}` |
@@ -85,7 +86,7 @@ keeps everything by id, so nothing doubles.
   answers it). Version 5 added workspaces: a task's `workspace` names one, `create_task` takes a workspace instead of a folder. Version 6 added Needs you: `list_needs`, `needs_changed`, a notice's `failure`
   kind, and `answering` on a follow-up. Version 7 added undo: a run's `undo` (state, why not, its own changes, committed), the
   diff requests, undo, redo, the storage figure and clearing it. Each change to a run's undo is a `run_changed` with the run whole.
-  `neko_protocol::undo::offers` says which run may be undone or redone, for both ends. Version 9 added rounds: a task's `round` (`{id, name, due_ms}`), the round requests, replies and events, and `RoundStatus`/`RunKind`/`RunEnd` (`rounds.md`; the arithmetic is `neko_protocol::schedule`, shared with the app). Version 11 added plugins: the plugin requests, replies and events above, `Plugin` and what is in it (`protocol/src/plugins.rs`: the manifest, `Approval`, `Access`, `FieldValue`, `Check`, `PluginAsk`), `Need::Plugin` (a "Needs you" item that belongs to no task: its `task`, `workspace`, `cat` and `cat_name` are empty), `ErrorCode::invalid_plugin`, and `neko_protocol::plugins::parse_mcp_json`, which a screen runs itself to show what a paste will add. Version 10 added the Briefing: `get_briefing`, `mark_briefing_read`, the settings requests, the `Briefing` shapes (`protocol/src/briefing.rs`) and the three events; `undo::Offer` and `Action` are now serialisable, since a finished task carries what its run's card offers. Version 8 added cats: a task's `cat`, a run's
+  `neko_protocol::undo::offers` says which run may be undone or redone, for both ends. Version 9 added rounds: a task's `round` (`{id, name, due_ms}`), the round requests, replies and events, and `RoundStatus`/`RunKind`/`RunEnd` (`rounds.md`; the arithmetic is `neko_protocol::schedule`, shared with the app). Version 11 added plugins: the plugin requests, replies and events above, `Plugin` and what is in it (`protocol/src/plugins.rs`: the manifest, `Approval`, `Access`, `FieldValue`, `Check`, `PluginAsk`), `Need::Plugin` (a "Needs you" item that belongs to no task: its `task`, `workspace`, `cat` and `cat_name` are empty), `ErrorCode::invalid_plugin`, and `neko_protocol::plugins::parse_mcp_json`, which a screen runs itself to show what a paste will add. Version 12 added threads: a task's `last_read_ms`, `activity_ms`, `latest_line` (the last line of the agent's newest words, at most 120 characters), `failure_line`, the derived `thread_status` (`working`, `failed`, `idle`) and the `needs_you` flag, and `mark_read` / `mark_unread`; a `task_updated` is pushed when the latest line changes. All are optional on the wire (`serde(default)`), so a screen that does not know them still reads a task (`threads.md`). Version 10 added the Briefing: `get_briefing`, `mark_briefing_read`, the settings requests, the `Briefing` shapes (`protocol/src/briefing.rs`) and the three events; `undo::Offer` and `Action` are now serialisable, since a finished task carries what its run's card offers. Version 8 added cats: a task's `cat`, a run's
   `cat` and `rules_hash`, the `rules_changed` part, a Needs-you item's `cat` and `cat_name`, the cat requests and events, and
   `invalid_name` (`cats.md`).
 - `DaemonInfo` (`daemon.json`) is part of the contract: `{pid, port, protocol, version}`.

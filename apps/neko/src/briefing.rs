@@ -72,7 +72,7 @@ pub fn dollars(usd: f64) -> String {
 /// The totals in words, without the figures: "5 tasks finished", "14 files changed".
 pub fn totals_words(b: &Briefing) -> (String, Option<String>, Option<String>) {
     let t = &b.totals;
-    let tasks = format!("{} task{} finished", t.finished, if t.finished == 1 { "" } else { "s" });
+    let tasks = format!("{} thread{} finished", t.finished, if t.finished == 1 { "" } else { "s" });
     let changed = (t.files > 0).then(|| format!("{} changed", files(t.files)));
     let cost = t.cost_usd.map(|c| format!("{} as Claude Code reported it", dollars(c)));
     (tasks, changed, cost)

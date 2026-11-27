@@ -32,6 +32,20 @@ daemon started with that variable; a release daemon refuses it (`rounds.md`).
 
 `briefing` makes a round (every day, a minute from now, so the daemon is started with `TZ=UTC` and the step's words say `{{utc+1}}`, the UTC time N minutes from now), a task that finishes and one that waits on a request (ask mode), waits for the round to start by itself, opens the Briefing (⌘4) and checks its sections and the first sentence of each answer, answers the request from the page, marks it read with ⌘↩, checks "You're caught up" and that Home's line is gone, then finishes a new task and checks the line comes back. `briefing-morning` sets the morning time three hours ahead in Settings ▸ Briefing, moves the scheduler's clock past it (`clock`) and checks one notification, "Your briefing: 1 finished, 1 needs you", in the notification log, none more when the clock moves on the same day, and the same counts on the page. Headless runs have no system to post to: the driver gives the app a poster that writes to the run's `notify.jsonl` in the form the window runs' log has, so `notified`, `withdrawn` and `posts` (`{max, titled}`: only the posts whose title starts so) are checked the same way in both.
 
+## The sidebar scenarios
+
+Headless only (they use the driver's `order` check: the named elements are on screen from top to bottom in that order).
+
+`sidebar-threads` adds two projects, makes a thread that ends with a question and a newer one in acme-api and a slow one in mochi-notes,
+opens the first while the slow one streams, and checks the group order (acme-api, mochi-notes, No project last), that the thread that
+needs the person sits above the newer one, that the streaming thread is unread (its row says so) and working, and that opening it reads
+it and it stays read while it streams. `sidebar-status` switches Settings to ask mode and makes, in acme-api, a finished thread, a thread
+that crashes (marked unread from its menu while another thread is open, so it shows as failed), one that waits on a request and one that
+works; it checks each row's words and second line, that a thread that finishes while another works does not move the working row even
+after the working thread streams on, and that opening the failed thread clears Failed. `sidebar-group-none` checks View ▸ Group by None
+(one list, newest activity first, each row naming its project, no headings), that the choice survives a quit and relaunch, and that
+Project brings the groups back.
+
 ## The plugin scenarios
 
 Both start the daemon (a debug build) with `NEKO_FAKE_RECORD` (what the fake CLI was given, including each `--mcp-config` file's content,
@@ -105,7 +119,7 @@ fake's Claude Code settings; daemon environment) and `steps`. A step is an actio
 focus ring at every stop), `allow-until`, `quit-app`, `start-app`, `stop-daemon`, `start-daemon`, `remove`, `git-record`, `run` (a command in the run's folder: an edit by hand), `stale-answer`, `clock`) or a
 check (`wait` with a deadline, `assert`). A step with `expect` is an expectation in the report; `soft` records a failure and goes
 on; `window: false` leaves a step to headless. Selectors match an element's `key` (with `*`), `text`, `label`, `label_is`, `name`
-(text, label or description), `role`, `focused`, `in` (an ancestor). Checks: `see`, `gone`, `count`, `focus` (with a drawn ring
+(text, label or description), `role`, `focused`, `in` (an ancestor). Checks: `see`, `gone`, `count`, `order`, `focus` (with a drawn ring
 unless `ring: false`), `title`, `daemon`, `file`, `no_file`, `sh`, `git_same`, `all`, `any`.
 
 ## House (the app's design)

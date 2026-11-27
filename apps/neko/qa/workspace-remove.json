@@ -1,7 +1,7 @@
 {
   "name": "workspace-remove",
-  "title": "Removing a workspace",
-  "about": "Remove… asks first and says nothing on disk is touched. Afterwards the section reads \"Earlier, removed workspace\", the folder is untouched, its task is readable, and no new task can be made in it. Adding the folder again brings it back.",
+  "title": "Removing a project",
+  "about": "Remove… asks first and says nothing on disk is touched. Afterwards the section reads \"Earlier, removed project\", the folder is untouched, its thread is readable, and no new thread can be made in it. Adding the folder again brings it back.",
   "cli": [
     "fake"
   ],
@@ -27,13 +27,13 @@
           "label_is": "mochi-site"
         }
       },
-      "expect": "The workspace is a section"
+      "expect": "The project is a section"
     },
     {
       "do": "click",
       "on": {
         "role": "button",
-        "label_is": "New task in mochi-site"
+        "label_is": "New thread in mochi-site"
       }
     },
     {
@@ -61,7 +61,7 @@
           }
         ]
       },
-      "expect": "A task runs in it"
+      "expect": "A thread runs in it"
     },
     {
       "do": "click",
@@ -118,10 +118,10 @@
       "do": "wait",
       "until": {
         "see": {
-          "text": "Earlier, removed workspace"
+          "text": "Earlier, removed project"
         }
       },
-      "expect": "The section now reads Earlier, removed workspace"
+      "expect": "The section now reads Earlier, removed project"
     },
     {
       "do": "assert",
@@ -136,12 +136,12 @@
           {
             "gone": {
               "role": "button",
-              "label_is": "New task in mochi-site"
+              "label_is": "New thread in mochi-site"
             }
           }
         ]
       },
-      "expect": "The folder on disk is untouched, and the section offers no new task"
+      "expect": "The folder on disk is untouched, and the section offers no new thread"
     },
     {
       "do": "click",
@@ -157,12 +157,12 @@
           "text": "Hello from the fake"
         }
       },
-      "expect": "Its task stays readable"
+      "expect": "Its thread stays readable"
     },
     {
       "do": "snap",
       "name": "removed",
-      "expect": "The removed workspace and its readable task"
+      "expect": "The removed project and its readable thread"
     },
     {
       "do": "key",
@@ -182,7 +182,7 @@
           "label": "mochi-site"
         }
       },
-      "expect": "A new task cannot be made there: the picker does not offer it"
+      "expect": "A new thread cannot be made there: the picker does not offer it"
     },
     {
       "do": "key",
@@ -198,18 +198,18 @@
         "all": [
           {
             "gone": {
-              "text": "Earlier, removed workspace"
+              "text": "Earlier, removed project"
             }
           },
           {
             "see": {
               "role": "button",
-              "label_is": "New task in mochi-site"
+              "label_is": "New thread in mochi-site"
             }
           }
         ]
       },
-      "expect": "Adding the folder again brings the workspace back"
+      "expect": "Adding the folder again brings the project back"
     },
     {
       "do": "assert",
@@ -223,12 +223,12 @@
           }
         }
       },
-      "expect": "With its task"
+      "expect": "With its thread"
     },
     {
       "do": "snap",
       "name": "back",
-      "expect": "The workspace is back"
+      "expect": "The project is back"
     }
   ]
 }

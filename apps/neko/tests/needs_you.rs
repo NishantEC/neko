@@ -42,7 +42,7 @@ fn command_2_opens_the_list_with_the_keyboard_on_its_oldest_item_and_the_arrows_
     press(&mut rt, Key::Down, Mods::default());
     assert_eq!(focus(&rt), Some(need_key(&ids[1])));
     press(&mut rt, Key::Down, Mods::default());
-    assert_eq!(focus(&rt), Some(need_key(&ids[2])), "Down crosses from one workspace's items to the next");
+    assert_eq!(focus(&rt), Some(need_key(&ids[2])), "Down crosses from one project's items to the next");
     press(&mut rt, Key::Up, Mods::default());
     assert_eq!(focus(&rt), Some(need_key(&ids[1])));
     // Return on a question goes to its reply box; on a failure, to its task.
@@ -50,7 +50,7 @@ fn command_2_opens_the_list_with_the_keyboard_on_its_oldest_item_and_the_arrows_
     assert!(rt.state.needs_replies.get(&ids[1]).is_some_and(|r| r.focused), "Return on a question is its reply box");
     let mut rt = runtime((1200.0, 800.0), false, scene("needs-you"));
     press(&mut rt, Key::Enter, Mods::default());
-    assert_eq!(rt.state.open.as_ref(), Some(&rt.state.needs[0].task), "Return on a failure opens its task");
+    assert_eq!(rt.state.open.as_ref(), Some(&rt.state.needs[0].task), "Return on a failure opens its thread");
     // A destructive request has no default: Return answers nothing.
     let mut rt = runtime((1200.0, 800.0), false, scene("needs-you"));
     let last = ids.last().unwrap().clone();
@@ -69,10 +69,10 @@ fn the_list_is_grouped_one_column_and_says_how_long_each_item_waited() {
     let rt = runtime((1200.0, 800.0), false, scene("needs-you"));
     let all = nodes(&rt.accessibility_json());
     let lists: Vec<&serde_json::Value> = all.iter().map(|(_, n)| n).filter(|n| str_of(n, "role") == "list" && str_of(n, "name").starts_with("Waiting in")).collect();
-    assert_eq!(lists.iter().map(|n| str_of(n, "name")).collect::<Vec<_>>(), ["Waiting in General", "Waiting in acme-api", "Waiting in Acme marketing website redesign for the spring launch"]);
+    assert_eq!(lists.iter().map(|n| str_of(n, "name")).collect::<Vec<_>>(), ["Waiting in No project", "Waiting in acme-api", "Waiting in Acme marketing website redesign for the spring launch"]);
     let rows: Vec<&serde_json::Value> = all.iter().map(|(_, n)| n).filter(|n| str_of(n, "key").starts_with("need-") && n.get("position").is_some()).collect();
     assert_eq!(rows.len(), 5, "every item is a row with its place");
-    assert!(str_of(rows[0], "description").contains("General, waiting 3 days"), "{}", rows[0]);
+    assert!(str_of(rows[0], "description").contains("No project, waiting 3 days"), "{}", rows[0]);
     assert!(str_of(rows[3], "name").starts_with("tofu asks: Answer the question about the retry limit"), "led by its cat: {}", rows[3]);
     // The destructive request keeps no default and no Always allow.
     let hero = need_key(&rt.state.needs[4].id);
@@ -95,7 +95,7 @@ fn the_sidebar_and_the_dock_count_what_needs_the_person() {
     let acme = all.iter().map(|(_, n)| n).find(|n| str_of(n, "key") == "ws-ws_acme").expect("acme-api's header");
     assert_eq!(str_of(acme, "description"), "2 need you", "a section counts what needs the person there, not what works");
     let web = all.iter().map(|(_, n)| n).find(|n| str_of(n, "key") == "ws-ws_web").unwrap();
-    assert_eq!(str_of(web, "description"), "1 needs you", "its working task is not counted");
+    assert_eq!(str_of(web, "description"), "1 needs you", "its working thread is not counted");
     assert_eq!(rt.state.badge_count(), 5);
     rt.update(|s, _| {
         let first = s.needs[0].id.clone();
@@ -119,7 +119,7 @@ fn a_link_opens_its_task_now_or_once_the_tasks_arrive() {
         s.tasks_loaded = true;
         s.open_link("neko://task/task_ZZZZZZZZZZZZZZZZZZZZZZZZZZ");
     });
-    assert!(rt.state.open.is_none() && rt.state.notice.as_deref() == Some("That task is not in Neko any more."));
+    assert!(rt.state.open.is_none() && rt.state.notice.as_deref() == Some("That thread is not in Neko any more."));
     // Before the daemon's list: kept, and opened when it comes.
     let mut a = App::default();
     a.open_link(&neko_app::deeplink::url(&id));
@@ -202,7 +202,7 @@ fn answering_from_the_list_and_from_notifications_against_a_real_daemon() {
             s.draft = rune::TextEdit::new(words);
             s.submit();
         });
-        until(&mut rt, "the task to be made", |rt| rt.state.creating.is_none() && rt.state.tasks.iter().any(|t| t.words == words));
+        until(&mut rt, "the thread to be made", |rt| rt.state.creating.is_none() && rt.state.tasks.iter().any(|t| t.words == words));
     }
     until(&mut rt, "both to need the person", |rt| rt.state.needs.len() == 2);
     assert_eq!(rt.state.badge_count(), 2);
@@ -226,7 +226,7 @@ fn answering_from_the_list_and_from_notifications_against_a_real_daemon() {
     until(&mut rt, "the run to finish", |rt| rt.state.tasks.iter().any(|t| t.id == perm.task && t.status == TaskStatus::Done));
     let sent = rec.take();
     assert!(sent.contains(&Sent::Withdraw(vec![neko_app::notify::note_id(&perm.task)])), "its notification is taken back: {sent:?}");
-    let cat = rt.state.tasks.iter().find(|t| t.id == perm.task).map(|t| rt.state.cat_name(t)).expect("the task's cat");
+    let cat = rt.state.tasks.iter().find(|t| t.id == perm.task).map(|t| rt.state.cat_name(t)).expect("the thread's cat");
     assert!(posts(&sent).iter().any(|n| n.body == format!("{cat} is done: The tests pass.")), "the finished run says its cat is done, with its first line: {sent:?}");
 
     // A notification's Allow once on what was already answered: nothing harmful, said plainly.

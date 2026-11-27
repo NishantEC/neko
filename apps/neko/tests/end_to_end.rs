@@ -102,10 +102,10 @@ fn a_task_streams_asks_stops_and_its_transcript_survives_a_restart() {
     // Type a task; it opens and its agent asks before running a command.
     let words = "Run the tests [fake:permission]";
     type_and_send(&mut rt, "composer-input", words);
-    until(&mut rt, "the task to open", |rt| rt.state.open_task().is_some());
+    until(&mut rt, "the thread to open", |rt| rt.state.open_task().is_some());
     let task = rt.state.open_task().unwrap().clone();
     assert_eq!(task.words, words, "the daemon kept the exact words");
-    until(&mut rt, "the request to appear in the task", |rt| rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("perm-") && k.ends_with("-allow"))));
+    until(&mut rt, "the request to appear in the thread", |rt| rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("perm-") && k.ends_with("-allow"))));
     assert_eq!(status(&rt), Some(TaskStatus::NeedsYou));
     let allow = rt.elements().into_iter().find_map(|e| e.key.filter(|k| k.starts_with("perm-") && k.ends_with("-allow"))).unwrap();
     click(&mut rt, &allow);
@@ -114,12 +114,12 @@ fn a_task_streams_asks_stops_and_its_transcript_survives_a_restart() {
     assert!(rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("worked-"))), "the run's one line");
     assert!(!rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("run-") && k.ends_with("-facts"))), "a scratch run that changed nothing has no card");
     assert!(!rt.elements().into_iter().filter_map(|e| e.text).any(|t| t.contains('$')), "no money on screen");
-    assert_eq!(shown(&rt, "task-words").as_deref(), Some(words), "the task's words are the first message");
+    assert_eq!(shown(&rt, "task-words").as_deref(), Some(words), "the thread's words are the first message");
 
     // A second task streams; Escape stops it.
     press(&mut rt, Key::Command('n'), Mods { cmd: true, ..Mods::default() });
     type_and_send(&mut rt, "composer-input", "Go slowly [fake:slow]");
-    until(&mut rt, "the second task to open and stream", |rt| rt.state.open_task().is_some_and(|t| t.id != task.id) && on_screen(rt, "slow1"));
+    until(&mut rt, "the second thread to open and stream", |rt| rt.state.open_task().is_some_and(|t| t.id != task.id) && on_screen(rt, "slow1"));
     let second = rt.state.open_task().unwrap().id.clone();
     assert!(rt.state.open_is_working());
     press(&mut rt, Key::Escape, Mods::default());
@@ -145,8 +145,8 @@ fn a_task_streams_asks_stops_and_its_transcript_survives_a_restart() {
     assert_ne!(first, second_pid, "a new daemon process");
     let id = task.id.clone();
     rt.update(move |s, _| s.open_task_id(&id));
-    until(&mut rt, "the first task's transcript", |rt| rt.state.books.get(&task.id).is_some_and(|b| b.loaded) && on_screen(rt, "The tests pass."));
-    assert_eq!(rt.state.window_title(), "Run the tests [fake:permission] — General", "the window's title follows the task and names its workspace");
+    until(&mut rt, "the first thread's transcript", |rt| rt.state.books.get(&task.id).is_some_and(|b| b.loaded) && on_screen(rt, "The tests pass."));
+    assert_eq!(rt.state.window_title(), "Run the tests [fake:permission] — No project", "the window's title follows the thread and names its project");
 
     rt.update(|s, _| s.conn = None);
     // SAFETY: as above.

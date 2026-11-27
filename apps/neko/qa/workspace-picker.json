@@ -1,7 +1,7 @@
 {
   "name": "workspace-picker",
-  "title": "The composer's workspace picker",
-  "about": "On Home the picker lists General and the workspaces and Add folder…. It remembers the last choice across a relaunch. Command-N from an open task starts a new task in that task's workspace.",
+  "title": "The composer's project picker",
+  "about": "On Home the picker lists No project and the projects and Add folder…. It remembers the last choice across a relaunch. Command-N from an open thread starts a new thread in that thread's project.",
   "cli": [
     "fake"
   ],
@@ -38,7 +38,7 @@
           "label_is": "acme-site"
         }
       },
-      "expect": "Both folders are workspaces"
+      "expect": "Both folders are projects"
     },
     {
       "do": "click",
@@ -53,7 +53,7 @@
           {
             "see": {
               "role": "menuitemcheckbox",
-              "label": "General"
+              "label": "No project"
             }
           },
           {
@@ -76,7 +76,7 @@
           }
         ]
       },
-      "expect": "The picker lists General, both workspaces and Add folder…"
+      "expect": "The picker lists General, both projects and Add folder…"
     },
     {
       "do": "snap",
@@ -151,7 +151,7 @@
           }
         ]
       },
-      "expect": "The task opens"
+      "expect": "The thread opens"
     },
     {
       "do": "assert",
@@ -175,7 +175,7 @@
           "label": "acme-site"
         }
       },
-      "expect": "Command-N from the acme-site task starts in acme-site"
+      "expect": "Command-N from the acme-site thread starts in acme-site"
     },
     {
       "do": "click",
@@ -187,7 +187,7 @@
       "do": "click",
       "on": {
         "role": "menuitemcheckbox",
-        "label": "General"
+        "label": "No project"
       }
     },
     {
@@ -221,7 +221,7 @@
           }
         ]
       },
-      "expect": "A General task opens"
+      "expect": "A General thread opens"
     },
     {
       "do": "click",
@@ -238,7 +238,7 @@
           "text": "Draft the page"
         }
       },
-      "expect": "The acme-site task opens from the sidebar"
+      "expect": "The acme-site thread opens from the sidebar"
     },
     {
       "do": "key",
@@ -252,7 +252,7 @@
           "label": "acme-site"
         }
       },
-      "expect": "Command-N starts in the open task's workspace (acme-site), not the last choice (General)"
+      "expect": "Command-N starts in the open thread's project (acme-site), not the last choice (General)"
     },
     {
       "do": "snap",

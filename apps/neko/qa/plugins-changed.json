@@ -1,7 +1,7 @@
 {
   "name": "plugins-changed",
   "title": "Plugins: a changed manifest is left out of runs and asks again",
-  "about": "A plugin folder is added from Settings > Plugins and approved in Needs you. A task gets its server. Its neko-plugin.json is then edited by hand: Needs you asks again showing what changed, and the next task does not get the server (its tool is not there and nothing asks). Approving the new manifest brings it back.",
+  "about": "A plugin folder is added from Settings > Plugins and approved in Needs you. A thread gets its server. Its neko-plugin.json is then edited by hand: Needs you asks again showing what changed, and the next thread does not get the server (its tool is not there and nothing asks). Approving the new manifest brings it back.",
   "cli": [
     "fake"
   ],
@@ -147,7 +147,7 @@
         }
       },
       "within": 20,
-      "expect": "The first task used the plugin"
+      "expect": "The first thread used the plugin"
     },
     {
       "do": "assert",
@@ -217,7 +217,7 @@
         }
       },
       "within": 20,
-      "expect": "The next task did not get the plugin: its tool is not there"
+      "expect": "The next thread did not get the plugin: its tool is not there"
     },
     {
       "do": "assert",
@@ -298,7 +298,7 @@
         }
       },
       "within": 20,
-      "expect": "The third task used it"
+      "expect": "The third thread used it"
     },
     {
       "do": "assert",

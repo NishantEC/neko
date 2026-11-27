@@ -74,7 +74,7 @@
         }
       },
       "within": 15,
-      "expect": "After the restart the task is in the sidebar"
+      "expect": "After the restart the thread is in the sidebar"
     },
     {
       "do": "click",
@@ -132,7 +132,7 @@
     {
       "do": "snap",
       "name": "after-restart",
-      "expect": "The task after the restart"
+      "expect": "The thread after the restart"
     },
     {
       "do": "click",

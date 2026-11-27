@@ -10,7 +10,8 @@
 | `lib.rs` | `run()`: headless runs return first; then the menu prep, the saved frame, the Dock registration, `rune::run_windows`. `poll` drains the link, follows the width, sets the title, keeps the frame, replaces the menu. `on_key`: ⌘N, ⌃⌘S, Escape. |
 | `state.rs` | `App` and what each event changes. No drawing, no I/O. |
 | `view.rs` | The window: the warm ground, the theme and its type scale, the content band, the panels that ask (rename, remove, retire, undo anyway, new cat). |
-| `sidebar.rs` | The inset sidebar panel: New task, Home, Briefing, Needs you, Rounds; the Cattains (only the cats at work, absent when none is); workspace sections of two-line task rows led by each cat's portrait; Add workspace…. |
+| `sidebar.rs` | The inset sidebar panel: New thread, Needs you, Briefing, Rounds; the Cattains (only the cats at work, absent when none is); Threads with View and New thread, grouped by project (or one list), two-line thread rows led by a status mark; Add project…. |
+| `threads.rs`, `status_mark.rs` | The words and the order of the threads (age, second line, groups, the hold that keeps a working row in its place) and the status mark (`threads.md`). |
 | `home_view.rs` | Home: the greeting, the composer with its cat and workspace pickers, the house of cats, Needs you and In progress. |
 | `task_view.rs`, `turn.rs` | The task view: the conversation, turns led by their cat, steps on a rail, requests led by the asking cat, the receipt, the composer and its context ring. |
 | `faces.rs` | The cats' portraits: a drawn face per face id on its own ground, the working ring and state dots (`design.md`). |
@@ -45,7 +46,7 @@
 
 ## Menus
 
-Neko (About Neko with version and commit, Services, Hide, Hide Others, Show All, Quit), File (New Task ⌘N, Close Window ⌘W),
+Neko (About Neko with version and commit, Services, Hide, Hide Others, Show All, Quit), File (New Thread ⌘N, Close Window ⌘W),
 Edit (Rune's standard items; AppKit adds Start Dictation and Emoji & Symbols), View (Home ⌘1, Needs You ⌘2, Rounds ⌘3, Briefing ⌘4, Hide/Show Sidebar ⌃⌘S, Enter/Exit Full
 Screen ⌃⌘F), Window (Minimize, Zoom, Bring All to Front), Help (Neko Help, registered as the help menu). Raw AppKit does three
 things Rune does not: register the Help menu, remove Rune's Window ▸ Close (File has it), keep AppKit's own Enter Full Screen out.
@@ -53,14 +54,14 @@ The model is pure and tested (`menu.rs`): no key is taken twice.
 
 ## Keyboard
 
-- Tab goes once round every control in reading order: Hide sidebar, New task, Home, Briefing, Needs you, Rounds, the Cattains (one stop, only when a cat is at work), the workspaces list (one stop), each
+- Tab goes once round every control in reading order: Hide sidebar, New thread, Needs you, Briefing, Rounds, the Cattains (one stop, only when a cat is at work), Threads' View and New thread, the projects list (one stop), each
   section's own buttons, Add workspace…, the composer, the cat picker and the workspace picker in its footer, each cat's tile in the house. In a task: copy buttons, fold lines, request answers, then the composer and its context ring.
   `App::tab_visits_controls(true)` makes this so whatever the Mac's Keyboard Navigation setting is.
 - In the workspaces list the arrow keys move through section headers and rows (`focus_group`), a typed name goes to it, Return
   opens a row or folds a section; Left and Right fold and open; ⌥⌘↑ and ⌥⌘↓ move a section (`workspaces.md`).
 - In the composer Return sends, Shift+Return makes a new line. Escape gives focus back.
 - ⌘1 is Home, ⌘2 Needs you (`needs-you.md`), ⌘3 Rounds (`rounds.md`), ⌘4 the Briefing (`briefing.md`; ⌘↩ marks it read).
-- ⌘N goes Home with the keyboard in the composer, in the workspace of the task in view. ⌘, opens Settings (Neko ▸ Settings…).
+- ⌘N goes Home (the sidebar's New thread row is selected while Home shows) with the keyboard in the composer, in the project of the thread in view. The sidebar has no Home row; ⌘1 still opens Home until it becomes New thread. ⌘, opens Settings (Neko ▸ Settings…).
 
 ## Accessibility
 
@@ -140,10 +141,11 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   sidebar's Needs you row.
 - **The band** keeps the task's title: in a content area under 700 points (the smallest window with the sidebar shown) the folder
   line is left out and the workspace's name shortens first; the title keeps at least 140 points.
-- A sidebar row leads with its cat's portrait in its state: a turning ring while it works, an amber dot when it needs the person
-  (a request waits, or the run ended with a question), a red dot when it failed; under the title, "miso · working · 12 min". The
-  row's description says the cat and the state in words. When the run ended with a question the composer says "Answer miso's
-  question".
+- A sidebar row leads with a status mark, not a cat's face (`threads.md`): a turning ring while it works, an amber dot when it needs
+  the person (a request waits, or the run ended with a question), a red dot when it failed and has not been opened since. The title
+  is bold while there is activity the person has not seen; opening the thread (and anything that arrives while it is in view and Neko
+  is in front) reads it. Under the title: `Needs you: …`, `Failed: …`, else the agent's last line. The row's description says the state,
+  the line and the age in words. When the run ended with a question the composer says "Answer miso's question".
 - **The task's folder** shows once, quietly, at the band's right: the newest run's working folder (else the chosen folder),
   shortened with `~` and cut in its middle, the branch beside it, and a Reveal in Finder button (`Tx::reveal_path`). The window title follows the task. Finishing, failing and needing you
   are announced (`Tx::announce`).

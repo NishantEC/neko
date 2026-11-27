@@ -1,0 +1,304 @@
+{
+  "name": "sidebar-threads",
+  "title": "Threads in the sidebar: groups, order, unread",
+  "about": "Two folders are added as projects. acme-api gets a thread that ends with a question (it needs the person) and a newer one that finishes; mochi-notes gets one that keeps working. While the person has the first one open, the working thread streams: its title is bold (unread). The groups follow the person's order with No project last; inside acme-api the thread that needs the person sits above the newer one. Opening the working thread reads it.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "files": {
+      "acme-api": {
+        "files": {
+          "README.md": "# Acme\n"
+        }
+      },
+      "mochi-notes": {
+        "files": {
+          "notes.md": "Notes\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "add-workspace",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "add-workspace",
+      "path": "$files/mochi-notes"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "button",
+              "label_is": "acme-api"
+            }
+          },
+          {
+            "see": {
+              "role": "button",
+              "label_is": "mochi-notes"
+            }
+          },
+          {
+            "see": {
+              "role": "button",
+              "label_is": "No project"
+            }
+          }
+        ]
+      },
+      "expect": "Both projects and No project are groups under Threads"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "role": "heading",
+              "text": "Threads"
+            }
+          },
+          {
+            "see": {
+              "key": "threads-view-button"
+            }
+          },
+          {
+            "see": {
+              "key": "threads-new"
+            }
+          }
+        ]
+      },
+      "expect": "The Threads header has View and New thread"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "New thread in acme-api"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Rename the button [fake:question]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Rename the button",
+          "name": "needs you"
+        }
+      },
+      "within": 20,
+      "expect": "The first thread ends with a question: its row says it needs you"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "New thread in acme-api"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check the API [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Check the API"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "New thread in mochi-notes"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Count slowly [fake:slow]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "slow1"
+        }
+      },
+      "within": 10,
+      "expect": "The slow thread streams"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Rename the button"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Count slowly",
+          "name": "unread"
+        }
+      },
+      "within": 10,
+      "expect": "While the person looks at another thread, the working one is unread"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "role": "option",
+          "label": "Count slowly",
+          "name": "working"
+        }
+      },
+      "expect": "and its row says it is working"
+    },
+    {
+      "do": "snap",
+      "name": "threads",
+      "expect": "The sidebar: three threads in two projects, the working one bold"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "order": [
+          {
+            "role": "button",
+            "label_is": "acme-api"
+          },
+          {
+            "role": "option",
+            "label": "Rename the button"
+          },
+          {
+            "role": "option",
+            "label": "Check the API"
+          },
+          {
+            "role": "button",
+            "label_is": "mochi-notes"
+          },
+          {
+            "role": "option",
+            "label": "Count slowly"
+          },
+          {
+            "role": "button",
+            "label_is": "No project"
+          }
+        ]
+      },
+      "expect": "Groups: acme-api, mochi-notes, No project last; inside acme-api the thread that needs the person is first, though the other is newer"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "role": "option",
+          "label": "Rename the button",
+          "name": "needs you"
+        }
+      },
+      "expect": "The question's row still says it needs you"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "role": "option",
+          "label": "Check the API",
+          "name": "unread"
+        }
+      },
+      "expect": "The finished thread was read while it was open: it is not bold"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Count slowly"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "Count slowly"
+        }
+      },
+      "expect": "The working thread opens"
+    },
+    {
+      "do": "sleep",
+      "secs": 1.5
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "role": "option",
+          "label": "Count slowly",
+          "name": "unread"
+        }
+      },
+      "expect": "Opening it reads it, and it stays read while it streams in view"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-submit"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Stopped after"
+        }
+      },
+      "within": 5,
+      "expect": "Stop ends the slow thread"
+    }
+  ]
+}

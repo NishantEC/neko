@@ -80,7 +80,7 @@ fn a_full_morning_says_its_sections_in_order_each_in_its_words() {
         "Backup test turned itself off",
         "after 3 failed runs in a row",
         "Port the backup script to the new server",
-        "6 tasks finished",
+        "6 threads finished",
         "4 files changed",
         "$1.84 as Claude Code reported it",
         "API-equivalent, not charged on a subscription.",
@@ -93,7 +93,7 @@ fn a_full_morning_says_its_sections_in_order_each_in_its_words() {
     assert!(ys.windows(2).all(|w| w[0] < w[1]), "{order:?} are at {ys:?}");
     assert_eq!(rt.state.window_title(), "Briefing");
     // One workspace has the activity: one list, no workspace headings.
-    assert!(!rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|k| k.contains("-ws-"))), "one workspace: no headings");
+    assert!(!rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|k| k.contains("-ws-"))), "one project: no headings");
 }
 
 #[test]
@@ -146,9 +146,9 @@ fn tab_goes_through_the_page_in_reading_order_and_ends_on_mark_as_read() {
     let read = at(&|k| k == "briefing-read");
     assert!(need < need_end && need_end < fin && fin_end < round && round < working && working < read, "reading order: {seen:?}");
     assert_eq!(seen.iter().filter(|k| *k == "briefing-read").count(), 1, "once round");
-    // The sidebar's row for it is a stop of its own, right after Home.
-    let home = at(&|k| k == "home");
-    assert_eq!(seen[home + 1], "briefing", "Home, then the Briefing row: {seen:?}");
+    // The sidebar's row for it is a stop of its own, right after Needs you.
+    let needs = at(&|k| k == "needs-you");
+    assert_eq!(seen[needs + 1], "briefing", "Needs you, then the Briefing row: {seen:?}");
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn the_arrows_move_between_finished_rows_and_return_opens_the_task() {
     press(&mut rt, Key::Up, Mods::default());
     assert_eq!(focus(&rt), Some(key(first)));
     press(&mut rt, Key::Enter, Mods::default());
-    assert_eq!(rt.state.open.as_ref(), Some(&first.task), "Return opens its task");
+    assert_eq!(rt.state.open.as_ref(), Some(&first.task), "Return opens its thread");
     assert!(!rt.state.briefing_open);
 }
 
@@ -292,7 +292,7 @@ impl Drop for Folder {
 fn until(rt: &mut Runtime<App>, what: &str, ok: impl Fn(&Runtime<App>) -> bool) {
     let end = Instant::now() + Duration::from_secs(30);
     while !ok(rt) {
-        assert!(Instant::now() < end, "timed out waiting for {what}: briefing {:?}, tasks {:?}, home line {}", rt.state.briefing.as_ref().map(|b| (b.finished.len(), b.from_ms, b.to_ms, b.totals.finished)), rt.state.tasks.iter().map(|t| t.status).collect::<Vec<_>>(), has_key(rt, "home-briefing"));
+        assert!(Instant::now() < end, "timed out waiting for {what}: briefing {:?}, threads {:?}, home line {}", rt.state.briefing.as_ref().map(|b| (b.finished.len(), b.from_ms, b.to_ms, b.totals.finished)), rt.state.tasks.iter().map(|t| t.status).collect::<Vec<_>>(), has_key(rt, "home-briefing"));
         std::thread::sleep(Duration::from_millis(20));
         rt.frame(0.0);
     }
@@ -305,7 +305,7 @@ fn make_task(rt: &mut Runtime<App>, words: &'static str) {
         s.draft = rune::TextEdit::new(words);
         s.submit();
     });
-    until(rt, "the task to be made", |rt| rt.state.creating.is_none() && rt.state.tasks.iter().any(|t| t.words == words));
+    until(rt, "the thread to be made", |rt| rt.state.creating.is_none() && rt.state.tasks.iter().any(|t| t.words == words));
     // A new task opens in the task view: the person is back on Home.
     rt.update(|s, _| s.go_home());
 }
@@ -356,7 +356,7 @@ fn the_whole_flow_against_a_real_daemon() {
     press(&mut rt, Key::Command('4'), cmd());
     assert!(rt.state.briefing_open);
     let all = texts(&rt);
-    assert!(all.contains("Hello from the fake Claude Code.") && all.contains("1 task finished") && all.contains("API-equivalent, not charged on a subscription."), "{all}");
+    assert!(all.contains("Hello from the fake Claude Code.") && all.contains("1 thread finished") && all.contains("API-equivalent, not charged on a subscription."), "{all}");
 
     // A request waits: it is in the Briefing, answered there with the Needs you card.
     make_task(&mut rt, "Run the tests [fake:permission]");
@@ -367,7 +367,7 @@ fn the_whole_flow_against_a_real_daemon() {
     assert!(has_key(&rt, &need_key(&item.id)), "the card is on the Briefing");
     click(&mut rt, &format!("{}-allow", need_key(&item.id)));
     assert!(rt.state.visible_needs().is_empty(), "answered: gone at once");
-    until(&mut rt, "the daemon to drop it and the task to finish", |rt| rt.state.needs.is_empty() && rt.state.tasks.iter().any(|t| t.id == item.task && t.status == TaskStatus::Done));
+    until(&mut rt, "the daemon to drop it and the thread to finish", |rt| rt.state.needs.is_empty() && rt.state.tasks.iter().any(|t| t.id == item.task && t.status == TaskStatus::Done));
     until(&mut rt, "both finished in the briefing", |rt| rt.state.briefing.as_ref().is_some_and(|b| b.finished.len() == 2 && b.needs.is_empty()));
 
     // Mark as read with ⌘↩: caught up, and the Home line is gone.

@@ -510,6 +510,22 @@ impl Headless<'_> {
             let n = matching(&all, sel).len();
             return if n == 0 { Ok(()) } else { Err(format!("{n} element(s) match {sel} (expected none)")) };
         }
+        // `order`: the elements the selectors name are on screen from top to bottom in this order (each strictly below the last).
+        if let Some(list) = c.get("order").and_then(Value::as_array) {
+            let rt = rt.ok_or("the app is not running")?;
+            let all = rt.elements();
+            let mut last: Option<(f32, String)> = None;
+            for sel in list {
+                let e = pick(&all, sel)?;
+                if let Some((y, who)) = &last
+                    && e.rect[1] <= *y
+                {
+                    return Err(format!("{} is not below {who}", describe(e)));
+                }
+                last = Some((e.rect[1], describe(e)));
+            }
+            return Ok(());
+        }
         if let Some(sel) = c.get("count") {
             let rt = rt.ok_or("the app is not running")?;
             let all = rt.elements();
@@ -646,7 +662,7 @@ impl Headless<'_> {
                     self.click(&json!({"key": "workspace-picker"}))?;
                     self.click(&json!({"name": "Add folder…", "role": "menuitem"}))?;
                 } else {
-                    self.click(&json!({"key": "add-workspace"}))?;
+                    self.click(&json!({"key": "add-project"}))?;
                 }
                 self.pump();
                 self.rt()?.resolve_file_dialog(Some(PathBuf::from(&path))).map_err(|e| format!("the folder panel: {e:?}"))?;
@@ -746,12 +762,12 @@ impl Headless<'_> {
                     Reply::Tasks { tasks } => tasks,
                     other => return Err(format!("list_tasks: {other:?}")),
                 };
-                let task = tasks.into_iter().find(|t| t.title.starts_with(want)).ok_or(format!("no task titled {want:?}"))?;
+                let task = tasks.into_iter().find(|t| t.title.starts_with(want)).ok_or(format!("no thread titled {want:?}"))?;
                 let runs = match c.request(Request::GetTranscript { task: task.id.clone() }).map_err(|e| e.to_string())? {
                     Reply::Transcript { transcript } => transcript.runs,
                     other => return Err(format!("get_transcript: {other:?}")),
                 };
-                let asked = runs.iter().rev().nth(1).ok_or("the task has no earlier run")?.id.clone();
+                let asked = runs.iter().rev().nth(1).ok_or("the thread has no earlier run")?.id.clone();
                 let reply = c.request(Request::FollowUp { task: task.id, words: v["words"].as_str().unwrap_or("Again").to_owned(), answering: Some(asked) }).map_err(|e| e.to_string())?;
                 c.close();
                 match reply {

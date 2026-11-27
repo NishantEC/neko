@@ -26,7 +26,7 @@ use crate::ui::tooltip::Tooltip;
 /// The header band's height, shared by the sidebar and the content.
 pub const BAND: f32 = 52.0;
 /// The sidebar's width.
-pub const SIDEBAR: f32 = 248.0;
+pub const SIDEBAR: f32 = 256.0;
 /// The reading column of a task, and Home's composer.
 pub const COLUMN: f32 = 680.0;
 /// The key of the window's root (its size is the window's).
@@ -236,7 +236,7 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
             text(w.name.clone())
                 .key("task-workspace")
                 .role("note")
-                .label(format!("Workspace: {}", w.name))
+                .label(format!("Project: {}", w.name))
                 .font(weight(t.ty.sm, t.ty.medium))
                 .color(t.ink_muted())
                 .truncate()
@@ -258,7 +258,7 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
 fn task_menu(s: &App, t: &Theme, task: &neko_protocol::Task, layer: &mut Vec<El>) -> El {
     let open = s.menu_open.as_deref() == Some("task-more");
     let face: PressTx<App> = Rc::new(|s: &mut App, _: &mut rune::Tx| s.menu_open = if s.menu_open.as_deref() == Some("task-more") { None } else { Some("task-more".into()) });
-    let trigger = icon_button(t, "task-more-button", "Task options", &crate::ui::icons::MORE, None, false, Some(face)).expanded(open);
+    let trigger = icon_button(t, "task-more-button", "Thread options", &crate::ui::icons::MORE, None, false, Some(face)).expanded(open);
     let id = task.id.clone();
     let menu = DropdownMenu::new("task-more")
         .trigger(trigger)
@@ -270,8 +270,8 @@ fn task_menu(s: &App, t: &Theme, task: &neko_protocol::Task, layer: &mut Vec<El>
             let any = s.book().is_some_and(|b| b.runs.iter().any(|r| r.undo.as_ref().is_some_and(neko_protocol::RunUndo::ready)));
             DropdownMenuItem::new("All changes").disabled(!any).on_select(move |s: &mut App| s.open_review(&id, None))
         })
-        .item(DropdownMenuItem::new("Remove task…").danger(true).disabled(s.open_is_working()).on_select(move |s: &mut App| s.ask_remove_task(&id)));
-    menu_named(menu, t, layer, "Task options", open)
+        .item(DropdownMenuItem::new("Remove thread…").danger(true).disabled(s.open_is_working()).on_select(move |s: &mut App| s.ask_remove_task(&id)));
+    menu_named(menu, t, layer, "Thread options", open)
 }
 
 /// The panels that ask or say something: rename a workspace, remove one, remove a task, and why something was not done.
@@ -298,11 +298,11 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
             let n = s.tasks_in(id).len();
             let tasks = match n {
                 0 => String::new(),
-                1 => " Its task stays readable in the sidebar under “Earlier, removed workspace”.".to_owned(),
-                n => format!(" Its {n} tasks stay readable in the sidebar under “Earlier, removed workspace”."),
+                1 => " Its thread stays readable in the sidebar under “Earlier, removed project”.".to_owned(),
+                n => format!(" Its {n} threads stay readable in the sidebar under “Earlier, removed project”."),
             };
             AlertDialog::new("remove-workspace", format!("Remove {name} from Neko?"))
-                .description(format!("Nothing on disk is touched: the folder and its files stay where they are.{tasks} No new task can be made in it until you add the folder again."))
+                .description(format!("Nothing on disk is touched: the folder and its files stay where they are.{tasks} No new thread can be made in it until you add the folder again."))
                 .destructive()
                 .cancel("Cancel", |s: &mut App| s.confirm = None)
                 .action("Remove", |s: &mut App| s.confirmed())
@@ -312,7 +312,7 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
         }
         Some(Confirm::RemoveTask(task)) => {
             let title = s.tasks.iter().find(|x| &x.id == task).map_or_else(String::new, |x| x.title.clone());
-            AlertDialog::new("remove-task", "Remove this task?")
+            AlertDialog::new("remove-task", "Remove this thread?")
                 .description(format!(
                     "“{title}” and its conversation leave Neko. Its worktree or scratch folder goes too when nothing in it is unsaved; a branch with commits keeps them. Neko deletes nothing with unsaved work."
                 ))
@@ -344,11 +344,11 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
             let n = s.tasks.iter().filter(|x| &x.cat == id).count();
             let tasks = match n {
                 0 => String::new(),
-                1 => format!(" Its task stays readable, still {name}'s."),
-                n => format!(" Its {n} tasks stay readable, still {name}'s."),
+                1 => format!(" Its thread stays readable, still {name}'s."),
+                n => format!(" Its {n} threads stay readable, still {name}'s."),
             };
             AlertDialog::new("retire-cat", format!("Retire {name}?"))
-                .description(format!("{name} takes no new tasks after this, and no workspace's new tasks go to it.{tasks} You can bring {name} back from Settings ▸ Cats."))
+                .description(format!("{name} takes no new threads after this, and no project's new threads go to it.{tasks} You can bring {name} back from Settings ▸ Cats."))
                 .destructive()
                 .cancel("Cancel", |s: &mut App| s.confirm = None)
                 .action("Retire", |s: &mut App| s.confirmed())
@@ -359,7 +359,7 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
         Some(Confirm::RemoveRound(id)) => {
             let name = s.round(id).map_or_else(String::new, |r| r.name.clone());
             AlertDialog::new("remove-round", format!("Remove the round {name}?"))
-                .description("It stops starting by itself, and its history goes. The tasks it made stay where they are.")
+                .description("It stops starting by itself, and its history goes. The threads it made stay where they are.")
                 .destructive()
                 .cancel("Cancel", |s: &mut App| s.confirm = None)
                 .action("Remove", |s: &mut App| s.confirmed())
@@ -398,7 +398,7 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
         let cancel = Button::new("cat-name-cancel", "Cancel").variant(ButtonVariant::Secondary).on_press(|s: &mut App| s.naming = None).build(t);
         let save = Button::new("cat-name-save", if renaming.is_some() { "Rename" } else { "Make cat" }).disabled(edit.text.trim().is_empty()).on_press(|s: &mut App| s.finish_naming()).build(t);
         let (title, words, back) = match &renaming {
-            Some(n) => (format!("Rename {n}"), "Its tasks keep it; the new name shows everywhere, and reaches the agent from the next run.".to_owned(), "cat-rename".to_owned()),
+            Some(n) => (format!("Rename {n}"), "Its threads keep it; the new name shows everywhere, and reaches the agent from the next run.".to_owned(), "cat-rename".to_owned()),
             None => ("New cat".to_owned(), "A name of up to 40 characters, not another cat's. You can give it a face, a purpose and standing rules on its page.".to_owned(), "settings-new-cat".to_owned()),
         };
         let mut dialog = Dialog::new("cat-name", title).description(words);

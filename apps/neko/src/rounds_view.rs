@@ -54,7 +54,7 @@ fn last_line(s: &App, t: &Theme, r: &Round) -> Option<El> {
     let mut line = row().key(format!("round-{}-last", r.id)).w_full().gap(t.space.at(2.0)).center_y().min_w(0.0);
     line = line.child(text(last_words(l, status, s.now_ms, &*zone)).key(format!("round-{}-last-words", r.id)).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0).shrink());
     if let Some(id) = l.task.clone().filter(|id| s.tasks.iter().any(|x| &x.id == id)) {
-        line = line.child(Button::new(format!("round-{}-open", r.id), "Open task").variant(ButtonVariant::Link).size(Size::Sm).on_press(move |s: &mut App| s.open_task_id(&id)).build(t));
+        line = line.child(Button::new(format!("round-{}-open", r.id), "Open thread").variant(ButtonVariant::Link).size(Size::Sm).on_press(move |s: &mut App| s.open_task_id(&id)).build(t));
     }
     Some(line)
 }
@@ -194,7 +194,7 @@ pub fn rounds_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     if n == 0 {
         let action = Button::new("rounds-new-empty", "New round…").on_press(|s: &mut App| s.start_new_round(None)).build(t);
         let empty = Empty::new("rounds-empty", &crate::icons::ROUNDS, "No rounds yet")
-            .description("A round is a cat's standing work that starts by itself, like “every weekday at 09:00, mochi checks the docs for broken links”. Each time is an ordinary task you can follow, stop and undo.")
+            .description("A round is a cat's standing work that starts by itself, like “every weekday at 09:00, mochi checks the docs for broken links”. Each time is an ordinary thread you can follow, stop and undo.")
             .action(action)
             .build(t);
         return wrap(t, page.child(empty).child(honest_note(t)));
@@ -265,13 +265,13 @@ fn pickers(s: &App, t: &Theme, f: &RoundForm, menus: &mut Vec<El>) -> El {
             s.menu_open = None;
         }));
     }
-    let ws = s.workspace_of(&f.workspace).map_or_else(|| "General".to_owned(), |w| w.name.clone());
+    let ws = s.workspace_of(&f.workspace).map_or_else(|| "No project".to_owned(), |w| w.name.clone());
     let ws_chip = chip(t, "round-workspace", None)
         .role("button")
-        .label(format!("Workspace: {ws}"))
+        .label(format!("Project: {ws}"))
         .child(glyph(&crate::ui::icons::FOLDER, t.control.icon_sm, t.ink_muted()))
         .child(text(ws).font(t.ty.sm).color(t.ink()).truncate().max_w(180.0).min_w(0.0).a11y_hidden());
-    let mut ws_menu = DropdownMenu::new("round-workspace-menu").min_width(220.0).label("Workspace");
+    let mut ws_menu = DropdownMenu::new("round-workspace-menu").min_width(220.0).label("Project");
     for w in s.workspaces.iter().filter(|w| w.is_active()) {
         let id = w.id.clone();
         ws_menu = ws_menu.item(DropdownMenuItem::new(w.name.clone()).checked(w.id == f.workspace).on_select(move |s: &mut App| {
@@ -284,7 +284,7 @@ fn pickers(s: &App, t: &Theme, f: &RoundForm, menus: &mut Vec<El>) -> El {
         .gap(t.space.at(2.0))
         .center_y()
         .child(picker(s, t, menus, "round-cat-menu", "Cats", cat_chip, cat_menu))
-        .child(picker(s, t, menus, "round-workspace-menu", "Workspaces", ws_chip, ws_menu))
+        .child(picker(s, t, menus, "round-workspace-menu", "Projects", ws_chip, ws_menu))
 }
 
 fn schedule_fields(s: &App, t: &Theme, f: &RoundForm) -> El {

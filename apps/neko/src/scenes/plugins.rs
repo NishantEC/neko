@@ -282,7 +282,7 @@ fn plugin_item(s: &App, p: &Plugin, minutes: i64) -> NeedsItem {
 /// The approval card among the other things that wait.
 pub fn needs_you_plugin(s: &mut App) {
     with_workspaces(s);
-    let retry = s.tasks.iter().find(|t| t.title.starts_with("Answer the question about the retry limit")).cloned().expect("the sample task");
+    let retry = s.tasks.iter().find(|t| t.title.starts_with("Answer the question about the retry limit")).cloned().expect("the sample thread");
     let waiting = acme_docs(1, Approval::Waiting, false, true);
     let folder = handbook(2, Approval::Waiting, false, false);
     s.plugins = vec![waiting.clone(), folder.clone()];

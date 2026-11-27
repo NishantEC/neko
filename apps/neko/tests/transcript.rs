@@ -81,7 +81,7 @@ fn empty_thoughts_show_nothing_and_thinking_shows_one_live_line() {
     assert!(!texts(&rt).iter().any(|t| t.starts_with("Thought")), "no fold that opens to nothing");
     let rt = runtime((1200.0, 800.0), false, scene("task-thinking"));
     let live = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("run-run_1-working")).expect("the live line");
-    assert_eq!(live.label.as_deref(), Some("miso is thinking"), "the task's cat, by name");
+    assert_eq!(live.label.as_deref(), Some("miso is thinking"), "the thread's cat, by name");
     // The head already shows the cat (portrait, name, ring): the line under it says only what is happening, never the cat again.
     assert!(texts(&rt).iter().any(|t| t.starts_with("Thinking…")), "the live line says what is happening: {:?}", texts(&rt));
     assert!(!texts(&rt).iter().any(|t| t.contains("is thinking") || t.contains("is working") || t.starts_with("Working…")), "one live line, and the cat's name once: {:?}", texts(&rt));
@@ -182,7 +182,7 @@ fn nothing_in_a_task_sits_further_apart_than_the_turn_gap() {
 #[test]
 fn finished_runs_fold_and_the_choice_is_remembered() {
     let mut rt = runtime((1200.0, 800.0), false, scene("task-real-run"));
-    assert!(has_key(&rt, "worked-run_1") && has_key(&rt, "worked-run_2"), "every run of the task folds");
+    assert!(has_key(&rt, "worked-run_1") && has_key(&rt, "worked-run_2"), "every run of the thread folds");
     assert!(!texts(&rt).iter().any(|t| t.contains("The guide is current")), "interim words fold away");
     while focus(&rt).as_deref() != Some("worked-run_1-trigger") {
         tab(&mut rt, false);
@@ -240,10 +240,10 @@ fn settings_name_three_modes_and_say_what_claude_codes_own_rules_allow() {
 fn a_run_that_ends_with_a_question_says_needs_you() {
     let rt = runtime((1200.0, 800.0), false, scene("task-asked"));
     let open = rt.state.open.clone().unwrap();
-    let row = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("task-{}", open.0))).expect("the task's row");
+    let row = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("thread-{}", open.0))).expect("the thread's row");
     let tree = nodes(&rt.accessibility_json());
-    let node = tree.iter().find(|(_, n)| str_of(n, "key") == format!("task-{}", open.0)).map(|(_, n)| n.clone()).expect("the row in the tree");
-    assert!(node.to_string().contains("miso, needs you"), "the row says its cat and needs you, not done: {node}");
+    let node = tree.iter().find(|(_, n)| str_of(n, "key") == format!("thread-{}", open.0)).map(|(_, n)| n.clone()).expect("the row in the tree");
+    assert!(node.to_string().contains("needs you"), "the row says it needs you, not done: {node}");
     assert!(!rt.state.open_is_working(), "it is not working: the person can answer");
     assert!(row.rect[2] > 0.0);
     assert!(rt.accessibility_json().to_string().contains("Answer miso's question"), "the composer asks for the cat's answer");

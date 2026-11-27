@@ -1,0 +1,353 @@
+{
+  "name": "sidebar-group-none",
+  "title": "View: Group by None gives one list by last activity",
+  "about": "Two projects each get a finished thread, and a third goes in No project. View > Group by > None makes one list with no project headings, newest activity first, each row naming its project. The choice survives a quit and relaunch (the prefs live in the run's folder). View > Group by > Project brings the groups back.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "files": {
+      "acme-api": {
+        "files": {
+          "README.md": "# Acme\n"
+        }
+      },
+      "mochi-notes": {
+        "files": {
+          "notes.md": "Notes\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "add-workspace",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "add-workspace",
+      "path": "$files/mochi-notes"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "button",
+              "label_is": "acme-api"
+            }
+          },
+          {
+            "see": {
+              "role": "button",
+              "label_is": "mochi-notes"
+            }
+          }
+        ]
+      },
+      "expect": "Both projects are groups"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "New thread in acme-api"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Rename the button [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Rename the button"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "New thread in mochi-notes"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Tidy the notes [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Tidy the notes"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "workspace-picker"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitemcheckbox",
+        "label_is": "No project"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Write a haiku [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Write a haiku"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "do": "assert",
+      "that": {
+        "order": [
+          {
+            "role": "button",
+            "label_is": "acme-api"
+          },
+          {
+            "role": "option",
+            "label": "Rename the button"
+          },
+          {
+            "role": "button",
+            "label_is": "mochi-notes"
+          },
+          {
+            "role": "option",
+            "label": "Tidy the notes"
+          },
+          {
+            "role": "button",
+            "label_is": "No project"
+          },
+          {
+            "role": "option",
+            "label": "Write a haiku"
+          }
+        ]
+      },
+      "expect": "Grouped by project: each thread under its own"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "threads-view-button"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "menuitemcheckbox",
+          "label_is": "None"
+        }
+      },
+      "expect": "View opens with Group by"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitemcheckbox",
+        "label_is": "None"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "gone": {
+              "role": "button",
+              "label_is": "acme-api"
+            }
+          },
+          {
+            "gone": {
+              "role": "button",
+              "label_is": "mochi-notes"
+            }
+          },
+          {
+            "gone": {
+              "role": "button",
+              "label_is": "No project"
+            }
+          }
+        ]
+      },
+      "within": 5,
+      "expect": "No project headings: one list"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "order": [
+          {
+            "role": "option",
+            "label": "Write a haiku"
+          },
+          {
+            "role": "option",
+            "label": "Tidy the notes"
+          },
+          {
+            "role": "option",
+            "label": "Rename the button"
+          }
+        ]
+      },
+      "expect": "One list by last activity: the newest first"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "text": "mochi-notes"
+            }
+          },
+          {
+            "see": {
+              "text": "acme-api"
+            }
+          }
+        ]
+      },
+      "expect": "Each row names its project"
+    },
+    {
+      "do": "snap",
+      "name": "none",
+      "expect": "One list, newest first, each row naming its project"
+    },
+    {
+      "do": "quit-app"
+    },
+    {
+      "do": "start-app"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Write a haiku"
+        }
+      },
+      "within": 15,
+      "expect": "After a relaunch the threads are back"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "role": "button",
+          "label_is": "acme-api"
+        }
+      },
+      "expect": "and the list is still ungrouped"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "threads-view-button"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitemcheckbox",
+        "label_is": "Project"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "button",
+              "label_is": "acme-api"
+            }
+          },
+          {
+            "see": {
+              "role": "button",
+              "label_is": "No project"
+            }
+          }
+        ]
+      },
+      "within": 5,
+      "expect": "Group by Project brings the groups back"
+    }
+  ]
+}

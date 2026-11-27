@@ -118,18 +118,18 @@ fn the_first_frame_does_not_wait_for_a_slow_daemon_and_a_task_typed_meanwhile_is
     // The window shows what it can by itself: the sidebar's quiet placeholder, Home and its composer.
     assert_eq!(rt.state.daemon, Daemon::Starting);
     assert_eq!(text_of(&rt, "connection").as_deref(), Some("Starting Neko…"));
-    assert_eq!(text_of(&rt, "ws-default-none").as_deref(), Some("Loading…"), "not \"No tasks yet\" before the list arrives");
+    assert_eq!(text_of(&rt, "ws-default-none").as_deref(), Some("Loading…"), "not \"No threads yet\" before the list arrives");
     click(&mut rt, "composer-input");
     press(&mut rt, Key::Text("Tidy the notes [fake:plain]".into()), Mods::default());
     press(&mut rt, Key::Enter, Mods::default());
-    assert!(rt.state.queued, "Return before the daemon answers keeps the task to send");
+    assert!(rt.state.queued, "Return before the daemon answers keeps the thread to send");
     assert_eq!(rt.state.draft.text, "Tidy the notes [fake:plain]", "the words stay in sight");
 
     // Every frame stays quick while the daemon starts; then the kept task is sent and opens.
     let end = Instant::now() + Duration::from_secs(30);
     let mut slowest = Duration::ZERO;
     while rt.state.open_task().is_none() {
-        assert!(Instant::now() < end, "the kept task never opened (daemon {:?})", rt.state.daemon);
+        assert!(Instant::now() < end, "the kept thread never opened (daemon {:?})", rt.state.daemon);
         let f = Instant::now();
         rt.frame(0.02);
         slowest = slowest.max(f.elapsed());

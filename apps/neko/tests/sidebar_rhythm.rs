@@ -58,7 +58,7 @@ fn check(scene: &str, dark: bool) {
     let at = format!("{scene} {}", if dark { "dark" } else { "light" });
 
     // The nav: one row height, one gap.
-    let nav = ["new-task", "home", "briefing", "needs-you", "rounds"];
+    let nav = ["new-thread", "needs-you", "briefing", "rounds"];
     for k in nav {
         near(height(&r, k), row_1(&t), &format!("{at}: nav row {k} height"));
     }
@@ -74,18 +74,21 @@ fn check(scene: &str, dark: bool) {
         .filter_map(|e| e.key.as_deref().filter(|k| k.starts_with("ws-") && k.ends_with("-section")).map(|k| (k.trim_end_matches("-section").to_owned(), e.rect[1], e.rect[1] + e.rect[3])))
         .collect();
     sections.sort_by(|a, b| a.1.total_cmp(&b.1));
-    assert!(!sections.is_empty(), "{at}: the sidebar shows workspaces");
+    assert!(!sections.is_empty(), "{at}: the sidebar shows projects");
     for (head, _, _) in &sections {
         near(height(&r, head), header(&t), &format!("{at}: header {head} height"));
     }
+    // Threads: its header a control high, a group gap under the nav (or the Cattains), the first project a row gap under it.
+    near(height(&r, "threads-head"), header(&t), &format!("{at}: Threads header height"));
+    near(top(&r, "workspaces") - bottom(&r, "threads-head"), row_gap, &format!("{at}: the Threads header to its first group"));
     for w in sections.windows(2) {
         near(w[1].1 - w[0].2, section_gap, &format!("{at}: gap between sections {} and {}", w[0].0, w[1].0));
     }
-    let mut task_rows: Vec<(String, f32, f32)> = r.iter().filter(|(k, _)| is_row(k, "task-task_")).map(|(k, v)| (k.clone(), v[1], v[1] + v[3])).collect();
+    let mut task_rows: Vec<(String, f32, f32)> = r.iter().filter(|(k, _)| is_row(k, "thread-task_")).map(|(k, v)| (k.clone(), v[1], v[1] + v[3])).collect();
     task_rows.sort_by(|a, b| a.1.total_cmp(&b.1));
-    assert!(!task_rows.is_empty(), "{at}: the sidebar shows tasks");
+    assert!(!task_rows.is_empty(), "{at}: the sidebar shows threads");
     for (k, y, b) in &task_rows {
-        near(b - y, row_2(&t), &format!("{at}: task row {k} height"));
+        near(b - y, row_2(&t), &format!("{at}: thread row {k} height"));
     }
     for (head, _, _) in &sections {
         // The first row under this header (if the section is open) is a row gap under it.
@@ -97,21 +100,21 @@ fn check(scene: &str, dark: bool) {
         // Rows in one section are a row gap apart; the next section's header lies between rows of different sections.
         let between = sections.iter().any(|(_, y, _)| *y >= w[0].2 - 0.5 && *y <= w[1].1);
         if !between {
-            near(w[1].1 - w[0].2, row_gap, &format!("{at}: gap between task rows {} and {}", w[0].0, w[1].0));
+            near(w[1].1 - w[0].2, row_gap, &format!("{at}: gap between thread rows {} and {}", w[0].0, w[1].0));
         }
     }
     let last = sections.last().expect("a section");
-    near(top(&r, "add-workspace") - last.2, row_gap, &format!("{at}: Add workspace… under the last section"));
-    near(height(&r, "add-workspace"), row_1(&t), &format!("{at}: Add workspace… height"));
+    near(top(&r, "add-project") - last.2, row_gap, &format!("{at}: Add project… under the last section"));
+    near(height(&r, "add-project"), row_1(&t), &format!("{at}: Add project… height"));
 
     // The Cattains (only when a cat is at work): a group gap under the nav and over the workspaces, a header a control high, then the
     // cats and, under a cat with several tasks, its tasks: all rows of two lines, a row gap apart. Add workspace… is the last thing.
     let cattains = r.contains_key("cattains-section");
     if cattains {
         near(top(&r, "cattains-head") - bottom(&r, "rounds"), group_gap, &format!("{at}: nav to the Cattains"));
-        near(sections[0].1 - bottom(&r, "cattains-section"), group_gap, &format!("{at}: Cattains to the workspaces"));
+        near(top(&r, "threads-head") - bottom(&r, "cattains-section"), group_gap, &format!("{at}: Cattains to Threads"));
         near(height(&r, "cattains-head"), header(&t), &format!("{at}: Cattains header height"));
-        let mut crew: Vec<(String, f32, f32)> = r.iter().filter(|(k, _)| is_row(k, "cat-cat_") || is_row(k, "cattain-task-task_")).map(|(k, v)| (k.clone(), v[1], v[1] + v[3])).collect();
+        let mut crew: Vec<(String, f32, f32)> = r.iter().filter(|(k, _)| is_row(k, "cat-cat_") || is_row(k, "cattain-thread-task_")).map(|(k, v)| (k.clone(), v[1], v[1] + v[3])).collect();
         crew.sort_by(|a, b| a.1.total_cmp(&b.1));
         assert!(!crew.is_empty(), "{at}: the Cattains list cats");
         near(crew[0].1 - bottom(&r, "cattains-head"), row_gap, &format!("{at}: the Cattains header to its first row"));
@@ -123,7 +126,7 @@ fn check(scene: &str, dark: bool) {
         }
         near(top(&r, "cattains-head") + header(&t) + row_gap, crew[0].1, &format!("{at}: the section is its header and its rows"));
     } else {
-        near(sections[0].1 - bottom(&r, "rounds"), group_gap, &format!("{at}: nav to the workspaces"));
+        near(top(&r, "threads-head") - bottom(&r, "rounds"), group_gap, &format!("{at}: nav to Threads"));
         assert!(!r.contains_key("cattains-head") && !r.contains_key("cattains"), "{at}: no cat at work, no section, no header");
     }
     assert!(!r.contains_key("new-cat") && !r.contains_key("cats-head"), "{at}: the sidebar has no New cat… and no Cats section");

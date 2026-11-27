@@ -1,7 +1,7 @@
 {
   "name": "stop",
   "title": "Stop ends a run at once, by the button and by Escape",
-  "about": "A slow run is stopped with the composer's Stop button; it ends within about a second, the task says it stopped, and a follow-up continues it. A second slow task is stopped with Escape.",
+  "about": "A slow run is stopped with the composer's Stop button; it ends within about a second, the thread says it stopped, and a follow-up continues it. A second slow thread is stopped with Escape.",
   "cli": [
     "fake"
   ],
@@ -61,12 +61,12 @@
         }
       },
       "soft": true,
-      "expect": "The sidebar row says the task stopped"
+      "expect": "The sidebar row says the thread stopped"
     },
     {
       "do": "snap",
       "name": "stopped",
-      "expect": "The stopped task"
+      "expect": "The stopped thread"
     },
     {
       "do": "click",
@@ -90,7 +90,7 @@
         }
       },
       "within": 10,
-      "expect": "A follow-up continues the stopped task"
+      "expect": "A follow-up continues the stopped thread"
     },
     {
       "do": "key",
@@ -128,7 +128,7 @@
         ]
       },
       "within": 10,
-      "expect": "A second slow task streams"
+      "expect": "A second slow thread streams"
     },
     {
       "do": "key",

@@ -1,7 +1,7 @@
 {
   "name": "cats",
-  "title": "Cats: who does a task, their rules, new and retired cats",
-  "about": "Three starter cats exist. A task for Any cat goes to one of them. Picking mochi makes the task mochi's everywhere. Rules written on mochi's page reach the agent once and verbatim on the next run, with a line saying they changed. The sidebar lists only the cats at work (Cattains); New cat… in Settings ▸ Cats makes a fourth. Retire asks first; a retired cat takes no new task and its tasks stay readable; Bring back from Settings.",
+  "title": "Cats: who does a thread, their rules, new and retired cats",
+  "about": "Three starter cats exist. A thread for Any cat goes to one of them. Picking mochi makes the thread mochi's everywhere. Rules written on mochi's page reach the agent once and verbatim on the next run, with a line saying they changed. The sidebar lists only the cats at work (Cattains); New cat… in Settings ▸ Cats makes a fourth. Retire asks first; a retired cat takes no new thread and its threads stay readable; Bring back from Settings.",
   "cli": [
     "fake"
   ],
@@ -95,7 +95,7 @@
           }
         ]
       },
-      "expect": "A task for Any cat runs"
+      "expect": "A thread for Any cat runs"
     },
     {
       "do": "assert",
@@ -184,7 +184,7 @@
         ]
       },
       "within": 10,
-      "expect": "The task is mochi's in the header, the turn and the sidebar row"
+      "expect": "The thread is mochi's in the header, the turn and the sidebar row"
     },
     {
       "do": "key",
@@ -435,7 +435,7 @@
           "label": "Feed the fish"
         }
       },
-      "expect": "mochi's tasks stay readable in the sidebar"
+      "expect": "mochi's threads stay readable in the sidebar"
     },
     {
       "do": "key",
@@ -455,7 +455,7 @@
           "label": "mochi"
         }
       },
-      "expect": "A retired cat takes no new task: the picker does not offer mochi"
+      "expect": "A retired cat takes no new thread: the picker does not offer mochi"
     },
     {
       "do": "key",

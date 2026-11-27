@@ -1,7 +1,7 @@
 {
   "name": "tidy",
-  "title": "Finished tasks leave nothing behind",
-  "about": "Ten quick tasks in a git workspace that change nothing leave no worktree folders and no neko/ branches. A task that leaves an uncommitted file keeps its worktree, and Remove task refuses with Reveal in Finder.",
+  "title": "Finished threads leave nothing behind",
+  "about": "Ten quick threads in a git project that change nothing leave no worktree folders and no neko/ branches. A thread that leaves an uncommitted file keeps its worktree, and Remove thread refuses with Reveal in Finder.",
   "cli": [
     "fake"
   ],
@@ -28,13 +28,13 @@
           "label_is": "acme-api"
         }
       },
-      "expect": "The repository is a workspace"
+      "expect": "The repository is a project"
     },
     {
       "do": "click",
       "on": {
         "role": "button",
-        "label_is": "New task in acme-api"
+        "label_is": "New thread in acme-api"
       }
     },
     {
@@ -350,7 +350,7 @@
     {
       "do": "snap",
       "name": "ten-tasks",
-      "expect": "Ten finished tasks in acme-api"
+      "expect": "Ten finished threads in acme-api"
     },
     {
       "do": "assert",
@@ -392,7 +392,7 @@
         }
       },
       "within": 15,
-      "expect": "A task edits files and finishes"
+      "expect": "A thread edits files and finishes"
     },
     {
       "do": "sleep",
@@ -428,7 +428,7 @@
           "key": "remove-task-dialog"
         }
       },
-      "expect": "Remove task asks first"
+      "expect": "Remove thread asks first"
     },
     {
       "do": "click",
@@ -472,7 +472,7 @@
           }
         ]
       },
-      "expect": "Nothing was deleted: the worktree and the task are still there"
+      "expect": "Nothing was deleted: the worktree and the thread are still there"
     }
   ]
 }

@@ -1,7 +1,7 @@
 {
   "name": "undo-plain-folder",
   "title": "Undo in a plain folder, and a run that commits",
-  "about": "In a plain (not git) workspace folder the same journey works and nothing is written into the folder but the restored files (the history lives in Neko's own folder). In a git workspace, a run that commits is refused for undo with its plain line.",
+  "about": "In a plain (not git) project folder the same journey works and nothing is written into the folder but the restored files (the history lives in Neko's own folder). In a git project, a run that commits is refused for undo with its plain line.",
   "cli": [
     "fake"
   ],

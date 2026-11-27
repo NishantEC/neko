@@ -1,7 +1,7 @@
 {
   "name": "first-task",
-  "title": "A first task from Home",
-  "about": "An empty app. The person types a task of two lines on Home and presses Return. The task appears in the sidebar and opens; the agent's answer streams in; when the run ends it folds behind one \"Worked for\" line; the task's title is its first line.",
+  "title": "A first thread from Home",
+  "about": "An empty app. The person types a thread of two lines on Home and presses Return. The thread appears in the sidebar and opens; the agent's answer streams in; when the run ends it folds behind one \"Worked for\" line; the thread's title is its first line.",
   "cli": [
     "fake"
   ],
@@ -10,7 +10,7 @@
     {
       "do": "snap",
       "name": "home-empty",
-      "expect": "Home greets the person and the sidebar has no tasks yet"
+      "expect": "Home greets the person and the sidebar has no threads yet"
     },
     {
       "do": "assert",
@@ -23,12 +23,12 @@
           },
           {
             "see": {
-              "text": "No tasks yet"
+              "text": "No threads yet"
             }
           }
         ]
       },
-      "expect": "The greeting is shown and the sidebar says \"No tasks yet\""
+      "expect": "The greeting is shown and the sidebar says \"No threads yet\""
     },
     {
       "do": "click",
@@ -69,7 +69,7 @@
         }
       },
       "within": 5,
-      "expect": "The task appears in the sidebar under General"
+      "expect": "The thread appears in the sidebar under No project"
     },
     {
       "do": "wait",
@@ -80,7 +80,7 @@
         }
       },
       "within": 5,
-      "expect": "The task opens; the band shows its title"
+      "expect": "The thread opens; the band shows its title"
     },
     {
       "do": "wait",
@@ -122,19 +122,19 @@
     {
       "do": "snap",
       "name": "done",
-      "expect": "The finished task: the answer stays open under its \"Worked for\" line"
+      "expect": "The finished thread: the answer stays open under its \"Worked for\" line"
     },
     {
       "do": "assert",
       "that": {
         "all": [
           {
-            "title": "Write a haiku about miso — General"
+            "title": "Write a haiku about miso — No project"
           },
           {
             "see": {
               "key": "task-workspace",
-              "text": "General"
+              "text": "No project"
             }
           },
           {

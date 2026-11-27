@@ -112,10 +112,10 @@ fn a_cat_with_rules_does_a_task_and_its_edited_rules_reach_the_next_run() {
     rt.update(move |s, _| s.pick_cat(Some(p.clone())));
     type_in(&mut rt, "composer-input", "Tidy the notes [fake:plain]");
     press(&mut rt, Key::Enter, Mods::default());
-    until(&mut rt, "the task to finish", |rt| rt.state.open_task().is_some_and(|t| t.status == TaskStatus::Done));
+    until(&mut rt, "the thread to finish", |rt| rt.state.open_task().is_some_and(|t| t.status == TaskStatus::Done));
     let task = rt.state.open_task().unwrap().clone();
-    assert_eq!(task.cat, pip, "the task is pip's");
-    let band = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("task-cat")).expect("the cat in the task's band");
+    assert_eq!(task.cat, pip, "the thread is pip's");
+    let band = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("task-cat")).expect("the cat in the thread's band");
     assert_eq!(band.label.as_deref(), Some("Cat: pip"));
     assert!(has_key(&rt, |k| k.starts_with("turn-") && k.ends_with("-cat")), "the turn is led by the cat");
     let got = blocks(&record);
@@ -133,7 +133,7 @@ fn a_cat_with_rules_does_a_task_and_its_edited_rules_reach_the_next_run() {
     click(&mut rt, "cat-save");
     until(&mut rt, "the new rules saved", |rt| rt.state.page_cat().is_some_and(|c| c.rules.ends_with("Use British spelling.")));
     assert!(rt.state.page_cat().unwrap().previous_rules.as_deref() == Some("Answer in one short paragraph."), "one previous version kept");
-    click(&mut rt, &format!("task-{}", task.id.0));
+    click(&mut rt, &format!("thread-{}", task.id.0));
     for _ in 0..4 {
         rt.frame(1.0);
     }

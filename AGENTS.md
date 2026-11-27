@@ -58,6 +58,7 @@ ships in `NOTICE` and `THIRD_PARTY_LICENSES/`.
 - [The transcript](docs/knowledge/transcript.md) — runs, parts, usage, write rate, interrupted runs, cost as reported.
 - [Needs you](docs/knowledge/needs-you.md) — what waits for the person, the list (⌘2), notifications and their limits, the badge, `neko://`.
 - [Undo](docs/knowledge/undo.md) — checkpoints at each run's start and end, the exact git commands, Review, Undo and Redo, limits, housekeeping.
+- [Threads](docs/knowledge/threads.md) — the words (thread, project, No project), unread, the status and its marks, a row's lines and order, View, what is not here yet.
 - [Cats](docs/knowledge/cats.md) — named agents with standing rules, which cat gets a task, how rules reach Claude Code, what they can never do.
 - [The Briefing](docs/knowledge/briefing.md) — what happened while the person was away, built from records with no model: the window, the sections, the morning notification and its limits, what is not here yet.
 - [Workspaces](docs/knowledge/workspaces.md) — folders the person added, General, removing, a missing folder, the tidy rule, Remove task.

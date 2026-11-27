@@ -195,7 +195,7 @@ fn the_daemons_events_keep_the_list_and_the_pause_current() {
 fn removing_a_round_asks_first() {
     let rt = runtime((1200.0, 800.0), false, scene("rounds-remove"));
     assert!(matches!(rt.state.confirm, Some(Confirm::RemoveRound(_))));
-    assert!(texts(&rt).contains("The tasks it made stay where they are."));
+    assert!(texts(&rt).contains("The threads it made stay where they are."));
 }
 
 #[test]
@@ -216,7 +216,7 @@ fn a_task_a_round_made_says_so_and_links_back() {
     assert!(texts(&rt).contains("From the round Docs check, due today at 09:00"), "{}", texts(&rt));
     assert!(has_key(&rt, "task-round-open"));
     let rt = runtime((1200.0, 800.0), false, scene("task-done"));
-    assert!(!has_key(&rt, "task-round"), "a task the person made has no such line");
+    assert!(!has_key(&rt, "task-round"), "a thread the person made has no such line");
 }
 
 #[test]
@@ -295,6 +295,6 @@ fn a_manual_round_has_no_switch_and_no_line_repeating_its_schedule() {
 fn a_task_from_a_round_lists_its_files_with_their_figures_and_its_line_has_its_own_ground() {
     let rt = runtime((1200.0, 800.0), false, scene("task-from-round"));
     let all = texts(&rt);
-    assert!(all.contains("src/toolbar.rs") && all.contains("src/menu.rs") && all.contains("docs/preferences.md"), "every file, as an ordinary task's receipt lists them: {all}");
+    assert!(all.contains("src/toolbar.rs") && all.contains("src/menu.rs") && all.contains("docs/preferences.md"), "every file, as an ordinary thread's receipt lists them: {all}");
     assert!(has_key(&rt, "task-round-strip"));
 }

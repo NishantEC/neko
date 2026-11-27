@@ -1,7 +1,7 @@
 {
   "name": "review-undo",
-  "title": "Review, Undo and Redo of a run in a git workspace",
-  "about": "A run (the fake's edit script) edits README.md, adds src/retry/mod.rs and logo.png, deletes OLD.md and renames docs/guide.md in the task's worktree. Review shows exactly those; Undo puts the files back and leaves the person's checkout untouched; Redo brings the changes back; after an undo, a follow-up's words to the agent start with the line that says the files were undone.",
+  "title": "Review, Undo and Redo of a run in a git project",
+  "about": "A run (the fake's edit script) edits README.md, adds src/retry/mod.rs and logo.png, deletes OLD.md and renames docs/guide.md in the thread's worktree. Review shows exactly those; Undo puts the files back and leaves the person's checkout untouched; Redo brings the changes back; after an undo, a follow-up's words to the agent start with the line that says the files were undone.",
   "cli": [
     "fake"
   ],

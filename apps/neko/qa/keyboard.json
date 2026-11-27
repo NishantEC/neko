@@ -1,7 +1,7 @@
 {
   "name": "keyboard",
-  "title": "The first-task journey by keyboard only",
-  "about": "Tab moves through the window's controls with a focus ring at every stop; the task is typed and sent with Return; a second task is made with Command-N; the arrow keys move between tasks in the sidebar and Return opens one; Escape gives focus back.",
+  "title": "The first-thread journey by keyboard only",
+  "about": "Tab moves through the window's controls with a focus ring at every stop; the thread is typed and sent with Return; a second thread is made with Command-N; the arrow keys move between threads in the sidebar and Return opens one; Escape gives focus back.",
   "cli": [
     "fake"
   ],
@@ -28,12 +28,12 @@
           "name": "Worked for"
         }
       },
-      "expect": "Return sends it; the task opens and finishes"
+      "expect": "Return sends it; the thread opens and finishes"
     },
     {
       "do": "snap",
       "name": "first-done",
-      "expect": "The first task, sent by keyboard"
+      "expect": "The first thread, sent by keyboard"
     },
     {
       "do": "assert",
@@ -42,7 +42,7 @@
           "key": "reply-input"
         }
       },
-      "expect": "After sending, the keyboard is in the task's composer"
+      "expect": "After sending, the keyboard is in the thread's composer"
     },
     {
       "do": "key",
@@ -83,7 +83,7 @@
           }
         ]
       },
-      "expect": "The second task opens and finishes"
+      "expect": "The second thread opens and finishes"
     },
     {
       "do": "tab-to",
@@ -95,12 +95,12 @@
       },
       "back": true,
       "max": 25,
-      "expect": "Shift-Tab reaches the task list, with a ring at every stop"
+      "expect": "Shift-Tab reaches the thread list, with a ring at every stop"
     },
     {
       "do": "snap",
       "name": "list-focused",
-      "expect": "The task list has focus"
+      "expect": "The thread list has focus"
     },
     {
       "do": "key",
@@ -115,7 +115,7 @@
         }
       },
       "soft": true,
-      "expect": "Down moves to the other task"
+      "expect": "Down moves to the other thread"
     },
     {
       "do": "key",

@@ -63,7 +63,7 @@ pub fn model(sidebar: bool, full_screen: bool) -> Vec<Item> {
         Item { keys_first: false, ..item("neko-about", "About Neko", None, None) },
         // After About in the app menu, where Mac apps keep it.
         item("neko-settings", "Settings…", None, Some("cmd+,")),
-        item("neko-new-task", "New Task", Some("File"), Some("cmd+n")),
+        item("neko-new-task", "New Thread", Some("File"), Some("cmd+n")),
         Item { separator: true, ..item("neko-file-sep", "", Some("File"), None) },
         item("neko-close-window", "Close Window", Some("File"), Some("cmd+w")),
         item("neko-home", "Home", Some("View"), Some("cmd+1")),
@@ -232,7 +232,7 @@ mod tests {
         let lines: Vec<String> = model(true, false).iter().filter(|i| !i.separator).map(|i| format!("{} / {} / {}", i.menu.unwrap_or("Neko"), i.title, i.key.unwrap_or("-"))).collect();
         assert_eq!(
             lines,
-            ["Neko / About Neko / -", "Neko / Settings… / cmd+,", "File / New Task / cmd+n", "File / Close Window / cmd+w", "View / Home / cmd+1", "View / Needs You / cmd+2", "View / Rounds / cmd+3", "View / Briefing / cmd+4", "View / Hide Sidebar / ctrl+cmd+s", "View / Enter Full Screen / ctrl+cmd+f", "Help / Neko Help / -"]
+            ["Neko / About Neko / -", "Neko / Settings… / cmd+,", "File / New Thread / cmd+n", "File / Close Window / cmd+w", "View / Home / cmd+1", "View / Needs You / cmd+2", "View / Rounds / cmd+3", "View / Briefing / cmd+4", "View / Hide Sidebar / ctrl+cmd+s", "View / Enter Full Screen / ctrl+cmd+f", "Help / Neko Help / -"]
         );
         let folded = model(false, true);
         assert!(folded.iter().any(|i| i.title == "Show Sidebar") && folded.iter().any(|i| i.title == "Exit Full Screen"), "titles follow the window");

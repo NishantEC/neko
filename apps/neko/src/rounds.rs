@@ -170,7 +170,7 @@ pub fn why_not(r: &Round) -> Option<String> {
         RoundStatus::Paused => Some("Paused".to_owned()),
         RoundStatus::CatRetired => Some(r.note.clone().unwrap_or_else(|| "Its cat is retired".to_owned()).trim_end_matches('.').to_owned()),
         RoundStatus::FolderMissing => Some("Folder missing".to_owned()),
-        RoundStatus::WorkspaceRemoved => Some("Workspace removed".to_owned()),
+        RoundStatus::WorkspaceRemoved => Some("Project removed".to_owned()),
     }
 }
 
@@ -195,7 +195,7 @@ pub fn outcome(l: &RoundRun, task: Option<TaskStatus>) -> (&'static str, Option<
                 (Some(RunEnd::Failed), _) => "could not finish",
                 (Some(RunEnd::Stopped), _) => "stopped",
                 (Some(RunEnd::Interrupted), _) => "was interrupted",
-                (Some(RunEnd::Removed), _) => "its task was removed",
+                (Some(RunEnd::Removed), _) => "its thread was removed",
                 (None, Some(TaskStatus::NeedsYou | TaskStatus::Asked)) => "waiting for you",
                 (None, _) => "working",
             },
@@ -381,7 +381,7 @@ mod tests {
         assert_eq!(said(&started(Some(RunEnd::Asked)), None).0, "Last: asked a question, today at 09:00");
         assert_eq!(said(&started(Some(RunEnd::Stopped)), None).0, "Last: stopped, today at 09:00");
         assert_eq!(said(&started(Some(RunEnd::Interrupted)), None).0, "Last: was interrupted, today at 09:00");
-        assert_eq!(said(&started(Some(RunEnd::Removed)), None).0, "Last: its task was removed, today at 09:00");
+        assert_eq!(said(&started(Some(RunEnd::Removed)), None).0, "Last: its thread was removed, today at 09:00");
         assert_eq!(said(&started(None), Some(TaskStatus::Working)).0, "Last: working, today at 09:00");
         assert_eq!(said(&started(None), Some(TaskStatus::NeedsYou)).0, "Last: waiting for you, today at 09:00");
         let skipped = line(RunKind::Skipped, None, Some("The last run is still working."), Some(at(26, 13, 45)), at(26, 13, 45) + 400);

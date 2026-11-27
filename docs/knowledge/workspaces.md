@@ -1,5 +1,7 @@
 # Workspaces (2026-11-26)
 
+> The app now says **project** for what this page calls a workspace, and **No project** for General (`threads.md`). The protocol, the store and the code keep the old names.
+
 A workspace is a folder the person added, with a name. Tasks are made in one and listed under it in the sidebar.
 
 ## How other tools do it, and where Neko differs

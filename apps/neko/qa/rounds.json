@@ -1,7 +1,7 @@
 {
   "name": "rounds",
-  "title": "Rounds: make one, run it now, see where its task came from, switch it off, remove it",
-  "about": "New round… on the Rounds page, with mochi picked, makes a round (every 6 hours, in the acme-api workspace). Run now makes an ordinary task: it appears under acme-api, is mochi's, and says it came from the round. The round's history shows how it ended. Switching the round off is said on its card. Removing it asks first; its task stays.",
+  "title": "Rounds: make one, run it now, see where its thread came from, switch it off, remove it",
+  "about": "New round… on the Rounds page, with mochi picked, makes a round (every 6 hours, in the acme-api project). Run now makes an ordinary thread: it appears under acme-api, is mochi's, and says it came from the round. The round's history shows how it ended. Switching the round off is said on its card. Removing it asks first; its thread stays.",
   "cli": [
     "fake"
   ],
@@ -29,7 +29,7 @@
         }
       },
       "within": 15,
-      "expect": "acme-api is a workspace"
+      "expect": "acme-api is a project"
     },
     {
       "do": "key",
@@ -120,7 +120,7 @@
         }
       },
       "within": 15,
-      "expect": "The workspace menu opens"
+      "expect": "The project menu opens"
     },
     {
       "do": "click",
@@ -194,14 +194,14 @@
           },
           {
             "see": {
-              "key": "task-*",
+              "key": "thread-*",
               "label": "Docs check"
             }
           }
         ]
       },
       "within": 20,
-      "expect": "Run now made a task and it finished"
+      "expect": "Run now made a thread and it finished"
     },
     {
       "do": "snap",
@@ -250,12 +250,12 @@
         ]
       },
       "within": 15,
-      "expect": "The task is mochi's, in acme-api, and says where it came from"
+      "expect": "The thread is mochi's, in acme-api, and says where it came from"
     },
     {
       "do": "snap",
       "name": "task-from-round",
-      "expect": "The task says it is from the round Docs check"
+      "expect": "The thread says it is from the round Docs check"
     },
     {
       "do": "key",
@@ -356,7 +356,7 @@
     {
       "do": "snap",
       "name": "remove-asks",
-      "expect": "The panel says the tasks it made stay"
+      "expect": "The panel says the threads it made stay"
     },
     {
       "do": "click",
@@ -379,19 +379,19 @@
           },
           {
             "see": {
-              "key": "task-*",
+              "key": "thread-*",
               "label": "Docs check"
             }
           }
         ]
       },
       "within": 15,
-      "expect": "The round is gone and its task is still in the sidebar"
+      "expect": "The round is gone and its thread is still in the sidebar"
     },
     {
       "do": "snap",
       "name": "removed",
-      "expect": "No rounds; the task stays"
+      "expect": "No rounds; the thread stays"
     }
   ]
 }

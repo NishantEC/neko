@@ -1,13 +1,13 @@
-//! The sidebar (docs/knowledge/app-shell.md, docs/knowledge/design.md): an inset panel on the window's warm ground. New task, Home,
-//! Briefing, Needs you and Rounds; then the Cattains (the cats at work now, each with what it is doing; absent when none is); then
-//! each workspace as a section of its tasks, each task a two-line row led by its cat's portrait in its state; Add workspace….
+//! The sidebar (docs/knowledge/app-shell.md, docs/knowledge/design.md, docs/knowledge/threads.md): an inset panel on the window's warm
+//! ground. New thread, Needs you, Briefing and Rounds; then the Cattains (the cats at work now, each with what it is doing; absent
+//! when none is); then Threads, grouped by project (or in one list), each thread a two-line row led by its status mark; Add project….
 //!
-//! Every section and row is one list for the keys: Up and Down move through sections and rows, a typed name goes to it, Tab stops
-//! once (on the open task, else the first section). A section's own buttons are Tab stops of their own.
+//! Every group and row is one list for the keys: Up and Down move through groups and rows, a typed name goes to it, Tab stops
+//! once (on the open thread, else the first group). A group's own buttons are Tab stops of their own.
 
 use std::rc::Rc;
 
-use neko_protocol::{Need, NeedsItem, Task, TaskStatus, Workspace};
+use neko_protocol::{NeedsItem, Task, TaskStatus, Workspace};
 use rune::{Color, El, Key, KeyEvent, Shadow, col, el, row, text};
 use rune_ui_style::{ButtonVariant, tabular, weight};
 
@@ -19,33 +19,34 @@ use crate::ui::button::Button;
 use crate::ui::dropdown_menu::{DropdownMenu, DropdownMenuItem};
 use crate::ui::sidebar::SidebarItem;
 use crate::ui::tooltip::Tooltip;
-use crate::view::{BAND, SIDEBAR, lights_room, menu_named, raised, since, state_ink, status_mark, toggle_button};
+use crate::threads::{self, Grouping, Line};
+use crate::view::{BAND, SIDEBAR, lights_room, menu_named, raised, toggle_button};
 
 /// How far the panel sits in from the window's edges.
 pub const INSET: f32 = 8.0;
 /// The panel's corner radius: the window's own corner less the inset, so the two curves run parallel.
 const PANEL_RADIUS: f32 = 14.0;
-/// A task's or a cat's portrait in a row.
+/// A cat's portrait in a row (a Cattain's).
 const FACE: f32 = 28.0;
 
 /// The sidebar's one vertical rhythm, in steps of the theme's spacing unit (docs/knowledge/design.md, "Sidebar rhythm"). Every
-/// gap between stacked rows is `ROW_GAP`; a section's header is one control high and sits `ROW_GAP` over its own rows; sections
-/// are `SECTION_GAP` apart, and the groups (the nav, the workspaces with Add workspace…, the Cats) `GROUP_GAP` apart.
+/// gap between stacked rows is `ROW_GAP`; a group's header is one control high and sits `ROW_GAP` over its own rows; groups
+/// are `SECTION_GAP` apart, and the sections (the nav, the Cattains, Threads with Add project…) `GROUP_GAP` apart.
 pub const ROW_GAP_STEPS: f32 = 0.5;
 pub const SECTION_GAP_STEPS: f32 = 3.0;
 pub const GROUP_GAP_STEPS: f32 = 5.0;
 
-/// A one-line row's height (nav rows, Add workspace…, New cat…, Show more).
+/// A one-line row's height (nav rows, Add project…, Show more).
 pub fn row_1(t: &Theme) -> f32 {
     t.metrics.row
 }
 
-/// A two-line row's height (a task, a cat): the one-line row and one more step either side.
+/// A two-line row's height (a thread, a Cattain): the one-line row and one more step either side.
 pub fn row_2(t: &Theme) -> f32 {
     t.metrics.row + t.space.at(4.0)
 }
 
-/// A section header's height: a control high, because its New task and menu buttons are.
+/// A section header's height: a control high, because its buttons are.
 pub fn header(t: &Theme) -> f32 {
     t.control.sm
 }
@@ -69,21 +70,14 @@ pub fn panel(t: &Theme, inner: El) -> El {
     col().w(SIDEBAR + 2.0 * INSET).h_full().padding(INSET).child(p.clip_rounded(PANEL_RADIUS))
 }
 
+
 pub fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     // The panel starts INSET down and in: its band is twice that shorter, so the lights stay on the window's centre line.
     let band = row().key("sidebar-band").w_full().h(BAND - 2.0 * INSET).center_y().pr(INSET).window_drag().child(lights_room((lights - INSET).max(0.0))).child(row().grow(1.0).h_full()).child(toggle_button(t, true));
-    // A sidebar row that acts: the same alignment as Home and the tasks, as Mail's and Notes' sidebars have.
-    let new = SidebarItem::new("new-task", "New task").icon(&icons::COMPOSE).button(true).on_press(|s: &mut App| s.new_task_here()).build(t);
-    let new = Tooltip::new("New task").keys("⌘N").wrap(new);
-    let home = SidebarItem::new("home", "Home").icon(&crate::ui::icons::HOME).selected(s.open.is_none() && !s.settings_open && !s.needs_open && !s.rounds_open && !s.briefing_open && s.open_cat.is_none()).on_press(|s: &mut App| s.go_home()).build(t);
-    let home = Tooltip::new("Home").keys("⌘1").wrap(home);
-    // What happened while the person was away: when there is news the row says it in words (Needs you keeps the count).
-    let news = s.briefing_news();
-    let mut briefing = SidebarItem::new("briefing", "Briefing").icon(&icons::BRIEFING).selected(s.briefing_open).on_press(|s: &mut App| s.open_briefing());
-    if let Some(c) = &news {
-        briefing = briefing.description(c.headline());
-    }
-    let briefing = Tooltip::new("Briefing").keys("⌘4").wrap(briefing.build(t));
+    // New thread is where the person starts: the row is selected while its composer (Home, until it is its own page) is what shows.
+    let at_home = s.open.is_none() && !s.settings_open && !s.needs_open && !s.rounds_open && !s.briefing_open && s.open_cat.is_none();
+    let new = SidebarItem::new("new-thread", "New thread").icon(&icons::COMPOSE).selected(at_home).on_press(|s: &mut App| s.new_task_here()).build(t);
+    let new = Tooltip::new("New thread").keys("⌘N").wrap(new);
     // Everything waiting for the person, with how many (the same count as the Dock's).
     let n = s.visible_needs().len();
     let mut needs = SidebarItem::new("needs-you", "Needs you").icon(&crate::ui::icons::INBOX).selected(s.needs_open).on_press(|s: &mut App| s.open_needs());
@@ -93,6 +87,13 @@ pub fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     }
     let needs = needs.build(t);
     let needs = Tooltip::new("Needs you").keys("⌘2").wrap(needs);
+    // What happened while the person was away: when there is news the row says it in words (Needs you keeps the count).
+    let news = s.briefing_news();
+    let mut briefing = SidebarItem::new("briefing", "Briefing").icon(&icons::BRIEFING).selected(s.briefing_open).on_press(|s: &mut App| s.open_briefing());
+    if let Some(c) = &news {
+        briefing = briefing.description(c.headline());
+    }
+    let briefing = Tooltip::new("Briefing").keys("⌘4").wrap(briefing.build(t));
     // Work that starts by itself: with how many rounds there are, or that every one is paused.
     let rounds_n = s.rounds.len();
     let mut rounds = SidebarItem::new("rounds", "Rounds").icon(&icons::ROUNDS).selected(s.rounds_open).on_press(|s: &mut App| s.open_rounds());
@@ -103,32 +104,23 @@ pub fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     }
     let rounds = Tooltip::new("Rounds").keys("⌘3").wrap(rounds.build(t));
     let row_gap = t.space.at(ROW_GAP_STEPS);
-    let nav = col().key("nav").w_full().gap(row_gap).child(new).child(home).child(briefing).child(needs).child(rounds);
-    let mut sections = col().key("workspaces").role("list").label("Workspaces").w_full().gap(t.space.at(SECTION_GAP_STEPS)).focus_group();
-    for w in s.sections() {
-        sections = sections.child(section(s, t, &w, layer));
-    }
-    let add: PressTx<App> = Rc::new(|s: &mut App, tx: &mut rune::Tx| crate::pick_folder(s, Pick::Add { select: false }, tx));
-    let add = SidebarItem::<App>::new("add-workspace", "Add workspace…").icon(&icons::FOLDER_PLUS).button(true).build(t).on_press_tx(move |s: &mut App, tx: &mut rune::Tx| add(s, tx));
-    // The workspaces and Add workspace… are one group: the button sits a row gap under the list, as a row sits under a row.
-    let workspaces = col().key("workspace-group").w_full().pt(t.space.at(GROUP_GAP_STEPS)).gap(row_gap).child(sections).child(add);
-    // The Cattains (the cats at work) sit under the nav, above the workspaces, as Capy puts its Captains; with none at work there is
-    // no section at all.
+    let nav = col().key("nav").w_full().gap(row_gap).child(new).child(needs).child(briefing).child(rounds);
+    // The Cattains (the cats at work) sit under the nav, above the threads; with none at work there is no section at all.
     let mut body = col().w_full().px(t.space.at(2.0)).child(nav);
-    if let Some(c) = cattains(s, t) {
+    if let Some(c) = cattains(s, t, layer) {
         body = body.child(c);
     }
-    let body = body.child(workspaces);
+    let body = body.child(threads_section(s, t, layer));
     let list = col().key("sidebar-scroll").w_full().grow(1.0).min_h(0.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(body.pb(t.space.at(4.0)));
     let mut column = col().key("sidebar").role("navigation").label("Sidebar").w_full().h_full().child(band).child(list);
-    // No money at the foot: what runs cost is in the task's context ring, for whoever opens it.
+    // No money at the foot: what runs cost is in the thread's context ring, for whoever opens it.
     if let Some(line) = connection_line(s, t) {
         column = column.child(row().w_full().px(t.space.at(4.0)).py(t.space.at(3.0)).child(line));
     }
     column
 }
 
-/// The amber count of things waiting: on Needs you, and on a section with something waiting in it.
+/// The amber count of things waiting: on Needs you, and on a group with something waiting in it.
 fn pill(t: &Theme, key: &str, n: usize) -> El {
     row().h(18.0).min_w(18.0).px(t.space.at(1.5)).radius(9.0).center().fill(t.c.warning.bg).child(text(n.to_string()).key(key.to_owned()).font(tabular(weight(t.ty.xs, t.ty.semibold))).color(t.c.warning.fg).a11y_hidden())
 }
@@ -138,14 +130,14 @@ fn under(t: &Theme, selected: bool) -> Color {
     if selected { crate::view::raised_fill(t) } else { panel_bg(t) }
 }
 
-/// A two-line sidebar row: a portrait in its state, a title and a line under it, selected as a raised pebble. The same words and
-/// keys as rune-ui's SidebarItem in a list: an option, its place in the list, its state as the description, Return presses it.
-/// Kept here, not a `SidebarItem` with `.image` and `.subtitle`: that second line is plain words, and this one is parts in their own
-/// inks (the state word in its colour, the round's mark before it). Upstream ask: a second line given as an element.
+/// A row's frame: an option in a list with its place in it, selected as a raised pebble, Return presses it, the row material gives
+/// hover and the focus ring. The same words and keys as rune-ui's SidebarItem in a list. Kept here, not a `SidebarItem` with `.image`
+/// and `.subtitle`: its second line is plain words, and these are parts in their own inks (the state word in its colour). Upstream ask:
+/// a second line given as an element.
 #[allow(clippy::too_many_arguments)]
-fn face_row(t: &Theme, key: String, title: &str, description: String, face: &str, st: Option<TaskStatus>, meta: El, i: usize, n: usize, selected: bool, indent: f32) -> El {
+fn row_frame(t: &Theme, key: String, title: &str, description: String, i: usize, n: usize, selected: bool, indent: f32) -> El {
     let mut r = row()
-        .key(key.clone())
+        .key(key)
         .role("option")
         .label(title.to_owned())
         .help(title.to_owned())
@@ -160,11 +152,18 @@ fn face_row(t: &Theme, key: String, title: &str, description: String, face: &str
         .gap(t.space.at(2.0))
         .center_y()
         .radius(t.radius.lg)
-        .round_as(t);
-    // A nested row (a cat's task under the cat) steps in: the same row, narrower, so its pebble and its hit area start further in.
+        .round_as(t)
+        .hover_group();
+    // A nested row (a Cattain's thread under the Cattain) steps in: the same row, narrower, so its pebble and its hit area start further in.
     r = if indent > 0.0 { r.ml(indent).w(SIDEBAR - 2.0 * t.space.at(2.0) - indent) } else { r.w_full() };
     // The row material gives hover and the focus ring in both states; the open row is raised under it.
-    r = paint_state(if selected { raised(t, r) } else { r }, &t.mat.row, States::default());
+    paint_state(if selected { raised(t, r) } else { r }, &t.mat.row, States::default())
+}
+
+/// A Cattain's row: its portrait in its state, its name and a line under it, selected as a raised pebble.
+#[allow(clippy::too_many_arguments)]
+fn face_row(t: &Theme, key: String, title: &str, description: String, face: &str, st: Option<TaskStatus>, meta: El, i: usize, n: usize, selected: bool) -> El {
+    let r = row_frame(t, key.clone(), title, description, i, n, selected, 0.0);
     let words = col()
         .grow(1.0)
         .min_w(0.0)
@@ -187,47 +186,94 @@ fn meta_line(t: &Theme, parts: Vec<(String, Color, bool)>) -> El {
     m
 }
 
-/// A task's row: its cat's portrait in its state, the title, and "miso · working · 12 min".
-pub fn task_row(s: &App, t: &Theme, task: &Task, i: usize, n: usize, open: bool) -> El {
-    task_row_in(s, t, task, i, n, open, "task", 0.0)
-}
+/// The width of a thread row's right side: the age, and under the pointer its menu.
+const RIGHT_AGE: f32 = 30.0;
+/// And of "Working".
+const RIGHT_WORKING: f32 = 46.0;
 
-/// A task's row under `prefix` (its key is `<prefix>-<id>`: a task shows in its workspace and, while its cat has several at work,
-/// under the cat), stepped in by `indent`.
+/// A thread's row (spec: two lines, 52 points): its status mark; the title, semibold while there is activity the person has not
+/// seen, and at the right the age or "Working" (the thread's menu under the pointer); under the title the first line that applies
+/// ([`threads::second_line`]). `project` is the project's name on the second line's right, when the section is not grouped.
 #[allow(clippy::too_many_arguments)]
-fn task_row_in(s: &App, t: &Theme, task: &Task, i: usize, n: usize, open: bool, prefix: &str, indent: f32) -> El {
-    let (_, word) = status_mark(task.status);
-    let name = s.cat_name(task);
-    let ink = state_ink(t, task.status);
-    let meta = meta_line(
-        t,
-        vec![(name.clone(), t.ink_muted(), true), (word.to_lowercase(), ink.unwrap_or(t.ink_faint()), ink.is_some()), (since(s, task.created_ms), t.ink_faint(), false)],
-    );
+pub fn thread_row(s: &App, t: &Theme, task: &Task, i: usize, n: usize, open: bool, prefix: &str, indent: f32, project: Option<&str>, layer: &mut Vec<El>) -> El {
+    let key = format!("{prefix}-{}", task.id.0);
+    let need = s.visible_needs().into_iter().find(|x| x.task == task.id);
+    let line = threads::second_line(task, need);
+    let state = threads::state_words(task);
+    let age = threads::age(s.now_ms, s.utc_offset_s, task.activity_ms.max(task.created_ms));
+    let working = task.thread_status == neko_protocol::ThreadStatus::Working;
+    let description = format!("{}{}{}", if state.is_empty() { String::new() } else { format!("{state}. ") }, line.spoken(), if project.is_some_and(|p| !p.is_empty()) { format!(", in {}", project.unwrap_or_default()) } else { String::new() });
     let tid = task.id.clone();
-    // A task a round made carries a small round mark before its line.
-    let (meta, from) = if task.round.is_some() {
-        (row().gap(t.space.at(1.0)).center_y().min_w(0.0).child(glyph(&icons::ROUNDS, 11.0, t.ink_faint()).a11y_hidden()).child(meta), ", from a round")
+    let r = row_frame(t, key.clone(), &task.title, format!("{description}, {}", if working { "working".to_owned() } else { age.clone() }), i, n, open, indent);
+    let unread = task.unread();
+    let title = text(task.title.clone()).font(weight(t.ty.base, if unread { t.ty.semibold } else { t.ty.regular })).color(t.ink()).truncate().grow(1.0).min_w(0.0).a11y_hidden();
+    // The right side: the age (or "Working" in teal), and the menu in its place while the pointer is over the row or the menu is open.
+    let menu_open = s.menu_open.as_deref() == Some(format!("thread-menu-{}", task.id.0).as_str());
+    let said = if working {
+        text("Working").font(weight(t.ty.xs, t.ty.medium)).color(crate::status_mark::ink(t, crate::status_mark::Mark::Working, under(t, open)).unwrap_or(t.c.accent.fg)).a11y_hidden()
     } else {
-        (meta, "")
+        text(age).font(tabular(t.ty.xs)).color(t.ink_faint()).a11y_hidden()
     };
-    face_row(t, format!("{prefix}-{}", task.id.0), &task.title, format!("{name}, {}{from}", word.to_lowercase()), s.cat_face(&task.cat), Some(task.status), meta, i, n, open, indent).on_press(move |s: &mut App| s.open_task_id(&tid))
-}
-
-/// What a cat's request says, short: "Run a command", "a question", "could not go on".
-fn need_words(n: &Need) -> String {
-    match n {
-        Need::Permission { permission } => permission.title.clone(),
-        Need::Question { .. } => "a question".to_owned(),
-        Need::Failure { .. } => "could not go on".to_owned(),
-        Need::Plugin { .. } => "a plugin".to_owned(),
+    let slot_h = row_2(t) / 2.0;
+    let right_w = if working { RIGHT_WORKING } else { RIGHT_AGE };
+    let mut said = row().absolute(0.0, 0.0).size(right_w, slot_h).justify_end().center_y().child(said);
+    let mut menu = row().absolute(0.0, 0.0).size(right_w, slot_h).justify_end().center_y().child(thread_menu(s, t, task, layer));
+    if menu_open {
+        said = said.opacity(0.0);
+    } else {
+        said = said.group_opacity(1.0, 0.0);
+        menu = menu.group_opacity(0.0, 1.0);
     }
+    let right = el().size(right_w, slot_h).child(said).child(menu);
+    let first = row().w_full().gap(t.space.at(1.0)).center_y().child(title).child(right);
+    let mut second = row().w_full().gap(t.space.at(1.5)).min_w(0.0);
+    let ink = match &line {
+        Line::NeedsYou(_) => t.c.warning.fg,
+        Line::Failed(_) => t.c.danger.fg,
+        Line::Quiet(_) => t.ink_muted(),
+    };
+    let said_line = line.spoken();
+    second = second.child(text(said_line).font(tabular(t.ty.xs)).color(ink).truncate().min_w(0.0).grow(1.0).a11y_hidden());
+    if let Some(p) = project.filter(|p| !p.is_empty()) {
+        second = second.child(text(p.to_owned()).font(t.ty.xs).color(t.ink_faint()).truncate().max_w(88.0).a11y_hidden());
+    }
+    let words = col().grow(1.0).min_w(0.0).gap(1.0).child(first).child(second);
+    let mark = crate::status_mark::status_mark(t, &format!("{key}-mark"), task, under(t, open));
+    r.child(mark).child(words).on_press(move |s: &mut App| s.open_task_id(&tid))
 }
 
-/// The Cattains: only the cats at work now (a task working, a request or a question waiting for the person). Each is a two-line
-/// row, its portrait in its state, its name and one line of what it is doing: the working task's title, "needs you: Run a
-/// command", or "working on 2" with its tasks nested under it. A napping cat is not here; cats are made and edited in
+/// A thread's menu: Mark as unread (or read), Remove thread…. Shown on hover; the keys reach the same through the band's menu.
+fn thread_menu(s: &App, t: &Theme, task: &Task, layer: &mut Vec<El>) -> El {
+    let key = format!("thread-menu-{}", task.id.0);
+    let open = s.menu_open.as_deref() == Some(key.as_str());
+    let k = key.clone();
+    let name = format!("Options for {}", task.title);
+    // Pointer only: the list is one Tab stop and its rows are reached by the arrows; the same actions are in the band's menu.
+    let mut trigger = row().key(format!("{key}-button")).role("button").label(name.clone()).help("Thread options".to_owned()).focusable(false).size(24.0, 20.0).center().radius(t.radius.md).round_as(t).child(glyph(&crate::ui::icons::MORE, t.control.icon, t.ink_muted()));
+    trigger = paint_state(trigger, &t.mat.ghost, States::default()).on_press(move |s: &mut App| s.menu_open = if s.menu_open.as_deref() == Some(k.as_str()) { None } else { Some(k.clone()) }).expanded(open);
+    let (a, b) = (task.id.clone(), task.id.clone());
+    let unread = task.unread();
+    let menu = DropdownMenu::new(key)
+        .trigger(trigger)
+        .open(open)
+        .min_width(190.0)
+        .on_close(|s: &mut App| s.menu_open = None)
+        .item(if unread {
+            DropdownMenuItem::new("Mark as read").on_select(move |s: &mut App| s.mark_read(&a))
+        } else {
+            // The thread in view is read as soon as anything arrives, so it cannot be left unread.
+            DropdownMenuItem::new("Mark as unread").disabled(s.open.as_ref() == Some(&task.id)).on_select(move |s: &mut App| s.mark_unread(&a))
+        })
+        .separator()
+        .danger_item(DropdownMenuItem::new("Remove thread…").disabled(task.thread_status == neko_protocol::ThreadStatus::Working).on_select(move |s: &mut App| s.ask_remove_task(&b)));
+    menu_named(menu, t, layer, &name, open)
+}
+
+/// The Cattains: only the cats at work now (a thread working, a request or a question waiting for the person). Each is a two-line
+/// row, its portrait in its state, its name and one line of what it is doing: the working thread's title, "needs you: Run a
+/// command", or "working on 2" with its threads nested under it. A napping cat is not here; cats are made and edited in
 /// Settings > Cats. With no cat at work the section is absent.
-fn cattains(s: &App, t: &Theme) -> Option<El> {
+fn cattains(s: &App, t: &Theme, layer: &mut Vec<El>) -> Option<El> {
     let at_work: Vec<&neko_protocol::Cat> = s.active_cats().into_iter().filter(|c| s.cat_state(&c.id) != CatState::Napping).collect();
     if at_work.is_empty() {
         return None;
@@ -238,7 +284,7 @@ fn cattains(s: &App, t: &Theme) -> Option<El> {
         let tasks = s.cat_work(&c.id);
         let needs: Vec<&NeedsItem> = s.visible_needs().into_iter().filter(|i| i.cat == c.id).collect();
         let (st, ink, said, line) = if let Some(first) = needs.first() {
-            let line = if tasks.len() >= 2 { format!("needs you · {} tasks", tasks.len()) } else { format!("needs you: {}", need_words(&first.need)) };
+            let line = if tasks.len() >= 2 { format!("needs you · {} threads", tasks.len()) } else { format!("needs you: {}", threads::need_words(&first.need)) };
             (TaskStatus::NeedsYou, t.c.warning.fg, line.clone(), line)
         } else if tasks.len() >= 2 {
             let line = format!("working on {}", tasks.len());
@@ -252,12 +298,12 @@ fn cattains(s: &App, t: &Theme) -> Option<El> {
         let n = 1 + if tasks.len() >= 2 { tasks.len() } else { 0 };
         let strong = ink != t.ink_muted();
         let meta = meta_line(t, vec![(line, ink, strong)]);
-        // One list per cat: the cat, then (when it has several) its tasks as options of the same list, in the order they are drawn.
+        // One list per cat: the cat, then (when it has several) its threads as options of the same list, in the order they are drawn.
         let mut crew = col().key(format!("cattain-{}", c.id)).role("listbox").label(c.name.clone()).w_full().gap(t.space.at(ROW_GAP_STEPS));
-        crew = crew.child(face_row(t, format!("cat-{}", c.id), &c.name, said, &c.face, Some(st), meta, 0, n, open, 0.0).on_press(move |s: &mut App| s.open_cat_page(&id)));
+        crew = crew.child(face_row(t, format!("cat-{}", c.id), &c.name, said, &c.face, Some(st), meta, 0, n, open).on_press(move |s: &mut App| s.open_cat_page(&id)));
         if tasks.len() >= 2 {
             for (i, task) in tasks.iter().enumerate() {
-                crew = crew.child(task_row_in(s, t, task, i + 1, n, s.open.as_ref() == Some(&task.id), "cattain-task", t.space.at(3.0)));
+                crew = crew.child(thread_row(s, t, task, i + 1, n, s.open.as_ref() == Some(&task.id), "cattain-thread", t.space.at(3.0), None, layer));
             }
         }
         list = list.child(crew);
@@ -265,12 +311,118 @@ fn cattains(s: &App, t: &Theme) -> Option<El> {
     Some(col().key("cattains-section").role("group").label("Cattains").w_full().gap(t.space.at(ROW_GAP_STEPS)).pt(t.space.at(GROUP_GAP_STEPS)).child(head).child(list))
 }
 
-/// What a section's header says about its workspace, after its name.
-fn section_state(s: &App, w: &Workspace) -> String {
+/// Threads: a header with View and New thread, then the threads in groups (a project's, or the one list), then Add project….
+fn threads_section(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
+    let view = view_menu(s, t, layer);
+    let new: PressTx<App> = Rc::new(|s: &mut App, _: &mut rune::Tx| s.new_task_here());
+    let new = icon_button(t, "threads-new", "New thread", &crate::ui::icons::PLUS, None, false, Some(new));
+    let head = row()
+        .key("threads-head")
+        .w_full()
+        .h(header(t))
+        .pl(t.metrics.gap)
+        .pr(t.space.at(1.0))
+        .gap(t.space.at(0.5))
+        .center_y()
+        .child(text("Threads").key("threads-heading").role("heading").level(2).font(weight(t.ty.sm, t.ty.semibold)).color(t.ink_muted()).grow(1.0))
+        .child(view)
+        .child(new);
+    let row_gap = t.space.at(ROW_GAP_STEPS);
+    let loaded = s.tasks_loaded || s.daemon == Daemon::Absent;
+    let none_at_all = s.tasks.is_empty() && loaded;
+    let mut groups = col().key("workspaces").role("list").label("Threads").w_full().gap(t.space.at(SECTION_GAP_STEPS)).focus_group();
+    match s.grouping {
+        Grouping::Project => {
+            for g in s.thread_groups() {
+                // With no thread anywhere, No project is not listed (an empty group says nothing); the projects the person added are.
+                if none_at_all && g.workspace.is_none_or(|w| w.is_general()) {
+                    continue;
+                }
+                groups = groups.child(group(s, t, &g, layer));
+            }
+        }
+        Grouping::None => {
+            let all = s.thread_groups().into_iter().next();
+            if let Some(g) = all.filter(|g| !g.threads.is_empty()) {
+                groups = groups.child(ungrouped(s, t, &g, layer));
+            }
+        }
+    }
+    let mut section = col().key("threads-section").role("group").label("Threads").w_full().gap(row_gap).pt(t.space.at(GROUP_GAP_STEPS)).child(head);
+    if none_at_all {
+        section = section.child(row().key("threads-none").h(row_1(t)).pl(t.metrics.gap).center_y().child(text("Threads you start appear here").font(t.ty.sm).color(t.ink_faint())));
+    } else if !loaded {
+        section = section.child(row().key("threads-none").h(row_1(t)).pl(t.metrics.gap).center_y().child(text("Loading…").font(t.ty.sm).color(t.ink_faint())));
+    }
+    section = section.child(groups);
+    let add: PressTx<App> = Rc::new(|s: &mut App, tx: &mut rune::Tx| crate::pick_folder(s, Pick::Add { select: false }, tx));
+    let add = SidebarItem::<App>::new("add-project", "Add project…").icon(&icons::FOLDER_PLUS).button(true).build(t).on_press_tx(move |s: &mut App, tx: &mut rune::Tx| add(s, tx));
+    // The groups and Add project… are one run: the button sits a row gap under the list, as a row sits under a row.
+    section.child(add)
+}
+
+/// View (the three lines at the Threads header's right): Group by project or no grouping.
+fn view_menu(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
+    let open = s.menu_open.as_deref() == Some("threads-view");
+    let face: PressTx<App> = Rc::new(|s: &mut App, _: &mut rune::Tx| s.menu_open = if s.menu_open.as_deref() == Some("threads-view") { None } else { Some("threads-view".into()) });
+    let trigger = icon_button(t, "threads-view-button", "View", &icons::LIST, None, false, Some(face)).expanded(open);
+    let menu = DropdownMenu::new("threads-view")
+        .trigger(trigger)
+        .open(open)
+        .min_width(200.0)
+        .on_close(|s: &mut App| s.menu_open = None)
+        .label("Group by")
+        .item(DropdownMenuItem::new("Project").checked(s.grouping == Grouping::Project).on_select(|s: &mut App| s.set_grouping(Grouping::Project)))
+        .item(DropdownMenuItem::new("None").checked(s.grouping == Grouping::None).on_select(|s: &mut App| s.set_grouping(Grouping::None)));
+    menu_named(menu, t, layer, "View", open)
+}
+
+/// The rows of a group (or of the one list), after eight "Show more".
+fn rows(s: &App, t: &Theme, g: &threads::Group<'_>, key: &str, name: &str, project: bool, layer: &mut Vec<El>) -> (El, Option<El>) {
+    let all = s.show_all.contains(&g.id) || g.threads.len() <= SECTION_ROWS + 1;
+    let shown: Vec<&&Task> = if all { g.threads.iter().collect() } else { g.threads.iter().take(SECTION_ROWS).collect() };
+    let mut list = col().key(format!("{key}-list")).role("listbox").label(name.to_owned()).w_full().gap(t.space.at(ROW_GAP_STEPS));
+    let n = shown.len();
+    for (i, task) in shown.into_iter().enumerate() {
+        let from = if project { None } else { Some(s.workspace_of(&task.workspace).map_or_else(String::new, |w| s.project_name(w))) };
+        list = list.child(thread_row(s, t, task, i, n, s.open.as_ref() == Some(&task.id), "thread", 0.0, from.as_deref(), layer));
+    }
+    let more = if g.threads.len() > SECTION_ROWS + 1 {
+        let id = g.id.clone();
+        let words = if all { "Show fewer".to_owned() } else { format!("Show {} more", g.threads.len() - SECTION_ROWS) };
+        Some(
+            SidebarItem::new(format!("{key}-more"), words)
+                .icon(if all { &crate::ui::icons::CHEVRON_UP } else { &crate::ui::icons::CHEVRON_DOWN })
+                .on_press(move |s: &mut App| {
+                    if !s.show_all.remove(&id) {
+                        s.show_all.insert(id.clone());
+                    }
+                })
+                .button(true)
+                .build(t),
+        )
+    } else {
+        None
+    };
+    (list, more)
+}
+
+/// The one list when the threads are not grouped: by last activity, each row naming its project.
+fn ungrouped(s: &App, t: &Theme, g: &threads::Group<'_>, layer: &mut Vec<El>) -> El {
+    let (list, more) = rows(s, t, g, "all", "Threads", false, layer);
+    let mut sec = col().key("all-section").role("group").label("Threads").w_full().gap(t.space.at(ROW_GAP_STEPS)).child(list);
+    if let Some(m) = more {
+        sec = sec.child(m);
+    }
+    sec
+}
+
+/// What a group's header says about its project, after its name.
+fn group_state(s: &App, w: &Workspace) -> String {
     let busy = s.needs_in(&w.id);
     let mut parts = Vec::new();
     if !w.is_active() {
-        parts.push("Earlier, removed workspace".to_owned());
+        parts.push("Earlier, removed project".to_owned());
     } else if w.missing {
         parts.push("Folder not found".to_owned());
     }
@@ -280,9 +432,17 @@ fn section_state(s: &App, w: &Workspace) -> String {
     parts.join(", ")
 }
 
-/// One workspace: its header (fold, name, an amber count when something waits; New task and its menu on hover or focus), what is
-/// wrong with it, and its tasks, newest first, with "Show more" after eight.
-fn section(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
+/// One project: its header (fold, name, an amber count when something waits; New thread and its menu on hover or focus), what is
+/// wrong with it, and its threads (those that need the person first, then by last activity) with "Show more" after eight.
+fn group(s: &App, t: &Theme, g: &threads::Group<'_>, layer: &mut Vec<El>) -> El {
+    let fallback;
+    let w = match g.workspace {
+        Some(w) => w,
+        None => {
+            fallback = Workspace { id: g.id.clone(), name: g.name.clone(), folder: None, created_ms: 0, removed_ms: None, position: 0, missing: false };
+            &fallback
+        }
+    };
     let id = w.id.clone();
     let folded = s.folded.contains(&w.id);
     let busy = s.needs_in(&w.id);
@@ -291,7 +451,7 @@ fn section(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
     let mut head = row()
         .key(key.clone())
         .role("button")
-        .label(w.name.clone())
+        .label(g.name.clone())
         .expanded(!folded)
         .focusable(true)
         .w_full()
@@ -303,7 +463,7 @@ fn section(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
         .radius(t.radius.md)
         .round_as(t)
         .hover_group();
-    let said = section_state(s, w);
+    let said = group_state(s, w);
     if !said.is_empty() {
         head = head.description(said);
     }
@@ -313,25 +473,25 @@ fn section(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
     label.hover = Delta::new();
     label.pressed = Delta::new();
     head = paint_state(head, &label, States::default());
-    head = head.child(chevron).child(text(w.name.clone()).font(weight(t.ty.sm, t.ty.semibold)).color(if w.is_active() { t.ink_muted() } else { t.ink_faint() }).grow(1.0).truncate().min_w(0.0).a11y_hidden());
+    head = head.child(chevron).child(text(g.name.clone()).font(weight(t.ty.sm, t.ty.medium)).color(if w.is_active() { t.ink_muted() } else { t.ink_faint() }).grow(1.0).truncate().min_w(0.0).a11y_hidden());
     if w.is_active() {
         let here = id.clone();
         let new: PressTx<App> = Rc::new(move |s: &mut App, _: &mut rune::Tx| s.new_task_in(&here));
-        let new = icon_button(t, &format!("{key}-new"), &format!("New task in {}", w.name), &crate::ui::icons::PLUS, None, w.missing, Some(new)).group_opacity(0.0, 1.0);
+        let new = icon_button(t, &format!("{key}-new"), &format!("New thread in {}", g.name), &crate::ui::icons::PLUS, None, w.missing, Some(new)).group_opacity(0.0, 1.0);
         head = head.child(new);
         if w.is_general() {
             // Room where the others have their menu, so every count lines up at the right.
             head = head.child(el().w(t.control.sm).h(t.control.sm));
         } else {
-            head = head.child(workspace_menu(s, t, w, layer));
+            head = head.child(project_menu(s, t, w, layer));
         }
     }
-    // The count sits last, at the same place in every section, and only when something waits.
+    // The count sits last, at the same place in every group, and only when something waits.
     head = head.child(row().w(t.space.at(6.0)).justify_end().child(if busy > 0 { pill(t, &format!("{key}-count"), busy) } else { el().key(format!("{key}-count")) }));
     let toggle = id.clone();
     let keys = id.clone();
-    head = head.on_press(move |s: &mut App| s.toggle_fold(&toggle)).on_key(move |s: &mut App, ev: &KeyEvent, _| section_key(s, &keys, ev));
-    let mut sec = col().key(format!("{key}-section")).role("group").label(w.name.clone()).w_full().gap(t.space.at(ROW_GAP_STEPS)).child(head);
+    head = head.on_press(move |s: &mut App| s.toggle_fold(&toggle)).on_key(move |s: &mut App, ev: &KeyEvent, _| group_key(s, &keys, ev));
+    let mut sec = col().key(format!("{key}-section")).role("group").label(g.name.clone()).w_full().gap(t.space.at(ROW_GAP_STEPS)).child(head);
     let indent = t.metrics.gap + t.control.icon_sm + t.space.at(1.5);
     if w.is_active() && w.missing {
         let here = id.clone();
@@ -361,45 +521,27 @@ fn section(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
         sec = sec.child(line);
     }
     if !w.is_active() {
-        sec = sec.child(row().key(format!("{key}-removed")).w_full().pl(indent).h(t.control.sm).center_y().child(text("Earlier, removed workspace").font(t.ty.sm).color(t.ink_faint()).truncate().min_w(0.0)));
+        sec = sec.child(row().key(format!("{key}-removed")).w_full().pl(indent).h(t.control.sm).center_y().child(text("Earlier, removed project").font(t.ty.sm).color(t.ink_faint()).truncate().min_w(0.0)));
     }
     if folded {
         return sec;
     }
-    let tasks = s.tasks_in(&w.id);
-    if tasks.is_empty() {
-        // Before the daemon's list arrives: a quiet placeholder, not "No tasks yet".
+    if g.threads.is_empty() {
+        // Before the daemon's list arrives: a quiet placeholder, not "No threads yet".
         let waiting = s.daemon != Daemon::Absent && !s.tasks_loaded;
-        let none = text(if waiting { "Loading…" } else { "No tasks yet" }).key(format!("{key}-none")).font(t.ty.sm).color(t.ink_faint());
+        let none = text(if waiting { "Loading…" } else { "No threads yet" }).key(format!("{key}-none")).font(t.ty.sm).color(t.ink_faint());
         return sec.child(row().h(row_1(t)).pl(indent).center_y().child(none));
     }
-    let all = s.show_all.contains(&w.id) || tasks.len() <= SECTION_ROWS + 1;
-    let shown: Vec<&&Task> = if all { tasks.iter().collect() } else { tasks.iter().take(SECTION_ROWS).collect() };
-    let mut list = col().key(format!("{key}-list")).role("listbox").label(format!("Tasks in {}", w.name)).w_full().gap(t.space.at(ROW_GAP_STEPS));
-    let n = shown.len();
-    for (i, task) in shown.into_iter().enumerate() {
-        list = list.child(task_row(s, t, task, i, n, s.open.as_ref() == Some(&task.id)));
-    }
+    let (list, more) = rows(s, t, g, &key, &format!("Threads in {}", g.name), true, layer);
     sec = sec.child(list);
-    if tasks.len() > SECTION_ROWS + 1 {
-        let more = id.clone();
-        let words = if all { "Show fewer".to_owned() } else { format!("Show {} more", tasks.len() - SECTION_ROWS) };
-        let toggle_more = SidebarItem::new(format!("{key}-more"), words)
-            .icon(if all { &crate::ui::icons::CHEVRON_UP } else { &crate::ui::icons::CHEVRON_DOWN })
-            .on_press(move |s: &mut App| {
-                if !s.show_all.remove(&more) {
-                    s.show_all.insert(more.clone());
-                }
-            })
-            .button(true)
-            .build(t);
-        sec = sec.child(toggle_more);
+    if let Some(m) = more {
+        sec = sec.child(m);
     }
     sec
 }
 
-/// Keys on a section's header: Left folds it, Right opens it, ⌥⌘↑ and ⌥⌘↓ move it.
-fn section_key(s: &mut App, id: &str, ev: &KeyEvent) -> bool {
+/// Keys on a group's header: Left folds it, Right opens it, ⌥⌘↑ and ⌥⌘↓ move it.
+fn group_key(s: &mut App, id: &str, ev: &KeyEvent) -> bool {
     let m = ev.mods;
     match ev.key {
         Key::Up | Key::Down if m.alt && m.cmd && !m.shift && !m.ctrl => {
@@ -418,8 +560,8 @@ fn section_key(s: &mut App, id: &str, ev: &KeyEvent) -> bool {
     }
 }
 
-/// A workspace's menu: Rename, Reveal in Finder, Locate (when its folder is not found), Move up and down, Remove.
-fn workspace_menu(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
+/// A project's menu: Rename, Reveal in Finder, Locate (when its folder is not found), Move up and down, Remove project….
+fn project_menu(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El {
     let key = format!("ws-menu-{}", w.id);
     let open = s.menu_open.as_deref() == Some(key.as_str());
     let k = key.clone();
@@ -449,7 +591,7 @@ fn workspace_menu(s: &App, t: &Theme, w: &Workspace, layer: &mut Vec<El>) -> El 
         .separator()
         .item(DropdownMenuItem::new("Move up").disabled(!s.can_move(&w.id, -1)).on_select(move |s: &mut App| s.move_workspace(&c, -1)))
         .item(DropdownMenuItem::new("Move down").disabled(!s.can_move(&w.id, 1)).on_select(move |s: &mut App| s.move_workspace(&d, 1)))
-        .danger_item(DropdownMenuItem::new("Remove…").on_select(move |s: &mut App| s.ask_remove_workspace(&e)));
+        .danger_item(DropdownMenuItem::new("Remove project…").on_select(move |s: &mut App| s.ask_remove_workspace(&e)));
     menu_named(menu, t, layer, &format!("{} options", w.name), open)
 }
 

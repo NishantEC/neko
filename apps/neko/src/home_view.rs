@@ -82,13 +82,13 @@ fn tile(s: &App, t: &Theme, cat: &Cat, small: bool) -> El {
     let (words, ink, st) = tile_state(t, task);
     let face = if small { SMALL_FACE } else { TILE_FACE };
     let pad = if small { t.space.at(2.0) } else { t.space.at(3.0) };
-    let line = task.map_or_else(|| "Free for a task".to_owned(), |x| x.title.clone());
+    let line = task.map_or_else(|| "Free for a thread".to_owned(), |x| x.title.clone());
     let mut card = row()
         .key(format!("cat-tile-{}", cat.id))
         .role("button")
         .label(format!("{}: {}", cat.name, words.to_lowercase()))
         .description(line.clone())
-        .help(if task.is_some() { "Open its task".to_owned() } else { format!("Ask {} to do the next task", cat.name) })
+        .help(if task.is_some() { "Open its thread".to_owned() } else { format!("Ask {} to do the next thread", cat.name) })
         .focusable(true)
         .grow(1.0)
         .min_w(0.0)
@@ -192,7 +192,7 @@ fn cat_picker(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let mut face = chip(t, "cat-picker", None)
         .role("button")
         .label(format!("Cat: {name}"))
-        .help("Who does the next task")
+        .help("Who does the next thread")
         .expanded(s.cat_picker_open)
         .focusable(true);
     if let Some(faces) = faces {
@@ -202,7 +202,7 @@ fn cat_picker(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
         .child(text(name.clone()).font(weight(t.ty.sm, t.ty.medium)).color(t.ink()).truncate().max_w(140.0).min_w(0.0).a11y_hidden())
         .child(glyph(&crate::ui::icons::CHEVRON_UP_DOWN, t.control.icon_sm, t.ink_faint()))
         .on_press(|s: &mut App| s.cat_picker_open = !s.cat_picker_open);
-    let mut menu = DropdownMenu::new("cat-menu").trigger(face).open(s.cat_picker_open).min_width(220.0).on_close(|s: &mut App| s.cat_picker_open = false).label("New task for");
+    let mut menu = DropdownMenu::new("cat-menu").trigger(face).open(s.cat_picker_open).min_width(220.0).on_close(|s: &mut App| s.cat_picker_open = false).label("New thread for");
     menu = menu.item(DropdownMenuItem::new("Any cat").checked(picked.is_none()).on_select(|s: &mut App| s.pick_cat(None))).separator();
     for c in s.active_cats() {
         let id = c.id.clone();
@@ -215,16 +215,16 @@ fn cat_picker(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
 /// General, the workspaces and "Add folder…". (rune-ui's Select is a field-shaped control; a chip that opens a menu is how this one reads.)
 fn workspace_picker(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let options = s.picker_options();
-    let current = options.iter().find(|o| o.1.as_deref() == Some(s.workspace.as_str())).map_or_else(|| "General".to_owned(), |o| o.0.clone());
-    let name = s.chosen().map_or_else(|| "General".to_owned(), |w| w.name.clone());
+    let current = options.iter().find(|o| o.1.as_deref() == Some(s.workspace.as_str())).map_or_else(|| "No project".to_owned(), |o| o.0.clone());
+    let name = s.chosen().map_or_else(|| "No project".to_owned(), |w| w.name.clone());
     let help = match s.chosen().and_then(|w| w.folder.clone()) {
         Some(f) => crate::task_view::show_path(&f, "", s.home.as_deref()),
-        None => "General: each task gets a scratch folder of its own".to_owned(),
+        None => "No project: each thread gets a scratch folder of its own".to_owned(),
     };
     let missing = s.chosen().is_some_and(|w| w.missing);
     let face = chip(t, "workspace-picker", None)
         .role("button")
-        .label(format!("Workspace: {name}"))
+        .label(format!("Project: {name}"))
         .help(help)
         .expanded(s.picker_open)
         .focusable(true)
@@ -232,7 +232,7 @@ fn workspace_picker(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
         .child(text(name).font(t.ty.sm).color(t.ink()).truncate().max_w(200.0).min_w(0.0).a11y_hidden())
         .child(glyph(&crate::ui::icons::CHEVRON_UP_DOWN, t.control.icon_sm, t.ink_faint()))
         .on_press(|s: &mut App| s.picker_open = !s.picker_open);
-    let mut menu = DropdownMenu::new("workspace-menu").trigger(face).open(s.picker_open).min_width(260.0).on_close(|s: &mut App| s.picker_open = false).label("New task in");
+    let mut menu = DropdownMenu::new("workspace-menu").trigger(face).open(s.picker_open).min_width(260.0).on_close(|s: &mut App| s.picker_open = false).label("New thread in");
     for (label, id) in options {
         let pick = label.clone();
         let item = DropdownMenuItem::new(label.clone()).on_select(move |s: &mut App| s.pick(&pick));
@@ -241,7 +241,7 @@ fn workspace_picker(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
             None => menu.separator().item(item.icon(&icons::FOLDER_PLUS)),
         };
     }
-    row().key("workspace").center_y().child(menu_named(menu, t, layer, "Workspaces", s.picker_open))
+    row().key("workspace").center_y().child(menu_named(menu, t, layer, "Projects", s.picker_open))
 }
 
 /// The keys under the composer.
@@ -276,7 +276,7 @@ fn composer(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
 fn list_row(s: &App, t: &Theme, task: &Task, list: &str, i: usize, n: usize, what: Option<String>) -> El {
     let id = task.id.clone();
     let name = s.cat_name(task);
-    let place = s.workspace_of(&task.workspace).map_or_else(|| "General".to_owned(), |w| w.name.clone());
+    let place = s.workspace_of(&task.workspace).map_or_else(|| "No project".to_owned(), |w| w.name.clone());
     let (_, word) = status_mark(task.status);
     let mut r = row()
         .key(format!("{list}-{}", task.id.0))

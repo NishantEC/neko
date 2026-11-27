@@ -1,7 +1,7 @@
 {
   "name": "git-worktree",
-  "title": "A task in a git repository works in its own worktree",
-  "about": "The person picks a git repository as the task's folder. The task runs on its own branch in its own worktree; the person's checkout (HEAD, branch, status) is the same afterwards; the band shows the folder and branch; the run card shows the changed files.",
+  "title": "A thread in a git repository works in its own worktree",
+  "about": "The person picks a git repository as the thread's folder. The thread runs on its own branch in its own worktree; the person's checkout (HEAD, branch, status) is the same afterwards; the band shows the folder and branch; the run card shows the changed files.",
   "cli": [
     "fake"
   ],
@@ -35,7 +35,7 @@
           "label": "acme-api"
         }
       },
-      "expect": "The repository is added as a workspace and chosen in the composer's picker"
+      "expect": "The repository is added as a project and chosen in the composer's picker"
     },
     {
       "do": "click",
@@ -97,7 +97,7 @@
           }
         ]
       },
-      "expect": "The task sits under the acme-api section; the band and the window's title name the workspace"
+      "expect": "The thread sits under the acme-api section; the band and the window's title name the project"
     },
     {
       "do": "assert",

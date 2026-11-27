@@ -1,7 +1,7 @@
 {
   "name": "narrow",
-  "title": "The first task in the smallest window",
-  "about": "At 760 by 560 points the sidebar is folded. The first-task journey works; the sidebar can be shown and hidden again with the band's button.",
+  "title": "The first thread in the smallest window",
+  "about": "At 760 by 560 points the sidebar is folded. The first-thread journey works; the sidebar can be shown and hidden again with the band's button.",
   "cli": [
     "fake"
   ],
@@ -64,12 +64,12 @@
           }
         ]
       },
-      "expect": "The task opens and finishes in the narrow window"
+      "expect": "The thread opens and finishes in the narrow window"
     },
     {
       "do": "snap",
       "name": "narrow-task",
-      "expect": "The task at the smallest size"
+      "expect": "The thread at the smallest size"
     },
     {
       "do": "click",
@@ -85,7 +85,7 @@
           "label": "Water the plants"
         }
       },
-      "expect": "Show sidebar shows it, with the task"
+      "expect": "Show sidebar shows it, with the thread"
     },
     {
       "do": "sleep",

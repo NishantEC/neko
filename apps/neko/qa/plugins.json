@@ -1,7 +1,7 @@
 {
   "name": "plugins",
   "title": "Plugins: paste a server, approve it, test it, set a secret, let a cat use it",
-  "about": "An mcpServers block with the fake server is pasted into Settings > Plugins. The plugin waits in Needs you; the card shows exactly what will run. Test lists its tools. A secret is changed. A task whose fake CLI calls the plugin's tool asks in Needs you naming the plugin; after Allow the step shows the plugin's name. The run's recorded config had the server and the secret in its env, no file is left after the run, and no secret is in the data folder.",
+  "about": "An mcpServers block with the fake server is pasted into Settings > Plugins. The plugin waits in Needs you; the card shows exactly what will run. Test lists its tools. A secret is changed. A thread whose fake CLI calls the plugin's tool asks in Needs you naming the plugin; after Allow the step shows the plugin's name. The run's recorded config had the server and the secret in its env, no file is left after the run, and no secret is in the data folder.",
   "cli": [
     "fake"
   ],

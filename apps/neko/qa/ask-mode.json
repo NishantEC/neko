@@ -1,7 +1,7 @@
 {
   "name": "ask-mode",
   "title": "Ask before risky steps",
-  "about": "Settings is switched to \"Ask before risky steps\". A task runs two shell commands: the first request is allowed once and the command runs; the second is denied, shows as Denied and the agent carries on. A follow-up asks again; \"Always allow\" for cargo means the second cargo command is not asked about.",
+  "about": "Settings is switched to \"Ask before risky steps\". A thread runs two shell commands: the first request is allowed once and the command runs; the second is denied, shows as Denied and the agent carries on. A follow-up asks again; \"Always allow\" for cargo means the second cargo command is not asked about.",
   "cli": [
     "fake"
   ],
@@ -61,7 +61,7 @@
         }
       },
       "within": 10,
-      "expect": "A request appears in the task and waits"
+      "expect": "A request appears in the thread and waits"
     },
     {
       "do": "snap",
@@ -78,7 +78,7 @@
         }
       },
       "soft": true,
-      "expect": "The sidebar row says the task needs you",
+      "expect": "The sidebar row says the thread needs you",
       "window": false
     },
     {

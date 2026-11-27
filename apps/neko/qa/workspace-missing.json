@@ -1,7 +1,7 @@
 {
   "name": "workspace-missing",
-  "title": "A workspace whose folder is gone",
-  "about": "The folder of a workspace is deleted while the app runs. Its section says Folder not found, with Locate… and Remove; a new task there is refused in plain words.",
+  "title": "A project whose folder is gone",
+  "about": "The folder of a project is deleted while the app runs. Its section says Folder not found, with Locate… and Remove; a new thread there is refused in plain words.",
   "cli": [
     "fake"
   ],
@@ -27,7 +27,7 @@
           "label_is": "tofu-notes"
         }
       },
-      "expect": "The workspace is a section"
+      "expect": "The project is a section"
     },
     {
       "do": "click",
@@ -119,7 +119,7 @@
         }
       },
       "within": 5,
-      "expect": "A new task there is refused with a plain line"
+      "expect": "A new thread there is refused with a plain line"
     },
     {
       "do": "assert",
@@ -138,7 +138,7 @@
           }
         ]
       },
-      "expect": "No task was made, and no raw error is shown"
+      "expect": "No thread was made, and no raw error is shown"
     },
     {
       "do": "snap",

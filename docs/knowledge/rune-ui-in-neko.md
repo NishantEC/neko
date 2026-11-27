@@ -76,8 +76,13 @@ only (tested by reading `lib.rs`).
 
 Neko tried each of these on 0.10.0 and kept its own, because the render got worse. Each says what would let it go.
 
-- **The cats' and tasks' two-line rows** (`sidebar::face_row`): `SidebarItem::subtitle` is plain words in one ink. Neko's second line is
+- **The Cattains' and threads' two-line rows** (`sidebar::face_row`, `thread_row`): `SidebarItem::subtitle` is plain words in one ink. Neko's second line is
   parts in their own inks (the state word in its colour, the round's mark before it). Ask: `SidebarItem::subtitle_el(El)`.
+- **A resizable split** (the sidebar's edge): the sidebar is fixed at 256 points because rune-ui has no component that drags an edge
+  between two regions with a minimum and a maximum (208 and 360 for the sidebar). Ask: `Split` with `min`, `max`, a saved width and a
+  keyboard way to move it. Neko will take it the day it lands.
+- **A thread's row** (`sidebar::thread_row`, `row_frame`) is the same ask as the Cattains' rows (`subtitle_el`), plus a trailing slot
+  that swaps its content under the pointer (the age gives way to a menu).
 - **The run receipt** (`turn::receipt`): `Receipt` draws the failed sentence in the plain ink (Neko's is red: "miso could not
   finish", and muted once undone), has no branch glyph, puts the note above the files, and cannot say "and N more" when the run
   changed more files than the list holds. Ask: `Receipt::sentence_ink(Color)` (or a tone), `.branch_icon`, `.note_after_files`, `.more(n)`.
@@ -88,12 +93,12 @@ Neko tried each of these on 0.10.0 and kept its own, because the render got wors
   icon's full size, two points more than a step's tick, so its words do not line up with the steps'. Ask: `Tool::failed_note`,
   `marks_size`.
 - **DropdownMenu names** (`view::menu_named`): the open surface is named "Menu" now, not nothing; Neko names it for its list ("Cats",
-  "Task options"). Ask: `DropdownMenu::name(..)`.
+  "Thread options"). Ask: `DropdownMenu::name(..)`.
 - **Shortcuts in menu rows** (`Row::shortcut`): the row's keys are drawn in the keycap face, but `shortcut_hint` makes the element carry
   its text in Inter, and `tests/structure.rs` ("Figtree everywhere") fails on it. Neko tried ⌥⌘↑ and ⌥⌘↓ on Move up and Move down
   and took them out again. Ask: the hint's text in the theme's keycap face.
-- **Reorder** for the workspaces: the sections have different heights (a header and its tasks), and `Reorder` takes rows of one pitch.
-  Ask: variable pitch. Until then workspaces are ordered by the menu and ⌥⌘↑ and ⌥⌘↓.
+- **Reorder** for the projects: the groups have different heights (a header and its threads), and `Reorder` takes rows of one pitch.
+  Ask: variable pitch. Until then projects are ordered by the menu and ⌥⌘↑ and ⌥⌘↓.
 - **Select** is installed and unused by choice: the composer's workspace and cat pickers are chips that open a menu with the current
   row checked, as a Mac pop-up button does; 0.10's Select now says "2 of 5" but is a field-shaped control.
 - `Status::Stopped` gave the stopped mark; `stopped_card` and the appended Review and Undo row no longer exist (the receipt replaced

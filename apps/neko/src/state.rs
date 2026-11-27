@@ -158,6 +158,10 @@ pub struct App {
     pub folded: HashSet<String>,
     /// Sections showing every task, not only the newest [`SECTION_ROWS`].
     pub show_all: HashSet<String>,
+    /// How the Threads section is grouped (View ▸ Group by). Remembered for the next launch.
+    pub grouping: crate::threads::Grouping,
+    /// Where a thread is placed while it works: the time it had when it began (`threads.rs`), so its row does not move as it streams.
+    pub sort_hold: HashMap<TaskId, i64>,
     /// The menu that is open (a workspace's, by `ws-menu-<id>`, or the task's, `task-more`).
     pub menu_open: Option<String>,
     /// Renaming a workspace: its id and the name being typed.
@@ -451,6 +455,8 @@ impl Default for App {
             picker_open: false,
             folded: HashSet::new(),
             show_all: HashSet::new(),
+            grouping: crate::threads::Grouping::default(),
+            sort_hold: HashMap::new(),
             menu_open: None,
             renaming: None,
             confirm: None,
@@ -951,7 +957,7 @@ impl App {
             self.pending_link = Some(task);
         } else {
             self.go_home();
-            self.notice = Some("That task is not in Neko any more.".to_owned());
+            self.notice = Some("That thread is not in Neko any more.".to_owned());
         }
     }
 
@@ -988,13 +994,15 @@ impl App {
         })
     }
 
-    /// The sections of the sidebar: General, the person's workspaces, then the removed ones that still have tasks. Before the
-    /// daemon's list arrives, General alone.
+    /// The projects of the sidebar: the person's own in their order, the removed ones that still have threads, then No project. Before
+    /// the daemon's list arrives, No project alone.
     pub fn sections(&self) -> Vec<Workspace> {
         if self.workspaces.is_empty() {
-            return vec![Workspace { id: GENERAL.into(), name: "General".into(), folder: None, created_ms: 0, removed_ms: None, position: 0, missing: false }];
+            return vec![Workspace { id: GENERAL.into(), name: "No project".into(), folder: None, created_ms: 0, removed_ms: None, position: 0, missing: false }];
         }
-        self.workspaces.iter().filter(|w| w.is_active() || self.tasks.iter().any(|t| t.workspace == w.id)).cloned().collect()
+        let mut out: Vec<Workspace> = self.workspaces.iter().filter(|w| !w.is_general() && (w.is_active() || self.tasks.iter().any(|t| t.workspace == w.id))).cloned().collect();
+        out.extend(self.workspaces.iter().filter(|w| w.is_general()).cloned());
+        out
     }
 
     /// The composer's picker: each workspace a new task can be made in (one line each, the same name told apart by its folder),
@@ -1003,7 +1011,7 @@ impl App {
         let live: Vec<&Workspace> = if self.workspaces.is_empty() { Vec::new() } else { self.workspaces.iter().filter(|w| w.is_active()).collect() };
         let mut out: Vec<(String, Option<String>)> = Vec::new();
         if live.is_empty() {
-            out.push(("General".into(), Some(GENERAL.into())));
+            out.push(("No project".into(), Some(GENERAL.into())));
         }
         for w in &live {
             let twins = live.iter().filter(|x| x.name == w.name).count() > 1;
@@ -1270,7 +1278,11 @@ impl App {
     }
 
     /// Adds or replaces a workspace, keeping General first, then the person's order, then the removed ones.
-    fn upsert_workspace(&mut self, w: Workspace) {
+    fn upsert_workspace(&mut self, mut w: Workspace) {
+        // The daemon calls it General; the person reads No project, everywhere.
+        if w.is_general() {
+            w.name = "No project".to_owned();
+        }
         self.workspaces.retain(|x| x.id != w.id);
         self.workspaces.push(w);
         self.workspaces.sort_by_key(|w| (!w.is_general(), w.removed_ms.is_some(), w.position, w.removed_ms.unwrap_or(0), w.created_ms));
@@ -1430,7 +1442,44 @@ impl App {
         self.briefing_open = false;
         self.notifier.opened(id);
         self.at_bottom = true;
+        self.read_open();
         self.follow_open();
+    }
+
+    /// The thread in view is read: told to the daemon (which tells every screen), and drawn read at once.
+    fn read_open(&mut self) {
+        let Some(id) = self.open.clone() else { return };
+        let now = self.now_ms;
+        let Some(t) = self.tasks.iter_mut().find(|t| t.id == id).filter(|t| t.unread()) else { return };
+        t.last_read_ms = t.activity_ms.max(now);
+        if t.thread_status == neko_protocol::ThreadStatus::Failed {
+            t.thread_status = neko_protocol::ThreadStatus::Idle;
+        }
+        self.send(Request::MarkRead { task: id });
+    }
+
+    /// Mark as unread (a thread's menu, `u` in the list): the daemon makes it so and every screen hears.
+    pub fn mark_unread(&mut self, id: &TaskId) {
+        self.menu_open = None;
+        self.send(Request::MarkUnread { task: id.clone() });
+    }
+
+    /// Mark as read (a thread's menu).
+    pub fn mark_read(&mut self, id: &TaskId) {
+        self.menu_open = None;
+        self.send(Request::MarkRead { task: id.clone() });
+    }
+
+    /// View ▸ Group by: remembered for the next launch.
+    pub fn set_grouping(&mut self, g: crate::threads::Grouping) {
+        self.menu_open = None;
+        self.grouping = g;
+        if self.persist {
+            let key = g.key();
+            let _ = std::thread::Builder::new().name("neko-prefs".into()).spawn(move || {
+                let _ = rune::prefs::Prefs::open(crate::PREFS_ID).set(crate::GROUPING_KEY, &key);
+            });
+        }
     }
 
     /// The link is set up (after the first frame, `lib.rs`): the app waits for the daemon from now.
@@ -1478,7 +1527,7 @@ impl App {
             // The link is coming up: the words stay in the box and go as soon as the daemon answers.
             None if self.conn.is_some() => {
                 self.queued = true;
-                self.notice = Some("Neko is starting. Your task is sent as soon as it is ready.".to_owned());
+                self.notice = Some("Neko is starting. Your thread is sent as soon as it is ready.".to_owned());
             }
             None => self.notice = Some("Neko is not running. Your words are kept.".to_owned()),
         }
@@ -1489,6 +1538,13 @@ impl App {
         // One short line, whatever the store holds (a title kept from before titles were cut): the sidebar, the band and the
         // window's title all read this.
         task.title = neko_protocol::title::title(&task.title);
+        // A thread that works keeps its place in its group, taking the time it had before it began; the hold ends with the work.
+        if task.thread_status == neko_protocol::ThreadStatus::Working {
+            let before = self.tasks.iter().find(|t| t.id == task.id).map(|t| t.activity_ms);
+            self.sort_hold.entry(task.id.clone()).or_insert_with(|| before.unwrap_or(task.activity_ms));
+        } else {
+            self.sort_hold.remove(&task.id);
+        }
         self.tasks.retain(|t| t.id != task.id);
         let at = self.tasks.iter().position(|t| (t.created_ms, &t.id) < (task.created_ms, &task.id)).unwrap_or(self.tasks.len());
         self.tasks.insert(at, task);
@@ -1553,7 +1609,12 @@ impl App {
                     let cat = self.cat_name(&task);
                     self.notifier.finished(&task.id, &title, &cat, words.as_deref(), &here);
                 }
+                let id = task.id.clone();
                 self.upsert(task);
+                // The person is looking at it: what it just said is read as it arrives (when Neko is in front, and the page is the thread).
+                if self.front && self.open.as_ref() == Some(&id) && !self.settings_open && !self.needs_open && !self.rounds_open && !self.briefing_open && self.open_cat.is_none() {
+                    self.read_open();
+                }
             }
             Change::TaskRemoved { task } => {
                 self.tasks.retain(|t| t.id != task);
@@ -1838,7 +1899,7 @@ impl App {
             Reply::Error { code, message } if matches!(asked, Some(Asked::RemoveTask(_))) => {
                 let Some(Asked::RemoveTask(task)) = asked else { return };
                 let reveal = (code == ErrorCode::UnsavedWork).then(|| self.place_of(&task)).flatten();
-                self.refusal = Some(Refusal { title: "Neko kept this task".into(), words: message, reveal });
+                self.refusal = Some(Refusal { title: "Neko kept this thread".into(), words: message, reveal });
                 return;
             }
             Reply::Error { message, .. } if matches!(asked, Some(Asked::Workspace | Asked::AddWorkspace { .. })) => {
@@ -2008,17 +2069,17 @@ mod tests {
     #[test]
     fn workspaces_keep_general_first_and_the_persons_order() {
         let mut a = with_workspaces();
-        assert_eq!(a.workspaces.iter().map(|w| w.name.as_str()).collect::<Vec<_>>(), ["General", "acme-api", "acme-web"]);
+        assert_eq!(a.workspaces.iter().map(|w| w.name.as_str()).collect::<Vec<_>>(), ["No project", "acme-api", "acme-web"]);
         let mut gone = ws("ws_a", "acme-api", 1);
         gone.removed_ms = Some(9);
         a.change(Change::WorkspaceUpdated { workspace: gone });
-        assert_eq!(a.workspaces.iter().map(|w| w.name.as_str()).collect::<Vec<_>>(), ["General", "acme-web", "acme-api"], "removed ones go last");
-        assert!(a.sections().iter().all(|w| w.id != "ws_a"), "a removed workspace with no tasks has no section");
+        assert_eq!(a.workspaces.iter().map(|w| w.name.as_str()).collect::<Vec<_>>(), ["No project", "acme-web", "acme-api"], "removed ones go last");
+        assert!(a.sections().iter().all(|w| w.id != "ws_a"), "a removed project with no threads has no section");
         let mut t = task("t", 1);
         t.workspace = "ws_a".into();
         a.change(Change::TaskCreated { task: t });
-        assert!(a.sections().iter().any(|w| w.id == "ws_a"), "its tasks stay readable under it");
-        assert_eq!(a.picker_options().iter().map(|o| o.0.as_str()).collect::<Vec<_>>(), ["General", "acme-web", ADD_FOLDER], "no new task in a removed workspace");
+        assert!(a.sections().iter().any(|w| w.id == "ws_a"), "its threads stay readable under it");
+        assert_eq!(a.picker_options().iter().map(|o| o.0.as_str()).collect::<Vec<_>>(), ["No project", "acme-web", ADD_FOLDER], "no new thread in a removed project");
     }
 
     #[test]
@@ -2036,7 +2097,7 @@ mod tests {
         a.open_task_id(&TaskId("t".into()));
         assert_eq!(a.window_title(), "Fix the build — acme-api");
         a.new_task_here();
-        assert_eq!((a.workspace.as_str(), a.open.as_ref()), ("ws_a", None), "⌘N: a new task in the workspace of the task in view");
+        assert_eq!((a.workspace.as_str(), a.open.as_ref()), ("ws_a", None), "⌘N: a new thread in the project of the thread in view");
         // Two workspaces with one name are told apart by their folders.
         a.change(Change::WorkspaceAdded { workspace: Workspace { folder: Some("/Users/example/old/acme-web".into()), ..ws("ws_c", "acme-web", 3) } });
         let labels: Vec<String> = a.picker_options().into_iter().map(|o| o.0).collect();
@@ -2051,7 +2112,7 @@ mod tests {
         a.change(Change::TaskRemoved { task: TaskId("t".into()) });
         assert!(a.tasks.is_empty() && a.open.is_none());
         a.asked.insert(4, Asked::RemoveTask(TaskId("u".into())));
-        a.take(Incoming::Message(ServerMessage::Reply { id: 4, reply: Reply::error(ErrorCode::UnsavedWork, "This task's worktree has changes that are not committed.") }));
+        a.take(Incoming::Message(ServerMessage::Reply { id: 4, reply: Reply::error(ErrorCode::UnsavedWork, "This thread's worktree has changes that are not committed.") }));
         assert!(a.refusal.as_ref().is_some_and(|r| r.words.contains("not committed")));
     }
 

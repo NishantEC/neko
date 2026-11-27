@@ -25,7 +25,9 @@ pub mod scenes;
 pub mod settings_view;
 pub mod sidebar;
 pub mod state;
+pub mod status_mark;
 pub mod task_view;
+pub mod threads;
 pub mod turn;
 /// rune-ui's components, copied in by the `rune-ui` CLI (`rune-ui.lock`); never edited here (docs/knowledge/rune-ui-in-neko.md).
 pub mod ui;
@@ -44,6 +46,8 @@ pub const PREFS_ID: &str = "dev.neko.app";
 pub const WORKSPACE_KEY: &str = "last-workspace";
 /// The sidebar's folded workspace sections (their ids), in the same prefs.
 pub const FOLDED_KEY: &str = "folded-workspaces";
+/// How the Threads section is grouped (`project` or `none`), in the same prefs.
+pub const GROUPING_KEY: &str = "thread-grouping";
 
 thread_local! {
     /// The window's width as the last layout saw it (written by the view, read by `poll`).
@@ -92,12 +96,13 @@ fn init() -> App {
     let prefs = rune::prefs::Prefs::open(PREFS_ID);
     let workspace = prefs.get::<String>(WORKSPACE_KEY).filter(|w| !w.is_empty()).unwrap_or_else(|| neko_protocol::GENERAL.to_owned());
     let folded = prefs.get::<Vec<String>>(FOLDED_KEY).unwrap_or_default().into_iter().collect();
+    let grouping = threads::Grouping::from_key(&prefs.get::<String>(GROUPING_KEY).unwrap_or_default());
     // The cat picked last in each workspace (a retired or missing one counts as "Any cat").
     let cat_picks = prefs.get::<std::collections::HashMap<String, String>>(state::CAT_PICKS_KEY).unwrap_or_default();
     // The real window posts real notifications; everything else keeps the recorder `App::default` gives.
     let mut notifier = notify::Notifier::new(Box::new(notify::System));
     notifier.switches = prefs.get::<notify::Switches>(notify::SWITCHES_KEY).unwrap_or_default();
-    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, workspace, folded, cat_picks, home: std::env::var("HOME").ok(), notifier, ..App::default() }
+    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, workspace, folded, grouping, cat_picks, home: std::env::var("HOME").ok(), notifier, ..App::default() }
 }
 
 /// New Task (⌘N): Home with the keyboard in the composer, in the workspace of the task in view.
@@ -109,8 +114,8 @@ pub fn new_task(s: &mut App, tx: &mut Tx) {
 /// The Mac's folder panel: a folder to add as a workspace, or where a workspace's folder is now.
 pub fn pick_folder(s: &App, pick: state::Pick, tx: &mut Tx) {
     let (title, start) = match &pick {
-        state::Pick::Add { .. } => ("Add a folder as a workspace", None),
-        state::Pick::Locate(id) => ("Where is this workspace's folder now?", s.workspace_of(id).and_then(|w| w.folder.as_deref()).and_then(|f| std::path::Path::new(f).parent()).filter(|p| p.is_dir()).map(PathBuf::from)),
+        state::Pick::Add { .. } => ("Add a folder as a project", None),
+        state::Pick::Locate(id) => ("Where is this project's folder now?", s.workspace_of(id).and_then(|w| w.folder.as_deref()).and_then(|f| std::path::Path::new(f).parent()).filter(|p| p.is_dir()).map(PathBuf::from)),
         state::Pick::PluginFolder => ("Add a folder that holds a plugin", None),
         state::Pick::PluginSetting(..) => ("Choose a folder for this setting", None),
     };

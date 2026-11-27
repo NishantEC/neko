@@ -156,9 +156,9 @@ pub fn review_view(s: &App, t: &Theme, r: &Review) -> El {
     let cat = run_cat.or_else(|| task.map(|x| x.cat.clone())).and_then(|id| s.cat(&id).cloned());
     let heading = match (&cat, r.run.is_some()) {
         (Some(c), true) => format!("{}'s changes in this run", c.name),
-        (Some(c), false) => format!("Everything {} changed in this task", c.name),
+        (Some(c), false) => format!("Everything {} changed in this thread", c.name),
         (None, true) => "Changes in this run".to_owned(),
-        (None, false) => "All changes in this task".to_owned(),
+        (None, false) => "All changes in this thread".to_owned(),
     };
     let mut title = row().w_full().gap(t.space.at(3.0)).center_y();
     if let Some(c) = &cat {

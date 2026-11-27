@@ -597,11 +597,11 @@ mod tests {
             vec![Button::Action { id: ALLOW_ONCE, label: "Allow once" }, Button::Action { id: ALWAYS_ALLOW, label: "Always allow" }, Button::Action { id: DENY, label: "Deny" }],
             "the default first"
         );
-        assert_eq!(p[0].get("url"), Some("neko://task/task_00000000000000000000000001"), "a click opens the task by its link");
+        assert_eq!(p[0].get("url"), Some("neko://task/task_00000000000000000000000001"), "a click opens the thread by its link");
         n.needs(&[perm(T1, false)], &away());
         assert!(r.take().is_empty(), "never twice for one item");
         let d = note_for(&perm(T2, true));
-        assert!(d.buttons.is_empty(), "a destructive request's notification only opens the task: {d:?}");
+        assert!(d.buttons.is_empty(), "a destructive request's notification only opens the thread: {d:?}");
         let q = note_for(&question(T2));
         assert_eq!((q.body.as_str(), &q.buttons[..]), ("mochi asks: Should I rename all four?", &[Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }][..]));
         let f = note_for(&failure(T2));
@@ -616,10 +616,10 @@ mod tests {
         assert!(r.take().is_empty(), "the first list after launch is not news");
         let front_in_task = Here { front: true, task: Some(TaskId(T2.into())), needs_view: false, ..Here::default() };
         n.needs(&[perm(T1, false), question(T2)], &front_in_task);
-        assert!(r.take().is_empty(), "the person is in that task, in front");
+        assert!(r.take().is_empty(), "the person is in that thread, in front");
         let front_elsewhere = Here { front: true, task: Some(TaskId(T1.into())), needs_view: false, ..Here::default() };
         n.needs(&[perm(T1, false), question(T2), failure("task_00000000000000000000000003")], &front_elsewhere);
-        assert_eq!(posted(&r.take()).len(), 1, "in front, but in a different task");
+        assert_eq!(posted(&r.take()).len(), 1, "in front, but in a different thread");
         let in_list = Here { front: true, task: None, needs_view: true, ..Here::default() };
         n.needs(&[perm(T1, false), question(T2), failure("task_00000000000000000000000003"), failure("task_00000000000000000000000004")], &in_list);
         assert!(r.take().is_empty(), "the Needs you list shows it");
@@ -668,7 +668,7 @@ mod tests {
         assert!(r.take().is_empty(), "the person is looking at it");
         n.finished(&TaskId(T2.into()), "Draft the notes", "tofu", Some("## I renamed **the button**\n\n- and more"), &here);
         let sent = r.take();
-        assert_eq!(posted(&sent)[0].body, "tofu is done: I renamed the button", "the list shows needs only, so a finished task is news");
+        assert_eq!(posted(&sent)[0].body, "tofu is done: I renamed the button", "the list shows needs only, so a finished thread is news");
         assert_eq!(done_note(&TaskId(T2.into()), "x", "tofu", None).body, "tofu is done");
         assert_eq!(first_line("\n\n  \n- `cargo test` passes"), Some("cargo test passes".into()));
     }
@@ -683,7 +683,7 @@ mod tests {
         assert_eq!(read_click(Some(ALLOW_ONCE), None, &d.info), ClickDo::Open(TaskId(T1.into())), "never confirms a destructive step");
         let q = note_for(&question(T2));
         assert_eq!(read_click(Some(REPLY), Some("  All four. "), &q.info), ClickDo::Reply { task: TaskId(T2.into()), run: RunId("run_2".into()), words: "All four.".into() });
-        assert_eq!(read_click(Some(REPLY), Some("  "), &q.info), ClickDo::Open(TaskId(T2.into())), "nothing typed: open the task");
+        assert_eq!(read_click(Some(REPLY), Some("  "), &q.info), ClickDo::Open(TaskId(T2.into())), "nothing typed: open the thread");
         assert_eq!(read_click(None, None, &[("task".into(), "../etc".into())]), ClickDo::Nothing);
         assert_eq!(read_click(Some("unknown"), None, &q.info), ClickDo::Open(TaskId(T2.into())));
     }

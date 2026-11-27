@@ -147,7 +147,7 @@ pub fn page(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
         list = list.child(card(s, t, p, i + 1, n, layer));
     }
     part.child(list).child(
-        text("A plugin is a program that runs on this Mac with your rights, started by Claude Code for a task. Neko keeps what you type into a secret field in the Keychain, never in its own files.")
+        text("A plugin is a program that runs on this Mac with your rights, started by Claude Code for a thread. Neko keeps what you type into a secret field in the Keychain, never in its own files.")
             .key("plugins-note")
             .font(t.ty.sm)
             .color(t.ink_faint())
@@ -462,7 +462,7 @@ fn test_row(s: &App, t: &Theme, p: &Plugin, ok: bool) -> El {
     } else if !ok {
         result = result.child(text("Approve it to test it.").key(format!("{key}-untestable")).font(t.ty.sm).color(t.ink_faint()).wrap().min_w(0.0));
     } else if remote {
-        result = result.child(text("Neko cannot test web servers yet. Claude Code connects to it when a task runs.").key(format!("{key}-untestable")).font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0));
+        result = result.child(text("Neko cannot test web servers yet. Claude Code connects to it when a thread runs.").key(format!("{key}-untestable")).font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0));
     } else if let Some(c) = &p.last_check {
         let zone = s.zone();
         let (head, tools, when) = check_words(c, s.now_ms, &*zone);

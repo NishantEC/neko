@@ -29,15 +29,16 @@ fn tab_reaches_every_control_once_in_reading_order() {
         seen,
         [
             "sidebar-hide",
-            "new-task",
-            "home",
-            "briefing",
+            "new-thread",
             "needs-you",
+            "briefing",
             "rounds",
             "cat-cat_mochi",
+            "threads-view-button",
+            "threads-new",
             "ws-default",
             "ws-default-new",
-            "add-workspace",
+            "add-project",
             "composer-input",
             "cat-picker",
             "workspace-picker",
@@ -45,7 +46,7 @@ fn tab_reaches_every_control_once_in_reading_order() {
             "cat-tile-cat_mochi",
             "cat-tile-cat_tofu"
         ],
-        "Home, then the Briefing, then Needs you, then Rounds; the Cattains (only the cats at work: here mochi) are one stop; the sections and their rows are one stop; a section's New task is its own; there is no New cat…; the words, then the cat picker and the workspace picker in the composer's footer (the empty composer's Send is off); then each cat's tile in the house"
+        "New thread, then Needs you, the Briefing and Rounds; the Cattains (only the cats at work: here mochi) are one stop; Threads' View and New thread are their own; the groups and their rows are one stop; a group's New thread is its own; there is no New cat…; the words, then the cat picker and the project picker in the composer's footer (the empty composer's Send is off); then each cat's tile in the house"
     );
     // Round once, the focus is back on the first control; Shift+Tab walks back the same way, wrapping.
     assert_eq!(focus(&rt).as_deref(), Some("sidebar-hide"));
@@ -58,14 +59,14 @@ fn tab_reaches_every_control_once_in_reading_order() {
 #[test]
 fn the_arrows_move_in_the_list_and_return_opens() {
     let mut rt = runtime((1200.0, 800.0), false, scene("tasks-home"));
-    for _ in 0..8 {
+    for _ in 0..9 {
         tab(&mut rt, false);
     }
-    assert_eq!(focus(&rt).as_deref(), Some("ws-default"), "with no task open, the list's stop is the first section (after the Cattains' stop)");
+    assert_eq!(focus(&rt).as_deref(), Some("ws-default"), "with no thread open, the list's stop is the first section (after the Cattains' stop)");
     press(&mut rt, Key::Down, Mods::default());
-    assert_eq!(focus(&rt).as_deref(), Some("task-task_00000000000000000000000004"), "Down goes from a section to its first row");
+    assert_eq!(focus(&rt).as_deref(), Some("thread-task_00000000000000000000000004"), "Down goes from a section to its first row");
     press(&mut rt, Key::Down, Mods::default());
-    assert_eq!(focus(&rt).as_deref(), Some("task-task_00000000000000000000000003"), "Down moves to the next row");
+    assert_eq!(focus(&rt).as_deref(), Some("thread-task_00000000000000000000000003"), "Down moves to the next row");
     assert_eq!(rt.state.open, None, "moving does not open");
     press(&mut rt, Key::Enter, Mods::default());
     assert_eq!(rt.state.open.as_ref().map(|t| t.0.as_str()), Some("task_00000000000000000000000003"), "Return opens the row");
@@ -76,14 +77,23 @@ fn the_arrows_move_in_the_list_and_return_opens() {
 #[test]
 fn the_keys_move_through_sections_fold_them_and_type_to_select() {
     let mut rt = runtime((1200.0, 800.0), false, scene("workspaces"));
-    while focus(&rt).as_deref() != Some("ws-default") {
+    // The list's one stop is its first header: acme-api (No project is the last group).
+    for _ in 0..30 {
+        if focus(&rt).as_deref() == Some("ws-ws_acme") {
+            break;
+        }
         tab(&mut rt, false);
     }
-    // General has two tasks; then acme-api's header.
-    for _ in 0..3 {
+    assert_eq!(focus(&rt).as_deref(), Some("ws-ws_acme"), "Tab stops on the first project");
+    // acme-api has three threads; Down goes through them into the next header.
+    for _ in 0..4 {
         press(&mut rt, Key::Down, Mods::default());
     }
-    assert_eq!(focus(&rt).as_deref(), Some("ws-ws_acme"), "Down crosses from one section into the next");
+    assert_eq!(focus(&rt).as_deref(), Some("ws-ws_web"), "Down crosses from one group into the next");
+    for _ in 0..4 {
+        press(&mut rt, Key::Up, Mods::default());
+    }
+    assert_eq!(focus(&rt).as_deref(), Some("ws-ws_acme"));
     press(&mut rt, Key::Left, Mods::default());
     assert!(rt.state.folded.contains("ws_acme"), "Left folds a section");
     press(&mut rt, Key::Down, Mods::default());
@@ -104,15 +114,15 @@ fn the_section_button_starts_a_task_there_and_command_n_follows_the_task_in_view
     assert_eq!(rt.state.window_title(), "Rename the Settings button to Preferences across the app — acme-api");
     rt.update(|s, _| s.choose_workspace(neko_protocol::GENERAL));
     press(&mut rt, Key::Command('n'), Mods { cmd: true, ..Mods::default() });
-    assert_eq!((rt.state.open.as_ref(), rt.state.workspace.as_str()), (None, "ws_acme"), "⌘N: a new task in the workspace of the task in view");
+    assert_eq!((rt.state.open.as_ref(), rt.state.workspace.as_str()), (None, "ws_acme"), "⌘N: a new thread in the project of the thread in view");
     assert_eq!(focus(&rt).as_deref(), Some("composer-input"));
-    click(&mut rt, "ws-default-new");
-    assert_eq!(rt.state.workspace, neko_protocol::GENERAL, "a section's New task picks its workspace");
+    click(&mut rt, "ws-ws_web-new");
+    assert_eq!(rt.state.workspace.as_str(), "ws_web", "a section's New thread picks its project");
     click(&mut rt, "workspace-picker");
     assert!(rt.state.picker_open);
     settle(&mut rt);
     let rows: Vec<String> = rt.elements().into_iter().filter(|e| e.key.as_deref().is_some_and(|k| k.starts_with("workspace-menu-item"))).filter_map(|e| e.label).collect();
-    assert!(rows.iter().any(|r| r == "General") && rows.iter().any(|r| r == "Add folder…") && !rows.iter().any(|r| r.contains("old-scripts")), "{rows:?}");
+    assert!(rows.iter().any(|r| r == "No project") && rows.iter().any(|r| r == "Add folder…") && !rows.iter().any(|r| r.contains("old-scripts")), "{rows:?}");
 }
 
 #[test]

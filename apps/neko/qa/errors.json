@@ -1,7 +1,7 @@
 {
   "name": "errors",
   "title": "Calm notices when the CLI cannot run",
-  "about": "The usage limit, not signed in, the task's folder gone, and Claude Code not installed: each shows a calm notice in the task saying what to do next.",
+  "about": "The usage limit, not signed in, the thread's folder gone, and Claude Code not installed: each shows a calm notice in the thread saying what to do next.",
   "cli": [
     "fake"
   ],
@@ -107,7 +107,7 @@
         }
       },
       "within": 10,
-      "expect": "A task in a plain folder runs"
+      "expect": "A thread in a plain folder runs"
     },
     {
       "do": "remove",
@@ -181,7 +181,7 @@
       "do": "click",
       "on": {
         "role": "menuitemcheckbox",
-        "label": "General"
+        "label": "No project"
       }
     },
     {

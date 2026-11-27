@@ -1,0 +1,390 @@
+{
+  "name": "sidebar-status",
+  "title": "Thread status in the sidebar: working, failed, needs you",
+  "about": "Settings is switched to ask mode. In acme-api: a finished thread, one that crashes (marked unread from its menu while another thread is open, so it shows as failed), one that waits on a request and one that keeps working. Each row says its state and its second line. A thread that finishes while another works does not move the working row: after the working thread streams on, the order is the one it began with. Opening the failed thread clears Failed.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "files": {
+      "acme-api": {
+        "files": {
+          "README.md": "# Acme\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "add-workspace",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "button",
+          "label_is": "acme-api"
+        }
+      },
+      "expect": "acme-api is a project"
+    },
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-mode-1"
+        }
+      },
+      "expect": "Settings opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-mode-1"
+      }
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "What changed this week? [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "What changed this week?"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "New thread in acme-api"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Sync the changelog [fake:crash]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "stopped unexpectedly"
+        }
+      },
+      "within": 20,
+      "expect": "The crash says so in its thread"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "What changed this week?"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "What changed this week?"
+        }
+      },
+      "expect": "Another thread is open"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label": "Options for Sync the changelog"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "menuitem",
+        "label_is": "Mark as unread"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Sync the changelog",
+          "name": "failed"
+        }
+      },
+      "within": 5,
+      "expect": "Marked unread, the crashed thread shows as failed again"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "Failed: "
+        }
+      },
+      "expect": "Its second line says Failed and why"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "New thread in acme-api"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Run the tests [fake:permission]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Run the tests",
+          "name": "needs you"
+        }
+      },
+      "within": 20,
+      "expect": "A request waits: the row says it needs you"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "Needs you: "
+        }
+      },
+      "expect": "Its second line says Needs you and what is asked"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "New thread in acme-api"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Count slowly [fake:slow]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "slow1"
+        }
+      },
+      "within": 10,
+      "expect": "A thread works"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "role": "option",
+          "label": "Count slowly",
+          "name": "working"
+        }
+      },
+      "expect": "Its row says it is working"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "Working"
+        }
+      },
+      "expect": "and says Working at the right"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "New thread in acme-api"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check the links [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Check the links"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 3
+    },
+    {
+      "do": "snap",
+      "name": "status",
+      "expect": "A request, a failure, work in progress and a finished thread, each with its mark"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "order": [
+          {
+            "role": "option",
+            "label": "Run the tests"
+          },
+          {
+            "role": "option",
+            "label": "Check the links"
+          },
+          {
+            "role": "option",
+            "label": "Count slowly"
+          },
+          {
+            "role": "option",
+            "label": "Sync the changelog"
+          },
+          {
+            "role": "option",
+            "label": "What changed this week?"
+          }
+        ]
+      },
+      "expect": "The request first; then the thread that just finished; the working thread keeps the place it had when it began, though it kept streaming after the other finished"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Sync the changelog"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "Sync the changelog"
+        }
+      },
+      "expect": "The failed thread opens"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "role": "option",
+          "label": "Sync the changelog",
+          "name": "failed"
+        }
+      },
+      "expect": "Opening it clears Failed"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Run the tests"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "perm-*-deny"
+        }
+      },
+      "within": 5,
+      "expect": "The request is in its thread"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "perm-*-deny"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Count slowly"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-submit"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Stopped after"
+        }
+      },
+      "within": 5,
+      "expect": "Stop ends the slow thread"
+    }
+  ]
+}

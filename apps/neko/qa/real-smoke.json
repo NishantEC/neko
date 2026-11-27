@@ -1,6 +1,6 @@
 {
   "name": "real-smoke",
-  "title": "One tiny real task through the installed Claude Code",
+  "title": "One tiny real thread through the installed Claude Code",
   "about": "Real model calls (the cheapest model). In \"Ask before risky steps\", in a temporary folder: create hello.txt containing the word hi, then say done. Each request is allowed once. The file exists and the transcript shows the step. Then a one-line follow-up.",
   "cli": [
     "real"
@@ -238,7 +238,7 @@
         ]
       },
       "within": 180,
-      "expect": "The follow-up finishes in the same task"
+      "expect": "The follow-up finishes in the same thread"
     },
     {
       "do": "assert",

@@ -1,7 +1,7 @@
 {
   "name": "rounds-due",
   "title": "Rounds: a time comes while the app is open, the next is skipped while a request waits, pause all holds it",
-  "about": "In ask mode a round (every 6 hours, mochi's) is made due by moving the scheduler's clock (a debug daemon with NEKO_DEBUG_CLOCK=1). Its task starts by itself and its step waits in Needs you, exactly as a task made by hand would. The next time comes while that request waits: it is skipped, with its reason. Pause all holds the third time. After the request is denied, letting rounds go on and a fourth time makes a second task.",
+  "about": "In ask mode a round (every 6 hours, mochi's) is made due by moving the scheduler's clock (a debug daemon with NEKO_DEBUG_CLOCK=1). Its thread starts by itself and its step waits in Needs you, exactly as a thread made by hand would. The next time comes while that request waits: it is skipped, with its reason. Pause all holds the third time. After the request is denied, letting rounds go on and a fourth time makes a second thread.",
   "cli": [
     "fake"
   ],
@@ -164,7 +164,7 @@
         }
       },
       "within": 20,
-      "expect": "The round's task started by itself and its step waits for the person"
+      "expect": "The round's thread started by itself and its step waits for the person"
     },
     {
       "do": "key",
@@ -296,7 +296,7 @@
         }
       },
       "within": 15,
-      "expect": "Denied: the task goes on"
+      "expect": "Denied: the thread goes on"
     },
     {
       "do": "clock",
@@ -306,12 +306,12 @@
       "do": "wait",
       "until": {
         "see": {
-          "key": "task-*",
+          "key": "thread-*",
           "label": "Run tests"
         }
       },
       "within": 20,
-      "expect": "Another time makes a task"
+      "expect": "Another time makes a thread"
     },
     {
       "do": "key",

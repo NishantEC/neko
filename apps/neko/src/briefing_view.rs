@@ -102,7 +102,7 @@ fn finished_row(s: &App, t: &Theme, item: &BriefingTask, pos: usize, n: usize, b
     let (task, run) = (item.task.clone(), item.run.clone());
     let open = {
         let task = task.clone();
-        Button::new(format!("{key}-open"), "Open task").variant(ButtonVariant::Ghost).size(Size::Sm).on_press(move |s: &mut App| s.open_task_id(&task)).build(t)
+        Button::new(format!("{key}-open"), "Open thread").variant(ButtonVariant::Ghost).size(Size::Sm).on_press(move |s: &mut App| s.open_task_id(&task)).build(t)
     };
     // Who and when on the left; the way into the task at the right, on the same line for every row.
     let who = row()
@@ -298,7 +298,7 @@ pub fn briefing_view(s: &App, t: &Theme) -> El {
         let mut at = 0usize;
         let groups: Vec<(String, Vec<&&neko_protocol::NeedsItem>)> = if grouped { group_by(&needs, |i| i.workspace.as_str()) } else { vec![(String::new(), needs.iter().collect())] };
         for (ws, list) in groups {
-            let name = if ws.is_empty() && grouped { crate::needs_view::group_name(s, &ws) } else { s.workspace_of(&ws).map_or_else(|| if ws.is_empty() { "Plugins".to_owned() } else { "General".to_owned() }, |w| w.name.clone()) };
+            let name = if ws.is_empty() && grouped { crate::needs_view::group_name(s, &ws) } else { s.workspace_of(&ws).map_or_else(|| if ws.is_empty() { "Plugins".to_owned() } else { "No project".to_owned() }, |w| w.name.clone()) };
             let mut cards = col().key(format!("briefing-needs-list-{ws}")).role("list").label(if grouped { format!("Waiting in {name}") } else { "Waiting for you".to_owned() }).w_full().gap(t.space.at(3.0));
             let m = list.len();
             for (j, item) in list.into_iter().enumerate() {

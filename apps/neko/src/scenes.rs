@@ -19,136 +19,168 @@ pub type Scene = (&'static str, fn(&mut App));
 
 pub const SCENES: &[Scene] = &[
     ("empty-home", |_| {}),
-    ("home-typed", home_typed),
-    ("home-folder", home_folder),
-    ("task-open", task_open),
-    ("tasks-home", tasks_home),
-    ("task-working", task_working),
-    ("task-working-live", task_working_live),
-    ("task-needs-you", task_needs_you),
-    ("task-needs-you-destructive", task_needs_you_destructive),
-    ("task-done", task_done),
-    ("task-done-open", task_done_open),
-    ("task-follow-up", task_follow_up),
-    ("task-failed", task_failed),
-    ("task-thinking", task_thinking),
-    ("task-talked", task_talked),
-    ("task-asked", task_asked),
-    ("task-real-run", task_real_run),
-    ("task-real-run-open", task_real_run_open),
-    ("task-context-open", task_context_open),
-    ("task-stopped", task_stopped),
-    ("task-interrupted", task_interrupted),
-    ("settings", settings),
-    ("settings-ask", settings_ask),
-    ("settings-full-access", settings_full),
-    ("settings-signed-out", settings_signed_out),
-    ("workspaces", workspaces),
-    ("workspaces-folded", workspaces_folded),
-    ("workspace-picker", workspace_picker),
-    ("workspace-menu", workspace_menu),
-    ("workspace-rename", workspace_rename),
-    ("workspace-remove", workspace_remove),
-    ("workspace-task", workspace_task),
-    ("task-remove", task_remove),
-    ("task-remove-refused", task_remove_refused),
-    ("settings-workspaces", settings_workspaces),
-    ("needs-you", needs_you),
-    ("needs-you-answering", needs_you_answering),
-    ("needs-you-empty", needs_you_empty),
-    ("settings-notifications", settings_notifications),
-    ("settings-notifications-not-asked", settings_notifications_not_asked),
-    ("settings-notifications-denied", settings_notifications_denied),
-    ("settings-notifications-unavailable", settings_notifications_unavailable),
-    ("task-undo", task_undo),
-    ("task-undone", task_undone),
-    ("task-undo-older", task_undo_older),
-    ("task-undo-committed", task_undo_committed),
-    ("task-undo-unavailable", task_undo_unavailable),
-    ("task-undo-dropped", task_undo_dropped),
-    ("undo-anyway", undo_anyway),
-    ("review", review),
-    ("review-open", review_open),
-    ("review-all", review_all),
-    ("review-undone", review_undone),
-    ("settings-undo", settings_undo),
-    ("clear-undo", clear_undo),
-    ("cat-page", cat_page),
-    ("cat-page-rules", cat_page_rules),
-    ("cat-page-editing", cat_page_editing),
-    ("cat-new", cat_new),
-    ("cat-retire", cat_retire),
-    ("cat-picker", cat_picker),
-    ("task-rules-changed", task_rules_changed),
-    ("settings-cats", settings_cats),
-    ("home-house", home_house),
-    ("home-many", home_many),
-    ("rounds-empty", rounds_empty),
-    ("rounds", rounds),
-    ("rounds-history", rounds_history),
-    ("rounds-paused", rounds_paused),
-    ("rounds-braked", rounds_braked),
-    ("rounds-remove", rounds_remove),
-    ("round-new", round_new),
-    ("round-daily", round_daily),
-    ("round-hours", round_hours),
-    ("round-manual", round_manual),
-    ("round-edit", round_edit),
-    ("round-invalid", round_invalid),
-    ("round-cat-menu", round_cat_menu),
-    ("task-from-round", task_from_round),
-    ("cat-page-rounds", cat_page_rounds),
-    ("home-next-round", home_next_round),
-    ("sparse-home", sparse_home),
-    ("sparse-working", sparse_working),
-    ("sparse-needs-you", sparse_needs_you),
-    ("sparse-two-tasks", sparse_two_tasks),
-    ("sparse-task", sparse_task),
-    ("briefing-sparse", briefing::sparse_briefing),
-    ("briefing", briefing::briefing),
-    ("briefing-finished", briefing::briefing_finished),
-    ("briefing-empty", briefing::briefing_empty),
-    ("briefing-caught-up", briefing::briefing_caught_up),
-    ("briefing-caught-up-waiting", briefing::briefing_caught_up_waiting),
-    ("briefing-many", briefing::briefing_many),
-    ("briefing-morning-off", briefing::briefing_morning_off),
-    ("home-briefing", briefing::home_briefing),
-    ("settings-briefing", briefing::settings_briefing),
-    ("settings-briefing-invalid", briefing::settings_briefing_invalid),
-    ("plugins-empty", plugins::plugins_empty),
-    ("plugins-waiting", plugins::plugins_waiting),
-    ("plugins", plugins::plugins),
-    ("plugins-changed", plugins::plugins_changed),
-    ("plugins-needs-setup", plugins::plugins_needs_setup),
-    ("plugins-check-ok", plugins::plugins_check_ok),
-    ("plugins-check-failed", plugins::plugins_check_failed),
-    ("plugins-testing", plugins::plugins_testing),
-    ("plugins-web", plugins::plugins_web),
-    ("plugins-fields-unset", plugins::plugins_fields_unset),
-    ("plugins-fields-set", plugins::plugins_fields_set),
-    ("plugins-secret-changing", plugins::plugins_secret_changing),
-    ("plugins-access-only", plugins::plugins_access_only),
-    ("plugins-access-none", plugins::plugins_access_none),
-    ("plugins-remove", plugins::plugins_remove),
-    ("plugin-add", plugins::plugin_add),
-    ("plugin-add-good", plugins::plugin_add_good),
-    ("plugin-add-bad", plugins::plugin_add_bad),
-    ("plugin-add-several", plugins::plugin_add_several),
-    ("plugin-add-unnamed", plugins::plugin_add_unnamed),
-    ("plugin-add-refused", plugins::plugin_add_refused),
-    ("needs-you-plugin", plugins::needs_you_plugin),
-    ("needs-you-plugin-changed", plugins::needs_you_plugin_changed),
-    ("needs-you-plugin-web", plugins::needs_you_plugin_web),
-    ("needs-you-plugin-only", plugins::needs_you_plugin_only),
-    ("task-plugin", plugins::task_plugin),
-    ("task-plugin-request", plugins::task_plugin_request),
-    ("cat-page-plugins", plugins::cat_page_plugins),
-    ("cat-page-no-plugins", plugins::cat_page_no_plugins),
-    ("cat-page-plugins-none-for-cat", plugins::cat_page_plugins_none_for_cat),
+    ("home-typed", |s| { home_typed(s); finish(s) }),
+    ("home-folder", |s| { home_folder(s); finish(s) }),
+    ("task-open", |s| { task_open(s); finish(s) }),
+    ("tasks-home", |s| { tasks_home(s); finish(s) }),
+    ("task-working", |s| { task_working(s); finish(s) }),
+    ("task-working-live", |s| { task_working_live(s); finish(s) }),
+    ("task-needs-you", |s| { task_needs_you(s); finish(s) }),
+    ("task-needs-you-destructive", |s| { task_needs_you_destructive(s); finish(s) }),
+    ("task-done", |s| { task_done(s); finish(s) }),
+    ("task-done-open", |s| { task_done_open(s); finish(s) }),
+    ("task-follow-up", |s| { task_follow_up(s); finish(s) }),
+    ("task-failed", |s| { task_failed(s); finish(s) }),
+    ("task-thinking", |s| { task_thinking(s); finish(s) }),
+    ("task-talked", |s| { task_talked(s); finish(s) }),
+    ("task-asked", |s| { task_asked(s); finish(s) }),
+    ("task-real-run", |s| { task_real_run(s); finish(s) }),
+    ("task-real-run-open", |s| { task_real_run_open(s); finish(s) }),
+    ("task-context-open", |s| { task_context_open(s); finish(s) }),
+    ("task-stopped", |s| { task_stopped(s); finish(s) }),
+    ("task-interrupted", |s| { task_interrupted(s); finish(s) }),
+    ("settings", |s| { settings(s); finish(s) }),
+    ("settings-ask", |s| { settings_ask(s); finish(s) }),
+    ("settings-full-access", |s| { settings_full(s); finish(s) }),
+    ("settings-signed-out", |s| { settings_signed_out(s); finish(s) }),
+    ("workspaces", |s| { workspaces(s); finish(s) }),
+    ("workspaces-folded", |s| { workspaces_folded(s); finish(s) }),
+    ("workspace-picker", |s| { workspace_picker(s); finish(s) }),
+    ("workspace-menu", |s| { workspace_menu(s); finish(s) }),
+    ("workspace-rename", |s| { workspace_rename(s); finish(s) }),
+    ("workspace-remove", |s| { workspace_remove(s); finish(s) }),
+    ("workspace-task", |s| { workspace_task(s); finish(s) }),
+    ("task-remove", |s| { task_remove(s); finish(s) }),
+    ("task-remove-refused", |s| { task_remove_refused(s); finish(s) }),
+    ("settings-workspaces", |s| { settings_workspaces(s); finish(s) }),
+    ("needs-you", |s| { needs_you(s); finish(s) }),
+    ("needs-you-answering", |s| { needs_you_answering(s); finish(s) }),
+    ("needs-you-empty", |s| { needs_you_empty(s); finish(s) }),
+    ("settings-notifications", |s| { settings_notifications(s); finish(s) }),
+    ("settings-notifications-not-asked", |s| { settings_notifications_not_asked(s); finish(s) }),
+    ("settings-notifications-denied", |s| { settings_notifications_denied(s); finish(s) }),
+    ("settings-notifications-unavailable", |s| { settings_notifications_unavailable(s); finish(s) }),
+    ("task-undo", |s| { task_undo(s); finish(s) }),
+    ("task-undone", |s| { task_undone(s); finish(s) }),
+    ("task-undo-older", |s| { task_undo_older(s); finish(s) }),
+    ("task-undo-committed", |s| { task_undo_committed(s); finish(s) }),
+    ("task-undo-unavailable", |s| { task_undo_unavailable(s); finish(s) }),
+    ("task-undo-dropped", |s| { task_undo_dropped(s); finish(s) }),
+    ("undo-anyway", |s| { undo_anyway(s); finish(s) }),
+    ("review", |s| { review(s); finish(s) }),
+    ("review-open", |s| { review_open(s); finish(s) }),
+    ("review-all", |s| { review_all(s); finish(s) }),
+    ("review-undone", |s| { review_undone(s); finish(s) }),
+    ("settings-undo", |s| { settings_undo(s); finish(s) }),
+    ("clear-undo", |s| { clear_undo(s); finish(s) }),
+    ("cat-page", |s| { cat_page(s); finish(s) }),
+    ("cat-page-rules", |s| { cat_page_rules(s); finish(s) }),
+    ("cat-page-editing", |s| { cat_page_editing(s); finish(s) }),
+    ("cat-new", |s| { cat_new(s); finish(s) }),
+    ("cat-retire", |s| { cat_retire(s); finish(s) }),
+    ("cat-picker", |s| { cat_picker(s); finish(s) }),
+    ("task-rules-changed", |s| { task_rules_changed(s); finish(s) }),
+    ("settings-cats", |s| { settings_cats(s); finish(s) }),
+    ("home-house", |s| { home_house(s); finish(s) }),
+    ("home-many", |s| { home_many(s); finish(s) }),
+    ("rounds-empty", |s| { rounds_empty(s); finish(s) }),
+    ("rounds", |s| { rounds(s); finish(s) }),
+    ("rounds-history", |s| { rounds_history(s); finish(s) }),
+    ("rounds-paused", |s| { rounds_paused(s); finish(s) }),
+    ("rounds-braked", |s| { rounds_braked(s); finish(s) }),
+    ("rounds-remove", |s| { rounds_remove(s); finish(s) }),
+    ("round-new", |s| { round_new(s); finish(s) }),
+    ("round-daily", |s| { round_daily(s); finish(s) }),
+    ("round-hours", |s| { round_hours(s); finish(s) }),
+    ("round-manual", |s| { round_manual(s); finish(s) }),
+    ("round-edit", |s| { round_edit(s); finish(s) }),
+    ("round-invalid", |s| { round_invalid(s); finish(s) }),
+    ("round-cat-menu", |s| { round_cat_menu(s); finish(s) }),
+    ("task-from-round", |s| { task_from_round(s); finish(s) }),
+    ("cat-page-rounds", |s| { cat_page_rounds(s); finish(s) }),
+    ("home-next-round", |s| { home_next_round(s); finish(s) }),
+    ("sparse-home", |s| { sparse_home(s); finish(s) }),
+    ("sparse-empty", |s| { sparse_empty(s); finish(s) }),
+    ("sparse-status", |s| { sparse_status(s); finish(s) }),
+    ("threads-ungrouped", |s| { threads_ungrouped(s); finish(s) }),
+    ("threads-view-menu", |s| { threads_view_menu(s); finish(s) }),
+    ("threads-row-menu", |s| { threads_row_menu(s); finish(s) }),
+    ("sparse-working", |s| { sparse_working(s); finish(s) }),
+    ("sparse-needs-you", |s| { sparse_needs_you(s); finish(s) }),
+    ("sparse-two-tasks", |s| { sparse_two_tasks(s); finish(s) }),
+    ("sparse-task", |s| { sparse_task(s); finish(s) }),
+    ("briefing-sparse", |s| { briefing::sparse_briefing(s); finish(s) }),
+    ("briefing", |s| { briefing::briefing(s); finish(s) }),
+    ("briefing-finished", |s| { briefing::briefing_finished(s); finish(s) }),
+    ("briefing-empty", |s| { briefing::briefing_empty(s); finish(s) }),
+    ("briefing-caught-up", |s| { briefing::briefing_caught_up(s); finish(s) }),
+    ("briefing-caught-up-waiting", |s| { briefing::briefing_caught_up_waiting(s); finish(s) }),
+    ("briefing-many", |s| { briefing::briefing_many(s); finish(s) }),
+    ("briefing-morning-off", |s| { briefing::briefing_morning_off(s); finish(s) }),
+    ("home-briefing", |s| { briefing::home_briefing(s); finish(s) }),
+    ("settings-briefing", |s| { briefing::settings_briefing(s); finish(s) }),
+    ("settings-briefing-invalid", |s| { briefing::settings_briefing_invalid(s); finish(s) }),
+    ("plugins-empty", |s| { plugins::plugins_empty(s); finish(s) }),
+    ("plugins-waiting", |s| { plugins::plugins_waiting(s); finish(s) }),
+    ("plugins", |s| { plugins::plugins(s); finish(s) }),
+    ("plugins-changed", |s| { plugins::plugins_changed(s); finish(s) }),
+    ("plugins-needs-setup", |s| { plugins::plugins_needs_setup(s); finish(s) }),
+    ("plugins-check-ok", |s| { plugins::plugins_check_ok(s); finish(s) }),
+    ("plugins-check-failed", |s| { plugins::plugins_check_failed(s); finish(s) }),
+    ("plugins-testing", |s| { plugins::plugins_testing(s); finish(s) }),
+    ("plugins-web", |s| { plugins::plugins_web(s); finish(s) }),
+    ("plugins-fields-unset", |s| { plugins::plugins_fields_unset(s); finish(s) }),
+    ("plugins-fields-set", |s| { plugins::plugins_fields_set(s); finish(s) }),
+    ("plugins-secret-changing", |s| { plugins::plugins_secret_changing(s); finish(s) }),
+    ("plugins-access-only", |s| { plugins::plugins_access_only(s); finish(s) }),
+    ("plugins-access-none", |s| { plugins::plugins_access_none(s); finish(s) }),
+    ("plugins-remove", |s| { plugins::plugins_remove(s); finish(s) }),
+    ("plugin-add", |s| { plugins::plugin_add(s); finish(s) }),
+    ("plugin-add-good", |s| { plugins::plugin_add_good(s); finish(s) }),
+    ("plugin-add-bad", |s| { plugins::plugin_add_bad(s); finish(s) }),
+    ("plugin-add-several", |s| { plugins::plugin_add_several(s); finish(s) }),
+    ("plugin-add-unnamed", |s| { plugins::plugin_add_unnamed(s); finish(s) }),
+    ("plugin-add-refused", |s| { plugins::plugin_add_refused(s); finish(s) }),
+    ("needs-you-plugin", |s| { plugins::needs_you_plugin(s); finish(s) }),
+    ("needs-you-plugin-changed", |s| { plugins::needs_you_plugin_changed(s); finish(s) }),
+    ("needs-you-plugin-web", |s| { plugins::needs_you_plugin_web(s); finish(s) }),
+    ("needs-you-plugin-only", |s| { plugins::needs_you_plugin_only(s); finish(s) }),
+    ("task-plugin", |s| { plugins::task_plugin(s); finish(s) }),
+    ("task-plugin-request", |s| { plugins::task_plugin_request(s); finish(s) }),
+    ("cat-page-plugins", |s| { plugins::cat_page_plugins(s); finish(s) }),
+    ("cat-page-no-plugins", |s| { plugins::cat_page_no_plugins(s); finish(s) }),
+    ("cat-page-plugins-none-for-cat", |s| { plugins::cat_page_plugins_none_for_cat(s); finish(s) }),
 ];
 
 mod briefing;
 mod plugins;
+
+/// What the daemon works out about each task, worked out here for placeholder data (the app never derives it for a real one):
+/// the thread's status, the Needs you flag, why it failed and what it last said. A scene sets `status`, and anything it wants
+/// different afterwards (an unread thread: `last_read_ms`).
+pub fn finish(s: &mut App) {
+    let failing: Vec<TaskId> = s.needs.iter().filter(|i| matches!(i.need, Need::Failure { .. })).map(|i| i.task.clone()).collect();
+    let mut i = 0;
+    for t in &mut s.tasks {
+        t.thread_status = match t.status {
+            TaskStatus::Working | TaskStatus::NeedsYou => neko_protocol::ThreadStatus::Working,
+            TaskStatus::Failed if t.last_read_ms < t.activity_ms => neko_protocol::ThreadStatus::Failed,
+            _ => neko_protocol::ThreadStatus::Idle,
+        };
+        t.needs_you = matches!(t.status, TaskStatus::NeedsYou | TaskStatus::Asked) || (t.status == TaskStatus::Failed && failing.contains(&t.id));
+        if t.status == TaskStatus::Failed && t.failure_line.is_empty() {
+            t.failure_line = "Claude Code is not signed in.".into();
+        }
+        if t.latest_line.is_empty() {
+            i += 1;
+            t.latest_line = match t.status {
+                TaskStatus::Done => ["Renamed the label in 4 files and ran the tests.", "The nightly build is slow because of the retry loop.", "Moved the notes into one folder per project.", "Checked all 31 links; two redirects remain."][i % 4].to_owned(),
+                TaskStatus::Working => ["Reading the release notes template.", "Running the tests for acme-api.", "Comparing the images before and after."][i % 3].to_owned(),
+                _ => String::new(),
+            };
+        }
+    }
+}
 
 /// The starter cats as a new install has them, each with one placeholder purpose; mochi has standing rules and an earlier version.
 pub fn sample_cats() -> Vec<Cat> {
@@ -219,7 +251,7 @@ fn cat_picker(s: &mut App) {
 fn task_rules_changed(s: &mut App) {
     task_follow_up(s);
     let id = s.open.clone().expect("open");
-    let cat = s.tasks.iter().find(|t| t.id == id).map(|t| t.cat.clone()).expect("the task");
+    let cat = s.tasks.iter().find(|t| t.id == id).map(|t| t.cat.clone()).expect("the thread");
     let name = s.cat(&cat).map(|c| c.name.clone()).expect("its cat");
     if let Some(b) = s.books.get_mut(&id) {
         let at = b.parts.iter().position(|p| p.run.as_ref().is_some_and(|r| r.0 == "run_2")).expect("the second run");
@@ -285,7 +317,7 @@ pub fn sample_workspaces() -> Vec<Workspace> {
     let mut notes = ws("ws_notes", "notes", Some("/Users/example/notes"), 4);
     notes.missing = true;
     vec![
-        ws(GENERAL, "General", None, 0),
+        ws(GENERAL, "No project", None, 0),
         ws("ws_acme", "acme-api", Some("/Users/example/acme-api"), 1),
         ws("ws_web", "Acme marketing website redesign for the spring launch", Some("/Users/example/Projects/acme-marketing-website-redesign-2026"), 2),
         notes,
@@ -336,9 +368,19 @@ fn with_workspaces(s: &mut App) {
     tasks.push(more("ws_scripts", "/Users/example/old-scripts", "Port the backup script to the new server", 9 * 24 * 60, TaskStatus::Done));
     tasks.sort_by_key(|t| std::cmp::Reverse(t.created_ms));
     s.tasks = tasks;
-    let retry = s.tasks.iter().find(|t| t.title.starts_with("Answer the question about the retry limit")).cloned().expect("the sample task");
+    // Two threads finished while the person was elsewhere: their titles are bold until opened.
+    mark_unread(s, "Find out why the nightly build");
+    mark_unread(s, "Check every page for broken links");
+    let retry = s.tasks.iter().find(|t| t.title.starts_with("Answer the question about the retry limit")).cloned().expect("the sample thread");
     s.needs = vec![permission_item(s, &retry, "Run a command", "cargo test --package acme-api retry", false, 30)];
     s.needs_loaded = true;
+}
+
+/// The thread whose title starts so has activity the person has not seen.
+fn mark_unread(s: &mut App, starts: &str) {
+    if let Some(t) = s.tasks.iter_mut().find(|t| t.title.starts_with(starts)) {
+        t.last_read_ms = t.activity_ms - 1;
+    }
 }
 
 fn ago(s: &App, minutes: i64) -> i64 {
@@ -370,7 +412,7 @@ fn permission_item(s: &App, task: &Task, title: &str, detail: &str, destructive:
 /// Every kind of item, in three workspaces, in the daemon's order (the workspace waiting longest first, oldest first inside it).
 fn needs_you(s: &mut App) {
     with_workspaces(s);
-    let find = |s: &App, start: &str| s.tasks.iter().find(|t| t.title.starts_with(start)).cloned().expect("the sample task");
+    let find = |s: &App, start: &str| s.tasks.iter().find(|t| t.title.starts_with(start)).cloned().expect("the sample thread");
     let tidy = find(s, "Tidy the Downloads");
     let notes = find(s, "Draft the release notes");
     let nightly = find(s, "Find out why the nightly build");
@@ -473,7 +515,7 @@ fn workspaces(s: &mut App) {
 /// A person's first week, as sparse as real use is: General folded with no tasks, one workspace with one finished task, three cats
 /// napping. The busy scenes hid how the sidebar looks when there is little in it.
 pub(crate) fn sparse(s: &mut App) {
-    s.workspaces = vec![ws(GENERAL, "General", None, 0), ws("ws_acme", "acme-api", Some("/Users/example/acme-api"), 1)];
+    s.workspaces = vec![ws(GENERAL, "No project", None, 0), ws("ws_acme", "acme-api", Some("/Users/example/acme-api"), 1)];
     s.tasks_loaded = true;
     s.folded = [GENERAL.to_owned()].into_iter().collect();
     let mut t = task(30, "What changed this week?", 26 * 60);
@@ -486,6 +528,47 @@ pub(crate) fn sparse(s: &mut App) {
 
 fn sparse_home(s: &mut App) {
     sparse(s);
+}
+
+/// A first launch: a project added and nothing started yet.
+fn sparse_empty(s: &mut App) {
+    sparse(s);
+    s.tasks.clear();
+}
+
+/// The three states a row can lead with, in one project: one working, one that failed, one with a request waiting.
+fn sparse_status(s: &mut App) {
+    sparse(s);
+    s.tasks.clear();
+    let working = sparse_task_of(s, 41, "Draft the release notes for 0.2", 4, "cat_mochi", TaskStatus::Working);
+    let failed = sparse_task_of(s, 42, "Sync the changelog with the docs", 70, "cat_miso", TaskStatus::Failed);
+    let asks = sparse_task_of(s, 43, "Find out why the nightly build is slow", 35, "cat_tofu", TaskStatus::NeedsYou);
+    s.needs = vec![permission_item(s, &asks, "Run a command", "cargo test --package acme-api retry", false, 30)];
+    let _ = (working, failed);
+    sparse_task_of(s, 44, "What changed this week?", 26 * 60, "cat_miso", TaskStatus::Done);
+    mark_unread(s, "What changed this week");
+    // It failed while the person was elsewhere: it is Failed until opened.
+    mark_unread(s, "Sync the changelog");
+    s.tasks.sort_by_key(|t| std::cmp::Reverse(t.created_ms));
+}
+
+/// The busy house with the threads in one list by last activity, each naming its project.
+fn threads_ungrouped(s: &mut App) {
+    with_workspaces(s);
+    s.grouping = crate::threads::Grouping::None;
+}
+
+/// View, open: Group by Project or None.
+fn threads_view_menu(s: &mut App) {
+    with_workspaces(s);
+    s.menu_open = Some("threads-view".into());
+}
+
+/// A thread's menu, open under its row.
+fn threads_row_menu(s: &mut App) {
+    with_workspaces(s);
+    let id = s.tasks.iter().find(|t| t.title.starts_with("Find out why the nightly build")).map(|t| t.id.clone()).expect("the sample thread");
+    s.menu_open = Some(format!("thread-menu-{}", id.0));
 }
 
 /// A task of the sparse house's workspace, in this state, given to this cat.
@@ -562,8 +645,8 @@ fn workspace_remove(s: &mut App) {
 
 fn workspace_task(s: &mut App) {
     with_workspaces(s);
-    let id = s.tasks.iter().find(|t| t.title.starts_with("Rename the Settings")).map(|t| t.id.clone()).expect("the sample task");
-    let task = s.tasks.iter().find(|t| t.id == id).cloned().expect("the sample task");
+    let id = s.tasks.iter().find(|t| t.title.starts_with("Rename the Settings")).map(|t| t.id.clone()).expect("the sample thread");
+    let task = s.tasks.iter().find(|t| t.id == id).cloned().expect("the sample thread");
     let at = start(s);
     let mut sc = Script::new(&task, "run_1", at);
     sc.person(&task.words);
@@ -585,8 +668,8 @@ fn task_remove(s: &mut App) {
 fn task_remove_refused(s: &mut App) {
     workspace_task(s);
     s.refusal = Some(crate::state::Refusal {
-        title: "Neko kept this task".into(),
-        words: "This task's worktree has changes that are not committed. Neko deletes nothing with unsaved work.".into(),
+        title: "Neko kept this thread".into(),
+        words: "This thread's worktree has changes that are not committed. Neko deletes nothing with unsaved work.".into(),
         reveal: Some("/Users/example/Library/Application Support/neko/worktrees/x7k2m9qa".into()),
     });
 }
@@ -626,7 +709,7 @@ fn home_house(s: &mut App) {
     busy("Draft the release notes", "cat_miso");
     busy("Make the hero image load", "cat_sesame");
     busy("Answer the question about the retry limit", "cat_yuzu");
-    let retry = s.tasks.iter().find(|t| t.title.starts_with("Answer the question about the retry limit")).cloned().expect("the sample task");
+    let retry = s.tasks.iter().find(|t| t.title.starts_with("Answer the question about the retry limit")).cloned().expect("the sample thread");
     s.needs = vec![permission_item(s, &retry, "Run a command", "cargo test --package acme-api retry", false, 30)];
 }
 
@@ -1293,7 +1376,7 @@ fn rounds_history(s: &mut App) {
     with_rounds(s);
     s.open_rounds();
     let docs = s.rounds[0].clone();
-    let done = s.tasks.iter().find(|t| t.title == "Docs check").cloned().expect("the sample task");
+    let done = s.tasks.iter().find(|t| t.title == "Docs check").cloned().expect("the sample thread");
     s.round_history_open.insert(docs.id.clone());
     s.round_history.insert(
         docs.id.clone(),
@@ -1395,8 +1478,8 @@ fn round_cat_menu(s: &mut App) {
 
 fn task_from_round(s: &mut App) {
     with_rounds(s);
-    let id = s.tasks.iter().find(|t| t.title == "Docs check").map(|t| t.id.clone()).expect("the sample task");
-    let task = s.tasks.iter().find(|t| t.id == id).cloned().expect("the sample task");
+    let id = s.tasks.iter().find(|t| t.title == "Docs check").map(|t| t.id.clone()).expect("the sample thread");
+    let task = s.tasks.iter().find(|t| t.id == id).cloned().expect("the sample thread");
     let mut sc = Script::new(&task, "run_1", start(s));
     steps(&mut sc);
     sc.say(ANSWER, true);

@@ -73,17 +73,17 @@ fn workspace_picker(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
     let shown = current.clone().unwrap_or_else(|| "None".to_owned());
     let chip_el = chip(t, "cat-workspace", None)
         .role("button")
-        .label(format!("Default workspace: {shown}"))
+        .label(format!("Default project: {shown}"))
         .child(glyph(&crate::ui::icons::FOLDER, t.control.icon_sm, t.ink_muted()))
         .child(text(shown).font(t.ty.sm).color(t.ink()).truncate().max_w(200.0).min_w(0.0).a11y_hidden());
     let cat = c.id.clone();
-    let mut menu = DropdownMenu::new("cat-workspace-menu").min_width(220.0).label("Default workspace");
+    let mut menu = DropdownMenu::new("cat-workspace-menu").min_width(220.0).label("Default project");
     menu = menu.item(DropdownMenuItem::new("None").checked(current.is_none()).on_select(move |s: &mut App| s.set_cat_workspace(&cat, None))).separator();
     for w in s.workspaces.iter().filter(|w| w.is_active()) {
         let (cat, ws) = (c.id.clone(), w.id.clone());
         menu = menu.item(DropdownMenuItem::new(w.name.clone()).checked(c.workspace.as_deref() == Some(w.id.as_str())).on_select(move |s: &mut App| s.set_cat_workspace(&cat, Some(ws.clone()))));
     }
-    picker(s, t, layer, "cat-workspace-menu", "Workspaces", chip_el, menu)
+    picker(s, t, layer, "cat-workspace-menu", "Projects", chip_el, menu)
 }
 
 /// One list of the cat's tasks, as rows that open them.
@@ -135,7 +135,7 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
         });
     let mut said = capital(&state.words());
     if !c.is_active() {
-        said = "Retired: takes no new tasks".to_owned();
+        said = "Retired: takes no new threads".to_owned();
     }
     let who = col()
         .grow(1.0)
@@ -167,7 +167,7 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
         .w_full()
         .gap(t.space.at(5.0))
         .child(col().w_full().gap(t.space.at(2.5)).child(label(t, "Face")).child(face_picker(t, c)))
-        .child(row().gap(t.space.at(3.0)).center_y().child(label(t, "Default workspace")).child(workspace_picker(s, t, c, layer)));
+        .child(row().gap(t.space.at(3.0)).center_y().child(label(t, "Default project")).child(workspace_picker(s, t, c, layer)));
     let purpose = {
         let id = id.clone();
         let save = id.clone();
@@ -199,7 +199,7 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
         .gap(t.space.at(2.0))
         .child(label(t, "Standing rules"))
         .child(
-            text(format!("{} reads these on every run of its tasks, ahead of your words. They are words for the agent only: they never change what Neko asks before a step.", c.name))
+            text(format!("{} reads these on every run of its threads, ahead of your words. They are words for the agent only: they never change what Neko asks before a step.", c.name))
                 .font(t.ty.sm)
                 .color(t.ink_muted())
                 .wrap()
@@ -229,7 +229,7 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
     let recent: Vec<&Task> = mine.iter().copied().filter(|x| !working.iter().chain(waiting.iter()).any(|w| w.id == x.id)).take(RECENT).collect();
     let mut tasks = col().key("cat-tasks").w_full().gap(t.space.at(5.0));
     if mine.is_empty() {
-        tasks = tasks.child(label(t, "Tasks")).child(text(format!("{} has no tasks yet. Pick {} in the composer, or let Neko choose.", c.name, c.name)).key("cat-no-tasks").font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0));
+        tasks = tasks.child(label(t, "Threads")).child(text(format!("{} has no threads yet. Pick {} in the composer, or let Neko choose.", c.name, c.name)).key("cat-no-tasks").font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0));
     }
     if !working.is_empty() {
         tasks = tasks.child(task_list(t, "working", "Working", &working, s.open.as_ref()));

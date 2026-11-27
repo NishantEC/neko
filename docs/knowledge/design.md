@@ -56,27 +56,46 @@ One vertical rhythm for the whole sidebar, in steps of the theme's 4 point unit 
 
 | What | Value |
 | --- | --- |
-| A one-line row (New task, Home, Briefing, Needs you, Rounds, Add workspace…, Show more) | 36 (`metrics.row`) |
-| A two-line row (a task, a cat in the Cattains) | 52 (a row and one step either side) |
-| A section header (a workspace, Cattains) | 32 (`control.sm`: its New task and menu buttons are this high) |
-| Gap between any two stacked rows (a cat and its nested tasks too), a header and its first row, a list and Add workspace… | 2 (half a step) |
-| Gap between workspace sections | 12 (3 steps) |
-| Gap between groups (the nav, the Cattains when a cat is at work, the workspaces with Add workspace…) | 20 (5 steps) |
+| A one-line row (New thread, Needs you, Briefing, Rounds, Add project…, Show more) | 36 (`metrics.row`) |
+| A two-line row (a thread, a cat in the Cattains) | 52 (a row and one step either side) |
+| A section or group header (Cattains, Threads, a project) | 32 (`control.sm`: its buttons are this high) |
+| Gap between any two stacked rows (a cat and its nested threads too), a header and its first row (the Threads header and its first project too), a list and Add project… | 2 (half a step) |
+| Gap between project groups | 12 (3 steps) |
+| Gap between sections (the nav, the Cattains when a cat is at work, Threads with Add project…) | 20 (5 steps) |
 
-So a header sits 2 points over its own rows and 12 under the section above: it belongs to what is below it. Add workspace… is a row like the others, a row gap under the list. A section header is a label, not a row: it has no wash at rest, under
+So a header sits 2 points over its own rows and 12 under the section above: it belongs to what is below it. Add project… is a row like the others, a row gap under the list. A section header is a label, not a row: it has no wash at rest, under
 the pointer or when pressed (only the keyboard's focus ring), because a wash on a full-width pill reads as the selected row. The
 earlier build gave headers the row material, so a header the pointer rested on after a click (to fold or open it) looked selected,
-and its pill ran into the first task row under it (a 1 point gap).
+and its pill ran into the first thread row under it (a 1 point gap).
+
+The sidebar is 256 points wide (`view::SIDEBAR`, fixed: a resizable split is an upstream ask).
+
+## Threads
+
+The section under the Cattains (`sidebar::threads_section`, `threads.md`). Header: "Threads", the same small semibold second-ink step as
+"Cattains", with View (three lines of different lengths) and New thread (+) as ghost buttons at its right. Under it one group per
+project: the project's name in the sm medium step in the second ink, a chevron, an amber count when something waits, and on hover
+or focus its New thread and its menu; the group's header is a label, so it takes no wash. The header "Threads" and a project's name
+differ in weight only, because a second weight of colour would add chrome: the owner asked for less.
+
+A thread's row is 52 points, two lines, in the sidebar's own row material (hover, focus ring only for the keys, the open thread a
+raised pebble). It leads with the **status mark** (`status_mark.rs`): 12 points in a 16 point slot, an amber dot for Needs you, a red
+dot for Failed, a small turning ring in the identity teal for Working, nothing for Idle. No cat's portrait leads a row any more: a
+face means a Cattain. Line 1 is the title (base; semibold while unread, regular once read) and at the right the age in the xs step in
+the faintest ink that reads, or "Working" in teal; under the pointer a quiet menu (three dots, no wash at rest) takes its place. Line
+2 is the xs step: `Needs you: …` amber, `Failed: …` red, else the agent's last line in the second ink. In the ungrouped list the
+project's name sits at the right of line 2 in the faint ink, cut at 88 points. The mark, the amber and the red are each taken toward
+their strong ink until they read against the panel (tested in both looks). Nothing in a row is a portrait, a card or a badge.
 
 ## The Cattains
 
-The sidebar's section for the cats at work, under the nav and above the workspaces (`sidebar::cattains`). Header: "Cattains", the small
+The sidebar's section for the cats at work, under the nav and above Threads (`sidebar::cattains`). Header: "Cattains", the small
 semibold step in the second ink, a control high (32), no wash. A row is the 28 point portrait (ring while it works, amber dot when it
 needs the person), the cat's name (base, medium; semibold while its page is open, raised pebble) and one line in the xs step: the
 working task's title in the second ink, `needs you: Run a command` in amber, `working on 2` in the identity teal. A cat with several
 tasks at work nests them under it as the ordinary task rows, stepped in 12 points (narrower, so the pebble and the hit area step in
 too); they sit a row gap apart like every row. Napping cats are not listed and with none at work the section is absent: no header, no
-empty line, and the workspaces rise to a group gap under the nav. The word is the owner's: Cattains.
+empty line, and Threads rises to a group gap under the nav. The word is the owner's: Cattains. A Cattain's nested threads are the ordinary thread rows (status mark, no portrait), stepped in 12 points.
 
 ## Rounds
 
@@ -84,7 +103,7 @@ A round is a raised card (the same material and corner as a Needs you card) led 
 the menu sit at the card's top right. "Next:" is the identity teal while the round will run, amber when something stops it ("Turned
 itself off", "mochi is retired", "Folder missing"), the ink while it is only paused or off. One primary button at a time: New round…
 is the page's, and while every round is paused Resume rounds is, with New round… stepping back to secondary. The icon is Neko's own
-(`icons::ROUNDS`, two arrows chasing round); a task a round made carries it, small, before its line in the sidebar.
+(`icons::ROUNDS`, two arrows chasing round); a thread a round made starts unread (its title is bold until it is opened).
 
 ## The Briefing
 

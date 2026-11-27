@@ -1,7 +1,7 @@
 {
   "name": "briefing",
   "title": "Briefing: what happened while the person was away, answered in place, marked read",
-  "about": "In ask mode a round (every day, a minute from now, mochi's or the first cat's) starts by itself and finishes; a task finishes; a second task waits on a request. The Briefing (⌘4) lists the finished tasks with the first sentence of their answers, the round's line, and the waiting request first, as a Needs you card. The request is answered from the Briefing; Mark as read (⌘↩) says the person is caught up and when the next briefing is; Home's line is gone; a new finished task makes it come back. Nothing here calls a model: the fake CLI answers, and the briefing is made from the daemon's own records.",
+  "about": "In ask mode a round (every day, a minute from now, mochi's or the first cat's) starts by itself and finishes; a thread finishes; a second thread waits on a request. The Briefing (⌘4) lists the finished threads with the first sentence of their answers, the round's line, and the waiting request first, as a Needs you card. The request is answered from the Briefing; Mark as read (⌘↩) says the person is caught up and when the next briefing is; Home's line is gone; a new finished thread makes it come back. Nothing here calls a model: the fake CLI answers, and the briefing is made from the daemon's own records.",
   "cli": [
     "fake"
   ],
@@ -156,7 +156,7 @@
           }
         ]
       },
-      "expect": "The first task finishes"
+      "expect": "The first thread finishes"
     },
     {
       "do": "key",
@@ -184,7 +184,7 @@
         }
       },
       "within": 15,
-      "expect": "The second task waits on a request"
+      "expect": "The second thread waits on a request"
     },
     {
       "do": "key",
@@ -263,7 +263,7 @@
           {
             "see": {
               "key": "briefing-totals-tasks",
-              "text": "2 tasks finished"
+              "text": "2 threads finished"
             }
           },
           {
@@ -301,7 +301,7 @@
         }
       },
       "within": 20,
-      "expect": "The answered task goes on and finishes: 3 finished"
+      "expect": "The answered thread goes on and finishes: 3 finished"
     },
     {
       "do": "key",
@@ -388,7 +388,7 @@
           }
         ]
       },
-      "expect": "A new task finishes"
+      "expect": "A new thread finishes"
     },
     {
       "do": "key",

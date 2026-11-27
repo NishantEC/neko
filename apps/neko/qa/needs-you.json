@@ -1,7 +1,7 @@
 {
   "name": "needs-you",
   "title": "Needs you: one list of what waits for the person",
-  "about": "In ask mode one task waits on a permission request; another ends with a question. The Needs you row counts 2; the list shows both under General, oldest first. Return answers the request with its default (Allow once) and the keyboard moves to the question; a typed reply is sent with Return; the list is then empty and says so. A second answer to the same question is refused.",
+  "about": "In ask mode one thread waits on a permission request; another ends with a question. The Needs you row counts 2; the list shows both under No project, oldest first. Return answers the request with its default (Allow once) and the keyboard moves to the question; a typed reply is sent with Return; the list is then empty and says so. A second answer to the same question is refused.",
   "cli": [
     "fake"
   ],
@@ -60,7 +60,7 @@
         }
       },
       "within": 10,
-      "expect": "The first task waits on a request"
+      "expect": "The first thread waits on a request"
     },
     {
       "do": "key",
@@ -97,7 +97,7 @@
           }
         ]
       },
-      "expect": "The second task finishes"
+      "expect": "The second thread finishes"
     },
     {
       "do": "click",
@@ -123,7 +123,7 @@
         }
       },
       "within": 10,
-      "expect": "It ends with a question: the task needs the person"
+      "expect": "It ends with a question: the thread needs the person"
     },
     {
       "do": "wait",
@@ -148,13 +148,13 @@
             "role": "listitem",
             "in": {
               "role": "list",
-              "label": "Waiting in General"
+              "label": "Waiting in No project"
             }
           },
           "is": 2
         }
       },
-      "expect": "The list shows both under General"
+      "expect": "The list shows both under No project"
     },
     {
       "do": "snap",

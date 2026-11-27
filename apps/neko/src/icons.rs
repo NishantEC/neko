@@ -16,14 +16,14 @@ pub static ROUNDS: Icon = Icon {
     body: r#"<path d="M2.75 7.25V7A3 3 0 0 1 5.75 4h6.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="m10.25 1.75 2.25 2.25-2.25 2.25" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M13.25 8.75V9a3 3 0 0 1-3 3h-6.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="m5.75 14.25-2.25-2.25 2.25-2.25" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#,
 };
 
-/// A pencil over a page: New task.
+/// A pencil over a page: New thread.
 pub static COMPOSE: Icon = Icon {
     name: "neko-compose",
     view: 16.0,
     body: r#"<path d="M7.25 3H5a2.25 2.25 0 0 0-2.25 2.25v5.75A2.25 2.25 0 0 0 5 13.25h5.75A2.25 2.25 0 0 0 13 11V8.75" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M11.6 2.6a1.35 1.35 0 0 1 1.9 1.9L8.4 9.6l-2.4.5.5-2.4z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>"#,
 };
 
-/// A folder with a plus: Add workspace….
+/// A folder with a plus: Add project….
 pub static FOLDER_PLUS: Icon = Icon {
     name: "neko-folder-plus",
     view: 16.0,
@@ -42,4 +42,11 @@ pub static BRIEFING: Icon = Icon {
     name: "neko-briefing",
     view: 16.0,
     body: r#"<path d="M4.25 10.75a3.75 3.75 0 0 1 7.5 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M1.75 10.75h12.5M5 13.5h6M8 2.25v1.5M3.6 5.1l1 1M12.4 5.1l-1 1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#,
+};
+
+/// Three lines of different lengths: View, how the threads are grouped.
+pub static LIST: Icon = Icon {
+    name: "neko-list",
+    view: 16.0,
+    body: r#"<path d="M2.75 4.25h10.5M2.75 8h7.5M2.75 11.75h4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#,
 };

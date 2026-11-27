@@ -157,7 +157,7 @@ pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, po
         if matches!(item.need, Need::Plugin { .. }) {
             answer(t, format!("{key}-open"), "Open in Settings", ButtonVariant::Ghost, true, move |s: &mut App| s.open_need_in_settings(&id))
         } else {
-            answer(t, format!("{key}-open"), "Open task", ButtonVariant::Ghost, true, move |s: &mut App| s.open_need(&id))
+            answer(t, format!("{key}-open"), "Open thread", ButtonVariant::Ghost, true, move |s: &mut App| s.open_need(&id))
         }
     };
     let mut controls = row().key(format!("{key}-answers")).w_full().gap(t.space.at(2.0)).center_y().flex_wrap();
@@ -287,7 +287,7 @@ pub fn group_name(s: &App, ws: &str) -> String {
     if ws.is_empty() {
         return "Plugins".to_owned();
     }
-    s.workspace_of(ws).map_or_else(|| if ws == neko_protocol::GENERAL { "General".to_owned() } else { "Workspace".to_owned() }, |w| w.name.clone())
+    s.workspace_of(ws).map_or_else(|| if ws == neko_protocol::GENERAL { "No project".to_owned() } else { "Project".to_owned() }, |w| w.name.clone())
 }
 
 fn wrap(t: &Theme, page: El) -> El {

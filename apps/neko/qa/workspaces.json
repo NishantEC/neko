@@ -1,7 +1,7 @@
 {
   "name": "workspaces",
-  "title": "Workspaces as sidebar sections",
-  "about": "Two folders are added as workspaces (one a git repository). Both appear as sections after General. A task runs in each and one in General; each sits under its own section with the right header. A section is folded; after a quit and relaunch the fold and everything else is as it was.",
+  "title": "Projects as sidebar sections",
+  "about": "Two folders are added as projects (one a git repository). Both appear as sections after General. A thread runs in each and one in No project; each sits under its own section with the right header. A section is folded; after a quit and relaunch the fold and everything else is as it was.",
   "cli": [
     "fake"
   ],
@@ -37,7 +37,7 @@
           {
             "see": {
               "role": "button",
-              "label_is": "General"
+              "label_is": "No project"
             }
           },
           {
@@ -54,7 +54,7 @@
           }
         ]
       },
-      "expect": "General and both workspaces appear as sections"
+      "expect": "No project and both projects appear as sections"
     },
     {
       "do": "snap",
@@ -65,7 +65,7 @@
       "do": "click",
       "on": {
         "role": "button",
-        "label_is": "New task in acme-api"
+        "label_is": "New thread in acme-api"
       }
     },
     {
@@ -93,7 +93,7 @@
           }
         ]
       },
-      "expect": "A task runs in acme-api"
+      "expect": "A thread runs in acme-api"
     },
     {
       "do": "assert",
@@ -123,7 +123,7 @@
       "do": "click",
       "on": {
         "role": "button",
-        "label_is": "New task in mochi-notes"
+        "label_is": "New thread in mochi-notes"
       }
     },
     {
@@ -151,7 +151,7 @@
           }
         ]
       },
-      "expect": "A task runs in mochi-notes"
+      "expect": "A thread runs in mochi-notes"
     },
     {
       "do": "assert",
@@ -184,7 +184,7 @@
       "do": "click",
       "on": {
         "role": "button",
-        "label_is": "New task in General"
+        "label_is": "New thread in No project"
       }
     },
     {
@@ -212,7 +212,7 @@
           }
         ]
       },
-      "expect": "A task runs in General"
+      "expect": "A thread runs in No project"
     },
     {
       "do": "assert",
@@ -221,7 +221,7 @@
           {
             "see": {
               "key": "task-workspace",
-              "text": "General"
+              "text": "No project"
             }
           },
           {
@@ -230,13 +230,13 @@
               "label": "Plan lunch",
               "in": {
                 "role": "group",
-                "label_is": "General"
+                "label_is": "No project"
               }
             }
           }
         ]
       },
-      "expect": "It sits under General"
+      "expect": "It sits under No project"
     },
     {
       "do": "click",
@@ -292,14 +292,14 @@
               "label": "Plan lunch",
               "in": {
                 "role": "group",
-                "label_is": "General"
+                "label_is": "No project"
               }
             }
           }
         ]
       },
       "within": 15,
-      "expect": "After a relaunch the sections and their tasks are back"
+      "expect": "After a relaunch the sections and their threads are back"
     },
     {
       "do": "assert",

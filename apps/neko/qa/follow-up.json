@@ -1,7 +1,7 @@
 {
   "name": "follow-up",
   "title": "A follow-up continues the same conversation",
-  "about": "A finished task gets a reply. The reply starts a second run that resumes the same Claude Code conversation (the fake says so when it is resumed), in the same task.",
+  "about": "A finished thread gets a reply. The reply starts a second run that resumes the same Claude Code conversation (the fake says so when it is resumed), in the same thread.",
   "cli": [
     "fake"
   ],
@@ -63,7 +63,7 @@
           "min": 2
         }
       },
-      "expect": "A second run starts and finishes in the same task"
+      "expect": "A second run starts and finishes in the same thread"
     },
     {
       "do": "snap",
@@ -92,7 +92,7 @@
           "is": 1
         }
       },
-      "expect": "Still one task in the sidebar"
+      "expect": "Still one thread in the sidebar"
     },
     {
       "do": "assert",

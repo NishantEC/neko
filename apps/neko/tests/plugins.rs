@@ -93,7 +93,7 @@ fn each_state_says_itself_in_words_and_offers_what_fits() {
     let tall = runtime((1200.0, 2400.0), false, scene("plugins"));
     assert!(names(&tall).contains("Approve it to test it."), "an unapproved plugin says why it cannot be tested");
     let rt = runtime((1200.0, 800.0), false, scene("plugins-web"));
-    assert!(names(&rt).contains("Neko cannot test web servers yet. Claude Code connects to it when a task runs."));
+    assert!(names(&rt).contains("Neko cannot test web servers yet. Claude Code connects to it when a thread runs."));
     assert!(disabled(&rt, &format!("plugin-{ID}-test")), "Test is off for a web server");
     // Changed and declined cards say what differs, and a missing setting is named.
     let rt = runtime((1200.0, 800.0), false, scene("plugins-changed"));
