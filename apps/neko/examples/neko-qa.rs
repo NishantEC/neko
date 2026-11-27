@@ -624,6 +624,19 @@ impl Headless<'_> {
                 self.pump();
                 self.check(&v["that"])?;
             }
+            "add-plugin-folder" => {
+                // A plugin folder added as the app's folder panel would (the app's own request goes through `add_plugin_folder`):
+                // straight to the daemon, which the app hears from by itself. The panel's own code is covered by the app's tests.
+                use neko_protocol::{Reply, Request};
+                let (info, token) = neko_protocol::client::find(&self.r.places.data).map_err(|e| e.to_string())?;
+                let mut c = neko_protocol::client::Client::connect(info.port, &token, "neko-qa").map_err(|e| e.to_string())?;
+                let reply = c.request(Request::AddPluginFolder { folder: v["path"].as_str().unwrap_or("").to_owned() }).map_err(|e| e.to_string())?;
+                c.close();
+                if !matches!(reply, Reply::Plugin { .. }) {
+                    return Err(format!("add_plugin_folder: {reply:?}"));
+                }
+                self.r.say("a plugin folder was added");
+            }
             "choose-folder" | "add-workspace" => {
                 // The Mac's folder panel cannot open headless: Rune's headless runtime holds the app's own request for it, and
                 // this answers it with the path, so the app's own code adds the folder as a workspace.

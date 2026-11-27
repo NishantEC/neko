@@ -32,6 +32,24 @@ daemon started with that variable; a release daemon refuses it (`rounds.md`).
 
 `briefing` makes a round (every day, a minute from now, so the daemon is started with `TZ=UTC` and the step's words say `{{utc+1}}`, the UTC time N minutes from now), a task that finishes and one that waits on a request (ask mode), waits for the round to start by itself, opens the Briefing (⌘4) and checks its sections and the first sentence of each answer, answers the request from the page, marks it read with ⌘↩, checks "You're caught up" and that Home's line is gone, then finishes a new task and checks the line comes back. `briefing-morning` sets the morning time three hours ahead in Settings ▸ Briefing, moves the scheduler's clock past it (`clock`) and checks one notification, "Your briefing: 1 finished, 1 needs you", in the notification log, none more when the clock moves on the same day, and the same counts on the page. Headless runs have no system to post to: the driver gives the app a poster that writes to the run's `notify.jsonl` in the form the window runs' log has, so `notified`, `withdrawn` and `posts` (`{max, titled}`: only the posts whose title starts so) are checked the same way in both.
 
+## The plugin scenarios
+
+Both start the daemon (a debug build) with `NEKO_FAKE_RECORD` (what the fake CLI was given, including each `--mcp-config` file's content,
+read at start because Neko removes the file when the run ends) and `NEKO_SECRETS_FILE` (a file store for plugin secrets, so no run touches
+the login keychain; a release daemon ignores it). A scenario names the fake MCP server as `$fake_mcp`; the `add-plugin-folder` step sends
+`add_plugin_folder` to the daemon (the app's folder panel is covered by the app's own tests).
+
+`plugins` pastes an `mcpServers` block with the fake server and a secret into Settings ▸ Plugins (⌘, then the Plugins page), checks the
+plugin waits and shows in Needs you (⌘2) as a plug with exactly what will run and the names it is handed, no value on screen, approves it,
+Tests it (Connected: 3 tools), changes the secret (the new value reaches the test store and is never shown), runs a task whose fake CLI
+calls `mcp__acme-docs__search` (the request in Needs you names the plugin; Allow; the step reads "acme-docs · search"), and checks the
+recorded config had the server with the secret in `env`, that Claude Code was given `--mcp-config`, that no file is left in
+`plugins-run/` after the run, and that no secret is anywhere in the data folder.
+
+`plugins-changed` adds a plugin folder and approves it, runs a task that gets the server, then edits the folder's `neko-plugin.json` by hand
+(`run` step): Needs you asks again showing the change, the next task does not get the server (its tool fails at once and nothing asks),
+approving the new manifest brings it back and the third task's server has the changed argument.
+
 ## How it drives and records
 
 - **Headless (default).** `apps/neko/examples/neko-qa.rs` builds the real app (`neko_app::app()`: its view, state, keys, `poll`

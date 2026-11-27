@@ -1,0 +1,412 @@
+{
+  "name": "plugins",
+  "title": "Plugins: paste a server, approve it, test it, set a secret, let a cat use it",
+  "about": "An mcpServers block with the fake server is pasted into Settings > Plugins. The plugin waits in Needs you; the card shows exactly what will run. Test lists its tools. A secret is changed. A task whose fake CLI calls the plugin's tool asks in Needs you naming the plugin; after Allow the step shows the plugin's name. The run's recorded config had the server and the secret in its env, no file is left after the run, and no secret is in the data folder.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl",
+      "NEKO_SECRETS_FILE": "$work/secrets-test.json"
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-page-5"
+        }
+      },
+      "expect": "Settings opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-page-5"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "plugins-add-json"
+        }
+      },
+      "expect": "Settings ▸ Plugins says what plugins are and offers Add MCP server…"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "plugins-add-json"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "plugin-json-input"
+        }
+      },
+      "expect": "The Add MCP server sheet opens"
+    },
+    {
+      "do": "sleep",
+      "secs": 1
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "plugin-json-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "{\"mcpServers\":{\"acme-docs\":{\"command\":\"$fake_mcp\",\"args\":[\"--name\",\"fake-acme\"],\"env\":{\"ACME_TOKEN\":\"qa-secret-123\"}}}}"
+    },
+    {
+      "do": "sleep",
+      "secs": 0.5
+    },
+    {
+      "do": "snap",
+      "name": "add-sheet",
+      "expect": "The sheet read the paste and says what it will add"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "plugin-add-submit"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "plugin-*-approve"
+            }
+          },
+          {
+            "see": {
+              "text": "Waiting for your approval"
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "acme-docs is added and waits for approval"
+    },
+    {
+      "do": "key",
+      "key": "cmd+2"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "need-plugin:*-approve"
+        }
+      },
+      "within": 15,
+      "expect": "The plugin waits in Needs you, led by a plug and not a cat"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "key": "need-plugin:*-runs",
+          "text": "neko-fake-mcp"
+        }
+      },
+      "expect": "The card shows exactly what will run"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "ACME_TOKEN"
+        }
+      },
+      "expect": "It names what the plugin is handed (names only)"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "text": "qa-secret-123"
+        }
+      },
+      "expect": "No secret value is on screen"
+    },
+    {
+      "do": "snap",
+      "name": "approval-card",
+      "expect": "The approval card"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "need-plugin:*-approve"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "key": "need-plugin:*-approve"
+        }
+      },
+      "expect": "Approved: the plugin leaves Needs you"
+    },
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-page-5"
+        }
+      },
+      "expect": "Settings opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-page-5"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "plugins-add-json"
+        }
+      },
+      "expect": "Settings ▸ Plugins says what plugins are and offers Add MCP server…"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "plugin-*-test"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "plugin-*-tools",
+          "text": "search"
+        }
+      },
+      "within": 20,
+      "expect": "Test lists the server's tools"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "Connected: 3 tools"
+        }
+      },
+      "expect": "Connected: 3 tools"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "plugin-*-acme_token-change"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "plugin-*-acme_token-input"
+        }
+      },
+      "expect": "The secret field opens, empty and masked"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "plugin-*-acme_token-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "qa-secret-456"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "plugin-*-acme_token-set"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "file": {
+          "path": "$work/secrets-test.json",
+          "has": "qa-secret-456"
+        }
+      },
+      "within": 10,
+      "expect": "The new secret went to the (test) keychain store"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "text": "qa-secret-456"
+        }
+      },
+      "expect": "The secret is not shown again"
+    },
+    {
+      "do": "snap",
+      "name": "settings-fields",
+      "expect": "The plugin with its secret set"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Look up the retry policy [fake:plugin-tool:acme-docs:search]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "perm-*-allow"
+        }
+      },
+      "within": 20,
+      "expect": "The plugin's tool asks, naming the plugin"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "acme-docs"
+        }
+      },
+      "expect": "The request names acme-docs"
+    },
+    {
+      "do": "snap",
+      "name": "plugin-request",
+      "expect": "The request for the plugin's tool"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "perm-*-allow"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "text": "I used search from"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for",
+              "role": "button"
+            }
+          }
+        ]
+      },
+      "within": 20,
+      "expect": "After Allow the tool runs and the agent finishes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Worked for",
+        "role": "button"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 0.5
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "acme-docs · search"
+        }
+      },
+      "expect": "The step shows the plugin's name, not mcp__acme-docs__search"
+    },
+    {
+      "do": "snap",
+      "name": "plugin-step",
+      "expect": "The step"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "file": {
+          "path": "$work/fake-record.jsonl",
+          "has": "\"env\":{\"ACME_TOKEN\":\"qa-secret-456\"}"
+        }
+      },
+      "expect": "The run's recorded config had the server with the secret in its env"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "file": {
+          "path": "$work/fake-record.jsonl",
+          "has": "--mcp-config"
+        }
+      },
+      "expect": "Claude Code was given --mcp-config"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "ls '$data/plugins-run' 2>/dev/null | wc -l",
+          "is": "0"
+        }
+      },
+      "expect": "No config file is left after the run"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "grep -rl qa-secret '$data' | wc -l",
+          "is": "0"
+        }
+      },
+      "expect": "No secret is anywhere in the data folder"
+    }
+  ]
+}

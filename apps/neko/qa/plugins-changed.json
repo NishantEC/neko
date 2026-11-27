@@ -1,0 +1,314 @@
+{
+  "name": "plugins-changed",
+  "title": "Plugins: a changed manifest is left out of runs and asks again",
+  "about": "A plugin folder is added from Settings > Plugins and approved in Needs you. A task gets its server. Its neko-plugin.json is then edited by hand: Needs you asks again showing what changed, and the next task does not get the server (its tool is not there and nothing asks). Approving the new manifest brings it back.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl",
+      "NEKO_SECRETS_FILE": "$work/secrets-test.json"
+    },
+    "files": {
+      "folder-plugin": {
+        "files": {
+          "neko-plugin.json": "{\"neko_plugin\": 1, \"name\": \"folder-docs\", \"version\": \"1.0\", \"kind\": \"mcp\", \"mcp\": {\"command\": \"$fake_mcp\", \"args\": [\"--name\", \"fake-folder\"]}}"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-page-5"
+        }
+      },
+      "expect": "Settings opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-page-5"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "plugins-add-json"
+        }
+      },
+      "expect": "Settings ▸ Plugins says what plugins are and offers Add MCP server…"
+    },
+    {
+      "do": "add-plugin-folder",
+      "path": "$files/folder-plugin"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Waiting for your approval"
+        }
+      },
+      "within": 15,
+      "expect": "The folder plugin is added and waits"
+    },
+    {
+      "do": "key",
+      "key": "cmd+2"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "need-plugin:*-approve"
+        }
+      },
+      "within": 15,
+      "expect": "The plugin waits in Needs you, led by a plug and not a cat"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "key": "need-plugin:*-runs",
+          "text": "neko-fake-mcp"
+        }
+      },
+      "expect": "The card shows exactly what will run"
+    },
+    {
+      "do": "snap",
+      "name": "approval-card",
+      "expect": "The approval card"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "need-plugin:*-approve"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "key": "need-plugin:*-approve"
+        }
+      },
+      "expect": "Approved: the plugin leaves Needs you"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Use the folder plugin [fake:plugin-tool:folder-docs:search]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "perm-*-allow"
+        }
+      },
+      "within": 20,
+      "expect": "Approved: its tool asks"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "perm-*-allow"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "I used search from"
+        }
+      },
+      "within": 20,
+      "expect": "The first task used the plugin"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "file": {
+          "path": "$work/fake-record.jsonl",
+          "has": "fake-folder"
+        }
+      },
+      "expect": "The run was given the server"
+    },
+    {
+      "do": "run",
+      "cmd": "sed -i '' 's/fake-folder\"/fake-folder\",\"--changed\"/' '$files/folder-plugin/neko-plugin.json'"
+    },
+    {
+      "do": "key",
+      "key": "cmd+2"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "need-plugin:*-approve"
+        }
+      },
+      "within": 20,
+      "expect": "Needs you asks again about the changed manifest"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "--changed"
+        }
+      },
+      "expect": "It shows what changed"
+    },
+    {
+      "do": "snap",
+      "name": "changed-card",
+      "expect": "The changed card"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Use the folder plugin again [fake:plugin-tool:folder-docs:search]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "was not available to me."
+        }
+      },
+      "within": 20,
+      "expect": "The next task did not get the plugin: its tool is not there"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "key": "perm-*-allow"
+        }
+      },
+      "expect": "Nothing asked"
+    },
+    {
+      "do": "key",
+      "key": "cmd+2"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "need-plugin:*-approve"
+        }
+      },
+      "expect": "The plugin still waits to be approved again"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "need-plugin:*-approve"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "key": "need-plugin:*-approve"
+        }
+      },
+      "expect": "Approved again"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "And once more [fake:plugin-tool:folder-docs:search]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "perm-*-allow"
+        }
+      },
+      "within": 20,
+      "expect": "Approved again, the plugin is back"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "perm-*-allow"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "I used search from"
+        }
+      },
+      "within": 20,
+      "expect": "The third task used it"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "file": {
+          "path": "$work/fake-record.jsonl",
+          "has": "--changed"
+        }
+      },
+      "expect": "The server it got has the changed argument"
+    }
+  ]
+}
