@@ -26,8 +26,9 @@ same after a restart (tested). A notice written before version 6 has no kind; it
   task's state changes, a request changes or a task is removed (a few at once are taken together), and pushes only a list that
   differs.
 - Order: oldest first, grouped by workspace. The workspace whose item waited longest comes first.
-- Each item carries its task's cat and the cat's name (`cats.md`); the list leads with them ("miso asks"), and a rename pushes the
-  list again.
+- Each item carries its task's cat and the cat's name (`cats.md`), empty strings for a thread with no cat (nearly every thread). The
+  card is led by a small amber or red dot and says "The agent asks", "The agent has a question", "The agent could not go on"
+  ("Kitten 1 asks" for a subagent; a plug leads a plugin's). A rename of a cat pushes the list again.
 - An item's id is stable while it waits: `perm:<id>`, `question:<run id>`, `failure:<part id>`, `plugin:<plugin id>`.
 - A plugin's item (`Need::Plugin {ask}`) has no task, workspace or cat: its `task`, `workspace`, `cat` and `cat_name` are empty and its
   `title` is the plugin's name. They make a group of their own, ordered like any group by their oldest item. It says what will run: the
@@ -53,18 +54,18 @@ The app holds no list of its own. It hides an item it answered at once, until th
 
 A plugin's card (`plugins.md`, `app-shell.md`) is led by a plug, in a group headed "Plugins", shows the exact command and what the plugin is handed, and has Approve, Decline and Open in Settings; its notification has no buttons.
 
-A row under Home in the sidebar, with the count. ⌘1 is Home. View has both, with their keys.
+A row under New thread in the sidebar, with the count. ⌘1 is New thread and ⌘2 this list. View has both, with their keys.
 
 - One column. A group per workspace, its name as a small heading. Each item: a mark, the task's title, how long it has waited,
   what is asked in a line or two, and its answers. The row's description says the workspace and the wait.
 - A request: Allow once, Always allow, Deny, the words and looks of the task's Confirmation. The destructive form has no Always and
   no default. Confirmation itself is not used: Escape inside it denies, and here Escape goes back.
-- A question: a reply box and Send.
+- A question: a reply box (placeholder "Answer the question") and Send.
 - A failure: what happened, what to do next, and the sign-in or install line with Copy.
 - Open task, on every item, goes to the task (where the item waits: its newest part).
 - Keys: the oldest item has the keyboard when the list opens. Up and Down move between items, across groups, and stop at the ends.
   Return gives the default: Allow once, the reply box, or the task for a failure; nothing for a destructive request. Escape goes
-  back to the task the person came from, or Home. Tab reaches each item's own controls. After an answer, the next item takes the
+  back to the task the person came from, or New thread. Tab reaches each item's own controls. After an answer, the next item takes the
   keyboard.
 - Empty: "Nothing needs you right now."
 - The rows are `listitem`s with their place in a named `list`. When an item leaves the list, the live region says how many are
@@ -84,13 +85,13 @@ the system.
 When each is posted:
 
 - An item the app has not seen before, while "When a task needs you" is on, unless Neko is in front and the person is in that task
-  or in the list. Title: the task's title. Body: the cat and what is asked ("miso asks: …"), at most 140 characters.
-  - A request: "Run a command: cargo test", with Allow once (first), Always allow and Deny as actions. A destructive request has no
+  or in the list. Title: the thread's title. Body: "Needs you: " and what is asked, at most 140 characters.
+  - A request: "Needs you: Run a command: cargo test" (a subagent's: "Needs you: Kitten 1 asks: …"), with Allow once (first), Always allow and Deny as actions. A destructive request has no
     actions: its notification only opens the task.
-  - A question: "mochi asks: " and the question, with a reply field ("Your answer", Send).
-  - A failure: "tofu could not go on: " and its words. No actions.
+  - A question: "Needs you: " and the question, with a reply field ("Your answer", Send).
+  - A failure: "Failed: " and its words. No actions.
 - A run that finished done (status from working to done), while "When a task finishes" is on, unless Neko is in front on that task:
-  the cat's name, " is done: " and the first line of the answer ("tofu is done: …").
+  title the thread's title, body "Done" or "Done: " and the first line of the answer.
 - A stale action or reply: "That was already answered."
 
 Rules:
@@ -114,7 +115,7 @@ System Settings at Notifications). Send a test notification.
 `neko://task/<id>` opens Neko at the task (`apps/neko/src/deeplink.rs`). The bundle declares the scheme (`scripts/build-app.sh`,
 `CFBundleURLTypes`); Rune hands each link to `on_open_url`, the one that launched the app too. It is read strictly: one scheme, the
 `task/` path, an id of the daemon's shape. A link that comes before the task list waits for it; one for a task that is gone goes
-Home with a quiet line.
+to New thread with a quiet line.
 
 `neko://briefing` opens the Briefing (`briefing.md`): that exact link, a trailing slash allowed. The Briefing's Needs you section is the very list and the same cards, answered the same way (and Escape goes back from it); the morning notification (`neko.briefing`, "Your briefing: 3 finished, 1 needs you") follows these rules: silent, the system's permission and Focus apply, nothing when Neko is in front on the Briefing, a click opens the link, taken back when the page opens.
 

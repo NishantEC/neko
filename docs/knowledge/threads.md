@@ -15,7 +15,7 @@ A **thread** is one conversation with one agent. It was called a task; the store
 What did not change, on purpose: the protocol's field and message names (`task`, `workspace`, `create_task`, …), the store's table
 names, the `neko://task/<id>` link (it is a contract with notifications already posted), Rune keys such as `task-more`, and the
 daemon's own name for the built-in project (`General`, id `default`); the app shows it as No project
-(`App::upsert_workspace`). The words "napping", "the house" and "Any cat" are Home's and stay until Home is replaced.
+(`App::upsert_workspace`). New thread (below) replaced Home, so those words are gone.
 
 ## What the daemon works out (protocol 12, store 9)
 
@@ -60,6 +60,37 @@ Migration 9 reads every existing task as read as of its last activity and fills 
 
 Subagents are not threads: no row, no group. Not here yet (later slices): Pinned and Settled groups, the row's keys (⌘⇧P, ⌘⇧S, `a`),
 drag a row onto a Cattain. `u` for Mark as unread was left out: in a list that jumps to a typed name it would swallow the letter.
+
+## New thread (protocol 14, store 11)
+
+The app opens on **New thread** (⌘N and ⌘1; the View menu's "New Thread"), not on a list. A thread has no cat: the daemon assigns
+none (`cats.md`). The screen is `new_thread_view.rs`, its state `new_thread.rs`.
+
+- **The screen:** the headline "What should we work on?" ("... in <project>?" once a project is chosen), the composer ("Describe
+  the work"), then one row of chips. Under it, when they apply: the notice line, the daemon-slow line, the Briefing's line.
+- **Chips:** Project (No project, the projects, Add folder…). Only for a project that is a git repository with a commit: **New
+  worktree** or **In the folder**, and, for a worktree, the branch it starts from. New worktree is the default every time, and it
+  is reset to it when the project changes; the choice is for the session only.
+- **Return** starts the thread and opens it. **⌘Return** starts it without opening: the screen stays, the box is empty with the
+  keyboard in it, and one quiet line says "Started <title>". A background start that is refused puts the words back.
+- **The folder race.** Choosing Add folder… and sending at once used to start the thread in No project, because the project became
+  the composer's choice only when the daemon answered. Now the folder is recorded at once (`App::begin_adding`) and the chip names it
+  ("Project: <name>, adding"). A send meanwhile is held (`new_thread.held`: the composer is disabled and the words stay in the box);
+  when the daemon answers `folder_added` chooses the project and sends. A refused folder or a lost link releases the hold
+  (`folder_failed`) and keeps the words.
+- **What the daemon takes:** `create_task {words, workspace?, in_folder?, from_branch?}`. `in_folder` works in the project's own
+  folder, even a repository, with no worktree: the place is "plain", the first edit asks, and Undo uses the shadow repository as for
+  any plain folder (`undo.md`). `from_branch` starts the worktree at that local branch's tip, not at the commit the checkout is on;
+  it is checked by `workplace::branch_name_ok` (a name that is not plausible is `refused`) and a branch that does not exist fails
+  the run's folder step with words. Both are kept on the task. `list_branches {workspace}` answers `branches` (the checkout's
+  branch first; `git` is false for a folder that is not a repository with a commit, and for No project) and is answered on its own
+  thread so the chip never waits. Code: `workplace::{Placement, Branches, branches, branch_name_ok}`, `Core::create_task_placed`.
+- **Turns have no head.** The portrait, name and "done" row are gone: the words are the agent's. A parent that rests while its
+  kittens work no longer reads "done"; the newest run's fold line carries "· Waiting on Kitten 1 and Kitten 2" (or "Reading the
+  reports"), `subagents_view::waiting_words`.
+- **Tests:** `apps/neko/tests/new_thread.rs` (end to end against a real daemon, the folder race included), core
+  `a_thread_can_start_from_a_chosen_branch_or_work_in_the_folder_itself`, the daemon's `a_new_thread_says_where_it_can_start_from_…`.
+  QA scenarios are in `qa.md`.
 
 ## Sidebar width
 

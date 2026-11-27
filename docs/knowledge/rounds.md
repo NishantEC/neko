@@ -125,8 +125,7 @@ at 09:00" with Open task, a switch, Run now and a menu (Edit…, Remove…), and
 paused band. The empty state explains rounds and offers New round…. New round… and Edit are one panel: name, what to do, cat and
 workspace chips (as the composer's), the schedule kind, the days and time or the hours, and one line saying when the first run will
 be before saving. A cat's page lists its rounds with "New round for <cat>…". A task a round made says so in a strip above its
-conversation ("From the round Docs check, due 09:00", with Open round); its sidebar row has a small round mark. Home has one quiet
-line ("Next round: miso, Release notes, today 18:35") and nothing when there is none.
+conversation ("From the round Docs check, due 09:00", with Open round); its sidebar row has a small round mark.
 
 ## The test clock
 

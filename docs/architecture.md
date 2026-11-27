@@ -92,8 +92,8 @@ server, a folder or the Keychain runs off the connection's thread, so a stop nev
 
 ## The app
 
-A sidebar of workspace sections and the content beside it, under one 52 point header band on the traffic lights' line. Home has a greeting and a
-composer. Return sends the words to the daemon; the new task opens in the task view. Components come from rune-ui, copied in
+A sidebar of workspace sections and the content beside it, under one 52 point header band on the traffic lights' line. The app opens on New thread: a headline, a composer and a row of chips (project, and for a repository the place and branch).
+Return sends the words to the daemon; the new task opens in the task view. Components come from rune-ui, copied in
 by its CLI. The task view shows the conversation with the agent, permission requests, a run card, and a composer that sends
 follow-ups and stops the run. Settings (⌘,) lists the agent CLIs. Needs you (⌘2) lists what waits for the person, derived by the daemon, with Mac
 notifications and the Dock badge; `neko://task/<id>` opens a task. The Briefing (⌘4) says what happened while the person was away; `neko://briefing` opens it. See `docs/knowledge/needs-you.md`. See `docs/knowledge/app-shell.md` and

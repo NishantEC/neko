@@ -19,7 +19,7 @@ first-class thing: it goes in **General**.
    folder inside another workspace's folder is a workspace of its own.
 3. **General** is built in (id `default`): no folder, each task gets a scratch folder of its own. It cannot be renamed or removed.
 4. A task belongs to exactly one workspace, chosen when it is made, never changed. In a git workspace it works in its own worktree
-   on `neko/<id>`; in a plain folder it works there directly; in General in a scratch folder.
+   on `neko/<id>`; in a plain folder it works there directly; in General in a scratch folder. In a git workspace the person may instead choose "In the folder" for a thread: it works in the project's own folder with no worktree (a plain place), or choose the local branch a worktree starts from (`threads.md`, protocol 14).
 5. **Removing** a workspace takes it off the list only. Nothing on disk is touched. Its tasks stay readable under "Earlier, removed
    workspace", and no new task can be made in it. The app asks first, saying exactly that.
 6. A workspace whose folder is gone shows "Folder not found" with Locate… and Remove. Its tasks stay readable. A new task in it is
@@ -53,15 +53,16 @@ in a scratch folder, refuse the removal in plain words with Reveal in Finder: no
 
 ## Screens
 
-- **Sidebar:** New task, Home, then one section per workspace (General first, then the person's order, removed ones last while they
+- **Sidebar:** New thread, then one section per workspace (General first, then the person's order, removed ones last while they
   have tasks). A header folds the section (remembered in the prefs, `folded-workspaces`) and shows a quiet count of what needs
   the person there (Needs you's items; not what is working). New task in this workspace and the menu (Rename…, Reveal in Finder, Locate…, Move up, Move down,
   Remove…) show on hover or focus. Eight tasks, then "Show N more". "Add workspace…" at the foot opens the folder panel.
 - **Keys:** the sections and their rows are one list (`role list`, `focus_group`): one Tab stop, Up and Down move through headers
   and rows, typing a name goes to it. On a header, Left folds, Right opens, Return toggles, ⌥⌘↑ and ⌥⌘↓ move it. A header's own
   buttons are Tab stops of their own.
-- **Composer:** a pop-up menu in its footer (General, the workspaces, "Add folder…"), remembered (`last-workspace`). ⌘N starts a
-  task in the workspace of the task in view.
+- **New thread:** the Project chip, a pop-up menu in the chip row under the composer (No project, the projects, "Add folder…"),
+  remembered (`last-workspace`). ⌘N starts a thread in the project of the thread in view. For a git project the same row has the
+  New worktree / In the folder chip and the branch chip (`threads.md`).
 - **Task band:** the workspace's name, then the folder and branch. **Window title:** "<task title> — <workspace name>".
 - **Settings ▸ Workspaces:** each workspace with its folder and task count; Rename…, Reveal in Finder (or Locate…), Remove…;
   then "Storage used by undo" and "Clear undo history…" (`undo.md`).
@@ -72,4 +73,4 @@ By keyboard (⌥⌘↑ / ⌥⌘↓ on a header) and the menu's Move up / Move do
 
 ## Not here yet, on purpose
 
-Per-workspace rules and instructions, per-workspace permissions, connections, a dashboard on Home, dragging to reorder.
+Per-workspace rules and instructions, per-workspace permissions, connections, a dashboard on New thread, dragging to reorder.

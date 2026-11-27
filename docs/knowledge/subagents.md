@@ -15,7 +15,7 @@ kitten where it speaks of what the person sees.
 
 - **A subagent is a task** with a parent, a number and a root (`Task.subagent`: `{parent, number, root}`). The number is `1`, `2`, and for
   Subagent 1's own subagents `1.1`, `1.2` (the person reads "Kitten 1", "Kitten 1.2"): a dot for each level down. It has no name and no face. It belongs to the thread that
-  started it and is **not a thread**: the sidebar, Home, the Briefing and the notifications never list it. Its folder is its root's
+  started it and is **not a thread**: the sidebar, New thread, the Briefing and the notifications never list it. Its folder is its root's
   folder (shared; a copy of its own is later).
 - **Depth** is at most 3 levels; at the last level the agent is not offered the tool to start more. At most 24 subagents of one thread
   may be unfinished at once, as a guard against a loop.

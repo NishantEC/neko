@@ -1,13 +1,13 @@
 # Cats (2026-11-26)
 
 Named agents who do the person's work. A cat has standing rules, and they reach the agent on every run of its tasks. Protocol 8,
-store 6.
+store 6. Since protocol 14 / store 11 a thread has no cat: see "Threads have no cat".
 
 ## The model
 
 `crates/neko-core/src/cats.rs`, `crates/neko-protocol/src/cats.rs`.
 
-- A cat has an id, a name, a face, an optional purpose line, standing rules, an optional default workspace, and when it was made
+- A cat has an id, a name, a face, an optional purpose line, standing rules, an optional default workspace (kept for a Cattain's optional project later; it assigns nothing), and when it was made
   and retired.
 - Name: one line, spaces collapsed, 1 to 40 characters. Unique among all cats, retired ones too, compared without case. Too long
   is refused, not cut.
@@ -21,22 +21,28 @@ store 6.
 - Three starter cats are made when a store has no cats: miso (`cat_miso`), mochi (`cat_mochi`), tofu (`cat_tofu`), with empty
   rules. They are ordinary cats. Like General, making them writes no event.
 
-## Which cat gets a task
+## Threads have no cat
 
-Every task has exactly one cat, set when it is made.
+Nothing assigns a cat. A thread is just the agent; `Task.cat` is `Option<String>` and is absent on the wire when there is none.
+`create_task` takes no `cat`. The old rules (the cat picked in the composer, the project's default cat, the least busy cat) and their
+tests are removed.
 
-1. The cat picked in the composer, if any. It must be active.
-2. Else the workspace's default cat. If several cats name that workspace, the least busy of them.
-3. Else the least busy active cat: the fewest tasks working now (working, or waiting on a request), then the one given a task
-   least recently (never comes first), then the oldest, then by id. The same store always gives the same answer.
+Why: cats are to become Cattains, a cat that runs other threads. Assigning by load made every ordinary thread wear a cat's face and
+rules, which made faces noise; a face should mean something.
 
-A task's cat changes (`set_task_cat`) only while no run has started. The composer remembers the last explicit pick per workspace
-in the app's prefs (`cat-picks`); "Any cat" forgets it.
+What still has a cat:
 
-**Migration (store 6).** When a version-5 store has tasks, the starter cats are made, as old as the oldest task. Every task goes to
-one, oldest first, by rule 3: no workspace has a default yet. A task still marked working counts as busy. In practice the oldest
-task goes to miso, the next to mochi, the next to tofu, and so on in turn, skipping a cat that has a task marked working. Old runs
-keep no cat and no rules version.
+- **A round's task** has its round's cat (`rounds.md`).
+- **Tasks made before** keep their cat as history, and their runs still carry that cat's rules block.
+- **A subagent** inherits its parent's cat, or none.
+
+A thread with no cat is handed no `<neko-cat>` block and its words are untouched (daemon test
+`a_thread_with_no_cat_is_handed_no_cat_block_and_its_words_untouched`); every run still gets the subagent paragraph in
+`--append-system-prompt`. `set_task_cat` is removed.
+
+**Migration (store 6, history).** When a version-5 store had tasks, the starter cats were made and each task was given one, oldest
+first, by the least-busy rule then in force. Store 11 changes nothing for cats: `tasks.cat_id` was already nullable and old tasks
+keep theirs.
 
 ## How the rules reach the agent
 
@@ -82,50 +88,46 @@ claude … --append-system-prompt "<the block>" --system-prompt-snapshot off [--
 
 ## Retiring
 
-A retired cat takes no new tasks, picked or by default. Its tasks keep it and stay readable. Follow-ups on its tasks still run
+A retired cat takes no new work after this, and its rounds stop running. Its tasks keep it and stay readable. Follow-ups on its tasks still run
 with its rules. It comes back from Settings ▸ Cats, unless 16 are active; a default workspace removed meanwhile is dropped.
 
 ## The protocol
 
 Requests: `list_cats`, `create_cat`, `rename_cat`, `set_cat_face`, `set_cat_purpose`, `set_cat_workspace`, `save_cat_rules`,
-`restore_cat_rules`, `retire_cat`, `bring_back_cat`, `set_task_cat`; `create_task` takes `cat`. Replies `cats`, `cat`; errors
-`invalid_name`, `refused`, `not_found`. Events `cat_added`, `cat_updated` (the whole cat). A task carries `cat`; a run carries `cat`
-and `rules_hash`; a Needs-you item carries `cat` and `cat_name`.
+`restore_cat_rules`, `retire_cat`, `bring_back_cat`. Replies `cats`, `cat`; errors
+`invalid_name`, `refused`, `not_found`. Events `cat_added`, `cat_updated` (the whole cat). A task carries `cat` when it has one; a run carries `cat`
+and `rules_hash`; a Needs-you item carries `cat` and `cat_name` (empty strings for a thread with no cat).
 
 ## The app
 
 How it looks is in `design.md`.
 
-- Sidebar: **Cattains**, directly under New task, Home, Briefing, Needs you and Rounds and above the workspaces. It lists only the cats
-  at work now (a task working, a request or a question waiting for the person); a napping cat is not listed, and with no cat at work
-  the section is absent (no header, no empty line). A row is the cat's portrait in its state (a turning ring while it works, an amber
+- Sidebar: **Cattains**, directly under New thread, Briefing, Needs you and Rounds and above the workspaces. It lists only the cats
+  at work now (a task working, a request or a question waiting for the person); only tasks a cat was given (rounds, older tasks) put a cat at work, so the section is usually absent (no header, no empty line); a napping cat is not listed. A row is the cat's portrait in its state (a turning ring while it works, an amber
   dot when it needs the person), its name and one line of what it is doing: the working task's title, `needs you: Run a command` (the
   request's short title; `a question`, `could not go on`), or `working on 2` / `needs you · 2 tasks` with its active tasks nested under
   it (the same task row, stepped in 12 points, as Capy nests a Captain's crew). A press opens the cat's page. There is no New cat… and
   no list of idle cats in the sidebar: cats are made, renamed, given a face, rules and a default workspace, retired and brought back
   in **Settings ▸ Cats** (New cat… is its first button, Open on each cat reaches the page), and a task's band opens its cat's page.
-- Home: the cat picker, a chip in the composer's footer beside the workspace's (the picked cat's face and name, or the free cats' faces overlapping in one row for "Any cat"); the house below it,
-  each cat as a tile; a napping cat's tile addresses the composer to it.
+- New thread has no cat picker, no house of cat tiles and no "Any cat" (`threads.md`).
 - A cat's page: its portrait large on a quiet wash of its own ground (every wash the same step from the page, `faces::wash`), its name, what it is doing, Rename… and Retire… (asks first); the
   faces as a row of portraits to choose from, the default workspace picker, purpose, the rules editor (rune-ui's Textarea) with
   Save, Revert, "Unsaved changes" and Restore previous rules, then its tasks: working, needs you, recent.
 - New cat… (Settings ▸ Cats): the dialog shows the face it will get; its page opens when it is made.
-- A task's band starts with its cat's portrait (a press opens its page); its sidebar row starts with the portrait and says the cat;
-  each turn is led by the cat's portrait and name; a request is led by the cat that asks; the receipt names it; the composer says
-  "Reply to miso".
-- Needs you items are cards led by the asking cat: "miso asks", "miso has a question", "miso could not go on". Notifications:
-  "miso asks: …", "tofu is done: …".
+- A thread has no head: a turn has no portrait, name or "done" row, a request is led by a small amber dot (red if destructive) and
+  says "The agent asks", the receipt says "Changed 3 files" with no cat name, and the composer says "Message the agent". The band
+  has no portrait; a task a cat was given shows the cat's name as quiet text (`task-cat`) that opens its page.
+- Needs you items are cards led by a small amber or red dot: "The agent asks", "The agent has a question", "The agent could not go
+  on". Notifications carry the thread's title and no cat name (`needs-you.md`).
 
 ## Not here yet, on purpose
 
-Per-cat permissions, per-cat agent or model, budgets, generated faces, rounds, changing a task's cat from the app (the daemon
-request exists; a task starts its run at once, so there is rarely a moment to use it).
+Per-cat permissions, per-cat agent or model, budgets, generated faces, Cattains (a cat that runs other threads).
 
 ## Tests
 
-- `crates/neko-core/tests/cats.rs`: starters, name rules, the 16 limit and the last active cat, assignment (picked, workspace
-  default, least busy, tie-break, determinism), rules and restore, retire and bring back, the rules version and the changed line,
-  the task's cat before and after a run, the migration from a version-5 store made in the test.
+- `crates/neko-core/tests/cats.rs`: starters, name rules, the 16 limit and the last active cat, that a thread has no cat, rules and restore, retire and bring back, the rules version and the changed line,
+  the task's cat before and after a run, the migration from a version-5 store made in the test. Daemon tests that need a task with a cat make it from a round run (`support::task_of_cat`).
 - `crates/neko-core/src/claude/mod.rs`: the block is one argument and changes no other.
 - `crates/neko-daemon/tests/cats.rs`: the requests and their events, the block reaching the fake CLI once per run and verbatim with
   the person's words untouched, edited rules reaching a resumed run with the changed line, Needs you naming the cat, rules that

@@ -99,7 +99,7 @@ Neko tried each of these on 0.10.0 and kept its own, because the render got wors
   and took them out again. Ask: the hint's text in the theme's keycap face.
 - **Reorder** for the projects: the groups have different heights (a header and its threads), and `Reorder` takes rows of one pitch.
   Ask: variable pitch. Until then projects are ordered by the menu and ⌥⌘↑ and ⌥⌘↓.
-- **Select** is installed and unused by choice: the composer's workspace and cat pickers are chips that open a menu with the current
+- **Select** is installed and unused by choice: New thread's project, place and branch pickers are chips that open a menu with the current
   row checked, as a Mac pop-up button does; 0.10's Select now says "2 of 5" but is a field-shaped control.
 - `Status::Stopped` gave the stopped mark; `stopped_card` and the appended Review and Undo row no longer exist (the receipt replaced
   them), so there was nothing to delete for `Task::secondary`.

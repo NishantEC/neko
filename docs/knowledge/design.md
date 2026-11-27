@@ -1,7 +1,7 @@
 # Neko's design: House (2026-11-26)
 
-Neko is a house of named cats who do the person's work. Each cat has a face of its own; the face leads everything the cat does: its
-rows, its turns, its requests, its receipts, its page. Warm paper on a warm window ground, large confident type, one identity colour.
+Neko's agents do the person's work; a cat is a named agent with standing rules, and a face means a cat (later a Cattain), so an
+ordinary thread has no face: its turns have no head, and its requests and Needs you cards are led by a small dot. Warm paper on a warm window ground, large confident type, one identity colour.
 This is the app's one design: there is no look switch.
 
 ## Where it lives
@@ -11,15 +11,15 @@ This is the app's one design: there is no look switch.
 | `themes/neko.json` | The colours (warm neutrals; the deep teal is the theme's `identity` ramp and role, `blue` is the kit's blue), the type steps (`type.<step>`), the scrim (`number.scrim`), radius 9.6, continuous corners, Figtree. |
 | `view.rs` | `theme()` (the theme file as it is), `raised` and `well` surfaces, `state_ink`. |
 | `faces.rs` | The drawn face per face id, its ground, the wash and the `NEKO_CAT_ART` override, given to rune-ui's `Portrait` (the tile, the working ring, the state dots). |
-| `sidebar.rs`, `home_view.rs`, `turn.rs`, `cat_view.rs`, `review_view.rs` | The inset panel, Home and the house, a turn's pieces and the receipt, a cat's page. |
+| `sidebar.rs`, `new_thread_view.rs`, `turn.rs`, `cat_view.rs`, `review_view.rs` | The inset panel, New thread, a turn's pieces and the receipt, a cat's page. |
 
 ## Type scale (Figtree)
 
 | Step | Size / line | Weight | Tracking | Use |
 | --- | --- | --- | --- | --- |
-| xxl | 40 / 46 | 700 | −1.2 | The greeting, a cat's name on its page |
-| xl | 24 / 30 | 600 | −0.4 | Page titles |
-| lg | 18 / 24 | 600 | −0.2 | The task's title in the band, a cat's name on its tile, Home's line under the greeting (400) |
+| xxl | 40 / 46 | 700 | −1.2 | A cat's name on its page |
+| xl | 24 / 30 | 600 | −0.4 | Page titles, New thread's headline |
+| lg | 18 / 24 | 600 | −0.2 | The task's title in the band, a cat's name on its tile, the Briefing's headline (400) |
 | md | 15 / 23 | 400 | 0 | The agent's answers and the person's words |
 | base | 15 / 21 | 400 | 0 | Chrome, row titles |
 | sm | 13 / 18 | 400 | 0 | Second lines, states, receipts |
@@ -44,10 +44,28 @@ overlay, lifted a fixed step: `sidebar::panel_bg`, the ground mixed 8.8% toward 
 In light the page stays a lighter paper on the warmer ground, which is how Mac apps read in light; a lighter page there also holds
 the content in a clear area beside the panel, so light is unchanged.
 
-Raised surfaces (a busy cat's tile, the open sidebar row, a receipt, a request, a Needs you card) are the floating surface in
+Raised surfaces (a cat's tile, the open sidebar row, a receipt, a request, a Needs you card) are the floating surface in
 light; in dark they sit a small step above the panel (`view::raised_fill`, the ground mixed 10.5% toward white) and are lit from
 above (an inner top edge and a faint gradient), not lifted by a lighter fill. Wells and the composer are the theme's translucent
 `input.bg` over the ground.
+
+## New thread
+
+The screen the app opens on (`new_thread_view.rs`; behaviour in `threads.md`). One column, centred, with the headline a little above
+the middle of the content area: "What should we work on?" ("... in <project>?"), plain text in the xl step, semibold. Then the
+composer, 640 points wide, four lines at rest and up to twelve as it grows, placeholder "Describe the work", and under it one row of
+chips (Project; for a repository, New worktree / In the folder and the branch a worktree starts from), each a quiet pop-up in the
+chip step the composer's footer used. Under the chips, only when they apply, the notice line, the daemon-slow line and the
+Briefing's line. Nothing else: no greeting, no date, no house of cats, no lists of threads (the sidebar has them). Keyboard
+focus is in the composer but no focus ring is drawn until a key moves focus, as on the Briefing and Needs you. The scenes
+are `new-thread`, `-typed`, `-folder`, `-in-folder`, `-place-menu`, `-branch-menu`, `-adding`, `-started`, `-busy` and `sparse-new-thread`.
+
+## Turns, requests and cards
+
+A turn has no head: the words are the agent's, with no portrait, name or "done" row. A request is led by a small amber dot (red if
+destructive) and says "The agent asks" ("Kitten 1 asks" for a subagent); a Needs you card is led by the same dot (a plug for a
+plugin). A cat's portrait appears only where a cat is the subject: its page, a round's card and the Cattains. A task a cat was given shows
+the cat's name as quiet text in the band.
 
 ## Sidebar rhythm
 
@@ -108,13 +126,13 @@ is the page's, and while every round is paused Resume rounds is, with New round�
 ## The Briefing
 
 The page a person reads over coffee (`briefing.md`): the date in the small faint step, the window as the page title (xl, "Since
-yesterday 18:00") and the headline under it at the lg step in the second ink, as Home's line under the greeting. Then sections, each
+yesterday 18:00") and the headline under it at the lg step in the second ink. Then sections, each
 headed at the base step with its count (amber for Needs you, the identity teal for Still working, faint otherwise):
 
-- **Needs you** is the Needs you card itself: raised, led by the 44 point portrait with its amber dot.
-- **Finished** and **Rounds** and **Still working** are *wells* (the pressed-in surface Home's lists use), one per section, rows
-  separated by a hairline: calmer than the cards, because nothing in them must be done. A finished row is led by a 40 point
-  portrait; a round line by a 24 point one. Who and how it ended is the sm step in the second ink with the time in tabular
+- **Needs you** is the Needs you card itself: raised, led by a small amber or red dot.
+- **Finished** and **Rounds** and **Still working** are *wells* (the pressed-in surface), one per section, rows
+  separated by a hairline: calmer than the cards, because nothing in them must be done. A round line is led by a 24 point
+  portrait; a finished or working row of a thread has no portrait or name. How it ended ("Finished", "Could not finish", "Stopped", "Interrupted") is the sm step in the second ink with the time in tabular
   figures; the title is md semibold; the sentence base in the second ink; the files, branch and "Undone" in sm. "Open task" is a ghost
   button at the right of the who line on every row, so every row has the same way in; Review and Undo are secondary buttons on the
   row's last line, only when the run offers them. Red is only for "could not finish" and a round that turned itself off.
@@ -123,7 +141,7 @@ headed at the base step with its count (amber for Needs you, the identity teal f
 - Caught up is rune-ui's Empty (a check in a small well, "You're caught up"); with a request still waiting, its card follows under
   "Still waiting for you".
 
-Home's line is a well too, one row high, with the Briefing's own glyph (a sun rising over a line, `icons::BRIEFING`) and Open
+The Briefing's line on New thread is a well too, one row high, with the Briefing's own glyph (a sun rising over a line, `icons::BRIEFING`) and Open
 briefing as a secondary button.
 
 ## Plugins

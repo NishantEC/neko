@@ -30,7 +30,7 @@ daemon started with that variable; a release daemon refuses it (`rounds.md`).
 
 ## The briefing scenarios
 
-`briefing` makes a round (every day, a minute from now, so the daemon is started with `TZ=UTC` and the step's words say `{{utc+1}}`, the UTC time N minutes from now), a task that finishes and one that waits on a request (ask mode), waits for the round to start by itself, opens the Briefing (⌘4) and checks its sections and the first sentence of each answer, answers the request from the page, marks it read with ⌘↩, checks "You're caught up" and that Home's line is gone, then finishes a new task and checks the line comes back. `briefing-morning` sets the morning time three hours ahead in Settings ▸ Briefing, moves the scheduler's clock past it (`clock`) and checks one notification, "Your briefing: 1 finished, 1 needs you", in the notification log, none more when the clock moves on the same day, and the same counts on the page. Headless runs have no system to post to: the driver gives the app a poster that writes to the run's `notify.jsonl` in the form the window runs' log has, so `notified`, `withdrawn` and `posts` (`{max, titled}`: only the posts whose title starts so) are checked the same way in both.
+`briefing` makes a round (every day, a minute from now, so the daemon is started with `TZ=UTC` and the step's words say `{{utc+1}}`, the UTC time N minutes from now), a task that finishes and one that waits on a request (ask mode), waits for the round to start by itself, opens the Briefing (⌘4) and checks its sections and the first sentence of each answer, answers the request from the page, marks it read with ⌘↩, checks "You're caught up" and that New thread's Briefing line is gone, then finishes a new task and checks the line comes back. `briefing-morning` sets the morning time three hours ahead in Settings ▸ Briefing, moves the scheduler's clock past it (`clock`) and checks one notification, "Your briefing: 1 finished, 1 needs you", in the notification log, none more when the clock moves on the same day, and the same counts on the page. Headless runs have no system to post to: the driver gives the app a poster that writes to the run's `notify.jsonl` in the form the window runs' log has, so `notified`, `withdrawn` and `posts` (`{max, titled}`: only the posts whose title starts so) are checked the same way in both.
 
 ## The sidebar scenarios
 
@@ -80,6 +80,23 @@ All four start the daemon with `NEKO_FAKE_RECORD` and use the fake CLI's `[fake:
 
 The band of a kitten is a row (key `band-title`, its name the whole breadcrumb), so selectors for it use `label` or `name`, not `text`; the thread's final words are matched on "I read 2" because Markdown isolates the "(s)".
 
+## The New thread scenarios
+
+Headless. Two driver steps serve them. `daemon` sends a request (JSON) straight to the daemon; `save_as` keeps a round or task id
+usable later as `$name`, and `expect_error` expects the refusal. `choose-folder` with `"send": true` presses Return at once, before a
+frame has heard the daemon, which is the folder race (`threads.md`).
+
+`new-thread`: the start screen (headline, composer, Project chip), choosing a folder, a thread started in that project, then the
+folder-race step: Add folder… and Return at once must start the thread in the new project, not in No project. `new-thread-background`:
+⌘Return twice; the screen stays, the box is empty with the keyboard in it, "Started <title>" shows, and both threads run.
+`new-thread-in-folder`: a git project shows the chips; In the folder makes no worktree and no `neko/` branch and leaves the checkout
+unchanged. `no-cat`: a thread's recorded arguments have no `<neko-cat>` block (the subagent paragraph is still appended, so the
+check is "no neko-cat", not "no `--append-system-prompt`").
+
+Changed to the new truth: `cats.json` is cut to the cats' own lifecycle (rules saved, New cat…, Retire asks, Bring back);
+`cat-rules-cannot-skip-checks` gets its miso task from a round run now, since nothing assigns a cat; `real-smoke` lost its cat steps
+(never run it unasked: it spends money).
+
 ## How it drives and records
 
 - **Headless (default).** `apps/neko/examples/neko-qa.rs` builds the real app (`neko_app::app()`: its view, state, keys, `poll`
@@ -90,7 +107,7 @@ The band of a kitten is a row (key `band-title`, its name the whole breadcrumb),
   `Runtime::accessibility_json`. Clicks land on the centre of the element's visible part after it stops moving; keys go through
   `Runtime::key`. The prefs live in the run's folder (`RUNE_DIRS_ROOT`), so a quit and relaunch keeps folds and choices.
 - **The folder panel.** It cannot open headless. Rune's headless runtime holds the app's own request for it and
-  `Runtime::resolve_file_dialog` answers it, so "Add workspace…" and the picker's "Add folder…" run the app's own code with the path
+  `Runtime::resolve_file_dialog` answers it, so "Add workspace…" and the Project chip's "Add folder…" run the app's own code with the path
   (`add-workspace`, `choose-folder`). In a window the panel would take focus, so those folders are added before launch with the
   daemon's `add_workspace` request, and a chosen one is written as the composer's last choice in the run's prefs.
 - **`--window`.** `run.sh` builds a development bundle with `scripts/build-app.sh --dev "$NEKO_TARGET/qa-bundle"` (never the
@@ -132,7 +149,7 @@ The band of a kitten is a row (key `band-title`, its name the whole breadcrumb),
 `apps/neko/qa/*.json`, one per journey: `name`, `title`, `about`, `cli`, `window`, `size`, `setup` (folders, optionally git; the
 fake's Claude Code settings; daemon environment) and `steps`. A step is an action (`click` on a selector, `type`, `key`
 (`cmd+n`, `shift+tab`), `sleep`, `snap`, `choose-folder`, `add-workspace`, `tab-to` (Tab until a control has focus, checking a
-focus ring at every stop), `allow-until`, `quit-app`, `start-app`, `stop-daemon`, `start-daemon`, `remove`, `git-record`, `run` (a command in the run's folder: an edit by hand), `stale-answer`, `clock`) or a
+focus ring at every stop), `allow-until`, `quit-app`, `start-app`, `stop-daemon`, `start-daemon`, `remove`, `git-record`, `run` (a command in the run's folder: an edit by hand), `stale-answer`, `clock`, `daemon`) or a
 check (`wait` with a deadline, `assert`). A step with `expect` is an expectation in the report; `soft` records a failure and goes
 on; `window: false` leaves a step to headless. Selectors match an element's `key` (with `*`), `text`, `label`, `label_is`, `name`
 (text, label or description), `role`, `focused`, `in` (an ancestor). Checks: `see`, `gone`, `count`, `order`, `focus` (with a drawn ring
@@ -140,10 +157,10 @@ unless `ring: false`), `title`, `daemon`, `file`, `no_file`, `sh`, `git_same`, `
 
 ## House (the app's design)
 
-The scenarios run unchanged on House except one expectation: the run card is no longer titled "Changes", it reads "miso changed 2
+The scenarios run unchanged on House except one expectation: the run card is no longer titled "Changes", it reads "Changed 2
 files" (`git-worktree`, "The run card shows the changes"). The band still has the workspace's name (`task-workspace`) and the
-folder line, which is quieter and drops its branch under 900 points. The rig found one crash House had introduced (Home's old cat
-picker stack underflowed with no cats yet), now gone with the picker's rewrite.
+folder line, which is quieter and drops its branch under 900 points. The rig found one crash House had introduced (the old cat
+picker's stack underflowed with no cats yet); the picker is gone now.
 
 Defect 10 (opening Review cross-faded the conversation and Review, both drawn at once) is checked by `apps/neko/tests/page_swap.rs`,
 which takes frames while the swap moves, not by a rig step: the rig's pictures are taken after things settle, so they cannot see it.

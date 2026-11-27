@@ -12,8 +12,8 @@
 | `view.rs` | The window: the warm ground, the theme and its type scale, the content band, the panels that ask (rename, remove, retire, undo anyway, new cat). |
 | `sidebar.rs` | The inset sidebar panel: New thread, Needs you, Briefing, Rounds; the Cattains (only the cats at work, absent when none is); Threads with View and New thread, grouped by project (or one list), two-line thread rows led by a status mark; Add project…. |
 | `threads.rs`, `status_mark.rs` | The words and the order of the threads (age, second line, groups, the hold that keeps a working row in its place) and the status mark (`threads.md`). |
-| `home_view.rs` | Home: the greeting, the composer with its cat and workspace pickers, the house of cats, Needs you and In progress. |
-| `task_view.rs`, `turn.rs` | The task view: the conversation, turns led by their cat, steps on a rail, requests led by the asking cat, the receipt, the composer and its context ring. |
+| `new_thread_view.rs`, `new_thread.rs` | New thread, the screen the app opens on: the headline, the composer, the chips (Project, New worktree / In the folder, branch); its state (the place, the branch, the held send, the quiet "Started" line) (`threads.md`). |
+| `task_view.rs`, `turn.rs` | The task view: the conversation, turns with no head, steps on a rail, requests led by a small dot, the receipt, the composer and its context ring. |
 | `faces.rs` | The cats' portraits: a drawn face per face id on its own ground, the working ring and state dots (`design.md`). |
 | `cat_view.rs`, `review_view.rs` | A cat's page; Review. |
 | `settings_view.rs` | Settings (⌘,): the agent CLIs, which one new tasks use, the permission mode, workspaces, notifications. |
@@ -48,7 +48,7 @@
 ## Menus
 
 Neko (About Neko with version and commit, Services, Hide, Hide Others, Show All, Quit), File (New Thread ⌘N, Close Window ⌘W),
-Edit (Rune's standard items; AppKit adds Start Dictation and Emoji & Symbols), View (Home ⌘1, Needs You ⌘2, Rounds ⌘3, Briefing ⌘4, Hide/Show Sidebar ⌃⌘S, Enter/Exit Full
+Edit (Rune's standard items; AppKit adds Start Dictation and Emoji & Symbols), View (New Thread ⌘1, Needs You ⌘2, Rounds ⌘3, Briefing ⌘4, Hide/Show Sidebar ⌃⌘S, Enter/Exit Full
 Screen ⌃⌘F), Window (Minimize, Zoom, Bring All to Front), Help (Neko Help, registered as the help menu). Raw AppKit does three
 things Rune does not: register the Help menu, remove Rune's Window ▸ Close (File has it), keep AppKit's own Enter Full Screen out.
 The model is pure and tested (`menu.rs`): no key is taken twice.
@@ -56,13 +56,13 @@ The model is pure and tested (`menu.rs`): no key is taken twice.
 ## Keyboard
 
 - Tab goes once round every control in reading order: Hide sidebar, New thread, Needs you, Briefing, Rounds, the Cattains (one stop, only when a cat is at work), Threads' View and New thread, the projects list (one stop), each
-  section's own buttons, Add workspace…, the composer, the cat picker and the workspace picker in its footer, each cat's tile in the house. In a task: copy buttons, fold lines, request answers, then the composer and its context ring.
+  section's own buttons, Add workspace…, the composer on New thread, then its chips in order (Project, New worktree / In the folder, the branch). In a task: copy buttons, fold lines, request answers, then the composer and its context ring.
   `App::tab_visits_controls(true)` makes this so whatever the Mac's Keyboard Navigation setting is.
 - In the workspaces list the arrow keys move through section headers and rows (`focus_group`), a typed name goes to it, Return
   opens a row or folds a section; Left and Right fold and open; ⌥⌘↑ and ⌥⌘↓ move a section (`workspaces.md`).
-- In the composer Return sends, Shift+Return makes a new line. Escape gives focus back.
-- ⌘1 is Home, ⌘2 Needs you (`needs-you.md`), ⌘3 Rounds (`rounds.md`), ⌘4 the Briefing (`briefing.md`; ⌘↩ marks it read).
-- ⌘N goes Home (the sidebar's New thread row is selected while Home shows) with the keyboard in the composer, in the project of the thread in view. The sidebar has no Home row; ⌘1 still opens Home until it becomes New thread. ⌘, opens Settings (Neko ▸ Settings…).
+- In the composer Return sends, Shift+Return makes a new line. On New thread ⌘Return starts the thread without opening it (`threads.md`). Escape gives focus back.
+- ⌘1 is New thread, ⌘2 Needs you (`needs-you.md`), ⌘3 Rounds (`rounds.md`), ⌘4 the Briefing (`briefing.md`; ⌘↩ marks it read).
+- ⌘N goes to New thread (the sidebar's New thread row is selected while it shows) with the keyboard in the composer, in the project of the thread in view. ⌘1 does the same. ⌘, opens Settings (Neko ▸ Settings…).
 
 ## Accessibility
 
@@ -87,7 +87,7 @@ to 2 s. On `Connected` the window asks `subscribe`, `list_tasks` and `list_runti
 
 1. `main`: the menu prep, the saved frame (one small prefs read), the Dock registration, `rune::run_windows`. Nothing here or in
    `init` touches the daemon.
-2. The first frame: the shell, the sidebar ("Starting Neko…" at its foot, "Loading…" where the tasks go), Home with a usable
+2. The first frame: the shell, the sidebar ("Starting Neko…" at its foot, "Loading…" where the tasks go), New thread with a usable
    composer.
 3. `on_ready` (after the first frame): `start_link` starts the link thread and returns at once. Finding or starting the daemon, the
    hello and the first lists happen on that thread; the window drains what arrives.
@@ -111,21 +111,21 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   the answer, requests, the card, the composer. Surfaces (fold lines' hover, the card, a request, the composer) start on the edge;
   an open "Worked for" shows its steps after it on the same edge, not indented (tested at both window shapes).
 - **The conversation** is rune-ui's Conversation: pinned to the newest content until the person scrolls up, then a "Jump to
-  latest" pill. The person's words are a soft well at the right (`turn::person`); its copy button shows on hover or focus and takes no room while hidden. The cat's
-  (led by the cat's face and name, `cats.md`) are Markdown on the page, no bubble, selectable; only a run's final answer has a copy button.
+  latest" pill. The person's words are a soft well at the right (`turn::person`); its copy button shows on hover or focus and takes no room while hidden. The agent's
+  words (a turn has no head: no portrait, name or "done" row) are Markdown on the page, no bubble, selectable; only a run's final answer has a copy button.
 - **Steps** are quiet single lines that fold, built on rune-ui's FoldLine, hung on a hairline rail in the margin with neutral marks (a tick in the third ink, a dash for denied). A shell step is its command, on one line, cut in its
   middle past 72 characters (the whole command is in the fold); other tools read as phrases ("Read src/app.rs", "Edited
   ~/notes.md", "Searched for “Settings”"). Paths inside the task's folder are relative; under home they start `~/`. A duration
   under a second is not shown. A command that exited non-zero keeps the finished mark with "exit 1" beside it; the red mark is
   only for a tool that could not run; a denied step says "Denied".
 - **Thinking**: a thought with no words shows nothing. While the agent thinks and nothing else arrives, one live line says
-  "Thinking…" beside the turning mark a running step has (still under Reduce Motion); while it waits on something else, "Working…", with the step it is on. The line never shows the cat again (the turn's head already has its portrait, name and ring); its name for assistive technology still says who ("miso is thinking"). A thought with words
+  "Thinking…" beside the turning mark a running step has (still under Reduce Motion); while it waits on something else, "Working…", with the step it is on. The line shows no cat. A thought with words
   folds as "Thought for 12s" ("Thought" under a second).
 - **Finished runs fold** behind one "Worked for 29s" line (or "Stopped after", "Interrupted after"), in every run of a task; its
   final answer and any notice stay open. The person can open it; the choice lasts for that run while the app is open. A run with
   nothing to fold shows the same line without a chevron. The live run is always open.
-- **The receipt** shows only when the run changed files, has a branch, failed, or undo has something to say: the cat and the sentence
-  ("miso changed 3 files", + and −), each file with its own counts (the run's diff, asked once, `App::receipts`), the undo line,
+- **The receipt** shows only when the run changed files, has a branch, failed, or undo has something to say: the sentence
+  ("Changed 3 files", + and −; a subagent's still starts with its number), each file with its own counts (the run's diff, asked once, `App::receipts`), the undo line,
   the branch, Review, Undo or Redo, Reveal in Finder and Copy branch. No duration (the line has it) and no money.
 - **The context ring** sits in the composer's footer: rune-ui's Context with its ring face, named "Context 31% used, 61.4k of 200k
   tokens", reached by Tab, opened by Return, Space or a press. Its popover is the kit's: context used and window, tokens in, out
@@ -138,7 +138,7 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   elsewhere in the task; with the context panel open, Escape closes it first). While a request waits in the task, Escape answers
   it no and the agent carries on: when it appears the keyboard leaves the composer, which shows Send (not Stop) and says "Escape
   denies it" until the request is answered. In the Needs you list Escape goes back, whatever the task behind it is doing.
-- After a task is sent from Home the keyboard is in its composer. After the last Needs you item is answered it is on the
+- After a thread is started from New thread with Return the keyboard is in its composer. After the last Needs you item is answered it is on the
   sidebar's Needs you row.
 - **The band** keeps the task's title: in a content area under 700 points (the smallest window with the sidebar shown) the folder
   line is left out and the workspace's name shortens first; the title keeps at least 140 points.
@@ -146,17 +146,17 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   the person (a request waits, or the run ended with a question), a red dot when it failed and has not been opened since. The title
   is bold while there is activity the person has not seen; opening the thread (and anything that arrives while it is in view and Neko
   is in front) reads it. Under the title: `Needs you: …`, `Failed: …`, else the agent's last line. The row's description says the state,
-  the line and the age in words. When the run ended with a question the composer says "Answer miso's question".
+  the line and the age in words. When the run ended with a question the composer says "Answer the question".
 - **The task's folder** shows once, quietly, at the band's right: the newest run's working folder (else the chosen folder),
   shortened with `~` and cut in its middle, the branch beside it, and a Reveal in Finder button (`Tx::reveal_path`). The window title follows the task. Finishing, failing and needing you
   are announced (`Tx::announce`).
-- **Home's workspace picker** is a pop-up menu in the composer's footer: General, the workspaces, "Add folder…" (the Mac's open
+- **New thread's Project chip** is a pop-up menu in the chip row under the composer, with the other chips: No project, the projects, "Add folder…" (the Mac's open
   panel, Rune's `native-file-dialog`, rfd). The choice is kept in the prefs (`last-workspace`). See `workspaces.md`.
-- **The task's band** leads with its cat's portrait (a press opens the cat's page), then the title (18 points, semibold: it leads
+- **The task's band** leads with the title (a task a cat was given shows the cat's name as quiet text, `task-cat`, that opens its page) (18 points, semibold: it leads
   and gets the room first), the run counter ("Step 4", or "5 steps · 2m 14s"), the workspace's name, the folder and branch, and a
   menu with All changes and Remove task…. The folder line is the quietest thing in the band: 12 points in the faintest ink that
   still reads, the path cut in its middle to 168 points (220 with the sidebar folded), the branch to 112.
-- **Page changes are cuts, then a fade in.** A page that replaces another (Home, a task's conversation, Review, a cat's page, Needs
+- **Page changes are cuts, then a fade in.** A page that replaces another (New thread, a task's conversation, Review, a cat's page, Needs
   you, Settings) is gone in that frame and the new one fades in on a clean page (`view::page_swap`). Rune fades a removed element
   out over a quarter second by default, so the conversation and Review were drawn one over the other when Review opened
   (QA defect 10); `tests/page_swap.rs` takes frames while the swap moves and fails if both are drawn.
@@ -177,12 +177,12 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
 
 A kitten (the app's word for a subagent: a helper a thread starts, numbered, with no name and no face) is a task (`Task.subagent`: its parent, its number, the thread at the top) and never a thread. `subagents.rs` holds the words and the state, `subagents_view.rs` the drawing.
 
-- **Not listed.** The sidebar (`tasks_in`, the Cattains), Home's lists, a cat's page and counts, and every notification skip tasks with `subagent`; a kitten finishing says nothing (its thread's end does), but its permission request reaches Needs you like any other. When a kitten is open its thread's row is the chosen one.
-- **The thread's row** (`threads::second_line`, `status_mark.rs`) says what it waits on as its second line, after Needs you and Failed and before the agent's last words: "Waiting on Kitten 1" (one live kitten and the thread waiting), "Kitten 1 working", "N kittens working", or "Reading the reports" (waiting, none live). Its mark is the working ring held still in the second ink (`Mark::Waiting`), the right side its age, and its description says "waiting". A kitten's request turns the thread's mark amber and the line reads "Needs you: Run a command · Kitten 1". Waiting is not active, so the thread is not in the Cattains, but it is in Home's In progress.
+- **Not listed.** The sidebar (`tasks_in`, the Cattains), a cat's page and counts, and every notification skip tasks with `subagent`; a kitten finishing says nothing (its thread's end does), but its permission request reaches Needs you like any other. When a kitten is open its thread's row is the chosen one.
+- **The thread's row** (`threads::second_line`, `status_mark.rs`) says what it waits on as its second line, after Needs you and Failed and before the agent's last words: "Waiting on Kitten 1" (one live kitten and the thread waiting), "Kitten 1 working", "N kittens working", or "Reading the reports" (waiting, none live). Its mark is the working ring held still in the second ink (`Mark::Waiting`), the right side its age, and its description says "waiting". A kitten's request turns the thread's mark amber and the line reads "Needs you: Run a command · Kitten 1". Waiting is not active, so the thread is not in the Cattains.
 - **The card** stands where `PartBody::Subagent` is: one raised card, a row (`subagent-card-<number>`) per kitten, `Kitten 1`, its title, its state at the right (Queued, Working, Needs you, Waiting, Done, Failed, Stopped, Interrupted, Has a question), "Shared folder" and its last line (the newest agent words' first line, else the newest step, from the transcript parts this window has of it; a thread's transcript asks once for the transcripts of its kittens it has not read, `ask_subagent_lines`), and Open (`subagent-open-<number>`, name "Open Kitten 1"). Kitten parts with only Neko's own tool steps between them are one card. In a finished run the cards are outside the "Worked for" fold, after it.
 - **The wake note** (`PartBody::Wake`) stands before the run it started, outside its fold: "Woken by Kitten 1 · done" with a hairline each side, then a closed fold "Report from Kitten 1" (key `wake-report-<seq>`, its button `…-trigger`) holding the summary, the files and the branch.
 - **The waiting line** (`waiting-line`) is the last line of a waiting thread: "Waiting on Kitten 1 and Kitten 2" with each name a link (`waiting-link-<number>`) to that kitten; "Reading the reports" when none is live. The composer of a waiting thread offers Stop, and Stop (or Escape) stops the thread and its kittens.
-- **A kitten opened** has no composer: a quiet line (`subagent-readonly`) "This is Kitten 1's own conversation, to read. Say what you want changed in Fix login.", Back (`subagent-back`, to its thread; to its parent for a deeper one) and, while it works, Stop (`subagent-stop`, "Stop Kitten 1"). Its turns have no cat head and its requests read "Kitten 1 asks" with no portrait, answered in place. Escape goes back to the thread (it denies a waiting request first) and never stops the kitten.
+- **A kitten opened** has no composer: a quiet line (`subagent-readonly`) "This is Kitten 1's own conversation, to read. Say what you want changed in Fix login.", Back (`subagent-back`, to its thread; to its parent for a deeper one) and, while it works, Stop (`subagent-stop`, "Stop Kitten 1"). Its turns have no head and its requests read "Kitten 1 asks" with no portrait, answered in place. Escape goes back to the thread (it denies a waiting request first) and never stops the kitten.
 - **The band** reads `Fix login / Kitten 1` (deeper, `Fix login / Kitten 1 / Kitten 1.2`): `band-title` is the heading (its name the whole breadcrumb), `crumb-thread` a button to the thread, `crumb-subagent` plain words; there is no cat and no task menu (a kitten leaves with its thread). The window's title is the same breadcrumb.
 - **Needs you** reads "Kitten 1 asks" led by the number on a quiet tile, "in Fix login" as its second line and "Open Kitten 1"; the notification's body starts "Kitten 1 asks:".
 - **Settings ▸ Plugins** starts with the switch `own-mcp`, "Also give runs my own Claude Code MCP servers", off by default, which sends `SetSettings` with `own_mcp` toggled and the other fields kept, and one line saying what on and off mean.

@@ -5,16 +5,15 @@ is away: code, browsers, files, spreadsheets, documents and creative apps, along
 
 **Status: slice S1, a task runs, with workspaces, Needs you and cats.** Neko is being rebuilt from an empty repository (begun 2026-11-26). Add a
 folder as a workspace once; the sidebar lists each workspace with its tasks under it, and General holds tasks with no folder.
-Type a task on Home, pick its workspace in the composer, press Return: the agent starts by itself and its words stream into the task. Thinking and tool calls
+Type a task on New thread, pick its project with the chip under the composer, press Return: the agent starts by itself and its words stream into the task. Thinking and tool calls
 are quiet lines that fold. Settings offers three permission modes: follow Claude Code's own rules, ask before risky steps
 (enforced by Neko), or full access; a step that waits shows in the task for Allow once, Always allow or Deny. Stop stops it at
 once, a follow-up continues the same conversation, a finished run folds behind one "Worked for" line, and a run card shows what
 changed when something did, with Review (the run's diff, file by file) and Undo or Redo: files go back to how they were before
 the run, from a checkpoint Neko keeps under its own git refs (or a shadow repository for a folder that is not one). An empty worktree is tidied away after its run; one with work in it is never deleted. Needs you (⌘2) lists everything waiting for you, oldest first, answered in place: a step to
 allow, a question to reply to, a failure you can fix. The installed app posts a Mac notification when a task starts needing you
-or finishes, and the Dock icon shows the count. Named cats do the work: miso, mochi and tofu to start, each with its own page and standing rules that reach Claude
-Code on every run of its tasks. A new task goes to the cat picked in the composer, else the workspace's default cat, else the
-least busy; its name is on the task everywhere. Make, rename and retire cats; bring one back from Settings. Quit and
+or finishes, and the Dock icon shows the count. Threads are just the agent. Named cats (miso, mochi and tofu to start) have their own page and standing rules that reach Claude
+Code on every run of the tasks they are given, such as a round's; nothing assigns a cat to an ordinary thread. Make, rename and retire cats; bring one back from Settings. Quit and
 relaunch: the workspaces and the whole transcript are still there. This page changes as each slice ships, and only describes what is built.
 
 **No API key.** Neko uses the agent CLIs already installed and signed in on your Mac, as child processes. Today that is Claude
