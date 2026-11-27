@@ -215,3 +215,15 @@ a permission card added to a conversation that sticks to its bottom, an open dro
 drawn. Expected: the tree follows the view in every window state. Suspected: `a11y_update`'s early return when `paint.drawn` and
 `tree.nodes` differ (frames that commit without painting), and the `scrolled_only` shortcut taking growth in a stick-to-bottom
 scroll view for a scroll." Narrowest workaround for Neko: none in the app at this rev (no public way to force a full tree).
+
+## The right pane scenarios (S3)
+
+Headless, 1280 by 800 (the pane open) unless said. `pane-overview` makes a run change 5 files in a git project and checks Overview's
+Changes (figures, five files, folder, branch, usage), the one change line and no receipt card or band folder line, then Review: the
+Changes tab with This run selected, All runs, Uncommitted, and back to Overview. `pane-undo` is `review-undo`'s undo, redo and
+follow-up checks with the buttons in Overview. `pane-subagent-tab` runs a kitten that asks for a command in ask mode: Overview lists
+it and its request, Open puts it in a tab with its Stop and its request, the request is answered there, its report comes first and wakes the thread,
+and Open in main view reaches the breadcrumb. `pane-narrow` runs at 1000 by 700: the pane is shut with its button in the band, the button opens the sheet,
+Escape closes it, and the band keeps the title's 140 points throughout. `review-undo`, `undo-plain-folder`, `git-worktree`,
+`subagents-restart` and `subagents-stop` moved to the Changes tab and the tab (the old checks are unchanged). The driver learned two
+selectors for these: `"selected": true` (a chosen item: `focus_selected`) and `"min_w": 140` (at least this wide).

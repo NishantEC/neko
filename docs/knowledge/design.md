@@ -33,8 +33,8 @@ One identity colour, the teal (the theme's `identity`; `ring` and `accent` use i
 person is needed, red that something could not go on, green and red are the + and − of changes. Finished things carry no colour.
 Contrast is measured from the theme by `tests/contrast.rs`: every ink on every surface at least 4.5:1, the rings and dots 3:1.
 
-A run earns a receipt card only when it changed files or failed. A run that changed nothing gets no card (no "worked on a
-branch", no branch name); what undo has to say about it is one quiet line under the answer. The reply composer stands alone:
+A run earns a change line only when it changed files or failed: `Changed 3 files · +19 −7 · Review · Undo`, one quiet line (the small step, the second ink, the figures green and red, Review and Undo ghost buttons; the dots between are the faint ink). A run that changed nothing gets no line (no "worked on a
+branch", no branch name); what undo has to say about it is one quiet line under the answer. The files, the folder and the branch are in the right pane. The reply composer stands alone:
 who answers is in the band and in its placeholder. Opening a page (Briefing, Needs you) puts the keyboard on its first item
 without drawing the focus ring; the ring shows once a key moves focus, as in Mac apps.
 
@@ -205,3 +205,14 @@ up and in); a tile's colours spring as its cat's state changes. Under Reduce Mot
 rune-ui 0.10.0 gave Neko the portrait, the turn header and well bubble, neutral marks, the diff's figures and foot, the theme's
 identity ramp, type steps and scrim. What Neko still builds itself, and what would let it stop, is in
 `docs/knowledge/rune-ui-in-neko.md`, "What rune-ui cannot do here".
+
+## The right pane
+
+Native and calm: a hairline at its edge (rune-ui's Split handle), the sidebar's panel material full height (not an inset card, so it reads as
+part of the window's frame), no heavy cards inside it. Its header is the band's line: rune-ui's Tabs in the Pane variant (the words in
+the second ink, the chosen one semibold with a 2 point underline), the pane button at the right. Sections are a small heading (sm,
+semibold, the second ink) with a faint count, 24 points apart; rows are 32 to 44 points, hover on the row material, with the right slot swapping its quiet state word or age for
+the row's actions under the pointer (as a thread's row does). Needs you leads with an amber dot, a kitten with its status mark and its number in semibold, the files in mono with
+only the figures that say something. Overview has no card around anything. Tabs share one body that fades in when it replaces
+another. The sheet under 1100 points is rune-ui's Sheet (the floating material, rounded on its free edges, a scrim) holding the same
+tabs. Renders: `scripts/snap.sh` pictures `pane-overview*`, `review*`, `pane-changes-*` and `pane-kitten-*`.

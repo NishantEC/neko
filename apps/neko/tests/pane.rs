@@ -52,8 +52,8 @@ fn the_pane_is_open_from_1240_points_and_shut_below_until_the_person_opens_it() 
     assert!(has_key(&mid, "pane") && has_key(&mid, "pane-hide"), "⌘⌥B opens it");
     cmd_alt(&mut mid, 'b');
     assert!(!has_key(&mid, "pane"), "and shuts it again");
-    // Nothing but a thread has a pane: Home, Settings and the lists have none and no button.
-    let home = runtime((1280.0, 800.0), false, scene("empty-home"));
+    // Nothing but a thread has a pane: New thread, Settings and the lists have none and no button.
+    let home = runtime((1280.0, 800.0), false, scene("new-thread"));
     assert!(!has_key(&home, "pane") && !has_key(&home, "pane-show") && !has_key(&home, "pane-hide"));
 }
 

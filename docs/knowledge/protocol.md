@@ -1,6 +1,6 @@
 # The protocol (S1, 2026-11-26)
 
-`crates/neko-protocol` is the contract between a screen and the daemon. Version 14 (new thread). The words the app shows say thread and project; the field and message names below keep `task` and `workspace` (`threads.md`).
+`crates/neko-protocol` is the contract between a screen and the daemon. Version 15 (the right pane). Version 15 added a diff's `source` (`run`, the default; `thread`; `uncommitted`) to `get_diff`, `get_diff_file` and `DiffSummary`, and `get_overview` with its reply `overview` (`{task, folder?, branch?, changes?, uncommitted?}`): see `undo.md`. No new event: a screen asks for the overview again when a run of the thread changes (`run_changed`). The store is unchanged by it (still 11). The words the app shows say thread and project; the field and message names below keep `task` and `workspace` (`threads.md`).
 
 ## Shape
 

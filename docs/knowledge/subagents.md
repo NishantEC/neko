@@ -137,7 +137,7 @@ copies do. It also keeps every run quick, which matters when one thread starts s
 - `own_copy` placement (a worktree of its own), `after` (stacking), drafts, `message_subagent`, a subagent's question going up,
   steering, `wake_me` and watches. Each is a later slice.
 - Keep-alive wakes.
-- The Waiting thread's status in the Briefing's wording and a subagent in Review: a thread's receipt covers its own run only.
+- The Waiting thread's status in the Briefing's wording and a subagent in Review: a thread's change line covers its own run only.
 
 ## Still not sure: check with the real CLI (one manual run, by the person, with the cheapest model)
 
@@ -148,3 +148,10 @@ copies do. It also keeps every run quick, which matters when one thread starts s
 4. That `--resume` plus the unchanged `--append-system-prompt` works for a wake and the model reads the `<neko-wake>` message as a report.
 5. That `mcp__neko__*` calls are not asked about by Claude Code in the person's default mode (Claude Code may ask for an MCP tool; if it
    does, it arrives as `can_use_tool` and Neko's policy allows it at once, never reaching the person).
+
+## In the right pane (S3)
+
+A kitten's card now has Open put its conversation in the pane as a tab (Command-click, or "Open in main view" in the tab, takes it into the
+main view as before); the waiting line's names open tabs too. Overview lists the kittens as a tree with Stop under the pointer and their
+requests under Needs you. A tab is read-only and answerable; a finished kitten's tab shows its report first. See app-shell.md,
+"The right pane". A kitten's own change line has no Review or Undo (its changes are the thread's to undo).

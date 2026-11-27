@@ -15,7 +15,8 @@
 | `new_thread_view.rs`, `new_thread.rs` | New thread, the screen the app opens on: the headline, the composer, the chips (Project, New worktree / In the folder, branch); its state (the place, the branch, the held send, the quiet "Started" line) (`threads.md`). |
 | `task_view.rs`, `turn.rs` | The task view: the conversation, turns with no head, steps on a rail, requests led by a small dot, the receipt, the composer and its context ring. |
 | `faces.rs` | The cats' portraits: a drawn face per face id on its own ground, the working ring and state dots (`design.md`). |
-| `cat_view.rs`, `review_view.rs` | A cat's page; Review. |
+| `cat_view.rs` | A cat's page. |
+| `pane.rs`, `pane_view.rs`, `review_view.rs` | The right pane: its state and words (open or shut, width, the tabs, each thread's overview), its drawing (header with tabs, Overview, a kitten's tab, the sheet), and the Changes tab (the files as rune-ui's Diff, the source switch, Undo, Redo, Copy diff). |
 | `settings_view.rs` | Settings (⌘,): the agent CLIs, which one new tasks use, the permission mode, workspaces, notifications. |
 | `rounds.rs`, `rounds_view.rs` | Rounds (⌘3): the words for schedules and times, the New round / Edit panel's form; the page of cards and the panel (`rounds.md`). |
 | `briefing.rs`, `briefing_view.rs` | The Briefing (⌘4): the words for a window, a round line and the totals, the state it keeps; the page (`briefing.md`). |
@@ -124,9 +125,12 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
 - **Finished runs fold** behind one "Worked for 29s" line (or "Stopped after", "Interrupted after"), in every run of a task; its
   final answer and any notice stay open. The person can open it; the choice lasts for that run while the app is open. A run with
   nothing to fold shows the same line without a chevron. The live run is always open.
-- **The receipt** shows only when the run changed files, has a branch, failed, or undo has something to say: the sentence
-  ("Changed 3 files", + and −; a subagent's still starts with its number), each file with its own counts (the run's diff, asked once, `App::receipts`), the undo line,
-  the branch, Review, Undo or Redo, Reveal in Finder and Copy branch. No duration (the line has it) and no money.
+- **The change line** (`turn::change_line`) ends a run's fold when it changed files or failed: `Changed 3 files · +19 −7 · Review · Undo`
+  in the small step, the second ink, with the figures in green and red and Review and Undo (or Redo) as ghost buttons (keys `run-<id>`,
+  `-facts`, `-review`, `-undo`, `-redo`). A failed run starts with "Could not finish" in red, a stopped or interrupted one says how far
+  it got, an undone one says "now undone" and offers Redo; the one quiet sentence undo sometimes has (`Offer::line`) is under it. A
+  kitten's line has no buttons. It replaced the receipt card (the files, the branch, Reveal and Copy branch moved to Overview); no
+  duration (the fold line has it) and no money.
 - **The context ring** sits in the composer's footer: rune-ui's Context with its ring face, named "Context 31% used, 61.4k of 200k
   tokens", reached by Tab, opened by Return, Space or a press. Its popover is the kit's: context used and window, tokens in, out
   and cached, the cost when reported, and "API-equivalent, as Claude Code reports it. Not charged on a subscription." only for a
@@ -147,20 +151,21 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   is bold while there is activity the person has not seen; opening the thread (and anything that arrives while it is in view and Neko
   is in front) reads it. Under the title: `Needs you: …`, `Failed: …`, else the agent's last line. The row's description says the state,
   the line and the age in words. When the run ended with a question the composer says "Answer the question".
-- **The task's folder** shows once, quietly, at the band's right: the newest run's working folder (else the chosen folder),
-  shortened with `~` and cut in its middle, the branch beside it, and a Reveal in Finder button (`Tx::reveal_path`). The window title follows the task. Finishing, failing and needing you
-  are announced (`Tx::announce`).
+- **The task's folder** is in the pane's Overview (the newest run's working folder, else the chosen one, shortened with `~` and cut in its
+  middle, the branch, Reveal in Finder and Copy branch), not in the band. The window title follows the task. Finishing, failing and
+  needing you are announced (`Tx::announce`).
 - **New thread's Project chip** is a pop-up menu in the chip row under the composer, with the other chips: No project, the projects, "Add folder…" (the Mac's open
   panel, Rune's `native-file-dialog`, rfd). The choice is kept in the prefs (`last-workspace`). See `workspaces.md`.
 - **The task's band** leads with the title (a task a cat was given shows the cat's name as quiet text, `task-cat`, that opens its page) (18 points, semibold: it leads
-  and gets the room first), the run counter ("Step 4", or "5 steps · 2m 14s"), the workspace's name, the folder and branch, and a
-  menu with All changes and Remove task…. The folder line is the quietest thing in the band: 12 points in the faintest ink that
-  still reads, the path cut in its middle to 168 points (220 with the sidebar folded), the branch to 112.
+  and gets the room first), the run counter ("Step 4", or "5 steps · 2m 14s"), the workspace's name, a
+  menu with All changes (the Changes tab on All runs) and Remove thread…, and the pane button (below) while the pane is shut. The
+  band has no folder or branch line any more.
 - **Page changes are cuts, then a fade in.** A page that replaces another (New thread, a task's conversation, Review, a cat's page, Needs
   you, Settings) is gone in that frame and the new one fades in on a clean page (`view::page_swap`). Rune fades a removed element
   out over a quarter second by default, so the conversation and Review were drawn one over the other when Review opened
-  (QA defect 10); `tests/page_swap.rs` takes frames while the swap moves and fails if both are drawn.
-- **Review's files** are rune-ui's Diff (0.10): `.stats` for a folded file's counts, `.hide_zero(true)` (a file that only gained
+  (QA defect 10); `tests/page_swap.rs` takes frames while the swap moves and fails if both are drawn. The pane's tab bodies swap the
+  same way (`page_swap` on the body that is replaced, not on a container that stays), and the same test holds them.
+- **The Changes tab's files** are rune-ui's Diff (0.10): `.stats` for a folded file's counts, `.hide_zero(true)` (a file that only gained
   lines shows no "−0"), `.selectable(true)` and `.foot(..)` for the note, Show all, Copy diff, Copy path and Reveal.
 - **Settings** has six pages, Agents, Workspaces, Notifications, Cats, Briefing and Plugins, switched by rune-ui's SegmentedControl. ⌘, then the page switch reaches Plugins (`settings-page-5`); "Open in Settings" on a plugin's Needs you card and a plugin's name on a cat's page open it at that plugin, with the keyboard on its first control.
 
@@ -203,3 +208,47 @@ one display and after unplugging a second, the Dock menu, Help's search field, o
 - **Spell check is on** (`PromptInput::spellcheck(true)`, rune-ui 0.8.1). The system's checker marks a word about a second after
   typing stops.
 - **Send with nothing to send** is a raised button at rest with a faint arrow: off, but still a button. With words it is ink.
+
+## The right pane (S3, 2026-11-27)
+
+A thread's own pane, `pane.rs` (state, words) and `pane_view.rs` (drawing). It belongs to the thread in view (a kitten opened in the main
+view shows its thread's pane) and to no other page: New thread, Settings, Needs you, Rounds, the Briefing and a cat's page have none.
+
+- **Where it sits.** Docked, it is the right region of rune-ui's Split (`window-right`): 380 points at first, 320 to 560 and at most half
+  the window, dragged by its edge (a hairline; double-click goes back to 380, the arrow keys move it), collapsing when dragged past the
+  least. The conversation keeps at least 440. The pane is the sidebar's panel material, full height, with the hairline at its edge. It is
+  open from a window 1240 points wide until the person closes it; between 1100 and 1240 it is shut until opened. The choice
+  (`pane-open`) and the width (`pane-width`) are in the prefs. Under 1100 points it is a rune-ui Sheet ("Details") over the conversation's
+  right edge, shut until the band's button opens it, closed by Escape, its close button or a press outside; it never opens by itself. Crossing 1100
+  shuts the sheet.
+- **The header** is on the band's 52 point line: rune-ui's Tabs in the Pane variant (the chosen tab semibold with a 2 point underline;
+  tabs that do not fit fold into "More tabs", the chosen one staying), then the pane button (`pane-hide`, ⌥⌘B). While the pane is shut
+  the same button (`pane-show`) is the band's last control, after the thread's menu.
+- **Tabs, in this order:** Overview (always first), Changes (with its file count), then a tab for each kitten opened, in the order they were
+  opened (`pane-tabs-0`, `-1`, `-2` …). Overview and Changes cannot be closed; a kitten's tab has its ×, and ⌘W on a focused tab closes it
+  (the tab's own key, which the File menu's Close Window ⌘W lets through first: the window closes only when no tab has focus). The
+  tab shown is kept per thread while the app is open. ⌘⌥1 … ⌘⌥9 choose a tab by its place (and open the pane), ⌘⇧G and ⌘D the Changes tab, ⌘⌥B shows or hides the pane
+  (View ▸ Show/Hide Pane, View ▸ Changes carry the first and the third).
+- **It opens by itself** once per thread (this session) when the first kitten starts or the first changes land in the thread being
+  looked at, unless the person shut it (`App::pane_proactive`); not as a sheet.
+- **Overview** (`pane-overview`) reads top to bottom in five seconds, a section only when it has something: **Needs you** (an amber dot,
+  what is asked, how long ago; under the pointer or focus the age gives way to Allow once and Deny for a permission, the
+  kitten's asks included; a press goes to the kitten's tab), **Kittens** (the tree, 12 points a step: the status mark, "Kitten 1.1", its title, the model and "Shared folder",
+  the state word and its age at the right; under the pointer a live one offers Stop; a press opens its tab), **Changes** (`+19 −7 · 3 files`, the first five files each
+  with its figures and "Show all N" for the rest, Review, and Undo last run or Redo, with undo's one quiet line), **Folder and branch**
+  (`~/…` cut in the middle, Reveal in Finder, Copy branch), **Waiting on** (the kittens the thread rests on), **Usage** (the context
+  ring's numbers in a line; the cost stays in the ring's popover, the only place that shows money). Nothing to show: one quiet line.
+  The data is the daemon's `get_overview` (the folder, the branch, the files all runs changed), asked when Overview shows and again
+  when a run of the thread or of one of its kittens ends (`RunChanged`); Needs you, the tree and Usage come from what the window has.
+- **Changes** (`changes-tab`): a segmented switch **This run**, **All runs**, **Uncommitted** (`changes-source-0..2`), the summary, the
+  files as Diff, and under them Undo, Redo and Copy diff (`changes-foot`). Review on a run's change line opens it on that run; ⌘⇧G
+  opens it on the newest run that changed something, else on all runs. Uncommitted for a folder that is not a repository says what the
+  daemon says. Copy diff copies every file's lines (it asks for the ones not opened and copies when the last arrives).
+- **A kitten's tab** (`pane-kitten`): the kitten's title and state, Stop while it lives and "Open in main view", the brief folded
+  (`pane-kitten-brief`), and, once it is done, its report first (`pane-kitten-report`), then its conversation read-only (the same blocks as the main view, `task_view::kitten_items`, with the
+  keys of whatever depends on a part's place prefixed `pane-` so no two elements of the window share one; its first words, the brief, are not said twice). Its
+  requests are answered in the tab. There is no composer: steer it through the thread.
+- **Open on a kitten's card** and the names in the waiting line open its tab; Command-click on Open, or "Open in main view", takes the
+  kitten into the main view (breadcrumb, read-only) and takes its tab away.
+- The Changes tab's badge, Overview's sections and the tab strip are checked by `tests/pane.rs`; the daemon's side by
+  `crates/neko-daemon/tests/undo.rs`; the journeys by the rig's `pane-overview`, `pane-undo`, `pane-subagent-tab` and `pane-narrow`.

@@ -1,6 +1,6 @@
 # The store (S1, 2026-11-26)
 
-`crates/neko-core`. SQLite through `rusqlite` with the `bundled` feature, at `<data>/neko.sqlite3`.
+`crates/neko-core`. (The right pane, protocol 15, changed nothing here: the pane's open state is the app's prefs, its overview is derived from checkpoints.) SQLite through `rusqlite` with the `bundled` feature, at `<data>/neko.sqlite3`.
 
 ## Records
 

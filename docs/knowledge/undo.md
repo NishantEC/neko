@@ -1,6 +1,6 @@
-# Undo: checkpoints, review, undo and redo (2026-11-26)
+# Undo: checkpoints, review, undo and redo (2026-11-26; the right pane 2026-11-27)
 
-A run's card has Review and Undo (or Redo). Review shows what that run changed as a diff. Undo puts the files back as they were
+A run's change line has Review and Undo (or Redo), and the right pane's Overview and Changes tab have Undo and Redo too. Review shows what that run changed as a diff in the Changes tab. Undo puts the files back as they were
 before the run; Redo puts its changes back. Nothing is ever merged, pushed, committed on a branch or lost. Protocol 7, store 5.
 
 ## How other tools do it, and where Neko differs
@@ -54,7 +54,7 @@ A shadow repository is made once with `git init --quiet --bare <shadow>` and `gi
 (also `core.safecrlf false`, `gc.auto 0`), its `info/exclude` holding `.DS_Store`. It keeps its own index (`neko-index`) between
 snapshots so the next one reads only what changed.
 
-A diff (Review):
+A diff (the Changes tab; Uncommitted compares `HEAD^{tree}` with the folder's tree now):
 
 ```text
 git diff-tree -r -z -M --raw <start tree> <end tree>         (statuses, renames, modes, blob ids)
@@ -163,9 +163,20 @@ its ref keeps those files, but nothing on screen brings them back yet.
 
 ## Review
 
-The run card's Review opens the run's changes in place of the conversation (Escape or "Back to the conversation" returns). A
-switch shows "This run" or "All changes": from the first run's start to where the newest run left the folder (also in the task's
-menu). Each file is rune-ui's Diff, folded until opened; its header has the path (or "old → new") and its + and − counts. Its
+The Changes tab of the right pane (the change line's Review, ⌘⇧G, ⌘D, the thread menu's All changes) shows the changes of one of three
+sources, a switch above the files (protocol 15: `get_diff` and `get_diff_file` take `source`):
+
+- **This run:** the run's start checkpoint against its end one.
+- **All runs:** from the first run's start to where the newest run left the folder (`source: thread`; a request with no run and no
+  source still means this, as before).
+- **Uncommitted:** the folder as it is now against the newest commit of its branch (`source: uncommitted`). It compares the same way
+  a checkpoint is made (`checkpoint::tree_now`: a copy of the index, `git add -A`, `git write-tree`, nothing in the person's
+  repository changes) with `HEAD^{tree}`, then the usual `git diff-tree` commands. Only a task's own checkout or a chosen folder that is a
+  git repository with commits has one; a plain folder, a repository with no commits and a folder that is gone are refused in words
+  ("This folder is not a git repository with commits, so there is nothing to compare with.").
+
+The conversation stays beside the tab. `get_overview` (the Overview tab) returns the thread's folder and branch, the All runs files and
+the uncommitted figures in one reply. Each file is rune-ui's Diff, folded until opened; its header has the path (or "old → new") and its + and − counts. Its
 lines come from the daemon the first time it opens (`get_diff_file`), cut at 1,000 lines with "Show all" (up to 50,000). A
 binary file is named with its sizes, never shown. An open file's foot has a note (moved from, now executable, "Showing 1,000 of
 4,210 lines"), Show all, Copy diff, Copy path and Reveal in Finder.
@@ -182,5 +193,5 @@ binary file is named with its sizes, never shown. An open file's foot has a note
 every kind of change, files changed since, the size guard, the shadow repository, mid-merge, no commits, a locked index, a
 detached HEAD, a submodule, refs), `crates/neko-protocol/src/undo.rs` (which run is offered), `crates/neko-daemon/tests/undo.rs`
 (the real daemon with the fake CLI editing files: review, undo, redo, the agent told, "Undo anyway", a run that committed, the size
-guard, a plain folder, housekeeping) and `apps/neko/tests/undo.rs` (the app against a real daemon: Review, Undo, Redo, the
+guard, a plain folder, housekeeping) and `apps/neko/tests/undo.rs` (the app against a real daemon: Review in the Changes tab and its three sources, Undo, Redo, the
 follow-up).

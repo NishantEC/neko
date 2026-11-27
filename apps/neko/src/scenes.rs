@@ -1208,6 +1208,7 @@ fn task_undone(s: &mut App) {
     let sc = done_script(s, task);
     let r = with_undo(run("run_1", task, RunStatus::Done, start(s), 134), UndoState::Undone, 4);
     open_with(s, TaskStatus::Done, vec![r], vec![sc]);
+    receipt_files(s, "run_1", 4);
 }
 
 /// Two runs that changed files: the older one's Undo waits for the newer one.

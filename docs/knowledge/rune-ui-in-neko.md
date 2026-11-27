@@ -82,12 +82,30 @@ only (tested by reading `lib.rs`).
   `destructive` (unused: Neko's request card is its own, below), `Task`'s facts (unused since the receipt), `SidebarItem` `lead`,
   `list_row` and `description`.
 
+## What Neko uses from 0.11.0
+
+- **Split** (`view::view`): the right pane is its right region (the sidebar's width stays fixed): width kept in `App::pane` and the prefs,
+  320 to 560 and at most half, the conversation never under 440, collapsible. It is built only while the pane is open (a collapsed
+  Split leaves a grab handle on the window's edge, which `tests/structure.rs` rightly rejects).
+- **Tabs** (`pane_view::tab_strip`): the Pane variant, `permanent()` on Overview and Changes, `on_close` for kitten tabs, overflow into
+  "More tabs" with `TabsState` in `App::pane`. **Sheet** (`rune-ui add sheet`): the pane under 1100 points.
+- **Dialog::scroll_body**, **Textarea::mono**, **icons::PLUG** (Add server). Not yet: `Toast` (nothing shows one before S8; the slice that
+  adds it adds `ToastHost::poll` to `poll`), `Command`, `SidebarItem::subtitle_el`/`trail_swap`/`indent` (the sidebar rows are Neko's own,
+  below), and Open in editor.
+
+## Upstream asks from S3
+
+- A Tabs strip that tells the app which tab has focus (⌘W on a focused tab works, but the app cannot ask), and `Tabs` content
+  cross-fading on its own (the pane wraps the body in `view::page_swap`).
+- Split: a collapsed region with no handle at all (Neko builds the Split only while the pane is open).
+
 ## What rune-ui cannot do here (for upstream)
 
 Neko tried each of these on 0.10.0 and kept its own, because the render got worse. Each says what would let it go. 0.11.0 answers the
 first two and the thread row's trailing slot (`SidebarItem::subtitle_el`, `trail_swap`, `indent`, `Split`); Neko still draws its rows
-itself (`sidebar::face_row`, `thread_row`), because moving them is a change to files the next slice also edits, and it is made on its
-own when the renders can be compared.
+itself (`sidebar::face_row`, `thread_row`). S3 did not move them: the swap is a change to the sidebar's two row builders, which another
+slice was changing in the same days, and the rows are pinned by `tests/sidebar_rhythm.rs`, so it is done alone, with the old and new renders side by
+side, not inside the pane's slice.
 
 - **The Cattains' and threads' two-line rows** (`sidebar::face_row`, `thread_row`): `SidebarItem::subtitle` is plain words in one ink. Neko's second line is
   parts in their own inks (the state word in its colour, the round's mark before it). Ask: `SidebarItem::subtitle_el(El)`.
