@@ -4,10 +4,17 @@ A thread can split its work into numbered subagents, end its turn and rest. Each
 page is how that works and why. Protocol 13, store 10. The app's side (the card, the note, the waiting line) is in `app-shell.md` and
 `design.md`; the scenarios are in `qa.md`.
 
+**Kittens.** Neko's word for subagents, in everything the person reads: cats are the Cattains, and the helpers they and the threads
+start are kittens ("Kitten 1", "Waiting on Kitten 1 and Kitten 2", "Woken by Kitten 1 · done"). Everything the model reads keeps
+"subagent" (the tool names `start_subagent`, `subagents`, `stop_subagent`, their descriptions and results, the `<neko-wake
+kind="subagent">` message and the appended paragraph), because the model understands that word best; the paragraph says once that the
+app shows them as kittens. The protocol and the store keep `subagent` too. This page says subagent where it speaks of the mechanism and
+kitten where it speaks of what the person sees.
+
 ## The model
 
 - **A subagent is a task** with a parent, a number and a root (`Task.subagent`: `{parent, number, root}`). The number is `1`, `2`, and for
-  Subagent 1's own subagents `1.1`, `1.2`: a dot for each level down. It has no name and no face. It belongs to the thread that
+  Subagent 1's own subagents `1.1`, `1.2` (the person reads "Kitten 1", "Kitten 1.2"): a dot for each level down. It has no name and no face. It belongs to the thread that
   started it and is **not a thread**: the sidebar, Home, the Briefing and the notifications never list it. Its folder is its root's
   folder (shared; a copy of its own is later).
 - **Depth** is at most 3 levels; at the last level the agent is not offered the tool to start more. At most 24 subagents of one thread
@@ -17,7 +24,8 @@ page is how that works and why. Protocol 13, store 10. The app's side (the card,
   While the account's limit is reached (a `rate_limit_event` whose status is not `allowed` or `allowed_warning`), nothing is started or
   woken by Neko until it resets (`resetsAt`, else five minutes).
 - **Safety is unchanged.** A subagent has the thread's permission mode (read from Settings for every run, so the same). Its "Always
-  allow" answers start empty: they belong to a task. Its requests go to Needs you, labelled "Subagent 1 asks" under its thread's title.
+  allow" answers start empty: they belong to a task. Its requests go to Needs you, labelled "Kitten 1 asks" under its thread's title (the thread's row turns amber too: its `needs_you` flag is on while one of its
+  subagents has a request waiting, and screens are told when that changes).
   Its run is guarded like any (`run-guard.md`). Stop on a thread stops everything under it.
 - **A subagent is read, not talked to**, for now: `follow_up` and `remove_task` on one are refused with words. Removing the thread
   removes its subagents (refused while one works).
@@ -64,8 +72,8 @@ run, so a resumed run's cached prompt is not spoiled by wording that moved.
 
 1. The thread's agent calls `start_subagent` (once or several times) and ends its turn. Its run ends `done`.
 2. `subagents::ended` runs when any run's thread ends. A thread that is `done` or `asked` while a child is unfinished (queued, working,
-   waiting) or a report is unread becomes **Waiting**: no run, **no process**. The row says Waiting; the conversation's last line says
-   what for.
+   waiting) or a report is unread becomes **Waiting**: no run, **no process**. The thread's `thread_status` is `waiting` (`thread::thread_status`, where S1's derived status gets it), its row shows the still ring
+   and "Waiting on Kitten 1" or "2 kittens working", and the conversation's last line says what for.
 3. When a subagent's run ends, `subagents::report` stores its report once (`wakes` row, `pending`): its final words (the last agent
    words of its newest run; or the run's reason, or "It ended without saying anything."), the files its run changed (from its
    checkpoints, at most 30, with counts), and its branch. A report for a thread that was stopped is stored `discarded`.

@@ -1,4 +1,4 @@
-//! Subagents in the app, the words and the state (docs/knowledge/app-shell.md, "Subagents in the app"): which tasks are a thread's own
+//! Kittens in the app, the words and the state (docs/knowledge/app-shell.md, "Kittens in the app"): which tasks are a thread's own
 //! subagents, what a thread's row says about them, the card's status words, the live last line of a subagent, the breadcrumb.
 //! The drawing is `subagents_view.rs`.
 //!
@@ -17,9 +17,9 @@ pub fn is_live(s: TaskStatus) -> bool {
     matches!(s, TaskStatus::New | TaskStatus::Working | TaskStatus::NeedsYou | TaskStatus::Waiting)
 }
 
-/// "Subagent 1.2".
+/// "Kitten 1.2".
 pub fn name(number: &str) -> String {
-    format!("Subagent {number}")
+    format!("Kitten {number}")
 }
 
 /// The status word on a card.
@@ -45,12 +45,12 @@ pub fn wake_word(status: &str) -> &str {
     }
 }
 
-/// The wake note's line: "Woken by Subagent 1 · done".
+/// The wake note's line: "Woken by Kitten 1 · done".
 pub fn wake_line(number: &str, status: &str) -> String {
     format!("Woken by {} · {}", name(number), wake_word(status))
 }
 
-/// The names a waiting line lists, as a sentence: "Subagent 1", "Subagent 1 and Subagent 2", "Subagent 1, Subagent 2 and Subagent 3".
+/// The names a waiting line lists, as a sentence: "Kitten 1", "Kitten 1 and Kitten 2", "Kitten 1, Kitten 2 and Kitten 3".
 pub fn names_sentence(names: &[String]) -> String {
     match names {
         [] => String::new(),
@@ -112,7 +112,7 @@ impl App {
             (0, ..) => None,
             (1, Some(n), true) => Some(format!("Waiting on {n}")),
             (1, Some(n), false) => Some(format!("{n} working")),
-            (n, ..) => Some(format!("{n} subagents working")),
+            (n, ..) => Some(format!("{n} kittens working")),
         }
     }
 
@@ -159,8 +159,8 @@ impl App {
         self.tasks.iter().find(|t| &t.id == root)
     }
 
-    /// The band's breadcrumb for a subagent: the thread (its task and title), then each subagent down to this one ("Subagent 1",
-    /// "Subagent 1.2"), each with its task when the window has it.
+    /// The band's breadcrumb for a subagent: the thread (its task and title), then each subagent down to this one ("Kitten 1",
+    /// "Kitten 1.2"), each with its task when the window has it.
     pub fn crumbs(&self, task: &Task) -> Vec<(Option<TaskId>, String)> {
         let Some(of) = &task.subagent else { return vec![(Some(task.id.clone()), task.title.clone())] };
         let thread = self.thread_of(task);
@@ -174,7 +174,7 @@ impl App {
         out
     }
 
-    /// The breadcrumb as one line ("Fix login / Subagent 1").
+    /// The breadcrumb as one line ("Fix login / Kitten 1").
     pub fn crumb_words(&self, task: &Task) -> String {
         self.crumbs(task).into_iter().map(|(_, w)| w).collect::<Vec<_>>().join(" / ")
     }
@@ -200,10 +200,10 @@ mod tests {
     fn words_for_a_card_and_a_note() {
         assert_eq!(card_word(TaskStatus::New), "Queued");
         assert_eq!(card_word(TaskStatus::Asked), "Has a question");
-        assert_eq!(wake_line("1", "done"), "Woken by Subagent 1 · done");
-        assert_eq!(wake_line("1.2", "asked"), "Woken by Subagent 1.2 · has a question");
-        assert_eq!(names_sentence(&["Subagent 1".into(), "Subagent 2".into()]), "Subagent 1 and Subagent 2");
-        assert_eq!(names_sentence(&["Subagent 1".into(), "Subagent 2".into(), "Subagent 3".into()]), "Subagent 1, Subagent 2 and Subagent 3");
+        assert_eq!(wake_line("1", "done"), "Woken by Kitten 1 · done");
+        assert_eq!(wake_line("1.2", "asked"), "Woken by Kitten 1.2 · has a question");
+        assert_eq!(names_sentence(&["Kitten 1".into(), "Kitten 2".into()]), "Kitten 1 and Kitten 2");
+        assert_eq!(names_sentence(&["Kitten 1".into(), "Kitten 2".into(), "Kitten 3".into()]), "Kitten 1, Kitten 2 and Kitten 3");
         assert!(order_of("1.10") > order_of("1.2"));
     }
 }

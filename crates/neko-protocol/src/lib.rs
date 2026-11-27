@@ -232,7 +232,7 @@ impl Task {
 pub struct SubagentOf {
     /// The task (a thread or another subagent) that started it, and that its report wakes.
     pub parent: TaskId,
-    /// `1`, `2`, or `1.2` for the second subagent of Subagent 1: the thread's own counter, a dot for each level down.
+    /// `1`, `2`, or `1.2` for the second subagent of Kitten 1: the thread's own counter, a dot for each level down.
     pub number: String,
     /// The top-level thread it belongs to.
     pub root: TaskId,
@@ -251,9 +251,9 @@ impl Task {
         self.subagent.is_none()
     }
 
-    /// "Subagent 1.2" for a subagent.
+    /// "Kitten 1.2" for a subagent.
     pub fn subagent_name(&self) -> Option<String> {
-        self.subagent.as_ref().map(|s| format!("Subagent {}", s.number))
+        self.subagent.as_ref().map(|s| format!("Kitten {}", s.number))
     }
 }
 
@@ -479,7 +479,7 @@ pub struct NeedsItem {
     /// Since when it has waited (ms since the epoch).
     pub since_ms: i64,
     pub need: Need,
-    /// The subagent's number when the item is its own ("1.2"): then `title` is the thread's, and the item reads "Subagent 1.2 asks".
+    /// The subagent's number when the item is its own ("1.2"): then `title` is the thread's, and the item reads "Kitten 1.2 asks".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subagent: Option<String>,
 }

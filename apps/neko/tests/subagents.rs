@@ -1,4 +1,4 @@
-//! Subagents in the app (docs/knowledge/app-shell.md, "Subagents in the app"), on scenes: not listed as threads, the thread's row
+//! Kittens in the app (docs/knowledge/app-shell.md, "Kittens in the app"), on scenes: not listed as threads, the thread's row
 //! and its second line, the card and its words for each state, the wake note and its fold, the waiting line and its links, a
 //! subagent opened read-only with its breadcrumb, Back and Stop, its permission request and its Needs you item and notification,
 //! and no news when one finishes. The Settings switch is checked against a real daemon (`NEKO_DAEMON_BIN`).
@@ -60,13 +60,13 @@ fn a_subagent_is_never_a_row_in_the_sidebar_and_the_thread_says_what_it_waits_on
         }
         let keys: Vec<String> = rt.elements().into_iter().filter_map(|e| e.key).collect();
         assert!(!keys.iter().any(|k| k.contains(&sub_id(1)) || k.contains(&sub_id(2))), "no subagent row anywhere: {keys:?}");
-        let row = keys.iter().find(|k| k.starts_with("task-") && k.contains("00000000000000000000000030")).expect("the thread's row");
+        let row = keys.iter().find(|k| k.starts_with("thread-") && k.contains("00000000000000000000000030")).expect("the thread's row");
         let n = node(&rt, row);
         assert_eq!(str_of(&n, "role"), "list-box-option");
         assert_eq!(str_of(&n, "name"), "Fix login");
         let d = str_of(&n, "description");
-        assert!(d.contains("waiting") && d.contains("2 subagents working"), "{d}");
-        assert!(texts(&rt).iter().any(|t| t == "2 subagents working"), "the row's second line");
+        assert!(d.contains("waiting") && d.contains("2 kittens working"), "{d}");
+        assert!(texts(&rt).iter().any(|t| t == "2 kittens working"), "the row's second line");
     }
     // Exactly one live subagent: it is named; a thread that is only working says it differently.
     let mut rt = runtime((1200.0, 800.0), false, scene("subagents-waiting"));
@@ -74,7 +74,7 @@ fn a_subagent_is_never_a_row_in_the_sidebar_and_the_thread_says_what_it_waits_on
         s.tasks.iter_mut().find(|t| t.id.0 == sub_id(2)).unwrap().status = TaskStatus::Done;
     });
     settle(&mut rt);
-    assert!(texts(&rt).iter().any(|t| t == "Waiting on Subagent 1"), "{:?}", texts(&rt));
+    assert!(texts(&rt).iter().any(|t| t == "Waiting on Kitten 1"), "{:?}", texts(&rt));
     rt.update(|s, _| {
         s.tasks.iter_mut().find(|t| t.id.0 == sub_id(1)).unwrap().status = TaskStatus::Done;
     });
@@ -92,11 +92,14 @@ fn a_subagent_is_never_a_row_in_the_sidebar_and_the_thread_says_what_it_waits_on
 #[test]
 fn the_waiting_thread_still_ring_is_a_state_of_its_own_and_not_the_working_ring() {
     let rt = runtime((1200.0, 800.0), false, scene("subagents-waiting"));
-    // Its row's portrait has the still ring; nothing in it turns.
-    assert!(rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|k| k.ends_with("-face-still"))), "the thread's portrait wears the still ring");
+    // Its row's mark is the Waiting one (the still ring, in the second ink), not the working ring and not an amber dot.
+    let thread = rt.state.tasks.iter().find(|t| t.id.0.ends_with("30")).expect("the thread");
+    assert_eq!(neko_app::status_mark::mark_of(thread), neko_app::status_mark::Mark::Waiting);
+    assert_eq!(thread.thread_status, neko_protocol::ThreadStatus::Waiting);
+    assert!(rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("thread-") && k.ends_with("-mark"))), "the row has its mark");
     let (words, _) = (neko_app::view::status_mark(TaskStatus::Waiting).1, ());
     assert_eq!(words, "Waiting");
-    assert_eq!(neko_app::briefing::task_words(TaskStatus::Waiting), "waiting on its subagents");
+    assert_eq!(neko_app::briefing::task_words(TaskStatus::Waiting), "waiting on its kittens");
 }
 
 #[test]
@@ -110,12 +113,12 @@ fn the_card_is_one_row_per_subagent_with_the_word_for_each_state() {
         assert!((h - 56.0).abs() < 1.0, "about 56 points a row: {h}");
     }
     let t = texts(&rt);
-    for want in ["Subagent 1", "Check links", "Working", "Subagent 2", "Check images", "Queued", "Shared folder"] {
+    for want in ["Kitten 1", "Check links", "Working", "Kitten 2", "Check images", "Queued", "Shared folder"] {
         assert!(t.iter().any(|x| x == want), "{want} in {t:?}");
     }
     assert!(t.iter().any(|x| x.starts_with("Two links are dead so far")), "its live last line: {t:?}");
-    assert_eq!(str_of(&node(&rt, "subagent-open-1"), "name"), "Open Subagent 1");
-    assert_eq!(str_of(&node(&rt, "subagent-open-2"), "name"), "Open Subagent 2");
+    assert_eq!(str_of(&node(&rt, "subagent-open-1"), "name"), "Open Kitten 1");
+    assert_eq!(str_of(&node(&rt, "subagent-open-2"), "name"), "Open Kitten 2");
     assert_eq!(str_of(&node(&rt, "subagent-card-1"), "role"), "list-item");
     // Every state has its word.
     for (st, word) in [
@@ -153,16 +156,16 @@ fn the_wake_note_says_who_woke_the_thread_and_folds_the_report() {
     for size in SIZES {
         let mut rt = runtime(size, false, scene("subagents-wake"));
         let t = texts(&rt);
-        assert!(t.iter().any(|x| x == "Woken by Subagent 1 · done") && t.iter().any(|x| x == "Woken by Subagent 2 · done"), "{t:?}");
+        assert!(t.iter().any(|x| x == "Woken by Kitten 1 · done") && t.iter().any(|x| x == "Woken by Kitten 2 · done"), "{t:?}");
         // Centred: the note's words sit in the middle of the column, a hairline each side.
         let w = wake_seqs(&rt);
         let (n1, r1) = (format!("wake-{}", w[0]), format!("wake-report-{}", w[0]));
         let note = el(&rt, &n1).rect;
-        let line = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Woken by Subagent 1 · done")).unwrap().rect;
+        let line = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("Woken by Kitten 1 · done")).unwrap().rect;
         assert!(((line[0] + line[2] / 2.0) - (note[0] + note[2] / 2.0)).abs() < 2.0, "centred: {line:?} in {note:?}");
         // Closed: the report is named, its words are not on the page.
         let fold = node(&rt, &format!("{r1}-trigger"));
-        assert_eq!(str_of(&fold, "name"), "Report from Subagent 1");
+        assert_eq!(str_of(&fold, "name"), "Report from Kitten 1");
         assert!(fold["states"].to_string().contains("collapsed"), "closed by default");
         assert!(!names(&rt).contains("Both pointed at the old site"), "closed by default");
         click(&mut rt, &format!("{r1}-trigger"));
@@ -192,8 +195,8 @@ fn the_wake_note_says_who_woke_the_thread_and_folds_the_report() {
 fn the_waiting_line_names_the_live_subagents_as_links_that_open_them() {
     let mut rt = runtime((1200.0, 800.0), false, scene("subagents-waiting"));
     let line = node(&rt, "waiting-line");
-    assert_eq!(str_of(&line, "name"), "Waiting on Subagent 1 and Subagent 2");
-    assert_eq!(str_of(&node(&rt, "waiting-link-1"), "name"), "Subagent 1");
+    assert_eq!(str_of(&line, "name"), "Waiting on Kitten 1 and Kitten 2");
+    assert_eq!(str_of(&node(&rt, "waiting-link-1"), "name"), "Kitten 1");
     assert_eq!(str_of(&node(&rt, "waiting-link-2"), "role"), "link");
     // It is the conversation's last line.
     let (l, c) = (el(&rt, "waiting-line"), el(&rt, "subagent-card-2"));
@@ -210,7 +213,7 @@ fn the_waiting_line_names_the_live_subagents_as_links_that_open_them() {
         s.tasks.push(third);
     });
     settle(&mut rt);
-    assert_eq!(str_of(&node(&rt, "waiting-line"), "name"), "Waiting on Subagent 1, Subagent 2 and Subagent 3");
+    assert_eq!(str_of(&node(&rt, "waiting-line"), "name"), "Waiting on Kitten 1, Kitten 2 and Kitten 3");
     rt.update(|s, _| s.tasks.iter_mut().find(|t| t.title == "Fix login").unwrap().status = TaskStatus::Done);
     settle(&mut rt);
     assert!(!has_key(&rt, "waiting-line"), "only while the thread waits");
@@ -220,7 +223,7 @@ fn the_waiting_line_names_the_live_subagents_as_links_that_open_them() {
 fn a_waiting_thread_can_be_stopped_like_a_working_one() {
     let rt = runtime((1200.0, 800.0), false, scene("subagents-waiting"));
     assert!(rt.state.open_is_working(), "Stop and Escape reach a thread that rests on its subagents");
-    assert_eq!(str_of(&node(&rt, "reply-input"), "placeholder"), "miso is waiting on its subagents. Press Escape to stop.");
+    assert_eq!(str_of(&node(&rt, "reply-input"), "placeholder"), "miso is waiting on its kittens. Press Escape to stop.");
     assert_eq!(str_of(&node(&rt, "reply-submit"), "name"), "Stop", "its composer offers Stop");
 }
 
@@ -230,18 +233,18 @@ fn a_subagent_opened_is_read_only_with_its_breadcrumb_back_and_stop() {
         let mut rt = runtime(size, false, scene("subagent-view"));
         assert!(!has_key(&rt, "reply") && !has_key(&rt, "reply-area-composer"), "no composer at {size:?}");
         let said = node(&rt, "subagent-readonly");
-        assert_eq!(str_of(&said, "name"), "This is Subagent 1's own conversation, to read. Say what you want changed in Fix login.");
+        assert_eq!(str_of(&said, "name"), "This is Kitten 1's own conversation, to read. Say what you want changed in Fix login.");
         assert_eq!(str_of(&node(&rt, "subagent-back"), "name"), "Back to Fix login");
-        assert_eq!(str_of(&node(&rt, "subagent-stop"), "name"), "Stop Subagent 1");
-        // The band: Fix login / Subagent 1, the thread a button, the subagent plain words.
+        assert_eq!(str_of(&node(&rt, "subagent-stop"), "name"), "Stop Kitten 1");
+        // The band: Fix login / Kitten 1, the thread a button, the subagent plain words.
         let title = node(&rt, "band-title");
-        assert_eq!(str_of(&title, "name"), "Fix login / Subagent 1");
+        assert_eq!(str_of(&title, "name"), "Fix login / Kitten 1");
         assert_eq!(str_of(&title, "role"), "heading");
         assert_eq!(str_of(&node(&rt, "crumb-thread"), "role"), "button");
         let plain = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("crumb-subagent")).unwrap();
-        assert_eq!(plain.text.as_deref(), Some("Subagent 1"));
+        assert_eq!(plain.text.as_deref(), Some("Kitten 1"));
         assert!(!has_key(&rt, "task-cat") && !has_key(&rt, "task-more-button"), "no cat and no task menu in a subagent's band");
-        assert_eq!(rt.state.window_title(), "Fix login / Subagent 1 — acme-api");
+        assert_eq!(rt.state.window_title(), "Fix login / Kitten 1 — acme-api");
         // No cat portrait leads its turns.
         assert!(!rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("turn-") && k.ends_with("-cat"))), "no head");
         // The thread's title goes back.
@@ -265,7 +268,7 @@ fn a_subagent_opened_is_read_only_with_its_breadcrumb_back_and_stop() {
 fn a_subagents_request_is_answered_in_place_and_says_who_asks() {
     let rt = runtime((1200.0, 800.0), false, scene("subagent-asks"));
     let t = texts(&rt);
-    assert!(t.iter().any(|x| x == "Subagent 1 asks"), "{t:?}");
+    assert!(t.iter().any(|x| x == "Kitten 1 asks"), "{t:?}");
     assert!(!t.iter().any(|x| x == "miso asks"), "not the cat's name");
     for k in ["allow", "always", "deny"] {
         assert!(rt.elements().iter().any(|e| e.key.as_deref().is_some_and(|key| key.starts_with("perm-") && key.ends_with(&format!("-{k}")))), "{k}");
@@ -279,16 +282,16 @@ fn needs_you_reads_subagent_1_asks_with_the_thread_as_its_quiet_line_and_opens_t
     let item = rt.state.needs.iter().find(|i| i.subagent.is_some()).unwrap().clone();
     let key = need_key(&item.id);
     let row = node(&rt, &key);
-    assert!(str_of(&row, "name").starts_with("Subagent 1 asks: ") && str_of(&row, "name").contains("Run a command"), "{}", str_of(&row, "name"));
+    assert!(str_of(&row, "name").starts_with("Kitten 1 asks: ") && str_of(&row, "name").contains("Run a command"), "{}", str_of(&row, "name"));
     let t = texts(&rt);
-    assert!(t.iter().any(|x| x == "Subagent 1 asks") && t.iter().any(|x| x == "in Fix login"), "{t:?}");
-    assert_eq!(str_of(&node(&rt, &format!("{key}-open")), "name"), "Open Subagent 1");
+    assert!(t.iter().any(|x| x == "Kitten 1 asks") && t.iter().any(|x| x == "in Fix login"), "{t:?}");
+    assert_eq!(str_of(&node(&rt, &format!("{key}-open")), "name"), "Open Kitten 1");
     click(&mut rt, &format!("{key}-open"));
     assert_eq!(rt.state.open.as_ref(), Some(&item.task), "the row opens the subagent");
     assert!(has_key(&rt, "subagent-readonly"));
     // Its notification: the number asks, not a cat.
     let note = neko_app::notify::note_for(&item);
-    assert!(note.body.starts_with("Subagent 1 asks: "), "{}", note.body);
+    assert!(note.body.starts_with("Kitten 1 asks: "), "{}", note.body);
     assert!(!note.body.contains("miso"));
 }
 
@@ -408,4 +411,18 @@ fn the_switch_sends_set_settings_with_own_mcp_and_keeps_the_other_fields() {
     assert_eq!((after.runtime.clone(), after.permission_mode), (before.runtime.clone(), before.permission_mode), "the other fields are kept");
     click(&mut rt, "own-mcp");
     until(&mut rt, "the setting to go off again", |rt| rt.state.runtimes.as_ref().is_some_and(|(_, s)| !s.own_mcp));
+}
+
+#[test]
+fn a_subagents_request_turns_its_threads_mark_amber_and_the_right_side_says_the_same_as_the_mark() {
+    let rt = runtime((1200.0, 800.0), false, scene("needs-subagent"));
+    let thread = rt.state.tasks.iter().find(|t| t.subagent.is_none() && t.status == TaskStatus::Waiting).expect("the waiting thread");
+    assert!(thread.needs_you, "a request one of its subagents has waiting is the thread's to show");
+    assert_eq!(neko_app::status_mark::mark_of(thread), neko_app::status_mark::Mark::NeedsYou, "the amber dot, not the still ring");
+    let all = texts(&rt);
+    assert!(all.iter().any(|t| t.starts_with("Needs you: ") && t.ends_with("· Kitten 1")), "the row's second line names the subagent: {all:?}");
+    // The right of a row says what its mark says: a thread behind an amber dot shows its age, never "Working".
+    let key = format!("thread-{}", thread.id.0);
+    let n = node(&rt, &key);
+    assert!(!str_of(&n, "description").ends_with("working"), "{}", str_of(&n, "description"));
 }

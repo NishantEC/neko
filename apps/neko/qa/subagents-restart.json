@@ -1,7 +1,7 @@
 {
   "name": "subagents-restart",
   "title": "The app and the daemon restart while a subagent works: the thread is woken with an interrupted report",
-  "about": "A thread starts one subagent that runs until stopped and rests. The app quits and the daemon stops; both start again. The subagent is marked Interrupted with its words kept, and the thread is woken by its report (\"Woken by Subagent 1 · interrupted\") and ends Done. The record has the resumed start whose message says status=\"interrupted\".",
+  "about": "A thread starts one subagent that runs until stopped and rests. The app quits and the daemon stops; both start again. The subagent is marked Interrupted with its words kept, and the thread is woken by its report (\"Woken by Kitten 1 \u00b7 interrupted\") and ends Done. The record has the resumed start whose message says status=\"interrupted\".",
   "cli": [
     "fake"
   ],
@@ -84,7 +84,7 @@
       "do": "wait",
       "until": {
         "see": {
-          "text": "Woken by Subagent 1 · interrupted"
+          "text": "Woken by Kitten 1 \u00b7 interrupted"
         }
       },
       "within": 60,
@@ -103,11 +103,33 @@
     {
       "do": "wait",
       "until": {
-        "see": {
-          "role": "option",
-          "label": "Check one",
-          "name": "done"
-        }
+        "all": [
+          {
+            "see": {
+              "text": "I read 1"
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Check one",
+              "name": "working"
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Check one",
+              "name": "waiting"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Check one"
+            }
+          }
+        ]
       },
       "within": 20,
       "expect": "The thread ends Done"
@@ -117,7 +139,8 @@
       "that": {
         "count": {
           "of": {
-            "role": "option"
+            "role": "option",
+            "label": "Check one"
           },
           "is": 1
         }
@@ -140,11 +163,11 @@
       "until": {
         "see": {
           "key": "crumb-subagent",
-          "text": "Subagent 1"
+          "text": "Kitten 1"
         }
       },
       "within": 10,
-      "expect": "Subagent 1 opens"
+      "expect": "Kitten 1 opens"
     },
     {
       "do": "assert",

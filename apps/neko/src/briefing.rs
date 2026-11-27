@@ -95,7 +95,7 @@ pub fn task_words(s: TaskStatus) -> &'static str {
     match s {
         TaskStatus::New | TaskStatus::Working => "working",
         TaskStatus::NeedsYou | TaskStatus::Asked => "waiting for you",
-        TaskStatus::Waiting => "waiting on its subagents",
+        TaskStatus::Waiting => "waiting on its kittens",
         TaskStatus::Done => "done",
         TaskStatus::Failed => "could not finish",
         TaskStatus::Stopped => "stopped",

@@ -240,7 +240,7 @@ pub const PARAGRAPH: &str = "Neko can run parts of your work as subagents: separ
 Split a part off only when it is independent of the rest and can be told in full, because a subagent sees nothing but the prompt you write. \
 Start each one with the mcp__neko__start_subagent tool. After starting them, end your turn when you have nothing else to do. Do not poll or wait: Neko wakes you with each report as a \
 message that begins with <neko-wake>. You cannot approve a subagent's steps, because it asks the person itself. Subagents work in your folder and on your branch, so give two of them \
-different files, or start the second one after the first reports. Your own Agent tool is still fine for a quick read-only search inside one run.";
+different files, or start the second one after the first reports. Your own Agent tool is still fine for a quick read-only search inside one run. Neko's app shows subagents to the person as kittens (Subagent 1 is Kitten 1), so you may use either word when you write to them.";
 
 /// What a subagent is told about itself, after the paragraph. The same bytes on every run of that subagent.
 pub fn subagent_block(number: &str, thread_title: &str) -> String {

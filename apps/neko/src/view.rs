@@ -230,7 +230,7 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     let room = s.width.map_or(f32::MAX, |w| w - if s.sidebar_shown() { SIDEBAR + 2.0 * crate::sidebar::INSET + 1.0 } else { 0.0 });
     let narrow = room < NARROW_BAND;
     band = if sub {
-        // A subagent's band says whose conversation it is: `Fix login / Subagent 1`, the thread's title a way back.
+        // A subagent's band says whose conversation it is: `Fix login / Kitten 1`, the thread's title a way back.
         band.child(crate::subagents_view::crumb(s, t, task, narrow))
     } else {
         band.child(text(task.title.clone()).key("band-title").role("heading").level(1).font(weight(t.ty.lg, t.ty.semibold)).color(t.ink()).truncate().min_w(TITLE_MIN).shrink())

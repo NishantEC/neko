@@ -69,7 +69,7 @@ impl Line {
     }
 }
 
-/// What a request or question says, short, for "Needs you: …". A subagent's request says whose it is ("Run a command · Subagent 1").
+/// What a request or question says, short, for "Needs you: …". A subagent's request says whose it is ("Run a command · Kitten 1").
 pub fn need_words(item: &NeedsItem) -> String {
     let n = &item.need;
     match n {
@@ -83,8 +83,8 @@ pub fn need_words(item: &NeedsItem) -> String {
     }
 }
 
-/// The line under a thread's title: the first that applies of Needs you, Failed, what it waits on ("Waiting on Subagent 1", "2
-/// subagents working": `subagents`, from [`App::thread_line`]), then the agent's latest line. A thread that has said nothing yet says
+/// The line under a thread's title: the first that applies of Needs you, Failed, what it waits on ("Waiting on Kitten 1", "2
+/// kittens working": `subagents`, from [`App::thread_line`]), then the agent's latest line. A thread that has said nothing yet says
 /// what it is.
 pub fn second_line(task: &Task, need: Option<&NeedsItem>, subagents: Option<&str>) -> Line {
     if task.needs_you {
@@ -260,10 +260,10 @@ mod tests {
         let mut task = t("a", 1);
         task.latest_line = "Renamed the label.".into();
         assert_eq!(second_line(&task, None, None), Line::Quiet("Renamed the label.".into()));
-        assert_eq!(second_line(&task, None, Some("Waiting on Subagent 1")), Line::Quiet("Waiting on Subagent 1".into()), "what it waits on comes before its last words");
+        assert_eq!(second_line(&task, None, Some("Waiting on Kitten 1")), Line::Quiet("Waiting on Kitten 1".into()), "what it waits on comes before its last words");
         task.thread_status = ThreadStatus::Failed;
         task.failure_line = "Claude Code stopped unexpectedly.".into();
-        assert_eq!(second_line(&task, None, Some("2 subagents working")), Line::Failed("Claude Code stopped unexpectedly.".into()));
+        assert_eq!(second_line(&task, None, Some("2 kittens working")), Line::Failed("Claude Code stopped unexpectedly.".into()));
         task.needs_you = true;
         assert_eq!(second_line(&task, None, None), Line::NeedsYou("waiting for you".into()), "Needs you comes before Failed");
         let mut quiet = t("b", 1);

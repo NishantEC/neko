@@ -69,6 +69,9 @@ struct NeedsWatch {
     dirty: Mutex<bool>,
     wake: Condvar,
     last: Mutex<Vec<NeedsItem>>,
+    /// The threads that had a request of a subagent waiting when screens were last told: a thread's `needs_you` flag turns on and off
+    /// with it, though nothing in the thread itself changed.
+    asking: Mutex<std::collections::HashSet<TaskId>>,
 }
 
 pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -156,7 +159,19 @@ fn watch_needs(shared: Arc<Shared>) {
             if *last != items {
                 *last = items.clone();
                 let revision = core.store.revision().unwrap_or(0);
-                shared.broadcast(&ServerMessage::Event { revision, change: Change::NeedsChanged { items } });
+                shared.broadcast(&ServerMessage::Event { revision, change: Change::NeedsChanged { items: items.clone() } });
+            }
+            // A thread whose subagent asks (or stopped asking) is told again: its flag and mark changed.
+            let now: std::collections::HashSet<TaskId> = items.iter().filter(|i| i.subagent.is_some()).filter_map(|i| core.store.get_task(&i.task).ok().flatten().and_then(|t| t.subagent).map(|s| s.root)).collect();
+            let mut asking = lock(&shared.needs.asking);
+            if *asking != now {
+                let revision = core.store.revision().unwrap_or(0);
+                for root in asking.symmetric_difference(&now) {
+                    if let Ok(Some(task)) = core.store.get_task(root) {
+                        shared.broadcast(&ServerMessage::Event { revision, change: Change::TaskUpdated { task } });
+                    }
+                }
+                *asking = now;
             }
         }
         // The briefing is made of the same records (and more), so it is looked at after the same changes.
@@ -204,7 +219,7 @@ pub fn run(dir: &Path, port: u16) -> Result<(), StartError> {
     let runtimes: Vec<Arc<dyn Runtime>> = vec![Arc::new(neko_core::claude::ClaudeRuntime::new(claude_bin, guard))];
     let runs = Runs::new(runtimes, dir.to_path_buf());
     let first = neko_core::needs::derive(&core.store).unwrap_or_default();
-    let needs = NeedsWatch { dirty: Mutex::new(false), wake: Condvar::new(), last: Mutex::new(first) };
+    let needs = NeedsWatch { dirty: Mutex::new(false), wake: Condvar::new(), last: Mutex::new(first), asking: Mutex::new(Default::default()) };
     let shared = Arc::new(Shared { core: Mutex::new(core), conns: Mutex::new(HashMap::new()), token, port, stopping: AtomicBool::new(false), runs, needs, rounds: crate::rounds::Hub::new(), briefing_last: Mutex::new(None), plugins: crate::plugins::Hub::new(), subagents: crate::subagents::Hub::new() });
     let for_needs = shared.clone();
     std::thread::Builder::new().name("neko-needs".into()).spawn(move || watch_needs(for_needs))?;
@@ -604,8 +619,8 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
             }
             let found = lock(&shared.core).store.get_task(&task);
             match found {
-                // A subagent takes no messages yet: it is read, not talked to (docs/knowledge/subagents.md).
-                Ok(Some(t)) if t.subagent.is_some() => Reply::error(ErrorCode::Refused, "A subagent takes no messages yet. Say it in the thread."),
+                // A kitten takes no messages yet: it is read, not talked to (docs/knowledge/subagents.md).
+                Ok(Some(t)) if t.subagent.is_some() => Reply::error(ErrorCode::Refused, "A kitten takes no messages yet. Say it in the thread."),
                 Ok(Some(t)) if answering.is_some() => {
                     // An answer to a question: only while the task still waits on that run's question (another screen, or a
                     // notification, may have answered it).

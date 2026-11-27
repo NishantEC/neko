@@ -31,20 +31,24 @@ The Needs you list uses the same predicate (`needs::failure_of`), so a thread's 
   is written with the part, in the same transaction, and the task is pushed (`task_updated`) when it changes, which is at most as
   often as the words are written to disk (every 3 s).
 - `failure_line`: why the last run failed, while the thread is `Failed`.
-- `thread_status`: **Working** (a run is going, also while it waits on a request), **Failed** (the last run failed and the person
-  has not opened the thread since) or **Idle**. The Waiting status of subagents is the one place to add: `thread::thread_status`.
-- `needs_you`: a flag beside the status, true for a request, a question, and a failure the person can act on.
+- `thread_status`: **Working** (a run is going, also while it waits on a request), **Waiting** (no run, and the thread waits on its
+  subagents: `subagents.md`), **Failed** (the last run failed and the person has not opened the thread since) or **Idle**. It is
+  `thread::thread_status`, and the task's own `status` is `waiting` then.
+- `needs_you`: a flag beside the status, true for a request, a question, and a failure the person can act on, and (version 13) for a
+  request one of the thread's subagents has waiting: the thread's run has ended, so its own status cannot say it.
 
 Migration 9 reads every existing task as read as of its last activity and fills `latest_line` from its newest agent words.
 
 ## What a row shows
 
 - **The status mark** (`status_mark.rs`), 12 points in a 16 point slot, in place of the cat's portrait: an amber dot for Needs you,
-  a red dot for Failed, a small turning ring in the identity teal for Working (still under Reduce Motion), nothing for Idle. A face
+  a red dot for Failed, a small turning ring in the identity teal for Working (still under Reduce Motion), the same ring held still in the second ink for
+  Waiting (the thread is not busy), nothing for Idle. A face
   now means a Cattain. Colours are taken toward their strong ink until they reach 3:1 (dots) and 4.5:1 (ring) against the panel.
 - **Line 1:** the title (semibold while unread), and at the right the age (`now`, `2m`, `3h`, `Mon`, `Oct 3`) or **Working** in
-  teal. Under the pointer the age gives way to a menu: Mark as unread (or read), Remove thread….
-- **Line 2**, the first that applies: `Needs you: <what>` in amber; `Failed: <why>` in red; the agent's latest line. A thread that
+  teal, only while the mark is the working ring: a thread that needs the person shows its age beside the amber dot, never "Working". Under the pointer the age gives way to a menu: Mark as unread (or read), Remove thread….
+- **Line 2**, the first that applies: `Needs you: <what>` in amber (a subagent's request reads `Needs you: Run a command · Kitten 1`);
+  `Failed: <why>` in red; what it waits on ("Waiting on Kitten 1", "2 kittens working"; `App::thread_line`); the agent's latest line. A thread that
   has said nothing yet says what it is ("Not started", "Working…").
 - **Order inside a group:** threads that need the person first, then by last activity, newest first. A thread that works keeps the
   place it had when it began (`App::sort_hold`), so a row does not move under the pointer as its words stream; it moves when the work
@@ -54,7 +58,7 @@ Migration 9 reads every existing task as read as of its last activity and fills 
   right of line 2). The choice is kept in the prefs (`thread-grouping`). Show more appears after 8 rows in a group.
 - **With no thread at all** the section says "Threads you start appear here" and No project is not listed.
 
-Not here yet (later slices): Pinned and Settled groups, the Waiting status and subagent lines, the row's keys (⌘⇧P, ⌘⇧S, `a`),
+Subagents are not threads: no row, no group. Not here yet (later slices): Pinned and Settled groups, the row's keys (⌘⇧P, ⌘⇧S, `a`),
 drag a row onto a Cattain. `u` for Mark as unread was left out: in a list that jumps to a typed name it would swallow the letter.
 
 ## Sidebar width

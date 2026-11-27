@@ -1,4 +1,4 @@
-//! The subagent scenes (docs/knowledge/app-shell.md, "Subagents in the app"): a thread that started two subagents, one working and one
+//! The subagent scenes (docs/knowledge/app-shell.md, "Kittens in the app"): a thread that started two subagents, one working and one
 //! queued; a thread woken by their reports, the note closed and open; a thread that waits on them, with its sidebar row; a subagent
 //! opened on its own, read-only, and one asking for a permission; and Needs you with a subagent's request. Placeholder data only.
 
@@ -101,7 +101,7 @@ fn open_thread(s: &mut App, t: &Task, runs: Vec<neko_protocol::Run>, scripts: Ve
     s.books.insert(t.id.clone(), book);
 }
 
-/// The thread at work: two cards in one stack, Subagent 1 working with its last line, Subagent 2 queued.
+/// The thread at work: two cards in one stack, Kitten 1 working with its last line, Kitten 2 queued.
 pub fn cards(s: &mut App) {
     let th = thread(TaskStatus::Working);
     let a = sub(1, &th, "1", "Check links", "Look at the links on the docs site and say which are dead", TaskStatus::Working, 8);
@@ -200,7 +200,7 @@ pub fn asks(s: &mut App) {
     s.open = Some(a.id.clone());
 }
 
-/// Needs you with a subagent's request among the others: "Subagent 1 asks", in the thread's title.
+/// Needs you with a subagent's request among the others: "Kitten 1 asks", in the thread's title.
 pub fn needs(s: &mut App) {
     let th = thread(TaskStatus::Waiting);
     let a = sub(1, &th, "1", "Check links", "Look at the links on the docs site and say which are dead", TaskStatus::NeedsYou, 8);

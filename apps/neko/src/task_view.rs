@@ -306,7 +306,7 @@ fn lay_out(s: &App, t: &Theme, book: &Book, r: &Run, w: &Who, parts: &[&Part], s
             i += 1;
             continue;
         }
-        // Subagents started one after another are one card with a row each; only Neko's own tool steps (the calls that started
+        // Kittens started one after another are one card with a row each; only Neko's own tool steps (the calls that started
         // them) may stand between them. Those steps follow the card.
         let (mut group, mut last, mut j) = (vec![p], i, i + 1);
         while j < parts.len() {
@@ -496,7 +496,7 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
         .placeholder(if asking {
             format!("{cat} is waiting for your answer above. Escape denies it.")
         } else if task.status == neko_protocol::TaskStatus::Waiting {
-            format!("{cat} is waiting on its subagents. Press Escape to stop.")
+            format!("{cat} is waiting on its kittens. Press Escape to stop.")
         } else if working {
             format!("{cat} is working. Press Escape to stop.")
         } else if task.status == neko_protocol::TaskStatus::Asked {

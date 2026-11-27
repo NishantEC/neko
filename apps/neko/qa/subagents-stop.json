@@ -137,11 +137,11 @@
       "until": {
         "see": {
           "key": "crumb-subagent",
-          "text": "Subagent 1"
+          "text": "Kitten 1"
         }
       },
       "within": 10,
-      "expect": "Subagent 1 opens in the main view"
+      "expect": "Kitten 1 opens in the main view"
     },
     {
       "do": "assert",

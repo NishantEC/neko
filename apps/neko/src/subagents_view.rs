@@ -1,4 +1,4 @@
-//! Subagents in the conversation (docs/knowledge/app-shell.md and design.md, "Subagents in the app"): the card where a thread started
+//! Kittens in the conversation (docs/knowledge/app-shell.md and design.md, "Kittens in the app"): the card where a thread started
 //! them, the note where one's report woke the thread, the line that says what the thread waits on, the read-only foot of a
 //! subagent opened on its own, and the band's breadcrumb. The words and the state are `subagents.rs`.
 
@@ -53,7 +53,7 @@ fn word_ink(t: &Theme, st: TaskStatus) -> rune::Color {
     }
 }
 
-/// A secondary button whose visible words are short and whose name for assistive technology says more ("Open", "Open Subagent 1").
+/// A secondary button whose visible words are short and whose name for assistive technology says more ("Open", "Open Kitten 1").
 fn named_button(t: &Theme, key: &str, words: &str, name: &str, press: impl Fn(&mut App) + 'static) -> El {
     let size = crate::ui::base::Size::Sm;
     let parts = recipes::button(t, ButtonVariant::Secondary);
@@ -76,7 +76,7 @@ struct Row<'a> {
     id: &'a TaskId,
 }
 
-/// One row of a card: `Subagent 1`, its title, its state at the right; "Shared folder" and its last line under; Open.
+/// One row of a card: `Kitten 1`, its title, its state at the right; "Shared folder" and its last line under; Open.
 fn card_row(s: &App, t: &Theme, r: &Row, first: bool) -> El {
     let task = s.tasks.iter().find(|x| &x.id == r.id);
     let st = task.map_or(TaskStatus::New, |x| x.status);
@@ -118,7 +118,7 @@ fn card_row(s: &App, t: &Theme, r: &Row, first: bool) -> El {
     line
 }
 
-/// Subagent parts that follow each other, as one raised card with a row each.
+/// Kitten parts that follow each other, as one raised card with a row each.
 pub fn card_stack(s: &App, t: &Theme, parts: &[&Part]) -> Option<El> {
     let rows: Vec<Row> = parts
         .iter()
@@ -128,7 +128,7 @@ pub fn card_stack(s: &App, t: &Theme, parts: &[&Part]) -> Option<El> {
         })
         .collect();
     let first = rows.first()?;
-    let label = if rows.len() == 1 { "Subagent".to_owned() } else { "Subagents".to_owned() };
+    let label = if rows.len() == 1 { "Kitten".to_owned() } else { "Kittens".to_owned() };
     let mut card = col().key(format!("subagent-cards-{}", first.number)).role("list").label(label).w_full().radius(t.radius.lg + 2.0).round_as(t).clip_rounded(t.radius.lg + 2.0);
     for (i, r) in rows.iter().enumerate() {
         card = card.child(card_row(s, t, r, i == 0));
@@ -241,7 +241,7 @@ fn cut_end(s: &str, max: usize) -> String {
     format!("{}…", s.chars().take(max.saturating_sub(1)).collect::<String>().trim_end())
 }
 
-/// The band's title for a subagent: the breadcrumb, `Fix login / Subagent 1`. The thread's title is a button that goes to it; the
+/// The band's title for a subagent: the breadcrumb, `Fix login / Kitten 1`. The thread's title is a button that goes to it; the
 /// subagent is plain words. The whole is the page's heading (its name is the full breadcrumb), keyed `band-title`.
 pub fn crumb(s: &App, t: &Theme, task: &Task, narrow: bool) -> El {
     let crumbs = s.crumbs(task);
@@ -257,7 +257,7 @@ pub fn crumb(s: &App, t: &Theme, task: &Task, narrow: bool) -> El {
             line = line.child(text(words).key("crumb-subagent").font(weight(t.ty.lg, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0).a11y_hidden());
             continue;
         }
-        let key = if i == 0 { "crumb-thread".to_owned() } else { format!("crumb-subagent-{}", words.trim_start_matches("Subagent ")) };
+        let key = if i == 0 { "crumb-thread".to_owned() } else { format!("crumb-subagent-{}", words.trim_start_matches("Kitten ")) };
         let shown = if i == 0 { cut_end(&words, if narrow { 18 } else { 36 }) } else { words.clone() };
         let mut b = Button::<App>::new(key, shown).variant(ButtonVariant::Ghost).size(crate::ui::base::Size::Sm);
         if let Some(id) = id {

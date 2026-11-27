@@ -1,7 +1,7 @@
 {
   "name": "subagents-wake",
   "title": "A thread starts two subagents, rests, and one wake reads both reports",
-  "about": "The person asks a thread to check two things. The fake CLI starts two subagents through Neko's own MCP server and ends its turn. Two cards appear; the thread rests as Waiting (its row says two subagents work; the conversation ends on \"Waiting on Subagent 1 and Subagent 2\"); both subagents run; then both reports wake the thread once (\"Woken by Subagent 1 · done\", \"Woken by Subagent 2 · done\"), its final words read both reports and the thread is Done. The sidebar lists one row, never a subagent. The record shows one resumed start with one message holding two <neko-wake> reports.",
+  "about": "The person asks a thread to check two things. The fake CLI starts two subagents through Neko's own MCP server and ends its turn. Two cards appear; the thread rests as Waiting (its row says two subagents work; the conversation ends on \"Waiting on Kitten 1 and Kitten 2\"); both subagents run; then both reports wake the thread once (\"Woken by Kitten 1 \u00b7 done\", \"Woken by Kitten 2 \u00b7 done\"), its final words read both reports and the thread is Done. The sidebar lists one row, never a subagent. The record shows one resumed start with one message holding two <neko-wake> reports.",
   "cli": [
     "fake"
   ],
@@ -42,7 +42,7 @@
         ]
       },
       "within": 30,
-      "expect": "Two cards, Subagent 1 and Subagent 2, appear in the conversation"
+      "expect": "Two cards, Kitten 1 and Kitten 2, appear in the conversation"
     },
     {
       "do": "wait",
@@ -50,7 +50,7 @@
         "see": {
           "role": "option",
           "label": "Check two",
-          "name": "2 subagents working"
+          "name": "2 kittens working"
         }
       },
       "within": 30,
@@ -73,17 +73,17 @@
       "that": {
         "see": {
           "key": "waiting-line",
-          "name": "Waiting on Subagent 1 and Subagent 2"
+          "name": "Waiting on Kitten 1 and Kitten 2"
         }
       },
-      "expect": "The conversation ends on \"Waiting on Subagent 1 and Subagent 2\""
+      "expect": "The conversation ends on \"Waiting on Kitten 1 and Kitten 2\""
     },
     {
       "do": "assert",
       "that": {
         "see": {
           "key": "waiting-link-1",
-          "name": "Subagent 1"
+          "name": "Kitten 1"
         }
       },
       "expect": "Each name is a link"
@@ -93,7 +93,8 @@
       "that": {
         "count": {
           "of": {
-            "role": "option"
+            "role": "option",
+            "label": "Check two"
           },
           "is": 1
         }
@@ -111,12 +112,12 @@
         "all": [
           {
             "see": {
-              "text": "Woken by Subagent 1 · done"
+              "text": "Woken by Kitten 1 \u00b7 done"
             }
           },
           {
             "see": {
-              "text": "Woken by Subagent 2 · done"
+              "text": "Woken by Kitten 2 \u00b7 done"
             }
           }
         ]
@@ -137,11 +138,33 @@
     {
       "do": "wait",
       "until": {
-        "see": {
-          "role": "option",
-          "label": "Check two",
-          "name": "done"
-        }
+        "all": [
+          {
+            "see": {
+              "text": "I read 2"
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Check two",
+              "name": "working"
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Check two",
+              "name": "waiting"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Check two"
+            }
+          }
+        ]
       },
       "within": 20,
       "expect": "The thread ends Done"
@@ -151,7 +174,8 @@
       "that": {
         "count": {
           "of": {
-            "role": "option"
+            "role": "option",
+            "label": "Check two"
           },
           "is": 1
         }

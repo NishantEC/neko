@@ -38,7 +38,7 @@ fn subagents_are_numbered_under_their_parent_and_belong_to_the_thread_at_the_top
     assert_eq!(core.store.subagents_of(&thread.id).unwrap().len(), 4, "every level, under the thread");
     assert_eq!(core.store.queued_subagents().unwrap().len(), 4);
     assert!(thread.is_thread() && !a.is_thread());
-    assert_eq!(a.subagent_name().as_deref(), Some("Subagent 1"));
+    assert_eq!(a.subagent_name().as_deref(), Some("Kitten 1"));
     // They survive a reopen as they were.
     drop(core);
     let core = open(&d);

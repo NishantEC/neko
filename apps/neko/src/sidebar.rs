@@ -197,7 +197,7 @@ const RIGHT_WORKING: f32 = 46.0;
 #[allow(clippy::too_many_arguments)]
 pub fn thread_row(s: &App, t: &Theme, task: &Task, i: usize, n: usize, open: bool, prefix: &str, indent: f32, project: Option<&str>, layer: &mut Vec<El>) -> El {
     let key = format!("{prefix}-{}", task.id.0);
-    // A request of one of its subagents is the thread's to show: "Needs you: Run a command · Subagent 1".
+    // A request of one of its subagents is the thread's to show: "Needs you: Run a command · Kitten 1".
     let need = s.visible_needs().into_iter().find(|x| x.task == task.id || s.tasks.iter().any(|u| u.id == x.task && u.subagent.as_ref().is_some_and(|o| o.root == task.id)));
     let line = threads::second_line(task, need, s.thread_line(task).as_deref());
     let state = threads::state_words(task);

@@ -155,6 +155,8 @@ fn a_thread_starts_two_subagents_rests_with_no_process_and_is_woken_once_for_bot
     // Both take a second, so the thread is seen resting while they work, and both end within one batch.
     let t = create(&mut c, &delegate(&[("Check links", "Look at the links [fake:long:1]"), ("Check images", "Look at the images [fake:long:1]")], &[]));
     until("the thread to rest", || task(&mut c, &t.id).status == TaskStatus::Waiting);
+    let resting = task(&mut c, &t.id);
+    assert_eq!((resting.thread_status, resting.needs_you), (ThreadStatus::Waiting, false), "the thread says what it is doing: it rests while its subagents work");
     // Resting: its run is over and nothing of it is left running; the subagents carry on.
     let tr = transcript(&mut c, &t.id);
     assert_eq!(tr.runs.len(), 1);
@@ -357,6 +359,19 @@ fn a_subagent_asks_for_the_same_permissions_as_its_thread_and_the_request_says_w
     assert_eq!(item.title, t.title, "shown under its thread's title");
     let Need::Permission { permission } = &item.need else { panic!("{item:?}") };
     assert_eq!(permission.tool, "Bash");
+    // A screen is told: the thread is pushed again with its flag on, though nothing in the thread itself changed.
+    let end = Instant::now() + T;
+    let mut heard = false;
+    while !heard && Instant::now() < end {
+        if let Some(ServerMessage::Event { change: Change::TaskUpdated { task }, .. }) = c.next_event(Duration::from_millis(200)).unwrap() {
+            heard = task.id == t.id && task.needs_you;
+        }
+    }
+    assert!(heard, "the thread's row turns amber on its own");
+    let th = task(&mut c, &t.id);
+    assert!(th.needs_you, "the thread's run has ended, yet a request of its subagent makes it need the person");
+    assert!(th.needs_you);
+    until("the thread to rest", || task(&mut c, &t.id).thread_status == ThreadStatus::Waiting);
     // It is asked in Ask mode like the thread would: the person says no, and the subagent reports that.
     assert_eq!(c.request(Request::AnswerPermission { permission: permission.id.clone(), decision: Decision::Deny }).unwrap(), Reply::Ok);
     until("the thread to read the report and finish", || {

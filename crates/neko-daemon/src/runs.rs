@@ -584,12 +584,12 @@ pub fn remove_task(shared: &Shared, task: &TaskId) -> Reply {
         Err(e) => return Reply::error(ErrorCode::Internal, e.to_string()),
     };
     if found.subagent.is_some() {
-        return Reply::error(ErrorCode::Refused, "A subagent goes with its thread. Remove the thread to remove it.");
+        return Reply::error(ErrorCode::Refused, "A kitten goes with its thread. Remove the thread to remove it.");
     }
     // Its subagents go with it, once none of them works (their folder is the thread's).
     let below = lock(&shared.core).store.subagents_of(task).unwrap_or_default();
     if below.iter().any(|t| lock(&shared.runs.active).contains_key(&t.id) || neko_core::subagents::is_live(t.status) && t.status != TaskStatus::Waiting) {
-        return Reply::error(ErrorCode::Busy, "A subagent of this thread is still working. Stop the thread first.");
+        return Reply::error(ErrorCode::Busy, "A kitten of this thread is still working. Stop the thread first.");
     }
     for t in &below {
         crate::undo::forget_task(shared, &t.id, None);

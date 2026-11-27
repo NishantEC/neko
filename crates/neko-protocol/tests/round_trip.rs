@@ -432,7 +432,7 @@ fn subagents_have_their_own_shapes_and_the_old_ones_do_not_change() {
     let json = serde_json::to_string(&s).unwrap();
     assert!(json.ends_with(r#""subagent":{"parent":"task_1","number":"1.2","root":"task_0"}}"#), "{json}");
     let back: Task = serde_json::from_str(&json).unwrap();
-    assert_eq!((back.subagent.as_ref().unwrap().depth(), back.subagent_name().as_deref(), back.is_thread()), (2, Some("Subagent 1.2"), false));
+    assert_eq!((back.subagent.as_ref().unwrap().depth(), back.subagent_name().as_deref(), back.is_thread()), (2, Some("Kitten 1.2"), false));
     assert_eq!(SubagentOf { parent: TaskId("p".into()), number: "1".into(), root: TaskId("p".into()) }.depth(), 1);
     pinned(TaskStatus::Waiting, "\"waiting\"");
     pinned(PartBody::Subagent { subagent: TaskId("task_2".into()), number: "1".into(), title: "Check links".into() }, r#"{"kind":"subagent","subagent":"task_2","number":"1","title":"Check links"}"#);
