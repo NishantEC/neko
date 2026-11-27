@@ -100,6 +100,9 @@ pub const SCENES: &[Scene] = &[
     ("task-from-round", task_from_round),
     ("cat-page-rounds", cat_page_rounds),
     ("home-next-round", home_next_round),
+    ("sparse-home", sparse_home),
+    ("sparse-task", sparse_task),
+    ("sparse-briefing", briefing::sparse_briefing),
     ("briefing", briefing::briefing),
     ("briefing-finished", briefing::briefing_finished),
     ("briefing-empty", briefing::briefing_empty),
@@ -460,6 +463,40 @@ fn settings_notifications_unavailable(s: &mut App) {
 fn workspaces(s: &mut App) {
     with_workspaces(s);
     s.workspace = "ws_acme".into();
+}
+
+/// A person's first week, as sparse as real use is: General folded with no tasks, one workspace with one finished task, three cats
+/// napping. The busy scenes hid how the sidebar looks when there is little in it.
+pub(crate) fn sparse(s: &mut App) {
+    s.workspaces = vec![ws(GENERAL, "General", None, 0), ws("ws_acme", "acme-api", Some("/Users/example/acme-api"), 1)];
+    s.tasks_loaded = true;
+    s.folded = [GENERAL.to_owned()].into_iter().collect();
+    let mut t = task(30, "What changed this week?", 26 * 60);
+    t.workspace = "ws_acme".into();
+    t.folder = Some("/Users/example/acme-api".into());
+    t.cat = "cat_miso".into();
+    t.status = TaskStatus::Done;
+    s.tasks = vec![t];
+}
+
+fn sparse_home(s: &mut App) {
+    sparse(s);
+}
+
+/// The sparse house with its one task open: a short answer, no files changed, so no receipt.
+fn sparse_task(s: &mut App) {
+    sparse(s);
+    let task = s.tasks[0].clone();
+    let at = s.now_ms - 26 * 60 * 60_000;
+    let mut sc = Script::new(&task, "run_1", at);
+    sc.tool("Bash", "git log --since=7.days --oneline", "{\n  \"command\": \"git log --since=7.days --oneline\"\n}", "9 commits", ToolState::Done, 2);
+    sc.say("Nine commits landed this week, all in `acme-api`.\n\n- The retry limit is now configurable\n- The nightly build is faster after the cache fix\n- Two docs pages were tidied\n\nNothing is waiting for review.", true);
+    let mut r = run("run_1", &task, RunStatus::Done, at, 41);
+    r.changes = None;
+    let mut book = Book { runs: vec![r], loaded: true, ..Book::default() };
+    book.parts.extend(sc.parts);
+    s.books.insert(task.id.clone(), book);
+    s.open = Some(task.id);
 }
 
 fn workspaces_folded(s: &mut App) {

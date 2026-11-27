@@ -207,6 +207,24 @@ fn full_morning(s: &mut App, workspaces: bool) {
     s.open_briefing();
 }
 
+/// The sparse house's morning: one finished task, nothing waiting, nothing working.
+pub fn sparse_briefing(s: &mut App) {
+    super::sparse(s);
+    in_the_morning(s);
+    default_morning(s);
+    let ended = at_time(s, -1, 19, 2);
+    let (t, f) = finished(
+        s,
+        Done { n: 30, cat: "cat_miso", ws: "ws_acme", title: "What changed this week?", end: FinishedEnd::Done, ended, answer: Some("Nine commits landed this week, all in acme-api. Nothing is waiting for review."), changes: None, branch: None, offer: offer(false, None, false) },
+    );
+    s.tasks = vec![t];
+    let mut b = empty_briefing(s);
+    b.finished = vec![f];
+    b.totals = BriefingTotals { finished: 1, files: 0, added: 0, removed: 0, cost_usd: Some(0.08), api_equivalent: true };
+    s.briefing = Some(b);
+    s.open_briefing();
+}
+
 pub fn briefing(s: &mut App) {
     full_morning(s, false);
 }
