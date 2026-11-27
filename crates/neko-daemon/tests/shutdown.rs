@@ -113,3 +113,35 @@ fn sigterm_with_a_request_pending_and_words_streaming_stops_within_a_second_and_
         assert!(t.permissions.iter().all(|p| p.state != PermissionState::Pending), "no request is left pending");
     }
 }
+
+/// A connection busy with something that never ends must not hold the stop. Seen on a Mac: Settings asked for the runtimes, the
+/// daemon read a Claude Code settings file inside a protected folder, macOS held that read for its privacy prompt, and the
+/// daemon then ignored SIGTERM for an hour because the stop waited for that connection. Here the never-ending read is a settings
+/// file that is a FIFO with no writer.
+#[test]
+fn sigterm_while_a_connection_is_stuck_in_a_read_still_stops_within_two_seconds() {
+    let dir = temp_dir("shutdown-stuck");
+    let fifo = home_of(&dir).join(".claude/settings.json");
+    let path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+    // SAFETY: makes a FIFO at a path inside this test's own temporary folder.
+    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0, "mkfifo");
+    let mut d = Daemon::start_in(dir);
+    let c = d.client();
+    // Settings' list reads that file: the request never gets its answer.
+    let asking = std::thread::spawn(move || {
+        let mut c = c;
+        let _ = c.request(Request::ListRuntimes);
+    });
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(!asking.is_finished(), "the read is stuck, as the privacy prompt held it");
+
+    let t = Instant::now();
+    d.signal(libc::SIGTERM);
+    loop {
+        if d.child.try_wait().unwrap().is_some() {
+            break;
+        }
+        assert!(t.elapsed() < Duration::from_secs(2), "the daemon waited on a stuck connection instead of stopping");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}

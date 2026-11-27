@@ -230,7 +230,13 @@ pub fn run(dir: &Path, port: u16) -> Result<(), StartError> {
         }
         workers.retain(|h| !h.is_finished());
     }
-    for h in workers {
+    // Each connection ends when its socket closes, but one may be busy with something that never ends (a file read macOS holds
+    // for its privacy prompt, for one): wait a moment for them, then go on; leaving `main` ends whatever is left.
+    let until = std::time::Instant::now() + Duration::from_secs(1);
+    while workers.iter().any(|h| !h.is_finished()) && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    for h in workers.into_iter().filter(|h| h.is_finished()) {
         let _ = h.join();
     }
     // A run that is finishing writes its last rows now: wait a moment for it (a long run goes on; a restart marks it interrupted).

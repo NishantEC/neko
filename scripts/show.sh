@@ -29,6 +29,12 @@ quit_open_copy() {
   if alive "$daemon"; then
     kill -TERM "$daemon" 2>/dev/null || true
     for _ in $(seq 1 50); do alive "$daemon" || break; sleep 0.1; done
+    # A daemon of this development data folder that ignores the stop would keep the new build's daemon out: say so and end it.
+    if alive "$daemon"; then
+      echo "The development daemon ($daemon) did not stop within 5 seconds; ending it." >&2
+      kill -KILL "$daemon" 2>/dev/null || true
+      for _ in $(seq 1 20); do alive "$daemon" || break; sleep 0.1; done
+    fi
   fi
   rm -f "$pid_file"
 }
