@@ -10,7 +10,7 @@
 | `lib.rs` | `run()`: headless runs return first; then the menu prep, the saved frame, the Dock registration, `rune::run_windows`. `poll` drains the link, follows the width, sets the title, keeps the frame, replaces the menu. `on_key`: ⌘N, ⌃⌘S, Escape. |
 | `state.rs` | `App` and what each event changes. No drawing, no I/O. |
 | `view.rs` | The window: the warm ground, the theme and its type scale, the content band, the panels that ask (rename, remove, retire, undo anyway, new cat). |
-| `sidebar.rs` | The inset sidebar panel: New task, Home, Needs you, workspace sections of two-line task rows led by each cat's portrait, the Cats section. |
+| `sidebar.rs` | The inset sidebar panel: New task, Home, Briefing, Needs you, Rounds; the Cattains (only the cats at work, absent when none is); workspace sections of two-line task rows led by each cat's portrait; Add workspace…. |
 | `home_view.rs` | Home: the greeting, the composer with its cat and workspace pickers, the house of cats, Needs you and In progress. |
 | `task_view.rs`, `turn.rs` | The task view: the conversation, turns led by their cat, steps on a rail, requests led by the asking cat, the receipt, the composer and its context ring. |
 | `faces.rs` | The cats' portraits: a drawn face per face id on its own ground, the working ring and state dots (`design.md`). |
@@ -53,8 +53,8 @@ The model is pure and tested (`menu.rs`): no key is taken twice.
 
 ## Keyboard
 
-- Tab goes once round every control in reading order: Hide sidebar, New task, Home, Briefing, Needs you, Rounds, the workspaces list (one stop), each
-  section's own buttons, Add workspace…, the cats (one stop), New cat…, the composer, the cat picker and the workspace picker in its footer, each cat's tile in the house. In a task: copy buttons, fold lines, request answers, then the composer and its context ring.
+- Tab goes once round every control in reading order: Hide sidebar, New task, Home, Briefing, Needs you, Rounds, the Cattains (one stop, only when a cat is at work), the workspaces list (one stop), each
+  section's own buttons, Add workspace…, the composer, the cat picker and the workspace picker in its footer, each cat's tile in the house. In a task: copy buttons, fold lines, request answers, then the composer and its context ring.
   `App::tab_visits_controls(true)` makes this so whatever the Mac's Keyboard Navigation setting is.
 - In the workspaces list the arrow keys move through section headers and rows (`focus_group`), a typed name goes to it, Return
   opens a row or folds a section; Left and Right fold and open; ⌥⌘↑ and ⌥⌘↓ move a section (`workspaces.md`).

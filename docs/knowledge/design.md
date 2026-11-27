@@ -56,18 +56,27 @@ One vertical rhythm for the whole sidebar, in steps of the theme's 4 point unit 
 
 | What | Value |
 | --- | --- |
-| A one-line row (New task, Home, Briefing, Needs you, Rounds, Add workspace…, New cat…, Show more) | 36 (`metrics.row`) |
-| A two-line row (a task, a cat) | 52 (a row and one step either side) |
-| A section header (a workspace, Cats) | 32 (`control.sm`: its New task and menu buttons are this high) |
-| Gap between any two stacked rows, a header and its first row, a list and Add workspace… or New cat… | 2 (half a step) |
+| A one-line row (New task, Home, Briefing, Needs you, Rounds, Add workspace…, Show more) | 36 (`metrics.row`) |
+| A two-line row (a task, a cat in the Cattains) | 52 (a row and one step either side) |
+| A section header (a workspace, Cattains) | 32 (`control.sm`: its New task and menu buttons are this high) |
+| Gap between any two stacked rows (a cat and its nested tasks too), a header and its first row, a list and Add workspace… | 2 (half a step) |
 | Gap between workspace sections | 12 (3 steps) |
-| Gap between groups (the nav, the workspaces with Add workspace…, the Cats) | 20 (5 steps) |
+| Gap between groups (the nav, the Cattains when a cat is at work, the workspaces with Add workspace…) | 20 (5 steps) |
 
-So a header sits 2 points over its own rows and 12 under the section above: it belongs to what is below it. Add workspace… and
-New cat… are rows like the others, a row gap under their list. A section header is a label, not a row: it has no wash at rest, under
+So a header sits 2 points over its own rows and 12 under the section above: it belongs to what is below it. Add workspace… is a row like the others, a row gap under the list. A section header is a label, not a row: it has no wash at rest, under
 the pointer or when pressed (only the keyboard's focus ring), because a wash on a full-width pill reads as the selected row. The
 earlier build gave headers the row material, so a header the pointer rested on after a click (to fold or open it) looked selected,
 and its pill ran into the first task row under it (a 1 point gap).
+
+## The Cattains
+
+The sidebar's section for the cats at work, under the nav and above the workspaces (`sidebar::cattains`). Header: "Cattains", the small
+semibold step in the second ink, a control high (32), no wash. A row is the 28 point portrait (ring while it works, amber dot when it
+needs the person), the cat's name (base, medium; semibold while its page is open, raised pebble) and one line in the xs step: the
+working task's title in the second ink, `needs you: Run a command` in amber, `working on 2` in the identity teal. A cat with several
+tasks at work nests them under it as the ordinary task rows, stepped in 12 points (narrower, so the pebble and the hit area step in
+too); they sit a row gap apart like every row. Napping cats are not listed and with none at work the section is absent: no header, no
+empty line, and the workspaces rise to a group gap under the nav. The word is the owner's: Cattains.
 
 ## Rounds
 

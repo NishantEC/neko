@@ -96,14 +96,20 @@ and `rules_hash`; a Needs-you item carries `cat` and `cat_name`.
 
 How it looks is in `design.md`.
 
-- Sidebar: a Cats section under the workspaces, each active cat with its portrait in its state and what it is doing (napping,
-  working on N, needs you; a napping cat with a purpose shows it), then New cat….
+- Sidebar: **Cattains**, directly under New task, Home, Briefing, Needs you and Rounds and above the workspaces. It lists only the cats
+  at work now (a task working, a request or a question waiting for the person); a napping cat is not listed, and with no cat at work
+  the section is absent (no header, no empty line). A row is the cat's portrait in its state (a turning ring while it works, an amber
+  dot when it needs the person), its name and one line of what it is doing: the working task's title, `needs you: Run a command` (the
+  request's short title; `a question`, `could not go on`), or `working on 2` / `needs you · 2 tasks` with its active tasks nested under
+  it (the same task row, stepped in 12 points, as Capy nests a Captain's crew). A press opens the cat's page. There is no New cat… and
+  no list of idle cats in the sidebar: cats are made, renamed, given a face, rules and a default workspace, retired and brought back
+  in **Settings ▸ Cats** (New cat… is its first button, Open on each cat reaches the page), and a task's band opens its cat's page.
 - Home: the cat picker, a chip in the composer's footer beside the workspace's (the picked cat's face and name, or the free cats' faces overlapping in one row for "Any cat"); the house below it,
   each cat as a tile; a napping cat's tile addresses the composer to it.
 - A cat's page: its portrait large on a quiet wash of its own ground (every wash the same step from the page, `faces::wash`), its name, what it is doing, Rename… and Retire… (asks first); the
   faces as a row of portraits to choose from, the default workspace picker, purpose, the rules editor (rune-ui's Textarea) with
   Save, Revert, "Unsaved changes" and Restore previous rules, then its tasks: working, needs you, recent.
-- New cat…: the dialog shows the face it will get.
+- New cat… (Settings ▸ Cats): the dialog shows the face it will get; its page opens when it is made.
 - A task's band starts with its cat's portrait (a press opens its page); its sidebar row starts with the portrait and says the cat;
   each turn is led by the cat's portrait and name; a request is led by the cat that asks; the receipt names it; the composer says
   "Reply to miso".

@@ -62,7 +62,7 @@ only (tested by reading `lib.rs`).
   development art), `.ringed(true)`, `.state(Activity::..)`, `.under(surface)`, `.decorative(true)`. Neko keeps the drawn faces, their
   grounds, `wash` and the art override. Every portrait takes a key.
 - **Message**: the person's words are `Message::user(..).bubble(Bubble::Well)` with `reveal_actions`; a turn's head is `Message::header`.
-- **SidebarItem**: `.button(true)` (New task, Add workspace, New cat, Show more) and `.trail(pill)` (Needs you).
+- **SidebarItem**: `.button(true)` (New task, Add workspace, Show more) and `.trail(pill)` (Needs you).
 - **Marks**: `agent::mark_with(.., Marks::Neutral)` for a step's and an answered request's mark, `Reasoning` with `.icon(None)` for a
   thought, `agent::hollow_dot` for the run line. A denied answer is the dash, as a denied step is (it was a cross).
 - **Diff** in Review: `.stats`, `.hide_zero(true)`, `.selectable(true)`, `.foot(..)`; no copy of its header or lines.
