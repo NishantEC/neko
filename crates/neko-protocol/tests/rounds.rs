@@ -96,10 +96,16 @@ fn a_task_made_by_a_round_says_so_and_one_made_by_a_person_does_not() {
         folder: None,
         cat: "cat_miso".into(),
         round: None,
+        last_read_ms: 0,
+        activity_ms: 1,
+        latest_line: String::new(),
+        failure_line: String::new(),
+        thread_status: ThreadStatus::Idle,
+        needs_you: false,
     };
     assert!(!serde_json::to_string(&t).unwrap().contains("round"));
     t.round = Some(TaskRound { id: "round_1".into(), name: "Docs check".into(), due_ms: Some(1_764_000_000_000) });
     let json = serde_json::to_string(&t).unwrap();
-    assert!(json.ends_with(r#""round":{"id":"round_1","name":"Docs check","due_ms":1764000000000}}"#), "{json}");
+    assert!(json.contains(r#""round":{"id":"round_1","name":"Docs check","due_ms":1764000000000}"#), "{json}");
     assert_eq!(serde_json::from_str::<Task>(&json).unwrap(), t);
 }

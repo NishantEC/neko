@@ -40,7 +40,7 @@ pub use undo::{DiffFile, DiffPatch, DiffSummary, FileStatus, Offer, RunUndo, Und
 /// happened while the person was away, derived by the daemon; mark it read; the morning time; an event when it is due). 11: plugins (MCP
 /// servers first: added by pasting JSON or from a folder, approved by digest, set up in Settings, left to chosen cats; a "Needs you"
 /// item asks for the approval).
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -150,6 +150,71 @@ pub struct Task {
     /// The round that made it and the time it was due; None for a task the person made.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub round: Option<TaskRound>,
+    /// When the person last opened it (version 12). Activity after this is unread.
+    #[serde(default)]
+    pub last_read_ms: i64,
+    /// When something last happened in it that the person did not do themselves: the agent's words, a run's end, a request
+    /// (version 12). Never earlier than `created_ms` for a task the store holds.
+    #[serde(default)]
+    pub activity_ms: i64,
+    /// The last line of the newest agent words, cut to [`LATEST_LINE_CHARS`] (version 12). Empty before the agent has said anything.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub latest_line: String,
+    /// Why the last run failed, in a line, while the task is `Failed` (version 12); else empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub failure_line: String,
+    /// What the thread is doing, derived by the daemon (version 12): `neko_core::thread::thread_status`.
+    #[serde(default)]
+    pub thread_status: ThreadStatus,
+    /// Something waits for the person in it: a request, a question, a failure they can act on (version 12). A flag, apart from
+    /// `thread_status`; the list is [`NeedsItem`]s.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_you: bool,
+}
+
+/// The longest a thread's `latest_line` is, in characters.
+pub const LATEST_LINE_CHARS: usize = 120;
+
+/// What a thread is doing, for a sidebar row (docs/knowledge/threads.md). Needs you is a flag beside it, not a value of it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadStatus {
+    /// A run is going.
+    Working,
+    /// The last run failed and the person has not opened the thread since.
+    Failed,
+    /// None of the above.
+    #[default]
+    Idle,
+}
+
+impl Task {
+    /// A task as it is at birth, made by the person: new, in a scratch folder, read. Tests and the app's placeholder data start
+    /// here; the daemon fills the rest from what is stored.
+    pub fn blank(id: TaskId, workspace: &str, words: &str, title: &str, created_ms: i64, cat: &str) -> Task {
+        Task {
+            id,
+            workspace: workspace.to_owned(),
+            words: words.to_owned(),
+            title: title.to_owned(),
+            created_ms,
+            status: TaskStatus::New,
+            folder: None,
+            cat: cat.to_owned(),
+            round: None,
+            last_read_ms: created_ms,
+            activity_ms: created_ms,
+            latest_line: String::new(),
+            failure_line: String::new(),
+            thread_status: ThreadStatus::Idle,
+            needs_you: false,
+        }
+    }
+
+    /// Something happened since the person last opened it.
+    pub fn unread(&self) -> bool {
+        self.activity_ms > self.last_read_ms
+    }
 }
 
 /// Where a run stands.
@@ -658,6 +723,10 @@ pub enum Request {
     },
     /// Stop the task's running agent.
     StopTask { task: TaskId },
+    /// The person opened the thread: it is read as of now. Replies `task`.
+    MarkRead { task: TaskId },
+    /// Make the thread unread again (the person asked). Replies `task`.
+    MarkUnread { task: TaskId },
     /// Answer a permission request. A request already answered is refused.
     AnswerPermission { permission: PermissionId, decision: Decision },
     /// Send this task's text as it streams (or none). Other changes reach every subscriber.

@@ -96,6 +96,8 @@ pub struct RunBook {
     approved: std::collections::HashSet<String>,
     /// The plugins whose servers this run was given, by name.
     plugins: Vec<String>,
+    /// The task's `latest_line` as screens were last told, so a row's second line follows the words without a push per word.
+    last_line: String,
     /// Bytes of part bodies written so far (for the write-rate check).
     pub written: u64,
     pub writes: u32,
@@ -133,9 +135,10 @@ impl RunBook {
             rules_hash: cat.map(|c| c.rules_hash.clone()),
         };
         let mut out = Vec::new();
+        let last_line = core.store.get_task(task)?.map(|t| t.latest_line).unwrap_or_default();
         let rev = core.store.insert_run(&run, now)?;
         out.push(Out::Change(rev, Change::RunChanged { run: run.clone() }));
-        let mut book = RunBook { run, task: task.clone(), who, place, mode, open: None, last_flush: now, tools: HashMap::new(), asked: HashMap::new(), hook_calls: HashMap::new(), denied: Default::default(), thinking: false, approved: Default::default(), plugins: Vec::new(), written: 0, writes: 0 };
+        let mut book = RunBook { run, task: task.clone(), who, place, mode, open: None, last_flush: now, tools: HashMap::new(), asked: HashMap::new(), hook_calls: HashMap::new(), denied: Default::default(), thinking: false, approved: Default::default(), plugins: Vec::new(), last_line, written: 0, writes: 0 };
         if let Some(c) = changed {
             let p = book.new_part(core, PartBody::RulesChanged { cat: c.id.clone(), name: c.name.clone() }, now, true)?;
             out.extend(p);
@@ -192,6 +195,16 @@ impl RunBook {
         Ok(out)
     }
 
+    /// The task whole, when the last line of its agent's words is not the one screens last heard (written with the part at `rev`).
+    fn line_out(&mut self, core: &mut Core, rev: u64) -> Result<Option<Out>, StoreError> {
+        let Some(task) = core.store.get_task(&self.task)? else { return Ok(None) };
+        if task.latest_line == self.last_line {
+            return Ok(None);
+        }
+        self.last_line = task.latest_line.clone();
+        Ok(Some(Out::Change(rev, Change::TaskUpdated { task })))
+    }
+
     fn count(&mut self, p: &Part) {
         self.writes += 1;
         self.written += serde_json::to_string(&p.body).map_or(0, |s| s.len() as u64);
@@ -224,6 +237,9 @@ impl RunBook {
             self.last_flush = now;
             if end {
                 out.push(Out::Change(rev, Change::PartChanged { part: part.clone() }));
+            }
+            if matches!(part.body, PartBody::Agent { .. }) {
+                out.extend(self.line_out(core, rev)?);
             }
         }
         if !end {

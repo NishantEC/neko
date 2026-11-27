@@ -240,7 +240,33 @@ const MIGRATIONS: &[Migration] = &[
         secret INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (plugin_id, key)
     );"),
+    // 9: threads (docs/knowledge/threads.md). When the person last opened a task, when it last had activity of its own, and the last
+    // line of its newest agent words. Everything that exists is read, as of its last activity.
+    Migration::Then(
+        "ALTER TABLE tasks ADD COLUMN last_read_ms INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE tasks ADD COLUMN activity_ms INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE tasks ADD COLUMN latest_line TEXT NOT NULL DEFAULT '';
+        UPDATE tasks SET activity_ms = MAX(created_ms, COALESCE((SELECT MAX(COALESCE(ended_ms, started_ms)) FROM runs WHERE runs.task_id = tasks.id), 0));
+        UPDATE tasks SET last_read_ms = activity_ms;",
+        migrate_latest_lines,
+    ),
 ];
+
+/// Migration 9's step: each task's `latest_line` from its newest agent words.
+fn migrate_latest_lines(tx: &rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
+    let ids: Vec<String> = {
+        let mut st = tx.prepare("SELECT id FROM tasks")?;
+        st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
+    };
+    for id in ids {
+        let body: Option<String> = tx.query_row("SELECT body FROM parts WHERE task_id = ?1 AND kind = 'agent' ORDER BY seq DESC LIMIT 1", [&id], |r| r.get(0)).optional()?;
+        let Some(body) = body else { continue };
+        if let Ok(neko_protocol::PartBody::Agent { text, .. }) = serde_json::from_str::<neko_protocol::PartBody>(&body) {
+            tx.execute("UPDATE tasks SET latest_line = ?2 WHERE id = ?1", params![id, crate::thread::latest_line(&text)])?;
+        }
+    }
+    Ok(())
+}
 
 /// The schema version this build writes.
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
@@ -283,6 +309,7 @@ pub(crate) fn status_of<T: serde::de::DeserializeOwned>(name: &str) -> rusqlite:
     serde_json::from_value(serde_json::Value::String(name.to_owned())).map_err(|e| rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(e)))
 }
 
+/// A task as stored. What the daemon derives (`thread_status`, `needs_you`, `failure_line`) is filled by [`Store::derived`].
 fn task_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     Ok(Task {
         id: TaskId(row.get(0)?),
@@ -296,15 +323,21 @@ fn task_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         round: row.get::<_, Option<String>>(8)?.map(|id| -> rusqlite::Result<TaskRound> {
             Ok(TaskRound { id, name: row.get::<_, Option<String>>(10)?.unwrap_or_default(), due_ms: row.get(9)? })
         }).transpose()?,
+        last_read_ms: row.get(11)?,
+        activity_ms: row.get(12)?,
+        latest_line: row.get(13)?,
+        failure_line: String::new(),
+        thread_status: neko_protocol::ThreadStatus::Idle,
+        needs_you: false,
     })
 }
 
-const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name";
+const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name, last_read_ms, activity_ms, latest_line";
 
 /// Writes a new task and its `task_created` event inside `tx`. Returns the event's sequence number.
 pub(crate) fn insert_task(tx: &rusqlite::Transaction<'_>, task: &Task) -> Result<u64, StoreError> {
     tx.execute(
-        &format!("INSERT INTO tasks ({TASK_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"),
+        &format!("INSERT INTO tasks ({TASK_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)"),
         params![
             task.id.0,
             task.workspace,
@@ -316,7 +349,10 @@ pub(crate) fn insert_task(tx: &rusqlite::Transaction<'_>, task: &Task) -> Result
             task.cat,
             task.round.as_ref().map(|r| &r.id),
             task.round.as_ref().and_then(|r| r.due_ms),
-            task.round.as_ref().map(|r| &r.name)
+            task.round.as_ref().map(|r| &r.name),
+            task.last_read_ms,
+            task.activity_ms,
+            task.latest_line
         ],
     )?;
     let data = serde_json::json!({ "title": task.title, "cat": task.cat, "round": task.round.as_ref().map(|r| &r.id) }).to_string();
@@ -376,7 +412,7 @@ impl Store {
 
     /// Stores a task for `cat` and its `task_created` event in one transaction. Returns the task and the event's sequence number.
     pub fn create_task(&mut self, id: &TaskId, workspace: &str, words: &str, folder: Option<&str>, cat: &str, now_ms: i64) -> Result<(Task, u64), StoreError> {
-        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New, folder: folder.map(str::to_owned), cat: cat.to_owned(), round: None };
+        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New, folder: folder.map(str::to_owned), cat: cat.to_owned(), round: None, last_read_ms: now_ms, activity_ms: now_ms, latest_line: String::new(), failure_line: String::new(), thread_status: neko_protocol::ThreadStatus::Idle, needs_you: false };
         let tx = self.conn.transaction()?;
         let seq = insert_task(&tx, &task)?;
         tx.commit()?;
@@ -387,19 +423,37 @@ impl Store {
     pub fn list_tasks(&self, workspace: &str) -> Result<Vec<Task>, StoreError> {
         let mut st = self.conn.prepare_cached(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE workspace_id = ?1 ORDER BY created_ms DESC, id DESC"))?;
         let rows = st.query_map([workspace], task_of)?;
-        Ok(rows.collect::<Result<_, _>>()?)
+        let tasks: Vec<Task> = rows.collect::<Result<_, _>>()?;
+        tasks.into_iter().map(|t| self.derived(t)).collect()
     }
 
     /// Every task of every workspace, newest first.
     pub fn all_tasks(&self) -> Result<Vec<Task>, StoreError> {
         let mut st = self.conn.prepare_cached(&format!("SELECT {TASK_COLUMNS} FROM tasks ORDER BY created_ms DESC, id DESC"))?;
         let rows = st.query_map([], task_of)?;
-        Ok(rows.collect::<Result<_, _>>()?)
+        let tasks: Vec<Task> = rows.collect::<Result<_, _>>()?;
+        tasks.into_iter().map(|t| self.derived(t)).collect()
     }
 
     pub fn get_task(&self, id: &TaskId) -> Result<Option<Task>, StoreError> {
         let mut st = self.conn.prepare_cached(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"))?;
-        Ok(st.query_row([&id.0], task_of).optional()?)
+        let task = st.query_row([&id.0], task_of).optional()?;
+        task.map(|t| self.derived(t)).transpose()
+    }
+
+    /// What the daemon works out about a task, from what is stored (`thread.rs` has the rules): its status as a thread, whether
+    /// something waits for the person, and why it failed. Only a failed task costs a read (its newest error notice).
+    fn derived(&self, mut t: Task) -> Result<Task, StoreError> {
+        let mut actionable = false;
+        if t.status == TaskStatus::Failed
+            && let Some(n) = self.newest_error_notice(&t.id)?
+        {
+            actionable = crate::needs::failure_of(&n).is_some();
+            t.failure_line = crate::thread::failure_line(n.body.text());
+        }
+        t.thread_status = crate::thread::thread_status(t.status, t.last_read_ms, t.activity_ms);
+        t.needs_you = crate::thread::needs_you(t.status, actionable);
+        Ok(t)
     }
 
     /// The sequence number of the last event (0 for none).

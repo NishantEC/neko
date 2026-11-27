@@ -1921,10 +1921,9 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neko_protocol::TaskStatus;
 
     fn task(id: &str, ms: i64) -> Task {
-        Task { id: TaskId(id.into()), workspace: "default".into(), words: format!("words of {id}"), title: id.into(), created_ms: ms, status: TaskStatus::New, folder: None, cat: "cat_miso".into(), round: None }
+        Task::blank(TaskId(id.into()), "default", &format!("words of {id}"), id, ms, "cat_miso")
     }
 
     #[test]

@@ -15,6 +15,12 @@ fn task() -> Task {
         folder: None,
         cat: "cat_miso".into(),
         round: None,
+        last_read_ms: 1_764_000_000_000,
+        activity_ms: 1_764_000_000_000,
+        latest_line: String::new(),
+        failure_line: String::new(),
+        thread_status: ThreadStatus::Idle,
+        needs_you: false,
     }
 }
 
@@ -40,12 +46,34 @@ fn requests_round_trip_with_their_ids() {
 }
 
 #[test]
+fn a_thread_says_what_it_is_doing_and_can_be_marked_read() {
+    pinned(ClientMessage { id: 6, request: Request::MarkRead { task: TaskId("task_1".into()) } }, r#"{"id":6,"type":"mark_read","task":"task_1"}"#);
+    pinned(ClientMessage { id: 7, request: Request::MarkUnread { task: TaskId("task_1".into()) } }, r#"{"id":7,"type":"mark_unread","task":"task_1"}"#);
+    let mut t = task();
+    t.status = TaskStatus::Failed;
+    t.thread_status = ThreadStatus::Failed;
+    t.needs_you = true;
+    t.latest_line = "Renamed the label.".into();
+    t.failure_line = "Claude Code is not signed in.".into();
+    t.activity_ms += 5;
+    assert!(t.unread());
+    let json = serde_json::to_string(&t).unwrap();
+    assert!(json.contains(r#""latest_line":"Renamed the label.","failure_line":"Claude Code is not signed in.","thread_status":"failed","needs_you":true"#), "{json}");
+    let back: Task = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, t);
+    // A task from a daemon that did not know them still reads: everything is as if the thread had been read.
+    let old = r#"{"id":"task_1","workspace":"default","words":"w","title":"t","created_ms":1,"status":"new","cat":"c"}"#;
+    let old: Task = serde_json::from_str(old).unwrap();
+    assert_eq!((old.thread_status, old.needs_you, old.unread()), (ThreadStatus::Idle, false, false));
+}
+
+#[test]
 fn replies_and_events_round_trip() {
     pinned(
         ServerMessage::Reply { id: 0, reply: Reply::Hello { daemon: "0.1.0".into(), protocol: 1, workspace: "default".into() } },
         r#"{"kind":"reply","id":0,"reply":{"type":"hello","daemon":"0.1.0","protocol":1,"workspace":"default"}}"#,
     );
-    let t = r#"{"id":"task_01HZX3J0000000000000000000","workspace":"default","words":"Rename the sidebar label\nand check ENG-123","title":"Rename the sidebar label","created_ms":1764000000000,"status":"new","cat":"cat_miso"}"#;
+    let t = r#"{"id":"task_01HZX3J0000000000000000000","workspace":"default","words":"Rename the sidebar label\nand check ENG-123","title":"Rename the sidebar label","created_ms":1764000000000,"status":"new","cat":"cat_miso","last_read_ms":1764000000000,"activity_ms":1764000000000,"thread_status":"idle"}"#;
     pinned(ServerMessage::Reply { id: 2, reply: Reply::Task { task: task() } }, &format!(r#"{{"kind":"reply","id":2,"reply":{{"type":"task","task":{t}}}}}"#));
     pinned(ServerMessage::Reply { id: 1, reply: Reply::Tasks { tasks: vec![task()] } }, &format!(r#"{{"kind":"reply","id":1,"reply":{{"type":"tasks","tasks":[{t}]}}}}"#));
     pinned(ServerMessage::Reply { id: 4, reply: Reply::Subscribed { revision: 7 } }, r#"{"kind":"reply","id":4,"reply":{"type":"subscribed","revision":7}}"#);
@@ -120,7 +148,7 @@ fn workspace_replies_and_events_round_trip() {
     t.folder = Some("/Users/example/acme-api".into());
     pinned(
         t,
-        r#"{"id":"task_01HZX3J0000000000000000000","workspace":"ws_1","words":"Rename the sidebar label\nand check ENG-123","title":"Rename the sidebar label","created_ms":1764000000000,"status":"new","folder":"/Users/example/acme-api","cat":"cat_miso"}"#,
+        r#"{"id":"task_01HZX3J0000000000000000000","workspace":"ws_1","words":"Rename the sidebar label\nand check ENG-123","title":"Rename the sidebar label","created_ms":1764000000000,"status":"new","folder":"/Users/example/acme-api","cat":"cat_miso","last_read_ms":1764000000000,"activity_ms":1764000000000,"thread_status":"idle"}"#,
     );
 }
 
@@ -390,5 +418,5 @@ fn cats_round_trip() {
     let json = serde_json::to_string(&r).unwrap();
     assert!(json.ends_with(r#""cat":"cat_miso","rules_hash":"cbf29ce484222325"}"#), "{json}");
     pinned(PartBody::RulesChanged { cat: c(), name: "miso".into() }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso"}"#);
-    assert_eq!(PROTOCOL_VERSION, 11);
+    assert_eq!(PROTOCOL_VERSION, 12);
 }

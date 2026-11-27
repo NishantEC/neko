@@ -45,15 +45,10 @@ pub fn derive(store: &Store) -> Result<Vec<NeedsItem>, StoreError> {
                 items.push(NeedsItem { id: format!("question:{}", run.id.0), task: t.id.clone(), workspace: t.workspace.clone(), title: t.title.clone(), cat: t.cat.clone(), cat_name: cat_name(t), since_ms: since, need: Need::Question { run: run.id, question: question_of(words) } });
             }
             TaskStatus::Failed => {
-                let parts = store.parts_of(&t.id)?;
                 // The newest error notice says why the last attempt failed.
-                let Some((part, text, next, failure)) = parts.iter().rev().find_map(|p| match &p.body {
-                    PartBody::Notice { tone: Tone::Error, text, next, failure } => Some((p, text, next, *failure)),
-                    _ => None,
-                }) else {
-                    continue;
-                };
-                let Some(kind) = failure.or_else(|| written_before_6(text)) else { continue };
+                let Some(part) = store.newest_error_notice(&t.id)? else { continue };
+                let Some(kind) = failure_of(&part) else { continue };
+                let PartBody::Notice { text, next, .. } = &part.body else { continue };
                 items.push(NeedsItem {
                     id: format!("failure:{}", part.id.0),
                     task: t.id.clone(),
@@ -77,6 +72,15 @@ pub fn derive(store: &Store) -> Result<Vec<NeedsItem>, StoreError> {
         items.push(NeedsItem { id: format!("plugin:{}", p.id), task: TaskId(String::new()), workspace: String::new(), title: p.name.clone(), cat: String::new(), cat_name: String::new(), since_ms, need: Need::Plugin { ask: crate::plugins::ask_of(&p) } });
     }
     Ok(order(items))
+}
+
+/// What kind of failure an error notice reports, when it is one the person can act on (not signed in, the usage limit, the CLI or
+/// the folder missing). `None` for any other; used by [`derive`] and by a task's `needs_you` flag, so the two agree.
+pub fn failure_of(part: &neko_protocol::Part) -> Option<FailureKind> {
+    match &part.body {
+        PartBody::Notice { tone: Tone::Error, text, failure, .. } => failure.or_else(|| written_before_6(text)),
+        _ => None,
+    }
 }
 
 /// Oldest first, grouped by workspace: groups in the order of their oldest item, items in the order they began to wait.

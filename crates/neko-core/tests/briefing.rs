@@ -355,7 +355,7 @@ fn a_store_from_before_the_briefing_opens_with_its_defaults_and_needs_no_migrati
         seed(&mut core, &d, Seed::done("Old", "Done.", 1_764_000_100_000));
         core.store.connection().execute("DELETE FROM settings WHERE key LIKE 'briefing_%'", []).unwrap();
     }
-    assert_eq!(SCHEMA_VERSION, 8, "the briefing keeps its marks in `settings`: no table, no migration (the eighth migration is plugins')");
+    assert_eq!(SCHEMA_VERSION, 9, "the briefing keeps its marks in `settings`: no table, no migration (the eighth migration is plugins', the ninth threads')");
     let store = Store::open(&path).unwrap();
     assert_eq!((store.briefing_read_ms().unwrap(), store.briefing_settings().unwrap()), (None, BriefingSettings::default()));
 }

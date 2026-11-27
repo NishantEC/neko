@@ -463,12 +463,12 @@ fn the_migration_from_store_six_adds_rounds_and_changes_nothing_else() {
     // A store as the last Neko left it: version 6, no rounds.
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch("DROP TABLE plugin_values; DROP TABLE plugins; DROP TABLE round_runs; DROP TABLE rounds; DROP INDEX tasks_by_round; ALTER TABLE tasks DROP COLUMN round_id; ALTER TABLE tasks DROP COLUMN round_due_ms; ALTER TABLE tasks DROP COLUMN round_name; PRAGMA user_version = 6;").unwrap();
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN last_read_ms; ALTER TABLE tasks DROP COLUMN activity_ms; ALTER TABLE tasks DROP COLUMN latest_line; DROP TABLE plugin_values; DROP TABLE plugins; DROP TABLE round_runs; DROP TABLE rounds; DROP INDEX tasks_by_round; ALTER TABLE tasks DROP COLUMN round_id; ALTER TABLE tasks DROP COLUMN round_due_ms; ALTER TABLE tasks DROP COLUMN round_name; PRAGMA user_version = 6;").unwrap();
     }
     assert_eq!(Store::open_at(&path, 6).unwrap().version().unwrap(), 6);
     let mut core = Core::open(&path, Box::new(FixedClock::new(1_764_000_100_000, 1000)), Box::new(SequentialIds::default())).unwrap();
-    assert_eq!(core.store.version().unwrap(), 8, "every migration after 6 ran: rounds' own is the seventh");
-    assert_eq!(SCHEMA_VERSION, 8);
+    assert_eq!(core.store.version().unwrap(), 9, "every migration after 6 ran: rounds' own is the seventh");
+    assert_eq!(SCHEMA_VERSION, 9);
     let tasks = core.store.all_tasks().unwrap();
     assert_eq!((tasks.len(), tasks[0].title.as_str(), tasks[0].round.clone()), (1, "Rename the sidebar label", None));
     assert!(core.rounds(env(0)).unwrap().0.is_empty());

@@ -21,6 +21,7 @@ pub mod rounds;
 pub mod runtime;
 pub mod secrets;
 pub mod store;
+pub mod thread;
 pub mod title;
 pub mod workplace;
 pub mod workspaces;

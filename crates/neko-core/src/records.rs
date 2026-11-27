@@ -92,6 +92,18 @@ fn part_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Part> {
     })
 }
 
+/// The agent's words in a part are what a row's second line shows and what makes a thread unread: the task keeps the last line of
+/// the newest of them and the time of the newest (in the part's own transaction, so a restart loses none).
+fn note_words(tx: &Transaction<'_>, p: &Part, now_ms: i64) -> rusqlite::Result<()> {
+    if let PartBody::Agent { text, .. } = &p.body {
+        let line = crate::thread::latest_line(text);
+        if !line.is_empty() {
+            tx.execute("UPDATE tasks SET latest_line = ?2, activity_ms = MAX(activity_ms, ?3) WHERE id = ?1", params![p.task.0, line, now_ms])?;
+        }
+    }
+    Ok(())
+}
+
 const PART_COLUMNS: &str = "id, task_id, run_id, seq, body, at_ms, ended_ms";
 
 fn kind_of(b: &PartBody) -> &'static str {
@@ -125,10 +137,42 @@ fn permission_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Permission> {
 const PERMISSION_COLUMNS: &str = "id, task_id, run_id, tool, title, why, detail, destructive, state, asked_ms, answered_ms";
 
 impl Store {
+    /// The newest error notice of a task: why its last attempt failed.
+    pub fn newest_error_notice(&self, task: &TaskId) -> Result<Option<Part>, StoreError> {
+        let mut st = self.conn.prepare_cached(&format!("SELECT {PART_COLUMNS} FROM parts WHERE task_id = ?1 AND kind = 'notice' ORDER BY seq DESC"))?;
+        let mut rows = st.query_map([&task.0], part_of)?;
+        while let Some(p) = rows.next().transpose()? {
+            if matches!(p.body, PartBody::Notice { tone: neko_protocol::Tone::Error, .. }) {
+                return Ok(Some(p));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The person opened the task (`read`), or asked for it to be unread again: it is read as of `now_ms`, or one tick before its
+    /// last activity. Returns the task whole with its event.
+    pub fn set_read(&mut self, id: &TaskId, read: bool, now_ms: i64) -> Result<(Task, u64), StoreError> {
+        let tx = self.conn.transaction()?;
+        if read {
+            tx.execute("UPDATE tasks SET last_read_ms = MAX(last_read_ms, ?2) WHERE id = ?1", params![id.0, now_ms])?;
+        } else {
+            tx.execute("UPDATE tasks SET last_read_ms = MAX(activity_ms - 1, 0) WHERE id = ?1", [&id.0])?;
+        }
+        let seq = log(&tx, now_ms, &id.0, if read { "task_read" } else { "task_unread" }, serde_json::json!({}))?;
+        tx.commit()?;
+        let task = self.get_task(id)?.ok_or(StoreError::Sqlite(rusqlite::Error::QueryReturnedNoRows))?;
+        Ok((task, seq))
+    }
+
     /// A task's status, with its event.
     pub fn set_task_status(&mut self, id: &TaskId, status: TaskStatus, now_ms: i64) -> Result<(Task, u64), StoreError> {
         let tx = self.conn.transaction()?;
         tx.execute("UPDATE tasks SET status = ?2 WHERE id = ?1", params![id.0, status_name(status)])?;
+        // A run that ended, a question or a request is something that happened in the thread; a stop is the person's own doing, and
+        // a run starting is too.
+        if matches!(status, TaskStatus::Done | TaskStatus::Failed | TaskStatus::Asked | TaskStatus::NeedsYou | TaskStatus::Interrupted) {
+            tx.execute("UPDATE tasks SET activity_ms = MAX(activity_ms, ?2) WHERE id = ?1", params![id.0, now_ms])?;
+        }
         let seq = log(&tx, now_ms, &id.0, "task_status", serde_json::json!({ "status": status_name(status) }))?;
         tx.commit()?;
         let task = self.get_task(id)?.ok_or(StoreError::Sqlite(rusqlite::Error::QueryReturnedNoRows))?;
@@ -225,6 +269,7 @@ impl Store {
             &format!("INSERT INTO parts ({PART_COLUMNS}, kind) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"),
             params![p.id.0, p.task.0, p.run.as_ref().map(|r| &r.0), p.seq as i64, serde_json::to_string(&p.body).unwrap_or_default(), p.at_ms, p.ended_ms, kind_of(&p.body)],
         )?;
+        note_words(&tx, p, now_ms)?;
         let seq = log(&tx, now_ms, &p.id.0, "part_added", serde_json::json!({ "task": p.task.0, "kind": kind_of(&p.body) }))?;
         tx.commit()?;
         Ok(seq)
@@ -234,6 +279,7 @@ impl Store {
     pub fn update_part(&mut self, p: &Part, now_ms: i64) -> Result<u64, StoreError> {
         let tx = self.conn.transaction()?;
         tx.execute("UPDATE parts SET body = ?2, ended_ms = ?3 WHERE id = ?1", params![p.id.0, serde_json::to_string(&p.body).unwrap_or_default(), p.ended_ms])?;
+        note_words(&tx, p, now_ms)?;
         let seq = log(&tx, now_ms, &p.id.0, "part_changed", serde_json::json!({ "bytes": p.body.text().len() }))?;
         tx.commit()?;
         Ok(seq)
@@ -352,7 +398,7 @@ impl Store {
                 "UPDATE runs SET status = 'interrupted', ended_ms = COALESCE(ended_ms, ?2), reason = COALESCE(reason, 'Neko stopped while this was running.') WHERE id = ?1",
                 params![run, now_ms],
             )?;
-            tx.execute("UPDATE tasks SET status = 'interrupted' WHERE id = ?1", [&task])?;
+            tx.execute("UPDATE tasks SET status = 'interrupted', activity_ms = MAX(activity_ms, ?2) WHERE id = ?1", params![task, now_ms])?;
             tx.execute("UPDATE permissions SET state = 'expired', answered_ms = ?2 WHERE run_id = ?1 AND state = 'pending'", params![run, now_ms])?;
             let open: Vec<(String, String)> = {
                 let mut q = tx.prepare("SELECT id, body FROM parts WHERE run_id = ?1 AND ended_ms IS NULL")?;

@@ -386,6 +386,27 @@ fn one_cat(shared: &Shared, change: impl FnOnce(&mut Core) -> Result<(neko_proto
     }
 }
 
+/// The person opened a thread (`read`), or asked for it to be unread: the task, whole, to every screen, when that changed anything.
+fn mark(shared: &Shared, task: &neko_protocol::TaskId, read: bool) -> Reply {
+    let internal = |e: neko_core::StoreError| Reply::error(ErrorCode::Internal, e.to_string());
+    let mut core = lock(&shared.core);
+    match core.store.get_task(task) {
+        Ok(Some(t)) if t.unread() != read => Reply::Task { task: t },
+        Ok(Some(t)) => {
+            let now = core.now();
+            match core.store.set_read(&t.id, read, now) {
+                Ok((task, revision)) => {
+                    shared.broadcast(&ServerMessage::Event { revision, change: Change::TaskUpdated { task: task.clone() } });
+                    Reply::Task { task }
+                }
+                Err(e) => internal(e),
+            }
+        }
+        Ok(None) => Reply::error(ErrorCode::NotFound, "There is no such thread."),
+        Err(e) => internal(e),
+    }
+}
+
 /// The reply to one message, the id it answers, and whether the connection goes on.
 fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) -> (u64, Reply, Flow) {
     let msg: ClientMessage = match serde_json::from_str(text) {
@@ -581,6 +602,8 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
             }
         }
         Request::StopTask { task } => runs::stop(shared, &task),
+        Request::MarkRead { task } => mark(shared, &task, true),
+        Request::MarkUnread { task } => mark(shared, &task, false),
         Request::AnswerPermission { permission, decision } => runs::answer(shared, &permission, decision),
         Request::WatchTask { task } => {
             if let Some(c) = lock(&shared.conns).get_mut(&conn) {

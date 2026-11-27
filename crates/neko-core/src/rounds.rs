@@ -482,6 +482,13 @@ impl Core {
             folder: w.folder,
             cat: cat.id,
             round: Some(TaskRound { id: r.id.clone(), name: r.name.clone(), due_ms }),
+            // A round's task is unread until the person opens it.
+            last_read_ms: 0,
+            activity_ms: now,
+            latest_line: String::new(),
+            failure_line: String::new(),
+            thread_status: neko_protocol::ThreadStatus::Idle,
+            needs_you: false,
         })
     }
 
