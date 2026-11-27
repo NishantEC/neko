@@ -313,7 +313,7 @@ fn list_row(s: &App, t: &Theme, task: &Task, list: &str, i: usize, n: usize, wha
 
 /// A section of Home: its heading and count, its rows in one well.
 fn section(t: &Theme, key: &str, title: &str, count: Option<usize>, body: El) -> El {
-    let mut head = row().w_full().px(t.space.at(1.0)).gap(t.space.at(2.0)).center_y().child(text(title.to_owned()).key(format!("{key}-title")).role("heading").level(2).font(weight(t.ty.base, t.ty.semibold)).color(t.ink()));
+    let mut head = row().w_full().gap(t.space.at(2.0)).center_y().child(text(title.to_owned()).key(format!("{key}-title")).role("heading").level(2).font(weight(t.ty.base, t.ty.semibold)).color(t.ink()));
     if let Some(n) = count {
         head = head.child(text(n.to_string()).font(tabular(weight(t.ty.sm, t.ty.medium))).color(t.ink_faint()).a11y_hidden());
     }

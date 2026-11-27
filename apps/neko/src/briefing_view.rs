@@ -30,7 +30,6 @@ fn head(t: &Theme, key: &str, title: &str, count: usize, ink: rune::Color) -> El
     row()
         .key(format!("{key}-head"))
         .w_full()
-        .px(t.space.at(1.0))
         .gap(t.space.at(2.0))
         .center_y()
         .child(text(title.to_owned()).key(format!("{key}-title")).role("heading").level(2).font(weight(t.ty.base, t.ty.semibold)).color(t.ink()))
@@ -40,7 +39,7 @@ fn head(t: &Theme, key: &str, title: &str, count: usize, ink: rune::Color) -> El
 /// A workspace's name as a small heading, over its part of a section.
 fn workspace_head(s: &App, t: &Theme, key: &str, ws: &str) -> El {
     let name = crate::needs_view::group_name(s, ws);
-    text(name).key(format!("{key}-ws-{ws}")).role("heading").level(3).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_muted()).truncate().min_w(0.0).px(t.space.at(1.0))
+    text(name).key(format!("{key}-ws-{ws}")).role("heading").level(3).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_muted()).truncate().min_w(0.0)
 }
 
 /// A well of rows: one surface, hairlines between.
