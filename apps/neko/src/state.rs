@@ -158,6 +158,9 @@ pub struct App {
     pub folded: HashSet<String>,
     /// Sections showing every task, not only the newest [`SECTION_ROWS`].
     pub show_all: HashSet<String>,
+    /// The thread in view is read as its words arrive even when Neko is not in front. Only the QA rig sets it: it has no window to
+    /// focus, and a real window that is behind another app must leave what arrives unread.
+    pub read_unfronted: bool,
     /// How the Threads section is grouped (View ▸ Group by). Remembered for the next launch.
     pub grouping: crate::threads::Grouping,
     /// Where a thread is placed while it works: the time it had when it began (`threads.rs`), so its row does not move as it streams.
@@ -455,6 +458,7 @@ impl Default for App {
             picker_open: false,
             folded: HashSet::new(),
             show_all: HashSet::new(),
+            read_unfronted: false,
             grouping: crate::threads::Grouping::default(),
             sort_hold: HashMap::new(),
             menu_open: None,
@@ -1612,7 +1616,7 @@ impl App {
                 let id = task.id.clone();
                 self.upsert(task);
                 // The person is looking at it: what it just said is read as it arrives (when Neko is in front, and the page is the thread).
-                if self.front && self.open.as_ref() == Some(&id) && !self.settings_open && !self.needs_open && !self.rounds_open && !self.briefing_open && self.open_cat.is_none() {
+                if (self.front || self.read_unfronted) && self.open.as_ref() == Some(&id) && !self.settings_open && !self.needs_open && !self.rounds_open && !self.briefing_open && self.open_cat.is_none() {
                     self.read_open();
                 }
             }

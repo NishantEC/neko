@@ -346,7 +346,7 @@ fn qa_state() -> App {
     let prefs = rune::prefs::Prefs::open(neko_app::PREFS_ID);
     let workspace = prefs.get::<String>(neko_app::WORKSPACE_KEY).filter(|w| !w.is_empty()).unwrap_or_else(|| neko_protocol::GENERAL.to_owned());
     let folded = prefs.get::<Vec<String>>(neko_app::FOLDED_KEY).unwrap_or_default().into_iter().collect();
-    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: neko_app::state::system_clock, home, width: Some(size.0), persist: true, workspace, folded, ..App::default() }
+    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: neko_app::state::system_clock, home, width: Some(size.0), persist: true, read_unfronted: true, workspace, folded, grouping: neko_app::threads::Grouping::from_key(&prefs.get::<String>(neko_app::GROUPING_KEY).unwrap_or_default()), ..App::default() }
 }
 
 /// A poster that posts nothing: it writes what would have been posted, as `NEKO_NOTIFY_LOG` has it (`notify::System` logs the same).

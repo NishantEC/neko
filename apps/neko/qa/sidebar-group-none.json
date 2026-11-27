@@ -82,6 +82,10 @@
       }
     },
     {
+      "do": "sleep",
+      "secs": 1.0
+    },
+    {
       "do": "click",
       "on": {
         "role": "button",
@@ -113,6 +117,10 @@
           }
         ]
       }
+    },
+    {
+      "do": "sleep",
+      "secs": 1.0
     },
     {
       "do": "key",
@@ -162,6 +170,10 @@
           }
         ]
       }
+    },
+    {
+      "do": "sleep",
+      "secs": 1.0
     },
     {
       "do": "assert",

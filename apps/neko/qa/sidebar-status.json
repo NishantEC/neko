@@ -85,6 +85,10 @@
       }
     },
     {
+      "do": "sleep",
+      "secs": 1.0
+    },
+    {
       "do": "click",
       "on": {
         "role": "button",
@@ -108,6 +112,10 @@
       },
       "within": 20,
       "expect": "The crash says so in its thread"
+    },
+    {
+      "do": "sleep",
+      "secs": 1.5
     },
     {
       "do": "click",
@@ -274,6 +282,10 @@
           }
         ]
       }
+    },
+    {
+      "do": "sleep",
+      "secs": 1.0
     },
     {
       "do": "sleep",

@@ -122,3 +122,22 @@ fn a_working_thread_keeps_its_place_while_it_streams_and_moves_when_it_ends() {
     a.change(Change::TaskUpdated { task: w });
     assert_eq!(order(&a), ["working", "newest", "older"], "the work ended: it takes the time it ended");
 }
+
+#[test]
+fn what_arrives_in_the_open_thread_is_read_only_while_neko_is_in_front() {
+    let mut a = neko_app::state::App::default();
+    let mk = |activity: i64| {
+        let mut t = Task::blank(TaskId("t".into()), "default", "w", "t", 1, "cat_miso");
+        t.last_read_ms = 5;
+        t.activity_ms = activity;
+        t
+    };
+    a.change(Change::TaskCreated { task: mk(5) });
+    a.open_task_id(&TaskId("t".into()));
+    a.front = false;
+    a.change(Change::TaskUpdated { task: mk(9) });
+    assert!(a.tasks[0].unread(), "Neko is behind another app: the person did not see it");
+    a.front = true;
+    a.change(Change::TaskUpdated { task: mk(12) });
+    assert!(!a.tasks[0].unread(), "in front, with the thread in view: read as it arrives");
+}

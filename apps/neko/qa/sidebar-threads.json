@@ -46,13 +46,12 @@
           },
           {
             "see": {
-              "role": "button",
-              "label_is": "No project"
+              "text": "Threads you start appear here"
             }
           }
         ]
       },
-      "expect": "Both projects and No project are groups under Threads"
+      "expect": "Both projects are groups under Threads; with no thread yet, No project is not listed and the section says where threads will appear"
     },
     {
       "do": "assert",
@@ -137,6 +136,10 @@
           }
         ]
       }
+    },
+    {
+      "do": "sleep",
+      "secs": 1.0
     },
     {
       "do": "click",
