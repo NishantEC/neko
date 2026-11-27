@@ -155,6 +155,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         None => content,
     };
     dialogs(s, &t, &mut layer);
+    // Toasts (Settled, Archived, Unpinned, each with Undo): bottom centre, over the page, last so nothing covers them.
+    crate::ui::toast::Toasts::new("toasts", &s.toasts, |s: &mut App| &mut s.toasts).position(crate::ui::toast::Position::BottomCenter).on_action(|s: &mut App, tag: &str| s.toast_action(tag)).mount(&t, &mut layer);
     crate::ui::base::overlay_root(root.child(main), layer)
 }
 
@@ -297,8 +299,12 @@ fn task_menu(s: &App, t: &Theme, task: &neko_protocol::Task, layer: &mut Vec<El>
     let menu = DropdownMenu::new("task-more")
         .trigger(trigger)
         .open(open)
-        .min_width(180.0)
+        .min_width(210.0)
         .on_close(|s: &mut App| s.menu_open = None)
+        .item(crate::sidebar::shelf_item(s, task, crate::shelf::Shelf::Pin, task.id.clone()))
+        .item(crate::sidebar::shelf_item(s, task, crate::shelf::Shelf::Settle, task.id.clone()))
+        .item(crate::sidebar::shelf_item(s, task, crate::shelf::Shelf::Archive, task.id.clone()))
+        .separator()
         .item({
             let id = task.id.clone();
             let any = s.book().is_some_and(|b| b.runs.iter().any(|r| r.undo.as_ref().is_some_and(neko_protocol::RunUndo::ready)));

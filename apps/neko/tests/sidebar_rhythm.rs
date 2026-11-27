@@ -134,7 +134,7 @@ fn check(scene: &str, dark: bool) {
 
 #[test]
 fn the_sidebar_keeps_one_rhythm() {
-    for scene in ["sparse-new-thread", "sparse-working", "sparse-needs-you", "sparse-two-tasks", "workspaces", "workspaces-folded", "sidebar-cattains"] {
+    for scene in ["sparse-new-thread", "sparse-working", "sparse-needs-you", "sparse-two-tasks", "workspaces", "workspaces-folded", "sidebar-cattains", "threads-pinned"] {
         for dark in [false, true] {
             check(scene, dark);
         }

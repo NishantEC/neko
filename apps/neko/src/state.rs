@@ -168,6 +168,14 @@ pub struct App {
     pub read_unfronted: bool,
     /// How the Threads section is grouped (View ▸ Group by). Remembered for the next launch.
     pub grouping: crate::threads::Grouping,
+    /// The Settled folds that are open, by group id (a project's, or `all`, or `archived`). Not remembered.
+    pub settled_open: HashSet<String>,
+    /// View ▸ Show settled: every Settled fold is open and the threads in it are listed. Remembered for the next launch.
+    pub show_settled: bool,
+    /// View ▸ Show archived: an Archived fold at the end of the Threads. Remembered for the next launch.
+    pub show_archived: bool,
+    /// The toasts showing (Settled, Archived, Unpinned, each with Undo), and their timers.
+    pub toasts: crate::ui::toast::ToastHost,
     /// Where a thread is placed while it works: the time it had when it began (`threads.rs`), so its row does not move as it streams.
     pub sort_hold: HashMap<TaskId, i64>,
     /// The menu that is open (a workspace's, by `ws-menu-<id>`, or the task's, `task-more`).
@@ -340,6 +348,8 @@ pub enum Asked {
     /// A change to a workspace (rename, remove, locate, move): a refusal is said in a panel.
     Workspace,
     RemoveTask(TaskId),
+    /// Pin, settle or archive (or their opposites): a refusal is said in a toast.
+    Shelf,
     /// An answer from the Needs you list or a notification: a refusal says so plainly.
     Answer { item: String, task: TaskId, from_notification: bool },
     /// Undo or redo of a run: files changed since ask first; a refusal is said in a panel.
@@ -469,6 +479,10 @@ impl Default for App {
             show_all: HashSet::new(),
             read_unfronted: false,
             grouping: crate::threads::Grouping::default(),
+            settled_open: HashSet::new(),
+            show_settled: false,
+            show_archived: false,
+            toasts: crate::ui::toast::ToastHost::new(),
             sort_hold: HashMap::new(),
             menu_open: None,
             renaming: None,
@@ -1904,6 +1918,10 @@ impl App {
             }
             Reply::Error { message, .. } if matches!(asked, Some(Asked::Queued | Asked::EditQueued(..))) => {
                 self.notice = Some(message);
+                return;
+            }
+            Reply::Error { message, .. } if matches!(asked, Some(Asked::Shelf)) => {
+                self.shelf_refused(message);
                 return;
             }
             Reply::Error { message, .. } if matches!(asked, Some(Asked::FollowUp(..))) => {

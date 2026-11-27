@@ -44,6 +44,13 @@ pub static LIST: Icon = Icon {
     body: r#"<path d="M2.75 4.25h10.5M2.75 8h7.5M2.75 11.75h4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#,
 };
 
+/// A drawing pin: Pinned, the threads kept at the top.
+pub static PIN: Icon = Icon {
+    name: "neko-pin",
+    view: 16.0,
+    body: r#"<path d="M5.5 2.75h5M6.5 2.75v4L4.75 9.25h6.5L9.5 6.75v-4M8 9.25v4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#,
+};
+
 /// A line that forks: the branch a new thread starts from.
 pub static BRANCH: Icon = Icon {
     name: "neko-branch",

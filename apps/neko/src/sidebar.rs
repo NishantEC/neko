@@ -12,6 +12,7 @@ use rune::{Color, El, Key, KeyEvent, Shadow, col, el, row, text};
 use rune_ui_style::{ButtonVariant, tabular, weight};
 
 use crate::icons;
+use crate::shelf::Shelf;
 use crate::state::{App, CatState, Daemon, Effect, Pick, SECTION_ROWS};
 use crate::ui::agent::{PressTx, icon_button};
 use crate::ui::base::{Delta, Shape, Size, States, Theme, glyph, paint_state};
@@ -241,10 +242,29 @@ pub fn thread_row(s: &App, t: &Theme, task: &Task, i: usize, n: usize, open: boo
     }
     let words = col().grow(1.0).min_w(0.0).gap(1.0).child(first).child(second);
     let mark = crate::status_mark::status_mark(t, &format!("{key}-mark"), task, under(t, open));
-    r.child(mark).child(words).on_press(move |s: &mut App| s.open_task_id(&tid))
+    // ⌘⇧P and ⌘⇧S on a focused row act on that row (the same keys act on the thread in view when no row has focus: `lib.rs`).
+    let acts = task.id.clone();
+    r.child(mark).child(words).on_press(move |s: &mut App| s.open_task_id(&tid)).on_key(move |s: &mut App, ev: &KeyEvent, _| row_key(s, &acts, ev))
 }
 
-/// A thread's menu: Mark as unread (or read), Remove thread…. Shown on hover; the keys reach the same through the band's menu.
+/// Keys on a thread's row: ⌘⇧P pins it or takes the pin off, ⌘⇧S settles it or brings it back.
+fn row_key(s: &mut App, id: &neko_protocol::TaskId, ev: &KeyEvent) -> bool {
+    let m = ev.mods;
+    if !(m.cmd && m.shift) || m.alt || m.ctrl {
+        return false;
+    }
+    if ev.is_command('p') {
+        s.toggle_pin(id);
+        true
+    } else if ev.is_command('s') {
+        s.toggle_settle(id);
+        true
+    } else {
+        false
+    }
+}
+
+/// A thread's menu: Pin, Settle, Mark as unread (or read), Archive, Remove thread…. Shown on hover; ⌘⇧P and ⌘⇧S do the first two.
 fn thread_menu(s: &App, t: &Theme, task: &Task, layer: &mut Vec<El>) -> El {
     let key = format!("thread-menu-{}", task.id.0);
     let open = s.menu_open.as_deref() == Some(key.as_str());
@@ -253,22 +273,45 @@ fn thread_menu(s: &App, t: &Theme, task: &Task, layer: &mut Vec<El>) -> El {
     // Pointer only: the list is one Tab stop and its rows are reached by the arrows; the same actions are in the band's menu.
     let mut trigger = row().key(format!("{key}-button")).role("button").label(name.clone()).help("Thread options".to_owned()).focusable(false).size(24.0, 20.0).center().radius(t.radius.md).round_as(t).child(glyph(&crate::ui::icons::MORE, t.control.icon, t.ink_muted()));
     trigger = paint_state(trigger, &t.mat.ghost, States::default()).on_press(move |s: &mut App| s.menu_open = if s.menu_open.as_deref() == Some(k.as_str()) { None } else { Some(k.clone()) }).expanded(open);
-    let (a, b) = (task.id.clone(), task.id.clone());
+    let (a, b, c, d, e) = (task.id.clone(), task.id.clone(), task.id.clone(), task.id.clone(), task.id.clone());
     let unread = task.unread();
     let menu = DropdownMenu::new(key)
         .trigger(trigger)
         .open(open)
-        .min_width(190.0)
+        .min_width(210.0)
         .on_close(|s: &mut App| s.menu_open = None)
+        .item(shelf_item(s, task, Shelf::Pin, a))
+        .item(shelf_item(s, task, Shelf::Settle, b))
         .item(if unread {
-            DropdownMenuItem::new("Mark as read").on_select(move |s: &mut App| s.mark_read(&a))
+            DropdownMenuItem::new("Mark as read").on_select(move |s: &mut App| s.mark_read(&c))
         } else {
             // The thread in view is read as soon as anything arrives, so it cannot be left unread.
-            DropdownMenuItem::new("Mark as unread").disabled(s.open.as_ref() == Some(&task.id)).on_select(move |s: &mut App| s.mark_unread(&a))
+            DropdownMenuItem::new("Mark as unread").disabled(s.open.as_ref() == Some(&task.id)).on_select(move |s: &mut App| s.mark_unread(&c))
         })
-        .separator()
-        .danger_item(DropdownMenuItem::new("Remove thread…").disabled(task.thread_status == neko_protocol::ThreadStatus::Working).on_select(move |s: &mut App| s.ask_remove_task(&b)));
+        .item(shelf_item(s, task, Shelf::Archive, d))
+        .danger_item(DropdownMenuItem::new("Remove thread…").disabled(task.thread_status == neko_protocol::ThreadStatus::Working).on_select(move |s: &mut App| s.ask_remove_task(&e)));
     menu_named(menu, t, layer, &name, open)
+}
+
+/// One of Pin, Settle and Archive as a menu item: it says which way it goes, shows its key, and is off while the thread cannot be
+/// settled or archived (it works).
+pub fn shelf_item(s: &App, task: &Task, shelf: Shelf, id: neko_protocol::TaskId) -> DropdownMenuItem<App> {
+    match shelf {
+        Shelf::Pin => {
+            let on = task.pinned;
+            DropdownMenuItem::new(if on { "Unpin" } else { "Pin to top" }).shortcut("⌘⇧P").on_select(move |s: &mut App| s.pin_thread(&id, !on))
+        }
+        Shelf::Settle => {
+            let on = task.settled;
+            let item = DropdownMenuItem::new(if on { "Bring back" } else { "Settle" }).on_select(move |s: &mut App| s.settle_thread(&id, !on));
+            if on { item } else { item.shortcut("⌘⇧S").disabled(!s.can_shelve(&task.id, Shelf::Settle)) }
+        }
+        Shelf::Archive => {
+            let on = task.archived;
+            let item = DropdownMenuItem::new(if on { "Restore" } else { "Archive" }).on_select(move |s: &mut App| s.archive_thread(&id, !on));
+            if on { item } else { item.disabled(!s.can_shelve(&task.id, Shelf::Archive)) }
+        }
+    }
 }
 
 /// The Cattains: only the cats at work now (a thread working, a request or a question waiting for the person). Each is a two-line
@@ -333,6 +376,10 @@ fn threads_section(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     let loaded = s.tasks_loaded || s.daemon == Daemon::Absent;
     let none_at_all = s.tasks.is_empty() && loaded;
     let mut groups = col().key("workspaces").role("list").label("Threads").w_full().gap(t.space.at(SECTION_GAP_STEPS)).focus_group();
+    // Pinned comes first, from any project; it is not there when nothing is pinned.
+    if let Some(p) = s.pinned_group() {
+        groups = groups.child(pinned(s, t, &p, layer));
+    }
     match s.grouping {
         Grouping::Project => {
             for g in s.thread_groups() {
@@ -349,6 +396,13 @@ fn threads_section(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
                 groups = groups.child(ungrouped(s, t, &g, layer));
             }
         }
+    }
+    // Archived threads are out of the lists; View ▸ Show archived brings them back as one fold at the end, the way to reach one until
+    // Search finds it.
+    if s.show_archived
+        && let Some(a) = s.archived_group()
+    {
+        groups = groups.child(archived(s, t, &a, layer));
     }
     let mut section = col().key("threads-section").role("group").label("Threads").w_full().gap(row_gap).pt(t.space.at(GROUP_GAP_STEPS)).child(head);
     if none_at_all {
@@ -375,14 +429,23 @@ fn view_menu(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
         .on_close(|s: &mut App| s.menu_open = None)
         .label("Group by")
         .item(DropdownMenuItem::new("Project").checked(s.grouping == Grouping::Project).on_select(|s: &mut App| s.set_grouping(Grouping::Project)))
-        .item(DropdownMenuItem::new("None").checked(s.grouping == Grouping::None).on_select(|s: &mut App| s.set_grouping(Grouping::None)));
+        .item(DropdownMenuItem::new("None").checked(s.grouping == Grouping::None).on_select(|s: &mut App| s.set_grouping(Grouping::None)))
+        .separator()
+        .item(DropdownMenuItem::new("Show settled").checked(s.show_settled).on_select({
+            let on = !s.show_settled;
+            move |s: &mut App| s.set_show_settled(on)
+        }))
+        .item(DropdownMenuItem::new("Show archived").checked(s.show_archived).on_select({
+            let on = !s.show_archived;
+            move |s: &mut App| s.set_show_archived(on)
+        }));
     menu_named(menu, t, layer, "View", open)
 }
 
 /// The rows of a group (or of the one list), after eight "Show more".
 fn rows(s: &App, t: &Theme, g: &threads::Group<'_>, key: &str, name: &str, project: bool, layer: &mut Vec<El>) -> (El, Option<El>) {
     let all = s.show_all.contains(&g.id) || g.threads.len() <= SECTION_ROWS + 1;
-    let shown: Vec<&&Task> = if all { g.threads.iter().collect() } else { g.threads.iter().take(SECTION_ROWS).collect() };
+    let shown = s.shown_rows(g);
     let mut list = col().key(format!("{key}-list")).role("listbox").label(name.to_owned()).w_full().gap(t.space.at(ROW_GAP_STEPS));
     let n = shown.len();
     for (i, task) in shown.into_iter().enumerate() {
@@ -415,6 +478,93 @@ fn ungrouped(s: &App, t: &Theme, g: &threads::Group<'_>, layer: &mut Vec<El>) ->
     let mut sec = col().key("all-section").role("group").label("Threads").w_full().gap(t.space.at(ROW_GAP_STEPS)).child(list);
     if let Some(m) = more {
         sec = sec.child(m);
+    }
+    if let Some(f) = settled_fold(s, t, g, "all", false, layer) {
+        sec = sec.child(f);
+    }
+    sec
+}
+
+/// Pinned: its heading (a pin and the word, no fold: the group goes when nothing is pinned) and the pinned threads of every project,
+/// each naming its project at the right of its second line.
+fn pinned(s: &App, t: &Theme, g: &threads::Group<'_>, layer: &mut Vec<El>) -> El {
+    let head = row()
+        .key("pinned-head")
+        .w_full()
+        .h(header(t))
+        .pl(t.metrics.gap)
+        .gap(t.space.at(1.5))
+        .center_y()
+        .child(glyph(&icons::PIN, t.control.icon_sm, t.ink_faint()))
+        .child(text("Pinned").key("pinned-heading").role("heading").level(3).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_muted()).grow(1.0));
+    let (list, more) = rows(s, t, g, "pinned", "Pinned threads", false, layer);
+    let mut sec = col().key("pinned-section").role("group").label("Pinned").w_full().gap(t.space.at(ROW_GAP_STEPS)).child(head).child(list);
+    if let Some(m) = more {
+        sec = sec.child(m);
+    }
+    sec
+}
+
+/// A fold line: a chevron, a word and how many are inside; pressing it opens or shuts what it holds.
+fn fold_line(t: &Theme, key: String, words: &str, n: usize, open: bool, press: impl Fn(&mut App) + 'static) -> El {
+    let chevron = glyph(if open { &crate::ui::icons::CHEVRON_DOWN } else { &crate::ui::icons::CHEVRON_RIGHT }, t.control.icon_sm, t.ink_faint());
+    let r = row()
+        .key(key)
+        .role("button")
+        .label(words.to_owned())
+        .description(if n == 1 { "1 thread".to_owned() } else { format!("{n} threads") })
+        .expanded(open)
+        .focusable(true)
+        .w_full()
+        .h(header(t))
+        .pl(t.metrics.gap)
+        .pr(t.space.at(2.0))
+        .gap(t.space.at(1.5))
+        .center_y()
+        .radius(t.radius.md)
+        .round_as(t);
+    paint_state(r, &t.mat.row, States::default())
+        .child(chevron)
+        .child(text(words.to_owned()).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_faint()).grow(1.0).a11y_hidden())
+        .child(text(n.to_string()).font(tabular(t.ty.xs)).color(t.ink_faint()).a11y_hidden())
+        .on_press(press)
+}
+
+/// A group's Settled fold, at the end of the group: shown when the group has settled threads. Pressing it opens them in place (View
+/// ▸ Show settled keeps every fold open).
+fn settled_fold(s: &App, t: &Theme, g: &threads::Group<'_>, key: &str, project: bool, layer: &mut Vec<El>) -> Option<El> {
+    if g.settled.is_empty() {
+        return None;
+    }
+    let open = s.settled_shown(&g.id);
+    let id = g.id.clone();
+    let line = fold_line(t, format!("{key}-settled"), "Settled", g.settled.len(), open, move |s: &mut App| s.flip_settled(&id));
+    let mut sec = col().key(format!("{key}-settled-section")).role("group").label("Settled").w_full().gap(t.space.at(ROW_GAP_STEPS)).child(line);
+    if open {
+        let mut list = col().key(format!("{key}-settled-list")).role("listbox").label(format!("Settled threads in {}", g.name)).w_full().gap(t.space.at(ROW_GAP_STEPS));
+        let n = g.settled.len();
+        for (i, task) in g.settled.iter().enumerate() {
+            let from = if project { None } else { Some(s.workspace_of(&task.workspace).map_or_else(String::new, |w| s.project_name(w))) };
+            list = list.child(thread_row(s, t, task, i, n, s.row_is_open(task), "thread", 0.0, from.as_deref(), layer));
+        }
+        sec = sec.child(list);
+    }
+    Some(sec)
+}
+
+/// The Archived fold View ▸ Show archived adds: the archived threads, each naming its project; Restore is in each row's menu.
+fn archived(s: &App, t: &Theme, g: &threads::Group<'_>, layer: &mut Vec<El>) -> El {
+    let open = s.settled_open.contains(threads::ARCHIVED);
+    let line = fold_line(t, "archived-fold".to_owned(), "Archived", g.threads.len(), open, |s: &mut App| s.flip_settled(threads::ARCHIVED));
+    let mut sec = col().key("archived-section").role("group").label("Archived").w_full().gap(t.space.at(ROW_GAP_STEPS)).child(line);
+    if open {
+        let mut list = col().key("archived-list").role("listbox").label("Archived threads").w_full().gap(t.space.at(ROW_GAP_STEPS));
+        let n = g.threads.len();
+        for (i, task) in g.threads.iter().enumerate() {
+            let from = s.workspace_of(&task.workspace).map_or_else(String::new, |w| s.project_name(w));
+            list = list.child(thread_row(s, t, task, i, n, s.row_is_open(task), "thread", 0.0, Some(&from), layer));
+        }
+        sec = sec.child(list);
     }
     sec
 }
@@ -528,16 +678,21 @@ fn group(s: &App, t: &Theme, g: &threads::Group<'_>, layer: &mut Vec<El>) -> El 
     if folded {
         return sec;
     }
-    if g.threads.is_empty() {
+    if g.threads.is_empty() && g.settled.is_empty() {
         // Before the daemon's list arrives: a quiet placeholder, not "No threads yet".
         let waiting = s.daemon != Daemon::Absent && !s.tasks_loaded;
         let none = text(if waiting { "Loading…" } else { "No threads yet" }).key(format!("{key}-none")).font(t.ty.sm).color(t.ink_faint());
         return sec.child(row().h(row_1(t)).pl(indent).center_y().child(none));
     }
-    let (list, more) = rows(s, t, g, &key, &format!("Threads in {}", g.name), true, layer);
-    sec = sec.child(list);
-    if let Some(m) = more {
-        sec = sec.child(m);
+    if !g.threads.is_empty() {
+        let (list, more) = rows(s, t, g, &key, &format!("Threads in {}", g.name), true, layer);
+        sec = sec.child(list);
+        if let Some(m) = more {
+            sec = sec.child(m);
+        }
+    }
+    if let Some(f) = settled_fold(s, t, g, &key, true, layer) {
+        sec = sec.child(f);
     }
     sec
 }

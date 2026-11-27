@@ -27,6 +27,7 @@ pub mod rounds;
 pub mod rounds_view;
 pub mod scenes;
 pub mod settings_view;
+pub mod shelf;
 pub mod sidebar;
 pub mod state;
 pub mod status_mark;
@@ -54,6 +55,9 @@ pub const WORKSPACE_KEY: &str = "last-workspace";
 pub const FOLDED_KEY: &str = "folded-workspaces";
 /// How the Threads section is grouped (`project` or `none`), in the same prefs.
 pub const GROUPING_KEY: &str = "thread-grouping";
+/// View ▸ Show settled and View ▸ Show archived (true or false), in the same prefs.
+pub const SHOW_SETTLED_KEY: &str = "show-settled";
+pub const SHOW_ARCHIVED_KEY: &str = "show-archived";
 
 thread_local! {
     /// The window's width as the last layout saw it (written by the view, read by `poll`).
@@ -104,10 +108,11 @@ fn init() -> App {
     let workspace = prefs.get::<String>(WORKSPACE_KEY).filter(|w| !w.is_empty()).unwrap_or_else(|| neko_protocol::GENERAL.to_owned());
     let folded = prefs.get::<Vec<String>>(FOLDED_KEY).unwrap_or_default().into_iter().collect();
     let grouping = threads::Grouping::from_key(&prefs.get::<String>(GROUPING_KEY).unwrap_or_default());
+    let (show_settled, show_archived) = (prefs.get::<bool>(SHOW_SETTLED_KEY).unwrap_or(false), prefs.get::<bool>(SHOW_ARCHIVED_KEY).unwrap_or(false));
     // The real window posts real notifications; everything else keeps the recorder `App::default` gives.
     let mut notifier = notify::Notifier::new(Box::new(notify::System));
     notifier.switches = prefs.get::<notify::Switches>(notify::SWITCHES_KEY).unwrap_or_default();
-    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, pane, workspace, folded, grouping, home: std::env::var("HOME").ok(), notifier, ..App::default() }
+    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, pane, workspace, folded, grouping, show_settled, show_archived, home: std::env::var("HOME").ok(), notifier, ..App::default() }
 }
 
 /// New Task (⌘N): Home with the keyboard in the composer, in the workspace of the task in view.
@@ -207,6 +212,38 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         tx.instant();
         return true;
     }
+    // Pin and settle the thread in view (⌘⇧P, ⌘⇧S); on a focused row of the sidebar they act on that row (`sidebar::thread_row`).
+    if m.cmd && m.shift && !(m.alt || m.ctrl) && (ev.is_command('p') || ev.is_command('s')) && let Some(id) = s.thread_in_view() {
+        if ev.is_command('p') {
+            s.toggle_pin(&id);
+        } else {
+            s.toggle_settle(&id);
+        }
+        return true;
+    }
+    // ⌘Z after a toast with Undo takes the settle, archive or unpin back.
+    if ev.is_command('z') && !(m.shift || m.alt || m.ctrl) && s.undo_toast() {
+        return true;
+    }
+    // ⌥1 … ⌥9 open the nth thread of the sidebar; ⌘⌥↑ and ⌘⌥↓ the one before and after.
+    if m.alt && !(m.cmd || m.shift || m.ctrl) {
+        const DIGITS: [rune::PhysicalKeyCode; 9] = [rune::PhysicalKeyCode::Digit1, rune::PhysicalKeyCode::Digit2, rune::PhysicalKeyCode::Digit3, rune::PhysicalKeyCode::Digit4, rune::PhysicalKeyCode::Digit5, rune::PhysicalKeyCode::Digit6, rune::PhysicalKeyCode::Digit7, rune::PhysicalKeyCode::Digit8, rune::PhysicalKeyCode::Digit9];
+        // On a Mac the key types "¡" under Option, so it is read by where it sits; a script's key is the digit itself.
+        let typed = match &ev.key {
+            Key::Text(t) => t.parse::<usize>().ok().filter(|n| (1..=9).contains(n)).map(|n| n - 1),
+            _ => None,
+        };
+        if let Some(i) = DIGITS.iter().position(|code| tx.physical_key() == Some(*code)).or(typed) {
+            if s.open_nth_thread(i) {
+                tx.instant();
+            }
+            return true;
+        }
+    }
+    if m.cmd && m.alt && !(m.shift || m.ctrl) && matches!(ev.key, Key::Up | Key::Down) && s.step_thread(if ev.key == Key::Up { -1 } else { 1 }) {
+        tx.instant();
+        return true;
+    }
     if ev.key == Key::Escape && !(m.cmd || m.shift || m.alt || m.ctrl) {
         // Escape closes the context panel first (focus goes back to its ring); then it stops the open task's agent while it
         // works; otherwise it gives focus back.
@@ -293,6 +330,8 @@ pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         changed = true;
     }
     (s.now_ms, s.utc_offset_s) = (now, offset);
+    // Toasts: their timers start here and end here (rune-ui's host needs the poll hook for the clock).
+    changed |= s.toasts.poll(t, tx);
     if let Some(w) = WIDTH.with(Cell::get)
         && s.width != Some(w)
     {

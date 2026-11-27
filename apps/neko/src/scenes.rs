@@ -128,6 +128,13 @@ pub const SCENES: &[Scene] = &[
     ("threads-ungrouped", |s| { threads_ungrouped(s); finish(s) }),
     ("threads-view-menu", |s| { threads_view_menu(s); finish(s) }),
     ("threads-row-menu", |s| { threads_row_menu(s); finish(s) }),
+    ("threads-pinned", |s| { threads_pinned(s); finish(s) }),
+    ("threads-settled", |s| { threads_settled(s); finish(s) }),
+    ("threads-settled-open", |s| { threads_settled_open(s); finish(s) }),
+    ("threads-archived", |s| { threads_archived(s); finish(s) }),
+    ("threads-pinned-menu", |s| { threads_pinned_menu(s); finish(s) }),
+    ("threads-toast-settled", |s| { threads_toast_settled(s); finish(s) }),
+    ("thread-band-menu", |s| { thread_band_menu(s); finish(s) }),
     ("sparse-working", |s| { sparse_working(s); finish(s) }),
     ("sparse-needs-you", |s| { sparse_needs_you(s); finish(s) }),
     ("sparse-two-tasks", |s| { sparse_two_tasks(s); finish(s) }),
@@ -667,6 +674,74 @@ fn threads_row_menu(s: &mut App) {
     s.menu_open = Some(format!("thread-menu-{}", id.0));
 }
 
+/// The thread whose title starts so, in the sample data.
+fn thread_titled(s: &mut App, starts: &str) -> TaskId {
+    s.tasks.iter().find(|t| t.title.starts_with(starts)).map(|t| t.id.clone()).unwrap_or_else(|| panic!("no sample thread starting {starts:?}"))
+}
+
+fn shelve(s: &mut App, starts: &str, how: impl Fn(&mut Task)) {
+    let id = thread_titled(s, starts);
+    if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id) {
+        how(t);
+    }
+}
+
+/// Two threads pinned, from two projects: Pinned is the first group and each row names its project.
+fn threads_pinned(s: &mut App) {
+    with_workspaces(s);
+    // A shorter house, so the groups' ends fit in a picture: the web project keeps five threads.
+    let drop: Vec<TaskId> = ["Translate the home page", "Set up the redirects", "Draft the press page", "Compress the case study", "Check every page for broken"].iter().map(|w| thread_titled(s, w)).collect();
+    s.tasks.retain(|t| !drop.contains(&t.id));
+    shelve(s, "Find out why the nightly build", |t| t.pinned = true);
+    shelve(s, "Write the pricing page copy", |t| t.pinned = true);
+    shelve(s, "Answer the question about the retry limit", |t| t.pinned = true);
+}
+
+/// Threads settled in two projects: each group ends in a closed Settled fold with its count.
+fn threads_settled(s: &mut App) {
+    threads_pinned(s);
+    for starts in ["Move the blog to the new layout", "Add the spring launch banner", "Tidy the footer links", "Fix the contact form on Safari"] {
+        shelve(s, starts, |t| t.settled = true);
+    }
+    shelve(s, "Rename the Settings button", |t| t.settled = true);
+}
+
+/// The same with the Settled fold of the web project open.
+fn threads_settled_open(s: &mut App) {
+    threads_settled(s);
+    s.settled_open.insert("ws_web".into());
+}
+
+/// One thread archived, with View ▸ Show archived on and its fold open.
+fn threads_archived(s: &mut App) {
+    threads_settled(s);
+    shelve(s, "Port the backup script", |t| t.archived = true);
+    shelve(s, "Sort the meeting notes", |t| t.archived = true);
+    // The groups above are folded, so the end of the list fits in a picture.
+    s.folded = ["ws_web".to_owned(), "ws_notes".to_owned(), "ws_scripts".to_owned()].into_iter().collect();
+    s.show_archived = true;
+    s.settled_open.insert(crate::threads::ARCHIVED.into());
+}
+
+/// A pinned thread's menu, open under its row.
+fn threads_pinned_menu(s: &mut App) {
+    threads_pinned(s);
+    let id = thread_titled(s, "Find out why the nightly build");
+    s.menu_open = Some(format!("thread-menu-{}", id.0));
+}
+
+/// A thread was just settled: the toast says so, with Undo (sticky here, so a picture can be taken).
+fn threads_toast_settled(s: &mut App) {
+    threads_settled(s);
+    s.toasts.push(crate::ui::toast::ToastSpec::new("Settled").description("Fix the contact form on Safari").action("Undo", "unsettle:none:0").sticky());
+}
+
+/// The band's own menu on an open thread.
+fn thread_band_menu(s: &mut App) {
+    sparse_task(s);
+    s.menu_open = Some("task-more".into());
+}
+
 /// A task of the sparse house's workspace, in this state, given to this cat.
 fn sparse_task_of(s: &mut App, n: u32, words: &str, minutes: i64, cat: &str, status: TaskStatus) -> Task {
     let mut t = task(n, words, minutes);
@@ -886,7 +961,7 @@ fn run(id: &str, task: &Task, status: RunStatus, started: i64, secs: i64) -> Run
         id: RunId(id.into()),
         task: task.id.clone(),
         runtime: "claude".into(),
-        model: Some("claude-model".into()),
+        model: Some("claude-sonnet-4-5".into()),
         status,
         started_ms: started,
         ended_ms: (status != RunStatus::Running).then_some(started + secs * 1000),
@@ -899,7 +974,7 @@ fn run(id: &str, task: &Task, status: RunStatus, started: i64, secs: i64) -> Run
             output_tokens: 5_100,
             cached_tokens: 212_000,
             cost_usd: Some(0.42),
-            model: Some("claude-model".into()),
+            model: Some("claude-sonnet-4-5".into()),
             pricing: Pricing::ApiEquivalent,
             reported_by: "Claude Code".into(),
             context_tokens: Some(48_200),
