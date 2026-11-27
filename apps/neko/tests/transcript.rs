@@ -250,19 +250,24 @@ fn a_run_that_ends_with_a_question_says_needs_you() {
 }
 
 #[test]
-fn the_task_band_shows_its_folder_and_branch_once_with_reveal_in_finder() {
-    let mut rt = runtime((1200.0, 800.0), false, scene("task-done"));
+fn the_folder_and_branch_are_in_the_panes_overview_once_with_reveal_in_finder() {
+    // The band no longer carries them: the pane's Overview does (closed at 1200, so the band is just the title and its controls).
+    let closed = runtime((1200.0, 800.0), false, scene("task-done"));
+    assert!(!has_key(&closed, "task-folder") && !has_key(&closed, "pane-folder-path"), "the pane is shut: no folder line anywhere");
+    let mut rt = runtime((1280.0, 800.0), false, scene("pane-overview"));
     let t = texts(&rt);
-    assert_eq!(t.iter().filter(|x| x.as_str() == "~/Library/Application Support/neko/worktrees/x7k2m9qa").count(), 1, "the folder, once, with ~: {t:?}");
+    assert_eq!(t.iter().filter(|x| x.starts_with("~/Librar")).count(), 1, "the folder, once, with ~ and cut in its middle: {t:?}");
     assert!(t.iter().any(|x| x == "neko/x7k2m9qa"), "the branch beside it: {t:?}");
-    click(&mut rt, "task-folder-reveal");
+    assert!(!has_key(&rt, "task-folder"), "the band has no folder line");
+    click(&mut rt, "overview-reveal");
     let asked = rt.take_path_requests();
     assert_eq!(asked.len(), 1, "{asked:?}");
     assert_eq!(asked[0].path, std::path::PathBuf::from("/Users/example/Library/Application Support/neko/worktrees/x7k2m9qa"));
     assert_eq!(asked[0].action, rune::PathAction::Reveal);
-    // At the smallest window it still fits the band (cut in its middle, never over the title).
-    let rt = runtime((760.0, 560.0), false, scene("task-done"));
-    let band = rect(&rt, "content-band");
-    let place = rect(&rt, "task-folder");
-    assert!(place[0] + place[2] <= band[0] + band[2] + 0.5, "{place:?} in {band:?}");
+    // At the smallest window the pane is a sheet; its folder still fits, cut in its middle.
+    let mut rt = runtime((760.0, 560.0), false, scene("pane-overview"));
+    rt.update(|s, _| s.pane.sheet = true);
+    settle(&mut rt);
+    let (sheet, place) = (rect(&rt, "pane-sheet"), rect(&rt, "pane-folder-path"));
+    assert!(place[0] + place[2] <= sheet[0] + sheet[2] + 0.5, "{place:?} in {sheet:?}");
 }

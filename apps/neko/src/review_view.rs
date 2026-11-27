@@ -1,14 +1,14 @@
-//! Review (docs/knowledge/undo.md): what a run changed, or the whole task ("All changes"), in place of the conversation. Each file
-//! is a rune-ui Diff (selectable, a zero side of its figures hidden, its counts given with `stats`), folded until opened; its lines
-//! come from the daemon when it opens. Binary files are named with their sizes,
-//! very long diffs are cut with "Show all", and an open file has Copy diff, Copy path and Reveal in Finder.
+//! The Changes tab of the right pane (docs/knowledge/undo.md): what a run changed, what the whole thread changed, or what is
+//! uncommitted in its folder. Each file is a rune-ui Diff (selectable, a zero side of its figures hidden, its counts given with `stats`),
+//! folded until opened; its lines come from the daemon when it opens. Binary files are named with their sizes, very long diffs are cut
+//! with "Show all", and an open file has Copy diff, Copy path and Reveal in Finder.
 
 use std::rc::Rc;
 
+use neko_protocol::undo::Action;
 use neko_protocol::undo::{self, CUT_LINES};
-use neko_protocol::{DiffFile, DiffPatch, FileStatus};
-use rune::{El, Tx, col, row, text};
-use rune_ui_style::weight;
+use neko_protocol::{DiffFile, DiffPatch, DiffSource, FileStatus, TaskId};
+use rune::{El, Tx, col, el, row, text};
 
 use crate::state::{App, Review};
 use crate::ui::agent::{PressTx, icon_button};
@@ -17,10 +17,9 @@ use crate::ui::button::Button;
 use crate::ui::diff::{Diff, FileDiff, Line};
 use crate::ui::icons;
 use crate::ui::segmented_control::SegmentedControl;
-use crate::view::COLUMN;
 
-/// "This run" or the whole task.
-const SHOW: [&str; 2] = ["This run", "All changes"];
+/// The Changes tab's source switch.
+const SHOW: [&str; 3] = ["This run", "All runs", "Uncommitted"];
 
 /// Bytes in words, as the Finder counts them.
 pub fn size_words(b: u64) -> String {
@@ -137,42 +136,49 @@ fn foot(t: &Theme, key: &str, root: &str, f: &DiffFile, patch: Option<&DiffPatch
     r.child(icon_button(t, &format!("{key}-reveal"), if deleted { "Reveal its folder in Finder" } else { "Reveal in Finder" }, &icons::FOLDER_OPEN, None, false, Some(reveal)))
 }
 
-/// The review, in place of the conversation.
-pub fn review_view(s: &App, t: &Theme, r: &Review) -> El {
-    let back = Button::new("review-back", "Back to the conversation").variant(ButtonVariant::Ghost).size(Size::Sm).icon(&icons::CHEVRON_LEFT).on_press(|s: &mut App| s.close_review()).build(t);
-    let mut top = row().w_full().gap(t.space.at(3.0)).center_y().child(back).child(row().grow(1.0));
-    if let Some(from) = r.from.clone() {
-        let task = r.task.clone();
-        top = top.child(
-            SegmentedControl::<App>::new("review-show", "Show", &SHOW, usize::from(r.run.is_none()))
-                .size(Size::Sm)
-                .on_change(move |s: &mut App, i| s.open_review(&task, if i == 0 { Some(from.clone()) } else { None }))
-                .build(t),
-        );
+/// The sources of the Changes tab, in the order of its switch.
+const SOURCES: [DiffSource; 3] = [DiffSource::Run, DiffSource::Thread, DiffSource::Uncommitted];
+
+/// What the Changes tab says is not there, for a source with nothing to show.
+fn nothing(source: DiffSource) -> &'static str {
+    match source {
+        DiffSource::Run => "This run changed nothing.",
+        DiffSource::Thread => "Nothing changed in this thread.",
+        DiffSource::Uncommitted => "Nothing is waiting to be committed.",
     }
-    // A thread's changes are not any cat's: the heading says what they are, and no face leads it.
-    let heading = if r.run.is_some() { "Changes in this run".to_owned() } else { "All changes in this thread".to_owned() };
-    let mut title = row().w_full().gap(t.space.at(3.0)).center_y();
-    title = title.child(text(heading).key("review-title").role("heading").level(2).font(weight(t.ty.xl, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0));
-    let mut page = col().key("review").w_full().max_w(COLUMN).gap(t.space.at(3.0)).child(top).child(title);
+}
+
+/// The Changes tab of the right pane: the source switch, the files as rune-ui's Diff (folded until opened, their lines asked for when they
+/// open), and under them Undo, Redo and Copy diff.
+pub fn changes_tab(s: &App, t: &Theme, root: &TaskId) -> El {
+    let r = s.review.as_ref().filter(|r| &r.task == root);
+    let source = r.map_or(DiffSource::Thread, |r| r.source);
+    let at = SOURCES.iter().position(|x| *x == source).unwrap_or(1);
+    let switch = SegmentedControl::<App>::new("changes-source", "Show changes of", &SHOW, at)
+        .size(Size::Sm)
+        .on_change(|s: &mut App, i| s.set_changes_source(SOURCES.get(i).copied().unwrap_or(DiffSource::Thread)))
+        .build(t);
+    let mut page = col().key("changes").w_full().gap(t.space.at(3.0)).child(switch);
+    let book = s.books.get(root);
     // Whether the run's changes are in the folder now.
-    let book = s.books.get(&r.task);
-    if let (Some(run), Some(b)) = (&r.run, book)
+    if let (Some(r), Some(b)) = (r, book)
+        && let (DiffSource::Run, Some(run)) = (r.source, &r.run)
         && let Some(i) = b.runs.iter().position(|x| &x.id == run)
         && undo::offers(&b.runs)[i].undone
     {
-        page = page.child(text("Undone: these changes are not in the folder now.").key("review-undone").role("status").font(t.ty.base).color(t.ink_muted()));
+        page = page.child(text("Undone: these changes are not in the folder now.").key("changes-undone").role("status").font(t.ty.base).color(t.ink_muted()));
     }
-    match (&r.summary, &r.error) {
-        (_, Some(e)) => page = page.child(text(e.clone()).key("review-error").role("status").font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0)),
-        (None, None) => page = page.child(text("Reading the changes…").key("review-loading").role("status").font(t.ty.base).color(t.ink_faint())),
-        (Some(d), None) if d.files.is_empty() => page = page.child(text("Nothing changed.").key("review-empty").role("status").font(t.ty.base).color(t.ink_muted())),
-        (Some(d), None) => {
+    match r.map(|r| (&r.summary, &r.error)) {
+        None | Some((None, None)) => page = page.child(text("Reading the changes\u{2026}").key("changes-loading").role("status").font(t.ty.base).color(t.ink_faint())),
+        Some((_, Some(e))) => page = page.child(text(e.clone()).key("changes-error").role("status").font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0)),
+        Some((Some(d), None)) if d.files.is_empty() => page = page.child(text(nothing(source)).key("changes-empty").role("status").font(t.ty.base).color(t.ink_muted())),
+        Some((Some(d), None)) => {
+            let r = r.expect("a summary comes with its review");
             let n = d.files.len();
             let summary = format!("{n} file{} changed, {} line{} added, {} removed", if n == 1 { "" } else { "s" }, d.added, if d.added == 1 { "" } else { "s" }, d.removed);
             page = page.child(
                 row()
-                    .key("review-summary")
+                    .key("changes-summary")
                     .role("note")
                     .label(summary)
                     .gap(t.space.at(2.0))
@@ -181,7 +187,7 @@ pub fn review_view(s: &App, t: &Theme, r: &Review) -> El {
                     .child(text(format!("+{}", d.added)).font(rune_ui_style::tabular(t.ty.sm)).color(t.c.success.fg).a11y_hidden())
                     .child(text(format!("\u{2212}{}", d.removed)).font(rune_ui_style::tabular(t.ty.sm)).color(t.c.danger.fg).a11y_hidden()),
             );
-            let mut list = col().key("review-files").w_full().gap(t.space.at(2.0));
+            let mut list = col().key("changes-files").w_full().gap(t.space.at(2.0));
             for (i, f) in d.files.iter().enumerate() {
                 let key = format!("diff-{i}");
                 let open = r.open.contains(&f.path);
@@ -198,7 +204,28 @@ pub fn review_view(s: &App, t: &Theme, r: &Review) -> El {
             }
         }
     }
-    col().key("review-scroll").w_full().grow(1.0).min_h(0.0).items_center().px(t.metrics.inset).pt(t.space.at(4.0)).pb(t.space.at(10.0)).scroll(rune::ScrollSpec { stick_bottom: false }).child(page)
+    let scroll = col().key("changes-scroll").w_full().grow(1.0).min_h(0.0).px(t.space.at(4.0)).pt(t.space.at(3.0)).pb(t.space.at(6.0)).scroll(rune::ScrollSpec { stick_bottom: false }).child(page);
+    col().key("changes-tab").w_full().grow(1.0).min_h(0.0).child(scroll).child(footer(s, t, root, r))
+}
+
+/// Under the files: Undo or Redo of the run shown (or the newest that offers one), and Copy diff. A quiet line says why Undo is off.
+fn footer(s: &App, t: &Theme, root: &TaskId, r: Option<&Review>) -> El {
+    let shown_run = r.filter(|r| r.source == DiffSource::Run).and_then(|r| r.run.clone());
+    let offer = crate::pane_view::offered_for(s, root, shown_run.as_ref());
+    let mut bar = row().key("changes-foot").w_full().px(t.space.at(4.0)).py(t.space.at(2.0)).gap(t.space.at(2.0)).center_y().flex_wrap().border_sides([0.5, 0.0, 0.0, 0.0], t.c.line);
+    if let Some((run, offer)) = offer {
+        if let Some((action, enabled)) = offer.action {
+            let root = root.clone();
+            let (words, icon, redo, key) = match action {
+                Action::Undo => ("Undo", &icons::RESTORE, false, "changes-undo"),
+                Action::Redo => ("Redo", &icons::RETRY, true, "changes-redo"),
+            };
+            bar = bar.child(Button::<App>::new(key, words).variant(ButtonVariant::Secondary).size(Size::Sm).icon(icon).disabled(!enabled).on_press(move |s: &mut App| s.undo_run(&root, &run, redo)).build(t));
+        }
+    }
+    bar = bar.child(el().grow(1.0));
+    let any = r.is_some_and(|r| r.summary.as_ref().is_some_and(|d| !d.files.is_empty()));
+    bar.child(Button::<App>::new("changes-copy", "Copy diff").variant(ButtonVariant::Ghost).size(Size::Sm).icon(&icons::COPY).disabled(!any).on_press(|s: &mut App| s.copy_all_diff()).build(t))
 }
 
 #[cfg(test)]

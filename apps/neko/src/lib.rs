@@ -17,6 +17,8 @@ pub mod needs_view;
 pub mod new_thread;
 pub mod new_thread_view;
 pub mod notify;
+pub mod pane;
+pub mod pane_view;
 pub mod plugins;
 pub mod plugins_view;
 pub mod review_view;
@@ -97,13 +99,14 @@ fn init() -> App {
     let width = Some(saved.map_or(window_place::DEFAULT.0, |f| f.w.max(window_place::MIN.0)) as f32);
     // The workspace chosen last time (checked against the daemon's list when it arrives) and the folded sections.
     let prefs = rune::prefs::Prefs::open(PREFS_ID);
+    let pane = pane::Pane { choice: prefs.get::<bool>(pane::OPEN_KEY), width: prefs.get::<f32>(pane::WIDTH_KEY).map_or(pane::DEFAULT_WIDTH, |w| w.clamp(pane::MIN_WIDTH, pane::MAX_WIDTH)), ..pane::Pane::default() };
     let workspace = prefs.get::<String>(WORKSPACE_KEY).filter(|w| !w.is_empty()).unwrap_or_else(|| neko_protocol::GENERAL.to_owned());
     let folded = prefs.get::<Vec<String>>(FOLDED_KEY).unwrap_or_default().into_iter().collect();
     let grouping = threads::Grouping::from_key(&prefs.get::<String>(GROUPING_KEY).unwrap_or_default());
     // The real window posts real notifications; everything else keeps the recorder `App::default` gives.
     let mut notifier = notify::Notifier::new(Box::new(notify::System));
     notifier.switches = prefs.get::<notify::Switches>(notify::SWITCHES_KEY).unwrap_or_default();
-    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, workspace, folded, grouping, home: std::env::var("HOME").ok(), notifier, ..App::default() }
+    App { daemon: Daemon::Starting, now_ms, utc_offset_s, clock: state::system_clock, window: window_place::Keeper::new(saved), persist: true, width, pane, workspace, folded, grouping, home: std::env::var("HOME").ok(), notifier, ..App::default() }
 }
 
 /// New Task (⌘N): Home with the keyboard in the composer, in the workspace of the task in view.
@@ -132,6 +135,11 @@ pub fn pick_folder(s: &App, pick: state::Pick, tx: &mut Tx) {
             }
         }
     });
+}
+
+/// Cmd with `ch`, by the letter or, whatever the layout and the Option key make it type, by the key's place.
+fn chord(ev: &KeyEvent, tx: &Tx, ch: char, code: rune::PhysicalKeyCode) -> bool {
+    ev.is_command(ch) || tx.physical_key() == Some(code)
 }
 
 /// Keys no control took.
@@ -169,6 +177,35 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         tx.instant();
         return true;
     }
+    // The right pane: ⌘⌥B shows or hides it, ⌘⌥1 … ⌘⌥9 its tabs in order, ⌘⇧G and ⌘D the Changes tab.
+    if m.cmd && m.alt && !(m.shift || m.ctrl) {
+        if chord(ev, tx, 'b', rune::PhysicalKeyCode::KeyB) {
+            s.toggle_pane();
+            tx.instant();
+            return true;
+        }
+        const DIGITS: [(char, rune::PhysicalKeyCode); 9] = [
+            ('1', rune::PhysicalKeyCode::Digit1),
+            ('2', rune::PhysicalKeyCode::Digit2),
+            ('3', rune::PhysicalKeyCode::Digit3),
+            ('4', rune::PhysicalKeyCode::Digit4),
+            ('5', rune::PhysicalKeyCode::Digit5),
+            ('6', rune::PhysicalKeyCode::Digit6),
+            ('7', rune::PhysicalKeyCode::Digit7),
+            ('8', rune::PhysicalKeyCode::Digit8),
+            ('9', rune::PhysicalKeyCode::Digit9),
+        ];
+        if let Some(i) = DIGITS.iter().position(|(c, code)| chord(ev, tx, *c, *code)) {
+            s.select_tab_shown(i);
+            tx.instant();
+            return true;
+        }
+    }
+    if (ev.is_command('g') && m.shift && !(m.alt || m.ctrl)) || (ev.is_command('d') && !(m.shift || m.alt || m.ctrl)) {
+        s.open_changes(None);
+        tx.instant();
+        return true;
+    }
     if ev.key == Key::Escape && !(m.cmd || m.shift || m.alt || m.ctrl) {
         // Escape closes the context panel first (focus goes back to its ring); then it stops the open task's agent while it
         // works; otherwise it gives focus back.
@@ -176,8 +213,9 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             s.context_open = false;
             return true;
         }
-        if !s.settings_open && !s.needs_open && !s.briefing_open && s.review.is_some() {
-            s.close_review();
+        // A narrow window's sheet closes first.
+        if s.pane_visible() && s.pane_is_sheet() {
+            s.close_sheet();
             return true;
         }
         // In the Needs you list and on the Briefing Escape goes back, whatever the task behind it is doing.
@@ -216,12 +254,13 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 /// Each frame: what the link brought, the clock, the width, the window's title and frame, the menu.
 pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     let mut changed = s.drain_link();
-    s.ask_receipts();
+    s.pane_sync();
     for e in std::mem::take(&mut s.effects) {
         match e {
             state::Effect::Reveal(path) => {
                 let _ = tx.reveal_path(&path);
             }
+            state::Effect::Copy(words) => tx.copy(words),
             state::Effect::PickFolder(pick) => pick_folder(s, pick, tx),
             state::Effect::Front => {
                 if s.persist {
@@ -256,9 +295,9 @@ pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     if let Some(w) = WIDTH.with(Cell::get)
         && s.width != Some(w)
     {
-        let before = s.sidebar_shown();
+        let before = (s.sidebar_shown(), s.pane_visible());
         s.set_width(w);
-        changed |= before != s.sidebar_shown();
+        changed |= before != (s.sidebar_shown(), s.pane_visible());
     }
     s.full_screen = FULL_SCREEN.with(Cell::get);
     let title = s.window_title();
@@ -290,11 +329,11 @@ pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         if let Some(at) = again {
             tx.wake_after(std::time::Duration::from_secs_f64((at - t).max(0.05)));
         }
-        let shown = (s.sidebar_shown(), s.full_screen);
+        let shown = (s.sidebar_shown(), s.pane_visible(), s.full_screen);
         if s.menu_shown != Some(shown)
             && let Some(h) = &s.handle
         {
-            let _ = h.set_menu(menu::items(&menu::model(shown.0, shown.1)));
+            let _ = h.set_menu(menu::items(&menu::model(shown.0, shown.1, shown.2)));
             s.menu_shown = Some(shown);
             s.menu_fix_until = t + 2.0;
         }
@@ -353,7 +392,7 @@ pub fn spec() -> rune::AppSpec<App> {
 pub fn app() -> rune::App<App> {
     // Tab reaches every control, not only fields and lists, whatever the Mac's own Keyboard Navigation setting says.
     let mut app = rune::App::new(spec()).standard_menus().tab_visits_controls(true).titlebar(rune::Titlebar::new(view::BAND)).on_open_url(open_url);
-    for item in menu::items(&menu::model(true, false)) {
+    for item in menu::items(&menu::model(true, false, false)) {
         app = app.menu_item(item);
     }
     app

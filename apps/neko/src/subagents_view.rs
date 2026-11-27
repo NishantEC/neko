@@ -5,12 +5,12 @@
 use std::rc::Rc;
 
 use neko_protocol::{Part, PartBody, Task, TaskId, TaskStatus};
-use rune::{El, col, el, row, text};
+use rune::{El, Tx, col, el, row, text};
 use rune_ui_style::{ButtonVariant, weight};
 
 use crate::state::App;
 use crate::subagents::{card_word, name, names_sentence, wake_line};
-use crate::ui::agent::{FoldLine, Marks, mark_with, mono};
+use crate::ui::agent::{FoldLine, Marks, PressTx, mark_with, mono};
 use crate::ui::base::{Shape, SizeExt, Theme, glyph, hit_area, paint_state, recipes, states};
 use crate::ui::button::Button;
 use crate::ui::icons;
@@ -54,19 +54,19 @@ fn word_ink(t: &Theme, st: TaskStatus) -> rune::Color {
 }
 
 /// A secondary button whose visible words are short and whose name for assistive technology says more ("Open", "Open Kitten 1").
-fn named_button(t: &Theme, key: &str, words: &str, name: &str, press: impl Fn(&mut App) + 'static) -> El {
+fn named_button(t: &Theme, key: &str, words: &str, name: &str, press: PressTx<App>) -> El {
     let size = crate::ui::base::Size::Sm;
     let parts = recipes::button(t, ButtonVariant::Secondary);
     let st = states(None, false, false);
     let ink = parts.label.resolve(st);
     let pad = size.pad(t);
-    let f = Rc::new(press);
-    let g = f.clone();
+    let g = press.clone();
     let mut face = row().key(key.to_owned()).role("button").label(name.to_owned()).focusable(true).h(size.height(t)).pl(pad).pr(pad).center().radius(size.radius(t)).round_as(t);
     face = paint_state(face, &parts.root, st).child(text(words.to_owned()).font(size.text(t, t.ty.medium)).color(ink).a11y_hidden());
-    face = face.on_press(move |s: &mut App| g(s));
-    let press: crate::ui::base::Press<App> = crate::ui::base::press(move |s: &mut App| f(s));
-    hit_area(key, face, 0.0, t.control.slop(size.height(t)), Some(press))
+    face = face.on_press_tx(move |s: &mut App, tx: &mut Tx| g(s, tx));
+    let slop = t.control.slop(size.height(t));
+    let hit = hit_area::<App>(key, face, 0.0, slop, None);
+    if slop > 0.0 { hit.on_press_tx(move |s: &mut App, tx: &mut Tx| press(s, tx)) } else { hit }
 }
 
 /// What a subagent's card knows: its task (if the window has it), its words.
@@ -96,7 +96,14 @@ fn card_row(s: &App, t: &Theme, r: &Row, first: bool) -> El {
         under = under.child(text("·").font(t.ty.sm).color(t.ink_faint()).a11y_hidden()).child(text(l.clone()).key(format!("subagent-line-{}", r.number)).font(t.ty.sm).color(t.ink_faint()).truncate().min_w(0.0).shrink().a11y_hidden());
     }
     let id = r.id.clone();
-    let open = named_button(t, &format!("subagent-open-{}", r.number), "Open", &format!("Open {who}"), move |s: &mut App| s.open_task_id(&id));
+    // Open puts its conversation in the right pane as a tab; with Command held it takes the main view.
+    let open = named_button(
+        t,
+        &format!("subagent-open-{}", r.number),
+        "Open",
+        &format!("Open {who}"),
+        Rc::new(move |s: &mut App, tx: &mut Tx| if tx.mods().cmd { s.open_kitten_main(&id) } else { s.open_kitten_tab(&id) }),
+    );
     let said = match &last {
         Some(l) => format!("{who}: {}, {word}. Shared folder. {l}", r.title),
         None => format!("{who}: {}, {word}. Shared folder.", r.title),
@@ -143,7 +150,7 @@ pub fn wake_note(s: &App, t: &Theme, p: &Part) -> Option<El> {
     let said = wake_line(number, status);
     let hair = || el().grow(1.0).h(1.0).fill(t.c.line);
     let line = row()
-        .key(format!("wake-{}", p.seq))
+        .key(crate::task_view::kk(format!("wake-{}", p.seq)))
         .role("note")
         .label(said.clone())
         .w_full()
@@ -157,7 +164,7 @@ pub fn wake_note(s: &App, t: &Theme, p: &Part) -> Option<El> {
     if summary.trim().is_empty() && files.is_empty() && branch.is_none() {
         return Some(note);
     }
-    let key = format!("wake-report-{}", p.seq);
+    let key = crate::task_view::kk(format!("wake-report-{}", p.seq));
     let open = s.is_open(&key);
     let k = key.clone();
     let fold = FoldLine::<App>::new(key.clone(), format!("Report from {}", name(number)), open).lead(crate::ui::agent::hollow_dot(t, t.control.icon)).on_toggle(move |s: &mut App| s.flip(&k));
@@ -214,7 +221,7 @@ pub fn waiting_line(s: &App, t: &Theme, task: &Task) -> Option<El> {
         if i > 0 {
             line = line.child(words(if i == n - 1 { " and ".to_owned() } else { ", ".to_owned() }));
         }
-        line = line.child(link(t, &format!("waiting-link-{num}"), &name(&num), move |s: &mut App| s.open_task_id(&id)));
+        line = line.child(link(t, &format!("waiting-link-{num}"), &name(&num), move |s: &mut App| s.open_kitten_tab(&id)));
     }
     Some(line)
 }

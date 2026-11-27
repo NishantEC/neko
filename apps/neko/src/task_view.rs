@@ -129,7 +129,7 @@ fn notice(t: &Theme, p: &Part) -> Option<El> {
     }
     Some(
         row()
-            .key(format!("notice-{}", p.seq))
+            .key(kk(format!("notice-{}", p.seq)))
             .role("status")
             .label(label)
             .w_full()
@@ -146,7 +146,7 @@ fn rules_changed(t: &Theme, p: &Part) -> Option<El> {
     let words = format!("{name}'s rules changed since the last run.");
     Some(
         row()
-            .key(format!("rules-changed-{}", p.seq))
+            .key(kk(format!("rules-changed-{}", p.seq)))
             .role("status")
             .label(words.clone())
             .w_full()
@@ -260,7 +260,7 @@ fn who(task: &Task) -> Who {
 /// One part as drawn in a run: a step, words on the way (`muted`, or the final answer when `last`), a request, a notice.
 #[allow(clippy::too_many_arguments)]
 fn part_el(s: &App, t: &Theme, book: &Book, r: &Run, w: &Who, p: &Part, streaming: bool, last: bool, muted: bool) -> Option<El> {
-    let key = format!("part-{}", p.seq);
+    let key = kk(format!("part-{}", p.seq));
     match &p.body {
         PartBody::Thinking { .. } => turn::thought(s, t, &key, p),
         PartBody::Tool { .. } => turn::step(s, t, &key, p, &r.workdir),
@@ -410,7 +410,7 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
     out.extend(crate::subagents_view::card_stack(s, t, &started));
     let tail_last = tail.iter().rposition(|p| matches!(&p.body, PartBody::Agent { text, .. } if !text.trim().is_empty()));
     out.extend(lay_out(s, t, book, r, &w, tail, None, tail_last));
-    out.extend(turn::receipt(s, t, r, parts, &offer, own_changes(r), &w.name));
+    out.extend(turn::change_line(t, r, &offer, own_changes(r), task.subagent.is_some()));
     out.into_iter().fold(turn, Message::child).build(t)
 }
 
@@ -472,18 +472,23 @@ fn context_ring(s: &App, t: &Theme, book: &Book, layer: &mut Vec<El>) -> Option<
     Some(ring.build(t, layer))
 }
 
-/// The open task: its conversation, and its composer.
-pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
-    let Some(task) = s.open_task() else { return el() };
-    if let Some(r) = s.review.as_ref().filter(|r| r.task == task.id) {
-        // A page of its own: the conversation it replaces goes at once (never a fade over Review), and this one fades in on a clean page.
-        return crate::view::page_swap(col().key("task-review").w_full().grow(1.0).min_h(0.0).child(crate::review_view::review_view(s, t, r)));
-    }
-    let empty = Book::default();
-    let book = s.book().unwrap_or(&empty);
+thread_local! {
+    /// The conversation being built is a kitten's tab in the right pane, beside its thread's own: every key that is not unique to the
+    /// task (a part's place in its transcript) takes a prefix, so no two elements of the window share one.
+    static IN_PANE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// A key that is only unique within one task's transcript: prefixed when the conversation is in the right pane.
+pub fn kk(key: String) -> String {
+    if IN_PANE.with(std::cell::Cell::get) { format!("pane-{key}") } else { key }
+}
+
+/// A task's conversation as the blocks of one column: the person's words, then each run, note and card in order, and what the thread
+/// waits on at the end.
+fn items_of(s: &App, t: &Theme, task: &Task, book: &Book) -> Vec<El> {
     // The task's own words first (their text keyed "task-words", as in S0).
     let mut items = vec![turn::person(s, t, "task-message", "task-words", &task.words)];
-    if book.loaded && book.runs.is_empty() && book.parts.is_empty() && task.status == neko_protocol::TaskStatus::New {
+    if book.loaded && book.runs.is_empty() && book.parts.is_empty() && task.status == neko_protocol::TaskStatus::New && task.subagent.is_none() {
         items.push(status_line(s, t, task));
     }
     for b in blocks(book) {
@@ -495,6 +500,27 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     }
     // A thread resting on its subagents ends on what it waits for.
     items.extend(crate::subagents_view::waiting_line(s, t, task));
+    items
+}
+
+/// A kitten's conversation for its tab in the right pane: the same blocks as the main view, with keys of their own.
+pub fn kitten_items(s: &App, t: &Theme, task: &Task, book: &Book) -> Vec<El> {
+    IN_PANE.with(|c| c.set(true));
+    let mut items = items_of(s, t, task, book);
+    IN_PANE.with(|c| c.set(false));
+    // Its first words are the brief, which the tab folds above: not said twice.
+    if !items.is_empty() {
+        items.remove(0);
+    }
+    items
+}
+
+/// The open task: its conversation, and its composer.
+pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
+    let Some(task) = s.open_task() else { return el() };
+    let empty = Book::default();
+    let book = s.book().unwrap_or(&empty);
+    let items = items_of(s, t, task, book);
     // One reading column: the conversation's content and the composer have the same width and left edge.
     let inset = t.metrics.inset;
     let conversation = Conversation::<App>::new("transcript", s.at_bottom).column(COLUMN + 2.0 * inset).children(items).on_at_bottom(|s: &mut App, at| s.at_bottom = at).build(t);

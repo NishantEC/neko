@@ -17,7 +17,7 @@ fn every_scene_holds_the_structure_rules() {
                 let at = format!("{name} at {}x{} {}", size.0, size.1, if dark { "dark" } else { "light" });
                 let els = rt.elements();
                 for e in &els {
-                    let [x, _, w, _] = e.rect;
+                    let [x, _, w, _] = e.visible;
                     if e.opacity > 0.0 && w > 0.0 {
                         assert!(x >= -0.5 && x + w <= size.0 + 0.5, "{at}: {:?} runs out of the window: {:?}", e.key, e.rect);
                     }

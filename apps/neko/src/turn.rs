@@ -6,12 +6,12 @@
 use std::rc::Rc;
 
 use neko_protocol::undo::{Action, Offer};
-use neko_protocol::{DiffFile, Part, PartBody, Permission, PermissionState, Run, RunStatus, ToolState};
+use neko_protocol::{Part, PartBody, Permission, PermissionState, Run, RunStatus, ToolState};
 use rune::{El, Key, KeyEvent, Transition, Tx, col, el, row, text};
 use rune_ui_style::{ButtonVariant, Size, tabular, weight};
 
 use crate::state::App;
-use crate::ui::agent::{FoldLine, Marks, PressTx, Status, caption, elapsed, icon_button, mark_with, mono, pre, return_presses, took};
+use crate::ui::agent::{FoldLine, Marks, PressTx, Status, caption, elapsed, icon_button, mark_with, pre, return_presses, took};
 use crate::ui::reasoning::Reasoning;
 use crate::ui::base::{Shape, Theme, glyph};
 use crate::ui::button::Button;
@@ -27,6 +27,8 @@ pub fn settling(e: El) -> El {
 /// The person's words: rune-ui's `Message` with the well bubble at the right. Copy shows under them while the pointer is over them or
 /// the keyboard is in them, and takes no room while hidden (it stays in the Tab order).
 pub fn person(s: &App, t: &Theme, key: &str, words_key: &str, words: &str) -> El {
+    let (key, words_key) = (crate::task_view::kk(key.to_owned()), crate::task_view::kk(words_key.to_owned()));
+    let (key, words_key) = (key.as_str(), words_key.as_str());
     let said = text(words.to_owned()).key(words_key.to_owned()).font(t.ty.md).color(t.ink()).wrap().min_w(0.0).selectable(true);
     let w = words.to_owned();
     let press: PressTx<App> = Rc::new(move |_: &mut App, tx: &mut Tx| tx.copy(w.clone()));
@@ -226,32 +228,6 @@ pub fn lower_first(s: &str) -> String {
     c.next().map(|f| f.to_lowercase().collect::<String>() + c.as_str()).unwrap_or_default()
 }
 
-/// A file of a receipt: its path and its own counts, or its name alone while the counts are on their way.
-pub struct ReceiptFile {
-    pub path: String,
-    pub counts: Option<(u32, u32)>,
-    pub note: Option<&'static str>,
-}
-
-/// The receipt's files: from the run's own diff when it has come, else the files the run's steps edited (names only).
-pub fn receipt_files(s: &App, r: &Run, parts: &[&Part]) -> Vec<ReceiptFile> {
-    if let Some(d) = s.receipts.get(&r.id) {
-        return d.files.iter().map(|f: &DiffFile| ReceiptFile { path: crate::review_view::file_label(f), counts: (!f.binary).then_some((f.added, f.removed)), note: f.binary.then_some("binary") }).collect();
-    }
-    let mut out: Vec<ReceiptFile> = Vec::new();
-    for p in parts {
-        if let PartBody::Tool { name, summary, state: ToolState::Done, .. } = &p.body
-            && matches!(name.as_str(), "Edit" | "MultiEdit" | "Write" | "NotebookEdit")
-        {
-            let f = crate::task_view::show_path(summary, &r.workdir, s.home.as_deref());
-            if !out.iter().any(|x| x.path == f) {
-                out.push(ReceiptFile { path: f, counts: None, note: None });
-            }
-        }
-    }
-    out
-}
-
 /// Plus and minus figures, in green and red, tabular.
 fn figures(t: &Theme, added: u32, removed: u32, style: rune::TextStyle) -> [El; 2] {
     [text(format!("+{added}")).font(tabular(style)).color(t.c.success.fg).a11y_hidden(), text(format!("\u{2212}{removed}")).font(tabular(style)).color(t.c.danger.fg).a11y_hidden()]
@@ -271,125 +247,56 @@ pub fn file_figures(t: &Theme, added: u32, removed: u32) -> Vec<El> {
     v
 }
 
-/// How many files a receipt lists before "and N more".
-const RECEIPT_FILES: usize = 5;
-
-/// The receipt a run ends with, when it has something to show beyond time (files changed, a branch, a failure, or something undo
-/// says): the cat and the sentence ("miso changed 3 files", +42 −7), the files each with its counts in a well, the quiet undo line,
-/// and the branch, Review, Undo or Redo, Reveal in Finder and Copy branch.
-#[allow(clippy::too_many_arguments)]
-pub fn receipt(s: &App, t: &Theme, r: &Run, parts: &[&Part], o: &Offer, changed: Option<neko_protocol::Changes>, name: &str) -> Option<El> {
+/// The quiet line a run that changed files ends its fold with: `Changed 3 files · +19 −7 · Review · Undo` (the full receipt, with the
+/// files, the folder and the branch, is in the right pane's Overview). A failed run says so first, in red; a stopped or interrupted
+/// one says how far it got; an undone run says "now undone" and offers Redo. A run that changed nothing and did not fail has no line,
+/// only the one quiet sentence undo sometimes has. A kitten's line has no buttons: its changes are read, and undone through its thread.
+pub fn change_line(t: &Theme, r: &Run, o: &Offer, changed: Option<neko_protocol::Changes>, kitten: bool) -> Option<El> {
     let failed = r.status == RunStatus::Failed;
     let key = format!("run-{}", r.id.0);
-    // A card is earned by changed files or a failure. A run that changed nothing gets no card: no "worked on a branch", no branch
-    // name; what undo has to say (it could not keep this run, say) is one quiet line under the answer.
+    let note = |line: &String| text(line.clone()).key(format!("{key}-note")).role("note").font(t.ty.sm).color(t.ink_faint()).wrap().min_w(0.0);
     if changed.is_none() && !failed {
-        return o.line.clone().map(|line| text(line).key(format!("{key}-note")).role("note").font(t.ty.sm).color(t.ink_faint()).wrap().min_w(0.0));
+        return o.line.as_ref().map(note);
     }
     let files = |n: u32| format!("{n} file{}", if n == 1 { "" } else { "s" });
-    // A thread's agent has no name: the sentence starts with its verb. A subagent's starts with its number ("Kitten 1 changed 3 files").
-    let who = |verb: String| {
-        if name.is_empty() {
-            let mut c = verb.chars();
-            c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
-        } else {
-            format!("{name} {verb}")
-        }
+    let words = match (r.status, changed) {
+        (RunStatus::Failed, Some(c)) => format!("Could not finish \u{b7} changed {}", files(c.files)),
+        (RunStatus::Failed, None) => "Could not finish".to_owned(),
+        (RunStatus::Stopped, Some(c)) => format!("Stopped after changing {}", files(c.files)),
+        (RunStatus::Interrupted, Some(c)) => format!("Interrupted after changing {}", files(c.files)),
+        (_, Some(c)) if o.undone => format!("Changed {}, now undone", files(c.files)),
+        (_, Some(c)) => format!("Changed {}", files(c.files)),
+        _ => "Finished".to_owned(),
     };
-    let sentence = match (r.status, changed) {
-        (RunStatus::Failed, _) => who("could not finish".to_owned()),
-        (RunStatus::Stopped, Some(c)) => who(format!("stopped after changing {}", files(c.files))),
-        (RunStatus::Stopped, None) => who("stopped".to_owned()),
-        (RunStatus::Interrupted, Some(c)) => who(format!("was interrupted after changing {}", files(c.files))),
-        (RunStatus::Interrupted, None) => who("was interrupted".to_owned()),
-        (_, Some(c)) if o.undone => who(format!("changed {}, now undone", files(c.files))),
-        (_, Some(c)) => who(format!("changed {}", files(c.files))),
-        _ => who("finished".to_owned()),
-    };
-    let pad = t.space.at(1.5);
-    let mut facts = row().key(format!("{key}-facts")).gap(t.space.at(2.0)).center_y();
+    let ink = if failed { t.c.danger.fg } else if o.undone { t.ink_faint() } else { t.ink_muted() };
+    let dot = || text("\u{b7}").font(t.ty.sm).color(t.ink_faint()).mx(t.space.at(1.0)).a11y_hidden();
+    let mut line = row().key(key.clone()).role("group").label(words.clone()).w_full().min_h(t.control.md).gap(0.0).center_y().flex_wrap().child(text(words).font(t.ty.sm).color(ink).a11y_hidden());
     if let Some(c) = changed {
-        facts = facts.label(format!("{}, {} lines added, {} removed", files(c.files), c.added, c.removed)).role("note").children(figures(t, c.added, c.removed, weight(t.ty.sm, t.ty.semibold)));
-    }
-    let head = row()
-        .w_full()
-        .px(t.space.at(2.5))
-        .h(t.control.lg + 8.0)
-        .gap(t.space.at(2.5))
-        .center_y()
-        .child(text(sentence.clone()).role("heading").level(3).font(weight(t.ty.base, t.ty.semibold)).color(if failed { t.c.danger.fg } else if o.undone { t.ink_muted() } else { t.ink() }).grow(1.0).truncate().min_w(0.0))
-        .child(facts);
-    let mut card = col().key(key.clone()).role("group").label(sentence).w_full().gap(0.0).child(head);
-    let list = receipt_files(s, r, parts);
-    let total = changed.map_or(list.len(), |c| (c.files as usize).max(list.len()));
-    if total > 0 {
-        let mut well_el = well(t, col().key(format!("{key}-files")).role("list").label("Files changed").w_full().py(t.space.at(1.0)).radius(t.radius.lg).round_as(t));
-        let shown = list.len().min(if list.len() == RECEIPT_FILES + 1 { RECEIPT_FILES + 1 } else { RECEIPT_FILES });
-        for (i, f) in list.iter().take(shown).enumerate() {
-            let mut line = row()
-                .role("listitem")
-                .label(match f.counts {
-                    Some((a, b)) => format!("{}, {a} added, {b} removed", f.path),
-                    None => f.path.clone(),
-                })
-                .w_full()
-                .h(t.control.md)
-                .px(t.space.at(3.0))
-                .gap(t.space.at(2.5))
-                .center_y()
-                .child(glyph(&icons::FILE, t.control.icon_sm, t.ink_faint()))
-                .child(text(f.path.clone()).font(mono(t, t.ty.sm)).color(if o.undone { t.ink_muted() } else { t.ink() }).truncate_middle().min_w(0.0).grow(1.0).a11y_hidden());
-            // Only the figures that say something: a file that only gained lines shows no "−0".
-            if let Some((a, b)) = f.counts {
-                line = line.children(file_figures(t, a, b));
-            }
-            if let Some(n) = f.note {
-                line = line.child(text(n).font(t.ty.xs).color(t.ink_faint()).a11y_hidden());
-            }
-            if i > 0 {
-                line = line.border_sides([0.5, 0.0, 0.0, 0.0], t.c.line);
-            }
-            well_el = well_el.child(line);
+        let mut facts = row().key(format!("{key}-facts")).gap(t.space.at(1.5)).label(format!("{} lines added, {} removed", c.added, c.removed)).role("note").children(figures(t, c.added, c.removed, weight(t.ty.sm, t.ty.semibold)));
+        if o.undone {
+            facts = facts.opacity(0.6);
         }
-        if total > shown {
-            let words = if list.is_empty() { files(total as u32) } else { format!("and {} more", total - shown) };
-            well_el = well_el.child(row().w_full().h(t.control.md).px(t.space.at(3.0)).center_y().border_sides([if list.is_empty() { 0.0 } else { 0.5 }, 0.0, 0.0, 0.0], t.c.line).child(text(words).font(t.ty.sm).color(t.ink_faint())));
+        line = line.child(dot()).child(facts);
+    }
+    if !kitten {
+        if o.review {
+            let (task, run) = (r.task.clone(), r.id.clone());
+            line = line.child(dot()).child(Button::new(format!("{key}-review"), "Review").variant(ButtonVariant::Ghost).size(Size::Sm).on_press(move |s: &mut App| s.open_review(&task, Some(run.clone()))).build(t));
         }
-        card = card.child(well_el);
+        if let Some((action, enabled)) = o.action {
+            let run = r.id.clone();
+            let (words, redo) = match action {
+                Action::Undo => ("Undo", false),
+                Action::Redo => ("Redo", true),
+            };
+            line = line.child(dot()).child(Button::new(format!("{key}-{}", words.to_lowercase()), words).variant(ButtonVariant::Ghost).size(Size::Sm).disabled(!enabled).on_press(move |s: &mut App| s.undo(&run, redo)).build(t));
+        }
     }
-    if let Some(line) = &o.line {
-        card = card.child(text(line.clone()).key(format!("{key}-note")).font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0).px(t.space.at(2.5)).pt(t.space.at(2.5)));
+    let mut out = col().w_full().gap(0.0).child(line);
+    if let Some(l) = &o.line {
+        out = out.child(note(l));
     }
-    let mut foot = row().key(format!("{key}-actions")).w_full().px(t.space.at(1.0)).pt(t.space.at(2.5)).pb(t.space.at(0.5)).gap(t.space.at(2.0)).center_y();
-    if let Some(b) = &r.branch {
-        foot = foot.child(row().pl(t.space.at(1.5)).gap(t.space.at(1.5)).center_y().min_w(0.0).shrink().child(glyph(&icons::COMMIT, t.control.icon_sm, t.ink_faint())).child(text(b.clone()).font(mono(t, t.ty.sm)).color(t.ink_muted()).truncate_middle().min_w(0.0).shrink()));
-    }
-    foot = foot.child(el().grow(1.0));
-    if o.review {
-        let (task, run) = (r.task.clone(), r.id.clone());
-        foot = foot.child(Button::new(format!("{key}-review"), "Review").variant(ButtonVariant::Secondary).size(Size::Sm).icon(&icons::FILE_CODE).on_press(move |s: &mut App| s.open_review(&task, Some(run.clone()))).build(t));
-    }
-    if let Some((action, enabled)) = o.action {
-        let run = r.id.clone();
-        let (words, icon, redo) = match action {
-            Action::Undo => ("Undo", &icons::RESTORE, false),
-            Action::Redo => ("Redo", &icons::RETRY, true),
-        };
-        foot = foot.child(Button::new(format!("{key}-{}", words.to_lowercase()), words).variant(ButtonVariant::Secondary).size(Size::Sm).icon(icon).disabled(!enabled).on_press(move |s: &mut App| s.undo(&run, redo)).build(t));
-    }
-    if !r.workdir.is_empty() {
-        let folder = r.workdir.clone();
-        let reveal: PressTx<App> = Rc::new(move |_: &mut App, tx: &mut Tx| {
-            let _ = tx.reveal_path(&folder);
-        });
-        foot = foot.child(icon_button(t, &format!("{key}-reveal"), "Reveal in Finder", &icons::FOLDER_OPEN, None, false, Some(reveal)));
-    }
-    if let Some(b) = r.branch.clone() {
-        let press: PressTx<App> = Rc::new(move |_: &mut App, tx: &mut Tx| tx.copy(b.clone()));
-        foot = foot.child(icon_button(t, &format!("{key}-copy-branch"), "Copy branch", &icons::COPY, None, false, Some(press)));
-    }
-    let card = card.child(foot).padding(pad).radius(t.radius.lg + pad).round_as(t);
-    Some(settling(raised(t, card)))
+    Some(out)
 }
 
 /// How many steps a run took: its tool calls. The band's chip and the run's own fold both count this, so they agree.

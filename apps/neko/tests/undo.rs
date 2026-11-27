@@ -114,14 +114,20 @@ fn review_undo_redo_and_the_follow_up_tells_the_agent() {
     assert_eq!(files(&notes), ["many", "plan.md"]);
     let run = rt.state.book().unwrap().runs[0].id.clone();
 
-    // Review: the run's three files.
+    // Review: the pane's Changes tab, on this run's three files; the conversation stays where it was.
     press_on(&mut rt, &format!("run-{}-review", run.0));
     until(&mut rt, "the review's files", |rt| has(rt, "diff-2") && !has(rt, "diff-3"));
-    assert!(on_screen(&rt, "Changes in this run"), "the heading says what these are, with no cat's name");
+    assert!(has(&rt, "changes-tab") && has(&rt, &format!("run-{}-undo", run.0)), "Changes is a tab beside the conversation");
+    assert_eq!(rt.state.review.as_ref().map(|r| r.source), Some(neko_protocol::DiffSource::Run), "This run is selected");
     press_on(&mut rt, "diff-0-trigger");
     until(&mut rt, "a file's lines", |rt| on_screen(rt, "file 0"));
-    press(&mut rt, Key::Escape, Mods::default());
-    until(&mut rt, "the conversation again", |rt| rt.state.review.is_none() && has(rt, &format!("run-{}-undo", run.0)));
+    // The other sources, through the daemon: all the thread's runs are this one; a plain folder has nothing to compare with.
+    rt.update(|s, _| s.set_changes_source(neko_protocol::DiffSource::Thread));
+    until(&mut rt, "the thread's files", |rt| has(rt, "diff-2") && rt.state.review.as_ref().is_some_and(|r| r.source == neko_protocol::DiffSource::Thread && r.summary.is_some()));
+    rt.update(|s, _| s.set_changes_source(neko_protocol::DiffSource::Uncommitted));
+    until(&mut rt, "the daemon's words about a folder that is not a repository", |rt| on_screen(rt, "not a git repository"));
+    rt.update(|s, _| s.set_changes_source(neko_protocol::DiffSource::Run));
+    until(&mut rt, "this run's files again", |rt| has(rt, "diff-2") && rt.state.review.as_ref().is_some_and(|r| r.source == neko_protocol::DiffSource::Run && r.summary.is_some()));
 
     // Undo, Redo, Undo.
     press_on(&mut rt, &format!("run-{}-undo", run.0));

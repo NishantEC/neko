@@ -1,6 +1,7 @@
-//! A page that replaces another is never drawn over it. Opening Review (and going back) used to cross-fade the conversation and
-//! Review for a quarter second: Rune fades a removed element out by default, so both pages were on screen, one over the other. The
-//! frames here are taken while the swap is moving (real time passes between them), as a person's eyes see it.
+//! A body that replaces another is never drawn over it. Opening Review used to cross-fade the conversation and the Review page for a
+//! quarter second: Rune fades a removed element out by default, so both were on screen, one over the other. Review is now a tab of the
+//! right pane, and the same must hold for its tabs. The frames here are taken while the swap is moving (real time passes between
+//! them), as a person's eyes see it.
 
 mod support;
 use rune::Runtime;
@@ -13,37 +14,40 @@ fn drawn(rt: &Runtime<App>, key: &str) -> bool {
     rt.elements().iter().any(|e| e.key.as_deref() == Some(key) && e.opacity > 0.01 && e.rect[2] > 0.0)
 }
 
-/// Frames a quarter second in, a little at a time, asserting at each that the two pages are not both drawn.
-fn never_both(rt: &mut Runtime<App>, what: &str) {
+/// Frames a quarter second in, a little at a time, asserting at each that the two bodies are not both drawn.
+fn never_both(rt: &mut Runtime<App>, a: &str, b: &str, what: &str) {
     for i in 0..8 {
         rt.frame(0.03);
-        let (conversation, review) = (drawn(rt, "task-words"), drawn(rt, "review-title"));
-        if conversation && review {
+        let (first, second) = (drawn(rt, a), drawn(rt, b));
+        if first && second {
             for e in rt.elements().iter().filter(|e| e.exiting && e.opacity > 0.01 && e.key.is_some()).take(12) {
                 eprintln!("exiting {:?} opacity {} path {}", e.key, e.opacity, e.path);
             }
         }
-        assert!(!(conversation && review), "{what}: after {} ms the conversation and Review are both drawn", (i + 1) * 30);
+        assert!(!(first && second), "{what}: after {} ms {a} and {b} are both drawn", (i + 1) * 30);
     }
 }
 
-#[test]
-fn the_conversation_and_review_are_never_drawn_one_over_the_other() {
-    let scene = scenes().iter().find(|s| s.0 == "task-undo").expect("the scene with a finished run and its Review button").1;
-    let mut rt = runtime((1200.0, 800.0), false, scene);
-    assert!(drawn(&rt, "task-words") && !drawn(&rt, "review-title"), "the conversation is open to begin with");
-    let review = rt.elements().iter().find_map(|e| e.key.clone().filter(|k| k.starts_with("run-") && k.ends_with("-review"))).expect("the receipt's Review button");
-    let (x, y) = rt.find(&review).expect("Review is on screen");
+fn press_key(rt: &mut Runtime<App>, key: &str) {
+    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("{key} is on screen"));
     rt.pointer_down(x, y);
     rt.pointer_up(x, y);
-    never_both(&mut rt, "opening Review");
-    settle(&mut rt);
-    assert!(drawn(&rt, "review-title") && !drawn(&rt, "task-words"), "Review is open, the conversation gone");
+}
 
-    let (x, y) = rt.find("review-back").expect("Back to the conversation");
-    rt.pointer_down(x, y);
-    rt.pointer_up(x, y);
-    never_both(&mut rt, "going back");
+#[test]
+fn the_panes_tabs_are_never_drawn_one_over_the_other() {
+    let scene = scenes().iter().find(|s| s.0 == "pane-overview").expect("the scene with a finished run and its Overview").1;
+    let mut rt = runtime((1280.0, 800.0), false, scene);
+    assert!(drawn(&rt, "pane-overview-scroll") && !drawn(&rt, "changes-tab"), "Overview is open to begin with");
+    assert!(drawn(&rt, "task-words"), "the conversation is beside the pane, always");
+    press_key(&mut rt, "overview-review");
+    never_both(&mut rt, "pane-overview-scroll", "changes-tab", "opening Review");
     settle(&mut rt);
-    assert!(drawn(&rt, "task-words") && !drawn(&rt, "review-title"), "the conversation is back, Review gone");
+    assert!(drawn(&rt, "changes-tab") && !drawn(&rt, "pane-overview-scroll"), "Changes is open, Overview gone");
+    assert!(drawn(&rt, "task-words"), "the conversation never moved");
+
+    press_key(&mut rt, &neko_app::ui::tabs::tab_key("pane-tabs", 0));
+    never_both(&mut rt, "pane-overview-scroll", "changes-tab", "going back to Overview");
+    settle(&mut rt);
+    assert!(drawn(&rt, "pane-overview-scroll") && !drawn(&rt, "changes-tab"), "Overview is back, Changes gone");
 }

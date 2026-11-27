@@ -137,8 +137,14 @@ fn the_card_is_one_row_per_subagent_with_the_word_for_each_state() {
         assert!(str_of(&c, "name").contains(&format!(", {word}.")), "{st:?}: {}", str_of(&c, "name"));
         assert!(texts(&rt).iter().any(|x| x == word), "{st:?} reads {word}: {:?}", texts(&rt));
     }
-    // Open opens the subagent in the main view.
+    // Open puts the subagent's conversation in the right pane as a tab; the thread stays in the main view.
     click(&mut rt, "subagent-open-1");
+    assert!(rt.state.open_subagent().is_none(), "the main view is still the thread's");
+    assert!(has_key(&rt, "pane-kitten") && has_key(&rt, "pane-transcript"), "its own conversation is the pane's tab");
+    // Open in main view takes it into the main view, read-only there.
+    rt.frame(0.3);
+    settle(&mut rt);
+    click(&mut rt, "pane-kitten-main");
     assert_eq!(rt.state.open.as_ref().map(|i| i.0.clone()), Some(sub_id(1)));
     assert!(has_key(&rt, "subagent-readonly"));
 }
@@ -202,7 +208,9 @@ fn the_waiting_line_names_the_live_subagents_as_links_that_open_them() {
     let (l, c) = (el(&rt, "waiting-line"), el(&rt, "subagent-card-2"));
     assert!(l.rect[1] > c.rect[1]);
     click(&mut rt, "waiting-link-2");
-    assert_eq!(rt.state.open.as_ref().map(|i| i.0.clone()), Some(sub_id(2)), "the link opens that subagent");
+    let root = rt.state.pane_root().expect("a thread is open");
+    assert_eq!(rt.state.tab_of(&root), neko_app::pane::Tab::Kitten(neko_protocol::TaskId(sub_id(2))), "the link opens that subagent's tab");
+    assert!(rt.state.open_subagent().is_none(), "the thread stays in the main view");
     // Three: commas, then "and"; nothing waits: the line is gone.
     let mut rt = runtime((1200.0, 800.0), false, scene("subagents-waiting"));
     rt.update(|s, _| {

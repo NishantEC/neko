@@ -4,7 +4,7 @@
 
 use neko_protocol::{PartBody, PermissionState, RunStatus, SubagentOf, Task, TaskStatus, ToolState};
 
-use super::{Script, cat_name, permission_item, run, start, task, with_workspaces};
+use super::{Script, cat_name, diff_file, permission_item, run, start, task, with_workspaces};
 use crate::state::{App, Book};
 
 const FOLDER: &str = "/Users/example/acme-api";
@@ -214,4 +214,88 @@ pub fn needs(s: &mut App) {
     s.needs.push(item);
     s.needs.sort_by_key(|i| i.since_ms);
     s.open_needs();
+}
+
+// ---- The right pane ---------------------------------------------------------------------------------------------------------------------
+
+/// The thread's overview as the daemon says it, for the scenes: its folder, its branch and the two files the kittens changed.
+fn overview(th: &Task) -> neko_protocol::Overview {
+    let files = vec![diff_file("docs/setup.md", neko_protocol::FileStatus::Modified, 1, 1), diff_file("docs/faq.md", neko_protocol::FileStatus::Modified, 1, 1), diff_file("src/auth.rs", neko_protocol::FileStatus::Modified, 12, 6)];
+    let (added, removed) = (files.iter().map(|f| f.added).sum(), files.iter().map(|f| f.removed).sum());
+    let changes = neko_protocol::DiffSummary { task: th.id.clone(), run: None, source: neko_protocol::DiffSource::Thread, root: FOLDER.into(), files, added, removed };
+    neko_protocol::Overview { task: th.id.clone(), folder: Some(FOLDER.into()), branch: Some("neko/4f2a".into()), changes: Some(changes), uncommitted: None }
+}
+
+fn open_pane(s: &mut App, th: &Task, tab: crate::pane::Tab) {
+    s.pane.choice = Some(true);
+    s.pane.sheet = true;
+    s.pane.overview.insert(th.id.clone(), overview(th));
+    s.pane.tab.insert(th.id.clone(), tab);
+}
+
+/// The thread at rest on its kittens: a request from Kitten 1 first, the tree (Kitten 1.1 under Kitten 1), what it waits on, the
+/// changes so far, the folder and the usage.
+pub fn pane_kittens(s: &mut App) {
+    let th = thread(TaskStatus::Waiting);
+    let a = sub(1, &th, "1", "Check links", "Look at the links on the docs site and say which are dead", TaskStatus::NeedsYou, 8);
+    let b = sub(2, &th, "2", "Check images", "Look at the images on the docs site and say which are too big", TaskStatus::Working, 8);
+    let mut c = sub(3, &th, "1.1", "Read the redirects", "Read the redirect file and say where each old link goes", TaskStatus::Done, 6);
+    if let Some(o) = &mut c.subagent {
+        o.parent = a.id.clone();
+    }
+    stage(s, th.clone(), vec![a.clone(), b.clone(), c.clone()]);
+    let mut sc = Script::new(&th, "run_1", start(s));
+    first_turn(&mut sc, &[&a, &b], true);
+    let mut r = run("run_1", &th, RunStatus::Done, start(s), 31);
+    r.changes = None;
+    open_thread(s, &th, vec![r], vec![sc]);
+    sub_book(s, &a, RunStatus::Running, |sc| {
+        sc.tool("Grep", "href=", "{\n  \"pattern\": \"href=\"\n}", "docs/setup.md:14\ndocs/faq.md:3", ToolState::Done, 2);
+        sc.ask("Run a command", "Commands can change anything on this Mac.", "npx linkcheck docs/", false, PermissionState::Pending);
+    });
+    sub_book(s, &b, RunStatus::Running, |_| {});
+    sub_book(s, &c, RunStatus::Done, |sc| {
+        sc.say("The redirect file sends both old links to the new site.", true);
+    });
+    let mut item = permission_item(s, &a, "Run a command", "npx linkcheck docs/", false, 4);
+    item.title = th.title.clone();
+    item.cat = th.cat.clone().unwrap_or_default();
+    item.cat_name = cat_name(s, &th.cat);
+    item.subagent = Some("1".into());
+    s.needs.push(item);
+    open_pane(s, &th, crate::pane::Tab::Overview);
+}
+
+/// Kitten 1's own tab while it works: its brief folded, Stop and Open in main view, what it said and did so far.
+pub fn pane_kitten_live(s: &mut App) {
+    let th = thread(TaskStatus::Waiting);
+    let a = sub(1, &th, "1", "Check links", "Look at the links on the docs site and say which are dead", TaskStatus::Working, 8);
+    let b = sub(2, &th, "2", "Check images", "Look at the images on the docs site and say which are too big", TaskStatus::Working, 8);
+    stage(s, th.clone(), vec![a.clone(), b.clone()]);
+    let mut sc = Script::new(&th, "run_1", start(s));
+    first_turn(&mut sc, &[&a, &b], true);
+    let mut r = run("run_1", &th, RunStatus::Done, start(s), 31);
+    r.changes = None;
+    open_thread(s, &th, vec![r], vec![sc]);
+    sub_book(s, &a, RunStatus::Running, |sc| links_work(sc, false));
+    sub_book(s, &b, RunStatus::Running, |_| {});
+    s.pane.kittens.insert(th.id.clone(), vec![a.id.clone()]);
+    open_pane(s, &th, crate::pane::Tab::Kitten(a.id.clone()));
+}
+
+/// Kitten 1's tab once it is done: its report first.
+pub fn pane_kitten_done(s: &mut App) {
+    let th = thread(TaskStatus::Done);
+    let a = sub(1, &th, "1", "Check links", "Look at the links on the docs site and say which are dead", TaskStatus::Done, 8);
+    let b = sub(2, &th, "2", "Check images", "Look at the images on the docs site and say which are too big", TaskStatus::Done, 8);
+    stage(s, th.clone(), vec![a.clone(), b.clone()]);
+    let mut sc = Script::new(&th, "run_1", start(s));
+    first_turn(&mut sc, &[&a, &b], true);
+    let mut r = run("run_1", &th, RunStatus::Done, start(s), 31);
+    r.changes = None;
+    open_thread(s, &th, vec![r], vec![sc]);
+    sub_book(s, &a, RunStatus::Done, |sc| links_work(sc, true));
+    sub_book(s, &b, RunStatus::Done, images_work);
+    s.pane.kittens.insert(th.id.clone(), vec![a.id.clone(), b.id.clone()]);
+    open_pane(s, &th, crate::pane::Tab::Kitten(a.id.clone()));
 }

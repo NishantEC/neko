@@ -281,8 +281,11 @@ fn a_manual_round_has_no_switch_and_no_line_repeating_its_schedule() {
 
 #[test]
 fn a_task_from_a_round_lists_its_files_with_their_figures_and_its_line_has_its_own_ground() {
-    let rt = runtime((1200.0, 800.0), false, scene("task-from-round"));
+    let mut rt = runtime((1280.0, 800.0), false, scene("task-from-round"));
+    // The files are in the right pane's Overview, which is open at this width.
+    rt.update(|s, _| s.pane.choice = Some(true));
+    settle(&mut rt);
     let all = texts(&rt);
-    assert!(all.contains("src/toolbar.rs") && all.contains("src/menu.rs") && all.contains("docs/preferences.md"), "every file, as an ordinary thread's receipt lists them: {all}");
+    assert!(all.contains("src/toolbar.rs") && all.contains("src/menu.rs") && all.contains("docs/preferences.md"), "every file, as an ordinary thread's Overview lists them: {all}");
     assert!(has_key(&rt, "task-round-strip"));
 }

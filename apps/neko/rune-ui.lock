@@ -212,6 +212,13 @@ files = [
 ]
 
 [[item]]
+name = "sheet"
+version = "0.10.0"
+files = [
+  { target = "src/ui/sheet.rs", sha256 = "e2495c8b6c6b6058c5d2e279e5184a38db5f5c8204e474bd96d3c11bf98d23cb" },
+]
+
+[[item]]
 name = "shimmer"
 version = "0.8.0"
 files = [

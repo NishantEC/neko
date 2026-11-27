@@ -57,8 +57,8 @@ fn item(id: &'static str, title: &'static str, menu: Option<&'static str>, key: 
     Item { id, title, menu, key, keys_first: true, separator: false }
 }
 
-/// Every item Neko adds, in menu order, for a window whose sidebar shows or not and which is full screen or not.
-pub fn model(sidebar: bool, full_screen: bool) -> Vec<Item> {
+/// Every item Neko adds, in menu order, for a window whose sidebar shows or not, whose right pane shows or not, and which is full screen or not.
+pub fn model(sidebar: bool, pane: bool, full_screen: bool) -> Vec<Item> {
     vec![
         Item { keys_first: false, ..item("neko-about", "About Neko", None, None) },
         // After About in the app menu, where Mac apps keep it.
@@ -72,6 +72,8 @@ pub fn model(sidebar: bool, full_screen: bool) -> Vec<Item> {
         item("neko-briefing", "Briefing", Some("View"), Some("cmd+4")),
         Item { separator: true, ..item("neko-view-sep", "", Some("View"), None) },
         item("neko-sidebar", if sidebar { "Hide Sidebar" } else { "Show Sidebar" }, Some("View"), Some("ctrl+cmd+s")),
+        item("neko-pane", if pane { "Hide Pane" } else { "Show Pane" }, Some("View"), Some("alt+cmd+b")),
+        item("neko-changes", "Changes", Some("View"), Some("shift+cmd+g")),
         Item { keys_first: false, ..item("neko-full-screen", if full_screen { "Exit Full Screen" } else { "Enter Full Screen" }, Some("View"), Some("ctrl+cmd+f")) },
         Item { keys_first: false, ..item("neko-help", "Neko Help", Some("Help"), None) },
     ]
@@ -104,6 +106,14 @@ fn action(id: &str) -> fn(&mut App, &mut Tx) {
         "neko-close-window" => |_, tx| tx.close_window(),
         "neko-sidebar" => |s, tx| {
             s.toggle_sidebar();
+            tx.instant();
+        },
+        "neko-pane" => |s, tx| {
+            s.toggle_pane();
+            tx.instant();
+        },
+        "neko-changes" => |s, tx| {
+            s.open_changes(None);
             tx.instant();
         },
         "neko-full-screen" => |_, tx| tx.toggle_full_screen(),
@@ -229,20 +239,20 @@ mod tests {
 
     #[test]
     fn the_menus_hold_what_a_mac_user_expects() {
-        let lines: Vec<String> = model(true, false).iter().filter(|i| !i.separator).map(|i| format!("{} / {} / {}", i.menu.unwrap_or("Neko"), i.title, i.key.unwrap_or("-"))).collect();
+        let lines: Vec<String> = model(true, false, false).iter().filter(|i| !i.separator).map(|i| format!("{} / {} / {}", i.menu.unwrap_or("Neko"), i.title, i.key.unwrap_or("-"))).collect();
         assert_eq!(
             lines,
-            ["Neko / About Neko / -", "Neko / Settings… / cmd+,", "File / New Thread / cmd+n", "File / Close Window / cmd+w", "View / Home / cmd+1", "View / Needs You / cmd+2", "View / Rounds / cmd+3", "View / Briefing / cmd+4", "View / Hide Sidebar / ctrl+cmd+s", "View / Enter Full Screen / ctrl+cmd+f", "Help / Neko Help / -"]
+            ["Neko / About Neko / -", "Neko / Settings… / cmd+,", "File / New Thread / cmd+n", "File / Close Window / cmd+w", "View / Home / cmd+1", "View / Needs You / cmd+2", "View / Rounds / cmd+3", "View / Briefing / cmd+4", "View / Hide Sidebar / ctrl+cmd+s", "View / Show Pane / alt+cmd+b", "View / Changes / shift+cmd+g", "View / Enter Full Screen / ctrl+cmd+f", "Help / Neko Help / -"]
         );
-        let folded = model(false, true);
-        assert!(folded.iter().any(|i| i.title == "Show Sidebar") && folded.iter().any(|i| i.title == "Exit Full Screen"), "titles follow the window");
+        let folded = model(false, true, true);
+        assert!(folded.iter().any(|i| i.title == "Show Sidebar") && folded.iter().any(|i| i.title == "Hide Pane") && folded.iter().any(|i| i.title == "Exit Full Screen"), "titles follow the window");
     }
 
     #[test]
     fn no_two_items_share_a_key_neither_neko_s_nor_the_system_s() {
         let mut seen: Vec<(Shortcut, String)> = Vec::new();
         let native = NATIVE.iter().filter_map(|(menu, title, key)| key.map(|k| (k, format!("{menu} ▸ {title}"))));
-        let ours = model(true, false).into_iter().filter_map(|i| i.key.map(|k| (k, format!("{:?} ▸ {}", i.menu, i.title))));
+        let ours = model(true, false, false).into_iter().filter_map(|i| i.key.map(|k| (k, format!("{:?} ▸ {}", i.menu, i.title))));
         for (key, name) in native.chain(ours) {
             let parsed = key.parse::<Shortcut>().unwrap_or_else(|_| panic!("{key} parses"));
             if let Some((_, other)) = seen.iter().find(|(k, _)| *k == parsed) {
@@ -254,7 +264,7 @@ mod tests {
 
     #[test]
     fn ids_are_unique() {
-        let m = model(true, false);
+        let m = model(true, false, false);
         let mut ids: Vec<&str> = m.iter().map(|i| i.id).collect();
         ids.sort_unstable();
         ids.dedup();

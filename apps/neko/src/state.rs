@@ -38,6 +38,8 @@ pub enum Effect {
     /// The Mac's folder panel, for a new workspace (`select`: the composer picks it) or for a workspace's folder that moved.
     PickFolder(Pick),
     Reveal(String),
+    /// Words for the clipboard, made when the daemon's answer arrives (Copy diff waits for every file's lines).
+    Copy(String),
     /// Bring the window forward (a notification or a link opened a task).
     Front,
 }
@@ -115,6 +117,8 @@ pub struct Review {
     pub run: Option<RunId>,
     /// The files must be asked for again (a run of the thread ended).
     pub stale: bool,
+    /// Copy diff was pressed and waits for the last file's lines.
+    pub copy_wanted: bool,
     /// The run the person opened it from: "This run" goes back to it.
     pub from: Option<RunId>,
     pub summary: Option<DiffSummary>,
@@ -196,7 +200,7 @@ pub struct App {
     /// The title the window was last given.
     pub title_set: String,
     /// What the menu bar last showed (sidebar shown, full screen), so it is replaced only when that changes.
-    pub menu_shown: Option<(bool, bool)>,
+    pub menu_shown: Option<(bool, bool, bool)>,
     pub full_screen: bool,
     /// Until when (seconds of the window's clock) the raw menu fix-ups keep running after a menu change.
     pub menu_fix_until: f64,
@@ -275,10 +279,8 @@ pub struct App {
     pub review: Option<Review>,
     /// How much room undo takes (Settings ▸ Workspaces), as the daemon last said.
     pub undo_storage: Option<UndoStorage>,
-    /// Each finished run's files with their own counts, for its receipt: asked once per run that changed something.
-    pub receipts: HashMap<RunId, DiffSummary>,
-    /// The runs whose files were asked for (each is asked once).
-    pub receipts_asked: HashSet<RunId>,
+    /// The right pane (docs/knowledge/app-shell.md): its tabs, its open state, each thread's overview.
+    pub pane: crate::pane::Pane,
     /// Every round, oldest first, as the daemon last said (with each one's next time, status and last line).
     pub rounds: Vec<neko_protocol::Round>,
     /// Every round is paused.
@@ -312,7 +314,7 @@ pub struct App {
 
 impl Review {
     pub fn new(task: TaskId, source: neko_protocol::DiffSource, run: Option<RunId>, from: Option<RunId>) -> Review {
-        Review { task, source, run, stale: false, from, summary: None, error: None, patches: HashMap::new(), open: HashSet::new() }
+        Review { task, source, run, stale: false, copy_wanted: false, from, summary: None, error: None, patches: HashMap::new(), open: HashSet::new() }
     }
 }
 
@@ -338,8 +340,6 @@ pub enum Asked {
     Undo { task: TaskId, run: RunId, redo: bool },
     /// A review's file list, or one file's lines.
     Diff,
-    /// A run's files for its receipt.
-    Receipt,
     /// A change to a cat: a refusal is said in a panel. `open`: the cat made opens its page.
     Cat { open: bool },
     ClearUndo,
@@ -521,8 +521,7 @@ impl Default for App {
             badge_set: None,
             review: None,
             undo_storage: None,
-            receipts: HashMap::new(),
-            receipts_asked: HashSet::new(),
+            pane: crate::pane::Pane::default(),
             rounds: Vec::new(),
             rounds_paused: false,
             rounds_loaded: false,
@@ -1161,38 +1160,12 @@ impl App {
         }
     }
 
-    /// Review on a run's card (None: the task's "All changes"): its files, folded, in place of the conversation.
+    /// Review on a run's change line (or the Briefing's row): the thread's Changes tab, on that run's files; none: the tab as it was.
     pub fn open_review(&mut self, task: &TaskId, run: Option<RunId>) {
-        let from = run.clone().or_else(|| self.review.as_ref().filter(|r| &r.task == task).and_then(|r| r.from.clone()));
-        self.menu_open = None;
-        self.review = Some(Review::new(task.clone(), if run.is_some() { neko_protocol::DiffSource::Run } else { neko_protocol::DiffSource::Thread }, run.clone(), from));
-        if let Some(id) = self.send(Request::GetDiff { task: task.clone(), run: run.clone(), source: if run.is_some() { neko_protocol::DiffSource::Run } else { neko_protocol::DiffSource::Thread } }) {
-            self.asked.insert(id, Asked::Diff);
+        if self.open.as_ref() != Some(task) {
+            self.open_task_id(task);
         }
-    }
-
-    /// Asks once for the files of each finished run of the open task that changed something, so its receipt can list them with
-    /// their counts. Without the daemon nothing is asked (and nothing is marked asked).
-    pub fn ask_receipts(&mut self) {
-        let Some(book) = self.book() else { return };
-        let want: Vec<(TaskId, RunId)> = book
-            .runs
-            .iter()
-            .filter(|r| r.status != RunStatus::Running && r.undo.as_ref().is_some_and(neko_protocol::RunUndo::changed))
-            .filter(|r| !self.receipts_asked.contains(&r.id) && !self.receipts.contains_key(&r.id))
-            .map(|r| (r.task.clone(), r.id.clone()))
-            .collect();
-        for (task, run) in want {
-            if let Some(id) = self.send(Request::GetDiff { task, run: Some(run.clone()), source: neko_protocol::DiffSource::Run }) {
-                self.asked.insert(id, Asked::Receipt);
-                self.receipts_asked.insert(run);
-            }
-        }
-    }
-
-    /// Back to the conversation.
-    pub fn close_review(&mut self) {
-        self.review = None;
+        self.open_changes(run);
     }
 
     /// Opens or folds a file of the review; its lines are asked for the first time it opens.
@@ -1203,21 +1176,21 @@ impl App {
         }
         r.open.insert(path.to_owned());
         if !r.patches.contains_key(path) {
-            let (task, run) = (r.task.clone(), r.run.clone());
-            self.ask_lines(task, run, path, false);
+            let (task, run, source) = (r.task.clone(), r.run.clone(), r.source);
+            self.ask_lines(task, run, source, path, false);
         }
     }
 
     /// "Show all": every line of a file that was cut.
     pub fn review_all(&mut self, path: &str) {
         if let Some(r) = &self.review {
-            let (task, run) = (r.task.clone(), r.run.clone());
-            self.ask_lines(task, run, path, true);
+            let (task, run, source) = (r.task.clone(), r.run.clone(), r.source);
+            self.ask_lines(task, run, source, path, true);
         }
     }
 
-    fn ask_lines(&mut self, task: TaskId, run: Option<RunId>, path: &str, full: bool) {
-        if let Some(id) = self.send(Request::GetDiffFile { task, source: if run.is_some() { neko_protocol::DiffSource::Run } else { neko_protocol::DiffSource::Thread }, run, path: path.to_owned(), full }) {
+    fn ask_lines(&mut self, task: TaskId, run: Option<RunId>, source: neko_protocol::DiffSource, path: &str, full: bool) {
+        if let Some(id) = self.send(Request::GetDiffFile { task, source, run, path: path.to_owned(), full }) {
             self.asked.insert(id, Asked::Diff);
         }
     }
@@ -1415,6 +1388,10 @@ impl App {
         if crossed {
             self.sidebar_choice = None;
         }
+        // Crossing into or out of a sheet leaves the sheet shut: it opens only when asked.
+        if self.width.is_some_and(|old| (old >= crate::pane::SHEET_BELOW) != (w >= crate::pane::SHEET_BELOW)) {
+            self.pane.sheet = false;
+        }
         self.width = Some(w);
     }
 
@@ -1586,7 +1563,10 @@ impl App {
     /// A change the daemon pushed.
     pub fn change(&mut self, change: Change) {
         match change {
-            Change::TaskCreated { task } => self.upsert(task),
+            Change::TaskCreated { task } => {
+                self.pane_task_seen(&task, false);
+                self.upsert(task);
+            }
             Change::TaskUpdated { task } => {
                 let before = self.tasks.iter().find(|t| t.id == task.id).map(|t| t.status);
                 // A subagent finishing is not news: its thread says it, when the thread is done (its requests still reach Needs you).
@@ -1625,12 +1605,10 @@ impl App {
                 self.upsert_workspace(workspace);
             }
             Change::RunChanged { run } => {
-                // "All changes" ends where the newest run left the folder: an undo or a new run moves it.
-                let again = self.review.as_ref().is_some_and(|r| r.task == run.task && r.run.is_none() && run.status != RunStatus::Running);
+                // The pane's overview and the thread's changes end where the newest run left the folder: an undo or a new run moves it.
+                let had_changes = self.books.get(&run.task).and_then(|b| b.runs.iter().find(|r| r.id == run.id)).is_some_and(|r| r.undo.as_ref().is_some_and(neko_protocol::RunUndo::changed));
+                self.pane_run_changed(&run, had_changes);
                 self.books.entry(run.task.clone()).or_default().run(run);
-                if again && let Some(r) = self.review.clone() {
-                    self.open_review(&r.task, None);
-                }
             }
             Change::PartChanged { part } => self.books.entry(part.task.clone()).or_default().part(part),
             Change::PartDelta { task, part, text } => {
@@ -1801,16 +1779,11 @@ impl App {
                 }
                 return;
             }
-            Reply::Diff { diff } if matches!(asked, Some(Asked::Receipt)) => {
-                if let Some(run) = diff.run.clone() {
-                    self.receipts.insert(run, diff);
-                }
-                return;
-            }
             Reply::Diff { diff } => {
                 if let Some(r) = &mut self.review
                     && r.task == diff.task
                     && r.run == diff.run
+                    && r.source == diff.source
                 {
                     r.error = None;
                     // One file opens by itself; more stay folded until the person opens them.
@@ -1826,6 +1799,11 @@ impl App {
                 if let Some(r) = &mut self.review {
                     r.patches.insert(file.path.clone(), file);
                 }
+                self.copy_diff_if_ready();
+                return;
+            }
+            Reply::Overview { overview } => {
+                self.take_overview(overview);
                 return;
             }
             Reply::Error { message, .. } if matches!(asked, Some(Asked::Diff)) => {

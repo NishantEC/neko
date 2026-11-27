@@ -73,6 +73,15 @@ pub const SCENES: &[Scene] = &[
     ("task-undo-unavailable", |s| { task_undo_unavailable(s); finish(s) }),
     ("task-undo-dropped", |s| { task_undo_dropped(s); finish(s) }),
     ("undo-anyway", |s| { undo_anyway(s); finish(s) }),
+    ("pane-overview", |s| { pane_overview(s); finish(s) }),
+    ("pane-overview-undone", |s| { pane_overview_undone(s); finish(s) }),
+    ("pane-overview-empty", |s| { pane_overview_empty(s); finish(s) }),
+    ("pane-overview-many", |s| { pane_overview_many(s); finish(s) }),
+    ("pane-changes-uncommitted", |s| { pane_changes_uncommitted(s); finish(s) }),
+    ("pane-changes-not-a-repository", |s| { pane_changes_not_a_repository(s); finish(s) }),
+    ("pane-overview-kittens", |s| { subagents::pane_kittens(s); finish(s) }),
+    ("pane-kitten-live", |s| { subagents::pane_kitten_live(s); finish(s) }),
+    ("pane-kitten-done", |s| { subagents::pane_kitten_done(s); finish(s) }),
     ("review", |s| { review(s); finish(s) }),
     ("review-open", |s| { review_open(s); finish(s) }),
     ("review-all", |s| { review_all(s); finish(s) }),
@@ -773,8 +782,9 @@ pub fn six_cats() -> Vec<Cat> {
 }
 
 /// Home in a house of six with work under way: three busy (two working, one waiting on the person), three free.
-/// A run's files for its receipt, each with its own counts (the run's totals: 42 added, 7 removed).
-fn receipt_files(s: &mut App, run: &str, n: usize) {
+/// The thread's overview as the daemon says it: its folder and branch, and the files all its runs changed, each with its own counts
+/// (the totals: 42 added, 7 removed). The pane's Overview and its Changes tab badge read it.
+fn receipt_files(s: &mut App, _run: &str, n: usize) {
     let all = [("src/toolbar.rs", 24, 4), ("src/menu.rs", 9, 2), ("docs/preferences.md", 3, 1), ("tests/labels.rs", 6, 0)];
     let take: Vec<_> = all.iter().take(n).collect();
     let mut files: Vec<DiffFile> = take.iter().map(|(p, a, r)| diff_file(p, FileStatus::Modified, *a, *r)).collect();
@@ -782,8 +792,9 @@ fn receipt_files(s: &mut App, run: &str, n: usize) {
     let (a, r): (u32, u32) = (files.iter().map(|f| f.added).sum(), files.iter().map(|f| f.removed).sum());
     files[0].added += 42 - a.min(42);
     files[0].removed += 7 - r.min(7);
-    let task = s.tasks[1].id.clone();
-    s.receipts.insert(RunId(run.into()), DiffSummary { task, run: Some(RunId(run.into())), source: neko_protocol::DiffSource::Run, root: String::new(), files, added: 42, removed: 7 });
+    let task = s.open.clone().unwrap_or_else(|| s.tasks[1].id.clone());
+    let changes = DiffSummary { task: task.clone(), run: None, source: neko_protocol::DiffSource::Thread, root: String::new(), files, added: 42, removed: 7 };
+    s.pane.overview.insert(task.clone(), neko_protocol::Overview { task, folder: Some("/Users/example/Library/Application Support/neko/worktrees/x7k2m9qa".into()), branch: Some("neko/x7k2m9qa".into()), changes: Some(changes), uncommitted: None });
 }
 
 fn task_open(s: &mut App) {
@@ -1310,7 +1321,75 @@ fn review_with(s: &mut App, run: Option<&str>, open: &[&str]) {
     for p in open {
         r.open.insert((*p).to_owned());
     }
+    // The Changes tab of the pane, open.
+    let root = r.task.clone();
+    s.pane.choice = Some(true);
+    s.pane.sheet = true;
+    s.pane.tab.insert(root, crate::pane::Tab::Changes);
     s.review = Some(r);
+}
+
+/// The pane open on a tab of the open thread.
+fn open_pane(s: &mut App, tab: crate::pane::Tab) {
+    let Some(root) = s.pane_root() else { return };
+    s.pane.choice = Some(true);
+    s.pane.sheet = true;
+    s.pane.tab.insert(root, tab);
+}
+
+/// The done thread with its changes, Overview open: the figures and files, Review and Undo, the folder and branch, and the usage.
+fn pane_overview(s: &mut App) {
+    task_undo(s);
+    open_pane(s, crate::pane::Tab::Overview);
+}
+
+/// The same, undone: the figures are quiet, the one line says so, and Redo is offered.
+fn pane_overview_undone(s: &mut App) {
+    task_undone(s);
+    open_pane(s, crate::pane::Tab::Overview);
+}
+
+/// A thread nothing has happened in: Overview says so in one quiet line.
+fn pane_overview_empty(s: &mut App) {
+    task_open(s);
+    s.tasks[1].folder = None;
+    open_pane(s, crate::pane::Tab::Overview);
+}
+
+/// A run that changed many files: five are listed, the rest behind Show all.
+fn pane_overview_many(s: &mut App) {
+    task_undo(s);
+    let task = s.tasks[1].id.clone();
+    let mut files = review_files();
+    files.push(diff_file("src/theme.rs", FileStatus::Modified, 5, 1));
+    let (added, removed) = (files.iter().map(|f| f.added).sum(), files.iter().map(|f| f.removed).sum());
+    if let Some(o) = s.pane.overview.get_mut(&task) {
+        o.changes = Some(DiffSummary { task: task.clone(), run: None, source: neko_protocol::DiffSource::Thread, root: String::new(), files, added, removed });
+    }
+    open_pane(s, crate::pane::Tab::Overview);
+}
+
+/// Changes on its third source: what is not committed in the folder now.
+fn pane_changes_uncommitted(s: &mut App) {
+    task_undo(s);
+    review_with(s, None, &["src/toolbar.rs"]);
+    if let Some(r) = &mut s.review {
+        r.source = neko_protocol::DiffSource::Uncommitted;
+        if let Some(d) = &mut r.summary {
+            d.source = neko_protocol::DiffSource::Uncommitted;
+        }
+    }
+}
+
+/// Changes on Uncommitted for a folder that is not a repository: the daemon's words.
+fn pane_changes_not_a_repository(s: &mut App) {
+    task_undo(s);
+    review_with(s, None, &[]);
+    if let Some(r) = &mut s.review {
+        r.source = neko_protocol::DiffSource::Uncommitted;
+        r.summary = None;
+        r.error = Some("This folder is not a git repository with commits, so there is nothing to compare with.".into());
+    }
 }
 
 fn review(s: &mut App) {

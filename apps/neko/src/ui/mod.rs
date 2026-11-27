@@ -32,6 +32,7 @@ pub mod response;
 pub mod scroll_area;
 pub mod segmented_control;
 pub mod select;
+pub mod sheet;
 pub mod shimmer;
 pub mod sidebar;
 pub mod split;

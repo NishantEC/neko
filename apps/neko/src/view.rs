@@ -16,11 +16,12 @@ use crate::icons;
 use crate::state::{App, Confirm, Effect};
 use crate::ui::agent::{PressTx, Status, icon_button};
 use crate::ui::alert_dialog::AlertDialog;
-use crate::ui::base::{Shape, Size, States, Theme, glyph, paint, paint_state};
+use crate::ui::base::{Shape, Size, States, Theme, paint, paint_state};
 use crate::ui::button::Button;
 use crate::ui::dialog::Dialog;
 use crate::ui::dropdown_menu::{DropdownMenu, DropdownMenuItem};
 use crate::ui::input::Input;
+use crate::ui::split::{Region, Split};
 use crate::ui::tooltip::Tooltip;
 
 /// The header band's height, shared by the sidebar and the content.
@@ -132,8 +133,29 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     };
     let page = page_swap(page);
     let content = col().key("content").role("main").label(main_label(s)).grow(1.0).min_w(0.0).h_full().fill(t.c.page.bg).child(content_band(s, &t, if shown { 0.0 } else { lights }, &mut layer)).child(page);
+    // A thread's right pane: docked beside the conversation (a region the person can drag), or a sheet over its right edge.
+    let main = match s.pane_root() {
+        Some(thread) if !s.pane_is_sheet() && s.pane_docked_open() => {
+            let side = crate::pane_view::pane(s, &t, &thread, &mut layer);
+            let split = Split::<App>::new("window", "Window regions")
+                .center(content)
+                .right(Region::new(side).name("details").width(s.pane.width).min(crate::pane::MIN_WIDTH).max(crate::pane::MAX_WIDTH).max_fraction(crate::pane::MAX_FRACTION).default(crate::pane::DEFAULT_WIDTH).collapsible(true))
+                .center_min(crate::pane::CENTER_MIN)
+                .on_resize(|s: &mut App, _, w| s.set_pane_width(w))
+                .on_collapse(|s: &mut App, _, hidden| s.set_pane_open(!hidden))
+                .build(&t);
+            col().key("window-main").grow(1.0).min_w(0.0).h_full().child(split)
+        }
+        Some(thread) => {
+            if s.pane.sheet {
+                crate::pane_view::sheet(s, &t, &thread, &mut layer);
+            }
+            content
+        }
+        None => content,
+    };
     dialogs(s, &t, &mut layer);
-    crate::ui::base::overlay_root(root.child(content), layer)
+    crate::ui::base::overlay_root(root.child(main), layer)
 }
 
 /// How a page of the content (Home, a task's conversation, Review, a cat's page, Needs you, Settings) comes and goes: it fades in, and when another page replaces it, it is gone in
@@ -211,9 +233,9 @@ pub const NARROW_BAND: f32 = 700.0;
 /// The least room the band's title keeps before anything else does.
 pub const TITLE_MIN: f32 = 140.0;
 
-/// The content's band: the sidebar's button when it is folded; in a task, its title, the run counter, its project, its folder and
-/// branch with Reveal in Finder, and its menu. A task a cat was given (before threads needed none, or by a round) names the cat in
-/// words, quietly, after the title: no face leads the band.
+/// The content's band: the sidebar's button when it is folded; in a task, its title, the run counter, its project, its menu, and the
+/// pane button while the pane is shut (the folder and the branch are in the pane's Overview). A task a cat was given (before threads
+/// needed none, or by a round) names the cat in words, quietly, after the title: no face leads the band.
 fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     let mut band = row().key("content-band").w_full().h(BAND).center_y().px(12.0).gap(t.space.at(2.5)).window_drag();
     if !s.sidebar_shown() {
@@ -222,7 +244,7 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     let Some(task) = s.open_task().filter(|_| !s.settings_open && !s.needs_open && !s.rounds_open && !s.briefing_open && s.page_cat().is_none()) else { return band };
     let sub = task.subagent.is_some();
     // The title always wins the room: in a narrow content area the folder line goes first and the workspace's name shortens.
-    let room = s.width.map_or(f32::MAX, |w| w - if s.sidebar_shown() { SIDEBAR + 2.0 * crate::sidebar::INSET + 1.0 } else { 0.0 });
+    let room = s.width.map_or(f32::MAX, |w| w - if s.sidebar_shown() { SIDEBAR + 2.0 * crate::sidebar::INSET + 1.0 } else { 0.0 } - if s.pane_visible() && !s.pane_is_sheet() { s.pane.width + 1.0 } else { 0.0 });
     let narrow = room < NARROW_BAND;
     band = if sub {
         // A subagent's band says whose conversation it is: `Fix login / Kitten 1`, the thread's title a way back.
@@ -255,13 +277,15 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
                 .max_w(if narrow { 110.0 } else { 180.0 }),
         );
     }
-    if !narrow
-        && let Some(place) = task_folder(s, t, room)
-    {
-        band = band.child(place);
-    }
     // A subagent is removed with its thread, never alone: it has no menu.
-    if sub { band } else { band.child(task_menu(s, t, task, layer)) }
+    if !sub {
+        band = band.child(task_menu(s, t, task, layer));
+    }
+    // The pane's own button is in its header while it is docked and open; otherwise it is here, the band's last control.
+    if !(s.pane_visible() && !s.pane_is_sheet()) {
+        band = band.child(crate::pane_view::toggle_button(t, s.pane_visible()));
+    }
+    band
 }
 
 /// The task's menu at the band's right: Remove task…, off while its agent works.
@@ -278,7 +302,10 @@ fn task_menu(s: &App, t: &Theme, task: &neko_protocol::Task, layer: &mut Vec<El>
         .item({
             let id = task.id.clone();
             let any = s.book().is_some_and(|b| b.runs.iter().any(|r| r.undo.as_ref().is_some_and(neko_protocol::RunUndo::ready)));
-            DropdownMenuItem::new("All changes").disabled(!any).on_select(move |s: &mut App| s.open_review(&id, None))
+            DropdownMenuItem::new("All changes").disabled(!any).on_select(move |s: &mut App| {
+                s.open_task_id(&id);
+                s.open_changes_source(neko_protocol::DiffSource::Thread);
+            })
         })
         .item(DropdownMenuItem::new("Remove thread…").danger(true).disabled(s.open_is_working()).on_select(move |s: &mut App| s.ask_remove_task(&id)));
     menu_named(menu, t, layer, "Thread options", open)
@@ -439,47 +466,6 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
         buttons.push(Button::new("refusal-ok", "OK").on_press(|s: &mut App| s.refusal = None).build(t));
         Dialog::new("refusal", r.title.clone()).description(r.words.clone()).footer(buttons).width(400.0).open(true).on_close(|s: &mut App| s.refusal = None).build(t, layer);
     }
-}
-
-/// Where the open task works: its newest run's folder (else the folder chosen for it), and the run's branch.
-pub fn working_folder(s: &App) -> Option<(String, Option<String>)> {
-    let task = s.open_task()?;
-    let run = s.book().and_then(|b| b.runs.iter().rev().find(|r| !r.workdir.is_empty()));
-    match run {
-        Some(r) => Some((r.workdir.clone(), r.branch.clone())),
-        None => task.folder.clone().map(|f| (f, None)),
-    }
-}
-
-/// The task's folder, once and quietly, at the band's right: the path shortened with `~` (cut in its middle when long), the branch
-/// beside it, and Reveal in Finder.
-fn task_folder(s: &App, t: &Theme, room: f32) -> Option<El> {
-    let (folder, branch) = working_folder(s)?;
-    let shown = crate::task_view::show_path(&folder, "", s.home.as_deref());
-    let label = match &branch {
-        Some(b) => format!("Working folder: {shown}, on branch {b}"),
-        None => format!("Working folder: {shown}"),
-    };
-    let mut place = row()
-        .key("task-folder")
-        .min_w(0.0)
-        .shrink()
-        .role("group")
-        .label(label)
-        .help(folder.clone())
-        .gap(t.space.at(1.5))
-        .center_y()
-        .child(glyph(&crate::ui::icons::FOLDER, t.control.icon_sm, t.ink_faint()))
-        // The title leads: the path is quiet (the small step, the faintest ink that reads) and short, cut in its middle.
-        .child(text(shown).key("task-folder-path").font(t.ty.xs).color(t.ink_faint()).truncate_middle().min_w(0.0).shrink().max_w(if room < 900.0 { 112.0 } else if s.sidebar_shown() { 168.0 } else { 220.0 }).a11y_hidden());
-    // Under 900 points the branch has no room to be read whole (the receipt names it too): the path stays, quietly.
-    if let Some(b) = branch.filter(|_| room >= 900.0) {
-        place = place.child(glyph(&crate::ui::icons::COMMIT, t.control.icon_sm, t.ink_faint())).child(text(b).key("task-folder-branch").font(crate::ui::agent::mono(t, t.ty.xs)).color(t.ink_faint()).truncate_middle().max_w(112.0).a11y_hidden());
-    }
-    let reveal: PressTx<App> = Rc::new(move |_: &mut App, tx: &mut rune::Tx| {
-        let _ = tx.reveal_path(&folder);
-    });
-    Some(place.child(icon_button(t, "task-folder-reveal", "Reveal in Finder", &crate::ui::icons::FOLDER_OPEN, None, false, Some(reveal))))
 }
 
 /// A rune-ui DropdownMenu, its open surface named for assistive technology (the kit's own leaves the modal surface unnamed; the

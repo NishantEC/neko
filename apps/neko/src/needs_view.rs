@@ -141,7 +141,7 @@ pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, po
         Need::Plugin { ask } => if ask.changed { "A plugin changed" } else { "A plugin asks" }.to_owned(),
     };
     let lead = if let Need::Plugin { .. } = &item.need {
-        el().key(format!("{key}-mark")).size(LEAD, LEAD).center().child(crate::ui::base::glyph(&crate::icons::PLUGIN, t.control.icon, crate::plugins_view::tile_ink(t))).a11y_hidden()
+        el().key(format!("{key}-mark")).size(LEAD, LEAD).center().child(crate::ui::base::glyph(&crate::ui::icons::PLUG, t.control.icon, crate::plugins_view::tile_ink(t))).a11y_hidden()
     } else {
         let ink = if failed { t.c.danger.fg } else { t.c.warning.fg };
         el().key(format!("{key}-mark")).size(LEAD, LEAD).center().child(el().size(8.0, 8.0).radius(4.0).fill(ink)).a11y_hidden()
