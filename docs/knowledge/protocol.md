@@ -1,6 +1,6 @@
 # The protocol (S1, 2026-11-26)
 
-`crates/neko-protocol` is the contract between a screen and the daemon. Version 15 (the right pane). Version 15 added a diff's `source` (`run`, the default; `thread`; `uncommitted`) to `get_diff`, `get_diff_file` and `DiffSummary`, and `get_overview` with its reply `overview` (`{task, folder?, branch?, changes?, uncommitted?}`): see `undo.md`. No new event: a screen asks for the overview again when a run of the thread changes (`run_changed`). The store is unchanged by it (still 11). The words the app shows say thread and project; the field and message names below keep `task` and `workspace` (`threads.md`).
+`crates/neko-protocol` is the contract between a screen and the daemon. Version 16 (steer, queue, interrupt: `composer.md`). Version 16 added `mode` to `follow_up`, `send_queued_now`, `discard_queued`, `Transcript.queued` and `queue_changed`, and `Settings.queue_first`; the store gained one table (12). Version 15 (the right pane). Version 15 added a diff's `source` (`run`, the default; `thread`; `uncommitted`) to `get_diff`, `get_diff_file` and `DiffSummary`, and `get_overview` with its reply `overview` (`{task, folder?, branch?, changes?, uncommitted?}`): see `undo.md`. No new event: a screen asks for the overview again when a run of the thread changes (`run_changed`). The words the app shows say thread and project; the field and message names below keep `task` and `workspace` (`threads.md`).
 
 ## Shape
 
@@ -29,7 +29,9 @@
 | `get_task {task}` | `task {task}`, or `error not_found` |
 | `subscribe` | `subscribed {revision}`; then an event for every change |
 | `get_transcript {task}` | `transcript {transcript}`: the task, its runs, parts and permission requests |
-| `follow_up {task, words, answering?}` | `ok`; a running agent gets the words, else a new run resumes the conversation. `busy` while it starts. With `answering` (a run): only while the task is still `asked` on that run, else `already_answered` |
+| `follow_up {task, words, answering?, mode?}` | `ok`; with no run going every mode starts a run that resumes the conversation. While a run goes, `mode` `steer` (the default) writes the words into the agent and lists them as steered, `queue` holds them for the next run, `interrupt` stops the turn and starts a run with them (`composer.md`). `busy` while the agent starts or will not take them, `refused` past 50 waiting. With `answering` (a run): only while the task is still `asked` on that run, else `already_answered` |
+| `send_queued_now {task, queued}` | `ok` (a queued message steers into the running agent, or starts a run when none goes); `not_found` when it was already sent or discarded; `refused` for one already on its way |
+| `discard_queued {task, queued}` | `ok` (Discard, and Edit, whose words the screen keeps); `not_found`; `refused` for a steered or interrupting one |
 | `list_needs` | `needs {items}`: what waits for the person, oldest first, grouped by workspace (`needs-you.md`) |
 | `stop_task {task}` | `ok`, also when nothing runs |
 | `mark_read {task}`, `mark_unread {task}` | `task {task}` (whole, with its new `last_read_ms`), or `not_found`. Nothing changes, and nothing is pushed, when the thread is already so |
@@ -74,7 +76,7 @@ never guessed.
 ## Events
 
 `task_created`, `task_updated`, `task_removed`, `workspace_added`, `workspace_updated` (renamed, removed, restored, located, moved:
-the whole row), `run_changed`, `part_changed`, `permission_changed`, `settings_changed`, `needs_changed` (the whole Needs you list, derived, sent when it differs), `cat_added`, `cat_updated` (the whole cat), `round_added`, `round_updated` (the whole round: edited, switched, run, skipped, braked, a new next time), `round_removed`, `rounds_paused`, `briefing_changed` (the whole briefing, derived, sent when its content differs), `briefing_settings_changed`, `briefing_due {counts}` (the morning notification is due: not stored, revision is the last stored change), `plugin_added`, `plugin_updated` (the whole plugin: approved, declined, changed, switched, set up, checked, left to other cats), `plugin_removed`, each with `revision`: the
+the whole row), `run_changed`, `part_changed`, `permission_changed`, `settings_changed`, `needs_changed` (the whole Needs you list, derived, sent when it differs), `cat_added`, `cat_updated` (the whole cat), `round_added`, `round_updated` (the whole round: edited, switched, run, skipped, braked, a new next time), `round_removed`, `rounds_paused`, `briefing_changed` (the whole briefing, derived, sent when its content differs), `briefing_settings_changed`, `briefing_due {counts}` (the morning notification is due: not stored, revision is the last stored change), `plugin_added`, `plugin_updated` (the whole plugin: approved, declined, changed, switched, set up, checked, left to other cats), `plugin_removed`, `queue_changed {task, queued}` (the whole list of messages waiting above a thread's composer: queued, steered, interrupting), each with `revision`: the
 store's event sequence number. `part_delta {task, part, text}` appends streamed words; it goes only to connections watching the
 task, is not stored as an event, and carries revision 0. A screen that made the task may see the event before its own reply; it
 keeps everything by id, so nothing doubles.

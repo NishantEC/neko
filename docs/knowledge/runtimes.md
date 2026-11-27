@@ -10,11 +10,11 @@ Claude Code. Codex is listed in Settings but not run yet.
 - `detect()`: found or not, the path, the version, signed in or not, and which login. It spends nothing.
 - `start(StartSpec)`: the words, the folder, the permission mode and a conversation to resume. It returns a `Control` and a
   stream of `AgentEvent`s.
-- `Control::steer` (more words while it runs), `Control::answer` (a permission decision), `Control::stop`.
+- `Control::steer` (more words while it runs), `Control::answer` (a permission decision), `Control::stop`, `Control::interrupt` (end the turn, keep the conversation; the default is `stop`).
 
 The events are Neko's own: `Started` (conversation id, model), `TextDelta`, `TextDone`, `ThinkingDelta`, `ThinkingDone`,
 `ToolStarted`, `ToolFinished`, `PermissionAsked` (with an `Action`: read, edit, command, network, other), `PermissionWithdrawn`,
-`Usage`, and `Finished` (done, stopped, or failed with a reason). The stream ends with exactly one `Finished`. Stop ends it within
+`Usage`, and `StepBegan` and `StepEnded` (a model call began or ended: how a steered message is known to be read), and `Finished` (done, stopped, interrupted by the person, or failed with a reason). The stream ends with exactly one `Finished`. Stop ends it within
 a second.
 
 `tests/contract.rs` runs one suite against an in-process fake runtime and against Claude Code driven by the fake CLI. A new runtime
@@ -73,6 +73,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose --inc
 - The `result` line ends a turn: usage, `total_cost_usd`, the model from `modelUsage`, and whether it failed. How full the context
   is comes from the last top-level `assistant` message's `usage` (input, cache read and cache written); the window from
   `modelUsage[…].contextWindow` when it is there. Once every message sent has its result, Neko closes stdin and the CLI ends.
+- Words sent while a run goes are steered, queued or sent as an interrupt (`composer.md`). A steer is one more `user` line on stdin; an interrupt is `{"type":"control_request","request_id":"neko-interrupt-N","request":{"subtype":"interrupt"}}` (the Agent SDK's form), after which the turn's `result` ends the run and stdin closes; the words start a new run. Neither is measured on the real CLI yet.
 - A follow-up after a run is a new run with `--resume` and the conversation id the last run reported. So is a wake: a thread that rests
   while its subagents work is resumed with their reports as one user message (`subagents.md`).
 - A `rate_limit_event` becomes `AgentEvent::RateLimit {status, resets_at}`; the daemon holds back what it starts by itself while the
@@ -140,7 +141,7 @@ and its last stderr line when it is plain words), a failure the CLI reported, 30
 
 `crates/neko-core/src/bin/neko-fake-claude.rs` speaks the same protocol from scripts picked by `[fake:NAME]` in the words: plain,
 long, thinking, tools, permission, destructive, outside, slow, spawn, spawn-stay, crash, limit, signin, stall, hook-shell,
-hook-twice, hook-read, hook-destructive, hook-no-verdict, delegate (the lines after it, played through the MCP servers `--mcp-config` named, really started: `mcp SERVER TOOL {json}`, `poll N`, `stay N`; steps may also be one line apart by ` ; `), woken (a message that begins `<neko-wake`), plugin-tool:SERVER:TOOL, real (empty thinking, words between tools, a long path, a check that
+work (`work:SECS[:step=MS][:deaf]`: steps a quarter second apart; a user message that arrives meanwhile is read at the next step and gets its own result; an `interrupt` control request ends the turn at once, `deaf` ignores it), hook-twice, hook-read, hook-destructive, hook-no-verdict, delegate (the lines after it, played through the MCP servers `--mcp-config` named, really started: `mcp SERVER TOOL {json}`, `poll N`, `stay N`; steps may also be one line apart by ` ; `), woken (a message that begins `<neko-wake`), plugin-tool:SERVER:TOOL, real (empty thinking, words between tools, a long path, a check that
 exits 1), and a resumed conversation. `NEKO_FAKE_RECORD` names a file it appends its arguments, the content of every `--mcp-config` file it was given (read at start, since the file goes with the run) every stdin line and, for `delegate`, every MCP tool call it made (`{"mcp_call": {server, tool, ms, error, text}}`) to. `plugin-tool:SERVER:TOOL` calls `mcp__SERVER__TOOL` through the permission route, or fails at once with "No such tool available" when the config gave no such server. Like Claude Code it reads `permissions.allow` from `$HOME/.claude/settings.json` and runs the `PreToolUse`
 hooks given with `--settings` as the documentation says. Tests give it a HOME of their own. No test runs the real CLI.
 
@@ -172,7 +173,7 @@ fake CLI proves Neko's side only.
 3. Whether a mod or plugin that approves calls (`tool.check`) can approve a call the hook denied in this setup.
 4. `--permission-mode default` is not in 2.1.331's list of choices; it worked, but may be an alias that goes away (`manual`?).
 5. `modelUsage[…].contextWindow` in the `result` line. Without it the ring assumes a 200K window and says so.
-6. Whether a second `user` message while a turn runs gets its own `result` (Neko closes stdin when the counts match).
+6. Whether a second `user` message while a turn runs gets its own `result` (Neko closes stdin when the counts match). The app can steer since S5, so this matters now: see `composer.md`, "Still not sure".
 7. `--include-partial-messages`: `message_start` ids matching the `assistant` message ids, so words are not shown twice.
 8. `result.usage`: `cache_creation_input_tokens` counted as input.
 9. Usage limit words: `rate_limit_event` with `status: rejected` and `resetsAt`, and the result text.

@@ -1,0 +1,103 @@
+# The composer while the agent works (2026-11-27)
+
+Words typed while a run goes can reach the agent three ways, and what has not yet gone waits above the composer. Protocol 16, store 12.
+The app's side is `apps/neko/src/composer.rs`; the daemon's is `crates/neko-daemon/src/queue.rs` and `crates/neko-core/src/queue.rs`.
+The scenarios are `steer`, `queue` and `interrupt` (`qa.md`).
+
+## The three modes
+
+| Key (while a run goes) | Mode | What the daemon does | What reaches the CLI |
+| --- | --- | --- | --- |
+| Return | **Steer** | Writes the words into the running agent's open input and records them in the transcript at once. A row waits above the composer until a later model call reads them. | One more `user` line on the same process's stdin. No run starts. |
+| ⌥Return | **Queue** | Keeps the words in the thread's list. When the run ends well they start the next run, one message per run, in order. | Nothing now; later a new run (`--resume`) whose first `user` line is the words. |
+| ⌘Return | **Interrupt** | Marks the run as interrupted, sends the CLI's interrupt, and when the turn is over starts a new run with the words at once. | A `control_request` `{"subtype":"interrupt"}` on stdin; when the turn has ended, a new process (`--resume`) with the words. |
+
+At rest (no run going, or a thread that only waits on its kittens) every mode just sends: a new run resumes the conversation with the
+words. ⌘Return also sends at rest; ⌥Return at rest stays a new line, as it is in every text field, so it never sends by surprise.
+
+Settings ▸ Agents ▸ "While the agent works" swaps the first two (Return queues, ⌥Return steers). Interrupt is always ⌘Return. The
+setting is `Settings.queue_first`; only the screen reads it (it chooses the mode it sends), the daemon never does. With no mode named,
+`follow_up` steers, as it always did.
+
+The Send button is Stop while the box is empty and Send once there are words. A chip beside it (`send-mode`) names what Return does
+and opens a menu with the three ways and their keys; choosing one sends in that mode. Under the box a quiet line says what each key
+does ("Return steers · ⌥Return queues · ⌘Return interrupts") while words are typed. The placeholder says "Steer the agent (⌥↩ to queue)".
+Escape stops the agent whatever is typed, unless a request waits (then it denies, as before).
+
+## What waits above the composer
+
+One block with a hairline between rows, each one line, in the order the messages were sent:
+
+- **Steered** ("Steered · waiting to be read"): in the agent already. No actions: it cannot be taken back.
+- **Queued**: Send now (steers it into the running agent, or starts a run when none goes), Edit (the message leaves the list and its
+  words come back into the composer, in front of what is there) and Discard (×).
+- **Interrupting**: the turn is being stopped; no actions. A second ⌘Return while one is going waits as a Queued message.
+- More than two queued fold behind one line, "3 queued", which opens on demand. (The spec says "two or more"; two rows are small
+  enough to read, so the fold starts at three.)
+
+The list is the daemon's (`queued` table, `Transcript.queued`, `queue_changed {task, queued}` with the whole list). It is stored, so
+what was queued survives a restart. After a restart nothing is sent by itself: an interrupted run starts nothing, and an interrupt that
+never went through becomes a queued message; steered messages were written (the transcript has them) and are dropped from the list.
+
+↑ in an empty composer brings back the newest queued message to edit, else the last message sent; ↓ gives the (empty) draft back while
+the words are unchanged.
+
+## When a queued message is sent
+
+When a run ends (`queue::after_run`, before anything else is decided about the thread):
+
+- It ended **done**, or with a question, or **interrupted** by the person: the interrupting message first, else the oldest queued one
+  starts a run (`runs::start`). The rest stay for the next end.
+- It ended **stopped** or **failed**: nothing is sent. The list is held for the person (Send now, Edit, Discard still work). An
+  interrupt that was cut short by Stop becomes a queued message. Nothing the person did not ask for runs after a Stop.
+- Steered rows are removed: the run is over, so whatever it read it read.
+
+A run that starts from the list skips `subagents::ended` for the run that just ended: the thread is not resting, and a kitten's
+report is made when its last run ends.
+
+## Interrupt, in detail
+
+`queue::interrupt`: the first interrupt of a run sets `Active.interrupting`, adds an Interrupting row and calls `Control::interrupt`.
+The Claude Code runtime writes the interrupt control request (`claude/mod.rs`) and treats the turn's `result` as the end (it closes
+stdin at once, so the process ends; the result's error text is not a failure). A CLI that does not end the turn within five seconds
+(`NEKO_INTERRUPT_GRACE_MS` shortens it) is stopped through the run guard by a small watcher thread; the conversation is resumed all
+the same, because `--resume` needs only the session id. The run ends **Interrupted**: the fold reads "Interrupted after 41s", the run's
+reason says "You interrupted it with a new message", and the new run starts with the words. A Stop pressed meanwhile wins: the run is
+Stopped and the words wait as a queued message.
+
+## How a steered message is known to be read
+
+The CLI does not say when it reads stdin. Neko watches model calls: `StepBegan` (a top-level `message_start`) and `StepEnded`
+(`message_stop`). A steer written while a call goes cannot be in it, so it waits for the next call to begin; one written between calls
+is read by the next. That is a good guess, not a proof: the CLI's `message_start` arrives a moment after the call began, so a steer
+written in that moment can be marked read one call early. The row only says "waiting to be read"; the words are in the transcript
+either way, and the row goes when the run ends.
+
+## What the activity bar is
+
+One thin line (32 pt) above the composer, shown only while something besides the run itself goes: a kitten of this thread that works
+or waits its turn, or a command that has run for more than five seconds (a Bash step of the running run). "2 kittens working · 1
+command running", with a caret; it opens to one line each, with × on the agent (the same as Stop) and on each kitten (`stop_task` on
+the kitten: it stops with its own kittens). A command has no × of its own: Neko cannot stop one step, only the run. Pressing a kitten
+opens its tab in the right pane. The pane's Overview keeps the detail (titles, states, the tree); the bar is the quick way to see and
+to stop, and is not shown for a run that only works, since the conversation already says so.
+
+Not seen by Neko: a command the agent started in the background and left (`&`, a background shell). The CLI does not report it, and
+the run guard ends it with the run. Timers and watches (S13) will list here when they exist.
+
+## Not here yet
+
+- `message_subagent` (the MCP tool that gives a kitten the same three modes). `queue::send` takes a task and a mode and works for a
+  kitten's task as it is, so the tool is a small step; it waits for S7, which needs it to answer a kitten's question.
+- Send now as an interrupt (it steers), and an `interrupt` of a kitten from the activity bar (× stops).
+
+## Still not sure: check with the real CLI
+
+1. That the `interrupt` control request ends the turn and the process stays resumable (the fake models it: an error result, the
+   process then ends when stdin closes). If the real CLI answers differently the watcher stops it after five seconds and the words
+   still run, so the worst case is a five second wait.
+2. That a `user` line written mid-turn is read at the next step, and **whether it gets a `result` of its own**. Neko closes stdin
+   when every message sent has a result; if the CLI folds a steered message into the running turn and sends one result, stdin stays
+   open until the stall limit (five minutes of silence) ends the run as failed. The fake gives each message a result. This was already
+   so for a steer before S5 (`runtimes.md`, open question 6), and the app could not steer before S5, so it is now reachable.
+3. That a `message_start` follows a step the CLI took after reading a steered message (the "read" guess above).

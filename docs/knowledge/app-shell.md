@@ -208,6 +208,15 @@ one display and after unplugging a second, the Dock menu, Help's search field, o
 - **Spell check is on** (`PromptInput::spellcheck(true)`, rune-ui 0.8.1). The system's checker marks a word about a second after
   typing stops.
 - **Send with nothing to send** is a raised button at rest with a faint arrow: off, but still a button. With words it is ink.
+- **While the agent works** (S5, `composer.md`, `composer.rs`): the PromptInput knows one way to send, so the keys that choose a mode
+  are read by `reply-block`, the column round it, with `on_key_preview` (before the text field sees them): Return, ⌥Return and ⌘Return
+  send as steer, queue and interrupt, ↑ and ↓ recall, Escape stops. The button is Stop for an empty box and Send for words (the
+  composer's phase follows the words). Above the box, in this order: `waiting` (the messages waiting, keys `waiting-N`, `waiting-N-send`,
+  `-edit`, `-discard`, `waiting-fold`), then `activity-bar` (and `activity-list` when open: `activity-run`, `activity-kitten-N` with
+  `-stop`, `activity-command-N`); the toolbar has the `send-mode` chip and its menu; under the box `reply-hints`. The keyboard stays in the
+  box after a send. A message the person steered into a run is stored with no run, at a time the run was going; the conversation
+  draws it after that run's block (one run is one block, with one fold and one key), not inside it.
+- **Settings ▸ Agents** has "While the agent works": Return steers (default) or queues.
 
 ## The right pane (S3, 2026-11-27)
 

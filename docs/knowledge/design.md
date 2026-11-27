@@ -152,6 +152,19 @@ A plugin has no face: it is led by a plug (`icons::PLUGIN`, Neko's own, because 
 
 A kitten has a number and no face, so nothing in its look borrows a cat's colour. **The card** is the receipt's material (raised, lit from above in dark) with one row of 56 points per kitten and a hairline between rows, so three kittens are one card, not three. Line 1 is `Kitten 1` (semibold, first ink), its title (second ink, cut at the end), and at the right its mark and word; line 2 is "Shared folder" in the second ink and, quieter, the live last line in the third; Open is a small secondary button. Marks are the kit's neutral ones: the turning ring (second ink) for Working, a hollow ring for Queued, a tick for Done, red only for Failed, amber for a request or a question. The word is the state's only colour: the identity colour for Working, amber, red, else the second ink. **The still ring** is the working ring held still in the second ink: it is what Waiting looks like (the thread's portrait in the sidebar and the Cattains, the waiting line, a cat's list), because a thread that rests is not busy and must not turn. **The wake note** is a centred line in the xs step, second ink, with a hairline each side, the quietest thing in the conversation: it says why the thread is running again, and the report under it is one fold like a step's (closed, a hollow dot, "Report from Kitten 1"), opening to the summary as Markdown in the second ink, the files in mono, one a line, and the branch. **The waiting line** is the conversation's last line: the still ring, "Waiting on", and each name in the identity ink as a link (no button padding, so the sentence reads as one). **The kitten's own view** is the ordinary conversation with its head left out (no portrait, no cat name), a quiet line where the composer was, and Back and Stop as small buttons; its band is `Fix login / Kitten 1`, the thread's title a ghost button and the kitten in the heading's own weight. A request there and in Needs you is led by the number on the plugin tile's quiet ground (4.5:1), never a cat.
 
+## The composer while it works
+
+Quiet, because the person is mid-thought. The messages that wait are **one block** above the box in the hover tint, radius `lg`, one line
+per message (the control height plus four points), a hairline between lines, no border of its own: the kind in medium weight and ink
+muted ("Steered", "Queued", "Interrupting"), the first line of the words in `sm` and ink faint, "waiting to be read" at the right of a
+steered one, and for a queued one the ghost buttons Send now and Edit and a × (Discard). More than two queued fold behind "3 queued"
+and a chevron. The **activity bar** is one line of the same height with no fill: the still ring, "2 kittens working · 1 command
+running" in `sm` ink muted, a chevron; open, a line each (name in ink, the title faint, how long at the right, a × that stops it), under
+the bar and above the box. The **send mode** is a chip in the toolbar ("Steer" and the up-down mark), and a faint hint line under the
+box ("Return steers · ⌥Return queues · ⌘Return interrupts") shows only while words are typed and the agent works. Nothing else changes: at
+rest the composer is what it was. Rendered round three of three (`composer-*` and `activity-*` scenes); the first round had a stripe per
+message and a fill per row, which read as three small cards, so they became one block.
+
 ## Faces
 
 The daemon gives each cat one of eight face ids (`neko_protocol::cats::FACES`); a new cat gets the first no active cat has, so a

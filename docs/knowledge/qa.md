@@ -80,6 +80,24 @@ All four start the daemon with `NEKO_FAKE_RECORD` and use the fake CLI's `[fake:
 
 The band of a kitten is a row (key `band-title`, its name the whole breadcrumb), so selectors for it use `label` or `name`, not `text`; the thread's final words are matched on "I read 2" because Markdown isolates the "(s)".
 
+## The composer scenarios
+
+Headless, with `NEKO_FAKE_RECORD`; they use the fake CLI's `work` script (`work:SECS:step=MS`: a step per message, a user message that
+arrives is read at the next step, an interrupt ends the turn) and check what reached the CLI by counting lines of the record
+(`"stdin":{"message"` is a user message; `"subtype":"interrupt"` the interrupt; `resume` a resumed start).
+
+`steer`: Return while the thread works. The row "Steered, waiting to be read: …" has no actions, goes when the next step reads it, the
+agent's words say it read the message, and the record has two user messages and one start (one process took both).
+`queue`: ⌥Return twice. Two Queued rows with Send now, Edit and Discard; the record still has only the first words; Discard drops the
+second; when the turn ends the first starts a resumed run ("You said: Second message"), nothing waits, the discarded one never ran
+(two user messages, one resume). `interrupt`: ⌘Return with new words. The CLI's interrupt request is in the record (once), the first
+run folds as "Interrupted after 2s", the new words run at once and the thread ends done in the same conversation (one resume), long before
+the job's 120 seconds. Typing the words first shows the mode chip and the key hints (`07-typed.png`).
+
+The same three are checked without the app, against the real daemon, in `crates/neko-daemon/tests/composer.rs` (steer, queue order and
+Discard, interrupt, a CLI that does not hear the interrupt, a second interrupt, Stop holding the queue, Send now, a restart, every mode
+at rest).
+
 ## The New thread scenarios
 
 Headless. Two driver steps serve them. `daemon` sends a request (JSON) straight to the daemon; `save_as` keeps a round or task id
