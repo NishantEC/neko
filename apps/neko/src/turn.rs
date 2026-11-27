@@ -313,10 +313,12 @@ const RECEIPT_FILES: usize = 5;
 #[allow(clippy::too_many_arguments)]
 pub fn receipt(s: &App, t: &Theme, r: &Run, parts: &[&Part], o: &Offer, changed: Option<neko_protocol::Changes>, name: &str, face: &str) -> Option<El> {
     let failed = r.status == RunStatus::Failed;
-    if changed.is_none() && r.branch.is_none() && !failed && o.line.is_none() && !o.review {
-        return None;
-    }
     let key = format!("run-{}", r.id.0);
+    // A card is earned by changed files or a failure. A run that changed nothing gets no card: no "worked on a branch", no branch
+    // name; what undo has to say (it could not keep this run, say) is one quiet line under the answer.
+    if changed.is_none() && !failed {
+        return o.line.clone().map(|line| text(line).key(format!("{key}-note")).role("note").font(t.ty.sm).color(t.ink_faint()).wrap().min_w(0.0));
+    }
     let files = |n: u32| format!("{n} file{}", if n == 1 { "" } else { "s" });
     let sentence = match (r.status, changed) {
         (RunStatus::Failed, _) => format!("{name} could not finish"),
@@ -326,7 +328,7 @@ pub fn receipt(s: &App, t: &Theme, r: &Run, parts: &[&Part], o: &Offer, changed:
         (RunStatus::Interrupted, None) => format!("{name} was interrupted"),
         (_, Some(c)) if o.undone => format!("{name} changed {}, now undone", files(c.files)),
         (_, Some(c)) => format!("{name} changed {}", files(c.files)),
-        _ => format!("{name} worked on a branch"),
+        _ => format!("{name} finished"),
     };
     let pad = t.space.at(1.5);
     let mut facts = row().key(format!("{key}-facts")).gap(t.space.at(2.0)).center_y();

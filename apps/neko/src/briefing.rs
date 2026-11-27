@@ -215,6 +215,7 @@ impl App {
         // The window may have been away: what happened since is asked for again.
         self.send(Request::GetBriefing { from_ms: None, to_ms: None });
         self.focus_next = self.first_briefing_stop();
+        self.focus_quiet = true;
     }
 
     /// Escape on the Briefing: back to the task the person came from, else Home.

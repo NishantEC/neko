@@ -221,7 +221,8 @@ pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         changed = true;
     }
     if let Some(key) = s.focus_next.take() {
-        tx.focus(key, true);
+        let ring = !std::mem::take(&mut s.focus_quiet);
+        tx.focus(key, ring);
     }
     // A request appears in the open task: the keyboard leaves the composer, so Escape answers it no and Return presses nothing
     // the person did not choose (the request's own answers are a Tab away).

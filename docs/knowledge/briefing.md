@@ -30,7 +30,7 @@ set back) is taken as now.
    waiting for the person (those are in Needs you) and not working again (those are in Still working). Newest first, at most 50
    (the rest are counted, "and 12 more finished earlier"). Each: the cat, how it ended (`finished`, `could not finish`, `was
    stopped`, `was interrupted`), when, the title, **the first sentence of the cat's final answer**, the files its run changed with
-   added and removed (the run's own changes when its checkpoints say, else its branch's), the branch, whether it was **undone
+   added and removed (the run's own changes when its checkpoints say, else its branch's; the branch's name is left to the task), whether it was **undone
    since**, and what the run's card offers (`neko_protocol::undo::offers` over all the task's runs: Review, Undo or Redo). A run
    that did not finish and said nothing gives its reason instead of a sentence.
 3. **Rounds**: every line the scheduler wrote in the window for a due time (ran with its task and where it stands, skipped, missed,

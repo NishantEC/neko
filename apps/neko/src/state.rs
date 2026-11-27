@@ -247,6 +247,8 @@ pub struct App {
     pub needs_notice: Option<String>,
     /// The element to focus at the next frame (the next item after one is answered).
     pub focus_next: Option<String>,
+    /// The next focus move draws no ring: a page opened (by pointer or shortcut) puts the keyboard on its first item quietly.
+    pub focus_quiet: bool,
     /// The request in the open task the window last moved the keyboard for (a new one takes it out of the composer).
     pub request_seen: Option<PermissionId>,
     /// The notification model and its poster (a recorder everywhere but the real window).
@@ -498,6 +500,7 @@ impl Default for App {
             needs_replies: HashMap::new(),
             needs_notice: None,
             focus_next: None,
+            focus_quiet: false,
             request_seen: None,
             notifier: Notifier::default(),
             front: true,
@@ -795,6 +798,7 @@ impl App {
         self.needs_notice = None;
         self.follow_open();
         self.focus_next = self.visible_needs().first().map(|i| need_key(&i.id));
+        self.focus_quiet = true;
     }
 
     /// Escape in the list: back to the task the person came from, else Home.

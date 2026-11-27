@@ -470,13 +470,8 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     if let Some(ring) = context_ring(s, t, book, layer) {
         composer = composer.tool(ring);
     }
-    // The composer carries the cat's portrait at its left, in the margin, so the field keeps the reading edge.
-    let mut composer = col().w_full().child(composer.build(t));
-    // Where the margin has room for it (not in a narrow window, where the column fills the width).
-    let margin = s.width.unwrap_or(1200.0) - if s.sidebar_shown() { crate::view::SIDEBAR + 2.0 * crate::sidebar::INSET } else { 0.0 } - COLUMN;
-    if margin / 2.0 >= 32.0 + t.space.at(3.0) + inset {
-        composer = composer.child(crate::faces::portrait(t, "reply-face", s.cat_face(&task.cat), 32.0).absolute(-(32.0 + t.space.at(3.0)), t.space.at(2.0)));
-    }
+    // The composer stands alone: who will answer is already in the band and in its placeholder ("Reply to miso").
+    let composer = col().w_full().child(composer.build(t));
     let mut foot = col().key("reply-area").w_full().max_w(COLUMN).gap(t.space.at(2.0)).child(composer);
     if let Some(line) = crate::view::slow_line(s, t) {
         foot = foot.child(line);

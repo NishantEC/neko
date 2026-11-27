@@ -15,8 +15,7 @@ use rune_ui_style::{ButtonVariant, Size, tabular, weight};
 use crate::briefing::{self as words, active_workspaces, group_by, task_key};
 use crate::faces::{portrait, portrait_in};
 use crate::state::App;
-use crate::ui::agent::mono;
-use crate::ui::base::{Shape, States, Theme, glyph, paint_state};
+use crate::ui::base::{Shape, States, Theme, paint_state};
 use crate::ui::button::Button;
 use crate::ui::empty::Empty;
 use crate::ui::icons;
@@ -75,7 +74,8 @@ fn row_keys(s: &mut App, ev: &KeyEvent, tx: &mut Tx, task: &neko_protocol::TaskI
     }
 }
 
-/// What a finished task's second line says about its changes: "3 files" with its figures, then the branch.
+/// What a finished task's second line says about its changes: "3 files" with its figures. The branch is the task's detail, not
+/// the Briefing's: it shows in the task.
 fn facts(t: &Theme, key: &str, item: &BriefingTask) -> Option<El> {
     let mut r = row().key(format!("{key}-facts")).gap(t.space.at(3.0)).center_y().min_w(0.0).flex_wrap();
     let mut any = false;
@@ -84,10 +84,6 @@ fn facts(t: &Theme, key: &str, item: &BriefingTask) -> Option<El> {
         let mut files = row().gap(t.space.at(2.0)).center_y().role("note").label(words::changes_label(c)).child(text(words::files(c.files)).font(t.ty.sm).color(t.ink_muted()).a11y_hidden());
         files = files.children(crate::turn::file_figures(t, c.added, c.removed));
         r = r.child(files);
-    }
-    if let Some(b) = &item.branch {
-        any = true;
-        r = r.child(row().gap(t.space.at(1.5)).center_y().min_w(0.0).child(glyph(&icons::COMMIT, t.control.icon_sm, t.ink_faint())).child(text(b.clone()).font(mono(t, t.ty.sm)).color(t.ink_muted()).truncate_middle().min_w(0.0).max_w(220.0)));
     }
     if item.offer.undone {
         any = true;

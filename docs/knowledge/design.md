@@ -33,6 +33,11 @@ One identity colour, the teal (the theme's `identity`; `ring` and `accent` use i
 person is needed, red that something could not go on, green and red are the + and − of changes. Finished things carry no colour.
 Contrast is measured from the theme by `tests/contrast.rs`: every ink on every surface at least 4.5:1, the rings and dots 3:1.
 
+A run earns a receipt card only when it changed files or failed. A run that changed nothing gets no card (no "worked on a
+branch", no branch name); what undo has to say about it is one quiet line under the answer. The reply composer stands alone:
+who answers is in the band and in its placeholder. Opening a page (Briefing, Needs you) puts the keyboard on its first item
+without drawing the focus ring; the ring shows once a key moves focus, as in Mac apps.
+
 Raised surfaces (a busy cat's tile, the open sidebar row, a receipt, a request, a Needs you card) are the floating surface in
 light; in dark they sit one small step above the page and are lit from above (an inner top edge and a faint gradient), not lifted
 by a lighter fill.
