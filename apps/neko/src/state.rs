@@ -155,6 +155,8 @@ pub struct App {
     pub workspace: String,
     /// The project chip's menu is open.
     pub picker_open: bool,
+    /// What the composer remembers beyond its words: the activity bar, the folded queue, the mode menu, a recalled message (`composer.rs`).
+    pub composer: crate::composer::Composer,
     /// What New thread asks beyond the project: where the thread works and the branch it starts from (`new_thread.rs`).
     pub new_thread: crate::new_thread::NewThread,
     /// Sections of the sidebar the person folded, by workspace id. Remembered for the next launch.
@@ -329,6 +331,10 @@ pub const SLOW_AFTER: std::time::Duration = std::time::Duration::from_secs(6);
 pub enum Asked {
     /// A follow-up: its words go back in the box if it is refused.
     FollowUp(TaskId, String),
+    /// Send now or Discard on a waiting message: a refusal is said in the notice under the composer.
+    Queued,
+    /// Edit on a waiting message: its words come back into the composer once it has left the list.
+    EditQueued(TaskId, String),
     /// A folder added as a workspace; `select`: the composer makes the next task there.
     AddWorkspace { select: bool },
     /// A change to a workspace (rename, remove, locate, move): a refusal is said in a panel.
@@ -458,6 +464,7 @@ impl Default for App {
             workspaces: Vec::new(),
             workspace: GENERAL.to_owned(),
             picker_open: false,
+            composer: Default::default(),
             folded: HashSet::new(),
             show_all: HashSet::new(),
             read_unfronted: false,
@@ -1318,16 +1325,7 @@ impl App {
 
     /// Return in a task's composer: the words continue the conversation.
     pub fn follow_up(&mut self) {
-        let Some(task) = self.open.clone() else { return };
-        let words = self.reply_box().map(|r| r.text.clone()).unwrap_or_default();
-        if words.trim().is_empty() || self.open_is_working() {
-            return;
-        }
-        if let Some(id) = self.send(Request::FollowUp { task: task.clone(), words: words.clone(), answering: None, mode: None }) {
-            self.asked.insert(id, Asked::FollowUp(task.clone(), words));
-            self.replies.insert(task, TextEdit::default());
-            self.at_bottom = true;
-        }
+        self.send_words(None);
     }
 
     /// Stop (the composer's button, Escape): the open task's agent stops.
@@ -1896,6 +1894,16 @@ impl App {
                     self.folder_failed();
                 }
                 self.refusal = Some(Refusal { title: "Neko could not do that".into(), words: message, reveal: None });
+                return;
+            }
+            Reply::Ok if matches!(asked, Some(Asked::EditQueued(..))) => {
+                if let Some(Asked::EditQueued(task, words)) = asked {
+                    self.queued_edited(task, words);
+                }
+                return;
+            }
+            Reply::Error { message, .. } if matches!(asked, Some(Asked::Queued | Asked::EditQueued(..))) => {
+                self.notice = Some(message);
                 return;
             }
             Reply::Error { message, .. } if matches!(asked, Some(Asked::FollowUp(..))) => {

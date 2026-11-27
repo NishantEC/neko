@@ -36,6 +36,17 @@ pub const SCENES: &[Scene] = &[
     ("task-done", |s| { task_done(s); finish(s) }),
     ("task-done-open", |s| { task_done_open(s); finish(s) }),
     ("task-follow-up", |s| { task_follow_up(s); finish(s) }),
+    ("composer-idle", |s| { composer::idle(s); finish(s) }),
+    ("composer-working", |s| { composer::working_idle(s); finish(s) }),
+    ("composer-typing", |s| { composer::typing(s); finish(s) }),
+    ("composer-queued", |s| { composer::two_queued(s); finish(s) }),
+    ("composer-queued-folded", |s| { composer::queued_folded(s); finish(s) }),
+    ("composer-queued-folded-open", |s| { composer::queued_folded_open(s); finish(s) }),
+    ("composer-editing", |s| { composer::editing(s); finish(s) }),
+    ("composer-interrupting", |s| { composer::interrupting(s); finish(s) }),
+    ("activity-collapsed", |s| { composer::activity_collapsed(s); finish(s) }),
+    ("activity-open", |s| { composer::activity_open(s); finish(s) }),
+    ("activity-open-queued", |s| { composer::activity_with_queue(s); finish(s) }),
     ("task-failed", |s| { task_failed(s); finish(s) }),
     ("task-thinking", |s| { task_thinking(s); finish(s) }),
     ("task-talked", |s| { task_talked(s); finish(s) }),
@@ -172,6 +183,7 @@ pub const SCENES: &[Scene] = &[
 ];
 
 mod briefing;
+mod composer;
 mod plugins;
 mod subagents;
 

@@ -190,6 +190,9 @@ pub fn settings_view(s: &App, t: &Theme, layer: &mut Vec<rune::El>) -> El {
                 );
             }
             page = page.child(agents).child(perms);
+            if let Some(sending) = crate::composer::settings_choice(s, t) {
+                page = page.child(sending);
+            }
             return wrap(t, page);
         }
     }

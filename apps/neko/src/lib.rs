@@ -7,6 +7,7 @@ pub mod briefing;
 pub mod briefing_view;
 pub mod cat_view;
 pub mod clock;
+pub mod composer;
 pub mod deeplink;
 pub mod dock;
 pub mod faces;

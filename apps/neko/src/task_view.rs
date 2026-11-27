@@ -529,30 +529,40 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     // first, and Stop comes back as soon as the request is answered.
     let asking = working && s.pending_request().is_some();
     let reply = s.reply_box().cloned().unwrap_or_default();
+    // While the agent works the button is Stop for an empty box and Send, in the mode Return uses, for words (`composer.rs`).
+    let has_words = !reply.text.trim().is_empty();
     let mut composer = PromptInput::new("reply", &reply, |s: &mut App| s.reply_mut())
-        .placeholder(if asking {
-            "Waiting for your answer above. Escape denies it.".to_owned()
-        } else if task.status == neko_protocol::TaskStatus::Waiting {
-            "The agent is waiting on its kittens. Press Escape to stop.".to_owned()
-        } else if working {
-            "The agent is working. Press Escape to stop.".to_owned()
-        } else if task.status == neko_protocol::TaskStatus::Asked {
-            "Answer the question".to_owned()
-        } else {
-            "Message the agent".to_owned()
-        })
+        .placeholder(crate::composer::placeholder(s, task, asking))
         .spellcheck(true)
-        .phase(if working && !asking { Phase::Streaming } else { Phase::Ready })
+        .phase(if working && !asking && !has_words { Phase::Streaming } else { Phase::Ready })
         .on_submit(|s: &mut App| s.follow_up())
         .on_stop(|s: &mut App| s.stop());
     if let Some(ring) = context_ring(s, t, book, layer) {
         composer = composer.tool(ring);
     }
-    // The composer stands alone: who will answer is already in the band and in its placeholder ("Reply to miso").
-    let composer = col().w_full().child(composer.build(t));
+    if let Some(chip) = crate::composer::mode_chip(s, t, layer) {
+        composer = composer.tool(chip);
+    }
+    // The composer stands alone: who will answer is already in the band and in its placeholder ("Reply to miso"). The keys that choose
+    // how words reach a working agent are read by the wrapper, before the text field sees them.
+    let composer = col().key("reply-block").w_full().on_key_preview(crate::composer::key_preview).child(composer.build(t));
     let mut foot = col().key("reply-area").w_full().max_w(COLUMN).gap(t.space.at(2.0));
     // A subagent is read, not talked to: no composer, a quiet line and the way back (and Stop while it works).
-    foot = if task.subagent.is_some() { foot.child(crate::subagents_view::readonly_foot(s, t, task)) } else { foot.child(composer) };
+    if task.subagent.is_some() {
+        foot = foot.child(crate::subagents_view::readonly_foot(s, t, task));
+    } else {
+        // Above the box: what waits to be read or sent, then the one thin line of what still runs.
+        if let Some(w) = crate::composer::waiting(s, t) {
+            foot = foot.child(w);
+        }
+        if let Some(bar) = crate::composer::activity_bar(s, t) {
+            foot = foot.child(bar);
+        }
+        foot = foot.child(composer);
+        if let Some(h) = crate::composer::key_hints(s, t) {
+            foot = foot.child(h);
+        }
+    }
     if let Some(line) = crate::view::slow_line(s, t) {
         foot = foot.child(line);
     }
