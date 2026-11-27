@@ -125,8 +125,12 @@ pub fn note_body(b: &Briefing) -> String {
             Need::Permission { permission } => format!("{}: {}", permission.title, permission.detail),
             Need::Question { question, .. } => question.clone(),
             Need::Failure { text, .. } => text.clone(),
-            Need::Plugin { ask } => format!("approve the plugin {}", ask.name),
+            Need::Plugin { ask } => crate::plugins::note_words(ask),
         };
+        // A plugin's item belongs to no cat: its words stand alone.
+        if matches!(n.need, Need::Plugin { .. }) {
+            return what;
+        }
         let verb = match n.need {
             Need::Failure { .. } => "could not go on",
             _ => "asks",

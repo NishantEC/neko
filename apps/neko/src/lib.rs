@@ -16,6 +16,8 @@ pub mod link;
 pub mod menu;
 pub mod needs_view;
 pub mod notify;
+pub mod plugins;
+pub mod plugins_view;
 pub mod review_view;
 pub mod rounds;
 pub mod rounds_view;
@@ -109,6 +111,8 @@ pub fn pick_folder(s: &App, pick: state::Pick, tx: &mut Tx) {
     let (title, start) = match &pick {
         state::Pick::Add { .. } => ("Add a folder as a workspace", None),
         state::Pick::Locate(id) => ("Where is this workspace's folder now?", s.workspace_of(id).and_then(|w| w.folder.as_deref()).and_then(|f| std::path::Path::new(f).parent()).filter(|p| p.is_dir()).map(PathBuf::from)),
+        state::Pick::PluginFolder => ("Add a folder that holds a plugin", None),
+        state::Pick::PluginSetting(..) => ("Choose a folder for this setting", None),
     };
     let options = rune::FileDialogOptions { title: title.into(), directory: start, ..Default::default() };
     tx.open_folder(options, move |s: &mut App, answer: rune::FileDialogResult, _: &mut Tx| {
@@ -117,6 +121,8 @@ pub fn pick_folder(s: &App, pick: state::Pick, tx: &mut Tx) {
             match &pick {
                 state::Pick::Add { select } => s.add_workspace(path, *select),
                 state::Pick::Locate(id) => s.locate(id, path),
+                state::Pick::PluginFolder => s.add_plugin_folder(path),
+                state::Pick::PluginSetting(plugin, key) => s.set_plugin_value(plugin, key, Some(path)),
             }
         }
     });

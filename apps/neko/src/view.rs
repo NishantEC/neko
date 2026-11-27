@@ -113,7 +113,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         root = root.child(crate::sidebar::panel(&t, crate::sidebar::sidebar(s, &t, lights, &mut layer)).paint_order(1));
     }
     let page = if s.settings_open {
-        crate::settings_view::settings_view(s, &t)
+        crate::settings_view::settings_view(s, &t, &mut layer)
     } else if let Some(cat) = s.page_cat() {
         crate::cat_view::cat_view(s, &t, cat, &mut layer)
     } else if s.needs_open {
@@ -366,6 +366,17 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
                 .return_focus("rounds-new")
                 .build(t, layer);
         }
+        Some(Confirm::RemovePlugin(id)) => {
+            let name = s.plugin(id).map_or_else(String::new, |p| p.name.clone());
+            AlertDialog::new("remove-plugin", format!("Remove {name}?"))
+                .description("It stops being offered to your cats, and its settings and secrets go, the secrets from the Keychain too. You can add it again later.")
+                .destructive()
+                .cancel("Cancel", |s: &mut App| s.confirm = None)
+                .action("Remove", |s: &mut App| s.confirmed())
+                .open(true)
+                .return_focus(format!("plugin-{id}-remove"))
+                .build(t, layer);
+        }
         Some(Confirm::ClearUndo) => {
             AlertDialog::new("clear-undo", "Clear the undo history?")
                 .description("Every checkpoint goes: no run can be reviewed, undone or redone after this. Your files and commits are not touched.")
@@ -379,6 +390,7 @@ fn dialogs(s: &App, t: &Theme, layer: &mut Vec<El>) {
         None => {}
     }
     crate::rounds_view::dialog(s, t, layer);
+    crate::plugins_view::dialog(s, t, layer);
     if let Some((id, edit)) = &s.naming {
         let renaming = id.as_ref().and_then(|i| s.cat(i)).map(|c| c.name.clone());
         let field = Input::new("cat-name-input", edit, |s: &mut App| &mut s.naming.as_mut().expect("naming").1).name("Name").placeholder("miso").on_submit(|s: &mut App| s.finish_naming()).build(t);

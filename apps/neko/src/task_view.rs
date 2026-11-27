@@ -100,9 +100,9 @@ pub fn phrase(name: &str, summary: &str, input: &str, running: bool, workdir: &s
         "Task" | "Agent" => format!("{} {summary}", tense("Asking a helper:", "Asked a helper:")),
         "TodoWrite" => tense("Updating the plan", "Updated the plan"),
         other => {
-            // An MCP tool reads as its own name and its server's: `mcp__acme__find_issue` is "find issue (acme)".
-            let named = match other.strip_prefix("mcp__").and_then(|r| r.split_once("__")) {
-                Some((server, tool)) => format!("{} ({server})", tool.replace('_', " ")),
+            // An MCP tool (a plugin's) reads as its server's name and its own: `mcp__acme-docs__find_issue` is "acme-docs · find issue".
+            let named = match neko_protocol::plugins::mcp_tool(other) {
+                Some((server, tool)) => format!("{server} · {}", tool.replace('_', " ")),
                 None => other.to_owned(),
             };
             format!("{named} {summary}").trim().to_owned()
@@ -542,7 +542,8 @@ mod tests {
         assert_eq!(phrase("Edit", "/Users/example/notes.md", "{}", false, w, home), "Edited ~/notes.md");
         assert_eq!(phrase("Edit", "notes.md", "{}", true, w, home), "Editing notes.md");
         assert_eq!(phrase("Grep", "Settings", "{}", false, w, home), "Searched for “Settings”");
-        assert_eq!(phrase("mcp__acme__find_issue", "ENG-123", "{}", false, w, home), "find issue (acme) ENG-123");
+        assert_eq!(phrase("mcp__acme__find_issue", "ENG-123", "{}", false, w, home), "acme · find issue ENG-123");
+        assert_eq!(phrase("mcp__acme-docs__search", "", "{}", false, w, home), "acme-docs · search");
         assert_eq!(show_path("/Users/examplex/a", w, home), "/Users/examplex/a", "a sibling of home is not home");
         let long = phrase("Bash", "", &format!("git status --short && git log --oneline -5 --decorate && {}", "x ".repeat(40)), false, w, home);
         assert_eq!(long.chars().count(), LINE_CHARS);

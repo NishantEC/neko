@@ -46,6 +46,10 @@ pub enum Effect {
 pub enum Pick {
     Add { select: bool },
     Locate(String),
+    /// A folder holding a plugin (`neko-plugin.json`), to add.
+    PluginFolder,
+    /// The folder a plugin's folder setting names: (plugin, setting key).
+    PluginSetting(String, String),
 }
 
 /// A question the window is asking before it acts.
@@ -60,6 +64,8 @@ pub enum Confirm {
     RetireCat(String),
     /// Remove a round (its id): its past tasks stay.
     RemoveRound(String),
+    /// Remove a plugin (its id): its settings and secrets go.
+    RemovePlugin(String),
 }
 
 /// A cat page's fields while the person edits them.
@@ -277,6 +283,8 @@ pub struct App {
     pub round_form: Option<crate::rounds::RoundForm>,
     /// Every plugin, oldest first, as the daemon last said (docs/knowledge/plugins.md).
     pub plugins: Vec<neko_protocol::Plugin>,
+    /// The Add sheet, what is pending on plugins, and the fields being typed in (`plugins.rs`).
+    pub plugin_ui: crate::plugins::Ui,
     /// The rounds whose history shows on their card, and each one's lines (newest first) as the daemon last said.
     pub round_history_open: HashSet<String>,
     pub round_history: HashMap<String, Vec<neko_protocol::RoundRun>>,
@@ -333,6 +341,15 @@ pub enum Asked {
     RoundRun,
     /// A round's history, for its card.
     RoundHistory(String),
+    /// Add in the Add sheet: it closes when the daemon accepts the paste, and says why when it does not.
+    PluginAdd,
+    /// A folder added as a plugin.
+    PluginFolder,
+    /// A plugin's check: the answer comes up to ten seconds later.
+    PluginTest(String),
+    /// A change to one plugin (approve, decline, switch, a setting, who may use it); `item` is the Needs you card it came from.
+    Plugin { plugin: String, item: Option<String>, did: crate::plugins::Did },
+    PluginRemove(String),
     /// "Mark as read" in the Briefing.
     BriefingRead,
     /// A change to the briefing's settings (the morning time, its switch).
@@ -499,6 +516,7 @@ impl Default for App {
             rounds_open: false,
             round_form: None,
             plugins: Vec::new(),
+            plugin_ui: crate::plugins::Ui::default(),
             round_history_open: HashSet::new(),
             round_history: HashMap::new(),
             briefing: None,
@@ -807,7 +825,7 @@ impl App {
     }
 
     /// Hides an answered item at once and gives the keyboard to the next one (or the one before it, at the end).
-    fn answered(&mut self, item: &str) {
+    pub(crate) fn answered(&mut self, item: &str) {
         let shown: Vec<String> = self.visible_needs().iter().map(|i| i.id.clone()).collect();
         let at = shown.iter().position(|i| i == item);
         self.needs_hidden.insert(item.to_owned());
@@ -862,7 +880,7 @@ impl App {
     }
 
     fn act_on(&mut self, what: ClickDo) {
-        if !matches!(what, ClickDo::Open(_) | ClickDo::OpenBriefing | ClickDo::Nothing) && self.daemon != Daemon::Connected {
+        if !matches!(what, ClickDo::Open(_) | ClickDo::OpenBriefing | ClickDo::OpenNeeds(_) | ClickDo::Nothing) && self.daemon != Daemon::Connected {
             self.pending_clicks.push(what);
             return;
         }
@@ -870,6 +888,13 @@ impl App {
             ClickDo::Open(task) => {
                 self.effects.push(Effect::Front);
                 self.go_to_task(task);
+            }
+            ClickDo::OpenNeeds(item) => {
+                self.effects.push(Effect::Front);
+                self.open_needs();
+                if self.visible_needs().iter().any(|i| i.id == item) {
+                    self.focus_next = Some(need_key(&item));
+                }
             }
             ClickDo::Answer { task, permission, decision } => {
                 let item = format!("perm:{}", permission.0);
@@ -1113,6 +1138,7 @@ impl App {
                 }
             }
             Some(Confirm::RemoveRound(id)) => self.remove_round(&id),
+            Some(Confirm::RemovePlugin(id)) => self.remove_plugin(&id),
             None => {}
         }
     }
@@ -1470,6 +1496,7 @@ impl App {
                 self.send(Request::ListNeeds);
                 self.send(Request::ListCats);
                 self.send(Request::ListRounds);
+                self.send(Request::ListPlugins);
                 self.send(Request::GetBriefing { from_ms: None, to_ms: None });
                 self.send(Request::GetBriefingSettings);
                 // A new connection watches nothing yet.
@@ -1483,6 +1510,7 @@ impl App {
                 }
             }
             Incoming::Lost(why) => {
+                self.plugins_lost();
                 self.daemon = Daemon::Lost(why);
                 self.waiting_since.get_or_insert_with(std::time::Instant::now);
                 // An answer that will never come: the words go back in the box.
@@ -1576,11 +1604,8 @@ impl App {
                 }
             }
             Change::RoundsPaused { paused } => self.rounds_paused = paused,
-            Change::PluginAdded { plugin } | Change::PluginUpdated { plugin } => match self.plugins.iter_mut().find(|p| p.id == plugin.id) {
-                Some(p) => *p = plugin,
-                None => self.plugins.push(plugin),
-            },
-            Change::PluginRemoved { plugin } => self.plugins.retain(|p| p.id != plugin),
+            Change::PluginAdded { plugin } | Change::PluginUpdated { plugin } => self.upsert_plugin(plugin),
+            Change::PluginRemoved { plugin } => self.drop_plugin(&plugin),
             Change::BriefingChanged { briefing } => self.set_briefing(briefing),
             Change::BriefingSettingsChanged { settings } => self.set_briefing_settings(settings),
             Change::BriefingDue { counts } => self.briefing_due(&counts),
@@ -1607,6 +1632,7 @@ impl App {
     fn reply(&mut self, id: u64, reply: Reply) {
         let mine = self.creating.as_ref().is_some_and(|(c, _)| *c == id);
         let asked = self.asked.remove(&id);
+        let Some(reply) = self.plugin_reply(&asked, reply) else { return };
         match reply {
             Reply::Transcript { transcript } => {
                 let id = transcript.task.id.clone();

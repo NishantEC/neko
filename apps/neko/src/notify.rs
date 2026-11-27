@@ -231,9 +231,20 @@ impl Default for Notifier {
     }
 }
 
-/// A task's notification id.
+/// A task's notification id. A plugin's card has no task: it is kept under `plugin:<id>` ([`key_of`]) and its id is
+/// `neko.plugin.<id>`.
 pub fn note_id(task: &TaskId) -> String {
-    format!("neko.task.{}", task.0)
+    match task.0.strip_prefix(PLUGIN_KEY) {
+        Some(plugin) => format!("neko.plugin.{plugin}"),
+        None => format!("neko.task.{}", task.0),
+    }
+}
+
+const PLUGIN_KEY: &str = "plugin:";
+
+/// What an item's notification is kept under: its task, or for a plugin (which has none) its own id.
+pub fn key_of(item: &NeedsItem) -> TaskId {
+    if item.task.0.is_empty() { TaskId(item.id.clone()) } else { item.task.clone() }
 }
 
 /// The id of Settings' test notification.
@@ -264,11 +275,15 @@ impl Notifier {
             if !self.notified.insert(item.id.clone()) {
                 continue;
             }
-            if !self.switches.needs || !wanted(here, &item.task, true) {
+            let plugin = matches!(item.need, Need::Plugin { .. });
+            // A plugin's card belongs to no task. The person who just added it, or changed its folder, with Neko in front, is looking
+            // at where it can be approved: only an app in the background is worth a banner.
+            let worth = if plugin { !here.front } else { wanted(here, &item.task, true) };
+            if !self.switches.needs || !worth {
                 continue;
             }
             self.poster.post(&note_for(item));
-            self.posted.insert(item.task.clone(), Shown::Item(item.id.clone()));
+            self.posted.insert(key_of(item), Shown::Item(item.id.clone()));
         }
     }
 
@@ -362,7 +377,7 @@ pub fn short(s: &str, max: usize) -> String {
 
 /// The notification for an item: the task's title, the cat and what is asked in short ("miso asks: …"), and its actions.
 pub fn note_for(item: &NeedsItem) -> Note {
-    let mut info = link_info(&item.task, Some(&item.id));
+    let mut info = if item.task.0.is_empty() { vec![("item".to_owned(), item.id.clone())] } else { link_info(&item.task, Some(&item.id)) };
     let (body, buttons) = match &item.need {
         Need::Permission { permission: p } => {
             info.push(("permission".into(), p.id.0.clone()));
@@ -386,9 +401,12 @@ pub fn note_for(item: &NeedsItem) -> Note {
         }
         Need::Failure { text, .. } => (short(&format!("{} could not go on: {text}", item.cat_name), BODY_CHARS), Vec::new()),
         // Approving a plugin is never done from a banner: the notification only opens the list.
-        Need::Plugin { ask } => (short(&format!("Approve the plugin {}", ask.name), BODY_CHARS), Vec::new()),
+        Need::Plugin { ask } => {
+            info.push(("plugin".into(), ask.plugin.clone()));
+            (short(&crate::plugins::note_words(ask), BODY_CHARS), Vec::new())
+        }
     };
-    Note { id: note_id(&item.task), title: item.title.clone(), body, info, buttons }
+    Note { id: note_id(&key_of(item)), title: item.title.clone(), body, info, buttons }
 }
 
 /// "tofu is done", with the first line of the answer when there is one.
@@ -418,6 +436,8 @@ pub enum ClickDo {
     Reply { task: TaskId, run: RunId, words: String },
     /// Open Neko at the Briefing (a click on the morning notification).
     OpenBriefing,
+    /// Open Neko at the Needs you list, on the plugin card of this item (a click on a plugin's notification).
+    OpenNeeds(String),
     /// Not one of Neko's.
     Nothing,
 }
@@ -429,6 +449,10 @@ pub fn read_click(action: Option<&str>, typed: Option<&str>, info: &[(String, St
     // The morning briefing's notification has no actions: any click on it opens the Briefing.
     if get("briefing") == Some("1") && get("task").is_none() {
         return ClickDo::OpenBriefing;
+    }
+    // A plugin's notification has no task: a click opens its card in the list, and nothing on it ever approves.
+    if get("task").is_none() && get("plugin").is_some() {
+        return get("item").map_or(ClickDo::Nothing, |i| ClickDo::OpenNeeds(i.to_owned()));
     }
     let Some(task) = get("task").filter(|t| crate::deeplink::is_task_id(t)).map(|t| TaskId(t.to_owned())) else { return ClickDo::Nothing };
     let open = ClickDo::Open(task.clone());

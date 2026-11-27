@@ -74,9 +74,9 @@ fn agent_card(t: &Theme, r: &RuntimeInfo) -> El {
 }
 
 /// Settings' pages, in the order the switch shows them.
-pub const PAGES: [&str; 5] = ["Agents", "Workspaces", "Notifications", "Cats", "Briefing"];
+pub const PAGES: [&str; 6] = ["Agents", "Workspaces", "Notifications", "Cats", "Briefing", "Plugins"];
 
-pub fn settings_view(s: &App, t: &Theme) -> El {
+pub fn settings_view(s: &App, t: &Theme, layer: &mut Vec<rune::El>) -> El {
     let mut page = col().key("settings").w_full().max_w(COLUMN).gap(t.space.at(6.0));
     let switch = SegmentedControl::<App>::new("settings-page", "Settings page", &PAGES, s.settings_page.min(PAGES.len() - 1)).size(Size::Sm).on_change(|s: &mut App, i| {
         s.settings_page = i;
@@ -104,6 +104,9 @@ pub fn settings_view(s: &App, t: &Theme) -> El {
     }
     if s.settings_page == 4 {
         return wrap(t, page.child(briefing_page(s, t)));
+    }
+    if s.settings_page == crate::plugins::SETTINGS_PAGE {
+        return wrap(t, page.child(crate::plugins_view::page(s, t, layer)));
     }
     let mut agents = col().key("settings-agents").w_full().gap(t.space.at(3.0)).child(text("Agents").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())).child(
         text("Neko uses the agent CLIs already installed and signed in on this Mac. It asks for no API key and never stores one.").font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0),

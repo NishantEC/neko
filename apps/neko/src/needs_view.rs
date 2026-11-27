@@ -40,7 +40,7 @@ pub fn what(item: &NeedsItem) -> String {
         Need::Permission { permission } => permission.title.clone(),
         Need::Question { question, .. } => question.clone(),
         Need::Failure { text, .. } => text.clone(),
-        Need::Plugin { ask } => format!("Approve plugin: {}", ask.name),
+        Need::Plugin { ask } => crate::plugins::ask_sentence(ask),
     }
 }
 
@@ -132,9 +132,13 @@ pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, po
         Need::Permission { .. } => format!("{} asks", item.cat_name),
         Need::Question { .. } => format!("{} has a question", item.cat_name),
         Need::Failure { .. } => format!("{} could not go on", item.cat_name),
-        Need::Plugin { .. } => "A plugin waits for you".to_owned(),
+        Need::Plugin { ask } => if ask.changed { "A plugin changed" } else { "A plugin asks" }.to_owned(),
     };
-    let lead = crate::faces::portrait_in(t, &format!("{key}-face"), &face, 44.0, Some(if failed { neko_protocol::TaskStatus::Failed } else { neko_protocol::TaskStatus::NeedsYou }), crate::view::raised_fill(t));
+    let lead = if let Need::Plugin { .. } = &item.need {
+        crate::plugins_view::tile(t, &format!("{key}-face"), 44.0, crate::ui::portrait::Activity::NeedsYou, true, crate::view::raised_fill(t))
+    } else {
+        crate::faces::portrait_in(t, &format!("{key}-face"), &face, 44.0, Some(if failed { neko_protocol::TaskStatus::Failed } else { neko_protocol::TaskStatus::NeedsYou }), crate::view::raised_fill(t))
+    };
     let who = row()
         .key(format!("{key}-cat"))
         .w_full()
@@ -145,11 +149,16 @@ pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, po
         .child(text(since.clone()).key(format!("{key}-when")).font(rune_ui_style::tabular(t.ty.sm)).color(t.ink_faint()).a11y_hidden());
     let head = text(item.title.clone()).key(format!("{key}-title")).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0);
     let body = col().w_full().gap(t.space.at(2.5));
-    let mut body = body.child(text(asked.clone()).key(format!("{key}-what")).font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0).a11y_hidden());
+    // A plugin's card shows what will run in its own block, not as a sentence.
+    let mut body = if matches!(item.need, Need::Plugin { .. }) { body } else { body.child(text(asked.clone()).key(format!("{key}-what")).font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0).a11y_hidden()) };
     let id = item.id.clone();
     let open = {
         let id = id.clone();
-        answer(t, format!("{key}-open"), "Open task", ButtonVariant::Ghost, true, move |s: &mut App| s.open_need(&id))
+        if matches!(item.need, Need::Plugin { .. }) {
+            answer(t, format!("{key}-open"), "Open in Settings", ButtonVariant::Ghost, true, move |s: &mut App| s.open_need_in_settings(&id))
+        } else {
+            answer(t, format!("{key}-open"), "Open task", ButtonVariant::Ghost, true, move |s: &mut App| s.open_need(&id))
+        }
     };
     let mut controls = row().key(format!("{key}-answers")).w_full().gap(t.space.at(2.0)).center_y().flex_wrap();
     match &item.need {
@@ -191,8 +200,14 @@ pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, po
                 body = body.child(copy_line(t, &format!("{key}-command"), c));
             }
         }
-        // The plugin's own card comes with the plugins' screens.
-        Need::Plugin { .. } => {}
+        Need::Plugin { ask } => {
+            body = body.child(crate::plugins_view::ask_details(s, t, &key, ask, true));
+            let (a, b, c) = (id.clone(), id.clone(), id.clone());
+            // Approving decides what runs on this Mac: Return answers nothing, as on a destructive request.
+            controls = controls.child(answer(t, format!("{key}-approve"), "Approve", ButtonVariant::Default, false, move |s: &mut App| s.approve_need(&a)));
+            controls = controls.child(answer(t, format!("{key}-decline"), "Decline", ButtonVariant::Secondary, false, move |s: &mut App| s.decline_need(&b)));
+            let _ = c;
+        }
     }
     // The reply box takes the room a question's row has; elsewhere Open task sits at the row's end.
     if !matches!(item.need, Need::Question { .. }) {
@@ -253,7 +268,7 @@ pub fn needs_view(s: &App, t: &Theme) -> El {
         }
     }
     for (ws, list) in groups {
-        let name = s.workspace_of(&ws).map_or_else(|| if ws == neko_protocol::GENERAL { "General".to_owned() } else { "Workspace".to_owned() }, |w| w.name.clone());
+        let name = group_name(s, &ws);
         let mut rows = col().key(format!("needs-list-{ws}")).role("list").label(format!("Waiting in {name}")).w_full().gap(t.space.at(3.0));
         let m = list.len();
         for (j, (i, item)) in list.into_iter().enumerate() {
@@ -265,6 +280,14 @@ pub fn needs_view(s: &App, t: &Theme) -> El {
         page = page.child(col().key(format!("needs-section-{ws}")).role("group").label(name).w_full().gap(t.space.at(2.0)).child(head).child(rows));
     }
     wrap(t, page)
+}
+
+/// The heading of a group: its workspace's name, or "Plugins" for the items that belong to no workspace.
+pub fn group_name(s: &App, ws: &str) -> String {
+    if ws.is_empty() {
+        return "Plugins".to_owned();
+    }
+    s.workspace_of(ws).map_or_else(|| if ws == neko_protocol::GENERAL { "General".to_owned() } else { "Workspace".to_owned() }, |w| w.name.clone())
 }
 
 fn wrap(t: &Theme, page: El) -> El {

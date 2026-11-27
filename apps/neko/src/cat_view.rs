@@ -250,6 +250,7 @@ pub fn cat_view(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
         .child(col().w_full().gap(t.space.at(2.0)).child(label(t, "Purpose")).child(purpose))
         .child(rules)
         .child(rounds)
+        .child(crate::plugins_view::cat_section(s, t, c))
         .child(tasks);
     col().key("cat-scroll").w_full().grow(1.0).min_h(0.0).items_center().px(t.space.at(8.0)).pt(t.space.at(6.0)).pb(t.space.at(10.0)).scroll(rune::ScrollSpec { stick_bottom: false }).child(page)
 }

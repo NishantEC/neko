@@ -40,7 +40,7 @@ fn head(t: &Theme, key: &str, title: &str, count: usize, ink: rune::Color) -> El
 
 /// A workspace's name as a small heading, over its part of a section.
 fn workspace_head(s: &App, t: &Theme, key: &str, ws: &str) -> El {
-    let name = s.workspace_of(ws).map_or_else(|| if ws == neko_protocol::GENERAL { "General".to_owned() } else { "Workspace".to_owned() }, |w| w.name.clone());
+    let name = crate::needs_view::group_name(s, ws);
     text(name).key(format!("{key}-ws-{ws}")).role("heading").level(3).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_muted()).truncate().min_w(0.0).px(t.space.at(1.0))
 }
 
@@ -303,7 +303,7 @@ pub fn briefing_view(s: &App, t: &Theme) -> El {
         let mut at = 0usize;
         let groups: Vec<(String, Vec<&&neko_protocol::NeedsItem>)> = if grouped { group_by(&needs, |i| i.workspace.as_str()) } else { vec![(String::new(), needs.iter().collect())] };
         for (ws, list) in groups {
-            let name = s.workspace_of(&ws).map_or_else(|| "General".to_owned(), |w| w.name.clone());
+            let name = if ws.is_empty() && grouped { crate::needs_view::group_name(s, &ws) } else { s.workspace_of(&ws).map_or_else(|| if ws.is_empty() { "Plugins".to_owned() } else { "General".to_owned() }, |w| w.name.clone()) };
             let mut cards = col().key(format!("briefing-needs-list-{ws}")).role("list").label(if grouped { format!("Waiting in {name}") } else { "Waiting for you".to_owned() }).w_full().gap(t.space.at(3.0));
             let m = list.len();
             for (j, item) in list.into_iter().enumerate() {

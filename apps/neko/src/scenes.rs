@@ -110,9 +110,40 @@ pub const SCENES: &[Scene] = &[
     ("home-briefing", briefing::home_briefing),
     ("settings-briefing", briefing::settings_briefing),
     ("settings-briefing-invalid", briefing::settings_briefing_invalid),
+    ("plugins-empty", plugins::plugins_empty),
+    ("plugins-waiting", plugins::plugins_waiting),
+    ("plugins", plugins::plugins),
+    ("plugins-changed", plugins::plugins_changed),
+    ("plugins-needs-setup", plugins::plugins_needs_setup),
+    ("plugins-check-ok", plugins::plugins_check_ok),
+    ("plugins-check-failed", plugins::plugins_check_failed),
+    ("plugins-testing", plugins::plugins_testing),
+    ("plugins-web", plugins::plugins_web),
+    ("plugins-fields-unset", plugins::plugins_fields_unset),
+    ("plugins-fields-set", plugins::plugins_fields_set),
+    ("plugins-secret-changing", plugins::plugins_secret_changing),
+    ("plugins-access-only", plugins::plugins_access_only),
+    ("plugins-access-none", plugins::plugins_access_none),
+    ("plugins-remove", plugins::plugins_remove),
+    ("plugin-add", plugins::plugin_add),
+    ("plugin-add-good", plugins::plugin_add_good),
+    ("plugin-add-bad", plugins::plugin_add_bad),
+    ("plugin-add-several", plugins::plugin_add_several),
+    ("plugin-add-unnamed", plugins::plugin_add_unnamed),
+    ("plugin-add-refused", plugins::plugin_add_refused),
+    ("needs-you-plugin", plugins::needs_you_plugin),
+    ("needs-you-plugin-changed", plugins::needs_you_plugin_changed),
+    ("needs-you-plugin-web", plugins::needs_you_plugin_web),
+    ("needs-you-plugin-only", plugins::needs_you_plugin_only),
+    ("task-plugin", plugins::task_plugin),
+    ("task-plugin-request", plugins::task_plugin_request),
+    ("cat-page-plugins", plugins::cat_page_plugins),
+    ("cat-page-no-plugins", plugins::cat_page_no_plugins),
+    ("cat-page-plugins-none-for-cat", plugins::cat_page_plugins_none_for_cat),
 ];
 
 mod briefing;
+mod plugins;
 
 /// The starter cats as a new install has them, each with one placeholder purpose; mochi has standing rules and an earlier version.
 pub fn sample_cats() -> Vec<Cat> {
