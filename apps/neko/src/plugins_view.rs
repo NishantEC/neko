@@ -10,7 +10,7 @@ use neko_protocol::plugins::{AccessMode, FieldKind, Plugin, PluginAsk, PluginSta
 use rune::{El, el, col, row, text};
 use rune_ui_style::{ButtonVariant, Size, tabular, weight};
 
-use crate::plugins::{self, AddSheet, Reading, access_words, ask_of, check_words, found_words, kind_line, list_words, passes_words, shown_value, state_tone, state_words};
+use crate::plugins::{self, Reading, ask_of, check_words, found_words, kind_line, list_words, passes_words, shown_value, state_tone, state_words};
 use crate::state::App;
 use crate::ui::agent::mono;
 use crate::ui::badge::Badge;
@@ -32,18 +32,28 @@ fn h2(t: &Theme, words: &str) -> El {
 }
 
 fn h3(t: &Theme, words: &str) -> El {
-    text(words.to_owned()).role("heading").level(3).font(weight(t.ty.base, t.ty.medium)).color(t.ink())
+    text(words.to_owned()).role("heading").level(3).font(weight(t.ty.base, t.ty.semibold)).color(t.ink())
 }
 
 fn rule(t: &Theme) -> El {
     el().w_full().h(1.0).fill(t.c.line)
 }
 
+/// The plug tile's ground: the page's paper taken a small step toward the ink, so no cat's colour is borrowed.
+pub fn tile_ground(t: &Theme) -> rune::Color {
+    rune_ui_style::mix(t.c.page.bg, t.ink(), if t.dark { 0.16 } else { 0.09 })
+}
+
+/// The plug's own ink on that ground (tested for contrast).
+pub fn tile_ink(t: &Theme) -> rune::Color {
+    t.ink_muted()
+}
+
 /// The plug on a quiet ground: what leads a plugin where a cat's portrait leads a task. With `ringed` it takes the room a cat's
 /// portrait takes (the Needs you card), and `activity` puts the amber dot on its corner.
 pub fn tile(t: &Theme, key: &str, size: f32, activity: Activity, ringed: bool, under: rune::Color) -> El {
-    let ground = rune_ui_style::mix(t.c.page.bg, t.ink(), if t.dark { 0.16 } else { 0.09 });
-    let face = row().size(size, size).center().child(glyph(&icons::PLUGIN, size * 0.46, t.ink_muted()));
+    let ground = tile_ground(t);
+    let face = row().size(size, size).center().child(glyph(&icons::PLUGIN, size * 0.46, tile_ink(t)));
     Portrait::new(key, "Plugin", size).face(face).ground(ground).state(activity).ringed(ringed).under(under).decorative(true).build(t)
 }
 
@@ -91,8 +101,8 @@ pub fn ask_details(s: &App, t: &Theme, key: &str, a: &PluginAsk, meta: bool) -> 
         (false, false) => "It will run",
         (false, true) => "It will connect to",
     };
-    let runs = well(t, row().key(format!("{key}-runs")).role("note").label(format!("{verb} {}", a.runs)).w_full().padding(t.space.at(2.5)).radius(t.radius.md).round_as(t))
-        .child(text(a.runs.clone()).font(mono(t, t.ty.sm)).color(t.ink()).selectable(true).wrap().min_w(0.0).shrink().a11y_hidden());
+    let runs = well(t, row().key(format!("{key}-runs-box")).role("note").label(format!("{verb} {}", a.runs)).w_full().padding(t.space.at(2.5)).radius(t.radius.md).round_as(t))
+        .child(text(a.runs.clone()).key(format!("{key}-runs")).font(mono(t, t.ty.sm)).color(t.ink()).selectable(true).wrap().min_w(0.0).shrink().a11y_hidden());
     body = body.child(
         col()
             .w_full()
@@ -187,13 +197,13 @@ fn card(s: &App, t: &Theme, p: &Plugin, pos: usize, n: usize, layer: &mut Vec<El
         card = card.child(text(d.clone()).key(format!("{key}-description")).font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0));
     }
     if let Some(why) = &p.problem {
-        card = card.child(note_line(t, &format!("{key}-problem"), &icons_warn(), t.c.danger.fg, &format!("Neko cannot read this plugin. {why}")));
+        card = card.child(note_line(t, &format!("{key}-problem"), &ui::icons::WARNING, t.c.danger.fg, &format!("Neko cannot read this plugin. {why}")));
     }
     if state == PluginState::NeedsSetup {
-        card = card.child(note_line(t, &format!("{key}-missing"), &icons_warn(), t.c.warning.fg, &format!("Still to set: {}. It does not run until you do.", list_words(&p.missing))));
+        card = card.child(note_line(t, &format!("{key}-missing"), &ui::icons::WARNING, t.c.warning.fg, &format!("Still to set: {}. It does not run until you do.", list_words(&p.missing))));
     }
     if let Some(why) = s.plugin_ui.notes.get(&p.id).filter(|_| !s.plugin_ui.testing.contains(&p.id)) {
-        card = card.child(note_line(t, &format!("{key}-note"), &icons_warn(), t.c.warning.fg, why));
+        card = card.child(note_line(t, &format!("{key}-note"), &ui::icons::WARNING, t.c.warning.fg, why));
     }
     if !ok {
         card = card.child(approval(s, t, p, busy));
@@ -208,10 +218,6 @@ fn card(s: &App, t: &Theme, p: &Plugin, pos: usize, n: usize, layer: &mut Vec<El
     }
     card = card.child(rule(t)).child(access(s, t, p, busy)).child(rule(t));
     card.child(test_row(s, t, p, ok))
-}
-
-fn icons_warn() -> &'static rune::Icon {
-    &ui::icons::WARNING
 }
 
 fn note_line(t: &Theme, key: &str, icon: &'static rune::Icon, ink: rune::Color, words: &str) -> El {
@@ -372,7 +378,8 @@ fn secret(s: &App, t: &Theme, p: &Plugin, f: &SettingField, key: &str) -> El {
     let busy = s.plugin_ui.busy.contains(&p.id);
     let is_set = p.value(&f.key).is_some_and(|v| v.set);
     let typing = s.plugin_ui.secrets.get(&(id.clone(), fkey.clone()));
-    if is_set && typing.is_none() {
+    let changing = s.plugin_ui.changing.contains(&(id.clone(), fkey.clone()));
+    if is_set && !changing {
         let (a, b, c, d) = (id.clone(), fkey.clone(), id.clone(), fkey.clone());
         return row()
             .key(format!("{key}-isset"))
@@ -425,11 +432,9 @@ fn access(s: &App, t: &Theme, p: &Plugin, busy: bool) -> El {
             let on = chosen.contains(&c.id);
             let last = on && chosen.len() == 1;
             let (a, b) = (p.id.clone(), c.id.clone());
-            let sw = Switch::<App>::new(format!("{key}-cat-{}", c.id), c.name.clone(), on)
-                .help(if last { "At least one cat has to be able to use it. Choose Every cat to open it to all." } else { "" })
-                .disabled(busy || last)
-                .on_toggle(move |s: &mut App| s.toggle_plugin_cat(&a, &b));
-            let sw = if last { sw } else { rune_cat_switch(sw) };
+            let sw = Switch::<App>::new(format!("{key}-cat-{}", c.id), c.name.clone(), on).disabled(busy || last).on_toggle(move |s: &mut App| s.toggle_plugin_cat(&a, &b));
+            // The one cat left cannot be turned off: its row says why.
+            let sw = if last { sw.help("At least one cat has to be able to use it. Choose Every cat to open it to all.") } else { sw.show_label() };
             list = list.child(row().role("listitem").position_in_set(i + 1, cats.len()).w_full().child(sw.build(t)));
         }
         part = part.child(list);
@@ -440,11 +445,6 @@ fn access(s: &App, t: &Theme, p: &Plugin, busy: bool) -> El {
         part = part.child(text("Every cat at work can use it while it is on.").font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0));
     }
     part
-}
-
-/// A cat's row in the list is a plain label and a switch; the help line is only for the one that cannot be turned off.
-fn rune_cat_switch(sw: Switch<App>) -> Switch<App> {
-    sw
 }
 
 // ---- Test and Remove ----------------------------------------------------------------------------------------------------------------
@@ -459,10 +459,10 @@ fn test_row(s: &App, t: &Theme, p: &Plugin, ok: bool) -> El {
     let mut result = col().key(format!("{key}-result")).grow(1.0).min_w(0.0).gap(t.space.at(0.5)).pt(t.space.at(1.0));
     if testing {
         result = result.child(text("Testing… this takes up to ten seconds.").key(format!("{key}-testing")).role("status").font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0));
-    } else if remote {
-        result = result.child(text("Neko cannot test web servers yet. Claude Code connects to it when a task runs.").key(format!("{key}-untestable")).font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0));
     } else if !ok {
         result = result.child(text("Approve it to test it.").key(format!("{key}-untestable")).font(t.ty.sm).color(t.ink_faint()).wrap().min_w(0.0));
+    } else if remote {
+        result = result.child(text("Neko cannot test web servers yet. Claude Code connects to it when a task runs.").key(format!("{key}-untestable")).font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0));
     } else if let Some(c) = &p.last_check {
         let zone = s.zone();
         let (head, tools, when) = check_words(c, s.now_ms, &*zone);
@@ -620,9 +620,5 @@ pub fn cat_section(s: &App, t: &Theme, c: &Cat) -> El {
             .on_press(move |s: &mut App| s.open_plugins(Some(&id)));
         list = list.child(row().role("listitem").w_full().child(face));
     }
-    let _ = access_words;
     part.child(list).child(row().child(settings))
 }
-
-#[allow(dead_code)]
-fn unused(_: &AddSheet) {}

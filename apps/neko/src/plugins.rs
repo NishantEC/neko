@@ -86,6 +86,9 @@ pub struct Ui {
     pub edits: HashMap<(String, String), TextEdit>,
     /// Secret fields being typed in, by (plugin, key): present while the masked field shows. Dropped the moment it is sent.
     pub secrets: HashMap<(String, String), TextEdit>,
+    /// Secrets that are set and being changed, by (plugin, key): the masked field shows instead of "Set". Only the person's Change
+    /// puts one here, so a stray edit event never turns a set secret back into a field.
+    pub changing: HashSet<(String, String)>,
     /// Plugins the person narrowed to "Only some cats" and chose no cat for yet: nothing is sent until one is chosen.
     pub only: HashSet<String>,
 }
@@ -404,11 +407,13 @@ impl App {
         let mut edit = TextEdit::default();
         edit.focused = true;
         self.plugin_ui.secrets.insert((plugin.to_owned(), key.to_owned()), edit);
+        self.plugin_ui.changing.insert((plugin.to_owned(), key.to_owned()));
         self.focus_next = Some(format!("plugin-{plugin}-{key}-input"));
     }
 
     /// Set: the typed secret goes to the daemon once and is dropped here at once.
     pub fn save_plugin_secret(&mut self, plugin: &str, key: &str) {
+        self.plugin_ui.changing.remove(&(plugin.to_owned(), key.to_owned()));
         let Some(edit) = self.plugin_ui.secrets.remove(&(plugin.to_owned(), key.to_owned())) else { return };
         let value = edit.text.clone();
         if value.is_empty() {
@@ -420,6 +425,7 @@ impl App {
     /// Stops changing a secret without sending anything.
     pub fn cancel_plugin_secret(&mut self, plugin: &str, key: &str) {
         self.plugin_ui.secrets.remove(&(plugin.to_owned(), key.to_owned()));
+        self.plugin_ui.changing.remove(&(plugin.to_owned(), key.to_owned()));
     }
 
     // ---- Which cats ---------------------------------------------------------------------------------------------------------
@@ -490,7 +496,9 @@ impl App {
             pid != &id || p.manifest.settings.iter().find(|f| &f.key == key).is_some_and(|f| shown_value(&p, f).unwrap_or_default() != e.text.trim())
         });
         // A secret now set (or gone) has nothing left to type; one being typed for a field that vanished goes.
-        self.plugin_ui.secrets.retain(|(pid, key), _| pid != &id || p.manifest.settings.iter().any(|f| &f.key == key && f.kind == FieldKind::Secret));
+        let secret = |key: &String| p.manifest.settings.iter().any(|f| &f.key == key && f.kind == FieldKind::Secret);
+        self.plugin_ui.secrets.retain(|(pid, key), _| pid != &id || secret(key));
+        self.plugin_ui.changing.retain(|(pid, key)| pid != &id || (secret(key) && p.value(key).is_some_and(|v| v.set)));
         if p.access.mode != AccessMode::All {
             self.plugin_ui.only.remove(&id);
         }
@@ -508,6 +516,7 @@ impl App {
         self.plugin_ui.only.remove(id);
         self.plugin_ui.edits.retain(|(p, _), _| p != id);
         self.plugin_ui.secrets.retain(|(p, _), _| p != id);
+        self.plugin_ui.changing.retain(|(p, _)| p != id);
         if self.confirm == Some(Confirm::RemovePlugin(id.to_owned())) {
             self.confirm = None;
         }
