@@ -136,6 +136,22 @@
       "do": "wait",
       "until": {
         "see": {
+          "key": "pane-kitten-main"
+        }
+      },
+      "within": 10,
+      "expect": "Open puts Kitten 1's conversation in the right pane as a tab"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "pane-kitten-main"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
           "key": "crumb-subagent",
           "text": "Kitten 1"
         }
@@ -180,5 +196,9 @@
       },
       "expect": "No resumed run was started"
     }
+  ],
+  "size": [
+    1280,
+    800
   ]
 }

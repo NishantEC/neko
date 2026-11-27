@@ -66,11 +66,11 @@
       "do": "wait",
       "until": {
         "see": {
-          "key": "task-folder",
-          "label": "on branch neko/"
+          "key": "pane-branch",
+          "label": "Branch neko/"
         }
       },
-      "expect": "The band shows the working folder and its neko/ branch"
+      "expect": "The pane's Overview shows the working folder and its neko/ branch (the band no longer does)"
     },
     {
       "do": "assert",
@@ -93,7 +93,7 @@
             }
           },
           {
-            "title": "Tidy the README [fake:tools] — acme-api"
+            "title": "Tidy the README [fake:tools] \u2014 acme-api"
           }
         ]
       },
@@ -140,5 +140,9 @@
       },
       "expect": "The worktree holds the agent's change"
     }
+  ],
+  "size": [
+    1280,
+    800
   ]
 }

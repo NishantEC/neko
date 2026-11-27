@@ -950,6 +950,18 @@ fn matches(all: &[ElementInfo], e: &ElementInfo, sel: &Value) -> bool {
     {
         return false;
     }
+    // A chosen item of a list, a segmented control or a group (`focus_selected`).
+    if let Some(f) = sel["selected"].as_bool()
+        && e.item_selected != f
+    {
+        return false;
+    }
+    // At least this wide, in points (a title keeps its room).
+    if let Some(w) = sel["min_w"].as_f64()
+        && f64::from(e.rect[2]) < w
+    {
+        return false;
+    }
     if let Some(inside) = sel.get("in") {
         let mut p = e.parent;
         let mut found = false;

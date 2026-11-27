@@ -1,0 +1,237 @@
+{
+  "name": "pane-subagent-tab",
+  "title": "A kitten's tab in the right pane: live, answerable, then its report",
+  "about": "Settings is in ask mode. A thread starts one kitten that runs a command. Overview lists the kitten and its request; Open on its card puts its conversation in a tab with its Stop; the request is answered inside the tab; the kitten finishes, its report comes first in the tab, and its report wakes the thread. Open in main view takes it into the main view, read-only.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1280,
+    800
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-mode-1"
+        }
+      },
+      "expect": "Settings opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-mode-1"
+      }
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check one thing [fake:delegate] mcp neko start_subagent {\"title\":\"Run the checks\",\"prompt\":\"Run the checks [fake:hook-shell]\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "subagent-card-1"
+        }
+      },
+      "within": 30,
+      "expect": "Kitten 1's card appears in the conversation"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "pane-needs"
+            }
+          },
+          {
+            "see": {
+              "key": "pane-kitten-1"
+            }
+          }
+        ]
+      },
+      "within": 30,
+      "expect": "Overview lists Kitten 1's request under Needs you and Kitten 1 in the tree"
+    },
+    {
+      "do": "snap",
+      "name": "overview",
+      "expect": "Overview with a kitten that asks"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "subagent-open-1"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "pane-kitten"
+            }
+          },
+          {
+            "see": {
+              "key": "pane-kitten-stop"
+            }
+          },
+          {
+            "see": {
+              "key": "perm-*-allow",
+              "in": {
+                "key": "pane-kitten"
+              }
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "Open puts Kitten 1 in a tab: its live run, its Stop, and its request inside it"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "pane-tabs-2",
+              "label": "Kitten 1"
+            }
+          },
+          {
+            "see": {
+              "key": "task-words"
+            }
+          },
+          {
+            "gone": {
+              "key": "subagent-readonly"
+            }
+          }
+        ]
+      },
+      "expect": "The tab strip has Overview, Changes, Kitten 1; the thread stays in the main view and nothing can be typed to the kitten"
+    },
+    {
+      "do": "snap",
+      "name": "tab-asks",
+      "expect": "The kitten's tab with its request"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "perm-*-allow"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "pane-kitten-report"
+            }
+          },
+          {
+            "see": {
+              "text": "The tests pass.",
+              "in": {
+                "key": "pane-kitten"
+              }
+            }
+          }
+        ]
+      },
+      "within": 30,
+      "expect": "The request was answered in the tab: the kitten finishes and its report comes first"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Woken by Kitten 1 \u00b7 done"
+        }
+      },
+      "within": 60,
+      "expect": "The report wakes the thread"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "key": "pane-kitten-stop"
+        }
+      },
+      "expect": "A finished kitten has no Stop"
+    },
+    {
+      "do": "snap",
+      "name": "tab-done",
+      "expect": "The kitten's tab once it is done"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "pane-kitten-main"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "crumb-subagent",
+          "text": "Kitten 1"
+        }
+      },
+      "within": 10,
+      "expect": "Open in main view takes it into the main view"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "crumb-thread"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "task-words"
+        }
+      },
+      "within": 10,
+      "expect": "Back in the thread"
+    }
+  ]
+}

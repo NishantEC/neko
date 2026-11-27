@@ -1,0 +1,155 @@
+{
+  "name": "pane-narrow",
+  "title": "The right pane as a sheet in a 1000 point window",
+  "about": "At 1000 by 700 points the pane is a sheet: shut until the band's pane button opens it over the conversation's right edge, closed by Escape; the band keeps the title's 140 points throughout.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1000,
+    700
+  ],
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Water the plants [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Water the plants"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "The thread finishes in a 1000 point window"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "min_w": 140
+            }
+          },
+          {
+            "see": {
+              "key": "pane-show"
+            }
+          },
+          {
+            "gone": {
+              "key": "pane-sheet"
+            }
+          },
+          {
+            "gone": {
+              "key": "pane"
+            }
+          }
+        ]
+      },
+      "expect": "Under 1100 points the pane is shut as a sheet, its button is in the band, and the title keeps its 140 points"
+    },
+    {
+      "do": "snap",
+      "name": "narrow-thread",
+      "expect": "The thread at 1000 points"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "pane-show"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "pane-sheet"
+        }
+      },
+      "within": 10,
+      "expect": "The button opens the pane as a sheet over the conversation's right edge"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "pane-tabs"
+            }
+          },
+          {
+            "see": {
+              "key": "band-title",
+              "min_w": 140
+            }
+          }
+        ]
+      },
+      "expect": "The sheet holds the tabs; the band keeps the title's room"
+    },
+    {
+      "do": "snap",
+      "name": "sheet",
+      "expect": "The sheet"
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "key": "pane-sheet"
+        }
+      },
+      "within": 10,
+      "expect": "Escape closes the sheet"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Water the plants"
+            }
+          },
+          {
+            "see": {
+              "key": "reply-input"
+            }
+          }
+        ]
+      },
+      "expect": "The thread is as it was: nothing was stopped"
+    }
+  ]
+}

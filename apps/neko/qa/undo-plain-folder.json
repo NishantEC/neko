@@ -85,7 +85,7 @@
             "see": {
               "name": "README.md",
               "in": {
-                "key": "review-files"
+                "key": "changes-files"
               }
             }
           },
@@ -93,7 +93,7 @@
             "see": {
               "name": "src/retry/mod.rs",
               "in": {
-                "key": "review-files"
+                "key": "changes-files"
               }
             }
           },
@@ -101,7 +101,7 @@
             "see": {
               "name": "OLD.md",
               "in": {
-                "key": "review-files"
+                "key": "changes-files"
               }
             }
           },
@@ -109,7 +109,7 @@
             "see": {
               "name": "docs/start.md",
               "in": {
-                "key": "review-files"
+                "key": "changes-files"
               }
             }
           },
@@ -117,7 +117,7 @@
             "see": {
               "name": "logo.png",
               "in": {
-                "key": "review-files"
+                "key": "changes-files"
               }
             }
           }
@@ -128,7 +128,7 @@
     {
       "do": "click",
       "on": {
-        "key": "review-back"
+        "key": "pane-tabs-0"
       }
     },
     {
@@ -234,5 +234,9 @@
       "name": "committed",
       "expect": "The refusal on the card"
     }
+  ],
+  "size": [
+    1280,
+    800
   ]
 }

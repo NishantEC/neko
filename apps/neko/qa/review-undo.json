@@ -1,7 +1,7 @@
 {
   "name": "review-undo",
   "title": "Review, Undo and Redo of a run in a git project",
-  "about": "A run (the fake's edit script) edits README.md, adds src/retry/mod.rs and logo.png, deletes OLD.md and renames docs/guide.md in the thread's worktree. Review shows exactly those; Undo puts the files back and leaves the person's checkout untouched; Redo brings the changes back; after an undo, a follow-up's words to the agent start with the line that says the files were undone.",
+  "about": "A run (the fake's edit script) edits README.md, adds src/retry/mod.rs and logo.png, deletes OLD.md and renames docs/guide.md in the thread's worktree. Review (on the run's change line) opens the pane's Changes tab on exactly those; Undo puts the files back and leaves the person's checkout untouched; Redo brings the changes back; after an undo, a follow-up's words to the agent start with the line that says the files were undone.",
   "cli": [
     "fake"
   ],
@@ -96,7 +96,7 @@
             "see": {
               "name": "README.md",
               "in": {
-                "key": "review-files"
+                "key": "changes-files"
               }
             }
           },
@@ -104,7 +104,7 @@
             "see": {
               "name": "src/retry/mod.rs",
               "in": {
-                "key": "review-files"
+                "key": "changes-files"
               }
             }
           },
@@ -112,7 +112,7 @@
             "see": {
               "name": "OLD.md",
               "in": {
-                "key": "review-files"
+                "key": "changes-files"
               }
             }
           },
@@ -120,7 +120,7 @@
             "see": {
               "name": "docs/start.md",
               "in": {
-                "key": "review-files"
+                "key": "changes-files"
               }
             }
           },
@@ -128,20 +128,20 @@
             "see": {
               "name": "logo.png",
               "in": {
-                "key": "review-files"
+                "key": "changes-files"
               }
             }
           }
         ]
       },
-      "expect": "Review lists exactly the run's changes: README.md, src/retry/mod.rs, OLD.md, docs/start.md, logo.png"
+      "expect": "The Changes tab lists exactly the run's changes: README.md, src/retry/mod.rs, OLD.md, docs/start.md, logo.png"
     },
     {
       "do": "assert",
       "that": {
         "count": {
           "of": {
-            "key": "review-file-*",
+            "key": "diff-*-trigger",
             "role": "button"
           },
           "max": 5
@@ -153,12 +153,12 @@
     {
       "do": "snap",
       "name": "review",
-      "expect": "The Review page"
+      "expect": "The Changes tab, This run"
     },
     {
       "do": "click",
       "on": {
-        "key": "review-back"
+        "key": "pane-tabs-0"
       }
     },
     {
@@ -331,5 +331,9 @@
       },
       "expect": "The person's checkout is still untouched"
     }
+  ],
+  "size": [
+    1280,
+    800
   ]
 }

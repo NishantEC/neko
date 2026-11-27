@@ -1,0 +1,282 @@
+{
+  "name": "pane-overview",
+  "title": "The right pane: Overview, Changes, and the change line",
+  "about": "A run (the fake's edit script) changes 5 files in a git project's worktree. Overview lists the changes with their figures, the folder and branch, the usage; the conversation ends with one quiet change line and no receipt card; the band has no folder line. Review opens the Changes tab on This run, All runs and Uncommitted switch the source, and the tab strip goes back to Overview.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1280,
+    800
+  ],
+  "setup": {
+    "files": {
+      "acme-api": {
+        "git": true,
+        "files": {
+          "README.md": "# Acme\nA small project.\n",
+          "OLD.md": "Old notes\n",
+          "docs/guide.md": "# Guide\n"
+        }
+      }
+    },
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "git-record",
+      "repo": "$files/acme-api",
+      "as": "before"
+    },
+    {
+      "do": "choose-folder",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Tidy the project [fake:edit]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Tidy the project"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "The run edits files in its worktree and finishes"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "run-*-review"
+            }
+          },
+          {
+            "see": {
+              "key": "run-*-undo"
+            }
+          }
+        ]
+      },
+      "expect": "The run card offers Review and Undo"
+    },
+    {
+      "do": "snap",
+      "name": "overview",
+      "expect": "Overview beside the conversation"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "pane-tabs"
+            }
+          },
+          {
+            "see": {
+              "key": "pane-changes-figures",
+              "label": "5 files changed"
+            }
+          },
+          {
+            "see": {
+              "key": "pane-folder-path"
+            }
+          },
+          {
+            "see": {
+              "key": "pane-branch",
+              "label": "Branch neko/"
+            }
+          },
+          {
+            "see": {
+              "key": "pane-usage"
+            }
+          }
+        ]
+      },
+      "expect": "Overview's Changes says 5 files changed, with the folder, the branch and the usage"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "count": {
+          "of": {
+            "key": "pane-file-*"
+          },
+          "is": 5
+        }
+      },
+      "expect": "The five files are listed, each with its own figures"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "run-*",
+              "name": "Changed 5 files"
+            }
+          },
+          {
+            "see": {
+              "key": "run-*-facts"
+            }
+          },
+          {
+            "gone": {
+              "key": "run-*-files"
+            }
+          },
+          {
+            "gone": {
+              "key": "task-folder"
+            }
+          }
+        ]
+      },
+      "expect": "The conversation has one quiet change line (Changed 5 files) and no receipt card; the band has no folder line"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "run-*-review"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "name": "README.md",
+              "in": {
+                "key": "changes-files"
+              }
+            }
+          },
+          {
+            "see": {
+              "name": "logo.png",
+              "in": {
+                "key": "changes-files"
+              }
+            }
+          },
+          {
+            "see": {
+              "key": "changes-source-0",
+              "selected": true
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "Review opens the Changes tab with This run selected, listing the run's files"
+    },
+    {
+      "do": "snap",
+      "name": "changes",
+      "expect": "The Changes tab"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "changes-source-1"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "changes-source-1",
+          "selected": true
+        }
+      },
+      "within": 10,
+      "expect": "All runs switches the source"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "changes-source-2"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "changes-source-2",
+              "selected": true
+            }
+          },
+          {
+            "see": {
+              "name": "README.md",
+              "in": {
+                "key": "changes-files"
+              }
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "Uncommitted lists what the worktree holds against its branch"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "pane-tabs-0"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "pane-changes"
+        }
+      },
+      "within": 10,
+      "expect": "Overview again"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "git_same": "before"
+      },
+      "expect": "The person's checkout is untouched"
+    }
+  ]
+}
