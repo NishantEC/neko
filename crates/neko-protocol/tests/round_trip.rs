@@ -24,6 +24,9 @@ fn task() -> Task {
         thread_status: ThreadStatus::Idle,
         needs_you: false,
         subagent: None,
+        pinned: false,
+        settled: false,
+        archived: false,
     }
 }
 
@@ -439,7 +442,7 @@ fn cats_round_trip() {
     let json = serde_json::to_string(&r).unwrap();
     assert!(json.ends_with(r#""cat":"cat_miso","rules_hash":"cbf29ce484222325"}"#), "{json}");
     pinned(PartBody::RulesChanged { cat: c(), name: "miso".into() }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso"}"#);
-    assert_eq!(PROTOCOL_VERSION, 16);
+    assert_eq!(PROTOCOL_VERSION, 17);
     // A thread with no cat writes none; one that chose its place writes the choice; an old screen's task (a cat, no choice) still reads.
     let mut t = task();
     t.cat = None;
@@ -494,4 +497,21 @@ fn steer_queue_and_interrupt_round_trip() {
     // Queue-first is written only when on, and a screen from before it sends none.
     pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: true }, r#"{"runtime":"claude","permission_mode":"follow","queue_first":true}"#);
     pinned(QueuedKind::Interrupting, "\"interrupting\"");
+}
+
+#[test]
+fn a_thread_can_be_pinned_settled_or_archived_and_says_so() {
+    pinned(ClientMessage { id: 5, request: Request::PinTask { task: TaskId("task_1".into()), pinned: true } }, r#"{"id":5,"type":"pin_task","task":"task_1","pinned":true}"#);
+    pinned(ClientMessage { id: 6, request: Request::SettleTask { task: TaskId("task_1".into()), settled: false } }, r#"{"id":6,"type":"settle_task","task":"task_1","settled":false}"#);
+    pinned(ClientMessage { id: 7, request: Request::ArchiveTask { task: TaskId("task_1".into()), archived: true } }, r#"{"id":7,"type":"archive_task","task":"task_1","archived":true}"#);
+    // None of the three is written until it is true, so a thread that is none looks as it did before version 17, and a task from a
+    // daemon that knows nothing of them reads as none.
+    assert!(!serde_json::to_string(&task()).unwrap().contains("pinned"));
+    let mut t = task();
+    t.pinned = true;
+    let json = serde_json::to_string(&t).unwrap();
+    assert!(json.ends_with(r#""pinned":true}"#), "{json}");
+    assert_eq!(serde_json::from_str::<Task>(&json).unwrap(), t);
+    let old: Task = serde_json::from_str(r#"{"id":"task_1","workspace":"default","words":"w","title":"t","created_ms":1,"status":"new"}"#).unwrap();
+    assert!(!old.pinned && !old.settled && !old.archived);
 }

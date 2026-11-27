@@ -36,7 +36,8 @@ pub fn derive(store: &Store) -> Result<Vec<NeedsItem>, StoreError> {
         items.push(NeedsItem { id: format!("perm:{}", p.id.0), task: t.id.clone(), workspace: t.workspace.clone(), title: shown(t), cat: cat_id(t), cat_name: cat_name(t), since_ms: p.asked_ms, need: Need::Permission { permission: p }, subagent: who(t) });
     }
     // A subagent's question or failure is its thread's to read (its report wakes it): only its requests wait for the person.
-    for t in tasks.values().filter(|t| t.subagent.is_none()) {
+    // An archived thread is put away: what it was waiting on is not the person's to answer until it wakes.
+    for t in tasks.values().filter(|t| t.subagent.is_none() && !t.archived) {
         match t.status {
             TaskStatus::Asked => {
                 let Some(run) = store.runs_of(&t.id)?.pop().filter(|r| r.status == RunStatus::Done) else { continue };

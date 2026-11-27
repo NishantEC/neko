@@ -44,7 +44,8 @@ pub use undo::{DiffFile, DiffPatch, DiffSource, DiffSummary, FileStatus, Offer, 
 /// instead, a task's `cat` is optional, `set_task_cat` is gone, `list_branches` says where a thread can start from).
 /// 15: the right pane (a diff has a source: a run, the thread, or what is uncommitted in the folder now; a thread's overview in one reply).
 /// 16: steer, queue, interrupt (`follow_up` takes a `mode`; the messages waiting above a composer are a list the daemon keeps, in the transcript and in `queue_changed`; `send_queued_now`, `discard_queued`; a setting swaps Return and Option-Return).
-pub const PROTOCOL_VERSION: u32 = 16;
+/// 17: a thread can be pinned, settled or archived (`pin_task`, `settle_task`, `archive_task`; a task says which it is).
+pub const PROTOCOL_VERSION: u32 = 17;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -192,6 +193,15 @@ pub struct Task {
     /// Set when this task is a subagent of another: whose it is and its number. A subagent is not listed as a thread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subagent: Option<SubagentOf>,
+    /// The person pinned it (version 16): it sits at the top of Threads, in any project. A pinned thread is never settled by itself.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
+    /// It is put away in its group's Settled fold (version 16), by the person or after a week idle. New activity brings it back.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub settled: bool,
+    /// It sleeps (version 16): out of the lists until the person's next message in it, which wakes it. Never both pinned and settled.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
 }
 
 /// The longest a thread's `latest_line` is, in characters.
@@ -235,6 +245,9 @@ impl Task {
             thread_status: ThreadStatus::Idle,
             needs_you: false,
             subagent: None,
+            pinned: false,
+            settled: false,
+            archived: false,
         }
     }
 
@@ -865,6 +878,15 @@ pub enum Request {
     MarkRead { task: TaskId },
     /// Make the thread unread again (the person asked). Replies `task`.
     MarkUnread { task: TaskId },
+    /// Pin the thread to the top of the list, or unpin it (version 16). Pinning brings a settled thread back; a thread that is not a
+    /// thread (a subagent) is refused. Replies `task`.
+    PinTask { task: TaskId, pinned: bool },
+    /// Put the thread in its group's Settled fold, or bring it back (version 16). Settling unpins; a thread that is working is
+    /// refused (`refused`). Replies `task`.
+    SettleTask { task: TaskId, settled: bool },
+    /// Archive the thread, or restore it without a run (version 16). A thread that is working or waits on its subagents is refused. A
+    /// message to an archived thread wakes it. Replies `task`.
+    ArchiveTask { task: TaskId, archived: bool },
     /// Answer a permission request. A request already answered is refused.
     AnswerPermission { permission: PermissionId, decision: Decision },
     /// Send this task's text as it streams (or none). Other changes reach every subscriber.

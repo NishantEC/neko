@@ -492,6 +492,9 @@ impl Core {
             thread_status: neko_protocol::ThreadStatus::Idle,
             needs_you: false,
             subagent: None,
+            pinned: false,
+            settled: false,
+            archived: false,
         })
     }
 

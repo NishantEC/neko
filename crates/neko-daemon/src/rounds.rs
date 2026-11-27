@@ -112,7 +112,7 @@ fn watch(shared: &Arc<Shared>) {
         if jumped(wall, mono) {
             eprintln!("neko-daemon: the clock moved {} s more than time did (the Mac slept, or the clock was set): looking at the rounds now", (wall - mono.as_millis() as i64) / 1000);
         }
-        let (started, wake_at) = {
+        let (started, wake_at, settle_in) = {
             // The core stays locked while events leave, so they go out in revision order.
             let mut core = lock(&shared.core);
             let e = env(shared);
@@ -142,17 +142,33 @@ fn watch(shared: &Arc<Shared>) {
                     None
                 }
             };
+            // The housekeeping (docs/knowledge/threads.md): threads left alone for a week are settled. It looks when a thread's week is
+            // up, and every few hours while any thread could still be settled; with none, it asks for no timer at all.
+            let settle_in = match core.store.auto_settle(e.now, neko_core::shelf::AUTO_SETTLE_AFTER_MS) {
+                Ok((settled, wake)) => {
+                    for (task, revision) in settled {
+                        shared.broadcast(&ServerMessage::Event { revision, change: Change::TaskUpdated { task } });
+                    }
+                    wake.map(|t| (t - e.now).max(0))
+                }
+                Err(e) => {
+                    eprintln!("neko-daemon: housekeeping: {e}");
+                    None
+                }
+            };
             let wake = [rounds_wake, morning_wake].into_iter().flatten().min();
-            (started, wake.map(|t| (t - e.now).max(0)))
+            (started, wake.map(|t| (t - e.now).max(0)), settle_in)
         };
         for task in started {
             let _ = runs::start(shared, task, None);
         }
         last = (Instant::now(), SystemClock.now_ms());
-        match wake_at {
+        // The rounds and the morning notification are kept to LONGEST_SLEEP; the housekeeping is not exact and needs no such care.
+        let sleep = [wake_at.map(|ms| ms.min(LONGEST_SLEEP.as_millis() as i64)), settle_in].into_iter().flatten().min();
+        match sleep {
             // Nothing on and automatic: no timer at all, until something changes.
             None => std::thread::park(),
-            Some(ms) => std::thread::park_timeout(Duration::from_millis(ms as u64).min(LONGEST_SLEEP)),
+            Some(ms) => std::thread::park_timeout(Duration::from_millis(ms.max(0) as u64)),
         }
     }
 }

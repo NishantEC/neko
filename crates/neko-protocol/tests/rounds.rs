@@ -105,6 +105,9 @@ fn a_task_made_by_a_round_says_so_and_one_made_by_a_person_does_not() {
         thread_status: ThreadStatus::Idle,
         needs_you: false,
         subagent: None,
+        pinned: false,
+        settled: false,
+        archived: false,
     };
     assert!(!serde_json::to_string(&t).unwrap().contains("round"));
     t.round = Some(TaskRound { id: "round_1".into(), name: "Docs check".into(), due_ms: Some(1_764_000_000_000) });

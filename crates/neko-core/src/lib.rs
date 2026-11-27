@@ -21,6 +21,7 @@ pub mod records;
 pub mod rounds;
 pub mod runtime;
 pub mod secrets;
+pub mod shelf;
 pub mod store;
 pub mod subagents;
 pub mod thread;

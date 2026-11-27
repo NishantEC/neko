@@ -15,6 +15,7 @@ use std::time::Duration;
 use neko_core::runtime::Runtime;
 use neko_core::{Core, NewTaskError, RandomIds, SystemClock};
 use neko_protocol::pump::{self, Flow, Out, Wake};
+use neko_core::shelf::Shelf;
 use neko_protocol::{Change, ClientMessage, DaemonInfo, ErrorCode, NeedsItem, PROTOCOL_VERSION, Reply, Request, ServerMessage, TaskId, TaskStatus, files};
 use tungstenite::WebSocket;
 use tungstenite::protocol::Role;
@@ -474,6 +475,36 @@ fn mark(shared: &Shared, task: &neko_protocol::TaskId, read: bool) -> Reply {
     }
 }
 
+/// The person pinned, settled or archived a thread, or took it back: the task, whole, to every screen. Refused with words when it
+/// cannot be done now (`neko_core::shelf::refusal`); asking for what already is is not an error and changes nothing.
+fn shelve(shared: &Shared, task: &neko_protocol::TaskId, shelf: Shelf, on: bool) -> Reply {
+    let mut core = lock(&shared.core);
+    let t = match core.store.get_task(task) {
+        Ok(Some(t)) => t,
+        Ok(None) => return Reply::error(ErrorCode::NotFound, "There is no such thread."),
+        Err(e) => return Reply::error(ErrorCode::Internal, e.to_string()),
+    };
+    let is = match shelf {
+        Shelf::Pin => t.pinned,
+        Shelf::Settle => t.settled,
+        Shelf::Archive => t.archived,
+    };
+    if is == on {
+        return Reply::Task { task: t };
+    }
+    if let Some(why) = neko_core::shelf::refusal(&t, shelf, on) {
+        return Reply::error(ErrorCode::Refused, why);
+    }
+    let now = core.now();
+    match core.store.set_shelf(task, shelf, on, now) {
+        Ok((task, revision)) => {
+            shared.broadcast(&ServerMessage::Event { revision, change: Change::TaskUpdated { task: task.clone() } });
+            Reply::Task { task }
+        }
+        Err(e) => Reply::error(ErrorCode::Internal, e.to_string()),
+    }
+}
+
 /// The reply to one message, the id it answers, and whether the connection goes on.
 fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) -> (u64, Reply, Flow) {
     let msg: ClientMessage = match serde_json::from_str(text) {
@@ -669,6 +700,9 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
         Request::StopTask { task } => runs::stop(shared, &task),
         Request::MarkRead { task } => mark(shared, &task, true),
         Request::MarkUnread { task } => mark(shared, &task, false),
+        Request::PinTask { task, pinned } => shelve(shared, &task, Shelf::Pin, pinned),
+        Request::SettleTask { task, settled } => shelve(shared, &task, Shelf::Settle, settled),
+        Request::ArchiveTask { task, archived } => shelve(shared, &task, Shelf::Archive, archived),
         Request::AnswerPermission { permission, decision } => runs::answer(shared, &permission, decision),
         Request::WatchTask { task } => {
             if let Some(c) = lock(&shared.conns).get_mut(&conn) {

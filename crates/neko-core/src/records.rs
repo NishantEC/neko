@@ -98,7 +98,8 @@ fn note_words(tx: &Transaction<'_>, p: &Part, now_ms: i64) -> rusqlite::Result<(
     if let PartBody::Agent { text, .. } = &p.body {
         let line = crate::thread::latest_line(text);
         if !line.is_empty() {
-            tx.execute("UPDATE tasks SET latest_line = ?2, activity_ms = MAX(activity_ms, ?3) WHERE id = ?1", params![p.task.0, line, now_ms])?;
+            // New words bring a settled thread back.
+            tx.execute("UPDATE tasks SET latest_line = ?2, activity_ms = MAX(activity_ms, ?3), settled_ms = NULL WHERE id = ?1", params![p.task.0, line, now_ms])?;
         }
     }
     Ok(())
@@ -173,7 +174,11 @@ impl Store {
         // A run that ended, a question or a request is something that happened in the thread; a stop is the person's own doing, and
         // a run starting is too.
         if matches!(status, TaskStatus::Done | TaskStatus::Failed | TaskStatus::Asked | TaskStatus::NeedsYou | TaskStatus::Interrupted) {
-            tx.execute("UPDATE tasks SET activity_ms = MAX(activity_ms, ?2) WHERE id = ?1", params![id.0, now_ms])?;
+            tx.execute("UPDATE tasks SET activity_ms = MAX(activity_ms, ?2), settled_ms = NULL WHERE id = ?1", params![id.0, now_ms])?;
+        }
+        // A run starting (the person's message, a wake, a round) brings a settled thread back and wakes an archived one.
+        if status == TaskStatus::Working {
+            tx.execute("UPDATE tasks SET settled_ms = NULL, archived_ms = NULL WHERE id = ?1", [&id.0])?;
         }
         let seq = log(&tx, now_ms, &id.0, "task_status", serde_json::json!({ "status": status_name(status) }))?;
         tx.commit()?;

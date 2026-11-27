@@ -286,6 +286,11 @@ const MIGRATIONS: &[Migration] = &[
         at_ms INTEGER NOT NULL
     );
     CREATE INDEX queued_by_task ON queued(task_id);"),
+    // 13: pin, settle, archive (docs/knowledge/threads.md). When the person pinned a thread, when it was settled (by them or after a
+    // week idle) and when it was archived; empty for a thread that is none of these. Nothing that exists is any of them.
+    Migration::Sql("ALTER TABLE tasks ADD COLUMN pinned_ms INTEGER;
+    ALTER TABLE tasks ADD COLUMN settled_ms INTEGER;
+    ALTER TABLE tasks ADD COLUMN archived_ms INTEGER;"),
 ];
 
 /// Migration 9's step: each task's `latest_line` from its newest agent words.
@@ -367,6 +372,9 @@ pub(crate) fn task_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         failure_line: String::new(),
         thread_status: neko_protocol::ThreadStatus::Idle,
         needs_you: false,
+        pinned: row.get::<_, Option<i64>>(19)?.is_some(),
+        settled: row.get::<_, Option<i64>>(20)?.is_some(),
+        archived: row.get::<_, Option<i64>>(21)?.is_some(),
         subagent: match (row.get::<_, Option<String>>(14)?, row.get::<_, Option<String>>(15)?, row.get::<_, Option<String>>(16)?) {
             (Some(parent), Some(number), Some(root)) => Some(SubagentOf { parent: TaskId(parent), number, root: TaskId(root) }),
             _ => None,
@@ -374,12 +382,15 @@ pub(crate) fn task_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     })
 }
 
-pub(crate) const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name, last_read_ms, activity_ms, latest_line, parent_id, sub_number, root_id, in_folder, from_branch";
+/// What a new task row writes (the rest of the columns begin empty).
+const INSERT_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name, last_read_ms, activity_ms, latest_line, parent_id, sub_number, root_id, in_folder, from_branch";
+/// What a task is read from, in the order [`task_of`] takes it.
+pub(crate) const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name, last_read_ms, activity_ms, latest_line, parent_id, sub_number, root_id, in_folder, from_branch, pinned_ms, settled_ms, archived_ms";
 
 /// Writes a new task and its `task_created` event inside `tx`. Returns the event's sequence number.
 pub(crate) fn insert_task(tx: &rusqlite::Transaction<'_>, task: &Task) -> Result<u64, StoreError> {
     tx.execute(
-        &format!("INSERT INTO tasks ({TASK_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)"),
+        &format!("INSERT INTO tasks ({INSERT_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)"),
         params![
             task.id.0,
             task.workspace,
@@ -460,7 +471,7 @@ impl Store {
     /// Stores a task (for `cat` when it has one) and its `task_created` event in one transaction. Returns the task and the event's
     /// sequence number.
     pub fn create_task(&mut self, id: &TaskId, workspace: &str, words: &str, folder: Option<&str>, cat: Option<&str>, how: &crate::workplace::Placement, now_ms: i64) -> Result<(Task, u64), StoreError> {
-        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New, folder: folder.map(str::to_owned), cat: cat.map(str::to_owned), in_folder: how.in_folder, from_branch: how.from_branch.clone(), round: None, last_read_ms: now_ms, activity_ms: now_ms, latest_line: String::new(), failure_line: String::new(), thread_status: neko_protocol::ThreadStatus::Idle, needs_you: false, subagent: None };
+        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New, folder: folder.map(str::to_owned), cat: cat.map(str::to_owned), in_folder: how.in_folder, from_branch: how.from_branch.clone(), round: None, last_read_ms: now_ms, activity_ms: now_ms, latest_line: String::new(), failure_line: String::new(), thread_status: neko_protocol::ThreadStatus::Idle, needs_you: false, subagent: None, pinned: false, settled: false, archived: false };
         let tx = self.conn.transaction()?;
         let seq = insert_task(&tx, &task)?;
         tx.commit()?;
@@ -501,7 +512,7 @@ impl Store {
         }
         t.thread_status = crate::thread::thread_status(t.status, t.last_read_ms, t.activity_ms);
         let subagent_asks = t.subagent.is_none() && self.conn.query_row("SELECT 1 FROM permissions p JOIN tasks s ON s.id = p.task_id WHERE s.root_id = ?1 AND p.state = 'pending' LIMIT 1", [&t.id.0], |_| Ok(())).optional()?.is_some();
-        t.needs_you = crate::thread::needs_you(t.status, actionable, subagent_asks);
+        t.needs_you = !t.archived && crate::thread::needs_you(t.status, actionable, subagent_asks);
         Ok(t)
     }
 
