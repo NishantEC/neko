@@ -177,14 +177,14 @@
           {
             "see": {
               "role": "option",
-              "label": "Feed the fish",
-              "name": "mochi"
+              "label": "mochi",
+              "name": "needs you"
             }
           }
         ]
       },
       "within": 10,
-      "expect": "The thread is mochi's in the header, the turn and the sidebar row"
+      "expect": "The thread is mochi's in the header and the turn, and mochi's Cattains row says it needs the person"
     },
     {
       "do": "key",

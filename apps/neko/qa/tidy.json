@@ -418,7 +418,7 @@
       "do": "click",
       "on": {
         "role": "menuitem",
-        "name": "Remove task…"
+        "name": "Remove thread…"
       }
     },
     {

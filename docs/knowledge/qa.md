@@ -34,6 +34,8 @@ daemon started with that variable; a release daemon refuses it (`rounds.md`).
 
 ## The sidebar scenarios
 
+The driver has no window to focus, so Neko is never "in front" there; it sets `App::read_unfronted` so the thread in view is read as its words arrive, as it is in a real window that is in front. A real window behind another app leaves what arrives unread (`tests/threads.rs`). The driver also reads the saved grouping, as the real window does.
+
 Headless only (they use the driver's `order` check: the named elements are on screen from top to bottom in that order).
 
 `sidebar-threads` adds two projects, makes a thread that ends with a question and a newer one in acme-api and a slow one in mochi-notes,

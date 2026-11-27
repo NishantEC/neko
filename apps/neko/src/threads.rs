@@ -115,6 +115,11 @@ pub fn state_words(task: &Task) -> String {
         ThreadStatus::Failed => parts.push("failed"),
         ThreadStatus::Idle => {}
     }
+    match task.status {
+        neko_protocol::TaskStatus::Stopped => parts.push("stopped"),
+        neko_protocol::TaskStatus::Interrupted => parts.push("interrupted"),
+        _ => {}
+    }
     if task.unread() {
         parts.push("unread");
     }

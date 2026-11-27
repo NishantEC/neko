@@ -23,7 +23,7 @@ All of it is derived in `crates/neko-core/src/thread.rs`, from what the store ho
 The Needs you list uses the same predicate (`needs::failure_of`), so a thread's flag and the list agree.
 
 - `last_read_ms`: when the person last opened the thread. A thread the person makes is read at birth; a thread a round makes is
-  unread until opened. Opening a thread sends `mark_read`; Mark as unread sends `mark_unread`.
+  unread until opened. Opening a thread sends `mark_read`, and so does anything that arrives in the thread in view while Neko is in front; Neko behind another app leaves it unread. Mark as unread (a row's menu, not offered for the thread in view) sends `mark_unread`.
 - `activity_ms`: when something happened that the person did not do themselves: the agent's words, a run's end, a request, an
   interruption. A run starting and a stop are the person's own, so neither counts. **Unread** is `activity_ms > last_read_ms`
   (`Task::unread`); the app shows it as a semibold title.

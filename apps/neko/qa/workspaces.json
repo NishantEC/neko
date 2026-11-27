@@ -1,7 +1,7 @@
 {
   "name": "workspaces",
   "title": "Projects as sidebar sections",
-  "about": "Two folders are added as projects (one a git repository). Both appear as sections after General. A thread runs in each and one in No project; each sits under its own section with the right header. A section is folded; after a quit and relaunch the fold and everything else is as it was.",
+  "about": "Two folders are added as projects (one a git repository). Both appear as groups, with No project last once a thread exists. A thread runs in each and one in No project; each sits under its own section with the right header. A section is folded; after a quit and relaunch the fold and everything else is as it was.",
   "cli": [
     "fake"
   ],
@@ -37,12 +37,6 @@
           {
             "see": {
               "role": "button",
-              "label_is": "No project"
-            }
-          },
-          {
-            "see": {
-              "role": "button",
               "label_is": "acme-api"
             }
           },
@@ -54,12 +48,12 @@
           }
         ]
       },
-      "expect": "No project and both projects appear as sections"
+      "expect": "Both projects appear as groups (No project is listed once a thread exists)"
     },
     {
       "do": "snap",
       "name": "sections",
-      "expect": "The sidebar with three sections"
+      "expect": "The sidebar with two project groups"
     },
     {
       "do": "click",

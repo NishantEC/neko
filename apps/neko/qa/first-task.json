@@ -10,7 +10,7 @@
     {
       "do": "snap",
       "name": "home-empty",
-      "expect": "Home greets the person and the sidebar has no threads yet"
+      "expect": "Home greets the person and the sidebar says where threads will appear"
     },
     {
       "do": "assert",
@@ -23,12 +23,12 @@
           },
           {
             "see": {
-              "text": "No threads yet"
+              "text": "Threads you start appear here"
             }
           }
         ]
       },
-      "expect": "The greeting is shown and the sidebar says \"No threads yet\""
+      "expect": "The greeting is shown and the sidebar says \"Threads you start appear here\""
     },
     {
       "do": "click",

@@ -74,7 +74,7 @@
       "do": "click",
       "on": {
         "role": "menuitem",
-        "name": "Remove…"
+        "name": "Remove project…"
       }
     },
     {
