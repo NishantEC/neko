@@ -4,12 +4,15 @@ One place that lists what waits for the person, and a Mac notification when some
 
 ## What counts
 
-Three things, and nothing else:
+Four things, and nothing else (the fourth belongs to no task):
 
 1. A permission request still pending.
 2. A run that ended with a question: the task is `asked`.
 3. A run that failed for a reason the person can act on: not signed in, the usage limit, the task's folder missing, the agent CLI
    missing. The failure's notice carries its kind (`FailureKind`). A crash, a timeout or a stall is a notice in the task only.
+
+4. A plugin waiting for the person to approve exactly what it will run (`waiting`), or to approve it again because its manifest changed
+   (`changed`). A declined plugin is not asked about again until its manifest changes (`plugins.md`).
 
 A finished task that needs nothing is done, not "needs you". An interrupted task is not either: a follow-up carries on.
 
@@ -25,7 +28,12 @@ same after a restart (tested). A notice written before version 6 has no kind; it
 - Order: oldest first, grouped by workspace. The workspace whose item waited longest comes first.
 - Each item carries its task's cat and the cat's name (`cats.md`); the list leads with them ("miso asks"), and a rename pushes the
   list again.
-- An item's id is stable while it waits: `perm:<id>`, `question:<run id>`, `failure:<part id>`.
+- An item's id is stable while it waits: `perm:<id>`, `question:<run id>`, `failure:<part id>`, `plugin:<plugin id>`.
+- A plugin's item (`Need::Plugin {ask}`) has no task, workspace or cat: its `task`, `workspace`, `cat` and `cat_name` are empty and its
+  `title` is the plugin's name. They make a group of their own, ordered like any group by their oldest item. It says what will run: the
+  command line or address, the names of what the plugin is handed (never values), its version, where it came from, and for a change
+  the lines that differ from what was approved. It waits since the manifest became what it is now. Approve (`approve_plugin`) names the
+  digest the card showed; a manifest that changed under the card is refused and the card shows the new one.
 - A question is the last paragraph of the run's words, without Markdown's marks, cut to the sentences at its end that fit 200
   characters.
 - A failure's line to copy is the first code span of what to do next (`claude auth login`).
@@ -34,6 +42,8 @@ The app holds no list of its own. It hides an item it answered at once, until th
 
 ## Answering
 
+- A plugin: `approve_plugin {plugin, digest}` or `decline_plugin {plugin}`. There is no default answer: Return does not approve, and a
+  notification for a plugin never has an Approve button (it only opens the list).
 - A request: `answer_permission`, the same request the task's own control sends. A second answer is refused (`already_answered`).
 - A question: `follow_up` with `answering` set to the run. The daemon refuses it unless the task is still `asked` on that run and
   no run has started; so a second answer, or an answer to an older question, never reaches the agent.
@@ -125,6 +135,7 @@ Phone push, quiet hours, dismissing an item without answering it, per-workspace 
 
 - `crates/neko-core/tests/needs.rs`: each kind and each way it ends, the failures that count and those that do not, the order and
   the groups, a restart.
+- `crates/neko-core/tests/plugins.rs` and `crates/neko-daemon/tests/plugins.rs`: a plugin's item, what it shows, when it leaves the list.
 - `crates/neko-daemon/tests/needs.rs`: the list and its pushes, answering a request and a question once, a stale answer refused, a
   failure kept across a restart, a folder gone before the run.
 - `apps/neko/src/notify.rs`: which notifications each change posts, their actions, withdrawal, the front and other-task rule, the

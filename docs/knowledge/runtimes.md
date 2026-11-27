@@ -35,12 +35,17 @@ Detection runs `claude --version` and `claude auth status --json`. From the seco
 ```text
 claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages
        --permission-prompt-tool stdio [--permission-mode default] [--settings <hook JSON>]
-       [--append-system-prompt <the cat's block> --system-prompt-snapshot off] [--resume <session>]
+       [--mcp-config <this run's plugins>] [--append-system-prompt <the cat's block> --system-prompt-snapshot off] [--resume <session>]
 ```
 
 - The task's cat reaches the agent as `--append-system-prompt`, one argument, on every run; `--system-prompt-snapshot off` makes a
   resumed run take rules edited since. It changes no other flag (`cats.md`).
 
+- The plugins the task's cat may use (`plugins.md`) reach Claude Code as `--mcp-config <file>`: one JSON file of `mcpServers` made for
+  this run alone (`<data>/plugins-run/<run id>/mcp.json`, mode 0600 in a 0700 folder), removed when the run ends. A run with none gets no
+  flag. Neko does **not** pass `--strict-mcp-config`: the MCP servers in the person's own Claude Code settings stay, as the rest of their
+  settings do. The secret settings of a plugin are in the file's `env` and `headers` for the length of the run, read from the Keychain
+  when the run starts. A plugin's tool is `mcp__<plugin>__<tool>` and asks through the same route as every tool (`permissions.md`).
 - `NEKO_CLAUDE_MODEL` in the daemon's environment adds `--model <name>` (the QA rig sets `haiku` for real runs,
   `docs/knowledge/qa.md`). Unset or empty, no `--model` is passed and the CLI's own default applies. The fake reports the model
   it was given (`tests/model.rs`).
@@ -125,9 +130,15 @@ and its last stderr line when it is plain words), a failure the CLI reported, 30
 
 `crates/neko-core/src/bin/neko-fake-claude.rs` speaks the same protocol from scripts picked by `[fake:NAME]` in the words: plain,
 long, thinking, tools, permission, destructive, outside, slow, spawn, spawn-stay, crash, limit, signin, stall, hook-shell,
-hook-twice, hook-read, hook-destructive, hook-no-verdict, real (empty thinking, words between tools, a long path, a check that
-exits 1), and a resumed conversation. `NEKO_FAKE_RECORD` names a file it appends its arguments and every stdin line to. Like Claude Code it reads `permissions.allow` from `$HOME/.claude/settings.json` and runs the `PreToolUse`
+hook-twice, hook-read, hook-destructive, hook-no-verdict, plugin-tool:SERVER:TOOL, real (empty thinking, words between tools, a long path, a check that
+exits 1), and a resumed conversation. `NEKO_FAKE_RECORD` names a file it appends its arguments, the content of every `--mcp-config` file it was given (read at start, since the file goes with the run) and every stdin line to. `plugin-tool:SERVER:TOOL` calls `mcp__SERVER__TOOL` through the permission route, or fails at once with "No such tool available" when the config gave no such server. Like Claude Code it reads `permissions.allow` from `$HOME/.claude/settings.json` and runs the `PreToolUse`
 hooks given with `--settings` as the documentation says. Tests give it a HOME of their own. No test runs the real CLI.
+
+## Plugins on a real run: not sure yet
+
+`plugins.md` ends with the list: that Claude Code takes `--mcp-config` of this shape alongside the person's own servers, names the tools
+`mcp__<name>__<tool>` unchanged and asks about them as it does about other tools, and how the Keychain behaves for the installed app. The
+fake CLI proves Neko's side only.
 
 ## What the first real run confirmed (Claude Code 2.1.331)
 

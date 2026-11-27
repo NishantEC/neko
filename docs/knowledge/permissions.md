@@ -57,6 +57,20 @@ For a run in this mode only, Neko passes `--permission-mode default` and this `-
 - The secret is in the environment of every command the agent runs. With it a command can only put a request to the person; it
   cannot answer one.
 
+## A plugin's tools
+
+A plugin (`plugins.md`) is an MCP server Claude Code starts for the run. Its tools are `mcp__<plugin>__<tool>` and take the same route as
+every other tool; nothing about a plugin lets a step through that another tool would ask about.
+
+- Following Claude Code's own rules: Claude Code asks (unless the person's own rules allow the tool), and Neko asks in the task and in
+  "Needs you". Ask before risky steps: the hook sees the call and the policy asks. Full access: it goes ahead.
+- The request names the plugin: "Use search from acme-docs", why: "acme-docs is a plugin you approved in Neko. Its tools can reach
+  whatever the plugin can."; a server that is not one of the run's plugins (from the person's own Claude Code settings) says so instead.
+  The detail is the call's input, compact JSON, shortened. It is never destructive: Neko cannot tell what a plugin's tool does.
+- "Always allow" is the same tool of the same server for the rest of the task (`tool:mcp__acme-docs__search`); another tool of the
+  plugin asks again. Whether a cat has the plugin at all is its own matter (`plugins.md`: which cats).
+- Tested with the fake CLI and the real daemon in every mode (`crates/neko-daemon/tests/plugins.rs`).
+
 ## A request
 
 A stored row (`permissions`): what it wants (title), why Neko asks, the exact command or path, whether it is destructive, its

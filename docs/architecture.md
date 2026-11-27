@@ -48,7 +48,7 @@ daemon pushes an event for every change. See `docs/knowledge/protocol.md`.
 
 SQLite, bundled, in WAL mode, at `neko.sqlite3` in the data folder. One row per entity: `workspaces` (General and the folders the
 person added), `tasks`, `runs`, `parts`,
-`permissions`, `usage`, `settings`, `cats`, `rounds` and its `round_runs`. Every change
+`permissions`, `usage`, `settings`, `cats`, `rounds` and its `round_runs`, `plugins` and `plugin_values`. Every change
 also appends one row to `events`, in the same transaction. Triggers refuse any update or delete of an event. The schema version
 is SQLite's `user_version`; migrations run in order from version 1. Logic never reads the clock or makes an id itself: both are
 handed in. See `docs/knowledge/store.md`.
@@ -74,6 +74,14 @@ permission mode, the cat's rules, the run guard and Undo apply unchanged. See `d
 What happened while the person was away is derived by the daemon from the records above, never written by a model and never stored apart from where the
 person last read it. It is pushed like Needs you, and the rounds scheduler's thread also decides the morning notification, which
 the app posts. See `docs/knowledge/briefing.md`.
+
+## Plugins
+
+Neko is meant to be built from plugins; the host and the first kind, MCP servers, are here and none ships. A plugin is a manifest, the
+digest of it and the digest the person approved. It runs only when those are the same: for a run, the cat's approved, enabled plugins go to
+Claude Code in a config file made for that run alone (`--mcp-config`, mode 0600, removed with the run); a check starts a server under the run
+guard on a thread of its own with a deadline. Secret settings are kept in the macOS Keychain and nowhere else. Anything that can wait on a
+server, a folder or the Keychain runs off the connection's thread, so a stop never waits on a plugin. See `docs/knowledge/plugins.md`.
 
 ## The app
 
