@@ -18,6 +18,7 @@
 | `settings_view.rs` | Settings (⌘,): the agent CLIs, which one new tasks use, the permission mode, workspaces, notifications. |
 | `rounds.rs`, `rounds_view.rs` | Rounds (⌘3): the words for schedules and times, the New round / Edit panel's form; the page of cards and the panel (`rounds.md`). |
 | `briefing.rs`, `briefing_view.rs` | The Briefing (⌘4): the words for a window, a round line and the totals, the state it keeps; the page (`briefing.md`). |
+| `plugins.rs`, `plugins_view.rs` | Plugins: the words for a state, a check and an ask; the Add sheet's state, read live with the daemon's own `parse_mcp_json`; Settings ▸ Plugins, the Add sheet, the approval block Needs you shares, a cat's plugins (`plugins.md`). |
 | `needs_view.rs` | Needs you (⌘2): one list of what waits for the person, answered in place (`needs-you.md`). |
 | `notify.rs`, `deeplink.rs` | The notification model and its poster (a recorder outside the real window); `neko://task/<id>`. |
 | `link.rs` | The supervisor thread: find or start the daemon, connect, reconnect, an inbox the window drains. |
@@ -158,7 +159,16 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   (QA defect 10); `tests/page_swap.rs` takes frames while the swap moves and fails if both are drawn.
 - **Review's files** are rune-ui's Diff (0.10): `.stats` for a folded file's counts, `.hide_zero(true)` (a file that only gained
   lines shows no "−0"), `.selectable(true)` and `.foot(..)` for the note, Show all, Copy diff, Copy path and Reveal.
-- **Settings** has five pages, Agents, Workspaces, Notifications, Cats and Briefing, switched by rune-ui's SegmentedControl.
+- **Settings** has six pages, Agents, Workspaces, Notifications, Cats, Briefing and Plugins, switched by rune-ui's SegmentedControl. ⌘, then the page switch reaches Plugins (`settings-page-5`); "Open in Settings" on a plugin's Needs you card and a plugin's name on a cat's page open it at that plugin, with the keyboard on its first control.
+
+## Plugins (app side)
+
+- **Settings ▸ Plugins** is a card per plugin: a plug tile, the name (and its version when it has one), where it came from, its state in words (a badge: amber where the person is needed, red for "Can't be read", green only for On), the switch once approved. While a plugin is not approved the card holds the approval block (exactly what will run, then Approve and Decline). Then its declared settings as fields (text: input and Save; secret: masked field and Set, then "Set" with Change and Remove; yes/no: a switch; choice: segmented up to three, else a select; folder: a path with Choose…), who may use it ("Every cat" or "Only some cats" with a switch per cat; none chosen sends nothing, the last cat cannot be turned off), and Test with its result and Remove… (asks first).
+- **The Add sheet** (`Add MCP server…`) reads the paste while it is typed with the daemon's own code. Add stays off until it reads. A single server without a name offers a Name field. Values in `env` and `headers` are never drawn, only names; the paste lives only in the sheet's text area and is dropped when the sheet closes. `Add plugin folder…` uses the Mac's folder panel exactly as Add workspace… does (`tx.open_folder`, so the QA driver answers it with `resolve_file_dialog`).
+- **Pending** is per plugin: `Ui.testing` ("Testing…", up to ten seconds, cleared if the link is lost) and `Ui.busy` (a change out). A refusal is a line on the card; one from the Needs you list brings the card back with the words.
+- **A secret** is held only while it is typed, sent once and dropped; Change is its own state (`Ui.changing`), so a stray edit event never turns a set secret back into a field. Tested: the value is in no accessibility name, text or description.
+- **Needs you** gives a plugin the plug tile (with the amber dot) in place of a cat's portrait, groups it under "Plugins", has no Open task (it has Open in Settings), and Approve and Decline answer nothing on Return (Space presses), as on a destructive request. Its notification has no buttons, is made only while Neko is not in front, and a click opens the list at the card.
+- **A tool step** of a plugin reads "acme-docs · search", never `mcp__acme-docs__search`.
 
 ## Not done yet
 

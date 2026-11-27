@@ -165,7 +165,7 @@ fn card(s: &App, t: &Theme, p: &Plugin, pos: usize, n: usize, layer: &mut Vec<El
     let ok = plugins::approved(p);
     let id = p.id.clone();
 
-    let mut title = row().w_full().gap(t.space.at(2.0)).items_end().child(text(p.name.clone()).key(format!("{key}-name")).role("heading").level(3).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0).shrink());
+    let mut title = row().w_full().gap(t.space.at(2.0)).items_end().child(text(p.name.clone()).key(format!("{key}-name")).role("heading").level(3).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0).shrink().help(p.name.clone()));
     // A pasted server has no version of its own ("0"): nothing is shown rather than a made-up number.
     if p.version != "0" {
         title = title.child(text(p.version.clone()).key(format!("{key}-version")).font(tabular(t.ty.xs)).color(t.ink_faint()).truncate().min_w(0.0));
@@ -175,7 +175,7 @@ fn card(s: &App, t: &Theme, p: &Plugin, pos: usize, n: usize, layer: &mut Vec<El
         .min_w(0.0)
         .gap(t.space.at(0.5))
         .child(title)
-        .child(text(kind_line(p, s.home.as_deref())).key(format!("{key}-kind")).font(t.ty.sm).color(t.ink_faint()).truncate_middle().min_w(0.0));
+        .child(text(kind_line(p, s.home.as_deref())).key(format!("{key}-kind")).font(t.ty.sm).color(t.ink_faint()).truncate_middle().min_w(0.0).help(p.folder.clone().or_else(|| p.manifest.mcp.url.as_deref().map(crate::plugins::host_of)).unwrap_or_default()));
     let mut head = row().w_full().gap(t.space.at(3.0)).center_y().child(tile(t, &format!("{key}-tile"), 40.0, Activity::None, false, t.c.surface.bg)).child(who).child(Badge::new(format!("{key}-state"), words).tone(state_tone(state)).dot().build(t));
     if ok {
         let on = p.enabled;

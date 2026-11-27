@@ -66,6 +66,10 @@ headed at the base step with its count (amber for Needs you, the identity teal f
 Home's line is a well too, one row high, with the Briefing's own glyph (a sun rising over a line, `icons::BRIEFING`) and Open
 briefing as a secondary button.
 
+## Plugins
+
+A plugin has no face: it is led by a plug (`icons::PLUGIN`, Neko's own, because rune-ui's set has none) on a quiet ground, the page's paper taken a small step toward the ink (`plugins_view::tile_ground`), so no cat's colour is borrowed and the glyph reads at 4.5:1 (tested). In a Needs you card the tile takes the room of a cat's 44 point portrait and carries its amber dot; in Settings it is 40 points. A card in Settings is the slab the agents' cards are; the approval block inside it is a well. The command line is mono, whole and wrapped (never cut), in its own well; names of what a plugin is handed are the sm step in the second ink. Check results are quiet: a check mark in the second ink for "Connected: 6 tools", red only for a failed test, the tool names in mono sm. The Add sheet is rune-ui's Dialog at 560 points: a text area, then what the paste will add (one well per server), notes, one quiet line; many servers scroll inside the sheet so Add stays on screen at 760 × 560.
+
 ## Faces
 
 The daemon gives each cat one of eight face ids (`neko_protocol::cats::FACES`); a new cat gets the first no active cat has, so a
