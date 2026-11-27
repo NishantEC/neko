@@ -283,7 +283,7 @@ impl Core {
 
     fn check_workspace(&self, ws: Option<&str>) -> Result<Option<String>, CatError> {
         let Some(id) = ws.filter(|w| !w.is_empty()) else { return Ok(None) };
-        let w = self.store.get_workspace(id)?.ok_or_else(|| CatError::Refused("That workspace is not there any more.".into()))?;
+        let w = self.store.get_workspace(id)?.ok_or_else(|| CatError::Refused("That project is not there any more.".into()))?;
         if !w.is_active() {
             return Err(CatError::Refused(format!("{} was removed from Neko.", w.name)));
         }
@@ -407,7 +407,7 @@ impl Core {
         if let Some(id) = picked.filter(|p| !p.is_empty()) {
             let cat = self.cat(id)?;
             if !cat.is_active() {
-                return Err(CatError::Refused(format!("{} is retired and takes no new tasks. Bring it back from Settings, or pick another cat.", cat.name)));
+                return Err(CatError::Refused(format!("{} is retired and takes no new threads. Bring it back from Settings, or pick another cat.", cat.name)));
             }
             return Ok(cat);
         }
@@ -418,10 +418,10 @@ impl Core {
 
     /// Gives a task to another active cat, only while no run of it has started.
     pub fn set_task_cat(&mut self, task: &TaskId, cat: &str) -> Result<(Task, u64), CatError> {
-        let t = self.store.get_task(task)?.ok_or_else(|| CatError::Refused("There is no such task.".into()))?;
+        let t = self.store.get_task(task)?.ok_or_else(|| CatError::Refused("There is no such thread.".into()))?;
         let c = self.cat_for(&t.workspace, Some(cat))?;
         if !self.store.runs_of(task)?.is_empty() {
-            return Err(CatError::Refused(format!("{} has already started on this task, so it stays theirs.", self.store.get_cat(&t.cat)?.map_or_else(|| "A cat".to_owned(), |c| c.name))));
+            return Err(CatError::Refused(format!("{} has already started on this thread, so it stays theirs.", self.store.get_cat(&t.cat)?.map_or_else(|| "A cat".to_owned(), |c| c.name))));
         }
         let now = self.now();
         Ok(self.store.set_task_cat(task, &c.id, now)?)
@@ -439,7 +439,7 @@ mod tests {
     #[test]
     fn the_least_busy_wins_then_the_least_recently_used() {
         let cats = [cand("cat_a", 1, Some(5), None), cand("cat_b", 0, Some(9), None), cand("cat_c", 0, Some(7), None)];
-        assert_eq!(least_busy(&cats).unwrap().id, "cat_c", "fewest working, then least recently given a task");
+        assert_eq!(least_busy(&cats).unwrap().id, "cat_c", "fewest working, then least recently given a thread");
         let fresh = [cand("cat_a", 0, Some(1), None), cand("cat_b", 0, None, None)];
         assert_eq!(least_busy(&fresh).unwrap().id, "cat_b", "never used comes first");
         let tie = [cand("cat_b", 0, None, None), cand("cat_a", 0, None, None)];

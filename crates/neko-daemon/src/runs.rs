@@ -201,10 +201,10 @@ pub fn start(shared: &Arc<Shared>, task: Task, words: Option<String>) -> Result<
     {
         let mut active = lock(&shared.runs.active);
         if active.contains_key(&task.id) {
-            return Err(Reply::error(ErrorCode::Busy, "Neko is already working on this task."));
+            return Err(Reply::error(ErrorCode::Busy, "Neko is already working on this thread."));
         }
         if lock(&shared.runs.undoing).contains(&task.id) {
-            return Err(Reply::error(ErrorCode::Busy, "Neko is undoing a run of this task. Send it again in a moment."));
+            return Err(Reply::error(ErrorCode::Busy, "Neko is undoing a run of this thread. Send it again in a moment."));
         }
         active.insert(task.id.clone(), Active { control: None, book: None, cancelled: cancelled.clone(), secret: None });
     }
@@ -249,11 +249,11 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
                 person(shared, &task.id, w);
             }
             release(shared, &task.id, cancelled);
-            return fail_before_run(shared, task, format!("The folder {f} is gone."), Some("Put it back, or start a new task with another folder.".into()), Some(FailureKind::FolderMissing));
+            return fail_before_run(shared, task, format!("The folder {f} is gone."), Some("Put it back, or start a new thread with another folder.".into()), Some(FailureKind::FolderMissing));
         }
         Err(PlaceError::Other(why)) => {
             release(shared, &task.id, cancelled);
-            return fail_before_run(shared, task, why, Some("Try again, or start a new task without a folder.".into()), None);
+            return fail_before_run(shared, task, why, Some("Try again, or start a new thread without a folder.".into()), None);
         }
     };
     {
@@ -475,7 +475,7 @@ pub fn follow_up(shared: &Arc<Shared>, task: Task, words: String) -> Reply {
             }
             Err(e) => Reply::error(ErrorCode::Busy, e.0),
         },
-        Some(None) => Reply::error(ErrorCode::Busy, "Neko is still starting this task's agent."),
+        Some(None) => Reply::error(ErrorCode::Busy, "Neko is still starting this thread's agent."),
         None => match start(shared, task, Some(words)) {
             Ok(()) => Reply::Ok,
             Err(r) => r,
@@ -518,11 +518,11 @@ pub fn answer(shared: &Shared, perm: &PermissionId, d: Decision) -> Reply {
 /// Removes a task: refused while its agent works, and when its folder holds unsaved work (nothing is deleted then).
 pub fn remove_task(shared: &Shared, task: &TaskId) -> Reply {
     if lock(&shared.runs.active).contains_key(task) {
-        return Reply::error(ErrorCode::Busy, "Neko is working on this task. Stop it first.");
+        return Reply::error(ErrorCode::Busy, "Neko is working on this thread. Stop it first.");
     }
     match lock(&shared.core).store.get_task(task) {
         Ok(Some(_)) => {}
-        Ok(None) => return Reply::error(ErrorCode::NotFound, "There is no such task."),
+        Ok(None) => return Reply::error(ErrorCode::NotFound, "There is no such thread."),
         Err(e) => return Reply::error(ErrorCode::Internal, e.to_string()),
     }
     let place = lock(&shared.core).store.place(task).ok().flatten();
@@ -536,7 +536,7 @@ pub fn remove_task(shared: &Shared, task: &TaskId) -> Reply {
     let mut core = lock(&shared.core);
     // A run may have started meanwhile (a follow-up from another screen): then nothing is removed.
     if lock(&shared.runs.active).contains_key(task) {
-        return Reply::error(ErrorCode::Busy, "Neko is working on this task. Stop it first.");
+        return Reply::error(ErrorCode::Busy, "Neko is working on this thread. Stop it first.");
     }
     let now = core.now();
     match core.store.delete_task(task, now) {
@@ -603,7 +603,7 @@ pub fn send_transcript(shared: &Shared, conn: u64, reply_id: u64, task: &TaskId)
                 }
                 Reply::Transcript { transcript: neko_protocol::Transcript { task: t, runs, parts, permissions } }
             }
-            (Ok(None), ..) => Reply::error(ErrorCode::NotFound, "There is no such task."),
+            (Ok(None), ..) => Reply::error(ErrorCode::NotFound, "There is no such thread."),
             (Err(e), ..) | (_, Err(e), ..) | (_, _, Err(e), _) | (.., Err(e)) => Reply::error(ErrorCode::Internal, e.to_string()),
         }
     };

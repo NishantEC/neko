@@ -168,7 +168,7 @@ pub fn decide(action: &Action, cx: &Context<'_>) -> Verdict {
                 return ask("Read a file".into(), "Claude Code asks before this under your own settings.", p.to_string_lossy().into_owned(), false, format!("read:{folder}"));
             }
             let folder = p.parent().unwrap_or(&p).to_string_lossy().into_owned();
-            ask("Read outside the task's folder".into(), "It is outside the folder this task works in.", p.to_string_lossy().into_owned(), false, format!("read:{folder}"))
+            ask("Read outside the thread's folder".into(), "It is outside the folder this thread works in.", p.to_string_lossy().into_owned(), false, format!("read:{folder}"))
         }
         Action::Edit { path } => {
             let p = resolve(cx.workdir, path);
@@ -189,7 +189,7 @@ pub fn decide(action: &Action, cx: &Context<'_>) -> Verdict {
                 );
             }
             let folder = p.parent().unwrap_or(&p).to_string_lossy().into_owned();
-            ask("Change a file outside the task's folder".into(), "It is outside the folder this task works in.", shown, false, format!("edit:{folder}"))
+            ask("Change a file outside the thread's folder".into(), "It is outside the folder this thread works in.", shown, false, format!("edit:{folder}"))
         }
         Action::Command { command } => {
             let d = destructive(command);

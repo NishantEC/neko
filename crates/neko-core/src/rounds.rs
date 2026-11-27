@@ -355,9 +355,9 @@ impl Core {
             return Err(RoundError::Refused(format!("{} is retired. Choose another cat, or bring {} back from Settings.", c.name, c.name)));
         }
         let ws = workspace.filter(|w| !w.is_empty()).unwrap_or(crate::DEFAULT_WORKSPACE);
-        let w = self.store.get_workspace(ws)?.ok_or_else(|| RoundError::Refused("That workspace is not there any more. Choose another.".into()))?;
+        let w = self.store.get_workspace(ws)?.ok_or_else(|| RoundError::Refused("That project is not there any more. Choose another.".into()))?;
         if !w.is_active() {
-            return Err(RoundError::Refused(format!("{} was removed from Neko. Choose another workspace.", w.name)));
+            return Err(RoundError::Refused(format!("{} was removed from Neko. Choose another project.", w.name)));
         }
         Ok((c.id, w))
     }
@@ -367,7 +367,7 @@ impl Core {
             return Err(RoundError::InvalidWords("Say what the round should do.".into()));
         }
         if words.len() > neko_protocol::MAX_WORDS_BYTES {
-            return Err(RoundError::InvalidWords("That is longer than a task can be. Put the long part in a file.".into()));
+            return Err(RoundError::InvalidWords("That is longer than a thread can be. Put the long part in a file.".into()));
         }
         Ok(())
     }
@@ -411,7 +411,7 @@ impl Core {
         let schedule = schedule.normalized().map_err(RoundError::Refused)?;
         // A cat that is retired may stay the round's until it is changed: only a new choice is checked.
         let (cat, w) = if cat == row.cat && workspace.map_or(crate::DEFAULT_WORKSPACE, |w| if w.is_empty() { crate::DEFAULT_WORKSPACE } else { w }) == row.workspace {
-            (row.cat.clone(), self.store.get_workspace(&row.workspace)?.ok_or(RoundError::Refused("That workspace is not there any more. Choose another.".into()))?)
+            (row.cat.clone(), self.store.get_workspace(&row.workspace)?.ok_or(RoundError::Refused("That project is not there any more. Choose another.".into()))?)
         } else {
             self.check_round_parts(cat, workspace)?
         };

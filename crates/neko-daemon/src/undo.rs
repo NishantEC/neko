@@ -282,10 +282,10 @@ pub fn undo_run(shared: &Arc<Shared>, task: &TaskId, run: &RunId, anyway: bool, 
     {
         let active = lock(&shared.runs.active);
         if active.contains_key(task) {
-            return Reply::error(ErrorCode::Busy, "Neko is working on this task. Undo waits until the run ends.");
+            return Reply::error(ErrorCode::Busy, "Neko is working on this thread. Undo waits until the run ends.");
         }
         if !lock(&shared.runs.undoing).insert(task.clone()) {
-            return Reply::error(ErrorCode::Busy, "Neko is already undoing a run of this task.");
+            return Reply::error(ErrorCode::Busy, "Neko is already undoing a run of this thread.");
         }
     }
     let reply = undo_inner(shared, task, run, anyway, redo);
@@ -328,7 +328,7 @@ fn undo_inner(shared: &Shared, task: &TaskId, run: &RunId, anyway: bool, redo: b
     if f.kind == Kind::Repo {
         let head = checkpoint::head(&f, until).ok().flatten();
         if head != end.head {
-            return refused("The task's branch has new commits since this run, so Neko did not touch it. Revert the commits instead.");
+            return refused("The thread's branch has new commits since this run, so Neko did not touch it. Revert the commits instead.");
         }
     }
     let applied = saved.as_ref().map_or(end.tree.clone(), |s| s.tree.clone());
@@ -381,7 +381,7 @@ pub fn storage(shared: &Shared) -> Reply {
 /// Clears every checkpoint: refs in repositories, the shadow repositories, and the rows. Refused while any task works.
 pub fn clear(shared: &Shared) -> Reply {
     if !lock(&shared.runs.active).is_empty() {
-        return Reply::error(ErrorCode::Busy, "Neko is working on a task. Clear the undo history once it ends.");
+        return Reply::error(ErrorCode::Busy, "Neko is working on a thread. Clear the undo history once it ends.");
     }
     let (kept, places) = {
         let core = lock(&shared.core);

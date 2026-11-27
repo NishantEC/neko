@@ -434,7 +434,7 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
         },
         Request::GetTask { task } => match lock(&shared.core).store.get_task(&task) {
             Ok(Some(task)) => Reply::Task { task },
-            Ok(None) => Reply::error(ErrorCode::NotFound, "There is no such task."),
+            Ok(None) => Reply::error(ErrorCode::NotFound, "There is no such thread."),
             Err(e) => internal(e),
         },
         Request::CreateTask { words, workspace, cat } => {
@@ -462,7 +462,7 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
         Request::RemoveTask { task } => runs::remove_task(shared, &task),
         Request::SetTaskCat { task, cat } => {
             if lock(&shared.runs.active).contains_key(&task) {
-                return (id, Reply::error(ErrorCode::Refused, "This task has started, so its cat stays."), Flow::Continue);
+                return (id, Reply::error(ErrorCode::Refused, "This thread has started, so its cat stays."), Flow::Continue);
             }
             let mut core = lock(&shared.core);
             match core.set_task_cat(&task, &cat) {
@@ -569,7 +569,7 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
             let s = &core.store;
             match (s.get_task(&task), s.runs_of(&task), s.parts_of(&task), s.permissions_of(&task)) {
                 (Ok(Some(task)), Ok(runs), Ok(parts), Ok(permissions)) => Reply::Transcript { transcript: neko_protocol::Transcript { task, runs, parts, permissions } },
-                (Ok(None), ..) => Reply::error(ErrorCode::NotFound, "There is no such task."),
+                (Ok(None), ..) => Reply::error(ErrorCode::NotFound, "There is no such thread."),
                 (Err(e), ..) | (_, Err(e), ..) | (_, _, Err(e), _) | (.., Err(e)) => internal(e),
             }
         }
@@ -597,7 +597,7 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
                     }
                 }
                 Ok(Some(t)) => runs::follow_up(shared, t, words),
-                Ok(None) => Reply::error(ErrorCode::NotFound, "There is no such task."),
+                Ok(None) => Reply::error(ErrorCode::NotFound, "There is no such thread."),
                 Err(e) => internal(e),
             }
         }

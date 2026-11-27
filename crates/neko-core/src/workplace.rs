@@ -49,7 +49,7 @@ pub fn prepare(data_dir: &Path, task: &TaskId, folder: Option<&str>) -> Result<P
     let short = short_id(task);
     let Some(folder) = folder else {
         let dir = data_dir.join(files::SCRATCH).join(&short);
-        std::fs::create_dir_all(&dir).map_err(|e| PlaceError::Other(format!("Neko could not make a folder for this task: {e}")))?;
+        std::fs::create_dir_all(&dir).map_err(|e| PlaceError::Other(format!("Neko could not make a folder for this thread: {e}")))?;
         return Ok(Place { workdir: dir.to_string_lossy().into_owned(), ..Place::default() });
     };
     let chosen = Path::new(folder);
@@ -110,7 +110,7 @@ pub fn reopen(data_dir: &Path, task: &TaskId, p: &Place) -> Result<(), PlaceErro
             Ok(())
         }
         _ if p.plain => Err(PlaceError::Gone(p.workdir.clone())),
-        _ => std::fs::create_dir_all(&p.workdir).map_err(|e| PlaceError::Other(format!("Neko could not make a folder for this task: {e}"))),
+        _ => std::fs::create_dir_all(&p.workdir).map_err(|e| PlaceError::Other(format!("Neko could not make a folder for this thread: {e}"))),
     }
 }
 
@@ -205,13 +205,13 @@ pub fn remove_place(data_dir: &Path, task: &TaskId, p: &Place) -> Result<String,
                 return Ok(if gone { format!("Its empty branch {branch} was deleted.") } else { String::new() });
             }
             let Some(st) = tree_state(&tree, branch, base) else {
-                return Err("Neko could not read this task's worktree with git, so it deleted nothing.".into());
+                return Err("Neko could not read this thread's worktree with git, so it deleted nothing.".into());
             };
             if st.uncommitted {
-                return Err("This task's worktree has changes that are not committed. Neko deletes nothing with unsaved work.".into());
+                return Err("This thread's worktree has changes that are not committed. Neko deletes nothing with unsaved work.".into());
             }
             if git_out(repo, &["worktree", "remove", &tree.to_string_lossy()]).is_none() {
-                return Err("git would not remove this task's worktree, so Neko deleted nothing.".into());
+                return Err("git would not remove this thread's worktree, so Neko deleted nothing.".into());
             }
             if st.commits == 0 && st.on_branch && delete_empty_branch(repo, branch, base) {
                 Ok(format!("Its worktree and its empty branch {branch} were deleted."))
@@ -229,7 +229,7 @@ pub fn remove_place(data_dir: &Path, task: &TaskId, p: &Place) -> Result<String,
                     let _ = std::fs::remove_dir(dir);
                     Ok(String::new())
                 }
-                Ok(false) => Err("This task's scratch folder has files in it. Neko deletes nothing with unsaved work.".into()),
+                Ok(false) => Err("This thread's scratch folder has files in it. Neko deletes nothing with unsaved work.".into()),
             }
         }
     }

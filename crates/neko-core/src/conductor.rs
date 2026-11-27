@@ -534,7 +534,7 @@ pub fn notice(who: &Who, f: &Failure) -> (String, Option<String>) {
         Failure::NotSignedIn => (format!("{n} is not signed in."), Some(format!("Run `{}` in Terminal, then send a follow-up.", who.sign_in))),
         Failure::UsageLimit { resets: Some(r) } => (format!("{n} has reached its usage limit."), Some(format!("It resets {r}. Send a follow-up then to carry on."))),
         Failure::UsageLimit { resets: None } => (format!("{n} has reached its usage limit."), Some("Send a follow-up once the limit has reset to carry on.".to_owned())),
-        Failure::FolderGone => ("The folder this task works in is gone.".to_owned(), Some("Put the folder back, or start a new task with another folder.".to_owned())),
+        Failure::FolderGone => ("The folder this thread works in is gone.".to_owned(), Some("Put the folder back, or start a new thread with another folder.".to_owned())),
         Failure::Crashed { code, words } => {
             let plain = !words.is_empty() && !words.trim_start().starts_with(['{', '[']) && !words.trim_start().starts_with("at ") && words.len() < 300;
             let mut t = format!("{n} stopped unexpectedly");

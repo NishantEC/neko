@@ -53,12 +53,12 @@ impl std::fmt::Display for NewTaskError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             NewTaskError::Empty => f.write_str("Type what you want done first."),
-            NewTaskError::TooLong => write!(f, "That is longer than a task can be ({} KB). Put the long part in a file.", MAX_WORDS_BYTES / 1000),
-            NewTaskError::NoWorkspace => f.write_str("That workspace is not there any more. Choose another one."),
-            NewTaskError::Removed(name) => write!(f, "{name} was removed from Neko, so no new task can be made in it. Add its folder again, or choose another workspace."),
-            NewTaskError::FolderMissing(name) => write!(f, "The folder of {name} was not found. Locate it in the sidebar, or choose another workspace."),
+            NewTaskError::TooLong => write!(f, "That is longer than a thread can be ({} KB). Put the long part in a file.", MAX_WORDS_BYTES / 1000),
+            NewTaskError::NoWorkspace => f.write_str("That project is not there any more. Choose another one."),
+            NewTaskError::Removed(name) => write!(f, "{name} was removed from Neko, so no new thread can be made in it. Add its folder again, or choose another project."),
+            NewTaskError::FolderMissing(name) => write!(f, "The folder of {name} was not found. Locate it in the sidebar, or choose another project."),
             NewTaskError::Cat(e) => write!(f, "{e}"),
-            NewTaskError::Store(e) => write!(f, "The task could not be saved: {e}"),
+            NewTaskError::Store(e) => write!(f, "The thread could not be saved: {e}"),
         }
     }
 }
@@ -76,10 +76,10 @@ pub enum WorkspaceError {
 impl std::fmt::Display for WorkspaceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WorkspaceError::NotFound => f.write_str("There is no such workspace."),
+            WorkspaceError::NotFound => f.write_str("There is no such project."),
             WorkspaceError::Folder(e) => write!(f, "{e}"),
             WorkspaceError::Refused(why) => f.write_str(why),
-            WorkspaceError::Store(e) => write!(f, "The workspace could not be saved: {e}"),
+            WorkspaceError::Store(e) => write!(f, "The project could not be saved: {e}"),
         }
     }
 }
@@ -197,7 +197,7 @@ impl Core {
         self.changeable(id, "renamed")?;
         let name: String = name.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(workspaces::MAX_NAME).collect();
         if name.is_empty() {
-            return Err(WorkspaceError::Refused("A workspace needs a name.".into()));
+            return Err(WorkspaceError::Refused("A project needs a name.".into()));
         }
         let now = self.clock.now_ms();
         let (w, rev) = self.store.rename_workspace(id, &name, now)?;
@@ -219,7 +219,7 @@ impl Core {
         if let Some(other) = self.store.workspace_by_folder(&real)?
             && other.id != w.id
         {
-            return Err(WorkspaceError::Refused(format!("That folder is already the workspace {}.", other.name)));
+            return Err(WorkspaceError::Refused(format!("That folder is already the project {}.", other.name)));
         }
         let now = self.clock.now_ms();
         let (w, rev) = self.store.locate_workspace(id, &real, now)?;

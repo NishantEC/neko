@@ -302,7 +302,7 @@ fn test(shared: &Arc<Shared>, id: &str) -> Reply {
         return Reply::error(ErrorCode::Refused, why.clone());
     }
     if p.manifest.mcp.is_remote() {
-        return Reply::error(ErrorCode::Refused, "Neko cannot test a server reached by a web address yet. Claude Code connects to it when a task runs.");
+        return Reply::error(ErrorCode::Refused, "Neko cannot test a server reached by a web address yet. Claude Code connects to it when a thread runs.");
     }
     if !lock(&shared.plugins.checking).insert(id.to_owned()) {
         return Reply::error(ErrorCode::Busy, "This plugin is being tested already.");

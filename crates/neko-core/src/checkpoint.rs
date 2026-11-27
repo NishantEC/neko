@@ -123,7 +123,7 @@ impl std::fmt::Display for Refusal {
                 size_words(limits.bytes)
             ),
             Refusal::Slow(d) => write!(f, "taking the checkpoint took longer than {} seconds", d.as_secs()),
-            Refusal::Gone => f.write_str("the task's folder is not there"),
+            Refusal::Gone => f.write_str("the thread's folder is not there"),
             Refusal::Failed(why) => f.write_str(why),
         }
     }
