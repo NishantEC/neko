@@ -40,6 +40,7 @@ pub fn what(item: &NeedsItem) -> String {
         Need::Permission { permission } => permission.title.clone(),
         Need::Question { question, .. } => question.clone(),
         Need::Failure { text, .. } => text.clone(),
+        Need::Plugin { ask } => format!("Approve plugin: {}", ask.name),
     }
 }
 
@@ -59,6 +60,8 @@ pub fn default_of(item: &NeedsItem) -> Default {
         Need::Permission { .. } => Default::Allow,
         Need::Question { .. } => Default::Reply,
         Need::Failure { .. } => Default::Open,
+        // Approving a plugin is a decision about what runs on this Mac: there is no default answer.
+        Need::Plugin { .. } => Default::Nothing,
     }
 }
 
@@ -129,6 +132,7 @@ pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, po
         Need::Permission { .. } => format!("{} asks", item.cat_name),
         Need::Question { .. } => format!("{} has a question", item.cat_name),
         Need::Failure { .. } => format!("{} could not go on", item.cat_name),
+        Need::Plugin { .. } => "A plugin waits for you".to_owned(),
     };
     let lead = crate::faces::portrait_in(t, &format!("{key}-face"), &face, 44.0, Some(if failed { neko_protocol::TaskStatus::Failed } else { neko_protocol::TaskStatus::NeedsYou }), crate::view::raised_fill(t));
     let who = row()
@@ -187,6 +191,8 @@ pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, po
                 body = body.child(copy_line(t, &format!("{key}-command"), c));
             }
         }
+        // The plugin's own card comes with the plugins' screens.
+        Need::Plugin { .. } => {}
     }
     // The reply box takes the room a question's row has; elsewhere Open task sits at the row's end.
     if !matches!(item.need, Need::Question { .. }) {

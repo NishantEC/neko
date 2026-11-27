@@ -9,6 +9,7 @@ mod files;
 mod folders;
 mod hook;
 mod http;
+mod plugins;
 mod rounds;
 mod runs;
 mod server;

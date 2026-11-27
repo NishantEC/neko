@@ -1,7 +1,7 @@
 //! "Needs you" (docs/knowledge/needs-you.md): what waits for the person, derived from what the store holds. Nothing here is stored
 //! of its own, so the list is the same after a restart and every screen sees the same one.
 //!
-//! Three things count, and nothing else:
+//! Four things count, and nothing else (the fourth, a plugin waiting for approval, belongs to no task: docs/knowledge/plugins.md):
 //!
 //! - a permission request still pending;
 //! - a run that ended with a question (the task is `asked`);
@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 
-use neko_protocol::{FailureKind, Need, NeedsItem, PartBody, RunStatus, Task, TaskStatus, Tone};
+use neko_protocol::{Approval, FailureKind, Need, NeedsItem, PartBody, RunStatus, Task, TaskId, TaskStatus, Tone};
 
 use crate::{Store, StoreError};
 
@@ -67,6 +67,14 @@ pub fn derive(store: &Store) -> Result<Vec<NeedsItem>, StoreError> {
             }
             _ => {}
         }
+    }
+    // A plugin waiting to be approved (or approved again) belongs to no task or workspace: its group is the empty one.
+    for p in store.plugins()? {
+        if !matches!(p.approval, Approval::Waiting | Approval::Changed) {
+            continue;
+        }
+        let since_ms = store.plugin_row(&p.id)?.map_or(p.created_ms, |r| r.manifest_ms);
+        items.push(NeedsItem { id: format!("plugin:{}", p.id), task: TaskId(String::new()), workspace: String::new(), title: p.name.clone(), cat: String::new(), cat_name: String::new(), since_ms, need: Need::Plugin { ask: crate::plugins::ask_of(&p) } });
     }
     Ok(order(items))
 }

@@ -80,6 +80,9 @@ pub struct StartSpec {
     /// Standing instructions for the agent on this run (the task's cat: `cats::block`), given the way the CLI takes them best. Text
     /// only: they change no permission, flag or hook.
     pub instructions: Option<String>,
+    /// A file of MCP servers for this run alone (the plugins that go to the task's cat): handed on as `--mcp-config`. Written by the
+    /// daemon with mode 0600 and removed when the run ends; the CLI keeps its own MCP servers too (docs/knowledge/plugins.md).
+    pub mcp_config: Option<PathBuf>,
 }
 
 /// How a run's `PreToolUse` hook helper (`neko-daemon --hook`) reaches the daemon: its loopback port and the run's own secret,
@@ -107,6 +110,9 @@ pub enum Action {
     Command { command: String },
     /// Reach the network (a URL or a search).
     Network { target: String },
+    /// A tool of an MCP server (`mcp__<server>__<tool>`): a plugin of Neko's, or one of the person's own Claude Code servers. `input` is
+    /// what it was called with, as compact JSON (shortened).
+    Mcp { server: String, tool: String, input: String },
     /// Anything else, named by the tool.
     Other { summary: String },
     /// Claude Code's own bookkeeping (its plan, a subagent, a question to the person): nothing on the Mac changes by it, so Neko

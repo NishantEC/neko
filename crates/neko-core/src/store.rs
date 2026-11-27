@@ -208,6 +208,38 @@ const MIGRATIONS: &[Migration] = &[
     ALTER TABLE tasks ADD COLUMN round_due_ms INTEGER;
     ALTER TABLE tasks ADD COLUMN round_name TEXT;
     CREATE INDEX tasks_by_round ON tasks(round_id) WHERE round_id IS NOT NULL;"),
+    // 8: plugins (docs/knowledge/plugins.md). A row per plugin with its manifest, the digest of it and the manifest and digest the
+    // person approved (`approved_*`), or declined; and a row per setting the person set. A secret's row says only that it is set: the
+    // secret itself is in the Keychain, never here. Removing a plugin removes its settings.
+    Migration::Sql("CREATE TABLE plugins (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        name_key TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        folder TEXT,
+        manifest TEXT NOT NULL,
+        digest TEXT NOT NULL,
+        approved_digest TEXT,
+        approved_manifest TEXT,
+        approved_ms INTEGER,
+        declined_digest TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        access_mode TEXT NOT NULL DEFAULT 'all',
+        access_cats TEXT NOT NULL DEFAULT '[]',
+        last_check TEXT,
+        problem TEXT,
+        created_ms INTEGER NOT NULL,
+        changed_ms INTEGER NOT NULL,
+        manifest_ms INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX plugins_by_name ON plugins(name_key);
+    CREATE TABLE plugin_values (
+        plugin_id TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+        key TEXT NOT NULL,
+        value TEXT,
+        secret INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (plugin_id, key)
+    );"),
 ];
 
 /// The schema version this build writes.

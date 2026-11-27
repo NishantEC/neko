@@ -10,6 +10,8 @@ Neko.app ships the following work by others, each under its own licence. The tex
 - Figtree, SIL Open Font License 1.1. Copyright 2022 The Figtree Project Authors. Figtree-OFL.txt
 - Inter, SIL Open Font License 1.1. Copyright 2016 The Inter Project Authors. Inter-OFL.txt
 - SQLite (bundled by rusqlite), public domain.
+- security-framework (https://github.com/kornelski/rust-security-framework), MIT or Apache-2.0: the daemon's way into the macOS
+  Keychain, where plugins' secrets are kept. It and its dependencies are in crates.md.
 - The Rust crates listed in crates.md, each under the licence it names. Inside Neko.app, crate-licences.txt holds the
   licence files each crate carries; a crate that carries none is under the licence it names (Apache-2.0 text:
   Apache-2.0.txt).

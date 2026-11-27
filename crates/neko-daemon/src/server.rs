@@ -57,6 +57,8 @@ pub struct Shared {
     pub rounds: crate::rounds::Hub,
     /// The briefing screens were last told (docs/knowledge/briefing.md).
     pub briefing_last: Mutex<Option<neko_protocol::Briefing>>,
+    /// Plugins: where their secrets are kept and which are being checked (docs/knowledge/plugins.md).
+    pub plugins: crate::plugins::Hub,
 }
 
 /// Keeps "Needs you" (docs/knowledge/needs-you.md) pushed: a change to a task's state, a request or a task's removal marks it, and
@@ -103,7 +105,10 @@ impl Shared {
                 | Change::RunChanged { .. }
                 | Change::RoundUpdated { .. }
                 | Change::RoundRemoved { .. }
-                | Change::BriefingSettingsChanged { .. },
+                | Change::BriefingSettingsChanged { .. }
+                | Change::PluginAdded { .. }
+                | Change::PluginUpdated { .. }
+                | Change::PluginRemoved { .. },
             ..
         } = msg
         {
@@ -182,6 +187,8 @@ pub fn run(dir: &Path, port: u16) -> Result<(), StartError> {
         Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
     }
     let token = dfiles::token(dir)?;
+    // A run's plugin config a killed daemon left behind goes (this daemon holds the folder's lock).
+    crate::plugins::sweep(dir);
     let mut core = Core::open(&dir.join(files::STORE), Box::new(SystemClock), Box::new(RandomIds))?;
     // Runs the last daemon left running were cut off: they are interrupted, and say so.
     runs::recover(&mut core);
@@ -194,11 +201,12 @@ pub fn run(dir: &Path, port: u16) -> Result<(), StartError> {
     let runs = Runs::new(runtimes, dir.to_path_buf());
     let first = neko_core::needs::derive(&core.store).unwrap_or_default();
     let needs = NeedsWatch { dirty: Mutex::new(false), wake: Condvar::new(), last: Mutex::new(first) };
-    let shared = Arc::new(Shared { core: Mutex::new(core), conns: Mutex::new(HashMap::new()), token, port, stopping: AtomicBool::new(false), runs, needs, rounds: crate::rounds::Hub::new(), briefing_last: Mutex::new(None) });
+    let shared = Arc::new(Shared { core: Mutex::new(core), conns: Mutex::new(HashMap::new()), token, port, stopping: AtomicBool::new(false), runs, needs, rounds: crate::rounds::Hub::new(), briefing_last: Mutex::new(None), plugins: crate::plugins::Hub::new() });
     let for_needs = shared.clone();
     std::thread::Builder::new().name("neko-needs".into()).spawn(move || watch_needs(for_needs))?;
     crate::folders::spawn(shared.clone())?;
     crate::rounds::spawn(shared.clone())?;
+    crate::plugins::spawn(shared.clone())?;
     // Find the agent CLIs once now, off the main thread, so the first task and Settings do not wait for it.
     let warm = shared.clone();
     let _ = std::thread::Builder::new().name("neko-detect".into()).spawn(move || {
@@ -262,6 +270,7 @@ fn stop(shared: &Shared) {
     crate::runs::stop_all(shared);
     crate::folders::stopping();
     crate::rounds::stopping(shared);
+    crate::plugins::stopping();
     *lock(&shared.needs.dirty) = true;
     shared.needs.wake.notify_one();
     for c in lock(&shared.conns).values() {
@@ -311,6 +320,15 @@ fn session(stream: TcpStream, id: u64, shared: &Arc<Shared>) {
             && let Ok(ClientMessage { id: reply_id, request: Request::GetTranscript { task } }) = serde_json::from_str::<ClientMessage>(&text)
         {
             crate::runs::send_transcript(shared, id, reply_id, &task);
+            return Flow::Continue;
+        }
+        // A plugin request that may wait on the Keychain, a folder or a server is answered on a thread of its own, so this connection (and
+        // a stop) never waits for it.
+        if said_hello
+            && let Ok(ClientMessage { id: reply_id, request }) = serde_json::from_str::<ClientMessage>(&text)
+            && crate::plugins::is_slow(&request)
+        {
+            crate::plugins::spawn_slow(shared, id, reply_id, request);
             return Flow::Continue;
         }
         let (reply_id, reply, flow) = answer(&text, id, &mut said_hello, shared);
@@ -598,6 +616,14 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
             Ok(items) => Reply::Needs { items },
             Err(e) => internal(e),
         },
+        r @ (Request::ListPlugins
+        | Request::UpdatePluginManifest { .. }
+        | Request::ApprovePlugin { .. }
+        | Request::DeclinePlugin { .. }
+        | Request::SetPluginEnabled { .. }
+        | Request::SetPluginAccess { .. }) => crate::plugins::quick(shared, &r).unwrap_or_else(|| Reply::error(ErrorCode::BadRequest, "Not a plugin request.")),
+        // Answered on their own threads (`session`); never reached here.
+        Request::AddMcpJson { .. } | Request::AddPluginFolder { .. } | Request::SetPluginSetting { .. } | Request::TestPlugin { .. } | Request::RemovePlugin { .. } => Reply::error(ErrorCode::Internal, "A plugin request reached the wrong place."),
         Request::GetBriefing { from_ms, to_ms } => crate::briefing::get(shared, from_ms, to_ms),
         Request::MarkBriefingRead => crate::briefing::mark_read(shared),
         Request::GetBriefingSettings => crate::briefing::settings(shared),
@@ -623,6 +649,7 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
                     crate::folders::screen_subscribed();
                     // A morning notification that waited for a screen is due now.
                     shared.rounds.poke();
+                    crate::plugins::poke();
                     Reply::Subscribed { revision }
                 }
                 Err(e) => internal(e),

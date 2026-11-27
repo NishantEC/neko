@@ -385,6 +385,8 @@ pub fn note_for(item: &NeedsItem) -> Note {
             (short(&format!("{} asks: {question}", item.cat_name), BODY_CHARS), vec![Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }])
         }
         Need::Failure { text, .. } => (short(&format!("{} could not go on: {text}", item.cat_name), BODY_CHARS), Vec::new()),
+        // Approving a plugin is never done from a banner: the notification only opens the list.
+        Need::Plugin { ask } => (short(&format!("Approve the plugin {}", ask.name), BODY_CHARS), Vec::new()),
     };
     Note { id: note_id(&item.task), title: item.title.clone(), body, info, buttons }
 }

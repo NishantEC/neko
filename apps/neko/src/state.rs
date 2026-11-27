@@ -275,6 +275,8 @@ pub struct App {
     pub rounds_open: bool,
     /// The New round / Edit panel, while it is open.
     pub round_form: Option<crate::rounds::RoundForm>,
+    /// Every plugin, oldest first, as the daemon last said (docs/knowledge/plugins.md).
+    pub plugins: Vec<neko_protocol::Plugin>,
     /// The rounds whose history shows on their card, and each one's lines (newest first) as the daemon last said.
     pub round_history_open: HashSet<String>,
     pub round_history: HashMap<String, Vec<neko_protocol::RoundRun>>,
@@ -496,6 +498,7 @@ impl Default for App {
             rounds_loaded: false,
             rounds_open: false,
             round_form: None,
+            plugins: Vec::new(),
             round_history_open: HashSet::new(),
             round_history: HashMap::new(),
             briefing: None,
@@ -1573,6 +1576,11 @@ impl App {
                 }
             }
             Change::RoundsPaused { paused } => self.rounds_paused = paused,
+            Change::PluginAdded { plugin } | Change::PluginUpdated { plugin } => match self.plugins.iter_mut().find(|p| p.id == plugin.id) {
+                Some(p) => *p = plugin,
+                None => self.plugins.push(plugin),
+            },
+            Change::PluginRemoved { plugin } => self.plugins.retain(|p| p.id != plugin),
             Change::BriefingChanged { briefing } => self.set_briefing(briefing),
             Change::BriefingSettingsChanged { settings } => self.set_briefing_settings(settings),
             Change::BriefingDue { counts } => self.briefing_due(&counts),

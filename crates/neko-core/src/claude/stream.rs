@@ -421,6 +421,10 @@ pub fn action(tool: &str, input: &Value, workdir: &str) -> Action {
         "WebFetch" => Action::Network { target: field(input, &["url"]).unwrap_or("").to_owned() },
         "WebSearch" => Action::Network { target: format!("a web search: {}", field(input, &["query"]).unwrap_or("")) },
         t if INTERNAL_TOOLS.contains(&t) => Action::Internal { tool: t.to_owned() },
+        t if neko_protocol::plugins::mcp_tool(t).is_some() => {
+            let (server, tool) = neko_protocol::plugins::mcp_tool(t).unwrap_or_default();
+            Action::Mcp { server: server.to_owned(), tool: tool.to_owned(), input: shorten(&input.to_string(), 400) }
+        }
         other => Action::Other { summary: format!("{other} {}", summary(other, input, workdir)).trim().to_owned() },
     }
 }
@@ -581,7 +585,8 @@ mod tests {
         assert_eq!(action("Write", &v(r#"{"file_path":"/etc/hosts"}"#), "/w"), Action::Edit { path: "/etc/hosts".into() });
         assert_eq!(action("Bash", &v(r#"{"command":"cargo test"}"#), "/w"), Action::Command { command: "cargo test".into() });
         assert_eq!(action("WebFetch", &v(r#"{"url":"https://example.com"}"#), "/w"), Action::Network { target: "https://example.com".into() });
-        assert!(matches!(action("mcp__x__y", &v("{}"), "/w"), Action::Other { .. }));
+        assert_eq!(action("mcp__x__y", &v(r#"{"q":"a"}"#), "/w"), Action::Mcp { server: "x".into(), tool: "y".into(), input: r#"{"q":"a"}"#.into() });
+        assert!(matches!(action("mcp__x", &v("{}"), "/w"), Action::Other { .. }), "not a server's tool");
         assert_eq!(action("TodoWrite", &v("{}"), "/w"), Action::Internal { tool: "TodoWrite".into() });
     }
 }

@@ -19,6 +19,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 httparse = "1"
 libc = "0.2"
+security-framework = "3"
 
 [profile.dev]
 debug = "line-tables-only"

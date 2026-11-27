@@ -348,7 +348,20 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, cancelled: &Arc
     };
     // The cat's block is text for the agent only: the mode and the hook above are the same whatever it says.
     let instructions = cat.as_ref().map(neko_core::cats::block);
-    let spec = StartSpec { words: said, workdir: PathBuf::from(&place.workdir), resume, mode: settings.permission_mode, hook, instructions };
+    // The plugins this cat may use, approved as they are now, in a config for this run alone; it goes when this function returns, which
+    // is when the run ends (docs/knowledge/plugins.md). A plugin's tool asks through the same route as every other tool.
+    let plugin_files = crate::plugins::for_run(shared, &shared.runs.data_dir, &cat.as_ref().map_or_else(|| task.cat.clone(), |c| c.id.clone()), &run_id.0);
+    {
+        let mut b = lock(&book);
+        b.set_plugins(plugin_files.names.clone());
+        for words in &plugin_files.left_out {
+            let mut core = lock(&shared.core);
+            if let Ok(outs) = conductor::standalone_notice(&mut core, task, Tone::Warning, words.clone(), None, None) {
+                push(shared, &task.id, outs, None);
+            }
+        }
+    }
+    let spec = StartSpec { words: said, workdir: PathBuf::from(&place.workdir), resume, mode: settings.permission_mode, hook, instructions, mcp_config: plugin_files.config.clone() };
     let started = match runtime.start(spec) {
         Ok(s) => s,
         Err(f) => return finish(Outcome::Failed(f)),

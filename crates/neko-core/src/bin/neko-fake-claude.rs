@@ -25,10 +25,13 @@
 //! | `hook-read` | Reads `README.md` in its folder (Claude Code never asks about that). |
 //! | `hook-destructive` | Runs `git reset --hard HEAD~1`. |
 //! | `real` | The shapes a real run showed: empty thinking, several words between tools, a long absolute path, a check that exits 1. |
+//! | `plugin-tool:SERVER:TOOL` | Calls the tool `mcp__SERVER__TOOL` (asking, as Claude Code would about an MCP tool), then says whether it ran. When `--mcp-config` did not give a server called SERVER there is no such tool: the call fails at once, asking nothing. |
 //! | `hook-no-verdict` | Says a hook gave no usable answer for `cargo test`, then runs it anyway, as Claude Code does (it fails open). |
 //!
 //! `NEKO_FAKE_RECORD` names a file it appends what it was given to, one JSON line each: `{"argv": [...]}` when it starts, then
-//! `{"stdin": <line>}` for every line it reads. Tests read it to see exactly what reached the CLI.
+//! `{"mcp_config": {"path": ..., "content": ...}}` for each file named by `--mcp-config` (read now, so a test sees exactly what the run
+//! was given even though Neko removes the file when the run ends), then `{"stdin": <line>}` for every line it reads. Tests read it to
+//! see exactly what reached the CLI.
 //!
 //! With `--resume ID` it continues conversation ID and says so. `--version` and `auth status --json` answer like the real CLI
 //! (`NEKO_FAKE_AUTH=out` makes it signed out). It also serves as the run guard in tests (`--neko-run-guard`). With `--model NAME`
@@ -178,6 +181,8 @@ struct Fake {
     /// Lines that arrived while a script waited for something else.
     queued: Vec<Value>,
     n: u32,
+    /// The names of the MCP servers `--mcp-config` gave.
+    mcp: Vec<String>,
 }
 
 impl Fake {
@@ -435,6 +440,23 @@ impl Fake {
                 self.say(&words, 2, Duration::from_millis(10));
                 self.result(&words, false);
             }
+            "plugin-tool" => {
+                let (server, tool) = arg.split_once(':').unwrap_or(("acme-docs", "search"));
+                let name = format!("mcp__{server}__{tool}");
+                let words = if self.mcp.iter().any(|m| m == server) {
+                    let (ran, why) = self.tool_why(&name, json!({"query":"retry policy"}), true, "3 results: Retry policy, Backoff, Limits", false);
+                    if ran { format!("I used {tool} from {server}.") } else { format!("I did not use {tool}. Claude Code said: {why}") }
+                } else {
+                    // Claude Code has no such tool: nothing asks, and the call fails.
+                    let tool_id = self.id("toolu");
+                    let msg = self.message();
+                    out(json!({"type":"assistant","message":{"id":msg,"model":model(),"content":[{"type":"tool_use","id":tool_id,"name":name,"input":{"query":"retry policy"}}]},"parent_tool_use_id":null,"session_id":self.session}));
+                    out(json!({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":tool_id,"is_error":true,"content":format!("Error: No such tool available: {name}")}]},"parent_tool_use_id":null,"session_id":self.session}));
+                    format!("{server} was not available to me.")
+                };
+                self.say(&words, 2, Duration::from_millis(10));
+                self.result(&words, false);
+            }
             "hook-no-verdict" => {
                 let tool_id = self.id("toolu");
                 let msg = self.message();
@@ -536,6 +558,20 @@ fn main() {
         return;
     }
     keep(&json!({ "argv": args }));
+    // The MCP config files given, read now: the run's own copy goes when the run ends.
+    let mut mcp = Vec::new();
+    for (i, a) in args.iter().enumerate() {
+        if a == "--mcp-config"
+            && let Some(path) = args.get(i + 1)
+        {
+            let text = std::fs::read_to_string(path).unwrap_or_default();
+            let content = serde_json::from_str::<Value>(&text).unwrap_or(Value::String(text));
+            if let Some(m) = content["mcpServers"].as_object() {
+                mcp.extend(m.keys().cloned());
+            }
+            keep(&json!({ "mcp_config": { "path": path, "content": content } }));
+        }
+    }
     let resume = args.iter().position(|a| a == "--resume").and_then(|i| args.get(i + 1)).cloned();
     let settings = args.iter().position(|a| a == "--settings").and_then(|i| args.get(i + 1)).cloned();
     let (tx, rx) = mpsc::channel();
@@ -552,7 +588,7 @@ fn main() {
     });
     let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
     let session = resume.clone().unwrap_or_else(|| format!("fake-{}-{}", std::process::id(), now_s()));
-    let mut fake = Fake { hooks: hooks_from(settings.as_deref()), allowed: allowed_by_settings(), session: session.clone(), resumed: resume.is_some(), cwd: cwd.clone(), input: rx, queued: Vec::new(), n: 0 };
+    let mut fake = Fake { hooks: hooks_from(settings.as_deref()), allowed: allowed_by_settings(), session: session.clone(), resumed: resume.is_some(), cwd: cwd.clone(), input: rx, queued: Vec::new(), n: 0, mcp };
     let mut started = false;
     loop {
         let v = if fake.queued.is_empty() {

@@ -16,6 +16,7 @@ pub mod client;
 pub mod pump;
 pub mod briefing;
 pub mod cats;
+pub mod plugins;
 pub mod rounds;
 pub mod schedule;
 pub mod title;
@@ -23,6 +24,7 @@ pub mod undo;
 
 pub use briefing::{Briefing, BriefingCounts, BriefingSettings};
 pub use cats::Cat;
+pub use plugins::{Access, AccessMode, Approval, Check, FieldKind, FieldValue, Manifest, Plugin, PluginAsk, PluginKind, PluginState, SettingField};
 pub use rounds::{Round, RoundRun, RoundStatus, TaskRound};
 pub use schedule::Schedule;
 pub use undo::{DiffFile, DiffPatch, DiffSummary, FileStatus, Offer, RunUndo, UndoState, UndoStorage};
@@ -35,8 +37,10 @@ pub use undo::{DiffFile, DiffPatch, DiffSummary, FileStatus, Offer, RunUndo, Und
 /// per file; undo, redo; the storage undo uses, and clearing it). 8: cats (named agents with standing rules; every task has one; a
 /// run records its cat and the version of its rules; "Needs you" items name the cat). 9: rounds (a cat's standing work that starts
 /// by itself: its schedule, its history, pause all; a task says which round made it and when it was due). 10: the Briefing (what
-/// happened while the person was away, derived by the daemon; mark it read; the morning time; an event when it is due).
-pub const PROTOCOL_VERSION: u32 = 10;
+/// happened while the person was away, derived by the daemon; mark it read; the morning time; an event when it is due). 11: plugins (MCP
+/// servers first: added by pasting JSON or from a folder, approved by digest, set up in Settings, left to chosen cats; a "Needs you"
+/// item asks for the approval).
+pub const PROTOCOL_VERSION: u32 = 11;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -333,13 +337,16 @@ pub enum Need {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         command: Option<String>,
     },
+    /// A plugin waits for the person to approve exactly what it will run (or, when it changed, to approve it again). It belongs to no
+    /// task: the item's `task`, `workspace`, `cat` and `cat_name` are empty and its `title` is the plugin's name.
+    Plugin { ask: PluginAsk },
 }
 
 /// One thing waiting for the person, derived by the daemon from what it stores (permissions, runs, notices). The list is oldest
 /// first, grouped by workspace.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NeedsItem {
-    /// Stable while it waits: `perm:<id>`, `question:<run id>`, `failure:<part id>`.
+    /// Stable while it waits: `perm:<id>`, `question:<run id>`, `failure:<part id>`, `plugin:<id>`.
     pub id: String,
     pub task: TaskId,
     pub workspace: String,
@@ -587,6 +594,40 @@ pub enum Request {
     /// The morning time and whether the notification is posted.
     GetBriefingSettings,
     SetBriefingSettings { settings: BriefingSettings },
+    /// Every plugin, in the order they were added.
+    ListPlugins,
+    /// Add what people already have for other tools: one MCP server's JSON, or a `{"mcpServers": {…}}` block. Each server becomes a
+    /// plugin that waits for approval; nothing runs. `name` names a single server that has none. Secret values in the paste go to the
+    /// Keychain. Answers with the plugins added.
+    AddMcpJson {
+        json: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// Add a folder with a `neko-plugin.json`. The plugin waits for approval; nothing runs.
+    AddPluginFolder { folder: String },
+    /// Change a pasted plugin's manifest. Its approval then no longer matches: it is `changed` until approved again. A plugin from
+    /// a folder is changed by editing the folder's file.
+    UpdatePluginManifest { plugin: String, manifest: Manifest },
+    /// Approve exactly the manifest with this digest. Refused when the plugin's manifest is not that one any more.
+    ApprovePlugin { plugin: String, digest: String },
+    /// Say no to the manifest the plugin has now: it does not run and does not ask again until the manifest changes.
+    DeclinePlugin { plugin: String },
+    SetPluginEnabled { plugin: String, on: bool },
+    /// Set (or, with no value, clear) one declared setting. A secret goes to the Keychain and is never sent back.
+    SetPluginSetting {
+        plugin: String,
+        key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
+    },
+    /// Which cats may use the plugin.
+    SetPluginAccess { plugin: String, access: Access },
+    /// Start the plugin's server, say hello as MCP does and list its tools, within [`plugins::CHECK_SECONDS`]. The answer comes when
+    /// the check ends (the daemon is never held up by it); the result is also the plugin's last check. Only an approved plugin is run.
+    TestPlugin { plugin: String },
+    /// Remove a plugin and its Keychain items.
+    RemovePlugin { plugin: String },
     /// Forget a task: its record goes, and its worktree or scratch folder when nothing unsaved is in it. Refused while it runs and
     /// when its folder holds unsaved work.
     RemoveTask { task: TaskId },
@@ -705,6 +746,8 @@ pub enum ErrorCode {
     UnsavedWork,
     /// A cat's name is empty, too long, or another cat's; the words say which.
     InvalidName,
+    /// What was pasted or read is not a plugin Neko can keep; the words say why.
+    InvalidPlugin,
 }
 
 /// The daemon's answer to one request.
@@ -742,6 +785,8 @@ pub enum Reply {
     BriefingSettings { settings: BriefingSettings },
     /// Every round, and whether all are paused.
     Rounds { rounds: Vec<Round>, paused: bool },
+    Plugins { plugins: Vec<Plugin> },
+    Plugin { plugin: Plugin },
     Round { round: Round },
     /// A round's history, newest first.
     RoundRuns { runs: Vec<RoundRun> },
@@ -791,6 +836,10 @@ pub enum Change {
     /// It is the morning time and the window has news: the screen posts the notification. Sent once a day at most, and not stored
     /// (`revision` is the last stored change). A daemon with no screen connected keeps it until one is, for that day.
     BriefingDue { counts: BriefingCounts },
+    PluginAdded { plugin: Plugin },
+    /// Approved, declined, changed, switched, set up, checked, left to other cats: the whole plugin as it is now.
+    PluginUpdated { plugin: Plugin },
+    PluginRemoved { plugin: String },
 }
 
 /// What the daemon sends.

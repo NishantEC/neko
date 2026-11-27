@@ -94,6 +94,8 @@ pub struct RunBook {
     thinking: bool,
     /// Tool calls the hook let go ahead: Claude Code's own ask for one of them is answered yes at once.
     approved: std::collections::HashSet<String>,
+    /// The plugins whose servers this run was given, by name.
+    plugins: Vec<String>,
     /// Bytes of part bodies written so far (for the write-rate check).
     pub written: u64,
     pub writes: u32,
@@ -133,7 +135,7 @@ impl RunBook {
         let mut out = Vec::new();
         let rev = core.store.insert_run(&run, now)?;
         out.push(Out::Change(rev, Change::RunChanged { run: run.clone() }));
-        let mut book = RunBook { run, task: task.clone(), who, place, mode, open: None, last_flush: now, tools: HashMap::new(), asked: HashMap::new(), hook_calls: HashMap::new(), denied: Default::default(), thinking: false, approved: Default::default(), written: 0, writes: 0 };
+        let mut book = RunBook { run, task: task.clone(), who, place, mode, open: None, last_flush: now, tools: HashMap::new(), asked: HashMap::new(), hook_calls: HashMap::new(), denied: Default::default(), thinking: false, approved: Default::default(), plugins: Vec::new(), written: 0, writes: 0 };
         if let Some(c) = changed {
             let p = book.new_part(core, PartBody::RulesChanged { cat: c.id.clone(), name: c.name.clone() }, now, true)?;
             out.extend(p);
@@ -144,6 +146,11 @@ impl RunBook {
         }
         out.extend(book.task_status(core, TaskStatus::Working, now)?);
         Ok((book, out))
+    }
+
+    /// The plugins this run's agent was given: a request for one of their tools says it is a plugin.
+    pub fn set_plugins(&mut self, names: Vec<String>) {
+        self.plugins = names;
     }
 
     /// Writes the run's own fields and reads back where its undo stands (the daemon keeps that), so what is pushed is whole.
@@ -363,7 +370,7 @@ impl RunBook {
             return Ok(vec![Out::Answer { request, answer: Answer::Allow }]);
         }
         let always = core.store.always_rules(&self.task)?;
-        let cx = policy::Context { workdir: std::path::Path::new(&self.place.workdir), mode: self.mode, plain: self.place.plain, always: &always };
+        let cx = policy::Context { workdir: std::path::Path::new(&self.place.workdir), mode: self.mode, plain: self.place.plain, always: &always, plugins: &self.plugins };
         let ask = match policy::decide(&action, &cx) {
             Verdict::Allow => {
                 if hook && let Some(t) = &tool_use {

@@ -28,6 +28,8 @@ pub struct Context<'a> {
     pub plain: bool,
     /// Rules answered "Always allow" in this task.
     pub always: &'a [String],
+    /// The plugins whose servers this run was given (their names), so a request for one of their tools says so.
+    pub plugins: &'a [String],
 }
 
 /// The policy's answer.
@@ -195,6 +197,11 @@ pub fn decide(action: &Action, cx: &Context<'_>) -> Verdict {
             ask(if d { "Run a command that deletes or overwrites".into() } else { "Run a command".into() }, why, command.clone(), d, format!("command:{}", program(command)))
         }
         Action::Network { target } => ask("Reach the internet".into(), "It sends a request out of this Mac.", target.clone(), false, format!("network:{}", host(target))),
+        Action::Mcp { server, tool, input } => {
+            let ours = cx.plugins.iter().any(|p| p == server);
+            let why = if ours { format!("{server} is a plugin you approved in Neko. Its tools can reach whatever the plugin can.") } else { format!("{server} is an MCP server from your own Claude Code settings. Its tools can reach whatever it can.") };
+            ask(format!("Use {tool} from {server}"), &why, input.clone(), false, format!("tool:mcp__{server}__{tool}"))
+        }
         Action::Other { summary } => {
             let tool = summary.split_whitespace().next().unwrap_or("tool").to_owned();
             ask(format!("Use {tool}"), "Neko does not know what this tool does.", summary.clone(), false, format!("tool:{tool}"))
@@ -208,7 +215,7 @@ mod tests {
     use super::*;
 
     fn cx<'a>(always: &'a [String], plain: bool) -> Context<'a> {
-        Context { workdir: Path::new("/tmp/neko-policy-w"), mode: PermissionMode::Ask, plain, always }
+        Context { workdir: Path::new("/tmp/neko-policy-w"), mode: PermissionMode::Ask, plain, always, plugins: &[] }
     }
 
     fn asked(v: Verdict) -> Ask {
@@ -263,7 +270,7 @@ mod tests {
 
     #[test]
     fn following_claude_codes_rules_asks_whatever_reaches_neko() {
-        let c = Context { workdir: Path::new("/tmp/neko-policy-w"), mode: PermissionMode::Follow, plain: false, always: &[] };
+        let c = Context { workdir: Path::new("/tmp/neko-policy-w"), mode: PermissionMode::Follow, plain: false, always: &[], plugins: &[] };
         let a = asked(decide(&Action::Edit { path: "/tmp/neko-policy-w/a.rs".into() }, &c));
         assert_eq!(a.title, "Edit a file", "Claude Code asked, so the person is asked: Neko lets nothing through by itself");
         assert!(matches!(decide(&Action::Read { path: "/tmp/neko-policy-w/a.rs".into() }, &c), Verdict::Ask(_)));
@@ -284,8 +291,31 @@ mod tests {
     }
 
     #[test]
+    fn a_plugins_tool_asks_by_name_and_always_is_that_tool_alone() {
+        let plugins = vec!["acme-docs".to_owned()];
+        let c = Context { plugins: &plugins, ..cx(&[], false) };
+        let call = Action::Mcp { server: "acme-docs".into(), tool: "search".into(), input: r#"{"query":"retry"}"#.into() };
+        let a = asked(decide(&call, &c));
+        assert_eq!(a.title, "Use search from acme-docs");
+        assert!(a.why.contains("a plugin you approved in Neko"), "{}", a.why);
+        assert_eq!(a.detail, r#"{"query":"retry"}"#);
+        assert_eq!(a.rule, "tool:mcp__acme-docs__search");
+        assert!(!a.destructive);
+        let rules = vec![a.rule];
+        assert_eq!(decide(&call, &Context { always: &rules, ..c }), Verdict::Allow);
+        let other = Action::Mcp { server: "acme-docs".into(), tool: "delete_page".into(), input: "{}".into() };
+        assert!(matches!(decide(&other, &Context { always: &rules, ..cx(&[], false) }), Verdict::Ask(_)), "another tool of the same plugin still asks");
+        let own = asked(decide(&Action::Mcp { server: "notes".into(), tool: "read".into(), input: "{}".into() }, &cx(&[], false)));
+        assert!(own.why.contains("your own Claude Code settings"), "{}", own.why);
+        let follow = Context { mode: PermissionMode::Follow, ..cx(&[], false) };
+        assert!(matches!(decide(&call, &follow), Verdict::Ask(_)));
+        let full = Context { mode: PermissionMode::Full, ..cx(&[], false) };
+        assert_eq!(decide(&call, &full), Verdict::Allow);
+    }
+
+    #[test]
     fn full_access_allows_everything() {
-        let c = Context { workdir: Path::new("/w"), mode: PermissionMode::Full, plain: true, always: &[] };
+        let c = Context { workdir: Path::new("/w"), mode: PermissionMode::Full, plain: true, always: &[], plugins: &[] };
         assert_eq!(decide(&Action::Command { command: "rm -rf /".into() }, &c), Verdict::Allow);
     }
 }

@@ -125,6 +125,7 @@ pub fn note_body(b: &Briefing) -> String {
             Need::Permission { permission } => format!("{}: {}", permission.title, permission.detail),
             Need::Question { question, .. } => question.clone(),
             Need::Failure { text, .. } => text.clone(),
+            Need::Plugin { ask } => format!("approve the plugin {}", ask.name),
         };
         let verb = match n.need {
             Need::Failure { .. } => "could not go on",
