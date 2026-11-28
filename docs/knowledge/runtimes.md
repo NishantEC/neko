@@ -90,6 +90,23 @@ turn of its own and send another `result`. An interrupted turn ends the run what
 start a run of their own). The rule relies on the echo: a CLI that took a message without echoing it would leave the run to the
 silence limit. The first message's echo comes before its turn's `result`, as in the probe below.
 
+**Between that `result` and the process's exit the run is still going, but takes no words.** The CLI exits a moment after stdin
+closes, not at once (the real one ends its MCP servers first; a real run took about a second), and the run is released only when its
+process has exited and its stdout has ended. Two rules keep that moment harmless:
+
+- **Words sent then wait for the next run.** `Control::takes_words` is false once stdin is closed. The daemon (`queue::send`) then
+  holds the words as a queued message, whatever mode they were sent in (Steer, Queue or Interrupt), and the run that is ending starts
+  the next one with them as soon as it is released, as any queued message (`composer.md`). A steer whose write fails because stdin
+  closed in between is held the same way. Before this, the steer was refused with "Claude Code has finished this turn." and the words
+  went nowhere: a real run (`real-make-cattain`, 2026-11-28) sent its follow-up in that second, the instant the last words had
+  streamed.
+- **A CLI still running ten seconds after that `result` is ended through the run guard.** A watcher thread starts when the run's last
+  `result` closes stdin; if the process has not exited within the grace (`NEKO_RUN_END_GRACE_MS`, default 10000), it is stopped like
+  any stop (its process group goes with it) and the daemon logs one line. The run ends as its result said (done, or the failure the
+  result reported), never "stopped" or "crashed", and its words and usage are kept. So a finished run can never hold the thread for
+  minutes. The fake CLI's `NEKO_FAKE_LINGER_MS` keeps it running that long after stdin closes, for the tests (`neko-core`'s
+  `claude.rs`, `neko-daemon`'s `run_end.rs`).
+
 Measured on Claude Code 2.1.331 with `--replay-user-messages`, a steer sent at 4.0 s during a 10 s shell loop:
 
 ```text

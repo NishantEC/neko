@@ -55,6 +55,17 @@ When a run ends (`queue::after_run`, before anything else is decided about the t
 A run that starts from the list skips `subagents::ended` for the run that just ended: the thread is not resting, and a kitten's
 report is made when its last run ends.
 
+## Words sent while a run is ending
+
+A run's last `result` closes the CLI's input, and the run stays active until the process has exited (a second or so on the real CLI;
+`runtimes.md`, "When a run ends"). The screen still shows the run as working then, so Return steers. **Words sent in that moment are
+never refused:** whatever the mode (Steer, Queue or Interrupt), the daemon holds them as a queued message (`queue::for_next_run`), the
+row shows above the composer, and the run that is ending starts the next one with them as soon as it is released (`after_run`, above).
+A steer whose write fails because the input closed meanwhile is held the same way. If the run was released before it looked at the
+list, `for_next_run` starts the run itself; the same goes for ⌥Return sent as a run is released. A CLI that does not exit is ended
+through the run guard ten seconds after its result (the run is done), so the words never wait longer than that. If the run that
+was ending turns out to have failed, the message is held for the person like any queued message (Send now starts it).
+
 ## Interrupt, in detail
 
 `queue::interrupt`: the first interrupt of a run sets `Active.interrupting`, adds an Interrupting row and calls `Control::interrupt`.

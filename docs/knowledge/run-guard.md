@@ -26,6 +26,9 @@ Nothing an agent starts outlives its run. `crates/neko-core/src/guard.rs`.
 A run may take 30 minutes. A run that says nothing for 5 minutes stops (time waiting for the person does not count). Both end
 the run as failed with the reason. Tests shorten them with `NEKO_RUN_LIMIT_MS` and `NEKO_RUN_STALL_MS`.
 
+A CLI still running ten seconds after the `result` that ended its run is ended the same way; that run is not failed, it ends as its
+result said (`runtimes.md`, "When a run ends"; `NEKO_RUN_END_GRACE_MS`).
+
 ## Subagents
 
 Each subagent is its own run with its own guardian and its own process group, so nothing above changes. Stop on a thread stops the run
