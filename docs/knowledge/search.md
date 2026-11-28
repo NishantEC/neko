@@ -24,7 +24,7 @@ only things with words in the store); the app's own lists answer for the rest.
     the top.
   - ⌘Return on a thread opens it with the right pane's Overview; on a kitten it opens it in the main view, where plain Return opens
     it as a tab of the pane beside its thread.
-  - Return on a Cattain opens its page; on a project starts a New thread in it; on an action does it.
+  - Return on a Cattain opens its own thread (`cats.md`); on a project starts a New thread in it; on an action does it.
   - **Tab:** closes the palette, goes to New thread with what was typed as its words, **without** the filters, and chooses the
     project a `project:` filter names. The keyboard is in the composer.
 - **Loading:** the field shows a spinner while the daemon has not answered the text now in it, and the rows already there stay put
@@ -103,3 +103,6 @@ deletion, the migration from store 13, filters, recents, kittens), `crates/neko-
 the speed), `apps/neko/tests/search.rs` (the keys, the sections in order, a message hit's words, Return, ⌘Return, Tab, stale answers,
 the menu item), QA `search-words`, `search-filters`, `search-new-thread` (`qa.md`). Scenes: `search-empty`, `-typing`, `-message`,
 `-actions`, `-filter`, `-problem`, `-none`, `-put-away`, `-loading`, `-first-moment`.
+
+Since protocol 21 a Cattain's own thread is never in the threads the daemon finds (`t.cattain = 0` in every query): it is found as
+its Cattain, which opens it.

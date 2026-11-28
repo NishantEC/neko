@@ -148,3 +148,10 @@ folds, menus, keys, toasts, order and rhythm). QA scenarios `settle-undo`, `auto
 
 Fixed at 256 points. A resizable split (drag the edge between 208 and 360) is an upstream ask to rune-ui, listed in
 `rune-ui-in-neko.md`.
+
+## A Cattain's thread and its crew (S10, protocol 21, store 17)
+
+A Cattain's own thread (`Task.cattain`) is not a row under Threads: the Cattain is listed by itself (`Task::listed`, `cats.md`), it
+is not in Search's threads, and it cannot be settled, archived or removed. A thread in a Cattain's crew (`Task::crew_of`: a round's,
+an older thread with a cat, or one started with `create_task {crew}`) is an ordinary row in its project; its band names the crew.
+New thread can start a thread in a crew (the crew chip, from the Cattain's Overview).

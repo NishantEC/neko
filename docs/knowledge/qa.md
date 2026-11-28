@@ -288,3 +288,26 @@ status:needs` keep what they say, and `status:sleepy` says it is not a status. `
 [fake:plain] project:acme" and Tab: the palette closes, New thread says "in acme-api" and its composer holds the words without the filter;
 Return starts the thread and it runs in acme-api. Not checked by the rig: the scroll to a found message in a long conversation (a thread
 the fake makes is one screen; `apps/neko/tests/search.rs` checks that the reveal is asked for and waits for the transcript).
+
+## The Cattain scenarios (S10)
+
+Headless, 1300 × 860 so the pane is docked and open, with `NEKO_FAKE_RECORD` (the fake CLI records its arguments, the folder it started in
+and stdin).
+
+`cattain-thread`: Settings ▸ Cattains opens miso's own thread, which opens on who it is and is not a row under Threads. RULES.md is written
+in the Files tab (from the Overview's file chip) and saved, and is on disk in `$data/cattains/cat_miso/`. A message to miso
+(`[fake:cattain-notes]`, which writes NOTES.md and DIGEST.md) runs in miso's folder, its system text holds RULES.md in a `<neko-cattain>`
+block, its turn is led by miso's face, and the Digest tab shows what it wrote.
+
+`cattain-files`: mochi's RULES.md and CREW.md are saved; New thread in mochi's crew (Overview) opens New thread with the crew chip; the
+thread's band says "In mochi's crew"; its system text holds CREW.md in a `<neko-crew>` block and nothing of RULES.md; its turns have no face.
+
+`cattain-migrate`: the app quits and the daemon stops; `run` replaces the store with one as Neko left it before Cattains (`$daemon --data-dir
+$data --make-store-at 16`, a debug-only flag that makes the store migrated no further and stops; then three cats with rules and two old
+threads written with `/usr/bin/sqlite3`); both start again. The old threads are untouched and no thread was made for a Cattain nobody
+opened; mochi's RULES.md and CREW.md hold its old rules, miso's RULES.md is on disk and keeps its previous version in the store; Settings ▸
+Cattains lists all three; the old thread that had mochi is in mochi's crew. A scenario names the daemon as `$daemon`.
+
+Changed to the new truth: `cats` makes and retires Cattains in Settings ▸ Cattains and the Profile, and writes RULES.md in the Files tab;
+`cat-rules-cannot-skip-checks` writes miso's CREW.md (a round's thread is in miso's crew); `no-cat` saves miso's files with
+`save_cattain_file` and checks no Cattain's block reaches a thread with no cat.

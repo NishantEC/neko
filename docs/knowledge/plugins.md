@@ -233,7 +233,7 @@ Settings ▸ Plugins (⌘, then the sixth page): the plugins with their state in
 `parse_mcp_json` and shows names only, never a value) and Add plugin folder…, and per plugin its switch, its declared settings as fields (a
 secret is a masked field and then "Set" with Change and Remove, never shown again), which cats may use it, Test with its result, and Remove
 (asks first). "Needs you" shows a plugin as a plug (no cat) in a group of its own, with the exact command, what it is handed and Approve and
-Decline, no default key and no button on its notification. A cat's page lists the plugins it may use, and a plugin's tool step reads
+Decline, no default key and no button on its notification. A Cattain's Profile lists the plugins it may use, and a plugin's tool step reads
 "acme-docs · search". Details and keys: `app-shell.md`, `design.md`.
 
 ## Requests and events

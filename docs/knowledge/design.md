@@ -11,13 +11,13 @@ This is the app's one design: there is no look switch.
 | `themes/neko.json` | The colours (warm neutrals; the deep teal is the theme's `identity` ramp and role, `blue` is the kit's blue), the type steps (`type.<step>`), the scrim (`number.scrim`), radius 9.6, continuous corners, Figtree. |
 | `view.rs` | `theme()` (the theme file as it is), `raised` and `well` surfaces, `state_ink`. |
 | `faces.rs` | The drawn face per face id, its ground, the wash and the `NEKO_CAT_ART` override, given to rune-ui's `Portrait` (the tile, the working ring, the state dots). |
-| `sidebar.rs`, `new_thread_view.rs`, `turn.rs`, `cat_view.rs`, `review_view.rs` | The inset panel, New thread, a turn's pieces and the receipt, a cat's page. |
+| `sidebar.rs`, `new_thread_view.rs`, `turn.rs`, `cattain_view.rs`, `review_view.rs` | The inset panel, New thread, a turn's pieces and the receipt, a Cattain's thread and pane. |
 
 ## Type scale (Figtree)
 
 | Step | Size / line | Weight | Tracking | Use |
 | --- | --- | --- | --- | --- |
-| xxl | 40 / 46 | 700 | −1.2 | A cat's name on its page |
+| xxl | 40 / 46 | 700 | −1.2 | (unused since the cat page went) |
 | xl | 24 / 30 | 600 | −0.4 | Page titles, New thread's headline |
 | lg | 18 / 24 | 600 | −0.2 | The task's title in the band, a cat's name on its tile, the Briefing's headline (400) |
 | md | 15 / 23 | 400 | 0 | The agent's answers and the person's words |
@@ -64,7 +64,7 @@ are `new-thread`, `-typed`, `-folder`, `-in-folder`, `-place-menu`, `-branch-men
 
 A turn has no head: the words are the agent's, with no portrait, name or "done" row. A request is led by a small amber dot (red if
 destructive) and says "The agent asks" ("Kitten 1 asks" for a subagent); a Needs you card is led by the same dot (a plug for a
-plugin). A cat's portrait appears only where a cat is the subject: its page, a round's card and the Cattains. A task a cat was given shows
+plugin). A cat's portrait appears only where a Cattain is the subject: its own thread (band, turns, intro, Profile), a round's card, the Cattains, Settings ▸ Cattains and a crew chip. A task a cat was given shows
 the cat's name as quiet text in the band.
 
 ## Sidebar rhythm
@@ -203,7 +203,7 @@ Motion), an amber dot when it needs the person, a red dot when it could not go o
 until they reach 4.5:1 and 3:1 against the surface they sit on, so the amber dot is a little lighter on a light card than it was
 when Neko chose it by hand.
 
-A cat's page puts its face on a wash of its ground (`faces::wash`). The ground is mixed into the page until the wash sits a fixed
+A wash of a cat's ground (`faces::wash`; the cat page used it until S10, and `tests/contrast.rs` still holds it to its step, for when a Cattain needs it again). The ground is mixed into the page until the wash sits a fixed
 step from the page (contrast 1.09:1 in light, 1.16:1 in dark), so the white cat's deep blue is no heavier than the grey cat's
 yellow (a fixed share of the ground made the cool grounds heavy).
 
@@ -251,3 +251,30 @@ the faint ink (a long project name is cut at 16 characters so the title keeps th
 of the words around the match, the match semibold. The highlighted row takes the selected wash. The footer names the four keys. The
 sheet's top never moves; rows come and go beneath it; while an answer is awaited the rows stay and the field spins. Renders:
 `scripts/snap.sh` pictures `search-*` (light, dark, 1200 by 800 and 760 by 560).
+
+## A Cattain (S10)
+
+Where a cat's character lives: its own thread. Everywhere else it is a small face or none.
+
+- **The band:** its 28 point portrait in its state (the working ring, the amber dot), its name in the band title's step, then its
+  purpose in the sm step, second ink, on the same line; the purpose gives way first when the room is short. No project name, no menu.
+- **The intro** (a thread nobody wrote in): its 72 point portrait, its name in the xl step, one line in the third ink on what it
+  reads and keeps. The band already says its purpose, so the intro does not repeat it.
+- **Its turns** are led by a 20 point portrait and its name (sm, semibold), on the reading edge, a block gap above the first block:
+  the one place a face leads turns. An ordinary thread's turns have no head.
+- **The pane's Overview:** sections a 24 point gap apart, each with the small semibold heading in the second ink and its count; rows of
+  a control and a bit high with the status mark in a 16 point slot (crew) or an amber dot (needs you), a title in the sm step and a
+  quiet xs line, the age at the right. "Done (n)" folds finished crew. The files are chips in mono with their ages. New thread in its
+  crew is a secondary button; New round… is a ghost button.
+- **Digest** is Markdown in the reading style, headings one step down, under a quiet "Updated 12 min ago".
+- **Files:** the four files as one list (the file glyph, its name, what it is for in the second line, its age at the right); the chosen
+  one below with its name in mono semibold and Reveal; RULES.md and CREW.md in rune-ui's Textarea; NOTES.md and DIGEST.md in a well.
+- **Profile:** a 48 point portrait with its name (lg) and state, Rename… at the right; the eight faces in one row of 30 point swatches,
+  its own ringed; Purpose; Project, Model and Access as pop-up chips in a column of labels 64 points wide; its plugins; Retire… alone at
+  the end.
+- **Settings ▸ Cattains:** each Cattain on the slab, its 40 point portrait (dimmed when retired), name, purpose, state and crew count.
+- **A crew thread's band** has a quiet "miso's crew" with its 14 point face; New thread's crew chip has the same face and an ×.
+
+Renders: `cattain-thread`, `cattain-thread-new`, `cattain-digest`, `cattain-files`, `cattain-files-editing`, `cattain-files-notes`,
+`cattain-profile`, `cattain-retire`, `crew-thread`, `new-thread-crew`, `sidebar-cattains-at-work`, `sidebar-cattains-quiet`,
+`settings-cats`, `cat-new` (`scripts/snap.sh`).

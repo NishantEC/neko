@@ -9,13 +9,13 @@
 | --- | --- |
 | `lib.rs` | `run()`: headless runs return first; then the menu prep, the saved frame, the Dock registration, `rune::run_windows`. `poll` drains the link, follows the width, sets the title, keeps the frame, replaces the menu. `on_key`: ⌘N, ⌃⌘S, Escape. |
 | `state.rs` | `App` and what each event changes. No drawing, no I/O. |
-| `view.rs` | The window: the warm ground, the theme and its type scale, the content band, the panels that ask (rename, remove, retire, undo anyway, new cat). |
+| `view.rs` | The window: the warm ground, the theme and its type scale, the content band, the panels that ask (rename, remove, retire, undo anyway, new Cattain). |
 | `sidebar.rs` | The inset sidebar panel: New thread, Needs you, Briefing, Rounds; the Cattains (only the cats at work, absent when none is); Threads with View and New thread, grouped by project (or one list), two-line thread rows led by a status mark; Add project…. |
 | `threads.rs`, `status_mark.rs` | The words and the order of the threads (age, second line, groups, the hold that keeps a working row in its place) and the status mark (`threads.md`). |
 | `new_thread_view.rs`, `new_thread.rs` | New thread, the screen the app opens on: the headline, the composer, the chips (Project, New worktree / In the folder, branch); its state (the place, the branch, the held send, the quiet "Started" line) (`threads.md`). |
 | `task_view.rs`, `turn.rs` | The task view: the conversation, turns with no head, steps on a rail, requests led by a small dot, the receipt, the composer and its context ring. |
 | `faces.rs` | The cats' portraits: a drawn face per face id on its own ground, the working ring and state dots (`design.md`). |
-| `cat_view.rs` | A cat's page. |
+| `cattain.rs`, `cattain_view.rs` | A Cattain (`cats.md`): opening its own thread, its files and the words being edited in them, its Profile's changes; its band lead, the head of its turns, its intro, and the pane's Overview, Digest, Files and Profile. |
 | `pane.rs`, `pane_view.rs`, `review_view.rs` | The right pane: its state and words (open or shut, width, the tabs, each thread's overview), its drawing (header with tabs, Overview, a kitten's tab, the sheet), and the Changes tab (the files as rune-ui's Diff, the source switch, Undo, Redo, Copy diff). |
 | `settings_view.rs` | Settings (⌘,): the agent CLIs, which one new tasks use, the permission mode, workspaces, notifications. |
 | `rounds.rs`, `rounds_view.rs` | Rounds (⌘3): the words for schedules and times, the New round / Edit panel's form; the page of cards and the panel (`rounds.md`). |
@@ -169,7 +169,7 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   same way (`page_swap` on the body that is replaced, not on a container that stays), and the same test holds them.
 - **The Changes tab's files** are rune-ui's Diff (0.10): `.stats` for a folded file's counts, `.hide_zero(true)` (a file that only gained
   lines shows no "−0"), `.selectable(true)` and `.foot(..)` for the note, Show all, Copy diff, Copy path and Reveal.
-- **Settings** has six pages, Agents, Workspaces, Notifications, Cats, Briefing and Plugins, switched by rune-ui's SegmentedControl. ⌘, then the page switch reaches Plugins (`settings-page-5`); "Open in Settings" on a plugin's Needs you card and a plugin's name on a cat's page open it at that plugin, with the keyboard on its first control.
+- **Settings** has six pages, Agents, Workspaces, Notifications, Cattains, Briefing and Plugins, switched by rune-ui's SegmentedControl. ⌘, then the page switch reaches Plugins (`settings-page-5`); "Open in Settings" on a plugin's Needs you card and a plugin's name on a cat's page open it at that plugin, with the keyboard on its first control.
 
 ## Plugins (app side)
 
@@ -186,7 +186,7 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
 
 A kitten (the app's word for a subagent: a helper a thread starts, numbered, with no name and no face) is a task (`Task.subagent`: its parent, its number, the thread at the top) and never a thread. `subagents.rs` holds the words and the state, `subagents_view.rs` the drawing.
 
-- **Not listed.** The sidebar (`tasks_in`, the Cattains), a cat's page and counts, and every notification skip tasks with `subagent`; a kitten finishing says nothing (its thread's end does), but its permission request reaches Needs you like any other. When a kitten is open its thread's row is the chosen one.
+- **Not listed.** The sidebar (`tasks_in`, the Cattains), a Cattain's crew and counts, and every notification skip tasks with `subagent`; a kitten finishing says nothing (its thread's end does), but its permission request reaches Needs you like any other. When a kitten is open its thread's row is the chosen one.
 - **The thread's row** (`threads::second_line`, `status_mark.rs`) says what it waits on as its second line, after Needs you and Failed and before the agent's last words: "Waiting on Kitten 1" (one live kitten and the thread waiting), "Kitten 1 working", "N kittens working", "1 kitten working, 1 waiting its turn" (a queued kitten is never counted as working: `subagents::crowd_words`), "2 draft kittens" (nothing else live), or "Reading the reports" (waiting, none live). Its mark is the working ring held still in the second ink (`Mark::Waiting`), the right side its age, and its description says "waiting". A kitten's request turns the thread's mark amber and the line reads "Needs you: Run a command · Kitten 1". Waiting is not active, so the thread is not in the Cattains.
 - **The card** stands where `PartBody::Subagent` is: one raised card, a row (`subagent-card-<number>`) per kitten, `Kitten 1`, its title, its state at the right (Queued, Working, Needs you, Waiting, Done, Failed, Stopped, Interrupted, Has a question), where it works ("Shared folder", or "Own copy · branch neko/4f2a-1") then "· After Kitten 1" while a stacked kitten has not started, and its last line (the newest agent words' first line, else the newest step, from the transcript parts this window has of it; a thread's transcript asks once for the transcripts of its kittens it has not read, `ask_subagent_lines`), and Open (`subagent-open-<number>`, name "Open Kitten 1"). Kitten parts with only Neko's own tool steps between them are one card. In a finished run the cards are outside the "Worked for" fold, after it.
 - **A draft card** (`subagent-card-<number>`, no Open): `Kitten 3`, its title, "Draft" at the right, where it works, then the prompt in a text box (`draft-prompt-<number>`, an editable Textarea; its field is `…-input`) and Discard (`draft-discard-<number>`) and Start (`draft-start-<number>`, names "Discard Kitten 3", "Start Kitten 3"). A draft is not a live kitten: it is not on the waiting line, the activity bar or the counts. A discarded draft reads "Discarded" with nothing to open. The text is kept in `App.draft_edits` and saved with `edit_draft` about 0.8 s after a change (`save_drafts`, from `poll`) and with Start.
@@ -228,7 +228,7 @@ one display and after unplugging a second, the Dock menu, Help's search field, o
 ## The right pane (S3, 2026-11-27)
 
 A thread's own pane, `pane.rs` (state, words) and `pane_view.rs` (drawing). It belongs to the thread in view (a kitten opened in the main
-view shows its thread's pane) and to no other page: New thread, Settings, Needs you, Rounds, the Briefing and a cat's page have none.
+view shows its thread's pane) and to no other page: New thread, Settings, Needs you, Rounds and the Briefing have none (a Cattain's own thread has its own tabs: `cats.md`).
 
 - **Where it sits.** Docked, it is the right region of rune-ui's Split (`window-right`): 380 points at first, 320 to 560 and at most half
   the window, dragged by its edge (a hairline; double-click goes back to 380, the arrow keys move it), collapsing when dragged past the
@@ -284,3 +284,24 @@ Command in the floating material, a soft scrim, 600 points wide, its top edge a 
 focus trapped, Escape and a press outside close it). State is `App::palette`; `search.md` has the rest. `poll` calls `palette_poll`
 each frame (it sends the request, never the view), and `Effect::ScrollTo(key)` carries a found message's scroll to `poll`, where the
 `Tx` is.
+
+## A Cattain's thread (S10, 2026-11-28)
+
+`cats.md` has what a Cattain is; this is where the app keeps it.
+
+- **Opening one** (`App::open_cattain`, `open_cattain_on(cat, tab)`) opens its own thread when the app has it, else asks the daemon
+  (`open_cattain`, `Asked::OpenCattain`) and opens the thread it answers, with the pane on the tab asked for (Profile after New
+  Cattain…, Files from a file chip). The sidebar's Cattains row, Search, Settings ▸ Cattains and a crew thread's band all open it.
+  `page_cat`, `open_cat` and the cat page are gone; nothing else replaces the content.
+- **The band** (`view::content_band`) leads with `cattain_view::band_lead` for a Cattain's own thread and has no project name or
+  thread menu (Retire is in its Profile). A crew thread's band has a quiet "miso's crew" (`task-cat`) with its 14 point face.
+- **The conversation** (`task_view::items_of`, `run_block`): a Cattain's thread has no first words, so it opens on
+  `cattain_view::intro` until anything is said; each turn has a header with its face and name (`turn-<run>-who`); runs have no change
+  line. The composer's placeholder is "Message miso".
+- **The pane** (`pane::tabs_of`): Overview, Digest, Files, Profile (and kitten tabs) for a Cattain's thread; `pane_sync` asks for the
+  files the tab shows (all four on Overview, DIGEST.md on Digest, the chosen one on Files), once each until answered
+  (`Cattains::asked`). `cattain_file_changed` replaces a file; the editor follows it unless the person has unsaved words there.
+- **New thread in a crew** (`App::new_crew_thread`): `NewThread::crew` and the crew chip; the Cattain's project is chosen when it has
+  one; `create_task` is sent with `crew`, which is cleared when the thread opens.
+- Threads lists no Cattain's own thread (`Task::listed`); `a11y.rs` checks the Cattain's row is the chosen one while its thread is open
+  and the Cattain is listed.
