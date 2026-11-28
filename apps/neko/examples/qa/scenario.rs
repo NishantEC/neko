@@ -82,6 +82,8 @@ pub struct Places {
     pub data: PathBuf,
     /// The fake MCP server `neko-fake-mcp`, beside the fake CLI (`$fake_mcp`): what a plugin scenario's server is.
     pub fake_mcp: PathBuf,
+    /// The daemon this run starts (`$daemon`): a step may run it with a debug flag (`--make-store-at`).
+    pub daemon: PathBuf,
 }
 
 fn substitute(v: &mut Value, p: &Places) {
@@ -93,6 +95,7 @@ fn substitute(v: &mut Value, p: &Places) {
                 .replace("$home", &p.home.to_string_lossy())
                 .replace("$data", &p.data.to_string_lossy())
                 .replace("$fake_mcp", &p.fake_mcp.to_string_lossy())
+                .replace("$daemon", &p.daemon.to_string_lossy())
                 .replace("$work", &w);
         }
         Value::Array(a) => a.iter_mut().for_each(|x| substitute(x, p)),

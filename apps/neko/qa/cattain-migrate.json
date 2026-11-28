@@ -1,0 +1,243 @@
+{
+  "name": "cattain-migrate",
+  "title": "Cats with rules become Cattains, and their old threads are left alone",
+  "about": "The daemon is stopped and its store replaced by one as Neko left it before Cattains (version 14, made by the debug daemon's --make-store-at, then three cats with rules and two old threads written with sqlite3). Started again, Settings ▸ Cattains lists the three; mochi's RULES.md and CREW.md hold its old rules and miso's RULES.md keeps its previous version; the old threads are unchanged, the one that had mochi now in mochi's crew.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "steps": [
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "composer-input"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "quit-app"
+    },
+    {
+      "do": "stop-daemon"
+    },
+    {
+      "do": "run",
+      "cmd": "rm -rf \"$data/neko.sqlite3\" \"$data/neko.sqlite3-wal\" \"$data/neko.sqlite3-shm\" \"$data/cattains\" && \"$daemon\" --data-dir \"$data\" --make-store-at 14 && /usr/bin/sqlite3 \"$data/neko.sqlite3\" \"INSERT INTO workspaces (id, name, created_ms, position) VALUES ('default', 'General', 1, 0); INSERT INTO cats (id, name, name_key, face, rules, previous_rules, rules_saved_ms, created_ms) VALUES ('cat_miso', 'miso', 'miso', 'ginger', 'QA-MISO-RULE: plan first.', 'QA-MISO-OLDER', 2, 1), ('cat_mochi', 'mochi', 'mochi', 'snow', 'QA-MOCHI-RULE: use British spelling.', NULL, NULL, 1), ('cat_tofu', 'tofu', 'tofu', 'calico', '', NULL, NULL, 1); INSERT INTO tasks (id, workspace_id, words, title, status, created_ms, activity_ms, last_read_ms, cat_id) VALUES ('task_old_docs', 'default', 'Old docs thread', 'Old docs thread', 'done', strftime('%s','now') * 1000 - 60000, strftime('%s','now') * 1000 - 60000, strftime('%s','now') * 1000, 'cat_mochi'), ('task_old_plain', 'default', 'Old plain thread', 'Old plain thread', 'done', strftime('%s','now') * 1000 - 50000, strftime('%s','now') * 1000 - 50000, strftime('%s','now') * 1000, NULL);\""
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" 'PRAGMA user_version'",
+          "is": "14"
+        }
+      },
+      "expect": "A store from before Cattains"
+    },
+    {
+      "do": "start-daemon"
+    },
+    {
+      "do": "start-app"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Old docs thread"
+        }
+      },
+      "within": 15,
+      "expect": "After the migration the old threads are in the sidebar"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "role": "option",
+              "label": "Old plain thread"
+            }
+          },
+          {
+            "sh": {
+              "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT COUNT(*) FROM tasks WHERE (id = 'task_old_docs' AND cat_id = 'cat_mochi' OR id = 'task_old_plain' AND cat_id IS NULL) AND cattain = 0 AND title LIKE 'Old %' AND status = 'done'\"",
+              "is": "2"
+            }
+          },
+          {
+            "sh": {
+              "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT COUNT(*) FROM tasks\"",
+              "is": "2"
+            }
+          }
+        ]
+      },
+      "expect": "The old threads are untouched, and no thread was made for a Cattain nobody opened"
+    },
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cattains",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-cat-cat_mochi-open"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-cat-cat_mochi-open"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "mochi"
+        }
+      },
+      "within": 10,
+      "expect": "mochi is a Cattain with its own thread"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-file-chip-rules"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cattain-file-input",
+          "text": "QA-MOCHI-RULE"
+        }
+      },
+      "within": 10,
+      "expect": "mochi's rules are its RULES.md"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-file-crew"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cattain-file-input",
+          "text": "QA-MOCHI-RULE"
+        }
+      },
+      "within": 10,
+      "expect": "and its CREW.md, so its old threads read the same words"
+    },
+    {
+      "do": "snap",
+      "name": "mochi-files",
+      "expect": "mochi's files after the migration"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "file": {
+              "path": "$data/cattains/cat_miso/RULES.md",
+              "has": "QA-MISO-RULE"
+            }
+          },
+          {
+            "sh": {
+              "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT previous FROM cattain_files WHERE cat_id = 'cat_miso' AND name = 'RULES.md'\"",
+              "is": "QA-MISO-OLDER"
+            }
+          }
+        ]
+      },
+      "expect": "miso's RULES.md is on disk and keeps its previous version"
+    },
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cattains",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "settings-cat-*",
+              "label": "miso"
+            }
+          },
+          {
+            "see": {
+              "key": "settings-cat-*",
+              "label": "mochi"
+            }
+          },
+          {
+            "see": {
+              "key": "settings-cat-*",
+              "label": "tofu"
+            }
+          }
+        ]
+      },
+      "within": 5,
+      "expect": "Settings ▸ Cattains lists all three"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Old docs thread"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "task-cat",
+          "label": "In mochi's crew"
+        }
+      },
+      "within": 10,
+      "expect": "The old thread that had mochi is in mochi's crew"
+    }
+  ]
+}

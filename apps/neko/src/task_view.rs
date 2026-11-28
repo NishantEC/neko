@@ -487,7 +487,10 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
     out.extend(parts.iter().filter_map(|p| crate::subagents_view::to_kitten_note(s, t, p, &w.subject())));
     let tail_last = tail.iter().rposition(|p| matches!(&p.body, PartBody::Agent { text, .. } if !text.trim().is_empty()));
     out.extend(lay_out(s, t, book, r, &w, tail, None, tail_last));
-    out.extend(turn::change_line(t, r, &offer, own_changes(r), task.subagent.is_some()));
+    // A Cattain's own runs change only its own files, which keep their own previous version (Files): no change line, no Review.
+    if !task.cattain {
+        out.extend(turn::change_line(t, r, &offer, own_changes(r), task.subagent.is_some()));
+    }
     out.into_iter().fold(turn, Message::child).build(t)
 }
 

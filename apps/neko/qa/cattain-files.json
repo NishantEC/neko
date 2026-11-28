@@ -1,0 +1,298 @@
+{
+  "name": "cattain-files",
+  "title": "A thread in a Cattain's crew reads CREW.md",
+  "about": "mochi's CREW.md is written in the Files tab and saved. New thread in mochi's crew (its Overview) starts a thread with the crew chip; its band names mochi's crew, and the fake CLI's system text for it holds CREW.md verbatim in a <neko-crew> block and nothing of RULES.md.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cattains",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-cat-cat_mochi-open"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-cat-cat_mochi-open"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "mochi"
+        }
+      },
+      "within": 10,
+      "expect": "mochi's own thread opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-file-chip-rules"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cattain-file-input"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-file-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "QA-OWN-3: only for mochi itself."
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cattain-file-unsaved"
+        }
+      },
+      "within": 5,
+      "expect": "Unsaved changes say so"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-file-save"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "gone": {
+              "key": "cattain-file-unsaved"
+            }
+          },
+          {
+            "see": {
+              "key": "cattain-file-input",
+              "text": "QA-OWN-3: on"
+            }
+          }
+        ]
+      },
+      "within": 5,
+      "expect": "RULES.md is saved"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-file-crew"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cattain-file-input"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-file-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "QA-CREW-5: open a PR; never merge."
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cattain-file-unsaved"
+        }
+      },
+      "within": 5,
+      "expect": "Unsaved changes say so"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-file-save"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "gone": {
+              "key": "cattain-file-unsaved"
+            }
+          },
+          {
+            "see": {
+              "key": "cattain-file-input",
+              "text": "QA-CREW-5: o"
+            }
+          }
+        ]
+      },
+      "within": 5,
+      "expect": "CREW.md is saved"
+    },
+    {
+      "do": "snap",
+      "name": "crew-md",
+      "expect": "CREW.md in the editor, saved"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "tab",
+        "name": "Overview"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cattain-new-crew"
+        }
+      },
+      "within": 5
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-new-crew"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "new-thread-crew"
+            }
+          },
+          {
+            "see": {
+              "key": "new-thread-headline",
+              "text": "What should mochi's crew work on?"
+            }
+          }
+        ]
+      },
+      "within": 5,
+      "expect": "New thread opens with mochi's crew chip"
+    },
+    {
+      "do": "sleep",
+      "secs": 0.5
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Tidy the README [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Worked for"
+        }
+      },
+      "within": 15,
+      "expect": "The crew thread runs"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "task-cat",
+              "label": "In mochi's crew"
+            }
+          },
+          {
+            "gone": {
+              "key": "turn-*-who"
+            }
+          },
+          {
+            "sh": {
+              "run": "test \"$(grep -c 'QA-CREW-5' fake-record.jsonl)\" -ge 1 && echo yes || echo no",
+              "is": "yes"
+            }
+          },
+          {
+            "sh": {
+              "run": "test \"$(grep -c 'neko-crew' fake-record.jsonl)\" -ge 1 && echo yes || echo no",
+              "is": "yes"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep -c 'QA-OWN-3' fake-record.jsonl || true",
+              "is": "0"
+            }
+          }
+        ]
+      },
+      "expect": "Its band names mochi's crew; its system text held CREW.md in a crew block and nothing of RULES.md"
+    },
+    {
+      "do": "snap",
+      "name": "crew-thread",
+      "expect": "The crew thread"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "name": "no-cat",
   "title": "A thread has no cat: no cat block reaches the agent",
-  "about": "A thread started from New thread has no cat. The fake CLI records what it was given: its system text holds what Neko tells every agent about subagents and no <neko-cat> block, whatever rules the cats have. A task a cat was given (a round made for it, run now) still carries its cat's block.",
+  "about": "A thread started from New thread has no cat. The fake CLI records what it was given: its system text holds what Neko tells every agent about subagents and no Cattain's block, whatever files the Cattains have. A thread in a Cattain's crew (a round made for it, run now) still carries its CREW.md.",
   "cli": [
     "fake"
   ],
@@ -15,9 +15,19 @@
     {
       "do": "daemon",
       "request": {
-        "type": "save_cat_rules",
+        "type": "save_cattain_file",
         "cat": "cat_miso",
-        "rules": "QA-RULE-9: Use British spelling."
+        "name": "CREW.md",
+        "text": "QA-RULE-9: Use British spelling."
+      }
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "save_cattain_file",
+        "cat": "cat_miso",
+        "name": "RULES.md",
+        "text": "QA-RULE-9: Use British spelling."
       }
     },
     {
@@ -61,13 +71,13 @@
           },
           {
             "sh": {
-              "run": "grep -c 'neko-cat' fake-record.jsonl || true",
+              "run": "grep -c 'neko-crew\\|neko-cattain\\|QA-RULE-9' fake-record.jsonl || true",
               "is": "0"
             }
           }
         ]
       },
-      "expect": "The record has the system text for subagents and no cat block; the thread shows no cat"
+      "expect": "The record has the system text for subagents and no Cattain's block; the thread shows no cat"
     },
     {
       "do": "daemon",

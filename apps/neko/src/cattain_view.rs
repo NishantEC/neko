@@ -271,8 +271,11 @@ pub fn digest(s: &App, t: &Theme, c: &Cat) -> El {
             )
         }
         Some(f) => {
-            let when = f.changed_ms.map(|ms| format!("Updated {}", crate::needs_view::waited(ms, s.now_ms))).unwrap_or_else(|| "As it was made".to_owned());
-            let when = if when.starts_with("Updated") { format!("{when} ago") } else { when };
+            let when = match f.changed_ms.map(|ms| crate::needs_view::waited(ms, s.now_ms)) {
+                Some(w) if w == "just now" => "Updated just now".to_owned(),
+                Some(w) => format!("Updated {w} ago"),
+                None => "As it was made".to_owned(),
+            };
             page = page.child(text(when).key("cattain-digest-age").role("note").font(tabular(t.ty.xs)).color(t.ink_faint()));
             page = page.child(Response::new("cattain-digest-words", demoted(&f.text)).selectable(true).column(crate::pane::MAX_WIDTH).build(t));
             if f.cut {

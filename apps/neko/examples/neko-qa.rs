@@ -295,7 +295,7 @@ pub fn descendants(root: i32) -> Vec<(u32, String)> {
 }
 
 fn run(o: &Opts) -> Result<bool, String> {
-    let places = Places { work: o.work.clone(), files: o.work.join("files"), home: o.work.join("home"), data: o.work.join("data"), fake_mcp: o.fake.as_ref().map(|f| f.with_file_name("neko-fake-mcp")).unwrap_or_default() };
+    let places = Places { work: o.work.clone(), files: o.work.join("files"), home: o.work.join("home"), data: o.work.join("data"), fake_mcp: o.fake.as_ref().map(|f| f.with_file_name("neko-fake-mcp")).unwrap_or_default(), daemon: o.daemon.clone() };
     // The app's prefs (frame, last workspace, folded sections) live in the run's folder, never the person's.
     // SAFETY: set before any other thread starts.
     unsafe { std::env::set_var("RUNE_DIRS_ROOT", o.work.join("rune")) };

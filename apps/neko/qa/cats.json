@@ -1,9 +1,13 @@
 {
   "name": "cats",
-  "title": "Cats: standing rules, new and retired cats",
-  "about": "Three starter cats exist and none is at work: the sidebar has no Cattains section, and a thread has no cat. Rules written on mochi's page are saved. New cat… in Settings ▸ Cats makes a fourth, and it is not at work either. Retire asks first, its page goes quiet, and Settings ▸ Cats offers Bring back. (What a cat's rules do to a run is covered by the daemon's and the app's tests: only work a cat was given, such as a round's, carries them.)",
+  "title": "Cattains: made, changed and retired in Settings and their Profile",
+  "about": "Three starter Cattains exist and none is at work: the sidebar has no Cattains section, and a thread has no cat. mochi's RULES.md is written in its Files tab and saved. New Cattain… in Settings ▸ Cattains makes a fourth, whose own thread opens on its Profile; it is not at work either. Retire asks first, its Profile says so, and Settings ▸ Cattains offers Bring back. (What a Cattain's files do to a run is covered by cattain-thread, cattain-files and the daemon's and app's tests.)",
   "cli": [
     "fake"
+  ],
+  "size": [
+    1300,
+    860
   ],
   "setup": {
     "daemon_env": {
@@ -18,7 +22,7 @@
     {
       "do": "click",
       "on": {
-        "name": "Cats",
+        "name": "Cattains",
         "in": {
           "key": "settings-page"
         }
@@ -49,7 +53,7 @@
         ]
       },
       "within": 10,
-      "expect": "Settings > Cats lists the three starter cats"
+      "expect": "Settings > Cattains lists the three starters"
     },
     {
       "do": "assert",
@@ -58,7 +62,7 @@
           "key": "cattains-section"
         }
       },
-      "expect": "No cat is at work: the sidebar has no Cattains section"
+      "expect": "No Cattain is at work: the sidebar has no Cattains section"
     },
     {
       "do": "click",
@@ -70,15 +74,32 @@
       "do": "wait",
       "until": {
         "see": {
-          "key": "cat-rules"
+          "key": "band-title",
+          "text": "mochi"
         }
       },
-      "expect": "mochi's page opens with its rules"
+      "within": 10,
+      "expect": "mochi's own thread opens"
     },
     {
       "do": "click",
       "on": {
-        "key": "cat-rules-input"
+        "key": "cattain-file-chip-rules"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cattain-file-input"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-file-input"
       }
     },
     {
@@ -86,9 +107,19 @@
       "text": "QA-RULE-7: Answer in one short paragraph."
     },
     {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cattain-file-unsaved"
+        }
+      },
+      "within": 5,
+      "expect": "Unsaved changes say so"
+    },
+    {
       "do": "click",
       "on": {
-        "key": "cat-save"
+        "key": "cattain-file-save"
       }
     },
     {
@@ -97,24 +128,24 @@
         "all": [
           {
             "gone": {
-              "key": "cat-unsaved"
+              "key": "cattain-file-unsaved"
             }
           },
           {
             "see": {
-              "key": "cat-rules-input",
-              "text": "QA-RULE-7"
+              "key": "cattain-file-input",
+              "text": "QA-RULE-7: A"
             }
           }
         ]
       },
       "within": 5,
-      "expect": "Save keeps the rules"
+      "expect": "Save keeps RULES.md"
     },
     {
       "do": "snap",
-      "name": "mochi-page",
-      "expect": "mochi's page with its rules"
+      "name": "mochi-rules",
+      "expect": "mochi's RULES.md"
     },
     {
       "do": "key",
@@ -123,7 +154,7 @@
     {
       "do": "click",
       "on": {
-        "name": "Cats",
+        "name": "Cattains",
         "in": {
           "key": "settings-page"
         }
@@ -156,13 +187,23 @@
     {
       "do": "wait",
       "until": {
-        "see": {
-          "key": "cat-title",
-          "text": "nori"
-        }
+        "all": [
+          {
+            "see": {
+              "key": "cat-title",
+              "text": "nori"
+            }
+          },
+          {
+            "see": {
+              "key": "band-title",
+              "text": "nori"
+            }
+          }
+        ]
       },
       "within": 5,
-      "expect": "New cat… in Settings makes a fourth cat, nori, and its page opens"
+      "expect": "New Cattain… makes a fourth, nori, and its own thread opens on its Profile"
     },
     {
       "do": "assert",
@@ -172,7 +213,7 @@
           "label": "nori"
         }
       },
-      "expect": "nori is napping: not in the Cattains"
+      "expect": "nori is napping: not in the sidebar's Cattains"
     },
     {
       "do": "key",
@@ -181,7 +222,7 @@
     {
       "do": "click",
       "on": {
-        "name": "Cats",
+        "name": "Cattains",
         "in": {
           "key": "settings-page"
         }
@@ -197,9 +238,27 @@
       "do": "wait",
       "until": {
         "see": {
+          "key": "band-title",
+          "text": "mochi"
+        }
+      },
+      "within": 5
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "tab",
+        "name": "Profile"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
           "key": "cat-retire"
         }
-      }
+      },
+      "within": 5
     },
     {
       "do": "click",
@@ -234,10 +293,27 @@
     {
       "do": "wait",
       "until": {
-        "gone": {
-          "key": "retire-cat-dialog"
-        }
-      }
+        "all": [
+          {
+            "gone": {
+              "key": "retire-cat-dialog"
+            }
+          },
+          {
+            "see": {
+              "key": "band-purpose",
+              "text": "Retired"
+            }
+          },
+          {
+            "see": {
+              "key": "cat-bring-back"
+            }
+          }
+        ]
+      },
+      "within": 5,
+      "expect": "Its thread stays open and says it is retired; its Profile offers Bring back"
     },
     {
       "do": "key",
@@ -246,7 +322,7 @@
     {
       "do": "click",
       "on": {
-        "name": "Cats",
+        "name": "Cattains",
         "in": {
           "key": "settings-page"
         }
@@ -260,7 +336,7 @@
           "name": "Bring back"
         }
       },
-      "expect": "Settings ▸ Cats offers Bring back"
+      "expect": "Settings ▸ Cattains offers Bring back"
     },
     {
       "do": "click",

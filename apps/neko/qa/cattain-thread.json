@@ -1,0 +1,236 @@
+{
+  "name": "cattain-thread",
+  "title": "A Cattain has its own thread",
+  "about": "Settings ▸ Cattains opens miso's own thread, which opens on who it is. RULES.md is written in the Files tab and saved. A message to miso runs in miso's own folder (the fake CLI records the folder it started in) and its system text holds RULES.md verbatim in a <neko-cattain> block; the answer is led by miso's face; what the fake wrote in the folder (DIGEST.md) shows in the Digest tab.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cattains",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-cat-cat_miso-open"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-cat-cat_miso-open"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "miso"
+            }
+          },
+          {
+            "see": {
+              "key": "cattain-intro"
+            }
+          },
+          {
+            "see": {
+              "key": "reply-input"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "miso's own thread opens on who it is, its name leading the band"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "key": "thread-*",
+          "label": "miso"
+        }
+      },
+      "expect": "Its own thread is not a row under Threads"
+    },
+    {
+      "do": "snap",
+      "name": "miso-thread",
+      "expect": "miso's thread before anyone wrote in it"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-file-chip-rules"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cattain-file-input"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-file-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "QA-RULE-11: plan first, then answer in one paragraph."
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cattain-file-unsaved"
+        }
+      },
+      "within": 5,
+      "expect": "Unsaved changes say so"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-file-save"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "gone": {
+              "key": "cattain-file-unsaved"
+            }
+          },
+          {
+            "see": {
+              "key": "cattain-file-input",
+              "text": "QA-RULE-11: "
+            }
+          }
+        ]
+      },
+      "within": 5,
+      "expect": "RULES.md is saved"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "file": {
+          "path": "$data/cattains/cat_miso/RULES.md",
+          "has": "QA-RULE-11"
+        }
+      },
+      "expect": "RULES.md is in miso's folder on disk"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "What is open? [fake:cattain-notes]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Worked for"
+        }
+      },
+      "within": 15,
+      "expect": "miso answers"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "turn-*-who"
+            }
+          },
+          {
+            "sh": {
+              "run": "test \"$(grep -c '\"cwd\":\"[^\"]*/cattains/cat_miso\"' fake-record.jsonl)\" -ge 1 && echo yes || echo no",
+              "is": "yes"
+            }
+          },
+          {
+            "sh": {
+              "run": "test \"$(grep -c 'QA-RULE-11' fake-record.jsonl)\" -ge 1 && echo yes || echo no",
+              "is": "yes"
+            }
+          },
+          {
+            "sh": {
+              "run": "test \"$(grep -c 'neko-cattain' fake-record.jsonl)\" -ge 1 && echo yes || echo no",
+              "is": "yes"
+            }
+          }
+        ]
+      },
+      "expect": "The run started in miso's folder, its system text held RULES.md in miso's block, and its turn is led by its face"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "tab",
+        "name": "Digest"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Fix login: a PR is open."
+        }
+      },
+      "within": 10,
+      "expect": "What miso wrote in DIGEST.md shows in the Digest tab"
+    },
+    {
+      "do": "snap",
+      "name": "digest",
+      "expect": "The Digest tab"
+    }
+  ]
+}
