@@ -1,0 +1,130 @@
+{
+  "name": "real-make-cattain",
+  "title": "A real thread makes a Cattain when asked, and not when it is not asked",
+  "about": "Real model calls (the cheapest model). Asked to make a Cattain for the iOS work, the real agent calls Neko's make_cattain (no permission asked) and the thread shows the note and the toast; asked again, it names the one it made instead of making a second. Only the real CLI can show the agent uses the tool as told.",
+  "cli": [
+    "real"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "setup": {
+    "files": {
+      "acme-ios": {
+        "files": {
+          "README.md": "# Acme iOS\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "choose-folder",
+      "path": "$files/acme-ios"
+    },
+    {
+      "do": "sleep",
+      "secs": 3
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Make a Cattain for the iOS work. It owns the beta builds. Reply in one line."
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "allow-until",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "text": "Made a Cattain: yuzu"
+            }
+          },
+          {
+            "gone": {
+              "key": "run-*-working"
+            }
+          }
+        ]
+      },
+      "within": 240,
+      "snap_first": true,
+      "expect": "The real agent makes yuzu with Neko's tool and the note shows"
+    },
+    {
+      "do": "snap",
+      "name": "made",
+      "expect": "The note and the agent's reply"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Make a Cattain for the iOS work again. Reply in one line."
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "allow-until",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "text": "already",
+              "in": {
+                "key": "turn-*"
+              }
+            }
+          },
+          {
+            "gone": {
+              "key": "run-*-working"
+            }
+          },
+          {
+            "gone": {
+              "key": "queued-*"
+            }
+          }
+        ]
+      },
+      "within": 240,
+      "expect": "The second ask is read (steered into the run or run after it) and answered by naming yuzu"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "text": "Made a Cattain: kuro"
+        }
+      },
+      "expect": "No second Cattain was made: the agent named yuzu instead"
+    },
+    {
+      "do": "snap",
+      "name": "asked-again",
+      "expect": "The thread after the second ask"
+    }
+  ]
+}
