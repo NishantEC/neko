@@ -234,7 +234,11 @@ impl Runtime for ClaudeRuntime {
             env.push((crate::runtime::MCP_SECRET_ENV.to_owned(), m.secret.clone()));
         }
         let mut args = arguments(spec.resume.as_deref(), spec.mode, hook.map(|h| h.helper.as_path()), spec.instructions.as_deref(), spec.mcp_config.as_deref(), spec.own_mcp);
-        args.extend(model_arguments(std::env::var(MODEL_ENV).ok().as_deref()));
+        for dir in &spec.add_dirs {
+            args.push("--add-dir".into());
+            args.push(dir.to_string_lossy().into_owned());
+        }
+        args.extend(model_arguments(spec.model.clone().or_else(|| std::env::var(MODEL_ENV).ok()).as_deref()));
         let guarded = guard::spawn(&self.guard, &path, &args, &spec.workdir, &env, |c| {
             c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         })

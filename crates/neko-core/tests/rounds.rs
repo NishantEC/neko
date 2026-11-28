@@ -301,7 +301,7 @@ fn removing_a_round_removes_its_history_and_never_its_tasks() {
     assert!(matches!(c.round_history(&id), Err(RoundError::NotFound)));
     let kept = c.store.get_task(&task.id).unwrap().unwrap();
     assert_eq!(kept.round.unwrap().name, "Docs check", "the task still says where it came from");
-    assert_eq!(c.store.all_tasks().unwrap().len(), 1);
+    assert_eq!(c.store.all_tasks().unwrap().iter().filter(|t| t.listed()).count(), 1);
     assert!(c.tick_rounds(env(at(2026, 11, 22, 9, 0))).unwrap().started.is_empty());
     let n: i64 = c.store.connection().query_row("SELECT COUNT(*) FROM round_runs", [], |r| r.get(0)).unwrap();
     assert_eq!(n, 0);
@@ -397,7 +397,7 @@ fn a_restart_in_the_middle_neither_runs_a_time_twice_nor_loses_one() {
     // The daemon restarts a moment later: the 21st's time is not run again.
     let mut c = open(&d);
     assert!(c.tick_rounds(env(at(2026, 11, 21, 9, 1))).unwrap().started.is_empty());
-    assert_eq!(c.store.all_tasks().unwrap().len(), 1);
+    assert_eq!(c.store.all_tasks().unwrap().iter().filter(|t| t.listed()).count(), 1);
     // The next time is still ahead: not lost.
     assert_eq!(c.round(&id, env(at(2026, 11, 21, 9, 1))).unwrap().next_due_ms, Some(at(2026, 11, 22, 9, 0)));
     // The daemon was down over the 22nd's time: it is run once when it is up again (within a day).
@@ -463,13 +463,13 @@ fn the_migration_from_store_six_adds_rounds_and_changes_nothing_else() {
     // A store as the last Neko left it: version 6, no rounds.
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch("ALTER TABLE runs DROP COLUMN ask; ALTER TABLE wakes DROP COLUMN run_id; ALTER TABLE wakes DROP COLUMN question; ALTER TABLE wakes DROP COLUMN question_chain; DROP INDEX tasks_by_activity; DROP TRIGGER find_titles_insert; DROP TRIGGER find_titles_update; DROP TRIGGER find_titles_delete; DROP TRIGGER find_words_insert; DROP TRIGGER find_words_update; DROP TRIGGER find_words_delete; DROP TABLE find_titles; DROP TABLE find_words; ALTER TABLE tasks DROP COLUMN sub_placement; ALTER TABLE tasks DROP COLUMN sub_after; ALTER TABLE tasks DROP COLUMN sub_draft; ALTER TABLE tasks DROP COLUMN sub_branch; ALTER TABLE tasks DROP COLUMN pinned_ms; ALTER TABLE tasks DROP COLUMN settled_ms; ALTER TABLE tasks DROP COLUMN archived_ms; ALTER TABLE tasks DROP COLUMN in_folder; ALTER TABLE tasks DROP COLUMN from_branch; DROP TABLE queued; DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN sub_number; ALTER TABLE tasks DROP COLUMN root_id; ALTER TABLE tasks DROP COLUMN last_read_ms; ALTER TABLE tasks DROP COLUMN activity_ms; ALTER TABLE tasks DROP COLUMN latest_line; DROP TABLE plugin_values; DROP TABLE plugins; DROP TABLE round_runs; DROP TABLE rounds; DROP INDEX tasks_by_round; ALTER TABLE tasks DROP COLUMN round_id; ALTER TABLE tasks DROP COLUMN round_due_ms; ALTER TABLE tasks DROP COLUMN round_name; PRAGMA user_version = 6;").unwrap();
+        conn.execute_batch("DELETE FROM tasks WHERE cattain = 1; DROP TABLE cattain_files; ALTER TABLE cats DROP COLUMN thread_id; ALTER TABLE cats DROP COLUMN model; ALTER TABLE cats DROP COLUMN access; ALTER TABLE tasks DROP COLUMN cattain; ALTER TABLE runs DROP COLUMN ask; ALTER TABLE wakes DROP COLUMN run_id; ALTER TABLE wakes DROP COLUMN question; ALTER TABLE wakes DROP COLUMN question_chain; DROP INDEX tasks_by_activity; DROP TRIGGER find_titles_insert; DROP TRIGGER find_titles_update; DROP TRIGGER find_titles_delete; DROP TRIGGER find_words_insert; DROP TRIGGER find_words_update; DROP TRIGGER find_words_delete; DROP TABLE find_titles; DROP TABLE find_words; ALTER TABLE tasks DROP COLUMN sub_placement; ALTER TABLE tasks DROP COLUMN sub_after; ALTER TABLE tasks DROP COLUMN sub_draft; ALTER TABLE tasks DROP COLUMN sub_branch; ALTER TABLE tasks DROP COLUMN pinned_ms; ALTER TABLE tasks DROP COLUMN settled_ms; ALTER TABLE tasks DROP COLUMN archived_ms; ALTER TABLE tasks DROP COLUMN in_folder; ALTER TABLE tasks DROP COLUMN from_branch; DROP TABLE queued; DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN sub_number; ALTER TABLE tasks DROP COLUMN root_id; ALTER TABLE tasks DROP COLUMN last_read_ms; ALTER TABLE tasks DROP COLUMN activity_ms; ALTER TABLE tasks DROP COLUMN latest_line; DROP TABLE plugin_values; DROP TABLE plugins; DROP TABLE round_runs; DROP TABLE rounds; DROP INDEX tasks_by_round; ALTER TABLE tasks DROP COLUMN round_id; ALTER TABLE tasks DROP COLUMN round_due_ms; ALTER TABLE tasks DROP COLUMN round_name; PRAGMA user_version = 6;").unwrap();
     }
     assert_eq!(Store::open_at(&path, 6).unwrap().version().unwrap(), 6);
     let mut core = Core::open(&path, Box::new(FixedClock::new(1_764_000_100_000, 1000)), Box::new(SequentialIds::default())).unwrap();
-    assert_eq!(core.store.version().unwrap(), 16, "every migration after 6 ran: rounds' own is the seventh");
-    assert_eq!(SCHEMA_VERSION, 16);
-    let tasks = core.store.all_tasks().unwrap();
+    assert_eq!(core.store.version().unwrap(), 17, "every migration after 6 ran: rounds' own is the seventh");
+    assert_eq!(SCHEMA_VERSION, 17);
+    let tasks: Vec<_> = core.store.all_tasks().unwrap().into_iter().filter(|t| t.listed()).collect();
     assert_eq!((tasks.len(), tasks[0].title.as_str(), tasks[0].round.clone()), (1, "Rename the sidebar label", None));
     assert!(core.rounds(env(0)).unwrap().0.is_empty());
     assert!(!core.store.rounds_paused().unwrap());

@@ -27,6 +27,7 @@ fn task() -> Task {
         pinned: false,
         settled: false,
         archived: false,
+        cattain: false,
     }
 }
 
@@ -42,9 +43,9 @@ fn pinned<T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug>(value: 
 fn requests_round_trip_with_their_ids() {
     pinned(ClientMessage { id: 0, request: Request::Hello { client: "neko-app".into(), protocol: 1 } }, r#"{"id":0,"type":"hello","client":"neko-app","protocol":1}"#);
     pinned(ClientMessage { id: 1, request: Request::ListTasks }, r#"{"id":1,"type":"list_tasks"}"#);
-    pinned(ClientMessage { id: 2, request: Request::CreateTask { words: "Fix the build".into(), workspace: None, in_folder: false, from_branch: None } }, r#"{"id":2,"type":"create_task","words":"Fix the build"}"#);
+    pinned(ClientMessage { id: 2, request: Request::CreateTask { crew: None, words: "Fix the build".into(), workspace: None, in_folder: false, from_branch: None } }, r#"{"id":2,"type":"create_task","words":"Fix the build"}"#);
     pinned(
-        ClientMessage { id: 2, request: Request::CreateTask { words: "Fix the build".into(), workspace: Some("ws_1".into()), in_folder: false, from_branch: None } },
+        ClientMessage { id: 2, request: Request::CreateTask { crew: None, words: "Fix the build".into(), workspace: Some("ws_1".into()), in_folder: false, from_branch: None } },
         r#"{"id":2,"type":"create_task","words":"Fix the build","workspace":"ws_1"}"#,
     );
     pinned(ClientMessage { id: 3, request: Request::GetTask { task: TaskId("task_1".into()) } }, r#"{"id":3,"type":"get_task","task":"task_1"}"#);
@@ -386,11 +387,10 @@ fn cat() -> Cat {
         name: "miso".into(),
         face: "ginger".into(),
         purpose: Some("Keeps the docs tidy.".into()),
-        rules: "- Use British spelling.".into(),
-        rules_hash: cats::rules_hash("- Use British spelling."),
-        previous_rules: Some(String::new()),
-        rules_saved_ms: Some(9),
         workspace: Some("ws_1".into()),
+        thread: Some(TaskId("task_m".into())),
+        model: Some("sonnet".into()),
+        access: Some(PermissionMode::Ask),
         created_ms: 1,
         retired_ms: None,
     }
@@ -409,13 +409,26 @@ fn cats_round_trip() {
     pinned(ClientMessage { id: 5, request: Request::SetCatFace { cat: c(), face: "void".into() } }, r#"{"id":5,"type":"set_cat_face","cat":"cat_miso","face":"void"}"#);
     pinned(ClientMessage { id: 6, request: Request::SetCatPurpose { cat: c(), purpose: "Docs".into() } }, r#"{"id":6,"type":"set_cat_purpose","cat":"cat_miso","purpose":"Docs"}"#);
     pinned(ClientMessage { id: 7, request: Request::SetCatWorkspace { cat: c(), workspace: None } }, r#"{"id":7,"type":"set_cat_workspace","cat":"cat_miso"}"#);
-    pinned(ClientMessage { id: 8, request: Request::SaveCatRules { cat: c(), rules: "Rules\n".into() } }, r#"{"id":8,"type":"save_cat_rules","cat":"cat_miso","rules":"Rules\n"}"#);
-    pinned(ClientMessage { id: 9, request: Request::RestoreCatRules { cat: c() } }, r#"{"id":9,"type":"restore_cat_rules","cat":"cat_miso"}"#);
+    // A Cattain (version 19): its model and access, and its files read, saved and restored by name.
+    pinned(ClientMessage { id: 8, request: Request::SetCatModel { cat: c(), model: Some("sonnet".into()) } }, r#"{"id":8,"type":"set_cat_model","cat":"cat_miso","model":"sonnet"}"#);
+    pinned(ClientMessage { id: 9, request: Request::SetCatAccess { cat: c(), access: None } }, r#"{"id":9,"type":"set_cat_access","cat":"cat_miso"}"#);
+    pinned(ClientMessage { id: 16, request: Request::SetCatAccess { cat: c(), access: Some(PermissionMode::Full) } }, r#"{"id":16,"type":"set_cat_access","cat":"cat_miso","access":"full"}"#);
+    pinned(ClientMessage { id: 17, request: Request::GetCattainFile { cat: c(), name: "DIGEST.md".into() } }, r#"{"id":17,"type":"get_cattain_file","cat":"cat_miso","name":"DIGEST.md"}"#);
+    pinned(ClientMessage { id: 18, request: Request::SaveCattainFile { cat: c(), name: "CREW.md".into(), text: "Open a PR.\n".into() } }, r#"{"id":18,"type":"save_cattain_file","cat":"cat_miso","name":"CREW.md","text":"Open a PR.\n"}"#);
+    pinned(ClientMessage { id: 19, request: Request::RestoreCattainFile { cat: c(), name: "RULES.md".into() } }, r#"{"id":19,"type":"restore_cattain_file","cat":"cat_miso","name":"RULES.md"}"#);
+    let file = CattainFile { cat: c(), name: "RULES.md".into(), text: "- Use British spelling.".into(), cut: false, previous: true, changed_ms: Some(9), path: "/Users/example/neko/cattains/cat_miso/RULES.md".into(), editable: true };
+    let fj = r#"{"cat":"cat_miso","name":"RULES.md","text":"- Use British spelling.","previous":true,"changed_ms":9,"path":"/Users/example/neko/cattains/cat_miso/RULES.md","editable":true}"#;
+    pinned(Reply::CattainFile { file: file.clone() }, &format!(r#"{{"type":"cattain_file","file":{fj}}}"#));
+    pinned(Change::CattainFileChanged { file: CattainFile { name: "DIGEST.md".into(), previous: false, changed_ms: None, editable: false, text: String::new(), path: "/d".into(), ..file } }, r#"{"type":"cattain_file_changed","file":{"cat":"cat_miso","name":"DIGEST.md","text":"","path":"/d"}}"#);
+    pinned(
+        ClientMessage { id: 20, request: Request::CreateTask { crew: Some(c()), words: "Fix it".into(), workspace: None, in_folder: false, from_branch: None } },
+        r#"{"id":20,"type":"create_task","words":"Fix it","crew":"cat_miso"}"#,
+    );
     pinned(ClientMessage { id: 10, request: Request::RetireCat { cat: c() } }, r#"{"id":10,"type":"retire_cat","cat":"cat_miso"}"#);
     pinned(ClientMessage { id: 11, request: Request::BringBackCat { cat: c() } }, r#"{"id":11,"type":"bring_back_cat","cat":"cat_miso"}"#);
     // A new thread takes no cat (version 14): where it works is its own choice, and each is written only when it is made.
     pinned(
-        ClientMessage { id: 13, request: Request::CreateTask { words: "Fix it".into(), workspace: Some("ws_1".into()), in_folder: true, from_branch: Some("next".into()) } },
+        ClientMessage { id: 13, request: Request::CreateTask { crew: None, words: "Fix it".into(), workspace: Some("ws_1".into()), in_folder: true, from_branch: Some("next".into()) } },
         r#"{"id":13,"type":"create_task","words":"Fix it","workspace":"ws_1","in_folder":true,"from_branch":"next"}"#,
     );
     pinned(ClientMessage { id: 14, request: Request::ListBranches { workspace: "ws_1".into() } }, r#"{"id":14,"type":"list_branches","workspace":"ws_1"}"#);
@@ -424,16 +437,15 @@ fn cats_round_trip() {
         r#"{"kind":"reply","id":14,"reply":{"type":"branches","workspace":"ws_1","git":true,"current":"main","branches":["main","next"]}}"#,
     );
     pinned(ServerMessage::Reply { id: 15, reply: Reply::Branches { workspace: "default".into(), git: false, current: None, branches: Vec::new() } }, r#"{"kind":"reply","id":15,"reply":{"type":"branches","workspace":"default","git":false}}"#);
-    let j = r#"{"id":"cat_miso","name":"miso","face":"ginger","purpose":"Keeps the docs tidy.","rules":"- Use British spelling.","rules_hash":"HASH","previous_rules":"","rules_saved_ms":9,"workspace":"ws_1","created_ms":1}"#.replace("HASH", &cats::rules_hash("- Use British spelling."));
+    let j = r#"{"id":"cat_miso","name":"miso","face":"ginger","purpose":"Keeps the docs tidy.","workspace":"ws_1","thread":"task_m","model":"sonnet","access":"ask","created_ms":1}"#;
     pinned(Reply::Cat { cat: cat() }, &format!(r#"{{"type":"cat","cat":{j}}}"#));
     pinned(Reply::Cats { cats: vec![cat()] }, &format!(r#"{{"type":"cats","cats":[{j}]}}"#));
     pinned(ServerMessage::Event { revision: 3, change: Change::CatAdded { cat: cat() } }, &format!(r#"{{"kind":"event","revision":3,"change":{{"type":"cat_added","cat":{j}}}}}"#));
     let mut retired = cat();
     retired.retired_ms = Some(20);
     retired.purpose = None;
-    retired.previous_rules = None;
     let encoded = serde_json::to_string(&Change::CatUpdated { cat: retired.clone() }).unwrap();
-    assert!(encoded.starts_with(r#"{"type":"cat_updated","cat":{"id":"cat_miso","name":"miso","face":"ginger","rules":"#) && encoded.ends_with(r#""workspace":"ws_1","created_ms":1,"retired_ms":20}}"#), "{encoded}");
+    assert!(encoded.starts_with(r#"{"type":"cat_updated","cat":{"id":"cat_miso","name":"miso","face":"ginger","workspace":"ws_1""#) && encoded.ends_with(r#""access":"ask","created_ms":1,"retired_ms":20}}"#), "{encoded}");
     assert!(!retired.is_active());
     pinned(ErrorCode::InvalidName, "\"invalid_name\"");
     // A run says which cat and which version of its rules went with it; a quiet part says when they changed.
@@ -442,8 +454,15 @@ fn cats_round_trip() {
     r.rules_hash = Some("cbf29ce484222325".into());
     let json = serde_json::to_string(&r).unwrap();
     assert!(json.ends_with(r#""cat":"cat_miso","rules_hash":"cbf29ce484222325"}"#), "{json}");
-    pinned(PartBody::RulesChanged { cat: c(), name: "miso".into() }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso"}"#);
-    assert_eq!(PROTOCOL_VERSION, 20);
+    pinned(PartBody::RulesChanged { cat: c(), name: "miso".into(), file: None }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso"}"#);
+    pinned(PartBody::RulesChanged { cat: c(), name: "miso".into(), file: Some("CREW.md".into()) }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso","file":"CREW.md"}"#);
+    assert_eq!(PROTOCOL_VERSION, 21);
+    // A Cattain's own thread says so; any other thread writes nothing.
+    let mut own = task();
+    own.cattain = true;
+    assert!(serde_json::to_string(&own).unwrap().ends_with(r#""cattain":true}"#));
+    assert!((own.crew_of(), own.listed()) == (None, false));
+    assert_eq!((task().crew_of(), task().listed()), (Some("cat_miso"), true));
     // A thread with no cat writes none; one that chose its place writes the choice; an old screen's task (a cat, no choice) still reads.
     let mut t = task();
     t.cat = None;

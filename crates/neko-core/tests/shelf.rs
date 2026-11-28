@@ -153,5 +153,5 @@ fn a_store_from_before_them_opens_with_nothing_put_away() {
     }
     let core = open(&d);
     assert_eq!(core.store.version().unwrap(), neko_core::store::SCHEMA_VERSION);
-    assert_eq!(core.store.all_tasks().unwrap().len(), 0);
+    assert_eq!(core.store.all_tasks().unwrap().iter().filter(|t| t.listed()).count(), 0);
 }

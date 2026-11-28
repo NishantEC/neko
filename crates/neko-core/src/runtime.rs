@@ -89,6 +89,11 @@ pub struct StartSpec {
     /// Also load the MCP servers in the person's own Claude Code settings. Off: `--strict-mcp-config`, so the run has only what
     /// `mcp_config` names.
     pub own_mcp: bool,
+    /// The model this run asks for (a Cattain's own thread: `--model`). None: `NEKO_CLAUDE_MODEL` when the daemon has it, else the
+    /// CLI's default.
+    pub model: Option<String>,
+    /// Folders the agent may also read (a Cattain's project), handed on as `--add-dir`.
+    pub add_dirs: Vec<PathBuf>,
 }
 
 /// What a run's own MCP server needs to reach the daemon (docs/knowledge/subagents.md).

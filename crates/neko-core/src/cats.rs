@@ -1,40 +1,39 @@
-//! Cats (docs/knowledge/cats.md): the named agents who do the person's work.
+//! Cats (docs/knowledge/cats.md): named agents with a face. Every cat is a Cattain (version 15 of the store): it has its own thread,
+//! its own folder of four files (`cattains.rs`), an optional project, a model and an access mode.
 //!
 //! - A cat has a name (1 to 40 characters, one line, unique among all cats without regard to case), a face from a fixed set, an
-//!   optional purpose line (200 characters), standing rules (Markdown, 16 KB) with one previous version kept, and an optional
-//!   default workspace. At most 16 are active; at least one always is.
+//!   optional purpose line (200 characters) and an optional project. At most 16 are active; at least one always is.
 //! - Three starter cats (miso, mochi, tofu) are made on first open. They are ordinary cats.
-//! - A thread has no cat (version 14). Nothing assigns one: the picked, workspace-default and least-busy rules are gone. A task made
-//!   before keeps the cat it was given, and a round's task has its round's cat; their runs still carry that cat's rules.
-//! - A cat's rules reach the agent as one block ([`block`]) on every run of its tasks. They are words for the agent and nothing
-//!   more: they never change the permission mode, the hook or any flag Neko passes.
+//! - A thread the person starts has no cat, unless it is started in a Cattain's crew. A task made before version 14 keeps the cat it
+//!   was given, and a round's task has its round's cat: both are in that cat's crew now.
+//! - What a cat hands a run (its RULES.md to its own thread, its CREW.md to its crew) is words for the agent and nothing more: it never
+//!   changes the permission mode, the hook or any flag Neko passes.
 
-use neko_protocol::cats::{self, Cat, FACES, MAX_ACTIVE, MAX_NAME, MAX_PURPOSE, MAX_RULES, STARTERS};
+use neko_protocol::cats::{self, Cat, FACES, MAX_ACTIVE, MAX_NAME, MAX_PURPOSE, STARTERS};
+use neko_protocol::{PermissionMode, TaskId};
 use rusqlite::{OptionalExtension, Transaction, params};
 
 use crate::records::log_event;
 use crate::store::{Store, StoreError};
 use crate::Core;
 
-const CAT_COLUMNS: &str = "id, name, face, purpose, rules, previous_rules, rules_saved_ms, workspace_id, created_ms, retired_ms";
+const CAT_COLUMNS: &str = "id, name, face, purpose, workspace_id, created_ms, retired_ms, thread_id, model, access";
 
 /// Active cats first, oldest first; then the retired ones.
 const CAT_ORDER: &str = "ORDER BY (retired_ms IS NOT NULL), created_ms, id";
 
 fn cat_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Cat> {
-    let rules: String = r.get(4)?;
     Ok(Cat {
         id: r.get(0)?,
         name: r.get(1)?,
         face: r.get(2)?,
         purpose: r.get(3)?,
-        rules_hash: cats::rules_hash(&rules),
-        rules,
-        previous_rules: r.get(5)?,
-        rules_saved_ms: r.get(6)?,
-        workspace: r.get(7)?,
-        created_ms: r.get(8)?,
-        retired_ms: r.get(9)?,
+        workspace: r.get(4)?,
+        created_ms: r.get(5)?,
+        retired_ms: r.get(6)?,
+        thread: r.get::<_, Option<String>>(7)?.map(TaskId),
+        model: r.get(8)?,
+        access: r.get::<_, Option<String>>(9)?.and_then(|a| crate::store::status_of::<PermissionMode>(&a).ok()),
     })
 }
 
@@ -49,7 +48,8 @@ pub enum CatError {
     NotFound,
     /// The name is empty, too long or taken; the words say which.
     InvalidName(String),
-    /// Not allowed now (the limit, the last active cat, a retired cat, rules too long, a run already started); the words say why.
+    /// Not allowed now (the limit, the last active cat, a retired cat, a file too long or not the person's to save); the words say
+    /// why.
     Refused(String),
     Store(String),
 }
@@ -91,24 +91,13 @@ pub fn clean_purpose(purpose: &str) -> Result<Option<String>, CatError> {
     Ok((!p.is_empty()).then_some(p))
 }
 
-/// The block that carries a cat to the agent, ahead of the person's words: it names the cat, and carries its purpose and rules
-/// exactly as saved. It says nothing else.
-pub fn block(cat: &Cat) -> String {
-    let mut b = format!("<neko-cat>\nYou are {}, one of the person's cats in Neko.\n", cat.name);
-    if let Some(p) = cat.purpose.as_deref().filter(|p| !p.is_empty()) {
-        b.push_str("\nYour purpose:\n");
-        b.push_str(p);
-        b.push('\n');
+/// A model name as it is kept: one word, at most 100 characters; empty is none (the CLI's default).
+pub fn clean_model(model: Option<&str>) -> Result<Option<String>, CatError> {
+    let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) else { return Ok(None) };
+    if m.len() > 100 || m.chars().any(|c| c.is_whitespace() || c.is_control()) || m.starts_with('-') {
+        return Err(CatError::Refused("A model is one name, such as sonnet.".into()));
     }
-    if !cat.rules.is_empty() {
-        b.push_str("\nYour standing rules, from the person:\n");
-        b.push_str(&cat.rules);
-        if !cat.rules.ends_with('\n') {
-            b.push('\n');
-        }
-    }
-    b.push_str("</neko-cat>");
-    b
+    Ok(Some(m.to_owned()))
 }
 
 /// One starter cat as migration 6 weighs it, when it gives the tasks that already existed a cat. Nothing else chooses a cat for a
@@ -164,6 +153,7 @@ pub(crate) fn migrate_tasks(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     Ok(())
 }
 
+
 impl Store {
     /// Every cat: active ones first, oldest first; then the retired.
     pub fn list_cats(&self) -> Result<Vec<Cat>, StoreError> {
@@ -188,31 +178,37 @@ impl Store {
         if none {
             let tx = self.conn.transaction()?;
             insert_starters(&tx, now_ms)?;
+            crate::cattains::insert_files(&tx, STARTERS.iter().map(|s| s.0))?;
             tx.commit()?;
         }
         Ok(())
     }
 
-    /// A new cat and its event.
+    /// A new cat, its four files (empty) and its event.
     pub fn insert_cat(&mut self, c: &Cat, now_ms: i64) -> Result<u64, StoreError> {
         let tx = self.conn.transaction()?;
         tx.execute(
             &format!("INSERT INTO cats ({CAT_COLUMNS}, name_key) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"),
-            params![c.id, c.name, c.face, c.purpose, c.rules, c.previous_rules, c.rules_saved_ms, c.workspace, c.created_ms, c.retired_ms, name_key(&c.name)],
+            params![c.id, c.name, c.face, c.purpose, c.workspace, c.created_ms, c.retired_ms, c.thread.as_ref().map(|t| &t.0), c.model, c.access.map(crate::store::status_name), name_key(&c.name)],
         )?;
+        crate::cattains::insert_files(&tx, [c.id.as_str()])?;
         let seq = log_event(&tx, now_ms, &c.id, "cat_added", serde_json::json!({ "name": c.name }))?;
         tx.commit()?;
         Ok(seq)
     }
 
-    /// Writes a cat whole, with an event of `kind` (`cat_renamed`, `cat_rules_saved`, …). Returns it as stored.
+    /// Writes a cat whole, with an event of `kind` (`cat_renamed`, `cat_face`, …). Its own thread's title is its name. Returns it as
+    /// stored.
     pub fn write_cat(&mut self, c: &Cat, kind: &str, now_ms: i64) -> Result<(Cat, u64), StoreError> {
         let tx = self.conn.transaction()?;
         tx.execute(
-            "UPDATE cats SET name = ?2, name_key = ?3, face = ?4, purpose = ?5, rules = ?6, previous_rules = ?7, rules_saved_ms = ?8, workspace_id = ?9, retired_ms = ?10 WHERE id = ?1",
-            params![c.id, c.name, name_key(&c.name), c.face, c.purpose, c.rules, c.previous_rules, c.rules_saved_ms, c.workspace, c.retired_ms],
+            "UPDATE cats SET name = ?2, name_key = ?3, face = ?4, purpose = ?5, workspace_id = ?6, retired_ms = ?7, thread_id = ?8, model = ?9, access = ?10 WHERE id = ?1",
+            params![c.id, c.name, name_key(&c.name), c.face, c.purpose, c.workspace, c.retired_ms, c.thread.as_ref().map(|t| &t.0), c.model, c.access.map(crate::store::status_name)],
         )?;
-        let seq = log_event(&tx, now_ms, &c.id, kind, serde_json::json!({ "name": c.name, "rules": cats::rules_hash(&c.rules) }))?;
+        if let Some(t) = &c.thread {
+            tx.execute("UPDATE tasks SET title = ?2 WHERE id = ?1 AND title != ?2", params![t.0, c.name])?;
+        }
+        let seq = log_event(&tx, now_ms, &c.id, kind, serde_json::json!({ "name": c.name }))?;
         let c = tx.query_row(&format!("SELECT {CAT_COLUMNS} FROM cats WHERE id = ?1"), [&c.id], cat_of)?;
         tx.commit()?;
         Ok((c, seq))
@@ -225,7 +221,7 @@ impl Core {
         self.store.list_cats()
     }
 
-    fn cat(&self, id: &str) -> Result<Cat, CatError> {
+    pub(crate) fn cat(&self, id: &str) -> Result<Cat, CatError> {
         self.store.get_cat(id)?.ok_or(CatError::NotFound)
     }
 
@@ -258,7 +254,8 @@ impl Core {
         Ok(Some(w.id))
     }
 
-    /// A new cat. Its face, when none is given, is the first no active cat has (else the first).
+    /// A new cat, with its folder and its four files (its own thread comes when it is first opened). Its face, when none is given, is the first no active cat has (else the
+    /// first).
     pub fn create_cat(&mut self, name: &str, face: Option<&str>, purpose: Option<&str>, workspace: Option<&str>) -> Result<(Cat, u64), CatError> {
         let name = clean_name(name)?;
         self.name_free(&name, None)?;
@@ -276,8 +273,9 @@ impl Core {
         let purpose = clean_purpose(purpose.unwrap_or(""))?;
         let workspace = self.check_workspace(workspace)?;
         let now = self.now();
-        let cat = Cat { id: self.new_id("cat"), name, face, purpose, rules: String::new(), rules_hash: cats::rules_hash(""), previous_rules: None, rules_saved_ms: None, workspace, created_ms: now, retired_ms: None };
+        let cat = Cat { id: self.new_id("cat"), name, face, purpose, workspace, thread: None, model: None, access: None, created_ms: now, retired_ms: None };
         let rev = self.store.insert_cat(&cat, now)?;
+        self.sync_cattain(&cat.id)?;
         Ok((cat, rev))
     }
 
@@ -286,6 +284,7 @@ impl Core {
         Ok(self.store.write_cat(cat, kind, now)?)
     }
 
+    /// Renames a cat; its own thread takes the name as its title.
     pub fn rename_cat(&mut self, id: &str, name: &str) -> Result<(Cat, u64), CatError> {
         let mut cat = self.cat(id)?;
         let name = clean_name(name)?;
@@ -307,39 +306,28 @@ impl Core {
         self.write(&cat, "cat_purpose")
     }
 
+    /// Its project (None: none). Its own thread reads that folder from its next run.
     pub fn set_cat_workspace(&mut self, id: &str, workspace: Option<&str>) -> Result<(Cat, u64), CatError> {
         let mut cat = self.cat(id)?;
         cat.workspace = self.check_workspace(workspace)?;
         self.write(&cat, "cat_workspace")
     }
 
-    /// Saves the rules exactly as given (at most [`MAX_RULES`] bytes); the ones before become the previous rules. Saving the same
-    /// rules again changes nothing.
-    pub fn save_cat_rules(&mut self, id: &str, rules: &str) -> Result<(Cat, u64), CatError> {
+    /// The model its own thread asks for (None: the CLI's default), from its next run.
+    pub fn set_cat_model(&mut self, id: &str, model: Option<&str>) -> Result<(Cat, u64), CatError> {
         let mut cat = self.cat(id)?;
-        if rules.len() > MAX_RULES {
-            return Err(CatError::Refused(format!("A cat's rules can be at most {} KB.", MAX_RULES / 1024)));
-        }
-        if rules == cat.rules {
-            let rev = self.store.revision()?;
-            return Ok((cat, rev));
-        }
-        cat.previous_rules = Some(std::mem::replace(&mut cat.rules, rules.to_owned()));
-        cat.rules_saved_ms = Some(self.now());
-        self.write(&cat, "cat_rules_saved")
+        cat.model = clean_model(model)?;
+        self.write(&cat, "cat_model")
     }
 
-    /// Puts the previous rules back; the current ones become the previous, so restoring again goes back.
-    pub fn restore_cat_rules(&mut self, id: &str) -> Result<(Cat, u64), CatError> {
+    /// The access its own thread runs with (None: the mode in Settings), from its next run.
+    pub fn set_cat_access(&mut self, id: &str, access: Option<PermissionMode>) -> Result<(Cat, u64), CatError> {
         let mut cat = self.cat(id)?;
-        let Some(previous) = cat.previous_rules.take() else { return Err(CatError::Refused(format!("{} has no earlier rules to restore.", cat.name))) };
-        cat.previous_rules = Some(std::mem::replace(&mut cat.rules, previous));
-        cat.rules_saved_ms = Some(self.now());
-        self.write(&cat, "cat_rules_restored")
+        cat.access = access;
+        self.write(&cat, "cat_access")
     }
 
-    /// Retires a cat: it takes no new tasks, and no workspace's new tasks go to it. Its tasks stay readable. The last active cat
-    /// cannot be retired.
+    /// Retires a cat: it takes no new crew. Its threads stay readable. The last active cat cannot be retired.
     pub fn retire_cat(&mut self, id: &str) -> Result<(Cat, u64), CatError> {
         let mut cat = self.cat(id)?;
         if !cat.is_active() {
@@ -362,14 +350,14 @@ impl Core {
             return Err(CatError::Refused(format!("Neko keeps at most {MAX_ACTIVE} cats at work. Retire one first.")));
         }
         cat.retired_ms = None;
-        // Its default workspace may have been removed meanwhile.
+        // Its project may have been removed meanwhile.
         if self.check_workspace(cat.workspace.as_deref()).is_err() {
             cat.workspace = None;
         }
         self.write(&cat, "cat_brought_back")
     }
 
-    /// A cat a task may be given (a round's cat): it must be there and active. Threads the person starts have none.
+    /// A cat a task may be given (a round's cat, a crew's Cattain): it must be there and active.
     pub fn active_cat(&self, id: &str) -> Result<Cat, CatError> {
         let cat = self.cat(id)?;
         if !cat.is_active() {
@@ -379,21 +367,14 @@ impl Core {
     }
 }
 
+/// The version of the words a cat hands a run, for the run's record.
+pub fn words_hash(words: &str) -> String {
+    cats::rules_hash(words)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_block_names_the_cat_and_carries_its_words_verbatim_and_nothing_else() {
-        let mut cat = Cat { id: "cat_miso".into(), name: "miso".into(), face: "ginger".into(), purpose: None, rules: String::new(), rules_hash: String::new(), previous_rules: None, rules_saved_ms: None, workspace: None, created_ms: 0, retired_ms: None };
-        assert_eq!(block(&cat), "<neko-cat>\nYou are miso, one of the person's cats in Neko.\n</neko-cat>");
-        cat.purpose = Some("Keeps the docs tidy.".into());
-        cat.rules = "- Use British spelling.\n- **Never** push.".into();
-        let b = block(&cat);
-        assert!(b.contains("\nYour purpose:\nKeeps the docs tidy.\n"));
-        assert!(b.contains("\nYour standing rules, from the person:\n- Use British spelling.\n- **Never** push.\n</neko-cat>"));
-        assert_eq!(b.matches("<neko-cat").count(), 1);
-    }
 
     #[test]
     fn names_are_one_line_and_at_most_forty_characters() {
@@ -403,5 +384,14 @@ mod tests {
         assert!(matches!(clean_name(&"é".repeat(41)), Err(CatError::InvalidName(_))));
         assert_eq!(clean_purpose("  ").unwrap(), None);
         assert!(clean_purpose(&"x".repeat(201)).is_err());
+    }
+
+    #[test]
+    fn a_model_is_one_name_or_none() {
+        assert_eq!(clean_model(Some(" sonnet ")).unwrap().as_deref(), Some("sonnet"));
+        assert_eq!(clean_model(Some("")).unwrap(), None);
+        assert_eq!(clean_model(None).unwrap(), None);
+        assert!(clean_model(Some("--dangerously-skip-permissions")).is_err(), "never a flag");
+        assert!(clean_model(Some("two words")).is_err());
     }
 }

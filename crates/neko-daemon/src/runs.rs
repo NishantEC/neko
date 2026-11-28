@@ -329,17 +329,27 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
         None
     };
     let resume = lock(&shared.core).store.runs_of(&task.id).ok().and_then(|runs| runs.iter().rev().find_map(|r| r.session.clone()));
-    // The task's cat, as it is now (docs/knowledge/cats.md): its rules go with this run, and the run records their version.
-    let cat = {
-        let core = lock(&shared.core);
-        let id = core.store.get_task(&task.id).ok().flatten().map_or_else(|| task.cat.clone(), |t| t.cat);
-        id.and_then(|id| core.store.get_cat(&id).ok().flatten())
+    // What the task's cat hands this run, read from its folder now (docs/knowledge/cats.md): RULES.md to a Cattain's own thread,
+    // CREW.md to its crew. The run records the version. A Cattain's own thread runs with its access and model, and may read its project.
+    let handed = match crate::cattains::handed(shared, task) {
+        Ok(h) => h,
+        Err(why) => {
+            if let Some(w) = &words {
+                person(shared, &task.id, w);
+            }
+            release(shared, &task.id, cancelled);
+            return fail_before_run(shared, task, why, Some("Try again in a moment.".into()), None);
+        }
     };
     // A question it had put is answered by this run's words: the kittens it came up from are told who has it now.
     let asked_before = lock(&shared.core).store.newest_ask(&task.id).ok().flatten().map(|a| a.chain).unwrap_or_default();
+    let own = handed.as_ref().filter(|h| h.own);
+    let mode = own.and_then(|h| h.cat.access).unwrap_or(settings.permission_mode);
+    let model = own.and_then(|h| h.cat.model.clone());
+    let read_too = handed.as_ref().map(|h| lock(&shared.core).read_too(h)).unwrap_or_default();
     let begun = {
         let mut core = lock(&shared.core);
-        let r = RunBook::begin(&mut core, &task.id, who.clone(), place.clone(), settings.permission_mode, resume.clone(), words.as_deref(), cat.as_ref());
+        let r = RunBook::begin(&mut core, &task.id, who.clone(), place.clone(), mode, resume.clone(), words.as_deref(), handed.as_ref());
         r.map(|(book, outs)| {
             push(shared, &task.id, outs, None);
             book
@@ -354,6 +364,8 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
         return fail_before_run(shared, task, "Neko could not write to its store.".into(), None, None);
     };
     crate::subagents::touch_chain(shared, task, &asked_before);
+    let mut book = book;
+    book.set_read_too(read_too.clone());
     let book = Arc::new(Mutex::new(book));
     let run_id = lock(&book).run.id.clone();
     let finish = |outcome: Outcome| {
@@ -372,6 +384,12 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
         if let Ok(outs) = b.finish(&mut core, outcome, changes, now) {
             push(shared, &task.id, outs, None);
         }
+        drop(core);
+        drop(b);
+        // What the Cattain wrote in its folder during the run (NOTES.md, DIGEST.md) reaches every screen now.
+        if let Some(h) = own {
+            crate::cattains::look(shared, &h.cat.id);
+        }
     };
     if let Some(f) = early {
         return finish(Outcome::Failed(f));
@@ -382,8 +400,8 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
     // Asking before risky steps, the run's hook helper reaches the daemon with a secret of its own.
     // The helper is this binary (`NEKO_HOOK_HELPER` names another, for tests); the runtime refuses to start without it.
     let helper = std::env::var_os("NEKO_HOOK_HELPER").filter(|h| !h.is_empty()).map(PathBuf::from).or_else(|| std::env::current_exe().ok()).unwrap_or_default();
-    let hook = (settings.permission_mode == PermissionMode::Ask).then(|| crate::files::random_hex(32).ok()).flatten().map(|secret| HookLink { port: shared.port, secret, helper });
-    if settings.permission_mode == PermissionMode::Ask && hook.is_none() {
+    let hook = (mode == PermissionMode::Ask).then(|| crate::files::random_hex(32).ok()).flatten().map(|secret| HookLink { port: shared.port, secret, helper });
+    if mode == PermissionMode::Ask && hook.is_none() {
         return finish(Outcome::Failed(Failure::Crashed { code: None, words: "Neko could not make a secret for this run's hook.".into() }));
     }
     if let Some(a) = lock(&shared.runs.active).get_mut(&task.id) {
@@ -402,9 +420,9 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
         Some(line) => format!("{line}\n\n{said}"),
         None => said,
     };
-    // The cat's block is text for the agent only: the mode and the hook above are the same whatever it says. After it, what Neko tells
-    // every agent about subagents, and a subagent's own few lines (docs/knowledge/subagents.md).
-    let cat_block = cat.as_ref().map(neko_core::cats::block);
+    // The cat's block is text for the agent only: the mode and the hook above come from Settings and the Cattain's Profile, never from
+    // the words. After it, what Neko tells every agent about subagents, and a subagent's own few lines (docs/knowledge/subagents.md).
+    let cat_block = handed.as_ref().map(|h| lock(&shared.core).block_for(h));
     let thread_title = task.subagent.as_ref().and_then(|s| lock(&shared.core).store.get_task(&s.root).ok().flatten()).map(|t| t.title);
     let instructions = Some(neko_core::subagents::instructions(cat_block.as_deref(), task.subagent.as_ref().zip(thread_title.as_deref()).map(|(s, t)| (s.number.as_str(), t, s.branch.as_deref()))));
     // This run's own MCP server finds the daemon with a secret made for this run alone.
@@ -420,7 +438,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
     }
     // The plugins this cat may use, approved as they are now, in a config for this run alone; it goes when this function returns, which
     // is when the run ends (docs/knowledge/plugins.md). A plugin's tool asks through the same route as every other tool.
-    let plugin_files = crate::plugins::for_run(shared, &shared.runs.data_dir, &cat.as_ref().map_or_else(|| task.cat.clone().unwrap_or_default(), |c| c.id.clone()), &run_id.0, &mcp_helper);
+    let plugin_files = crate::plugins::for_run(shared, &shared.runs.data_dir, &handed.as_ref().map_or_else(|| task.cat.clone().unwrap_or_default(), |h| h.cat.id.clone()), &run_id.0, &mcp_helper);
     {
         let mut b = lock(&book);
         b.set_plugins(plugin_files.names.clone());
@@ -431,7 +449,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
             }
         }
     }
-    let spec = StartSpec { words: said, workdir: PathBuf::from(&place.workdir), resume, mode: settings.permission_mode, hook, instructions, mcp_config: plugin_files.config.clone(), mcp: Some(neko_core::runtime::McpLink { port: shared.port, secret: mcp_secret }), own_mcp: settings.own_mcp };
+    let spec = StartSpec { words: said, workdir: PathBuf::from(&place.workdir), resume, mode, hook, instructions, mcp_config: plugin_files.config.clone(), mcp: Some(neko_core::runtime::McpLink { port: shared.port, secret: mcp_secret }), own_mcp: settings.own_mcp, model, add_dirs: read_too };
     let started = match runtime.start(spec) {
         Ok(s) => s,
         Err(f) => return finish(Outcome::Failed(f)),
@@ -515,7 +533,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
             }
             Some(neko_core::runtime::AgentEvent::Unchecked { tool_use }) => {
                 // Claude Code ran a step our hook could not check. Asking before risky steps, that run stops now.
-                if settings.permission_mode == PermissionMode::Ask && limit.is_none() {
+                if mode == PermissionMode::Ask && limit.is_none() {
                     limit = Some(Failure::Unchecked { step: tool_use.as_deref().and_then(|t| b.step_words(t)) });
                     control.stop();
                 }
@@ -591,6 +609,9 @@ pub fn remove_task(shared: &Shared, task: &TaskId) -> Reply {
     };
     if found.subagent.is_some() {
         return Reply::error(ErrorCode::Refused, "A kitten goes with its thread. Remove the thread to remove it.");
+    }
+    if found.cattain {
+        return Reply::error(ErrorCode::Refused, format!("This is {}'s own thread. Retire {} in its Profile instead.", found.title, found.title));
     }
     // Its subagents go with it, once none of them works (their folder is the thread's).
     let below = lock(&shared.core).store.subagents_of(task).unwrap_or_default();

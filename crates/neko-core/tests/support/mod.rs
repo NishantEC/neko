@@ -64,7 +64,7 @@ impl Drop for Reap {
 }
 
 pub fn spec(words: &str, dir: &Path) -> StartSpec {
-    StartSpec { words: words.into(), workdir: dir.to_path_buf(), resume: None, mode: PermissionMode::Follow, hook: None, instructions: None, mcp_config: None, mcp: None, own_mcp: true }
+    StartSpec { words: words.into(), workdir: dir.to_path_buf(), resume: None, mode: PermissionMode::Follow, hook: None, instructions: None, mcp_config: None, mcp: None, own_mcp: true, model: None, add_dirs: Vec::new() }
 }
 
 /// Every event of a run until it finishes (with a deadline), answering permission requests with `answer`.

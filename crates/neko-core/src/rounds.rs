@@ -495,6 +495,7 @@ impl Core {
             pinned: false,
             settled: false,
             archived: false,
+            cattain: false,
         })
     }
 

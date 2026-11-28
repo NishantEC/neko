@@ -37,7 +37,7 @@ fn list(c: &mut Client) -> Vec<NeedsItem> {
 }
 
 fn create(c: &mut Client, words: &str) -> Task {
-    match c.request(Request::CreateTask { words: words.into(), workspace: None, in_folder: false, from_branch: None }).unwrap() {
+    match c.request(Request::CreateTask { crew: None, words: words.into(), workspace: None, in_folder: false, from_branch: None }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("create: {r:?}"),
     }
@@ -129,7 +129,7 @@ fn a_folder_gone_before_the_run_is_listed() {
         Reply::Workspace { workspace, .. } => workspace.id,
         r => panic!("{r:?}"),
     };
-    let task = match c.request(Request::CreateTask { words: "Hi [fake:plain]".into(), workspace: Some(ws.clone()), in_folder: false, from_branch: None }).unwrap() {
+    let task = match c.request(Request::CreateTask { crew: None, words: "Hi [fake:plain]".into(), workspace: Some(ws.clone()), in_folder: false, from_branch: None }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("{r:?}"),
     };

@@ -293,6 +293,8 @@ impl Store {
             sql.push_str(" AND t.activity_ms >= ?");
             args.push(Value::Integer(now_ms.saturating_sub(ms)));
         }
+        // A Cattain's own thread is found as the Cattain (the app's own list), never as a thread.
+        sql.push_str(" AND t.cattain = 0");
         Ok(Some((sql, args)))
     }
 

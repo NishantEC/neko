@@ -5,6 +5,7 @@
 
 pub mod briefing;
 pub mod cats;
+pub mod cattains;
 pub mod checkpoint;
 pub mod claude;
 pub mod clock;
@@ -112,6 +113,8 @@ pub struct Added {
 /// The store with the clock and ids its writes need.
 pub struct Core {
     pub store: Store,
+    /// The data folder (the store's own): a Cattain's folder is in it.
+    data_dir: std::path::PathBuf,
     clock: Box<dyn Clock>,
     ids: Box<dyn Ids>,
 }
@@ -123,7 +126,11 @@ impl Core {
         let now = clock.now_ms();
         store.ensure_default_workspace(now)?;
         store.ensure_starter_cats(now)?;
-        Ok(Core { store, clock, ids })
+        let data_dir = path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+        let mut core = Core { store, clock, ids, data_dir };
+        // Every cat is a Cattain with its own thread and folder (store 15).
+        core.ensure_cattains().map_err(|e| StoreError::Files(e.to_string()))?;
+        Ok(core)
     }
 
     /// Stores a task with the person's exact words, in General, and the event that says so. Returns the task and the event's

@@ -8,7 +8,6 @@
 use std::collections::HashMap;
 
 use neko_protocol::{
-    Cat,
     Change, Changes, Decision, FailureKind, Part, PartBody, PartId, Permission, PermissionId, PermissionMode, PermissionState, Pricing, Run, RunId, RunStatus, Task, TaskId, TaskStatus, Tone, ToolState, Usage,
 };
 
@@ -96,6 +95,8 @@ pub struct RunBook {
     approved: std::collections::HashSet<String>,
     /// The plugins whose servers this run was given, by name.
     plugins: Vec<String>,
+    /// Folders this run may also read without asking under "Ask before risky steps" (a Cattain's project, handed as `--add-dir`).
+    read_too: Vec<std::path::PathBuf>,
     /// The task's `latest_line` as screens were last told, so a row's second line follows the words without a push per word.
     last_line: String,
     /// Bytes of part bodies written so far (for the write-rate check).
@@ -108,14 +109,14 @@ fn part_kind_open(b: &PartBody) -> bool {
 }
 
 impl RunBook {
-    /// Stores the new run and the task's new status. `words` (the person's) is stored first as their part, unless None. `cat` is
-    /// the task's cat: the run records it and the version of its rules, and when those rules differ from the ones the task's last
-    /// run used, one quiet part says so first.
+    /// Stores the new run and the task's new status. `words` (the person's) is stored first as their part, unless None. `handed` is
+    /// what the task's cat hands it (RULES.md or CREW.md): the run records the cat and the version of those words, and when they
+    /// differ from the ones the task's last run used, one quiet part says so first.
     #[allow(clippy::too_many_arguments)]
-    pub fn begin(core: &mut Core, task: &TaskId, who: Who, place: Place, mode: PermissionMode, resume: Option<String>, words: Option<&str>, cat: Option<&Cat>) -> Result<(RunBook, Vec<Out>), StoreError> {
+    pub fn begin(core: &mut Core, task: &TaskId, who: Who, place: Place, mode: PermissionMode, resume: Option<String>, words: Option<&str>, handed: Option<&crate::cattains::Handed>) -> Result<(RunBook, Vec<Out>), StoreError> {
         let now = core.now();
         let before = core.store.runs_of(task)?.into_iter().rev().find_map(|r| r.rules_hash);
-        let changed = cat.filter(|c| before.as_ref().is_some_and(|h| *h != c.rules_hash));
+        let changed = handed.filter(|h| before.as_ref().is_some_and(|b| *b != h.hash()));
         let run = Run {
             id: RunId(core.new_id("run")),
             task: task.clone(),
@@ -131,17 +132,17 @@ impl RunBook {
             usage: None,
             changes: None,
             undo: None,
-            cat: cat.map(|c| c.id.clone()),
-            rules_hash: cat.map(|c| c.rules_hash.clone()),
+            cat: handed.map(|h| h.cat.id.clone()),
+            rules_hash: handed.map(crate::cattains::Handed::hash),
             ask: None,
         };
         let mut out = Vec::new();
         let last_line = core.store.get_task(task)?.map(|t| t.latest_line).unwrap_or_default();
         let rev = core.store.insert_run(&run, now)?;
         out.push(Out::Change(rev, Change::RunChanged { run: run.clone() }));
-        let mut book = RunBook { run, task: task.clone(), who, place, mode, open: None, last_flush: now, tools: HashMap::new(), asked: HashMap::new(), hook_calls: HashMap::new(), denied: Default::default(), thinking: false, approved: Default::default(), plugins: Vec::new(), last_line, written: 0, writes: 0 };
-        if let Some(c) = changed {
-            let p = book.new_part(core, PartBody::RulesChanged { cat: c.id.clone(), name: c.name.clone() }, now, true)?;
+        let mut book = RunBook { run, task: task.clone(), who, place, mode, open: None, last_flush: now, tools: HashMap::new(), asked: HashMap::new(), hook_calls: HashMap::new(), denied: Default::default(), thinking: false, approved: Default::default(), plugins: Vec::new(), read_too: Vec::new(), last_line, written: 0, writes: 0 };
+        if let Some(h) = changed {
+            let p = book.new_part(core, PartBody::RulesChanged { cat: h.cat.id.clone(), name: h.cat.name.clone(), file: Some(h.file().to_owned()) }, now, true)?;
             out.extend(p);
         }
         if let Some(w) = words {
@@ -174,6 +175,11 @@ impl RunBook {
     /// The plugins this run's agent was given: a request for one of their tools says it is a plugin.
     pub fn set_plugins(&mut self, names: Vec<String>) {
         self.plugins = names;
+    }
+
+    /// The folders the run may also read ([`crate::cattains::Handed`]: a Cattain's project).
+    pub fn set_read_too(&mut self, dirs: Vec<std::path::PathBuf>) {
+        self.read_too = dirs;
     }
 
     /// Writes the run's own fields and reads back where its undo stands (the daemon keeps that), so what is pushed is whole.
@@ -408,7 +414,7 @@ impl RunBook {
             return Ok(vec![Out::Answer { request, answer: Answer::Allow }]);
         }
         let always = core.store.always_rules(&self.task)?;
-        let cx = policy::Context { workdir: std::path::Path::new(&self.place.workdir), mode: self.mode, plain: self.place.plain, always: &always, plugins: &self.plugins };
+        let cx = policy::Context { workdir: std::path::Path::new(&self.place.workdir), mode: self.mode, plain: self.place.plain, always: &always, plugins: &self.plugins, read_too: &self.read_too };
         let ask = match policy::decide(&action, &cx) {
             Verdict::Allow => {
                 if hook && let Some(t) = &tool_use {

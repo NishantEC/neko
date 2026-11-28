@@ -245,7 +245,8 @@ impl Store {
 
         // Working now: its latest run's start.
         let mut working = Vec::new();
-        for t in tasks.values().filter(|t| matches!(t.status, TaskStatus::Working | TaskStatus::New)) {
+        // A Cattain's own thread is new until the person first writes in it: it waits, it is not starting.
+        for t in tasks.values().filter(|t| t.status == TaskStatus::Working || t.status == TaskStatus::New && !t.cattain) {
             let since = self.runs_of(&t.id)?.last().map(|r| r.started_ms).unwrap_or(t.created_ms);
             working.push(BriefingWorking { task: t.id.clone(), workspace: t.workspace.clone(), title: t.title.clone(), cat: task_cat(&t.cat).0, cat_name: task_cat(&t.cat).1, since_ms: since });
         }

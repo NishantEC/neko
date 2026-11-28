@@ -36,6 +36,9 @@ pub fn refusal(t: &Task, shelf: Shelf, on: bool) -> Option<&'static str> {
     if !t.is_thread() {
         return Some("A kitten is not a thread of its own.");
     }
+    if t.cattain && on {
+        return Some("A Cattain's own thread stays where it is. Retire the Cattain in its Profile instead.");
+    }
     if !on {
         return None;
     }
@@ -74,7 +77,7 @@ impl Store {
         let candidates: Vec<(String, i64)> = {
             let mut st = self.conn.prepare_cached(
                 "SELECT id, MAX(created_ms, activity_ms, COALESCE((SELECT MAX(COALESCE(ended_ms, started_ms)) FROM runs WHERE runs.task_id = tasks.id), 0))
-                 FROM tasks WHERE parent_id IS NULL AND pinned_ms IS NULL AND settled_ms IS NULL AND archived_ms IS NULL",
+                 FROM tasks WHERE parent_id IS NULL AND cattain = 0 AND pinned_ms IS NULL AND settled_ms IS NULL AND archived_ms IS NULL",
             )?;
             st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?
         };

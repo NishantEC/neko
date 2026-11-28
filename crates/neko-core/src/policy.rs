@@ -30,6 +30,8 @@ pub struct Context<'a> {
     pub always: &'a [String],
     /// The plugins whose servers this run was given (their names), so a request for one of their tools says so.
     pub plugins: &'a [String],
+    /// Folders it may also read without asking under "Ask before risky steps" (a Cattain's project). Editing there still asks.
+    pub read_too: &'a [PathBuf],
 }
 
 /// The policy's answer.
@@ -167,6 +169,9 @@ pub fn decide(action: &Action, cx: &Context<'_>) -> Verdict {
                 let folder = p.parent().unwrap_or(&p).to_string_lossy().into_owned();
                 return ask("Read a file".into(), "Claude Code asks before this under your own settings.", p.to_string_lossy().into_owned(), false, format!("read:{folder}"));
             }
+            if shortcut && cx.read_too.iter().any(|d| inside(d, &p)) {
+                return Verdict::Allow;
+            }
             let folder = p.parent().unwrap_or(&p).to_string_lossy().into_owned();
             ask("Read outside the thread's folder".into(), "It is outside the folder this thread works in.", p.to_string_lossy().into_owned(), false, format!("read:{folder}"))
         }
@@ -215,7 +220,7 @@ mod tests {
     use super::*;
 
     fn cx<'a>(always: &'a [String], plain: bool) -> Context<'a> {
-        Context { workdir: Path::new("/tmp/neko-policy-w"), mode: PermissionMode::Ask, plain, always, plugins: &[] }
+        Context { workdir: Path::new("/tmp/neko-policy-w"), mode: PermissionMode::Ask, plain, always, plugins: &[], read_too: &[] }
     }
 
     fn asked(v: Verdict) -> Ask {
@@ -234,6 +239,18 @@ mod tests {
         assert!(matches!(decide(&Action::Read { path: "../secret".into() }, &c), Verdict::Ask(_)));
         assert!(matches!(decide(&Action::Read { path: "/tmp/neko-policy-w-other/x".into() }, &c), Verdict::Ask(_)), "a sibling with the same prefix is outside");
         assert!(matches!(decide(&Action::Edit { path: "/etc/hosts".into() }, &c), Verdict::Ask(_)));
+    }
+
+    #[test]
+    fn a_cattain_reads_its_project_without_asking_and_editing_there_asks() {
+        let project = [PathBuf::from("/tmp/neko-policy-project")];
+        let c = Context { read_too: &project, ..cx(&[], false) };
+        assert_eq!(decide(&Action::Read { path: "/tmp/neko-policy-project/src/lib.rs".into() }, &c), Verdict::Allow);
+        assert_eq!(decide(&Action::Edit { path: "/tmp/neko-policy-w/NOTES.md".into() }, &c), Verdict::Allow, "its own folder");
+        assert!(matches!(decide(&Action::Edit { path: "/tmp/neko-policy-project/src/lib.rs".into() }, &c), Verdict::Ask(_)), "the project asks before an edit");
+        assert!(matches!(decide(&Action::Read { path: "/tmp/neko-policy-projects/x".into() }, &c), Verdict::Ask(_)), "a sibling with the same prefix is outside");
+        let follow = Context { mode: PermissionMode::Follow, ..c };
+        assert!(matches!(decide(&Action::Read { path: "/tmp/neko-policy-project/a".into() }, &follow), Verdict::Ask(_)), "only Ask mode lets reads go ahead by itself");
     }
 
     #[test]
@@ -270,7 +287,7 @@ mod tests {
 
     #[test]
     fn following_claude_codes_rules_asks_whatever_reaches_neko() {
-        let c = Context { workdir: Path::new("/tmp/neko-policy-w"), mode: PermissionMode::Follow, plain: false, always: &[], plugins: &[] };
+        let c = Context { workdir: Path::new("/tmp/neko-policy-w"), mode: PermissionMode::Follow, plain: false, always: &[], plugins: &[], read_too: &[] };
         let a = asked(decide(&Action::Edit { path: "/tmp/neko-policy-w/a.rs".into() }, &c));
         assert_eq!(a.title, "Edit a file", "Claude Code asked, so the person is asked: Neko lets nothing through by itself");
         assert!(matches!(decide(&Action::Read { path: "/tmp/neko-policy-w/a.rs".into() }, &c), Verdict::Ask(_)));
@@ -315,7 +332,7 @@ mod tests {
 
     #[test]
     fn full_access_allows_everything() {
-        let c = Context { workdir: Path::new("/w"), mode: PermissionMode::Full, plain: true, always: &[], plugins: &[] };
+        let c = Context { workdir: Path::new("/w"), mode: PermissionMode::Full, plain: true, always: &[], plugins: &[], read_too: &[] };
         assert_eq!(decide(&Action::Command { command: "rm -rf /".into() }, &c), Verdict::Allow);
     }
 }

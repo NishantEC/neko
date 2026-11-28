@@ -107,7 +107,7 @@ fn transcript(c: &mut Client, id: &TaskId) -> Transcript {
 }
 
 fn create(c: &mut Client, words: &str, workspace: Option<&Workspace>) -> Task {
-    match c.request(Request::CreateTask { words: words.into(), workspace: workspace.map(|w| w.id.clone()), in_folder: false, from_branch: None }).unwrap() {
+    match c.request(Request::CreateTask { crew: None, words: words.into(), workspace: workspace.map(|w| w.id.clone()), in_folder: false, from_branch: None }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("create: {r:?}"),
     }

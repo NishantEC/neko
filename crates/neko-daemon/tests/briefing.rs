@@ -43,7 +43,7 @@ fn briefing(c: &mut Client) -> Briefing {
 }
 
 fn task(c: &mut Client, words: &str) -> Task {
-    match c.request(Request::CreateTask { words: words.into(), workspace: None, in_folder: false, from_branch: None }).unwrap() {
+    match c.request(Request::CreateTask { crew: None, words: words.into(), workspace: None, in_folder: false, from_branch: None }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("create_task: {r:?}"),
     }

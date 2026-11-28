@@ -24,7 +24,7 @@ pub mod title;
 pub mod undo;
 
 pub use briefing::{Briefing, BriefingCounts, BriefingSettings};
-pub use cats::Cat;
+pub use cats::{Cat, CattainFile};
 pub use plugins::{Access, AccessMode, Approval, Check, FieldKind, FieldValue, Manifest, Plugin, PluginAsk, PluginKind, PluginState, SettingField};
 pub use rounds::{Round, RoundRun, RoundStatus, TaskRound};
 pub use schedule::Schedule;
@@ -54,7 +54,10 @@ pub use undo::{DiffFile, DiffPatch, DiffSource, DiffSummary, FileStatus, Offer, 
 /// 20: questions go up (a run may carry the question it asked with Neko's tools, to its parent or to the person; a kitten says the
 /// question it waits on and where it stands; a wake can be a question; a note says the agent answered or wrote to a kitten; a "Needs
 /// you" question says which kitten it came from and through whom).
-pub const PROTOCOL_VERSION: u32 = 20;
+/// 21: a cat is a Cattain (its own thread, project, model and access; its four files read and saved with `get_cattain_file`,
+/// `save_cattain_file`, `restore_cattain_file` and pushed in `cattain_file_changed`; `create_task` may start a thread in a Cattain's crew;
+/// a task says whether it is a Cattain's own thread; the rules requests are gone, the rules being RULES.md).
+pub const PROTOCOL_VERSION: u32 = 21;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -211,6 +214,10 @@ pub struct Task {
     /// It sleeps (version 16): out of the lists until the person's next message in it, which wakes it. Never both pinned and settled.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
+    /// It is a Cattain's own thread (version 19): its `cat`'s conversation with the person, which runs in the Cattain's folder. It is
+    /// not listed under Threads; the Cattain is.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cattain: bool,
 }
 
 /// The longest a thread's `latest_line` is, in characters.
@@ -257,6 +264,7 @@ impl Task {
             pinned: false,
             settled: false,
             archived: false,
+            cattain: false,
         }
     }
 
@@ -387,6 +395,17 @@ impl Task {
     /// A subagent that has not ended and is not a draft: its thread waits on it (a draft waits on the person).
     pub fn is_live_subagent(&self) -> bool {
         self.subagent.as_ref().is_some_and(|s| !s.draft) && matches!(self.status, TaskStatus::New | TaskStatus::Working | TaskStatus::NeedsYou | TaskStatus::Waiting)
+    }
+
+    /// Whether Threads lists it: a thread that is not a Cattain's own (a Cattain is listed by itself, version 19).
+    pub fn listed(&self) -> bool {
+        self.is_thread() && !self.cattain
+    }
+
+    /// The Cattain whose crew it is in: a thread that has a cat and is not that cat's own thread (version 19). A round's thread and a
+    /// thread made before version 14 are in their cat's crew.
+    pub fn crew_of(&self) -> Option<&str> {
+        if self.cattain || self.subagent.is_some() { None } else { self.cat.as_deref() }
     }
 
     /// "Kitten 1.2" for a subagent.
@@ -548,9 +567,15 @@ pub enum PartBody {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         failure: Option<FailureKind>,
     },
-    /// The cat's standing rules changed since the task's last run: this run is the first with the new ones. `name` is the cat's
-    /// name then.
-    RulesChanged { cat: String, name: String },
+    /// The words its cat hands the run changed since the task's last run: this run is the first with the new ones. `name` is the cat's
+    /// name then; `file` (version 19) is the file they came from, RULES.md in a Cattain's own thread and CREW.md in its crew (absent
+    /// before: the rules).
+    RulesChanged {
+        cat: String,
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file: Option<String>,
+    },
     /// A subagent was started here: the card in the conversation. Its state is the task's own (`subagent`).
     Subagent { subagent: TaskId, number: String, title: String },
     /// The thread was woken by a subagent's report: the centred note, and what the report carried. `status` is `done`, `failed`,
@@ -845,6 +870,9 @@ pub enum Request {
         in_folder: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         from_branch: Option<String>,
+        /// A Cattain's id (version 19): the thread is in its crew, and reads its CREW.md on every run. Refused for a retired one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        crew: Option<String>,
     },
     /// The branches a new thread in this project can start from (version 14): whether its folder is a git repository, the branch the
     /// checkout is on, and the local branches.
@@ -871,10 +899,28 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workspace: Option<String>,
     },
-    /// Save the cat's standing rules; the ones before become its previous rules.
-    SaveCatRules { cat: String, rules: String },
-    /// Put the previous rules back (the current ones become the previous).
-    RestoreCatRules { cat: String },
+    /// The model a Cattain's own thread asks for (version 19). None: the CLI's default.
+    SetCatModel {
+        cat: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+    },
+    /// The access a Cattain's own thread runs with (version 19). None: the mode in Settings.
+    SetCatAccess {
+        cat: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        access: Option<PermissionMode>,
+    },
+    /// A Cattain's own thread (version 19), made the first time it is asked for: answers `task`. Every screen hears `task_created` and
+    /// `cat_updated` when it was made now.
+    OpenCattain { cat: String },
+    /// One of a Cattain's files as it is on disk now ([`cats::FILES`]; version 19).
+    GetCattainFile { cat: String, name: String },
+    /// Saves RULES.md or CREW.md exactly as given (at most [`cats::MAX_RULES`] bytes); what was there becomes the previous version.
+    /// NOTES.md and DIGEST.md are the Cattain's and are refused.
+    SaveCattainFile { cat: String, name: String, text: String },
+    /// Puts the previous version of RULES.md or CREW.md back; the current one becomes the previous.
+    RestoreCattainFile { cat: String, name: String },
     /// Retire a cat: it takes no new tasks; its tasks stay readable. Refused for the last active cat.
     RetireCat { cat: String },
     /// Bring a retired cat back. Refused when [`cats::MAX_ACTIVE`] are active.
@@ -1186,6 +1232,7 @@ pub enum Reply {
     UndoStorage { storage: UndoStorage },
     Cats { cats: Vec<Cat> },
     Cat { cat: Cat },
+    CattainFile { file: CattainFile },
     Briefing { briefing: Briefing },
     BriefingSettings { settings: BriefingSettings },
     /// Every round, and whether all are paused.
@@ -1226,8 +1273,11 @@ pub enum Change {
     /// caused it).
     NeedsChanged { items: Vec<NeedsItem> },
     CatAdded { cat: Cat },
-    /// Renamed, a new face, purpose, default workspace or rules, retired or brought back: the whole cat as it is now.
+    /// Renamed, a new face, purpose, project, model or access, retired or brought back: the whole cat as it is now.
     CatUpdated { cat: Cat },
+    /// One of a Cattain's files changed (version 19): saved or restored by the person, or written by the Cattain (seen when one of its
+    /// runs ends, and when the file is asked for).
+    CattainFileChanged { file: CattainFile },
     RoundAdded { round: Round },
     /// Changed in any way (edited, switched, run, skipped, braked, a new next time): the whole round as it is now.
     RoundUpdated { round: Round },
@@ -1284,6 +1334,9 @@ pub mod files {
     pub const WORKTREES: &str = "worktrees";
     /// Undo's own folder: a shadow repository per task whose folder is not a git repository, and temporary index files.
     pub const UNDO: &str = "undo";
+    /// Each Cattain's own folder, by its id: RULES.md, CREW.md, NOTES.md, DIGEST.md and reports/ (version 19). Its own thread runs
+    /// here.
+    pub const CATTAINS: &str = "cattains";
 }
 
 fn yes() -> bool {

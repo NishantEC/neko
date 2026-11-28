@@ -542,10 +542,13 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
             Ok(None) => Reply::error(ErrorCode::NotFound, "There is no such thread."),
             Err(e) => internal(e),
         },
-        Request::CreateTask { words, workspace, in_folder, from_branch } => {
+        Request::CreateTask { words, workspace, in_folder, from_branch, crew } => {
             let made = {
                 let mut core = lock(&shared.core);
-                let made = core.create_task_placed(&words, workspace.as_deref(), None, &neko_core::workplace::Placement { in_folder, from_branch });
+                // A thread in a Cattain's crew (docs/knowledge/cats.md): with no project chosen, it is made in the Cattain's.
+                let crew = crew.filter(|c| !c.is_empty());
+                let workspace = workspace.filter(|w| !w.is_empty()).or_else(|| crew.as_deref().and_then(|c| core.store.get_cat(c).ok().flatten()).and_then(|c| c.workspace));
+                let made = core.create_task_placed(&words, workspace.as_deref(), crew.as_deref(), &neko_core::workplace::Placement { in_folder, from_branch });
                 if let Ok((task, revision)) = &made {
                     shared.broadcast(&ServerMessage::Event { revision: *revision, change: Change::TaskCreated { task: task.clone() } });
                 }
@@ -579,12 +582,28 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
                 Err(e) => cat_error(e),
             }
         }
-        Request::RenameCat { cat, name } => one_cat(shared, |c| c.rename_cat(&cat, &name)),
+        Request::RenameCat { cat, name } => {
+            let reply = one_cat(shared, |c| c.rename_cat(&cat, &name));
+            // Its own thread's title is its name.
+            if let Reply::Cat { cat: c } = &reply
+                && let Some(t) = &c.thread
+            {
+                let core = lock(&shared.core);
+                if let (Ok(Some(task)), Ok(revision)) = (core.store.get_task(t), core.store.revision()) {
+                    shared.broadcast(&ServerMessage::Event { revision, change: Change::TaskUpdated { task } });
+                }
+            }
+            reply
+        }
         Request::SetCatFace { cat, face } => one_cat(shared, |c| c.set_cat_face(&cat, &face)),
         Request::SetCatPurpose { cat, purpose } => one_cat(shared, |c| c.set_cat_purpose(&cat, &purpose)),
         Request::SetCatWorkspace { cat, workspace } => one_cat(shared, |c| c.set_cat_workspace(&cat, workspace.as_deref())),
-        Request::SaveCatRules { cat, rules } => one_cat(shared, |c| c.save_cat_rules(&cat, &rules)),
-        Request::RestoreCatRules { cat } => one_cat(shared, |c| c.restore_cat_rules(&cat)),
+        Request::SetCatModel { cat, model } => one_cat(shared, |c| c.set_cat_model(&cat, model.as_deref())),
+        Request::SetCatAccess { cat, access } => one_cat(shared, |c| c.set_cat_access(&cat, access)),
+        Request::OpenCattain { cat } => crate::cattains::open(shared, &cat),
+        Request::GetCattainFile { cat, name } => crate::cattains::get(shared, &cat, &name),
+        Request::SaveCattainFile { cat, name, text } => crate::cattains::change(shared, &cat, &name, Some(&text)),
+        Request::RestoreCattainFile { cat, name } => crate::cattains::change(shared, &cat, &name, None),
         Request::RetireCat { cat } => one_cat(shared, |c| c.retire_cat(&cat)),
         Request::BringBackCat { cat } => one_cat(shared, |c| c.bring_back_cat(&cat)),
         Request::ListRounds => crate::rounds::list(shared),

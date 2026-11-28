@@ -42,7 +42,7 @@ fn add(c: &mut Client, folder: &Path) -> Workspace {
 }
 
 fn create(c: &mut Client, words: &str, workspace: Option<&Workspace>) -> Task {
-    match c.request(Request::CreateTask { words: words.into(), workspace: workspace.map(|w| w.id.clone()), in_folder: false, from_branch: None }).unwrap() {
+    match c.request(Request::CreateTask { crew: None, words: words.into(), workspace: workspace.map(|w| w.id.clone()), in_folder: false, from_branch: None }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("create: {r:?}"),
     }
@@ -169,7 +169,7 @@ fn removing_a_workspace_and_a_missing_folder() {
     events_until(&mut c, "removed", |ch| matches!(ch, Change::WorkspaceUpdated { workspace } if workspace.id == acme.id && workspace.removed_ms.is_some()));
     assert_eq!(std::fs::read_to_string(acme_dir.join("README.md")).unwrap(), "kept\n", "nothing on disk is touched");
     assert!(tasks(&mut c).iter().any(|x| x.id == t.id), "its task stays readable");
-    assert!(matches!(c.request(Request::CreateTask { words: "After".into(), workspace: Some(acme.id.clone()), in_folder: false, from_branch: None }).unwrap(), Reply::Error { code: ErrorCode::Refused, .. }));
+    assert!(matches!(c.request(Request::CreateTask { crew: None, words: "After".into(), workspace: Some(acme.id.clone()), in_folder: false, from_branch: None }).unwrap(), Reply::Error { code: ErrorCode::Refused, .. }));
     assert!(matches!(c.request(Request::RemoveWorkspace { workspace: GENERAL.into() }).unwrap(), Reply::Error { code: ErrorCode::Refused, .. }));
     assert!(matches!(c.request(Request::RenameWorkspace { workspace: GENERAL.into(), name: "Mine".into() }).unwrap(), Reply::Error { code: ErrorCode::Refused, .. }));
     assert!(matches!(c.request(Request::AddWorkspace { folder: "/nonexistent/acme".into() }).unwrap(), Reply::Error { code: ErrorCode::InvalidFolder, .. }));
@@ -179,7 +179,7 @@ fn removing_a_workspace_and_a_missing_folder() {
     let moved = outside.0.join("moved");
     std::fs::rename(&other_dir, &moved).unwrap();
     assert!(workspaces(&mut c).iter().any(|w| w.id == other.id && w.missing), "folder not found");
-    match c.request(Request::CreateTask { words: "Hi".into(), workspace: Some(other.id.clone()), in_folder: false, from_branch: None }).unwrap() {
+    match c.request(Request::CreateTask { crew: None, words: "Hi".into(), workspace: Some(other.id.clone()), in_folder: false, from_branch: None }).unwrap() {
         Reply::Error { code: ErrorCode::Refused, message } => assert!(message.contains("was not found"), "{message}"),
         r => panic!("{r:?}"),
     }
@@ -264,7 +264,7 @@ fn removing_a_task_refuses_unsaved_work_and_keeps_commits_on_the_branch() {
 }
 
 fn create_placed(c: &mut Client, words: &str, workspace: &Workspace, in_folder: bool, from_branch: Option<&str>) -> Reply {
-    c.request(Request::CreateTask { words: words.into(), workspace: Some(workspace.id.clone()), in_folder, from_branch: from_branch.map(str::to_owned) }).unwrap()
+    c.request(Request::CreateTask { crew: None, words: words.into(), workspace: Some(workspace.id.clone()), in_folder, from_branch: from_branch.map(str::to_owned) }).unwrap()
 }
 
 fn run_of(c: &mut Client, task: &TaskId) -> Run {

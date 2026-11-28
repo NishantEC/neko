@@ -84,7 +84,7 @@ fn only_what_was_said_is_indexed_and_the_index_follows_the_words_as_they_grow_an
     // Removing the thread removes its words and its title from the index.
     core.store.delete_task(&t.id, T0).unwrap();
     assert!(core.store.search("route", 12, T0).unwrap().0.is_empty() && core.store.search("notes", 12, T0).unwrap().0.is_empty());
-    let n: i64 = core.store.connection().query_row("SELECT (SELECT COUNT(*) FROM find_words) + (SELECT COUNT(*) FROM find_titles)", [], |r| r.get(0)).unwrap();
+    let n: i64 = core.store.connection().query_row("SELECT (SELECT COUNT(*) FROM find_words) + (SELECT COUNT(*) FROM find_titles WHERE rowid NOT IN (SELECT rowid FROM tasks WHERE cattain = 1))", [], |r| r.get(0)).unwrap();
     assert_eq!(n, 0);
 }
 
@@ -102,7 +102,7 @@ fn a_store_from_before_search_is_indexed_when_it_opens() {
     assert_eq!(old.version().unwrap(), 13);
     drop(old);
     let s = Store::open(&path).unwrap();
-    assert_eq!(s.version().unwrap(), 16);
+    assert_eq!(s.version().unwrap(), neko_core::store::SCHEMA_VERSION);
     let (found, _) = s.search("turnip", 12, T0).unwrap();
     assert_eq!((ids(&found), found[0].by), (vec!["task_old"], FoundBy::Message), "the words of a thread made before search are found, a notice is not");
     assert_eq!(ids(&s.search("harvest", 12, T0).unwrap().0), ["task_old"]);

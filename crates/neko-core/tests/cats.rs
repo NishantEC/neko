@@ -1,6 +1,6 @@
-//! Cats in the store (docs/knowledge/cats.md): the starters, the name rules, the limits, that a thread has no cat (version 14), the
-//! rules and their previous version, retiring and bringing back, a run's rules version and the line when it changed, and the
-//! migration from version 5.
+//! Cats in the store (docs/knowledge/cats.md): the starters, the name rules, the limits, that a thread has no cat (version 14), every
+//! cat a Cattain with its own thread and folder, its files and their previous version, what a run is handed, retiring and bringing
+//! back, a run's version of its words and the line when they changed, and the migrations from versions 5 and 16.
 
 use neko_core::conductor::{RunBook, Who};
 use neko_core::runtime::Outcome;
@@ -43,7 +43,7 @@ fn a_new_install_has_three_starter_cats_made_once() {
     let c = open(&d);
     assert_eq!(names(&c), ["miso", "mochi", "tofu"]);
     let cats = c.cats().unwrap();
-    assert!(cats.iter().all(|c| c.rules.is_empty() && c.purpose.is_none() && c.workspace.is_none()), "starters have empty rules");
+    assert!(cats.iter().all(|c| c.purpose.is_none() && c.workspace.is_none() && c.model.is_none() && c.access.is_none()), "starters have nothing set");
     assert_eq!(cats.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), STARTERS.iter().map(|s| s.0).collect::<Vec<_>>());
     drop(c);
     let c = open(&d);
@@ -116,22 +116,116 @@ fn a_thread_has_no_cat_and_nothing_gives_it_one() {
 }
 
 #[test]
-fn rules_are_saved_verbatim_with_one_previous_version_to_restore() {
+fn every_cat_is_a_cattain_with_its_folder_and_its_own_thread_once_opened() {
     let d = dir();
     let mut c = open(&d);
-    assert!(matches!(c.restore_cat_rules("cat_miso"), Err(CatError::Refused(_))), "nothing to restore yet");
-    let first = "# House rules\n\n- Use British spelling.  \n- **Never** push.\n\n";
-    let (cat, _) = c.save_cat_rules("cat_miso", first).unwrap();
-    assert_eq!((cat.rules.as_str(), cat.previous_rules.as_deref(), cat.rules_hash.clone()), (first, Some(""), rules_hash(first)));
-    let (cat, _) = c.save_cat_rules("cat_miso", "Second").unwrap();
-    assert_eq!((cat.rules.as_str(), cat.previous_rules.as_deref()), ("Second", Some(first)), "one previous version is kept");
-    let (cat, _) = c.restore_cat_rules("cat_miso").unwrap();
-    assert_eq!((cat.rules.as_str(), cat.previous_rules.as_deref()), (first, Some("Second")), "restore swaps them");
-    assert!(matches!(c.save_cat_rules("cat_miso", &"x".repeat(MAX_RULES + 1)), Err(CatError::Refused(_))));
-    assert!(c.save_cat_rules("cat_miso", &"x".repeat(MAX_RULES)).is_ok(), "16 KB fits");
+    assert!(c.store.all_tasks().unwrap().is_empty(), "no thread until a Cattain is opened");
+    for cat in c.cats().unwrap() {
+        let folder = d.0.join("cattains").join(&cat.id);
+        for f in neko_protocol::cats::FILES {
+            assert_eq!(std::fs::read_to_string(folder.join(f)).unwrap(), "", "{f} is there, empty");
+        }
+        assert!(folder.join("reports").is_dir());
+        let (t, with, made) = c.cattain_thread(&cat.id).unwrap();
+        assert!(made.is_some() && with.thread.as_ref() == Some(&t.id));
+        assert!(t.cattain && !t.listed(), "its own thread, not listed under Threads");
+        assert_eq!((t.title.as_str(), t.cat.as_deref(), t.status), (cat.name.as_str(), Some(cat.id.as_str()), neko_protocol::TaskStatus::New), "named for it, read, and not started");
+        assert!(c.store.runs_of(&t.id).unwrap().is_empty(), "it starts no run by itself");
+        assert_eq!(c.store.place(&t.id).unwrap().unwrap().workdir, folder.to_string_lossy(), "it runs in its folder");
+        let (again, _, made) = c.cattain_thread(&cat.id).unwrap();
+        assert_eq!((again.id, made), (t.id, None), "made once");
+    }
+    let (pip, _) = c.create_cat("pip", None, None, None).unwrap();
+    assert!(d.0.join("cattains").join(&pip.id).join("RULES.md").exists(), "a new cat has its folder at once");
+    let (t, _, _) = c.cattain_thread(&pip.id).unwrap();
     drop(c);
-    let c = open(&d);
-    assert_eq!(c.store.get_cat("cat_miso").unwrap().unwrap().previous_rules.as_deref(), Some(first), "kept across a restart");
+    let mut c = open(&d);
+    assert_eq!(c.store.get_cat(&pip.id).unwrap().unwrap().thread, Some(t.id.clone()), "kept across a restart");
+    assert_eq!(c.cattain_thread(&pip.id).unwrap().0.id, t.id);
+    assert_eq!(c.store.all_tasks().unwrap().iter().filter(|t| t.cattain).count(), 4);
+}
+
+#[test]
+fn rules_and_crew_are_saved_verbatim_with_one_previous_version_to_restore() {
+    let d = dir();
+    let mut c = open(&d);
+    assert!(matches!(c.restore_cattain_file("cat_miso", "RULES.md"), Err(CatError::Refused(_))), "nothing to restore yet");
+    let first = "# House rules\n\n- Use British spelling.  \n- **Never** push.\n\n";
+    let (f, _) = c.save_cattain_file("cat_miso", "RULES.md", first).unwrap();
+    assert_eq!((f.text.as_str(), f.previous, f.editable), (first, true, true));
+    assert_eq!(std::fs::read_to_string(d.0.join("cattains/cat_miso/RULES.md")).unwrap(), first, "on disk, exactly");
+    c.save_cattain_file("cat_miso", "RULES.md", "Second").unwrap();
+    let (f, _) = c.restore_cattain_file("cat_miso", "RULES.md").unwrap();
+    assert_eq!(f.text, first, "restore puts the one before back");
+    let (f, _) = c.restore_cattain_file("cat_miso", "RULES.md").unwrap();
+    assert_eq!(f.text, "Second", "and restoring again goes back");
+    assert!(matches!(c.save_cattain_file("cat_miso", "CREW.md", &"x".repeat(MAX_RULES + 1)), Err(CatError::Refused(_))));
+    assert!(c.save_cattain_file("cat_miso", "CREW.md", &"x".repeat(MAX_RULES)).is_ok(), "16 KB fits");
+    // NOTES.md and DIGEST.md are the Cattain's to write; nothing else is a file of its.
+    assert!(matches!(c.save_cattain_file("cat_miso", "DIGEST.md", "x"), Err(CatError::Refused(w)) if w.contains("miso's to write")));
+    assert!(matches!(c.cattain_file("cat_miso", "../token"), Err(CatError::Refused(_))));
+    drop(c);
+    let mut c = open(&d);
+    let (f, _) = c.cattain_file("cat_miso", "RULES.md").unwrap();
+    assert_eq!((f.text.as_str(), f.previous), ("Second", true), "kept across a restart");
+}
+
+#[test]
+fn what_the_cattain_writes_on_disk_is_taken_in_with_the_version_before_it() {
+    let d = dir();
+    let mut c = open(&d);
+    let folder = d.0.join("cattains/cat_miso");
+    std::fs::write(folder.join("DIGEST.md"), "## Needs you\n\n- Merge acme#12?\n").unwrap();
+    let (f, changed) = c.cattain_file("cat_miso", "DIGEST.md").unwrap();
+    assert_eq!((f.text.as_str(), f.previous, f.editable), ("## Needs you\n\n- Merge acme#12?\n", true, false));
+    assert_eq!(changed.iter().map(|(f, _)| f.name.as_str()).collect::<Vec<_>>(), ["DIGEST.md"], "said once");
+    assert!(c.sync_cattain("cat_miso").unwrap().is_empty(), "nothing new the second time");
+    // The person's save after the Cattain's own edit keeps the Cattain's as the previous version.
+    std::fs::write(folder.join("CREW.md"), "From miso").unwrap();
+    c.save_cattain_file("cat_miso", "CREW.md", "From the person").unwrap();
+    assert_eq!(c.restore_cattain_file("cat_miso", "CREW.md").unwrap().0.text, "From miso");
+    // A file that went missing comes back from what Neko last saw.
+    std::fs::remove_file(folder.join("RULES.md")).unwrap();
+    c.save_cattain_file("cat_miso", "RULES.md", "Kept").unwrap();
+    std::fs::remove_file(folder.join("RULES.md")).unwrap();
+    assert!(c.sync_cattain("cat_miso").unwrap().is_empty());
+    assert_eq!(std::fs::read_to_string(folder.join("RULES.md")).unwrap(), "Kept");
+}
+
+#[test]
+fn its_own_thread_is_handed_rules_md_and_its_crew_crew_md() {
+    let d = dir();
+    let mut c = open(&d);
+    std::fs::create_dir_all(d.0.join("acme-api")).unwrap();
+    let ws = c.add_workspace(&d.0.join("acme-api").to_string_lossy()).unwrap().workspace;
+    c.set_cat_workspace("cat_miso", Some(&ws.id)).unwrap();
+    c.save_cattain_file("cat_miso", "RULES.md", "RULE-1: plan first.").unwrap();
+    c.save_cattain_file("cat_miso", "CREW.md", "CREW-1: open a PR, never merge.").unwrap();
+    let (own, _, _) = c.cattain_thread("cat_miso").unwrap();
+    let (h, _) = c.handed(&own).unwrap();
+    let h = h.unwrap();
+    assert!(h.own && h.text == "RULE-1: plan first." && h.file() == "RULES.md");
+    let block = c.block_for(&h);
+    assert!(block.contains("RULE-1: plan first.") && !block.contains("CREW-1") && block.contains(&d.0.join("cattains/cat_miso").display().to_string()));
+    assert!(block.contains("Your project is acme-api"));
+    assert_eq!(c.read_too(&h), [std::path::PathBuf::from(ws.folder.clone().unwrap())], "it may read its project");
+    let (crew, _) = c.create_task_for("Fix the login", Some(&ws.id), Some("cat_miso")).unwrap();
+    assert_eq!(crew.crew_of(), Some("cat_miso"));
+    let (h, _) = c.handed(&crew).unwrap();
+    let h = h.unwrap();
+    assert!(!h.own && h.text == "CREW-1: open a PR, never merge.");
+    let block = c.block_for(&h);
+    assert!(block.starts_with("<neko-crew>") && block.contains("CREW-1: open a PR, never merge.") && !block.contains("RULE-1"));
+    assert!(c.read_too(&h).is_empty(), "a crew thread reads only its own folder");
+    let (plain, _) = c.create_task("No cat").unwrap();
+    assert_eq!(c.handed(&plain).unwrap().0, None);
+    // Model and access are the Profile's, and only names, never flags.
+    assert_eq!(c.set_cat_model("cat_miso", Some("sonnet")).unwrap().0.model.as_deref(), Some("sonnet"));
+    assert!(c.set_cat_model("cat_miso", Some("--dangerously-skip-permissions")).is_err());
+    assert_eq!(c.set_cat_access("cat_miso", Some(PermissionMode::Ask)).unwrap().0.access, Some(PermissionMode::Ask));
+    // Renaming the cat renames its thread.
+    c.rename_cat("cat_miso", "Miso").unwrap();
+    assert_eq!(c.store.get_task(&own.id).unwrap().unwrap().title, "Miso");
 }
 
 #[test]
@@ -155,8 +249,9 @@ fn who() -> Who {
 
 fn run(c: &mut Core, d: &Gone, t: &TaskId, words: &str) {
     let place = Place { workdir: d.0.join("w").to_string_lossy().into_owned(), ..Place::default() };
-    let cat = c.store.get_cat(&c.store.get_task(t).unwrap().unwrap().cat.unwrap_or_default()).unwrap();
-    let (mut b, _) = RunBook::begin(c, t, who(), place, PermissionMode::Follow, None, Some(words), cat.as_ref()).unwrap();
+    let task = c.store.get_task(t).unwrap().unwrap();
+    let (handed, _) = c.handed(&task).unwrap();
+    let (mut b, _) = RunBook::begin(c, t, who(), place, PermissionMode::Follow, None, Some(words), handed.as_ref()).unwrap();
     let now = c.now();
     b.finish(c, Outcome::Done, None, now).unwrap();
 }
@@ -166,16 +261,17 @@ fn changed_lines(c: &Core, t: &TaskId) -> Vec<String> {
 }
 
 #[test]
-fn a_run_records_its_rules_version_and_one_line_says_when_they_changed() {
+fn a_crew_run_records_its_crew_md_version_and_one_line_says_when_it_changed() {
     let d = dir();
     let mut c = open(&d);
     let t = c.create_task_for("Tidy the docs", None, Some("cat_miso")).unwrap().0.id;
     run(&mut c, &d, &t, "Tidy the docs");
     run(&mut c, &d, &t, "Again");
     assert!(changed_lines(&c, &t).is_empty(), "the same rules: no line");
-    c.save_cat_rules("cat_miso", "Use British spelling.").unwrap();
+    c.save_cattain_file("cat_miso", "CREW.md", "Use British spelling.").unwrap();
     run(&mut c, &d, &t, "Once more");
-    assert_eq!(changed_lines(&c, &t), ["miso"], "one line, on the first run with the new rules");
+    assert_eq!(changed_lines(&c, &t), ["miso"], "one line, on the first run with the new CREW.md");
+    assert!(c.store.parts_of(&t).unwrap().iter().any(|p| matches!(&p.body, PartBody::RulesChanged { file: Some(f), .. } if f == "CREW.md")), "it names the file");
     run(&mut c, &d, &t, "And again");
     assert_eq!(changed_lines(&c, &t).len(), 1);
     let runs = c.store.runs_of(&t).unwrap();
@@ -215,4 +311,37 @@ fn a_version_5_store_gives_its_tasks_to_the_starter_cats_by_the_rule() {
     assert!(cats.iter().all(|x| x.created_ms == 100), "as old as the oldest task");
     let run = c.store.get_run(&neko_protocol::RunId("run_1".into())).unwrap().unwrap();
     assert_eq!((run.cat, run.rules_hash), (None, None), "an old run used no rules");
+}
+
+#[test]
+fn a_version_16_store_makes_each_cat_a_cattain_with_its_rules_in_rules_md_and_leaves_its_threads_alone() {
+    let d = dir();
+    let path = d.0.join("neko.sqlite3");
+    {
+        let s = Store::open_at(&path, 16).unwrap();
+        let conn = s.connection();
+        conn.execute("INSERT INTO workspaces (id, name, created_ms, position) VALUES ('default', 'General', 1, 0)", []).unwrap();
+        for (id, name, face, rules, previous) in [("cat_miso", "miso", "ginger", "MISO-RULE: plan first.", Some("older")), ("cat_mochi", "mochi", "snow", "MOCHI-RULE", None), ("cat_tofu", "tofu", "calico", "", None)] {
+            conn.execute("INSERT INTO cats (id, name, name_key, face, rules, previous_rules, rules_saved_ms, created_ms) VALUES (?1, ?2, ?2, ?3, ?4, ?5, 7, 1)", rusqlite::params![id, name, face, rules, previous]).unwrap();
+        }
+        for (id, cat) in [("task_a", Some("cat_miso")), ("task_b", Some("cat_mochi")), ("task_c", None)] {
+            conn.execute("INSERT INTO tasks (id, workspace_id, words, title, status, created_ms, cat_id) VALUES (?1, 'default', 'w', 'Old thread', 'done', 5, ?2)", rusqlite::params![id, cat]).unwrap();
+        }
+    }
+    let mut c = open(&d);
+    assert_eq!(c.store.version().unwrap(), SCHEMA_VERSION);
+    let (rules, _) = c.cattain_file("cat_miso", "RULES.md").unwrap();
+    assert_eq!((rules.text.as_str(), rules.previous), ("MISO-RULE: plan first.", true), "the rules are RULES.md, with their previous version");
+    assert_eq!(c.restore_cattain_file("cat_miso", "RULES.md").unwrap().0.text, "older");
+    assert_eq!(c.cattain_file("cat_mochi", "CREW.md").unwrap().0.text, "MOCHI-RULE", "and CREW.md, so its old threads read what they read before");
+    assert_eq!(std::fs::read_to_string(d.0.join("cattains/cat_mochi/RULES.md")).unwrap(), "MOCHI-RULE", "on disk");
+    assert_eq!(c.cattain_file("cat_tofu", "NOTES.md").unwrap().0.text, "");
+    for cat in c.cats().unwrap() {
+        assert!(d.0.join("cattains").join(&cat.id).join("DIGEST.md").exists(), "{} has its folder", cat.name);
+        assert!(c.cattain_thread(&cat.id).unwrap().0.cattain, "{} has its own thread once opened", cat.name);
+    }
+    for (id, cat) in [("task_a", "cat_miso"), ("task_b", "cat_mochi"), ("task_c", "")] {
+        let t = c.store.get_task(&TaskId(id.into())).unwrap().unwrap();
+        assert_eq!((t.title.as_str(), t.cat.unwrap_or_default().as_str(), t.cattain, t.status), ("Old thread", cat, false, neko_protocol::TaskStatus::Done), "{id} is untouched");
+    }
 }

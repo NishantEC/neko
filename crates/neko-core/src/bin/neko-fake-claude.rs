@@ -28,9 +28,10 @@
 //! | `real` | The shapes a real run showed: empty thinking, several words between tools, a long absolute path, a check that exits 1. |
 //! | `plugin-tool:SERVER:TOOL` | Calls the tool `mcp__SERVER__TOOL` (asking, as Claude Code would about an MCP tool), then says whether it ran. When `--mcp-config` did not give a server called SERVER there is no such tool: the call fails at once, asking nothing. |
 //! | `mcp` (or `delegate`, or `steps`) | Plays the lines after the tag through the MCP servers `--mcp-config` gave, really started (stdio, with this process's environment): `mcp SERVER TOOL {json}` calls `mcp__SERVER__TOOL` (asking first, as Claude Code does) and reads the server's answer, `poll N` calls `mcp__neko__subagents` N times, `stay N` keeps streaming N seconds, `write NAME TEXT` writes a file in its folder, `sh COMMAND` runs a shell command there, `tools LABEL` records the tools Neko's server offered (`{"neko_tools": "a,b", "label": LABEL}` in the record). Steps are one per line, or several on one line apart by ` ; ` (what stands before the tag is the person's words). `steps` is the same script for a prompt that sits inside another script's step (a subagent's), where a second `mcp` tag would cut that step: its steps must be on lines of their own. Then it ends its turn. A message that begins `<neko-wake` is answered by saying which reports it read; with `NEKO_FAKE_WAKE_SH` set it first runs that shell command in its folder for each report that names a branch (`{branch}` is replaced), as a thread that merges would. A `kind="question"` wake (a kitten asks) is handled as `NEKO_FAKE_ON_QUESTION` says, rules apart by `|`, by the kitten's number: `1=answer:TEXT` answers it with `message_subagent`, `1=up` passes it up (`ask_person` in a thread, `ask_parent` in a kitten); with no rule it is read and left. |
+//! | `cattain-notes` | Writes NOTES.md and DIGEST.md in its folder, as a Cattain keeps them, then answers. |
 //! | `hook-no-verdict` | Says a hook gave no usable answer for `cargo test`, then runs it anyway, as Claude Code does (it fails open). |
 //!
-//! `NEKO_FAKE_RECORD` names a file it appends what it was given to, one JSON line each: `{"argv": [...]}` when it starts, then
+//! `NEKO_FAKE_RECORD` names a file it appends what it was given to, one JSON line each: `{"argv": [...], "cwd": ...}` when it starts (the folder it was started in), then
 //! `{"mcp_config": {"path": ..., "content": ...}}` for each file named by `--mcp-config` (read now, so a test sees exactly what the run
 //! was given even though Neko removes the file when the run ends), then `{"stdin": <line>}` for every line it reads. Tests read it to
 //! see exactly what reached the CLI.
@@ -575,6 +576,14 @@ impl Fake {
                 self.say("I edited the README, added the retry module, removed OLD.md and moved the guide.", 3, Duration::from_millis(10));
                 self.result("Done.", false);
             }
+            "cattain-notes" => {
+                // A Cattain keeping its files: NOTES.md and DIGEST.md in the folder it runs in.
+                let _ = std::fs::write(format!("{cwd}/NOTES.md"), "# Plan\n\n- Read the open threads.\n");
+                let _ = std::fs::write(format!("{cwd}/DIGEST.md"), "## Needs you\n\n- Merge acme#12?\n\n## New\n\n- Fix login: a PR is open.\n\n## In progress\n\n- The docs.\n");
+                self.tool("Write", json!({"file_path": format!("{cwd}/DIGEST.md")}), false, "Wrote the file.");
+                self.say("I updated my notes and the digest.", 2, Duration::from_millis(10));
+                self.result("Done.", false);
+            }
             "commit" => {
                 let _ = std::fs::write(format!("{cwd}/CHANGELOG.md"), "# Changes\n\n- Retry failed pages\n");
                 let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&cwd).args(["-c", "user.name=Asha", "-c", "user.email=asha@example.com", "-c", "commit.gpgsign=false"]).args(args).status();
@@ -888,7 +897,7 @@ fn main() {
         println!(r#"{{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}}"#);
         return;
     }
-    keep(&json!({ "argv": args }));
+    keep(&json!({ "argv": args, "cwd": std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default() }));
     // The MCP config files given, read now: the run's own copy goes when the run ends.
     let mut mcp = Vec::new();
     let mut mcp_specs = std::collections::HashMap::new();

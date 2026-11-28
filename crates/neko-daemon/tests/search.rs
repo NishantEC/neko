@@ -123,7 +123,7 @@ fn the_request_is_answered_while_a_thread_runs_and_a_bad_filter_says_why() {
     let d = Daemon::start("search-live");
     let mut c = d.client();
     assert!(matches!(c.request(Request::Subscribe).unwrap(), Reply::Subscribed { .. }));
-    let Reply::Task { task } = c.request(Request::CreateTask { words: "Tidy the garden shed [fake:long:2]".into(), workspace: None, in_folder: false, from_branch: None }).unwrap() else { panic!("create") };
+    let Reply::Task { task } = c.request(Request::CreateTask { crew: None, words: "Tidy the garden shed [fake:long:2]".into(), workspace: None, in_folder: false, from_branch: None }).unwrap() else { panic!("create") };
     // The thread's own words (the person's message is stored with the run's first part) and its title are found at once, and again once
     // the agent has spoken, with the run still going.
     let end = Instant::now() + Duration::from_secs(30);

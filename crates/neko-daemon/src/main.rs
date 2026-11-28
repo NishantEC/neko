@@ -5,6 +5,7 @@
 //! checkpointed and `daemon.json` is removed. See docs/architecture.md.
 
 mod briefing;
+mod cattains;
 mod files;
 mod folders;
 mod heat;

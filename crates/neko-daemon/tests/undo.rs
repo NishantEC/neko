@@ -44,7 +44,7 @@ fn add(c: &mut Client, folder: &Path) -> Workspace {
 
 /// Makes a task and waits for its first run to end.
 fn run_task(c: &mut Client, words: &str, w: Option<&Workspace>) -> Task {
-    let task = match c.request(Request::CreateTask { words: words.into(), workspace: w.map(|w| w.id.clone()), in_folder: false, from_branch: None }).unwrap() {
+    let task = match c.request(Request::CreateTask { crew: None, words: words.into(), workspace: w.map(|w| w.id.clone()), in_folder: false, from_branch: None }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("create: {r:?}"),
     };

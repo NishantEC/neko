@@ -150,7 +150,7 @@ fn a_round_becomes_due_and_starts_by_itself_and_an_unattended_step_that_would_as
     let due = task.round.as_ref().unwrap().due_ms.unwrap();
     assert!(due > r.created_ms && due <= r.created_ms + 61 * MIN + 5_000, "due an hour after it was made");
     // The same step waits for the person, as it does in a task the person made: the permission mode is the one in Settings.
-    let attended = match c.request(Request::CreateTask { words: "Run the tests [fake:hook-shell]".into(), workspace: None, in_folder: false, from_branch: None }).unwrap() {
+    let attended = match c.request(Request::CreateTask { crew: None, words: "Run the tests [fake:hook-shell]".into(), workspace: None, in_folder: false, from_branch: None }).unwrap() {
         Reply::Task { task } => task,
         r => panic!("{r:?}"),
     };
