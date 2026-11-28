@@ -111,6 +111,11 @@ pub const SCENES: &[Scene] = &[
     ("new-thread-crew", |s| { cattains::new_thread_crew(s); finish(s) }),
     ("sidebar-cattains-at-work", |s| { cattains::sidebar_at_work(s); finish(s) }),
     ("sidebar-cattains-quiet", |s| { cattains::sidebar_quiet(s); finish(s) }),
+    ("cattain-made", |s| { make_cattain::note(s); finish(s) }),
+    ("cattain-made-toast", |s| { make_cattain::toast(s); finish(s) }),
+    ("cattain-made-thread", |s| { make_cattain::first_thread(s); finish(s) }),
+    ("cattain-made-settings", |s| { make_cattain::settings(s); finish(s) }),
+    ("cattain-made-limit", |s| { make_cattain::limit(s); finish(s) }),
     ("cat-new", |s| { cat_new(s); finish(s) }),
     ("task-rules-changed", |s| { task_rules_changed(s); finish(s) }),
     ("settings-cats", |s| { settings_cats(s); finish(s) }),
@@ -220,6 +225,7 @@ pub const SCENES: &[Scene] = &[
 mod briefing;
 mod cattains;
 mod composer;
+mod make_cattain;
 mod plugins;
 mod search;
 mod subagents;

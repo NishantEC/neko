@@ -156,7 +156,14 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     // Search (⌘K): over everything but the toasts.
     crate::search_view::palette(s, &t, cx.layout_size(ROOT).map_or(800.0, |[_, h]| h), &mut layer);
     // Toasts (Settled, Archived, Unpinned, each with Undo): bottom centre, over the page, last so nothing covers them.
-    crate::ui::toast::Toasts::new("toasts", &s.toasts, |s: &mut App| &mut s.toasts).position(crate::ui::toast::Position::BottomCenter).on_action(|s: &mut App, tag: &str| s.toast_action(tag)).mount(&t, &mut layer);
+    // Where a composer is on screen (a thread's, New thread's), they stand above it, so a toast never covers the box being typed in.
+    let mut toasts = Vec::new();
+    crate::ui::toast::Toasts::new("toasts", &s.toasts, |s: &mut App| &mut s.toasts).position(crate::ui::toast::Position::BottomCenter).on_action(|s: &mut App, tag: &str| s.toast_action(tag)).mount(&t, &mut toasts);
+    let composer_top = if s.toasts.is_empty() { None } else { cx.window_layout_with("reply-area", |r| r[1].round()).or_else(|| cx.window_layout_with("composer-block", |r| r[1].round())) };
+    match composer_top.filter(|y| *y > 120.0) {
+        Some(top) => layer.push(col().key("toasts-above-composer").absolute(0.0, 0.0).w_full().h(top).children(toasts)),
+        None => layer.extend(toasts),
+    }
     crate::ui::base::overlay_root(root.child(main), layer)
 }
 

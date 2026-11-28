@@ -198,6 +198,30 @@ impl App {
         self.draft.focused = true;
     }
 
+    /// A Cattain an agent just made: the toast "Made yuzu", its purpose under it, with Undo (⌘Z too) for five seconds.
+    pub fn cattain_made_toast(&mut self, cat: &Cat) {
+        let mut spec = crate::ui::toast::ToastSpec::new(format!("Made {}", cat.name)).action("Undo", format!("unmake:{}", cat.id)).timeout(crate::shelf::TOAST_SECONDS);
+        if let Some(p) = cat.purpose.as_ref().filter(|p| !p.is_empty()) {
+            spec = spec.description(format!("A Cattain for {p}"));
+        }
+        self.toasts.push(spec);
+    }
+
+    /// The toast's Undo: the daemon retires the Cattain while it has no work yet, and says why not in a toast otherwise.
+    pub fn undo_make_cattain(&mut self, cat: &str) {
+        if let Some(id) = self.send(Request::UndoMakeCattain { cat: cat.to_owned() }) {
+            self.asked.insert(id, Asked::Shelf);
+        }
+    }
+
+    /// Settings ▸ Cattains: "Agents may make Cattains" (on unless the person keeps them to making by hand).
+    pub fn set_agents_make_cattains(&mut self, on: bool) {
+        if let Some((_, s)) = &self.runtimes {
+            let settings = neko_protocol::Settings { cattains_by_hand: !on, ..s.clone() };
+            self.send(Request::SetSettings { settings });
+        }
+    }
+
     /// The replies this module asked for. True when the reply was one of them.
     pub(crate) fn cattain_reply(&mut self, asked: &Option<Asked>, reply: &Reply) -> bool {
         match (asked, reply) {

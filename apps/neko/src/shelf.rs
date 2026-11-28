@@ -8,7 +8,7 @@ use crate::state::{Asked, App};
 use crate::ui::toast::ToastSpec;
 
 /// How long a toast with Undo stays: the spec's five seconds.
-const TOAST_SECONDS: f64 = 5.0;
+pub(crate) const TOAST_SECONDS: f64 = 5.0;
 
 /// Which of the three the person asked for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,6 +86,8 @@ impl App {
         let mut parts = tag.split(':');
         let (what, id) = (parts.next().unwrap_or(""), TaskId(parts.next().unwrap_or("").to_owned()));
         match what {
+            // A Cattain an agent made: retired, while it has no work yet.
+            "unmake" => self.undo_make_cattain(&id.0),
             "unsettle" => {
                 self.shelf_request(&id, Shelf::Settle, false);
                 if parts.next() == Some("1") {

@@ -71,14 +71,48 @@ pub fn turn_header(t: &Theme, key: &str, c: &Cat) -> El {
         .child(text(c.name.clone()).font(weight(t.ty.sm, t.ty.semibold)).color(t.ink()).a11y_hidden())
 }
 
-/// A Cattain's thread before anyone has written in it: who it is, and where its files are.
+/// A Cattain's thread before anyone has written in it: who it is (its face, its name, what it is for), and where its files are.
 pub fn intro(t: &Theme, c: &Cat) -> El {
-    let who = col().items_center().gap(t.space.at(1.5)).child(crate::faces::portrait(t, "cattain-intro-face", &c.face, 72.0)).child(
+    let mut who = col().items_center().gap(t.space.at(1.5)).child(crate::faces::portrait(t, "cattain-intro-face", &c.face, 72.0)).child(
         text(c.name.clone()).key("cattain-intro-name").role("heading").level(2).font(weight(t.ty.xl, t.ty.semibold)).color(t.ink()),
     );
+    if let Some(p) = c.purpose.as_ref().filter(|p| !p.is_empty()) {
+        who = who.child(text(p.clone()).key("cattain-intro-purpose").font(t.ty.base).color(t.ink_muted()).wrap().max_w(440.0).align(rune::Align::Center));
+    }
     let words = format!("Write to {} here. It reads its rules, notes and digest at the start of every turn, and keeps them in its own folder.", c.name);
     let who = who.child(text(words).key("cattain-intro-line").font(t.ty.sm).color(t.ink_faint()).wrap().max_w(440.0).align(rune::Align::Center).pt(t.space.at(2.0)));
     row().key("cattain-intro").role("note").label(format!("{}'s thread", c.name)).w_full().justify_center().pt(t.space.at(12.0)).pb(t.space.at(6.0)).child(who)
+}
+
+/// The quiet note where a thread's agent made a Cattain (`make_cattain`): a centred line between hairlines, "Made a Cattain: yuzu ·
+/// iOS work", and Open, which opens its own thread. The name and state are the cat's as they are now.
+pub fn made_note(s: &App, t: &Theme, p: &neko_protocol::Part) -> Option<El> {
+    let neko_protocol::PartBody::CattainMade { cat, name, purpose } = &p.body else { return None };
+    let now = s.cat(cat);
+    let mut said = format!("Made a Cattain: {}", now.map_or(name.as_str(), |c| c.name.as_str()));
+    if let Some(pp) = purpose.as_ref().filter(|p| !p.is_empty()) {
+        said.push_str(&format!(" \u{b7} {pp}"));
+    }
+    if now.is_some_and(|c| !c.is_active()) {
+        said.push_str(" \u{b7} retired");
+    }
+    let key = crate::task_view::kk(format!("cattain-made-{}", p.seq));
+    let hair = || el().grow(1.0).h(1.0).fill(t.c.line);
+    let mut line = row()
+        .key(key.clone())
+        .role("note")
+        .label(said.clone())
+        .w_full()
+        .h(t.control.md)
+        .gap(t.space.at(3.0))
+        .center_y()
+        .child(hair())
+        .child(text(said).font(t.ty.xs).color(t.ink_muted()).truncate().min_w(0.0).shrink().a11y_hidden());
+    if now.is_some() {
+        let id = cat.clone();
+        line = line.child(Button::new(format!("{key}-open"), "Open").variant(ButtonVariant::Link).size(Size::Sm).on_press(move |s: &mut App| s.open_cattain(&id)).build(t));
+    }
+    Some(line.child(hair()))
 }
 
 // ---- Overview ---------------------------------------------------------------------------------------------------------------------------

@@ -1580,7 +1580,14 @@ impl App {
                 }
             }
             Change::NeedsChanged { items } => self.set_needs(items),
-            Change::CatAdded { cat } | Change::CatUpdated { cat } => self.upsert_cat(cat),
+            Change::CatAdded { cat } => {
+                // A Cattain an agent made says so once, with Undo (docs/knowledge/cats.md, "Made by asking").
+                if cat.made_in.is_some() && self.cat(&cat.id).is_none() {
+                    self.cattain_made_toast(&cat);
+                }
+                self.upsert_cat(cat);
+            }
+            Change::CatUpdated { cat } => self.upsert_cat(cat),
             Change::CattainFileChanged { file } => self.take_cattain_file(file),
             Change::RoundAdded { round } | Change::RoundUpdated { round } => {
                 let id = round.id.clone();

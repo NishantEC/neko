@@ -143,6 +143,24 @@ fn neko_phrase(name: &str, summary: &str, input: &str, output: Option<&str>, run
         // Questions go up: what was asked, and an answer passed down.
         "message_subagent" if !id.is_empty() => if running { format!("Writing to Kitten {id}") } else { format!("Wrote to Kitten {id}") },
         "message_subagent" => if running { "Writing to a kitten" } else { "Wrote to a kitten" }.to_owned(),
+        // A Cattain made by asking (docs/knowledge/cats.md): its name from the answer.
+        "make_cattain" => {
+            let purpose = v["purpose"].as_str().map(|p| p.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|p| !p.is_empty()).unwrap_or_else(|| summary.to_owned());
+            let about = |head: String| if purpose.is_empty() { head } else { format!("{head} \u{b7} {purpose}") };
+            let out = output.unwrap_or("");
+            if running {
+                about("Making a Cattain".to_owned())
+            } else if let Some(name) = out.strip_prefix("Made a Cattain: ").and_then(|r| r.split(" (").next()).filter(|n| !n.is_empty()) {
+                about(format!("Made {name}"))
+            } else if let Some((name, _)) = out.split_once(" already looks after this") {
+                about(format!("Found {name}"))
+            } else if out.is_empty() {
+                about("Made a Cattain".to_owned())
+            } else {
+                about("Could not make a Cattain".to_owned())
+            }
+        }
+        "list_cattains" => if running { "Looking at the Cattains" } else { "Looked at the Cattains" }.to_owned(),
         "ask_parent" | "ask_person" => {
             let q = v["question"].as_str().map(|q| q.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
             let whom = if tool == "ask_parent" { "the agent" } else { "you" };
@@ -339,7 +357,8 @@ fn part_el(s: &App, t: &Theme, book: &Book, r: &Run, w: &Who, p: &Part, streamin
         PartBody::Agent { text: words, .. } => Some(answer(t, &key, words, streaming, last, muted)),
         PartBody::Notice { .. } => notice(t, p),
         PartBody::ToSubagent { .. } => crate::subagents_view::to_kitten_note(s, t, p, &w.subject()),
-        PartBody::Person { .. } | PartBody::RulesChanged { .. } | PartBody::Subagent { .. } | PartBody::Wake { .. } | PartBody::CattainMade { .. } => None,
+        PartBody::CattainMade { .. } => crate::cattain_view::made_note(s, t, p),
+        PartBody::Person { .. } | PartBody::RulesChanged { .. } | PartBody::Subagent { .. } | PartBody::Wake { .. } => None,
     }
 }
 
@@ -442,7 +461,7 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
     // The final answer is the words after the last step; notices stay in sight; everything else folds.
     let tail_from = parts.iter().rposition(|p| !matches!(p.body, PartBody::Agent { .. } | PartBody::Notice { .. })).map_or(0, |i| i + 1);
     let (work, tail) = parts.split_at(tail_from);
-    let work: Vec<&Part> = work.iter().copied().filter(|p| part_el(s, t, book, r, &w, p, false, false, false).is_some() && !matches!(p.body, PartBody::Notice { .. } | PartBody::ToSubagent { .. })).collect();
+    let work: Vec<&Part> = work.iter().copied().filter(|p| part_el(s, t, book, r, &w, p, false, false, false).is_some() && !matches!(p.body, PartBody::Notice { .. } | PartBody::ToSubagent { .. } | PartBody::CattainMade { .. })).collect();
     let key = format!("worked-{}", r.id.0);
     let offer = offer_of(book, r);
     // The newest run of a thread that rests on its subagents says so on its own line, never "done": the thread is not.
@@ -485,6 +504,8 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
     out.extend(crate::subagents_view::card_stack(s, t, &started));
     // And what it wrote to them, each a quiet note: "The agent answered Kitten 1".
     out.extend(parts.iter().filter_map(|p| crate::subagents_view::to_kitten_note(s, t, p, &w.subject())));
+    // And a Cattain it made, once: "Made a Cattain: yuzu · iOS work · Open".
+    out.extend(parts.iter().filter_map(|p| crate::cattain_view::made_note(s, t, p)));
     let tail_last = tail.iter().rposition(|p| matches!(&p.body, PartBody::Agent { text, .. } if !text.trim().is_empty()));
     out.extend(lay_out(s, t, book, r, &w, tail, None, tail_last));
     // A Cattain's own runs change only its own files, which keep their own previous version (Files): no change line, no Review.
@@ -742,6 +763,13 @@ mod tests {
         assert_eq!(step_phrase("mcp__neko__subagents", "2", "{\"id\": \"2\"}", None, false, w, home), "Read Kitten 2's report");
         assert_eq!(step_phrase("mcp__neko__stop_subagent", "2", "{\"id\": \"Subagent 2\"}", None, false, w, home), "Stopped Kitten 2");
         assert_eq!(step_phrase("mcp__neko__start_drafts", "", "{}", None, false, w, home), "Started the drafts");
+        // A Cattain made by asking: its name from the answer; a near-twin found; the limit.
+        let make = "{\"purpose\": \"iOS work\"}";
+        assert_eq!(step_phrase("mcp__neko__make_cattain", "iOS work", make, None, true, w, home), "Making a Cattain \u{b7} iOS work");
+        assert_eq!(step_phrase("mcp__neko__make_cattain", "iOS work", make, Some("Made a Cattain: yuzu (iOS work). Address it as yuzu."), false, w, home), "Made yuzu \u{b7} iOS work");
+        assert_eq!(step_phrase("mcp__neko__make_cattain", "iOS work", make, Some("miso already looks after this (iOS work), so no Cattain was made."), false, w, home), "Found miso \u{b7} iOS work");
+        assert_eq!(step_phrase("mcp__neko__make_cattain", "iOS work", make, Some("Neko keeps at most 16 Cattains at work, and 16 are: miso"), false, w, home), "Could not make a Cattain \u{b7} iOS work");
+        assert_eq!(step_phrase("mcp__neko__list_cattains", "", "{}", Some("3 of at most 16"), false, w, home), "Looked at the Cattains");
         assert_eq!(step_phrase("mcp__acme__find_issue", "ENG-123", "{}", None, false, w, home), "acme \u{b7} find issue ENG-123", "a plugin keeps its own reading");
         let long = phrase("Bash", "", &format!("git status --short && git log --oneline -5 --decorate && {}", "x ".repeat(40)), false, w, home);
         assert_eq!(long.chars().count(), LINE_CHARS);

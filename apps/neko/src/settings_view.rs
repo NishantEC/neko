@@ -218,6 +218,16 @@ fn cats_page(s: &App, t: &Theme) -> El {
     );
     // Cattains are made here (the sidebar lists only the ones at work): name it, and its thread opens on its Profile.
     part = part.child(row().child(Button::new("settings-new-cat", "New Cattain…").variant(ButtonVariant::Secondary).size(Size::Sm).icon(&crate::ui::icons::PLUS).disabled(active >= neko_protocol::cats::MAX_ACTIVE).on_press(|s: &mut App| s.start_new_cat()).build(t)));
+    // A thread's agent may make one when the person asks ("make a Cattain for the iOS work"), unless they keep it to this page.
+    if let Some((_, settings)) = &s.runtimes {
+        let on = !settings.cattains_by_hand;
+        part = part.child(
+            crate::ui::switch::Switch::<App>::new("settings-agents-make-cattains", "Agents may make Cattains", on)
+                .help("When you ask in a thread (\u{201c}make a Cattain for the iOS work\u{201d}), or when work clearly needs a standing owner, the agent makes one and tells you. Undo takes it back.")
+                .on_toggle(move |s: &mut App| s.set_agents_make_cattains(!on))
+                .build(t),
+        );
+    }
     for c in &s.cats {
         let key = format!("settings-cat-{}", c.id);
         let n = s.tasks.iter().filter(|x| x.listed() && x.crew_of() == Some(c.id.as_str())).count();
@@ -234,8 +244,12 @@ fn cats_page(s: &App, t: &Theme) -> El {
         if let Some(p) = c.purpose.as_ref().filter(|p| !p.is_empty()) {
             facts = facts.child(text(p.clone()).key(format!("{key}-purpose")).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0));
         }
-        let state = if c.is_active() { format!("{} · {count}", capital(&crate::sidebar::cat_words(s, c))) } else { count };
-        facts = facts.child(text(state).key(format!("{key}-facts")).font(t.ty.sm).color(t.ink_faint()));
+        let mut state = if c.is_active() { format!("{} · {count}", capital(&crate::sidebar::cat_words(s, c))) } else { count };
+        // One an agent made says where, while that thread is there.
+        if let Some(by) = c.made_in.as_ref().and_then(|m| s.tasks.iter().find(|x| &x.id == m)) {
+            state.push_str(&format!(" · made in \u{201c}{}\u{201d}", by.title));
+        }
+        facts = facts.child(text(state).key(format!("{key}-facts")).font(t.ty.sm).color(t.ink_faint()).truncate().min_w(0.0));
         let id = c.id.clone();
         let action = if c.is_active() {
             Button::new(format!("{key}-open"), "Open").variant(ButtonVariant::Secondary).size(Size::Sm).on_press(move |s: &mut App| {
