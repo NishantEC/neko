@@ -1,0 +1,115 @@
+{
+  "name": "real-crew",
+  "title": "A real Cattain starts a crew thread, rests, is woken by it and updates its digest",
+  "about": "Real model calls (the cheapest model). In miso's own thread the person asks for one crew thread with a tiny brief; the real Claude Code calls Neko's start_crew_thread, ends its turn, the crew thread runs and finishes, miso is woken with the crew news and writes its DIGEST.md. Only the real CLI can show a Cattain uses its crew tools and is woken as told.",
+  "cli": [
+    "real"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "setup": {
+    "files": {}
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cattains",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-cat-cat_miso-open"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-cat-cat_miso-open"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "miso"
+            }
+          },
+          {
+            "see": {
+              "key": "reply-input"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "miso's own thread opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Start exactly one crew thread titled Say ready, with the brief: reply with the single word ready. Do not do it yourself. When it reports, write one line into your DIGEST.md saying: crew checked. Then reply in one line."
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "allow-until",
+      "until": {
+        "all": [
+          {
+            "sh": {
+              "run": "cat $data/cattains/cat_miso/DIGEST.md 2>/dev/null",
+              "has": "rew checked"
+            }
+          },
+          {
+            "gone": {
+              "key": "run-*-working"
+            }
+          }
+        ]
+      },
+      "within": 420,
+      "snap_first": true,
+      "expect": "miso starts the crew thread, is woken when it finishes, and writes its digest"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "Woken by Say ready"
+        }
+      },
+      "expect": "miso's thread shows it was woken by its crew thread"
+    },
+    {
+      "do": "snap",
+      "name": "crew-woken",
+      "expect": "miso after the crew thread reported"
+    }
+  ]
+}
