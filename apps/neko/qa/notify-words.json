@@ -1,0 +1,152 @@
+{
+  "name": "notify-words",
+  "title": "Notifications name no cat but a Cattain's own question; a crew thread finishing posts nothing",
+  "about": "miso starts one crew thread, Fix login, and waits on it. The crew thread finishes: its Cattain hears it, so nothing is posted for it. miso is woken, rewrites its digest and tags the person with ask_person. That posts once, \"miso asks\" with the question as its body and a reply field: the one notification that names a cat. Read from the app's notification log (headless: nothing reaches the system).",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl",
+      "NEKO_CREW_BATCH_MS": "2000",
+      "NEKO_FAKE_ON_CREW": "mcp neko ask_person {\"question\":\"Merge acme#12?\"}"
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Cattains",
+          "in": {
+            "key": "settings-page"
+          }
+        }
+      },
+      "within": 15,
+      "expect": "Settings opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cattains",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-cat-cat_miso-open"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-cat-cat_miso-open"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "miso"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Fix the login test [fake:mcp] mcp neko start_crew_thread {\"title\":\"Fix login\",\"brief\":\"Fix the login test [fake:work:3]\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "sh": {
+          "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT status FROM tasks WHERE title = 'Fix login'\"",
+          "is": "done"
+        }
+      },
+      "within": 40,
+      "expect": "The crew thread ran and finished"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "notified": {
+          "title": "miso asks",
+          "body": "Merge acme#12?",
+          "buttons": [
+            "reply: Send"
+          ]
+        }
+      },
+      "within": 40,
+      "expect": "miso was woken by its crew and tagged the person: \"miso asks\", the question, a reply field"
+    },
+    {
+      "do": "sleep",
+      "secs": 3
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "posts": {
+              "max": 0,
+              "titled": "Fix login"
+            }
+          },
+          {
+            "posts": {
+              "max": 1,
+              "titled": "miso asks"
+            }
+          },
+          {
+            "posts": {
+              "max": 1
+            }
+          },
+          {
+            "sh": {
+              "run": "grep '\"stdin\"' fake-record.jsonl | grep -c 'kind=.\"crew' | tr -d ' '",
+              "is": "1"
+            }
+          }
+        ]
+      },
+      "expect": "Nothing was posted for the crew thread finishing (miso heard it), and miso's question was posted once: the only notification"
+    },
+    {
+      "do": "snap",
+      "name": "miso-asks",
+      "expect": "miso's thread ends on its question; the notification log has \"miso asks\" alone"
+    }
+  ]
+}

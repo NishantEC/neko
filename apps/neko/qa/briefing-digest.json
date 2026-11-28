@@ -1,0 +1,382 @@
+{
+  "name": "briefing-digest",
+  "title": "The Briefing reads the digests: only the one that changed since it was read",
+  "about": "miso and mochi each write their DIGEST.md in their own threads (the fake CLI's write step, as a Cattain's agent would). The Briefing (⌘4) has a Cattains section with both, each led by its face, quoting its Needs you and New lines; miso's turn is not also a finished row. Mark as read (⌘↩); then only miso writes again. The Briefing now shows miso's block alone, with its new lines, and nothing of mochi's. No model is called: the fake CLI writes the files and the Briefing is made from the daemon's records.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Cattains",
+          "in": {
+            "key": "settings-page"
+          }
+        }
+      },
+      "within": 15,
+      "expect": "Settings opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cattains",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-cat-cat_miso-open"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-cat-cat_miso-open"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "miso"
+        }
+      },
+      "within": 10,
+      "expect": "miso's own thread opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Keep your digest [fake:mcp] write DIGEST.md ## Needs you\\n- Merge acme#12?\\n\\n## New\\n- Fix login: a PR is open.\\n\\n## In progress\\n- The docs."
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep -c 'Merge acme#12?' \"$data/cattains/cat_miso/DIGEST.md\" || true",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT status FROM tasks WHERE cattain = 1 AND cat_id = 'cat_miso'\"",
+              "is": "done"
+            }
+          }
+        ]
+      },
+      "within": 30,
+      "expect": "miso wrote its digest in its folder and its turn ended"
+    },
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Cattains",
+          "in": {
+            "key": "settings-page"
+          }
+        }
+      },
+      "within": 15
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cattains",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-cat-cat_mochi-open"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-cat-cat_mochi-open"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "mochi"
+        }
+      },
+      "within": 10,
+      "expect": "mochi's own thread opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Keep your digest [fake:mcp] write DIGEST.md ## Needs you\\nNothing.\\n\\n## New\\n- The docs link is fixed."
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep -c 'The docs link is fixed' \"$data/cattains/cat_mochi/DIGEST.md\" || true",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT status FROM tasks WHERE cattain = 1 AND cat_id = 'cat_mochi'\"",
+              "is": "done"
+            }
+          }
+        ]
+      },
+      "within": 30,
+      "expect": "mochi wrote its digest and its turn ended"
+    },
+    {
+      "do": "key",
+      "key": "cmd+4"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "briefing-digest-cat_miso-needs-0",
+              "text": "Merge acme#12?"
+            }
+          },
+          {
+            "see": {
+              "key": "briefing-digest-cat_miso-new-0",
+              "text": "Fix login: a PR is open."
+            }
+          },
+          {
+            "see": {
+              "key": "briefing-digest-cat_mochi-new-0",
+              "text": "The docs link is fixed."
+            }
+          },
+          {
+            "gone": {
+              "key": "briefing-digest-cat_mochi-needs"
+            }
+          },
+          {
+            "see": {
+              "key": "briefing-digest-cat_miso-face"
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "The Briefing's Cattains section has both digests, each led by its face; mochi's \"Nothing.\" is not a line"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "count": {
+          "of": {
+            "key": "briefing-task-*"
+          },
+          "is": 0
+        }
+      },
+      "expect": "The Cattains' own turns are told by their digests, not as finished rows"
+    },
+    {
+      "do": "snap",
+      "name": "both-digests",
+      "expect": "Cattains: miso's block (Needs you, New) and mochi's (New)"
+    },
+    {
+      "do": "key",
+      "key": "cmd+return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "briefing-caught-up"
+        }
+      },
+      "within": 10,
+      "expect": "Mark as read: caught up, no digest shown"
+    },
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Cattains",
+          "in": {
+            "key": "settings-page"
+          }
+        }
+      },
+      "within": 15
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cattains",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-cat-cat_miso-open"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-cat-cat_miso-open"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "miso"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Keep your digest [fake:mcp] write DIGEST.md ## Needs you\\n- Merge acme#12 and acme#13?\\n\\n## New\\n- Fix docs: done."
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep -c 'acme#13' \"$data/cattains/cat_miso/DIGEST.md\" || true",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT status FROM tasks WHERE cattain = 1 AND cat_id = 'cat_miso'\"",
+              "is": "done"
+            }
+          }
+        ]
+      },
+      "within": 30,
+      "expect": "Only miso writes again"
+    },
+    {
+      "do": "key",
+      "key": "cmd+4"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "briefing-digest-cat_miso-needs-0",
+              "text": "Merge acme#12 and acme#13?"
+            }
+          },
+          {
+            "gone": {
+              "key": "briefing-digest-cat_mochi"
+            }
+          },
+          {
+            "count": {
+              "of": {
+                "key": "briefing-digest-*-face"
+              },
+              "is": 1
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "Only miso's digest changed since it was read: only miso's block shows, with its new lines"
+    },
+    {
+      "do": "snap",
+      "name": "only-miso",
+      "expect": "The Cattains section has miso's block alone"
+    }
+  ]
+}
