@@ -258,6 +258,11 @@ pub trait Control: Send + Sync {
     fn interrupt(&self) {
         self.stop();
     }
+    /// Whether the agent still takes words now. False once its turn is over and its input is closed, while the process ends: words
+    /// sent then wait for the next run instead (docs/knowledge/composer.md). The default is true.
+    fn takes_words(&self) -> bool {
+        true
+    }
 }
 
 /// A started run: its control and its events.

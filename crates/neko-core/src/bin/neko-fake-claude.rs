@@ -40,6 +40,9 @@
 //! CLI does: `{"type":"user","isReplay":true,"message":{...}}`. A message waiting for a turn of its own is echoed when that turn
 //! starts; one folded into a running turn, when the turn reads it. Ordinary tool results (no `isReplay`) are not echoes.
 //!
+//! When stdin closes it exits, as the real CLI does; with `NEKO_FAKE_LINGER_MS` set it first keeps running that many milliseconds (a
+//! CLI slow to exit after its last `result`), and records `{"linger_ms": N, "pid": PID}`.
+//!
 //! With `--resume ID` it continues conversation ID and says so. `--version` and `auth status --json` answer like the real CLI
 //! (`NEKO_FAKE_AUTH=out` makes it signed out). It also serves as the run guard in tests (`--neko-run-guard`). With `--model NAME`
 //! it reports NAME as its model (else `claude-fake-1`).
@@ -970,6 +973,12 @@ fn main() {
             }
             _ => {}
         }
+    }
+    // Stdin closed: the real CLI then exits, though not always at once (it ends its MCP servers first). `NEKO_FAKE_LINGER_MS` keeps
+    // this one running that long after, as a CLI that is slow to exit would.
+    if let Some(ms) = std::env::var("NEKO_FAKE_LINGER_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
+        keep(&json!({ "linger_ms": ms, "pid": std::process::id() }));
+        std::thread::sleep(Duration::from_millis(ms));
     }
 }
 

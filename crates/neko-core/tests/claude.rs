@@ -168,3 +168,45 @@ fn an_interrupted_turn_ends_the_run_whatever_waits_unread() {
     let ev = drain(&s, T, |_, _| None);
     assert_eq!(finished(&ev), &Outcome::Stopped, "an interrupted run is not a failure and ends on its own result: {ev:?}");
 }
+
+/// The pid a lingering fake recorded (`NEKO_FAKE_LINGER_MS`), once it has.
+fn lingering_pid(record: &std::path::Path) -> Option<i32> {
+    std::fs::read_to_string(record).unwrap_or_default().lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).find_map(|v| v["pid"].as_i64()).map(|p| p as i32)
+}
+
+#[test]
+fn a_cli_still_running_after_its_last_result_takes_no_words_and_is_ended_after_the_grace_as_done() {
+    let dir = Temp::new("linger");
+    let record = dir.0.join("record.jsonl");
+    let rt = claude_on_fake().with_env("NEKO_FAKE_LINGER_MS", "120000").with_env("NEKO_FAKE_RECORD", &record.to_string_lossy()).with_end_grace(Duration::from_millis(800));
+    let s = rt.start(spec("[fake:plain]", &dir.0)).unwrap();
+    // The result (its usage) comes; stdin closes after it, and the fake keeps running.
+    let mut seen = Vec::new();
+    until("the result", T, || {
+        if let Ok(e) = s.events.recv_timeout(Duration::from_millis(20)) {
+            seen.push(e);
+        }
+        seen.iter().any(|e| matches!(e, AgentEvent::Usage(_)))
+    });
+    let at = std::time::Instant::now();
+    until("stdin to close", T, || !s.control.takes_words());
+    assert!(s.control.steer("Too late").is_err(), "nothing can reach a CLI whose input is closed");
+    until("the fake to linger", T, || lingering_pid(&record).is_some());
+    let ev = drain(&s, T, |_, _| None);
+    let took = at.elapsed();
+    assert_eq!(finished(&ev), &Outcome::Done, "its result said done; ending it after the grace is not a stop or a crash: {ev:?}");
+    assert!(took >= Duration::from_millis(600) && took < Duration::from_secs(6), "ended about the grace after its result ({took:?})");
+    assert!(text_of(&seen).starts_with("Hello from the fake"), "the answer is kept: {}", text_of(&seen));
+    let pid = lingering_pid(&record).unwrap();
+    until("the lingering CLI to be gone", Duration::from_secs(5), || !alive(pid));
+}
+
+#[test]
+fn a_cli_that_exits_a_moment_after_its_result_is_not_hurried() {
+    let dir = Temp::new("linger-short");
+    let s = claude_on_fake().with_env("NEKO_FAKE_LINGER_MS", "600").with_end_grace(Duration::from_secs(5)).start(spec("[fake:plain]", &dir.0)).unwrap();
+    let at = std::time::Instant::now();
+    let ev = drain(&s, T, |_, _| None);
+    assert_eq!(finished(&ev), &Outcome::Done);
+    assert!(at.elapsed() < Duration::from_secs(4), "it ended when the CLI exited, not at the grace");
+}

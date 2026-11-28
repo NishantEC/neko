@@ -27,6 +27,9 @@
 //! (`{"type":"user","isReplay":true,...}`), so Neko counts messages sent and messages consumed. At each `result`, stdin closes (the CLI
 //! ends, the run is over) when every message sent has been consumed, or when the turn was interrupted; otherwise stdin stays open
 //! because the CLI will take the waiting message in a turn of its own and send another `result` (docs/knowledge/runtimes.md).
+//! Once stdin is closed the run takes no more words ([`Control::takes_words`]): the daemon holds words sent then for the next run. A
+//! CLI still running [`END_GRACE_ENV`] (ten seconds) after that `result` is ended through the run guard; the run ends as its result
+//! said (done), so a finished run never stays active waiting for a process that does not exit.
 //!
 //! The permission mode (docs/knowledge/permissions.md): following Claude Code's own rules, Neko passes no `--permission-mode` and
 //! no settings, so the person's own default mode and rules apply as in the terminal. Asking before risky steps, it passes
@@ -65,11 +68,26 @@ pub struct ClaudeRuntime {
     pub guard: PathBuf,
     /// More environment for the CLI (tests give the fake a HOME of its own).
     pub env: Vec<(String, String)>,
+    /// How long the CLI may keep running after the `result` that ended its run before the run guard ends it ([`END_GRACE_ENV`]).
+    pub end_grace: Duration,
+}
+
+/// Names the grace, in milliseconds, a CLI has to exit after the `result` that ended its run (default ten seconds). Tests shorten it.
+pub const END_GRACE_ENV: &str = "NEKO_RUN_END_GRACE_MS";
+
+/// The grace from [`END_GRACE_ENV`], else ten seconds.
+pub fn end_grace_from_env() -> Duration {
+    Duration::from_millis(std::env::var(END_GRACE_ENV).ok().and_then(|v| v.parse().ok()).unwrap_or(10_000))
 }
 
 impl ClaudeRuntime {
     pub fn new(binary: Option<PathBuf>, guard: PathBuf) -> ClaudeRuntime {
-        ClaudeRuntime { binary, guard, env: Vec::new() }
+        ClaudeRuntime { binary, guard, env: Vec::new(), end_grace: end_grace_from_env() }
+    }
+
+    pub fn with_end_grace(mut self, grace: Duration) -> ClaudeRuntime {
+        self.end_grace = grace;
+        self
     }
 
     pub fn with_env(mut self, key: &str, value: &str) -> ClaudeRuntime {
@@ -249,7 +267,17 @@ impl Runtime for ClaudeRuntime {
             let _ = child.wait();
             return Err(Failure::Crashed { code: None, words: "Claude Code started without its pipes.".into() });
         };
-        let session = Arc::new(Session { stdin: Mutex::new(Some(stdin)), stopper, stopped: AtomicBool::new(false), interrupted: AtomicBool::new(false), sent: AtomicU32::new(0), consumed: AtomicU32::new(0), asks: Mutex::new(Default::default()) });
+        let session = Arc::new(Session {
+            stdin: Mutex::new(Some(stdin)),
+            stopper,
+            stopped: AtomicBool::new(false),
+            interrupted: AtomicBool::new(false),
+            over: AtomicBool::new(false),
+            reaped: AtomicBool::new(false),
+            sent: AtomicU32::new(0),
+            consumed: AtomicU32::new(0),
+            asks: Mutex::new(Default::default()),
+        });
         let (tx, rx) = mpsc::channel();
         // The first line asks the CLI to set up its control channel, as the Agent SDK does; then the words.
         let _ = session.write(&json!({"type": "control_request", "request_id": "neko-init", "request": {"subtype": "initialize", "hooks": {}}}));
@@ -275,10 +303,14 @@ impl Runtime for ClaudeRuntime {
         });
         let s = session.clone();
         let workdir = spec.workdir.to_string_lossy().into_owned();
+        let grace = self.end_grace;
         let _ = std::thread::Builder::new().name("neko-claude-stdout".into()).spawn(move || {
             let mut mapper = Mapper::new();
             let mut reader = BufReader::new(stdout);
             let mut line = String::new();
+            // Told when the process has exited; dropped then too. Its receiver waits out the grace after the run's last `result`.
+            let (exited, exit_seen) = mpsc::channel::<()>();
+            let mut exit_seen = Some(exit_seen);
             loop {
                 line.clear();
                 match reader.read_line(&mut line) {
@@ -288,13 +320,30 @@ impl Runtime for ClaudeRuntime {
                 for said in mapper.feed(&line, &workdir) {
                     s.said(said, &workdir, &tx);
                 }
+                // The run is over (its last `result` came and stdin is closed): the CLI should exit now. One that is still running
+                // after the grace is ended through the run guard; its result is kept, and the run ends as that result said.
+                if s.over.load(Ordering::SeqCst)
+                    && let Some(seen) = exit_seen.take()
+                {
+                    let watched = s.clone();
+                    let _ = std::thread::Builder::new().name("neko-claude-end".into()).spawn(move || {
+                        if seen.recv_timeout(grace) == Err(mpsc::RecvTimeoutError::Timeout) {
+                            eprintln!("neko-daemon: Claude Code was still running {} ms after the result that ended its run; Neko ended it through the run guard", grace.as_millis());
+                            watched.reaped.store(true, Ordering::SeqCst);
+                            watched.stopper.stop();
+                        }
+                    });
+                }
             }
             s.close_stdin();
             let status = child.wait().ok();
+            drop(exited);
             // Let the stderr reader take the last words.
             std::thread::sleep(Duration::from_millis(30));
             let tail = String::from_utf8_lossy(&tail.lock().unwrap_or_else(std::sync::PoisonError::into_inner)).into_owned();
-            let outcome = outcome(&mapper, s.stopped.load(Ordering::SeqCst) || s.interrupted.load(Ordering::SeqCst), status.and_then(|st| st.code()), status.is_some_and(|st| st.success()), &tail);
+            // Ended after its run was over (the grace above): as its result said, not as a stop or a crash.
+            let reaped = s.reaped.load(Ordering::SeqCst) && !s.stopped.load(Ordering::SeqCst);
+            let outcome = outcome(&mapper, s.stopped.load(Ordering::SeqCst) || s.interrupted.load(Ordering::SeqCst), status.and_then(|st| st.code()), reaped || status.is_some_and(|st| st.success()), &tail);
             let _ = tx.send(AgentEvent::Finished(outcome));
         });
         let control: Arc<dyn Control> = session;
@@ -334,6 +383,10 @@ struct Session {
     stopped: AtomicBool,
     /// The person interrupted the turn: its result is not a failure, and stdin closes right after it.
     interrupted: AtomicBool,
+    /// The run is over: its last `result` came and stdin closed. The process should exit now; words wait for the next run.
+    over: AtomicBool,
+    /// The process was still running a grace after the run was over, so Neko ended it through the run guard.
+    reaped: AtomicBool,
     /// User messages written to the CLI.
     sent: AtomicU32,
     /// User messages the CLI said it consumed (`--replay-user-messages`). At a `result`, stdin closes when this has caught up with
@@ -378,6 +431,7 @@ impl Session {
             Said::TurnEnded { .. } => {
                 if self.run_is_over() {
                     self.close_stdin();
+                    self.over.store(true, Ordering::SeqCst);
                 }
             }
         }
@@ -437,6 +491,11 @@ impl Control for Session {
         if self.write(&json!({"type": "control_request", "request_id": format!("neko-interrupt-{id}"), "request": {"subtype": "interrupt"}})).is_err() {
             self.stop();
         }
+    }
+
+    /// Words go in while stdin is open; once the run's last `result` has closed it, they wait for the next run.
+    fn takes_words(&self) -> bool {
+        self.stdin.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some()
     }
 }
 
