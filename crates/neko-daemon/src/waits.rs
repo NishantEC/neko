@@ -424,12 +424,12 @@ fn skip(shared: &Arc<Shared>, w: &WaitRow, n: i64) {
         return;
     }
     let at = w.wait.at_ms.map(|a| rules::when_words(a, n, &SystemZone)).unwrap_or_default();
-    let note = if w.wait.note.is_empty() { String::new() } else { format!(" It was for: {}", w.wait.note) };
-    let text = format!("Neko did not wake this thread at {at}: automatic work is paused.{note}");
+    let text = format!("Not woken at {at}: automatic work was paused.");
+    let next = if w.wait.note.is_empty() { "Resume automatic work in Rounds, or write here to carry on.".to_owned() } else { format!("The timer was for: {} Resume automatic work in Rounds, or write here to carry on.", w.wait.note) };
     {
         let mut core = lock(&shared.core);
         if let Ok(Some(t)) = core.store.get_task(&w.task)
-            && let Ok(outs) = neko_core::conductor::standalone_notice(&mut core, &t, Tone::Info, text, Some("Resume automatic work in Rounds, or write to the thread to carry on.".into()), None)
+            && let Ok(outs) = neko_core::conductor::standalone_notice(&mut core, &t, Tone::Info, text, Some(next), None)
         {
             drop(core);
             crate::runs::push(shared, &w.task, outs, None);

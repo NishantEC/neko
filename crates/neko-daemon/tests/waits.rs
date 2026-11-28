@@ -230,7 +230,7 @@ fn a_timer_due_while_automatic_work_is_paused_starts_nothing_is_recorded_and_the
     assert_eq!(c.request(Request::SetRoundsPaused { paused: true }).unwrap(), Reply::Ok);
     clock(&mut c, 31);
     until("the thread to say so", || {
-        transcript(&mut c, &t.id).parts.iter().any(|p| matches!(&p.body, PartBody::Notice { text, .. } if text.contains("automatic work is paused")))
+        transcript(&mut c, &t.id).parts.iter().any(|p| matches!(&p.body, PartBody::Notice { text, .. } if text.contains("automatic work was paused")))
     });
     let after = task(&mut c, &t.id);
     assert!(after.waits.is_empty() && after.status == TaskStatus::Done, "skipped, and at rest: {after:?}");

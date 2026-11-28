@@ -45,8 +45,9 @@ pub struct Active {
     pub interrupting: bool,
     /// A model call is going now (between `StepBegan` and `StepEnded`).
     pub open_step: bool,
-    /// Steered messages not read yet; the flag says whether the next call to begin has them (a call already going does not).
-    pub steers: Vec<(neko_protocol::QueuedId, bool)>,
+    /// Steered messages not read yet; the flag says whether the next call to begin has them (a call already going does not), and the
+    /// person part that holds their words (moved to where the agent read them).
+    pub steers: Vec<(neko_protocol::QueuedId, bool, Option<neko_protocol::PartId>)>,
 }
 
 /// A run, as its MCP server reaches it.

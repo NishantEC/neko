@@ -51,11 +51,15 @@ fn remove(shared: &Shared, task: &TaskId, id: &QueuedId, why: &str) -> bool {
     true
 }
 
-fn person(shared: &Shared, task: &TaskId, words: &str) {
+fn person(shared: &Shared, task: &TaskId, words: &str) -> Option<neko_protocol::PartId> {
     let mut core = lock(&shared.core);
-    if let Ok(outs) = neko_core::conductor::person_part(&mut core, task, words) {
-        runs::push(shared, task, outs, None);
-    }
+    let outs = neko_core::conductor::person_part(&mut core, task, words).ok()?;
+    let id = outs.iter().find_map(|o| match o {
+        neko_core::conductor::Out::Change(_, Change::PartChanged { part }) => Some(part.id.clone()),
+        _ => None,
+    });
+    runs::push(shared, task, outs, None);
+    id
 }
 
 const FULL: &str = "Too many messages are waiting. Send or discard some first.";
@@ -92,12 +96,12 @@ fn steer(shared: &Arc<Shared>, task: &TaskId, c: &Arc<dyn Control>, words: &str)
         }
         return Reply::error(ErrorCode::Busy, e.0);
     }
-    person(shared, task, words);
+    let part = person(shared, task, words);
     if let Some(q) = add(shared, task, words, QueuedKind::Steered) {
         // A message the agent was already reading when this was written cannot include it: it waits for the next one.
         if let Some(a) = lock(&shared.runs.active).get_mut(task) {
             let armed = !a.open_step;
-            a.steers.push((q.id, armed));
+            a.steers.push((q.id, armed, part));
         }
     }
     Reply::Ok
@@ -209,18 +213,29 @@ pub fn discard(shared: &Shared, task: &TaskId, id: &QueuedId) -> Reply {
     if remove(shared, task, id, "discarded") { Reply::Ok } else { Reply::error(ErrorCode::NotFound, "That message was already sent.") }
 }
 
-/// A model call began: the steered messages written before the previous one ended are in it.
+/// A model call began: the steered messages written before the previous one ended are in it. Each moves in the transcript to where
+/// the agent read it, so what the agent says next stands after the person's words (it was sent while a step was still going).
 pub fn step_began(shared: &Shared, task: &TaskId) {
-    let read: Vec<QueuedId> = {
+    let read: Vec<(QueuedId, Option<neko_protocol::PartId>)> = {
         let mut active = lock(&shared.runs.active);
         let Some(a) = active.get_mut(task) else { return };
         a.open_step = true;
-        let (armed, wait): (Vec<_>, Vec<_>) = std::mem::take(&mut a.steers).into_iter().partition(|(_, armed)| *armed);
+        let (armed, wait): (Vec<_>, Vec<_>) = std::mem::take(&mut a.steers).into_iter().partition(|(_, armed, _)| *armed);
         a.steers = wait;
-        armed.into_iter().map(|(id, _)| id).collect()
+        armed.into_iter().map(|(id, _, part)| (id, part)).collect()
     };
-    for id in read {
+    for (id, part) in read {
         remove(shared, task, &id, "read");
+        if let Some(p) = part {
+            let moved = {
+                let mut core = lock(&shared.core);
+                let now = core.now();
+                core.store.move_part_to_end(&p, now).ok().flatten()
+            };
+            if let Some((part, revision)) = moved {
+                shared.broadcast(&neko_protocol::ServerMessage::Event { revision, change: Change::PartChanged { part } });
+            }
+        }
     }
 }
 

@@ -133,6 +133,12 @@ fn a_steer_folded_into_the_running_turn_ends_the_run_promptly_with_the_words_in_
     assert_eq!(user_messages(&rec).len(), 2);
     assert_eq!(argvs(&rec).len(), 1, "one process took both");
     assert!(argvs(&rec)[0].iter().any(|a| a == "--replay-user-messages"), "the CLI is asked to say which messages it consumed");
+    // The words stand where the agent read them: after the steps it took before, right before what it said about them.
+    let at = t.parts.iter().position(|p| matches!(&p.body, PartBody::Person { text } if text == "Also end with the word meow")).unwrap();
+    let read = t.parts.iter().position(|p| matches!(&p.body, PartBody::Agent { text, .. } if text.contains("Reading your message: Also end with the word meow"))).unwrap();
+    assert!(at < read, "the person's words come before the agent's answer to them");
+    assert!(t.parts[at + 1..read].iter().all(|p| !matches!(p.body, PartBody::Agent { .. })), "nothing the agent said before reading them stands between: {:?}", &t.parts[at..=read]);
+    assert!(t.parts[..at].iter().any(|p| p.run.is_some()), "the run's earlier steps stand before them");
 }
 
 /// A CLI that does not fold: the steer waits for a turn of its own, and the run waits for that turn's result too.

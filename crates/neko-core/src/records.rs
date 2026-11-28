@@ -275,6 +275,20 @@ impl Store {
         Ok(self.conn.query_row("SELECT COALESCE(MAX(seq), 0) + 1 FROM parts WHERE task_id = ?1", [&task.0], |r| r.get::<_, i64>(0))? as u64)
     }
 
+    /// Moves a part to the end of its task's transcript, at `now_ms`: words the person steered into a running agent go where the agent
+    /// read them (docs/knowledge/composer.md). Returns it as it now is, with its event's number.
+    pub fn move_part_to_end(&mut self, id: &PartId, now_ms: i64) -> Result<Option<(Part, u64)>, StoreError> {
+        let tx = self.conn.transaction()?;
+        let task: Option<String> = tx.query_row("SELECT task_id FROM parts WHERE id = ?1", [&id.0], |r| r.get(0)).optional()?;
+        let Some(task) = task else { return Ok(None) };
+        let next: i64 = tx.query_row("SELECT COALESCE(MAX(seq), 0) + 1 FROM parts WHERE task_id = ?1", [&task], |r| r.get(0))?;
+        tx.execute("UPDATE parts SET seq = ?2, at_ms = ?3, ended_ms = ?3 WHERE id = ?1", params![id.0, next, now_ms])?;
+        let seq = log(&tx, now_ms, &id.0, "part_moved", serde_json::json!({ "task": task, "seq": next }))?;
+        let part = tx.query_row(&format!("SELECT {PART_COLUMNS} FROM parts WHERE id = ?1"), [&id.0], part_of)?;
+        tx.commit()?;
+        Ok(Some((part, seq)))
+    }
+
     pub fn insert_part(&mut self, p: &Part, now_ms: i64) -> Result<u64, StoreError> {
         let tx = self.conn.transaction()?;
         tx.execute(
