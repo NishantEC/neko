@@ -15,7 +15,7 @@ The scenarios are `steer`, `queue` and `interrupt` (`qa.md`).
 At rest (no run going, or a thread that only waits on its kittens) every mode just sends: a new run resumes the conversation with the
 words. ⌘Return also sends at rest; ⌥Return at rest stays a new line, as it is in every text field, so it never sends by surprise.
 
-Settings ▸ Agents ▸ "While the agent works" swaps the first two (Return queues, ⌥Return steers). Interrupt is always ⌘Return. The
+Settings ▸ General ▸ "While the agent works" swaps the first two (Return queues, ⌥Return steers). Interrupt is always ⌘Return. The
 setting is `Settings.queue_first`; only the screen reads it (it chooses the mode it sends), the daemon never does. With no mode named,
 `follow_up` steers, as it always did.
 

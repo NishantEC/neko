@@ -52,7 +52,7 @@ behaviour may inspire, never their code, text or art). Dependencies are MIT, Apa
 - [Architecture](docs/architecture.md) — the crates, the daemon and the screens, the transport and token, the store.
 - [The store](docs/knowledge/store.md) — SQLite rows per entity, the append-only event log, migrations, the clock and ids handed in.
 - [The protocol](docs/knowledge/protocol.md) — requests, replies and events as JSON, versioned at hello, the WebSocket pump.
-- [The app shell](docs/knowledge/app-shell.md) — the band, folding, the window's frame, menus, keyboard, accessibility, the link.
+- [The app shell](docs/knowledge/app-shell.md) — the band, folding, the window's frame, menus, keyboard, accessibility, the link, Settings' pages and search.
 - [rune-ui in Neko](docs/knowledge/rune-ui-in-neko.md) — installing with the CLI, never editing copies, the theme, licences, upstream asks.
 - [Design: House](docs/knowledge/design.md) — the one design: type scale, colour and contrast, the cats' faces, `NEKO_CAT_ART` (dev builds only), motion.
 - [Runtimes](docs/knowledge/runtimes.md) — the agent contract, how Claude Code is found and run, the fake CLI, what is not sure yet.

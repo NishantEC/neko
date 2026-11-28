@@ -95,7 +95,7 @@ new briefing and pushes it to every screen.
 
 ## The morning notification
 
-- **Settings:** `briefing_settings {morning_on, morning_at}`, local time of the Mac, default on at 08:00 (Settings ▸ Briefing). A
+- **Settings:** `briefing_settings {morning_on, morning_at}`, local time of the Mac, default on at 08:00 (Settings ▸ Rounds & wakes). A
   time that is not a time of day is refused (`bad_request`) and changes nothing.
 - **The scheduler is Rounds' scheduler.** The morning is a `Daily { at }` schedule on the same arithmetic (`schedule::Schedule`), on
   the same thread (`neko-rounds`) with the same clock handed in (`Hub::now`, and its debug offset), and its timer is the earlier of
@@ -149,7 +149,7 @@ a screen only as long as the daemon runs; Neko cannot wake the Mac. These are Ro
   - **Empty**, never read: "Nothing happened since yesterday 08:05." and the next briefing; no Mark as read (nothing to read).
 - **New thread** has one quiet line under its chips while there is news ("While you were away: 3 finished, 1 needs you", Open briefing)
   and nothing when empty or read.
-- **Settings ▸ Briefing**: what it shows, the morning switch and the time (Save, or Return), with the plain note on when it posts.
+- **Settings ▸ Rounds & wakes ▸ Morning Briefing**: what it shows, the morning switch and the time (Save, or Return), with the plain note on when it posts.
 - **Keyboard.** Tab goes through the page in reading order: the Needs you cards and their answers, each Cattain's block and line and
   its button, each finished row and its buttons, the rounds that open a task, the working rows, Mark as read, which is the last stop.
   With nothing waiting, the first Cattain's block has the keyboard when the page opens. Up and Down move between the rows of the

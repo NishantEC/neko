@@ -381,3 +381,23 @@ Cattains".
 `make-cattain-limit`: thirteen `create_cat` requests (the `daemon` step) make sixteen at work. The agent's `make_cattain` is refused: the
 step reads "Could not make a Cattain · iOS work" once the fold is open, there is no note and no toast, the record has the error with "at
 most 16 Cattains at work, and 16 are", and the store still has sixteen active.
+
+## The Settings scenarios (S16)
+
+Headless, against the real daemon. Settings' page rows are options of the listbox keyed `settings-page`, so a step can choose a page by
+its key (`settings-page-permissions`) or by name inside the list (`"name": "Cattains", "in": {"key": "settings-page"}`, which the
+Cattain scenarios already used and still do). The chosen row is `"selected": true`.
+
+`settings-search`: ⌘, opens Settings on General with eleven pages. Typing "undo" in the search field leaves two pages (Storage, and
+Shortcuts for ⌘Z), shows Storage with its row selected, says "Undo history" on its row and marks it on the page (`settings-undo-found`).
+Two more letters say `No results for “undozz”` and keep Storage; Escape empties the field and the eleven come back; "miso" shows the
+Cattains page with miso's card marked. `settings-deeplink`: Settings is left on General, a plugin folder is added and waits in Needs you;
+Open in Settings on its card opens Settings on Plugins (its row selected) with the plugin's card and the keyboard on its Approve.
+
+Changed to the new truth (Settings now opens on General, not on the page that had the permission modes): `ask-mode`, `briefing`,
+`cat-rules-cannot-skip-checks`, `crew-needs-you`, `destructive`, `needs-you`, `needs-you-restart`, `notifications`, `pane-subagent-tab`,
+`rounds-due`, `sidebar-status`, `subagent-request`, `follow-rules` and the real-CLI `real-smoke` and `real-kittens-own-copy` choose
+Permissions before a mode (or before the rules line); `briefing-morning` sets the morning time on Rounds & wakes (`settings-page-rounds`,
+was `settings-page-4`); `plugins` and `plugins-changed` choose Plugins by its name (`settings-page-plugins`, was `settings-page-5`).
+Nothing they check was loosened.
+

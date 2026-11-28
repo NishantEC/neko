@@ -316,3 +316,21 @@ Renders: `crew-at-work`, `crew-woken`, `crew-digest`, `crew-started-by`, `crew-s
 Renders: `cattain-thread`, `cattain-thread-new`, `cattain-digest`, `cattain-files`, `cattain-files-editing`, `cattain-files-notes`,
 `cattain-profile`, `cattain-retire`, `crew-thread`, `new-thread-crew`, `sidebar-cattains-at-work`, `sidebar-cattains-quiet`,
 `settings-cats`, `cat-new` (`scripts/snap.sh`).
+
+## Settings (S16)
+
+Calm and native, as System Settings: the page list in the content area on the page's paper (no second panel beside the sidebar's), its
+rows rune-ui's `SidebarItem` in the sidebar's own rhythm (36 point rows two points apart, the selected wash and first ink, the 16 point
+glyph in the second ink) with a group's gap (12) after Permissions and after Rounds & wakes. The search field (the small control, a
+magnifier, a clear button once there is text) sits at the top of the list, its left edge on the band's title. While searching, a row
+gains a second line in the faint ink naming what matched (52 points, a two-line row). Neko draws three glyphs of its own for the list:
+a cat's head (Cattains), a paw (Kittens) and a drive (Storage); the rest are rune-ui's (gear, sparkle, shield, folder, bell, plug, ⌘)
+and Neko's Rounds arrows.
+
+The page: its name in the xl step, then sections a 32 point gap apart, each a md semibold heading, an optional line on what it is for
+in the second ink, and its controls; facts under them in the small step and the faint ink. Cards (an agent CLI, a project, a Cattain)
+keep their slab. A found option is marked with the identity colour's quiet tint, spread 8 points past its edges, rounded, so the page
+does not move when the search changes. Renders: the `settings-*` scenes (`settings`, `-agents`, `-permissions`, `-ask`,
+`-full-access`, `-signed-out`, `-workspaces`, `-cats`, `-kittens`, `-briefing`, `-notifications*`, `-shortcuts`, `-storage`, `-undo`,
+`-search-undo`, `-search-notify`, `-search-miso`, `-search-none`) and `plugins*`, light and dark at 1200 by 800 and 760 by 560.
+

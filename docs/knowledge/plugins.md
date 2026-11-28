@@ -229,7 +229,7 @@ is since the manifest became what it is now. Approve and Decline are `approve_pl
 
 ## In the app
 
-Settings ▸ Plugins (⌘, then the sixth page): the plugins with their state in words, Add MCP server… (a sheet that reads the paste live with
+Settings ▸ Plugins (⌘, then Plugins in the page list): the plugins with their state in words, Add MCP server… (a sheet that reads the paste live with
 `parse_mcp_json` and shows names only, never a value) and Add plugin folder…, and per plugin its switch, its declared settings as fields (a
 secret is a masked field and then "Set" with Change and Remove, never shown again), which cats may use it, Test with its result, and Remove
 (asks first). "Needs you" shows a plugin as a plug (no cat) in a group of its own, with the exact command, what it is handed and Approve and

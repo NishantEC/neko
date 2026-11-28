@@ -112,7 +112,7 @@ booleans `pinned`, `settled`, `archived` (none is written until it is true).
   **7 days** (the newest of its creation, its activity and its runs) is settled when it is idle. It skips pinned, archived and settled
   threads, threads that work or wait on their kittens, threads that need the person, and threads with a report waiting to wake them. It
   looks when a thread's week is up and at least every 6 hours while any thread could still be settled; with none it asks for no timer.
-  Its clock is the scheduler's, so the QA rig's debug clock moves it (`qa.md`, `auto-settle`). The setting "Auto-settle after" is S16.
+  Its clock is the scheduler's, so the QA rig's debug clock moves it (`qa.md`, `auto-settle`). Settings ▸ General says the week as a fact; a choice of it needs a setting the daemon keeps, and is not here yet.
 - **Requests:** `pin_task {task, pinned}`, `settle_task {task, settled}`, `archive_task {task, archived}`; each answers `task` and every
   screen hears `task_updated`.
 

@@ -148,7 +148,7 @@ its ref keeps those files, but nothing on screen brings them back yet.
   history of this run was removed." (A run that changed nothing says nothing.)
 - **Older than 30 days:** when a task finishes a run, its checkpoints older than 30 days go, never its newest run's pair. Tests
   shorten it with `NEKO_UNDO_KEEP_MS`.
-- **Settings ▸ Workspaces** says "Storage used by undo: 18.4 MB in Neko's folder, 38 checkpoints in 6 tasks. Checkpoints of a git
+- **Settings ▸ Storage** ("Undo history") says "Storage used by undo: 18.4 MB in Neko's folder, 38 checkpoints in 6 tasks. Checkpoints of a git
   repository are kept in the repository itself." "Clear undo history…" asks first, then removes every ref, every shadow
   repository and marks every run's history removed. It is refused while a task works.
 - The objects of a removed ref stay in the person's repository until their own `git gc` prunes them (two weeks by git's default).

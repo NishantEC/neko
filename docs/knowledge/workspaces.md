@@ -66,7 +66,7 @@ in a scratch folder, refuse the removal in plain words with Reveal in Finder: no
   remembered (`last-workspace`). ⌘N starts a thread in the project of the thread in view. For a git project the same row has the
   New worktree / In the folder chip and the branch chip (`threads.md`).
 - **Task band:** the workspace's name, then the folder and branch. **Window title:** "<task title> — <workspace name>".
-- **Settings ▸ Workspaces:** each workspace with its folder and task count; Rename…, Reveal in Finder (or Locate…), Remove…;
+- **Settings ▸ Projects:** each workspace with its folder and task count; Rename…, Reveal in Finder (or Locate…), Remove…;
   then "Storage used by undo" and "Clear undo history…" (`undo.md`).
 
 ## Reordering

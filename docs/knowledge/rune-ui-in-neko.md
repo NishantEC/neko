@@ -172,3 +172,9 @@ matches would also win the highlight over the snippet's letters).
 Upstream asks (rune-ui Command): speak a row's `hint` (it is `a11y_hidden`, so VoiceOver does not hear a thread's project and age); let the
 caller give the text rows are matched against (Command matches the whole field, so `status:needs` is a word to fuzzy-match and the app works
 round it with keywords); its rows are not focusable, so only the highlighted one says it is selected (`tests/a11y.rs` holds the palette to exactly one selected row instead of the "selected or unselected" every other list row has); a subtitle match is only medium weight in the faint ink, quiet beside the title's semibold.
+
+## Settings (S16)
+
+Nothing new installed. The page list is `SidebarItem`s with `.list_row(..)` in Neko's own listbox (`Sidebar::list` would bring the
+whole sidebar column and its slab), the field is `Input::search` with an `on_key_preview` for Escape added on the built element, and the
+Kbd caps on Shortcuts are `kbd`. `segmented_control` stays: a plugin's choices, the Changes tab's source switch and the round panel use it.

@@ -17,7 +17,7 @@
 | `faces.rs` | The cats' portraits: a drawn face per face id on its own ground, the working ring and state dots (`design.md`). |
 | `cattain.rs`, `cattain_view.rs` | A Cattain (`cats.md`): opening its own thread, its files and the words being edited in them, its Profile's changes; its band lead, the head of its turns, its intro, and the pane's Overview, Digest, Files and Profile. |
 | `pane.rs`, `pane_view.rs`, `review_view.rs` | The right pane: its state and words (open or shut, width, the tabs, each thread's overview), its drawing (header with tabs, Overview, a kitten's tab, the sheet), and the Changes tab (the files as rune-ui's Diff, the source switch, Undo, Redo, Copy diff). |
-| `settings_view.rs` | Settings (⌘,): the agent CLIs, which one new tasks use, the permission mode, workspaces, notifications. |
+| `settings_view/` | Settings (⌘,): the page list and its search (`mod.rs`: `Page`, the search's entries, `Found`, the marks) and one file per page (`general.rs` … `storage.rs`; Plugins' page is `plugins_view::page`). |
 | `rounds.rs`, `rounds_view.rs` | Rounds (⌘3): the words for schedules and times, the New round / Edit panel's form; the page of cards and the panel (`rounds.md`). |
 | `briefing.rs`, `briefing_view.rs` | The Briefing (⌘4): the words for a window, a round line and the totals, the state it keeps; the page (`briefing.md`). |
 | `plugins.rs`, `plugins_view.rs` | Plugins: the words for a state, a check and an ask; the Add sheet's state, read live with the daemon's own `parse_mcp_json`; Settings ▸ Plugins, the Add sheet, the approval block Needs you shares, a cat's plugins (`plugins.md`). |
@@ -169,7 +169,7 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
   same way (`page_swap` on the body that is replaced, not on a container that stays), and the same test holds them.
 - **The Changes tab's files** are rune-ui's Diff (0.10): `.stats` for a folded file's counts, `.hide_zero(true)` (a file that only gained
   lines shows no "−0"), `.selectable(true)` and `.foot(..)` for the note, Show all, Copy diff, Copy path and Reveal.
-- **Settings** has six pages, Agents, Workspaces, Notifications, Cattains, Briefing and Plugins, switched by rune-ui's SegmentedControl. ⌘, then the page switch reaches Plugins (`settings-page-5`); "Open in Settings" on a plugin's Needs you card and a plugin's name on a cat's page open it at that plugin, with the keyboard on its first control.
+- **Settings** is a page list, as the Mac's System Settings has it (S16, below). "Open in Settings" on a plugin's Needs you card and a plugin's name on a cat's page open it on Plugins at that plugin, with the keyboard on its first control, whatever page Settings was last on.
 
 ## Plugins (app side)
 
@@ -191,7 +191,7 @@ A kitten (the app's word for a subagent: a helper a thread starts, numbered, wit
 - **The card** stands where `PartBody::Subagent` is: one raised card, a row (`subagent-card-<number>`) per kitten, `Kitten 1`, its title, its state at the right (Queued, Working, Needs you, Waiting, Done, Failed, Stopped, Interrupted, Has a question), where it works ("Shared folder", or "Own copy · branch neko/4f2a-1") then "· After Kitten 1" while a stacked kitten has not started, and its last line (the newest agent words' first line, else the newest step, from the transcript parts this window has of it; a thread's transcript asks once for the transcripts of its kittens it has not read, `ask_subagent_lines`), and Open (`subagent-open-<number>`, name "Open Kitten 1"). Kitten parts with only Neko's own tool steps between them are one card. In a finished run the cards are outside the "Worked for" fold, after it.
 - **A draft card** (`subagent-card-<number>`, no Open): `Kitten 3`, its title, "Draft" at the right, where it works, then the prompt in a text box (`draft-prompt-<number>`, an editable Textarea; its field is `…-input`) and Discard (`draft-discard-<number>`) and Start (`draft-start-<number>`, names "Discard Kitten 3", "Start Kitten 3"). A draft is not a live kitten: it is not on the waiting line, the activity bar or the counts. A discarded draft reads "Discarded" with nothing to open. The text is kept in `App.draft_edits` and saved with `edit_draft` about 0.8 s after a change (`save_drafts`, from `poll`) and with Start.
 - **Neko's own tool steps** read as words ("Started Kitten 1 · Check links"; `subagents.md`).
-- **Overview** lists the kittens as a tree (12 points a level) with the place and the order before the model ("Own copy · neko/4f2a-1-2 · After Kitten 1.1"); a draft reads Draft. **Settings ▸ Agents** has a "Kittens" section: the switch `settings-ask-first-kitten` ("Ask before a thread's first kitten", off) and one line of the limits (3 at once in a thread, 8 across Neko, 3 deep, a warm Mac waits).
+- **Overview** lists the kittens as a tree (12 points a level) with the place and the order before the model ("Own copy · neko/4f2a-1-2 · After Kitten 1.1"); a draft reads Draft. **Settings ▸ Kittens** has the switch `settings-ask-first-kitten` ("Ask before a thread's first kitten", off) and one line of the limits (3 at once in a thread, 8 across Neko, 3 deep, a warm Mac waits).
 - **The wake note** (`PartBody::Wake`) stands before the run it started, outside its fold: "Woken by Kitten 1 · done" with a hairline each side, then a closed fold "Report from Kitten 1" (key `wake-report-<seq>`, its button `…-trigger`) holding the summary, the files and the branch.
 - **The waiting line** (`waiting-line`) is the last line of a waiting thread: "Waiting on Kitten 1 and Kitten 2" with each name a link (`waiting-link-<number>`) to that kitten; "Reading the reports" when none is live. The composer of a waiting thread offers Stop, and Stop (or Escape) stops the thread and its kittens.
 - **A kitten opened** has no composer: a quiet line (`subagent-readonly`) "This is Kitten 1's own conversation, to read. Say what you want changed in Fix login.", Back (`subagent-back`, to its thread; to its parent for a deeper one) and, while it works, Stop (`subagent-stop`, "Stop Kitten 1"). Its turns have no head and its requests read "Kitten 1 asks" with no portrait, answered in place. Escape goes back to the thread (it denies a waiting request first) and never stops the kitten.
@@ -223,7 +223,7 @@ one display and after unplugging a second, the Dock menu, Help's search field, o
   `-stop`, `activity-command-N`); the toolbar has the `send-mode` chip and its menu; under the box `reply-hints`. The keyboard stays in the
   box after a send. A message the person steered into a run is stored with no run, at a time the run was going; the conversation
   draws it after that run's block (one run is one block, with one fold and one key), not inside it.
-- **Settings ▸ Agents** has "While the agent works": Return steers (default) or queues.
+- **Settings ▸ General** has "While the agent works": Return steers (default) or queues.
 
 ## The right pane (S3, 2026-11-27)
 
@@ -309,3 +309,41 @@ each frame (it sends the request, never the view), and `Effect::ScrollTo(key)` c
   one; `create_task` is sent with `crew`, which is cleared when the thread opens.
 - Threads lists no Cattain's own thread (`Task::listed`); `a11y.rs` checks the Cattain's row is the chosen one while its thread is open
   and the Cattain is listed.
+
+## Settings (S16, 2026-11-28)
+
+Settings (⌘,, Neko ▸ Settings…) takes the content area: "Settings" is the band's title (level 1, `settings-title`), and under the band
+a list of pages down the left (200 points and its inset, `settings-nav`) with the page beside it, one page at a time, as System Settings
+and well-made Mac apps do. The segmented control is gone.
+
+- **The pages**, in order, in three groups a group gap apart (what Neko does; the work; Neko itself). Each row is a `SidebarItem`
+  (`settings-page-<slug>`, an option in the listbox `settings-page`, "Settings pages": one Tab stop, ↑ ↓ move, Return opens).
+
+  | Page (`slug`) | On it |
+  | --- | --- |
+  | General (`general`) | While the agent works (Steer or Queue first); Threads in the sidebar: Group threads (By project, One list), Show settled threads, Show archived threads (the View menu's choices, kept in step); the auto-settle week said as a fact |
+  | Agents & models (`agents`) | The agent CLIs found, with install and sign-in lines; New threads use; Model (Neko chooses none: the CLI's own applies) |
+  | Permissions (`permissions`) | The three modes, the line on what the person's Claude Code rules allow (in Follow), the full-access warning; Kittens: never more access than their thread (said, not a switch) |
+  | Projects (`projects`) | Each project with its folder and thread count, Rename…, Reveal in Finder or Locate…, Remove…; Add project…; Worktree branches (`neko/…`) |
+  | Cattains (`cattains`) | What a Cattain is and how many of 16 are active; New Cattain…; Agents may make Cattains; each Cattain with Open or Bring back |
+  | Kittens (`kittens`) | What a kitten is; Ask before a thread's first kitten; how many work at once |
+  | Rounds & wakes (`rounds`) | Automatic work: Pause all rounds (the Rounds page's brake); Morning Briefing: what it shows, its switch and time (moved from the old Briefing page) |
+  | Notifications (`notifications`) | As before: the system's permission in words, three switches, Send a test notification |
+  | Plugins (`plugins`) | As before (below) |
+  | Shortcuts (`shortcuts`) | Every key, by where it works, read-only (`settings_view::shortcuts::rows`; Return and ⌥Return follow General's choice) |
+  | Storage (`storage`) | Undo history with Clear undo history… (moved from Workspaces); Worktrees (what is kept and tidied); Archived threads (how many, where to find them) |
+
+- **The page** (`settings-scroll`, `settings-<slug>-page`) starts with its name (level 2, xl, `settings-page-title`); its sections are
+  level 3 and their parts level 4. A page another replaces is gone in that frame (`view::page_swap`). Settings opens on the page it was last
+  on (General the first time), with the search empty.
+- **Search** (`settings-search`, rune-ui's `Input::search`, at the top of the list; ⌘F goes to it) matches every word typed against each
+  page's name and words and each option's name and words (`settings_view::OPTIONS`, and the names of agents, projects, Cattains, plugins
+  and every shortcut). The list keeps only the pages that have a match, each row's second line naming what matched ("Undo history"); the
+  options found are marked on the page (`<key>-found`: the identity colour's quiet tint, spread a few points past the option's edges, so
+  nothing moves). When the page in view is not in the list any more, the page that fits best takes its place (a page's own name or words
+  first, then an option's name, then its other words; the list's order on a tie), so "undo" shows Storage though ⌘Z on Shortcuts also says
+  undo. Return opens the best page. With no match the list says `No results for “…”` (`settings-no-results`) and the page stays. Escape
+  in the field empties it first.
+- **Search (⌘K)** offers each page as an action (`settings-<slug>`, "Settings: Rounds & wakes").
+- **Not yet:** the auto-settle week as a choice, the right pane's default and Open at login need settings the daemon does not keep, so
+  General says the week as a fact and has neither of the others; remapping a key.
