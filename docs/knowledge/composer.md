@@ -58,8 +58,8 @@ report is made when its last run ends.
 ## Interrupt, in detail
 
 `queue::interrupt`: the first interrupt of a run sets `Active.interrupting`, adds an Interrupting row and calls `Control::interrupt`.
-The Claude Code runtime writes the interrupt control request (`claude/mod.rs`) and treats the turn's `result` as the end (it closes
-stdin at once, so the process ends; the result's error text is not a failure). A CLI that does not end the turn within five seconds
+The Claude Code runtime writes the interrupt control request (`claude/mod.rs`) and treats the turn's `result` as the end whatever
+message is still unconsumed (it closes stdin at once, so the process ends; the result's error text is not a failure). A CLI that does not end the turn within five seconds
 (`NEKO_INTERRUPT_GRACE_MS` shortens it) is stopped through the run guard by a small watcher thread; the conversation is resumed all
 the same, because `--resume` needs only the session id. The run ends **Interrupted**: the fold reads "Interrupted after 41s", the run's
 reason says "You interrupted it with a new message", and the new run starts with the words. A Stop pressed meanwhile wins: the run is
@@ -67,7 +67,8 @@ Stopped and the words wait as a queued message.
 
 ## How a steered message is known to be read
 
-The CLI does not say when it reads stdin. Neko watches model calls: `StepBegan` (a top-level `message_start`) and `StepEnded`
+With `--replay-user-messages` the CLI does echo each message when it consumes it, but the row does not use that yet: the echo is
+counted only to end the run (`runtimes.md`). For the row, Neko watches model calls: `StepBegan` (a top-level `message_start`) and `StepEnded`
 (`message_stop`). A steer written while a call goes cannot be in it, so it waits for the next call to begin; one written between calls
 is read by the next. That is a good guess, not a proof: the CLI's `message_start` arrives a moment after the call began, so a steer
 written in that moment can be marked read one call early. The row only says "waiting to be read"; the words are in the transcript
@@ -96,8 +97,11 @@ the run guard ends it with the run. Timers and watches (S13) will list here when
 1. That the `interrupt` control request ends the turn and the process stays resumable (the fake models it: an error result, the
    process then ends when stdin closes). If the real CLI answers differently the watcher stops it after five seconds and the words
    still run, so the worst case is a five second wait.
-2. That a `user` line written mid-turn is read at the next step, and **whether it gets a `result` of its own**. Neko closes stdin
-   when every message sent has a result; if the CLI folds a steered message into the running turn and sends one result, stdin stays
-   open until the stall limit (five minutes of silence) ends the run as failed. The fake gives each message a result. This was already
-   so for a steer before S5 (`runtimes.md`, open question 6), and the app could not steer before S5, so it is now reachable.
+2. ~~Whether a steered `user` line gets a `result` of its own.~~ **Settled on Claude Code 2.1.331: often it does not.** The CLI folds
+   a steer into the turn already running, reads it at its next step and ends with ONE `result` for both. Counting results (the
+   first S5 build closed stdin after one `result` per message) left such a run at "Working" until the five-minute silence limit
+   failed it, although the steer had been obeyed. Neko now passes `--replay-user-messages` and counts the messages the CLI
+   *consumed*: at a `result` the run ends when every message sent has been consumed (or the turn was interrupted); a message still
+   unconsumed gets a turn of its own, so stdin stays open for that turn's `result`. Details and the probe: `runtimes.md`, "When a run
+   ends". The fake folds by default and has `work:SECS:separate` for a CLI that does not.
 3. That a `message_start` follows a step the CLI took after reading a steered message (the "read" guess above).

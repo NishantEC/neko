@@ -83,11 +83,13 @@ The band of a kitten is a row (key `band-title`, its name the whole breadcrumb),
 ## The composer scenarios
 
 Headless, with `NEKO_FAKE_RECORD`; they use the fake CLI's `work` script (`work:SECS:step=MS`: a step per message, a user message that
-arrives is read at the next step, an interrupt ends the turn) and check what reached the CLI by counting lines of the record
+arrives is folded into the running turn and read at the next step, as the real CLI does, so one result ends the run; an interrupt ends the turn) and check what reached the CLI by counting lines of the record
 (`"stdin":{"message"` is a user message; `"subtype":"interrupt"` the interrupt; `resume` a resumed start).
 
 `steer`: Return while the thread works. The row "Steered, waiting to be read: …" has no actions, goes when the next step reads it, the
-agent's words say it read the message, and the record has two user messages and one start (one process took both).
+agent's words say it read the message, and the record has two user messages and one start (one process took both). The fake folds the
+steer into the running turn (one result for both), so the thread must end by itself, shortly after the work, and the record shows the CLI
+was started with `--replay-user-messages`: a run waiting for a second result would sit at Working and fail the scenario's last wait.
 `queue`: ⌥Return twice. Two Queued rows with Send now, Edit and Discard; the record still has only the first words; Discard drops the
 second; when the turn ends the first starts a resumed run ("You said: Second message"), nothing waits, the discarded one never ran
 (two user messages, one resume). `interrupt`: ⌘Return with new words. The CLI's interrupt request is in the record (once), the first

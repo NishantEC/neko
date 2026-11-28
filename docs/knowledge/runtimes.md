@@ -33,7 +33,7 @@ Detection runs `claude --version` and `claude auth status --json`. From the seco
 ## How Claude Code is run
 
 ```text
-claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages
+claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --replay-user-messages
        --permission-prompt-tool stdio [--permission-mode default] [--settings <hook JSON>]
        --mcp-config <Neko's own server and this run's plugins> [--strict-mcp-config] --append-system-prompt <the cat's block and the subagent paragraph> --system-prompt-snapshot off [--resume <session>]
 ```
@@ -72,8 +72,33 @@ claude -p --input-format stream-json --output-format stream-json --verbose --inc
 - Each step Claude Code would ask about arrives as a `can_use_tool` control request and waits for Neko's `control_response`.
 - The `result` line ends a turn: usage, `total_cost_usd`, the model from `modelUsage`, and whether it failed. How full the context
   is comes from the last top-level `assistant` message's `usage` (input, cache read and cache written); the window from
-  `modelUsage[…].contextWindow` when it is there. Once every message sent has its result, Neko closes stdin and the CLI ends.
-- Words sent while a run goes are steered, queued or sent as an interrupt (`composer.md`). A steer is one more `user` line on stdin; an interrupt is `{"type":"control_request","request_id":"neko-interrupt-N","request":{"subtype":"interrupt"}}` (the Agent SDK's form), after which the turn's `result` ends the run and stdin closes; the words start a new run. Neither is measured on the real CLI yet.
+  `modelUsage[…].contextWindow` when it is there. Whether a `result` ends the run is the rule under "When a run ends" below.
+- Words sent while a run goes are steered, queued or sent as an interrupt (`composer.md`). A steer is one more `user` line on stdin; an interrupt is `{"type":"control_request","request_id":"neko-interrupt-N","request":{"subtype":"interrupt"}}` (the Agent SDK's form), after which the turn's `result` ends the run and stdin closes; the words start a new run. The steer is measured on the real CLI (below); the interrupt is not yet.
+- `--replay-user-messages` (valid only with stream-json in and out) makes the CLI echo each `user` line from stdin on stdout when it
+  **consumes** it: `{"type":"user","isReplay":true,"message":{…}}`. The stream mapper turns a top-level echo into `Said::Consumed` and
+  draws nothing (Neko stored the person's words when they were sent). Ordinary `tool_result` `user` lines carry no `isReplay` and
+  work as before.
+
+## When a run ends
+
+A steer written mid-turn may be **folded** into the turn already running (the CLI reads it at its next step and ends with one
+`result` for both messages) or taken in a turn of its own (another `result`). Counting results cannot tell the two apart: waiting for
+a second result that never comes left a run "Working" until the five-minute silence limit failed it. So the session counts `sent`
+(user lines written, counted before the write) and `consumed` (echoes). **At each `result`, stdin closes, and the run ends, when
+`consumed >= sent` or the turn was interrupted; otherwise stdin stays open**, because the CLI will consume the waiting message in a
+turn of its own and send another `result`. An interrupted turn ends the run whatever is unconsumed (the words that interrupted it
+start a run of their own). The rule relies on the echo: a CLI that took a message without echoing it would leave the run to the
+silence limit. The first message's echo comes before its turn's `result`, as in the probe below.
+
+Measured on Claude Code 2.1.331 with `--replay-user-messages`, a steer sent at 4.0 s during a 10 s shell loop:
+
+```text
+[ 1.9] user isReplay=true  'Run this shell command…'        first message consumed
+[ 4.0] sent                'Also: end your final line with the word meow.'
+[13.1] user (no isReplay)  tool_result                       an ordinary tool result
+[13.1] user isReplay=true  'Also: end your final line…'      the steer consumed INSIDE the same turn
+[14.4] result #1           '… meow'                          one result for both
+```
 - A follow-up after a run is a new run with `--resume` and the conversation id the last run reported. So is a wake: a thread that rests
   while its subagents work is resumed with their reports as one user message (`subagents.md`).
 - A `rate_limit_event` becomes `AgentEvent::RateLimit {status, resets_at}`; the daemon holds back what it starts by itself while the
@@ -141,7 +166,7 @@ and its last stderr line when it is plain words), a failure the CLI reported, 30
 
 `crates/neko-core/src/bin/neko-fake-claude.rs` speaks the same protocol from scripts picked by `[fake:NAME]` in the words: plain,
 long, thinking, tools, permission, destructive, outside, slow, spawn, spawn-stay, crash, limit, signin, stall, hook-shell,
-work (`work:SECS[:step=MS][:deaf]`: steps a quarter second apart; a user message that arrives meanwhile is read at the next step and gets its own result; an `interrupt` control request ends the turn at once, `deaf` ignores it), hook-twice, hook-read, hook-destructive, hook-no-verdict, delegate (the lines after it, played through the MCP servers `--mcp-config` named, really started: `mcp SERVER TOOL {json}`, `poll N`, `stay N`; steps may also be one line apart by ` ; `), woken (a message that begins `<neko-wake`), plugin-tool:SERVER:TOOL, real (empty thinking, words between tools, a long path, a check that
+work (`work:SECS[:step=MS][:deaf][:separate]`: steps a quarter second apart; a user message that arrives meanwhile is folded into the running turn, as the real CLI does: read at the next step, echoed with `--replay-user-messages`, one result for both; with `separate` it waits and gets a turn and a result of its own; an `interrupt` control request ends the turn at once, `deaf` ignores it), hook-twice, hook-read, hook-destructive, hook-no-verdict, delegate (the lines after it, played through the MCP servers `--mcp-config` named, really started: `mcp SERVER TOOL {json}`, `poll N`, `stay N`; steps may also be one line apart by ` ; `), woken (a message that begins `<neko-wake`), plugin-tool:SERVER:TOOL, real (empty thinking, words between tools, a long path, a check that
 exits 1), and a resumed conversation. `NEKO_FAKE_RECORD` names a file it appends its arguments, the content of every `--mcp-config` file it was given (read at start, since the file goes with the run) every stdin line and, for `delegate`, every MCP tool call it made (`{"mcp_call": {server, tool, ms, error, text}}`) to. `plugin-tool:SERVER:TOOL` calls `mcp__SERVER__TOOL` through the permission route, or fails at once with "No such tool available" when the config gave no such server. Like Claude Code it reads `permissions.allow` from `$HOME/.claude/settings.json` and runs the `PreToolUse`
 hooks given with `--settings` as the documentation says. Tests give it a HOME of their own. No test runs the real CLI.
 
@@ -173,7 +198,7 @@ fake CLI proves Neko's side only.
 3. Whether a mod or plugin that approves calls (`tool.check`) can approve a call the hook denied in this setup.
 4. `--permission-mode default` is not in 2.1.331's list of choices; it worked, but may be an alias that goes away (`manual`?).
 5. `modelUsage[…].contextWindow` in the `result` line. Without it the ring assumes a 200K window and says so.
-6. Whether a second `user` message while a turn runs gets its own `result` (Neko closes stdin when the counts match). The app can steer since S5, so this matters now: see `composer.md`, "Still not sure".
+6. ~~Whether a second `user` message while a turn runs gets its own `result`.~~ Often not: it is folded into the running turn (2.1.331). Neko counts consumed messages instead of results ("When a run ends").
 7. `--include-partial-messages`: `message_start` ids matching the `assistant` message ids, so words are not shown twice.
 8. `result.usage`: `cache_creation_input_tokens` counted as input.
 9. Usage limit words: `rate_limit_event` with `status: rejected` and `resetsAt`, and the result text.

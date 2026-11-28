@@ -1,7 +1,7 @@
 {
   "name": "steer",
   "title": "Return while the agent works steers it",
-  "about": "A thread works. Words typed and sent with Return reach the running agent at its next step: the row above the composer says Steered until the fake reads them, the agent's words show it read them, and the same single process took both messages (no second run).",
+  "about": "A thread works. Words typed and sent with Return reach the running agent at its next step: the row above the composer says Steered until the fake reads them, the agent's words show it read them, and the same single process took both messages (no second run). The fake folds the steer into the running turn, as the real CLI does, so one result ends the run: the thread must end on its own.",
   "cli": [
     "fake"
   ],
@@ -121,10 +121,16 @@
               "run": "grep -c '\"argv\"' fake-record.jsonl || true",
               "is": "1"
             }
+          },
+          {
+            "sh": {
+              "run": "grep -c 'replay-user-messages' fake-record.jsonl || true",
+              "is": "1"
+            }
           }
         ]
       },
-      "expect": "Both messages reached one CLI process: two user messages, one start"
+      "expect": "Both messages reached one CLI process: two user messages, one start, asked to say which messages it consumes"
     }
   ]
 }
