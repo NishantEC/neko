@@ -1,4 +1,4 @@
-//! Cats (docs/knowledge/cats.md): named agents with a face. Every cat is a Cattain (version 15 of the store): it has its own thread,
+//! Cats (docs/knowledge/cats.md): named agents with a face. Every cat is a Cattain (version 16 of the store): it has its own thread,
 //! its own folder of four files (`cattains.rs`), an optional project, a model and an access mode.
 //!
 //! - A cat has a name (1 to 40 characters, one line, unique among all cats without regard to case), a face from a fixed set, an
