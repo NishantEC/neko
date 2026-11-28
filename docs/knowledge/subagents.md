@@ -172,7 +172,7 @@ copies do. It also keeps every run quick, which matters when one thread starts s
 
 ## What is not here yet
 
-- `wake_me` and watches. Each is a later slice.
+- Timers and watches are a thread's (`waits.md`); a kitten is not offered them.
 - The person answering a kitten directly in its tab (the answer goes through the thread, on purpose: the thread keeps the context).
 - The app does not say that a kitten waits for a cool Mac; a stack whose copy cannot be made says so only as a failed kitten.
 - Keep-alive wakes.

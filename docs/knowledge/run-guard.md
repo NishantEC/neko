@@ -38,6 +38,12 @@ the processes of the daemon's folder before and after a Stop of two working suba
 and the rig's own end check in the four subagent scenarios). Neko's own MCP server (`neko-daemon --mcp`) is a child of the CLI, so it is in
 the CLI's tree and dies with it.
 
+## A watch's checks
+
+A command watch (`waits.md`) runs its check outside any run: `/bin/sh -c` in the thread's folder, in a process group of its own, at most
+one at a time per watch. It is given a minute, then its whole group is ended; when it ends by itself its group is ended too, so nothing it
+started is left. At the daemon's stop every running check's group is ended. A files watch starts no process (FSEvents).
+
 The limits that keep a thread from starting too much: 3 subagents of a thread running, 4 runs across the daemon, 24 unfinished per
 thread, depth 3. The 30 minutes and 5 minutes of silence above apply to each subagent's run on its own.
 

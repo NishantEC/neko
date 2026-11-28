@@ -99,7 +99,9 @@ server"); every other run is not offered them, and Neko refuses them in words if
   its own kittens has not ended its turn. Why 30 s and not a kitten's 2 s: crew threads are whole threads that end minutes apart, and every
   wake is a cold turn on the person's own subscription.
 - **Who hears.** A Cattain hears its crew once its own thread has run (a Cattain nobody has talked to costs nothing) and while it is
-  active. A round's thread does not wake it: a round runs by itself at its times, and S13 decides how rounds speak to their Cattain.
+  active. A round's thread does not wake it: a round runs by itself at its times. A **standing** round of the Cattain's speaks to it
+  directly instead: its words go into the Cattain's own thread at each due time (`rounds.md`). Its own timers and watches wake it too
+  (`waits.md`).
 - **Waiting on its crew.** A Cattain's own thread whose turn ends while a crew thread that tells it is unfinished (queued, working,
   needing the person, waiting on kittens), or while its crew news is pending, is **Waiting**, as a thread waiting on kittens is: no
   process. Its conversation ends on "Waiting on its crew: Fix login and Fix docs" (each a link), its composer says "miso is waiting on its

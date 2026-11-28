@@ -32,7 +32,7 @@ The Needs you list uses the same predicate (`needs::failure_of`), so a thread's 
   often as the words are written to disk (every 3 s).
 - `failure_line`: why the last run failed, while the thread is `Failed`.
 - `thread_status`: **Working** (a run is going, also while it waits on a request), **Waiting** (no run, and the thread waits on its
-  subagents: `subagents.md`), **Failed** (the last run failed and the person has not opened the thread since) or **Idle**. It is
+  subagents, its crew, a timer or a watch: `subagents.md`, `cats.md`, `waits.md`), **Failed** (the last run failed and the person has not opened the thread since) or **Idle**. It is
   `thread::thread_status`, and the task's own `status` is `waiting` then.
 - `needs_you`: a flag beside the status, true for a request, a question, and a failure the person can act on, and (version 13) for a
   request one of the thread's subagents has waiting: the thread's run has ended, so its own status cannot say it.

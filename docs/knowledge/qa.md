@@ -153,6 +153,27 @@ now asks for the overview again at that moment (`App::pane_run_changed`, when a 
 check is the same, only waited for; 14 reruns, 8 of them with the machine loaded, passed. The race was not seen again, so the cause is the
 one described, not one reproduced.
 
+## The timers and watches scenarios (S13)
+
+Headless, the daemon started with `NEKO_DEBUG_CLOCK=1`, `NEKO_FAKE_RECORD` and `NEKO_WAKE_BATCH_MS=300`; the thread is made with the
+`daemon` step and its words call Neko's tools through the fake's `[fake:mcp]` script. Runs are counted with `grep -o '"argv"' | wc -l`
+(two processes can write one line of the record each at nearly the same moment), and the wake run is waited for by its answer ("I read
+1"), not by its note, which appears when the run begins, before its process writes anything.
+
+`timer-wake`: `wake_me` after 2 hours; the row and the waiting line say "Waiting until …", one quiet line with Stop the timer stands above
+the composer; an hour on nothing runs; 121 minutes on the thread is woken once (one `--resume`, one `<neko-wake kind="timer">` with its
+note) and "Woken by its timer" stands before the run. `watch-file`: `watch_files` on `build.log`; a `run` step touches the file in the
+thread's folder (read from the store) after the agent's own run; one wake (`kind="watch"`), "Woken by a change to build.log", and the
+thread rests on the watch again; Stop watching ends it, a second change wakes nothing and the store says `stopped`. `pause-automatic`:
+a timer for 30 minutes on, Pause automatic work on the Rounds page (the band names rounds, timers and watches), the clock past it: no run,
+the store has it `skipped` with `wait_skipped`, the thread says "Not woken at …: automatic work was paused.", and resuming starts nothing.
+`round-standing`: the New round panel starts with No Cattain; choosing miso offers Post in miso's own thread, which hides the project; the
+card says "miso · in its own thread"; Run now and Open miso's thread show the words "From the round Morning check" and miso's run reading
+them in a `<neko-wake kind="round">`; no thread of the round's own is made.
+
+Changed to the new truth: `rounds-due` and the other round scenarios choose mochi in the cat picker as before (the panel now starts on No
+Cattain, which they never relied on).
+
 ## How it drives and records
 
 - **Headless (default).** `apps/neko/examples/neko-qa.rs` builds the real app (`neko_app::app()`: its view, state, keys, `poll`

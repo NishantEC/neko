@@ -1,7 +1,9 @@
 # Rounds (2026-11-27)
 
-A round is a cat's standing work that starts by itself: "every weekday at 09:00, mochi checks the docs for broken links in
-acme-api". The daemon keeps the rounds and runs them; the app lists and changes them. Protocol 9, store 7.
+A round is work that starts by itself at its times: "every weekday at 09:00, check the docs for broken links in acme-api". It belongs
+to a Cattain (mochi's) or to nobody, and a Cattain's may be **standing**: its words go to the Cattain's own thread as a message instead
+of starting a thread. The daemon keeps the rounds and runs them; the app lists and changes them. Protocol 9, store 7; owners and standing
+rounds protocol 25, store 20.
 
 Code: `neko-protocol/src/schedule.rs` (the arithmetic, shared with the app so the panel can say when the first run will be),
 `neko-protocol/src/rounds.rs` (the shapes), `neko-core/src/rounds.rs` (rows and logic, no clock), `neko-daemon/src/rounds.rs`
@@ -10,7 +12,8 @@ Code: `neko-protocol/src/schedule.rs` (the arithmetic, shared with the app so th
 ## The model
 
 A round has an id (`round_…`), a name (one line, 1 to 60 characters; the title of every task it makes), the words (what to do),
-a cat, a workspace (General when none), a schedule, an on/off switch, and created and changed times. The daemon sends each round
+a Cattain or none (`cat`; a round of nobody's makes threads with no cat, as a thread the person starts has none), `standing` (only with a
+Cattain), a workspace (General when none), a schedule, an on/off switch, and created and changed times. The daemon sends each round
 with its **status**, its **next due time**, a **note** (a line about the round itself) and its **last** history line. At most 64
 rounds.
 
@@ -43,6 +46,18 @@ the system zone against real tzdata for New York and Kolkata.
 - So a daily round runs exactly once on every date it is due. "Every N hours" is elapsed time and is not moved by a change.
 - Month and year ends, leap days and weekdays are plain civil-date arithmetic (tested across 2026-11-30, 2027-01-01, 2028-02-29).
 
+## A standing round
+
+A standing round of miso's does not make a thread. At each due time its words go to miso's own thread (made then if miso was never
+opened) as a wake (`kind = round` in `wakes`, written in the same transaction as the history line), which the subagent hub delivers as it
+delivers any wake: at rest, a resumed run of miso's thread with `<neko-wake kind="round" round="Morning check" due="…">` and the words,
+then the line that this is its standing round, written by the person; while miso works, steered in. The conversation shows the words in
+the person's well, "From the round Morning check" (`PartBody::EventWake`, `event: round`), never as the person's own message. Why: a
+Cattain keeps its own context and notes, so a recurring check of its belongs in its own conversation, as Capy's single-thread
+automations do. The history line's task is miso's thread; it ends when the message was read and the run that read it ended (`discarded`
+reads as stopped). Overlap: while the last message is still unread the time is skipped ("The last message has not been read yet."). A
+missing project folder does not stop it (miso's thread has its own folder); a retired Cattain does. Run now posts at once.
+
 ## What a run is
 
 Each due time makes an **ordinary task**: the round's words, titled with the round's name, for the round's cat in the round's
@@ -63,6 +78,8 @@ a round are the person's words, written by them.
 
 One thread, `neko-rounds`. It deals with every due time up to now, then sleeps.
 
+- **Timers and watches** (`waits.md`) are dealt with on the same pass, with the same clock and the same 5-minute cap; the soonest of
+  a round, a timer, a watch's end or a check sets the sleep. FSEvents unparks the thread when a watched file changes.
 - **No timer when no round is on.** With no round that is on and automatic (a paused round still counts: its time passes as a
   skipped line) the thread parks with no timeout. Measured as `tests/measure.rs` measures the folder watcher
   (`idle_with_rounds_on_and_off`): 2 ms of CPU in 30 seconds with no round, and the same with one round on (due in a day) and one off.
@@ -102,8 +119,9 @@ is skipped and recorded: "The last run is still working." or "The last run is wa
   row.") and the round's note say so. Turning it on clears the brake and counts from then.
 - **A missing folder, a removed workspace, a retired cat:** the time is skipped with the reason ("The folder of acme-api was not
   found.", "mochi is retired.", "acme-api was removed from Neko."). The round says so (`status`, `note`).
-- **Pause all** (`set_rounds_paused`): one switch in the store (`settings.rounds_paused`); it survives a restart. While paused each
-  time that passes is a skipped line ("Every round was paused."); nothing is caught up after.
+- **Pause automatic work** (`set_rounds_paused`; it was "Pause all rounds"): one switch in the store (`settings.rounds_paused`); it
+  survives a restart. It now holds timers and watches too (`waits.md`). While paused each time that passes is a skipped line ("Every
+  round was paused."); nothing is caught up after.
 - **Run now** works whatever the switch, the pause or the schedule say, and is refused (`busy`) while the last task is unfinished
   and (`refused`) for a retired cat or a missing folder.
 - **A manual round** is always on: making or editing a round to manual turns it on, and the brake counts only rounds that start by themselves.
@@ -119,11 +137,13 @@ Per round the last 50 lines (`round_runs`), newest first: due time (None for Run
 
 Results read as short plain phrases, never a sentence inside a sentence: "Last: done, today at 09:00", "Last: skipped today at 13:45, the last run is still working", "Last: could not finish, today at 09:00", "Last: missed today at 09:00, Neko was not running, or this Mac was asleep" (`rounds::last_words`, tested for every outcome). The band's step chip and the run's fold both count a run's tool calls (`turn::step_count`).
 
-The Rounds page (⌘3, View ▸ Rounds, the sidebar row under Needs you): a card per round led by its cat's portrait: name, "mochi ·
-Weekdays at 09:00", "Next: tomorrow 09:00" or why not ("Paused", "Off", "mochi is retired", "Folder missing"), "Last: Done · today
-at 09:00" with Open task, a switch, Run now and a menu (Edit…, Remove…), and a History fold. Pause all rounds / Resume rounds, and a
-paused band. The empty state explains rounds and offers New round…. New round… and Edit are one panel: name, what to do, cat and
-workspace chips (as the composer's), the schedule kind, the days and time or the hours, and one line saying when the first run will
+The Rounds page (⌘3, View ▸ Rounds, the sidebar row under Needs you): a card per round led by its Cattain's face, or by the Rounds mark
+in the same room for a round of nobody's: name, "mochi · Weekdays at 09:00" ("miso · in its own thread · Every day at 08:30" for a
+standing one, the schedule alone for nobody's), "Next: tomorrow 09:00" or why not ("Paused", "Off", "mochi is retired", "Folder missing"), "Last: Done · today
+at 09:00" with Open task, a switch, Run now and a menu (Edit…, Remove…), and a History fold. Pause automatic work / Resume automatic work, and a paused band ("Automatic work is paused. No round starts, and no timer or watch
+wakes a thread, until you resume."). The empty state explains rounds and offers New round…. New round… and Edit are one panel: name, what to do, a Cattain chip (No Cattain first, the
+default from the page; a Cattain's Overview starts it on that Cattain) and, with a Cattain, the switch "Post in miso's own thread" (which
+hides the project chip), a project chip, the schedule kind, the days and time or the hours, and one line saying when the first run will
 be before saving. A Cattain's Overview lists its rounds with their next time and New round… (`cats.md`). A task a round made says so in a strip above its
 conversation ("From the round Docs check, due 09:00", with Open round); its sidebar row has a small round mark.
 

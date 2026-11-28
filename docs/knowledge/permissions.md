@@ -79,6 +79,11 @@ the hook says nothing). What a subagent then does is asked about like anything e
 (`message_subagent`, `subagents.md` "Questions go up") is words, not a decision: it approves no step, and no tool of the agent's answers a
 request.
 
+One is not internal: `watch_command` (`waits.md`) runs a command later, unattended, again and again, so `stream::action` makes it
+`Action::Watch` and the policy asks as for a command ("Run a check again and again", the exact command; "Always" scoped to `watch:<program>`,
+apart from Bash's `command:<program>`). Full access lets it go ahead. Under "Follow Claude Code's own rules" the real CLI allows Neko's
+tools up front (`--allowedTools mcp__neko__*`), so it is not asked there.
+
 A **subagent never has more permission than its thread**: the mode is the one setting every run reads. Its "Always allow" answers are
 scoped to its own task, so they start empty. Its requests are stored under its own task, answered in its view or in Needs you ("Subagent
 1 asks", under its thread's title), and a stop of the thread expires them.

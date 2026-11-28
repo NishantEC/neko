@@ -66,6 +66,19 @@ list, `for_next_run` starts the run itself; the same goes for ⌥Return sent as 
 through the run guard ten seconds after its result (the run is done), so the words never wait longer than that. If the run that
 was ending turns out to have failed, the message is held for the person like any queued message (Send now starts it).
 
+## Where steered words stand in the conversation
+
+The words are stored when they are sent, but the agent reads them at its next step, so whatever it said in the rest of the step it was
+taking stood before them and its answer to them seemed to come first. Now, when the next model call begins (`step_began`, the same moment
+the "Steered" row goes), the daemon moves the person's part to the end of the transcript (`Store::move_part_to_end`: a new `seq` and
+time, the event `part_moved`) and every screen hears `part_changed`; the app's book re-sorts a part whose `seq` changed.
+
+The app draws them inside their run, at that point: the run's turn is cut there into pieces, the person's well between them. While it
+works, the live steps and the live line follow the words. Once it ends, the run keeps its **one** "Worked for" fold, in the first piece;
+words read during the folded work stand after the fold, before the answer they led to; words read inside the answer cut the answer there.
+Steered words that came before the run said anything stand before its turn. The scenes `steered-done` and `steered-working`,
+`apps/neko/tests/waits.rs` and `crates/neko-daemon/tests/composer.rs` check it.
+
 ## Interrupt, in detail
 
 `queue::interrupt`: the first interrupt of a run sets `Active.interrupting`, adds an Interrupting row and calls `Control::interrupt`.
@@ -95,7 +108,11 @@ opens its tab in the right pane. The pane's Overview keeps the detail (titles, s
 to stop, and is not shown for a run that only works, since the conversation already says so.
 
 Not seen by Neko: a command the agent started in the background and left (`&`, a background shell). The CLI does not report it, and
-the run guard ends it with the run. Timers and watches (S13) will list here when they exist.
+the run guard ends it with the run.
+
+**Timers and watches** (`waits.md`) list here too. A thread that rests on them alone shows them as quiet lines, one each, with nothing to
+fold ("Until 18:00 · its note", "Watching build/deploy.log", "Checking gh pr checks 12 · every 5 minutes"), each with its × (Stop the
+timer, Stop watching). Beside kittens or a long command they join the summary ("1 kitten working · until 18:00") and its open list.
 
 ## Writing to a kitten (`message_subagent`)
 

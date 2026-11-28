@@ -64,7 +64,8 @@ ships in `NOTICE` and `THIRD_PARTY_LICENSES/`.
 - [The composer while the agent works](docs/knowledge/composer.md) — Return steers, ⌥Return queues, ⌘Return interrupts; the messages that wait above the composer; when a queued message is sent; the activity bar; what only the real CLI can prove.
 - [The Briefing](docs/knowledge/briefing.md) — what happened while the person was away, built from records with no model: the window, the sections, the Cattains' digests, the morning notification and its limits, what is not here yet.
 - [Workspaces](docs/knowledge/workspaces.md) — folders the person added, General, removing, a missing folder, the tidy rule, Remove task.
-- [Rounds](docs/knowledge/rounds.md) — a cat's work that starts by itself: schedules and daylight saving, missed times, overlap, the brakes, the scheduler, the test clock.
+- [Rounds](docs/knowledge/rounds.md) — work that starts by itself, a Cattain's or nobody's, standing rounds in a Cattain's thread: schedules and daylight saving, missed times, overlap, the brakes (Pause automatic work), the scheduler, the test clock.
+- [Timers and watches](docs/knowledge/waits.md) — `wake_me`, `watch_files`, `watch_command`: a thread rests as Waiting and is woken with `--resume`; the limits, FSEvents, checks, Stop watching, pausing.
 - [Plugins](docs/knowledge/plugins.md) — MCP servers as plugins: the manifest, pasting what people have, approval by digest, secrets in the Keychain, what a run is handed, the check, what is not here yet.
 - [0002: Plugins start with MCP](docs/decisions/0002-plugins-start-with-mcp.md) — why MCP first, why the person approves digests, why no plugin is bundled.
 - [Search](docs/knowledge/search.md) — ⌘K: threads by title and by what was said (FTS5), kittens, Cattains, projects, actions; filters, keys, the speed, the limits.
