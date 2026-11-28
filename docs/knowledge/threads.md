@@ -125,12 +125,12 @@ What the person sees (`sidebar.rs`, `shelf.rs`):
   its fold.
 - **Archived threads** are in no list. Until Search (S9) finds them, View ▸ Show archived adds an **Archived** fold at the end of Threads,
   with the threads as rows naming their projects. This is the one thing the spec did not ask for.
-- **The row's menu** (the three dots under the pointer): Pin to top or Unpin, Settle (off while the thread works) or Bring back, Mark as
+- **The row's menu** (the three dots under the pointer; it shows no key hints, see below): Pin to top or Unpin, Settle (off while the thread works) or Bring back, Mark as
   unread or read, Archive or Restore, Remove thread…. The band's menu has Pin, Settle, Archive, then All changes and Remove thread….
 - **Keys:** ⌘⇧P and ⌘⇧S pin and settle **the thread in view** (whatever has focus: when a row leaves the list the focus moves, and the
   key must not act on a row the person did not choose); ⌥1 to ⌥9 open the nth thread of the sidebar in the order it is drawn (Pinned,
   then each open group, its rows and then its settled ones when that fold is open); ⌘⌥↑ and ⌘⌥↓ step to the thread before and after,
-  wrapping. A bare `a` for Archive was left out for the reason `u` was: the list jumps to a typed name.
+  wrapping. The menus do not print the keys beside Pin and Settle: rune-ui's menu row sets its shortcut text in Inter, which the font rule (`tests/structure.rs`) refuses, so this is an upstream ask (`rune-ui-in-neko.md`); the keys are in this page and in app-shell.md. A bare `a` for Archive was left out for the reason `u` was: the list jumps to a typed name.
 - **Toasts** (rune-ui's Toast, bottom centre, polite): Settled, Archived and Unpinned each say what happened, name the thread and offer
   Undo for 5 seconds; the timer holds while the pointer is over the toast. ⌘Z takes back the newest toast that has an Undo (the toast goes
   with it). Pinning shows no toast (the row jumps to Pinned: that is the news). A refusal shows a warning toast with the daemon's words

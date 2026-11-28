@@ -274,18 +274,18 @@ fn thread_menu(s: &App, t: &Theme, task: &Task, layer: &mut Vec<El>) -> El {
     menu_named(menu, t, layer, &name, open)
 }
 
-/// One of Pin, Settle and Archive as a menu item: it says which way it goes, shows its key, and is off while the thread cannot be
+/// One of Pin, Settle and Archive as a menu item: it says which way it goes and is off while the thread cannot be
 /// settled or archived (it works).
 pub fn shelf_item(s: &App, task: &Task, shelf: Shelf, id: neko_protocol::TaskId) -> DropdownMenuItem<App> {
     match shelf {
         Shelf::Pin => {
             let on = task.pinned;
-            DropdownMenuItem::new(if on { "Unpin" } else { "Pin to top" }).shortcut("⌘⇧P").on_select(move |s: &mut App| s.pin_thread(&id, !on))
+            DropdownMenuItem::new(if on { "Unpin" } else { "Pin to top" }).on_select(move |s: &mut App| s.pin_thread(&id, !on))
         }
         Shelf::Settle => {
             let on = task.settled;
             let item = DropdownMenuItem::new(if on { "Bring back" } else { "Settle" }).on_select(move |s: &mut App| s.settle_thread(&id, !on));
-            if on { item } else { item.shortcut("⌘⇧S").disabled(!s.can_shelve(&task.id, Shelf::Settle)) }
+            if on { item } else { item.disabled(!s.can_shelve(&task.id, Shelf::Settle)) }
         }
         Shelf::Archive => {
             let on = task.archived;

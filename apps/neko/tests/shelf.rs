@@ -153,7 +153,7 @@ fn a_thread_that_is_pinned_and_archived_is_in_neither_place() {
 fn the_row_menu_offers_pin_settle_and_archive_and_says_which_way() {
     let rt = runtime((1200.0, 800.0), false, scene("threads-pinned-menu"));
     let t = texts(&rt);
-    for want in ["Unpin", "Settle", "Archive", "Mark as read", "⌘⇧P", "⌘⇧S"] {
+    for want in ["Unpin", "Settle", "Archive", "Mark as read"] {
         assert!(t.iter().any(|x| x == want), "{want} in {t:?}");
     }
     let rt = runtime((1200.0, 800.0), false, scene("threads-row-menu"));

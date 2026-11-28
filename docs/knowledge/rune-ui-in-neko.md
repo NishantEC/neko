@@ -97,6 +97,11 @@ only (tested by reading `lib.rs`).
   cross-fading on its own (the pane wraps the body in `view::page_swap`).
 - Split: a collapsed region with no handle at all (Neko builds the Split only while the pane is open).
 
+## Upstream asks from S8
+
+- A menu row's `shortcut` should be drawn with `Kbd` (icons for ⌘ ⌥ ⇧, the theme's face): today it is text in Inter, so Neko's font rule
+  refuses it and the Pin and Settle rows show no key hint. Until then the keys are in `threads.md`.
+
 ## What rune-ui cannot do here (for upstream)
 
 Neko tried each of these on 0.10.0 and kept its own, because the render got worse. Each says what would let it go. 0.11.0 answers the
