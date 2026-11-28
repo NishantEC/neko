@@ -72,11 +72,11 @@ pub fn send(shared: &Arc<Shared>, task: Task, words: String, mode: SendMode) -> 
             Ok(()) => Reply::Ok,
             Err(r) => r,
         },
-        (Some(_), SendMode::Queue) => match add(shared, &task.id, &words, QueuedKind::Queued) {
-            Some(_) => Reply::Ok,
-            None => Reply::error(ErrorCode::Refused, FULL),
-        },
+        (Some(_), SendMode::Queue) => for_next_run(shared, &task.id, &words),
         (Some(None), _) => Reply::error(ErrorCode::Busy, "Neko is still starting this thread's agent."),
+        // The agent's turn is over and its input closed; the run is only ending. Nothing can reach it now, so the words wait for the
+        // next run, which starts as soon as this one is released.
+        (Some(Some(c)), _) if !c.takes_words() => for_next_run(shared, &task.id, &words),
         (Some(Some(c)), SendMode::Steer) => steer(shared, &task.id, &c, &words),
         (Some(Some(c)), SendMode::Interrupt) => interrupt(shared, &task.id, &c, &words),
     }
@@ -86,6 +86,10 @@ pub fn send(shared: &Arc<Shared>, task: Task, words: String, mode: SendMode) -> 
 /// step reads them (`step_began`).
 fn steer(shared: &Arc<Shared>, task: &TaskId, c: &Arc<dyn Control>, words: &str) -> Reply {
     if let Err(e) = c.steer(words) {
+        // Its input closed between the look and the write (the turn's last `result` came): the words wait for the next run.
+        if !c.takes_words() {
+            return for_next_run(shared, task, words);
+        }
         return Reply::error(ErrorCode::Busy, e.0);
     }
     person(shared, task, words);
@@ -95,6 +99,21 @@ fn steer(shared: &Arc<Shared>, task: &TaskId, c: &Arc<dyn Control>, words: &str)
             let armed = !a.open_step;
             a.steers.push((q.id, armed));
         }
+    }
+    Reply::Ok
+}
+
+/// Holds the words as a queued message for the next run (docs/knowledge/composer.md). When the run is released before it looked at
+/// the list (`after_run` already found it empty), nothing else would start them, so they start a run now.
+fn for_next_run(shared: &Arc<Shared>, task: &TaskId, words: &str) -> Reply {
+    let Some(q) = add(shared, task, words, QueuedKind::Queued) else { return Reply::error(ErrorCode::Refused, FULL) };
+    if lock(&shared.runs.active).contains_key(task) {
+        return Reply::Ok;
+    }
+    let Some(t) = lock(&shared.core).store.get_task(task).ok().flatten() else { return Reply::Ok };
+    // Refused only because a run started meanwhile (`after_run`, or another screen): it, or the next end, takes the message.
+    if runs::start(shared, t, Some(q.words.clone())).is_ok() {
+        remove(shared, task, &q.id, "sent");
     }
     Reply::Ok
 }
