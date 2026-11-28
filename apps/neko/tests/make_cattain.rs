@@ -92,7 +92,7 @@ fn a_cattain_made_by_asking_shows_its_note_and_toast_opens_on_who_it_is_and_undo
     // Open: yuzu's own thread, on who it is.
     let open = rt.elements().into_iter().find(|e| e.key.as_deref().is_some_and(|k| k.starts_with("cattain-made-") && k.ends_with("-open"))).unwrap().key.unwrap();
     click(&mut rt, &open);
-    until(&mut rt, "yuzu's own thread, on who it is", |rt| rt.state.open_cattain_cat().is_some_and(|c| c.name == "yuzu") && has_key(rt, |k| k == "cattain-intro") && has_key(rt, |k| k == "cattain-intro-purpose"));
+    until(&mut rt, "yuzu's own thread, on who it is", |rt| rt.state.open_cattain_cat().is_some_and(|c| c.name == "yuzu") && has_key(rt, |k| k == "cattain-intro") && rt.elements().iter().any(|e| e.key.as_deref() == Some("band-purpose") && e.text.as_deref() == Some("iOS work")));
 
     // Settings ▸ Cattains lists it, says where it was made, and has the switch.
     rt.update(|s, _| {

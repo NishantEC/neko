@@ -1,7 +1,7 @@
 {
   "name": "make-cattain",
   "title": "A thread's agent makes a Cattain by asking",
-  "about": "The person asks a thread for a Cattain for the iOS work. The fake CLI lists the Cattains and calls make_cattain through Neko's own MCP server. The thread shows the note \"Made a Cattain: yuzu · iOS work\" with Open, and the toast \"Made yuzu\" with Undo. The record has the tool's answer naming yuzu; RULES.md is seeded in yuzu's folder. Open takes the person to yuzu's own thread, which opens on who it is (its face, its name, its purpose). Settings ▸ Cattains lists yuzu, says the thread it was made in, and has \"Agents may make Cattains\".",
+  "about": "The person asks a thread for a Cattain for the iOS work. The fake CLI lists the Cattains and calls make_cattain through Neko's own MCP server. The thread shows the note \"Made a Cattain: yuzu · iOS work\" with Open, and the toast \"Made yuzu\" with Undo. The record has the tool's answer naming yuzu; RULES.md is seeded in yuzu's folder. Open takes the person to yuzu's own thread, which opens on who it is (its face and name, its purpose in the band). Settings ▸ Cattains lists yuzu, says the thread it was made in, and has \"Agents may make Cattains\".",
   "cli": [
     "fake"
   ],
@@ -111,7 +111,7 @@
           },
           {
             "see": {
-              "key": "cattain-intro-purpose",
+              "key": "band-purpose",
               "text": "iOS work"
             }
           }

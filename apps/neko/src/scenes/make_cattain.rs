@@ -8,7 +8,7 @@ use neko_protocol::{Cat, PartBody, RunStatus, Task, TaskId, TaskStatus, ToolStat
 use super::{Script, run, start, task, with_workspaces, ws};
 use crate::state::{App, Book};
 
-const ASKED: &str = "Make a Cattain for the iOS work in acme-ios. It should own the TestFlight builds and the App Store notes.";
+const ASKED: &str = "Make a Cattain for the iOS work in acme-ios. It should own the beta builds and the release notes.";
 
 fn ios(s: &mut App) {
     with_workspaces(s);
@@ -54,9 +54,9 @@ fn made(s: &mut App) -> TaskId {
     let at = start(s) + 41 * 60_000;
     let mut sc = Script::new(&t, "run_made", at);
     sc.tool("mcp__neko__list_cattains", "", "{}", HOUSE, ToolState::Done, 1);
-    sc.tool("mcp__neko__make_cattain", "iOS work", "{\n  \"purpose\": \"iOS work\",\n  \"project\": \"acme-ios\",\n  \"rules\": \"Own the TestFlight builds and the App Store notes.\"\n}", MADE, ToolState::Done, 1);
+    sc.tool("mcp__neko__make_cattain", "iOS work", "{\n  \"purpose\": \"iOS work\",\n  \"project\": \"acme-ios\",\n  \"rules\": \"Own the beta builds and the release notes.\"\n}", MADE, ToolState::Done, 1);
     sc.part(PartBody::CattainMade { cat: "cat_yuzu".into(), name: "yuzu".into(), purpose: Some("iOS work".into()) }, 0, true);
-    sc.say("I made **yuzu**, a Cattain for the iOS work in acme-ios. Its rules say it owns the TestFlight builds and the App Store notes.\n\nWrite to yuzu in its own thread to give it work; until then it does nothing. You can change its rules in its Files tab.", true);
+    sc.say("I made **yuzu**, a Cattain for the iOS work in acme-ios. Its rules say it owns the beta builds and the release notes.\n\nWrite to yuzu in its own thread to give it work; until then it does nothing. You can change its rules in its Files tab.", true);
     let mut r = run("run_made", &t, RunStatus::Done, at, 9);
     r.changes = None;
     r.branch = None;
@@ -88,7 +88,7 @@ pub fn first_thread(s: &mut App) {
         t.workspace = "ws_ios".into();
     }
     s.books.insert(own.clone(), Book { loaded: true, ..Book::default() });
-    let rules = "Own the TestFlight builds and the App Store notes.\n";
+    let rules = "Own the beta builds and the release notes.\n";
     for &name in cats::FILES {
         let text = if name == cats::RULES { rules } else { "" };
         let f = CattainFile { cat: "cat_yuzu".into(), name: name.into(), text: text.into(), cut: false, previous: false, changed_ms: (name == cats::RULES).then_some(s.now_ms - 60_000), path: format!("/Users/example/Library/Application Support/neko/cattains/cat_yuzu/{name}"), editable: cats::editable(name) };

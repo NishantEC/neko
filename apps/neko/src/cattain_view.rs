@@ -71,14 +71,11 @@ pub fn turn_header(t: &Theme, key: &str, c: &Cat) -> El {
         .child(text(c.name.clone()).font(weight(t.ty.sm, t.ty.semibold)).color(t.ink()).a11y_hidden())
 }
 
-/// A Cattain's thread before anyone has written in it: who it is (its face, its name, what it is for), and where its files are.
+/// A Cattain's thread before anyone has written in it: who it is, and where its files are.
 pub fn intro(t: &Theme, c: &Cat) -> El {
-    let mut who = col().items_center().gap(t.space.at(1.5)).child(crate::faces::portrait(t, "cattain-intro-face", &c.face, 72.0)).child(
+    let who = col().items_center().gap(t.space.at(1.5)).child(crate::faces::portrait(t, "cattain-intro-face", &c.face, 72.0)).child(
         text(c.name.clone()).key("cattain-intro-name").role("heading").level(2).font(weight(t.ty.xl, t.ty.semibold)).color(t.ink()),
     );
-    if let Some(p) = c.purpose.as_ref().filter(|p| !p.is_empty()) {
-        who = who.child(text(p.clone()).key("cattain-intro-purpose").font(t.ty.base).color(t.ink_muted()).wrap().max_w(440.0).align(rune::Align::Center));
-    }
     let words = format!("Write to {} here. It reads its rules, notes and digest at the start of every turn, and keeps them in its own folder.", c.name);
     let who = who.child(text(words).key("cattain-intro-line").font(t.ty.sm).color(t.ink_faint()).wrap().max_w(440.0).align(rune::Align::Center).pt(t.space.at(2.0)));
     row().key("cattain-intro").role("note").label(format!("{}'s thread", c.name)).w_full().justify_center().pt(t.space.at(12.0)).pb(t.space.at(6.0)).child(who)
