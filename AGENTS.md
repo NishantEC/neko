@@ -14,8 +14,11 @@ bottom; keep this file small.
 
 ## Other people's work
 
-Read others' code for ideas and write every line fresh. Dependencies are MIT, Apache-2.0 or OFL only; nothing GPL. Record what
-ships in `NOTICE` and `THIRD_PARTY_LICENSES/`.
+Code, prompts, text and assets from projects under **MIT or Apache-2.0** may be copied or adapted (the owner's decision,
+2026-11-28), as long as their terms are kept: the licence text goes in `THIRD_PARTY_LICENSES/`, the project and what was taken go in
+`NOTICE`, a copied or adapted file keeps the original copyright line and says it was changed, and an Apache-2.0 project's own
+`NOTICE` is carried over. Nothing GPL, LGPL, AGPL, MPL, CC-BY-SA or unlicensed, and nothing from closed products (their
+behaviour may inspire, never their code, text or art). Dependencies are MIT, Apache-2.0 or OFL only.
 
 ## How work is done
 
