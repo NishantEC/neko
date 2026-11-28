@@ -87,7 +87,7 @@ fn more_than_two_queued_fold_behind_a_count_and_open_on_demand() {
 #[test]
 fn the_activity_bar_is_one_line_that_opens_to_each_kitten_with_its_own_stop() {
     let mut rt = runtime((1200.0, 800.0), false, scene("activity-collapsed"));
-    assert_eq!(str_of(&node(&rt, "activity-bar"), "name"), "Running: 2 kittens working");
+    assert_eq!(str_of(&node(&rt, "activity-bar"), "name"), "Running: 1 kitten working, 1 waiting its turn", "one works and one waits its turn: the bar does not call both working");
     assert!(!has_key(&rt, "activity-list"));
     click(&mut rt, "activity-bar");
     settle(&mut rt);
