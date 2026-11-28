@@ -360,7 +360,9 @@ fn kitten_body(s: &App, t: &Theme, kitten: &TaskId, layer: &mut Vec<El>) -> El {
     // A finished kitten's report comes first: its final words, in the second ink. They are said once: the conversation below leaves
     // them out (its last words are the report, never a second copy).
     let book = s.books.get(kitten);
-    let report = if live { None } else { book.and_then(|b| b.parts.iter().rev().find(|p| matches!(&p.body, neko_protocol::PartBody::Agent { text, .. } if !text.trim().is_empty()))) };
+    // One waiting on an answer has no report yet: its question ends its conversation instead.
+    let asking = task.subagent.as_ref().is_some_and(|o| o.question.is_some());
+    let report = if live || asking { None } else { book.and_then(|b| b.parts.iter().rev().find(|p| matches!(&p.body, neko_protocol::PartBody::Agent { text, .. } if !text.trim().is_empty()))) };
     if let Some(p) = report
         && let neko_protocol::PartBody::Agent { text: words, .. } = &p.body
     {

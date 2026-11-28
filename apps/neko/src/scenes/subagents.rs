@@ -438,3 +438,211 @@ pub fn pane_kittens_deep(s: &mut App) {
     }
     open_pane(s, &th, crate::pane::Tab::Overview);
 }
+
+// ---- Questions go up (S7) ------------------------------------------------------------------------------------------------------------
+
+const DB_Q: &str = "Which database should the migration target: SQLite or Postgres? The project has drivers for both.";
+
+/// `t` waits on its answer to `text`, with `with`.
+fn asking(mut t: Task, text: &str, chain: &[&str], with: neko_protocol::QuestionWith) -> Task {
+    t.status = TaskStatus::Asked;
+    if let Some(o) = &mut t.subagent {
+        o.question = Some(neko_protocol::KittenQuestion { text: text.into(), chain: chain.iter().map(|c| (*c).to_owned()).collect(), with });
+    }
+    t
+}
+
+/// The thread's first turn for the migration: it reads the schema and starts two kittens, then rests.
+fn migration_turn(sc: &mut Script, subs: &[&Task]) {
+    sc.tool("Read", "migrations/", "{\n  \"file_path\": \"migrations/\"\n}", "0001_users.sql\n0002_sessions.sql", ToolState::Done, 1);
+    sc.say("The sign-in needs the sessions table moved. One kitten writes the migration in a copy of its own; another counts the rows that would move.", true);
+    start_tool(sc, "1", "Write the migration", 1);
+    card(sc, subs[0], "1");
+    start_tool(sc, "2", "Count the sessions", 1);
+    card(sc, subs[1], "2");
+    sc.say("Both are started. I will pick this up when they report.", true);
+}
+
+/// A kitten's own run that ended on its question to the agent (`ask_parent`).
+fn asked_work(sc: &mut Script) {
+    sc.tool("Read", "src/db.rs", "{\n  \"file_path\": \"src/db.rs\"\n}", "pub enum Driver { Sqlite, Postgres }", ToolState::Done, 2);
+    let input = format!("{{\n  \"question\": \"{DB_Q}\"\n}}");
+    sc.tool("mcp__neko__ask_parent", "", &input, "Your question is with the agent that started you. End your turn now: Neko resumes you with the answer as your next message.", ToolState::Done, 1);
+    sc.say("I asked which database the migration should target, and stopped there rather than guess.", true);
+}
+
+fn question_wake(sc: &mut Script) {
+    sc.part(
+        PartBody::Wake { number: "1".into(), title: "Write the migration".into(), status: "asked".into(), summary: "I asked which database the migration should target, and stopped there rather than guess.".into(), files: Vec::new(), branch: None, question: Some(DB_Q.into()) },
+        0,
+        true,
+    );
+}
+
+fn migration_kittens(th: &Task, one: TaskStatus) -> (Task, Task) {
+    let a = in_copy(sub(1, th, "1", "Write the migration", "Write the migration that moves sessions to their own table.", one, 9), "neko/4f2a-1");
+    let b = sub(2, th, "2", "Count the sessions", "Count the session rows the migration would move.", TaskStatus::Working, 9);
+    (a, b)
+}
+
+/// Kitten 1 asked the agent: its card says so, while Kitten 2 works on. The thread is woken by it in a moment.
+pub fn question_card(s: &mut App) {
+    let th = thread(TaskStatus::Waiting);
+    let (a, b) = migration_kittens(&th, TaskStatus::Asked);
+    let a = asking(a, DB_Q, &[], neko_protocol::QuestionWith::Parent);
+    stage(s, th.clone(), vec![a.clone(), b.clone()]);
+    let mut sc = Script::new(&th, "run_1", start(s));
+    migration_turn(&mut sc, &[&a, &b]);
+    let mut r = run("run_1", &th, RunStatus::Done, start(s), 31);
+    r.changes = None;
+    open_thread(s, &th, vec![r], vec![sc]);
+    sub_book(s, &a, RunStatus::Done, asked_work);
+    sub_book(s, &b, RunStatus::Running, |sc| {
+        sc.tool("Bash", "sqlite3 dev.db 'select count(*) from sessions'", "sqlite3 dev.db 'select count(*) from sessions'", "", ToolState::Running, 0);
+    });
+}
+
+/// The question woke the thread, which answered it from what the person said: the note "The agent answered Kitten 1", and Kitten 1 works
+/// again. `open`: the question's fold and the answer's are open.
+pub fn question_answered(s: &mut App, open: bool) {
+    let th = thread(TaskStatus::Waiting);
+    let (a, b) = migration_kittens(&th, TaskStatus::Working);
+    stage(s, th.clone(), vec![a.clone(), b.clone()]);
+    let mut sc = Script::new(&th, "run_1", start(s));
+    migration_turn(&mut sc, &[&a, &b]);
+    let mut first = run("run_1", &th, RunStatus::Done, start(s), 31);
+    first.changes = None;
+    let mut sc2 = Script::new(&th, "run_2", start(s) + 6 * 60_000);
+    sc2.seq = sc.seq;
+    question_wake(&mut sc2);
+    let answer = "Postgres. The person said production runs on Postgres, and the tests start one in CI. Keep the SQLite path working for local runs.";
+    sc2.tool("mcp__neko__message_subagent", "1", &format!("{{\n  \"id\": \"1\",\n  \"text\": \"{answer}\"\n}}"), "Subagent 1 has your answer and is working again.", ToolState::Done, 1);
+    sc2.part(PartBody::ToSubagent { number: "1".into(), text: answer.into(), answer: true }, 0, true);
+    sc2.say("Kitten 1 asked which database to target. You said production runs on Postgres, so I told it Postgres, with SQLite kept for local runs.", true);
+    let mut second = run("run_2", &th, RunStatus::Done, start(s) + 6 * 60_000, 14);
+    second.changes = None;
+    open_thread(s, &th, vec![first, second], vec![sc, sc2]);
+    sub_book(s, &a, RunStatus::Running, |sc| {
+        asked_work(sc);
+        sc.tool("Write", "migrations/0003_sessions_table.sql", "{\n  \"file_path\": \"migrations/0003_sessions_table.sql\"\n}", "", ToolState::Running, 0);
+    });
+    sub_book(s, &b, RunStatus::Running, |_| {});
+    if open {
+        for (seq, p) in s.books.get(&th.id).map(|b| b.parts.iter().map(|p| (p.seq, p.body.clone())).collect::<Vec<_>>()).unwrap_or_default() {
+            match p {
+                PartBody::Wake { .. } => {
+                    s.open_folds.insert(format!("wake-report-{seq}"));
+                }
+                PartBody::ToSubagent { .. } => {
+                    s.open_folds.insert(format!("to-kitten-{seq}"));
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// The thread could not answer Kitten 1 (only the person knows), so it asked them: the conversation ends on "Kitten 1 asks (via the
+/// agent)", the composer waits for the answer, and the card says the person has it.
+pub fn question_to_person(s: &mut App) {
+    let th = thread(TaskStatus::Asked);
+    let (a, b) = migration_kittens(&th, TaskStatus::Asked);
+    let a = asking(a, DB_Q, &[], neko_protocol::QuestionWith::Person);
+    stage(s, th.clone(), vec![a.clone(), b.clone()]);
+    let mut sc = Script::new(&th, "run_1", start(s));
+    migration_turn(&mut sc, &[&a, &b]);
+    let mut first = run("run_1", &th, RunStatus::Done, start(s), 31);
+    first.changes = None;
+    let mut sc2 = Script::new(&th, "run_2", start(s) + 6 * 60_000);
+    sc2.seq = sc.seq;
+    question_wake(&mut sc2);
+    let q = "Which database should the migration target: SQLite or Postgres? Production's database is not named anywhere in the project.";
+    sc2.tool("mcp__neko__ask_person", "", &format!("{{\n  \"question\": \"{q}\",\n  \"subagent\": \"1\"\n}}"), "The person has Subagent 1's question in Needs you.", ToolState::Done, 1);
+    sc2.say("Kitten 1 needs to know which database to target, and nothing in the project says which one production uses, so I passed its question to you.", true);
+    let mut second = run("run_2", &th, RunStatus::Done, start(s) + 6 * 60_000, 9);
+    second.changes = None;
+    second.ask = Some(neko_protocol::RunAsk { to: neko_protocol::AskTo::Person, text: q.into(), chain: vec!["1".into()], unanswered: false });
+    open_thread(s, &th, vec![first, second], vec![sc, sc2]);
+    sub_book(s, &a, RunStatus::Done, asked_work);
+    sub_book(s, &b, RunStatus::Running, |_| {});
+    let item = question_item(s, &th, "run_2", q, "1", &[], false, 1);
+    s.needs.push(item);
+}
+
+fn question_item(s: &App, th: &Task, run: &str, question: &str, kitten: &str, via: &[&str], unanswered: bool, minutes: i64) -> neko_protocol::NeedsItem {
+    neko_protocol::NeedsItem {
+        id: format!("question:{run}"),
+        task: th.id.clone(),
+        workspace: th.workspace.clone(),
+        title: th.title.clone(),
+        cat: th.cat.clone().unwrap_or_default(),
+        cat_name: cat_name(s, &th.cat),
+        since_ms: s.now_ms - minutes * 60_000,
+        need: neko_protocol::Need::Question { run: neko_protocol::RunId(run.into()), question: question.into(), kitten: Some(kitten.into()), via: via.iter().map(|v| (*v).to_owned()).collect(), unanswered },
+        subagent: None,
+    }
+}
+
+/// Needs you with kittens' questions passed up: "Kitten 1 asks (via the agent)", one that came up two levels and that the agent did not
+/// answer, and a kitten's request beside them (which never goes through the agent).
+pub fn question_needs(s: &mut App) {
+    let th = thread(TaskStatus::Asked);
+    let (a, b) = migration_kittens(&th, TaskStatus::Asked);
+    let a = asking(a, DB_Q, &[], neko_protocol::QuestionWith::Person);
+    let b = { let mut b = b; b.status = TaskStatus::NeedsYou; b };
+    let mut other = task(31, "Tidy the release notes\n\nGroup them by area.", 20);
+    other.workspace = "ws_acme".into();
+    other.folder = Some(FOLDER.into());
+    other.cat = None;
+    other.status = TaskStatus::Asked;
+    stage(s, th.clone(), vec![a.clone(), b.clone(), other.clone()]);
+    s.needs.push(question_item(s, &th, "run_2", "Which database should the migration target: SQLite or Postgres? Production's database is not named anywhere in the project.", "1", &[], false, 6));
+    s.needs.push(question_item(s, &other, "run_9", "May I publish the notes to the public changelog, or keep them as a draft for now?", "1.2", &["1"], true, 12));
+    let mut item = permission_item(s, &b, "Run a command", "psql -c 'select count(*) from sessions'", false, 3);
+    item.title = th.title.clone();
+    item.cat = th.cat.clone().unwrap_or_default();
+    item.cat_name = cat_name(s, &th.cat);
+    item.subagent = Some("2".into());
+    s.needs.push(item);
+    s.needs.sort_by_key(|i| i.since_ms);
+    s.open_needs();
+}
+
+/// Kitten 1's tab while it waits: its question at the end of its conversation, and that the agent passed it to the person.
+pub fn question_kitten_tab(s: &mut App) {
+    question_to_person(s);
+    let th = s.open.clone().expect("the thread");
+    let a = s.tasks.iter().find(|t| t.subagent.as_ref().is_some_and(|o| o.number == "1")).map(|t| t.id.clone()).expect("Kitten 1");
+    s.pane.kittens.insert(th.clone(), vec![a.clone()]);
+    let task = s.tasks.iter().find(|t| t.id == th).cloned().expect("the thread");
+    open_pane(s, &task, crate::pane::Tab::Kitten(a));
+}
+
+/// Kitten 1's tab once it has its answer: the agent's words in their well ("From the agent"), and its second run going.
+pub fn question_kitten_answered(s: &mut App) {
+    question_answered(s, false);
+    let th = s.open.clone().expect("the thread");
+    let a = s.tasks.iter().find(|t| t.subagent.as_ref().is_some_and(|o| o.number == "1")).cloned().expect("Kitten 1");
+    let answer = "Postgres. The person said production runs on Postgres, and the tests start one in CI. Keep the SQLite path working for local runs.";
+    let mut sc = Script::new(&a, &format!("run_{}", a.id.0), start(s) + 3 * 60_000);
+    asked_work(&mut sc);
+    let mut first = run(&format!("run_{}", a.id.0), &a, RunStatus::Done, start(s) + 3 * 60_000, 40);
+    first.changes = None;
+    first.branch = None;
+    first.ask = Some(neko_protocol::RunAsk { to: neko_protocol::AskTo::Parent, text: DB_Q.into(), chain: Vec::new(), unanswered: false });
+    let id2 = format!("run_{}_2", a.id.0);
+    let mut sc2 = Script::new(&a, &id2, start(s) + 7 * 60_000);
+    sc2.seq = sc.seq;
+    sc2.person(answer);
+    sc2.tool("Write", "migrations/0003_sessions_table.sql", "{\n  \"file_path\": \"migrations/0003_sessions_table.sql\"\n}", "", ToolState::Running, 0);
+    let mut second = run(&id2, &a, RunStatus::Running, start(s) + 7 * 60_000, 0);
+    second.changes = None;
+    second.branch = None;
+    let mut book = Book { runs: vec![first, second], loaded: true, ..Book::default() };
+    book.parts.extend(sc.parts);
+    book.parts.extend(sc2.parts);
+    s.books.insert(a.id.clone(), book);
+    s.pane.kittens.insert(th.clone(), vec![a.id.clone()]);
+    let task = s.tasks.iter().find(|t| t.id == th).cloned().expect("the thread");
+    open_pane(s, &task, crate::pane::Tab::Kitten(a.id.clone()));
+}

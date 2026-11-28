@@ -43,6 +43,30 @@ pub fn person(s: &App, t: &Theme, key: &str, words_key: &str, words: &str) -> El
         .build(t)
 }
 
+/// Words a kitten was sent by the agent that started it (an answer, or more to do), in its own conversation: the same well as the
+/// person's, with who wrote them above it ("From the agent"), so they are never read as the person's.
+pub fn person_from(s: &App, t: &Theme, key: &str, words_key: &str, words: &str, from: &str) -> El {
+    let (key, words_key) = (crate::task_view::kk(key.to_owned()), crate::task_view::kk(words_key.to_owned()));
+    let (key, words_key) = (key.as_str(), words_key.as_str());
+    let said = text(words.to_owned()).key(words_key.to_owned()).font(t.ty.md).color(t.ink()).wrap().min_w(0.0).selectable(true);
+    let w = words.to_owned();
+    let press: PressTx<App> = Rc::new(move |_: &mut App, tx: &mut Tx| tx.copy(w.clone()));
+    let copy = icon_button(t, &format!("copy-{key}"), "Copy", &icons::COPY, None, false, Some(press));
+    let at = key.to_owned();
+    let mut who = from.to_owned();
+    if let Some(c) = who.get_mut(0..1) {
+        c.make_ascii_uppercase();
+    }
+    Message::user(key.to_owned(), who)
+        .header(text(format!("From {from}")).key(format!("{key}-from")).font(t.ty.xs).color(t.ink_muted()).a11y_hidden())
+        .bubble(Bubble::Well)
+        .column(COLUMN)
+        .child(said)
+        .actions(copy)
+        .reveal_actions(s.reveal(key), move |s: &mut App| s.reveals.entry(at.clone()).or_default())
+        .build(t)
+}
+
 /// A neutral step mark: rune-ui's `Marks::Neutral` (a tick and a dash in the third ink, a turning ring in the second), red only for a
 /// tool that could not run. A tick and a turning ring are two points under the icon's size, so a step stays quiet.
 fn mark(t: &Theme, st: ToolState) -> El {

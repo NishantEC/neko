@@ -5,7 +5,7 @@
 //! A subagent is a task, but not a thread: it is never listed in the sidebar, Home or the Briefing and never notified about; it is
 //! opened from its card or from the thread's waiting line, and read there.
 
-use neko_protocol::{Part, PartBody, Request, SubPlace, Task, TaskId, TaskStatus};
+use neko_protocol::{Part, PartBody, QuestionWith, Request, SubPlace, Task, TaskId, TaskStatus};
 use rune::TextEdit;
 
 use crate::state::App;
@@ -46,9 +46,38 @@ pub fn wake_word(status: &str) -> &str {
     }
 }
 
-/// The wake note's line: "Woken by Kitten 1 · done".
+/// The wake note's line: "Woken by Kitten 1 · done"; a question says itself: "Kitten 1 has a question".
 pub fn wake_line(number: &str, status: &str) -> String {
+    if status == "asked" {
+        return format!("{} has a question", name(number));
+    }
     format!("Woken by {} · {}", name(number), wake_word(status))
+}
+
+/// Who asks, as a "Needs you" question is led: "The agent has a question", or, for a kitten's question the agent passed up, "Kitten 1
+/// asks (via the agent)" and "Kitten 1.2 asks (via Kitten 1 and the agent)".
+pub fn question_says(kitten: Option<&str>, via: &[String]) -> String {
+    let Some(k) = kitten else { return "The agent has a question".to_owned() };
+    let mut through: Vec<String> = via.iter().map(|n| name(n)).collect();
+    through.push("the agent".to_owned());
+    format!("{} asks (via {})", name(k), names_sentence(&through))
+}
+
+/// Who a kitten's question is put to: its parent ("the agent" for a thread, "Kitten 1" for a kitten).
+pub fn asked_whom(parent: Option<&Task>) -> String {
+    parent.and_then(Task::subagent_name).unwrap_or_else(|| "the agent".to_owned())
+}
+
+/// The line a kitten's card says while it waits on an answer: "Asks the agent: Which database?", "Passed up: …" once its parent
+/// passed it on, "Asks you (via the agent): …" once it reached the person.
+pub fn question_line(task: &Task, parent: Option<&Task>) -> Option<String> {
+    let q = task.subagent.as_ref()?.question.as_ref()?;
+    let lead = match q.with {
+        QuestionWith::Parent => format!("Asks {}", asked_whom(parent)),
+        QuestionWith::Up => "Passed up".to_owned(),
+        QuestionWith::Person => format!("Asks you (via {})", asked_whom(parent)),
+    };
+    Some(format!("{lead}: {}", q.text))
 }
 
 /// The word on a kitten's card and in Overview: its status, or Draft (written, not started) or Discarded (a draft thrown away).
@@ -307,7 +336,10 @@ mod tests {
         assert_eq!(card_word(TaskStatus::New), "Queued");
         assert_eq!(card_word(TaskStatus::Asked), "Has a question");
         assert_eq!(wake_line("1", "done"), "Woken by Kitten 1 · done");
-        assert_eq!(wake_line("1.2", "asked"), "Woken by Kitten 1.2 · has a question");
+        assert_eq!(wake_line("1.2", "asked"), "Kitten 1.2 has a question");
+        assert_eq!(question_says(None, &[]), "The agent has a question");
+        assert_eq!(question_says(Some("1"), &[]), "Kitten 1 asks (via the agent)");
+        assert_eq!(question_says(Some("1.2"), &["1".into()]), "Kitten 1.2 asks (via Kitten 1 and the agent)");
         assert_eq!(names_sentence(&["Kitten 1".into(), "Kitten 2".into()]), "Kitten 1 and Kitten 2");
         assert_eq!(names_sentence(&["Kitten 1".into(), "Kitten 2".into(), "Kitten 3".into()]), "Kitten 1, Kitten 2 and Kitten 3");
         assert!(order_of("1.10") > order_of("1.2"));

@@ -136,7 +136,8 @@ pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, po
             Some(n) => format!("{} asks", crate::subagents::name(n)),
             None => "The agent asks".to_owned(),
         },
-        Need::Question { .. } => "The agent has a question".to_owned(),
+        // A kitten's question the agent passed up says whose it is and whom it came through.
+        Need::Question { kitten, via, .. } => crate::subagents::question_says(kitten.as_deref(), via),
         Need::Failure { .. } => "The agent could not go on".to_owned(),
         Need::Plugin { ask } => if ask.changed { "A plugin changed" } else { "A plugin asks" }.to_owned(),
     };
@@ -195,7 +196,10 @@ pub(crate) fn item_row(s: &App, t: &Theme, item: &NeedsItem, workspace: &str, po
             }
             controls = controls.child(answer(t, format!("{key}-deny"), "Deny", ButtonVariant::Ghost, !destructive, move |s: &mut App| s.answer_need(&c, Decision::Deny)));
         }
-        Need::Question { .. } => {
+        Need::Question { unanswered, .. } => {
+            if *unanswered {
+                body = body.child(text("The agent did not answer it, so Neko passed it to you.").key(format!("{key}-unanswered")).font(t.ty.sm).color(t.ink_faint()).wrap().min_w(0.0).a11y_hidden());
+            }
             let reply = s.needs_replies.get(&item.id).cloned().unwrap_or_default();
             let (a, b, c) = (id.clone(), id.clone(), id.clone());
             let empty = reply.text.trim().is_empty();

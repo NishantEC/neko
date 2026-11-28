@@ -9,7 +9,7 @@ use rune::{El, TextEdit, Tx, col, el, row, text};
 use rune_ui_style::{ButtonVariant, weight};
 
 use crate::state::App;
-use crate::subagents::{kitten_word, name, names_sentence, order_words, place_words, wake_line};
+use crate::subagents::{kitten_word, name, names_sentence, order_words, place_words, question_line, wake_line};
 use crate::ui::agent::{FoldLine, Marks, PressTx, mark_with, mono};
 use crate::ui::base::{Shape, SizeExt, Theme, glyph, hit_area, paint_state, recipes, states};
 use crate::ui::button::Button;
@@ -99,17 +99,26 @@ fn card_row(s: &App, t: &Theme, r: &Row, first: bool) -> El {
     let discarded = task.and_then(|x| x.subagent.as_ref()).is_some_and(|o| o.discarded);
     let last = if discarded { None } else { s.subagent_line(r.id) };
     let place = under_words(task);
+    // While it waits on an answer, its question is what the card says under its name.
+    let asking = task.and_then(|x| question_line(x, s.parent_of(x)));
+    // A question still with the agents above waits on them, not on the person: the still ring and the quiet ink, never amber.
+    let with_agent = task.and_then(|x| x.subagent.as_ref()?.question.as_ref()).is_some_and(|q| q.with != neko_protocol::QuestionWith::Person);
     let head = row()
         .w_full()
         .gap(t.space.at(2.0))
         .center_y()
         .child(text(who.clone()).font(weight(t.ty.base, t.ty.semibold)).color(t.ink()).a11y_hidden())
         .child(text(r.title.to_owned()).font(t.ty.base).color(t.ink_muted()).truncate().min_w(0.0).grow(1.0).a11y_hidden())
-        .child(if discarded { el().size(0.0, 0.0) } else { status_glyph(t, st, t.control.icon - 2.0) })
-        .child(text(word).font(weight(t.ty.sm, t.ty.medium)).color(word_ink(t, st)).a11y_hidden());
-    let mut under = row().w_full().gap(t.space.at(1.5)).center_y().child(text(place.clone()).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0).shrink().a11y_hidden());
-    if let Some(l) = &last {
-        under = under.child(text("\u{b7}").font(t.ty.sm).color(t.ink_faint()).a11y_hidden()).child(text(l.clone()).key(format!("subagent-line-{}", r.number)).font(t.ty.sm).color(t.ink_faint()).truncate().min_w(0.0).shrink().a11y_hidden());
+        .child(if discarded { el().size(0.0, 0.0) } else if with_agent { still_ring(t, t.control.icon - 2.0) } else { status_glyph(t, st, t.control.icon - 2.0) })
+        .child(text(word).font(weight(t.ty.sm, t.ty.medium)).color(if with_agent { t.ink_muted() } else { word_ink(t, st) }).a11y_hidden());
+    let mut under = row().w_full().gap(t.space.at(1.5)).center_y();
+    if let Some(q) = &asking {
+        under = under.child(text(q.clone()).key(format!("subagent-question-{}", r.number)).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0).shrink().a11y_hidden());
+    } else {
+        under = under.child(text(place.clone()).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0).shrink().a11y_hidden());
+        if let Some(l) = &last {
+            under = under.child(text("\u{b7}").font(t.ty.sm).color(t.ink_faint()).a11y_hidden()).child(text(l.clone()).key(format!("subagent-line-{}", r.number)).font(t.ty.sm).color(t.ink_faint()).truncate().min_w(0.0).shrink().a11y_hidden());
+        }
     }
     let id = r.id.clone();
     // Open puts its conversation in the right pane as a tab; with Command held it takes the main view. A discarded draft never ran: it
@@ -124,9 +133,10 @@ fn card_row(s: &App, t: &Theme, r: &Row, first: bool) -> El {
             Rc::new(move |s: &mut App, tx: &mut Tx| if tx.mods().cmd { s.open_kitten_main(&id) } else { s.open_kitten_tab(&id) }),
         )
     });
-    let said = match &last {
-        Some(l) => format!("{who}: {}, {word}. {place}. {l}", r.title),
-        None => format!("{who}: {}, {word}. {place}.", r.title),
+    let said = match (&asking, &last) {
+        (Some(q), _) => format!("{who}: {}, {word}. {q}", r.title),
+        (None, Some(l)) => format!("{who}: {}, {word}. {place}. {l}", r.title),
+        (None, None) => format!("{who}: {}, {word}. {place}.", r.title),
     };
     let mut line = row()
         .key(format!("subagent-card-{}", r.number))
@@ -243,32 +253,25 @@ impl App {
 
 /// The note where a subagent's report woke the thread: a centred line with a hairline each side, and under it the report, folded.
 pub fn wake_note(s: &App, t: &Theme, p: &Part) -> Option<El> {
-    let PartBody::Wake { number, status, summary, files, branch, .. } = &p.body else { return None };
+    let PartBody::Wake { number, status, summary, files, branch, question, .. } = &p.body else { return None };
     let said = wake_line(number, status);
-    let hair = || el().grow(1.0).h(1.0).fill(t.c.line);
-    let line = row()
-        .key(crate::task_view::kk(format!("wake-{}", p.seq)))
-        .role("note")
-        .label(said.clone())
-        .w_full()
-        .h(t.control.md)
-        .gap(t.space.at(3.0))
-        .center_y()
-        .child(hair())
-        .child(text(said).font(t.ty.xs).color(t.ink_muted()).a11y_hidden())
-        .child(hair());
-    let mut note = col().w_full().gap(0.0).child(line);
-    if summary.trim().is_empty() && files.is_empty() && branch.is_none() {
+    let mut note = col().w_full().gap(0.0).child(centred_note(t, &crate::task_view::kk(format!("wake-{}", p.seq)), &said));
+    let asked = question.as_deref().filter(|_| status == "asked");
+    if summary.trim().is_empty() && files.is_empty() && branch.is_none() && asked.is_none() {
         return Some(note);
     }
     let key = crate::task_view::kk(format!("wake-report-{}", p.seq));
     let open = s.is_open(&key);
     let k = key.clone();
-    let fold = FoldLine::<App>::new(key.clone(), format!("Report from {}", name(number)), open).lead(crate::ui::agent::hollow_dot(t, t.control.icon)).on_toggle(move |s: &mut App| s.flip(&k));
+    let title = if asked.is_some() { "The question".to_owned() } else { format!("Report from {}", name(number)) };
+    let fold = FoldLine::<App>::new(key.clone(), title, open).lead(crate::ui::agent::hollow_dot(t, t.control.icon)).on_toggle(move |s: &mut App| s.flip(&k));
     let mut body = Vec::new();
     if open {
         let mut inner = col().key(format!("{key}-body")).w_full().gap(t.space.at(3.0)).pl(t.space.at(1.5));
-        if !summary.trim().is_empty() {
+        if let Some(q) = asked {
+            inner = inner.child(text(q.to_owned()).key(format!("{key}-question")).role("note").font(t.ty.base).color(t.ink()).wrap().min_w(0.0).selectable(true));
+        }
+        if !summary.trim().is_empty() && asked.is_none_or(|q| q.trim() != summary.trim()) {
             inner = inner.child(Response::new(format!("{key}-summary"), summary.clone()).selectable(true).muted(true).column(COLUMN).build(t));
         }
         if !files.is_empty() {
@@ -285,6 +288,86 @@ pub fn wake_note(s: &App, t: &Theme, p: &Part) -> Option<El> {
     }
     note = note.child(fold.build(t, body));
     Some(note)
+}
+
+/// A centred xs line in the second ink with a hairline on each side: how the conversation says something happened between turns.
+fn centred_note(t: &Theme, key: &str, said: &str) -> El {
+    let hair = || el().grow(1.0).h(1.0).fill(t.c.line);
+    row()
+        .key(key.to_owned())
+        .role("note")
+        .label(said.to_owned())
+        .w_full()
+        .h(t.control.md)
+        .gap(t.space.at(3.0))
+        .center_y()
+        .child(hair())
+        .child(text(said.to_owned()).font(t.ty.xs).color(t.ink_muted()).a11y_hidden())
+        .child(hair())
+}
+
+/// The note where the agent wrote to one of its kittens: "The agent answered Kitten 1" (it was waiting on a question) or "The agent
+/// wrote to Kitten 1", and under it what it said, folded. `subject` is who wrote ("The agent", or "Kitten 1" for a kitten's own).
+pub fn to_kitten_note(s: &App, t: &Theme, p: &Part, subject: &str) -> Option<El> {
+    let PartBody::ToSubagent { number, text: words, answer } = &p.body else { return None };
+    let said = format!("{subject} {} {}", if *answer { "answered" } else { "wrote to" }, name(number));
+    let key = crate::task_view::kk(format!("to-kitten-{}", p.seq));
+    let open = s.is_open(&key);
+    let k = key.clone();
+    let fold = FoldLine::<App>::new(key.clone(), if *answer { "The answer".to_owned() } else { "What it said".to_owned() }, open).lead(crate::ui::agent::hollow_dot(t, t.control.icon)).on_toggle(move |s: &mut App| s.flip(&k));
+    let body = if open { vec![col().key(format!("{key}-body")).w_full().pl(t.space.at(1.5)).child(Response::new(format!("{key}-words"), words.clone()).selectable(true).muted(true).column(COLUMN).build(t))] } else { Vec::new() };
+    Some(col().w_full().gap(0.0).child(centred_note(t, &crate::task_view::kk(format!("to-kitten-line-{}", p.seq)), &said)).child(fold.build(t, body)))
+}
+
+/// The question a conversation ends on while it waits for an answer, led by a small amber mark: a thread's that asked the person ("Kitten
+/// 1 asks (via the agent)", or "The agent asks"), and a kitten's tab while it waits on its parent ("Kitten 1 asks the agent"). Who has it
+/// is the quiet line under it. None when nothing is asked with Neko's tools.
+pub fn question_block(s: &App, t: &Theme, task: &Task, last: Option<&neko_protocol::Run>) -> Option<El> {
+    if task.status != TaskStatus::Asked {
+        return None;
+    }
+    let (head, words, under) = match &task.subagent {
+        Some(of) => {
+            let q = of.question.as_ref()?;
+            let whom = crate::subagents::asked_whom(s.parent_of(task));
+            let under = match q.with {
+                neko_protocol::QuestionWith::Parent => format!("Waiting for {whom} to answer."),
+                neko_protocol::QuestionWith::Up => format!("{} passed it up.", capital(&whom)),
+                neko_protocol::QuestionWith::Person => format!("{} passed it to you in Needs you.", capital(&whom)),
+            };
+            (format!("{} asks {whom}", name(&of.number)), q.text.clone(), Some(under))
+        }
+        None => {
+            let a = last?.ask.as_ref().filter(|a| a.to == neko_protocol::AskTo::Person)?;
+            let (kitten, via) = match a.chain.split_first() {
+                Some((k, rest)) => (Some(k.as_str()), rest.to_vec()),
+                None => (None, Vec::new()),
+            };
+            let head = if kitten.is_some() { crate::subagents::question_says(kitten, &via) } else { "The agent asks".to_owned() };
+            let under = a.unanswered.then(|| "The agent did not answer it, so Neko passed it to you.".to_owned());
+            (head, a.text.clone(), under)
+        }
+    };
+    let label = match &under {
+        Some(u) => format!("{head}: {words} {u}"),
+        None => format!("{head}: {words}"),
+    };
+    let mark = row().size(t.control.icon, t.ty.base.line_height.max(t.control.icon)).center().child(el().size(8.0, 8.0).radius(4.0).fill(t.c.warning.fg)).a11y_hidden();
+    let mut lines = col()
+        .min_w(0.0)
+        .shrink()
+        .gap(t.space.at(1.0))
+        .child(text(head).font(weight(t.ty.sm, t.ty.semibold)).color(t.c.warning.fg).a11y_hidden())
+        .child(text(words).key(crate::task_view::kk("question-words".into())).font(t.ty.md).color(t.ink()).wrap().min_w(0.0).selectable(true));
+    if let Some(u) = under {
+        lines = lines.child(text(u).font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0).a11y_hidden());
+    }
+    Some(row().key(crate::task_view::kk("question-block".into())).role("note").label(label).w_full().pl(t.space.at(1.5)).py(t.space.at(1.0)).gap(t.metrics.gap).items_start().child(mark).child(lines))
+}
+
+fn capital(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map_or_else(String::new, |f| f.to_uppercase().collect::<String>() + c.as_str())
 }
 
 /// What a thread that rests on its subagents waits on, in words ("Waiting on Kitten 1 and Kitten 2"): None when it is not resting.

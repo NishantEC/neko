@@ -140,6 +140,18 @@ fn neko_phrase(name: &str, summary: &str, input: &str, output: Option<&str>, run
         "subagents" => if running { "Asking about kittens" } else { "Asked about kittens" }.to_owned(),
         "stop_subagent" if !id.is_empty() => if running { format!("Stopping Kitten {id}") } else { format!("Stopped Kitten {id}") },
         "stop_subagent" => if running { "Stopping a kitten" } else { "Stopped a kitten" }.to_owned(),
+        // Questions go up: what was asked, and an answer passed down.
+        "message_subagent" if !id.is_empty() => if running { format!("Writing to Kitten {id}") } else { format!("Wrote to Kitten {id}") },
+        "message_subagent" => if running { "Writing to a kitten" } else { "Wrote to a kitten" }.to_owned(),
+        "ask_parent" | "ask_person" => {
+            let q = v["question"].as_str().map(|q| q.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
+            let whom = if tool == "ask_parent" { "the agent" } else { "you" };
+            let head = match v["subagent"].as_str().filter(|n| !n.is_empty()) {
+                Some(n) => format!("Passed Kitten {n}'s question to {whom}"),
+                None => format!("Asked {whom}"),
+            };
+            if q.is_empty() { head } else { format!("{head} \u{b7} {q}") }
+        }
         _ => return None,
     })
 }
@@ -323,7 +335,8 @@ fn part_el(s: &App, t: &Theme, book: &Book, r: &Run, w: &Who, p: &Part, streamin
         PartBody::Agent { text: words, .. } if words.trim().is_empty() => None,
         PartBody::Agent { text: words, .. } => Some(answer(t, &key, words, streaming, last, muted)),
         PartBody::Notice { .. } => notice(t, p),
-        PartBody::Person { .. } | PartBody::RulesChanged { .. } | PartBody::Subagent { .. } | PartBody::Wake { .. } | PartBody::ToSubagent { .. } => None,
+        PartBody::ToSubagent { .. } => crate::subagents_view::to_kitten_note(s, t, p, &w.subject()),
+        PartBody::Person { .. } | PartBody::RulesChanged { .. } | PartBody::Subagent { .. } | PartBody::Wake { .. } => None,
     }
 }
 
@@ -422,7 +435,7 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
     // The final answer is the words after the last step; notices stay in sight; everything else folds.
     let tail_from = parts.iter().rposition(|p| !matches!(p.body, PartBody::Agent { .. } | PartBody::Notice { .. })).map_or(0, |i| i + 1);
     let (work, tail) = parts.split_at(tail_from);
-    let work: Vec<&Part> = work.iter().copied().filter(|p| part_el(s, t, book, r, &w, p, false, false, false).is_some() && !matches!(p.body, PartBody::Notice { .. })).collect();
+    let work: Vec<&Part> = work.iter().copied().filter(|p| part_el(s, t, book, r, &w, p, false, false, false).is_some() && !matches!(p.body, PartBody::Notice { .. } | PartBody::ToSubagent { .. })).collect();
     let key = format!("worked-{}", r.id.0);
     let offer = offer_of(book, r);
     // The newest run of a thread that rests on its subagents says so on its own line, never "done": the thread is not.
@@ -463,6 +476,8 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
     // The subagents it started stay in sight, as one card, outside the fold.
     let started: Vec<&Part> = parts.iter().copied().filter(|p| matches!(p.body, PartBody::Subagent { .. })).collect();
     out.extend(crate::subagents_view::card_stack(s, t, &started));
+    // And what it wrote to them, each a quiet note: "The agent answered Kitten 1".
+    out.extend(parts.iter().filter_map(|p| crate::subagents_view::to_kitten_note(s, t, p, &w.subject())));
     let tail_last = tail.iter().rposition(|p| matches!(&p.body, PartBody::Agent { text, .. } if !text.trim().is_empty()));
     out.extend(lay_out(s, t, book, r, &w, tail, None, tail_last));
     out.extend(turn::change_line(t, r, &offer, own_changes(r), task.subagent.is_some()));
@@ -560,13 +575,16 @@ fn items_of(s: &App, t: &Theme, task: &Task, book: &Book) -> Vec<El> {
     }
     for b in blocks(book) {
         match b {
+            // In a kitten's conversation every message after its brief is its parent's (an answer, or more to do).
+            Block::Person(p) if task.subagent.is_some() => items.push(turn::person_from(s, t, &format!("part-{}", p.seq), &format!("part-{}-words", p.seq), p.body.text(), &crate::subagents::asked_whom(s.parent_of(task)))),
             Block::Person(p) => items.push(turn::person(s, t, &format!("part-{}", p.seq), &format!("part-{}-words", p.seq), p.body.text())),
             Block::Loose(p) => items.extend(notice(t, p).or_else(|| rules_changed(t, p)).or_else(|| crate::subagents_view::wake_note(s, t, p)).or_else(|| crate::subagents_view::card_stack(s, t, &[p]))),
             Block::Run(r, parts) => items.push(run_block(s, t, book, r, &parts, task)),
         }
     }
-    // A thread resting on its subagents ends on what it waits for.
+    // A thread resting on its subagents ends on what it waits for; one that asked, on its question.
     items.extend(crate::subagents_view::waiting_line(s, t, task));
+    items.extend(crate::subagents_view::question_block(s, t, task, book.runs.last()));
     items
 }
 

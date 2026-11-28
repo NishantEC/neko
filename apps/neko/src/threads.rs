@@ -84,6 +84,7 @@ pub fn need_words(item: &NeedsItem) -> String {
             Some(number) => format!("{} · {}", permission.title, crate::subagents::name(number)),
             None => permission.title.clone(),
         },
+        Need::Question { kitten: Some(k), .. } => format!("a question from {}", crate::subagents::name(k)),
         Need::Question { .. } => "a question".to_owned(),
         Need::Failure { .. } => "could not go on".to_owned(),
         Need::Plugin { .. } => "a plugin".to_owned(),

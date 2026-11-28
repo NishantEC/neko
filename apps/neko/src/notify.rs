@@ -400,9 +400,10 @@ pub fn note_for(item: &NeedsItem) -> Note {
                 (body, b)
             }
         }
-        Need::Question { run, question, .. } => {
+        Need::Question { run, question, kitten, via, .. } => {
             info.push(("run".into(), run.0.clone()));
-            (short(&format!("Needs you: {question}"), BODY_CHARS), vec![Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }])
+            let whose = kitten.as_deref().map(|k| format!("{}: ", crate::subagents::question_says(Some(k), via))).unwrap_or_default();
+            (short(&format!("Needs you: {whose}{question}"), BODY_CHARS), vec![Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }])
         }
         Need::Failure { text, .. } => (short(&format!("Failed: {text}"), BODY_CHARS), Vec::new()),
         // Approving a plugin is never done from a banner: the notification only opens the list.
