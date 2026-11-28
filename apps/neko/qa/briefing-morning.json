@@ -1,7 +1,7 @@
 {
   "name": "briefing-morning",
   "title": "Briefing: the morning notification comes once, with the right counts",
-  "about": "One thread finishes and one ends with a question. The morning time is set to three hours from now (Settings ▸ Briefing) and the scheduler's clock is moved to just after it (a debug daemon with NEKO_DEBUG_CLOCK=1): the app posts one notification, \"Your briefing: 1 finished, 1 needs you\", logged through its notification log (nothing reaches the system). Moving the clock on again the same day posts no second one. Opening the Briefing from the notification's link route shows the page. The briefing is made from the daemon's records: no model is called.",
+  "about": "One thread finishes and one ends with a question. The morning time is set to three hours from now (Settings ▸ Rounds & wakes) and the scheduler's clock is moved to just after it (a debug daemon with NEKO_DEBUG_CLOCK=1): the app posts one notification, \"Your briefing: 1 finished, 1 needs you\", logged through its notification log (nothing reaches the system). Moving the clock on again the same day posts no second one. Opening the Briefing from the notification's link route shows the page. The briefing is made from the daemon's records: no model is called.",
   "cli": [
     "fake"
   ],
@@ -86,7 +86,7 @@
       "do": "wait",
       "until": {
         "see": {
-          "key": "settings-page-4"
+          "key": "settings-page-rounds"
         }
       },
       "within": 15,
@@ -95,7 +95,7 @@
     {
       "do": "click",
       "on": {
-        "key": "settings-page-4"
+        "key": "settings-page-rounds"
       }
     },
     {
@@ -106,7 +106,7 @@
         }
       },
       "within": 15,
-      "expect": "Settings ▸ Briefing shows the morning time"
+      "expect": "Settings ▸ Rounds & wakes shows the morning time"
     },
     {
       "do": "click",

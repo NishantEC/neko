@@ -1,0 +1,230 @@
+{
+  "name": "settings-search",
+  "title": "Settings: the search narrows the page list and marks what it found",
+  "about": "Settings opens on General with its eleven pages listed. Typing \"undo\" in the search field at the top of the list keeps only the pages that have it (Storage, and Shortcuts for ⌘Z), shows Storage, says under its row what matched and marks Undo history on the page. A word nothing has says so and keeps the page; Escape empties the field and every page is back. A Cattain's name finds the Cattains page. Nothing here asks the daemon for anything new.",
+  "cli": [
+    "fake"
+  ],
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "settings-page-general",
+              "selected": true
+            }
+          },
+          {
+            "see": {
+              "key": "settings-page-title",
+              "text": "General"
+            }
+          },
+          {
+            "see": {
+              "key": "settings-page-storage"
+            }
+          }
+        ]
+      },
+      "expect": "Settings opens on General, every page listed"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "count": {
+          "of": {
+            "key": "settings-page-*",
+            "role": "option"
+          },
+          "is": 11
+        }
+      },
+      "expect": "Eleven pages in the list"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-search"
+      }
+    },
+    {
+      "do": "type",
+      "text": "undo"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "settings-page-storage",
+              "selected": true
+            }
+          },
+          {
+            "see": {
+              "key": "settings-page-title",
+              "text": "Storage"
+            }
+          },
+          {
+            "see": {
+              "key": "settings-undo-found"
+            }
+          }
+        ]
+      },
+      "expect": "Storage is shown, with Undo history marked"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "gone": {
+              "key": "settings-page-general"
+            }
+          },
+          {
+            "gone": {
+              "key": "settings-page-plugins"
+            }
+          },
+          {
+            "see": {
+              "key": "settings-page-shortcuts"
+            }
+          }
+        ]
+      },
+      "expect": "The list keeps only the pages that have undo"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "key": "settings-page-storage",
+          "name": "Undo history"
+        }
+      },
+      "expect": "Storage's row says what matched"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "count": {
+          "of": {
+            "key": "settings-page-*",
+            "role": "option"
+          },
+          "is": 2
+        }
+      },
+      "expect": "Two pages are left"
+    },
+    {
+      "do": "snap",
+      "name": "search-undo",
+      "expect": "The search with Storage shown"
+    },
+    {
+      "do": "type",
+      "text": "zz"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-no-results",
+          "text": "No results for"
+        }
+      },
+      "expect": "A word nothing has says so"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "key": "settings-page-title",
+          "text": "Storage"
+        }
+      },
+      "expect": "The page in view stays"
+    },
+    {
+      "do": "snap",
+      "name": "search-none",
+      "expect": "No results"
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "settings-page-general"
+            }
+          },
+          {
+            "see": {
+              "key": "settings-page-plugins"
+            }
+          }
+        ]
+      },
+      "expect": "Escape empties the field and every page is back"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "count": {
+          "of": {
+            "key": "settings-page-*",
+            "role": "option"
+          },
+          "is": 11
+        }
+      },
+      "expect": "Eleven pages again"
+    },
+    {
+      "do": "type",
+      "text": "miso"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "settings-page-title",
+              "text": "Cattains"
+            }
+          },
+          {
+            "see": {
+              "key": "settings-cat-cat_miso-found"
+            }
+          }
+        ]
+      },
+      "expect": "A Cattain's name finds the Cattains page and marks it"
+    },
+    {
+      "do": "snap",
+      "name": "search-miso",
+      "expect": "miso found"
+    }
+  ]
+}

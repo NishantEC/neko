@@ -1,0 +1,107 @@
+{
+  "name": "settings-deeplink",
+  "title": "Settings: a plugin's Open in Settings lands on it",
+  "about": "A plugin folder is added and waits in Needs you. Settings was last left on General. Open in Settings on the plugin's card opens Settings on the Plugins page, its row selected, with the plugin's card there and the keyboard on its Approve. The person's place in Settings does not win over the link.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl",
+      "NEKO_SECRETS_FILE": "$work/secrets-test.json"
+    },
+    "files": {
+      "folder-plugin": {
+        "files": {
+          "neko-plugin.json": "{\"neko_plugin\": 1, \"name\": \"folder-docs\", \"version\": \"1.0\", \"kind\": \"mcp\", \"mcp\": {\"command\": \"$fake_mcp\", \"args\": [\"--name\", \"fake-folder\"]}}"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-page-general"
+        }
+      },
+      "expect": "Settings opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-page-general"
+      }
+    },
+    {
+      "do": "add-plugin-folder",
+      "path": "$files/folder-plugin"
+    },
+    {
+      "do": "key",
+      "key": "cmd+2"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "need-plugin:*-open"
+        }
+      },
+      "within": 15,
+      "expect": "The plugin waits in Needs you with Open in Settings"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "need-plugin:*-open"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "settings-page-plugins",
+              "selected": true
+            }
+          },
+          {
+            "see": {
+              "key": "settings-page-title",
+              "text": "Plugins"
+            }
+          },
+          {
+            "see": {
+              "key": "plugin-*-name",
+              "text": "folder-docs"
+            }
+          }
+        ]
+      },
+      "expect": "Settings opens on Plugins with the plugin's card"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "focus": {
+          "key": "plugin-*-approve"
+        },
+        "ring": false
+      },
+      "expect": "The keyboard is on the plugin's Approve"
+    },
+    {
+      "do": "snap",
+      "name": "deeplink-plugins",
+      "expect": "Settings ▸ Plugins from the link"
+    }
+  ]
+}

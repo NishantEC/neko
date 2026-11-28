@@ -63,11 +63,26 @@
       "do": "wait",
       "until": {
         "see": {
+          "key": "settings-page-permissions"
+        }
+      },
+      "expect": "Settings opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-page-permissions"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
           "key": "settings-rules",
           "label": "Bash"
         }
       },
-      "expect": "Settings says the person's rules allow Bash, under Permissions"
+      "expect": "Settings ▸ Permissions says the person's rules allow Bash"
     },
     {
       "do": "snap",

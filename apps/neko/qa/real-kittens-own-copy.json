@@ -24,10 +24,25 @@
       "do": "wait",
       "until": {
         "see": {
+          "key": "settings-page-permissions"
+        }
+      },
+      "expect": "Settings opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-page-permissions"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
           "key": "settings-mode-2"
         }
       },
-      "expect": "Settings lists the permission modes"
+      "expect": "Settings ▸ Permissions lists the permission modes"
     },
     {
       "do": "click",

@@ -20,7 +20,7 @@
       "do": "wait",
       "until": {
         "see": {
-          "key": "settings-page-5"
+          "key": "settings-page-plugins"
         }
       },
       "expect": "Settings opens"
@@ -28,7 +28,7 @@
     {
       "do": "click",
       "on": {
-        "key": "settings-page-5"
+        "key": "settings-page-plugins"
       }
     },
     {
@@ -173,7 +173,7 @@
       "do": "wait",
       "until": {
         "see": {
-          "key": "settings-page-5"
+          "key": "settings-page-plugins"
         }
       },
       "expect": "Settings opens"
@@ -181,7 +181,7 @@
     {
       "do": "click",
       "on": {
-        "key": "settings-page-5"
+        "key": "settings-page-plugins"
       }
     },
     {
