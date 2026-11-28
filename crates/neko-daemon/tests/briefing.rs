@@ -241,3 +241,50 @@ fn the_briefing_never_asks_a_model_for_anything() {
     assert!(b.is_empty());
     assert!(matches!(c.request(Request::MarkBriefingRead).unwrap(), Reply::Briefing { .. }));
 }
+
+/// A Cattain's own thread, opened, given words: its run writes its digest in its folder (the fake's `write` step, `\n` a new line).
+fn cattain_writes(c: &mut Client, cat: &str, digest: &str) -> TaskId {
+    let Reply::Task { task: own } = c.request(Request::OpenCattain { cat: cat.into() }).unwrap() else { panic!("open_cattain") };
+    let words = format!("Keep your digest [fake:mcp] write DIGEST.md {digest}");
+    assert_eq!(c.request(Request::FollowUp { task: own.id.clone(), words, answering: None, mode: None }).unwrap(), Reply::Ok);
+    let want = format!("{}\n", digest.replace(r"\n", "\n"));
+    wait_for("the Cattain's turn to end with its digest written", || {
+        let file = match c.request(Request::GetCattainFile { cat: cat.into(), name: "DIGEST.md".into() }).unwrap() {
+            Reply::CattainFile { file } => file,
+            r => panic!("{r:?}"),
+        };
+        Some(()).filter(|_| file.text == want && status_of(c, &own.id) == TaskStatus::Done)
+    });
+    own.id
+}
+
+#[test]
+fn the_briefing_reads_the_digest_a_cattain_wrote_and_only_one_that_changed_since_it_was_read() {
+    let d = daemon("briefing-digest");
+    let mut c = screen(&d);
+    let mut other = screen(&d);
+    let miso = cattain_writes(&mut c, "cat_miso", r"## Needs you\n- Merge acme#12?\n\n## New\n- Fix login: a PR is open.\n\n## In progress\n- The docs.");
+    let b = wait_for("miso's digest in the briefing", || Some(briefing(&mut c)).filter(|b| !b.cattains.is_empty()));
+    assert_eq!(b.cattains.len(), 1);
+    let block = &b.cattains[0];
+    assert_eq!((block.name.as_str(), block.needs.as_slice(), block.new.as_slice()), ("miso", &["Merge acme#12?".to_owned()][..], &["Fix login: a PR is open.".to_owned()][..]));
+    assert!(!b.finished.iter().any(|t| t.task == miso), "miso's turn is told by its digest, not as a finished row");
+    // Every screen heard it, pushed after the file changed (no request of theirs, no model).
+    wait_for("briefing_changed with the digest", || match other.next_event(Duration::from_millis(100)).unwrap() {
+        Some(ServerMessage::Event { change: Change::BriefingChanged { briefing }, .. }) if !briefing.cattains.is_empty() => Some(()),
+        _ => None,
+    });
+    cattain_writes(&mut c, "cat_mochi", r"## Needs you\nNothing.\n\n## New\n- The docs link is fixed.");
+    let b = wait_for("both digests", || Some(briefing(&mut c)).filter(|b| b.cattains.len() == 2));
+    assert_eq!(b.cattains[0].name, "mochi", "the most recent first");
+    assert!(b.cattains[0].needs.is_empty(), "\"Nothing.\" is not a line");
+    let Reply::Briefing { briefing: read } = c.request(Request::MarkBriefingRead).unwrap() else { panic!("mark") };
+    assert!(read.cattains.is_empty() && !read.counts().news);
+    // Only miso writes again: only miso's block is news.
+    std::thread::sleep(Duration::from_millis(5));
+    cattain_writes(&mut c, "cat_miso", r"## Needs you\n- Merge acme#12 and acme#13?\n\n## New\n- Fix docs: done.");
+    let b = wait_for("miso's new digest", || Some(briefing(&mut c)).filter(|b| !b.cattains.is_empty()));
+    assert_eq!(b.cattains.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["miso"], "mochi's digest did not change since");
+    assert_eq!(b.cattains[0].needs, vec!["Merge acme#12 and acme#13?"]);
+    assert!(b.counts().news && b.counts().digests == 1);
+}

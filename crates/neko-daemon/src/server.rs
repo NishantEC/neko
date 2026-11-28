@@ -108,6 +108,9 @@ impl Shared {
                 | Change::PermissionChanged { .. }
                 | Change::TaskRemoved { .. }
                 | Change::CatUpdated { .. }
+                // The Briefing reads the digests and the Cattains made by asking (briefing.md).
+                | Change::CatAdded { .. }
+                | Change::CattainFileChanged { .. }
                 | Change::RunChanged { .. }
                 | Change::RoundUpdated { .. }
                 | Change::RoundRemoved { .. }
