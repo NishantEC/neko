@@ -131,7 +131,7 @@ pub fn task_of_cat(c: &mut Client, words: &str, cat: &str) -> neko_protocol::Tas
     use neko_protocol::{Reply, Request, Schedule};
     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let round = match c.request(Request::CreateRound { name: format!("Round {n}"), words: words.into(), cat: cat.into(), workspace: None, schedule: Schedule::Every { hours: 24 }, on: false }).unwrap() {
+    let round = match c.request(Request::CreateRound { name: format!("Round {n}"), words: words.into(), cat: Some(cat.into()), standing: false, workspace: None, schedule: Schedule::Every { hours: 24 }, on: false }).unwrap() {
         Reply::Round { round } => round,
         r => panic!("create_round: {r:?}"),
     };

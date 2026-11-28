@@ -9,6 +9,7 @@ mod cattains;
 mod crew;
 mod files;
 mod folders;
+mod fsevents;
 mod heat;
 mod hook;
 mod http;
@@ -21,6 +22,7 @@ mod search;
 mod server;
 mod subagents;
 mod undo;
+mod waits;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

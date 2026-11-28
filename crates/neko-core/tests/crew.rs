@@ -92,7 +92,8 @@ fn crew_wake(c: &mut Core, thread: &TaskId, crew: &TaskId, run: Option<&str>) ->
         run: run.map(|r| neko_protocol::RunId(r.into())),
         question: None,
         chain: vec![],
-        crew: true,
+        kind: neko_core::subagents::WakeKind::Crew,
+        at_ms: None,
         about: None,
     }
 }
@@ -110,7 +111,7 @@ fn a_crew_wake_is_kept_once_per_run_read_back_as_crew_and_counted_per_hour() {
     assert!(!c.store.crew_wake_for_run(&t.id, &neko_protocol::RunId("run_2".into())).unwrap());
     let pending = c.store.pending_wakes().unwrap();
     assert_eq!(pending.len(), 1);
-    assert!(pending[0].crew && pending[0].number.is_empty() && pending[0].subagent == t.id && pending[0].title == "Fix login");
+    assert!(pending[0].is_crew() && pending[0].number.is_empty() && pending[0].subagent == t.id && pending[0].title == "Fix login");
     assert!(c.store.has_pending_wake(&own.id).unwrap(), "the Cattain's thread has news waiting");
     assert_eq!(c.store.crew_wakes_since(&own.id, 0).unwrap(), 0);
     let now = c.now();
@@ -139,7 +140,7 @@ fn a_version_18_store_opens_with_no_thread_started_by_a_cattain_and_every_wake_a
         s.connection().execute("INSERT INTO wakes (id, task_id, subagent_id, status, summary, files, state, created_ms) VALUES ('wake_old', 'task_old', 'task_old', 'done', 'x', '[]', 'delivered', 1)", []).unwrap();
     }
     let c = open(&d);
-    assert_eq!((c.store.version().unwrap(), SCHEMA_VERSION), (19, 19));
+    assert_eq!((c.store.version().unwrap(), SCHEMA_VERSION), (20, 20));
     assert_eq!(c.store.get_task(&TaskId("task_old".into())).unwrap().unwrap().started_by, None);
     let kind: String = c.store.connection().query_row("SELECT kind FROM wakes WHERE id = 'wake_old'", [], |r| r.get(0)).unwrap();
     assert_eq!(kind, "subagent");

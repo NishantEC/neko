@@ -43,7 +43,7 @@ fn env(now: i64) -> Env<'static> {
 }
 
 fn daily(c: &mut Core, at_: &str, now: i64) -> String {
-    c.create_round("Docs check", "Check the docs for broken links", "cat_mochi", None, &Schedule::Daily { at: at_.into() }, true, env(now)).unwrap().0.id
+    c.create_round("Docs check", "Check the docs for broken links", Some("cat_mochi"), false, None, &Schedule::Daily { at: at_.into() }, true, env(now)).unwrap().0.id
 }
 
 fn finish(c: &mut Core, task: &neko_protocol::TaskId, status: TaskStatus) {
@@ -55,13 +55,13 @@ fn a_round_has_its_words_cat_workspace_schedule_and_a_next_time() {
     let d = dir();
     let mut c = open(&d);
     let now = at(2026, 11, 27, 8, 0);
-    let (r, _) = c.create_round("  Docs   check ", "Check the docs", "cat_mochi", None, &Schedule::Weekdays { days: vec![Weekday::Fri, Weekday::Mon], at: "9:00".into() }, true, env(now)).unwrap();
-    assert_eq!((r.name.as_str(), r.cat.as_str(), r.workspace.as_str(), r.on, r.status), ("Docs check", "cat_mochi", "default", true, RoundStatus::Scheduled));
+    let (r, _) = c.create_round("  Docs   check ", "Check the docs", Some("cat_mochi"), false, None, &Schedule::Weekdays { days: vec![Weekday::Fri, Weekday::Mon], at: "9:00".into() }, true, env(now)).unwrap();
+    assert_eq!((r.name.as_str(), r.cat.as_deref().unwrap_or(""), r.workspace.as_str(), r.on, r.status), ("Docs check", "cat_mochi", "default", true, RoundStatus::Scheduled));
     assert_eq!(r.schedule, Schedule::Weekdays { days: vec![Weekday::Mon, Weekday::Fri], at: "09:00".into() });
     assert_eq!(r.next_due_ms, Some(at(2026, 11, 27, 9, 0)), "Friday 09:00 is the first run");
     assert_eq!(c.rounds(env(now)).unwrap().0.len(), 1);
     // Manual rounds have no next time; off rounds neither.
-    let (m, _) = c.create_round("By hand", "x", "cat_miso", None, &Schedule::Manual, true, env(now)).unwrap();
+    let (m, _) = c.create_round("By hand", "x", Some("cat_miso"), false, None, &Schedule::Manual, true, env(now)).unwrap();
     assert_eq!((m.status, m.next_due_ms), (RoundStatus::Manual, None));
     let (off, _) = c.set_round_on(&r.id, false, env(now)).unwrap();
     assert_eq!((off.status, off.next_due_ms), (RoundStatus::Off, None));
@@ -73,14 +73,14 @@ fn a_round_is_refused_with_words_it_can_act_on() {
     let mut c = open(&d);
     let e = env(0);
     let s = Schedule::Manual;
-    assert!(matches!(c.create_round(" ", "x", "cat_miso", None, &s, true, e), Err(RoundError::InvalidName(_))));
-    assert!(matches!(c.create_round("A", "  ", "cat_miso", None, &s, true, e), Err(RoundError::InvalidWords(_))));
-    assert!(matches!(c.create_round("A", "x", "cat_nobody", None, &s, true, e), Err(RoundError::Refused(_))));
-    assert!(matches!(c.create_round("A", "x", "cat_miso", Some("ws_nope"), &s, true, e), Err(RoundError::Refused(_))));
-    assert!(matches!(c.create_round("A", "x", "cat_miso", None, &Schedule::Every { hours: 0 }, true, e), Err(RoundError::Refused(_))));
-    assert!(matches!(c.create_round("A", "x", "cat_miso", None, &Schedule::Weekdays { days: vec![], at: "09:00".into() }, true, e), Err(RoundError::Refused(_))));
+    assert!(matches!(c.create_round(" ", "x", Some("cat_miso"), false, None, &s, true, e), Err(RoundError::InvalidName(_))));
+    assert!(matches!(c.create_round("A", "  ", Some("cat_miso"), false, None, &s, true, e), Err(RoundError::InvalidWords(_))));
+    assert!(matches!(c.create_round("A", "x", Some("cat_nobody"), false, None, &s, true, e), Err(RoundError::Refused(_))));
+    assert!(matches!(c.create_round("A", "x", Some("cat_miso"), false, Some("ws_nope"), &s, true, e), Err(RoundError::Refused(_))));
+    assert!(matches!(c.create_round("A", "x", Some("cat_miso"), false, None, &Schedule::Every { hours: 0 }, true, e), Err(RoundError::Refused(_))));
+    assert!(matches!(c.create_round("A", "x", Some("cat_miso"), false, None, &Schedule::Weekdays { days: vec![], at: "09:00".into() }, true, e), Err(RoundError::Refused(_))));
     c.retire_cat("cat_tofu").unwrap();
-    assert!(matches!(c.create_round("A", "x", "cat_tofu", None, &s, true, e), Err(RoundError::Refused(w)) if w.contains("tofu is retired")));
+    assert!(matches!(c.create_round("A", "x", Some("cat_tofu"), false, None, &s, true, e), Err(RoundError::Refused(w)) if w.contains("tofu is retired")));
     assert!(matches!(c.round("round_nope", e), Err(RoundError::NotFound)));
 }
 
@@ -136,12 +136,12 @@ fn a_time_more_than_a_day_old_is_recorded_as_missed_not_run() {
     // Exactly 24 hours old is "at most 24 hours": it runs.
     let d = dir();
     let mut c = open(&d);
-    c.create_round("Weekly", "x", "cat_miso", None, &weekly, true, env(anchor)).unwrap();
+    c.create_round("Weekly", "x", Some("cat_miso"), false, None, &weekly, true, env(anchor)).unwrap();
     assert_eq!(c.tick_rounds(env(sunday + CATCH_UP_MS)).unwrap().started.len(), 1);
     // One millisecond older does not: it is recorded as missed, once.
     let d = dir();
     let mut c = open(&d);
-    let (r, _) = c.create_round("Weekly", "x", "cat_miso", None, &weekly, true, env(anchor)).unwrap();
+    let (r, _) = c.create_round("Weekly", "x", Some("cat_miso"), false, None, &weekly, true, env(anchor)).unwrap();
     assert!(c.tick_rounds(env(sunday + CATCH_UP_MS + 1)).unwrap().started.is_empty());
     let h = c.round_history(&r.id).unwrap();
     assert_eq!((h.len(), h[0].kind, h[0].due_ms), (1, RunKind::Missed, Some(sunday)));
@@ -259,7 +259,7 @@ fn a_retired_cat_a_missing_folder_or_a_removed_workspace_skips_and_says_why() {
     let folder = d.0.join("w");
     let ws = c.add_workspace(folder.to_str().unwrap()).unwrap().workspace;
     let start = at(2026, 11, 20, 8, 0);
-    let (r, _) = c.create_round("Docs check", "x", "cat_mochi", Some(&ws.id), &Schedule::Daily { at: "09:00".into() }, true, env(start)).unwrap();
+    let (r, _) = c.create_round("Docs check", "x", Some("cat_mochi"), false, Some(&ws.id), &Schedule::Daily { at: "09:00".into() }, true, env(start)).unwrap();
     assert_eq!(r.workspace, ws.id);
     // The folder goes missing.
     std::fs::remove_dir_all(&folder).unwrap();
@@ -337,7 +337,7 @@ fn every_n_hours_counts_from_when_it_was_made_turned_on_or_changed() {
     let d = dir();
     let mut c = open(&d);
     let t0 = at(2026, 11, 27, 10, 17);
-    let (r, _) = c.create_round("Hourly", "x", "cat_miso", None, &Schedule::Every { hours: 3 }, true, env(t0)).unwrap();
+    let (r, _) = c.create_round("Hourly", "x", Some("cat_miso"), false, None, &Schedule::Every { hours: 3 }, true, env(t0)).unwrap();
     assert_eq!(r.next_due_ms, Some(t0 + 3 * HOUR));
     assert!(c.tick_rounds(env(t0 + 3 * HOUR - 1)).unwrap().started.is_empty());
     let t = c.tick_rounds(env(t0 + 3 * HOUR)).unwrap();
@@ -345,7 +345,7 @@ fn every_n_hours_counts_from_when_it_was_made_turned_on_or_changed() {
     assert_eq!(t.wake_at_ms, Some(t0 + 6 * HOUR));
     finish(&mut c, &t.started[0].id, TaskStatus::Done);
     // Changing the schedule counts from then: nothing that was due under the old one is run.
-    let (r, _) = c.update_round(&r.id, "Hourly", "x", "cat_miso", None, &Schedule::Every { hours: 5 }, env(t0 + 4 * HOUR)).unwrap();
+    let (r, _) = c.update_round(&r.id, "Hourly", "x", Some("cat_miso"), false, None, &Schedule::Every { hours: 5 }, env(t0 + 4 * HOUR)).unwrap();
     assert_eq!(r.next_due_ms, Some(t0 + 9 * HOUR));
     assert!(c.tick_rounds(env(t0 + 8 * HOUR)).unwrap().started.is_empty());
     assert_eq!(c.tick_rounds(env(t0 + 9 * HOUR)).unwrap().started.len(), 1);
@@ -357,7 +357,7 @@ fn across_daylight_saving_a_daily_round_runs_exactly_once_on_each_date() {
     let mut c = open(&d);
     let ny = Rules::us(-5 * 3600);
     let envz = |now: i64| Env { now, zone: &ny };
-    let (r, _) = c.create_round("Early", "x", "cat_miso", None, &Schedule::Daily { at: "02:30".into() }, true, envz(at(2026, 3, 6, 12, 0))).unwrap();
+    let (r, _) = c.create_round("Early", "x", Some("cat_miso"), false, None, &Schedule::Daily { at: "02:30".into() }, true, envz(at(2026, 3, 6, 12, 0))).unwrap();
     let mut ran = Vec::new();
     // Look every half hour from Friday noon to Tuesday noon (UTC), as a daemon that was up all the time would.
     let mut now = at(2026, 3, 6, 12, 0);
@@ -370,7 +370,7 @@ fn across_daylight_saving_a_daily_round_runs_exactly_once_on_each_date() {
     }
     assert_eq!(ran, vec![at(2026, 3, 7, 7, 30), at(2026, 3, 8, 7, 30), at(2026, 3, 9, 6, 30), at(2026, 3, 10, 6, 30)], "Sunday's 02:30 does not exist: it ran once, at 03:30 EDT");
     // Fall back: 01:30 happens twice on 2026-11-01; once.
-    let (r2, _) = c.create_round("Late", "x", "cat_miso", None, &Schedule::Daily { at: "01:30".into() }, true, envz(at(2026, 10, 30, 12, 0))).unwrap();
+    let (r2, _) = c.create_round("Late", "x", Some("cat_miso"), false, None, &Schedule::Daily { at: "01:30".into() }, true, envz(at(2026, 10, 30, 12, 0))).unwrap();
     let mut ran = Vec::new();
     let mut now = at(2026, 10, 30, 12, 0);
     while now < at(2026, 11, 2, 12, 0) {
@@ -419,7 +419,7 @@ fn a_restart_in_the_middle_neither_runs_a_time_twice_nor_loses_one() {
 fn a_manual_round_is_always_on_and_the_brake_leaves_it_alone() {
     let d = dir();
     let mut c = open(&d);
-    let (r, _) = c.create_round("By hand", "x", "cat_miso", None, &Schedule::Manual, false, env(0)).unwrap();
+    let (r, _) = c.create_round("By hand", "x", Some("cat_miso"), false, None, &Schedule::Manual, false, env(0)).unwrap();
     assert!(r.on, "it has nothing to switch");
     // Run now three times and fail each: still on.
     for i in 0..3 {
@@ -432,7 +432,7 @@ fn a_manual_round_is_always_on_and_the_brake_leaves_it_alone() {
     // A round that was off and is then made manual is on.
     let id = daily(&mut c, "09:00", 0);
     c.set_round_on(&id, false, env(1)).unwrap();
-    let (v, _) = c.update_round(&id, "Docs check", "x", "cat_mochi", None, &Schedule::Manual, env(2)).unwrap();
+    let (v, _) = c.update_round(&id, "Docs check", "x", Some("cat_mochi"), false, None, &Schedule::Manual, env(2)).unwrap();
     assert!(v.on && v.status == RoundStatus::Manual);
 }
 
@@ -463,15 +463,15 @@ fn the_migration_from_store_six_adds_rounds_and_changes_nothing_else() {
     // A store as the last Neko left it: version 6, no rounds.
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch("ALTER TABLE tasks DROP COLUMN started_by; ALTER TABLE wakes DROP COLUMN kind; ALTER TABLE wakes DROP COLUMN about; ALTER TABLE cats DROP COLUMN made_in; DELETE FROM tasks WHERE cattain = 1; DROP TABLE cattain_files; ALTER TABLE cats DROP COLUMN thread_id; ALTER TABLE cats DROP COLUMN model; ALTER TABLE cats DROP COLUMN access; ALTER TABLE tasks DROP COLUMN cattain; ALTER TABLE runs DROP COLUMN ask; ALTER TABLE wakes DROP COLUMN run_id; ALTER TABLE wakes DROP COLUMN question; ALTER TABLE wakes DROP COLUMN question_chain; DROP INDEX tasks_by_activity; DROP TRIGGER find_titles_insert; DROP TRIGGER find_titles_update; DROP TRIGGER find_titles_delete; DROP TRIGGER find_words_insert; DROP TRIGGER find_words_update; DROP TRIGGER find_words_delete; DROP TABLE find_titles; DROP TABLE find_words; ALTER TABLE tasks DROP COLUMN sub_placement; ALTER TABLE tasks DROP COLUMN sub_after; ALTER TABLE tasks DROP COLUMN sub_draft; ALTER TABLE tasks DROP COLUMN sub_branch; ALTER TABLE tasks DROP COLUMN pinned_ms; ALTER TABLE tasks DROP COLUMN settled_ms; ALTER TABLE tasks DROP COLUMN archived_ms; ALTER TABLE tasks DROP COLUMN in_folder; ALTER TABLE tasks DROP COLUMN from_branch; DROP TABLE queued; DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN sub_number; ALTER TABLE tasks DROP COLUMN root_id; ALTER TABLE tasks DROP COLUMN last_read_ms; ALTER TABLE tasks DROP COLUMN activity_ms; ALTER TABLE tasks DROP COLUMN latest_line; DROP TABLE plugin_values; DROP TABLE plugins; DROP TABLE round_runs; DROP TABLE rounds; DROP INDEX tasks_by_round; ALTER TABLE tasks DROP COLUMN round_id; ALTER TABLE tasks DROP COLUMN round_due_ms; ALTER TABLE tasks DROP COLUMN round_name; PRAGMA user_version = 6;").unwrap();
+        conn.execute_batch("DROP TABLE waits; ALTER TABLE wakes DROP COLUMN title; ALTER TABLE wakes DROP COLUMN at_ms; ALTER TABLE rounds DROP COLUMN standing; ALTER TABLE tasks DROP COLUMN started_by; ALTER TABLE wakes DROP COLUMN kind; ALTER TABLE wakes DROP COLUMN about; ALTER TABLE cats DROP COLUMN made_in; DELETE FROM tasks WHERE cattain = 1; DROP TABLE cattain_files; ALTER TABLE cats DROP COLUMN thread_id; ALTER TABLE cats DROP COLUMN model; ALTER TABLE cats DROP COLUMN access; ALTER TABLE tasks DROP COLUMN cattain; ALTER TABLE runs DROP COLUMN ask; ALTER TABLE wakes DROP COLUMN run_id; ALTER TABLE wakes DROP COLUMN question; ALTER TABLE wakes DROP COLUMN question_chain; DROP INDEX tasks_by_activity; DROP TRIGGER find_titles_insert; DROP TRIGGER find_titles_update; DROP TRIGGER find_titles_delete; DROP TRIGGER find_words_insert; DROP TRIGGER find_words_update; DROP TRIGGER find_words_delete; DROP TABLE find_titles; DROP TABLE find_words; ALTER TABLE tasks DROP COLUMN sub_placement; ALTER TABLE tasks DROP COLUMN sub_after; ALTER TABLE tasks DROP COLUMN sub_draft; ALTER TABLE tasks DROP COLUMN sub_branch; ALTER TABLE tasks DROP COLUMN pinned_ms; ALTER TABLE tasks DROP COLUMN settled_ms; ALTER TABLE tasks DROP COLUMN archived_ms; ALTER TABLE tasks DROP COLUMN in_folder; ALTER TABLE tasks DROP COLUMN from_branch; DROP TABLE queued; DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN sub_number; ALTER TABLE tasks DROP COLUMN root_id; ALTER TABLE tasks DROP COLUMN last_read_ms; ALTER TABLE tasks DROP COLUMN activity_ms; ALTER TABLE tasks DROP COLUMN latest_line; DROP TABLE plugin_values; DROP TABLE plugins; DROP TABLE round_runs; DROP TABLE rounds; DROP INDEX tasks_by_round; ALTER TABLE tasks DROP COLUMN round_id; ALTER TABLE tasks DROP COLUMN round_due_ms; ALTER TABLE tasks DROP COLUMN round_name; PRAGMA user_version = 6;").unwrap();
     }
     assert_eq!(Store::open_at(&path, 6).unwrap().version().unwrap(), 6);
     let mut core = Core::open(&path, Box::new(FixedClock::new(1_764_000_100_000, 1000)), Box::new(SequentialIds::default())).unwrap();
-    assert_eq!(core.store.version().unwrap(), 19, "every migration after 6 ran: rounds' own is the seventh");
-    assert_eq!(SCHEMA_VERSION, 19);
+    assert_eq!(core.store.version().unwrap(), 20, "every migration after 6 ran: rounds' own is the seventh");
+    assert_eq!(SCHEMA_VERSION, 20);
     let tasks: Vec<_> = core.store.all_tasks().unwrap().into_iter().filter(|t| t.listed()).collect();
     assert_eq!((tasks.len(), tasks[0].title.as_str(), tasks[0].round.clone()), (1, "Rename the sidebar label", None));
     assert!(core.rounds(env(0)).unwrap().0.is_empty());
     assert!(!core.store.rounds_paused().unwrap());
-    assert_eq!(core.create_round("A", "x", "cat_miso", None, &Schedule::Manual, true, env(5)).unwrap().0.name, "A");
+    assert_eq!(core.create_round("A", "x", Some("cat_miso"), false, None, &Schedule::Manual, true, env(5)).unwrap().0.name, "A");
 }

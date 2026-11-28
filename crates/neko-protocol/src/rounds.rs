@@ -17,7 +17,7 @@ pub const CATCH_UP_MS: i64 = 24 * 3_600_000;
 /// Failed runs in a row after which a round turns itself off.
 pub const BRAKE_AFTER: u32 = 3;
 
-/// A cat's standing work that starts by itself.
+/// Work that starts by itself at its times: a Cattain's, or nobody's.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Round {
     /// `round_` and 26 letters and digits.
@@ -26,8 +26,12 @@ pub struct Round {
     pub name: String,
     /// What to do: the words of every task the round makes.
     pub words: String,
-    /// The cat that does it (a [`crate::Cat`]'s id).
-    pub cat: String,
+    /// The Cattain it belongs to (a [`crate::Cat`]'s id); None for a round of nobody's (version 24), whose threads have no cat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cat: Option<String>,
+    /// It posts its words into its Cattain's own thread at each due time, instead of starting a thread of its own (version 24).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub standing: bool,
     /// The workspace it works in (`default` is General).
     pub workspace: String,
     pub schedule: Schedule,

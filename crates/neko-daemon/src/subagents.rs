@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use neko_core::Core;
 use neko_core::conductor;
-use neko_core::subagents::{self as rules, DraftChange, NewSubagent, Standing, WakeRow};
+use neko_core::subagents::{self as rules, DraftChange, NewSubagent, Standing, WakeKind, WakeRow};
 use neko_core::workplace::{self, PlaceError};
 use neko_protocol::{AskTo, Change, DiffFile, ErrorCode, FileStatus, Reply, RunAsk, SendMode, ServerMessage, SubPlace, SubagentOf, Task, TaskId, TaskStatus};
 use serde_json::{Value, json};
@@ -284,7 +284,7 @@ fn deliver_wakes(shared: &Arc<Shared>) {
             None => {
                 // A Cattain's crew news alone waits longer for more (crew threads end minutes apart), and no more often than an hour
                 // allows; a kitten's report among it goes at once.
-                let crew_only = wakes.iter().all(|w| w.crew);
+                let crew_only = wakes.iter().all(WakeRow::is_crew);
                 if crew_only && let Some(again) = crate::crew::over_budget(shared, &task_id) {
                     let mut st = lock(&shared.subagents.state);
                     st.next = Some(st.next.map_or(again, |n| n.min(again)));
@@ -431,7 +431,15 @@ fn pass_up_unanswered(shared: &Shared, task: &Task) {
 
 fn has_live_children(shared: &Shared, task: &Task) -> bool {
     let core = lock(&shared.core);
-    core.store.children_of(&task.id).unwrap_or_default().iter().any(Task::is_live_subagent) || core.store.has_pending_wake(&task.id).unwrap_or(false) || crate::crew::has_live_crew(&core, task)
+    core.store.children_of(&task.id).unwrap_or_default().iter().any(Task::is_live_subagent)
+        || core.store.has_pending_wake(&task.id).unwrap_or(false)
+        || crate::crew::has_live_crew(&core, task)
+        || crate::waits::has_waits(&core, &task.id)
+}
+
+/// Whether a thread at rest still waits on something: a kitten, an unread report, its crew, a timer or a watch.
+pub fn waits_on_anything(shared: &Shared, task: &Task) -> bool {
+    has_live_children(shared, task)
 }
 
 fn set_status(shared: &Shared, task: &Task, status: TaskStatus) {
@@ -536,8 +544,9 @@ fn report(shared: &Arc<Shared>, task: &Task, said: Option<&str>) {
         run,
         question,
         chain,
-        crew: false,
+        kind: WakeKind::Subagent,
         about: None,
+        at_ms: None,
     };
     let _ = core.store.insert_wake(&w, if silenced { "discarded" } else { "pending" }, now);
 }
@@ -568,6 +577,8 @@ pub fn stop_tree(shared: &Arc<Shared>, id: &TaskId) {
         (task, below)
     };
     shared.subagents.silence(below.iter().map(|t| t.id.clone()));
+    // Its timers and watches stop with it (docs/knowledge/waits.md).
+    crate::waits::end_all(shared, &task.id, "The person stopped the thread.");
     {
         let mut core = lock(&shared.core);
         let now = core.now();
@@ -625,7 +636,7 @@ pub fn recover(core: &mut Core) {
         let asked = task.status == TaskStatus::Asked;
         let question = if asked { core.store.question_of(&task.id).ok().flatten() } else { None };
         let chain = if asked { core.store.newest_ask(&task.id).ok().flatten().map(|a| a.chain).unwrap_or_default() } else { Vec::new() };
-        let w = WakeRow { id: core.new_id("wake"), task: of.parent.clone(), subagent: task.id.clone(), number: of.number.clone(), title: task.title.clone(), status, summary, files: Vec::new(), branch, created_ms: now, run, question, chain, crew: false, about: None };
+        let w = WakeRow { id: core.new_id("wake"), task: of.parent.clone(), subagent: task.id.clone(), number: of.number.clone(), title: task.title.clone(), status, summary, files: Vec::new(), branch, created_ms: now, run, question, chain, kind: WakeKind::Subagent, about: None, at_ms: None };
         let _ = core.store.insert_wake(&w, "pending", now);
     }
 }
@@ -641,7 +652,7 @@ pub fn handle(shared: &Arc<Shared>, run: &McpRun, body: &Value) -> Value {
     if body["op"] == "info" {
         let core = lock(&shared.core);
         let depth = core.store.get_task(&run.task).ok().flatten().and_then(|t| t.subagent).map_or(0, |s| SubagentOf::depth(&s));
-        return json!({"depth": depth, "cattains": crate::cattains::may_make(&core, &run.task), "crew": crate::crew::may_run_crew(&core, &run.task)});
+        return json!({"depth": depth, "cattains": crate::cattains::may_make(&core, &run.task), "crew": crate::crew::may_run_crew(&core, &run.task), "waits": crate::waits::may_wait(&core, &run.task)});
     }
     let args = &body["arguments"];
     match body["tool"].as_str().unwrap_or("") {
@@ -657,6 +668,10 @@ pub fn handle(shared: &Arc<Shared>, run: &McpRun, body: &Value) -> Value {
         "start_crew_thread" => crate::crew::start_tool(shared, run, args),
         "crew" => crate::crew::list_tool(shared, run, args),
         "message_crew" => crate::crew::message_tool(shared, run, args),
+        "wake_me" => crate::waits::wake_me(shared, run, args),
+        "watch_files" => crate::waits::watch_files(shared, run, args),
+        "watch_command" => crate::waits::watch_command(shared, run, args),
+        "stop_watching" => crate::waits::stop_watching(shared, run, args),
         other => answer(format!("Neko has no tool called {other}."), true),
     }
 }

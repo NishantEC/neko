@@ -74,7 +74,7 @@ fn idle_with_rounds_on_and_off() {
     println!("idle, 30 s, no round: {} ms CPU ({:.3}%)", cpu1 - cpu0, (cpu1 - cpu0) as f64 / 300.0);
     // A round that is on, due in a day, and one that is off: the scheduler sleeps until the next due time (at most five minutes).
     let make = |c: &mut neko_protocol::client::Client, name: &str, on: bool| {
-        c.request(Request::CreateRound { name: name.into(), words: "Check [fake:plain]".into(), cat: "cat_mochi".into(), workspace: None, schedule: neko_protocol::Schedule::Every { hours: 24 }, on }).unwrap()
+        c.request(Request::CreateRound { name: name.into(), words: "Check [fake:plain]".into(), cat: Some("cat_mochi".into()), standing: false, workspace: None, schedule: neko_protocol::Schedule::Every { hours: 24 }, on }).unwrap()
     };
     make(&mut c, "Docs check", true);
     make(&mut c, "Off round", false);

@@ -294,6 +294,7 @@ fn stop(shared: &Shared) {
     crate::runs::stop_all(shared);
     crate::folders::stopping();
     crate::rounds::stopping(shared);
+    crate::waits::stopping();
     crate::plugins::stopping();
     crate::subagents::stopping(shared);
     *lock(&shared.needs.dirty) = true;
@@ -487,7 +488,17 @@ fn mark(shared: &Shared, task: &neko_protocol::TaskId, read: bool) -> Reply {
 
 /// The person pinned, settled or archived a thread, or took it back: the task, whole, to every screen. Refused with words when it
 /// cannot be done now (`neko_core::shelf::refusal`); asking for what already is is not an error and changes nothing.
-fn shelve(shared: &Shared, task: &neko_protocol::TaskId, shelf: Shelf, on: bool) -> Reply {
+fn shelve(shared: &Arc<Shared>, task: &neko_protocol::TaskId, shelf: Shelf, on: bool) -> Reply {
+    // A thread that rests only on its timers and watches may be archived: they stop with it (docs/knowledge/waits.md).
+    if shelf == Shelf::Archive
+        && on
+        && let Ok(Some(t)) = lock(&shared.core).store.get_task(task)
+        && t.status == neko_protocol::TaskStatus::Waiting
+        && crate::waits::only_waits(shared, &t)
+    {
+        crate::waits::end_all(shared, task, "The person archived the thread.");
+        crate::waits::settle(shared, task);
+    }
     let mut core = lock(&shared.core);
     let t = match core.store.get_task(task) {
         Ok(Some(t)) => t,
@@ -611,8 +622,8 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
         Request::BringBackCat { cat } => one_cat(shared, |c| c.bring_back_cat(&cat)),
         Request::UndoMakeCattain { cat } => crate::cattains::undo_make(shared, &cat),
         Request::ListRounds => crate::rounds::list(shared),
-        Request::CreateRound { name, words, cat, workspace, schedule, on } => crate::rounds::create(shared, &name, &words, &cat, workspace.as_deref(), &schedule, on),
-        Request::UpdateRound { round, name, words, cat, workspace, schedule } => crate::rounds::update(shared, &round, &name, &words, &cat, workspace.as_deref(), &schedule),
+        Request::CreateRound { name, words, cat, standing, workspace, schedule, on } => crate::rounds::create(shared, &name, &words, cat.as_deref(), standing, workspace.as_deref(), &schedule, on),
+        Request::UpdateRound { round, name, words, cat, standing, workspace, schedule } => crate::rounds::update(shared, &round, &name, &words, cat.as_deref(), standing, workspace.as_deref(), &schedule),
         Request::SetRoundOn { round, on } => crate::rounds::set_on(shared, &round, on),
         Request::RemoveRound { round } => crate::rounds::remove(shared, &round),
         Request::RunRoundNow { round } => crate::rounds::run_now(shared, &round),
@@ -733,6 +744,7 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
         Request::PinTask { task, pinned } => shelve(shared, &task, Shelf::Pin, pinned),
         Request::SettleTask { task, settled } => shelve(shared, &task, Shelf::Settle, settled),
         Request::ArchiveTask { task, archived } => shelve(shared, &task, Shelf::Archive, archived),
+        Request::StopWaiting { task, wait } => crate::waits::stop_request(shared, &task, &wait),
         Request::StartDraft { task } => crate::subagents::start_draft(shared, &task),
         Request::EditDraft { task, prompt } => crate::subagents::edit_draft(shared, &task, &prompt),
         Request::DiscardDraft { task } => crate::subagents::discard_draft(shared, &task),

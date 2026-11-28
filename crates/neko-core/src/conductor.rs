@@ -607,7 +607,22 @@ pub fn wake_notes(core: &mut Core, task: &TaskId, run: Option<&RunId>, wakes: &[
     let mut out = Vec::new();
     for w in wakes {
         let now = core.now();
-        let body = if w.crew {
+        let body = if w.is_event() {
+            let event = match (w.kind, w.status.as_str()) {
+                (crate::subagents::WakeKind::Timer, _) => neko_protocol::EventKind::Timer,
+                (crate::subagents::WakeKind::Round, _) => neko_protocol::EventKind::Round,
+                (_, "ended") => neko_protocol::EventKind::WatchEnded,
+                (_, "succeeded") => neko_protocol::EventKind::Command,
+                _ => neko_protocol::EventKind::Files,
+            };
+            let (note, detail) = match event {
+                // A round: its name, then its words (the person's).
+                neko_protocol::EventKind::Round => (w.title.clone(), w.summary.clone()),
+                neko_protocol::EventKind::Files | neko_protocol::EventKind::Command => (w.summary.clone(), w.files.join("\n")),
+                _ => (w.summary.clone(), w.title.clone()),
+            };
+            PartBody::EventWake { event, note, detail, at_ms: w.at_ms, from: w.about.clone().unwrap_or_default() }
+        } else if w.is_crew() {
             PartBody::CrewWake { thread: w.subagent.clone(), title: w.title.clone(), status: w.status.clone(), summary: w.summary.clone(), files: w.files.clone(), question: w.question.clone().filter(|_| w.status == "asked") }
         } else {
             PartBody::Wake { number: w.number.clone(), title: w.title.clone(), status: w.status.clone(), summary: w.summary.clone(), files: w.files.clone(), branch: w.branch.clone(), question: w.question.clone().filter(|_| w.status == "asked") }

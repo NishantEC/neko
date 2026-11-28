@@ -27,7 +27,7 @@
 //! | `hook-destructive` | Runs `git reset --hard HEAD~1`. |
 //! | `real` | The shapes a real run showed: empty thinking, several words between tools, a long absolute path, a check that exits 1. |
 //! | `plugin-tool:SERVER:TOOL` | Calls the tool `mcp__SERVER__TOOL` (asking, as Claude Code would about an MCP tool), then says whether it ran. When `--mcp-config` did not give a server called SERVER there is no such tool: the call fails at once, asking nothing. |
-//! | `mcp` (or `delegate`, or `steps`) | Plays the lines after the tag through the MCP servers `--mcp-config` gave, really started (stdio, with this process's environment): `mcp SERVER TOOL {json}` calls `mcp__SERVER__TOOL` (asking first, as Claude Code does) and reads the server's answer, `poll N` calls `mcp__neko__subagents` N times, `stay N` keeps streaming N seconds, `write NAME TEXT` writes a file in its folder (`\n` in TEXT is a new line), `sh COMMAND` runs a shell command there, `tools LABEL` records the tools Neko's server offered (`{"neko_tools": "a,b", "label": LABEL}` in the record). Steps are one per line, or several on one line apart by ` ; ` (what stands before the tag is the person's words). `steps` is the same script for a prompt that sits inside another script's step (a subagent's), where a second `mcp` tag would cut that step: its steps must be on lines of their own. Then it ends its turn. A message that begins `<neko-wake` is answered by saying which reports it read; with `NEKO_FAKE_WAKE_SH` set it first runs that shell command in its folder for each report that names a branch (`{branch}` is replaced), as a thread that merges would. A `kind="question"` wake (a kitten asks) is handled as `NEKO_FAKE_ON_QUESTION` says, rules apart by `|`, by the kitten's number: `1=answer:TEXT` answers it with `message_subagent`, `1=up` passes it up (`ask_person` in a thread, `ask_parent` in a kitten); with no rule it is read and left. A `kind="crew"` wake (a Cattain hears its crew) is read, then the Cattain calls `mcp__neko__crew` and rewrites DIGEST.md (Needs you, New, In progress) and NOTES.md in its folder, recording `{"digest": ...}`; `NEKO_FAKE_ON_CREW` adds script steps apart by ` ; ` that it plays next (`mcp neko message_crew {...}`). |
+//! | `mcp` (or `delegate`, or `steps`) | Plays the lines after the tag through the MCP servers `--mcp-config` gave, really started (stdio, with this process's environment): `mcp SERVER TOOL {json}` calls `mcp__SERVER__TOOL` (asking first, as Claude Code does) and reads the server's answer, `poll N` calls `mcp__neko__subagents` N times, `stay N` keeps streaming N seconds, `write NAME TEXT` writes a file in its folder (`\n` in TEXT is a new line), `sh COMMAND` runs a shell command there, `tools LABEL` records the tools Neko's server offered (`{"neko_tools": "a,b", "label": LABEL}` in the record). Steps are one per line, or several on one line apart by ` ; ` (what stands before the tag is the person's words). `steps` is the same script for a prompt that sits inside another script's step (a subagent's), where a second `mcp` tag would cut that step: its steps must be on lines of their own. Then it ends its turn. A message that begins `<neko-wake` is answered by saying which reports it read; with `NEKO_FAKE_WAKE_SH` set it first runs that shell command in its folder for each report that names a branch (`{branch}` is replaced), as a thread that merges would. A `kind="question"` wake (a kitten asks) is handled as `NEKO_FAKE_ON_QUESTION` says, rules apart by `|`, by the kitten's number: `1=answer:TEXT` answers it with `message_subagent`, `1=up` passes it up (`ask_person` in a thread, `ask_parent` in a kitten); with no rule it is read and left. A `kind="crew"` wake (a Cattain hears its crew) is read, then the Cattain calls `mcp__neko__crew` and rewrites DIGEST.md (Needs you, New, In progress) and NOTES.md in its folder, recording `{"digest": ...}`; `NEKO_FAKE_ON_CREW` adds script steps apart by ` ; ` that it plays next (`mcp neko message_crew {...}`). A `kind="timer"`, `kind="watch"` or `kind="round"` wake is read and named in the answer ("Timer wait_…: its note", "Watch wait_… changed: build.log", "Round Docs check: its first line"). |
 //! | `cattain-notes` | Writes NOTES.md and DIGEST.md in its folder, as a Cattain keeps them, then answers. |
 //! | `hook-no-verdict` | Says a hook gave no usable answer for `cargo test`, then runs it anyway, as Claude Code does (it fails open). |
 //!
@@ -787,6 +787,26 @@ impl Fake {
                         let detail = chunk.split("<request>").nth(1).or_else(|| chunk.split("<question>").nth(1)).and_then(|r| r.split('<').next()).map(str::to_owned).unwrap_or(first.clone());
                         seen.push(format!("Crew {} {}: {}", attr("title"), attr("status"), detail));
                         crew += 1;
+                        continue;
+                    }
+                    // A timer, a watch or a standing round (docs/knowledge/waits.md): what woke it, and what it carried.
+                    let inner = |tag: &str| chunk.split(&format!("<{tag}>")).nth(1).and_then(|r| r.split(&format!("</{tag}>")).next()).unwrap_or("").replace("&lt;", "<").replace("&amp;", "&");
+                    if chunk.starts_with(" kind=\"timer\"") {
+                        seen.push(format!("Timer {}: {}", attr("id"), inner("note")));
+                        continue;
+                    }
+                    if chunk.starts_with(" kind=\"watch\"") {
+                        let what = match attr("status").as_str() {
+                            "changed" => inner("changed"),
+                            "succeeded" => inner("output"),
+                            _ => "it ended".to_owned(),
+                        };
+                        seen.push(format!("Watch {} {}: {}", attr("id"), attr("status"), what));
+                        continue;
+                    }
+                    if chunk.starts_with(" kind=\"round\"") {
+                        let body = chunk.split_once('>').map(|(_, b)| b).unwrap_or("").split("</neko-wake>").next().unwrap_or("").trim().lines().next().unwrap_or("").to_owned();
+                        seen.push(format!("Round {}: {}", attr("round"), body));
                         continue;
                     }
                     if chunk.starts_with(" kind=\"question\"") {

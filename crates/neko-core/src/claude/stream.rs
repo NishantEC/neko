@@ -419,6 +419,9 @@ pub fn summary(name: &str, input: &Value, workdir: &str) -> String {
         "mcp__neko__list_cattains" => String::new(),
         "mcp__neko__start_crew_thread" => field(input, &["title"]).map(|d| first_line(d, 60)).unwrap_or_default(),
         "mcp__neko__crew" | "mcp__neko__message_crew" => field(input, &["id"]).unwrap_or("").to_owned(),
+        "mcp__neko__wake_me" => field(input, &["at", "after"]).unwrap_or("").to_owned(),
+        "mcp__neko__watch_command" => field(input, &["command"]).map(|d| first_line(d, 60)).unwrap_or_default(),
+        "mcp__neko__stop_watching" => field(input, &["id"]).unwrap_or("").to_owned(),
         _ => input.as_object().and_then(|o| o.values().find_map(s)).map(|v| first_line(v, 60)).unwrap_or_default(),
     }
 }
@@ -443,6 +446,8 @@ pub fn action(tool: &str, input: &Value, workdir: &str) -> Action {
         "WebFetch" => Action::Network { target: field(input, &["url"]).unwrap_or("").to_owned() },
         "WebSearch" => Action::Network { target: format!("a web search: {}", field(input, &["query"]).unwrap_or("")) },
         t if INTERNAL_TOOLS.contains(&t) => Action::Internal { tool: t.to_owned() },
+        // A command watch runs a command later, unattended: it asks as a command does (docs/knowledge/waits.md).
+        "mcp__neko__watch_command" => Action::Watch { command: field(input, &["command"]).unwrap_or("").to_owned() },
         // Neko's own tools (docs/knowledge/subagents.md) only record work in Neko's own state, so they go ahead in every mode.
         t if t.starts_with("mcp__neko__") => Action::Internal { tool: t.to_owned() },
         t if neko_protocol::plugins::mcp_tool(t).is_some() => {

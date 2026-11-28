@@ -34,10 +34,13 @@ pub struct RoundRow {
     pub id: String,
     pub name: String,
     pub words: String,
+    /// The Cattain it belongs to; empty for a round of nobody's.
     pub cat: String,
     pub workspace: String,
     pub schedule: Schedule,
     pub enabled: bool,
+    /// It posts its words into its Cattain's own thread instead of starting a thread.
+    pub standing: bool,
     /// Where "every N hours" counts from.
     pub anchor_ms: i64,
     /// The last due time dealt with.
@@ -50,7 +53,7 @@ pub struct RoundRow {
     pub changed_ms: i64,
 }
 
-const ROUND_COLUMNS: &str = "id, name, words, cat_id, workspace_id, schedule, enabled, anchor_ms, cursor_ms, fail_streak, brake_note, created_ms, changed_ms";
+const ROUND_COLUMNS: &str = "id, name, words, cat_id, workspace_id, schedule, enabled, anchor_ms, cursor_ms, fail_streak, brake_note, created_ms, changed_ms, standing";
 
 fn round_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoundRow> {
     let schedule: String = r.get(5)?;
@@ -68,6 +71,7 @@ fn round_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoundRow> {
         brake_note: r.get(10)?,
         created_ms: r.get(11)?,
         changed_ms: r.get(12)?,
+        standing: r.get::<_, i64>(13)? != 0,
     })
 }
 
@@ -141,6 +145,8 @@ pub struct Tick {
     pub events: Vec<(u64, Change)>,
     /// Tasks just made by a round: the caller starts their agents.
     pub started: Vec<Task>,
+    /// A standing round posted into its Cattain's thread: the caller delivers the wakes.
+    pub posted: bool,
     /// When the next due time is, over every round that may still come due (None: nothing will, so the scheduler sleeps until
     /// something changes).
     pub wake_at_ms: Option<i64>,
@@ -159,8 +165,8 @@ impl Store {
 
     fn write_round_row(tx: &Transaction<'_>, r: &RoundRow, kind: &str, now: i64) -> Result<u64, StoreError> {
         tx.execute(
-            "UPDATE rounds SET name = ?2, words = ?3, cat_id = ?4, workspace_id = ?5, schedule = ?6, enabled = ?7, anchor_ms = ?8, cursor_ms = ?9, fail_streak = ?10, brake_note = ?11, changed_ms = ?12 WHERE id = ?1",
-            params![r.id, r.name, r.words, r.cat, r.workspace, serde_json::to_string(&r.schedule).unwrap_or_default(), r.enabled as i64, r.anchor_ms, r.cursor_ms, r.fail_streak, r.brake_note, r.changed_ms],
+            "UPDATE rounds SET name = ?2, words = ?3, cat_id = ?4, workspace_id = ?5, schedule = ?6, enabled = ?7, anchor_ms = ?8, cursor_ms = ?9, fail_streak = ?10, brake_note = ?11, changed_ms = ?12, standing = ?13 WHERE id = ?1",
+            params![r.id, r.name, r.words, r.cat, r.workspace, serde_json::to_string(&r.schedule).unwrap_or_default(), r.enabled as i64, r.anchor_ms, r.cursor_ms, r.fail_streak, r.brake_note, r.changed_ms, r.standing as i64],
         )?;
         log_event(tx, now, &r.id, kind, serde_json::json!({ "name": r.name, "on": r.enabled }))
     }
@@ -176,8 +182,8 @@ impl Store {
     pub fn insert_round(&mut self, r: &RoundRow, now: i64) -> Result<u64, StoreError> {
         let tx = self.conn.transaction()?;
         tx.execute(
-            &format!("INSERT INTO rounds ({ROUND_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"),
-            params![r.id, r.name, r.words, r.cat, r.workspace, serde_json::to_string(&r.schedule).unwrap_or_default(), r.enabled as i64, r.anchor_ms, r.cursor_ms, r.fail_streak, r.brake_note, r.created_ms, r.changed_ms],
+            &format!("INSERT INTO rounds ({ROUND_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)"),
+            params![r.id, r.name, r.words, r.cat, r.workspace, serde_json::to_string(&r.schedule).unwrap_or_default(), r.enabled as i64, r.anchor_ms, r.cursor_ms, r.fail_streak, r.brake_note, r.created_ms, r.changed_ms, r.standing as i64],
         )?;
         let seq = log_event(&tx, now, &r.id, "round_added", serde_json::json!({ "name": r.name }))?;
         tx.commit()?;
@@ -240,11 +246,14 @@ impl Store {
 
     /// Writes what came of a due time in one transaction: the history lines, the cursor, and the task when one was made. Returns
     /// the task's creation event (if any) and the round's change event, in order.
-    fn commit_due(&mut self, round: &RoundRow, lines: &[RoundRun], task: Option<&Task>, now: i64) -> Result<Vec<u64>, StoreError> {
+    fn commit_due(&mut self, round: &RoundRow, lines: &[RoundRun], task: Option<&Task>, wake: Option<&crate::subagents::WakeRow>, now: i64) -> Result<Vec<u64>, StoreError> {
         let tx = self.conn.transaction()?;
         let mut seqs = Vec::new();
         if let Some(t) = task {
             seqs.push(insert_task(&tx, t)?);
+        }
+        if let Some(w) = wake {
+            crate::subagents::insert_wake_in(&tx, w, "pending")?;
         }
         for l in lines {
             tx.execute(
@@ -297,6 +306,10 @@ impl Core {
         {
             return Some((RoundStatus::CatRetired, Some(format!("{} is retired.", c.name))));
         }
+        // A standing round posts into its Cattain's own thread, which needs no project folder.
+        if r.standing {
+            return None;
+        }
         if let Ok(Some(w)) = self.store.get_workspace(&r.workspace) {
             if !w.is_active() {
                 return Some((RoundStatus::WorkspaceRemoved, Some(format!("{} was removed from Neko.", w.name))));
@@ -317,7 +330,8 @@ impl Core {
             id: r.id.clone(),
             name: r.name.clone(),
             words: r.words.clone(),
-            cat: r.cat.clone(),
+            cat: (!r.cat.is_empty()).then(|| r.cat.clone()),
+            standing: r.standing,
             workspace: r.workspace.clone(),
             schedule: r.schedule.clone(),
             on: r.enabled,
@@ -349,17 +363,24 @@ impl Core {
 
     /// The cat and workspace a round may be saved with: an active cat, a workspace that is there (its folder may be missing: the
     /// round then says so and skips).
-    fn check_round_parts(&self, cat: &str, workspace: Option<&str>) -> Result<(String, Workspace), RoundError> {
-        let c = self.store.get_cat(cat)?.ok_or_else(|| RoundError::Refused("That cat is not there any more. Choose another.".into()))?;
-        if !c.is_active() {
-            return Err(RoundError::Refused(format!("{} is retired. Choose another cat, or bring {} back from Settings.", c.name, c.name)));
-        }
+    fn check_round_parts(&self, cat: Option<&str>, standing: bool, workspace: Option<&str>) -> Result<(String, Workspace), RoundError> {
+        let cat = match cat.filter(|c| !c.is_empty()) {
+            None if standing => return Err(RoundError::Refused("A round that posts into a Cattain's thread needs a Cattain. Choose one.".into())),
+            None => String::new(),
+            Some(cat) => {
+                let c = self.store.get_cat(cat)?.ok_or_else(|| RoundError::Refused("That Cattain is not there any more. Choose another.".into()))?;
+                if !c.is_active() {
+                    return Err(RoundError::Refused(format!("{} is retired. Choose another Cattain, or bring {} back from Settings.", c.name, c.name)));
+                }
+                c.id
+            }
+        };
         let ws = workspace.filter(|w| !w.is_empty()).unwrap_or(crate::DEFAULT_WORKSPACE);
         let w = self.store.get_workspace(ws)?.ok_or_else(|| RoundError::Refused("That project is not there any more. Choose another.".into()))?;
         if !w.is_active() {
             return Err(RoundError::Refused(format!("{} was removed from Neko. Choose another project.", w.name)));
         }
-        Ok((c.id, w))
+        Ok((cat, w))
     }
 
     fn check_round_words(words: &str) -> Result<(), RoundError> {
@@ -373,11 +394,12 @@ impl Core {
     }
 
     /// A new round. A schedule counts from `env.now`: its first run is the first due time after it.
-    pub fn create_round(&mut self, name: &str, words: &str, cat: &str, workspace: Option<&str>, schedule: &Schedule, on: bool, env: Env<'_>) -> Result<(Round, u64), RoundError> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_round(&mut self, name: &str, words: &str, cat: Option<&str>, standing: bool, workspace: Option<&str>, schedule: &Schedule, on: bool, env: Env<'_>) -> Result<(Round, u64), RoundError> {
         let name = rounds::clean_name(name).map_err(RoundError::InvalidName)?;
         Self::check_round_words(words)?;
         let schedule = schedule.normalized().map_err(RoundError::Refused)?;
-        let (cat, w) = self.check_round_parts(cat, workspace)?;
+        let (cat, w) = self.check_round_parts(cat, standing, workspace)?;
         if self.store.round_rows()?.len() >= rounds::MAX_ROUNDS {
             return Err(RoundError::Refused(format!("Neko keeps at most {} rounds. Remove one first.", rounds::MAX_ROUNDS)));
         }
@@ -397,6 +419,7 @@ impl Core {
             brake_note: None,
             created_ms: env.now,
             changed_ms: env.now,
+            standing,
         };
         let rev = self.store.insert_round(&row, env.now)?;
         Ok((self.round_view(&row, env)?, rev))
@@ -404,17 +427,19 @@ impl Core {
 
     /// Changes a round whole. A different schedule (or cat or workspace) counts from now, so nothing that was due under the old
     /// one is caught up. The brake stays as it was: turning the round on clears it.
-    pub fn update_round(&mut self, id: &str, name: &str, words: &str, cat: &str, workspace: Option<&str>, schedule: &Schedule, env: Env<'_>) -> Result<(Round, u64), RoundError> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_round(&mut self, id: &str, name: &str, words: &str, cat: Option<&str>, standing: bool, workspace: Option<&str>, schedule: &Schedule, env: Env<'_>) -> Result<(Round, u64), RoundError> {
         let mut row = self.round_row(id)?;
         let name = rounds::clean_name(name).map_err(RoundError::InvalidName)?;
         Self::check_round_words(words)?;
         let schedule = schedule.normalized().map_err(RoundError::Refused)?;
         // A cat that is retired may stay the round's until it is changed: only a new choice is checked.
-        let (cat, w) = if cat == row.cat && workspace.map_or(crate::DEFAULT_WORKSPACE, |w| if w.is_empty() { crate::DEFAULT_WORKSPACE } else { w }) == row.workspace {
+        let (cat, w) = if cat.unwrap_or("") == row.cat && standing == row.standing && workspace.map_or(crate::DEFAULT_WORKSPACE, |w| if w.is_empty() { crate::DEFAULT_WORKSPACE } else { w }) == row.workspace {
             (row.cat.clone(), self.store.get_workspace(&row.workspace)?.ok_or(RoundError::Refused("That project is not there any more. Choose another.".into()))?)
         } else {
-            self.check_round_parts(cat, workspace)?
+            self.check_round_parts(cat, standing, workspace)?
         };
+        row.standing = standing;
         if schedule != row.schedule {
             row.anchor_ms = env.now;
             row.cursor_ms = env.now;
@@ -471,7 +496,7 @@ impl Core {
     /// Makes the round's task: the round's words under its name, for its cat in its workspace, marked as the round's. `due_ms` None
     /// is Run now. Everything an ordinary task has applies; nothing about permission is set here.
     fn plan_round_task(&mut self, r: &RoundRow, due_ms: Option<i64>) -> Result<Task, NewTaskError> {
-        let (id, w, cat, now) = self.plan_task(&r.words, Some(&r.workspace), Some(&r.cat))?;
+        let (id, w, cat, now) = self.plan_task(&r.words, Some(&r.workspace), (!r.cat.is_empty()).then_some(r.cat.as_str()))?;
         Ok(Task {
             id,
             workspace: w.id,
@@ -497,11 +522,16 @@ impl Core {
             archived: false,
             cattain: false,
             started_by: None,
+            waits: Vec::new(),
         })
     }
 
     /// The words that say the round's last task is not finished, when it is not.
     fn overlap(&self, r: &RoundRow) -> Result<Option<String>, StoreError> {
+        if r.standing {
+            let unread = self.store.conn.query_row("SELECT 1 FROM wakes WHERE kind = 'round' AND about = ?1 AND state = 'pending' LIMIT 1", [&r.id], |_| Ok(())).optional()?.is_some();
+            return Ok(unread.then(|| "The last message has not been read yet.".to_owned()));
+        }
         let open = self.store.unfinished_of(&r.id)?;
         Ok(open.first().map(|s| {
             if matches!(s, TaskStatus::NeedsYou | TaskStatus::Asked) { "The last run is waiting for you.".to_owned() } else { "The last run is still working.".to_owned() }
@@ -518,14 +548,54 @@ impl Core {
         if let Some((_, Some(why))) = self.blocker(&row) {
             return Err(RoundError::Refused(why));
         }
+        if row.standing {
+            let mut events = Vec::new();
+            let (thread, wake) = self.standing_post(&row, None, env.now, &mut events)?;
+            let line = RoundRun { id: self.new_id("rrun"), round: row.id.clone(), due_ms: None, at_ms: env.now, kind: RunKind::Started, task: Some(thread.id.clone()), reason: None, end: None };
+            let mut row = row;
+            row.changed_ms = env.now;
+            let seqs = self.store.commit_due(&row, &[line], None, Some(&wake), env.now)?;
+            let view = self.round_view(&row, env)?;
+            events.push((seqs[0], Change::RoundUpdated { round: view.clone() }));
+            return Ok((view, thread, events));
+        }
         let task = self.plan_round_task(&row, None)?;
         let line = RoundRun { id: self.new_id("rrun"), round: row.id.clone(), due_ms: None, at_ms: env.now, kind: RunKind::Started, task: Some(task.id.clone()), reason: None, end: None };
         let mut row = row;
         row.changed_ms = env.now;
-        let seqs = self.store.commit_due(&row, &[line], Some(&task), env.now)?;
+        let seqs = self.store.commit_due(&row, &[line], Some(&task), None, env.now)?;
         let view = self.round_view(&row, env)?;
         let events = vec![(seqs[0], Change::TaskCreated { task: task.clone() }), (seqs[1], Change::RoundUpdated { round: view.clone() })];
         Ok((view, task, events))
+    }
+
+    /// A standing round's due time: its words go to its Cattain's own thread (made now if the Cattain was never opened) as a wake,
+    /// which the daemon delivers (resumed at rest, steered in while it works). Returns the thread and the wake, to be committed with
+    /// the history line.
+    fn standing_post(&mut self, r: &RoundRow, due_ms: Option<i64>, now: i64, events: &mut Vec<(u64, Change)>) -> Result<(Task, crate::subagents::WakeRow), RoundError> {
+        let (thread, _, made) = self.cattain_thread(&r.cat).map_err(|e| RoundError::Refused(e.to_string()))?;
+        if let Some(rev) = made {
+            events.push((rev, Change::TaskCreated { task: thread.clone() }));
+        }
+        let wake = crate::subagents::WakeRow {
+            id: self.new_id("wake"),
+            task: thread.id.clone(),
+            subagent: thread.id.clone(),
+            number: String::new(),
+            title: r.name.clone(),
+            status: "due".into(),
+            summary: r.words.clone(),
+            files: Vec::new(),
+            branch: None,
+            created_ms: now,
+            run: None,
+            question: None,
+            chain: Vec::new(),
+            kind: crate::subagents::WakeKind::Round,
+            about: Some(r.id.clone()),
+            at_ms: due_ms.or(Some(now)),
+        };
+        Ok((thread, wake))
     }
 
     /// Deals with every due time up to `env.now`, settles the tasks that ended, and says when to look again. See the module
@@ -546,6 +616,7 @@ impl Core {
             let mut lines = Vec::new();
             let line = |core: &mut Core, due: i64, kind: RunKind, reason: Option<String>| RoundRun { id: core.new_id("rrun"), round: row.id.clone(), due_ms: Some(due), at_ms: env.now, kind, task: None, reason, end: None };
             let mut task = None;
+            let mut wake = None;
             if env.now - latest > CATCH_UP_MS {
                 let n = dues.len();
                 let why = if n == 1 { "Neko was not running, or this Mac was asleep".to_owned() } else { format!("{n} times passed while Neko was not running or this Mac was asleep") };
@@ -564,6 +635,15 @@ impl Core {
                 };
                 match skip {
                     Some(why) => lines.push(line(self, latest, RunKind::Skipped, Some(why))),
+                    None if row.standing => match self.standing_post(&row, Some(latest), env.now, &mut tick.events) {
+                        Ok((thread, w)) => {
+                            let mut l = line(self, latest, RunKind::Started, None);
+                            l.task = Some(thread.id);
+                            lines.push(l);
+                            wake = Some(w);
+                        }
+                        Err(e) => lines.push(line(self, latest, RunKind::Skipped, Some(e.to_string()))),
+                    },
                     None => match self.plan_round_task(&row, Some(latest)) {
                         Ok(t) => {
                             let mut l = line(self, latest, RunKind::Started, None);
@@ -575,7 +655,8 @@ impl Core {
                     },
                 }
             }
-            let seqs = self.store.commit_due(&row, &lines, task.as_ref(), env.now)?;
+            let seqs = self.store.commit_due(&row, &lines, task.as_ref(), wake.as_ref(), env.now)?;
+            tick.posted |= wake.is_some();
             if let Some(t) = task {
                 tick.events.push((seqs[0], Change::TaskCreated { task: t.clone() }));
                 tick.started.push(t);
@@ -598,6 +679,20 @@ impl Core {
         for run in self.store.open_runs()? {
             let Some(task_id) = run.task.clone() else { continue };
             let task = self.store.get_task(&task_id)?;
+            // A standing round's line is about its message in the Cattain's thread: open until the message was read and the run that
+            // read it ended.
+            if self.store.get_round_row(&run.round)?.is_some_and(|r| r.standing) {
+                let state: Option<String> = self.store.conn.query_row("SELECT state FROM wakes WHERE kind = 'round' AND about = ?1 AND created_ms >= ?2 ORDER BY created_ms, id LIMIT 1", params![run.round, run.at_ms], |r| r.get(0)).optional()?;
+                match state.as_deref() {
+                    Some("pending") => continue,
+                    Some("discarded") => {
+                        self.store.conn.execute("UPDATE round_runs SET ended = ?2 WHERE id = ?1", params![run.id, crate::store::status_name(RunEnd::Stopped)])?;
+                        continue;
+                    }
+                    _ if task.as_ref().is_some_and(|t| t.status.is_active()) => continue,
+                    _ => {}
+                }
+            }
             let end = match task.as_ref().map(|t| t.status) {
                 None => RunEnd::Removed,
                 Some(TaskStatus::Done) => RunEnd::Done,

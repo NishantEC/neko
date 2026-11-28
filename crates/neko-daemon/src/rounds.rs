@@ -61,6 +61,11 @@ impl Hub {
         }
     }
 
+    /// The scheduler's thread, once it runs (a files watch unparks it from FSEvents' queue).
+    pub fn thread(&self) -> Option<std::thread::Thread> {
+        self.thread.get().cloned()
+    }
+
     /// Wakes the thread: something changed that it should look at now.
     pub fn poke(&self) {
         if let Some(t) = self.thread.get() {
@@ -103,6 +108,8 @@ fn watch(shared: &Arc<Shared>) {
     for t in orphans {
         let _ = runs::start(shared, t, None);
     }
+    // Every files watch still waiting gets its stream back (docs/knowledge/waits.md).
+    crate::waits::start(shared);
     let mut last = (Instant::now(), SystemClock.now_ms());
     loop {
         if shared.stopping.load(Ordering::SeqCst) {
@@ -112,20 +119,20 @@ fn watch(shared: &Arc<Shared>) {
         if jumped(wall, mono) {
             eprintln!("neko-daemon: the clock moved {} s more than time did (the Mac slept, or the clock was set): looking at the rounds now", (wall - mono.as_millis() as i64) / 1000);
         }
-        let (started, wake_at, settle_in) = {
+        let (started, posted, wake_at, settle_in) = {
             // The core stays locked while events leave, so they go out in revision order.
             let mut core = lock(&shared.core);
             let e = env(shared);
-            let (started, rounds_wake) = match core.tick_rounds(e) {
+            let (started, posted, rounds_wake) = match core.tick_rounds(e) {
                 Ok(tick) => {
                     for (revision, change) in tick.events {
                         shared.broadcast(&ServerMessage::Event { revision, change });
                     }
-                    (tick.started, tick.wake_at_ms)
+                    (tick.started, tick.posted, tick.wake_at_ms)
                 }
                 Err(e) => {
                     eprintln!("neko-daemon: rounds: {e}");
-                    (Vec::new(), None)
+                    (Vec::new(), false, None)
                 }
             };
             // The morning notification (docs/knowledge/briefing.md): the same thread, the same clock, the same timer.
@@ -157,11 +164,19 @@ fn watch(shared: &Arc<Shared>) {
                 }
             };
             let wake = [rounds_wake, morning_wake].into_iter().flatten().min();
-            (started, wake.map(|t| (t - e.now).max(0)), settle_in)
+            (started, posted, wake, settle_in)
         };
         for task in started {
             let _ = runs::start(shared, task, None);
         }
+        // A standing round posted into its Cattain's thread: the hub delivers it.
+        if posted {
+            crate::subagents::poke(shared);
+        }
+        // Timers and watches (docs/knowledge/waits.md): the same thread, the same clock, the same sleep.
+        let waits_wake = crate::waits::pass(shared);
+        let now_ms = env(shared).now;
+        let wake_at = [wake_at, waits_wake].into_iter().flatten().min().map(|t| (t - now_ms).max(0));
         last = (Instant::now(), SystemClock.now_ms());
         // The rounds and the morning notification are kept to LONGEST_SLEEP; the housekeeping is not exact and needs no such care.
         let sleep = [wake_at.map(|ms| ms.min(LONGEST_SLEEP.as_millis() as i64)), settle_in].into_iter().flatten().min();
@@ -194,9 +209,10 @@ pub fn list(shared: &Shared) -> Reply {
     }
 }
 
-pub fn create(shared: &Shared, name: &str, words: &str, cat: &str, workspace: Option<&str>, schedule: &Schedule, on: bool) -> Reply {
+#[allow(clippy::too_many_arguments)]
+pub fn create(shared: &Shared, name: &str, words: &str, cat: Option<&str>, standing: bool, workspace: Option<&str>, schedule: &Schedule, on: bool) -> Reply {
     let mut core = lock(&shared.core);
-    match core.create_round(name, words, cat, workspace, schedule, on, env(shared)) {
+    match core.create_round(name, words, cat, standing, workspace, schedule, on, env(shared)) {
         Ok((round, revision)) => {
             shared.broadcast(&ServerMessage::Event { revision, change: Change::RoundAdded { round: round.clone() } });
             shared.rounds.poke();
@@ -207,9 +223,9 @@ pub fn create(shared: &Shared, name: &str, words: &str, cat: &str, workspace: Op
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn update(shared: &Shared, round: &str, name: &str, words: &str, cat: &str, workspace: Option<&str>, schedule: &Schedule) -> Reply {
+pub fn update(shared: &Shared, round: &str, name: &str, words: &str, cat: Option<&str>, standing: bool, workspace: Option<&str>, schedule: &Schedule) -> Reply {
     let mut core = lock(&shared.core);
-    match core.update_round(round, name, words, cat, workspace, schedule, env(shared)) {
+    match core.update_round(round, name, words, cat, standing, workspace, schedule, env(shared)) {
         Ok((round, revision)) => {
             shared.broadcast(&ServerMessage::Event { revision, change: Change::RoundUpdated { round: round.clone() } });
             shared.rounds.poke();
@@ -256,8 +272,13 @@ pub fn run_now(shared: &Arc<Shared>, round: &str) -> Reply {
         made
     };
     match made {
-        Ok((_, task, _)) => {
-            let _ = runs::start(shared, task.clone(), None);
+        Ok((round, task, _)) => {
+            // A standing round posted into its Cattain's thread: the hub delivers it. Any other made a thread, which starts.
+            if round.standing {
+                crate::subagents::poke(shared);
+            } else {
+                let _ = runs::start(shared, task.clone(), None);
+            }
             shared.rounds.poke();
             Reply::Task { task }
         }

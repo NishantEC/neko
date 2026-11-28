@@ -135,6 +135,8 @@ pub enum Action {
     Edit { path: String },
     /// Run a command line.
     Command { command: String },
+    /// Run a check command again and again, unattended, until it succeeds: Neko's `watch_command` (docs/knowledge/waits.md).
+    Watch { command: String },
     /// Reach the network (a URL or a search).
     Network { target: String },
     /// A tool of an MCP server (`mcp__<server>__<tool>`): a plugin of Neko's, or one of the person's own Claude Code servers. `input` is

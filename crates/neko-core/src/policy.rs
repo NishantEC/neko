@@ -201,6 +201,16 @@ pub fn decide(action: &Action, cx: &Context<'_>) -> Verdict {
             let why = if d { "This command deletes or overwrites things." } else { "Commands can change anything on this Mac." };
             ask(if d { "Run a command that deletes or overwrites".into() } else { "Run a command".into() }, why, command.clone(), d, format!("command:{}", program(command)))
         }
+        Action::Watch { command } => {
+            let d = destructive(command);
+            ask(
+                "Run a check again and again".into(),
+                "Neko runs this command every few minutes, unattended, until it succeeds or the watch ends (at most 7 days).",
+                command.clone(),
+                d,
+                format!("watch:{}", program(command)),
+            )
+        }
         Action::Network { target } => ask("Reach the internet".into(), "It sends a request out of this Mac.", target.clone(), false, format!("network:{}", host(target))),
         Action::Mcp { server, tool, input } => {
             let ours = cx.plugins.iter().any(|p| p == server);

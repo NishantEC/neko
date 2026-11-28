@@ -79,6 +79,10 @@ pub fn handle(msg: &Value, ask: &dyn Fn(&Value) -> Result<Value, String>, offer:
             if crew && depth == 0 {
                 tools.extend(neko_core::crew::tools());
             }
+            // Timers and watches: a thread's, not a kitten's (docs/knowledge/waits.md).
+            if depth == 0 {
+                tools.extend(neko_core::waits::tools());
+            }
             reply(id, json!({"tools": tools}))
         }
         "tools/call" => {
@@ -129,15 +133,15 @@ mod tests {
         assert_eq!(init["result"]["protocolVersion"], "2025-11-25");
         let list = handle(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}), &ask_ok, &|| (0, false, false)).unwrap();
         let names: Vec<&str> = list["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
-        assert_eq!(names, ["start_subagent", "start_drafts", "subagents", "message_subagent", "stop_subagent", "ask_person"]);
+        assert_eq!(names, ["start_subagent", "start_drafts", "subagents", "message_subagent", "stop_subagent", "ask_person", "wake_me", "watch_files", "watch_command", "stop_watching"], "a thread may also set timers and watches");
         let deep = handle(&json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}), &ask_ok, &|| (3, true, true)).unwrap();
-        assert_eq!(deep["result"]["tools"].as_array().unwrap().len(), 4, "no tool to start more at the last level, ask_parent for ask_person, and no Cattains");
+        assert_eq!(deep["result"]["tools"].as_array().unwrap().len(), 4, "no tool to start more at the last level, ask_parent for ask_person, no Cattains, and no timers or watches for a kitten");
         let thread = handle(&json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}), &ask_ok, &|| (0, true, false)).unwrap();
         let names: Vec<&str> = thread["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
-        assert_eq!(names[6..], ["make_cattain", "list_cattains"], "a thread whose agent may make Cattains");
+        assert_eq!(names[6..], ["make_cattain", "list_cattains", "wake_me", "watch_files", "watch_command", "stop_watching"], "a thread whose agent may make Cattains");
         let own = handle(&json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}), &ask_ok, &|| (0, true, true)).unwrap();
         let names: Vec<&str> = own["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
-        assert_eq!(names[6..], ["make_cattain", "list_cattains", "start_crew_thread", "crew", "message_crew"], "a Cattain's own thread also runs its crew");
+        assert_eq!(names[6..], ["make_cattain", "list_cattains", "start_crew_thread", "crew", "message_crew", "wake_me", "watch_files", "watch_command", "stop_watching"], "a Cattain's own thread also runs its crew");
     }
 
     #[test]

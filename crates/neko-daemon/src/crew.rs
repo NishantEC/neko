@@ -11,7 +11,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use neko_core::crew::{self as rules, CrewAsk};
-use neko_core::subagents::{self as kittens, WakeRow};
+use neko_core::subagents::{self as kittens, WakeKind, WakeRow};
 use neko_protocol::{Cat, Change, Reply, SendMode, ServerMessage, Task, TaskId, TaskStatus};
 use serde_json::{Value, json};
 
@@ -255,8 +255,9 @@ pub fn turn_ended(shared: &Arc<Shared>, task: &Task) {
         run: Some(run.id),
         question,
         chain: Vec::new(),
-        crew: true,
+        kind: WakeKind::Crew,
         about: None,
+        at_ms: None,
     };
     let _ = core.store.insert_wake(&w, "pending", now);
 }
@@ -285,8 +286,9 @@ fn requests(shared: &Shared) {
             run: None,
             question: None,
             chain: Vec::new(),
-            crew: true,
+            kind: WakeKind::Crew,
             about: Some(r.permission),
+            at_ms: None,
         };
         let _ = core.store.insert_wake(&w, if to.is_some() { "pending" } else { "discarded" }, now);
     }

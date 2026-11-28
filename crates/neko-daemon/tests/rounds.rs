@@ -34,7 +34,7 @@ fn wait_for<R>(what: &str, mut f: impl FnMut() -> Option<R>) -> R {
 }
 
 fn hourly(c: &mut Client, name: &str, words: &str) -> Round {
-    match c.request(Request::CreateRound { name: name.into(), words: words.into(), cat: "cat_mochi".into(), workspace: None, schedule: Schedule::Every { hours: 1 }, on: true }).unwrap() {
+    match c.request(Request::CreateRound { name: name.into(), words: words.into(), cat: Some("cat_mochi".into()), standing: false, workspace: None, schedule: Schedule::Every { hours: 1 }, on: true }).unwrap() {
         Reply::Round { round } => round,
         r => panic!("create_round: {r:?}"),
     }
@@ -92,21 +92,21 @@ fn a_round_is_made_listed_changed_switched_and_removed_and_every_screen_hears_it
     assert_eq!(heard, r);
     // Edit.
     let Reply::Round { round: edited } = c
-        .request(Request::UpdateRound { round: r.id.clone(), name: "Docs links".into(), words: "Check links".into(), cat: "cat_miso".into(), workspace: None, schedule: Schedule::Weekdays { days: vec![schedule::Weekday::Mon], at: "09:00".into() } })
+        .request(Request::UpdateRound { round: r.id.clone(), name: "Docs links".into(), words: "Check links".into(), cat: Some("cat_miso".into()), standing: false, workspace: None, schedule: Schedule::Weekdays { days: vec![schedule::Weekday::Mon], at: "09:00".into() } })
         .unwrap()
     else {
         panic!("update")
     };
-    assert_eq!((edited.name.as_str(), edited.cat.as_str(), edited.schedule.is_automatic()), ("Docs links", "cat_miso", true));
+    assert_eq!((edited.name.as_str(), edited.cat.as_deref().unwrap_or(""), edited.schedule.is_automatic()), ("Docs links", "cat_miso", true));
     // Off and on again.
     let Reply::Round { round: off } = c.request(Request::SetRoundOn { round: r.id.clone(), on: false }).unwrap() else { panic!("off") };
     assert_eq!((off.on, off.status, off.next_due_ms), (false, RoundStatus::Off, None));
     let Reply::Round { round: on } = c.request(Request::SetRoundOn { round: r.id.clone(), on: true }).unwrap() else { panic!("on") };
     assert_eq!(on.status, RoundStatus::Scheduled);
     // Refusals.
-    assert_eq!(code(c.request(Request::CreateRound { name: " ".into(), words: "x".into(), cat: "cat_miso".into(), workspace: None, schedule: Schedule::Manual, on: true }).unwrap()), Some(ErrorCode::InvalidName));
-    assert_eq!(code(c.request(Request::CreateRound { name: "A".into(), words: "".into(), cat: "cat_miso".into(), workspace: None, schedule: Schedule::Manual, on: true }).unwrap()), Some(ErrorCode::InvalidWords));
-    assert_eq!(code(c.request(Request::CreateRound { name: "A".into(), words: "x".into(), cat: "cat_miso".into(), workspace: None, schedule: Schedule::Every { hours: 99 }, on: true }).unwrap()), Some(ErrorCode::Refused));
+    assert_eq!(code(c.request(Request::CreateRound { name: " ".into(), words: "x".into(), cat: Some("cat_miso".into()), standing: false, workspace: None, schedule: Schedule::Manual, on: true }).unwrap()), Some(ErrorCode::InvalidName));
+    assert_eq!(code(c.request(Request::CreateRound { name: "A".into(), words: "".into(), cat: Some("cat_miso".into()), standing: false, workspace: None, schedule: Schedule::Manual, on: true }).unwrap()), Some(ErrorCode::InvalidWords));
+    assert_eq!(code(c.request(Request::CreateRound { name: "A".into(), words: "x".into(), cat: Some("cat_miso".into()), standing: false, workspace: None, schedule: Schedule::Every { hours: 99 }, on: true }).unwrap()), Some(ErrorCode::Refused));
     assert_eq!(code(c.request(Request::SetRoundOn { round: "round_nope".into(), on: true }).unwrap()), Some(ErrorCode::NotFound));
     // Remove.
     assert_eq!(c.request(Request::RemoveRound { round: r.id.clone() }).unwrap(), Reply::Ok);
@@ -121,7 +121,7 @@ fn a_round_is_made_listed_changed_switched_and_removed_and_every_screen_hears_it
 fn run_now_makes_an_ordinary_task_that_says_where_it_came_from_and_the_history_shows_how_it_ended() {
     let d = daemon("rounds-run-now");
     let mut c = screen(&d);
-    let r = c.request(Request::CreateRound { name: "Docs check".into(), words: "Check the docs [fake:plain]".into(), cat: "cat_mochi".into(), workspace: None, schedule: Schedule::Manual, on: true }).unwrap();
+    let r = c.request(Request::CreateRound { name: "Docs check".into(), words: "Check the docs [fake:plain]".into(), cat: Some("cat_mochi".into()), standing: false, workspace: None, schedule: Schedule::Manual, on: true }).unwrap();
     let Reply::Round { round: r } = r else { panic!("{r:?}") };
     assert_eq!(r.status, RoundStatus::Manual);
     let Reply::Task { task } = c.request(Request::RunRoundNow { round: r.id.clone() }).unwrap() else { panic!("run now") };
@@ -254,7 +254,7 @@ fn the_debug_clock_is_refused_unless_the_daemon_was_started_with_it() {
     let mut c = d.client();
     assert_eq!(code(c.request(Request::DebugClock { offset_ms: Some(3_600_000) }).unwrap()), Some(ErrorCode::Refused));
     // And a round is not made due by it.
-    let Reply::Round { round } = c.request(Request::CreateRound { name: "A".into(), words: "x [fake:plain]".into(), cat: "cat_miso".into(), workspace: None, schedule: Schedule::Every { hours: 1 }, on: true }).unwrap() else { panic!("create") };
+    let Reply::Round { round } = c.request(Request::CreateRound { name: "A".into(), words: "x [fake:plain]".into(), cat: Some("cat_miso".into()), standing: false, workspace: None, schedule: Schedule::Every { hours: 1 }, on: true }).unwrap() else { panic!("create") };
     std::thread::sleep(Duration::from_millis(500));
     assert!(tasks_of(&mut c, &round.id).is_empty());
 }
@@ -264,7 +264,7 @@ fn a_retired_cats_round_says_so_and_a_round_cannot_run_now_while_its_task_works(
     let d = daemon("rounds-brakes");
     let mut c = screen(&d);
     let Reply::Round { round: r } =
-        c.request(Request::CreateRound { name: "Slow".into(), words: "Go slowly [fake:slow]".into(), cat: "cat_tofu".into(), workspace: None, schedule: Schedule::Manual, on: true }).unwrap()
+        c.request(Request::CreateRound { name: "Slow".into(), words: "Go slowly [fake:slow]".into(), cat: Some("cat_tofu".into()), standing: false, workspace: None, schedule: Schedule::Manual, on: true }).unwrap()
     else {
         panic!("create")
     };

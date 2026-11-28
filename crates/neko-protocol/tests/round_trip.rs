@@ -29,6 +29,7 @@ fn task() -> Task {
         archived: false,
         cattain: false,
         started_by: None,
+        waits: Vec::new(),
     }
 }
 
@@ -458,7 +459,7 @@ fn cats_round_trip() {
     assert!(json.ends_with(r#""cat":"cat_miso","rules_hash":"cbf29ce484222325"}"#), "{json}");
     pinned(PartBody::RulesChanged { cat: c(), name: "miso".into(), file: None }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso"}"#);
     pinned(PartBody::RulesChanged { cat: c(), name: "miso".into(), file: Some("CREW.md".into()) }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso","file":"CREW.md"}"#);
-    assert_eq!(PROTOCOL_VERSION, 24);
+    assert_eq!(PROTOCOL_VERSION, 25);
     // A Cattain's own thread says so; any other thread writes nothing.
     let mut own = task();
     own.cattain = true;
@@ -620,7 +621,7 @@ fn a_cattain_made_by_asking_round_trips() {
     assert!(!old.cattains_by_hand, "agents may make Cattains unless the person said otherwise");
     let pool = neko_protocol::cats::NAME_POOL;
     assert!(pool.len() > neko_protocol::cats::MAX_ACTIVE && !pool.iter().any(|n| neko_protocol::cats::STARTERS.iter().any(|s| s.1 == *n)));
-    assert_eq!(PROTOCOL_VERSION, 24);
+    assert_eq!(PROTOCOL_VERSION, 25);
 }
 
 #[test]
@@ -640,5 +641,30 @@ fn a_crew_round_trips() {
         PartBody::CrewWake { thread: TaskId("task_2".into()), title: "Fix login".into(), status: "asked".into(), summary: "Which?".into(), files: vec![], question: Some("Which?".into()) },
         r#"{"kind":"crew_wake","thread":"task_2","title":"Fix login","status":"asked","summary":"Which?","question":"Which?"}"#,
     );
-    assert_eq!(PROTOCOL_VERSION, 24);
+    assert_eq!(PROTOCOL_VERSION, 25);
+}
+
+#[test]
+fn timers_and_watches_round_trip() {
+    // A thread with nothing to wait on writes nothing; one that waits says on what.
+    let mut t = task();
+    assert!(!serde_json::to_string(&t).unwrap().contains("waits"));
+    t.waits = vec![
+        Wait { id: "wait_1".into(), kind: WaitKind::Timer, note: "Check the deploy".into(), at_ms: Some(1_764_000_000_000), until_ms: None, paths: vec![], command: None, every_ms: None, checked_ms: None, last_exit: None, created_ms: 1 },
+        Wait { id: "wait_2".into(), kind: WaitKind::Files, note: String::new(), at_ms: None, until_ms: Some(2), paths: vec!["src/**".into()], command: None, every_ms: None, checked_ms: None, last_exit: None, created_ms: 1 },
+    ];
+    let json = serde_json::to_string(&t).unwrap();
+    assert!(json.contains(r#""waits":[{"id":"wait_1","kind":"timer","note":"Check the deploy","at_ms":1764000000000,"created_ms":1},{"id":"wait_2","kind":"files","until_ms":2,"paths":["src/**"],"created_ms":1}]"#), "{json}");
+    assert_eq!(serde_json::from_str::<Task>(&json).unwrap(), t);
+    pinned(ClientMessage { id: 1, request: Request::StopWaiting { task: TaskId("task_1".into()), wait: "wait_2".into() } }, r#"{"id":1,"type":"stop_waiting","task":"task_1","wait":"wait_2"}"#);
+    pinned(
+        PartBody::EventWake { event: EventKind::Timer, note: "Check the deploy".into(), detail: String::new(), at_ms: Some(5), from: "wait_1".into() },
+        r#"{"kind":"event_wake","event":"timer","note":"Check the deploy","at_ms":5,"from":"wait_1"}"#,
+    );
+    pinned(
+        PartBody::EventWake { event: EventKind::Round, note: "Docs check".into(), detail: "Check the links".into(), at_ms: None, from: "round_1".into() },
+        r#"{"kind":"event_wake","event":"round","note":"Docs check","detail":"Check the links","from":"round_1"}"#,
+    );
+    pinned(PartBody::EventWake { event: EventKind::WatchEnded, note: String::new(), detail: String::new(), at_ms: None, from: String::new() }, r#"{"kind":"event_wake","event":"watch_ended"}"#);
+    assert_eq!(PROTOCOL_VERSION, 25);
 }

@@ -29,6 +29,7 @@ pub mod store;
 pub mod subagents;
 pub mod thread;
 pub mod title;
+pub mod waits;
 pub mod workplace;
 pub mod workspaces;
 

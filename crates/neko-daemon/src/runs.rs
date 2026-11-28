@@ -385,9 +385,9 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
         // The end checkpoint, before anything can be tidied away or a follow-up start (docs/knowledge/undo.md).
         crate::undo::at_end(shared, &task.id, &run_id);
         // A worktree or scratch folder with nothing in it goes now, before a follow-up can start (it makes it again). Not while a
-        // subagent still works in it, and never a subagent's: the folder is its thread's.
+        // subagent still works in it, nor while a timer or watch waits on it (docs/knowledge/waits.md), and never a subagent's: the folder is its thread's.
         let shares = task.subagent.as_ref().is_some_and(|s| s.placement == neko_protocol::SubPlace::Shared);
-        let tidied = if shares || crate::subagents::has_live_subagents(shared, &task.id) { workplace::Tidied::Kept } else { workplace::tidy(&shared.runs.data_dir, &task.id, &place) };
+        let tidied = if shares || crate::subagents::has_live_subagents(shared, &task.id) || crate::waits::has_waits(&lock(&shared.core), &task.id) { workplace::Tidied::Kept } else { workplace::tidy(&shared.runs.data_dir, &task.id, &place) };
         crate::undo::after_run(shared, &task.id, matches!(tidied, workplace::Tidied::Removed { .. }) && place.branch.is_some());
         release(shared, &task.id, cancelled);
         let mut b = lock(&book);
@@ -650,6 +650,7 @@ pub fn remove_task(shared: &Shared, task: &TaskId) -> Reply {
         }
     }
     let _ = lock(&shared.core).store.delete_wakes_of_task(task);
+    let _ = lock(&shared.core).store.delete_waits_of_task(task);
     let _ = lock(&shared.core).store.delete_queue_of_task(task);
     let place = lock(&shared.core).store.place(task).ok().flatten();
     if let Some(p) = &place

@@ -18,7 +18,8 @@ fn round() -> Round {
         id: "round_01HZX3J0000000000000000000".into(),
         name: "Docs check".into(),
         words: "Check the docs for broken links".into(),
-        cat: "cat_mochi".into(),
+        cat: Some("cat_mochi".into()),
+        standing: false,
         workspace: "ws_1".into(),
         schedule: Schedule::Weekdays { days: vec![Weekday::Mon, Weekday::Fri], at: "09:00".into() },
         on: true,
@@ -37,15 +38,15 @@ const ROUND_JSON: &str = r#"{"id":"round_01HZX3J0000000000000000000","name":"Doc
 fn rounds_requests_are_pinned() {
     pinned(ClientMessage { id: 1, request: Request::ListRounds }, r#"{"id":1,"type":"list_rounds"}"#);
     pinned(
-        ClientMessage { id: 2, request: Request::CreateRound { name: "Docs check".into(), words: "Check".into(), cat: "cat_mochi".into(), workspace: None, schedule: Schedule::Every { hours: 6 }, on: true } },
+        ClientMessage { id: 2, request: Request::CreateRound { name: "Docs check".into(), words: "Check".into(), cat: Some("cat_mochi".into()), standing: false, workspace: None, schedule: Schedule::Every { hours: 6 }, on: true } },
         r#"{"id":2,"type":"create_round","name":"Docs check","words":"Check","cat":"cat_mochi","schedule":{"kind":"every","hours":6}}"#,
     );
     pinned(
-        ClientMessage { id: 3, request: Request::CreateRound { name: "A".into(), words: "B".into(), cat: "cat_miso".into(), workspace: Some("ws_1".into()), schedule: Schedule::Manual, on: false } },
+        ClientMessage { id: 3, request: Request::CreateRound { name: "A".into(), words: "B".into(), cat: Some("cat_miso".into()), standing: false, workspace: Some("ws_1".into()), schedule: Schedule::Manual, on: false } },
         r#"{"id":3,"type":"create_round","name":"A","words":"B","cat":"cat_miso","workspace":"ws_1","schedule":{"kind":"manual"},"on":false}"#,
     );
     pinned(
-        ClientMessage { id: 4, request: Request::UpdateRound { round: "round_1".into(), name: "A".into(), words: "B".into(), cat: "cat_miso".into(), workspace: None, schedule: Schedule::Daily { at: "07:15".into() } } },
+        ClientMessage { id: 4, request: Request::UpdateRound { round: "round_1".into(), name: "A".into(), words: "B".into(), cat: Some("cat_miso".into()), standing: false, workspace: None, schedule: Schedule::Daily { at: "07:15".into() } } },
         r#"{"id":4,"type":"update_round","round":"round_1","name":"A","words":"B","cat":"cat_miso","schedule":{"kind":"daily","at":"07:15"}}"#,
     );
     pinned(ClientMessage { id: 5, request: Request::SetRoundOn { round: "round_1".into(), on: false } }, r#"{"id":5,"type":"set_round_on","round":"round_1","on":false}"#);
@@ -110,6 +111,7 @@ fn a_task_made_by_a_round_says_so_and_one_made_by_a_person_does_not() {
         archived: false,
         cattain: false,
         started_by: None,
+        waits: Vec::new(),
     };
     assert!(!serde_json::to_string(&t).unwrap().contains("round"));
     t.round = Some(TaskRound { id: "round_1".into(), name: "Docs check".into(), due_ms: Some(1_764_000_000_000) });

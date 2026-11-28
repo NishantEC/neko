@@ -22,6 +22,7 @@ pub mod schedule;
 pub mod search;
 pub mod title;
 pub mod undo;
+pub mod waits;
 
 pub use briefing::{Briefing, BriefingCounts, BriefingSettings};
 pub use cats::{Cat, CattainFile};
@@ -30,6 +31,7 @@ pub use rounds::{Round, RoundRun, RoundStatus, TaskRound};
 pub use schedule::Schedule;
 pub use search::{Found, FoundBy};
 pub use undo::{DiffFile, DiffPatch, DiffSource, DiffSummary, FileStatus, Offer, Overview, RunUndo, UndoState, UndoStorage};
+pub use waits::{EventKind, Wait, WaitKind};
 
 /// The version of this contract. A screen and a daemon talk only when theirs are equal. 2: tasks run (S1). 3: three permission
 /// modes, the context window, a command's exit code, Claude Code's own rules in words. 4: a task can be `asked` (its run ended with
@@ -63,7 +65,10 @@ pub use undo::{DiffFile, DiffPatch, DiffSource, DiffSummary, FileStatus, Offer, 
 /// thread says which crew thread's turn end or request woke it).
 /// 24: the Briefing reads the digests (a briefing lists the Cattains whose DIGEST.md changed in the window, with its Needs you and
 /// New lines, and the Cattains made by asking in it; its counts say how many of each).
-pub const PROTOCOL_VERSION: u32 = 24;
+/// 25: timers and watches (a thread says the timers and watches it waits on, `waits`; `stop_waiting` stops one; the note `event_wake`
+/// says a timer, a watch or a standing round woke it); a round belongs to a Cattain or to nobody (`cat` is optional) and may be
+/// `standing` (it posts into its Cattain's own thread).
+pub const PROTOCOL_VERSION: u32 = 25;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -228,6 +233,9 @@ pub struct Task {
     /// words are that Cattain's brief, not the person's. None for a thread the person started, in a crew or not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_by: Option<String>,
+    /// The timers and watches its agent set that still wait (version 24), oldest first. Derived by the daemon; a kitten has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waits: Vec<Wait>,
 }
 
 /// The longest a thread's `latest_line` is, in characters.
@@ -241,7 +249,7 @@ pub enum ThreadStatus {
     Working,
     /// The last run failed and the person has not opened the thread since.
     Failed,
-    /// No run, and the thread waits on its subagents (docs/knowledge/subagents.md).
+    /// No run, and the thread waits on its subagents (docs/knowledge/subagents.md), its crew, a timer or a watch.
     Waiting,
     /// None of the above.
     #[default]
@@ -276,6 +284,7 @@ impl Task {
             archived: false,
             cattain: false,
             started_by: None,
+            waits: Vec::new(),
         }
     }
 
@@ -630,6 +639,21 @@ pub enum PartBody {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         question: Option<String>,
     },
+    /// The thread was woken by a timer, a watch or a standing round (version 24): the centred note before the run that read it.
+    /// `note` is what the agent said the timer or watch is for (a round: its name); `detail` what happened (the files that changed,
+    /// the check's last output, the round's words); `at_ms` the time a timer was set for, or a round was due.
+    EventWake {
+        event: EventKind,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        note: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        detail: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at_ms: Option<i64>,
+        /// The timer or watch (`wait_…`) or round (`round_…`) it came from.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        from: String,
+    },
 }
 
 /// A failure the person can do something about (docs/knowledge/needs-you.md). Every other failure is a notice only.
@@ -970,7 +994,12 @@ pub enum Request {
     CreateRound {
         name: String,
         words: String,
-        cat: String,
+        /// The Cattain it belongs to (version 24: None, a round of nobody's).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cat: Option<String>,
+        /// It posts its words into its Cattain's own thread instead of starting a thread (version 24).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        standing: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workspace: Option<String>,
         schedule: Schedule,
@@ -982,7 +1011,10 @@ pub enum Request {
         round: String,
         name: String,
         words: String,
-        cat: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cat: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        standing: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workspace: Option<String>,
         schedule: Schedule,
@@ -1109,6 +1141,9 @@ pub enum Request {
     /// Archive the thread, or restore it without a run (version 16). A thread that is working or waits on its subagents is refused. A
     /// message to an archived thread wakes it. Replies `task`.
     ArchiveTask { task: TaskId, archived: bool },
+    /// Stop one timer or watch a thread waits on (version 24): Stop watching. A thread that waited on nothing else is at rest. Replies
+    /// `ok`; one that already fired or ended is `not_found`.
+    StopWaiting { task: TaskId, wait: String },
     /// Find threads and kittens (version 18) by their titles and by what was said in them. `query` holds the words and any filters
     /// (`project:`, `status:`, `cat:`, `since:`: `docs/knowledge/search.md`); an empty query asks for the most recent threads. At most
     /// `limit` results (12 when none; never more than 50). Replies `found`.
@@ -1418,6 +1453,7 @@ impl PartBody {
             PartBody::Person { text } | PartBody::Agent { text, .. } | PartBody::Thinking { text, .. } | PartBody::Notice { text, .. } => text,
             PartBody::Tool { summary, .. } => summary,
             PartBody::Wake { summary, .. } | PartBody::CrewWake { summary, .. } => summary,
+            PartBody::EventWake { detail, .. } => detail,
             PartBody::Subagent { title, .. } => title,
             PartBody::ToSubagent { text, .. } => text,
             PartBody::CattainMade { name, .. } => name,

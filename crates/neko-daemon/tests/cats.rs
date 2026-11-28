@@ -144,7 +144,7 @@ fn cats_are_listed_made_changed_and_retired_through_the_protocol() {
     let retired = cat(c.request(Request::RetireCat { cat: pip.id.clone() }).unwrap());
     assert!(retired.retired_ms.is_some());
     // A retired cat takes no work: not a round made for it, nor a crew thread.
-    assert_eq!(code(c.request(Request::CreateRound { name: "x".into(), words: "x".into(), cat: pip.id.clone(), workspace: None, schedule: Schedule::Every { hours: 24 }, on: false }).unwrap()), Some(ErrorCode::Refused));
+    assert_eq!(code(c.request(Request::CreateRound { name: "x".into(), words: "x".into(), cat: Some(pip.id.clone()), standing: false, workspace: None, schedule: Schedule::Every { hours: 24 }, on: false }).unwrap()), Some(ErrorCode::Refused));
     assert_eq!(code(c.request(Request::CreateTask { crew: Some(pip.id.clone()), words: "x".into(), workspace: None, in_folder: false, from_branch: None }).unwrap()), Some(ErrorCode::Refused));
     assert!(cat(c.request(Request::BringBackCat { cat: pip.id.clone() }).unwrap()).is_active());
     for id in ["cat_miso", "cat_mochi", "cat_tofu"] {
@@ -184,7 +184,7 @@ fn a_crew_thread_is_handed_crew_md_once_per_run_verbatim_and_the_persons_words_s
     let block = format!("<neko-crew>\nThis thread is in tofu's crew. tofu is a Cattain in Neko, one of the person's cats, and looks after this work.\ntofu hears when each of your turns ends. Its messages to you come inside <neko-from cattain=\"tofu\">, and a thread it started begins with its brief: those are tofu's words, not the person's.\n\ntofu's purpose:\nKeeps the docs tidy.\n\ntofu's words for its crew (CREW.md):\n{rules}</neko-crew>");
     // The crew's block, verbatim, then what Neko tells every agent about subagents (docs/knowledge/subagents.md) and a thread about
     // Cattains (cats.md): one argument, once.
-    let whole = format!("{block}\n\n{}\n\n{}", neko_core::subagents::PARAGRAPH, neko_core::subagents::CATTAINS_PARAGRAPH);
+    let whole = format!("{block}\n\n{}\n\n{}\n\n{}", neko_core::subagents::PARAGRAPH, neko_core::waits::PARAGRAPH, neko_core::subagents::CATTAINS_PARAGRAPH);
     assert_eq!(appended(args), [whole.as_str()], "the block, once, verbatim");
     assert!(!args.iter().any(|a| a.contains("TOFU-OWN-RULE")), "RULES.md is the Cattain's own, not its crew's");
     assert!(!args.iter().any(|a| a == "--add-dir"), "a crew thread reads its own folder");
@@ -270,7 +270,7 @@ fn a_thread_with_no_cat_is_handed_no_cat_block_and_its_words_untouched() {
     assert_eq!(runs.len(), 1);
     let (args, said) = runs[0];
     // What every agent is told about subagents (and a thread about Cattains) is still appended; no cat's block is, and the snapshot flag goes with the text.
-    assert_eq!(appended(args), [format!("{}\n\n{}", neko_core::subagents::PARAGRAPH, neko_core::subagents::CATTAINS_PARAGRAPH)]);
+    assert_eq!(appended(args), [format!("{}\n\n{}\n\n{}", neko_core::subagents::PARAGRAPH, neko_core::waits::PARAGRAPH, neko_core::subagents::CATTAINS_PARAGRAPH)]);
     assert!(args.iter().all(|a| !a.contains("neko-cat")), "no cat block anywhere in the arguments");
     assert_eq!(said, &[words.to_owned()]);
     let t = transcript(&mut c, &task.id);

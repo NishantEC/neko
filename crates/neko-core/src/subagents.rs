@@ -90,10 +90,94 @@ pub struct WakeRow {
     /// Its question, when it ended `asked`, and the kittens below it that question came up from (the first asked first).
     pub question: Option<String>,
     pub chain: Vec<String>,
-    /// A crew thread's turn end or request, waking its Cattain (version 19): `subagent` is then the crew thread, `number` empty.
-    pub crew: bool,
-    /// The request a crew wake is about (a permission waiting on the person), so each wakes its Cattain once.
+    /// What the wake is (version 19: a crew thread's turn end or request, waking its Cattain, `subagent` then the crew thread and
+    /// `number` empty; version 20: a timer, a watch or a standing round, `subagent` then the thread itself).
+    pub kind: WakeKind,
+    /// The request a crew wake is about (a permission waiting on the person), so each wakes its Cattain once; the timer or watch
+    /// (`wait_…`) or the round (`round_…`) a wake of those kinds came from.
     pub about: Option<String>,
+    /// The time a timer was set for, a watch was to end or a round was due (version 20).
+    pub at_ms: Option<i64>,
+}
+
+/// What made a wake.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WakeKind {
+    /// A kitten's report or question.
+    #[default]
+    Subagent,
+    /// A crew thread's turn end or request, for its Cattain.
+    Crew,
+    /// A timer the agent set (`wake_me`).
+    Timer,
+    /// A watch the agent set: files changed, a check succeeded, or the watch ended.
+    Watch,
+    /// A standing round's words, for its Cattain's own thread.
+    Round,
+}
+
+impl WakeKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            WakeKind::Subagent => "subagent",
+            WakeKind::Crew => "crew",
+            WakeKind::Timer => "timer",
+            WakeKind::Watch => "watch",
+            WakeKind::Round => "round",
+        }
+    }
+
+    pub fn of(name: &str) -> WakeKind {
+        match name {
+            "crew" => WakeKind::Crew,
+            "timer" => WakeKind::Timer,
+            "watch" => WakeKind::Watch,
+            "round" => WakeKind::Round,
+            _ => WakeKind::Subagent,
+        }
+    }
+}
+
+impl WakeRow {
+    /// A crew thread's news for its Cattain.
+    pub fn is_crew(&self) -> bool {
+        self.kind == WakeKind::Crew
+    }
+
+    /// A timer, a watch or a standing round: news from no other agent.
+    pub fn is_event(&self) -> bool {
+        matches!(self.kind, WakeKind::Timer | WakeKind::Watch | WakeKind::Round)
+    }
+}
+
+/// Writes a wake inside `tx` (with its event), in `state`.
+pub(crate) fn insert_wake_in(tx: &rusqlite::Transaction<'_>, w: &WakeRow, state: &str) -> Result<u64, StoreError> {
+    tx.execute(
+        "INSERT INTO wakes (id, task_id, subagent_id, status, summary, files, branch, state, created_ms, run_id, question, question_chain, kind, about, title, at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+        params![
+            w.id,
+            w.task.0,
+            w.subagent.0,
+            w.status,
+            w.summary,
+            serde_json::to_string(&w.files).unwrap_or_else(|_| "[]".into()),
+            w.branch,
+            state,
+            w.created_ms,
+            w.run.as_ref().map(|r| r.0.clone()),
+            w.question,
+            (!w.chain.is_empty()).then(|| serde_json::to_string(&w.chain).unwrap_or_default()),
+            w.kind.name(),
+            w.about,
+            w.is_event().then_some(&w.title),
+            w.at_ms
+        ],
+    )?;
+    let kind = match w.kind {
+        WakeKind::Subagent => "wake_created".to_owned(),
+        k => format!("{}_wake_created", k.name()),
+    };
+    log_event(tx, w.created_ms, &w.subagent.0, &kind, json!({ "task": w.task.0, "status": w.status, "state": state }))
 }
 
 /// The longest question Neko's tools take, in characters.
@@ -176,13 +260,9 @@ impl Store {
     }
 
     /// Stores a report that wakes a thread, `pending` until it is read.
-    pub fn insert_wake(&mut self, w: &WakeRow, state: &str, now_ms: i64) -> Result<u64, StoreError> {
+    pub fn insert_wake(&mut self, w: &WakeRow, state: &str, _now_ms: i64) -> Result<u64, StoreError> {
         let tx = self.conn.transaction()?;
-        tx.execute(
-            "INSERT INTO wakes (id, task_id, subagent_id, status, summary, files, branch, state, created_ms, run_id, question, question_chain, kind, about) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-            params![w.id, w.task.0, w.subagent.0, w.status, w.summary, serde_json::to_string(&w.files).unwrap_or_else(|_| "[]".into()), w.branch, state, w.created_ms, w.run.as_ref().map(|r| r.0.clone()), w.question, (!w.chain.is_empty()).then(|| serde_json::to_string(&w.chain).unwrap_or_default()), if w.crew { "crew" } else { "subagent" }, w.about],
-        )?;
-        let seq = log_event(&tx, now_ms, &w.subagent.0, if w.crew { "crew_wake_created" } else { "wake_created" }, json!({ "task": w.task.0, "status": w.status, "state": state }))?;
+        let seq = insert_wake_in(&tx, w, state)?;
         tx.commit()?;
         Ok(seq)
     }
@@ -190,7 +270,7 @@ impl Store {
     /// Every report not read yet, oldest first, with its subagent's number and title.
     pub fn pending_wakes(&self) -> Result<Vec<WakeRow>, StoreError> {
         let mut st = self.conn.prepare_cached(
-            "SELECT w.id, w.task_id, w.subagent_id, t.sub_number, t.title, w.status, w.summary, w.files, w.branch, w.created_ms, w.run_id, w.question, w.question_chain, w.kind, w.about \
+            "SELECT w.id, w.task_id, w.subagent_id, t.sub_number, COALESCE(w.title, t.title), w.status, w.summary, w.files, w.branch, w.created_ms, w.run_id, w.question, w.question_chain, w.kind, w.about, w.at_ms \
              FROM wakes w JOIN tasks t ON t.id = w.subagent_id WHERE w.state = 'pending' ORDER BY w.created_ms, w.id",
         )?;
         let rows = st.query_map([], |r| {
@@ -208,8 +288,9 @@ impl Store {
                 run: r.get::<_, Option<String>>(10)?.map(RunId),
                 question: r.get(11)?,
                 chain: r.get::<_, Option<String>>(12)?.and_then(|c| serde_json::from_str(&c).ok()).unwrap_or_default(),
-                crew: r.get::<_, String>(13)? == "crew",
+                kind: WakeKind::of(&r.get::<_, String>(13)?),
                 about: r.get(14)?,
+                at_ms: r.get(15)?,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -441,8 +522,13 @@ pub fn instructions(cat_block: Option<&str>, subagent: Option<Of<'_>>, cattains:
     parts.push(PARAGRAPH.to_owned());
     match subagent {
         Some((number, thread, branch)) => parts.push(subagent_block(number, thread, branch)),
-        None if cattains => parts.push(CATTAINS_PARAGRAPH.to_owned()),
-        None => {}
+        None => {
+            // A thread may wait on a timer or a watch (docs/knowledge/waits.md); a subagent ends with its report instead.
+            parts.push(crate::waits::PARAGRAPH.to_owned());
+            if cattains {
+                parts.push(CATTAINS_PARAGRAPH.to_owned());
+            }
+        }
     }
     parts.join("\n\n")
 }
@@ -511,12 +597,17 @@ pub fn wake_message(wakes: &[WakeRow], in_subagent: bool) -> String {
     let mut m = wakes
         .iter()
         .map(|w| {
+            match w.kind {
+                WakeKind::Timer | WakeKind::Watch => return crate::waits::wake_element(w, w.at_ms.map(|t| crate::waits::when_words(t, w.created_ms, &neko_protocol::schedule::SystemZone))),
+                WakeKind::Round => return crate::waits::round_element(w, w.at_ms.map(|t| crate::waits::when_words(t, w.created_ms, &neko_protocol::schedule::SystemZone))),
+                WakeKind::Subagent | WakeKind::Crew => {}
+            }
             let mut summary = cap(&w.summary, SUMMARY_LIMIT);
             if summary.len() < w.summary.len() {
-                summary.push_str(if w.crew { "\n… Call mcp__neko__crew with this id to read the rest." } else { "\n… Call mcp__neko__subagents with this id to read the rest." });
+                summary.push_str(if w.is_crew() { "\n… Call mcp__neko__crew with this id to read the rest." } else { "\n… Call mcp__neko__subagents with this id to read the rest." });
             }
             let title = escape(&w.title).replace('"', "&quot;");
-            if w.crew {
+            if w.is_crew() {
                 return crew_element(w, &title, &summary);
             }
             if let Some(q) = w.question.as_deref().filter(|_| w.status == "asked") {
@@ -544,7 +635,7 @@ pub fn wake_message(wakes: &[WakeRow], in_subagent: bool) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n");
-    if wakes.iter().any(|w| w.crew) {
+    if wakes.iter().any(WakeRow::is_crew) {
         m.push_str("\n\n");
         m.push_str(crate::crew::WAKE_CUE);
     }
@@ -711,7 +802,7 @@ mod tests {
     use super::*;
 
     fn wake(n: &str, status: &str, summary: &str) -> WakeRow {
-        WakeRow { id: format!("w{n}"), task: TaskId("t".into()), subagent: TaskId(format!("s{n}")), number: n.into(), title: "Check links".into(), status: status.into(), summary: summary.into(), files: vec![], branch: None, created_ms: 0, run: None, question: None, chain: vec![], crew: false, about: None }
+        WakeRow { id: format!("w{n}"), task: TaskId("t".into()), subagent: TaskId(format!("s{n}")), number: n.into(), title: "Check links".into(), status: status.into(), summary: summary.into(), files: vec![], branch: None, created_ms: 0, run: None, question: None, chain: vec![], kind: WakeKind::Subagent, about: None, at_ms: None }
     }
 
     #[test]
@@ -761,7 +852,7 @@ mod tests {
     #[test]
     fn a_crew_wake_says_which_thread_how_it_ended_and_what_to_do() {
         let mut done = wake("", "done", "Fixed the flaky test <retry>.");
-        done.crew = true;
+        done.kind = WakeKind::Crew;
         done.subagent = TaskId("task_01".into());
         done.title = "Fix \"login\"".into();
         done.files = vec!["src/login.rs +3 -1".into()];

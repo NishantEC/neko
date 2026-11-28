@@ -365,6 +365,35 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Sql("ALTER TABLE tasks ADD COLUMN started_by TEXT;
     ALTER TABLE wakes ADD COLUMN kind TEXT NOT NULL DEFAULT 'subagent';
     ALTER TABLE wakes ADD COLUMN about TEXT;"),
+    // 20: timers and watches (docs/knowledge/waits.md). A row per timer or watch a thread's agent set: what it waits on, where its paths
+    // are read from (`root`, the thread's folder then), its state (`active` until it fires, ends, is stopped or is skipped while
+    // automatic work is paused) and, for a command, when it last ran and how. A wake may now come from one of them or from a standing
+    // round, with a title and a time of its own. A round may belong to nobody (`cat_id` empty) and may be standing. Nothing that exists
+    // waits on any of them, and every round that exists is its cat's and starts threads.
+    Migration::Sql("CREATE TABLE waits (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        note TEXT NOT NULL,
+        at_ms INTEGER,
+        until_ms INTEGER,
+        paths TEXT,
+        root TEXT,
+        command TEXT,
+        every_ms INTEGER,
+        state TEXT NOT NULL,
+        created_ms INTEGER NOT NULL,
+        ended_ms INTEGER,
+        end_reason TEXT,
+        checked_ms INTEGER,
+        last_exit INTEGER,
+        fired_ms INTEGER
+    );
+    CREATE INDEX waits_by_task ON waits(task_id, state);
+    CREATE INDEX waits_active ON waits(state) WHERE state = 'active';
+    ALTER TABLE wakes ADD COLUMN title TEXT;
+    ALTER TABLE wakes ADD COLUMN at_ms INTEGER;
+    ALTER TABLE rounds ADD COLUMN standing INTEGER NOT NULL DEFAULT 0;"),
 ];
 
 /// Migration 9's step: each task's `latest_line` from its newest agent words.
@@ -454,6 +483,7 @@ pub(crate) fn task_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         archived: row.get::<_, Option<i64>>(21)?.is_some(),
         cattain: row.get::<_, i64>(26)? != 0,
         started_by: row.get::<_, Option<String>>(27)?.filter(|c| !c.is_empty()),
+        waits: Vec::new(),
         subagent: match (row.get::<_, Option<String>>(14)?, row.get::<_, Option<String>>(15)?, row.get::<_, Option<String>>(16)?) {
             (Some(parent), Some(number), Some(root)) => {
                 let draft = row.get::<_, i64>(23)?;
@@ -566,7 +596,7 @@ impl Store {
     /// Stores a task (for `cat` when it has one) and its `task_created` event in one transaction. Returns the task and the event's
     /// sequence number.
     pub fn create_task(&mut self, id: &TaskId, workspace: &str, words: &str, folder: Option<&str>, cat: Option<&str>, how: &crate::workplace::Placement, now_ms: i64) -> Result<(Task, u64), StoreError> {
-        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New, folder: folder.map(str::to_owned), cat: cat.map(str::to_owned), in_folder: how.in_folder, from_branch: how.from_branch.clone(), round: None, last_read_ms: now_ms, activity_ms: now_ms, latest_line: String::new(), failure_line: String::new(), thread_status: neko_protocol::ThreadStatus::Idle, needs_you: false, subagent: None, pinned: false, settled: false, archived: false, cattain: false, started_by: None };
+        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New, folder: folder.map(str::to_owned), cat: cat.map(str::to_owned), in_folder: how.in_folder, from_branch: how.from_branch.clone(), round: None, last_read_ms: now_ms, activity_ms: now_ms, latest_line: String::new(), failure_line: String::new(), thread_status: neko_protocol::ThreadStatus::Idle, needs_you: false, subagent: None, pinned: false, settled: false, archived: false, cattain: false, started_by: None, waits: Vec::new() };
         let tx = self.conn.transaction()?;
         let seq = insert_task(&tx, &task)?;
         tx.commit()?;
@@ -608,6 +638,10 @@ impl Store {
         t.thread_status = crate::thread::thread_status(t.status, t.last_read_ms, t.activity_ms);
         let subagent_asks = t.subagent.is_none() && self.conn.query_row("SELECT 1 FROM permissions p JOIN tasks s ON s.id = p.task_id WHERE s.root_id = ?1 AND p.state = 'pending' LIMIT 1", [&t.id.0], |_| Ok(())).optional()?.is_some();
         t.needs_you = !t.archived && crate::thread::needs_you(t.status, actionable, subagent_asks);
+        // The timers and watches it waits on (docs/knowledge/waits.md); a kitten sets none.
+        if t.subagent.is_none() {
+            t.waits = self.waits_of(&t.id)?;
+        }
         // A kitten that ended with a question says it, and who has it now (docs/knowledge/subagents.md, "Questions go up").
         if t.status == TaskStatus::Asked && t.subagent.is_some() {
             let q = self.kitten_question(&t)?;

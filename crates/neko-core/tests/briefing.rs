@@ -279,7 +279,7 @@ fn every_round_outcome_has_a_line_and_a_run_now_has_none() {
     let mut core = open(&d);
     let t0 = at(2026, 11, 27, 0, 0);
     let e = env(t0);
-    let (r, _) = core.create_round("Docs check", "Check", "cat_mochi", None, &Schedule::Daily { at: "01:00".into() }, true, e).unwrap();
+    let (r, _) = core.create_round("Docs check", "Check", Some("cat_mochi"), false, None, &Schedule::Daily { at: "01:00".into() }, true, e).unwrap();
     let (task, _) = seed_task_for_round(&mut core, &d, "Docs check", t0 + 2 * HOUR);
     let line = |id: &str, at_ms: i64, due: Option<i64>, kind: &str, task: Option<&TaskId>, reason: Option<&str>| {
         core.store
@@ -355,7 +355,7 @@ fn a_store_from_before_the_briefing_opens_with_its_defaults_and_needs_no_migrati
         seed(&mut core, &d, Seed::done("Old", "Done.", 1_764_000_100_000));
         core.store.connection().execute("DELETE FROM settings WHERE key LIKE 'briefing_%'", []).unwrap();
     }
-    assert_eq!(SCHEMA_VERSION, 19, "the briefing keeps its marks in `settings`: no table, no migration (the eighth migration is plugins', the ninth threads', the tenth subagents', the eleventh new thread's, the twelfth the composer's, the thirteenth pin, settle and archive's, the fourteenth search's, the fifteenth kittens' place, order and drafts, the sixteenth questions going up, the seventeenth Cattains, the eighteenth the thread that made a Cattain, the nineteenth the crew)");
+    assert_eq!(SCHEMA_VERSION, 20, "the briefing keeps its marks in `settings`: no table, no migration (the eighth migration is plugins', the ninth threads', the tenth subagents', the eleventh new thread's, the twelfth the composer's, the thirteenth pin, settle and archive's, the fourteenth search's, the fifteenth kittens' place, order and drafts, the sixteenth questions going up, the seventeenth Cattains, the eighteenth the thread that made a Cattain, the nineteenth the crew, the twentieth timers and watches)");
     let store = Store::open(&path).unwrap();
     assert_eq!((store.briefing_read_ms().unwrap(), store.briefing_settings().unwrap()), (None, BriefingSettings::default()));
 }
