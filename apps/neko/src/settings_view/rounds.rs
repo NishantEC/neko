@@ -1,5 +1,6 @@
-//! Settings ▸ Rounds & wakes: the brake on work that starts by itself, and the morning Briefing's notification and time
-//! (docs/knowledge/rounds.md, docs/knowledge/briefing.md).
+//! Settings ▸ Rounds & wakes: the brake on work that starts by itself (rounds, timers and watches), the limits on timers and
+//! watches, and the morning Briefing's notification and time (docs/knowledge/rounds.md, docs/knowledge/waits.md,
+//! docs/knowledge/briefing.md).
 
 use rune::{El, col, row, text};
 use rune_ui_style::{ButtonVariant, Size};
@@ -13,14 +14,29 @@ use crate::ui::input::Input;
 use crate::ui::switch::Switch;
 
 pub fn page(s: &App, t: &Theme, f: &Found) -> El {
-    col().w_full().gap(t.space.at(8.0)).child(f.lit(t, "settings-rounds-pause", automatic(s, t))).child(f.lit(t, "settings-briefing", briefing(s, t)))
+    col()
+        .w_full()
+        .gap(t.space.at(8.0))
+        .child(f.lit(t, "settings-rounds-pause", automatic(s, t)))
+        .child(f.lit(t, "settings-waits", waits(t)))
+        .child(f.lit(t, "settings-briefing", briefing(s, t)))
 }
 
-/// "Automatic work": Pause all rounds, the same switch as the Rounds page's button.
+/// "Timers and watches": what a thread's agent may set, said plainly (the limits are the daemon's, `neko_protocol::waits`).
+fn waits(t: &Theme) -> El {
+    use neko_protocol::waits::{DAY_MS, TIMERS_PER_THREAD, WATCH_MAX_MS, WATCHES_IN_ALL, WATCHES_PER_THREAD};
+    let words = format!(
+        "A thread's agent can ask to be woken later: up to {TIMERS_PER_THREAD} timers, from a minute to a week ahead, and {WATCHES_PER_THREAD} watches, for files changing in its folder or a check that succeeds, with at most {WATCHES_IN_ALL} watches across Neko. A watch lasts at most {} days. Each shows on its thread, with Stop watching.",
+        WATCH_MAX_MS / DAY_MS
+    );
+    section(t, "settings-waits", "Timers and watches", None).child(note(t, "settings-waits-words", words))
+}
+
+/// "Automatic work": Pause automatic work, the same brake as the Rounds page's button: rounds, timers and watches.
 fn automatic(s: &App, t: &Theme) -> El {
     let paused = s.rounds_paused;
-    let sw = Switch::<App>::new("settings-rounds-pause", "Pause all rounds", paused)
-        .help("While paused no round starts, and a time that passes is not made up after. It lasts until you resume, across restarts.")
+    let sw = Switch::<App>::new("settings-rounds-pause", "Pause automatic work", paused)
+        .help("While paused no round starts, no timer wakes a thread and no watch checks; what was due is not made up after. It lasts until you resume, across restarts.")
         .on_toggle(move |s: &mut App| s.set_rounds_paused(!paused))
         .build(t);
     let words = match s.rounds.len() {
@@ -28,7 +44,7 @@ fn automatic(s: &App, t: &Theme) -> El {
         1 => "1 round, on the Rounds page (⌘3).".to_owned(),
         n => format!("{n} rounds, on the Rounds page (⌘3)."),
     };
-    section(t, "settings-rounds", "Automatic work", Some("A round is a cat's work that starts by itself, on a schedule.")).child(sw).child(note(t, "settings-rounds-count", words))
+    section(t, "settings-rounds", "Automatic work", Some("Rounds start work on a schedule; timers and watches wake a thread when it asked to be woken.")).child(sw).child(note(t, "settings-rounds-count", words))
 }
 
 /// The morning Briefing: what it shows, its switch and its time.

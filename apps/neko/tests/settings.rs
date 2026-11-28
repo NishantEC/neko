@@ -74,7 +74,7 @@ fn every_setting_there_was_is_on_its_page() {
         (Page::Projects, &["settings-add-workspace", "settings-branches"]),
         (Page::Cattains, &["settings-new-cat", "settings-agents-make-cattains", "settings-cat-cat_miso"]),
         (Page::Kittens, &["settings-ask-first-kitten", "settings-kitten-limits"]),
-        (Page::Rounds, &["settings-rounds-pause", "briefing-morning-on", "briefing-morning-time"]),
+        (Page::Rounds, &["settings-rounds-pause", "settings-waits", "briefing-morning-on", "briefing-morning-time"]),
         (Page::Notifications, &["notify-needs", "notify-finished", "notify-badge", "settings-notify-test"]),
         (Page::Plugins, &["own-mcp", "plugins-add-json", "plugins-add-folder"]),
         (Page::Shortcuts, &["shortcut-0", "shortcuts-threads"]),

@@ -107,7 +107,7 @@ pub const ACTIONS: &[Action] = &[
     Action { id: "settings-projects", label: "Settings: Projects", keywords: "folders workspaces", keys: None },
     Action { id: "settings-cattains", label: "Settings: Cattains", keywords: "cats rules faces crew", keys: None },
     Action { id: "settings-kittens", label: "Settings: Kittens", keywords: "subagents helpers limits", keys: None },
-    Action { id: "settings-rounds", label: "Settings: Rounds & wakes", keywords: "pause briefing morning notification", keys: None },
+    Action { id: "settings-rounds", label: "Settings: Rounds & wakes", keywords: "pause timers watches briefing morning notification", keys: None },
     Action { id: "settings-notifications", label: "Settings: Notifications", keywords: "alerts badge", keys: None },
     Action { id: "settings-plugins", label: "Settings: Plugins", keywords: "mcp servers tools", keys: None },
     Action { id: "settings-shortcuts", label: "Settings: Shortcuts", keywords: "keyboard keys", keys: None },

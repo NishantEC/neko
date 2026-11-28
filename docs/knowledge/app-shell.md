@@ -327,7 +327,7 @@ and well-made Mac apps do. The segmented control is gone.
   | Projects (`projects`) | Each project with its folder and thread count, Rename…, Reveal in Finder or Locate…, Remove…; Add project…; Worktree branches (`neko/…`) |
   | Cattains (`cattains`) | What a Cattain is and how many of 16 are active; New Cattain…; Agents may make Cattains; each Cattain with Open or Bring back |
   | Kittens (`kittens`) | What a kitten is; Ask before a thread's first kitten; how many work at once |
-  | Rounds & wakes (`rounds`) | Automatic work: Pause all rounds (the Rounds page's brake); Morning Briefing: what it shows, its switch and time (moved from the old Briefing page) |
+  | Rounds & wakes (`rounds`) | Automatic work: Pause automatic work (the Rounds page's brake: rounds, timers and watches); Timers and watches: their limits, said (`waits.md`); Morning Briefing: what it shows, its switch and time (moved from the old Briefing page) |
   | Notifications (`notifications`) | As before: the system's permission in words, three switches, Send a test notification |
   | Plugins (`plugins`) | As before (below) |
   | Shortcuts (`shortcuts`) | Every key, by where it works, read-only (`settings_view::shortcuts::rows`; Return and ⌥Return follow General's choice) |

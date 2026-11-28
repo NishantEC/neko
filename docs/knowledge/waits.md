@@ -77,7 +77,7 @@ group is ended (`run-guard.md`).
 - **Stop** on the thread ends every timer and watch with its run and kittens.
 - **Archive** a thread that rests only on its timers and watches: they stop and it is archived. (One still waiting on kittens or crew is
   refused, as before.) Removing a thread removes them.
-- **Pause automatic work** (Rounds; the setting that was "Pause all rounds", `settings.rounds_paused`) holds rounds, timers and
+- **Pause automatic work** (Rounds, and the same switch in Settings ▸ Rounds & wakes, which also says the limits above; the setting that was "Pause all rounds", `settings.rounds_paused`) holds rounds, timers and
   watches: a timer that comes due is **skipped** (`state = skipped`, `end_reason`, the event `wait_skipped`) and the thread says so, in
   a quiet notice: "Not woken at 18:00: automatic work was paused." with what the timer was for; a watch that ends meanwhile ends without
   a wake; files changes wake nothing and checks do not run. Nothing is caught up after a resume.
@@ -112,7 +112,6 @@ group is ended (`run-guard.md`).
 - Timers and watches for kittens.
 - Waking the Mac for a timer, or starting Neko at login: a timer that came due while the Mac slept fires once when Neko next looks
   (within 5 minutes of a wake).
-- Settings ▸ Rounds & wakes showing the limits (S16).
 
 ## Still not sure: check with the real CLI
 
