@@ -1,0 +1,140 @@
+{
+  "name": "real-kittens-own-copy",
+  "title": "A real thread starts two writing kittens in their own copies and merges their work",
+  "about": "Real model calls (the cheapest model), in \"Full access\" so file writes and git commands go ahead without asking. In a small git project the person asks for two independent file changes by two subagents, each in its own copy, then a merge. The real Claude Code should call Neko's start_subagent with placement own_copy twice, each kitten writes and commits on its own neko/ branch in its own worktree, the thread is woken and merges both into its own branch (the thread itself works in a new worktree by default, so the person's checkout is untouched). This is the own-copy check only the real CLI can make.",
+  "cli": [
+    "real"
+  ],
+  "setup": {
+    "files": {
+      "acme-api": {
+        "git": true,
+        "files": {
+          "README.md": "# Acme\nA small project.\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-mode-2"
+        }
+      },
+      "expect": "Settings lists the permission modes"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-mode-2"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 0.5
+    },
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "choose-folder",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "sleep",
+      "secs": 3
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Use two subagents, each working in its own copy of the project (placement own_copy). Subagent one creates a.txt containing the word alpha and commits it. Subagent two creates b.txt containing the word beta and commits it. Do not write the files yourself. When both have reported, merge both branches into the current branch and reply with one line."
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "allow-until",
+      "until": {
+        "see": {
+          "key": "subagent-card-2"
+        }
+      },
+      "within": 180,
+      "snap_first": true,
+      "expect": "The real agent starts two kittens"
+    },
+    {
+      "do": "snap",
+      "name": "kittens-own-copy",
+      "expect": "Two cards that say Own copy"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "Own copy"
+        }
+      },
+      "expect": "The kittens work in their own copies"
+    },
+    {
+      "do": "allow-until",
+      "until": {
+        "all": [
+          {
+            "sh": {
+              "run": "r=$files/acme-api; for b in $(git -C $r for-each-ref --format='%(refname:short)' refs/heads/neko/); do case $b in *-1|*-2) ;; *) git -C $r show $b:a.txt 2>/dev/null;; esac; done",
+              "has": "alpha"
+            }
+          },
+          {
+            "sh": {
+              "run": "r=$files/acme-api; for b in $(git -C $r for-each-ref --format='%(refname:short)' refs/heads/neko/); do case $b in *-1|*-2) ;; *) git -C $r show $b:b.txt 2>/dev/null;; esac; done",
+              "has": "beta"
+            }
+          },
+          {
+            "sh": {
+              "run": "git -C $files/acme-api status --porcelain | wc -l | tr -d ' '",
+              "has": "0"
+            }
+          },
+          {
+            "gone": {
+              "key": "waiting-line"
+            }
+          },
+          {
+            "gone": {
+              "key": "run-*-working"
+            }
+          }
+        ]
+      },
+      "within": 420,
+      "expect": "Both kittens commit on their own branches, the thread is woken and merges both into the thread's branch; the person's checkout is untouched"
+    },
+    {
+      "do": "snap",
+      "name": "merged",
+      "expect": "The thread after the merge"
+    }
+  ]
+}
