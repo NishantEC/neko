@@ -294,16 +294,16 @@ const MIGRATIONS: &[Migration] = &[
     // 14: search (docs/knowledge/search.md). Two FTS5 tables, each row numbered with the rowid of the row it indexes (a task's title; the
     // words of a part of the person or the agent), kept by triggers in the same transaction as the change, and filled here from what
     // exists. `tasks_by_activity` serves the recent threads and the filters that need no words.
-    Migration::Sql("CREATE VIRTUAL TABLE find_titles USING fts5(title, tokenize = 'unicode61 remove_diacritics 2', prefix = '2 3');
+    Migration::Sql("CREATE VIRTUAL TABLE find_titles USING fts5(title, words, tokenize = 'unicode61 remove_diacritics 2', prefix = '2 3');
     CREATE VIRTUAL TABLE find_words USING fts5(text, tokenize = 'unicode61 remove_diacritics 2', prefix = '2 3');
-    INSERT INTO find_titles (rowid, title) SELECT rowid, title FROM tasks;
+    INSERT INTO find_titles (rowid, title, words) SELECT rowid, title, words FROM tasks;
     INSERT INTO find_words (rowid, text) SELECT rowid, COALESCE(json_extract(body, '$.text'), '') FROM parts WHERE kind IN ('person', 'agent');
     CREATE TRIGGER find_titles_insert AFTER INSERT ON tasks BEGIN
-        INSERT INTO find_titles (rowid, title) VALUES (new.rowid, new.title);
+        INSERT INTO find_titles (rowid, title, words) VALUES (new.rowid, new.title, new.words);
     END;
-    CREATE TRIGGER find_titles_update AFTER UPDATE OF title ON tasks BEGIN
+    CREATE TRIGGER find_titles_update AFTER UPDATE OF title, words ON tasks BEGIN
         DELETE FROM find_titles WHERE rowid = old.rowid;
-        INSERT INTO find_titles (rowid, title) VALUES (new.rowid, new.title);
+        INSERT INTO find_titles (rowid, title, words) VALUES (new.rowid, new.title, new.words);
     END;
     CREATE TRIGGER find_titles_delete AFTER DELETE ON tasks BEGIN
         DELETE FROM find_titles WHERE rowid = old.rowid;

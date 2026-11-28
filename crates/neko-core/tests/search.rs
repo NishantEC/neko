@@ -51,6 +51,14 @@ fn a_title_is_found_by_the_start_of_any_word_and_a_message_by_what_was_said() {
     // Quotes: the words in order, whole.
     assert_eq!(ids(&core.store.search("\"redirect alone\"", 12, T0).unwrap().0), [docs.id.0.as_str()]);
     assert_eq!(ids(&core.store.search("\"alone redirect\"", 12, T0).unwrap().0), Vec::<&str>::new());
+    // A thread's first words are not a part of its transcript; they are found too, with no part to open at.
+    let (zebra, _) = core.create_task("Plan the trip\nBring the zebrafish tank").unwrap();
+    let (found, _) = core.store.search("zebrafish", 12, T0).unwrap();
+    assert_eq!(ids(&found), [zebra.id.0.as_str()]);
+    assert_eq!((found[0].by, found[0].part.clone(), found[0].seq), (FoundBy::Message, None, 0));
+    assert!(found[0].snippet.contains("zebrafish"), "{:?}", found[0].snippet);
+    assert_eq!(ids(&core.store.search("trip", 12, T0).unwrap().0), [zebra.id.0.as_str()]);
+    assert_eq!(core.store.search("trip", 12, T0).unwrap().0[0].by, FoundBy::Title);
     // Case and accents do not matter; nothing typed is read as a query language.
     assert_eq!(ids(&core.store.search("LOGIN NEAR( \"", 12, T0).unwrap().0), Vec::<&str>::new());
     assert_eq!(ids(&core.store.search("LOGIN", 12, T0).unwrap().0).len(), 2);

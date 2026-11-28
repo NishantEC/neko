@@ -3,7 +3,7 @@
 //! The words are in two FTS5 tables the store keeps (`find_titles`, `find_words`: migration 14), each row numbered with the rowid of the
 //! row it indexes. The person's text is parsed here: words (bare or in quotes) and the filters `project:`, `status:`, `cat:` and `since:`.
 //! Every word is a prefix ("log" finds "login") and every word must be in the same title or the same message. A thread found by its
-//! title is listed before one found by what was said in it. A title's matches are ranked by how well they fit and then by activity;
+//! title is listed before one found by what was said in it (the thread's first words, then the parts). A title's matches are ranked by how well they fit and then by activity;
 //! what was said comes newest first (a part's rowid grows with time), which lets SQLite stop after the first few hundred of a common
 //! word's matches instead of ranking all of them.
 //!
@@ -311,19 +311,28 @@ impl Store {
     fn match_words(&self, q: &Query, now_ms: i64) -> Result<Vec<Candidate>, StoreError> {
         let Some((filters, args)) = self.filter_sql(q, now_ms)? else { return Ok(Vec::new()) };
         let expr = fts_expression(&q.words);
-        let with = |args: &[Value]| std::iter::once(Value::Text(expr.clone())).chain(args.iter().cloned()).collect::<Vec<_>>();
+        let with = |expr: String, args: &[Value]| std::iter::once(Value::Text(expr)).chain(args.iter().cloned()).collect::<Vec<_>>();
         let mut out: Vec<Candidate> = Vec::new();
+        // A title that has every word, best first.
         let titles = format!("SELECT t.id FROM find_titles JOIN tasks t ON t.rowid = find_titles.rowid WHERE find_titles MATCH ?{filters} ORDER BY bm25(find_titles), t.activity_ms DESC LIMIT {CANDIDATES}");
         let mut st = self.conn.prepare(&titles)?;
-        let rows = st.query_map(params_from_iter(with(&args)), |r| r.get::<_, String>(0))?;
+        let rows = st.query_map(params_from_iter(with(format!("title : ({expr})"), &args)), |r| r.get::<_, String>(0))?;
         for r in rows {
             out.push(Candidate { task: r?, by: FoundBy::Title, snippet: String::new(), part: None, seq: 0 });
+        }
+        // A thread's first words are the task's own, not a part: found here, with no part to open at.
+        let first = format!("SELECT t.id, snippet(find_titles, 1, '', '', '…', {SNIPPET_WORDS}) FROM find_titles JOIN tasks t ON t.rowid = find_titles.rowid WHERE find_titles MATCH ?{filters} ORDER BY find_titles.rowid DESC LIMIT {CANDIDATES}");
+        let mut st = self.conn.prepare(&first)?;
+        let rows = st.query_map(params_from_iter(with(format!("words : ({expr})"), &args)), |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        for r in rows {
+            let (task, snippet) = r?;
+            out.push(Candidate { task, by: FoundBy::Message, snippet: one_line(&snippet), part: None, seq: 0 });
         }
         let said = format!(
             "SELECT p.task_id, p.id, p.seq, snippet(find_words, 0, '', '', '…', {SNIPPET_WORDS}) FROM find_words JOIN parts p ON p.rowid = find_words.rowid JOIN tasks t ON t.id = p.task_id WHERE find_words MATCH ?{filters} ORDER BY find_words.rowid DESC LIMIT {CANDIDATES}"
         );
         let mut st = self.conn.prepare(&said)?;
-        let rows = st.query_map(params_from_iter(with(&args)), |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?)))?;
+        let rows = st.query_map(params_from_iter(with(expr.clone(), &args)), |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?)))?;
         for r in rows {
             let (task, part, seq, snippet) = r?;
             out.push(Candidate { task, by: FoundBy::Message, snippet: one_line(&snippet), part: Some(part), seq: seq.max(0) as u64 });
