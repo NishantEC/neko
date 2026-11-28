@@ -51,6 +51,7 @@ fn main() -> ExitCode {
     }
     let mut data_dir = None;
     let mut port = 0u16;
+    let mut make_store_at: Option<i64> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -62,6 +63,9 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
+            // Debug builds only: make the data folder's store as an older Neko left it (migrated no further than N) and stop. The QA rig
+            // uses it to try a migration end to end (docs/knowledge/qa.md, `cattain-migrate`); a release build refuses it.
+            "--make-store-at" if cfg!(debug_assertions) => make_store_at = args.next().and_then(|n| n.parse().ok()),
             "--version" => {
                 println!("neko-daemon {} (protocol {})", env!("CARGO_PKG_VERSION"), neko_protocol::PROTOCOL_VERSION);
                 return ExitCode::SUCCESS;
@@ -80,6 +84,16 @@ fn main() -> ExitCode {
         eprintln!("neko-daemon: no data folder (pass --data-dir)");
         return ExitCode::from(2);
     };
+    if let Some(n) = make_store_at {
+        let _ = std::fs::create_dir_all(&data_dir);
+        return match neko_core::Store::open_at(&data_dir.join(neko_protocol::files::STORE), n) {
+            Ok(_) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("neko-daemon: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     match server::run(&data_dir, port) {
         Ok(()) => ExitCode::SUCCESS,
         Err(server::StartError::InUse) => {
