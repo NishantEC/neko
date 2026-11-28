@@ -6,11 +6,14 @@
 //! - **Needs you** is what still waits, whenever it began ([`needs::derive`]); the rest is what happened inside the window.
 //! - **Finished** is a task whose newest run that ended in the window ended in the window and is not waiting for the person.
 //! - **Rounds** is every round line (ran, skipped, missed) the scheduler wrote in the window, and every brake.
+//! - **Cattains** is each Cattain whose DIGEST.md changed in the window (as the store last saw it), with what its digest says under
+//!   Needs you and New ([`digest_lines`]), and each Cattain an agent made by asking in the window. A Cattain whose digest is there
+//!   is not also a finished row: its digest tells its turns.
 //! - **The morning time** is a daily schedule on the rounds scheduler's arithmetic; the scheduler thread asks [`Core::morning`].
 
 use std::collections::{HashMap, HashSet};
 
-use neko_protocol::briefing::{BriefingSettings, FIRST_WINDOW_MS, FinishedEnd, MAX_FINISHED, MAX_ROUND_LINES, RoundOutcome, first_sentence};
+use neko_protocol::briefing::{BriefingCattain, BriefingNewCattain, BriefingSettings, DIGEST_LINES, FIRST_WINDOW_MS, FinishedEnd, MAX_FINISHED, MAX_ROUND_LINES, RoundOutcome, digest_lines, first_sentence};
 use neko_protocol::rounds::RunKind;
 use neko_protocol::schedule::{Schedule, local_parts};
 use neko_protocol::undo::{self, UndoState};
@@ -136,6 +139,18 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// The DIGEST.md of each Cattain that changed in `[from, to)`, as Neko last saw it: (cat, its words, when it changed), the most
+    /// recent first. A digest the Cattain emptied has nothing to say and is left out.
+    fn digests_between(&self, from: i64, to: i64) -> Result<Vec<(String, String, i64)>, StoreError> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT cat_id, content, changed_ms FROM cattain_files WHERE name = ?1 AND changed_ms >= ?2 AND changed_ms < ?3 \
+             ORDER BY changed_ms DESC, cat_id",
+        )?;
+        let rows = st.query_map(params![neko_protocol::cats::DIGEST, from, to], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get(2)?)))?;
+        let rows: Vec<(String, String, i64)> = rows.collect::<Result<_, _>>()?;
+        Ok(rows.into_iter().filter(|(_, text, _)| !text.trim().is_empty()).collect())
+    }
+
     /// Rounds that turned themselves off in `[from, to)`: (when, id, name, workspace, cat).
     fn brakes_between(&self, from: i64, to: i64) -> Result<Vec<(i64, String, String, String, String)>, StoreError> {
         let mut st = self.conn.prepare_cached(
@@ -170,17 +185,38 @@ impl Store {
         let needs = needs::derive(self)?;
         let waiting: HashSet<TaskId> = needs.iter().map(|n| n.task.clone()).collect();
         let tasks: HashMap<TaskId, Task> = self.all_tasks()?.into_iter().map(|t| (t.id.clone(), t)).collect();
-        let cats: HashMap<String, String> = self.list_cats()?.into_iter().map(|c| (c.id, c.name)).collect();
+        let all_cats = self.list_cats()?;
+        let cats: HashMap<String, String> = all_cats.iter().map(|c| (c.id.clone(), c.name.clone())).collect();
         let cat_name = |id: &str| cats.get(id).cloned().unwrap_or_else(|| "Neko".to_owned());
         // A thread with no cat (version 14) has an empty id and an empty name.
         let task_cat = |c: &Option<String>| -> (String, String) { c.as_ref().map(|c| (c.clone(), cat_name(c))).unwrap_or_default() };
+
+        // The Cattains whose digest changed in the window: their Needs you and New lines, in their own words.
+        let mut cattains = Vec::new();
+        for (cat, text, changed_ms) in self.digests_between(from, to)? {
+            let Some(name) = cats.get(&cat).cloned() else { continue };
+            let (needs, new) = digest_lines(&text);
+            let more = |v: &[String]| v.len().saturating_sub(DIGEST_LINES) as u32;
+            let (needs_more, new_more) = (more(&needs), more(&new));
+            let first = |v: Vec<String>| v.into_iter().take(DIGEST_LINES).collect::<Vec<_>>();
+            cattains.push(BriefingCattain { cat, name, changed_ms, needs: first(needs), needs_more, new: first(new), new_more });
+        }
+        // A Cattain's own turns are told by its digest: when its block is here, its thread is not a finished row as well.
+        let told: HashSet<TaskId> = all_cats.iter().filter(|c| cattains.iter().any(|b| b.cat == c.id)).filter_map(|c| c.thread.clone()).collect();
+        // The Cattains an agent made by asking in the window, still at work (one undone at once is not news).
+        let mut new_cattains: Vec<BriefingNewCattain> = all_cats
+            .iter()
+            .filter(|c| c.is_active() && c.created_ms >= from && c.created_ms < to)
+            .filter_map(|c| c.made_in.clone().map(|made_in| BriefingNewCattain { cat: c.id.clone(), name: c.name.clone(), purpose: c.purpose.clone(), made_ms: c.created_ms, made_in }))
+            .collect();
+        new_cattains.sort_by(|a, b| (b.made_ms, &b.cat).cmp(&(a.made_ms, &a.cat)));
 
         // Finished: the newest run of a task that ended in the window; not for a task that waits for the person or is working again.
         let mut finished: Vec<BriefingTask> = Vec::new();
         let mut totals = BriefingTotals::default();
         for id in self.tasks_ended_between(from, to)? {
             let Some(task) = tasks.get(&id) else { continue };
-            if waiting.contains(&id) || matches!(task.status, TaskStatus::Working | TaskStatus::NeedsYou) {
+            if waiting.contains(&id) || matches!(task.status, TaskStatus::Working | TaskStatus::NeedsYou) || told.contains(&id) {
                 continue;
             }
             let runs = self.runs_of(&id)?;
@@ -259,7 +295,7 @@ impl Store {
 
         let settings = self.briefing_settings()?;
         let next_morning_ms = settings.morning_on.then(|| Schedule::Daily { at: settings.morning_at }.next_due(0, to.max(env.now), env.zone)).flatten();
-        Ok(Briefing { from_ms: from, to_ms: to, first, read_ms, next_morning_ms, needs, finished, rounds, rounds_ran, rounds_not_run, working, totals })
+        Ok(Briefing { from_ms: from, to_ms: to, first, read_ms, next_morning_ms, needs, finished, rounds, rounds_ran, rounds_not_run, working, totals, cattains, new_cattains })
     }
 }
 

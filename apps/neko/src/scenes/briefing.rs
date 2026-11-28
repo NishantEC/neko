@@ -125,6 +125,8 @@ fn empty_briefing(s: &App) -> Briefing {
         rounds_not_run: 0,
         working: Vec::new(),
         totals: BriefingTotals::default(),
+        cattains: Vec::new(),
+        new_cattains: Vec::new(),
     }
 }
 

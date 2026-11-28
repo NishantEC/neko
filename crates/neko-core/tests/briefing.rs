@@ -487,3 +487,81 @@ fn the_morning_on_daylight_saving_days_comes_once_by_the_wall_clock() {
         }
     }
 }
+
+/// Writes a Cattain's DIGEST.md as its agent does (on disk) and lets Neko see it; returns when Neko saw it change.
+fn write_digest(core: &mut Core, cat: &str, words: &str) -> i64 {
+    std::fs::write(core.cattain_folder(cat).join(neko_protocol::cats::DIGEST), words).unwrap();
+    core.sync_cattain(cat).unwrap();
+    core.cattain_file(cat, neko_protocol::cats::DIGEST).unwrap().0.changed_ms.expect("changed")
+}
+
+#[test]
+fn only_the_cattains_whose_digest_changed_in_the_window_are_there_with_their_needs_you_and_new_lines() {
+    let d = dir();
+    let mut core = open(&d);
+    let miso1 = write_digest(&mut core, "cat_miso", "## Needs you\n- Nothing.\n\n## New\n- Fix test one: done.\n");
+    let mochi = write_digest(&mut core, "cat_mochi", "## Needs you\n- Decide the retry limit.\n\n## New\n- Docs link fixed.\n\n## In progress\n- The backup port.\n");
+    let from = mochi + 1;
+    // After the person read it, only miso writes again: four new lines, of which three are quoted.
+    let miso2 = write_digest(&mut core, "cat_miso", "# miso\n\n## Needs you\n- Merge the three branches?\n\n## New\n- Fix test one: done.\n- Fix test two: done.\n- Fix test three: done.\n- Fix docs: done.\n\n## In progress\n- Nothing.\n");
+    assert!(miso1 < mochi && mochi < miso2);
+    let b = window(&core, from, miso2 + 1);
+    assert_eq!(b.cattains.len(), 1, "only the digest that changed in the window: {:?}", b.cattains);
+    let c = &b.cattains[0];
+    assert_eq!((c.cat.as_str(), c.name.as_str(), c.changed_ms), ("cat_miso", "miso", miso2));
+    assert_eq!(c.needs, vec!["Merge the three branches?"]);
+    assert_eq!((c.new.as_slice(), c.new_more), (&["Fix test one: done.".to_owned(), "Fix test two: done.".to_owned(), "Fix test three: done.".to_owned()][..], 1));
+    let counts = b.counts();
+    assert!(counts.news && counts.digests == 1, "a digest that changed is news");
+    assert_eq!(counts.headline(), "1 digest updated");
+    // The whole day has both, the most recent first; a window before either has none and no news from them.
+    let all = window(&core, miso1, miso2 + 1);
+    assert_eq!(all.cattains.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["miso", "mochi"]);
+    assert_eq!(all.cattains[1].needs, vec!["Decide the retry limit."]);
+    let before = window(&core, miso1 - 10 * HOUR, miso1);
+    assert!(before.cattains.is_empty() && !before.counts().news);
+    // A digest emptied has nothing to say.
+    let emptied = write_digest(&mut core, "cat_miso", "   \n");
+    assert!(window(&core, emptied, emptied + 1).cattains.is_empty());
+}
+
+#[test]
+fn a_cattains_own_turn_is_told_by_its_digest_not_as_a_finished_row() {
+    let d = dir();
+    let mut core = open(&d);
+    let (own, _, _) = core.cattain_thread("cat_miso").unwrap();
+    let mut b = begin(&mut core, &d, &own.id, None);
+    say(&mut core, &mut b, "I started three crew threads.");
+    finish(&mut core, &mut b, Outcome::Done, None);
+    let ended = core.store.runs_of(&own.id).unwrap().last().unwrap().ended_ms.unwrap();
+    let (plain, _) = seed(&mut core, &d, Seed::done("Fix the login test", "Fixed it.", ended + 1000));
+    // No digest yet: miso's turn is a finished row as any thread's is.
+    let w = window(&core, ended - HOUR, ended + HOUR);
+    assert!(w.finished.iter().any(|t| t.task == own.id) && w.cattains.is_empty());
+    let changed = write_digest(&mut core, "cat_miso", "## New\n- Started three crew threads.\n");
+    let w = window(&core, ended - HOUR, changed.max(ended) + HOUR);
+    assert_eq!(w.cattains.len(), 1);
+    assert_eq!(w.finished.iter().map(|t| &t.task).collect::<Vec<_>>(), [&plain], "miso's turn is in its block; the other thread stays");
+    assert_eq!(w.totals.finished, 1);
+}
+
+#[test]
+fn a_cattain_made_by_asking_is_a_new_cattain_line_once_in_the_window_it_was_made() {
+    let d = dir();
+    let mut core = open(&d);
+    let (asking, _) = core.create_task("Make a Cattain for the iOS work").unwrap();
+    let by_hand = core.create_cat("kinako", None, Some("Docs"), None).unwrap().0;
+    let yuzu = match core.make_cattain(&asking.id, &neko_core::cats::MakeAsk { purpose: "iOS work", ..Default::default() }).unwrap() {
+        neko_core::cats::Made::New { cat, .. } => cat,
+        other => panic!("{other:?}"),
+    };
+    let w = window(&core, by_hand.created_ms, yuzu.created_ms + 1);
+    assert_eq!(w.new_cattains.len(), 1, "made by hand is the person's own doing: {:?}", w.new_cattains);
+    let n = &w.new_cattains[0];
+    assert_eq!((n.name.as_str(), n.purpose.as_deref(), n.made_ms, &n.made_in), ("yuzu", Some("iOS work"), yuzu.created_ms, &asking.id));
+    assert!(w.counts().news && w.counts().new_cattains == 1);
+    assert!(window(&core, yuzu.created_ms + 1, yuzu.created_ms + HOUR).new_cattains.is_empty(), "once: the next window has it no more");
+    // Undone at once, it is not news.
+    core.undo_make_cattain(&yuzu.id).unwrap();
+    assert!(window(&core, by_hand.created_ms, yuzu.created_ms + 1).new_cattains.is_empty());
+}

@@ -19,6 +19,8 @@ pub const MAX_FINISHED: usize = 50;
 pub const MAX_ROUND_LINES: usize = 40;
 /// The longest a task's first sentence is, in characters.
 pub const SENTENCE_CHARS: usize = 160;
+/// The most lines a Cattain's block quotes from each of its digest's "Needs you" and "New".
+pub const DIGEST_LINES: usize = 3;
 /// The morning time before the person chooses one.
 pub const DEFAULT_MORNING_AT: &str = "08:00";
 
@@ -137,6 +139,43 @@ pub struct BriefingRound {
     pub reason: Option<String>,
 }
 
+/// A Cattain whose DIGEST.md changed in the window (version 24): what its digest says under "Needs you" and "New", at most
+/// [`DIGEST_LINES`] lines of each, in its own words ([`digest_lines`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BriefingCattain {
+    pub cat: String,
+    pub name: String,
+    /// When its DIGEST.md last changed, as Neko saw it.
+    pub changed_ms: i64,
+    /// Its lines under "Needs you".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub needs: Vec<String>,
+    /// How many more lines it has there.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub needs_more: u32,
+    /// Its lines under "New".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub new: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub new_more: u32,
+}
+
+/// A Cattain an agent made by asking in the window (version 24), still at work: "New Cattain: yuzu (iOS work)", once.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BriefingNewCattain {
+    pub cat: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+    pub made_ms: i64,
+    /// The thread whose agent made it.
+    pub made_in: TaskId,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
 /// The window's totals.
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct BriefingTotals {
@@ -181,6 +220,12 @@ pub struct Briefing {
     /// Tasks running now.
     pub working: Vec<BriefingWorking>,
     pub totals: BriefingTotals,
+    /// The Cattains whose DIGEST.md changed in the window, the most recent first (version 24).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cattains: Vec<BriefingCattain>,
+    /// The Cattains agents made by asking in the window and still at work, the newest first (version 24).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub new_cattains: Vec<BriefingNewCattain>,
 }
 
 /// The numbers a headline is made of.
@@ -193,14 +238,21 @@ pub struct BriefingCounts {
     /// Round lines that ran, and those that did not (skipped, missed or braked).
     pub rounds_ran: u32,
     pub rounds_not_run: u32,
-    /// There is something new to say: a task finished, a round was due, or something began to wait inside the window. A request
-    /// that has been waiting since before the window is not news (it is in Needs you), so after "Mark as read" the Home line and the
-    /// morning notification are quiet.
+    /// There is something new to say: a task finished, a round was due, something began to wait inside the window, a Cattain's
+    /// digest changed or a Cattain was made by asking. A request that has been waiting since before the window is not news (it is in
+    /// Needs you), so after "Mark as read" New thread's line and the morning notification are quiet.
     pub news: bool,
+    /// Cattains whose digest changed in the window (version 24).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub digests: u32,
+    /// Cattains made by asking in the window (version 24).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub new_cattains: u32,
 }
 
 impl BriefingCounts {
-    /// "3 finished, 1 needs you". When neither is there: what the rounds did, then what is working.
+    /// "3 finished, 1 needs you". When neither is there: the digests and new Cattains, then what the rounds did, then what is
+    /// working.
     pub fn headline(&self) -> String {
         let mut parts = Vec::new();
         if self.finished > 0 {
@@ -208,6 +260,14 @@ impl BriefingCounts {
         }
         if self.needs_you > 0 {
             parts.push(format!("{} needs you", self.needs_you));
+        }
+        if parts.is_empty() {
+            if self.digests > 0 {
+                parts.push(format!("{} {} updated", self.digests, if self.digests == 1 { "digest" } else { "digests" }));
+            }
+            if self.new_cattains > 0 {
+                parts.push(format!("{} new {}", self.new_cattains, if self.new_cattains == 1 { "Cattain" } else { "Cattains" }));
+            }
         }
         if parts.is_empty() {
             let plural = |n: u32| if n == 1 { "round" } else { "rounds" };
@@ -233,7 +293,9 @@ impl Briefing {
             working: self.working.len() as u32,
             rounds_ran: self.rounds_ran,
             rounds_not_run: self.rounds_not_run,
-            news: self.totals.finished > 0 || self.rounds_ran + self.rounds_not_run > 0 || new_needs,
+            news: self.totals.finished > 0 || self.rounds_ran + self.rounds_not_run > 0 || new_needs || !self.cattains.is_empty() || !self.new_cattains.is_empty(),
+            digests: self.cattains.len() as u32,
+            new_cattains: self.new_cattains.len() as u32,
         }
     }
 
@@ -323,6 +385,107 @@ pub fn first_sentence(answer: &str) -> String {
         };
     }
     cut(&sentence_end(&text))
+}
+
+/// Which of a digest's sections a line belongs to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DigestPart {
+    NeedsYou,
+    New,
+    Other,
+}
+
+/// What a digest says under its "Needs you" and "New" headings (cats.md: a Cattain keeps DIGEST.md under Needs you, New and In
+/// progress), each line in the Cattain's own words: a list item is a line (its marker off, a checkbox too; an item nested under
+/// another is its detail and is passed over), the lines of a paragraph are one line, Markdown's marks are dropped as in
+/// [`first_sentence`], a code block is skipped, and a line that only says there is nothing ("None", "Nothing new.") is not a line.
+/// A heading is a `#` line, or a line that is only one of the three names (in bold, or with a colon). Each line is at most
+/// [`SENTENCE_CHARS`] characters, cut at a word. A digest with neither heading gives nothing.
+pub fn digest_lines(digest: &str) -> (Vec<String>, Vec<String>) {
+    let (mut needs, mut new) = (Vec::new(), Vec::new());
+    let mut part = DigestPart::Other;
+    let mut in_code = false;
+    // The line being gathered, and whether more of it may follow (a paragraph's next line, an item's lazy continuation).
+    let mut open: Option<String> = None;
+    let flush = |open: &mut Option<String>, part: DigestPart, needs: &mut Vec<String>, new: &mut Vec<String>| {
+        let Some(line) = open.take() else { return };
+        let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        if line.is_empty() || says_nothing(&line) {
+            return;
+        }
+        match part {
+            DigestPart::NeedsYou => needs.push(cut(&line)),
+            DigestPart::New => new.push(cut(&line)),
+            DigestPart::Other => {}
+        }
+    };
+    for raw in digest.lines() {
+        let line = raw.trim();
+        if line.starts_with("```") || line.starts_with("~~~") {
+            flush(&mut open, part, &mut needs, &mut new);
+            in_code = !in_code;
+            continue;
+        }
+        if in_code {
+            continue;
+        }
+        if line.is_empty() || line.starts_with('|') || line.chars().all(|c| matches!(c, '-' | '=' | '*' | '_' | ' ')) {
+            flush(&mut open, part, &mut needs, &mut new);
+            continue;
+        }
+        if let Some(p) = heading_of(line) {
+            flush(&mut open, part, &mut needs, &mut new);
+            part = p;
+            continue;
+        }
+        let (body, item) = strip_marks(line);
+        let indent = raw.len() - raw.trim_start().len();
+        if item && indent >= 2 {
+            // A nested item is the detail of the one above it.
+            flush(&mut open, part, &mut needs, &mut new);
+            continue;
+        }
+        if item {
+            flush(&mut open, part, &mut needs, &mut new);
+            open = Some(plain(&body));
+        } else if let Some(o) = &mut open {
+            o.push(' ');
+            o.push_str(&plain(&body));
+        } else {
+            open = Some(plain(&body));
+        }
+    }
+    flush(&mut open, part, &mut needs, &mut new);
+    (needs, new)
+}
+
+/// The section a heading line starts, or None when the line is not a heading.
+fn heading_of(line: &str) -> Option<DigestPart> {
+    let hashed = line.starts_with('#');
+    let bare = line.trim_start_matches('#').trim();
+    let framed = bare.len() > 4 && (bare.starts_with("**") && bare.ends_with("**") || bare.starts_with("__") && bare.ends_with("__"));
+    let words = plain(bare).trim().trim_end_matches(':').trim().to_lowercase();
+    let colon = bare.ends_with(':') || bare.ends_with(":**");
+    // "Needs you (2)" and "New · 3" keep their name.
+    let name: String = words.split(['(', '·', '-', '—']).next().unwrap_or("").trim().to_owned();
+    let part = match name.as_str() {
+        "needs you" | "needs your attention" | "needs your decision" => Some(DigestPart::NeedsYou),
+        "new" => Some(DigestPart::New),
+        "in progress" => Some(DigestPart::Other),
+        _ => None,
+    };
+    match (hashed, part) {
+        (true, Some(p)) => Some(p),
+        (true, None) => Some(DigestPart::Other),
+        (false, Some(p)) if framed || colon => Some(p),
+        _ => None,
+    }
+}
+
+/// A line that only says there is nothing to say.
+fn says_nothing(line: &str) -> bool {
+    let l = line.trim().trim_end_matches(['.', '!']).trim().to_lowercase();
+    matches!(l.as_str(), "none" | "none yet" | "(none)" | "nothing" | "nothing yet" | "nothing new" | "nothing right now" | "nothing needs you" | "n/a" | "—" | "-")
 }
 
 /// A quote's or list item's marker taken off, and whether it was a list item.
@@ -479,9 +642,37 @@ mod tests {
     }
 
     #[test]
+    fn a_digest_gives_its_needs_you_and_new_lines_in_its_own_words() {
+        let digest = "# miso's digest\n\n## Needs you\n- Merge the three branches? `neko/4f2a-1`, `neko/4f2a-2` and `neko/4f2a-3` are ready.\n- **Decide** which [retry limit](https://example.com/r) to keep.\n\n## New\n- Fix test one: done.\n- Fix test two: done,\n  with a note on the flaky clock.\n  - a detail under it\n- Fix test three: done.\n- Fix test four: done.\n\n## In progress\n- Nothing else.\n";
+        let (needs, new) = digest_lines(digest);
+        assert_eq!(needs, vec!["Merge the three branches? neko/4f2a-1, neko/4f2a-2 and neko/4f2a-3 are ready.", "Decide which retry limit to keep."]);
+        assert_eq!(new, vec!["Fix test one: done.", "Fix test two: done, with a note on the flaky clock.", "Fix test three: done.", "Fix test four: done."], "every line: the caller keeps three");
+    }
+
+    #[test]
+    fn a_digest_heading_may_be_bold_or_carry_a_colon_or_a_count() {
+        let (needs, new) = digest_lines("**Needs you**\nNothing right now.\n\nNew (2):\n1. Fixed the login test.\n2. Fixed the docs link.\n\nIn progress:\n- Port the backup script");
+        assert!(needs.is_empty(), "a line that says nothing is not a line: {needs:?}");
+        assert_eq!(new, vec!["Fixed the login test.", "Fixed the docs link."]);
+        let (needs, new) = digest_lines("### NEEDS YOU:\n- [ ] Approve the release notes\n### new · 1\nA paragraph\nover two lines.\n```sh\ncargo test\n```\n");
+        assert_eq!((needs, new), (vec!["Approve the release notes".to_owned()], vec!["A paragraph over two lines.".to_owned()]));
+    }
+
+    #[test]
+    fn a_digest_without_the_headings_gives_nothing() {
+        assert_eq!(digest_lines(""), (vec![], vec![]));
+        assert_eq!(digest_lines("Merged the branch. Next: the docs.\n- New things are coming"), (vec![], vec![]));
+        let long = format!("## New\n- {}", "word ".repeat(80));
+        let (_, new) = digest_lines(&long);
+        assert!(new[0].chars().count() <= SENTENCE_CHARS && new[0].ends_with('…'), "{new:?}");
+    }
+
+    #[test]
     fn the_headline_names_what_matters() {
-        let c = BriefingCounts { needs_you: 1, finished: 3, working: 2, rounds_ran: 1, rounds_not_run: 0, news: true };
+        let c = BriefingCounts { needs_you: 1, finished: 3, working: 2, rounds_ran: 1, rounds_not_run: 0, news: true, digests: 1, new_cattains: 0 };
         assert_eq!(c.headline(), "3 finished, 1 needs you");
+        assert_eq!(BriefingCounts { digests: 2, new_cattains: 1, rounds_ran: 1, news: true, ..BriefingCounts::default() }.headline(), "2 digests updated, 1 new Cattain");
+        assert_eq!(BriefingCounts { digests: 1, news: true, ..BriefingCounts::default() }.headline(), "1 digest updated");
         assert_eq!(BriefingCounts { finished: 1, news: true, ..BriefingCounts::default() }.headline(), "1 finished");
         assert_eq!(BriefingCounts { needs_you: 2, news: true, ..BriefingCounts::default() }.headline(), "2 needs you");
         assert_eq!(BriefingCounts { rounds_ran: 2, news: true, ..BriefingCounts::default() }.headline(), "2 rounds ran");

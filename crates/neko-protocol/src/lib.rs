@@ -61,7 +61,9 @@ pub use undo::{DiffFile, DiffPatch, DiffSource, DiffSummary, FileStatus, Offer, 
 /// `cattain_made` in that thread; `undo_make_cattain` retires one that has no work yet; a setting keeps Cattains made by hand only).
 /// 23: a Cattain runs its crew (a thread says the Cattain whose agent started it, `started_by`; the note `crew_wake` in a Cattain's
 /// thread says which crew thread's turn end or request woke it).
-pub const PROTOCOL_VERSION: u32 = 23;
+/// 24: the Briefing reads the digests (a briefing lists the Cattains whose DIGEST.md changed in the window, with its Needs you and
+/// New lines, and the Cattains made by asking in it; its counts say how many of each).
+pub const PROTOCOL_VERSION: u32 = 24;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";

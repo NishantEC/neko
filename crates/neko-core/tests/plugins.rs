@@ -276,7 +276,7 @@ fn the_migration_from_store_seven_adds_plugins_and_changes_nothing_else() {
     assert_eq!((core.store.version().unwrap(), SCHEMA_VERSION), (19, 19));
     assert_eq!(core.store.all_tasks().unwrap().iter().filter(|t| t.listed()).count(), 1, "and each cat's own thread, made on open");
     assert!(core.plugins().unwrap().is_empty());
-    assert_eq!(PROTOCOL_VERSION, 23);
+    assert_eq!(PROTOCOL_VERSION, 24);
     assert_eq!(add(&mut core, PASTE).len(), 1);
 }
 

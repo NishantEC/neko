@@ -27,6 +27,8 @@ fn empty() -> Briefing {
         rounds_not_run: 0,
         working: vec![],
         totals: BriefingTotals::default(),
+        cattains: vec![],
+        new_cattains: vec![],
     }
 }
 
@@ -53,11 +55,37 @@ fn the_replies_and_events_are_pinned() {
         ServerMessage::Event { revision: 4, change: Change::BriefingSettingsChanged { settings: BriefingSettings { morning_on: false, morning_at: "07:30".into() } } },
         r#"{"kind":"event","revision":4,"change":{"type":"briefing_settings_changed","settings":{"morning_on":false,"morning_at":"07:30"}}}"#,
     );
-    let counts = BriefingCounts { needs_you: 1, finished: 3, working: 0, rounds_ran: 1, rounds_not_run: 2, news: true };
+    let counts = BriefingCounts { needs_you: 1, finished: 3, working: 0, rounds_ran: 1, rounds_not_run: 2, news: true, digests: 0, new_cattains: 0 };
     pinned(
         ServerMessage::Event { revision: 4, change: Change::BriefingDue { counts } },
         r#"{"kind":"event","revision":4,"change":{"type":"briefing_due","counts":{"needs_you":1,"finished":3,"working":0,"rounds_ran":1,"rounds_not_run":2,"news":true}}}"#,
     );
+    // Version 24: the digests and the new Cattains are counted, written only when there are some.
+    let counts = BriefingCounts { digests: 2, new_cattains: 1, news: true, ..BriefingCounts::default() };
+    pinned(counts, r#"{"needs_you":0,"finished":0,"working":0,"rounds_ran":0,"rounds_not_run":0,"news":true,"digests":2,"new_cattains":1}"#);
+}
+
+#[test]
+fn a_cattains_digest_and_a_new_cattain_are_pinned() {
+    // Version 24.
+    let digest = BriefingCattain { cat: "cat_miso".into(), name: "miso".into(), changed_ms: 9, needs: vec!["Merge the three branches?".into()], needs_more: 0, new: vec!["Fix test one: done.".into()], new_more: 2 };
+    pinned(digest.clone(), r#"{"cat":"cat_miso","name":"miso","changed_ms":9,"needs":["Merge the three branches?"],"new":["Fix test one: done."],"new_more":2}"#);
+    let quiet = BriefingCattain { needs: vec![], new: vec![], new_more: 0, ..digest.clone() };
+    pinned(quiet, r#"{"cat":"cat_miso","name":"miso","changed_ms":9}"#);
+    let made = BriefingNewCattain { cat: "cat_y".into(), name: "yuzu".into(), purpose: Some("iOS work".into()), made_ms: 8, made_in: TaskId("task_1".into()) };
+    pinned(made.clone(), r#"{"cat":"cat_y","name":"yuzu","purpose":"iOS work","made_ms":8,"made_in":"task_1"}"#);
+    let mut b = empty();
+    assert!(!b.counts().news);
+    b.cattains = vec![digest];
+    assert!(b.counts().news && b.counts().digests == 1, "a digest that changed is news");
+    let json = serde_json::to_string(&b).unwrap();
+    assert!(json.ends_with(r#""cattains":[{"cat":"cat_miso","name":"miso","changed_ms":9,"needs":["Merge the three branches?"],"new":["Fix test one: done."],"new_more":2}]}"#), "{json}");
+    b.cattains.clear();
+    b.new_cattains = vec![made];
+    assert!(b.counts().news && b.counts().new_cattains == 1, "a Cattain made by asking is news");
+    // An older daemon's briefing (no digests) still reads.
+    let old: Briefing = serde_json::from_str(EMPTY_JSON).unwrap();
+    assert!(old.cattains.is_empty() && old.new_cattains.is_empty());
 }
 
 #[test]

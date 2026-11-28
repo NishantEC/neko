@@ -714,7 +714,7 @@ mod tests {
     #[test]
     fn the_morning_briefing_is_one_notification_with_the_counts_and_its_own_click() {
         let (mut n, r) = notifier();
-        let counts = neko_protocol::BriefingCounts { needs_you: 1, finished: 3, working: 0, rounds_ran: 0, rounds_not_run: 0, news: true };
+        let counts = neko_protocol::BriefingCounts { needs_you: 1, finished: 3, news: true, ..Default::default() };
         n.briefing(&counts, "mochi asks: Run a command: cargo test", &away());
         let sent = r.take();
         let p = posted(&sent);
