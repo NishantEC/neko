@@ -150,7 +150,10 @@ fn processes_of(d: &Daemon) -> Vec<String> {
 
 #[test]
 fn a_thread_starts_two_subagents_rests_with_no_process_and_is_woken_once_for_both() {
-    let r = rig("wake", &[]);
+    // The batch window is wide: both reports must reach the thread in one message, and on a busy machine the two subagents may end a
+    // long way apart. (A report that comes later than the window is steered into the run the first one started; the next test and
+    // `a_report_that_arrives_while_the_thread_still_works…` check that way of delivery.)
+    let r = rig("wake", &[("NEKO_WAKE_BATCH_MS", "8000")]);
     let mut c = r.client();
     // Both take a second, so the thread is seen resting while they work, and both end within one batch.
     let t = create(&mut c, &delegate(&[("Check links", "Look at the links [fake:long:1]"), ("Check images", "Look at the images [fake:long:1]")], &[]));
@@ -214,7 +217,9 @@ fn a_thread_starts_two_subagents_rests_with_no_process_and_is_woken_once_for_bot
 fn a_report_that_arrives_while_the_thread_still_works_is_steered_into_that_run() {
     let r = rig("steer", &[]);
     let mut c = r.client();
-    let t = create(&mut c, &delegate(&[("Quick", "Hello [fake:plain]")], &["stay 3"]));
+    // The thread keeps working until the report reaches it (the fake ends `stay` when a message arrives), however long a busy machine
+    // takes to run the subagent: the report must arrive while its run is still going.
+    let t = create(&mut c, &delegate(&[("Quick", "Hello [fake:plain]")], &["stay 30"]));
     until("the thread to be done", || task(&mut c, &t.id).status == TaskStatus::Done);
     let tr = transcript(&mut c, &t.id);
     assert_eq!(tr.runs.len(), 1, "no second run: the report went into the one that was going");
@@ -256,8 +261,11 @@ fn a_restart_interrupts_a_working_subagent_and_the_thread_is_woken_with_that() {
     let mut c = r.client();
     let t = create(&mut c, &delegate(&[("Count", "Count slowly [fake:slow]")], &[]));
     until("the subagent to work", || task(&mut c, &t.id).status == TaskStatus::Waiting && subagents(&mut c, &t.id).iter().any(|s| s.status == TaskStatus::Working));
-    // Let its words reach the disk before the quit.
-    std::thread::sleep(Duration::from_millis(3300));
+    // Let its words reach the disk before the quit: wait until the store has them, not for a guess of how long that takes.
+    until("the subagent's words to reach the disk", || {
+        let id = subagents(&mut c, &t.id)[0].id.clone();
+        agent_words(&transcript(&mut c, &id)).contains("slow")
+    });
     drop(c);
     let dir = r.d.dir.clone();
     let record = r.record.clone();

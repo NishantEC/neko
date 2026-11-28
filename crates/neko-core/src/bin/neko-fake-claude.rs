@@ -716,10 +716,16 @@ impl Fake {
                         reports.push(format!("tools {names}"));
                     }
                 }
+                // `stay N` keeps working up to N seconds, and ends early when a message of the person's (or Neko's: a report) arrives, so
+                // a test waits on that event and not on a guess of how long a loaded machine takes.
                 let until = Instant::now() + Duration::from_secs(stay);
                 while Instant::now() < until {
                     self.say("working on my own part ", 1, Duration::from_millis(0));
                     std::thread::sleep(Duration::from_millis(300));
+                    self.listen(false, false);
+                    if self.queued.iter().any(|v| v["type"] == "user") {
+                        break;
+                    }
                 }
                 let text = format!("Done with my calls: {} call(s). {}", reports.len(), reports.last().cloned().unwrap_or_default());
                 self.say(&text, 3, Duration::from_millis(10));
