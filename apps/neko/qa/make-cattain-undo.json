@@ -1,0 +1,111 @@
+{
+  "name": "make-cattain-undo",
+  "title": "Undo on the toast retires a Cattain an agent just made",
+  "about": "A thread's agent makes yuzu. The toast's Undo retires it at once (it has no work yet): the toast goes, the thread's note says it is retired, and Settings ▸ Cattains offers Bring back. The store has yuzu retired.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Make a Cattain for the iOS work [fake:mcp] mcp neko make_cattain {\"purpose\":\"iOS work\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "button",
+          "label_is": "Undo"
+        }
+      },
+      "within": 30,
+      "expect": "The toast with Undo"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "Undo"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "note",
+              "label": "Made a Cattain: yuzu · iOS work · retired"
+            }
+          },
+          {
+            "gone": {
+              "role": "status",
+              "label": "Made yuzu"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "yuzu is retired, and the note says so"
+    },
+    {
+      "do": "snap",
+      "name": "undone",
+      "expect": "The note after Undo"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT COUNT(*) FROM cats WHERE name = 'yuzu' AND retired_ms IS NOT NULL\"",
+          "is": "1"
+        }
+      },
+      "expect": "The store has yuzu retired"
+    },
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cattains",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-cat-*-back"
+        }
+      },
+      "within": 10,
+      "expect": "Settings ▸ Cattains offers Bring back for yuzu"
+    }
+  ]
+}

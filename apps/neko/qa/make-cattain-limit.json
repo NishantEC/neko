@@ -1,0 +1,207 @@
+{
+  "name": "make-cattain-limit",
+  "title": "At sixteen Cattains the agent is refused with the house listed",
+  "about": "Thirteen Cattains are made by request, so sixteen are at work. A thread's agent calls make_cattain: the record has the error, which lists the house; the step reads \"Could not make a Cattain · iOS work\"; no note, no toast, and still sixteen in the store.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_cat",
+        "name": "kuro",
+        "purpose": "Work 1"
+      }
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_cat",
+        "name": "sesame",
+        "purpose": "Work 2"
+      }
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_cat",
+        "name": "azuki",
+        "purpose": "Work 3"
+      }
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_cat",
+        "name": "kinako",
+        "purpose": "Work 4"
+      }
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_cat",
+        "name": "nori",
+        "purpose": "Work 5"
+      }
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_cat",
+        "name": "ume",
+        "purpose": "Work 6"
+      }
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_cat",
+        "name": "sumi",
+        "purpose": "Work 7"
+      }
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_cat",
+        "name": "hana",
+        "purpose": "Work 8"
+      }
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_cat",
+        "name": "momo",
+        "purpose": "Work 9"
+      }
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_cat",
+        "name": "sora",
+        "purpose": "Work 10"
+      }
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_cat",
+        "name": "mikan",
+        "purpose": "Work 11"
+      }
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_cat",
+        "name": "shiro",
+        "purpose": "Work 12"
+      }
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_cat",
+        "name": "kabu",
+        "purpose": "Work 13"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Make a Cattain for the iOS work [fake:mcp] mcp neko make_cattain {\"purpose\":\"iOS work\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Worked for"
+        }
+      },
+      "within": 30,
+      "expect": "The agent's turn ends"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Worked for"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "name": "Could not make a Cattain · iOS work"
+        }
+      },
+      "within": 10,
+      "expect": "The step says it could not make one"
+    },
+    {
+      "do": "snap",
+      "name": "refused",
+      "expect": "The refused step, opened"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "gone": {
+              "role": "note",
+              "label": "Made a Cattain"
+            }
+          },
+          {
+            "gone": {
+              "role": "status",
+              "label": "Made "
+            }
+          },
+          {
+            "sh": {
+              "run": "test \"$(grep -c 'at most 16 Cattains at work, and 16 are' fake-record.jsonl)\" -ge 1 && echo yes || echo no",
+              "is": "yes"
+            }
+          },
+          {
+            "sh": {
+              "run": "test \"$(grep 'make_cattain' fake-record.jsonl | grep -c '\"error\":true')\" -ge 1 && echo yes || echo no",
+              "is": "yes"
+            }
+          },
+          {
+            "sh": {
+              "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT COUNT(*) FROM cats WHERE retired_ms IS NULL\"",
+              "is": "16"
+            }
+          }
+        ]
+      },
+      "expect": "No note and no toast; the fake got the error text with the house; still sixteen"
+    }
+  ]
+}
