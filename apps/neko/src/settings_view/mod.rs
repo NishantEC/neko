@@ -382,6 +382,16 @@ pub(crate) fn note(t: &Theme, key: &str, words: impl Into<String>) -> El {
 /// have what is typed, each saying what matched.
 fn nav(s: &App, t: &Theme, found: &Found) -> El {
     let search = Input::search("settings-search", &s.settings_query, |s: &mut App| &mut s.settings_query).name("Search settings").placeholder("Search").size(Size::Sm).on_submit(|s: &mut App| s.settings_submit()).build(t);
+    // Escape empties the field first, as a Mac search field does; empty, it goes on to the window.
+    let search = search.on_key_preview(|s: &mut App, k: &rune::KeyEvent, _: &mut rune::Tx| {
+        let plain = !(k.mods.cmd || k.mods.shift || k.mods.alt || k.mods.ctrl);
+        if k.key == rune::Key::Escape && plain && !s.settings_query.text.is_empty() {
+            s.settings_query = rune::TextEdit::default();
+            s.settings_query.focused = true;
+            return true;
+        }
+        false
+    });
     let row_gap = t.space.at(crate::sidebar::ROW_GAP_STEPS);
     let shown: Vec<Page> = Page::ALL.into_iter().filter(|p| found.shows(*p)).collect();
     let n = shown.len();
@@ -425,7 +435,8 @@ fn page(s: &App, t: &Theme, found: &Found, layer: &mut Vec<El>) -> El {
         Page::Storage => storage::page(s, t, found),
     };
     let title = text(p.title()).key("settings-page-title").role("heading").level(2).font(weight(t.ty.xl, t.ty.semibold)).color(t.ink());
-    let column = col().key(format!("settings-{}-page", p.slug())).w_full().max_w(PAGE).gap(t.space.at(6.0)).child(title).child(body);
+    // A page that another replaces is gone in that frame (`view::page_swap`), so two pages are never drawn one over the other.
+    let column = crate::view::page_swap(col().key(format!("settings-{}-page", p.slug())).w_full().max_w(PAGE).gap(t.space.at(6.0)).child(title).child(body));
     col().key("settings-scroll").grow(1.0).min_w(0.0).h_full().px(t.space.at(6.0)).pt(t.space.at(1.0)).pb(t.space.at(10.0)).scroll(rune::ScrollSpec { stick_bottom: false }).child(column)
 }
 

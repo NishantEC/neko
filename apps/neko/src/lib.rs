@@ -282,12 +282,6 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             s.leave_briefing();
             return true;
         }
-        // In Settings' search field Escape empties it first, as a Mac search field does.
-        if s.settings_open && s.settings_query.focused && !s.settings_query.text.is_empty() {
-            s.settings_query = rune::TextEdit::default();
-            s.settings_query.focused = true;
-            return true;
-        }
         // A request waiting in the open task: Escape answers it no (the destructive form has no other key), and the agent carries
         // on. Only with nothing asked does Escape stop the run.
         if !s.settings_open
