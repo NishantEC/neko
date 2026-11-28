@@ -1,0 +1,208 @@
+{
+  "name": "crew-needs-you",
+  "title": "A crew thread's request is the person's: the amber count on its Cattain",
+  "about": "Asking before risky steps, miso starts two crew threads; the second wants to run a command. The request is in Needs you and first in miso's Overview, and miso's row in the sidebar carries the amber count 1. miso hears of it once (a note \"… needs you\"), and nothing of miso's answers it: the person allows it in Needs you, the crew thread runs the command and ends, and miso hears that too. A crew thread finishing posts no notification.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl",
+      "NEKO_CREW_BATCH_MS": "2000"
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-mode-1"
+        }
+      },
+      "expect": "Settings opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-mode-1"
+      }
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cattains",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-cat-cat_miso-open"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-cat-cat_miso-open"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "miso"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check the docs and run the tests [fake:mcp] mcp neko start_crew_thread {\"title\":\"Read the docs\",\"brief\":\"Read the README [fake:work:20]\"} ; mcp neko start_crew_thread {\"title\":\"Run the tests\",\"brief\":\"Run the test suite [fake:hook-shell]\"} ; stay 8"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "cat-cat_miso-count",
+              "text": "1"
+            }
+          },
+          {
+            "see": {
+              "key": "cattain-need-*"
+            }
+          },
+          {
+            "order": [
+              {
+                "key": "cattain-needs"
+              },
+              {
+                "key": "cattain-crew"
+              }
+            ]
+          }
+        ]
+      },
+      "within": 40,
+      "expect": "The amber count 1 on miso's row, and the request first in miso's Overview"
+    },
+    {
+      "do": "snap",
+      "name": "needs-you",
+      "expect": "miso's row with the amber count, its crew nested; Needs you first in its Overview"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "note",
+          "label": "Run the tests needs you"
+        }
+      },
+      "within": 30,
+      "expect": "miso hears of the request once, as a note in its thread"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep '\"stdin\"' fake-record.jsonl | grep -c 'status=.\"needs_you' || true",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT state FROM permissions\"",
+              "is": "pending"
+            }
+          }
+        ]
+      },
+      "expect": "Told once, and the request still waits on the person"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "needs-you"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "button",
+          "name": "Allow once"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "name": "Allow once"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "sh": {
+              "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT status FROM tasks WHERE title = 'Run the tests'\"",
+              "is": "done"
+            }
+          },
+          {
+            "gone": {
+              "key": "cat-cat_miso-count"
+            }
+          }
+        ]
+      },
+      "within": 30,
+      "expect": "The person allowed it; the crew thread ran the command and ended; the count is gone"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "sh": {
+          "run": "grep '\"stdin\"' fake-record.jsonl | grep -c 'title=.\"Run the tests.\">' | tr -d ' '",
+          "is": "2"
+        }
+      },
+      "within": 40,
+      "expect": "miso heard the turn end too"
+    }
+  ]
+}

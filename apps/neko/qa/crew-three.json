@@ -1,0 +1,186 @@
+{
+  "name": "crew-three",
+  "title": "A Cattain starts three crew threads, rests on them, and keeps its digest",
+  "about": "The person asks miso, in its own thread, to fix three flaky tests, one thread each. The fake CLI calls start_crew_thread three times through Neko's own MCP server. The three crew threads nest under miso in the sidebar and list in its Overview; miso's thread rests on them (\"Waiting on its crew\"). As each crew thread's turn ends miso is woken, in at most two batches, one note \"Woken by …\" for each; the fake Cattain rewrites DIGEST.md, which the Digest tab shows. The store says miso started all three.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl",
+      "NEKO_CREW_BATCH_MS": "4000"
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cattains",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-cat-cat_miso-open"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-cat-cat_miso-open"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "miso"
+        }
+      },
+      "within": 10,
+      "expect": "miso's own thread opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Fix the three flaky tests, one thread each [fake:mcp] mcp neko start_crew_thread {\"title\":\"Fix test one\",\"brief\":\"Fix the first flaky test [fake:work:6]\"} ; mcp neko start_crew_thread {\"title\":\"Fix test two\",\"brief\":\"Fix the second [fake:work:7]\"} ; mcp neko start_crew_thread {\"title\":\"Fix test three\",\"brief\":\"Fix the third [fake:work:8]\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "count": {
+              "of": {
+                "key": "cattain-thread-*"
+              },
+              "min": 3
+            }
+          },
+          {
+            "count": {
+              "of": {
+                "key": "cattain-crew-task_*",
+                "role": "button"
+              },
+              "min": 3
+            }
+          },
+          {
+            "see": {
+              "key": "waiting-line",
+              "label": "Waiting on its crew"
+            }
+          }
+        ]
+      },
+      "within": 40,
+      "expect": "Three crew threads nest under miso and list in its Overview; miso rests on them"
+    },
+    {
+      "do": "snap",
+      "name": "crew-at-work",
+      "expect": "miso with its crew at work: nested in the sidebar, Crew 3 in the Overview, the waiting line"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT COUNT(*) FROM tasks WHERE started_by = 'cat_miso' AND cat_id = 'cat_miso' AND parent_id IS NULL\"",
+              "is": "3"
+            }
+          },
+          {
+            "sh": {
+              "run": "test \"$(grep -c 'is started in your crew' fake-record.jsonl)\" -ge 3 && echo yes || echo no",
+              "is": "yes"
+            }
+          }
+        ]
+      },
+      "expect": "The store has three crew threads miso started; each start answered with the cue to end the turn"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "count": {
+              "of": {
+                "role": "note",
+                "label": "Woken by Fix test"
+              },
+              "min": 3
+            }
+          },
+          {
+            "sh": {
+              "run": "grep -c 'Fix test three: done' \"$data/cattains/cat_miso/DIGEST.md\" || true",
+              "is": "1"
+            }
+          }
+        ]
+      },
+      "within": 90,
+      "expect": "miso is woken by all three and rewrites its digest"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "n=$(grep '\"stdin\"' fake-record.jsonl | grep -c 'neko-wake kind=.\"crew' || true); test \"$n\" -ge 1 -a \"$n\" -le 2 && echo yes || echo \"no: $n wakes\"",
+          "is": "yes"
+        }
+      },
+      "expect": "miso was woken in at most two batches"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "pane-tabs-1"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cattain-digest-age"
+        }
+      },
+      "within": 10,
+      "expect": "The Digest tab shows what miso wrote, with its age"
+    },
+    {
+      "do": "snap",
+      "name": "digest",
+      "expect": "The digest after the update: New lists the three crew threads, done"
+    }
+  ]
+}

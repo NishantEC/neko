@@ -1,0 +1,176 @@
+{
+  "name": "crew-merge-only-when-asked",
+  "title": "A Cattain passes on a merge only after the person asked for it",
+  "about": "miso starts a crew thread, which finishes; miso is woken and keeps its digest, and writes nothing to the crew thread. Then the person writes \"merge it\" in miso's thread, and miso passes it on with message_crew. By the order of the records, miso's words reach the crew thread only after the person's message. The crew thread shows \"Started by miso\" and both miso's brief and miso's message \"From miso\", never as the person's.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl",
+      "NEKO_CREW_BATCH_MS": "1500"
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cattains",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-cat-cat_miso-open"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-cat-cat_miso-open"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "band-title",
+          "text": "miso"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Fix the flaky login test [fake:mcp] mcp neko start_crew_thread {\"title\":\"Fix the login test\",\"brief\":\"Fix the flaky login test on your branch. Do not merge. [fake:plain]\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "note",
+              "label": "Woken by Fix the login test"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep -c 'Fix the login test: done' \"$data/cattains/cat_miso/DIGEST.md\" || true",
+              "is": "1"
+            }
+          }
+        ]
+      },
+      "within": 60,
+      "expect": "The crew thread ends; miso is woken and rewrites its digest"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "grep '\"stdin\"' fake-record.jsonl | grep -c 'neko-from cattain' || true",
+          "is": "0"
+        }
+      },
+      "expect": "Before the person asked, miso wrote nothing to its crew"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Merge it [fake:mcp] mcp neko message_crew {\"id\":\"Fix the login test\",\"text\":\"Asha said in my thread: merge it. Merge your branch and say so. [fake:plain]\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "sh": {
+          "run": "grep '\"stdin\"' fake-record.jsonl | grep -c 'neko-from cattain' | tr -d ' '",
+          "is": "1"
+        }
+      },
+      "within": 30,
+      "expect": "miso passes the person's decision on"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "a=$(grep -n '\"stdin\"' fake-record.jsonl | grep 'Merge it' | head -1 | cut -d: -f1); b=$(grep -n '\"stdin\"' fake-record.jsonl | grep 'neko-from cattain' | head -1 | cut -d: -f1); test -n \"$a\" -a -n \"$b\" && test \"$b\" -gt \"$a\" && echo yes || echo no",
+          "is": "yes"
+        }
+      },
+      "expect": "By the order of the records, miso's merge words reach the crew thread only after the person's message"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "thread-*",
+        "name": "Fix the login test"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "task-started-by",
+              "label": "Started by miso"
+            }
+          },
+          {
+            "see": {
+              "key": "task-message-from"
+            }
+          },
+          {
+            "see": {
+              "key": "part-*-from"
+            }
+          }
+        ]
+      },
+      "within": 20,
+      "expect": "The crew thread: Started by miso, its brief and miso's message both From miso"
+    },
+    {
+      "do": "snap",
+      "name": "crew-thread",
+      "expect": "A crew thread miso started, with miso's brief and message led by its face"
+    }
+  ]
+}
