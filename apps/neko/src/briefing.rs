@@ -7,6 +7,7 @@ use neko_protocol::schedule::{Zone, format_at, local_parts, parse_at};
 use neko_protocol::{Briefing, BriefingCounts, BriefingSettings, Changes, Need, Request, RunId, TaskId, TaskStatus};
 use rune::TextEdit;
 
+use crate::notify::{Whose, titled};
 use crate::state::{App, Asked};
 
 const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -119,8 +120,10 @@ pub fn round_line(l: &neko_protocol::briefing::BriefingRound) -> (String, Option
     (what, after)
 }
 
-/// The notification's body: one line of what is first, the thing that needs the person else the newest finished task.
-pub fn note_body(b: &Briefing) -> String {
+/// The notification's body: one line of what is first: the thing that needs the person, else the newest finished task, else a
+/// Cattain's digest, else a new Cattain. `whose` says whose thread an item is in: a Cattain's own question reads "miso asks: …", a crew
+/// thread's title says its crew, and no other cat is named (docs/knowledge/needs-you.md).
+pub fn note_body(b: &Briefing, whose: &dyn Fn(&TaskId) -> Whose) -> String {
     if let Some(n) = b.needs.first() {
         let what = match &n.need {
             Need::Permission { permission } => format!("{}: {}", permission.title, permission.detail),
@@ -132,15 +135,37 @@ pub fn note_body(b: &Briefing) -> String {
         if matches!(n.need, Need::Plugin { .. }) {
             return what;
         }
-        return match n.need {
-            Need::Failure { .. } => format!("{} \u{b7} Failed: {what}", n.title),
-            _ => format!("{} \u{b7} Needs you: {what}", n.title),
+        let w = whose(&n.task);
+        return match (&n.need, &w) {
+            (Need::Question { .. }, Whose::Cattain(name)) => format!("{name} asks: {what}"),
+            (Need::Failure { .. }, _) => format!("{} \u{b7} Failed: {what}", titled(&n.title, &w)),
+            _ => format!("{} \u{b7} Needs you: {what}", titled(&n.title, &w)),
         };
     }
-    match b.finished.first() {
-        Some(t) => format!("{} \u{b7} {}", t.title, end_words(t.end)),
-        None => String::new(),
+    if let Some(t) = b.finished.first() {
+        return format!("{} \u{b7} {}", titled(&t.title, &whose(&t.task)), end_words(t.end));
     }
+    if let Some(c) = b.cattains.first() {
+        return match (c.needs.first(), c.new.first()) {
+            (Some(n), _) => format!("{}'s digest \u{b7} Needs you: {n}", c.name),
+            (None, Some(n)) => format!("{}'s digest \u{b7} New: {n}", c.name),
+            _ => format!("{} updated its digest", c.name),
+        };
+    }
+    b.new_cattains.first().map(new_cattain_words).unwrap_or_default()
+}
+
+/// "New Cattain: yuzu (iOS work)".
+pub fn new_cattain_words(n: &neko_protocol::briefing::BriefingNewCattain) -> String {
+    match n.purpose.as_deref().filter(|p| !p.is_empty()) {
+        Some(p) => format!("New Cattain: {} ({p})", n.name),
+        None => format!("New Cattain: {}", n.name),
+    }
+}
+
+/// A Cattain's lines from its digest under one heading, with "and 2 more" when it has more than are quoted.
+pub fn more_words(n: u32) -> Option<String> {
+    (n > 0).then(|| format!("and {n} more in its digest"))
 }
 
 /// The workspaces that have anything in the briefing, in the order they first appear (needs, finished, rounds, working).
@@ -194,7 +219,7 @@ impl App {
     /// The morning time came and the window has news: the notification (the daemon says when; the app decides whether it is worth
     /// posting, as it does for Needs you).
     pub fn briefing_due(&mut self, counts: &BriefingCounts) {
-        let body = self.briefing.as_ref().map(note_body).unwrap_or_default();
+        let body = self.briefing.as_ref().map(|b| note_body(b, &|t| self.whose(t))).unwrap_or_default();
         let here = self.here();
         self.notifier.briefing(counts, &body, &here);
     }
@@ -231,6 +256,9 @@ impl App {
         let b = self.briefing.as_ref()?;
         if let Some(n) = self.visible_needs().first() {
             return Some(crate::state::need_key(&n.id));
+        }
+        if let Some(k) = cattain_keys(b).into_iter().next() {
+            return Some(k);
         }
         if let Some(t) = b.finished.first() {
             return Some(task_key(&t.task));
@@ -278,6 +306,24 @@ impl App {
         }
         self.briefing_time.focused = false;
     }
+}
+
+/// The keys of the Cattains section's rows, in order: each digest's block, then each new Cattain's line (one that also has a block
+/// is said in its block).
+pub fn cattain_keys(b: &Briefing) -> Vec<String> {
+    let blocks = b.cattains.iter().map(|c| digest_key(&c.cat));
+    let lines = b.new_cattains.iter().filter(|n| !b.cattains.iter().any(|c| c.cat == n.cat)).map(|n| new_cattain_key(&n.cat));
+    blocks.chain(lines).collect()
+}
+
+/// The key of a Cattain's digest block.
+pub fn digest_key(cat: &str) -> String {
+    format!("briefing-digest-{cat}")
+}
+
+/// The key of a new Cattain's line.
+pub fn new_cattain_key(cat: &str) -> String {
+    format!("briefing-new-cattain-{cat}")
 }
 
 /// The key of a finished task's row.

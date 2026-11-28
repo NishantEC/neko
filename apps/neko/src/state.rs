@@ -783,7 +783,8 @@ impl App {
         self.needs_hidden.retain(|h| live.contains(h));
         self.needs_replies.retain(|k, _| live.contains(k));
         let here = self.here();
-        self.notifier.needs(&self.needs, &here);
+        let whose: HashMap<TaskId, notify::Whose> = self.needs.iter().map(|i| (i.task.clone(), self.whose(&i.task))).collect();
+        self.notifier.needs_with(&self.needs, &here, &|i| whose.get(&i.task).cloned().unwrap_or_default());
         let after = self.visible_needs().len();
         if self.needs_open && after < before {
             self.announce = Some((left_words(after), false));
@@ -937,6 +938,18 @@ impl App {
     /// A Cattain's own thread resting on its crew alone (no kittens of its own at work).
     pub fn rests_on_crew(&self, t: &Task) -> bool {
         t.cattain && t.status == neko_protocol::TaskStatus::Waiting && self.live_subagents(&t.id).is_empty()
+    }
+
+    /// Whose thread `task` is (a subagent's: its thread's), for a notification's words: a Cattain's own, one in a Cattain's crew, or
+    /// the person's (docs/knowledge/needs-you.md, "Notifications").
+    pub fn whose(&self, task: &TaskId) -> notify::Whose {
+        let Some(t) = self.tasks.iter().find(|t| &t.id == task) else { return notify::Whose::Thread };
+        let root = t.subagent.as_ref().and_then(|s| self.tasks.iter().find(|x| x.id == s.root)).unwrap_or(t);
+        let name = |id: &str| self.cat(id).map(|c| c.name.clone());
+        if root.cattain {
+            return root.cat.as_deref().and_then(name).map_or(notify::Whose::Thread, notify::Whose::Cattain);
+        }
+        root.crew_of().and_then(name).map_or(notify::Whose::Thread, notify::Whose::Crew)
     }
 
     /// Whether this Cattain hears its crew's turns: it is active and its own thread has run (the daemon wakes only such a one).
@@ -1547,7 +1560,8 @@ impl App {
                 if task.is_thread() && task.status == neko_protocol::TaskStatus::Done && before.is_some_and(neko_protocol::TaskStatus::is_active) && !crews && !self.woken_by_crew(&task.id) {
                     let words = self.last_words(&task.id);
                     let here = self.here();
-                    let title = neko_protocol::title::title(&task.title);
+                    // A crew thread nobody hears (its Cattain has not run, or is retired) is the person's news: it says whose crew.
+                    let title = notify::titled(&neko_protocol::title::title(&task.title), &self.whose(&task.id));
                     self.notifier.finished(&task.id, &title, words.as_deref(), &here);
                 }
                 let id = task.id.clone();

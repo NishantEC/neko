@@ -298,7 +298,7 @@ fn needs_you_reads_subagent_1_asks_with_the_thread_as_its_quiet_line_and_opens_t
     assert_eq!(rt.state.open.as_ref(), Some(&item.task), "the row opens the subagent");
     assert!(has_key(&rt, "subagent-readonly"));
     // Its notification: the number asks, not a cat.
-    let note = neko_app::notify::note_for(&item);
+    let note = neko_app::notify::note_for(&item, &neko_app::notify::Whose::Thread);
     assert!(note.body.starts_with("Needs you: Kitten 1 asks: "), "{}", note.body);
 }
 

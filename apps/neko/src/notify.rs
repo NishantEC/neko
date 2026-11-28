@@ -255,9 +255,15 @@ impl Notifier {
         Notifier { switches: Switches::default(), poster, posted: HashMap::new(), notified: HashSet::new(), heard: false, briefing_posted: false }
     }
 
-    /// The daemon's list, as it is now. Takes back the notifications whose item is gone, and posts one for each item never seen
-    /// before (oldest first), unless the switch is off or the person is already looking.
+    /// The daemon's list, as it is now, every item worded as a plain thread's. See [`Notifier::needs_with`].
     pub fn needs(&mut self, items: &[NeedsItem], here: &Here) {
+        self.needs_with(items, here, &|_| Whose::Thread);
+    }
+
+    /// The daemon's list, as it is now. Takes back the notifications whose item is gone, and posts one for each item never seen
+    /// before (oldest first), unless the switch is off or the person is already looking. `whose` says whose thread each item is in,
+    /// for its words ([`note_for`]).
+    pub fn needs_with(&mut self, items: &[NeedsItem], here: &Here, whose: &dyn Fn(&NeedsItem) -> Whose) {
         let live: HashSet<&str> = items.iter().map(|i| i.id.as_str()).collect();
         let mut gone: Vec<TaskId> = self.posted.iter().filter(|(_, s)| matches!(s, Shown::Item(i) if !live.contains(i.as_str()))).map(|(t, _)| t.clone()).collect();
         gone.sort();
@@ -282,7 +288,7 @@ impl Notifier {
             if !self.switches.needs || !worth {
                 continue;
             }
-            self.poster.post(&note_for(item));
+            self.poster.post(&note_for(item, &whose(item)));
             self.posted.insert(key_of(item), Shown::Item(item.id.clone()));
         }
     }
@@ -375,9 +381,31 @@ pub fn short(s: &str, max: usize) -> String {
     format!("{}…", cut[..at].trim_end())
 }
 
-/// The notification for an item: the thread's title, then "Needs you: …" with what is asked in short, and its actions. No cat is named
-/// (docs/knowledge/needs-you.md): the thread is the person's, whoever its agent is.
-pub fn note_for(item: &NeedsItem) -> Note {
+/// Whose thread a notification is about, for its words (docs/knowledge/needs-you.md, "Notifications"): a cat is named only where the
+/// cat is the one who speaks.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Whose {
+    /// A thread of the person's: its title, no cat.
+    #[default]
+    Thread,
+    /// A Cattain's own thread (the cat's name): its question reads "miso asks", the one notification that names a cat.
+    Cattain(String),
+    /// A thread in a Cattain's crew (the Cattain's name): "Fix login (miso's crew)".
+    Crew(String),
+}
+
+/// A thread's title as a notification says it: "Fix login", or "Fix login (miso's crew)" for a crew thread.
+pub fn titled(title: &str, whose: &Whose) -> String {
+    match whose {
+        Whose::Crew(name) => format!("{title} ({name}'s crew)"),
+        _ => title.to_owned(),
+    }
+}
+
+/// The notification for an item: the thread's title ("Fix login (miso's crew)" in a crew), then "Needs you: …" with what is asked in
+/// short, and its actions. No cat is named (docs/knowledge/needs-you.md): the thread is the person's, whoever its agent is. The one
+/// exception is a Cattain's own question (its `ask_person`, or a turn that ended asking): "miso asks", then the question.
+pub fn note_for(item: &NeedsItem, whose: &Whose) -> Note {
     let mut info = if item.task.0.is_empty() { vec![("item".to_owned(), item.id.clone())] } else { link_info(&item.task, Some(&item.id)) };
     let (body, buttons) = match &item.need {
         Need::Permission { permission: p } => {
@@ -402,8 +430,13 @@ pub fn note_for(item: &NeedsItem) -> Note {
         }
         Need::Question { run, question, kitten, via, .. } => {
             info.push(("run".into(), run.0.clone()));
-            let whose = kitten.as_deref().map(|k| format!("{}: ", crate::subagents::question_says(Some(k), via))).unwrap_or_default();
-            (short(&format!("Needs you: {whose}{question}"), BODY_CHARS), vec![Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }])
+            let from = kitten.as_deref().map(|k| format!("{}: ", crate::subagents::question_says(Some(k), via))).unwrap_or_default();
+            let reply = vec![Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }];
+            if let Whose::Cattain(name) = whose {
+                // The Cattain tags the person: its name asks, and the question is the whole body.
+                return Note { id: note_id(&key_of(item)), title: format!("{name} asks"), body: short(&format!("{from}{question}"), BODY_CHARS), info, buttons: reply };
+            }
+            (short(&format!("Needs you: {from}{question}"), BODY_CHARS), reply)
         }
         Need::Failure { text, .. } => (short(&format!("Failed: {text}"), BODY_CHARS), Vec::new()),
         // Approving a plugin is never done from a banner: the notification only opens the list.
@@ -412,7 +445,7 @@ pub fn note_for(item: &NeedsItem) -> Note {
             (short(&crate::plugins::note_words(ask), BODY_CHARS), Vec::new())
         }
     };
-    Note { id: note_id(&key_of(item)), title: item.title.clone(), body, info, buttons }
+    Note { id: note_id(&key_of(item)), title: titled(&item.title, whose), body, info, buttons }
 }
 
 /// "Done", with the first line of the answer when there is one.
@@ -606,11 +639,11 @@ mod tests {
         assert_eq!(p[0].get("url"), Some("neko://task/task_00000000000000000000000001"), "a click opens the thread by its link");
         n.needs(&[perm(T1, false)], &away());
         assert!(r.take().is_empty(), "never twice for one item");
-        let d = note_for(&perm(T2, true));
+        let d = note_for(&perm(T2, true), &Whose::Thread);
         assert!(d.buttons.is_empty(), "a destructive request's notification only opens the thread: {d:?}");
-        let q = note_for(&question(T2));
+        let q = note_for(&question(T2), &Whose::Thread);
         assert_eq!((q.body.as_str(), &q.buttons[..]), ("Needs you: Should I rename all four?", &[Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }][..]));
-        let f = note_for(&failure(T2));
+        let f = note_for(&failure(T2), &Whose::Thread);
         assert_eq!((f.body.as_str(), f.buttons.len()), ("Failed: Claude Code is not signed in.", 0));
         // A kitten's question the agent passed up says whose it is.
         let mut up = question(T2);
@@ -618,7 +651,35 @@ mod tests {
             *kitten = Some("1.2".into());
             *via = vec!["1".into()];
         }
-        assert_eq!(note_for(&up).body, "Needs you: Kitten 1.2 asks (via Kitten 1 and the agent): Should I rename all four?");
+        assert_eq!(note_for(&up, &Whose::Thread).body, "Needs you: Kitten 1.2 asks (via Kitten 1 and the agent): Should I rename all four?");
+    }
+
+    #[test]
+    fn a_cat_is_named_only_when_a_cattain_asks_and_a_crew_thread_says_whose_crew_it_is_in() {
+        let miso = Whose::Cattain("miso".into());
+        let mut ask = question(T1);
+        ask.title = "miso".into();
+        if let Need::Question { question, .. } = &mut ask.need {
+            *question = "Merge acme#12?".into();
+        }
+        let n = note_for(&ask, &miso);
+        assert_eq!((n.title.as_str(), n.body.as_str()), ("miso asks", "Merge acme#12?"), "the Cattain tags the person");
+        assert_eq!(n.buttons, vec![Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }], "answered from the banner as any question");
+        // A request in the Cattain's own thread is its thread's, as any thread's request is.
+        assert_eq!(note_for(&perm(T1, false), &miso).title, "Run the tests");
+        let crew = Whose::Crew("miso".into());
+        let p = note_for(&perm(T2, false), &crew);
+        assert_eq!((p.title.as_str(), p.body.as_str()), ("Run the tests (miso's crew)", "Needs you: Run a command: cargo test"));
+        assert_eq!(note_for(&question(T2), &crew).title, "Rename the button (miso's crew)");
+        assert_eq!(titled("Fix login", &Whose::Thread), "Fix login");
+        // The list as the app hands it: each item worded by whose it is, once.
+        let (mut nt, r) = notifier();
+        nt.needs_with(&[ask.clone(), perm(T2, false)], &away(), &|i| if i.task.0 == T1 { miso.clone() } else { crew.clone() });
+        let sent = r.take();
+        let titles: Vec<&str> = posted(&sent).iter().map(|n| n.title.as_str()).collect();
+        assert_eq!(titles, ["miso asks", "Run the tests (miso's crew)"]);
+        nt.needs_with(&[ask], &away(), &|_| Whose::Cattain("miso".into()));
+        assert!(posted(&r.take()).is_empty(), "miso's question posts once");
     }
 
     #[test]
@@ -688,13 +749,13 @@ mod tests {
 
     #[test]
     fn a_click_is_read_strictly() {
-        let n = note_for(&perm(T1, false));
+        let n = note_for(&perm(T1, false), &Whose::Thread);
         assert_eq!(read_click(None, None, &n.info), ClickDo::Open(TaskId(T1.into())));
         assert_eq!(read_click(Some(ALWAYS_ALLOW), None, &n.info), ClickDo::Answer { task: TaskId(T1.into()), permission: PermissionId(format!("perm_{T1}")), decision: Decision::AlwaysAllow });
         assert_eq!(read_click(Some(DENY), None, &n.info), ClickDo::Answer { task: TaskId(T1.into()), permission: PermissionId(format!("perm_{T1}")), decision: Decision::Deny });
-        let d = note_for(&perm(T1, true));
+        let d = note_for(&perm(T1, true), &Whose::Thread);
         assert_eq!(read_click(Some(ALLOW_ONCE), None, &d.info), ClickDo::Open(TaskId(T1.into())), "never confirms a destructive step");
-        let q = note_for(&question(T2));
+        let q = note_for(&question(T2), &Whose::Thread);
         assert_eq!(read_click(Some(REPLY), Some("  All four. "), &q.info), ClickDo::Reply { task: TaskId(T2.into()), run: RunId("run_2".into()), words: "All four.".into() });
         assert_eq!(read_click(Some(REPLY), Some("  "), &q.info), ClickDo::Open(TaskId(T2.into())), "nothing typed: open the thread");
         assert_eq!(read_click(None, None, &[("task".into(), "../etc".into())]), ClickDo::Nothing);

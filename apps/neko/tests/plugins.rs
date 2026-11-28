@@ -341,7 +341,7 @@ fn the_briefing_shows_a_plugin_item_without_a_cat_or_a_workspace() {
     settle(&mut rt);
     let key = need_key(&rt.state.needs[0].id);
     assert!(has_key(&rt, &key) && has_key(&rt, &format!("{key}-approve")), "the very card, answered where it is");
-    assert_eq!(rt.state.briefing.as_ref().map(neko_app::briefing::note_body).as_deref(), Some("Approve the plugin notes-sync"), "the morning's line has no cat in front of it");
+    assert_eq!(rt.state.briefing.as_ref().map(|b| neko_app::briefing::note_body(b, &|_| neko_app::notify::Whose::Thread)).as_deref(), Some("Approve the plugin notes-sync"), "the morning's line has no cat in front of it");
 }
 
 #[test]
