@@ -1,7 +1,7 @@
 # Subagents (2026-11-27)
 
 A thread can split its work into numbered subagents, end its turn and rest. Each subagent's report wakes the thread with `--resume`. This
-page is how that works and why. Protocol 19, store 15. The app's side (the card, the note, the waiting line) is in `app-shell.md` and
+page is how that works and why. Protocol 20, store 16. The app's side (the card, the note, the waiting line) is in `app-shell.md` and
 `design.md`; the scenarios are in `qa.md`.
 
 **Kittens.** Neko's word for subagents, in everything the person reads: cats are the Cattains, and the helpers they and the threads
@@ -29,8 +29,8 @@ kitten where it speaks of what the person sees.
   subagents has a request waiting, and screens are told when that changes).
   Its run is guarded like any (`run-guard.md`). Stop on a thread stops everything under it.
 - **A draft** (`SubagentOf.draft`) is status `new` that nothing starts and nothing waits on: a thread with only drafts is not Waiting.
-- **A subagent is read, not talked to**, for now: `follow_up` and `remove_task` on one are refused with words. Removing the thread
-  removes its subagents (refused while one works).
+- **The person reads a subagent, and talks to the thread**: `follow_up` and `remove_task` on one are refused with words. Its parent
+  writes to it with `message_subagent` ("Questions go up"). Removing the thread removes its subagents (refused while one works).
 
 ## Neko's own MCP server
 
@@ -55,7 +55,10 @@ hook helper (`permissions.md`): a thin process that keeps nothing.
    | `start_subagent {title, prompt, placement?, after?, draft?}` | makes the subagent, puts a card in the thread's transcript, starts it when there is room | "Subagent 1 ("Check links") is started. It is working now. Neko wakes you with its report when it ends. Do not poll or wait. If you have nothing else to do, end your turn now." (queued: "…queued behind other work…"; stacked: "…starts when Subagent 1 is done, from its branch."; an own copy adds "It works in a copy of its own on the branch neko/4f2a-1."; a draft: "…saved as a draft…"). An error in words for a depth, ceiling, empty prompt, `own_copy` outside a git project with a commit, a placement that is neither, an `after` that names no sibling or a discarded one, or a thread that was stopped |
    | `start_drafts {}` | starts the drafts this run's task wrote | "Started Subagent 1, Subagent 2. …" |
    | `subagents {id?}` | lists the thread's own subagents: number, title, state, where it works (and after whom), last line; with `id` that report in full | the list, ending "Do not call this to wait: Neko wakes you with each report." |
-   | `stop_subagent {id}` | stops that subagent and any it started | "Subagent 1 is stopped. You are woken with its report." |
+   | `stop_subagent {id}` | stops that subagent and any it started (one waiting on an answer is stopped and its question taken back) | "Subagent 1 is stopped. You are woken with its report." |
+   | `message_subagent {id, text, mode?}` | writes to a subagent it started: at rest it starts again with the words, working it reads them as a steer, a queued message or an interrupt; a note in the agent's conversation | "Subagent 1 has your answer and is working again. …" (or "…reads your message at its next step."). Refused in words for a number it does not have, a draft, a discarded one, one not started yet |
+   | `ask_parent {question, subagent?}` (subagents only) | the run carries the question and ends `asked`; with `subagent`, passes that one's question up | "Your question is with the agent that started you. End your turn now: Neko resumes you with the answer as your next message." |
+   | `ask_person {question, subagent?}` (threads only) | the run carries the question for the person and ends `asked`: it is in Needs you | "The person has Subagent 1's question in Needs you. End your turn now: their answer is your next message. Then pass it on…" |
 
    The server's `initialize.instructions` carry the same guidance but did not visibly reach the model in the real probe, so the
    guidance is also in the tool results above and in the system paragraph below.
@@ -158,7 +161,8 @@ copies do. It also keeps every run quick, which matters when one thread starts s
 
 ## What is not here yet
 
-- `message_subagent`, a subagent's question going up, `wake_me` and watches. Each is a later slice.
+- `wake_me` and watches. Each is a later slice.
+- The person answering a kitten directly in its tab (the answer goes through the thread, on purpose: the thread keeps the context).
 - The app does not say that a kitten waits for a cool Mac; a stack whose copy cannot be made says so only as a failed kitten.
 - Keep-alive wakes.
 - The Waiting thread's status in the Briefing's wording and a subagent in Review: a thread's change line covers its own run only.
@@ -173,9 +177,76 @@ copies do. It also keeps every run quick, which matters when one thread starts s
 5. That `mcp__neko__*` calls are not asked about by Claude Code in the person's default mode (Claude Code may ask for an MCP tool; if it
    does, it arrives as `can_use_tool` and Neko's policy allows it at once, never reaching the person).
 
+## Questions go up
+
+A kitten that cannot go on without an answer asks the agent that started it, never the person directly. The parent answers it, or
+passes it up; a question reaches the person only through every agent above the kitten, one level at a time. Progress never wakes
+anyone; a question does. Why: the parent has the context the kitten lacks (it read the person's words and the other kittens'
+reports), so most questions end there, cheaply, and the person sees only what truly needs them.
+
+**How a kitten asks.** It calls `mcp__neko__ask_parent {question}` and ends its turn (its few lines and the tool say so). Its run
+carries the question (`Run.ask`) and ends `asked`. A kitten whose last words end in a question mark asks the same way (that is what a
+real agent in `-p` does when it is stuck); its question is the end of those words. Claude Code's own `AskUserQuestion` is not used for
+this (it would ask no one in `-p`); see `runtimes.md` for what is not measured yet.
+
+**The wake.** The kitten's report is stored as for any end, with its question (`wakes.question`, and `question_chain` when it was
+passed up) and the run it is about. The parent is woken (or steered, while it runs) with:
+
+```text
+<neko-wake kind="question" id="1" title="Write the migration">
+<question>Which database should the migration target?</question>
+<summary>…its last words, when they say more than the question…</summary>
+Subagent 1 waits for your answer. Answer it with mcp__neko__message_subagent (id "1") when the answer follows from the work or from
+what the person said. If only the person can answer (a secret, a choice that cannot be undone, what they want), pass it up with
+mcp__neko__ask_person (subagent "1") and end your turn. Never make up such an answer.
+</neko-wake>
+```
+
+A kitten woken by its own kitten's question is told `ask_parent` instead, and a passed-up question carries `from="1.2"` and the line
+"Subagent 1 passed up this question of Subagent 1.2's."
+
+**Answering.** `message_subagent {id, text}` resumes the kitten's conversation with the words as its next message (an answer starts at
+once, past the limits: the kitten was counted when it began and the answer is what it waits for). The parent's conversation gets the
+note "The agent answered Kitten 1" (`PartBody::ToSubagent`, the words folded under it); the kitten's tab shows the words in their own
+well, "From the agent". The kitten works on and reports again when it ends: a report is now per run (`wakes.run_id`).
+
+**Passing up.** A thread calls `ask_person {question, subagent: "1"}`; a kitten calls `ask_parent {question, subagent: "1.2"}`. The run
+carries the question with its chain (`["1.2", "1"]`: who first asked, then whom it came through). A thread's question to the person
+is a Needs you item led by "Kitten 1 asks (via the agent)" (or "Kitten 1.2 asks (via Kitten 1 and the agent)"); the person answers in
+Needs you or in the thread's composer, which resumes the thread with their words; the thread then passes them down with
+`message_subagent`. While a task waits for the answer to a question it put with a tool, it is not made Waiting and the reports of its
+other kittens wait (kept, nothing lost) until it runs again: the question stays the one thing in front of whoever answers.
+
+**Who has it.** `SubagentOf.question` is derived on read while the kitten is `asked`: its text, its chain, and `with`: `parent` (its
+card says "Asks the agent: …", in the quiet ink with the still ring: it waits on an agent, not on the person), `up` ("Passed up: …")
+or `person` ("Asks you (via the agent): …", amber). Its tab ends on the question and says who has it.
+
+**The rule: never bypass the person when the parent cannot or should not answer.** Told to every agent (the paragraph, the wake, the
+tools): answer only what follows from the work or from the person's own words; pass up a password, key or other secret, a choice that
+deletes, publishes, pays or cannot be undone, and what the person wants; never make up such an answer. Neko enforces what it can
+check:
+- **A question never just sits.** When an agent's turn ends (done, or with its own question in words) and a kitten's `ask_parent`
+  question was put in front of it (its wake was delivered) and is still unanswered and not passed on, Neko passes it up itself, as
+  that agent's question, marked `unanswered`; at the top it reaches the person ("The agent did not answer it, so Neko passed it to
+  you."). One at a time. A kitten that only ended its words with a question mark is not passed up by itself (a closing "Anything
+  else?" would otherwise reach the person).
+- **Safety stays on actions.** An answer approves nothing: a kitten's risky steps still ask the person exactly as before (Needs you,
+  "Kitten 1 asks", in its thread's title), and no tool of the parent's answers a request.
+- **Stop takes questions back.** Stop on a thread stops every kitten under it, those waiting on an answer included, and a thread
+  waiting on the person's answer to a question it put with a tool is stopped too: its item leaves Needs you. `stop_subagent` on a kitten
+  that asked stops it and its question.
+
+A stacked kitten whose predecessor asked waits (the predecessor may still finish) instead of being cancelled.
+
+Tests: `crates/neko-daemon/tests/questions.rs` (the parent answers and the kitten resumes once, with the same session; passed up to the
+person and back down; one level at a time with the chain; unanswered goes up by itself; reports wait while the thread waits for the
+person; Stop takes it back; the tools' refusals), `crates/neko-core/tests/subagents.rs` (a report per run, the question on the run and
+who has it, the migration to 16), the scenes `question-*` and `apps/neko/tests/questions.rs`, the rig's `question-answered-by-parent`,
+`question-to-person` and `subagent-request`.
+
 ## Neko's own tool steps
 
-The conversation reads Neko's own tools as a person would: "Started Kitten 1 · Check links" (the number from the tool's answer), "Saved Kitten 3 as a draft · Later", "Started the drafts", "Asked about kittens", "Read Kitten 2's report", "Stopped Kitten 2", "Could not start a kitten · Write tests" (`task_view::step_phrase`; a plugin's tool still reads "acme-docs · search").
+The conversation reads Neko's own tools as a person would: "Started Kitten 1 · Check links" (the number from the tool's answer), "Saved Kitten 3 as a draft · Later", "Started the drafts", "Asked about kittens", "Read Kitten 2's report", "Stopped Kitten 2", "Wrote to Kitten 1", "Asked the agent · Which database…", "Passed Kitten 1's question to you · …", "Could not start a kitten · Write tests" (`task_view::step_phrase`; a plugin's tool still reads "acme-docs · search").
 
 ## In the right pane (S3)
 

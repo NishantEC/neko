@@ -7,7 +7,11 @@ One place that lists what waits for the person, and a Mac notification when some
 Four things, and nothing else (the fourth belongs to no task):
 
 1. A permission request still pending.
-2. A run that ended with a question: the task is `asked`.
+2. A run that ended with a question: the task is `asked`. The question is the end of its last words, or what the agent put with
+   `ask_person` (protocol 20). A kitten's question is **not** here: it goes to the agent that started it, and reaches the person only
+   when that agent passes it up with `ask_person` (or, at the top, when the agent ended its turn without answering it: Neko passes it
+   up then, so no question is left to sit). Such an item says whose it is: `kitten` (the kitten that first asked), `via` (the kittens
+   it came through) and `unanswered`.
 3. A run that failed for a reason the person can act on: not signed in, the usage limit, the task's folder missing, the agent CLI
    missing. The failure's notice carries its kind (`FailureKind`). A crash, a timeout or a stall is a notice in the task only.
 
@@ -28,7 +32,9 @@ same after a restart (tested). A notice written before version 6 has no kind; it
 - Order: oldest first, grouped by workspace. The workspace whose item waited longest comes first.
 - Each item carries its task's cat and the cat's name (`cats.md`), empty strings for a thread with no cat (nearly every thread). The
   card is led by a small amber or red dot and says "The agent asks", "The agent has a question", "The agent could not go on"
-  ("Kitten 1 asks" for a subagent; a plug leads a plugin's). A rename of a cat pushes the list again.
+  ("Kitten 1 asks" for a subagent's request; "Kitten 1 asks (via the agent)" and "Kitten 1.2 asks (via Kitten 1 and the agent)" for a
+  kitten's question the agent passed up, with "The agent did not answer it, so Neko passed it to you." under one Neko passed up; a
+  plug leads a plugin's). A rename of a cat pushes the list again.
 - An item's id is stable while it waits: `perm:<id>`, `question:<run id>`, `failure:<part id>`, `plugin:<plugin id>`.
 - A plugin's item (`Need::Plugin {ask}`) has no task, workspace or cat: its `task`, `workspace`, `cat` and `cat_name` are empty and its
   `title` is the plugin's name. They make a group of their own, ordered like any group by their oldest item. It says what will run: the
@@ -88,7 +94,8 @@ When each is posted:
   or in the list. Title: the thread's title. Body: "Needs you: " and what is asked, at most 140 characters.
   - A request: "Needs you: Run a command: cargo test" (a subagent's: "Needs you: Kitten 1 asks: …"), with Allow once (first), Always allow and Deny as actions. A destructive request has no
     actions: its notification only opens the task.
-  - A question: "Needs you: " and the question, with a reply field ("Your answer", Send).
+  - A question: "Needs you: " and the question, with a reply field ("Your answer", Send). A kitten's passed-up question: "Needs you:
+    Kitten 1 asks (via the agent): …". The row's second line says "Needs you: a question from Kitten 1".
   - A failure: "Failed: " and its words. No actions.
 - A run that finished done (status from working to done), while "When a task finishes" is on, unless Neko is in front on that task:
   title the thread's title, body "Done" or "Done: " and the first line of the answer.
@@ -129,6 +136,11 @@ to New thread with a quiet line.
   links, and Settings says it cannot send notifications. Only the installed app does.
 - A click that launches a closed app arrives through the delegate Rune installs at launch; Neko installs its handler before the
   window starts, and an action that arrives before the daemon answers is done once it does. Only a real run can confirm this.
+
+## Not here yet
+
+The spec's "a thread has waited on a kitten for over a day" item (Stop, Keep waiting) and Later on a card (hidden until the next
+morning) are not built: S7 built the questions.
 
 ## Not here, on purpose
 

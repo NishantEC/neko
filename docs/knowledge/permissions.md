@@ -75,7 +75,9 @@ every other tool; nothing about a plugin lets a step through that another tool w
 
 `mcp__neko__*` (`subagents.md`) are Neko's tools for the agent: start, list and stop its own subagents. They only record work in Neko's
 state, so `stream::action` makes them `Action::Internal` and they go ahead in every mode (a `can_use_tool` for one is allowed at once;
-the hook says nothing). What a subagent then does is asked about like anything else.
+the hook says nothing). What a subagent then does is asked about like anything else. A parent's answer to a kitten's question
+(`message_subagent`, `subagents.md` "Questions go up") is words, not a decision: it approves no step, and no tool of the agent's answers a
+request.
 
 A **subagent never has more permission than its thread**: the mode is the one setting every run reads. Its "Always allow" answers are
 scoped to its own task, so they start empty. Its requests are stored under its own task, answered in its view or in Needs you ("Subagent

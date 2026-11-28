@@ -612,6 +612,13 @@ mod tests {
         assert_eq!((q.body.as_str(), &q.buttons[..]), ("Needs you: Should I rename all four?", &[Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }][..]));
         let f = note_for(&failure(T2));
         assert_eq!((f.body.as_str(), f.buttons.len()), ("Failed: Claude Code is not signed in.", 0));
+        // A kitten's question the agent passed up says whose it is.
+        let mut up = question(T2);
+        if let Need::Question { kitten, via, .. } = &mut up.need {
+            *kitten = Some("1.2".into());
+            *via = vec!["1".into()];
+        }
+        assert_eq!(note_for(&up).body, "Needs you: Kitten 1.2 asks (via Kitten 1 and the agent): Should I rename all four?");
     }
 
     #[test]

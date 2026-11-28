@@ -86,10 +86,15 @@ to stop, and is not shown for a run that only works, since the conversation alre
 Not seen by Neko: a command the agent started in the background and left (`&`, a background shell). The CLI does not report it, and
 the run guard ends it with the run. Timers and watches (S13) will list here when they exist.
 
+## Writing to a kitten (`message_subagent`)
+
+The agent's `message_subagent {id, text, mode?}` (`subagents.md`, "Questions go up") goes through the same `queue::send` with the
+kitten's task: a kitten at rest (it asked, or it ended) starts again with the words (a resumed run, its conversation kept); one that
+works has them steered in, queued for its next turn or sent as an interrupt, exactly as the person's words reach a thread. The
+person still cannot write to a kitten (`follow_up` on one is refused): what they want changed goes to the thread.
+
 ## Not here yet
 
-- `message_subagent` (the MCP tool that gives a kitten the same three modes). `queue::send` takes a task and a mode and works for a
-  kitten's task as it is, so the tool is a small step; it waits for S7, which needs it to answer a kitten's question.
 - Send now as an interrupt (it steers), and an `interrupt` of a kitten from the activity bar (× stops).
 
 ## Still not sure: check with the real CLI

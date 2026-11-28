@@ -182,6 +182,8 @@ before `main` runs, measured with `--list-scenes` on a fresh copy), not the daem
 
 ## Kittens in the app
 
+**Questions (S7, `subagents.md` "Questions go up").** A kitten waiting on an answer: its card's second line is "Asks the agent: …" (quiet ink, the still ring: it waits on an agent), "Passed up: …", or "Asks you (via the agent): …" (amber, once it reached the person). Its wake note reads "Kitten 1 has a question" with "The question" folded under it; `message_subagent` leaves "The agent answered Kitten 1" (or "wrote to") with "The answer" folded, outside the run's fold. A thread that asked the person ends on a block led by a small amber mark: "Kitten 1 asks (via the agent)" (or "The agent asks"), the question, and "The agent did not answer it, so Neko passed it to you." when Neko passed it up; the composer says "Answer the question". A kitten's tab ends on "Kitten 1 asks the agent", the question and who has it, has no Report while it waits, and shows its parent's words in a well headed "From the agent". Scenes: `question-card`, `question-answered`, `question-answered-open`, `question-to-person`, `question-needs`, `question-kitten-tab`, `question-kitten-answered`.
+
 A kitten (the app's word for a subagent: a helper a thread starts, numbered, with no name and no face) is a task (`Task.subagent`: its parent, its number, the thread at the top) and never a thread. `subagents.rs` holds the words and the state, `subagents_view.rs` the drawing.
 
 - **Not listed.** The sidebar (`tasks_in`, the Cattains), a cat's page and counts, and every notification skip tasks with `subagent`; a kitten finishing says nothing (its thread's end does), but its permission request reaches Needs you like any other. When a kitten is open its thread's row is the chosen one.

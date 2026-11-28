@@ -100,7 +100,14 @@ Measured on Claude Code 2.1.331 with `--replay-user-messages`, a steer sent at 4
 [14.4] result #1           '… meow'                          one result for both
 ```
 - A follow-up after a run is a new run with `--resume` and the conversation id the last run reported. So is a wake: a thread that rests
-  while its subagents work is resumed with their reports as one user message (`subagents.md`).
+  while its subagents work is resumed with their reports as one user message (`subagents.md`). So is an answer: a kitten that asked
+  with `ask_parent` is resumed with its parent's words (`message_subagent`) as its next user message.
+- **A run that asked ends `asked`.** A run whose agent called `ask_parent` or `ask_person` carries the question (`Run.ask`) and ends
+  `asked` whatever its last words are; without the tool, last words that end in a question mark still make it `asked`, as before. How a
+  kitten asks today on the real CLI in `-p`: it ends its turn with a question, or (told to in its few lines and the tool's
+  description) it calls `mcp__neko__ask_parent` and ends its turn. Claude Code's own `AskUserQuestion` is left as it was (a
+  bookkeeping tool Neko lets through); whether `-p` offers it to a kitten, and what it answers when no host fills in the answer, is
+  not measured yet (below).
 - A `rate_limit_event` becomes `AgentEvent::RateLimit {status, resets_at}`; the daemon holds back what it starts by itself while the
   status is not `allowed` or `allowed_warning` (`subagents.md`). `rejected` still ends the run as a usage limit.
 
@@ -207,3 +214,5 @@ fake CLI proves Neko's side only.
 12. A run stopped by SIGKILL resumes cleanly with `--resume`.
 13. `--append-system-prompt` with `--system-prompt-snapshot off` on a resumed run: the edited rules are what the model sees, and
     the person's own CLAUDE.md and settings still apply.
+14. Whether a kitten in `-p` is offered `AskUserQuestion`, and what happens when it calls it with Neko's plain allow (no answers filled in). If
+    it is offered and returns nothing useful, a kitten's request for it should be denied with words pointing at `ask_parent`.
