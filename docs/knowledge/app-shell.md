@@ -275,6 +275,10 @@ rune-ui's Toast is installed (`src/ui/toast.rs`). `App::toasts` is a `ToastHost`
 frame, which starts a toast's timer and asks for the wake that ends it; `view::view` mounts `Toasts` last in the overlay layer, bottom centre,
 with `on_action` sending the toast's tag to `App::toast_action`. A handler without a `Tx` uses `ToastHost::push`; its timer starts at the
 next `poll`. Each toast is a polite `status` live region, so it is read out without moving focus; Escape on a focused toast dismisses it.
+While a composer is on screen (a thread's `reply-area`, New thread's `composer-block`) the toasts are mounted in a layer that ends at the
+composer's top (`toasts-above-composer`, read from the last layout), so a toast never covers the box being typed in (S11: "Made yuzu" with
+Undo arrives while the person is in that thread; `tests/structure.rs` holds that no two controls overlap). Elsewhere they sit at the
+window's bottom as before. The tags: `unsettle:`, `unarchive:`, `repin:` (`shelf.rs`) and `unmake:<cat>` (`cattain.rs`, `cats.md`).
 
 ## Search (S9, 2026-11-28)
 

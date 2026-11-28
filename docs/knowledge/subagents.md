@@ -1,7 +1,7 @@
 # Subagents (2026-11-27)
 
 A thread can split its work into numbered subagents, end its turn and rest. Each subagent's report wakes the thread with `--resume`. This
-page is how that works and why. Protocol 20, store 16. The app's side (the card, the note, the waiting line) is in `app-shell.md` and
+page is how that works and why. Protocol 20, store 16 (Neko's tools for Cattains: protocol 22). The app's side (the card, the note, the waiting line) is in `app-shell.md` and
 `design.md`; the scenarios are in `qa.md`.
 
 **Kittens.** Neko's word for subagents, in everything the person reads: cats are the Cattains, and the helpers they and the threads
@@ -59,6 +59,10 @@ hook helper (`permissions.md`): a thin process that keeps nothing.
    | `message_subagent {id, text, mode?}` | writes to a subagent it started: at rest it starts again with the words, working it reads them as a steer, a queued message or an interrupt; a note in the agent's conversation | "Subagent 1 has your answer and is working again. …" (or "…reads your message at its next step."). Refused in words for a number it does not have, a draft, a discarded one, one not started yet |
    | `ask_parent {question, subagent?}` (subagents only) | the run carries the question and ends `asked`; with `subagent`, passes that one's question up | "Your question is with the agent that started you. End your turn now: Neko resumes you with the answer as your next message." |
    | `ask_person {question, subagent?}` (threads only) | the run carries the question for the person and ends `asked`: it is in Needs you | "The person has Subagent 1's question in Needs you. End your turn now: their answer is your next message. Then pass it on…" |
+   | `make_cattain {purpose, name?, project?, rules?}` (threads only, while "Agents may make Cattains" is on; protocol 22) | makes a Cattain, or names the active one with that purpose; the thread gets the note "Made a Cattain: yuzu · iOS work · Open" (`cats.md`, "Made by asking") | "Made a Cattain: yuzu (iOS work) in the project acme-ios. Address it as yuzu. … Tell the person you made yuzu and what it is for." (or "yuzu already looks after this…"); refused in words at 16 (the house listed), for a taken name, an unknown project, no purpose, a subagent, or the setting off |
+   | `list_cattains {}` (the same) | lists the Cattains at work: name, purpose, project, working or at rest, crew count | "3 of at most 16 Cattains are at work: …" |
+
+   The tools a run is offered depend on what `info` says of it: its depth, and whether it may make Cattains (a thread, the setting on).
 
    The server's `initialize.instructions` carry the same guidance but did not visibly reach the model in the real probe, so the
    guidance is also in the tool results above and in the system paragraph below.
@@ -74,8 +78,10 @@ hook helper (`permissions.md`): a thin process that keeps nothing.
 needs no subagents; split only independent parts and write complete prompts; start with `mcp__neko__start_subagent`; end your turn
 after starting them, do not poll, Neko wakes you with a `<neko-wake>` message; you cannot approve a subagent's steps; subagents share
 your folder, so give two different files or start the second after the first reports; your own Agent tool is still fine for a quick
-read-only search), then for a subagent three lines saying whose it is and that its final message is its report. The same bytes every
-run, so a resumed run's cached prompt is not spoiled by wording that moved.
+read-only search), then for a subagent three lines saying whose it is and that its final message is its report, or for a thread whose
+agent may make Cattains one more paragraph on when to make one (`CATTAINS_PARAGRAPH`, `cats.md`, "Made by asking"). The same bytes every
+run, so a resumed run's cached prompt is not spoiled by wording that moved (turning "Agents may make Cattains" off or on changes them
+once).
 
 ## Where a kitten works
 

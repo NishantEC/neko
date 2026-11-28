@@ -311,3 +311,21 @@ Cattains lists all three; the old thread that had mochi is in mochi's crew. A sc
 Changed to the new truth: `cats` makes and retires Cattains in Settings ▸ Cattains and the Profile, and writes RULES.md in the Files tab;
 `cat-rules-cannot-skip-checks` writes miso's CREW.md (a round's thread is in miso's crew); `no-cat` saves miso's files with
 `save_cattain_file` and checks no Cattain's block reaches a thread with no cat.
+
+## Making a Cattain by asking (S11)
+
+Headless, 1300 × 860, with `NEKO_FAKE_RECORD`. The fake CLI's `[fake:mcp]` script calls `list_cattains` and `make_cattain` through Neko's
+real MCP server, as it does the kitten tools; the record holds each call's answer (`mcp_call`, with `error`).
+
+`make-cattain`: the person asks a new thread for a Cattain for the iOS work. The note "Made a Cattain: yuzu · iOS work" (a `note`) with Open
+and the toast "Made yuzu" (a `status`) with Undo appear; the record has "3 of at most 16 Cattains are at work" and "Made a Cattain: yuzu (iOS
+work)"; exactly one RULES.md under `$data/cattains/` holds the seeded line. Open (`cattain-made-*-open`) opens yuzu's own thread on who it is
+(its name in the band, "iOS work" as the band's purpose, the intro). Settings ▸ Cattains shows "made in" on yuzu's line and "Agents may make
+Cattains".
+
+`make-cattain-undo`: the toast's Undo retires yuzu: the note reads "… · retired", the toast is gone, the store has yuzu retired
+(`/usr/bin/sqlite3`), and Settings ▸ Cattains offers Bring back.
+
+`make-cattain-limit`: thirteen `create_cat` requests (the `daemon` step) make sixteen at work. The agent's `make_cattain` is refused: the
+step reads "Could not make a Cattain · iOS work" once the fold is open, there is no note and no toast, the record has the error with "at
+most 16 Cattains at work, and 16 are", and the store still has sixteen active.

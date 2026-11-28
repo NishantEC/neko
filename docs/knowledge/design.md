@@ -275,6 +275,13 @@ Where a cat's character lives: its own thread. Everywhere else it is a small fac
 - **Settings ▸ Cattains:** each Cattain on the slab, its 40 point portrait (dimmed when retired), name, purpose, state and crew count.
 - **A crew thread's band** has a quiet "miso's crew" with its 14 point face; New thread's crew chip has the same face and an ×.
 
+- **Made by asking (S11):** no portrait anywhere: the character lives in its own thread. In the thread that asked, the note is the
+  conversation's between-turns line (xs, second ink, a hairline each side, as a kitten's wake) with Open as a small link before the right
+  hairline; it stands outside the run's fold, between the steps and the agent's words. The toast is the house toast ("Made yuzu", "A Cattain
+  for iOS work" under it, Undo, ×), above the composer. Settings' line adds "made in “…”" to the faint facts; "Agents may make Cattains" is
+  a switch with its help under New Cattain…. The refused step is an ordinary failed step whose error lists the house one per line.
+  Renders: `cattain-made`, `cattain-made-toast`, `cattain-made-thread`, `cattain-made-settings`, `cattain-made-limit`.
+
 Renders: `cattain-thread`, `cattain-thread-new`, `cattain-digest`, `cattain-files`, `cattain-files-editing`, `cattain-files-notes`,
 `cattain-profile`, `cattain-retire`, `crew-thread`, `new-thread-crew`, `sidebar-cattains-at-work`, `sidebar-cattains-quiet`,
 `settings-cats`, `cat-new` (`scripts/snap.sh`).
