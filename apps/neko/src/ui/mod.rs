@@ -8,6 +8,7 @@ pub mod alert_dialog;
 pub mod badge;
 pub mod base;
 pub mod button;
+pub mod command;
 pub mod confirmation;
 pub mod context;
 pub mod conversation;

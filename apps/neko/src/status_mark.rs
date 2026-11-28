@@ -77,6 +77,19 @@ pub fn status_mark(t: &Theme, key: &str, task: &Task, under: Color) -> El {
     }
 }
 
+/// The mark by itself, centred in a square of `size` (a palette row's lead, which is not 52 points tall): the same drawing as
+/// [`status_mark`], nothing in an idle thread's place but the room.
+pub fn bare_mark(t: &Theme, key: &str, task: &Task, under: Color, size: f32) -> El {
+    let mark = mark_of(task);
+    let slot = el().key(key.to_owned()).size(size, size).center().a11y_hidden();
+    match (mark, ink(t, mark, under)) {
+        (Mark::Working, Some(c)) => slot.child(spinner_in(t, MARK, c, "").a11y_hidden()),
+        (Mark::Waiting, Some(c)) => slot.child(crate::subagents_view::still_ring_in(MARK, c).a11y_hidden()),
+        (Mark::NeedsYou | Mark::Failed, Some(c)) => slot.child(el().size(DOT, DOT).radius(DOT / 2.0).fill(c).box_shadow(Shadow { spread: 1.0, color: under, ..Shadow::default() })),
+        _ => slot,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

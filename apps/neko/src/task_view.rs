@@ -428,6 +428,18 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
     out.into_iter().fold(turn, Message::child).build(t)
 }
 
+/// Whether a part of a finished run is in the run's closed fold: words before the run's last step are interim and fold with the steps;
+/// the words after it are the answer and stay on the page.
+pub fn in_fold(book: &Book, p: &Part) -> bool {
+    let Some(run) = &p.run else { return false };
+    if book.runs.iter().find(|r| &r.id == run).is_none_or(|r| r.status == RunStatus::Running) {
+        return false;
+    }
+    let parts: Vec<&Part> = book.parts.iter().filter(|x| x.run.as_ref() == Some(run) && !matches!(x.body, PartBody::Person { .. })).collect();
+    let tail_from = parts.iter().rposition(|p| !matches!(p.body, PartBody::Agent { .. } | PartBody::Notice { .. })).map_or(0, |i| i + 1);
+    parts.iter().position(|x| x.id == p.id).is_some_and(|i| i < tail_from)
+}
+
 /// A finished run's folded work: steps, and words that are all interim.
 fn lay_out_folded(s: &App, t: &Theme, book: &Book, r: &Run, w: &Who, work: &[&Part]) -> Vec<El> {
     let tagged = work.iter().filter_map(|p| part_el(s, t, book, r, w, p, false, false, true).map(|e| (quiet_line(p), e))).collect();

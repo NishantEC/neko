@@ -42,6 +42,8 @@ pub enum Effect {
     Copy(String),
     /// Bring the window forward (a notification or a link opened a task).
     Front,
+    /// Scroll the conversation to the element with this key (a message Search found).
+    ScrollTo(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -320,6 +322,8 @@ pub struct App {
     pub briefing_settings: Option<BriefingSettings>,
     /// The morning time being typed in Settings ▸ Briefing.
     pub briefing_time: TextEdit,
+    /// The Search palette (⌘K): its text, what the daemon found, and where to scroll once a found message's thread is open.
+    pub palette: crate::search::Palette,
 }
 
 impl Review {
@@ -560,6 +564,7 @@ impl Default for App {
             sub_asked: HashSet::new(),
             briefing_settings: None,
             briefing_time: TextEdit::default(),
+            palette: Default::default(),
         }
     }
 }
@@ -1688,7 +1693,7 @@ impl App {
         let mine = self.creating.as_ref().is_some_and(|(c, _)| *c == id);
         let asked = self.asked.remove(&id);
         let Some(reply) = self.plugin_reply(&asked, reply) else { return };
-        if self.new_thread_reply(&reply) {
+        if self.new_thread_reply(&reply) || self.take_found(id, &reply) {
             return;
         }
         // A thread started with ⌘Return: it is in the sidebar; the screen stays.

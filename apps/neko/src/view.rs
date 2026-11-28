@@ -155,6 +155,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         None => content,
     };
     dialogs(s, &t, &mut layer);
+    // Search (⌘K): over everything but the toasts.
+    crate::search_view::palette(s, &t, cx.layout_size(ROOT).map_or(800.0, |[_, h]| h), &mut layer);
     // Toasts (Settled, Archived, Unpinned, each with Undo): bottom centre, over the page, last so nothing covers them.
     crate::ui::toast::Toasts::new("toasts", &s.toasts, |s: &mut App| &mut s.toasts).position(crate::ui::toast::Position::BottomCenter).on_action(|s: &mut App, tag: &str| s.toast_action(tag)).mount(&t, &mut layer);
     crate::ui::base::overlay_root(root.child(main), layer)

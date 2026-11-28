@@ -26,6 +26,8 @@ pub mod review_view;
 pub mod rounds;
 pub mod rounds_view;
 pub mod scenes;
+pub mod search;
+pub mod search_view;
 pub mod settings_view;
 pub mod shelf;
 pub mod sidebar;
@@ -151,6 +153,17 @@ fn chord(ev: &KeyEvent, tx: &Tx, ch: char, code: rune::PhysicalKeyCode) -> bool 
 /// Keys no control took.
 pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     let m = ev.mods;
+    // Search: ⌘K opens it, and closes it again; with it open, Tab turns the text into a new thread (the field takes no Tab itself).
+    if ev.is_command('k') && !(m.shift || m.alt || m.ctrl) {
+        s.toggle_palette();
+        tx.instant();
+        return true;
+    }
+    if s.palette.open && ev.key == Key::Tab && !(m.cmd || m.shift || m.alt || m.ctrl) {
+        s.palette_new_thread();
+        tx.instant();
+        return true;
+    }
     if ev.is_command('n') && !(m.shift || m.alt || m.ctrl) {
         new_thread(s, tx);
         return true;
@@ -294,6 +307,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     let mut changed = s.drain_link();
     s.pane_sync();
+    s.palette_poll();
     for e in std::mem::take(&mut s.effects) {
         match e {
             state::Effect::Reveal(path) => {
@@ -301,6 +315,7 @@ pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             }
             state::Effect::Copy(words) => tx.copy(words),
             state::Effect::PickFolder(pick) => pick_folder(s, pick, tx),
+            state::Effect::ScrollTo(key) => tx.scroll_into_view(key),
             state::Effect::Front => {
                 if s.persist {
                     rune_notify::bring_to_front();

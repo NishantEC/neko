@@ -38,6 +38,13 @@ files = [
 ]
 
 [[item]]
+name = "command"
+version = "0.11.0"
+files = [
+  { target = "src/ui/command.rs", sha256 = "1cd7a72debe58eef3e15be4aff132ff2530ae6887812a7777b4882cb611d2b0d" },
+]
+
+[[item]]
 name = "confirmation"
 version = "0.10.0"
 files = [

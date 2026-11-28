@@ -187,11 +187,22 @@ pub const SCENES: &[Scene] = &[
     ("cat-page-plugins", |s| { plugins::cat_page_plugins(s); finish(s) }),
     ("cat-page-no-plugins", |s| { plugins::cat_page_no_plugins(s); finish(s) }),
     ("cat-page-plugins-none-for-cat", |s| { plugins::cat_page_plugins_none_for_cat(s); finish(s) }),
+    ("search-empty", |s| { search::empty(s); finish(s) }),
+    ("search-typing", |s| { search::typing(s); finish(s) }),
+    ("search-message", |s| { search::message(s); finish(s) }),
+    ("search-actions", |s| { search::actions(s); finish(s) }),
+    ("search-filter", |s| { search::filter(s); finish(s) }),
+    ("search-problem", |s| { search::problem(s); finish(s) }),
+    ("search-none", |s| { search::none(s); finish(s) }),
+    ("search-put-away", |s| { search::put_away(s); finish(s) }),
+    ("search-loading", |s| { search::loading(s); finish(s) }),
+    ("search-first-moment", |s| { search::first_moment(s); finish(s) }),
 ];
 
 mod briefing;
 mod composer;
 mod plugins;
+mod search;
 mod subagents;
 
 /// What the daemon works out about each task, worked out here for placeholder data (the app never derives it for a real one):

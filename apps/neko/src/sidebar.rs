@@ -72,9 +72,15 @@ pub fn panel(t: &Theme, inner: El) -> El {
 }
 
 
+/// Search (⌘K), beside Hide sidebar in the band.
+fn search_button(t: &Theme) -> El {
+    let b = Button::new("search-open", "Search").variant(ButtonVariant::Ghost).size(Size::Sm).icon_only(&crate::ui::icons::SEARCH).on_press(|s: &mut App| s.toggle_palette()).build(t);
+    Tooltip::new("Search").keys("⌘K").wrap(b)
+}
+
 pub fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     // The panel starts INSET down and in: its band is twice that shorter, so the lights stay on the window's centre line.
-    let band = row().key("sidebar-band").w_full().h(BAND - 2.0 * INSET).center_y().pr(INSET).window_drag().child(lights_room((lights - INSET).max(0.0))).child(row().grow(1.0).h_full()).child(toggle_button(t, true));
+    let band = row().key("sidebar-band").w_full().h(BAND - 2.0 * INSET).center_y().pr(INSET).window_drag().child(lights_room((lights - INSET).max(0.0))).child(row().grow(1.0).h_full()).child(search_button(t)).child(toggle_button(t, true));
     // New thread is where the person starts: the row is selected while its composer (Home, until it is its own page) is what shows.
     let at_home = s.open.is_none() && !s.settings_open && !s.needs_open && !s.rounds_open && !s.briefing_open && s.open_cat.is_none();
     let new = SidebarItem::new("new-thread", "New thread").icon(&icons::COMPOSE).selected(at_home).on_press(|s: &mut App| s.new_thread_here()).build(t);
