@@ -934,6 +934,24 @@ impl App {
     }
 
     /// The newest run's last words in a task, when the window has them.
+    /// A Cattain's own thread resting on its crew alone (no kittens of its own at work).
+    pub fn rests_on_crew(&self, t: &Task) -> bool {
+        t.cattain && t.status == neko_protocol::TaskStatus::Waiting && self.live_subagents(&t.id).is_empty()
+    }
+
+    /// Whether this Cattain hears its crew's turns: it is active and its own thread has run (the daemon wakes only such a one).
+    fn hears_its_crew(&self, cat: Option<&str>) -> bool {
+        let Some(c) = cat.and_then(|c| self.cat(c)).filter(|c| c.is_active()) else { return false };
+        c.thread.as_ref().and_then(|id| self.tasks.iter().find(|t| &t.id == id)).is_some_and(|t| t.status != neko_protocol::TaskStatus::New)
+    }
+
+    /// Whether the newest run of this thread was one its crew woke (a Cattain's: its news is its own, not the person's).
+    fn woken_by_crew(&self, task: &TaskId) -> bool {
+        let Some(b) = self.books.get(task) else { return false };
+        let Some(run) = b.runs.last() else { return false };
+        b.parts.iter().any(|p| p.run.as_ref() == Some(&run.id) && matches!(p.body, PartBody::CrewWake { .. }))
+    }
+
     fn last_words(&self, task: &TaskId) -> Option<String> {
         let b = self.books.get(task)?;
         let run = b.runs.last()?;
@@ -1232,7 +1250,8 @@ impl App {
 
     /// Whether the open task's agent is at work.
     pub fn open_is_working(&self) -> bool {
-        self.open_task().is_some_and(|t| t.status.is_active() || t.status == neko_protocol::TaskStatus::Waiting) || self.book().is_some_and(|b| b.running().is_some())
+        // A Cattain resting on its crew is not at work itself: its crew threads are threads of their own (nothing to stop here).
+        self.open_task().is_some_and(|t| t.status.is_active() || (t.status == neko_protocol::TaskStatus::Waiting && !self.rests_on_crew(t))) || self.book().is_some_and(|b| b.running().is_some())
     }
 
     /// The open task's composer.
@@ -1522,7 +1541,10 @@ impl App {
                     self.say_status(&task);
                 }
                 // A run finished with nothing asked: "Done" (a question or a failure to act on is an item of the list instead).
-                if task.is_thread() && task.status == neko_protocol::TaskStatus::Done && before.is_some_and(neko_protocol::TaskStatus::is_active) {
+                // Not for a crew thread whose Cattain hears it, nor for a Cattain's turn its crew woke: that news is the Cattain's, and
+                // what needs the person still reaches Needs you (docs/knowledge/cats.md, "The crew").
+                let crews = task.round.is_none() && self.hears_its_crew(task.crew_of());
+                if task.is_thread() && task.status == neko_protocol::TaskStatus::Done && before.is_some_and(neko_protocol::TaskStatus::is_active) && !crews && !self.woken_by_crew(&task.id) {
                     let words = self.last_words(&task.id);
                     let here = self.here();
                     let title = neko_protocol::title::title(&task.title);

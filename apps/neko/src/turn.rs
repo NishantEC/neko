@@ -67,6 +67,33 @@ pub fn person_from(s: &App, t: &Theme, key: &str, words_key: &str, words: &str, 
         .build(t)
 }
 
+/// Words a Cattain wrote to a thread of its crew (its brief, or what it sent with `message_crew`): the same well as the person's, led
+/// by its 14 point face and "From miso", so they are never read as the person's.
+pub fn person_from_cat(s: &App, t: &Theme, key: &str, words_key: &str, words: &str, cat: &neko_protocol::Cat) -> El {
+    let (key, words_key) = (crate::task_view::kk(key.to_owned()), crate::task_view::kk(words_key.to_owned()));
+    let (key, words_key) = (key.as_str(), words_key.as_str());
+    let said = text(words.to_owned()).key(words_key.to_owned()).font(t.ty.md).color(t.ink()).wrap().min_w(0.0).selectable(true);
+    let w = words.to_owned();
+    let press: PressTx<App> = Rc::new(move |_: &mut App, tx: &mut Tx| tx.copy(w.clone()));
+    let copy = icon_button(t, &format!("copy-{key}"), "Copy", &icons::COPY, None, false, Some(press));
+    let at = key.to_owned();
+    let head = row()
+        .key(format!("{key}-from"))
+        .gap(t.space.at(1.5))
+        .center_y()
+        .child(crate::faces::portrait(t, &format!("{key}-from-face"), &cat.face, 14.0))
+        .child(text(format!("From {}", cat.name)).font(t.ty.xs).color(t.ink_muted()))
+        .a11y_hidden();
+    Message::user(key.to_owned(), cat.name.clone())
+        .header(head)
+        .bubble(Bubble::Well)
+        .column(COLUMN)
+        .child(said)
+        .actions(copy)
+        .reveal_actions(s.reveal(key), move |s: &mut App| s.reveals.entry(at.clone()).or_default())
+        .build(t)
+}
+
 /// A neutral step mark: rune-ui's `Marks::Neutral` (a tick and a dash in the third ink, a turning ring in the second), red only for a
 /// tool that could not run. A tick and a turning ring are two points under the icon's size, so a step stays quiet.
 fn mark(t: &Theme, st: ToolState) -> El {

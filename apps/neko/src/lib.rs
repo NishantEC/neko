@@ -9,6 +9,7 @@ pub mod cattain;
 pub mod cattain_view;
 pub mod clock;
 pub mod composer;
+pub mod crew_view;
 pub mod deeplink;
 pub mod dock;
 pub mod faces;

@@ -169,7 +169,7 @@ fn row_frame(t: &Theme, key: String, title: &str, description: String, i: usize,
 
 /// A Cattain's row: its portrait in its state, its name and a line under it, selected as a raised pebble.
 #[allow(clippy::too_many_arguments)]
-fn face_row(t: &Theme, key: String, title: &str, description: String, face: &str, st: Option<TaskStatus>, meta: El, i: usize, n: usize, selected: bool) -> El {
+fn face_row(t: &Theme, key: String, title: &str, description: String, face: &str, st: Option<TaskStatus>, meta: El, i: usize, n: usize, selected: bool, waiting: usize) -> El {
     let r = row_frame(t, key.clone(), title, description, i, n, selected, 0.0);
     let words = col()
         .grow(1.0)
@@ -178,7 +178,9 @@ fn face_row(t: &Theme, key: String, title: &str, description: String, face: &str
         .child(text(title.to_owned()).font(weight(t.ty.base, if selected { t.ty.semibold } else { t.ty.medium })).color(t.ink()).truncate().min_w(0.0).a11y_hidden())
         .child(meta);
     let portrait = crate::faces::portrait_in(t, &format!("{key}-face"), face, FACE, st, under(t, selected));
-    r.child(portrait).child(words)
+    let r = r.child(portrait).child(words);
+    // What of its crew and itself waits on the person: the amber count, as on Needs you.
+    if waiting > 0 { r.child(pill(t, &format!("{key}-count"), waiting)) } else { r }
 }
 
 /// The quiet line under a row's title, its parts apart by middle dots.
@@ -326,7 +328,8 @@ fn cattains(s: &App, t: &Theme, layer: &mut Vec<El>) -> Option<El> {
         let needs: Vec<&NeedsItem> = s.visible_needs().into_iter().filter(|i| i.cat == c.id).collect();
         let (st, ink, said, line) = if let Some(first) = needs.first() {
             let line = if crew.len() >= 2 { format!("needs you · {} threads", crew.len()) } else { format!("needs you: {}", threads::need_words(first)) };
-            (TaskStatus::NeedsYou, t.c.warning.fg, line.clone(), line)
+            let said = if needs.len() == 1 { format!("{line}, 1 waiting") } else { format!("{line}, {} waiting", needs.len()) };
+            (TaskStatus::NeedsYou, t.c.warning.fg, said, line)
         } else if crew.len() >= 2 {
             let line = format!("working on {}", crew.len());
             (TaskStatus::Working, t.c.accent.fg, line.clone(), line)
@@ -343,7 +346,7 @@ fn cattains(s: &App, t: &Theme, layer: &mut Vec<El>) -> Option<El> {
         let meta = meta_line(t, vec![(line, ink, strong)]);
         // One list per Cattain: it, then (when it has several at work) its crew threads as options of the same list, in the order drawn.
         let mut group = col().key(format!("cattain-{}", c.id)).role("listbox").label(c.name.clone()).w_full().gap(t.space.at(ROW_GAP_STEPS));
-        group = group.child(face_row(t, format!("cat-{}", c.id), &c.name, said, &c.face, Some(st), meta, 0, n, open).on_press(move |s: &mut App| s.open_cattain(&id)));
+        group = group.child(face_row(t, format!("cat-{}", c.id), &c.name, said, &c.face, Some(st), meta, 0, n, open, needs.len()).on_press(move |s: &mut App| s.open_cattain(&id)));
         if crew.len() >= 2 {
             for (i, task) in crew.iter().enumerate() {
                 group = group.child(thread_row(s, t, task, i + 1, n, s.row_is_open(task), "cattain-thread", t.space.at(3.0), None, layer));

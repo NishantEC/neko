@@ -161,6 +161,26 @@ fn neko_phrase(name: &str, summary: &str, input: &str, output: Option<&str>, run
             }
         }
         "list_cattains" => if running { "Looking at the Cattains" } else { "Looked at the Cattains" }.to_owned(),
+        // A Cattain's crew (docs/knowledge/cats.md, "The crew"): the thread by its title, from the input or the answer's first quote.
+        "start_crew_thread" => match (running, output.filter(|o| !o.is_empty())) {
+            (true, _) => with("Starting a crew thread".to_owned()),
+            (false, Some(o)) if !o.starts_with('"') => with("Could not start a crew thread".to_owned()),
+            (false, _) => with("Started a crew thread".to_owned()),
+        },
+        "crew" | "message_crew" => {
+            let named = output.and_then(|o| o.strip_prefix('"')).and_then(|r| r.split_once('"')).map(|(n, _)| n.to_owned()).filter(|n| !n.is_empty());
+            // Every answer that sent the words says "your message"; a refusal does not.
+            let sent = output.is_some_and(|o| o.contains("your message"));
+            match (tool, running, named) {
+                ("crew", true, _) => "Looking at the crew".to_owned(),
+                ("crew", false, Some(n)) => format!("Read {n}"),
+                ("crew", false, None) => "Looked at the crew".to_owned(),
+                (_, true, _) => "Writing to a crew thread".to_owned(),
+                (_, false, Some(n)) if sent => format!("Wrote to {n}"),
+                (_, false, Some(n)) => format!("Could not write to {n}"),
+                (_, false, None) => "Could not write to a crew thread".to_owned(),
+            }
+        }
         "ask_parent" | "ask_person" => {
             let q = v["question"].as_str().map(|q| q.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
             let whom = if tool == "ask_parent" { "the agent" } else { "you" };
@@ -296,7 +316,7 @@ fn blocks<'a>(book: &'a Book) -> Vec<Block<'a>> {
             out.extend(held.drain(..).map(Block::Person));
         }
         // The rules line and the note that a report woke the thread stand before their run, outside its fold.
-        if let PartBody::RulesChanged { .. } | PartBody::Wake { .. } = p.body {
+        if let PartBody::RulesChanged { .. } | PartBody::Wake { .. } | PartBody::CrewWake { .. } = p.body {
             out.push(Block::Loose(p));
             continue;
         }
@@ -465,7 +485,7 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
     let key = format!("worked-{}", r.id.0);
     let offer = offer_of(book, r);
     // The newest run of a thread that rests on its subagents says so on its own line, never "done": the thread is not.
-    let resting = book.runs.last().is_some_and(|x| x.id == r.id).then(|| crate::subagents_view::waiting_words(s, task)).flatten();
+    let resting = book.runs.last().is_some_and(|x| x.id == r.id).then(|| crate::crew_view::run_words(s, task).or_else(|| crate::subagents_view::waiting_words(s, task))).flatten();
     let mut out = Vec::new();
     let lead = crate::ui::agent::hollow_dot(t, t.control.icon);
     if work.is_empty() {
@@ -603,7 +623,11 @@ fn items_of(s: &App, t: &Theme, task: &Task, book: &Book) -> Vec<El> {
     let mut items = match s.cattain_of(&task.id) {
         Some(c) if task.words.is_empty() && book.runs.is_empty() && book.parts.is_empty() => vec![crate::cattain_view::intro(t, c)],
         Some(_) if task.words.is_empty() => Vec::new(),
-        _ => vec![turn::person(s, t, "task-message", "task-words", &task.words)],
+        // A crew thread its Cattain started opens on the Cattain's brief, led by its face: never read as the person's words.
+        _ => match crate::crew_view::not_the_persons(s, task, &task.words, true) {
+            Some((c, said)) => vec![turn::person_from_cat(s, t, "task-message", "task-words", said, c)],
+            None => vec![turn::person(s, t, "task-message", "task-words", &task.words)],
+        },
     };
     if !task.cattain && book.loaded && book.runs.is_empty() && book.parts.is_empty() && task.status == neko_protocol::TaskStatus::New && task.subagent.is_none() {
         items.push(status_line(s, t, task));
@@ -612,13 +636,19 @@ fn items_of(s: &App, t: &Theme, task: &Task, book: &Book) -> Vec<El> {
         match b {
             // In a kitten's conversation every message after its brief is its parent's (an answer, or more to do).
             Block::Person(p) if task.subagent.is_some() => items.push(turn::person_from(s, t, &format!("part-{}", p.seq), &format!("part-{}-words", p.seq), p.body.text(), &crate::subagents::asked_whom(s.parent_of(task)))),
-            Block::Person(p) => items.push(turn::person(s, t, &format!("part-{}", p.seq), &format!("part-{}-words", p.seq), p.body.text())),
-            Block::Loose(p) => items.extend(notice(t, p).or_else(|| rules_changed(t, p)).or_else(|| crate::subagents_view::wake_note(s, t, p)).or_else(|| crate::subagents_view::card_stack(s, t, &[p]))),
+            // Words its Cattain sent it (`message_crew`) are the Cattain's, led by its face.
+            Block::Person(p) => items.push(match crate::crew_view::not_the_persons(s, task, p.body.text(), false) {
+                Some((c, said)) => turn::person_from_cat(s, t, &format!("part-{}", p.seq), &format!("part-{}-words", p.seq), said, c),
+                None => turn::person(s, t, &format!("part-{}", p.seq), &format!("part-{}-words", p.seq), p.body.text()),
+            }),
+            Block::Loose(p) => items.extend(
+                notice(t, p).or_else(|| rules_changed(t, p)).or_else(|| crate::subagents_view::wake_note(s, t, p)).or_else(|| crate::crew_view::wake_note(s, t, p)).or_else(|| crate::subagents_view::card_stack(s, t, &[p])),
+            ),
             Block::Run(r, parts) => items.push(run_block(s, t, book, r, &parts, task)),
         }
     }
-    // A thread resting on its subagents ends on what it waits for; one that asked, on its question.
-    items.extend(crate::subagents_view::waiting_line(s, t, task));
+    // A thread resting on its subagents ends on what it waits for (a Cattain, on its crew); one that asked, on its question.
+    items.extend(crate::crew_view::waiting_line(s, t, task).or_else(|| crate::subagents_view::waiting_line(s, t, task)));
     items.extend(crate::subagents_view::question_block(s, t, task, book.runs.last()));
     items
 }
@@ -691,7 +721,7 @@ pub fn task_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     }
     // Where the task came from stays in sight above the conversation (which scrolls to its newest words), not in it.
     // It has the page's own ground and a hairline under it, and is drawn above the conversation, so nothing shows through it.
-    let from = from_round(s, t, task).map(|line| {
+    let from = from_round(s, t, task).or_else(|| crate::crew_view::started_by(s, t, task)).map(|line| {
         row().key("task-round-strip").w_full().justify_center().px(inset).pt(t.space.at(2.0)).pb(t.space.at(2.0)).fill(t.c.page.bg).border_sides([0.0, 0.0, 0.0, 1.0], t.c.line).paint_order(1).child(col().w_full().max_w(COLUMN).child(line))
     });
     let mut page = col().key("task").w_full().grow(1.0).min_h(0.0).items_center();

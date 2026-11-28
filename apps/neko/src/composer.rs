@@ -240,6 +240,9 @@ pub fn placeholder(s: &App, task: &Task, asking: bool) -> String {
     };
     if asking {
         "Waiting for your answer above. Escape denies it.".to_owned()
+    } else if s.rests_on_crew(task) {
+        let name = s.cattain_of(&task.id).map_or_else(|| "The Cattain".to_owned(), |c| c.name.clone());
+        format!("{name} is waiting on its crew. Message {name} to wake it now")
     } else if task.status == TaskStatus::Waiting {
         "The agent is waiting on its kittens. Say something to wake it, or press Escape to stop.".to_owned()
     } else if s.open_is_running() {
