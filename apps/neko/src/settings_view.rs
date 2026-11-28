@@ -208,7 +208,7 @@ fn cats_page(s: &App, t: &Theme) -> El {
     let active = s.active_cats().len();
     let mut part = col().key("settings-cats").w_full().gap(t.space.at(3.0)).child(text("Cattains").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())).child(
         text(format!(
-            "Cats with a thread of their own to talk to, their own files (RULES.md, CREW.md, NOTES.md, DIGEST.md) and a crew of threads. A retired Cattain keeps its threads readable and takes no new crew until you bring it back. {active} of 16 at work."
+            "Cats with a thread of their own to talk to, their own files (RULES.md, CREW.md, NOTES.md, DIGEST.md) and a crew of threads. A retired Cattain keeps its threads readable and takes no new crew until you bring it back. {active} of at most 16 are active."
         ))
         .key("settings-cats-about")
         .font(t.ty.base)

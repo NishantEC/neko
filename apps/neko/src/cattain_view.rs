@@ -49,7 +49,7 @@ pub fn band_lead(s: &App, t: &Theme, c: &Cat, min_title: f32) -> El {
         .gap(t.space.at(2.5))
         .center_y()
         .child(face)
-        .child(text(c.name.clone()).key("band-title").role("heading").level(1).font(weight(t.ty.lg, t.ty.semibold)).color(t.ink()).truncate().min_w(min_title.min(80.0)));
+        .child(text(c.name.clone()).key("band-title").role("heading").level(1).font(weight(t.ty.lg, t.ty.semibold)).color(t.ink()).truncate().min_w(min_title.min(48.0)).max_w(260.0));
     let line = match (&c.purpose, c.is_active()) {
         (_, false) => Some("Retired: takes no new crew".to_owned()),
         (Some(p), true) if !p.is_empty() => Some(p.clone()),
@@ -73,14 +73,11 @@ pub fn turn_header(t: &Theme, key: &str, c: &Cat) -> El {
 
 /// A Cattain's thread before anyone has written in it: who it is, and where its files are.
 pub fn intro(t: &Theme, c: &Cat) -> El {
-    let mut who = col().items_center().gap(t.space.at(1.5)).child(crate::faces::portrait(t, "cattain-intro-face", &c.face, 72.0)).child(
+    let who = col().items_center().gap(t.space.at(1.5)).child(crate::faces::portrait(t, "cattain-intro-face", &c.face, 72.0)).child(
         text(c.name.clone()).key("cattain-intro-name").role("heading").level(2).font(weight(t.ty.xl, t.ty.semibold)).color(t.ink()),
     );
-    if let Some(p) = c.purpose.as_ref().filter(|p| !p.is_empty()) {
-        who = who.child(text(p.clone()).key("cattain-intro-purpose").font(t.ty.base).color(t.ink_muted()).wrap().max_w(440.0).align(rune::Align::Center));
-    }
     let words = format!("Write to {} here. It reads its rules, notes and digest at the start of every turn, and keeps them in its own folder.", c.name);
-    who = who.child(text(words).key("cattain-intro-line").font(t.ty.sm).color(t.ink_faint()).wrap().max_w(440.0).align(rune::Align::Center).pt(t.space.at(2.0)));
+    let who = who.child(text(words).key("cattain-intro-line").font(t.ty.sm).color(t.ink_faint()).wrap().max_w(440.0).align(rune::Align::Center).pt(t.space.at(2.0)));
     row().key("cattain-intro").role("note").label(format!("{}'s thread", c.name)).w_full().justify_center().pt(t.space.at(12.0)).pb(t.space.at(6.0)).child(who)
 }
 
@@ -158,7 +155,7 @@ fn crew(s: &App, t: &Theme, c: &Cat) -> El {
         let key = format!("cattain-crew-done-{}", c.id);
         let shown = s.is_open(&key);
         let k = key.clone();
-        let fold = crate::ui::agent::FoldLine::<App>::new(key.clone(), format!("Done ({})", done.len()), shown).indent(false).on_toggle(move |s: &mut App| s.flip(&k));
+        let fold = crate::ui::agent::FoldLine::<App>::new(key.clone(), format!("Done ({})", done.len()), shown).lead(el().size(16.0, 16.0)).indent(false).on_toggle(move |s: &mut App| s.flip(&k));
         let inner = if shown { done.iter().map(|x| crew_row(s, t, x)).collect() } else { Vec::new() };
         rows.push(fold.build(t, inner));
     }
@@ -169,7 +166,7 @@ fn crew(s: &App, t: &Theme, c: &Cat) -> El {
         let id = c.id.clone();
         rows.push(row().pt(t.space.at(1.0)).child(Button::<App>::new("cattain-new-crew", format!("New thread in {}'s crew", c.name)).variant(ButtonVariant::Secondary).size(Size::Sm).icon(&icons::PLUS).on_press(move |s: &mut App| s.new_crew_thread(&id)).build(t)));
     }
-    section(t, "cattain-crew", "Crew", Some(mine.len()), rows)
+    section(t, "cattain-crew", "Crew", (!mine.is_empty()).then_some(mine.len()), rows)
 }
 
 /// When a file last changed, in a few words ("2m", "never").
@@ -315,12 +312,7 @@ pub fn files(s: &App, t: &Theme, c: &Cat) -> El {
         }
         list = list.child(item.build(t));
     }
-    let folder = s.cattains.files.get(&(c.id.clone(), chosen.clone())).map(|f| f.path.rsplit_once('/').map_or_else(|| f.path.clone(), |(d, _)| d.to_owned()));
-    let mut head = row().w_full().center_y().child(crate::pane_view::heading(t, "cattain-files-heading", "Files", None));
-    if let Some(dir) = folder {
-        head = head.child(el().grow(1.0)).child(reveal_button(t, "cattain-folder-reveal", dir, &format!("Reveal {}'s folder in Finder", c.name)));
-    }
-    let page = col().key("cattain-files").w_full().gap(t.space.at(4.0)).child(col().w_full().gap(t.space.at(1.5)).child(head).child(list)).child(file_body(s, t, c, &chosen));
+    let page = col().key("cattain-files").w_full().gap(t.space.at(5.0)).child(list).child(file_body(s, t, c, &chosen));
     scroll(t, "cattain-files-scroll", page)
 }
 
@@ -329,6 +321,14 @@ fn file_body(s: &App, t: &Theme, c: &Cat, name: &str) -> El {
     let key = (c.id.clone(), name.to_owned());
     let Some(f) = s.cattains.files.get(&key) else { return text(format!("Reading {name}…")).key("cattain-file-loading").font(t.ty.sm).color(t.ink_faint()) };
     let mut body = col().key("cattain-file-body").role("group").label(name.to_owned()).w_full().gap(t.space.at(2.0));
+    body = body.child(
+        row()
+            .w_full()
+            .center_y()
+            .child(text(name.to_owned()).key("cattain-file-name").role("heading").level(3).font(mono(t, weight(t.ty.sm, t.ty.semibold))).color(t.ink()))
+            .child(el().grow(1.0))
+            .child(reveal_button(t, "cattain-file-reveal", f.path.clone(), &format!("Reveal {name} in Finder"))),
+    );
     let about = match name {
         cats::RULES => format!("{} reads these on every run of its own thread, ahead of your words. Words for the agent only: they never change what Neko asks before a step.", c.name),
         cats::CREW => format!("Every thread in {}'s crew reads this on every run, exactly as it is here.", c.name),
@@ -391,11 +391,11 @@ fn picker(s: &App, t: &Theme, layer: &mut Vec<El>, key: &str, name: &str, shown:
 /// The faces as a row of portraits to choose from: one Tab stop, the arrows move, Return or Space picks; its own is ringed.
 fn face_picker(t: &Theme, c: &Cat) -> El {
     let n = crate::faces::COATS.len();
-    let mut swatches = row().key("cat-face").role("radiogroup").label("Face").gap(t.space.at(1.5)).flex_wrap().focus_group();
+    let mut swatches = row().key("cat-face").role("radiogroup").label("Face").gap(t.space.at(1.0)).flex_wrap().focus_group();
     for (i, coat) in crate::faces::COATS.iter().enumerate() {
         let on = c.face == coat.id;
         let (cat, face) = (c.id.clone(), coat.id.to_owned());
-        let size = 32.0;
+        let size = 30.0;
         let ring = 2.0;
         let mut sw = el()
             .key(format!("cat-face-{}", coat.id))
@@ -492,7 +492,7 @@ pub fn profile(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
     let model = picker(s, t, layer, "cat-model-menu", "Model", model_shown, menu);
     // Access.
     let setting = s.runtimes.as_ref().map(|(_, x)| x.permission_mode).unwrap_or_default();
-    let access_shown = c.access.map_or_else(|| format!("As in Settings ({})", access_words(setting)), |m| access_words(m).to_owned());
+    let access_shown = c.access.map_or_else(|| "As in Settings".to_owned(), |m| access_words(m).to_owned());
     let mut menu = DropdownMenu::new("cat-access-menu").min_width(260.0).label("Access");
     {
         let a = id.clone();
@@ -528,12 +528,12 @@ pub fn profile(s: &App, t: &Theme, c: &Cat, layer: &mut Vec<El>) -> El {
         .child(purpose_part)
         .child(facts)
         .child(crate::plugins_view::cat_section(s, t, c))
-        .child(row().w_full().pt(t.space.at(2.0)).border_sides([0.0, 1.0, 0.0, 0.0], t.c.line).child(row().pt(t.space.at(4.0)).child(end)));
+        .child(row().w_full().pt(t.space.at(2.0)).child(end));
     scroll(t, "cat-profile-scroll", page)
 }
 
 fn label(t: &Theme, words: &str) -> El {
-    text(words.to_owned()).role("heading").level(3).font(weight(t.ty.sm, t.ty.semibold)).color(t.ink_muted())
+    text(words.to_owned()).role("heading").level(2).font(weight(t.ty.base, t.ty.medium)).color(t.ink())
 }
 
 fn fact_row(t: &Theme, key: &str, words: &str, value: El) -> El {

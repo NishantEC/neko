@@ -224,7 +224,7 @@ pub fn sidebar_at_work(s: &mut App) {
 pub fn sidebar_quiet(s: &mut App) {
     mochi(s);
     s.needs.clear();
-    for t in s.tasks.iter_mut().filter(|t| t.cat.as_deref() == Some("cat_mochi")) {
+    for t in s.tasks.iter_mut().filter(|t| t.cat.is_some()) {
         t.status = TaskStatus::Done;
     }
 }

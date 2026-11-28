@@ -577,7 +577,8 @@ pub fn kk(key: String) -> String {
 fn items_of(s: &App, t: &Theme, task: &Task, book: &Book) -> Vec<El> {
     // The task's own words first (their text keyed "task-words", as in S0). A Cattain's own thread has none: it opens on who it is.
     let mut items = match s.cattain_of(&task.id) {
-        Some(c) if task.words.is_empty() => vec![crate::cattain_view::intro(t, c)],
+        Some(c) if task.words.is_empty() && book.runs.is_empty() && book.parts.is_empty() => vec![crate::cattain_view::intro(t, c)],
+        Some(_) if task.words.is_empty() => Vec::new(),
         _ => vec![turn::person(s, t, "task-message", "task-words", &task.words)],
     };
     if !task.cattain && book.loaded && book.runs.is_empty() && book.parts.is_empty() && task.status == neko_protocol::TaskStatus::New && task.subagent.is_none() {
