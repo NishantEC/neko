@@ -80,6 +80,10 @@ refuses and writes nothing.
 Housekeeping: `git for-each-ref --format=%(refname) refs/neko/checkpoints/<task>/`, `git update-ref -d <ref>` for each, and in a
 shadow repository only, `git gc --quiet --prune=now`.
 
+## Kittens
+
+A kitten's run has checkpoints like any run, kept under its own task id. A kitten in a copy of its own (`subagents.md`) is checkpointed in its own worktree. A kitten in the shared folder is checkpointed in the folder it shares, the nearest task above it that has a folder of its own (`subagents::folder_task`), and its refs are kept in the same repository or the same shadow repository. A copy's first snapshot (`workplace::copy_base`) is the same `git add -A` into a temporary index and `write-tree` as a checkpoint, and keeps no ref of its own: the new branch holds it. A merge the thread makes belongs to the thread's run: its start and end checkpoints see the merged files, and Undo of that run writes the thread's working files only (the kittens' branches and copies stay).
+
 ## What is never touched
 
 The person's index (and the worktree's), HEAD, every branch, the stash, remotes, config, hooks and their working files. Neko

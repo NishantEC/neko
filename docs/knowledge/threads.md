@@ -48,7 +48,7 @@ Migration 9 reads every existing task as read as of its last activity and fills 
 - **Line 1:** the title (semibold while unread), and at the right the age (`now`, `2m`, `3h`, `Mon`, `Oct 3`) or **Working** in
   teal, only while the mark is the working ring: a thread that needs the person shows its age beside the amber dot, never "Working". Under the pointer the age gives way to a menu: Mark as unread (or read), Remove thread….
 - **Line 2**, the first that applies: `Needs you: <what>` in amber (a subagent's request reads `Needs you: Run a command · Kitten 1`);
-  `Failed: <why>` in red; what it waits on ("Waiting on Kitten 1", "2 kittens working"; `App::thread_line`); the agent's latest line. A thread that
+  `Failed: <why>` in red; what it waits on ("Waiting on Kitten 1", "2 kittens working", "1 kitten working, 1 waiting its turn", "2 draft kittens"; `App::thread_line`); the agent's latest line. A thread that
   has said nothing yet says what it is ("Not started", "Working…").
 - **Order inside a group:** threads that need the person first, then by last activity, newest first. A thread that works keeps the
   place it had when it began (`App::sort_hold`), so a row does not move under the pointer as its words stream; it moves when the work

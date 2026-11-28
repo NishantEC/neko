@@ -47,6 +47,8 @@ Measured (`crates/neko-daemon/tests/workspaces.rs`): after 20 finished tasks (10
 folders, 0 scratch folders, 0 `neko/` branches, and git lists only the person's own checkout. A task that edited files keeps its
 worktree.
 
+A kitten in a copy of its own (`subagents.md`) has a worktree of its own on `neko/<thread>-<number>`, and the same rule: after its run it goes when its branch has no commits and nothing is uncommitted; otherwise it is kept. Removing the thread removes each copy that holds nothing unsaved; one with uncommitted work stops the removal ("Kitten 1 has work that is not saved…") and nothing is deleted; a branch with commits stays in the repository.
+
 **Remove task** (the task's menu in the band) asks first, and is off while the agent works. It deletes the task's record. Its
 worktree goes when nothing in it is uncommitted; a branch with commits keeps them in the repository. Uncommitted changes, or files
 in a scratch folder, refuse the removal in plain words with Reveal in Finder: nothing is deleted.

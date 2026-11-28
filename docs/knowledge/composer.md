@@ -78,7 +78,7 @@ either way, and the row goes when the run ends.
 
 One thin line (32 pt) above the composer, shown only while something besides the run itself goes: a kitten of this thread that works
 or waits its turn, or a command that has run for more than five seconds (a Bash step of the running run). "2 kittens working · 1
-command running", with a caret; it opens to one line each, with × on the agent (the same as Stop) and on each kitten (`stop_task` on
+command running" ("1 kitten working, 1 waiting its turn": a queued kitten is not called working), with a caret; it opens to one line each, with × on the agent (the same as Stop) and on each kitten (`stop_task` on
 the kitten: it stops with its own kittens). A command has no × of its own: Neko cannot stop one step, only the run. Pressing a kitten
 opens its tab in the right pane. The pane's Overview keeps the detail (titles, states, the tree); the bar is the quick way to see and
 to stop, and is not shown for a run that only works, since the conversation already says so.

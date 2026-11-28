@@ -1,7 +1,7 @@
 # Subagents (2026-11-27)
 
 A thread can split its work into numbered subagents, end its turn and rest. Each subagent's report wakes the thread with `--resume`. This
-page is how that works and why. Protocol 13, store 10. The app's side (the card, the note, the waiting line) is in `app-shell.md` and
+page is how that works and why. Protocol 19, store 15. The app's side (the card, the note, the waiting line) is in `app-shell.md` and
 `design.md`; the scenarios are in `qa.md`.
 
 **Kittens.** Neko's word for subagents, in everything the person reads: cats are the Cattains, and the helpers they and the threads
@@ -15,18 +15,20 @@ kitten where it speaks of what the person sees.
 
 - **A subagent is a task** with a parent, a number and a root (`Task.subagent`: `{parent, number, root}`). The number is `1`, `2`, and for
   Subagent 1's own subagents `1.1`, `1.2` (the person reads "Kitten 1", "Kitten 1.2"): a dot for each level down. It has no name and no face. It belongs to the thread that
-  started it and is **not a thread**: the sidebar, New thread, the Briefing and the notifications never list it. Its folder is its root's
-  folder (shared; a copy of its own is later).
-- **Depth** is at most 3 levels; at the last level the agent is not offered the tool to start more. At most 24 subagents of one thread
-  may be unfinished at once, as a guard against a loop.
-- **Limits.** 3 subagents of a thread run at once, the rest are queued (status `new`). 4 runs at once across the daemon (the person's
+  started it and is **not a thread**: the sidebar, New thread, the Briefing and the notifications never list it. Where it works is
+  `placement`: its parent's folder (`shared`) or a copy of its own (`own_copy`), see "Where a kitten works".
+- **Depth** is at most 3 levels (Kitten 1.1.1 is the last); at the last level the agent is not offered `start_subagent` or `start_drafts`
+  (`tools(depth)`). At most 24 subagents of one thread may be unfinished at once, drafts included, as a guard against a loop.
+- **Limits.** 3 subagents of a thread run at once, the rest are queued (status `new`). 8 runs at once across the daemon (the person's
   own threads count; only what Neko starts by itself waits). Past those, subagents start in the order they were made as room appears.
+  When the Mac is warm, new ones wait too: see "Limits and heat".
   While the account's limit is reached (a `rate_limit_event` whose status is not `allowed` or `allowed_warning`), nothing is started or
   woken by Neko until it resets (`resetsAt`, else five minutes).
 - **Safety is unchanged.** A subagent has the thread's permission mode (read from Settings for every run, so the same). Its "Always
   allow" answers start empty: they belong to a task. Its requests go to Needs you, labelled "Kitten 1 asks" under its thread's title (the thread's row turns amber too: its `needs_you` flag is on while one of its
   subagents has a request waiting, and screens are told when that changes).
   Its run is guarded like any (`run-guard.md`). Stop on a thread stops everything under it.
+- **A draft** (`SubagentOf.draft`) is status `new` that nothing starts and nothing waits on: a thread with only drafts is not Waiting.
 - **A subagent is read, not talked to**, for now: `follow_up` and `remove_task` on one are refused with words. Removing the thread
   removes its subagents (refused while one works).
 
@@ -50,8 +52,9 @@ hook helper (`permissions.md`): a thin process that keeps nothing.
 
    | Tool | Does | Returns |
    | --- | --- | --- |
-   | `start_subagent {title, prompt, placement?}` | makes the subagent, puts a card in the thread's transcript, starts it when there is room | "Subagent 1 ("Check links") is started. It is working now. Neko wakes you with its report when it ends. Do not poll or wait. If you have nothing else to do, end your turn now." (queued: "…queued behind other work…"). An error in words for a depth, ceiling, empty prompt, `own_copy` (not yet) or a thread that was stopped |
-   | `subagents {id?}` | lists the thread's own subagents: number, title, state, last line; with `id` that report in full | the list, ending "Do not call this to wait: Neko wakes you with each report." |
+   | `start_subagent {title, prompt, placement?, after?, draft?}` | makes the subagent, puts a card in the thread's transcript, starts it when there is room | "Subagent 1 ("Check links") is started. It is working now. Neko wakes you with its report when it ends. Do not poll or wait. If you have nothing else to do, end your turn now." (queued: "…queued behind other work…"; stacked: "…starts when Subagent 1 is done, from its branch."; an own copy adds "It works in a copy of its own on the branch neko/4f2a-1."; a draft: "…saved as a draft…"). An error in words for a depth, ceiling, empty prompt, `own_copy` outside a git project with a commit, a placement that is neither, an `after` that names no sibling or a discarded one, or a thread that was stopped |
+   | `start_drafts {}` | starts the drafts this run's task wrote | "Started Subagent 1, Subagent 2. …" |
+   | `subagents {id?}` | lists the thread's own subagents: number, title, state, where it works (and after whom), last line; with `id` that report in full | the list, ending "Do not call this to wait: Neko wakes you with each report." |
    | `stop_subagent {id}` | stops that subagent and any it started | "Subagent 1 is stopped. You are woken with its report." |
 
    The server's `initialize.instructions` carry the same guidance but did not visibly reach the model in the real probe, so the
@@ -67,6 +70,26 @@ after starting them, do not poll, Neko wakes you with a `<neko-wake>` message; y
 your folder, so give two different files or start the second after the first reports; your own Agent tool is still fine for a quick
 read-only search), then for a subagent three lines saying whose it is and that its final message is its report. The same bytes every
 run, so a resumed run's cached prompt is not spoiled by wording that moved.
+
+## Where a kitten works
+
+A kitten **shares** its parent's folder (the default; for reading, or for work on different files) or has **a copy of its own** (`placement: own_copy`: for anything that writes).
+
+- **The copy is a git worktree** on `neko/<the thread's short id>-<number>` (dots as dashes: Kitten 1.2 of thread `…4f2a` is `neko/4f2a-1-2`; the name is on its card from the start). It is made when the kitten first runs, in Neko's own worktrees folder, from the
+  parent's folder **as it is now, uncommitted and new files included** (`workplace::copy_base`): when nothing there is uncommitted the base is the folder's HEAD, otherwise a snapshot commit made the way a checkpoint is (a temporary index; `undo.md`), so the person's repository, index and
+  branches are not touched. Then `git worktree add -b <branch> <folder> <base>`. A project that is not a git repository with a commit refuses `own_copy` in words, and the agent uses `shared`. A repository mid-merge or too big for a checkpoint refuses it too, as a failed start.
+- **`after`** stacks: the kitten stays queued ("After Kitten 1") until the sibling it names ends `done`, then its copy is made from **that kitten's copy** (uncommitted work included; if that copy was tidied away because it changed nothing, from the parent's folder). Its branch then holds the earlier branch's commits, so merging the last of a stack merges the stack. A predecessor that failed, was stopped, discarded, interrupted or ended with a question would leave the stacked kitten queued for ever, so it is **stopped without ever running** and its report says why ("Subagent 1, which it follows, failed, so Subagent 2 was not started…"), which wakes the thread.
+- **Merging is the agent's.** It is told to commit its own changes and merge the branch itself and say so; a merge is then the thread's own run's change (its checkpoints see the files), reviewable and, when it did not commit, undoable like any run. Undoing it writes the thread's working files only, so the kittens' branches and copies are never touched (`subagents-own-copy` checks this). A kitten's report names its branch, and says when the kitten left changes in its copy that are not committed, with where the copy is, because a branch holds only what was committed.
+- **Each kitten's run has its own checkpoints** (`undo.md`): a copy's are of its own worktree; a shared kitten's are of its parent's folder, found through `subagents::folder_task` (before this, a shared kitten in a repository could not be checkpointed). A kitten's changes are not offered Undo of their own.
+- **Keeping and tidying.** A copy that changed nothing is tidied after the kitten's run like a thread's own worktree (`workspaces.md`); one with commits or uncommitted work is kept. Removing the thread removes each copy that holds no unsaved work (its branch keeps its commits); a copy with uncommitted work stops the removal in words, and nothing is deleted.
+
+## Drafts
+
+`start_subagent` with `draft: true` writes the kitten down: a card with its prompt and **Start**, **Discard**. A draft is not started by itself and not waited on. The person may change the prompt in the card (saved to the daemon about a second after the last change, and with Start: `edit_draft`), start it (`start_draft`; the thread, if it rests with nothing else going, becomes Waiting on it) or throw it away (`discard_draft`: stopped, `discarded`, no report, nothing woken). The agent starts its own drafts with `start_drafts`. Stopping a thread discards its drafts. **"Ask before a thread's first kitten"** (Settings, off) makes the thread's first `start_subagent` a draft whatever the agent asked for, and tells the agent so ("saved as a draft: the person asked to approve…"); later ones go ahead.
+
+## Limits and heat
+
+3 kittens of a thread run at once and 8 runs across Neko (`NEKO_MAX_RUNS` changes it for tests), the rest queued in the order made. Heat (`crates/neko-daemon/src/heat.rs`): `Warm` (macOS memory pressure of 2 or more, or a CPU speed limit under 100 from `pmset -g therm`) queues new kittens; `Wait` (pressure 4, or a limit under 50) also holds wakes. Only what Neko starts by itself is held, never a run the person starts. It reads at most every 15 seconds and only when a kitten could otherwise start, and while something is held back the hub looks again after 30 seconds (the only timer it sets for that). A debug daemon is told the level by `NEKO_HEAT` or a file `NEKO_HEAT_FILE` (and `NEKO_HEAT_RECHECK_MS`); a release daemon ignores them. Tests and the rig start their daemons with `NEKO_HEAT=ok`. The app does not say that a kitten waits because the Mac is warm; its card says Queued.
 
 ## Rest and wake
 
@@ -126,16 +149,17 @@ copies do. It also keeps every run quick, which matters when one thread starts s
   missing), a report's words, Needs you for a subagent's request, a plugin's name, the migration from store 8.
 - `crates/neko-core/src/subagents.rs`, `crates/neko-daemon/src/mcp_server.rs`, `http.rs`: the wake message, the tools by depth, the
   server's JSON-RPC, the `/v1/mcp` head.
+- `crates/neko-daemon/tests/kittens.rs` (real temporary repositories): a copy's branch and files, the thread's uncommitted file in the copy, the person's checkout untouched, the copy's own checkpoints, a shared kitten's checkpoints of its parent's folder, `own_copy` refused outside git and a bad placement refused, removal of a clean copy and refusal for one with unsaved work, a squash merge as the thread's change and an undo that leaves the branch, a stack that starts after and from the first's branch, a stack whose predecessor failed, a missing predecessor, drafts (edit, discard, start, the edited text reaching the fake), `start_drafts`, ask-first, Stop discarding drafts, three levels with the tool missing at the last, a warm Mac queueing and starting when it cools (the person's own run never held), five asked and three working.
 - `crates/neko-daemon/tests/subagents.rs`, with the real daemon, the fake CLI and the real MCP hop: two subagents, rest with no process,
   one wake for both with the right `--resume`; a report steered into a running thread; Stop leaves no process; a restart interrupts
-  and still wakes; 30 calls of `subagents` each under a second; 3 per thread; 4 across the daemon; a subagent's request in Needs you and
+  and still wakes; 30 calls of `subagents` each under a second; 3 per thread; 8 across the daemon (three threads of three: the ninth waits); a subagent's request in Needs you and
   denied; a subagent is read-only and goes with its thread; a reached limit holds the wake; the person's own MCP servers; a wrong secret.
-- The rig: `subagents-wake`, `subagents-stop`, `subagents-restart`, `subagents-poll` (`qa.md`).
+- The rig: `subagents-wake`, `subagents-stop`, `subagents-restart`, `subagents-poll`, `subagents-own-copy`, `subagents-stacked`, `subagents-drafts`, `subagents-limits`, `subagents-depth` (`qa.md`).
 
 ## What is not here yet
 
-- `own_copy` placement (a worktree of its own), `after` (stacking), drafts, `message_subagent`, a subagent's question going up,
-  steering, `wake_me` and watches. Each is a later slice.
+- `message_subagent`, a subagent's question going up, `wake_me` and watches. Each is a later slice.
+- The app does not say that a kitten waits for a cool Mac; a stack whose copy cannot be made says so only as a failed kitten.
 - Keep-alive wakes.
 - The Waiting thread's status in the Briefing's wording and a subagent in Review: a thread's change line covers its own run only.
 
@@ -148,6 +172,10 @@ copies do. It also keeps every run quick, which matters when one thread starts s
 4. That `--resume` plus the unchanged `--append-system-prompt` works for a wake and the model reads the `<neko-wake>` message as a report.
 5. That `mcp__neko__*` calls are not asked about by Claude Code in the person's default mode (Claude Code may ask for an MCP tool; if it
    does, it arrives as `can_use_tool` and Neko's policy allows it at once, never reaching the person).
+
+## Neko's own tool steps
+
+The conversation reads Neko's own tools as a person would: "Started Kitten 1 · Check links" (the number from the tool's answer), "Saved Kitten 3 as a draft · Later", "Started the drafts", "Asked about kittens", "Read Kitten 2's report", "Stopped Kitten 2", "Could not start a kitten · Write tests" (`task_view::step_phrase`; a plugin's tool still reads "acme-docs · search").
 
 ## In the right pane (S3)
 
