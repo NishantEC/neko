@@ -175,7 +175,9 @@ fn a_kittens_question_wakes_its_parent_which_answers_and_the_kitten_goes_on() {
     assert_eq!(kt.runs.len(), 2, "asked, then answered: two runs");
     assert_eq!(kt.runs[0].ask.as_ref().map(|a| (a.to, a.text.as_str())), Some((AskTo::Parent, Q)), "the first run carries its question");
     assert!(kt.runs[1].session.is_some() && kt.runs[1].session == kt.runs[0].session, "the same conversation, resumed");
-    assert!(persons(&kt).iter().any(|p| p == "Use SQLite: it is what the tests run on."), "{:?}", persons(&kt));
+    assert_eq!(persons(&kt).iter().filter(|p| *p == "Use SQLite: it is what the tests run on.").count(), 1, "{:?}", persons(&kt));
+    let lines: Vec<String> = std::fs::read_to_string(&r.record).unwrap_or_default().lines().filter(|l| l.contains("Use SQLite: it is what the tests run on.")).map(|l| l.chars().take(400).collect()).collect();
+    assert_eq!(r.messages().iter().filter(|m| *m == "Use SQLite: it is what the tests run on.").count(), 1, "the kitten read the answer once: {lines:#?}");
     assert!(r.messages().iter().any(|m| m.contains("kind=\"subagent\" id=\"1\" status=\"done\"") && m.contains("You said: Use SQLite")), "its second report wakes the thread");
     assert!(questions(&mut c).is_empty());
 }

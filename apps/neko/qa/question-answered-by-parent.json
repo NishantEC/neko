@@ -1,0 +1,111 @@
+{
+  "name": "question-answered-by-parent",
+  "title": "A kitten asks the agent, the agent answers, and the kitten goes on; nothing reaches Needs you",
+  "about": "The thread starts Kitten 1, which asks its parent a question with ask_parent and ends its turn. Its card says \"Asks the agent: \u2026\" in the quiet ink. The thread is woken with kind=\"question\" (\"Kitten 1 has a question\"), answers with message_subagent (the fake parent follows NEKO_FAKE_ON_QUESTION), and the conversation says \"The agent answered Kitten 1\". The kitten resumes its own conversation with the answer as its next message, reports again, and the thread reads that report. Needs you never lists the question.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl",
+      "NEKO_FAKE_ON_QUESTION": "1=answer:Use SQLite."
+    }
+  },
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Plan the migration [fake:delegate] mcp neko start_subagent {\"title\":\"Write the migration\",\"prompt\":\"[fake:steps]\\nmcp neko ask_parent {\\\"question\\\":\\\"Which database should the migration target: SQLite or Postgres?\\\"}\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Kitten 1 has a question"
+        }
+      },
+      "within": 60,
+      "expect": "The kitten's question wakes the thread: \"Kitten 1 has a question\""
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "The agent answered Kitten 1"
+        }
+      },
+      "within": 30,
+      "expect": "The agent answers it: \"The agent answered Kitten 1\""
+    },
+    {
+      "do": "snap",
+      "name": "answered",
+      "expect": "The wake note and the note that the agent answered"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Subagent 1 done"
+        }
+      },
+      "within": 90,
+      "expect": "The kitten finishes with the answer and its report wakes the thread"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "gone": {
+          "role": "option",
+          "label": "Plan the migration",
+          "name": "needs you"
+        }
+      },
+      "expect": "The thread never needed the person"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep -c 'neko-wake kind=.\\{1,2\\}question' $work/fake-record.jsonl",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep '\"role\":\"user\"' $work/fake-record.jsonl | grep -c '\"text\":\"Use SQLite.\"'",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep '\"mcp_call\"' $work/fake-record.jsonl | grep -c 'has your answer and is working again'",
+              "is": "1"
+            }
+          }
+        ]
+      },
+      "expect": "One question wake; the kitten read the answer as its next message; message_subagent said it resumed"
+    },
+    {
+      "do": "snap",
+      "name": "done",
+      "expect": "The thread done after the second report"
+    }
+  ],
+  "size": [
+    1280,
+    800
+  ]
+}

@@ -1,0 +1,190 @@
+{
+  "name": "question-to-person",
+  "title": "The agent passes a kitten's question to the person; their answer goes back down",
+  "about": "Kitten 1 asks; the woken thread cannot answer and calls ask_person naming the kitten. The thread needs the person, ends on \"Kitten 1 asks (via the agent)\", the card says \"Asks you (via the agent): \u2026\", and Needs you leads the item with the same words. The person answers in Needs you; the thread runs with their words, passes them to Kitten 1 with message_subagent (\"The agent answered Kitten 1\"), and the kitten resumes with them.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl",
+      "NEKO_FAKE_ON_QUESTION": "1=up"
+    }
+  },
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Plan the migration [fake:delegate] mcp neko start_subagent {\"title\":\"Write the migration\",\"prompt\":\"[fake:steps]\\nmcp neko ask_parent {\\\"question\\\":\\\"Which database should the migration target: SQLite or Postgres?\\\"}\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Plan the migration",
+          "name": "needs you"
+        }
+      },
+      "within": 60,
+      "expect": "The thread needs the person"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "question-block"
+            }
+          },
+          {
+            "see": {
+              "text": "Kitten 1 asks (via the agent)"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "The conversation ends on \"Kitten 1 asks (via the agent)\""
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "Asks you (via the agent): "
+        }
+      },
+      "expect": "Kitten 1's card says the person has its question"
+    },
+    {
+      "do": "snap",
+      "name": "thread-asks",
+      "expect": "The question the thread waits on, and the card"
+    },
+    {
+      "do": "key",
+      "key": "cmd+2"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "listitem",
+          "label": "Plan the migration"
+        }
+      },
+      "within": 5,
+      "expect": "Needs you lists the question"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "Kitten 1 asks (via the agent)"
+        }
+      },
+      "expect": "Led by \"Kitten 1 asks (via the agent)\""
+    },
+    {
+      "do": "snap",
+      "name": "needs-you",
+      "expect": "The item in Needs you"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "focus": {
+          "key": "*-reply-input"
+        },
+        "ring": false
+      },
+      "soft": true,
+      "expect": "Return puts the keyboard in its reply box"
+    },
+    {
+      "do": "type",
+      "text": "Postgres [fake:mcp] mcp neko message_subagent {\"id\":\"1\",\"text\":\"The person says: Postgres.\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "needs-empty"
+        }
+      },
+      "within": 10,
+      "expect": "Answered: nothing needs the person"
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "The agent answered Kitten 1"
+        }
+      },
+      "within": 60,
+      "expect": "The agent passes the answer down"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Subagent 1 done"
+        }
+      },
+      "within": 90,
+      "expect": "Kitten 1 finishes with the answer and reports"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep '\"mcp_call\"' $work/fake-record.jsonl | grep -c 'The person has Subagent 1.s question in Needs you'",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep '\"role\":\"user\"' $work/fake-record.jsonl | grep -c '\"text\":\"The person says: Postgres.\"'",
+              "is": "1"
+            }
+          }
+        ]
+      },
+      "expect": "ask_person named the kitten; the kitten read the person's answer"
+    },
+    {
+      "do": "snap",
+      "name": "answered",
+      "expect": "The answer went down and the thread is done"
+    }
+  ],
+  "size": [
+    1280,
+    800
+  ]
+}

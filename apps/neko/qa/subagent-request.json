@@ -1,0 +1,147 @@
+{
+  "name": "subagent-request",
+  "title": "A kitten's risky step asks the person, never its parent",
+  "about": "Asking before risky steps, Kitten 1 wants to run a command. The request goes straight to Needs you, led by \"Kitten 1 asks\" in the thread's title; the thread's agent is offered no tool that could answer it (the record of its tools has nothing to allow or deny with). Allow once in Needs you lets the kitten run it; its report wakes the thread.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-mode-1"
+        }
+      },
+      "expect": "Settings opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-mode-1"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 0.5
+    },
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check the tests [fake:delegate] tools d0 ; mcp neko start_subagent {\"title\":\"Run the tests\",\"prompt\":\"Run them [fake:hook-shell]\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "needs-you",
+          "name": "1 waiting"
+        }
+      },
+      "within": 60,
+      "expect": "Kitten 1's request waits for the person"
+    },
+    {
+      "do": "key",
+      "key": "cmd+2"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Kitten 1 asks"
+        }
+      },
+      "within": 5,
+      "expect": "Needs you leads it with \"Kitten 1 asks\""
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "text": "in Check the tests"
+        }
+      },
+      "expect": "In the thread's title"
+    },
+    {
+      "do": "snap",
+      "name": "request",
+      "expect": "A kitten's request in Needs you"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep '\"label\":\"d0\"' $work/fake-record.jsonl | grep -c -E 'allow|deny|permission|answer_'",
+              "is": "0"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep '\"label\":\"d0\"' $work/fake-record.jsonl | grep -c message_subagent",
+              "is": "1"
+            }
+          }
+        ]
+      },
+      "expect": "The thread's agent has no tool that answers a request (it has message_subagent, which approves nothing)"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "needs-empty"
+        }
+      },
+      "within": 10,
+      "expect": "Allowed once in Needs you"
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Subagent 1 done"
+        }
+      },
+      "within": 90,
+      "expect": "The kitten ran the step, and its report woke the thread"
+    }
+  ],
+  "size": [
+    1280,
+    800
+  ]
+}
