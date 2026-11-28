@@ -63,7 +63,10 @@ hook helper (`permissions.md`): a thin process that keeps nothing.
    The server's `initialize.instructions` carry the same guidance but did not visibly reach the model in the real probe, so the
    guidance is also in the tool results above and in the system paragraph below.
 5. **Permissions.** `mcp__neko__*` tools are `Action::Internal` (`claude/stream.rs`): they only record work in Neko's own state, so
-   they go ahead in every mode, like Claude Code's own bookkeeping tools. Everything a subagent then does asks as usual.
+   they go ahead in every mode, like Claude Code's own bookkeeping tools. Everything a subagent then does asks as usual. Every run
+   with Neko's server is also started with `--allowedTools "mcp__neko__*"`: in "Follow Claude Code's own rules" the person's own
+   default mode applies, and a real run under an `auto` default had `start_subagent` denied by Claude Code's classifier before Neko
+   was asked (2026-11-28). Allowed up front, Neko's own coordination never depends on that classifier.
 
 ## What the agent is told
 

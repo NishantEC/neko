@@ -1,0 +1,127 @@
+{
+  "name": "real-questions",
+  "title": "A real kitten asks its parent something only the person knows; the question reaches the person and the answer comes back down",
+  "about": "Real model calls (the cheapest model). The thread starts one kitten that must ask (ask_parent) instead of guessing; the thread passes the question to the person (ask_person); the person answers in Needs you; the thread passes the answer down (message_subagent); the kitten writes the file. Only the real CLI can show the real agent follows this path.",
+  "cli": [
+    "real"
+  ],
+  "setup": {
+    "files": {
+      "scratch": {
+        "files": {
+          "README.md": "# Acme\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+n"
+    },
+    {
+      "do": "choose-folder",
+      "path": "$files/scratch"
+    },
+    {
+      "do": "sleep",
+      "secs": 3
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Start exactly one subagent with this brief: Write the name of the production database into db.txt in this folder. You do not know it and must not guess: before writing anything, ask with ask_parent which database production uses, end your turn, and wait for the answer. -- Do not answer the subagent's question yourself; pass it to the person with ask_person. When the subagent has finished, reply with one line."
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "allow-until",
+      "until": {
+        "see": {
+          "text": "Kitten 1 asks (via the agent)"
+        }
+      },
+      "within": 300,
+      "snap_first": true,
+      "expect": "The kitten asks its parent and the parent passes the question to the person"
+    },
+    {
+      "do": "snap",
+      "name": "asks-person",
+      "expect": "The thread ends on the kitten's question for the person"
+    },
+    {
+      "do": "key",
+      "key": "cmd+2"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "Kitten 1 asks (via the agent)"
+        }
+      },
+      "within": 10,
+      "expect": "Needs you leads with Kitten 1 asks (via the agent)"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "type",
+      "text": "The production database is named acme_prod (it runs on Postgres). Write exactly acme_prod."
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "needs-empty"
+        }
+      },
+      "within": 20,
+      "expect": "Answered"
+    },
+    {
+      "do": "allow-until",
+      "until": {
+        "all": [
+          {
+            "file": {
+              "path": "$files/scratch/db.txt",
+              "has": "acme_prod"
+            }
+          },
+          {
+            "gone": {
+              "key": "waiting-line"
+            }
+          },
+          {
+            "gone": {
+              "key": "run-*-working"
+            }
+          }
+        ]
+      },
+      "within": 360,
+      "expect": "The answer goes down to the kitten, which writes db.txt, and the thread finishes"
+    },
+    {
+      "do": "snap",
+      "name": "answered",
+      "expect": "The thread after the answer"
+    }
+  ]
+}

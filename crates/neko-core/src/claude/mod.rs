@@ -130,6 +130,11 @@ pub fn arguments(resume: Option<&str>, mode: PermissionMode, hook: Option<&Path>
     if let Some(file) = mcp_config {
         a.push("--mcp-config".into());
         a.push(file.to_string_lossy().into_owned());
+        // Neko's own tools (kittens, questions) always go ahead: they act only through Neko, which keeps every action that matters
+        // under the person's permission route. Allowed up front, so no mode of the person's own (their "auto" classifier among
+        // them) can deny Neko's own coordination; a real run was denied `start_subagent` by that classifier without this.
+        a.push("--allowedTools".into());
+        a.push("mcp__neko__*".into());
     }
     if !own_mcp {
         a.push("--strict-mcp-config".into());
@@ -498,8 +503,9 @@ mod tests {
             assert!(!plain.iter().any(|a| a == "--mcp-config"), "no config, no flag");
             let at = with.iter().position(|a| a == "--mcp-config").expect("the run's config is passed");
             assert_eq!(with[at + 1], "/tmp/neko-run/mcp.json");
+            assert_eq!((with[at + 2].as_str(), with[at + 3].as_str()), ("--allowedTools", "mcp__neko__*"), "Neko's own tools go ahead ({mode:?})");
             let mut rest = with.clone();
-            rest.drain(at..at + 2);
+            rest.drain(at..at + 4);
             assert_eq!(rest, plain, "nothing else changes ({mode:?})");
         }
     }
