@@ -98,7 +98,9 @@ When each is posted:
     Kitten 1 asks (via the agent): …". The row's second line says "Needs you: a question from Kitten 1".
   - A failure: "Failed: " and its words. No actions.
 - A run that finished done (status from working to done), while "When a task finishes" is on, unless Neko is in front on that task:
-  title the thread's title, body "Done" or "Done: " and the first line of the answer.
+  title the thread's title, body "Done" or "Done: " and the first line of the answer. Not for a crew thread whose Cattain hears it, and
+  not for a Cattain's turn its crew woke: that news is the Cattain's, and it keeps it in its digest (`cats.md`, "The crew"). A crew
+  thread's request, question or failure still posts as above.
 - A stale action or reply: "That was already answered."
 
 Rules:

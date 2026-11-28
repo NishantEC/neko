@@ -312,6 +312,28 @@ Changed to the new truth: `cats` makes and retires Cattains in Settings ▸ Catt
 `cat-rules-cannot-skip-checks` writes miso's CREW.md (a round's thread is in miso's crew); `no-cat` saves miso's files with
 `save_cattain_file` and checks no Cattain's block reaches a thread with no cat.
 
+## A Cattain runs its crew (S12)
+
+Headless, 1300 × 860, with `NEKO_FAKE_RECORD` and a short crew batch (`NEKO_CREW_BATCH_MS`). The fake CLI's `[fake:mcp]` script calls
+`start_crew_thread` and `message_crew` through Neko's real MCP server; a fake woken with `<neko-wake kind="crew">` calls `crew` and
+rewrites DIGEST.md and NOTES.md in its folder (the record keeps `{"digest": …}`).
+
+`crew-three`: in miso's own thread the person asks for three flaky tests, one thread each; the fake starts three crew threads
+(`[fake:work:6]` to `:8`). Three rows nest under miso in the sidebar (`cattain-thread-*`), three list in its Overview, and miso's thread
+ends on "Waiting on its crew"; the store has three tasks with `started_by = 'cat_miso'`. As they end, three "Woken by Fix test …" notes
+appear, DIGEST.md says "Fix test three: done", the record has at most two crew wake messages, and the Digest tab shows the digest with its
+age.
+
+`crew-needs-you`: in "Ask before risky steps" miso starts two crew threads, the second `[fake:hook-shell]`; miso's script stays in its turn
+(`stay 8`) so the request's news is steered into it. miso's sidebar row carries the amber count 1 (`cat-cat_miso-count`), its Overview has
+Needs you above Crew, the note "Run the tests needs you" appears, the record has exactly one `needs_you` crew wake and the permission is
+still pending; the person's Allow once in Needs you lets the crew thread finish, the count goes, and miso hears that turn end too.
+
+`crew-merge-only-when-asked`: miso starts one crew thread, which ends; miso is woken and rewrites its digest, and the record has no
+`<neko-from>` message yet. The person writes "Merge it" in miso's thread and the fake passes it on with `message_crew` (by the thread's
+title); by the record's order miso's `<neko-from>` words reach the crew thread only after the person's message. The crew thread shows
+"Started by miso" and both miso's brief and miso's message led by "From miso".
+
 ## Making a Cattain by asking (S11)
 
 Headless, 1300 × 860, with `NEKO_FAKE_RECORD`. The fake CLI's `[fake:mcp]` script calls `list_cattains` and `make_cattain` through Neko's

@@ -61,8 +61,10 @@ hook helper (`permissions.md`): a thin process that keeps nothing.
    | `ask_person {question, subagent?}` (threads only) | the run carries the question for the person and ends `asked`: it is in Needs you | "The person has Subagent 1's question in Needs you. End your turn now: their answer is your next message. Then pass it on…" |
    | `make_cattain {purpose, name?, project?, rules?}` (threads only, while "Agents may make Cattains" is on; protocol 22) | makes a Cattain, or names the active one with that purpose; the thread gets the note "Made a Cattain: yuzu · iOS work · Open" (`cats.md`, "Made by asking") | "Made a Cattain: yuzu (iOS work) in the project acme-ios. Address it as yuzu. … Tell the person you made yuzu and what it is for." (or "yuzu already looks after this…"); refused in words at 16 (the house listed), for a taken name, an unknown project, no purpose, a subagent, or the setting off |
    | `list_cattains {}` (the same) | lists the Cattains at work: name, purpose, project, working or at rest, crew count | "3 of at most 16 Cattains are at work: …" |
+   | `start_crew_thread {title, brief, project?, placement?}`, `crew {id?}`, `message_crew {id, text, mode?}` (a Cattain's own thread only; protocol 23) | a thread in its crew, its crew listed, a message to one; a crew thread's turn end or request then wakes the Cattain with `<neko-wake kind="crew">` (`cats.md`, "The crew") | "\"Fix login\" is started in your crew… Do not poll or wait…"; refused in words for any other run |
 
-   The tools a run is offered depend on what `info` says of it: its depth, and whether it may make Cattains (a thread, the setting on).
+   The tools a run is offered depend on what `info` says of it: its depth, whether it may make Cattains (a thread, the setting on), and
+   whether it is a Cattain's own thread (`crew`).
 
    The server's `initialize.instructions` carry the same guidance but did not visibly reach the model in the real probe, so the
    guidance is also in the tool results above and in the system paragraph below.

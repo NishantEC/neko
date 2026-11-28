@@ -1,9 +1,9 @@
 # Cats and Cattains (2026-11-28)
 
 A cat is a named agent with a face. Every cat is a **Cattain**: it has a thread of its own that the person talks to, its own folder
-of four files, an optional project, a model and an access mode, and a **crew** of threads that read its CREW.md. Protocol 22,
-store 18 (cats came in protocol 8, store 6; threads lost their cat in protocol 14, store 11; Cattains came in protocol 21, store 17;
-making one by asking in protocol 22, store 18). Its crew tools and its digest are later slices; this page says what is here now.
+of four files, an optional project, a model and an access mode, and a **crew** of threads that read its CREW.md. Protocol 23,
+store 19 (cats came in protocol 8, store 6; threads lost their cat in protocol 14, store 11; Cattains came in protocol 21, store 17;
+making one by asking in protocol 22, store 18; running its crew in protocol 23, store 19).
 
 ## The model
 
@@ -63,11 +63,62 @@ making one by asking in protocol 22, store 18). Its crew tools and its digest ar
 
 ## The crew
 
-A thread is in a Cattain's crew when it has that cat and is not the cat's own thread (`Task::crew_of`): a round's thread (a round
-belongs to a cat, `rounds.md`), a thread made before protocol 14 that was given that cat, or a thread started with
-`create_task {crew}` (New thread in miso's crew, from its Overview). A crew thread started with no project chosen is made in the
-Cattain's project. A retired Cattain takes no new crew. A kitten of the Cattain's own thread does its work and reads CREW.md too.
-Crew tools (`start_crew_thread` and the rest), nesting crew under the Cattain and waking it at each crew turn's end are S12.
+A thread is in a Cattain's crew when it has that cat and is not the cat's own thread (`Task::crew_of`): a thread its agent started with
+`start_crew_thread` (`Task.started_by`), a thread started with `create_task {crew}` (New thread in miso's crew, from its Overview), a
+round's thread (a round belongs to a cat, `rounds.md`), or a thread made before protocol 14 that was given that cat. A crew thread started
+with no project chosen is made in the Cattain's project. A retired Cattain takes no new crew. A kitten of the Cattain's own thread does its
+work and reads CREW.md too. `crates/neko-core/src/crew.rs` (the records and the words), `crates/neko-daemon/src/crew.rs` (the tools and
+what wakes the Cattain).
+
+Why: a Cattain looks after standing work by handing each piece to a whole thread of the person's, as a person would delegate, and keeps the
+person's picture of it (DIGEST.md) current; the person reads the digest instead of every thread, and is tagged only for what is theirs.
+
+**Its tools.** Only a Cattain's own thread (not a kitten of it) is offered three more of Neko's MCP tools (`subagents.md`, "Neko's own MCP
+server"); every other run is not offered them, and Neko refuses them in words if one calls them anyway.
+
+| Tool | Does | Returns |
+| --- | --- | --- |
+| `start_crew_thread {title, brief, project?, placement?}` | an ordinary thread in its crew: the brief is its first message (its words), the title as given (spaces collapsed, at most 80 characters), `started_by` the Cattain, in the project named (by name, folder or the folder's last part; else the Cattain's, else No project), in a worktree of its own (`placement: worktree`, the default) or the project's folder (`folder`). It starts now when there is room, else waits queued | "\"Fix login\" is started in your crew in the project acme-api (thread task_…). It is working now. It reads your CREW.md on every run. Neko wakes you when its turn ends or when it needs the person. Do not poll or wait. If you have nothing else to do, update DIGEST.md and NOTES.md and end your turn now." (queued: "…queued behind other work…"). Refused in words: no title, no brief, an unknown project, a retired Cattain, eight unfinished |
+| `crew {id?}` | its crew, newest first, a line each (id, title, state, project, who started it when not the Cattain, a round's, archived, its last line), at most 30; with `id`, that thread's last words in full | the list, ending "Do not call this to wait: Neko wakes you as each crew thread's turn ends." Read-only |
+| `message_crew {id, text, mode?}` | writes to a thread of its crew (by its id, the id's last part, or its exact title): at rest it starts again with the words; working, they are a steer, a queued message or an interrupt, as the person's are (`composer.md`) | "\"Fix login\" is working again with your message. …" (or "…reads your message at its next step."). Refused in words for an archived thread, one not started yet, and **a question the thread put to the person** ("…only they answer it. Put it under Needs you in DIGEST.md.") |
+
+- **The Cattain's words are never the person's.** They reach the crew thread as `<neko-from cattain="miso">\n…\n</neko-from>`, and its
+  transcript keeps them so; the crew thread's block says that messages inside it, and the brief of a thread miso started, are miso's
+  words, not the person's. The app shows them led by miso's face, "From miso".
+- **What wakes the Cattain.** Each crew thread's turn end (done, failed, stopped, interrupted, or asked: a question for the person) and
+  each of its own requests that waits on the person (`needs_you`) is stored once (`wakes` with `kind = crew`: per run for a turn end, per
+  permission for a request) and woken like a kitten's report (`subagents.md`, "Rest and wake"): steered into the Cattain's run when it
+  is going, else after a **30 second batch** (from the first news; `NEKO_CREW_BATCH_MS` in tests) a run that `--resume`s its thread with
+  one message, a `<neko-wake kind="crew" thread="task_…" status="done" title="Fix login">` per crew thread (its last words in `<summary>`,
+  up to 16 KB, the files its run changed in `<files>`, its question in `<question>` with "It asked the person and waits for their answer,
+  not yours…", or the request in `<request>` with "You cannot approve it…"), then one cue: rewrite DIGEST.md (Needs you, New, In progress)
+  and NOTES.md; write to a crew thread only when it needs more; never tell one to merge, push, publish, delete or pay unless the person
+  asked in your thread; tag the person with `ask_person` only for a decision that is theirs; end your turn. A thread that rests waiting on
+  its own kittens has not ended its turn. Why 30 s and not a kitten's 2 s: crew threads are whole threads that end minutes apart, and every
+  wake is a cold turn on the person's own subscription.
+- **Who hears.** A Cattain hears its crew once its own thread has run (a Cattain nobody has talked to costs nothing) and while it is
+  active. A round's thread does not wake it: a round runs by itself at its times, and S13 decides how rounds speak to their Cattain.
+- **Waiting on its crew.** A Cattain's own thread whose turn ends while a crew thread that tells it is unfinished (queued, working,
+  needing the person, waiting on kittens), or while its crew news is pending, is **Waiting**, as a thread waiting on kittens is: no
+  process. Its conversation ends on "Waiting on its crew: Fix login and Fix docs" (each a link), its composer says "miso is waiting on its
+  crew. Message miso to wake it now", and there is nothing to Stop (its crew threads are threads of their own). The person's message runs
+  it at once, as ever.
+- **Limits.** At most 8 crew threads of one Cattain are unfinished at once (a guard against a loop). A crew thread the agent starts counts
+  in the runs across Neko (8) and is held while the Mac is warm or the account's limit is reached, as a kitten is: it waits queued (status
+  new, no run) and the hub starts it as room appears. At most **20 crew wakes of one Cattain an hour** (`NEKO_CREW_WAKES_PER_HOUR` in
+  tests): past it, its crew news is kept and goes when the hour allows (the hub looks again each minute), so a Cattain and its crew can
+  never wake each other for ever. A kitten's report never waits on that budget.
+- **Safety does not move.** A crew thread asks the person before risky steps as any thread does; its requests are in Needs you under its
+  own title, and the Cattain hears of them but has no tool that answers one. **A crew thread never has more access than its Cattain**
+  (`crew::crew_mode`): the narrower of Settings' mode and the Cattain's own (Ask before risky steps, then Follow Claude Code's own rules,
+  then Full access); a Cattain with no access of its own leaves Settings'. The same holds for a kitten of the Cattain's own thread or of a
+  crew thread. Merging only when the person asked is told to the Cattain (its block and every crew wake), as prose: in "Ask before risky
+  steps" a merge is a command and asks the person anyway.
+- **No noise.** A crew thread finishing posts no notification when its Cattain hears it, and nor does the Cattain's turn its crew woke
+  (the app sees the crew wake note in that run). What needs the person (a request, a question, a failure to act on) still reaches Needs
+  you and notifies as before.
+- **A restart.** Crew news stored before a stop is delivered after it. A crew run the stop interrupted leaves no news (it was not a turn
+  end); the next run's end does.
 
 ## Made by asking
 
@@ -131,6 +182,10 @@ You work in your own folder, <data>/cattains/cat_miso. It holds your files:
 - DIGEST.md: what happened, for the person, under three headings: Needs you, New, In progress. Keep it current.
 Read RULES.md, NOTES.md and DIGEST.md at the start of every turn.
 
+Your work goes to the threads of your crew. Start one with mcp__neko__start_crew_thread for each separate piece, with a brief that says
+everything it needs … Never tell a crew thread to merge, push, publish, delete or pay unless the person asked for it here, and when you
+pass their decision on, quote it.
+
 Your project is acme-api, in /Users/example/acme-api. You can read it.
 
 Your standing rules (RULES.md):
@@ -143,6 +198,8 @@ A thread in its crew:
 ```text
 <neko-crew>
 This thread is in miso's crew. miso is a Cattain in Neko, one of the person's cats, and looks after this work.
+miso hears when each of your turns ends. Its messages to you come inside <neko-from cattain="miso">, and a thread it started begins with
+its brief: those are miso's words, not the person's.
 
 miso's purpose:
 <purpose>
@@ -164,7 +221,8 @@ claude … --append-system-prompt "<the block>\n\n<subagents paragraph>" --syste
 - When the words differ from the ones the thread's last run used, a quiet part (`rules_changed`, with `file`) stands before that
   run's words: "miso's CREW.md changed since the last run." It shows outside the run's fold.
 - A thread with no cat is handed no block (`a_thread_with_no_cat_is_handed_no_cat_block_and_its_words_untouched`).
-- The block does not mention crew tools yet: they come with S12.
+- The Cattain's own block carries one paragraph on how it works its crew (`cattains::CREW_PARAGRAPH`, the same bytes every run). A crew
+  thread's block says the Cattain hears it, except a round's thread (`Handed.hears`).
 
 ## What a Cattain's files can never do
 
@@ -188,6 +246,11 @@ untouched. `cats.rules` and its previous version stay in the table, unread.
 `cats` gains `made_in`, the thread whose agent made it with `make_cattain`. Every cat that exists was made by hand or is a starter, so
 none has one. Events: `cat_added` carries `made_in` for one made by asking; `cattain_file_seeded` is its first RULES.md.
 
+## Migration (store 19)
+
+`tasks` gains `started_by`; `wakes` gains `kind` (`subagent` for every wake that exists) and `about`. No thread was started by a
+Cattain before, so none has `started_by`.
+
 ## Retiring
 
 A retired cat takes no new crew, and its rounds stop running. Its threads keep it and stay readable, its own thread too (the band
@@ -203,7 +266,9 @@ Requests: `list_cats`, `create_cat`, `rename_cat`, `set_cat_face`, `set_cat_purp
 when it has one and `cattain` when it is a cat's own thread; a run carries `cat` and `rules_hash` (the version of what it was
 handed); `rules_changed` carries `file`. `save_cat_rules` and `restore_cat_rules` are gone. Version 22: a cat carries `made_in` (the
 thread whose agent made it); `undo_make_cattain {cat}` (reply `cat`, retired; `refused` for one made by hand or one with work); the part
-`cattain_made {cat, name, purpose?}` (the note); `Settings.cattains_by_hand`.
+`cattain_made {cat, name, purpose?}` (the note); `Settings.cattains_by_hand`. Version 23: a task carries `started_by` (the Cattain whose agent started it); the part `crew_wake {thread,
+title, status, summary, files?, question?}`; the Cattain's words to its crew are a person part inside `<neko-from cattain="…">`
+(`cats::from_cattain`, `cats::read_from_cattain`).
 
 ## The app
 
@@ -233,15 +298,25 @@ How it looks is in `design.md` ("A Cattain").
   or its own latest line.
 - **New thread** in a crew shows a chip with the face and "miso's crew" (× takes the thread out of the crew) and asks "What should
   miso's crew work on?".
+- **Its crew at work** (design.md, "A Cattain's crew"): the sidebar's Cattain row nests its crew threads at work (two or more, as
+  before) and carries the amber count of what of its crew and itself waits on the person; its Overview lists them under Crew with Needs
+  you first. A crew thread its Cattain started has "Started by miso" with Open miso above its conversation (where a round's thread says
+  its round), opens on miso's brief led by miso's face ("From miso"), and shows miso's later messages the same way. In the Cattain's
+  thread each crew wake is a centred note, "Woken by Fix login · done", "Fix login asks you" or "Fix login needs you" (amber), with Open
+  and a fold (what it said, its question, what it waits for, the files); the run line says "Waiting on its crew (3)" and the conversation
+  ends on the waiting line. The steps read "Started a crew thread · Fix login", "Looked at the crew", "Read Fix login", "Wrote to Fix
+  login" and "Could not write to Fix login". The Digest tab follows DIGEST.md as the Cattain rewrites it (`cattain_file_changed`).
 - A thread has no head: an ordinary thread's turns have no portrait or name, its requests say "The agent asks". Notifications carry
   the thread's title and no cat name (`needs-you.md`).
 
 ## Not here yet, on purpose
 
 Promote to Cattain (a thread's history becoming a Cattain's thread) and the Briefing's "New Cattain" line; a Cattain made by asking
-starting at once with the asking thread's request (it waits for the person instead: nothing runs by itself); crew tools, the crew nested under its Cattain, wakes at each crew turn,
-the amber count and `ask_person` from a Cattain (S12); rounds that post into a Cattain's thread (S13); the Briefing reading digests
-(S14); crew access never broader than the Cattain's (S12/S15); the Needs you page filtered to one Cattain ("n more" opens it whole).
+starting at once with the asking thread's request (it waits for the person instead: nothing runs by itself); `adopt_thread` and
+`release_thread` (moving a thread in or out of a crew, by tool or by dragging a row onto a Cattain); a per-thread model for a crew thread
+(S15); the notification "miso asks: …" worded for a Cattain's own `ask_person` (it notifies as any thread's question does, S14 rewords
+it); rounds that post into a Cattain's thread or wake it (S13); the Briefing reading digests (S14); a crew thread's line in Threads led
+by its Cattain's face; the Needs you page filtered to one Cattain ("n more" opens it whole).
 
 ## Tests
 
@@ -262,6 +337,14 @@ the amber count and `ask_person` from a Cattain (S12); rounds that post into a C
   `crates/neko-core/src/subagents.rs` and `crates/neko-daemon/src/mcp_server.rs` (only a thread that may is offered and told),
   `crates/neko-daemon/tests/make_cattain.rs` (through the real MCP hop: the events, the note, a near-twin, Undo; a kitten neither
   offered nor able; the setting off; refused at 16), `apps/neko/tests/make_cattain.rs` (the note, the toast, Open, Settings, ⌘Z), the step phrases in `task_view.rs`.
+- The crew: `crates/neko-core/tests/crew.rs` (a crew thread's words, title, `started_by` and project; a retired Cattain and the limit of
+  eight; a crew wake once per run, read back as crew, counted per hour; the migration from 18), `crates/neko-core/src/crew.rs` (the
+  narrower access, the wrapper, the tools), `crates/neko-core/src/subagents.rs` (the crew wake message), `crates/neko-core/src/cattains.rs`
+  (the crew paragraph and line), `crates/neko-daemon/tests/crew.rs` (through the real MCP hop: three crew threads, miso Waiting, woken in
+  at most two batches with one element each, the digest rewritten, the resumed conversation; a request told once and answered only by
+  the person; `<neko-from>` and the question refused; access never above miso's; only a Cattain's own thread is offered the tools),
+  `crates/neko-daemon/src/mcp_server.rs` (the tools listed), `apps/neko/src/crew_view.rs` (the words, the brief and messages never the
+  person's, the waiting line), the scenes `crew-*`.
 - QA: `cattain-thread`, `cattain-files`, `cattain-migrate`, `cats`, `cat-rules-cannot-skip-checks`, `no-cat`, `make-cattain`,
-  `make-cattain-undo`, `make-cattain-limit` (`qa.md`).
+  `make-cattain-undo`, `make-cattain-limit`, `crew-three`, `crew-needs-you`, `crew-merge-only-when-asked` (`qa.md`).
 - `crates/neko-protocol/tests/round_trip.rs` pins the shapes.

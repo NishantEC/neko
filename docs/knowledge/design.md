@@ -282,6 +282,27 @@ Where a cat's character lives: its own thread. Everywhere else it is a small fac
   a switch with its help under New Cattain…. The refused step is an ordinary failed step whose error lists the house one per line.
   Renders: `cattain-made`, `cattain-made-toast`, `cattain-made-thread`, `cattain-made-settings`, `cattain-made-limit`.
 
+## A Cattain's crew (S12)
+
+Calm on purpose: a crew thread is the Cattain's news first, so the person sees only what is theirs and the digest.
+
+- **The sidebar:** the Cattain's row is as before (portrait in its state, its line), its crew threads at work nested under it stepped in
+  12 points when two or more work, and at the right the house's amber count pill (as on Needs you and a group) when anything of its crew
+  or itself waits on the person; the row's spoken description adds "1 waiting".
+- **A crew thread its Cattain started:** above the conversation, where a round's thread says its round, one quiet line: the Cattain's 14
+  point face, "Started by miso" (sm, second ink) and Open miso as a small link, on the page's ground with a hairline under it. Its brief
+  and every later message of the Cattain's stand in the person's well at the right, so they read as messages, but each is led by the 14
+  point face and "From miso" (xs, second ink) above the well: never read as the person's own words.
+- **In the Cattain's thread:** each crew wake is the conversation's between-turns line (xs, a hairline each side, as a kitten's wake),
+  "Woken by Fix login · done" in the second ink, or "Fix login asks you" / "Fix login needs you" in amber, with Open as a small link;
+  under it a fold (the hollow dot) with what it said, its question or what it waits for, and the files. The run that ended before the
+  Cattain rested says "Waiting on its crew (3)" on its line; the conversation ends on the still ring and "Waiting on its crew:" with each
+  title as a link (three named, then "and 2 more"). The composer says the Cattain waits on its crew and that a message wakes it; it has
+  Send, not Stop.
+- **The Digest tab** follows DIGEST.md as the Cattain rewrites it, with "Updated just now".
+
+Renders: `crew-at-work`, `crew-woken`, `crew-digest`, `crew-started-by`, `crew-sidebar` (`scripts/snap.sh`).
+
 Renders: `cattain-thread`, `cattain-thread-new`, `cattain-digest`, `cattain-files`, `cattain-files-editing`, `cattain-files-notes`,
 `cattain-profile`, `cattain-retire`, `crew-thread`, `new-thread-crew`, `sidebar-cattains-at-work`, `sidebar-cattains-quiet`,
 `settings-cats`, `cat-new` (`scripts/snap.sh`).
