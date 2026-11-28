@@ -1,0 +1,113 @@
+{
+  "name": "subagents-depth",
+  "title": "Kittens start kittens three deep; the last level has no tool to start more",
+  "about": "The thread starts Kitten 1, which starts Kitten 1.1, which starts Kitten 1.1.1, which asks for the tool and is told there is none. Overview nests the three. The record of what each run was offered shows start_subagent at depths 0 to 2 and not at 3. The reports go up the chain and wake the thread.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Go three deep [fake:delegate] tools d0 ; mcp neko start_subagent {\"title\":\"Level one\",\"prompt\":\"[fake:steps]\\ntools d1\\nmcp neko start_subagent {\\\"title\\\":\\\"Level two\\\",\\\"prompt\\\":\\\"[fake:steps]\\\\ntools d2\\\\nmcp neko start_subagent {\\\\\\\"title\\\\\\\":\\\\\\\"Level three\\\\\\\",\\\\\\\"prompt\\\\\\\":\\\\\\\"[fake:steps]\\\\\\\\ntools d3\\\\\\\\nmcp neko start_subagent {\\\\\\\\\\\\\\\"title\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"Too deep\\\\\\\\\\\\\\\",\\\\\\\\\\\\\\\"prompt\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"Never\\\\\\\\\\\\\\\"}\\\\\\\"}\\\"}\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "pane-kitten-1.1.1"
+        }
+      },
+      "within": 90,
+      "expect": "Three levels of kittens nest in Overview (1, 1.1, 1.1.1)"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "pane-kitten-1"
+            }
+          },
+          {
+            "see": {
+              "key": "pane-kitten-1.1"
+            }
+          },
+          {
+            "see": {
+              "key": "pane-kitten-1.1.1"
+            }
+          }
+        ]
+      },
+      "expect": "All three are in the tree"
+    },
+    {
+      "do": "snap",
+      "name": "depth",
+      "expect": "The tree three deep"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "I read 1"
+        }
+      },
+      "within": 120,
+      "expect": "The reports go up the chain and wake the thread"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep -c '\"neko_tools\"' $work/fake-record.jsonl",
+              "is": "4"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep '\"label\":\"d3\"' $work/fake-record.jsonl | grep -c start_subagent",
+              "is": "0"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep '\"label\":\"d2\"' $work/fake-record.jsonl | grep -c start_subagent",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep '\"mcp_call\"' $work/fake-record.jsonl | grep -c 'No such tool available: start_subagent'",
+              "is": "1"
+            }
+          }
+        ]
+      },
+      "expect": "The kitten at the third level is not offered start_subagent; the levels above are; its attempt fails in words"
+    }
+  ],
+  "size": [
+    1280,
+    800
+  ]
+}

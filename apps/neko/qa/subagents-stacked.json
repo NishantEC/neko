@@ -1,0 +1,117 @@
+{
+  "name": "subagents-stacked",
+  "title": "A stacked kitten starts only after the one before it, from its branch",
+  "about": "The agent starts Kitten 1 (a copy of its own, working a few seconds) and Kitten 2 with after 1. Kitten 2's card says After Kitten 1 and Queued while Kitten 1 works; it starts only when Kitten 1 is done, in a copy made from Kitten 1's branch (it reads Kitten 1's file), and its branch has Kitten 1's commit as an ancestor.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "files": {
+      "acme-api": {
+        "git": true,
+        "files": {
+          "README.md": "# Acme\nA small project.\n",
+          "src/main.rs": "fn main() {}\n"
+        }
+      }
+    },
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "choose-folder",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Do these in order [fake:delegate] mcp neko start_subagent {\"title\":\"First\",\"prompt\":\"[fake:steps]\\nwrite a.txt one\\nsh git add -A && git -c user.name=Kit -c user.email=kit@example.com -c commit.gpgsign=false commit -qm work\\nstay 4\",\"placement\":\"own_copy\"} ; mcp neko start_subagent {\"title\":\"Second\",\"prompt\":\"[fake:steps]\\nsh cat a.txt\\nwrite b.txt two\\nsh git add -A && git -c user.name=Kit -c user.email=kit@example.com -c commit.gpgsign=false commit -qm work\",\"placement\":\"own_copy\",\"after\":\"1\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "subagent-card-2",
+              "name": "After Kitten 1"
+            }
+          },
+          {
+            "see": {
+              "key": "subagent-card-2",
+              "name": "Queued"
+            }
+          },
+          {
+            "see": {
+              "key": "subagent-card-1",
+              "name": "Working"
+            }
+          }
+        ]
+      },
+      "within": 40,
+      "expect": "The second card says it follows Kitten 1 and waits, while the first works"
+    },
+    {
+      "do": "snap",
+      "name": "stacked-waiting",
+      "expect": "Kitten 2 queued, After Kitten 1"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "text": "Woken by Kitten 1 \u00b7 done"
+            }
+          },
+          {
+            "see": {
+              "text": "Woken by Kitten 2 \u00b7 done"
+            }
+          }
+        ]
+      },
+      "within": 90,
+      "expect": "Both finish, one after the other, and wake the thread"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "A=$(git -C files/acme-api for-each-ref --format='%(refname:short)' 'refs/heads/neko/*-1'); B=$(git -C files/acme-api for-each-ref --format='%(refname:short)' 'refs/heads/neko/*-2'); git -C files/acme-api merge-base --is-ancestor $A $B && echo yes",
+              "is": "yes"
+            }
+          },
+          {
+            "sh": {
+              "run": "git -C files/acme-api ls-tree -r --name-only \"$(git -C files/acme-api for-each-ref --format='%(refname:short)' 'refs/heads/neko/*-2')\" | tr '\\n' ' '",
+              "has": "a.txt"
+            }
+          }
+        ]
+      },
+      "expect": "The second kitten's branch holds the first's work: it started from that branch and read its file"
+    }
+  ],
+  "size": [
+    1280,
+    800
+  ]
+}

@@ -1,0 +1,109 @@
+{
+  "name": "subagents-limits",
+  "title": "Five kittens asked: three work and two wait their turn",
+  "about": "The agent starts five kittens that each work for a few seconds. Three run at once (the limit for a thread) and two are queued; the cards say Working and Queued and the sidebar row and the activity bar say \"3 kittens working, 2 waiting their turn\". The queued two start as others finish, and all five reports wake the thread.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check five things [fake:delegate] mcp neko start_subagent {\"title\":\"Check one\",\"prompt\":\"Look at one [fake:long:8]\"} ; mcp neko start_subagent {\"title\":\"Check two\",\"prompt\":\"Look at two [fake:long:8]\"} ; mcp neko start_subagent {\"title\":\"Check three\",\"prompt\":\"Look at three [fake:long:8]\"} ; mcp neko start_subagent {\"title\":\"Check four\",\"prompt\":\"Look at four [fake:long:8]\"} ; mcp neko start_subagent {\"title\":\"Check five\",\"prompt\":\"Look at five [fake:long:8]\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "count": {
+              "of": {
+                "key": "subagent-card-*",
+                "name": "Working"
+              },
+              "is": 3
+            }
+          },
+          {
+            "count": {
+              "of": {
+                "key": "subagent-card-*",
+                "name": "Queued"
+              },
+              "is": 2
+            }
+          }
+        ]
+      },
+      "within": 60,
+      "expect": "Three kittens work and two are queued"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "role": "option",
+              "label": "Check five things",
+              "name": "3 kittens working, 2 waiting their turn"
+            }
+          },
+          {
+            "see": {
+              "key": "activity-bar",
+              "name": "Running: 3 kittens working, 2 waiting their turn"
+            }
+          }
+        ]
+      },
+      "expect": "The row and the activity bar say how many work and how many wait"
+    },
+    {
+      "do": "snap",
+      "name": "limits",
+      "expect": "Three working, two queued"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "text": "Woken by Kitten 5 \u00b7 done"
+            }
+          },
+          {
+            "count": {
+              "of": {
+                "key": "subagent-card-*",
+                "name": "Done"
+              },
+              "is": 5
+            }
+          }
+        ]
+      },
+      "within": 150,
+      "expect": "The queued two start as the others finish, and all five report"
+    }
+  ],
+  "size": [
+    1280,
+    800
+  ]
+}

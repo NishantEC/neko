@@ -1,0 +1,210 @@
+{
+  "name": "subagents-own-copy",
+  "title": "Two kittens write in a copy of their own and the thread merges them",
+  "about": "The agent starts two kittens with placement own_copy in a git project. Each card says it works in its own copy on its own branch. Both write a file and commit; the thread is woken, merges both branches (the fake CLI runs a squash merge for each branch a report names) and ends. Both branches and both copies exist, the merge is the thread's own run's change (two files), the person's checkout is untouched, and undoing the thread's run leaves the kittens' branches and copies alone.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "files": {
+      "acme-api": {
+        "git": true,
+        "files": {
+          "README.md": "# Acme\nA small project.\n",
+          "src/main.rs": "fn main() {}\n"
+        }
+      }
+    },
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl",
+      "NEKO_FAKE_WAKE_SH": "git merge --squash {branch}"
+    }
+  },
+  "steps": [
+    {
+      "do": "git-record",
+      "repo": "$files/acme-api",
+      "as": "before"
+    },
+    {
+      "do": "choose-folder",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Write two files [fake:delegate] mcp neko start_subagent {\"title\":\"Write a\",\"prompt\":\"[fake:steps]\\nwrite a.txt one\\nsh git add -A && git -c user.name=Kit -c user.email=kit@example.com -c commit.gpgsign=false commit -qm work\",\"placement\":\"own_copy\"} ; mcp neko start_subagent {\"title\":\"Write b\",\"prompt\":\"[fake:steps]\\nwrite b.txt two\\nsh git add -A && git -c user.name=Kit -c user.email=kit@example.com -c commit.gpgsign=false commit -qm work\",\"placement\":\"own_copy\"}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "subagent-card-1"
+            }
+          },
+          {
+            "see": {
+              "key": "subagent-card-2"
+            }
+          }
+        ]
+      },
+      "within": 60,
+      "expect": "Two cards appear in the conversation"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "subagent-card-1",
+              "name": "Own copy \u00b7 branch neko/"
+            }
+          },
+          {
+            "see": {
+              "key": "subagent-card-2",
+              "name": "Own copy \u00b7 branch neko/"
+            }
+          }
+        ]
+      },
+      "expect": "Each card says it works in a copy of its own, on its own branch"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "text": "Woken by Kitten 1 \u00b7 done"
+            }
+          },
+          {
+            "see": {
+              "text": "Woken by Kitten 2 \u00b7 done"
+            }
+          },
+          {
+            "see": {
+              "text": "I read 2"
+            }
+          }
+        ]
+      },
+      "within": 90,
+      "expect": "Both reports wake the thread, which merges both branches and says what it read"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "run-*",
+          "name": "Changed 2 files"
+        }
+      },
+      "within": 30,
+      "expect": "The thread's merge is its own run's change: two files"
+    },
+    {
+      "do": "snap",
+      "name": "merged",
+      "expect": "Two cards in a copy of their own, the notes and the merge's change line"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "git -C files/acme-api for-each-ref --format='%(refname:short)' 'refs/heads/neko/*-[12]' | wc -l | tr -d ' '",
+              "is": "2"
+            }
+          },
+          {
+            "sh": {
+              "run": "git -C files/acme-api ls-tree -r --name-only \"$(git -C files/acme-api for-each-ref --format='%(refname:short)' 'refs/heads/neko/*-1')\" | tr '\\n' ' '",
+              "has": "a.txt"
+            }
+          },
+          {
+            "sh": {
+              "run": "git -C files/acme-api ls-tree -r --name-only \"$(git -C files/acme-api for-each-ref --format='%(refname:short)' 'refs/heads/neko/*-2')\" | tr '\\n' ' '",
+              "has": "b.txt"
+            }
+          },
+          {
+            "sh": {
+              "run": "git -C files/acme-api worktree list | grep -c '\\[neko/.*-[12]\\]'",
+              "is": "2"
+            }
+          }
+        ]
+      },
+      "expect": "Both branches exist in the repository, each with its own file, and both copies are kept"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "git_same": "before"
+      },
+      "expect": "The person's own checkout is untouched"
+    },
+    {
+      "do": "run",
+      "cmd": "git -C files/acme-api for-each-ref --format='%(refname) %(objectname)' 'refs/heads/neko/*-[12]' > refs-before.txt"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "run-*-undo"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "2 steps \u00b7 undone"
+        }
+      },
+      "within": 30,
+      "expect": "Undoing the thread's merge works: its run reads undone"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "git -C files/acme-api for-each-ref --format='%(refname) %(objectname)' 'refs/heads/neko/*-[12]' | diff - refs-before.txt && echo same",
+              "is": "same"
+            }
+          },
+          {
+            "sh": {
+              "run": "git -C files/acme-api worktree list | grep -c '\\[neko/.*-[12]\\]'",
+              "is": "2"
+            }
+          }
+        ]
+      },
+      "expect": "Undoing the parent's run leaves the kittens' branches and copies alone"
+    }
+  ],
+  "size": [
+    1280,
+    800
+  ]
+}

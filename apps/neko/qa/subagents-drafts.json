@@ -1,0 +1,145 @@
+{
+  "name": "subagents-drafts",
+  "title": "A draft kitten's prompt is edited and started",
+  "about": "The agent writes a kitten down as a draft. The card has a text box with the prompt, Start and Discard, and the thread does not wait on it. The person replaces the prompt and presses Start; the kitten runs and the fake CLI receives the edited words, not the original; the report wakes the thread.",
+  "cli": [
+    "fake"
+  ],
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl"
+    }
+  },
+  "steps": [
+    {
+      "do": "click",
+      "on": {
+        "key": "composer-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Write one down [fake:delegate] mcp neko start_subagent {\"title\":\"Later\",\"prompt\":\"Original words [fake:plain]\",\"draft\":true}"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "draft-prompt-1"
+            }
+          },
+          {
+            "see": {
+              "key": "draft-start-1"
+            }
+          },
+          {
+            "see": {
+              "key": "draft-discard-1"
+            }
+          }
+        ]
+      },
+      "within": 40,
+      "expect": "A draft card with its prompt, Start and Discard"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "see": {
+              "key": "subagent-card-1",
+              "name": "Draft"
+            }
+          },
+          {
+            "gone": {
+              "key": "waiting-line"
+            }
+          }
+        ]
+      },
+      "expect": "The thread does not wait on a draft"
+    },
+    {
+      "do": "snap",
+      "name": "draft",
+      "expect": "The draft card"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "draft-prompt-1-input"
+      }
+    },
+    {
+      "do": "key",
+      "key": "cmd+a"
+    },
+    {
+      "do": "type",
+      "text": "Edited words [fake:plain]"
+    },
+    {
+      "do": "snap",
+      "name": "draft-edited",
+      "expect": "The prompt as edited"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "draft-start-1"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "text": "Woken by Kitten 1 \u00b7 done"
+            }
+          },
+          {
+            "gone": {
+              "key": "draft-prompt-1"
+            }
+          }
+        ]
+      },
+      "within": 60,
+      "expect": "Start runs the kitten and its report wakes the thread"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep '\"type\":\"user\"' $work/fake-record.jsonl | grep -v start_subagent | grep -c 'Edited words \\[fake:plain\\]'",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep '\"type\":\"user\"' $work/fake-record.jsonl | grep -v start_subagent | grep -c 'Original words \\[fake:plain\\]'",
+              "is": "0"
+            }
+          }
+        ]
+      },
+      "expect": "The kitten read the edited prompt; the original text is only in the thread's own message (the one that starts it)"
+    }
+  ],
+  "size": [
+    1280,
+    800
+  ]
+}
