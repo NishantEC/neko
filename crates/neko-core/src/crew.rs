@@ -231,19 +231,9 @@ one that works reads them at its next step (steer), after its turn (queue) or at
     ]
 }
 
-/// The words the Cattain sends a crew thread, as the thread reads them (and as its transcript keeps them): inside `<neko-from>`, so
-/// neither its agent nor the person reads them as the person's.
-pub fn from_cattain(name: &str, text: &str) -> String {
-    format!("<neko-from cattain=\"{}\">\n{}\n</neko-from>", name.replace('"', "'"), text.trim_end())
-}
-
-/// The Cattain's words inside a message from it, and its name, when the message is one (`from_cattain`).
-pub fn read_from_cattain(message: &str) -> Option<(&str, &str)> {
-    let rest = message.strip_prefix("<neko-from cattain=\"")?;
-    let (name, rest) = rest.split_once("\">\n")?;
-    let words = rest.strip_suffix("\n</neko-from>")?;
-    Some((name, words))
-}
+/// The words the Cattain sends a crew thread, inside `<neko-from>`, and reading them back (the app reads them too, so they are the
+/// protocol's).
+pub use neko_protocol::cats::{from_cattain, read_from_cattain};
 
 /// What the end of a crew wake tells the Cattain to do.
 pub const WAKE_CUE: &str = "Read what changed, then rewrite DIGEST.md (Needs you, New, In progress) and NOTES.md. Write to a crew thread with mcp__neko__message_crew only when it needs \

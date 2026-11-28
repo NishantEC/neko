@@ -417,6 +417,8 @@ pub fn summary(name: &str, input: &Value, workdir: &str) -> String {
         "mcp__neko__stop_subagent" | "mcp__neko__subagents" => field(input, &["id"]).unwrap_or("").to_owned(),
         "mcp__neko__make_cattain" => field(input, &["purpose"]).map(|d| first_line(d, 60)).unwrap_or_default(),
         "mcp__neko__list_cattains" => String::new(),
+        "mcp__neko__start_crew_thread" => field(input, &["title"]).map(|d| first_line(d, 60)).unwrap_or_default(),
+        "mcp__neko__crew" | "mcp__neko__message_crew" => field(input, &["id"]).unwrap_or("").to_owned(),
         _ => input.as_object().and_then(|o| o.values().find_map(s)).map(|v| first_line(v, 60)).unwrap_or_default(),
     }
 }

@@ -127,6 +127,20 @@ pub fn rules_hash(rules: &str) -> String {
     format!("{h:016x}")
 }
 
+/// The words a Cattain sends a thread of its crew with Neko's `message_crew` (version 23), as the thread's agent reads them and its
+/// transcript keeps them: inside `<neko-from>`, so neither the agent nor the person reads them as the person's.
+pub fn from_cattain(name: &str, text: &str) -> String {
+    format!("<neko-from cattain=\"{}\">\n{}\n</neko-from>", name.replace('"', "'"), text.trim_end())
+}
+
+/// The Cattain's name and its words, when a message is one from a Cattain ([`from_cattain`]).
+pub fn read_from_cattain(message: &str) -> Option<(&str, &str)> {
+    let rest = message.strip_prefix("<neko-from cattain=\"")?;
+    let (name, rest) = rest.split_once("\">\n")?;
+    let words = rest.strip_suffix("\n</neko-from>")?;
+    Some((name, words))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
