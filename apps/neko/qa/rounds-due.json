@@ -224,13 +224,13 @@
           {
             "see": {
               "key": "rounds-pause",
-              "label": "Resume rounds"
+              "label": "Resume automatic work"
             }
           }
         ]
       },
       "within": 15,
-      "expect": "Pause all shows a clear paused state"
+      "expect": "Pause automatic work shows a clear paused state"
     },
     {
       "do": "clock",
