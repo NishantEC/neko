@@ -467,6 +467,7 @@ mod tests {
             events(&said),
             vec![
                 AgentEvent::Started { session: Some("s1".into()), model: Some("claude-x".into()) },
+                AgentEvent::StepBegan,
                 AgentEvent::TextDelta("Hel".into()),
                 AgentEvent::TextDelta("lo".into()),
                 AgentEvent::TextDone,
@@ -512,6 +513,20 @@ mod tests {
     }
 
     #[test]
+    fn a_model_call_begins_and_ends_only_for_the_agents_own_messages() {
+        // How a steered message is known to be read (docs/knowledge/composer.md): the calls' edges, never a subagent's.
+        let mut m = Mapper::new();
+        let said = feed(&mut m, &[
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1"}},"parent_tool_use_id":null}"#,
+            r#"{"type":"stream_event","event":{"type":"message_stop"},"parent_tool_use_id":null}"#,
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"sub1"}},"parent_tool_use_id":"toolu_1"}"#,
+            r#"{"type":"stream_event","event":{"type":"message_stop"},"parent_tool_use_id":"toolu_1"}"#,
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m2"}},"parent_tool_use_id":null}"#,
+        ]);
+        assert_eq!(events(&said), vec![AgentEvent::StepBegan, AgentEvent::StepEnded, AgentEvent::StepBegan]);
+    }
+
+    #[test]
     fn empty_thinking_makes_no_event_and_signatures_are_ignored() {
         // The shape Claude Code 2.1.331 sends: a thinking block, an empty delta, a signature, the whole block with no text.
         let mut m = Mapper::new();
@@ -524,7 +539,7 @@ mod tests {
             r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"thinking","thinking":"","signature":"EqQBCkYIBxgCKkA"},{"type":"redacted_thinking","data":"x"}]},"parent_tool_use_id":null}"#,
         ]);
         assert!(!events(&said).iter().any(|e| matches!(e, AgentEvent::ThinkingDelta(_) | AgentEvent::Started { .. })), "nothing to show: {said:?}");
-        assert_eq!(events(&said), vec![AgentEvent::ThinkingStarted, AgentEvent::ThinkingDone], "only that it thought");
+        assert_eq!(events(&said), vec![AgentEvent::StepBegan, AgentEvent::ThinkingStarted, AgentEvent::ThinkingDone], "only that a call began and it thought");
         // A thought with words still comes through.
         let said = feed(&mut m, &[r#"{"type":"assistant","message":{"id":"m2","content":[{"type":"thinking","thinking":"Check the tests first."}]},"parent_tool_use_id":null}"#]);
         assert!(events(&said).contains(&AgentEvent::ThinkingDelta("Check the tests first.".into())));

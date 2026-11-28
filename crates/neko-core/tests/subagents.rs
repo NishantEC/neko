@@ -165,7 +165,7 @@ fn the_migration_from_store_nine_adds_subagents_and_changes_nothing_else() {
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch(
-            "ALTER TABLE tasks DROP COLUMN in_folder; ALTER TABLE tasks DROP COLUMN from_branch; DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; \
+            "ALTER TABLE tasks DROP COLUMN in_folder; ALTER TABLE tasks DROP COLUMN from_branch; DROP TABLE queued; DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; \
              ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN sub_number; ALTER TABLE tasks DROP COLUMN root_id; PRAGMA user_version = 9;",
         )
         .unwrap();
