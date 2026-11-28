@@ -848,7 +848,10 @@ impl Fake {
                         seen.extend(did);
                     }
                 }
-                let text = format!("I read {n} report(s). {}", seen.join(" | "));
+                // A Cattain ends on its digest, as a real one does: a crew thread's question it quotes is not its own question to the
+                // person (its last words would otherwise end with that question mark and its turn read as asking).
+                let close = if crew > 0 { " I updated the digest." } else { "" };
+                let text = format!("I read {n} report(s). {}{close}", seen.join(" | "));
                 self.say(&text, 3, Duration::from_millis(10));
                 self.result(&text, false);
             }
