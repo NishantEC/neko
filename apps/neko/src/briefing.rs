@@ -138,6 +138,7 @@ pub fn note_body(b: &Briefing, whose: &dyn Fn(&TaskId) -> Whose) -> String {
         let w = whose(&n.task);
         return match (&n.need, &w) {
             (Need::Question { .. }, Whose::Cattain(name)) => format!("{name} asks: {what}"),
+            (Need::Permission { .. }, Whose::Cattain(name)) if n.subagent.is_none() => format!("{name} asks: {what}"),
             (Need::Failure { .. }, _) => format!("{} \u{b7} Failed: {what}", titled(&n.title, &w)),
             _ => format!("{} \u{b7} Needs you: {what}", titled(&n.title, &w)),
         };

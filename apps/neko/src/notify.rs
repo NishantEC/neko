@@ -404,7 +404,8 @@ pub fn titled(title: &str, whose: &Whose) -> String {
 
 /// The notification for an item: the thread's title ("Fix login (miso's crew)" in a crew), then "Needs you: …" with what is asked in
 /// short, and its actions. No cat is named (docs/knowledge/needs-you.md): the thread is the person's, whoever its agent is. The one
-/// exception is a Cattain's own question (its `ask_person`, or a turn that ended asking): "miso asks", then the question.
+/// exception is a Cattain asking in its own thread (its `ask_person`, a turn that ended asking, or its own request): "miso asks", then
+/// what it asks.
 pub fn note_for(item: &NeedsItem, whose: &Whose) -> Note {
     let mut info = if item.task.0.is_empty() { vec![("item".to_owned(), item.id.clone())] } else { link_info(&item.task, Some(&item.id)) };
     let (body, buttons) = match &item.need {
@@ -431,12 +432,7 @@ pub fn note_for(item: &NeedsItem, whose: &Whose) -> Note {
         Need::Question { run, question, kitten, via, .. } => {
             info.push(("run".into(), run.0.clone()));
             let from = kitten.as_deref().map(|k| format!("{}: ", crate::subagents::question_says(Some(k), via))).unwrap_or_default();
-            let reply = vec![Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }];
-            if let Whose::Cattain(name) = whose {
-                // The Cattain tags the person: its name asks, and the question is the whole body.
-                return Note { id: note_id(&key_of(item)), title: format!("{name} asks"), body: short(&format!("{from}{question}"), BODY_CHARS), info, buttons: reply };
-            }
-            (short(&format!("Needs you: {from}{question}"), BODY_CHARS), reply)
+            (short(&format!("Needs you: {from}{question}"), BODY_CHARS), vec![Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }])
         }
         Need::Failure { text, .. } => (short(&format!("Failed: {text}"), BODY_CHARS), Vec::new()),
         // Approving a plugin is never done from a banner: the notification only opens the list.
@@ -445,7 +441,14 @@ pub fn note_for(item: &NeedsItem, whose: &Whose) -> Note {
             (short(&crate::plugins::note_words(ask), BODY_CHARS), Vec::new())
         }
     };
-    Note { id: note_id(&key_of(item)), title: titled(&item.title, whose), body, info, buttons }
+    // A Cattain's own question or request is the Cattain asking the person: its name asks, and what it asks is the whole body. (A
+    // kitten's request in its thread stays the thread's: the kitten asks, not the Cattain.)
+    let asks = matches!(item.need, Need::Question { .. }) || matches!(item.need, Need::Permission { .. }) && item.subagent.is_none();
+    let (title, body) = match whose {
+        Whose::Cattain(name) if asks => (format!("{name} asks"), body.strip_prefix("Needs you: ").map(str::to_owned).unwrap_or(body)),
+        _ => (titled(&item.title, whose), body),
+    };
+    Note { id: note_id(&key_of(item)), title, body, info, buttons }
 }
 
 /// "Done", with the first line of the answer when there is one.
@@ -665,8 +668,13 @@ mod tests {
         let n = note_for(&ask, &miso);
         assert_eq!((n.title.as_str(), n.body.as_str()), ("miso asks", "Merge acme#12?"), "the Cattain tags the person");
         assert_eq!(n.buttons, vec![Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }], "answered from the banner as any question");
-        // A request in the Cattain's own thread is its thread's, as any thread's request is.
-        assert_eq!(note_for(&perm(T1, false), &miso).title, "Run the tests");
+        // Its own request is the Cattain asking too; a kitten's request in its thread is the kitten's, under the thread's title.
+        let own = note_for(&perm(T1, false), &miso);
+        assert_eq!((own.title.as_str(), own.body.as_str(), own.buttons.len()), ("miso asks", "Run a command: cargo test", 3));
+        let mut kitten = perm(T1, false);
+        kitten.subagent = Some("1".into());
+        assert_eq!(note_for(&kitten, &miso).title, "Run the tests");
+        assert_eq!(note_for(&failure(T1), &miso).body, "Failed: Claude Code is not signed in.");
         let crew = Whose::Crew("miso".into());
         let p = note_for(&perm(T2, false), &crew);
         assert_eq!((p.title.as_str(), p.body.as_str()), ("Run the tests (miso's crew)", "Needs you: Run a command: cargo test"));

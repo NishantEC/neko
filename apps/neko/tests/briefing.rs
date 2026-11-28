@@ -218,6 +218,42 @@ fn the_cattains_section_quotes_each_changed_digest_and_only_cattains_have_faces(
 }
 
 #[test]
+fn a_cattains_own_turn_posts_no_done_and_a_crew_thread_nobody_hears_says_whose_crew() {
+    let mut rt = runtime((1200.0, 800.0), false, scene("briefing-cattains"));
+    let rec = Recorder::default();
+    let finish = |rt: &mut Runtime<App>, pick: &dyn Fn(&neko_protocol::Task) -> bool| {
+        let mut t = rt.state.tasks.iter().find(|t| pick(t)).cloned().unwrap();
+        t.status = TaskStatus::Working;
+        rt.update(move |s, _| s.change(neko_protocol::Change::TaskUpdated { task: t.clone() }));
+        let mut t = rt.state.tasks.iter().find(|t| pick(t)).cloned().unwrap();
+        t.status = TaskStatus::Done;
+        rt.update(move |s, _| s.change(neko_protocol::Change::TaskUpdated { task: t.clone() }));
+    };
+    rt.update({
+        let rec = rec.clone();
+        move |s, _| s.notifier = Notifier::new(Box::new(rec))
+    });
+    finish(&mut rt, &|t| t.cattain && t.cat.as_deref() == Some("cat_miso"));
+    assert!(posts(&rec.take()).is_empty(), "nothing of a Cattain's notifies but its ask");
+    // miso has run, so it hears its crew: a crew thread finishing is miso's news, not the person's.
+    finish(&mut rt, &|t| t.title.starts_with("Fix test four"));
+    assert!(posts(&rec.take()).is_empty(), "a crew thread finishing posts nothing when its Cattain hears it");
+    // A Cattain nobody has talked to hears nothing: the person does, told whose crew it is.
+    rt.update(|s, _| {
+        for t in s.tasks.iter_mut().filter(|t| t.cattain) {
+            t.status = TaskStatus::New;
+        }
+    });
+    finish(&mut rt, &|t| t.title.starts_with("Fix test one"));
+    let sent = rec.take();
+    let p = posts(&sent);
+    assert_eq!((p.len(), p[0].title.as_str()), (1, "Fix test one: the clock in the retry test (miso's crew)"));
+    finish(&mut rt, &|t| t.title.starts_with("Ask for a Cattain"));
+    let sent = rec.take();
+    assert_eq!(posts(&sent)[0].title, "Ask for a Cattain for the iOS beta", "a thread of the person's names no cat");
+}
+
+#[test]
 fn a_digest_with_nothing_under_needs_you_or_new_still_shows_it_changed_in_one_quiet_line() {
     let rt = runtime((1200.0, 800.0), false, scene("briefing-cattains-quiet"));
     assert!(has_key(&rt, "briefing-digest-cat_mochi-quiet") && texts(&rt).contains("Nothing under Needs you or New."));
