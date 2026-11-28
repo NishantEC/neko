@@ -241,3 +241,13 @@ the row's actions under the pointer (as a thread's row does). Needs you leads wi
 only the figures that say something. Overview has no card around anything. Tabs share one body that fades in when it replaces
 another. The sheet under 1100 points is rune-ui's Sheet (the floating material, rounded on its free edges, a scrim) holding the same
 tabs. Renders: `scripts/snap.sh` pictures `pane-overview*`, `review*`, `pane-changes-*` and `pane-kitten-*`.
+
+## The search palette (S9)
+
+The calmest way to get anywhere: one centred sheet in the floating material (rune-ui's Command), a bare field over a hairline, sections in
+the second ink (Recent or Threads, Kittens, Cattains, Projects, Actions), rows of one line with a lead (a thread's status mark in a 20 point
+square, a Cattain's face, an icon), the title in the first ink with its matched letters semibold, and at the right the project and age in
+the faint ink (a long project name is cut at 16 characters so the title keeps the room). A row found by what was said has a second line
+of the words around the match, the match semibold. The highlighted row takes the selected wash. The footer names the four keys. The
+sheet's top never moves; rows come and go beneath it; while an answer is awaited the rows stay and the field spins. Renders:
+`scripts/snap.sh` pictures `search-*` (light, dark, 1200 by 800 and 760 by 560).

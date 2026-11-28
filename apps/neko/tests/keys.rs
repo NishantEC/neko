@@ -28,6 +28,7 @@ fn tab_reaches_every_control_once_in_reading_order() {
     assert_eq!(
         seen,
         [
+            "search-open",
             "sidebar-hide",
             "new-thread",
             "needs-you",
@@ -41,10 +42,10 @@ fn tab_reaches_every_control_once_in_reading_order() {
             "composer-input",
             "workspace-picker"
         ],
-        "New thread, then Needs you, the Briefing and Rounds (no thread has a cat, so no Cattains stop); Threads' View and New thread are their own; the groups and their rows are one stop; a group's New thread is its own; there is no New cat…; the words, then the project chip under the composer (the empty composer's Send is off, and No project offers no worktree or branch); no house, no cat tiles"
+        "Search then Hide sidebar (the band), New thread, then Needs you, the Briefing and Rounds (no thread has a cat, so no Cattains stop); Threads' View and New thread are their own; the groups and their rows are one stop; a group's New thread is its own; there is no New cat…; the words, then the project chip under the composer (the empty composer's Send is off, and No project offers no worktree or branch); no house, no cat tiles"
     );
     // Round once, the focus is back on the first control; Shift+Tab walks back the same way, wrapping.
-    assert_eq!(focus(&rt).as_deref(), Some("sidebar-hide"));
+    assert_eq!(focus(&rt).as_deref(), Some("search-open"));
     tab(&mut rt, true);
     assert_eq!(focus(&rt).as_deref(), Some("workspace-picker"));
     tab(&mut rt, true);
@@ -54,7 +55,7 @@ fn tab_reaches_every_control_once_in_reading_order() {
 #[test]
 fn the_arrows_move_in_the_list_and_return_opens() {
     let mut rt = runtime((1200.0, 800.0), false, scene("tasks-home"));
-    for _ in 0..8 {
+    for _ in 0..9 {
         tab(&mut rt, false);
     }
     assert_eq!(focus(&rt).as_deref(), Some("ws-default"), "with no thread open, the list's stop is the first section");

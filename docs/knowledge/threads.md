@@ -123,7 +123,7 @@ What the person sees (`sidebar.rs`, `shelf.rs`):
 - **Settled (n)** ends a group: a chevron, the word and the count, a control high, a row gap under the last row. Pressing it opens the
   settled threads in place as ordinary rows; View ▸ Show settled keeps every fold open. A group with only settled threads shows just
   its fold.
-- **Archived threads** are in no list. Until Search (S9) finds them, View ▸ Show archived adds an **Archived** fold at the end of Threads,
+- **Archived threads** are in no list. Search (⌘K, `search.md`) finds them, marked "archived"; View ▸ Show archived stays and adds an **Archived** fold at the end of Threads,
   with the threads as rows naming their projects. This is the one thing the spec did not ask for.
 - **The row's menu** (the three dots under the pointer; it shows no key hints, see below): Pin to top or Unpin, Settle (off while the thread works) or Bring back, Mark as
   unread or read, Archive or Restore, Remove thread…. The band's menu has Pin, Settle, Archive, then All changes and Remove thread….

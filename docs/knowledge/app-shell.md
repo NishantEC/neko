@@ -48,7 +48,7 @@
 
 ## Menus
 
-Neko (About Neko with version and commit, Services, Hide, Hide Others, Show All, Quit), File (New Thread ⌘N, Close Window ⌘W),
+Neko (About Neko with version and commit, Services, Hide, Hide Others, Show All, Quit), File (New Thread ⌘N, Search… ⌘K, Close Window ⌘W),
 Edit (Rune's standard items; AppKit adds Start Dictation and Emoji & Symbols), View (New Thread ⌘1, Needs You ⌘2, Rounds ⌘3, Briefing ⌘4, Hide/Show Sidebar ⌃⌘S, Enter/Exit Full
 Screen ⌃⌘F), Window (Minimize, Zoom, Bring All to Front), Help (Neko Help, registered as the help menu). Raw AppKit does three
 things Rune does not: register the Help menu, remove Rune's Window ▸ Close (File has it), keep AppKit's own Enter Full Screen out.
@@ -64,6 +64,7 @@ The model is pure and tested (`menu.rs`): no key is taken twice.
 - In the composer Return sends, Shift+Return makes a new line. On New thread ⌘Return starts the thread without opening it (`threads.md`). Escape gives focus back.
 - ⌘1 is New thread, ⌘2 Needs you (`needs-you.md`), ⌘3 Rounds (`rounds.md`), ⌘4 the Briefing (`briefing.md`; ⌘↩ marks it read).
 - ⌘⇧P pins and ⌘⇧S settles the thread in view, ⌘Z takes back what the newest toast offers to undo, ⌥1 to ⌥9 open the nth thread of the sidebar and ⌘⌥↑ and ⌘⌥↓ the one before and after (`threads.md`, "Pin, settle, archive"). On a Mac Option types a symbol, so ⌥1 is read by where the key sits (`lib.rs`, `on_key`). On a group's header ⌥⌘↑ and ⌥⌘↓ still move the group.
+- ⌘K opens Search, the palette (`search.md`); with it open ↑ ↓ move, ↩ opens, ⌘↩ opens beside, Tab makes a new thread of the text, Esc closes. The sidebar's band has a Search button beside Hide sidebar (the first Tab stop after the traffic lights is Search, then Hide sidebar).
 - ⌘N goes to New thread (the sidebar's New thread row is selected while it shows) with the keyboard in the composer, in the project of the thread in view. ⌘1 does the same. ⌘, opens Settings (Neko ▸ Settings…).
 
 ## Accessibility
@@ -269,3 +270,12 @@ rune-ui's Toast is installed (`src/ui/toast.rs`). `App::toasts` is a `ToastHost`
 frame, which starts a toast's timer and asks for the wake that ends it; `view::view` mounts `Toasts` last in the overlay layer, bottom centre,
 with `on_action` sending the toast's tag to `App::toast_action`. A handler without a `Tx` uses `ToastHost::push`; its timer starts at the
 next `poll`. Each toast is a polite `status` live region, so it is read out without moving focus; Escape on a focused toast dismisses it.
+
+## Search (S9, 2026-11-28)
+
+The palette is a modal over the window (`search_view::palette`, mounted by `view::view` after the dialogs and before the toasts): rune-ui's
+Command in the floating material, a soft scrim, 600 points wide, its top edge a function of the window's height. It is built from
+`Command::build` with Neko's own `on_key_preview` for Tab and the same scrim and layer Command's `dialog` makes (so the sheet is modal:
+focus trapped, Escape and a press outside close it). State is `App::palette`; `search.md` has the rest. `poll` calls `palette_poll`
+each frame (it sends the request, never the view), and `Effect::ScrollTo(key)` carries a found message's scroll to `poll`, where the
+`Tx` is.

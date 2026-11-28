@@ -67,6 +67,7 @@ ships in `NOTICE` and `THIRD_PARTY_LICENSES/`.
 - [Rounds](docs/knowledge/rounds.md) — a cat's work that starts by itself: schedules and daylight saving, missed times, overlap, the brakes, the scheduler, the test clock.
 - [Plugins](docs/knowledge/plugins.md) — MCP servers as plugins: the manifest, pasting what people have, approval by digest, secrets in the Keychain, what a run is handed, the check, what is not here yet.
 - [0002: Plugins start with MCP](docs/decisions/0002-plugins-start-with-mcp.md) — why MCP first, why the person approves digests, why no plugin is bundled.
+- [Search](docs/knowledge/search.md) — ⌘K: threads by title and by what was said (FTS5), kittens, Cattains, projects, actions; filters, keys, the speed, the limits.
 - [The QA rig](docs/knowledge/qa.md) — `scripts/qa/run.sh`: scripted journeys of the real app on a real daemon, recorded, with a verdict.
 
 ## Showing a change

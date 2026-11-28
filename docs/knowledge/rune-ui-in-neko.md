@@ -27,7 +27,7 @@ keeps what was last written), then `rune-ui add portrait receipt reorder`. Rune 
 0.11.0 (2026-11-27): both git dependencies on `tag = "v0.11.0"` (the CLI built from the tag into `$NEKO_TARGET/cli`), `rune-ui update`
 (five copies merged: `dialog`, `icons`, `kbd`, `sidebar`, `textarea`; nothing of Neko's was in them), then `rune-ui add tabs split`.
 Nothing else broke: the 0.11 breaking changes are `CommandItem` (Neko has no Command yet) and the tab strip's one Tab stop. `command`
-is not installed yet (S9). `rune-ui diff --check` says "no drift". Toast was added by S8 (below).
+was installed by S9 (below). `rune-ui diff --check` says "no drift". Toast was added by S8 (below).
 
 What 0.11 let Neko drop: the plug glyph it drew itself (`icons::PLUGIN`; `ui::icons::PLUG` is the kit's), the Add-server sheet's own
 150 point scroll for a long list of servers (`Dialog::scroll_body(true)`: the header and the buttons stay, the body scrolls), and
@@ -159,3 +159,16 @@ by `view::view`, `ToastSpec::new(title).description(thread title).action("Undo",
 and the spec says 5, so the timeout is set after the action. Not adopted: `SidebarItem::subtitle_el`, `trail_swap` and `indent` for the thread
 rows. They would have to reproduce S1's rows to the point (the status mark's slot, the age and "Working" swap with the menu, the project
 name on line 2, the rhythm test); the rows stayed Neko's own, and nothing in S8 needed the swap.
+
+## Command (S9)
+
+`rune-ui add command` (0.11.0, built from the tag into `$NEKO_TARGET/cli`; only `src/ui/command.rs`, `mod.rs` and the lock changed; `kbd` and
+`icons` were already there; `rune-ui diff --check` says "no drift"). Neko uses `Command::new(..).items(..).recents(..).loading(..).hint(..)`
+`.on_select/.on_alt/.on_highlight` and `.build(t)`, adding its own `on_key_preview` (Tab) to the built element and mounting it as `dialog`
+does. `CommandItem` is not `Send`: the items are built in the view each frame (a dozen of them). Command matches fuzzily and ranks, so a row
+the daemon found by something it cannot see (an accent, a filter) carries the typed text as `keywords`, and only then (a keyword that always
+matches would also win the highlight over the snippet's letters).
+
+Upstream asks (rune-ui Command): speak a row's `hint` (it is `a11y_hidden`, so VoiceOver does not hear a thread's project and age); let the
+caller give the text rows are matched against (Command matches the whole field, so `status:needs` is a word to fuzzy-match and the app works
+round it with keywords); its rows are not focusable, so only the highlighted one says it is selected (`tests/a11y.rs` holds the palette to exactly one selected row instead of the "selected or unselected" every other list row has); a subtitle match is only medium weight in the faint ink, quiet beside the title's semibold.

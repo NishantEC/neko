@@ -270,3 +270,17 @@ and Open in main view reaches the breadcrumb. `pane-narrow` runs at 1000 by 700:
 Escape closes it, and the band keeps the title's 140 points throughout. `review-undo`, `undo-plain-folder`, `git-worktree`,
 `subagents-restart` and `subagents-stop` moved to the Changes tab and the tab (the old checks are unchanged). The driver learned two
 selectors for these: `"selected": true` (a chosen item: `focus_selected`) and `"min_w": 140` (at least this wide).
+
+## The search scenarios (S9)
+
+Headless, against the real daemon. The palette's rows have the role `option` to the driver (`list-box-option` in the accessibility tree), and the
+selector `"in": {"key": "palette"}` keeps a check to the palette's own rows (the sidebar has rows of the same names).
+
+`search-words`: two threads finish (the fake `plain` script says "Hello from the fake Claude Code. Nothing was changed."). ⌘K lists both under
+Recent with the actions after; typing "nothing" (a word only the agent said) lists exactly the two, each row showing the words around the match;
+Down and Return open the older one and close the palette; ⌘K and "garden" find one by its title and leave the other out; Escape closes.
+`search-filters`: a thread finishes in acme-api, one in mochi-notes ends with a question; `status:needs`, `project:acme`, `project:mochi
+status:needs` keep what they say, and `status:sleepy` says it is not a status. `search-new-thread`: with a project added, "tidy the garden shed
+[fake:plain] project:acme" and Tab: the palette closes, New thread says "in acme-api" and its composer holds the words without the filter;
+Return starts the thread and it runs in acme-api. Not checked by the rig: the scroll to a found message in a long conversation (a thread
+the fake makes is one screen; `apps/neko/tests/search.rs` checks that the reveal is asked for and waits for the transcript).
