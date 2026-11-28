@@ -17,7 +17,7 @@ names, the `neko://task/<id>` link (it is a contract with notifications already 
 daemon's own name for the built-in project (`General`, id `default`); the app shows it as No project
 (`App::upsert_workspace`). New thread (below) replaced Home, so those words are gone.
 
-## What the daemon works out (protocol 12, store 9)
+## What the daemon works out (protocol 12, store 9; pin, settle and archive come below)
 
 All of it is derived in `crates/neko-core/src/thread.rs`, from what the store holds, so every screen sees the same after a restart.
 The Needs you list uses the same predicate (`needs::failure_of`), so a thread's flag and the list agree.
@@ -58,8 +58,7 @@ Migration 9 reads every existing task as read as of its last activity and fills 
   right of line 2). The choice is kept in the prefs (`thread-grouping`). Show more appears after 8 rows in a group.
 - **With no thread at all** the section says "Threads you start appear here" and No project is not listed.
 
-Subagents are not threads: no row, no group. Not here yet (later slices): Pinned and Settled groups, the row's keys (⌘⇧P, ⌘⇧S, `a`),
-drag a row onto a Cattain. `u` for Mark as unread was left out: in a list that jumps to a typed name it would swallow the letter.
+Subagents are not threads: no row, no group. Not here yet (later slices): drag a row onto a Cattain. `u` for Mark as unread (and `a` for Archive) was left out: in a list that jumps to a typed name it would swallow the letter.
 
 ## New thread (protocol 14, store 11)
 
@@ -91,6 +90,56 @@ none (`cats.md`). The screen is `new_thread_view.rs`, its state `new_thread.rs`.
 - **Tests:** `apps/neko/tests/new_thread.rs` (end to end against a real daemon, the folder race included), core
   `a_thread_can_start_from_a_chosen_branch_or_work_in_the_folder_itself`, the daemon's `a_new_thread_says_where_it_can_start_from_…`.
   QA scenarios are in `qa.md`.
+
+## Pin, settle, archive (protocol 17, store 13; S8, 2026-11-27)
+
+Three ways to put a thread where the person wants it, and one way Neko puts one away. The rules are in one place,
+`crates/neko-core/src/shelf.rs`; the stored times are `tasks.pinned_ms`, `settled_ms` and `archived_ms`, and the task carries them as the
+booleans `pinned`, `settled`, `archived` (none is written until it is true).
+
+- **Pinned** threads sit at the top of Threads in a group of their own, from any project, and are never settled by themselves.
+- **Settled** threads wait in a folded **Settled (n)** line at the end of their group. New activity brings one back: the agent's words,
+  the end of a run, a request, a run starting (the person's message, a wake, a round). A stop is the person's own doing and does not.
+  Pinning a settled thread brings it back; settling a pinned thread unpins it (Undo puts the pin back too).
+- **Archived** threads sleep: out of every list, out of Needs you (its flag and its request items go while it sleeps and come back when
+  it is restored), kept as they were. The person's next message in one starts a run and wakes it; Restore (the row's menu) brings it back
+  without a run. Archiving keeps a thread's pin, so Restore puts it back exactly. Timers and watches do not exist yet; when they do
+  (S13) archiving ends them.
+- **Refusals,** in words, never silent: a thread that works cannot be settled or archived ("It is working. Settle it when it stops."),
+  and one that waits on its kittens cannot be archived. A kitten is not a thread: it cannot be any of the three. Taking one off, and
+  asking for what already is, are always fine.
+- **Auto-settle** is the daemon's housekeeping, in the rounds scheduler's loop (`rounds.rs`): a thread nothing has happened in for
+  **7 days** (the newest of its creation, its activity and its runs) is settled when it is idle. It skips pinned, archived and settled
+  threads, threads that work or wait on their kittens, threads that need the person, and threads with a report waiting to wake them. It
+  looks when a thread's week is up and at least every 6 hours while any thread could still be settled; with none it asks for no timer.
+  Its clock is the scheduler's, so the QA rig's debug clock moves it (`qa.md`, `auto-settle`). The setting "Auto-settle after" is S16.
+- **Requests:** `pin_task {task, pinned}`, `settle_task {task, settled}`, `archive_task {task, archived}`; each answers `task` and every
+  screen hears `task_updated`.
+
+What the person sees (`sidebar.rs`, `shelf.rs`):
+
+- **Pinned** is the first group under the Threads header (a pin glyph and the word, no fold: it is gone when nothing is pinned). Its rows
+  are the ordinary rows and each names its project at the right of line 2, as in the ungrouped list.
+- **Settled (n)** ends a group: a chevron, the word and the count, a control high, a row gap under the last row. Pressing it opens the
+  settled threads in place as ordinary rows; View ▸ Show settled keeps every fold open. A group with only settled threads shows just
+  its fold.
+- **Archived threads** are in no list. Until Search (S9) finds them, View ▸ Show archived adds an **Archived** fold at the end of Threads,
+  with the threads as rows naming their projects. This is the one thing the spec did not ask for.
+- **The row's menu** (the three dots under the pointer): Pin to top or Unpin, Settle (off while the thread works) or Bring back, Mark as
+  unread or read, Archive or Restore, Remove thread…. The band's menu has Pin, Settle, Archive, then All changes and Remove thread….
+- **Keys:** ⌘⇧P and ⌘⇧S pin and settle **the thread in view** (whatever has focus: when a row leaves the list the focus moves, and the
+  key must not act on a row the person did not choose); ⌥1 to ⌥9 open the nth thread of the sidebar in the order it is drawn (Pinned,
+  then each open group, its rows and then its settled ones when that fold is open); ⌘⌥↑ and ⌘⌥↓ step to the thread before and after,
+  wrapping. A bare `a` for Archive was left out for the reason `u` was: the list jumps to a typed name.
+- **Toasts** (rune-ui's Toast, bottom centre, polite): Settled, Archived and Unpinned each say what happened, name the thread and offer
+  Undo for 5 seconds; the timer holds while the pointer is over the toast. ⌘Z takes back the newest toast that has an Undo (the toast goes
+  with it). Pinning shows no toast (the row jumps to Pinned: that is the news). A refusal shows a warning toast with the daemon's words
+  and no Undo. A text field keeps its own ⌘Z. `App::undo_toast`, `App::toast_action`.
+- Opening a settled or archived thread works as for any thread; it stays open when it is settled or archived under the person's eyes.
+
+Tests: `crates/neko-core/tests/shelf.rs` (flags, refusals, what brings a thread back, the housekeeping), `crates/neko-daemon/tests/shelf.rs`
+(requests, pushes, a message waking an archived thread, Needs you, the week with the debug clock), `apps/neko/tests/shelf.rs` (groups,
+folds, menus, keys, toasts, order and rhythm). QA scenarios `settle-undo`, `auto-settle`, `archive-wake` (`qa.md`).
 
 ## Sidebar width
 

@@ -1,6 +1,6 @@
 # The store (S1, 2026-11-26)
 
-`crates/neko-core`. (The right pane, protocol 15, changed nothing here: the pane's open state is the app's prefs, its overview is derived from checkpoints.) SQLite through `rusqlite` with the `bundled` feature, at `<data>/neko.sqlite3`.
+`crates/neko-core`. (Version 13 below is pin, settle and archive.) (The right pane, protocol 15, changed nothing here: the pane's open state is the app's prefs, its overview is derived from checkpoints.) SQLite through `rusqlite` with the `bundled` feature, at `<data>/neko.sqlite3`.
 
 ## Records
 
@@ -41,6 +41,7 @@
   `task_created` carries the subagent's number; `wake_created`, `wake_delivered`, `wake_discarded`. See `subagents.md`.
 - Version 12 (steer, queue, interrupt; protocol 16) adds `queued (id, task_id, words, kind, at_ms)`: the messages waiting above a thread's composer, `kind` `queued`, `steered` or `interrupting` (`composer.md`), in the order of the table's rowid. A thread's rows go with it (`remove_task`); a stop settles them (steered rows are dropped, an interrupt that never went through becomes `queued`). Events: `queued`, `queued_changed`, `queued_left` (with the reason: read, sent, sent now, discarded, run ended, daemon stopped). `Settings.queue_first` is a `settings` row (`queue_first`, `yes`/`no`).
 - Version 11 (new thread) adds `tasks.in_folder` and `tasks.from_branch` (work in the project's own folder with no worktree; the local branch a worktree starts from). `cat_id` was already nullable: no data changes and old tasks keep their cat, but nothing assigns one to a new task any more (`cats.md`, `threads.md`).
+- Version 13 (pin, settle, archive; protocol 17) adds `tasks.pinned_ms`, `settled_ms` and `archived_ms` (null: not; else when). Nothing that exists is any of them. Events: `task_pinned`, `task_unpinned`, `task_settled`, `task_unsettled`, `task_archived`, `task_unarchived`. A run starting clears `settled_ms` and `archived_ms` and a run's end or the agent's words clear `settled_ms`, in the same transaction (`records.rs`); `Store::auto_settle` is the week's housekeeping (`shelf.rs`). An archived task is left out of `needs::derive` and its `needs_you` flag is false.
 - The Briefing (protocol 10) adds **no table and no migration**: where the person last read it, the morning switch and time and the morning's cursor are `settings` rows (`briefing_read_ms`, `briefing_morning_on`, `briefing_morning_at`, `briefing_morning_cursor_ms`). The store stayed at version 7 for it (plugins made the eighth migration). See `briefing.md`.
 - `events (seq, at_ms, workspace_id, subject, kind, data)`. One row per change, in the same transaction as the change.
   `seq` is the revision the daemon pushes. Triggers refuse `UPDATE` and `DELETE` on it.

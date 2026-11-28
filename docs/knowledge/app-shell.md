@@ -63,6 +63,7 @@ The model is pure and tested (`menu.rs`): no key is taken twice.
   opens a row or folds a section; Left and Right fold and open; ⌥⌘↑ and ⌥⌘↓ move a section (`workspaces.md`).
 - In the composer Return sends, Shift+Return makes a new line. On New thread ⌘Return starts the thread without opening it (`threads.md`). Escape gives focus back.
 - ⌘1 is New thread, ⌘2 Needs you (`needs-you.md`), ⌘3 Rounds (`rounds.md`), ⌘4 the Briefing (`briefing.md`; ⌘↩ marks it read).
+- ⌘⇧P pins and ⌘⇧S settles the thread in view, ⌘Z takes back what the newest toast offers to undo, ⌥1 to ⌥9 open the nth thread of the sidebar and ⌘⌥↑ and ⌘⌥↓ the one before and after (`threads.md`, "Pin, settle, archive"). On a Mac Option types a symbol, so ⌥1 is read by where the key sits (`lib.rs`, `on_key`). On a group's header ⌥⌘↑ and ⌥⌘↓ still move the group.
 - ⌘N goes to New thread (the sidebar's New thread row is selected while it shows) with the keyboard in the composer, in the project of the thread in view. ⌘1 does the same. ⌘, opens Settings (Neko ▸ Settings…).
 
 ## Accessibility
@@ -261,3 +262,10 @@ view shows its thread's pane) and to no other page: New thread, Settings, Needs 
   kitten into the main view (breadcrumb, read-only) and takes its tab away.
 - The Changes tab's badge, Overview's sections and the tab strip are checked by `tests/pane.rs`; the daemon's side by
   `crates/neko-daemon/tests/undo.rs`; the journeys by the rig's `pane-overview`, `pane-undo`, `pane-subagent-tab` and `pane-narrow`.
+
+## Toasts (S8, 2026-11-27)
+
+rune-ui's Toast is installed (`src/ui/toast.rs`). `App::toasts` is a `ToastHost`; `poll` in `lib.rs` calls `toasts.poll(clock, tx)` each
+frame, which starts a toast's timer and asks for the wake that ends it; `view::view` mounts `Toasts` last in the overlay layer, bottom centre,
+with `on_action` sending the toast's tag to `App::toast_action`. A handler without a `Tx` uses `ToastHost::push`; its timer starts at the
+next `poll`. Each toast is a polite `status` live region, so it is read out without moving focus; Escape on a focused toast dismisses it.

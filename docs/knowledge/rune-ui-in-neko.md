@@ -26,9 +26,8 @@ keeps what was last written), then `rune-ui add portrait receipt reorder`. Rune 
 
 0.11.0 (2026-11-27): both git dependencies on `tag = "v0.11.0"` (the CLI built from the tag into `$NEKO_TARGET/cli`), `rune-ui update`
 (five copies merged: `dialog`, `icons`, `kbd`, `sidebar`, `textarea`; nothing of Neko's was in them), then `rune-ui add tabs split`.
-Nothing else broke: the 0.11 breaking changes are `CommandItem` (Neko has no Command yet) and the tab strip's one Tab stop. `toast`
-and `command` are not installed (nothing uses them until the slices that need them), so there is no `ToastHost` to poll yet; the slice
-that adds toasts adds `ToastHost::poll` to `poll` in `lib.rs`. `rune-ui diff --check` says "no drift".
+Nothing else broke: the 0.11 breaking changes are `CommandItem` (Neko has no Command yet) and the tab strip's one Tab stop. `command`
+is not installed yet (S9). `rune-ui diff --check` says "no drift". Toast was added by S8 (below).
 
 What 0.11 let Neko drop: the plug glyph it drew itself (`icons::PLUGIN`; `ui::icons::PLUG` is the kit's), the Add-server sheet's own
 150 point scroll for a long list of servers (`Dialog::scroll_body(true)`: the header and the buttons stay, the body scrolls), and
@@ -89,8 +88,7 @@ only (tested by reading `lib.rs`).
   Split leaves a grab handle on the window's edge, which `tests/structure.rs` rightly rejects).
 - **Tabs** (`pane_view::tab_strip`): the Pane variant, `permanent()` on Overview and Changes, `on_close` for kitten tabs, overflow into
   "More tabs" with `TabsState` in `App::pane`. **Sheet** (`rune-ui add sheet`): the pane under 1100 points.
-- **Dialog::scroll_body**, **Textarea::mono**, **icons::PLUG** (Add server). Not yet: `Toast` (nothing shows one before S8; the slice that
-  adds it adds `ToastHost::poll` to `poll`), `Command`, `SidebarItem::subtitle_el`/`trail_swap`/`indent` (the sidebar rows are Neko's own,
+- **Dialog::scroll_body**, **Textarea::mono**, **icons::PLUG** (Add server). Not yet: `Command`, `SidebarItem::subtitle_el`/`trail_swap`/`indent` (the sidebar rows are Neko's own,
   below), and Open in editor.
 
 ## Upstream asks from S3
@@ -147,3 +145,12 @@ now takes Rune with `default-features = false` and names the six other defaults 
 no package, `Cargo.lock` has neither, and `scripts/licenses.py` no longer lists MPL-2.0 among the licences it accepts, so one that
 comes back fails the check. Neko plays no audio. Cargo unifies features: any new dependency that turns Rune's defaults back on
 brings them back, and the licence script will say so.
+
+## Toast (S8)
+
+`rune-ui add toast` (0.11.0, built from the tag into `$NEKO_TARGET/cli`; nothing else changed in `src/ui/`). Neko uses the host: `App::toasts`
+(`ToastHost`), `ToastHost::poll` in `lib.rs`'s `poll`, `Toasts::new("toasts", &s.toasts, access).position(BottomCenter).on_action(..)` mounted
+by `view::view`, `ToastSpec::new(title).description(thread title).action("Undo", tag).timeout(5.0)`. `ToastSpec::action` gives 8 seconds
+and the spec says 5, so the timeout is set after the action. Not adopted: `SidebarItem::subtitle_el`, `trail_swap` and `indent` for the thread
+rows. They would have to reproduce S1's rows to the point (the status mark's slot, the age and "Working" swap with the menu, the project
+name on line 2, the rhythm test); the rows stayed Neko's own, and nothing in S8 needed the swap.

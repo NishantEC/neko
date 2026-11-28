@@ -105,6 +105,18 @@ the faintest ink that reads, or "Working" in teal; under the pointer a quiet men
 project's name sits at the right of line 2 in the faint ink, cut at 88 points. The mark, the amber and the red are each taken toward
 their strong ink until they read against the panel (tested in both looks). Nothing in a row is a portrait, a card or a badge.
 
+### Pinned, Settled and toasts (S8)
+
+**Pinned** is a group heading in the project headings' own step (sm medium, second ink) led by a pin glyph where a project has its chevron,
+so the glyph and the chevrons share a column; it has no fold, no count and no wash. Its rows are the ordinary two-line rows. **Settled (n)**
+is a fold line a control high in the faint ink (sm medium, the count tabular in xs at the right), set a row gap under its group's last row, so
+a group ends in one quiet line and the next group is a section gap away. Pressing it opens ordinary rows under it; nothing is dimmed, because
+a settled thread is put away, not disabled. Both keep the sidebar's one rhythm (`tests/shelf.rs`, `tests/sidebar_rhythm.rs`). The **toast** is
+rune-ui's floating card at the bottom centre: a title ("Settled"), the thread's title under it in the second ink, Undo as a secondary small
+button and a dismiss cross; it comes in from the bottom edge (not under Reduce Motion) and goes after five seconds. A refusal is the same card
+with a warning icon and one line. Pictures: the scenes `threads-pinned`, `threads-settled`, `threads-settled-open`, `threads-archived`,
+`threads-pinned-menu`, `threads-toast-settled` and `thread-band-menu`.
+
 ## The Cattains
 
 The sidebar's section for the cats at work, under the nav and above Threads (`sidebar::cattains`). Header: "Cattains", the small

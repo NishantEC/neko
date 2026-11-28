@@ -115,6 +115,29 @@ Changed to the new truth: `cats.json` is cut to the cats' own lifecycle (rules s
 `cat-rules-cannot-skip-checks` gets its miso task from a round run now, since nothing assigns a cat; `real-smoke` lost its cat steps
 (never run it unasked: it spends money).
 
+## The settle scenarios (S8)
+
+Headless, in No project, threads made with the `daemon` step (`create_task`, kept with `save_as`). A thread that has said its words is not
+yet a thread at rest (its run is still ending), so each scenario waits for "Worked for" or for the row to stop saying "working" before it
+settles or archives: a thread that works is refused, correctly.
+
+`settle-undo`: two finished threads; ⌘⇧S settles the open one: a toast (a polite `status` named Settled) with Undo, the thread out of the
+list and still open, the group ending in a Settled fold that says 1 thread; ⌘Z takes it back (no fold, no toast, newest above the older);
+settled again the toast goes by itself after five seconds and the fold stays; pressing the fold opens it in place; ⌘⇧S brings the thread
+back with no toast. `auto-settle` starts the daemon with `NEKO_DEBUG_CLOCK=1`: an idle thread, a pinned one and one that ends with a
+question; the clock moves on eight days (`clock`, 11520 minutes): the idle one is settled (fold of 1), the pinned one stays in Pinned, the
+asking one stays listed and still needs you. `archive-wake`: Archive from a row's menu (toast, the row leaves, no fold of either kind);
+View ▸ Show archived adds the Archived fold; it holds the thread; opening it and sending a message runs it again (a second "Worked for"),
+the fold goes and the thread is a row of its group. Two driver facts: a checked menu item has the role `menuitemcheckbox`, and a
+`create_task` thread's title includes its `[fake:…]` tag.
+
+`pane-overview` waits, in its step 6, for Overview to say "5 files changed" with five files, not only for the run card's buttons: the card's
+Review and Undo appear when the run's end checkpoint is written, a moment before Overview has asked again and been answered, and the old
+`assert` straight after could see Overview as it was while the run was still writing (it failed once with 2 files, passed on rerun). The app
+now asks for the overview again at that moment (`App::pane_run_changed`, when a run's undo is ready, not only when its status is done). The
+check is the same, only waited for; 14 reruns, 8 of them with the machine loaded, passed. The race was not seen again, so the cause is the
+one described, not one reproduced.
+
 ## How it drives and records
 
 - **Headless (default).** `apps/neko/examples/neko-qa.rs` builds the real app (`neko_app::app()`: its view, state, keys, `poll`
