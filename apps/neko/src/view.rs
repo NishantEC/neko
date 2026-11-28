@@ -117,8 +117,6 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     }
     let page = if s.settings_open {
         crate::settings_view::settings_view(s, &t, &mut layer)
-    } else if let Some(cat) = s.page_cat() {
-        crate::cat_view::cat_view(s, &t, cat, &mut layer)
     } else if s.needs_open {
         crate::needs_view::needs_view(s, &t)
     } else if s.rounds_open {
@@ -182,9 +180,6 @@ fn main_label(s: &App) -> String {
     if s.briefing_open {
         return "Briefing".to_owned();
     }
-    if let Some(c) = s.page_cat() {
-        return c.name.clone();
-    }
     s.open_task().map_or_else(|| "Home".to_owned(), |t| t.title.clone())
 }
 
@@ -245,28 +240,38 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     if !s.sidebar_shown() {
         band = band.child(lights_room(lights).w(if lights > 0.0 { (lights - 4.0).max(0.0) } else { 0.0 })).child(toggle_button(t, false));
     }
-    let Some(task) = s.open_task().filter(|_| !s.settings_open && !s.needs_open && !s.rounds_open && !s.briefing_open && s.page_cat().is_none()) else { return band };
+    let Some(task) = s.open_task().filter(|_| !s.settings_open && !s.needs_open && !s.rounds_open && !s.briefing_open) else { return band };
     let sub = task.subagent.is_some();
     // The title always wins the room: in a narrow content area the folder line goes first and the workspace's name shortens.
     let room = s.width.map_or(f32::MAX, |w| w - if s.sidebar_shown() { SIDEBAR + 2.0 * crate::sidebar::INSET + 1.0 } else { 0.0 } - if s.pane_visible() && !s.pane_is_sheet() { s.pane.width + 1.0 } else { 0.0 });
     let narrow = room < NARROW_BAND;
+    let own = s.cattain_of(&task.id).filter(|_| !sub);
     band = if sub {
         // A subagent's band says whose conversation it is: `Fix login / Kitten 1`, the thread's title a way back.
         band.child(crate::subagents_view::crumb(s, t, task, narrow))
+    } else if let Some(c) = own {
+        // A Cattain's own thread leads with who it is: its portrait, its name, its purpose (docs/knowledge/cats.md).
+        band.child(crate::cattain_view::band_lead(s, t, c, TITLE_MIN))
     } else {
         band.child(text(task.title.clone()).key("band-title").role("heading").level(1).font(weight(t.ty.lg, t.ty.semibold)).color(t.ink()).truncate().min_w(TITLE_MIN).shrink())
     };
-    if let Some(c) = s.cat_of(task).filter(|_| !sub) {
+    // A thread in a Cattain's crew names it, quietly; pressing it opens the Cattain.
+    if let Some(c) = task.crew_of().and_then(|c| s.cat(c)).filter(|_| !sub) {
         let id = c.id.clone();
-        let face = row().key("task-cat").role("button").label(format!("Cat: {}", c.name)).help(format!("Open {}'s page", c.name)).focusable(true).px(t.space.at(1.5)).h(t.control.sm).center_y().radius(t.radius.md).round_as(t);
-        band = band.child(paint_state(face, &t.mat.row, States::default()).child(text(c.name.clone()).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_muted()).a11y_hidden()).on_press(move |s: &mut App| s.open_cat_page(&id)));
+        let face = row().key("task-cat").role("button").label(format!("In {}'s crew", c.name)).help(format!("Open {}", c.name)).focusable(true).px(t.space.at(1.5)).h(t.control.sm).gap(t.space.at(1.5)).center_y().radius(t.radius.md).round_as(t);
+        band = band.child(
+            paint_state(face, &t.mat.row, States::default())
+                .child(crate::faces::portrait(t, "task-cat-face", &c.face, 14.0))
+                .child(text(format!("{}'s crew", c.name)).font(weight(t.ty.sm, t.ty.medium)).color(t.ink_muted()).a11y_hidden())
+                .on_press(move |s: &mut App| s.open_cattain(&id)),
+        );
     }
     band = band.child(row().grow(1.0).min_w(t.space.at(4.0)).h_full());
     let wide = s.width.unwrap_or(1200.0) >= 1000.0;
     if let Some(c) = crate::task_view::run_counter(s, t).filter(|_| wide) {
         band = band.child(c);
     }
-    if let Some(w) = s.workspace_of(&task.workspace) {
+    if let Some(w) = s.workspace_of(&task.workspace).filter(|_| own.is_none()) {
         band = band.child(
             text(w.name.clone())
                 .key("task-workspace")
@@ -281,8 +286,9 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
                 .max_w(if narrow { 110.0 } else { 180.0 }),
         );
     }
-    // A subagent is removed with its thread, never alone: it has no menu.
-    if !sub {
+    // A subagent is removed with its thread, never alone: it has no menu. A Cattain's own thread is kept as long as the Cattain is: its
+    // Profile has Retire.
+    if !sub && own.is_none() {
         band = band.child(task_menu(s, t, task, layer));
     }
     // The pane's own button is in its header while it is docked and open; otherwise it is here, the band's last control.

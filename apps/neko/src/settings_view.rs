@@ -74,7 +74,7 @@ fn agent_card(t: &Theme, r: &RuntimeInfo) -> El {
 }
 
 /// Settings' pages, in the order the switch shows them.
-pub const PAGES: [&str; 6] = ["Agents", "Projects", "Notifications", "Cats", "Briefing", "Plugins"];
+pub const PAGES: [&str; 6] = ["Agents", "Projects", "Notifications", "Cattains", "Briefing", "Plugins"];
 
 pub fn settings_view(s: &App, t: &Theme, layer: &mut Vec<rune::El>) -> El {
     let mut page = col().key("settings").w_full().max_w(COLUMN).gap(t.space.at(6.0));
@@ -203,42 +203,50 @@ pub fn settings_view(s: &App, t: &Theme, layer: &mut Vec<rune::El>) -> El {
 }
 
 /// The Workspaces page: each workspace with its folder and how many tasks it has, and what can be done to it.
-/// Settings ▸ Cats: every cat, the ones at work with Open, the retired ones with Bring back (docs/knowledge/cats.md).
+/// Settings ▸ Cattains: every Cattain, the active ones with Open, the retired ones with Bring back, and New Cattain… (docs/knowledge/cats.md).
 fn cats_page(s: &App, t: &Theme) -> El {
-    let mut part = col().key("settings-cats").w_full().gap(t.space.at(3.0)).child(text("Cats").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())).child(
-        text("The cats who do your threads, each with its own standing rules. A retired cat keeps its threads readable and takes no new ones until you bring it back. At most 16 are at work at once.")
-            .font(t.ty.base)
-            .color(t.ink_muted())
-            .wrap()
-            .min_w(0.0),
+    let active = s.active_cats().len();
+    let mut part = col().key("settings-cats").w_full().gap(t.space.at(3.0)).child(text("Cattains").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())).child(
+        text(format!(
+            "Cats with a thread of their own to talk to, their own files (RULES.md, CREW.md, NOTES.md, DIGEST.md) and a crew of threads. A retired Cattain keeps its threads readable and takes no new crew until you bring it back. {active} of 16 at work."
+        ))
+        .key("settings-cats-about")
+        .font(t.ty.base)
+        .color(t.ink_muted())
+        .wrap()
+        .min_w(0.0),
     );
-    // Cats are made here (the sidebar lists only the cats at work): name it, and its page opens.
-    part = part.child(row().child(Button::new("settings-new-cat", "New cat…").variant(ButtonVariant::Secondary).size(Size::Sm).icon(&crate::ui::icons::PLUS).on_press(|s: &mut App| s.start_new_cat()).build(t)));
+    // Cattains are made here (the sidebar lists only the ones at work): name it, and its thread opens on its Profile.
+    part = part.child(row().child(Button::new("settings-new-cat", "New Cattain…").variant(ButtonVariant::Secondary).size(Size::Sm).icon(&crate::ui::icons::PLUS).disabled(active >= neko_protocol::cats::MAX_ACTIVE).on_press(|s: &mut App| s.start_new_cat()).build(t)));
     for c in &s.cats {
         let key = format!("settings-cat-{}", c.id);
-        let n = s.tasks.iter().filter(|x| x.is_thread() && x.cat.as_deref() == Some(c.id.as_str())).count();
+        let n = s.tasks.iter().filter(|x| x.listed() && x.crew_of() == Some(c.id.as_str())).count();
         let count = match n {
-            0 => "No threads yet".to_owned(),
-            1 => "1 thread".to_owned(),
-            n => format!("{n} threads"),
+            0 => "No crew yet".to_owned(),
+            1 => "1 thread in its crew".to_owned(),
+            n => format!("{n} threads in its crew"),
         };
-        let state = s.cat_state(&c.id).words();
         let mut head = row().w_full().gap(t.space.at(2.0)).center_y().child(text(c.name.clone()).role("heading").level(3).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0).shrink());
         if !c.is_active() {
             head = head.child(Badge::new(format!("{key}-retired"), "Retired").tone(Tone::Neutral).dot().build(t));
         }
-        let facts = col().grow(1.0).min_w(0.0).gap(t.space.at(1.0)).child(head).child(text(if c.is_active() { format!("{} · {count}", capital(&state)) } else { count }).key(format!("{key}-facts")).font(t.ty.sm).color(t.ink_faint()));
+        let mut facts = col().grow(1.0).min_w(0.0).gap(t.space.at(1.0)).child(head);
+        if let Some(p) = c.purpose.as_ref().filter(|p| !p.is_empty()) {
+            facts = facts.child(text(p.clone()).key(format!("{key}-purpose")).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0));
+        }
+        let state = if c.is_active() { format!("{} · {count}", capital(&crate::sidebar::cat_words(s, c))) } else { count };
+        facts = facts.child(text(state).key(format!("{key}-facts")).font(t.ty.sm).color(t.ink_faint()));
         let id = c.id.clone();
         let action = if c.is_active() {
-            Button::new(format!("{key}-open"), "Open").variant(ButtonVariant::Secondary).size(Size::Sm).on_press(move |s: &mut App| s.open_cat_page(&id)).build(t)
+            Button::new(format!("{key}-open"), "Open").variant(ButtonVariant::Secondary).size(Size::Sm).on_press(move |s: &mut App| {
+                s.settings_open = false;
+                s.open_cattain(&id);
+            })
+            .build(t)
         } else {
             Button::new(format!("{key}-back"), "Bring back").variant(ButtonVariant::Secondary).size(Size::Sm).on_press(move |s: &mut App| s.bring_back_cat(&id)).build(t)
         };
-        let st = match s.cat_state(&c.id) {
-            crate::state::CatState::Working(_) if c.is_active() => Some(neko_protocol::TaskStatus::Working),
-            crate::state::CatState::NeedsYou if c.is_active() => Some(neko_protocol::TaskStatus::NeedsYou),
-            _ => None,
-        };
+        let st = if c.is_active() { crate::cattain_view::cattain_status(s, c) } else { None };
         let face = crate::faces::portrait_in(t, &format!("{key}-face"), &c.face, 40.0, st, t.c.surface.bg);
         let face = if c.is_active() { face } else { face.opacity(0.55) };
         part = part.child(paint(row().key(key.clone()).role("group").label(c.name.clone()).w_full().padding(t.space.at(3.0)).gap(t.space.at(3.0)).center_y().radius(t.radius.xl).round_as(t), &t.mat.slab.base).child(face).child(facts).child(action));

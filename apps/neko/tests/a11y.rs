@@ -78,8 +78,11 @@ fn every_scene_reads_well_to_assistive_technology() {
             if let Some(open) = &rt.state.open {
                 // A subagent has no row of its own: its thread's row is the chosen one.
                 let id = rt.state.tasks.iter().find(|t| &t.id == open).and_then(|t| t.subagent.as_ref().map(|s| s.root.clone())).unwrap_or_else(|| open.clone());
-                let row = all.iter().find(|(_, n)| str_of(n, "key") == format!("thread-{}", id.0)).map(|(_, n)| n.clone());
-                if size.0 >= 1000.0 {
+                // A Cattain's own thread is not a row under Threads: its Cattain's row is the chosen one, while it is at work and listed.
+                let own = rt.state.cattain_of(&id).map(|c| (c.id.clone(), rt.state.cat_state(&c.id) != neko_app::state::CatState::Napping));
+                let want = own.as_ref().map_or_else(|| format!("thread-{}", id.0), |(c, _)| format!("cat-{c}"));
+                let row = all.iter().find(|(_, n)| str_of(n, "key") == want).map(|(_, n)| n.clone());
+                if size.0 >= 1000.0 && own.as_ref().is_none_or(|(_, listed)| *listed) {
                     assert!(row.is_some_and(|r| has(&r, "states", "selected")), "{at}: the open thread's row is selected");
                 }
             }

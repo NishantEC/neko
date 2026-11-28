@@ -385,8 +385,8 @@ fn a_plugins_notification_has_no_buttons_opens_the_list_and_is_taken_back() {
 // ---- A cat, a task ------------------------------------------------------------------------------------------------------------------
 
 #[test]
-fn a_cats_page_lists_the_plugins_it_can_use_and_a_name_opens_settings_at_it() {
-    let mut rt = runtime((1200.0, 2400.0), false, scene("cat-page-plugins"));
+fn a_cattains_profile_lists_the_plugins_it_can_use_and_a_name_opens_settings_at_it() {
+    let mut rt = runtime((1200.0, 2400.0), false, scene("cattain-profile-plugins"));
     let all = names(&rt);
     assert!(all.contains("miso can use these plugins."), "{all}");
     assert!(has_key(&rt, &format!("cat-plugin-{ID}")), "acme-docs: for every cat, on");
@@ -395,9 +395,9 @@ fn a_cats_page_lists_the_plugins_it_can_use_and_a_name_opens_settings_at_it() {
     click(&mut rt, &format!("cat-plugin-{ID}"));
     assert!(rt.state.settings_open && rt.state.settings_page == neko_app::plugins::SETTINGS_PAGE);
     assert_eq!(focus(&rt), Some(format!("plugin-{ID}-switch")));
-    let rt = runtime((1200.0, 2400.0), false, scene("cat-page-no-plugins"));
+    let rt = runtime((1200.0, 2400.0), false, scene("cattain-profile-no-plugins"));
     assert!(names(&rt).contains("No plugins. A plugin gives every cat more tools; add one in Settings."));
-    let rt = runtime((1200.0, 2400.0), false, scene("cat-page-plugins-none-for-cat"));
+    let rt = runtime((1200.0, 2400.0), false, scene("cattain-profile-plugins-none-for-cat"));
     assert!(names(&rt).contains("No plugin that is on is open to miso."));
 }
 
@@ -578,13 +578,13 @@ fn paste_approve_test_set_a_secret_choose_cats_switch_off_and_remove_against_a_r
     assert_eq!(rt.state.plugins[0].access.cats, vec![cat.clone()]);
     assert!(rt.state.plugins[0].runs_for(&cat) && !rt.state.plugins[0].runs_for(&rt.state.active_cats()[0].id.clone()));
 
-    // A cat's page names the plugins it may use.
+    // A Cattain's Profile names the plugins it may use.
     rt.update({
         let cat = cat.clone();
-        move |s, _| s.open_cat_page(&cat)
+        move |s, _| s.open_cattain_on(&cat, neko_app::pane::Tab::Profile)
     });
-    settle(&mut rt);
-    assert!(has_key(&rt, &format!("cat-plugin-{id}")));
+    let key = format!("cat-plugin-{id}");
+    until(&mut rt, "its Profile", move |rt| has_key(rt, &key));
 
     // Off, and a plugin that is off is on no cat's page.
     rt.update(|s, _| s.open_plugins(None));

@@ -204,7 +204,7 @@ impl App {
 
     /// The threads of the section that are listed in a group: pinned ones are in Pinned, archived ones are out of the lists.
     fn listed(&self, of: impl Fn(&Task) -> bool) -> (Vec<&Task>, Vec<&Task>) {
-        let mine = |t: &&Task| t.is_thread() && !t.pinned && !t.archived && of(t);
+        let mine = |t: &&Task| t.listed() && !t.pinned && !t.archived && of(t);
         let all: Vec<&Task> = self.tasks.iter().filter(mine).collect();
         let (settled, active): (Vec<&Task>, Vec<&Task>) = all.into_iter().partition(|t| t.settled);
         (self.ordered(active), self.ordered(settled))
@@ -233,13 +233,13 @@ impl App {
     /// The Pinned group: every pinned thread of any project (archived ones are out), those that need the person first. None when
     /// nothing is pinned.
     pub fn pinned_group(&self) -> Option<Group<'_>> {
-        let threads = self.ordered(self.tasks.iter().filter(|t| t.is_thread() && t.pinned && !t.archived).collect());
+        let threads = self.ordered(self.tasks.iter().filter(|t| t.listed() && t.pinned && !t.archived).collect());
         (!threads.is_empty()).then(|| Group { id: PINNED.to_owned(), name: "Pinned".to_owned(), workspace: None, threads, settled: Vec::new() })
     }
 
     /// The archived threads, newest activity first, for the fold View ▸ Show archived adds. None when there are none.
     pub fn archived_group(&self) -> Option<Group<'_>> {
-        let threads = self.ordered(self.tasks.iter().filter(|t| t.is_thread() && t.archived).collect());
+        let threads = self.ordered(self.tasks.iter().filter(|t| t.listed() && t.archived).collect());
         (!threads.is_empty()).then(|| Group { id: ARCHIVED.to_owned(), name: "Archived".to_owned(), workspace: None, threads, settled: Vec::new() })
     }
 

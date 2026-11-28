@@ -82,7 +82,7 @@ pub fn sidebar(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     // The panel starts INSET down and in: its band is twice that shorter, so the lights stay on the window's centre line.
     let band = row().key("sidebar-band").w_full().h(BAND - 2.0 * INSET).center_y().pr(INSET).window_drag().child(lights_room((lights - INSET).max(0.0))).child(row().grow(1.0).h_full()).child(search_button(t)).child(toggle_button(t, true));
     // New thread is where the person starts: the row is selected while its composer (Home, until it is its own page) is what shows.
-    let at_home = s.open.is_none() && !s.settings_open && !s.needs_open && !s.rounds_open && !s.briefing_open && s.open_cat.is_none();
+    let at_home = s.open.is_none() && !s.settings_open && !s.needs_open && !s.rounds_open && !s.briefing_open;
     let new = SidebarItem::new("new-thread", "New thread").icon(&icons::COMPOSE).selected(at_home).on_press(|s: &mut App| s.new_thread_here()).build(t);
     let new = Tooltip::new("New thread").keys("⌘N").wrap(new);
     // Everything waiting for the person, with how many (the same count as the Dock's).
@@ -301,10 +301,17 @@ pub fn shelf_item(s: &App, task: &Task, shelf: Shelf, id: neko_protocol::TaskId)
     }
 }
 
-/// The Cattains: only the cats at work now (a thread working, a request or a question waiting for the person). Each is a two-line
-/// row, its portrait in its state, its name and one line of what it is doing: the working thread's title, "needs you: Run a
-/// command", or "working on 2" with its threads nested under it. A napping cat is not here; cats are made and edited in
-/// Settings > Cats. With no cat at work the section is absent.
+/// What a Cattain is doing, in a few words ("Needs you", "Working on 2", "Napping"): its Profile and Settings ▸ Cattains say it.
+pub fn cat_words(s: &App, c: &neko_protocol::Cat) -> String {
+    let w = s.cat_state(&c.id).words();
+    let mut ch = w.chars();
+    ch.next().map(|f| f.to_uppercase().collect::<String>() + ch.as_str()).unwrap_or_default()
+}
+
+/// The Cattains: only the ones at work now (its own thread or a crew thread working, a request or a question waiting for the
+/// person). Each is a two-line row, its portrait in its state, its name and one line of what it is doing: "needs you: Run a
+/// command", the crew thread's title, "working on 2" with its crew threads nested under it, or its own latest line. A press opens its
+/// thread. A napping Cattain is not here; all of them are in Settings ▸ Cattains and in Search. With none at work the section is absent.
 fn cattains(s: &App, t: &Theme, layer: &mut Vec<El>) -> Option<El> {
     let at_work: Vec<&neko_protocol::Cat> = s.active_cats().into_iter().filter(|c| s.cat_state(&c.id) != CatState::Napping).collect();
     if at_work.is_empty() {
@@ -313,32 +320,36 @@ fn cattains(s: &App, t: &Theme, layer: &mut Vec<El>) -> Option<El> {
     let head = row().key("cattains-head").w_full().h(header(t)).pl(t.metrics.gap).center_y().child(text("Cattains").key("cattains-heading").role("heading").level(2).font(weight(t.ty.sm, t.ty.semibold)).color(t.ink_muted()));
     let mut list = col().key("cattains").role("list").label("Cattains").w_full().gap(t.space.at(ROW_GAP_STEPS)).focus_group();
     for c in at_work {
-        let tasks = s.cat_work(&c.id);
+        let work = s.cat_work(&c.id);
+        let crew: Vec<&Task> = work.iter().copied().filter(|x| x.crew_of() == Some(c.id.as_str())).collect();
+        let own = work.iter().copied().find(|x| x.cattain);
         let needs: Vec<&NeedsItem> = s.visible_needs().into_iter().filter(|i| i.cat == c.id).collect();
         let (st, ink, said, line) = if let Some(first) = needs.first() {
-            let line = if tasks.len() >= 2 { format!("needs you · {} threads", tasks.len()) } else { format!("needs you: {}", threads::need_words(first)) };
+            let line = if crew.len() >= 2 { format!("needs you · {} threads", crew.len()) } else { format!("needs you: {}", threads::need_words(first)) };
             (TaskStatus::NeedsYou, t.c.warning.fg, line.clone(), line)
-        } else if tasks.len() >= 2 {
-            let line = format!("working on {}", tasks.len());
+        } else if crew.len() >= 2 {
+            let line = format!("working on {}", crew.len());
             (TaskStatus::Working, t.c.accent.fg, line.clone(), line)
+        } else if let Some(x) = crew.first() {
+            (TaskStatus::Working, t.ink_muted(), format!("working on {}", x.title), x.title.clone())
         } else {
-            let title = tasks.first().map_or_else(String::new, |x| x.title.clone());
-            (TaskStatus::Working, t.ink_muted(), format!("working on {title}"), title)
+            let words = own.map(|x| x.latest_line.clone()).filter(|l| !l.is_empty()).unwrap_or_else(|| "Working…".to_owned());
+            (TaskStatus::Working, t.ink_muted(), format!("working: {words}"), words)
         };
         let id = c.id.clone();
-        let open = s.open_cat.as_deref() == Some(c.id.as_str());
-        let n = 1 + if tasks.len() >= 2 { tasks.len() } else { 0 };
+        let open = c.thread.is_some() && s.open == c.thread && !s.settings_open && !s.needs_open && !s.rounds_open && !s.briefing_open;
+        let n = 1 + if crew.len() >= 2 { crew.len() } else { 0 };
         let strong = ink != t.ink_muted();
         let meta = meta_line(t, vec![(line, ink, strong)]);
-        // One list per cat: the cat, then (when it has several) its threads as options of the same list, in the order they are drawn.
-        let mut crew = col().key(format!("cattain-{}", c.id)).role("listbox").label(c.name.clone()).w_full().gap(t.space.at(ROW_GAP_STEPS));
-        crew = crew.child(face_row(t, format!("cat-{}", c.id), &c.name, said, &c.face, Some(st), meta, 0, n, open).on_press(move |s: &mut App| s.open_cat_page(&id)));
-        if tasks.len() >= 2 {
-            for (i, task) in tasks.iter().enumerate() {
-                crew = crew.child(thread_row(s, t, task, i + 1, n, s.row_is_open(task), "cattain-thread", t.space.at(3.0), None, layer));
+        // One list per Cattain: it, then (when it has several at work) its crew threads as options of the same list, in the order drawn.
+        let mut group = col().key(format!("cattain-{}", c.id)).role("listbox").label(c.name.clone()).w_full().gap(t.space.at(ROW_GAP_STEPS));
+        group = group.child(face_row(t, format!("cat-{}", c.id), &c.name, said, &c.face, Some(st), meta, 0, n, open).on_press(move |s: &mut App| s.open_cattain(&id)));
+        if crew.len() >= 2 {
+            for (i, task) in crew.iter().enumerate() {
+                group = group.child(thread_row(s, t, task, i + 1, n, s.row_is_open(task), "cattain-thread", t.space.at(3.0), None, layer));
             }
         }
-        list = list.child(crew);
+        list = list.child(group);
     }
     Some(col().key("cattains-section").role("group").label("Cattains").w_full().gap(t.space.at(ROW_GAP_STEPS)).pt(t.space.at(GROUP_GAP_STEPS)).child(head).child(list))
 }

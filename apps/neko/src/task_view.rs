@@ -195,8 +195,11 @@ fn notice(t: &Theme, p: &Part) -> Option<El> {
 
 /// The quiet line before a run whose cat's rules changed since the task's last run (docs/knowledge/cats.md).
 fn rules_changed(t: &Theme, p: &Part) -> Option<El> {
-    let PartBody::RulesChanged { name, .. } = &p.body else { return None };
-    let words = format!("{name}'s rules changed since the last run.");
+    let PartBody::RulesChanged { name, file, .. } = &p.body else { return None };
+    let words = match file {
+        Some(f) => format!("{name}'s {f} changed since the last run."),
+        None => format!("{name}'s rules changed since the last run."),
+    };
     Some(
         row()
             .key(kk(format!("rules-changed-{}", p.seq)))
@@ -420,7 +423,11 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
     let w = who(task);
     // No turn has a head (a portrait and "done"): the words are the agent's, as in any agent app. What a run is doing is its live
     // line, then its fold; what a thread rests on is the line that ends the conversation.
-    let turn = Message::assistant(format!("turn-{}", r.id.0), w.subject()).column(COLUMN);
+    let mut turn = Message::assistant(format!("turn-{}", r.id.0), w.subject()).column(COLUMN);
+    // The one place a face leads turns: a Cattain's own thread (docs/knowledge/cats.md).
+    if let Some(c) = s.cattain_of(&task.id) {
+        turn = turn.header(crate::cattain_view::turn_header(t, &format!("turn-{}", r.id.0), c));
+    }
     if r.status == RunStatus::Running {
         let streaming = parts.last().is_some_and(|p| matches!(&p.body, PartBody::Agent { done: false, .. }) || matches!(&p.body, PartBody::Thinking { done: false, text } if !text.trim().is_empty()));
         let mut out = lay_out(s, t, book, r, &w, parts, if streaming { Some(parts.len() - 1) } else { None }, None);
@@ -568,9 +575,12 @@ pub fn kk(key: String) -> String {
 /// A task's conversation as the blocks of one column: the person's words, then each run, note and card in order, and what the thread
 /// waits on at the end.
 fn items_of(s: &App, t: &Theme, task: &Task, book: &Book) -> Vec<El> {
-    // The task's own words first (their text keyed "task-words", as in S0).
-    let mut items = vec![turn::person(s, t, "task-message", "task-words", &task.words)];
-    if book.loaded && book.runs.is_empty() && book.parts.is_empty() && task.status == neko_protocol::TaskStatus::New && task.subagent.is_none() {
+    // The task's own words first (their text keyed "task-words", as in S0). A Cattain's own thread has none: it opens on who it is.
+    let mut items = match s.cattain_of(&task.id) {
+        Some(c) if task.words.is_empty() => vec![crate::cattain_view::intro(t, c)],
+        _ => vec![turn::person(s, t, "task-message", "task-words", &task.words)],
+    };
+    if !task.cattain && book.loaded && book.runs.is_empty() && book.parts.is_empty() && task.status == neko_protocol::TaskStatus::New && task.subagent.is_none() {
         items.push(status_line(s, t, task));
     }
     for b in blocks(book) {

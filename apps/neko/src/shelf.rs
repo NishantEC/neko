@@ -114,7 +114,7 @@ impl App {
 
     /// The thread ⌘⇧P and ⌘⇧S act on: the one in view.
     pub fn thread_in_view(&self) -> Option<TaskId> {
-        if self.settings_open || self.needs_open || self.rounds_open || self.briefing_open || self.open_cat.is_some() {
+        if self.settings_open || self.needs_open || self.rounds_open || self.briefing_open {
             return None;
         }
         self.open_task().filter(|t| t.is_thread()).map(|t| t.id.clone())

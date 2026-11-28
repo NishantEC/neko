@@ -208,20 +208,21 @@ fn a_task_a_round_made_says_so_and_links_back() {
 }
 
 #[test]
-fn a_cats_page_lists_its_rounds_and_offers_a_new_one() {
-    let mut rt = runtime((1200.0, 800.0), false, scene("cat-page-rounds"));
-    assert!(texts(&rt).contains("Docs check: mochi, Weekdays at 09:00"));
+fn a_cattains_overview_lists_its_rounds_and_offers_a_new_one() {
+    let mut rt = runtime((1300.0, 800.0), false, scene("cattain-thread"));
+    assert!(has_key(&rt, "cattain-round-round_00000000000000000000000001"), "Docs check is mochi's");
+    assert!(!has_key(&rt, "cattain-round-round_00000000000000000000000002"), "Release notes is miso's");
     assert!(has_key(&rt, "cat-new-round"));
     rt.update(|s, _| s.start_new_round(Some("cat_mochi")));
     let f = rt.state.round_form.as_ref().expect("the panel opens");
-    assert_eq!(f.cat, "cat_mochi", "for this cat");
-    let rt = runtime((1200.0, 800.0), false, scene("cat-page"));
+    assert_eq!(f.cat, "cat_mochi", "for this Cattain");
+    let rt = runtime((1300.0, 800.0), false, scene("cattain-thread-new"));
     assert!(texts(&rt).contains("miso has no rounds"));
 }
 
 #[test]
 fn nothing_is_clipped_at_the_smallest_window() {
-    for name in ["rounds", "rounds-braked", "round-new", "round-hours", "task-from-round", "cat-page-rounds"] {
+    for name in ["rounds", "rounds-braked", "round-new", "round-hours", "task-from-round", "cattain-thread"] {
         let rt = runtime((760.0, 560.0), false, scene(name));
         for e in rt.elements() {
             if let Some(k) = e.key.as_deref().filter(|k| k.starts_with("round-") && (k.ends_with("-switch") || k.ends_with("-run") || k.ends_with("-menu"))) {

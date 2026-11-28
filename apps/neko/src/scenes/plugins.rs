@@ -352,12 +352,12 @@ pub fn cat_page_plugins(s: &mut App) {
     let mut only_mochi = notes_sync(2, Approval::Approved, true);
     only_mochi.access = Access { mode: AccessMode::Only, cats: vec!["cat_mochi".into()] };
     s.plugins = vec![acme_docs(1, Approval::Approved, true, true), only_mochi, tracker(3, Approval::Approved, false)];
-    s.open_cat_page("cat_miso");
+    super::cattains::show_profile(s, "cat_miso");
 }
 
 pub fn cat_page_no_plugins(s: &mut App) {
     with_workspaces(s);
-    s.open_cat_page("cat_miso");
+    super::cattains::show_profile(s, "cat_miso");
 }
 
 pub fn cat_page_plugins_none_for_cat(s: &mut App) {
@@ -365,5 +365,5 @@ pub fn cat_page_plugins_none_for_cat(s: &mut App) {
     let mut only = notes_sync(1, Approval::Approved, true);
     only.access = Access { mode: AccessMode::Only, cats: vec!["cat_mochi".into()] };
     s.plugins = vec![only];
-    s.open_cat_page("cat_miso");
+    super::cattains::show_profile(s, "cat_miso");
 }

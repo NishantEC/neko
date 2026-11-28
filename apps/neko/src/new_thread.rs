@@ -27,6 +27,8 @@ pub struct BranchList {
 
 #[derive(Clone, Debug, Default)]
 pub struct NewThread {
+    /// A Cattain's id: the thread starts in its crew and reads its CREW.md (docs/knowledge/cats.md). Cleared once one starts and opens.
+    pub crew: Option<String>,
     /// Work in the project's folder itself, not in a worktree of its own. Kept while Neko runs; back to a worktree (the safe
     /// default) when the project changes.
     pub in_folder: bool,
@@ -158,12 +160,14 @@ impl App {
             Some(list) => (false, self.new_thread.from_branch.clone().filter(|b| list.names.contains(b) && Some(b) != list.current.as_ref())),
             None => (false, None),
         };
-        match self.send(Request::CreateTask { words: words.clone(), workspace, in_folder, from_branch }) {
+        let crew = self.new_thread.crew.clone().filter(|c| self.cat(c).is_some_and(neko_protocol::Cat::is_active));
+        match self.send(Request::CreateTask { crew, words: words.clone(), workspace, in_folder, from_branch }) {
             Some(id) => {
                 if background {
                     self.new_thread.background.insert(id, words);
                 } else {
                     self.creating = Some((id, words));
+                    self.new_thread.crew = None;
                 }
                 self.draft = TextEdit::default();
                 // The screen stays: the keyboard stays in its box for the next thread.

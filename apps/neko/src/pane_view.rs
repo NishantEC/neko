@@ -25,7 +25,7 @@ use crate::ui::tabs::{Tabs, TabsVariant};
 use crate::view::BAND;
 
 /// A section's heading: its words, and how many are in it.
-fn heading(t: &Theme, key: &str, words: &str, count: Option<usize>) -> El {
+pub(crate) fn heading(t: &Theme, key: &str, words: &str, count: Option<usize>) -> El {
     let mut h = row().key(key.to_owned()).w_full().gap(t.space.at(1.5)).center_y().child(text(words.to_owned()).role("heading").level(3).font(weight(t.ty.sm, t.ty.semibold)).color(t.ink_muted()));
     if let Some(n) = count {
         h = h.child(text(n.to_string()).font(tabular(t.ty.sm)).color(t.ink_faint()).a11y_hidden());
@@ -34,17 +34,17 @@ fn heading(t: &Theme, key: &str, words: &str, count: Option<usize>) -> El {
 }
 
 /// A section: its heading, then its rows.
-fn section(t: &Theme, key: &str, words: &str, count: Option<usize>, rows: Vec<El>) -> El {
+pub(crate) fn section(t: &Theme, key: &str, words: &str, count: Option<usize>, rows: Vec<El>) -> El {
     col().key(key.to_owned()).role("group").label(words.to_owned()).w_full().gap(t.space.at(1.5)).child(heading(t, &format!("{key}-heading"), words, count)).children(rows)
 }
 
 /// The age of a thing, in a few words.
-fn age(s: &App, ms: i64) -> String {
+pub(crate) fn age(s: &App, ms: i64) -> String {
     crate::view::since(s, ms)
 }
 
 /// A row that opens something: the row material's hover and focus ring, a button's role.
-fn press_row(t: &Theme, key: String, label: String, h: f32) -> El {
+pub(crate) fn press_row(t: &Theme, key: String, label: String, h: f32) -> El {
     let r = row().key(key).role("button").label(label).focusable(true).w_full().h(h).px(t.space.at(1.5)).gap(t.space.at(2.0)).center_y().radius(t.radius.md).round_as(t).hover_group();
     paint_state(r, &t.mat.row, States::default())
 }
@@ -252,7 +252,7 @@ fn changes(s: &App, t: &Theme, root: &TaskId, o: Option<&Overview>) -> Option<El
 }
 
 /// A label and its value, on one line.
-fn fact(t: &Theme, key: &str, label: &str, value: El, end: Vec<El>) -> El {
+pub(crate) fn fact(t: &Theme, key: &str, label: &str, value: El, end: Vec<El>) -> El {
     let mut r = row().key(key.to_owned()).w_full().min_h(t.control.md).gap(t.space.at(2.0)).center_y().child(text(label.to_owned()).font(t.ty.sm).color(t.ink_faint()).w(52.0).a11y_hidden());
     r = r.child(value);
     r.child(el().grow(1.0)).children(end)
@@ -418,6 +418,9 @@ fn tab_strip(s: &App, t: &Theme, root: &TaskId, layer: &mut Vec<El>) -> El {
                 let n = s.pane.overview.get(root).and_then(|o| o.changes.as_ref()).map(|c| c.files.len()).filter(|n| *n > 0);
                 strip.tab("Changes", n).permanent()
             }
+            Tab::Digest => strip.tab("Digest", None).permanent(),
+            Tab::Files => strip.tab("Files", None).permanent(),
+            Tab::Profile => strip.tab("Profile", None).permanent(),
             Tab::Kitten(k) => strip.tab(s.tasks.iter().find(|x| &x.id == k).and_then(|x| x.subagent_name()).unwrap_or_else(|| "Kitten".to_owned()), None),
         };
     }
@@ -436,8 +439,13 @@ fn header(s: &App, t: &Theme, root: &TaskId, docked: bool, layer: &mut Vec<El>) 
 
 /// The body of the tab shown.
 fn body(s: &App, t: &Theme, root: &TaskId, layer: &mut Vec<El>) -> El {
-    match s.tab_of(root) {
+    let tab = s.tab_of(root);
+    if let Some(b) = crate::cattain_view::body(s, t, root, &tab, layer) {
+        return b;
+    }
+    match tab {
         Tab::Overview => overview_body(s, t, root),
+        Tab::Digest | Tab::Files | Tab::Profile => el(),
         Tab::Changes => crate::review_view::changes_tab(s, t, root),
         Tab::Kitten(k) => kitten_body(s, t, &k, layer),
     }

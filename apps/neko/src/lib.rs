@@ -5,7 +5,8 @@
 pub mod about;
 pub mod briefing;
 pub mod briefing_view;
-pub mod cat_view;
+pub mod cattain;
+pub mod cattain_view;
 pub mod clock;
 pub mod composer;
 pub mod deeplink;

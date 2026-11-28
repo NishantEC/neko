@@ -21,6 +21,9 @@ pub const WIDTH: f32 = 640.0;
 
 /// "What should we work on?", or "…in acme-web?" once a project with a folder is chosen.
 pub fn headline(s: &App) -> String {
+    if let Some(c) = s.new_thread.crew.as_deref().and_then(|c| s.cat(c)) {
+        return format!("What should {}'s crew work on?", c.name);
+    }
     let project = s.chosen().filter(|w| w.folder.is_some()).map(|w| w.name.clone());
     match (s.adding_folder(), project) {
         (true, _) => format!("What should we work on in {}?", s.chip_project_name()),
@@ -136,9 +139,25 @@ fn composer(s: &App, t: &Theme) -> El {
     .child(field)
 }
 
+/// The thread goes to a Cattain's crew: its face and "miso's crew", with a way to take it out.
+fn crew_chip(t: &Theme, c: &neko_protocol::Cat) -> El {
+    let clear = crate::ui::button::Button::<App>::new("new-thread-crew-clear", format!("Not in {}'s crew", c.name)).variant(rune_ui_style::ButtonVariant::Ghost).size(rune_ui_style::Size::Sm).icon_only(&crate::ui::icons::CLOSE).on_press(|s: &mut App| s.new_thread.crew = None).build(t);
+    crate::ui::agent::chip(t, "new-thread-crew", None)
+        .role("group")
+        .label(format!("In {}'s crew", c.name))
+        .pr(t.space.at(0.5))
+        .child(crate::faces::portrait(t, "new-thread-crew-face", &c.face, 14.0))
+        .child(text(format!("{}'s crew", c.name)).font(t.ty.sm).color(t.ink()).a11y_hidden())
+        .child(clear)
+}
+
 /// New thread, the whole page.
 pub fn new_thread(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
-    let mut chips = row().key("new-thread-chips").w_full().gap(t.space.at(2.0)).center_y().flex_wrap().pl(t.space.at(1.0)).child(project_chip(s, t, layer));
+    let mut chips = row().key("new-thread-chips").w_full().gap(t.space.at(2.0)).center_y().flex_wrap().pl(t.space.at(1.0));
+    if let Some(c) = s.new_thread.crew.as_deref().and_then(|c| s.cat(c)) {
+        chips = chips.child(crew_chip(t, c));
+    }
+    chips = chips.child(project_chip(s, t, layer));
     if s.branch_list().is_some() {
         chips = chips.child(place_chip(s, t, layer));
         if !s.new_thread.in_folder

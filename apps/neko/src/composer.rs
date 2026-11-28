@@ -246,6 +246,8 @@ pub fn placeholder(s: &App, task: &Task, asking: bool) -> String {
         format!("{ret} ({alt})")
     } else if task.status == TaskStatus::Asked {
         "Answer the question".to_owned()
+    } else if let Some(c) = s.cattain_of(&task.id) {
+        format!("Message {}", c.name)
     } else {
         "Message the agent".to_owned()
     }

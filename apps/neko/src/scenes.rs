@@ -99,11 +99,19 @@ pub const SCENES: &[Scene] = &[
     ("review-undone", |s| { review_undone(s); finish(s) }),
     ("settings-undo", |s| { settings_undo(s); finish(s) }),
     ("clear-undo", |s| { clear_undo(s); finish(s) }),
-    ("cat-page", |s| { cat_page(s); finish(s) }),
-    ("cat-page-rules", |s| { cat_page_rules(s); finish(s) }),
-    ("cat-page-editing", |s| { cat_page_editing(s); finish(s) }),
+    ("cattain-thread", |s| { cattains::thread(s); finish(s) }),
+    ("cattain-thread-new", |s| { cattains::thread_new(s); finish(s) }),
+    ("cattain-digest", |s| { cattains::digest(s); finish(s) }),
+    ("cattain-files", |s| { cattains::files(s); finish(s) }),
+    ("cattain-files-editing", |s| { cattains::files_editing(s); finish(s) }),
+    ("cattain-files-notes", |s| { cattains::files_notes(s); finish(s) }),
+    ("cattain-profile", |s| { cattains::profile(s); finish(s) }),
+    ("cattain-retire", |s| { cattains::retire(s); finish(s) }),
+    ("crew-thread", |s| { cattains::crew_thread(s); finish(s) }),
+    ("new-thread-crew", |s| { cattains::new_thread_crew(s); finish(s) }),
+    ("sidebar-cattains-at-work", |s| { cattains::sidebar_at_work(s); finish(s) }),
+    ("sidebar-cattains-quiet", |s| { cattains::sidebar_quiet(s); finish(s) }),
     ("cat-new", |s| { cat_new(s); finish(s) }),
-    ("cat-retire", |s| { cat_retire(s); finish(s) }),
     ("task-rules-changed", |s| { task_rules_changed(s); finish(s) }),
     ("settings-cats", |s| { settings_cats(s); finish(s) }),
     ("rounds-empty", |s| { rounds_empty(s); finish(s) }),
@@ -120,7 +128,6 @@ pub const SCENES: &[Scene] = &[
     ("round-invalid", |s| { round_invalid(s); finish(s) }),
     ("round-cat-menu", |s| { round_cat_menu(s); finish(s) }),
     ("task-from-round", |s| { task_from_round(s); finish(s) }),
-    ("cat-page-rounds", |s| { cat_page_rounds(s); finish(s) }),
     ("sidebar-cattains", |s| { sidebar_cattains(s); finish(s) }),
     ("sparse-new-thread", |s| { sparse_new_thread(s); finish(s) }),
     ("sparse-empty", |s| { sparse_empty(s); finish(s) }),
@@ -195,9 +202,9 @@ pub const SCENES: &[Scene] = &[
     ("question-kitten-answered", |s| { subagents::question_kitten_answered(s); finish(s) }),
     ("task-plugin", |s| { plugins::task_plugin(s); finish(s) }),
     ("task-plugin-request", |s| { plugins::task_plugin_request(s); finish(s) }),
-    ("cat-page-plugins", |s| { plugins::cat_page_plugins(s); finish(s) }),
-    ("cat-page-no-plugins", |s| { plugins::cat_page_no_plugins(s); finish(s) }),
-    ("cat-page-plugins-none-for-cat", |s| { plugins::cat_page_plugins_none_for_cat(s); finish(s) }),
+    ("cattain-profile-plugins", |s| { plugins::cat_page_plugins(s); finish(s) }),
+    ("cattain-profile-no-plugins", |s| { plugins::cat_page_no_plugins(s); finish(s) }),
+    ("cattain-profile-plugins-none-for-cat", |s| { plugins::cat_page_plugins_none_for_cat(s); finish(s) }),
     ("search-empty", |s| { search::empty(s); finish(s) }),
     ("search-typing", |s| { search::typing(s); finish(s) }),
     ("search-message", |s| { search::message(s); finish(s) }),
@@ -211,6 +218,7 @@ pub const SCENES: &[Scene] = &[
 ];
 
 mod briefing;
+mod cattains;
 mod composer;
 mod plugins;
 mod search;
@@ -246,48 +254,24 @@ pub fn finish(s: &mut App) {
     }
 }
 
-/// The starter cats as a new install has them, each with one placeholder purpose; mochi has standing rules and an earlier version.
+/// The starter cats as a new install has them, each with one placeholder purpose.
 pub fn sample_cats() -> Vec<Cat> {
-    let cat = |id: &str, name: &str, face: &str, purpose: Option<&str>, rules: &str| Cat {
+    let cat = |id: &str, name: &str, face: &str, purpose: Option<&str>| Cat {
         id: id.into(),
         name: name.into(),
         face: face.into(),
         purpose: purpose.map(str::to_owned),
-        rules: rules.into(),
-        rules_hash: neko_protocol::cats::rules_hash(rules),
-        previous_rules: None,
-        rules_saved_ms: None,
         workspace: None,
+        thread: None,
+        model: None,
+        access: None,
         created_ms: 1,
         retired_ms: None,
     };
-    let mut mochi = cat("cat_mochi", "mochi", "snow", Some("Writes and tidies the docs."), MOCHI_RULES);
-    mochi.previous_rules = Some("Use British spelling.".into());
-    mochi.rules_saved_ms = Some(2);
-    vec![cat("cat_miso", "miso", "ginger", None, ""), mochi, cat("cat_tofu", "tofu", "calico", Some("Runs the tests and fixes what breaks."), "")]
+    vec![cat("cat_miso", "miso", "ginger", None), cat("cat_mochi", "mochi", "snow", Some("Writes and tidies the docs.")), cat("cat_tofu", "tofu", "calico", Some("Runs the tests and fixes what breaks."))]
 }
 
-const MOCHI_RULES: &str = "# How I like docs\n\n- Use British spelling.\n- Short sentences; one idea each.\n- Never push or open a pull request: leave the branch for Asha.\n- Name a file before you change it.\n";
-
-fn cat_page(s: &mut App) {
-    with_workspaces(s);
-    s.open_cat_page("cat_miso");
-}
-
-fn cat_page_rules(s: &mut App) {
-    with_workspaces(s);
-    s.cats[1].workspace = Some("ws_acme".into());
-    s.open_cat_page("cat_mochi");
-}
-
-fn cat_page_editing(s: &mut App) {
-    cat_page_rules(s);
-    let d = s.cat_draft_mut("cat_mochi");
-    d.rules = TextEdit::new(&format!("{MOCHI_RULES}- Link ENG-123 in every changelog line.\n"));
-    d.rules.focused = true;
-}
-
-/// Making a cat, from Settings > Cats (the only place): the dialog says which face it will get.
+/// Making a Cattain, from Settings ▸ Cattains (the only place): the dialog says which face it will get.
 fn cat_new(s: &mut App) {
     with_workspaces(s);
     s.settings_open = true;
@@ -299,16 +283,11 @@ fn cat_new(s: &mut App) {
     }
 }
 
-fn cat_retire(s: &mut App) {
-    cat_page_rules(s);
-    s.ask_retire_cat("cat_mochi");
-}
-
 /// A follow-up after its cat's rules changed: one quiet line before the run that used the new ones.
 fn task_rules_changed(s: &mut App) {
     task_follow_up(s);
     let id = s.open.clone().expect("open");
-    // This task was given miso, so miso's rules go with its runs.
+    // This thread is in miso's crew, so miso's CREW.md goes with its runs.
     if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id) {
         t.cat = Some("cat_miso".into());
     }
@@ -321,7 +300,7 @@ fn task_rules_changed(s: &mut App) {
             p.seq += 1;
         }
         let first = b.parts[at].clone();
-        b.parts.insert(at, Part { id: PartId("part_rules".into()), seq, body: PartBody::RulesChanged { cat, name }, ..first });
+        b.parts.insert(at, Part { id: PartId("part_rules".into()), seq, body: PartBody::RulesChanged { cat, name, file: Some("CREW.md".into()) }, ..first });
     }
 }
 
@@ -1736,8 +1715,4 @@ fn task_from_round(s: &mut App) {
     receipt_files(s, "run_1", 3);
 }
 
-fn cat_page_rounds(s: &mut App) {
-    with_rounds(s);
-    s.open_cat_page("cat_mochi");
-}
 

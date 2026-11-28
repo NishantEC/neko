@@ -104,7 +104,7 @@ pub const ACTIONS: &[Action] = &[
     Action { id: "settings-0", label: "Settings: Agents", keywords: "claude runtime model permissions", keys: None },
     Action { id: "settings-1", label: "Settings: Projects", keywords: "folders workspaces undo storage", keys: None },
     Action { id: "settings-2", label: "Settings: Notifications", keywords: "alerts badge", keys: None },
-    Action { id: "settings-3", label: "Settings: Cats", keywords: "cattains rules faces", keys: None },
+    Action { id: "settings-3", label: "Settings: Cattains", keywords: "cats rules faces crew", keys: None },
     Action { id: "settings-4", label: "Settings: Briefing", keywords: "morning notification", keys: None },
     Action { id: "settings-5", label: "Settings: Plugins", keywords: "mcp servers tools", keys: None },
 ];
@@ -227,7 +227,7 @@ impl App {
                     self.open_kitten_tab(&id);
                 }
             }
-            Row::Cattain(id) => self.open_cat_page(&id),
+            Row::Cattain(id) => self.open_cattain(&id),
             Row::Project(id) => self.new_thread_in(&id),
             Row::Action(a) => self.run_action(a),
         }

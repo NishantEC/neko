@@ -27,11 +27,15 @@ pub const SHEET_BELOW: f32 = 1100.0;
 pub const OPEN_KEY: &str = "pane-open";
 pub const WIDTH_KEY: &str = "pane-width";
 
-/// One tab of the pane. Overview first, Changes second, then a kitten's tab for each one opened, in the order they were opened.
+/// One tab of the pane. Overview first, Changes second, then a kitten's tab for each one opened, in the order they were opened. A
+/// Cattain's own thread has Overview, Digest, Files and Profile instead of Changes (docs/knowledge/cats.md).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Tab {
     Overview,
     Changes,
+    Digest,
+    Files,
+    Profile,
     Kitten(TaskId),
 }
 
@@ -91,7 +95,7 @@ pub fn files_words(n: u32) -> String {
 impl App {
     /// The thread the pane is about: the open thread, or the thread a kitten opened in the main view belongs to. None on any other page.
     pub fn pane_root(&self) -> Option<TaskId> {
-        if self.settings_open || self.needs_open || self.rounds_open || self.briefing_open || self.page_cat().is_some() {
+        if self.settings_open || self.needs_open || self.rounds_open || self.briefing_open {
             return None;
         }
         let t = self.open_task()?;
@@ -174,7 +178,7 @@ impl App {
 
     /// The tabs of a thread, in order: Overview, Changes, then the kittens opened (the ones that still exist).
     pub fn tabs_of(&self, root: &TaskId) -> Vec<Tab> {
-        let mut v = vec![Tab::Overview, Tab::Changes];
+        let mut v = if self.cattain_of(root).is_some() { vec![Tab::Overview, Tab::Digest, Tab::Files, Tab::Profile] } else { vec![Tab::Overview, Tab::Changes] };
         if let Some(list) = self.pane.kittens.get(root) {
             v.extend(list.iter().filter(|k| self.tasks.iter().any(|t| &t.id == *k)).map(|k| Tab::Kitten(k.clone())));
         }
@@ -375,6 +379,12 @@ impl App {
         let Some(root) = self.pane_root() else { return };
         match self.tab_of(&root) {
             Tab::Overview => {
+                // A Cattain's Overview says when each of its files last changed.
+                if let Some(c) = self.cattain_of(&root).map(|c| c.id.clone()) {
+                    for name in neko_protocol::cats::FILES {
+                        self.ask_file(&c, name);
+                    }
+                }
                 // The kittens' rows say which model each one ran on: that is in their runs, so their transcripts are read once.
                 let kittens: Vec<TaskId> = self.tasks.iter().filter(|t| t.subagent.as_ref().is_some_and(|o| o.root == root)).map(|t| t.id.clone()).collect();
                 for k in kittens {
@@ -396,6 +406,18 @@ impl App {
                     }
                 }
             }
+            Tab::Digest => {
+                if let Some(c) = self.cattain_of(&root).map(|c| c.id.clone()) {
+                    self.ask_file(&c, neko_protocol::cats::DIGEST);
+                }
+            }
+            Tab::Files => {
+                if let Some(c) = self.cattain_of(&root).map(|c| c.id.clone()) {
+                    let name = self.chosen_file(&c);
+                    self.ask_file(&c, &name);
+                }
+            }
+            Tab::Profile => {}
             Tab::Kitten(k) => self.ask_kitten_book(&k),
         }
     }

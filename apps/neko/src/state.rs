@@ -72,25 +72,6 @@ pub enum Confirm {
     RemovePlugin(String),
 }
 
-/// A cat page's fields while the person edits them.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct CatDraft {
-    pub purpose: TextEdit,
-    pub rules: TextEdit,
-}
-
-impl CatDraft {
-    /// The fields as the cat has them saved.
-    pub fn of(cat: &Cat) -> CatDraft {
-        CatDraft { purpose: TextEdit::new(cat.purpose.as_deref().unwrap_or("")), rules: TextEdit::new(&cat.rules) }
-    }
-
-    /// Whether anything differs from what the cat has saved.
-    pub fn unsaved(&self, cat: &Cat) -> bool {
-        self.rules.text != cat.rules || self.purpose.text.split_whitespace().collect::<Vec<_>>().join(" ") != cat.purpose.clone().unwrap_or_default()
-    }
-}
-
 /// What a cat is doing, as the sidebar and its page say it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CatState {
@@ -145,10 +126,8 @@ pub struct App {
     pub tasks: Vec<Task>,
     /// Every cat: the active ones first, then the retired (as the daemon last said).
     pub cats: Vec<Cat>,
-    /// The cat whose page shows instead of the content.
-    pub open_cat: Option<String>,
-    /// Each cat page's purpose and rules as the person is editing them (Save sends them; Revert puts the saved ones back).
-    pub cat_drafts: HashMap<String, CatDraft>,
+    /// The Cattains' files, the words being edited in them, and the Profile's fields (`cattain.rs`).
+    pub cattains: crate::cattain::Cattains,
     /// The panel that names a cat: a new one (None) or a rename (its id), and the name being typed.
     pub naming: Option<(Option<String>, TextEdit)>,
     /// The workspaces: General first, then the person's order, then the removed ones (as the daemon last said).
@@ -364,8 +343,12 @@ pub enum Asked {
     Undo { task: TaskId, run: RunId, redo: bool },
     /// A review's file list, or one file's lines.
     Diff,
-    /// A change to a cat: a refusal is said in a panel. `open`: the cat made opens its page.
+    /// A change to a cat: a refusal is said in a panel. `open`: the cat made opens its thread, on its Profile.
     Cat { open: bool },
+    /// `open_cattain`: its own thread opens when it comes.
+    OpenCattain,
+    /// One of a Cattain's files, read, saved or restored.
+    CattainFile,
     ClearUndo,
     /// A change to a round (switch, pause, remove): a refusal is said in a panel.
     Round,
@@ -476,8 +459,7 @@ impl Default for App {
             tasks: Vec::new(),
             cats: Vec::new(),
             new_thread: crate::new_thread::NewThread::default(),
-            open_cat: None,
-            cat_drafts: HashMap::new(),
+            cattains: Default::default(),
             naming: None,
             workspaces: Vec::new(),
             workspace: GENERAL.to_owned(),
@@ -620,14 +602,9 @@ impl App {
 
     /// Adds or replaces a cat, keeping the daemon's order (active first, oldest first; then the retired).
     fn upsert_cat(&mut self, cat: Cat) {
-        // A page's fields follow a change saved elsewhere, unless the person has unsaved words in them.
-        if let (Some(old), Some(d)) = (self.cat(&cat.id), self.cat_drafts.get(&cat.id))
-            && !d.unsaved(old)
-        {
-            let mut fresh = CatDraft::of(&cat);
-            fresh.rules.focused = d.rules.focused;
-            fresh.purpose.focused = d.purpose.focused;
-            self.cat_drafts.insert(cat.id.clone(), fresh);
+        // The Profile's purpose follows a change saved elsewhere, unless the person is typing in it.
+        if self.cattains.purpose.get(&cat.id).is_some_and(|d| !d.focused) {
+            self.cattains.purpose.remove(&cat.id);
         }
         self.cats.retain(|c| c.id != cat.id);
         self.cats.push(cat);
@@ -668,64 +645,15 @@ impl App {
         }
     }
 
-    /// A cat's page, in place of the content.
-    pub fn open_cat_page(&mut self, id: &str) {
-        let Some(cat) = self.cat(id).cloned() else { return };
-        self.open = None;
-        self.review = None;
-        self.context_open = false;
-        self.settings_open = false;
-        self.needs_open = false;
-        self.rounds_open = false;
-        self.briefing_open = false;
-        self.menu_open = None;
-        let d = self.cat_drafts.entry(cat.id.clone()).or_insert_with(|| CatDraft::of(&cat));
-        // Opening a page puts the keyboard in none of its fields.
-        d.rules.focused = false;
-        d.purpose.focused = false;
-        self.open_cat = Some(cat.id);
-        self.follow_open();
-    }
-
-    /// The open cat, when there is one the daemon has.
-    pub fn page_cat(&self) -> Option<&Cat> {
-        self.open_cat.as_deref().and_then(|id| self.cat(id))
-    }
-
-    pub fn cat_draft_mut(&mut self, id: &str) -> &mut CatDraft {
-        let saved = self.cat(id).map(CatDraft::of).unwrap_or_default();
-        self.cat_drafts.entry(id.to_owned()).or_insert(saved)
-    }
-
     fn cat_request(&mut self, r: Request, open: bool) {
         if let Some(id) = self.send(r) {
             self.asked.insert(id, Asked::Cat { open });
         }
     }
 
-    /// Save on a cat's page: the purpose and the rules, each only when it changed.
-    pub fn save_cat(&mut self, id: &str) {
-        let (Some(cat), Some(d)) = (self.cat(id).cloned(), self.cat_drafts.get(id).cloned()) else { return };
-        let purpose = d.purpose.text.split_whitespace().collect::<Vec<_>>().join(" ");
-        if purpose != cat.purpose.clone().unwrap_or_default() {
-            self.cat_request(Request::SetCatPurpose { cat: cat.id.clone(), purpose }, false);
-        }
-        if d.rules.text != cat.rules {
-            self.cat_request(Request::SaveCatRules { cat: cat.id.clone(), rules: d.rules.text.clone() }, false);
-        }
-    }
-
-    /// Revert on a cat's page: the saved purpose and rules back in the fields.
-    pub fn revert_cat(&mut self, id: &str) {
-        if let Some(cat) = self.cat(id).cloned() {
-            self.cat_drafts.insert(cat.id.clone(), CatDraft::of(&cat));
-        }
-    }
-
-    /// Restore previous rules: the daemon swaps them; the fields follow.
-    pub fn restore_cat_rules(&mut self, id: &str) {
-        self.cat_drafts.remove(id);
-        self.cat_request(Request::RestoreCatRules { cat: id.to_owned() }, false);
+    /// A change to a cat from its Profile or Settings: a refusal is said in a panel.
+    pub fn cat_change(&mut self, r: Request) {
+        self.cat_request(r, false);
     }
 
     pub fn set_cat_face(&mut self, id: &str, face: &str) {
@@ -788,7 +716,7 @@ impl App {
 
     /// The workspace's tasks, newest first.
     pub fn tasks_in(&self, id: &str) -> Vec<&Task> {
-        self.tasks.iter().filter(|t| t.is_thread() && t.workspace == id).collect()
+        self.tasks.iter().filter(|t| t.listed() && t.workspace == id).collect()
     }
 
     /// How many things in the workspace need the person (the sidebar's quiet count): the daemon's items there.
@@ -823,7 +751,6 @@ impl App {
             self.needs_back = self.open.clone().filter(|_| !self.settings_open);
         }
         self.open = None;
-        self.open_cat = None;
         self.review = None;
         self.context_open = false;
         self.settings_open = false;
@@ -1178,9 +1105,7 @@ impl App {
             }
             Some(Confirm::UndoAnyway { task, run, redo, .. }) => self.send_undo(task, run, redo, true),
             Some(Confirm::RetireCat(id)) => {
-                if self.open_cat.as_deref() == Some(id.as_str()) {
-                    self.go_new_thread();
-                }
+                // Its thread stays open and readable: a retired Cattain takes no new crew.
                 self.cat_request(Request::RetireCat { cat: id }, false);
             }
             Some(Confirm::ClearUndo) => {
@@ -1371,7 +1296,6 @@ impl App {
         self.needs_open = false;
         self.rounds_open = false;
         self.briefing_open = false;
-        self.open_cat = None;
         self.send(Request::ListRuntimes);
         self.ask_undo_storage();
     }
@@ -1422,7 +1346,6 @@ impl App {
 
     pub fn go_new_thread(&mut self) {
         self.open = None;
-        self.open_cat = None;
         self.review = None;
         self.context_open = false;
         self.settings_open = false;
@@ -1444,7 +1367,6 @@ impl App {
             self.review = None;
         }
         self.open = Some(id.clone());
-        self.open_cat = None;
         self.context_open = false;
         self.settings_open = false;
         self.needs_open = false;
@@ -1609,7 +1531,7 @@ impl App {
                 let id = task.id.clone();
                 self.upsert(task);
                 // The person is looking at it: what it just said is read as it arrives (when Neko is in front, and the page is the thread).
-                if (self.front || self.read_unfronted) && self.open.as_ref() == Some(&id) && !self.settings_open && !self.needs_open && !self.rounds_open && !self.briefing_open && self.open_cat.is_none() {
+                if (self.front || self.read_unfronted) && self.open.as_ref() == Some(&id) && !self.settings_open && !self.needs_open && !self.rounds_open && !self.briefing_open {
                     self.read_open();
                 }
             }
@@ -1659,6 +1581,7 @@ impl App {
             }
             Change::NeedsChanged { items } => self.set_needs(items),
             Change::CatAdded { cat } | Change::CatUpdated { cat } => self.upsert_cat(cat),
+            Change::CattainFileChanged { file } => self.take_cattain_file(file),
             Change::RoundAdded { round } | Change::RoundUpdated { round } => {
                 let id = round.id.clone();
                 self.upsert_round(round);
@@ -1701,6 +1624,9 @@ impl App {
     fn reply(&mut self, id: u64, reply: Reply) {
         let mine = self.creating.as_ref().is_some_and(|(c, _)| *c == id);
         let asked = self.asked.remove(&id);
+        if self.cattain_reply(&asked, &reply) {
+            return;
+        }
         let Some(reply) = self.plugin_reply(&asked, reply) else { return };
         if self.new_thread_reply(&reply) || self.take_found(id, &reply) {
             return;
@@ -1873,7 +1799,8 @@ impl App {
                 let id = cat.id.clone();
                 self.upsert_cat(cat);
                 if matches!(asked, Some(Asked::Cat { open: true })) {
-                    self.open_cat_page(&id);
+                    self.settings_open = false;
+                    self.open_cattain_on(&id, crate::pane::Tab::Profile);
                 }
                 return;
             }
