@@ -360,7 +360,8 @@ fn file_body(s: &App, t: &Theme, c: &Cat, name: &str) -> El {
         buttons = buttons.child(text("Unsaved changes").key("cattain-file-unsaved").role("status").font(t.ty.sm).color(t.ink_muted()));
     }
     buttons = buttons.child(row().grow(1.0));
-    if f.previous {
+    // Restore previous is offered while nothing is unsaved (it would throw the words away); the row then has room for "Unsaved changes".
+    if f.previous && !unsaved {
         let (a, b) = (c.id.clone(), name.to_owned());
         buttons = buttons.child(Button::<App>::new("cattain-file-restore", "Restore previous").variant(ButtonVariant::Ghost).size(Size::Sm).disabled(unsaved).on_press(move |s: &mut App| s.restore_file(&a, &b)).build(t));
     }
