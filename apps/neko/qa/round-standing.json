@@ -1,0 +1,237 @@
+{
+  "name": "round-standing",
+  "title": "A standing round posts its words into its Cattain's own thread",
+  "about": "A round of miso's, standing (it posts into miso's own thread), is made in the New round panel: Cattain miso, Post in miso's own thread on, no project to choose. Run now posts its words: miso's thread shows them as \"From the round Morning check\" and miso's run reads them in a <neko-wake kind=\"round\">. No thread of its own is made, and the round's card says where it posts.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl",
+      "NEKO_DEBUG_CLOCK": "1",
+      "NEKO_WAKE_BATCH_MS": "300"
+    }
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+3"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "rounds-new-empty"
+        }
+      },
+      "within": 15
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "rounds-new-empty"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-name-input"
+        }
+      },
+      "within": 15,
+      "expect": "The New round panel opens, for no Cattain"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "see": {
+          "key": "round-cat",
+          "label": "No Cattain"
+        }
+      },
+      "expect": "A new round from the page belongs to nobody until a Cattain is chosen"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-name-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Morning check"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-words-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Look over the open pull requests [fake:plain]"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-cat"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-cat-menu-item*",
+          "label": "miso"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "sleep",
+      "secs": 0.5
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-cat-menu-item*",
+        "label": "miso"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-standing"
+        }
+      },
+      "within": 10,
+      "expect": "With a Cattain, the panel offers Post in miso's own thread"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-standing"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "key": "round-workspace"
+        }
+      },
+      "within": 10,
+      "expect": "A standing round has no project to choose"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-kind-3"
+      }
+    },
+    {
+      "do": "snap",
+      "name": "panel",
+      "expect": "The panel: miso, Post in miso's own thread"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-save"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-*-schedule",
+          "text": "miso · in its own thread"
+        }
+      },
+      "within": 15,
+      "expect": "The card says where it posts, led by miso's face"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-*-run"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "round-*-open",
+          "label": "Open miso's thread"
+        }
+      },
+      "within": 20,
+      "expect": "Its last line leads to miso's own thread"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "round-*-open"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "article",
+          "label": "The round Morning check said"
+        }
+      },
+      "within": 30,
+      "expect": "miso's thread shows the round's words as a message from the round"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "text": "I read 1"
+        }
+      },
+      "within": 30,
+      "expect": "miso's run read them and ended"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep '\"stdin\"' fake-record.jsonl | grep 'neko-wake kind=..round' | grep -c 'Morning check' || true",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT COUNT(*) FROM tasks WHERE round_id IS NOT NULL\"",
+              "is": "0"
+            }
+          },
+          {
+            "sh": {
+              "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT t.cattain FROM round_runs r JOIN tasks t ON t.id = r.task_id\"",
+              "is": "1"
+            }
+          }
+        ]
+      },
+      "expect": "miso's own thread read the round's words; no thread of the round's own was made"
+    },
+    {
+      "do": "snap",
+      "name": "posted",
+      "expect": "From the round Morning check, in miso's thread, and miso's answer"
+    }
+  ]
+}

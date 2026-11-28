@@ -1,0 +1,200 @@
+{
+  "name": "watch-file",
+  "title": "A watched file wakes the thread once, and Stop watching ends the watch",
+  "about": "The fake CLI calls watch_files on build.log and ends its turn; the thread rests on \"a file change\" with the watch a quiet line, Stop watching beside it. A change to the file (made by hand, after the agent's own run) wakes the thread once with a <neko-wake kind=\"watch\"> naming build.log. The watch goes on, so the thread rests on it again. Stop watching ends it: the thread is at rest, and the next change wakes nothing.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl",
+      "NEKO_DEBUG_CLOCK": "1",
+      "NEKO_WAKE_BATCH_MS": "300"
+    }
+  },
+  "steps": [
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_task",
+        "words": "Watch the build log [fake:mcp] mcp neko watch_files {\"paths\":[\"build.log\"],\"note\":\"Read the log\"}"
+      },
+      "save_as": "w"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Watch the build log",
+          "name": "waiting"
+        }
+      },
+      "within": 25,
+      "expect": "The thread rests on its watch"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Watch the build log"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "waiting-line",
+              "label": "Waiting on a file change"
+            }
+          },
+          {
+            "see": {
+              "key": "activity-wait-*",
+              "label": "Watching build.log"
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "Waiting on a file change; the watch a quiet line with Stop watching"
+    },
+    {
+      "do": "snap",
+      "name": "watching",
+      "expect": "The watch above the composer"
+    },
+    {
+      "do": "sleep",
+      "secs": 4
+    },
+    {
+      "do": "run",
+      "cmd": "touch \"$(/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT workdir FROM tasks WHERE title LIKE 'Watch the build log%'\")/build.log\""
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "note",
+          "label": "Woken by a change to build.log"
+        }
+      },
+      "within": 30,
+      "expect": "The change wakes the thread"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "waiting-line",
+          "label": "Waiting on a file change"
+        }
+      },
+      "within": 20,
+      "expect": "The watch goes on: the thread rests on it again"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep -o '\"argv\"' fake-record.jsonl | wc -l | tr -d ' '",
+              "is": "2"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep '\"stdin\"' fake-record.jsonl | grep -c 'neko-wake kind=.\"watch' || true",
+              "is": "1"
+            }
+          }
+        ]
+      },
+      "expect": "One wake, a watch's"
+    },
+    {
+      "do": "snap",
+      "name": "woken",
+      "expect": "Woken by a change to build.log, and waiting again"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "activity-wait-*-stop",
+        "label": "Stop watching"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "gone": {
+              "key": "waiting-line"
+            }
+          },
+          {
+            "gone": {
+              "key": "activity-wait-*"
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Watch the build log",
+              "name": "waiting"
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "Stop watching ends it; the thread is at rest"
+    },
+    {
+      "do": "sleep",
+      "secs": 2
+    },
+    {
+      "do": "run",
+      "cmd": "touch \"$(/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT workdir FROM tasks WHERE title LIKE 'Watch the build log%'\")/build.log\""
+    },
+    {
+      "do": "sleep",
+      "secs": 4
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep -o '\"argv\"' fake-record.jsonl | wc -l | tr -d ' '",
+              "is": "2"
+            }
+          },
+          {
+            "sh": {
+              "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT state FROM waits\"",
+              "is": "stopped"
+            }
+          }
+        ]
+      },
+      "expect": "A stopped watch wakes nothing; the store says it was stopped"
+    },
+    {
+      "do": "snap",
+      "name": "stopped",
+      "expect": "No watch left, nothing waiting"
+    }
+  ]
+}

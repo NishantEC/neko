@@ -1,0 +1,182 @@
+{
+  "name": "timer-wake",
+  "title": "A thread sets a timer, rests as Waiting until then, and is woken once when its time comes",
+  "about": "The fake CLI calls wake_me (after 2h) through Neko's own MCP server and ends its turn. The thread rests: its row and its waiting line say \"Waiting until …\", one quiet line with Stop the timer stands above the composer, and no process runs. The scheduler's clock (a debug daemon) moves on 121 minutes: the thread is woken once with --resume and a <neko-wake kind=\"timer\"> carrying its note, the note \"Woken by its timer\" stands before the run that read it, and nothing waits after.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl",
+      "NEKO_DEBUG_CLOCK": "1",
+      "NEKO_WAKE_BATCH_MS": "300"
+    }
+  },
+  "steps": [
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_task",
+        "words": "Deploy the docs, then look again [fake:mcp] mcp neko wake_me {\"after\":\"2h\",\"note\":\"Check the deploy\"}"
+      },
+      "save_as": "t"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Deploy the docs",
+          "name": "waiting"
+        }
+      },
+      "within": 25,
+      "expect": "The thread rests as Waiting"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Deploy the docs"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "waiting-line",
+              "label": "Waiting until"
+            }
+          },
+          {
+            "see": {
+              "key": "activity-wait-*",
+              "label": "Until"
+            }
+          },
+          {
+            "see": {
+              "key": "activity-wait-*-stop",
+              "label": "Stop the timer"
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "The conversation ends on Waiting until …, and the timer is one quiet line with Stop the timer"
+    },
+    {
+      "do": "snap",
+      "name": "resting",
+      "expect": "Waiting until …, on the row, the waiting line and the line above the composer"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "grep -o '\"argv\"' fake-record.jsonl | wc -l | tr -d ' '",
+          "is": "1"
+        }
+      },
+      "expect": "One run so far: resting, nothing runs"
+    },
+    {
+      "do": "clock",
+      "minutes": 60
+    },
+    {
+      "do": "sleep",
+      "secs": 1.5
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "grep -o '\"argv\"' fake-record.jsonl | wc -l | tr -d ' '",
+          "is": "1"
+        }
+      },
+      "expect": "An hour early, nothing wakes"
+    },
+    {
+      "do": "clock",
+      "minutes": 121
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "note",
+              "label": "Woken by its timer"
+            }
+          },
+          {
+            "gone": {
+              "key": "waiting-line"
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Deploy the docs",
+              "name": "waiting"
+            }
+          },
+          {
+            "see": {
+              "text": "I read 1"
+            }
+          }
+        ]
+      },
+      "within": 30,
+      "expect": "Woken once: the note, the run that read it, nothing left to wait on"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep -o '\"argv\"' fake-record.jsonl | wc -l | tr -d ' '",
+              "is": "2"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep -o -- '\"--resume\"' fake-record.jsonl | wc -l | tr -d ' '",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep '\"stdin\"' fake-record.jsonl | grep -c 'neko-wake kind=.\"timer' || true",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "grep '\"stdin\"' fake-record.jsonl | grep -c 'Check the deploy</note>' || true",
+              "is": "1"
+            }
+          }
+        ]
+      },
+      "expect": "One resumed run, whose one message is the timer's wake with its note"
+    },
+    {
+      "do": "snap",
+      "name": "woken",
+      "expect": "Woken by its timer, then the agent's answer"
+    }
+  ]
+}

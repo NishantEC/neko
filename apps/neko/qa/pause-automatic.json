@@ -1,0 +1,183 @@
+{
+  "name": "pause-automatic",
+  "title": "Pause automatic work holds a timer: no run, the skip recorded, and the thread says so",
+  "about": "The fake CLI sets a timer for 30 minutes on. The person presses Pause automatic work on the Rounds page (the paused band says it holds rounds, timers and watches). The scheduler's clock moves past the timer: no run starts, the store records the timer as skipped, and the thread says \"Not woken at …: automatic work was paused.\" Resuming starts nothing after the fact.",
+  "cli": [
+    "fake"
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false,
+  "setup": {
+    "daemon_env": {
+      "NEKO_FAKE_RECORD": "$work/fake-record.jsonl",
+      "NEKO_DEBUG_CLOCK": "1",
+      "NEKO_WAKE_BATCH_MS": "300"
+    }
+  },
+  "steps": [
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_task",
+        "words": "Look again later [fake:mcp] mcp neko wake_me {\"after\":\"30m\",\"note\":\"Look again\"}"
+      },
+      "save_as": "t"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Look again later",
+          "name": "waiting"
+        }
+      },
+      "within": 25,
+      "expect": "The thread rests on its timer"
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_round",
+        "name": "Docs check",
+        "words": "Check the docs [fake:plain]",
+        "schedule": {
+          "kind": "every",
+          "hours": 6
+        }
+      }
+    },
+    {
+      "do": "key",
+      "key": "cmd+3"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "rounds-pause",
+          "label": "Pause automatic work"
+        }
+      },
+      "within": 15,
+      "expect": "Rounds offers Pause automatic work"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "rounds-pause"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "rounds-paused",
+              "label": "no timer or watch wakes a thread"
+            }
+          },
+          {
+            "see": {
+              "key": "rounds-pause",
+              "label": "Resume automatic work"
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "The band says what is held: rounds, timers and watches"
+    },
+    {
+      "do": "snap",
+      "name": "paused",
+      "expect": "Automatic work is paused"
+    },
+    {
+      "do": "clock",
+      "minutes": 31
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "option",
+        "label": "Look again later"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "text": "automatic work was paused"
+            }
+          },
+          {
+            "gone": {
+              "key": "waiting-line"
+            }
+          }
+        ]
+      },
+      "within": 25,
+      "expect": "The thread says it was not woken, and rests on nothing"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "all": [
+          {
+            "sh": {
+              "run": "grep -o '\"argv\"' fake-record.jsonl | wc -l | tr -d ' '",
+              "is": "1"
+            }
+          },
+          {
+            "sh": {
+              "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT state || ' ' || end_reason FROM waits\"",
+              "is": "skipped Automatic work was paused."
+            }
+          },
+          {
+            "sh": {
+              "run": "/usr/bin/sqlite3 \"$data/neko.sqlite3\" \"SELECT COUNT(*) FROM events WHERE kind = 'wait_skipped'\"",
+              "is": "1"
+            }
+          }
+        ]
+      },
+      "expect": "No run while paused; the skip is recorded"
+    },
+    {
+      "do": "snap",
+      "name": "skipped",
+      "expect": "Not woken at …: automatic work was paused"
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "set_rounds_paused",
+        "paused": false
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 2
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "grep -o '\"argv\"' fake-record.jsonl | wc -l | tr -d ' '",
+          "is": "1"
+        }
+      },
+      "expect": "Resuming starts nothing after the fact"
+    }
+  ]
+}
