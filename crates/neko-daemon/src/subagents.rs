@@ -619,8 +619,9 @@ fn answer(text: impl Into<String>, error: bool) -> Value {
 /// `POST /v1/mcp` for a run: `info`, or one tool call. Every answer is quick; nothing here waits for a subagent.
 pub fn handle(shared: &Arc<Shared>, run: &McpRun, body: &Value) -> Value {
     if body["op"] == "info" {
-        let depth = lock(&shared.core).store.get_task(&run.task).ok().flatten().and_then(|t| t.subagent).map_or(0, |s| SubagentOf::depth(&s));
-        return json!({"depth": depth});
+        let core = lock(&shared.core);
+        let depth = core.store.get_task(&run.task).ok().flatten().and_then(|t| t.subagent).map_or(0, |s| SubagentOf::depth(&s));
+        return json!({"depth": depth, "cattains": crate::cattains::may_make(&core, &run.task)});
     }
     let args = &body["arguments"];
     match body["tool"].as_str().unwrap_or("") {
@@ -631,6 +632,8 @@ pub fn handle(shared: &Arc<Shared>, run: &McpRun, body: &Value) -> Value {
         "message_subagent" => message(shared, run, args),
         "ask_parent" => ask(shared, run, args, AskTo::Parent),
         "ask_person" => ask(shared, run, args, AskTo::Person),
+        "make_cattain" => crate::cattains::make_tool(shared, run, args),
+        "list_cattains" => crate::cattains::list_tool(shared, run),
         other => answer(format!("Neko has no tool called {other}."), true),
     }
 }

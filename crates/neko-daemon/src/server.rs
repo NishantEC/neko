@@ -606,6 +606,7 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
         Request::RestoreCattainFile { cat, name } => crate::cattains::change(shared, &cat, &name, None),
         Request::RetireCat { cat } => one_cat(shared, |c| c.retire_cat(&cat)),
         Request::BringBackCat { cat } => one_cat(shared, |c| c.bring_back_cat(&cat)),
+        Request::UndoMakeCattain { cat } => crate::cattains::undo_make(shared, &cat),
         Request::ListRounds => crate::rounds::list(shared),
         Request::CreateRound { name, words, cat, workspace, schedule, on } => crate::rounds::create(shared, &name, &words, &cat, workspace.as_deref(), &schedule, on),
         Request::UpdateRound { round, name, words, cat, workspace, schedule } => crate::rounds::update(shared, &round, &name, &words, &cat, workspace.as_deref(), &schedule),

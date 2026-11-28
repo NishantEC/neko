@@ -277,6 +277,11 @@ impl Core {
         self.write_file(cat, name, Row { previous: Some(row.content), content: text.to_owned(), changed_ms: Some(self.now()) }, "cattain_file_saved")
     }
 
+    /// The first RULES.md of a Cattain an agent made (`make_cattain`): written as it is made, with no earlier version to restore.
+    pub(crate) fn seed_rules(&mut self, cat: &str, text: &str) -> Result<(CattainFile, u64), CatError> {
+        self.write_file(cat, cats::RULES, Row { previous: None, content: text.to_owned(), changed_ms: Some(self.now()) }, "cattain_file_seeded")
+    }
+
     /// Puts the previous version of RULES.md or CREW.md back; the current one becomes the previous, so restoring again goes back.
     pub fn restore_cattain_file(&mut self, cat: &str, name: &str) -> Result<(CattainFile, u64), CatError> {
         let c = self.cat(cat)?;
@@ -344,7 +349,7 @@ mod tests {
     use super::*;
 
     fn miso() -> Cat {
-        Cat { id: "cat_miso".into(), name: "miso".into(), face: "ginger".into(), purpose: None, workspace: None, thread: None, model: None, access: None, created_ms: 0, retired_ms: None }
+        Cat { id: "cat_miso".into(), name: "miso".into(), face: "ginger".into(), purpose: None, workspace: None, thread: None, model: None, access: None, created_ms: 0, retired_ms: None, made_in: None }
     }
 
     #[test]

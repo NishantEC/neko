@@ -267,6 +267,7 @@ pub fn sample_cats() -> Vec<Cat> {
         access: None,
         created_ms: 1,
         retired_ms: None,
+        made_in: None,
     };
     vec![cat("cat_miso", "miso", "ginger", None), cat("cat_mochi", "mochi", "snow", Some("Writes and tidies the docs.")), cat("cat_tofu", "tofu", "calico", Some("Runs the tests and fixes what breaks."))]
 }
@@ -1175,7 +1176,7 @@ fn agents(signed_in: bool, mode: PermissionMode) -> (Vec<RuntimeInfo>, Settings)
                 rules: None,
             },
         ],
-        Settings { runtime: "claude".into(), permission_mode: mode, own_mcp: false, queue_first: false, ask_first_subagent: false },
+        Settings { runtime: "claude".into(), permission_mode: mode, own_mcp: false, queue_first: false, ask_first_subagent: false, cattains_by_hand: false },
     )
 }
 

@@ -89,3 +89,92 @@ pub fn change(shared: &Shared, cat: &str, name: &str, text: Option<&str>) -> Rep
         Err(e) => refused(e),
     }
 }
+
+// ---- Making one by asking (version 22) ----------------------------------------------------------------------------------------
+
+fn answer(text: impl Into<String>, error: bool) -> serde_json::Value {
+    serde_json::json!({"text": text.into(), "error": error})
+}
+
+/// A thread's agent may make Cattains: it is not a subagent, and the person did not keep them to making by hand.
+pub fn may_make(core: &neko_core::Core, task: &neko_protocol::TaskId) -> bool {
+    let thread = core.store.get_task(task).ok().flatten().is_some_and(|t| t.subagent.is_none());
+    thread && !core.store.settings().is_ok_and(|s| s.cattains_by_hand)
+}
+
+/// Neko's `make_cattain` tool, from the run `run`: the Cattain is made (or one with that purpose is named), every screen hears it,
+/// and the thread that asked gets its note. The words tell the agent its name and to tell the person.
+pub fn make_tool(shared: &Shared, run: &crate::runs::McpRun, args: &serde_json::Value) -> serde_json::Value {
+    let text = |k: &str| args[k].as_str();
+    let Some(purpose) = text("purpose") else { return answer("make_cattain needs a purpose: a few words on what the Cattain looks after.", true) };
+    let ask = neko_core::cats::MakeAsk { name: text("name"), purpose, project: text("project"), rules: text("rules") };
+    let made = {
+        let core = &mut *lock(&shared.core);
+        if core.store.get_task(&run.task).ok().flatten().is_some_and(|t| t.subagent.is_some()) {
+            return answer("Only a thread's own agent can make a Cattain, not a subagent. Say in your report that one is needed.", true);
+        }
+        if !may_make(core, &run.task) {
+            return answer("The person makes Cattains by hand only (Settings ▸ Cattains). Tell them which one would help and why.", true);
+        }
+        core.make_cattain(&run.task, &ask)
+    };
+    match made {
+        Ok(neko_core::cats::Made::Reused(cat)) => answer(
+            format!(
+                "{} already looks after this ({}), so no Cattain was made. Tell the person to write to {} in its own thread in Neko.",
+                cat.name,
+                cat.purpose.clone().unwrap_or_default(),
+                cat.name
+            ),
+            false,
+        ),
+        Ok(neko_core::cats::Made::New { cat, revision, rules: (file, file_rev) }) => {
+            shared.broadcast(&ServerMessage::Event { revision, change: Change::CatAdded { cat: cat.clone() } });
+            shared.broadcast(&ServerMessage::Event { revision: file_rev, change: Change::CattainFileChanged { file } });
+            {
+                let mut b = lock(&run.book);
+                let mut core = lock(&shared.core);
+                let now = core.now();
+                if let Ok(outs) = b.cattain_note(&mut core, &cat, now) {
+                    crate::runs::push(shared, &run.task, outs, run.control.as_ref());
+                }
+            }
+            let project = cat.workspace.as_deref().and_then(|w| lock(&shared.core).store.get_workspace(w).ok().flatten()).map(|w| format!(" in the project {}", w.name)).unwrap_or_default();
+            answer(
+                format!(
+                    "Made a Cattain: {} ({}){project}. Address it as {}. The person sees it in Neko (Settings ▸ Cattains, Search) and talks to it in its own thread; it has no work until they write to it there. Tell the person you made {} and what it is for.",
+                    cat.name,
+                    cat.purpose.clone().unwrap_or_default(),
+                    cat.name,
+                    cat.name
+                ),
+                false,
+            )
+        }
+        Err(e) => answer(e.to_string(), true),
+    }
+}
+
+/// Neko's `list_cattains` tool: the Cattains at work, in words. Read-only.
+pub fn list_tool(shared: &Shared, run: &crate::runs::McpRun) -> serde_json::Value {
+    let core = lock(&shared.core);
+    if core.store.get_task(&run.task).ok().flatten().is_some_and(|t| t.subagent.is_some()) {
+        return answer("Only a thread's own agent looks after Cattains, not a subagent.", true);
+    }
+    match core.cattains_text() {
+        Ok(t) => answer(t, false),
+        Err(e) => answer(format!("Neko could not list the Cattains: {e}"), true),
+    }
+}
+
+/// `undo_make_cattain`: the toast's Undo. Every screen hears the cat, retired.
+pub fn undo_make(shared: &Shared, cat: &str) -> Reply {
+    let done = lock(&shared.core).undo_make_cattain(cat);
+    match done {
+        Ok((cat, revision)) => {
+            shared.broadcast(&ServerMessage::Event { revision, change: Change::CatUpdated { cat: cat.clone() } });
+            Reply::Cat { cat }
+        }
+        Err(e) => refused(e),
+    }
+}

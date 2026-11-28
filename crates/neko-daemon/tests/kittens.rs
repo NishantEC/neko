@@ -121,7 +121,7 @@ fn add(c: &mut Client, folder: &Path) -> Workspace {
 }
 
 fn set_settings(c: &mut Client, ask_first_subagent: bool) {
-    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: false, ask_first_subagent };
+    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: false, ask_first_subagent, cattains_by_hand: false };
     assert_eq!(c.request(Request::SetSettings { settings: s.clone() }).unwrap(), Reply::Settings { settings: s });
 }
 

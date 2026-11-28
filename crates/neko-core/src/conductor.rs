@@ -172,6 +172,11 @@ impl RunBook {
         self.new_part(core, PartBody::ToSubagent { number: number.to_owned(), text: text.to_owned(), answer }, now, true)
     }
 
+    /// The quiet note that this run's agent made a Cattain (`make_cattain`): "Made a Cattain: yuzu · iOS work · Open".
+    pub fn cattain_note(&mut self, core: &mut Core, cat: &neko_protocol::Cat, now: i64) -> Result<Vec<Out>, StoreError> {
+        self.new_part(core, PartBody::CattainMade { cat: cat.id.clone(), name: cat.name.clone(), purpose: cat.purpose.clone() }, now, true)
+    }
+
     /// The plugins this run's agent was given: a request for one of their tools says it is a plugin.
     pub fn set_plugins(&mut self, names: Vec<String>) {
         self.plugins = names;

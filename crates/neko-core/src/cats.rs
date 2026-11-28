@@ -9,7 +9,7 @@
 //! - What a cat hands a run (its RULES.md to its own thread, its CREW.md to its crew) is words for the agent and nothing more: it never
 //!   changes the permission mode, the hook or any flag Neko passes.
 
-use neko_protocol::cats::{self, Cat, FACES, MAX_ACTIVE, MAX_NAME, MAX_PURPOSE, STARTERS};
+use neko_protocol::cats::{self, Cat, FACES, MAX_ACTIVE, MAX_NAME, MAX_PURPOSE, MAX_RULES, STARTERS};
 use neko_protocol::{PermissionMode, TaskId};
 use rusqlite::{OptionalExtension, Transaction, params};
 
@@ -17,7 +17,7 @@ use crate::records::log_event;
 use crate::store::{Store, StoreError};
 use crate::Core;
 
-const CAT_COLUMNS: &str = "id, name, face, purpose, workspace_id, created_ms, retired_ms, thread_id, model, access";
+const CAT_COLUMNS: &str = "id, name, face, purpose, workspace_id, created_ms, retired_ms, thread_id, model, access, made_in";
 
 /// Active cats first, oldest first; then the retired ones.
 const CAT_ORDER: &str = "ORDER BY (retired_ms IS NOT NULL), created_ms, id";
@@ -34,6 +34,7 @@ fn cat_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Cat> {
         thread: r.get::<_, Option<String>>(7)?.map(TaskId),
         model: r.get(8)?,
         access: r.get::<_, Option<String>>(9)?.and_then(|a| crate::store::status_of::<PermissionMode>(&a).ok()),
+        made_in: r.get::<_, Option<String>>(10)?.map(TaskId),
     })
 }
 
@@ -188,11 +189,14 @@ impl Store {
     pub fn insert_cat(&mut self, c: &Cat, now_ms: i64) -> Result<u64, StoreError> {
         let tx = self.conn.transaction()?;
         tx.execute(
-            &format!("INSERT INTO cats ({CAT_COLUMNS}, name_key) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"),
-            params![c.id, c.name, c.face, c.purpose, c.workspace, c.created_ms, c.retired_ms, c.thread.as_ref().map(|t| &t.0), c.model, c.access.map(crate::store::status_name), name_key(&c.name)],
+            &format!("INSERT INTO cats ({CAT_COLUMNS}, name_key) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"),
+            params![c.id, c.name, c.face, c.purpose, c.workspace, c.created_ms, c.retired_ms, c.thread.as_ref().map(|t| &t.0), c.model, c.access.map(crate::store::status_name), c.made_in.as_ref().map(|t| &t.0), name_key(&c.name)],
         )?;
         crate::cattains::insert_files(&tx, [c.id.as_str()])?;
-        let seq = log_event(&tx, now_ms, &c.id, "cat_added", serde_json::json!({ "name": c.name }))?;
+        let seq = match &c.made_in {
+            Some(t) => log_event(&tx, now_ms, &c.id, "cat_added", serde_json::json!({ "name": c.name, "made_in": t.0 }))?,
+            None => log_event(&tx, now_ms, &c.id, "cat_added", serde_json::json!({ "name": c.name }))?,
+        };
         tx.commit()?;
         Ok(seq)
     }
@@ -257,6 +261,10 @@ impl Core {
     /// A new cat, with its folder and its four files (its own thread comes when it is first opened). Its face, when none is given, is the first no active cat has (else the
     /// first).
     pub fn create_cat(&mut self, name: &str, face: Option<&str>, purpose: Option<&str>, workspace: Option<&str>) -> Result<(Cat, u64), CatError> {
+        self.insert_new_cat(name, face, purpose, workspace, None)
+    }
+
+    fn insert_new_cat(&mut self, name: &str, face: Option<&str>, purpose: Option<&str>, workspace: Option<&str>, made_in: Option<TaskId>) -> Result<(Cat, u64), CatError> {
         let name = clean_name(name)?;
         self.name_free(&name, None)?;
         if self.active_count()? >= MAX_ACTIVE {
@@ -273,7 +281,7 @@ impl Core {
         let purpose = clean_purpose(purpose.unwrap_or(""))?;
         let workspace = self.check_workspace(workspace)?;
         let now = self.now();
-        let cat = Cat { id: self.new_id("cat"), name, face, purpose, workspace, thread: None, model: None, access: None, created_ms: now, retired_ms: None };
+        let cat = Cat { id: self.new_id("cat"), name, face, purpose, workspace, thread: None, model: None, access: None, created_ms: now, retired_ms: None, made_in };
         let rev = self.store.insert_cat(&cat, now)?;
         self.sync_cattain(&cat.id)?;
         Ok((cat, rev))
@@ -367,6 +375,172 @@ impl Core {
     }
 }
 
+// ---- Making one by asking (version 22) ----------------------------------------------------------------------------------------
+
+/// What a thread's agent asked for with Neko's `make_cattain` tool.
+#[derive(Clone, Debug, Default)]
+pub struct MakeAsk<'a> {
+    /// None: the first free name of [`cats::NAME_POOL`].
+    pub name: Option<&'a str>,
+    /// What it is for: required.
+    pub purpose: &'a str,
+    /// A project by its name or its folder. None: the asking thread's project, when it has one.
+    pub project: Option<&'a str>,
+    /// Its RULES.md. None: [`default_rules`].
+    pub rules: Option<&'a str>,
+}
+
+/// What `make_cattain` did.
+#[derive(Clone, Debug)]
+pub enum Made {
+    /// A new Cattain, the revision of its making, and its RULES.md as written then (with that change's revision).
+    New { cat: Cat, revision: u64, rules: (neko_protocol::CattainFile, u64) },
+    /// An active Cattain already has that purpose (and that name, when one was asked for): no near-twin is made.
+    Reused(Cat),
+}
+
+/// RULES.md for a Cattain made by asking with no rules of its own: one line, the person's to change.
+pub fn default_rules(purpose: &str) -> String {
+    format!("Stay on your purpose ({purpose}); ask the person before you take on other work.\n")
+}
+
+/// Two purposes are the same when their words are, without case or punctuation at the ends.
+pub fn same_purpose(a: &str, b: &str) -> bool {
+    let key = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ").trim_matches(|c: char| c.is_ascii_punctuation()).to_lowercase();
+    !key(a).is_empty() && key(a) == key(b)
+}
+
+/// The first name of the pool that `taken` does not refuse; past the end, the first pool name with the lowest free number ("yuzu 2").
+pub fn pool_name(taken: impl Fn(&str) -> bool) -> String {
+    if let Some(n) = cats::NAME_POOL.iter().find(|n| !taken(n)) {
+        return (*n).to_owned();
+    }
+    (2..).flat_map(|i| cats::NAME_POOL.iter().map(move |n| format!("{n} {i}"))).find(|n| !taken(n)).unwrap_or_default()
+}
+
+/// One Cattain in a line, for the agent: "miso (Writes the docs; project acme-api)".
+fn line_of(c: &Cat, project: Option<&str>) -> String {
+    let mut about = Vec::new();
+    if let Some(p) = &c.purpose {
+        about.push(p.clone());
+    }
+    if let Some(p) = project {
+        about.push(format!("project {p}"));
+    }
+    if about.is_empty() { c.name.clone() } else { format!("{} ({})", c.name, about.join("; ")) }
+}
+
+impl Core {
+    fn project_name(&self, ws: Option<&str>) -> Option<String> {
+        ws.and_then(|w| self.store.get_workspace(w).ok().flatten()).filter(|w| !w.is_general()).map(|w| w.name)
+    }
+
+    /// The active Cattains in a line each, for the agent (what the limit's refusal lists).
+    pub fn house_lines(&self) -> Result<Vec<String>, StoreError> {
+        Ok(self.store.list_cats()?.iter().filter(|c| c.is_active()).map(|c| line_of(c, self.project_name(c.workspace.as_deref()).as_deref())).collect())
+    }
+
+    /// The project `make_cattain` named: an active project (not General) by its name, its folder or its folder's last part, without
+    /// case. Refused in words with the projects there are.
+    fn project_named(&self, named: &str) -> Result<String, CatError> {
+        let named = named.trim().trim_end_matches('/');
+        let all: Vec<_> = self.workspaces()?.into_iter().filter(|w| w.is_active() && !w.is_general()).collect();
+        let hit = all.iter().find(|w| {
+            let folder = w.folder.as_deref().unwrap_or("").trim_end_matches('/');
+            w.name.eq_ignore_ascii_case(named) || w.id == named || folder == named || folder.rsplit('/').next().is_some_and(|last| last.eq_ignore_ascii_case(named))
+        });
+        match hit {
+            Some(w) => Ok(w.id.clone()),
+            None if all.is_empty() => Err(CatError::Refused(format!("Neko has no project called {named}, and no projects yet. Leave project out to make the Cattain with none."))),
+            None => Err(CatError::Refused(format!(
+                "Neko has no project called {named}. Its projects are {}. Leave project out to make the Cattain with none.",
+                all.iter().map(|w| w.name.clone()).collect::<Vec<_>>().join(", ")
+            ))),
+        }
+    }
+
+    /// `make_cattain` from the agent of `asking`: an active Cattain with the same purpose is reused; otherwise a new one is made with a
+    /// name from the pool unless one was asked for, the first face no active Cattain has, the asking thread's project unless another
+    /// was named, and its RULES.md (the rules given, else one line). Refused at [`MAX_ACTIVE`], with the house listed.
+    pub fn make_cattain(&mut self, asking: &TaskId, ask: &MakeAsk<'_>) -> Result<Made, CatError> {
+        let purpose = clean_purpose(ask.purpose)?.ok_or_else(|| CatError::Refused("make_cattain needs a purpose: a few words on what the Cattain looks after.".into()))?;
+        let name = ask.name.filter(|n| !n.trim().is_empty()).map(clean_name).transpose()?;
+        let all = self.store.list_cats()?;
+        let twin = all.iter().find(|c| c.is_active() && c.purpose.as_deref().is_some_and(|p| same_purpose(p, &purpose)) && name.as_deref().is_none_or(|n| name_key(n) == name_key(&c.name)));
+        if let Some(c) = twin {
+            return Ok(Made::Reused(c.clone()));
+        }
+        let active = all.iter().filter(|c| c.is_active()).count();
+        if active >= MAX_ACTIVE {
+            return Err(CatError::Refused(format!(
+                "Neko keeps at most {MAX_ACTIVE} Cattains at work, and {active} are: {}. No Cattain was made. Ask the person whether one of these should take the work, or whether they will retire one in Settings ▸ Cattains.",
+                self.house_lines()?.join("; ")
+            )));
+        }
+        let name = match name {
+            Some(n) => n,
+            None => pool_name(|n| all.iter().any(|c| name_key(&c.name) == name_key(n))),
+        };
+        let workspace = match ask.project.map(str::trim).filter(|p| !p.is_empty()) {
+            Some(p) => Some(self.project_named(p)?),
+            None => self.store.get_task(asking)?.map(|t| t.workspace).filter(|w| self.store.get_workspace(w).ok().flatten().is_some_and(|w| w.is_active() && !w.is_general())),
+        };
+        let rules = match ask.rules.filter(|r| !r.trim().is_empty()) {
+            Some(r) if r.len() > MAX_RULES => return Err(CatError::Refused(format!("Its rules can be at most {} KB.", MAX_RULES / 1024))),
+            Some(r) => r.to_owned(),
+            None => default_rules(&purpose),
+        };
+        let (cat, revision) = self.insert_new_cat(&name, None, Some(&purpose), workspace.as_deref(), Some(asking.clone()))?;
+        let rules = self.seed_rules(&cat.id, &rules)?;
+        Ok(Made::New { cat, revision, rules })
+    }
+
+    /// The Cattain has work: its own thread ran, a thread is in its crew, or a round is its.
+    pub fn cattain_has_work(&self, id: &str) -> Result<bool, StoreError> {
+        let q = "SELECT EXISTS (SELECT 1 FROM tasks t WHERE t.cat_id = ?1 AND (t.cattain = 0 OR EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id))) OR EXISTS (SELECT 1 FROM rounds WHERE cat_id = ?1)";
+        Ok(self.store.conn.query_row(q, [id], |r| r.get(0))?)
+    }
+
+    /// Undo for a Cattain an agent made: it is retired, while it has no work yet. Refused for one made by hand, and once it has work
+    /// ("Retire it in its Profile instead").
+    pub fn undo_make_cattain(&mut self, id: &str) -> Result<(Cat, u64), CatError> {
+        let cat = self.cat(id)?;
+        if cat.made_in.is_none() {
+            return Err(CatError::Refused(format!("{} was made by hand. Retire it in its Profile instead.", cat.name)));
+        }
+        if !cat.is_active() {
+            return Ok((cat, self.store.revision()?));
+        }
+        if self.cattain_has_work(id)? {
+            return Err(CatError::Refused(format!("{} has work already, so it was kept. Retire it in its Profile instead.", cat.name)));
+        }
+        self.retire_cat(id)
+    }
+
+    /// What `list_cattains` tells the agent: each active Cattain with its purpose, project, whether it works now and its crew.
+    pub fn cattains_text(&self) -> Result<String, StoreError> {
+        let mut lines = Vec::new();
+        for c in self.store.list_cats()?.iter().filter(|c| c.is_active()) {
+            let (crew, busy): (i64, bool) = self.store.conn.query_row(
+                "SELECT COUNT(*) FILTER (WHERE cattain = 0 AND parent_id IS NULL), COALESCE(MAX(status IN ('working', 'needs_you')), 0) FROM tasks WHERE cat_id = ?1",
+                [&c.id],
+                |r| Ok((r.get(0)?, r.get::<_, i64>(1)? != 0)),
+            )?;
+            let mut l = format!("- {}", line_of(c, self.project_name(c.workspace.as_deref()).as_deref()));
+            l.push_str(if busy { ": working now" } else { ": at rest" });
+            if crew > 0 {
+                l.push_str(&format!(", {crew} thread{} in its crew", if crew == 1 { "" } else { "s" }));
+            }
+            lines.push(l);
+        }
+        let n = lines.len();
+        Ok(format!(
+            "{n} of at most {MAX_ACTIVE} Cattains are at work:\n{}\nThe person talks to each in its own thread in Neko. Reuse one whose purpose fits rather than making another.",
+            lines.join("\n")
+        ))
+    }
+}
+
 /// The version of the words a cat hands a run, for the run's record.
 pub fn words_hash(words: &str) -> String {
     cats::rules_hash(words)
@@ -384,6 +558,22 @@ mod tests {
         assert!(matches!(clean_name(&"é".repeat(41)), Err(CatError::InvalidName(_))));
         assert_eq!(clean_purpose("  ").unwrap(), None);
         assert!(clean_purpose(&"x".repeat(201)).is_err());
+    }
+
+    #[test]
+    fn a_name_comes_from_the_pool_in_order_and_then_with_a_number() {
+        assert_eq!(pool_name(|_| false), "yuzu");
+        assert_eq!(pool_name(|n| n == "yuzu"), "kuro");
+        assert_eq!(pool_name(|n| !n.contains(' ')), "yuzu 2", "past the pool, a number");
+        assert_eq!(pool_name(|n| !n.contains(' ') || n == "yuzu 2"), "kuro 2");
+    }
+
+    #[test]
+    fn purposes_are_the_same_without_case_or_end_punctuation() {
+        assert!(same_purpose("iOS work", " ios  Work. "));
+        assert!(!same_purpose("iOS work", "Android work"));
+        assert!(!same_purpose("", ""), "no purpose matches nothing");
+        assert_eq!(default_rules("iOS work"), "Stay on your purpose (iOS work); ask the person before you take on other work.\n");
     }
 
     #[test]

@@ -355,6 +355,9 @@ const MIGRATIONS: &[Migration] = &[
     INSERT INTO cattain_files (cat_id, name, content) SELECT id, 'CREW.md', rules FROM cats;
     INSERT INTO cattain_files (cat_id, name, content) SELECT id, 'NOTES.md', '' FROM cats;
     INSERT INTO cattain_files (cat_id, name, content) SELECT id, 'DIGEST.md', '' FROM cats;"),
+    // 18: a Cattain made by asking (docs/knowledge/cats.md). The thread whose agent made it with Neko's `make_cattain`; every cat that
+    // exists was made by hand or is a starter, so none has one.
+    Migration::Sql("ALTER TABLE cats ADD COLUMN made_in TEXT;"),
 ];
 
 /// Migration 9's step: each task's `latest_line` from its newest agent words.

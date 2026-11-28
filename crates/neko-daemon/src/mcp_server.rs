@@ -24,7 +24,7 @@ const PROTOCOL: &str = "2025-06-18";
 /// How long the daemon has to answer a call.
 const ANSWER_WITHIN: Duration = Duration::from_secs(10);
 
-/// What the daemon says about this run: how deep it is (the tools offered depend on it).
+/// What the daemon says about this run: how deep it is and whether it may make Cattains (the tools offered depend on both).
 fn info() -> Option<Value> {
     call(&json!({"op": "info"})).ok()
 }
@@ -62,7 +62,8 @@ fn failure(id: &Value, code: i64, message: &str) -> Value {
 }
 
 /// The answer to one message, if it needs one (notifications do not).
-pub fn handle(msg: &Value, ask: &dyn Fn(&Value) -> Result<Value, String>, depth: &dyn Fn() -> usize) -> Option<Value> {
+/// `offer` says how deep the run is and whether it may make Cattains, when the tools are listed.
+pub fn handle(msg: &Value, ask: &dyn Fn(&Value) -> Result<Value, String>, offer: &dyn Fn() -> (usize, bool)) -> Option<Value> {
     let method = msg["method"].as_str().unwrap_or("");
     let id = msg.get("id")?;
     Some(match method {
@@ -71,7 +72,10 @@ pub fn handle(msg: &Value, ask: &dyn Fn(&Value) -> Result<Value, String>, depth:
             reply(id, json!({"protocolVersion": asked, "capabilities": {"tools": {}}, "serverInfo": {"name": "neko", "version": env!("CARGO_PKG_VERSION")}, "instructions": neko_core::subagents::SERVER_INSTRUCTIONS}))
         }
         "ping" => reply(id, json!({})),
-        "tools/list" => reply(id, json!({"tools": neko_core::subagents::tools(depth())})),
+        "tools/list" => {
+            let (depth, cattains) = offer();
+            reply(id, json!({"tools": neko_core::subagents::tools(depth, cattains)}))
+        }
         "tools/call" => {
             let p = &msg["params"];
             let tool = p["name"].as_str().unwrap_or("");
@@ -89,11 +93,14 @@ pub fn handle(msg: &Value, ask: &dyn Fn(&Value) -> Result<Value, String>, depth:
 pub fn serve() -> ExitCode {
     let stdin = std::io::stdin();
     let mut out = std::io::stdout().lock();
-    let depth = || info().and_then(|v| v["depth"].as_u64()).map_or(0, |d| d as usize);
+    let offer = || {
+        let v = info().unwrap_or_default();
+        (v["depth"].as_u64().map_or(0, |d| d as usize), v["cattains"].as_bool().unwrap_or(false))
+    };
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
         let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
-        if let Some(answer) = handle(&msg, &call, &depth) {
+        if let Some(answer) = handle(&msg, &call, &offer) {
             if writeln!(out, "{answer}").and_then(|()| out.flush()).is_err() {
                 break;
             }
@@ -112,14 +119,17 @@ mod tests {
 
     #[test]
     fn it_introduces_itself_and_lists_its_tools() {
-        let init = handle(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}), &ask_ok, &|| 0).unwrap();
+        let init = handle(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}), &ask_ok, &|| (0, false)).unwrap();
         assert_eq!(init["result"]["serverInfo"]["name"], "neko");
         assert_eq!(init["result"]["protocolVersion"], "2025-11-25");
-        let list = handle(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}), &ask_ok, &|| 0).unwrap();
+        let list = handle(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}), &ask_ok, &|| (0, false)).unwrap();
         let names: Vec<&str> = list["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
         assert_eq!(names, ["start_subagent", "start_drafts", "subagents", "message_subagent", "stop_subagent", "ask_person"]);
-        let deep = handle(&json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}), &ask_ok, &|| 3).unwrap();
-        assert_eq!(deep["result"]["tools"].as_array().unwrap().len(), 4, "no tool to start more at the last level, and ask_parent for ask_person");
+        let deep = handle(&json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}), &ask_ok, &|| (3, true)).unwrap();
+        assert_eq!(deep["result"]["tools"].as_array().unwrap().len(), 4, "no tool to start more at the last level, ask_parent for ask_person, and no Cattains");
+        let thread = handle(&json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}), &ask_ok, &|| (0, true)).unwrap();
+        let names: Vec<&str> = thread["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
+        assert_eq!(names[6..], ["make_cattain", "list_cattains"], "a thread whose agent may make Cattains");
     }
 
     #[test]
@@ -128,22 +138,22 @@ mod tests {
             assert_eq!(b["tool"], "start_subagent");
             assert_eq!(b["tool_use_id"], "toolu_1");
             ask_ok(b)
-        }, &|| 0).unwrap();
+        }, &|| (0, false)).unwrap();
         assert_eq!(r["result"]["content"][0]["text"], "Subagent 1 is started.");
         assert_eq!(r["result"]["isError"], false);
     }
 
     #[test]
     fn a_call_that_cannot_be_made_is_an_error_in_words() {
-        let r = handle(&json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"subagents"}}), &|_: &Value| Err("Neko could not be reached.".into()), &|| 0).unwrap();
+        let r = handle(&json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"subagents"}}), &|_: &Value| Err("Neko could not be reached.".into()), &|| (0, false)).unwrap();
         assert_eq!(r["result"]["isError"], true);
         assert_eq!(r["result"]["content"][0]["text"], "Neko could not be reached.");
     }
 
     #[test]
     fn notifications_get_no_answer_and_unknown_requests_are_refused() {
-        assert!(handle(&json!({"jsonrpc":"2.0","method":"notifications/initialized"}), &ask_ok, &|| 0).is_none());
-        let r = handle(&json!({"jsonrpc":"2.0","id":"server-discover-probe-1","method":"server/discover"}), &ask_ok, &|| 0).unwrap();
+        assert!(handle(&json!({"jsonrpc":"2.0","method":"notifications/initialized"}), &ask_ok, &|| (0, false)).is_none());
+        let r = handle(&json!({"jsonrpc":"2.0","id":"server-discover-probe-1","method":"server/discover"}), &ask_ok, &|| (0, false)).unwrap();
         assert_eq!(r["error"]["code"], -32601);
         assert_eq!(r["id"], "server-discover-probe-1");
     }

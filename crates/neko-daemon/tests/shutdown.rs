@@ -57,7 +57,7 @@ fn sigterm_with_a_request_pending_and_words_streaming_stops_within_a_second_and_
     d.keep_dir = true;
     let mut c = d.client();
     assert!(matches!(c.request(Request::Subscribe).unwrap(), Reply::Subscribed { .. }));
-    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Ask, own_mcp: false, queue_first: false, ask_first_subagent: false };
+    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Ask, own_mcp: false, queue_first: false, ask_first_subagent: false, cattains_by_hand: false };
     assert_eq!(c.request(Request::SetSettings { settings: s.clone() }).unwrap(), Reply::Settings { settings: s });
 
     // One task waits on the person; another streams words.

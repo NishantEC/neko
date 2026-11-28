@@ -108,7 +108,7 @@ fn create(c: &mut Client, words: &str) -> Task {
 }
 
 fn set_mode(c: &mut Client, m: PermissionMode) {
-    let s = Settings { runtime: "claude".into(), permission_mode: m, own_mcp: false, queue_first: false, ask_first_subagent: false };
+    let s = Settings { runtime: "claude".into(), permission_mode: m, own_mcp: false, queue_first: false, ask_first_subagent: false, cattains_by_hand: false };
     assert_eq!(c.request(Request::SetSettings { settings: s.clone() }).unwrap(), Reply::Settings { settings: s });
 }
 
@@ -432,7 +432,7 @@ fn a_reached_limit_holds_back_the_wake_until_it_resets() {
 fn the_user_can_have_runs_keep_their_own_mcp_servers() {
     let r = rig("own-mcp", &[]);
     let mut c = r.client();
-    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: true, queue_first: false, ask_first_subagent: false };
+    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: true, queue_first: false, ask_first_subagent: false, cattains_by_hand: false };
     assert_eq!(c.request(Request::SetSettings { settings: s.clone() }).unwrap(), Reply::Settings { settings: s });
     let t = create(&mut c, "Hello [fake:plain]");
     until("done", || task(&mut c, &t.id).status == TaskStatus::Done);

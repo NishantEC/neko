@@ -184,7 +184,7 @@ fn the_requests_that_run_a_task_round_trip() {
     pinned(ClientMessage { id: 9, request: Request::WatchTask { task: None } }, r#"{"id":9,"type":"watch_task"}"#);
     pinned(ClientMessage { id: 10, request: Request::ListRuntimes }, r#"{"id":10,"type":"list_runtimes"}"#);
     pinned(
-        ClientMessage { id: 11, request: Request::SetSettings { settings: Settings { runtime: "claude".into(), permission_mode: PermissionMode::Full, own_mcp: false, queue_first: false, ask_first_subagent: false } } },
+        ClientMessage { id: 11, request: Request::SetSettings { settings: Settings { runtime: "claude".into(), permission_mode: PermissionMode::Full, own_mcp: false, queue_first: false, ask_first_subagent: false, cattains_by_hand: false } } },
         r#"{"id":11,"type":"set_settings","settings":{"runtime":"claude","permission_mode":"full"}}"#,
     );
     for (m, name) in [(PermissionMode::Follow, "follow"), (PermissionMode::Ask, "ask"), (PermissionMode::Full, "full")] {
@@ -393,6 +393,7 @@ fn cat() -> Cat {
         access: Some(PermissionMode::Ask),
         created_ms: 1,
         retired_ms: None,
+        made_in: None,
     }
 }
 
@@ -456,7 +457,7 @@ fn cats_round_trip() {
     assert!(json.ends_with(r#""cat":"cat_miso","rules_hash":"cbf29ce484222325"}"#), "{json}");
     pinned(PartBody::RulesChanged { cat: c(), name: "miso".into(), file: None }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso"}"#);
     pinned(PartBody::RulesChanged { cat: c(), name: "miso".into(), file: Some("CREW.md".into()) }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso","file":"CREW.md"}"#);
-    assert_eq!(PROTOCOL_VERSION, 21);
+    assert_eq!(PROTOCOL_VERSION, 22);
     // A Cattain's own thread says so; any other thread writes nothing.
     let mut own = task();
     own.cattain = true;
@@ -514,8 +515,8 @@ fn subagents_have_their_own_shapes_and_the_old_ones_do_not_change() {
     );
     pinned(PartBody::Wake { number: "2".into(), title: "T".into(), status: "failed".into(), summary: String::new(), files: vec![], branch: None, question: None }, r#"{"kind":"wake","number":"2","title":"T","status":"failed","summary":""}"#);
     // The setting that gives runs the person's own MCP servers is written only when it is on.
-    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: false, ask_first_subagent: false }, r#"{"runtime":"claude","permission_mode":"follow"}"#);
-    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: true, queue_first: false, ask_first_subagent: false }, r#"{"runtime":"claude","permission_mode":"follow","own_mcp":true}"#);
+    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: false, ask_first_subagent: false, cattains_by_hand: false }, r#"{"runtime":"claude","permission_mode":"follow"}"#);
+    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: true, queue_first: false, ask_first_subagent: false, cattains_by_hand: false }, r#"{"runtime":"claude","permission_mode":"follow","own_mcp":true}"#);
     let old: Settings = serde_json::from_str(r#"{"runtime":"claude","permission_mode":"ask"}"#).unwrap();
     assert!(!old.own_mcp, "a screen from before the setting sends none");
 }
@@ -534,7 +535,7 @@ fn steer_queue_and_interrupt_round_trip() {
         r#"{"kind":"event","revision":3,"change":{"type":"queue_changed","task":"task_1","queued":[{"id":"queued_1","task":"task_1","words":"Next","kind":"steered","at_ms":5}]}}"#,
     );
     // Queue-first is written only when on, and a screen from before it sends none.
-    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: true, ask_first_subagent: false }, r#"{"runtime":"claude","permission_mode":"follow","queue_first":true}"#);
+    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: true, ask_first_subagent: false, cattains_by_hand: false }, r#"{"runtime":"claude","permission_mode":"follow","queue_first":true}"#);
     pinned(QueuedKind::Interrupting, "\"interrupting\"");
 }
 
@@ -596,7 +597,27 @@ fn a_kitten_says_where_it_works_what_it_follows_and_whether_it_is_a_draft() {
     pinned(ClientMessage { id: 5, request: Request::StartDraft { task: TaskId("task_2".into()) } }, r#"{"id":5,"type":"start_draft","task":"task_2"}"#);
     pinned(ClientMessage { id: 6, request: Request::EditDraft { task: TaskId("task_2".into()), prompt: "Read the docs".into() } }, r#"{"id":6,"type":"edit_draft","task":"task_2","prompt":"Read the docs"}"#);
     pinned(ClientMessage { id: 7, request: Request::DiscardDraft { task: TaskId("task_2".into()) } }, r#"{"id":7,"type":"discard_draft","task":"task_2"}"#);
-    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: false, ask_first_subagent: true }, r#"{"runtime":"claude","permission_mode":"follow","ask_first_subagent":true}"#);
+    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: false, ask_first_subagent: true, cattains_by_hand: false }, r#"{"runtime":"claude","permission_mode":"follow","ask_first_subagent":true}"#);
     let old: Settings = serde_json::from_str(r#"{"runtime":"claude","permission_mode":"ask"}"#).unwrap();
     assert!(!old.ask_first_subagent);
+}
+
+#[test]
+fn a_cattain_made_by_asking_round_trips() {
+    // Version 22: a cat says the thread whose agent made it; the note in that thread; Undo; the setting.
+    let mut made = cat();
+    made.made_in = Some(TaskId("task_1".into()));
+    let json = serde_json::to_string(&made).unwrap();
+    assert!(json.ends_with(r#""created_ms":1,"made_in":"task_1"}"#), "{json}");
+    assert_eq!(serde_json::from_str::<Cat>(&json).unwrap(), made);
+    assert!(!serde_json::to_string(&cat()).unwrap().contains("made_in"), "a cat made by hand writes none");
+    pinned(PartBody::CattainMade { cat: "cat_y".into(), name: "yuzu".into(), purpose: Some("iOS work".into()) }, r#"{"kind":"cattain_made","cat":"cat_y","name":"yuzu","purpose":"iOS work"}"#);
+    pinned(PartBody::CattainMade { cat: "cat_y".into(), name: "yuzu".into(), purpose: None }, r#"{"kind":"cattain_made","cat":"cat_y","name":"yuzu"}"#);
+    pinned(ClientMessage { id: 1, request: Request::UndoMakeCattain { cat: "cat_y".into() } }, r#"{"id":1,"type":"undo_make_cattain","cat":"cat_y"}"#);
+    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: false, ask_first_subagent: false, cattains_by_hand: true }, r#"{"runtime":"claude","permission_mode":"follow","cattains_by_hand":true}"#);
+    let old: Settings = serde_json::from_str(r#"{"runtime":"claude","permission_mode":"ask"}"#).unwrap();
+    assert!(!old.cattains_by_hand, "agents may make Cattains unless the person said otherwise");
+    let pool = neko_protocol::cats::NAME_POOL;
+    assert!(pool.len() > neko_protocol::cats::MAX_ACTIVE && !pool.iter().any(|n| neko_protocol::cats::STARTERS.iter().any(|s| s.1 == *n)));
+    assert_eq!(PROTOCOL_VERSION, 22);
 }

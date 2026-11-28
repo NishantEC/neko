@@ -57,7 +57,9 @@ pub use undo::{DiffFile, DiffPatch, DiffSource, DiffSummary, FileStatus, Offer, 
 /// 21: a cat is a Cattain (its own thread, project, model and access; its four files read and saved with `get_cattain_file`,
 /// `save_cattain_file`, `restore_cattain_file` and pushed in `cattain_file_changed`; `create_task` may start a thread in a Cattain's crew;
 /// a task says whether it is a Cattain's own thread; the rules requests are gone, the rules being RULES.md).
-pub const PROTOCOL_VERSION: u32 = 21;
+/// 22: a thread's agent can make a Cattain (Neko's `make_cattain` tool: a cat says the thread that made it, `made_in`; the note
+/// `cattain_made` in that thread; `undo_make_cattain` retires one that has no work yet; a setting keeps Cattains made by hand only).
+pub const PROTOCOL_VERSION: u32 = 22;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -598,6 +600,14 @@ pub enum PartBody {
     /// The agent wrote to one of its kittens with `message_subagent` (version 20): the quiet note in its own conversation. `answer`: the
     /// kitten was waiting on a question, so these words are the answer.
     ToSubagent { number: String, text: String, answer: bool },
+    /// The agent made a Cattain with Neko's `make_cattain` (version 22): the quiet note in the thread that asked, "Made a Cattain: yuzu
+    /// · iOS work · Open". `cat` is its id; `name` and `purpose` are as it was made (the cat itself says how it is now).
+    CattainMade {
+        cat: String,
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        purpose: Option<String>,
+    },
 }
 
 /// A failure the person can do something about (docs/knowledge/needs-you.md). Every other failure is a notice only.
@@ -760,6 +770,10 @@ pub struct Settings {
     /// Ask before a thread's first kitten (version 19): it is made a draft the person Starts. Off: kittens start by themselves.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first_subagent: bool,
+    /// Cattains are made by hand only (version 22): a thread's agent is not offered `make_cattain` and is not told about it. Off (the
+    /// default): "Agents may make Cattains" in Settings ▸ Cattains is on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cattains_by_hand: bool,
 }
 
 /// An agent CLI Neko knows, as found on this Mac.
@@ -925,6 +939,9 @@ pub enum Request {
     RetireCat { cat: String },
     /// Bring a retired cat back. Refused when [`cats::MAX_ACTIVE`] are active.
     BringBackCat { cat: String },
+    /// Takes back a Cattain an agent made (version 22): it is retired, as the toast's Undo says. Refused for one made by hand and for
+    /// one that has work already (its own thread ran, a thread in its crew, a round). Answers `cat`.
+    UndoMakeCattain { cat: String },
     /// Every round, in the order they were made, and whether every round is paused.
     ListRounds,
     /// A new round. `workspace` None is General. It is on unless `on` is false.
@@ -1381,6 +1398,7 @@ impl PartBody {
             PartBody::Wake { summary, .. } => summary,
             PartBody::Subagent { title, .. } => title,
             PartBody::ToSubagent { text, .. } => text,
+            PartBody::CattainMade { name, .. } => name,
             PartBody::Permission { .. } | PartBody::RulesChanged { .. } => "",
         }
     }

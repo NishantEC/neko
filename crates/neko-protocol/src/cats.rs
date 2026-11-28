@@ -42,6 +42,13 @@ pub const FACES: &[&str] = &["tabby", "ginger", "tuxedo", "calico", "siamese", "
 /// The three cats a new install starts with: their fixed ids, names and faces. Ordinary cats: they can be renamed or retired.
 pub const STARTERS: &[(&str, &str, &str)] = &[("cat_miso", "miso", "ginger"), ("cat_mochi", "mochi", "snow"), ("cat_tofu", "tofu", "calico")];
 
+/// The names a Cattain an agent makes is given when the agent names none, in this order: the first no cat has (retired ones too,
+/// compared without case). Past the end, the first with the lowest free number after it ("yuzu 2").
+pub const NAME_POOL: &[&str] = &[
+    "yuzu", "kuro", "sesame", "azuki", "kinako", "nori", "ume", "sumi", "hana", "momo", "sora", "mikan", "shiro", "kabu", "ponzu", "daifuku", "kiku", "kumo", "taro",
+    "natsu",
+];
+
 /// A named agent with a face, its own thread and its own files: a Cattain (version 21).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cat {
@@ -71,6 +78,9 @@ pub struct Cat {
     /// When it was retired: its threads stay readable; it takes no new crew until it is brought back.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retired_ms: Option<i64>,
+    /// The thread whose agent made it with Neko's `make_cattain` (version 22). None: made by hand, or a starter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub made_in: Option<crate::TaskId>,
 }
 
 impl Cat {

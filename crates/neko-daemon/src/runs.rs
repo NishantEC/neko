@@ -305,7 +305,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
         let now = core.now();
         let _ = core.store.set_place(&task.id, &place, now);
     }
-    let settings = lock(&shared.core).store.settings().unwrap_or(neko_protocol::Settings { runtime: "claude".into(), permission_mode: Default::default(), own_mcp: false, queue_first: false, ask_first_subagent: false });
+    let settings = lock(&shared.core).store.settings().unwrap_or(neko_protocol::Settings { runtime: "claude".into(), permission_mode: Default::default(), own_mcp: false, queue_first: false, ask_first_subagent: false, cattains_by_hand: false });
     let Some(runtime) = shared.runs.runtimes.iter().find(|r| r.id() == settings.runtime).cloned() else {
         if let Some(w) = &words {
             person(shared, &task.id, w);
@@ -424,7 +424,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
     // the words. After it, what Neko tells every agent about subagents, and a subagent's own few lines (docs/knowledge/subagents.md).
     let cat_block = handed.as_ref().map(|h| lock(&shared.core).block_for(h));
     let thread_title = task.subagent.as_ref().and_then(|s| lock(&shared.core).store.get_task(&s.root).ok().flatten()).map(|t| t.title);
-    let instructions = Some(neko_core::subagents::instructions(cat_block.as_deref(), task.subagent.as_ref().zip(thread_title.as_deref()).map(|(s, t)| (s.number.as_str(), t, s.branch.as_deref()))));
+    let instructions = Some(neko_core::subagents::instructions(cat_block.as_deref(), task.subagent.as_ref().zip(thread_title.as_deref()).map(|(s, t)| (s.number.as_str(), t, s.branch.as_deref())), !settings.cattains_by_hand));
     // This run's own MCP server finds the daemon with a secret made for this run alone.
     let mcp_helper = std::env::var_os("NEKO_MCP_HELPER").filter(|h| !h.is_empty()).map(PathBuf::from).or_else(|| std::env::current_exe().ok()).unwrap_or_default();
     let Some(mcp_secret) = crate::files::random_hex(32).ok() else {

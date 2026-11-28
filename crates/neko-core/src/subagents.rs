@@ -401,6 +401,13 @@ answer follows from the work or from what the person said. When only the person 
 undone; what the person wants), pass it up with mcp__neko__ask_person naming the subagent (a subagent passes it to its own parent with mcp__neko__ask_parent), then end your turn. \
 Never make up such an answer. Your answer approves no step: the subagent still asks the person before risky steps.";
 
+/// What a thread's agent is told about Cattains when it may make them (not a subagent; Settings ▸ Cattains, "Agents may make
+/// Cattains", on), after the paragraph. The same bytes every time.
+pub const CATTAINS_PARAGRAPH: &str = "Neko also keeps Cattains: the person's named, standing agents (cats such as miso), each with a thread of its own, its own files and \
+often a project. Make one with mcp__neko__make_cattain only when the person asks for one, or when they hand over long-running work in several parts that clearly needs \
+a standing owner; never for one task, which you do yourself or with subagents. Call mcp__neko__list_cattains first and use one whose purpose fits instead of making a \
+near-twin. A new Cattain has no work until the person writes to it in its own thread. After you make one, tell the person its name and what it is for.";
+
 /// What a subagent is told about itself, after the paragraph. The same bytes on every run of that subagent. `branch` is the branch of
 /// its own copy, when it works in one.
 pub fn subagent_block(number: &str, thread_title: &str, branch: Option<&str>) -> String {
@@ -418,15 +425,18 @@ turn. The agent that started you answers, or asks the person, and Neko resumes y
 /// Who a subagent is, for its own few lines: its number, its thread's title and the branch of its own copy.
 pub type Of<'a> = (&'a str, &'a str, Option<&'a str>);
 
-/// The whole text added to a run's system text for a task: the cat's own block, then the paragraph, then (for a subagent) its own.
-pub fn instructions(cat_block: Option<&str>, subagent: Option<Of<'_>>) -> String {
+/// The whole text added to a run's system text for a task: the cat's own block, then the paragraph, then (for a subagent) its own,
+/// or (for a thread whose agent may make Cattains, `cattains`) the paragraph about them.
+pub fn instructions(cat_block: Option<&str>, subagent: Option<Of<'_>>, cattains: bool) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(b) = cat_block.filter(|b| !b.is_empty()) {
         parts.push(b.to_owned());
     }
     parts.push(PARAGRAPH.to_owned());
-    if let Some((number, thread, branch)) = subagent {
-        parts.push(subagent_block(number, thread, branch));
+    match subagent {
+        Some((number, thread, branch)) => parts.push(subagent_block(number, thread, branch)),
+        None if cattains => parts.push(CATTAINS_PARAGRAPH.to_owned()),
+        None => {}
     }
     parts.join("\n\n")
 }
@@ -528,8 +538,9 @@ pub fn wake_message(wakes: &[WakeRow], in_subagent: bool) -> String {
 }
 
 /// The tools of Neko's own server, as MCP's `tools/list` gives them. `depth` is how deep the asking run is: at the last level a
-/// subagent may not start more, so it is not offered the tool.
-pub fn tools(depth: usize) -> Vec<Value> {
+/// subagent may not start more, so it is not offered the tool. `cattains`: a thread (depth 0) whose agent may make Cattains is
+/// offered `make_cattain` and `list_cattains`; a subagent never is.
+pub fn tools(depth: usize, cattains: bool) -> Vec<Value> {
     let mut list = Vec::new();
     if depth < MAX_DEPTH {
         list.push(json!({
@@ -604,7 +615,32 @@ Then end your turn: their answer is your next message. To pass up a subagent's q
                 "additionalProperties": false
             }
         }));
-    } else {
+    }
+    if depth == 0 && cattains {
+        list.push(json!({
+            "name": "make_cattain",
+            "description": "Makes a Cattain: a named, standing agent of the person's (like miso), with a thread of its own, its own files and a project. Only when the person asks for one, \
+or when they hand over long-running work in several parts that clearly needs a standing owner; never for one task. Returns at once with its name. If an active Cattain already has \
+this purpose it is returned instead. Neko keeps at most 16 at work. A new one has no work until the person writes to it. Tell the person its name and what it is for.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "purpose": {"type": "string", "description": "What it looks after, in a few words (\"iOS work\"). At most 200 characters."},
+                    "name": {"type": "string", "description": "Only when the person gave one. Otherwise Neko picks a cat's name."},
+                    "project": {"type": "string", "description": "The project it works in, by its name in Neko or its folder. Default: this thread's project."},
+                    "rules": {"type": "string", "description": "Its standing rules (its RULES.md), when the person said how it should work. Default: one line about its purpose."}
+                },
+                "required": ["purpose"],
+                "additionalProperties": false
+            }
+        }));
+        list.push(json!({
+            "name": "list_cattains",
+            "description": "Lists the person's Cattains at work: name, purpose, project, whether it works now and its crew. Read-only and instant. Call it before make_cattain.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+        }));
+    }
+    if depth > 0 {
         list.push(json!({
             "name": "ask_parent",
             "description": "Asks the agent that started you a question you cannot go on without. Returns at once. Then end your turn: it answers, or asks the person, and Neko \
@@ -663,10 +699,23 @@ mod tests {
 
     #[test]
     fn a_subagent_at_the_last_level_is_not_offered_the_tool_to_start_more() {
-        let names = |d| tools(d).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        let names = |d| tools(d, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         assert_eq!(names(0), ["start_subagent", "start_drafts", "subagents", "message_subagent", "stop_subagent", "ask_person"]);
         assert_eq!(names(MAX_DEPTH - 1), ["start_subagent", "start_drafts", "subagents", "message_subagent", "stop_subagent", "ask_parent"]);
         assert_eq!(names(MAX_DEPTH), ["subagents", "message_subagent", "stop_subagent", "ask_parent"]);
+    }
+
+    #[test]
+    fn only_a_threads_agent_that_may_is_offered_and_told_about_cattains() {
+        let names = |d, c| tools(d, c).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        assert_eq!(names(0, true), ["start_subagent", "start_drafts", "subagents", "message_subagent", "stop_subagent", "ask_person", "make_cattain", "list_cattains"]);
+        assert!(!names(1, true).iter().any(|n| n.contains("cattain")), "a subagent never makes one");
+        let thread = instructions(None, None, true);
+        assert!(thread.ends_with(CATTAINS_PARAGRAPH) && CATTAINS_PARAGRAPH.contains("only when the person asks") && CATTAINS_PARAGRAPH.contains("tell the person"), "{thread}");
+        assert!(!instructions(None, Some(("1", "Fix login", None)), true).contains("make_cattain"));
+        assert!(!instructions(None, None, false).contains("make_cattain"), "the setting off: not a word of it");
+        let make = &tools(0, true)[6];
+        assert_eq!(make["inputSchema"]["required"], json!(["purpose"]));
     }
 
     #[test]
@@ -694,17 +743,17 @@ mod tests {
     fn the_question_tools_tell_the_agent_to_end_its_turn() {
         assert!(asked_text(AskTo::Parent, None).contains("End your turn now"));
         assert!(asked_text(AskTo::Person, Some("1")).contains("pass it on to Subagent 1 with message_subagent"));
-        assert!(instructions(None, Some(("1", "Fix login", None))).contains("mcp__neko__ask_parent"));
+        assert!(instructions(None, Some(("1", "Fix login", None)), false).contains("mcp__neko__ask_parent"));
         assert!(PARAGRAPH.contains("Never make up such an answer") && PARAGRAPH.contains("approves no step"));
     }
 
     #[test]
     fn the_text_is_the_same_bytes_every_time() {
-        assert_eq!(instructions(Some("Rules."), Some(("1.2", "Fix login", None))), instructions(Some("Rules."), Some(("1.2", "Fix login", None))));
-        assert!(instructions(None, None).starts_with("Neko can run parts of your work"));
-        assert!(instructions(Some("Rules."), None).starts_with("Rules.\n\nNeko can run"));
-        assert!(instructions(None, Some(("1", "Fix login", None))).ends_with("the same folder as the agent that started you."));
-        let own = instructions(None, Some(("1", "Fix login", Some("neko/4f2a-1"))));
+        assert_eq!(instructions(Some("Rules."), Some(("1.2", "Fix login", None)), true), instructions(Some("Rules."), Some(("1.2", "Fix login", None)), true));
+        assert!(instructions(None, None, false).starts_with("Neko can run parts of your work"));
+        assert!(instructions(Some("Rules."), None, false).starts_with("Rules.\n\nNeko can run"));
+        assert!(instructions(None, Some(("1", "Fix login", None)), false).ends_with("the same folder as the agent that started you."));
+        let own = instructions(None, Some(("1", "Fix login", Some("neko/4f2a-1"))), false);
         assert!(own.contains("on the branch neko/4f2a-1") && own.contains("Commit your work there"));
     }
 
