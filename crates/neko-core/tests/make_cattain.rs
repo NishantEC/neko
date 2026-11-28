@@ -105,7 +105,7 @@ fn past_sixteen_at_work_it_is_refused_with_the_house_listed() {
     }
     let e = c.make_cattain(&asking.id, &ask("iOS work")).unwrap_err();
     let CatError::Refused(words) = e else { panic!("{e:?}") };
-    assert!(words.starts_with("Neko keeps at most 16 Cattains at work, and 16 are: miso; mochi; tofu; yuzu (Work 0);"), "{words}");
+    assert!(words.starts_with("Neko keeps at most 16 Cattains at work, and 16 are:\n- miso\n- mochi\n- tofu\n- yuzu (Work 0)\n"), "{words}");
     assert!(words.contains("No Cattain was made") && words.contains("Settings ▸ Cattains"), "{words}");
     // The same purpose as one at work is still that one, even at the limit.
     assert!(matches!(c.make_cattain(&asking.id, &ask("work 3")), Ok(Made::Reused(_))));

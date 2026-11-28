@@ -226,7 +226,7 @@ fn at_sixteen_the_agent_is_refused_with_the_house_listed_and_nothing_is_made() {
     let m = r.mcp_calls("make_cattain").remove(0);
     let said = m["text"].as_str().unwrap();
     assert_eq!(m["error"], true);
-    assert!(said.starts_with("Neko keeps at most 16 Cattains at work, and 16 are: miso; mochi; tofu; cat 0 (Work 0);") && said.contains("No Cattain was made"), "{said}");
+    assert!(said.starts_with("Neko keeps at most 16 Cattains at work, and 16 are:\n- miso\n- mochi\n- tofu\n- cat 0 (Work 0)\n") && said.contains("No Cattain was made"), "{said}");
     assert_eq!(cats(&mut c).len(), 16);
     assert!(notes(&transcript(&mut c, &t.id)).is_empty());
 }

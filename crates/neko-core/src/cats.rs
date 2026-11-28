@@ -473,8 +473,8 @@ impl Core {
         let active = all.iter().filter(|c| c.is_active()).count();
         if active >= MAX_ACTIVE {
             return Err(CatError::Refused(format!(
-                "Neko keeps at most {MAX_ACTIVE} Cattains at work, and {active} are: {}. No Cattain was made. Ask the person whether one of these should take the work, or whether they will retire one in Settings ▸ Cattains.",
-                self.house_lines()?.join("; ")
+                "Neko keeps at most {MAX_ACTIVE} Cattains at work, and {active} are:\n{}\nNo Cattain was made.\nAsk the person whether one of these should take the work,\nor whether they will retire one in Settings ▸ Cattains.",
+                self.house_lines()?.iter().map(|l| format!("- {l}")).collect::<Vec<_>>().join("\n")
             )));
         }
         let name = match name {
