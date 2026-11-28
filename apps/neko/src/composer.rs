@@ -70,7 +70,7 @@ impl App {
         self.open_task().is_some_and(|t| t.status.is_active()) || self.book().is_some_and(|b| b.running().is_some())
     }
 
-    fn queue_first(&self) -> bool {
+    pub(crate) fn queue_first(&self) -> bool {
         self.runtimes.as_ref().is_some_and(|(_, s)| s.queue_first)
     }
 
@@ -520,7 +520,7 @@ pub fn settings_choice(s: &App, t: &Theme) -> Option<El> {
             .key("settings-sending")
             .w_full()
             .gap(t.space.at(3.0))
-            .child(text("While the agent works").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()))
+            .child(text("While the agent works").role("heading").level(3).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()))
             .child(crate::ui::radio_group::RadioGroup::<App>::new("settings-send", "What Return does while the agent works", &options, Some(chosen)).on_change(|s: &mut App, i| s.set_queue_first(i == 1)).build(t)),
     )
 }

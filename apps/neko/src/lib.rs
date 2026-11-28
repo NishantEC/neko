@@ -189,6 +189,11 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         tx.instant();
         return true;
     }
+    // ⌘F in Settings: its search field, as in System Settings.
+    if s.settings_open && ev.is_command('f') && !(m.shift || m.alt || m.ctrl) {
+        tx.focus("settings-search", true);
+        return true;
+    }
     if rune_kit::shell::is_sidebar_toggle(ev) || (ev.is_command('s') && m.ctrl && !(m.shift || m.alt)) {
         s.toggle_sidebar();
         tx.instant();
@@ -277,6 +282,12 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
             s.leave_briefing();
             return true;
         }
+        // In Settings' search field Escape empties it first, as a Mac search field does.
+        if s.settings_open && s.settings_query.focused && !s.settings_query.text.is_empty() {
+            s.settings_query = rune::TextEdit::default();
+            s.settings_query.focused = true;
+            return true;
+        }
         // A request waiting in the open task: Escape answers it no (the destructive form has no other key), and the agent carries
         // on. Only with nothing asked does Escape stop the run.
         if !s.settings_open
@@ -304,6 +315,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 /// Each frame: what the link brought, the clock, the width, the window's title and frame, the menu.
 pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     let mut changed = s.drain_link();
+    changed |= s.settings_follow_search();
     s.pane_sync();
     s.palette_poll();
     s.save_drafts(t, None);

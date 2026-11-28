@@ -101,12 +101,17 @@ pub const ACTIONS: &[Action] = &[
     Action { id: "show-settled", label: "Show settled threads", keywords: "view put away", keys: None },
     Action { id: "hide-settled", label: "Fold settled threads", keywords: "view put away", keys: None },
     Action { id: "settings", label: "Settings", keywords: "preferences options", keys: Some("⌘ ,") },
-    Action { id: "settings-0", label: "Settings: Agents", keywords: "claude runtime model permissions", keys: None },
-    Action { id: "settings-1", label: "Settings: Projects", keywords: "folders workspaces undo storage", keys: None },
-    Action { id: "settings-2", label: "Settings: Notifications", keywords: "alerts badge", keys: None },
-    Action { id: "settings-3", label: "Settings: Cattains", keywords: "cats rules faces crew", keys: None },
-    Action { id: "settings-4", label: "Settings: Briefing", keywords: "morning notification", keys: None },
-    Action { id: "settings-5", label: "Settings: Plugins", keywords: "mcp servers tools", keys: None },
+    Action { id: "settings-general", label: "Settings: General", keywords: "steer queue group threads sidebar settle", keys: None },
+    Action { id: "settings-agents", label: "Settings: Agents & models", keywords: "claude runtime model cli", keys: None },
+    Action { id: "settings-permissions", label: "Settings: Permissions", keywords: "access ask full follow rules", keys: None },
+    Action { id: "settings-projects", label: "Settings: Projects", keywords: "folders workspaces", keys: None },
+    Action { id: "settings-cattains", label: "Settings: Cattains", keywords: "cats rules faces crew", keys: None },
+    Action { id: "settings-kittens", label: "Settings: Kittens", keywords: "subagents helpers limits", keys: None },
+    Action { id: "settings-rounds", label: "Settings: Rounds & wakes", keywords: "pause briefing morning notification", keys: None },
+    Action { id: "settings-notifications", label: "Settings: Notifications", keywords: "alerts badge", keys: None },
+    Action { id: "settings-plugins", label: "Settings: Plugins", keywords: "mcp servers tools", keys: None },
+    Action { id: "settings-shortcuts", label: "Settings: Shortcuts", keywords: "keyboard keys", keys: None },
+    Action { id: "settings-storage", label: "Settings: Storage", keywords: "undo checkpoints disk worktrees archived", keys: None },
 ];
 
 /// The words a text field holds once its filters (`project:acme`, `status:needs`, `cat:miso`, `since:2d`) are taken out.
@@ -247,9 +252,9 @@ impl App {
             "show-settled" | "hide-settled" => self.set_show_settled(id == "show-settled"),
             "settings" => self.open_settings(),
             other => {
-                if let Some(page) = other.strip_prefix("settings-").and_then(|n| n.parse::<usize>().ok()) {
+                if let Some(page) = other.strip_prefix("settings-").and_then(crate::settings_view::Page::of_slug) {
                     self.open_settings();
-                    self.settings_page = page;
+                    self.set_settings_page(page);
                 }
             }
         }

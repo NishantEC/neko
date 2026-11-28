@@ -97,7 +97,7 @@ fn a_cattain_made_by_asking_shows_its_note_and_toast_opens_on_who_it_is_and_undo
     // Settings ▸ Cattains lists it, says where it was made, and has the switch.
     rt.update(|s, _| {
         s.settings_open = true;
-        s.settings_page = 3;
+        s.settings_page = neko_app::settings_view::Page::Cattains;
     });
     settle(&mut rt);
     let facts = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("settings-cat-{}-facts", yuzu.id))).expect("yuzu in Settings");

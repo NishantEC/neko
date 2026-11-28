@@ -206,8 +206,10 @@ pub struct App {
     pub at_bottom: bool,
     /// Settings (⌘,) shows instead of the content.
     pub settings_open: bool,
-    /// Which of Settings' pages shows (`settings_view::PAGES`).
-    pub settings_page: usize,
+    /// Which of Settings' pages shows (kept while Settings is closed, so ⌘, comes back to it).
+    pub settings_page: crate::settings_view::Page,
+    /// The words in Settings' search field (emptied each time Settings opens).
+    pub settings_query: TextEdit,
     /// The agent CLIs and the settings, as the daemon last said.
     pub runtimes: Option<(Vec<RuntimeInfo>, Settings)>,
     /// The person's home folder, so paths under it read `~/…` (None: shown whole).
@@ -506,7 +508,8 @@ impl Default for App {
             open_folds: HashSet::new(),
             at_bottom: true,
             settings_open: false,
-            settings_page: 0,
+            settings_page: crate::settings_view::Page::default(),
+            settings_query: TextEdit::default(),
             runtimes: None,
             home: None,
             reveals: HashMap::new(),
@@ -1322,6 +1325,10 @@ impl App {
     /// Settings (⌘,).
     pub fn open_settings(&mut self) {
         self.settings_open = true;
+        self.settings_query = TextEdit::default();
+        if self.settings_page == crate::settings_view::Page::Notifications {
+            self.read_allowed_soon();
+        }
         self.needs_open = false;
         self.rounds_open = false;
         self.briefing_open = false;

@@ -223,7 +223,7 @@ fn the_context_ring_is_named_reached_and_left_by_the_keyboard() {
 
 #[test]
 fn settings_name_three_modes_and_say_what_claude_codes_own_rules_allow() {
-    let rt = runtime((1200.0, 800.0), false, scene("settings"));
+    let rt = runtime((1200.0, 800.0), false, scene("settings-permissions"));
     let t: Vec<String> = rt.elements().into_iter().filter_map(|e| e.text).collect();
     for mode in ["Follow Claude Code's own rules", "Ask before risky steps", "Full access"] {
         assert!(t.iter().any(|x| x == mode), "{mode}: {t:?}");

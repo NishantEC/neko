@@ -105,7 +105,7 @@ pub fn settings(s: &mut App) {
     made(s);
     s.open = None;
     s.settings_open = true;
-    s.settings_page = 3;
+    s.settings_page = crate::settings_view::Page::Cattains;
     s.runtimes = Some(super::agents(true, neko_protocol::PermissionMode::Follow));
 }
 

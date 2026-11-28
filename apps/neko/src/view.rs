@@ -247,6 +247,10 @@ fn content_band(s: &App, t: &Theme, lights: f32, layer: &mut Vec<El>) -> El {
     if !s.sidebar_shown() {
         band = band.child(lights_room(lights).w(if lights > 0.0 { (lights - 4.0).max(0.0) } else { 0.0 })).child(toggle_button(t, false));
     }
+    // Settings' title stands where a thread's does; its pages are listed under it.
+    if s.settings_open {
+        return band.child(text("Settings").key("settings-title").role("heading").level(1).font(weight(t.ty.lg, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0).shrink());
+    }
     let Some(task) = s.open_task().filter(|_| !s.settings_open && !s.needs_open && !s.rounds_open && !s.briefing_open) else { return band };
     let sub = task.subagent.is_some();
     // The title always wins the room: in a narrow content area the folder line goes first and the workspace's name shortens.

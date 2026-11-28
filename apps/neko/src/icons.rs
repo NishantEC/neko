@@ -64,3 +64,24 @@ pub static BRANCH: Icon = Icon {
     view: 16.0,
     body: r#"<circle cx="4.75" cy="3.75" r="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="4.75" cy="12.25" r="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="11.25" cy="5.75" r="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4.75 5.25v5.5M11.25 7.25c0 2.4-2 3.1-4.6 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>"#,
 };
+
+/// A cat's head, ears up: Settings ▸ Cattains.
+pub static CAT: Icon = Icon {
+    name: "neko-cat",
+    view: 16.0,
+    body: r#"<path d="M2.75 12.25V3.5l3 2.5h4.5l3-2.5v8.75a1 1 0 0 1-1 1h-8.5a1 1 0 0 1-1-1Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="6" cy="9.25" r="0.9" fill="currentColor"/><circle cx="10" cy="9.25" r="0.9" fill="currentColor"/>"#,
+};
+
+/// A paw: Settings ▸ Kittens.
+pub static PAW: Icon = Icon {
+    name: "neko-paw",
+    view: 16.0,
+    body: r#"<path d="M8 8.25c-2 0-3.75 1.9-3.75 3.4 0 .95.75 1.6 1.7 1.6.75 0 1.3-.4 2.05-.4s1.3.4 2.05.4c.95 0 1.7-.65 1.7-1.6 0-1.5-1.75-3.4-3.75-3.4Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="3.4" cy="6.9" r="1.2" fill="currentColor"/><circle cx="6.1" cy="4.1" r="1.2" fill="currentColor"/><circle cx="9.9" cy="4.1" r="1.2" fill="currentColor"/><circle cx="12.6" cy="6.9" r="1.2" fill="currentColor"/>"#,
+};
+
+/// A drive: Settings ▸ Storage.
+pub static DRIVE: Icon = Icon {
+    name: "neko-drive",
+    view: 16.0,
+    body: r#"<rect x="2.25" y="3.75" width="11.5" height="8.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 8.75h11" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10.75" cy="10.5" r="0.85" fill="currentColor"/>"#,
+};

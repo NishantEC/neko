@@ -215,32 +215,6 @@ pub fn card_stack(s: &App, t: &Theme, parts: &[&Part]) -> Option<El> {
     Some(crate::turn::settling(raised(t, card)).my(t.space.at(1.0)))
 }
 
-/// Settings ▸ Agents ▸ Kittens: the one choice (ask before a thread's first kitten) and the limits, said plainly.
-pub fn settings_section(s: &App, t: &Theme) -> Option<El> {
-    let (_, settings) = s.runtimes.as_ref()?;
-    let on = settings.ask_first_subagent;
-    let limits = format!(
-        "Up to {} kittens of a thread work at once and {} across Neko; the rest wait their turn. Kittens can start kittens, {} levels deep. When this Mac is warm, new kittens wait until it cools. A kitten that writes works in a copy of the project of its own.",
-        neko_protocol::SUBAGENTS_PER_THREAD,
-        neko_protocol::RUNS_ACROSS_NEKO,
-        neko_protocol::SUBAGENT_DEPTH
-    );
-    Some(
-        col()
-            .key("settings-kittens")
-            .w_full()
-            .gap(t.space.at(3.0))
-            .child(text("Kittens").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()))
-            .child(
-                crate::ui::switch::Switch::<App>::new("settings-ask-first-kitten", "Ask before a thread's first kitten", on)
-                    .help("The first kitten a thread starts waits as a draft until you press Start.")
-                    .on_toggle(move |s: &mut App| s.set_ask_first_subagent(!on))
-                    .build(t),
-            )
-            .child(text(limits).key("settings-kitten-limits").font(t.ty.sm).color(t.ink_faint()).wrap().min_w(0.0)),
-    )
-}
-
 impl App {
     /// Settings: ask before a thread's first kitten.
     pub fn set_ask_first_subagent(&mut self, on: bool) {

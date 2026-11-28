@@ -57,6 +57,8 @@ pub const SCENES: &[Scene] = &[
     ("task-stopped", |s| { task_stopped(s); finish(s) }),
     ("task-interrupted", |s| { task_interrupted(s); finish(s) }),
     ("settings", |s| { settings(s); finish(s) }),
+    ("settings-agents", |s| { settings_agents(s); finish(s) }),
+    ("settings-permissions", |s| { settings_permissions(s); finish(s) }),
     ("settings-ask", |s| { settings_ask(s); finish(s) }),
     ("settings-full-access", |s| { settings_full(s); finish(s) }),
     ("settings-signed-out", |s| { settings_signed_out(s); finish(s) }),
@@ -124,6 +126,13 @@ pub const SCENES: &[Scene] = &[
     ("cat-new", |s| { cat_new(s); finish(s) }),
     ("task-rules-changed", |s| { task_rules_changed(s); finish(s) }),
     ("settings-cats", |s| { settings_cats(s); finish(s) }),
+    ("settings-kittens", |s| { settings_kittens(s); finish(s) }),
+    ("settings-shortcuts", |s| { settings_shortcuts(s); finish(s) }),
+    ("settings-storage", |s| { settings_storage(s); finish(s) }),
+    ("settings-search-undo", |s| { settings_search(s, "undo"); finish(s) }),
+    ("settings-search-notify", |s| { settings_search(s, "notif"); finish(s) }),
+    ("settings-search-miso", |s| { settings_search(s, "miso"); finish(s) }),
+    ("settings-search-none", |s| { settings_search(s, "zebra"); finish(s) }),
     ("rounds-empty", |s| { rounds_empty(s); finish(s) }),
     ("rounds", |s| { rounds(s); finish(s) }),
     ("rounds-history", |s| { rounds_history(s); finish(s) }),
@@ -300,7 +309,7 @@ pub fn sample_cats() -> Vec<Cat> {
 fn cat_new(s: &mut App) {
     with_workspaces(s);
     s.settings_open = true;
-    s.settings_page = 3;
+    s.settings_page = crate::settings_view::Page::Cattains;
     s.start_new_cat();
     if let Some((_, e)) = &mut s.naming {
         *e = TextEdit::new("pip");
@@ -333,7 +342,7 @@ fn settings_cats(s: &mut App) {
     with_workspaces(s);
     s.cats[2].retired_ms = Some(3);
     s.settings_open = true;
-    s.settings_page = 3;
+    s.settings_page = crate::settings_view::Page::Cattains;
 }
 
 /// A task made `minutes_ago` before the fixed clock.
@@ -591,7 +600,7 @@ fn needs_you_empty(s: &mut App) {
 
 fn settings_notifications_with(s: &mut App, a: crate::notify::Allowed) {
     settings(s);
-    s.settings_page = 2;
+    s.settings_page = crate::settings_view::Page::Notifications;
     s.allowed.store(match a {
         crate::notify::Allowed::Unknown => 0,
         crate::notify::Allowed::NotAsked => 1,
@@ -882,7 +891,7 @@ fn task_remove_refused(s: &mut App) {
 fn settings_workspaces(s: &mut App) {
     with_workspaces(s);
     s.settings_open = true;
-    s.settings_page = 1;
+    s.settings_page = crate::settings_view::Page::Projects;
     s.runtimes = Some(agents(true, PermissionMode::Follow));
     s.undo_storage = Some(UndoStorage { bytes: 0, checkpoints: 0, tasks: 0 });
 }
@@ -1211,18 +1220,61 @@ fn settings(s: &mut App) {
 }
 
 fn settings_ask(s: &mut App) {
-    settings(s);
+    settings_permissions(s);
     s.runtimes = Some(agents(true, PermissionMode::Ask));
 }
 
 fn settings_full(s: &mut App) {
-    settings(s);
+    settings_permissions(s);
     s.runtimes = Some(agents(true, PermissionMode::Full));
 }
 
 fn settings_signed_out(s: &mut App) {
-    settings(s);
+    settings_agents(s);
     s.runtimes = Some(agents(false, PermissionMode::Follow));
+}
+
+/// Settings ▸ Agents & models, Claude Code ready.
+fn settings_agents(s: &mut App) {
+    settings(s);
+    s.settings_page = crate::settings_view::Page::Agents;
+}
+
+/// Settings ▸ Permissions, following Claude Code's own rules (the line says what they allow).
+fn settings_permissions(s: &mut App) {
+    settings(s);
+    s.settings_page = crate::settings_view::Page::Permissions;
+}
+
+fn settings_kittens(s: &mut App) {
+    settings(s);
+    s.settings_page = crate::settings_view::Page::Kittens;
+}
+
+fn settings_shortcuts(s: &mut App) {
+    settings(s);
+    s.settings_page = crate::settings_view::Page::Shortcuts;
+}
+
+/// Settings ▸ Storage: undo's checkpoints, the worktrees, two archived threads.
+fn settings_storage(s: &mut App) {
+    settings_undo(s);
+    s.settings_page = crate::settings_view::Page::Storage;
+    for t in s.tasks.iter_mut().take(2) {
+        t.archived = true;
+    }
+}
+
+/// Settings' search with words typed: the list narrows, the page that fits best shows, and its options are marked.
+fn settings_search(s: &mut App, words: &str) {
+    with_workspaces(s);
+    s.settings_open = true;
+    s.runtimes = Some(agents(true, PermissionMode::Follow));
+    s.undo_storage = Some(UndoStorage { bytes: 18_400_000, checkpoints: 38, tasks: 6 });
+    s.briefing_settings = Some(neko_protocol::BriefingSettings::default());
+    s.settings_query = TextEdit::new(words);
+    s.settings_query.focused = true;
+    s.settings_follow_search();
 }
 
 fn task_thinking(s: &mut App) {
@@ -1537,6 +1589,7 @@ fn review_undone(s: &mut App) {
 
 fn settings_undo(s: &mut App) {
     settings_workspaces(s);
+    s.settings_page = crate::settings_view::Page::Storage;
     s.undo_storage = Some(UndoStorage { bytes: 18_400_000, checkpoints: 38, tasks: 6 });
 }
 

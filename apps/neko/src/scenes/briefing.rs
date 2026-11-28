@@ -394,7 +394,7 @@ pub fn home_briefing(s: &mut App) {
 
 pub fn settings_briefing(s: &mut App) {
     settings(s);
-    s.settings_page = 4;
+    s.settings_page = crate::settings_view::Page::Rounds;
     default_morning(s);
 }
 

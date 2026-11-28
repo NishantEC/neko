@@ -101,8 +101,8 @@ pub enum Did {
     Other,
 }
 
-/// Settings' page for plugins (`settings_view::PAGES`).
-pub const SETTINGS_PAGE: usize = 5;
+/// Settings' page for plugins.
+pub const SETTINGS_PAGE: crate::settings_view::Page = crate::settings_view::Page::Plugins;
 
 /// A plugin's state in words, as the list and its card say it.
 pub fn state_words(s: PluginState) -> &'static str {
@@ -267,7 +267,7 @@ impl App {
     /// Settings ▸ Plugins, at a plugin when one is named: the keyboard goes to the plugin's first control.
     pub fn open_plugins(&mut self, at: Option<&str>) {
         self.open_settings();
-        self.settings_page = SETTINGS_PAGE;
+        self.set_settings_page(SETTINGS_PAGE);
         if let Some(p) = at.and_then(|id| self.plugin(id)) {
             let key = match p.state() {
                 PluginState::Waiting | PluginState::Changed | PluginState::Declined => format!("plugin-{}-approve", p.id),

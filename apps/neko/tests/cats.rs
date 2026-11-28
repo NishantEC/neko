@@ -92,7 +92,7 @@ fn a_cattain_has_its_own_thread_its_files_and_a_crew_that_reads_crew_md() {
     // New Cattain… (Settings ▸ Cattains is where they are made): name it, and its own thread opens on its Profile.
     rt.update(|s, _| {
         s.settings_open = true;
-        s.settings_page = 3;
+        s.settings_page = neko_app::settings_view::Page::Cattains;
     });
     settle(&mut rt);
     assert!(has_key(&rt, |k| k == "settings-cat-cat_tofu"), "Settings lists every Cattain");

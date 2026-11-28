@@ -27,10 +27,6 @@ use crate::ui::textarea::Textarea;
 use crate::view::well;
 use crate::ui;
 
-fn h2(t: &Theme, words: &str) -> El {
-    text(words.to_owned()).role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink())
-}
-
 fn h3(t: &Theme, words: &str) -> El {
     text(words.to_owned()).role("heading").level(3).font(weight(t.ty.base, t.ty.semibold)).color(t.ink())
 }
@@ -119,32 +115,33 @@ pub fn ask_details(s: &App, t: &Theme, key: &str, a: &PluginAsk, meta: bool) -> 
 // ---- Settings ▸ Plugins ----------------------------------------------------------------------------------------------------------
 
 /// The two ways to add one. In Settings they sit under the page's words; in the empty state they are the page's action.
-fn add_buttons(t: &Theme) -> El {
+fn add_buttons(t: &Theme, f: &crate::settings_view::Found) -> El {
     let json = Button::<App>::new("plugins-add-json", "Add MCP server…").variant(ButtonVariant::Secondary).size(Size::Sm).on_press(|s: &mut App| s.start_add_json()).build(t);
     let folder = Button::<App>::new("plugins-add-folder", "Add plugin folder…")
         .variant(ButtonVariant::Secondary)
         .size(Size::Sm)
         .build(t)
         .on_press_tx(|s: &mut App, tx: &mut rune::Tx| crate::pick_folder(s, crate::state::Pick::PluginFolder, tx));
-    row().key("plugins-add").gap(t.space.at(2.0)).center_y().flex_wrap().child(json).child(folder)
+    f.lit_hug(t, "plugins-add", row().key("plugins-add").gap(t.space.at(2.0)).center_y().flex_wrap().child(json).child(folder))
 }
 
-pub fn page(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
-    let mut part = col().key("settings-plugins").w_full().gap(t.space.at(3.0)).child(h2(t, "Plugins")).child(own_mcp_switch(s, t));
+/// Settings ▸ Plugins (the page's name is Settings' own heading): the switch for the person's own servers, then the plugins.
+pub fn page(s: &App, t: &Theme, f: &crate::settings_view::Found, layer: &mut Vec<El>) -> El {
+    let mut part = col().key("settings-plugins").w_full().gap(t.space.at(3.0)).child(f.lit(t, "own-mcp", own_mcp_switch(s, t)));
     if s.plugins.is_empty() {
         let empty = Empty::new("plugins-empty", &ui::icons::PLUG, "No plugins yet")
             .description("A plugin gives your cats more tools, like searching your docs or filing a ticket. None come with Neko: you add each one, and it runs only after you approve exactly what it will run.")
-            .action(add_buttons(t))
+            .action(add_buttons(t, f))
             .build(t);
         return part.child(empty);
     }
     part = part
         .child(text("Plugins give your cats more tools. Each one runs only after you approve exactly what it will run.").font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0))
-        .child(add_buttons(t));
+        .child(add_buttons(t, f));
     let n = s.plugins.len();
     let mut list = col().key("plugins-list").role("list").label("Plugins").w_full().gap(t.space.at(3.0));
     for (i, p) in s.plugins.iter().enumerate() {
-        list = list.child(card(s, t, p, i + 1, n, layer));
+        list = list.child(f.lit(t, &format!("plugin-{}", p.id), card(s, t, p, i + 1, n, layer)));
     }
     part.child(list).child(
         text("A plugin is a program that runs on this Mac with your rights, started by Claude Code for a thread. Neko keeps what you type into a secret field in the Keychain, never in its own files.")

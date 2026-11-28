@@ -121,7 +121,7 @@ fn the_overview_nests_kittens_three_deep_with_where_each_works() {
 
 #[test]
 fn settings_offers_asking_before_a_threads_first_kitten_and_says_the_limits() {
-    let rt = runtime((1200.0, 1500.0), false, scene("settings"));
+    let rt = runtime((1200.0, 1500.0), false, scene("settings-kittens"));
     let sw = node(&rt, "settings-ask-first-kitten");
     assert_eq!(str_of(&sw, "name"), "Ask before a thread's first kitten");
     assert!(!sw.get("states").and_then(|s| s.as_array()).is_some_and(|s| s.iter().any(|x| x == "checked")), "off by default: {sw}");
