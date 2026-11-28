@@ -20,6 +20,7 @@ pub mod queue;
 pub mod records;
 pub mod rounds;
 pub mod runtime;
+pub mod search;
 pub mod secrets;
 pub mod shelf;
 pub mod store;

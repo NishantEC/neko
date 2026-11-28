@@ -14,6 +14,7 @@ mod plugins;
 mod queue;
 mod rounds;
 mod runs;
+mod search;
 mod server;
 mod subagents;
 mod undo;

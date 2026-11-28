@@ -19,6 +19,7 @@ pub mod cats;
 pub mod plugins;
 pub mod rounds;
 pub mod schedule;
+pub mod search;
 pub mod title;
 pub mod undo;
 
@@ -27,6 +28,7 @@ pub use cats::Cat;
 pub use plugins::{Access, AccessMode, Approval, Check, FieldKind, FieldValue, Manifest, Plugin, PluginAsk, PluginKind, PluginState, SettingField};
 pub use rounds::{Round, RoundRun, RoundStatus, TaskRound};
 pub use schedule::Schedule;
+pub use search::{Found, FoundBy};
 pub use undo::{DiffFile, DiffPatch, DiffSource, DiffSummary, FileStatus, Offer, Overview, RunUndo, UndoState, UndoStorage};
 
 /// The version of this contract. A screen and a daemon talk only when theirs are equal. 2: tasks run (S1). 3: three permission
@@ -45,7 +47,8 @@ pub use undo::{DiffFile, DiffPatch, DiffSource, DiffSummary, FileStatus, Offer, 
 /// 15: the right pane (a diff has a source: a run, the thread, or what is uncommitted in the folder now; a thread's overview in one reply).
 /// 16: steer, queue, interrupt (`follow_up` takes a `mode`; the messages waiting above a composer are a list the daemon keeps, in the transcript and in `queue_changed`; `send_queued_now`, `discard_queued`; a setting swaps Return and Option-Return).
 /// 17: a thread can be pinned, settled or archived (`pin_task`, `settle_task`, `archive_task`; a task says which it is).
-pub const PROTOCOL_VERSION: u32 = 17;
+/// 18: search (`search` finds threads and kittens by title and by what was said in them; filters in the query).
+pub const PROTOCOL_VERSION: u32 = 18;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -887,6 +890,14 @@ pub enum Request {
     /// Archive the thread, or restore it without a run (version 16). A thread that is working or waits on its subagents is refused. A
     /// message to an archived thread wakes it. Replies `task`.
     ArchiveTask { task: TaskId, archived: bool },
+    /// Find threads and kittens (version 18) by their titles and by what was said in them. `query` holds the words and any filters
+    /// (`project:`, `status:`, `cat:`, `since:`: `docs/knowledge/search.md`); an empty query asks for the most recent threads. At most
+    /// `limit` results (12 when none; never more than 50). Replies `found`.
+    Search {
+        query: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+    },
     /// Answer a permission request. A request already answered is refused.
     AnswerPermission { permission: PermissionId, decision: Decision },
     /// Send this task's text as it streams (or none). Other changes reach every subscriber.
@@ -1019,6 +1030,16 @@ pub enum Reply {
         current: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         branches: Vec<String>,
+    },
+    /// What a search found, best first (version 18). `problem` says in words why a filter could not be used (and then nothing was
+    /// found). `took_ms` is how long the daemon took.
+    Found {
+        query: String,
+        hits: Vec<Found>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        problem: Option<String>,
+        #[serde(default)]
+        took_ms: u32,
     },
     /// A run's (or a task's) changes, file by file.
     Diff { diff: DiffSummary },

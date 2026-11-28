@@ -442,7 +442,7 @@ fn cats_round_trip() {
     let json = serde_json::to_string(&r).unwrap();
     assert!(json.ends_with(r#""cat":"cat_miso","rules_hash":"cbf29ce484222325"}"#), "{json}");
     pinned(PartBody::RulesChanged { cat: c(), name: "miso".into() }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso"}"#);
-    assert_eq!(PROTOCOL_VERSION, 17);
+    assert_eq!(PROTOCOL_VERSION, 18);
     // A thread with no cat writes none; one that chose its place writes the choice; an old screen's task (a cat, no choice) still reads.
     let mut t = task();
     t.cat = None;
@@ -514,4 +514,21 @@ fn a_thread_can_be_pinned_settled_or_archived_and_says_so() {
     assert_eq!(serde_json::from_str::<Task>(&json).unwrap(), t);
     let old: Task = serde_json::from_str(r#"{"id":"task_1","workspace":"default","words":"w","title":"t","created_ms":1,"status":"new"}"#).unwrap();
     assert!(!old.pinned && !old.settled && !old.archived);
+}
+
+#[test]
+fn a_search_asks_with_its_text_and_is_answered_with_why_each_thread_is_there() {
+    use neko_protocol::{Found, FoundBy, PartId};
+    pinned(ClientMessage { id: 8, request: Request::Search { query: "login status:needs".into(), limit: None } }, r#"{"id":8,"type":"search","query":"login status:needs"}"#);
+    pinned(ClientMessage { id: 9, request: Request::Search { query: String::new(), limit: Some(6) } }, r#"{"id":9,"type":"search","query":"","limit":6}"#);
+    let title = Found { task: TaskId("task_1".into()), kitten: false, by: FoundBy::Title, snippet: String::new(), part: None, seq: 0 };
+    let said = Found { task: TaskId("task_2".into()), kitten: true, by: FoundBy::Message, snippet: "…the login page…".into(), part: Some(PartId("part_3".into())), seq: 3 };
+    pinned(
+        ServerMessage::Reply { id: 8, reply: Reply::Found { query: "login".into(), hits: vec![title, said], problem: None, took_ms: 4 } },
+        r#"{"kind":"reply","id":8,"reply":{"type":"found","query":"login","hits":[{"task":"task_1","by":"title"},{"task":"task_2","kitten":true,"by":"message","snippet":"…the login page…","part":"part_3","seq":3}],"took_ms":4}}"#,
+    );
+    pinned(
+        ServerMessage::Reply { id: 9, reply: Reply::Found { query: "status:x".into(), hits: Vec::new(), problem: Some("“x” is not a status.".into()), took_ms: 0 } },
+        r#"{"kind":"reply","id":9,"reply":{"type":"found","query":"status:x","hits":[],"problem":"“x” is not a status.","took_ms":0}}"#,
+    );
 }

@@ -370,6 +370,13 @@ fn session(stream: TcpStream, id: u64, shared: &Arc<Shared>) {
             spawn_branches(shared, id, reply_id, workspace);
             return Flow::Continue;
         }
+        // A search reads the store on a connection of its own, on a thread of its own.
+        if said_hello
+            && let Ok(ClientMessage { id: reply_id, request: Request::Search { query, limit } }) = serde_json::from_str::<ClientMessage>(&text)
+        {
+            crate::search::spawn(shared, id, reply_id, query, limit);
+            return Flow::Continue;
+        }
         // A plugin request that may wait on the Keychain, a folder or a server is answered on a thread of its own, so this connection (and
         // a stop) never waits for it.
         if said_hello
@@ -746,6 +753,7 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
         | Request::SetPluginAccess { .. }) => crate::plugins::quick(shared, &r).unwrap_or_else(|| Reply::error(ErrorCode::BadRequest, "Not a plugin request.")),
         // Answered on their own threads (`session`); never reached here.
         Request::ListBranches { .. } => Reply::error(ErrorCode::Internal, "A branch request reached the wrong place."),
+        Request::Search { .. } => Reply::error(ErrorCode::Internal, "A search request reached the wrong place."),
         Request::AddMcpJson { .. } | Request::AddPluginFolder { .. } | Request::SetPluginSetting { .. } | Request::TestPlugin { .. } | Request::RemovePlugin { .. } => Reply::error(ErrorCode::Internal, "A plugin request reached the wrong place."),
         Request::GetBriefing { from_ms, to_ms } => crate::briefing::get(shared, from_ms, to_ms),
         Request::MarkBriefingRead => crate::briefing::mark_read(shared),

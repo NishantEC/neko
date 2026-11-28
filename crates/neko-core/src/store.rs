@@ -291,6 +291,34 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Sql("ALTER TABLE tasks ADD COLUMN pinned_ms INTEGER;
     ALTER TABLE tasks ADD COLUMN settled_ms INTEGER;
     ALTER TABLE tasks ADD COLUMN archived_ms INTEGER;"),
+    // 14: search (docs/knowledge/search.md). Two FTS5 tables, each row numbered with the rowid of the row it indexes (a task's title; the
+    // words of a part of the person or the agent), kept by triggers in the same transaction as the change, and filled here from what
+    // exists. `tasks_by_activity` serves the recent threads and the filters that need no words.
+    Migration::Sql("CREATE VIRTUAL TABLE find_titles USING fts5(title, tokenize = 'unicode61 remove_diacritics 2', prefix = '2 3');
+    CREATE VIRTUAL TABLE find_words USING fts5(text, tokenize = 'unicode61 remove_diacritics 2', prefix = '2 3');
+    INSERT INTO find_titles (rowid, title) SELECT rowid, title FROM tasks;
+    INSERT INTO find_words (rowid, text) SELECT rowid, COALESCE(json_extract(body, '$.text'), '') FROM parts WHERE kind IN ('person', 'agent');
+    CREATE TRIGGER find_titles_insert AFTER INSERT ON tasks BEGIN
+        INSERT INTO find_titles (rowid, title) VALUES (new.rowid, new.title);
+    END;
+    CREATE TRIGGER find_titles_update AFTER UPDATE OF title ON tasks BEGIN
+        DELETE FROM find_titles WHERE rowid = old.rowid;
+        INSERT INTO find_titles (rowid, title) VALUES (new.rowid, new.title);
+    END;
+    CREATE TRIGGER find_titles_delete AFTER DELETE ON tasks BEGIN
+        DELETE FROM find_titles WHERE rowid = old.rowid;
+    END;
+    CREATE TRIGGER find_words_insert AFTER INSERT ON parts WHEN new.kind IN ('person', 'agent') BEGIN
+        INSERT INTO find_words (rowid, text) VALUES (new.rowid, COALESCE(json_extract(new.body, '$.text'), ''));
+    END;
+    CREATE TRIGGER find_words_update AFTER UPDATE OF body ON parts WHEN new.kind IN ('person', 'agent') BEGIN
+        DELETE FROM find_words WHERE rowid = old.rowid;
+        INSERT INTO find_words (rowid, text) VALUES (new.rowid, COALESCE(json_extract(new.body, '$.text'), ''));
+    END;
+    CREATE TRIGGER find_words_delete AFTER DELETE ON parts WHEN old.kind IN ('person', 'agent') BEGIN
+        DELETE FROM find_words WHERE rowid = old.rowid;
+    END;
+    CREATE INDEX tasks_by_activity ON tasks(activity_ms DESC);"),
 ];
 
 /// Migration 9's step: each task's `latest_line` from its newest agent words.
@@ -502,7 +530,7 @@ impl Store {
 
     /// What the daemon works out about a task, from what is stored (`thread.rs` has the rules): its status as a thread, whether
     /// something waits for the person, and why it failed. Only a failed task costs a read (its newest error notice).
-    fn derived(&self, mut t: Task) -> Result<Task, StoreError> {
+    pub(crate) fn derived(&self, mut t: Task) -> Result<Task, StoreError> {
         let mut actionable = false;
         if t.status == TaskStatus::Failed
             && let Some(n) = self.newest_error_notice(&t.id)?
