@@ -715,10 +715,18 @@ fn threads_settled_open(s: &mut App) {
 /// One thread archived, with View ▸ Show archived on and its fold open.
 fn threads_archived(s: &mut App) {
     threads_settled(s);
-    shelve(s, "Port the backup script", |t| t.archived = true);
-    shelve(s, "Sort the meeting notes", |t| t.archived = true);
+    // A shorter list, so its end fits in a picture: the two archived threads were the other projects' (which are not drawn here).
+    shelve(s, "Port the backup script", |t| {
+        t.archived = true;
+        t.workspace = "ws_acme".into();
+    });
+    shelve(s, "Sort the meeting notes", |t| {
+        t.archived = true;
+        t.workspace = "ws_acme".into();
+    });
+    s.workspaces.retain(|w| w.id != "ws_notes" && w.id != "ws_scripts");
     // The groups above are folded, so the end of the list fits in a picture.
-    s.folded = ["ws_web".to_owned(), "ws_notes".to_owned(), "ws_scripts".to_owned()].into_iter().collect();
+    s.folded = ["default", "ws_web", "ws_notes", "ws_scripts"].iter().map(|x| (*x).to_owned()).collect::<std::collections::HashSet<_>>();
     s.show_archived = true;
     s.settled_open.insert(crate::threads::ARCHIVED.into());
 }

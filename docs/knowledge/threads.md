@@ -137,6 +137,9 @@ What the person sees (`sidebar.rs`, `shelf.rs`):
   and no Undo. A text field keeps its own ⌘Z. `App::undo_toast`, `App::toast_action`.
 - Opening a settled or archived thread works as for any thread; it stays open when it is settled or archived under the person's eyes.
 
+A row's right side is 38 points wide (it was 30): a date such as "Nov 17", which an archived or old thread shows, overflowed the old slot and touched
+the title.
+
 Tests: `crates/neko-core/tests/shelf.rs` (flags, refusals, what brings a thread back, the housekeeping), `crates/neko-daemon/tests/shelf.rs`
 (requests, pushes, a message waking an archived thread, Needs you, the week with the debug clock), `apps/neko/tests/shelf.rs` (groups,
 folds, menus, keys, toasts, order and rhythm). QA scenarios `settle-undo`, `auto-settle`, `archive-wake` (`qa.md`).

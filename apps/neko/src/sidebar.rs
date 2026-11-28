@@ -188,7 +188,7 @@ fn meta_line(t: &Theme, parts: Vec<(String, Color, bool)>) -> El {
 }
 
 /// The width of a thread row's right side: the age, and under the pointer its menu.
-const RIGHT_AGE: f32 = 30.0;
+const RIGHT_AGE: f32 = 38.0;
 /// And of "Working".
 const RIGHT_WORKING: f32 = 46.0;
 
