@@ -16,6 +16,13 @@ pub static ROUNDS: Icon = Icon {
     body: r#"<path d="M2.75 7.25V7A3 3 0 0 1 5.75 4h6.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="m10.25 1.75 2.25 2.25-2.25 2.25" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M13.25 8.75V9a3 3 0 0 1-3 3h-6.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="m5.75 14.25-2.25-2.25 2.25-2.25" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#,
 };
 
+/// An open eye: a watch, files a thread waits to see change.
+pub static EYE: Icon = Icon {
+    name: "neko-eye",
+    view: 16.0,
+    body: r#"<path d="M1.75 8s2.25-4.25 6.25-4.25S14.25 8 14.25 8 12 12.25 8 12.25 1.75 8 1.75 8z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="8" cy="8" r="1.75" fill="none" stroke="currentColor" stroke-width="1.5"/>"#,
+};
+
 /// A pencil over a page: New thread.
 pub static COMPOSE: Icon = Icon {
     name: "neko-compose",

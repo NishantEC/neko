@@ -43,6 +43,7 @@ pub mod turn;
 /// rune-ui's components, copied in by the `rune-ui` CLI (`rune-ui.lock`); never edited here (docs/knowledge/rune-ui-in-neko.md).
 pub mod ui;
 pub mod view;
+pub mod waits;
 pub mod window_place;
 
 use std::cell::Cell;

@@ -291,7 +291,7 @@ pub fn wake_note(s: &App, t: &Theme, p: &Part) -> Option<El> {
 }
 
 /// A centred xs line in the second ink with a hairline on each side: how the conversation says something happened between turns.
-fn centred_note(t: &Theme, key: &str, said: &str) -> El {
+pub fn centred_note(t: &Theme, key: &str, said: &str) -> El {
     let hair = || el().grow(1.0).h(1.0).fill(t.c.line);
     row()
         .key(key.to_owned())
@@ -377,6 +377,10 @@ pub fn waiting_words(s: &App, task: &Task) -> Option<String> {
         return None;
     }
     let names: Vec<String> = s.live_subagents(&task.id).iter().filter_map(|x| x.subagent_name()).collect();
+    // Resting on its timers and watches alone: they say it (`waits.rs`).
+    if names.is_empty() && !task.waits.is_empty() {
+        return None;
+    }
     Some(if names.is_empty() { "Reading the reports".to_owned() } else { format!("Waiting on {}", names_sentence(&names)) })
 }
 
@@ -386,6 +390,9 @@ pub fn waiting_line(s: &App, t: &Theme, task: &Task) -> Option<El> {
         return None;
     }
     let live = s.live_subagents(&task.id);
+    if live.is_empty() && !task.waits.is_empty() {
+        return None;
+    }
     let names: Vec<String> = live.iter().filter_map(|x| x.subagent_name()).collect();
     let sentence = if names.is_empty() { "Reading the reports".to_owned() } else { format!("Waiting on {}", names_sentence(&names)) };
     let mut line = row().key("waiting-line").role("status").label(sentence).w_full().min_h(t.control.lg).pl(t.space.at(1.5)).gap(0.0).center_y().flex_wrap().child(row().size(t.control.icon, t.control.icon).mr(t.metrics.gap).center().child(still_ring(t, t.control.icon - 2.0).a11y_hidden()));

@@ -128,6 +128,15 @@ pub const SCENES: &[Scene] = &[
     ("rounds", |s| { rounds(s); finish(s) }),
     ("rounds-history", |s| { rounds_history(s); finish(s) }),
     ("rounds-paused", |s| { rounds_paused(s); finish(s) }),
+    ("round-new-standing", |s| { round_new_standing(s); finish(s) }),
+    ("waits-timer", |s| { waits::timer_waiting(s); finish(s) }),
+    ("waits-timer-overview", |s| { waits::timer_overview(s); finish(s) }),
+    ("waits-watch", |s| { waits::watch_waiting(s); finish(s) }),
+    ("waits-woken", |s| { waits::timer_woken(s); finish(s) }),
+    ("waits-paused", |s| { waits::timer_paused(s); finish(s) }),
+    ("round-standing", |s| { waits::round_standing(s); finish(s) }),
+    ("steered-done", |s| { waits::steered_done(s); finish(s) }),
+    ("steered-working", |s| { waits::steered_working(s); finish(s) }),
     ("rounds-braked", |s| { rounds_braked(s); finish(s) }),
     ("rounds-remove", |s| { rounds_remove(s); finish(s) }),
     ("round-new", |s| { round_new(s); finish(s) }),
@@ -237,6 +246,7 @@ mod make_cattain;
 mod plugins;
 mod search;
 mod subagents;
+mod waits;
 
 /// What the daemon works out about each task, worked out here for placeholder data (the app never derives it for a real one):
 /// the thread's status, the Needs you flag, why it failed and what it last said. A scene sets `status`, and anything it wants
@@ -1549,7 +1559,8 @@ fn round(s: &App, n: u32, name: &str, words: &str, cat: &str, workspace: &str, s
         id: format!("round_{n:026}"),
         name: name.into(),
         words: words.into(),
-        cat: cat.into(),
+        cat: (!cat.is_empty()).then(|| cat.into()),
+        standing: false,
         workspace: workspace.into(),
         schedule,
         on: true,
@@ -1577,8 +1588,13 @@ fn with_rounds(s: &mut App) {
     // Made an hour and a half ago: its six hours count from then.
     notes.created_ms = s.now_ms - 90 * 60_000;
     notes.next_due_ms = notes.schedule.next_due(notes.created_ms, s.now_ms, &*s.zone());
-    let mut tidy = round(s, 3, "Tidy downloads", "Move old files from Downloads into Archive.", "cat_tofu", GENERAL, Schedule::Manual);
+    // A round of nobody's: its threads have no cat, and its card is led by the Rounds mark.
+    let mut tidy = round(s, 3, "Tidy downloads", "Move old files from Downloads into Archive.", "", GENERAL, Schedule::Manual);
     tidy.status = RoundStatus::Manual;
+    // A standing round: its words go to miso's own thread each morning.
+    let mut morning = round(s, 9, "Morning check", "Look over the open pull requests on acme-api and tell me which are ready to merge.", "cat_miso", GENERAL, Schedule::Daily { at: "08:30".into() });
+    morning.standing = true;
+    morning.next_due_ms = Some(nine(s, 1) - 30 * 60_000);
     // This morning's task for the docs check, done; the notes round's last time was skipped while its task still worked.
     let mut done = task(40, "Check the docs for broken links and fix the ones you can.", 5 * 60);
     done.title = "Docs check".into();
@@ -1597,8 +1613,22 @@ fn with_rounds(s: &mut App) {
     s.tasks.push(done);
     s.tasks.push(working);
     s.tasks.sort_by_key(|t| std::cmp::Reverse(t.created_ms));
-    s.rounds = vec![docs, notes, tidy];
+    s.rounds = vec![docs, notes, tidy, morning];
     s.rounds_loaded = true;
+}
+
+/// The New round panel for miso, posting in its own thread.
+fn round_new_standing(s: &mut App) {
+    with_rounds(s);
+    s.open_rounds();
+    s.start_new_round(Some("cat_miso"));
+    let f = s.form_mut();
+    f.name = TextEdit::new("Morning check");
+    f.words = TextEdit::new("Look over the open pull requests on acme-api and tell me which are ready to merge.");
+    f.standing = true;
+    f.kind = 0;
+    f.time = TextEdit::new("08:30");
+    f.name.focused = false;
 }
 
 fn rounds_empty(s: &mut App) {

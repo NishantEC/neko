@@ -105,7 +105,7 @@ fn mochi(s: &mut App) -> TaskId {
 }
 
 /// mochi's thread with one exchange: the person's question, its answer led by its face.
-fn talked(s: &mut App) -> TaskId {
+pub(super) fn talked(s: &mut App) -> TaskId {
     let own = mochi(s);
     let task = s.tasks.iter().find(|t| t.id == own).cloned().expect("its thread");
     let mut sc = Script::new(&task, "run_m1", start(s));

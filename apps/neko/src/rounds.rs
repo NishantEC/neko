@@ -18,7 +18,10 @@ pub struct RoundForm {
     pub id: Option<String>,
     pub name: TextEdit,
     pub words: TextEdit,
+    /// The Cattain it belongs to; empty for a round of nobody's.
     pub cat: String,
+    /// It posts its words into the Cattain's own thread instead of starting a thread.
+    pub standing: bool,
     pub workspace: String,
     /// An index into [`KINDS`].
     pub kind: usize,
@@ -39,6 +42,7 @@ impl RoundForm {
             name,
             words: TextEdit::default(),
             cat: cat.to_owned(),
+            standing: false,
             workspace: workspace.to_owned(),
             kind: 1,
             time: TextEdit::new("09:00"),
@@ -50,7 +54,8 @@ impl RoundForm {
 
     /// The form of an existing round.
     pub fn of(r: &Round) -> RoundForm {
-        let mut f = RoundForm::blank(&r.cat, &r.workspace);
+        let mut f = RoundForm::blank(r.cat.as_deref().unwrap_or(""), &r.workspace);
+        f.standing = r.standing && r.cat.is_some();
         f.id = Some(r.id.clone());
         f.name = TextEdit::new(&r.name);
         f.words = TextEdit::new(&r.words);
@@ -237,9 +242,9 @@ impl App {
         self.rounds.iter().find(|r| r.id == id)
     }
 
-    /// The rounds of a cat.
+    /// The rounds of a Cattain.
     pub fn rounds_of(&self, cat: &str) -> Vec<&Round> {
-        self.rounds.iter().filter(|r| r.cat == cat).collect()
+        self.rounds.iter().filter(|r| r.cat.as_deref() == Some(cat)).collect()
     }
 
     /// The Rounds page (⌘3, the sidebar's row).
@@ -254,9 +259,10 @@ impl App {
         }
     }
 
-    /// New round… (the page's button, a cat's page): a blank form for `cat` (else the first active cat).
+    /// New round… (the page's button, a Cattain's Overview): a blank form for `cat` (else a round of nobody's, which starts a thread
+    /// of its own as a thread the person starts does).
     pub fn start_new_round(&mut self, cat: Option<&str>) {
-        let cat = cat.map(str::to_owned).or_else(|| self.active_cats().first().map(|c| c.id.clone())).unwrap_or_default();
+        let cat = cat.map(str::to_owned).unwrap_or_default();
         let ws = if self.chosen().is_some_and(neko_protocol::Workspace::is_active) { self.workspace.clone() } else { GENERAL.to_owned() };
         self.menu_open = None;
         self.round_form = Some(RoundForm::blank(&cat, &ws));
@@ -281,9 +287,11 @@ impl App {
             return;
         }
         let workspace = Some(f.workspace.clone()).filter(|w| w != GENERAL);
+        let cat = Some(f.cat.clone()).filter(|c| !c.is_empty());
+        let standing = f.standing && cat.is_some();
         let request = match &f.id {
-            None => Request::CreateRound { name: f.name.text.clone(), words: f.words.text.clone(), cat: f.cat.clone(), workspace, schedule, on: true },
-            Some(id) => Request::UpdateRound { round: id.clone(), name: f.name.text.clone(), words: f.words.text.clone(), cat: f.cat.clone(), workspace, schedule },
+            None => Request::CreateRound { name: f.name.text.clone(), words: f.words.text.clone(), cat, standing, workspace, schedule, on: true },
+            Some(id) => Request::UpdateRound { round: id.clone(), name: f.name.text.clone(), words: f.words.text.clone(), cat, standing, workspace, schedule },
         };
         self.round_request(request, Asked::RoundForm);
     }

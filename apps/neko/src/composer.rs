@@ -243,6 +243,10 @@ pub fn placeholder(s: &App, task: &Task, asking: bool) -> String {
     } else if s.rests_on_crew(task) {
         let name = s.cattain_of(&task.id).map_or_else(|| "The Cattain".to_owned(), |c| c.name.clone());
         format!("{name} is waiting on its crew. Message {name} to wake it now")
+    } else if task.status == TaskStatus::Waiting && s.live_subagents(&task.id).is_empty() && !task.waits.is_empty() {
+        // Resting on its timers and watches: what it waits for, and that a message wakes it sooner.
+        let rest = crate::waits::rest_words(task, s.now_ms, &*s.zone()).unwrap_or_else(|| "Waiting".to_owned());
+        format!("The agent is {}. Say something to wake it now", rest.replacen("Waiting", "waiting", 1))
     } else if task.status == TaskStatus::Waiting {
         "The agent is waiting on its kittens. Say something to wake it, or press Escape to stop.".to_owned()
     } else if s.open_is_running() {
@@ -426,10 +430,14 @@ pub fn activity_bar(s: &App, t: &Theme) -> Option<El> {
     let kittens = s.live_subagents(&task.id);
     let commands = s.running_commands();
     if kittens.is_empty() && commands.is_empty() {
-        return None;
+        // Only its timers and watches: quiet lines, each with its × (docs/knowledge/waits.md). Nothing to fold: they are few.
+        return (!task.waits.is_empty()).then(|| crate::waits::activity(s, t, task));
     }
     let (working, queued) = s.kitten_counts(&task.id);
-    let said = summary(working, queued, commands.len());
+    let mut said = summary(working, queued, commands.len());
+    if let Some(w) = crate::waits::summary_words(task, s.now_ms, &*s.zone()) {
+        said = format!("{said} · {w}");
+    }
     let open = s.composer.activity_open;
     let face = row()
         .key("activity-bar")
@@ -470,6 +478,7 @@ pub fn activity_bar(s: &App, t: &Theme) -> Option<El> {
         for (i, c) in commands.iter().enumerate() {
             list = list.child(item(t, &format!("activity-command-{i}"), &c.words, "", &running_for(s.now_ms, c.since_ms), None));
         }
+        list = list.children(crate::waits::rows(s, t, "activity-wait", task));
         bar = bar.child(face).child(list);
     } else {
         bar = bar.child(face);

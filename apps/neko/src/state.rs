@@ -404,6 +404,10 @@ impl Book {
     }
 
     fn part(&mut self, p: Part) {
+        // A part that moved (the person's steered words, put where the agent read them) leaves its old place first.
+        if let Some(i) = self.parts.iter().position(|x| x.id == p.id && x.seq != p.seq) {
+            self.parts.remove(i);
+        }
         match self.parts.iter_mut().find(|x| x.id == p.id) {
             Some(x) => *x = p,
             None => {

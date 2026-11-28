@@ -239,7 +239,8 @@ impl App {
         let (working, queued) = self.kitten_counts(&task.id);
         let first = live.first().and_then(|t| t.subagent_name());
         match (live.len(), first, waiting) {
-            (0, _, true) => Some("Reading the reports".to_owned()),
+            // Resting on its timers and watches: "Waiting until 18:00" (docs/knowledge/waits.md).
+            (0, _, true) => Some(crate::waits::rest_words(task, self.now_ms, &*self.zone()).unwrap_or_else(|| "Reading the reports".to_owned())),
             (0, ..) => {
                 let drafts = self.draft_subagents(&task.id).len();
                 (drafts > 0).then(|| if drafts == 1 { "1 draft kitten".to_owned() } else { format!("{drafts} draft kittens") })

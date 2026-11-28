@@ -281,14 +281,20 @@ fn folder(s: &App, t: &Theme, o: Option<&Overview>) -> Option<El> {
 /// What the thread rests on, each name a link to its tab.
 fn waiting(s: &App, t: &Theme, root: &TaskId) -> Option<El> {
     let task = s.tasks.iter().find(|x| &x.id == root)?;
-    if task.status != TaskStatus::Waiting {
-        return None;
-    }
+    // Its timers and watches, each with Stop watching (docs/knowledge/waits.md), whether it rests or works.
+    let mut lines = crate::waits::section_rows(s, t, task);
     let live = s.live_subagents(root);
+    if task.status != TaskStatus::Waiting || (live.is_empty() && !lines.is_empty()) {
+        return (!lines.is_empty()).then(|| section(t, "pane-waiting", "Waiting on", None, vec![col().key("pane-waits").role("list").label("Timers and watches").w_full().gap(0.0).children(std::mem::take(&mut lines))]));
+    }
     let names: Vec<String> = live.iter().filter_map(|x| x.subagent_name()).collect();
     let said = if names.is_empty() { "Reading the reports".to_owned() } else { crate::subagents::names_sentence(&names) };
     let line = row().key("pane-waiting-line").role("status").label(said.clone()).w_full().gap(t.space.at(2.0)).center_y().child(still_ring(t, t.control.icon - 2.0).a11y_hidden()).child(text(said).font(t.ty.sm).color(t.ink_muted()).wrap().min_w(0.0).shrink().a11y_hidden());
-    Some(section(t, "pane-waiting", "Waiting on", None, vec![line]))
+    let mut body = vec![line];
+    if !lines.is_empty() {
+        body.push(col().key("pane-waits").role("list").label("Timers and watches").w_full().gap(0.0).children(lines));
+    }
+    Some(section(t, "pane-waiting", "Waiting on", None, body))
 }
 
 /// "61.4k", "820".

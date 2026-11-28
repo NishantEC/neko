@@ -297,17 +297,20 @@ enum Block<'a> {
 
 fn blocks<'a>(book: &'a Book) -> Vec<Block<'a>> {
     let mut out: Vec<Block<'a>> = Vec::new();
-    // Words the person steered into a run while it worked (stored with no run, at a time the run was going) stand after the run's
-    // block, not inside it: a run is one block, with one fold and one key.
+    // Words the person steered into a run while it worked (stored with no run, at a time the run was going, and moved by the daemon to
+    // where the agent read them) stay in that run's block, where they fell: the run draws them at that point (`run_block`). Steered
+    // words that came before the run said anything wait for its block.
     let mut held: Vec<&'a Part> = Vec::new();
-    let inside = |p: &Part| book.runs.iter().any(|r| r.started_ms <= p.at_ms && r.ended_ms.is_none_or(|e| p.at_ms <= e));
+    let within = |p: &Part| book.runs.iter().find(|r| r.started_ms <= p.at_ms && r.ended_ms.is_none_or(|e| p.at_ms <= e)).map(|r| r.id.clone());
     for p in &book.parts {
         if let PartBody::Person { .. } = p.body {
-            if p.run.is_none() && inside(p) {
-                held.push(p);
-            } else {
-                out.extend(held.drain(..).map(Block::Person));
-                out.push(Block::Person(p));
+            match (p.run.is_none().then(|| within(p)).flatten(), out.last_mut()) {
+                (Some(run), Some(Block::Run(r, parts))) if r.id == run => parts.push(p),
+                (Some(_), _) => held.push(p),
+                (None, _) => {
+                    out.extend(held.drain(..).map(Block::Person));
+                    out.push(Block::Person(p));
+                }
             }
             continue;
         }
@@ -316,7 +319,7 @@ fn blocks<'a>(book: &'a Book) -> Vec<Block<'a>> {
             out.extend(held.drain(..).map(Block::Person));
         }
         // The rules line and the note that a report woke the thread stand before their run, outside its fold.
-        if let PartBody::RulesChanged { .. } | PartBody::Wake { .. } | PartBody::CrewWake { .. } = p.body {
+        if let PartBody::RulesChanged { .. } | PartBody::Wake { .. } | PartBody::CrewWake { .. } | PartBody::EventWake { .. } = p.body {
             out.push(Block::Loose(p));
             continue;
         }
@@ -339,6 +342,25 @@ fn blocks<'a>(book: &'a Book) -> Vec<Block<'a>> {
             });
             out.insert(at.unwrap_or(out.len()), Block::Run(r, Vec::new()));
         }
+    }
+    out
+}
+
+/// A run's parts cut where the person's steered words fell: one piece before each, and the rest after the last.
+fn pieces<'a>(parts: &[&'a Part], steered: &[&Part]) -> Vec<Vec<&'a Part>> {
+    let mut out = vec![Vec::new()];
+    let mut cuts = steered.iter().map(|p| p.seq).peekable();
+    for p in parts {
+        while cuts.peek().is_some_and(|&c| p.seq > c) {
+            cuts.next();
+            out.push(Vec::new());
+        }
+        if let Some(last) = out.last_mut() {
+            last.push(*p);
+        }
+    }
+    while cuts.next().is_some() {
+        out.push(Vec::new());
     }
     out
 }
@@ -378,7 +400,7 @@ fn part_el(s: &App, t: &Theme, book: &Book, r: &Run, w: &Who, p: &Part, streamin
         PartBody::Notice { .. } => notice(t, p),
         PartBody::ToSubagent { .. } => crate::subagents_view::to_kitten_note(s, t, p, &w.subject()),
         PartBody::CattainMade { .. } => crate::cattain_view::made_note(s, t, p),
-        PartBody::Person { .. } | PartBody::RulesChanged { .. } | PartBody::Subagent { .. } | PartBody::Wake { .. } | PartBody::CrewWake { .. } => None,
+        PartBody::Person { .. } | PartBody::RulesChanged { .. } | PartBody::Subagent { .. } | PartBody::Wake { .. } | PartBody::CrewWake { .. } | PartBody::EventWake { .. } => None,
     }
 }
 
@@ -457,26 +479,62 @@ fn worked_words(r: &Run) -> String {
 
 /// One run, as one turn of the agent's (rune-ui's rhythm: its blocks [`BLOCK_GAP`] apart). While it works: its steps and words as
 /// they come, and the live line. Once it ends: one "Worked for" fold that opens to its steps on the page's own edge (`indent(false)`),
-/// the final answer, notices, and the card if it earns one.
-fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &Task) -> El {
+/// the final answer, notices, and the card if it earns one. Words the person steered in while it worked stand where the agent read
+/// them: the turn is cut there, the person's well between its pieces, and the run keeps its one fold (in the first piece).
+fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &Task) -> Vec<El> {
     let w = who(task);
+    let steered: Vec<&Part> = parts.iter().copied().filter(|p| matches!(p.body, PartBody::Person { .. })).collect();
+    let parts: Vec<&Part> = parts.iter().copied().filter(|p| !matches!(p.body, PartBody::Person { .. })).collect();
     // No turn has a head (a portrait and "done"): the words are the agent's, as in any agent app. What a run is doing is its live
     // line, then its fold; what a thread rests on is the line that ends the conversation.
-    let mut turn = Message::assistant(format!("turn-{}", r.id.0), w.subject()).column(COLUMN);
-    // The one place a face leads turns: a Cattain's own thread (docs/knowledge/cats.md).
-    if let Some(c) = s.cattain_of(&task.id) {
-        turn = turn.header(crate::cattain_view::turn_header(t, &format!("turn-{}", r.id.0), c));
-    }
+    let header = s.cattain_of(&task.id).map(|c| crate::cattain_view::turn_header(t, &format!("turn-{}", r.id.0), c));
+    let bubble = |p: &Part| turn::person(s, t, &format!("part-{}", p.seq), &format!("part-{}-words", p.seq), p.body.text());
+    // The pieces become turns: the first with something in it carries the run's key and (in a Cattain's thread) its face.
+    let assemble = |chunks: Vec<Vec<El>>| -> Vec<El> {
+        let mut els = Vec::new();
+        let mut header = header.clone();
+        let mut first = true;
+        for (i, chunk) in chunks.into_iter().enumerate() {
+            if !chunk.is_empty() {
+                let key = if first { format!("turn-{}", r.id.0) } else { format!("turn-{}-{i}", r.id.0) };
+                let mut turn = Message::assistant(key, w.subject()).column(COLUMN);
+                if first && let Some(h) = header.take() {
+                    turn = turn.header(h);
+                }
+                first = false;
+                els.push(chunk.into_iter().fold(turn, Message::child).build(t));
+            }
+            if let Some(p) = steered.get(i) {
+                els.push(bubble(p));
+            }
+        }
+        els
+    };
     if r.status == RunStatus::Running {
         let streaming = parts.last().is_some_and(|p| matches!(&p.body, PartBody::Agent { done: false, .. }) || matches!(&p.body, PartBody::Thinking { done: false, text } if !text.trim().is_empty()));
-        let mut out = lay_out(s, t, book, r, &w, parts, if streaming { Some(parts.len() - 1) } else { None }, None);
         let waiting = parts.iter().any(|p| matches!(&p.body, PartBody::Permission { permission } if book.permissions.get(permission).is_some_and(|x| x.state == PermissionState::Pending)));
         let tool_running = parts.iter().any(|p| matches!(&p.body, PartBody::Tool { state: ToolState::Running, .. }));
+        let cut = pieces(&parts, &steered);
+        let n = cut.len();
+        let mut chunks: Vec<Vec<El>> = cut
+            .iter()
+            .enumerate()
+            .map(|(i, piece)| {
+                let at = (i == n - 1 && streaming && !piece.is_empty()).then(|| piece.len() - 1);
+                lay_out(s, t, book, r, &w, piece, at, None)
+            })
+            .collect();
         if !streaming && !waiting && !tool_running {
             let steps = parts.iter().filter(|p| matches!(p.body, PartBody::Tool { .. })).count();
-            out.push(turn::live_line(t, r, &w.subject(), book.thinking, steps));
+            if let Some(last) = chunks.last_mut() {
+                last.push(turn::live_line(t, r, &w.subject(), book.thinking, steps));
+            }
         }
-        return out.into_iter().fold(turn, Message::child).build(t);
+        // A turn that has said nothing yet still stands (its live line, or nothing while it streams its first words).
+        if chunks.iter().all(Vec::is_empty) {
+            return vec![Message::assistant(format!("turn-{}", r.id.0), w.subject()).column(COLUMN).build(t)];
+        }
+        return assemble(chunks);
     }
     // The final answer is the words after the last step; notices stay in sight; everything else folds.
     let tail_from = parts.iter().rposition(|p| !matches!(p.body, PartBody::Agent { .. } | PartBody::Notice { .. })).map_or(0, |i| i + 1);
@@ -485,7 +543,16 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
     let key = format!("worked-{}", r.id.0);
     let offer = offer_of(book, r);
     // The newest run of a thread that rests on its subagents says so on its own line, never "done": the thread is not.
-    let resting = book.runs.last().is_some_and(|x| x.id == r.id).then(|| crate::crew_view::run_words(s, task).or_else(|| crate::subagents_view::waiting_words(s, task))).flatten();
+    let resting = book
+        .runs
+        .last()
+        .is_some_and(|x| x.id == r.id)
+        .then(|| {
+            crate::crew_view::run_words(s, task)
+                .or_else(|| crate::subagents_view::waiting_words(s, task))
+                .or_else(|| (task.status == neko_protocol::TaskStatus::Waiting).then(|| crate::waits::rest_words(task, s.now_ms, &*s.zone())).flatten())
+        })
+        .flatten();
     let mut out = Vec::new();
     let lead = crate::ui::agent::hollow_dot(t, t.control.icon);
     if work.is_empty() {
@@ -526,13 +593,35 @@ fn run_block(s: &App, t: &Theme, book: &Book, r: &Run, parts: &[&Part], task: &T
     out.extend(parts.iter().filter_map(|p| crate::subagents_view::to_kitten_note(s, t, p, &w.subject())));
     // And a Cattain it made, once: "Made a Cattain: yuzu · iOS work · Open".
     out.extend(parts.iter().filter_map(|p| crate::cattain_view::made_note(s, t, p)));
-    let tail_last = tail.iter().rposition(|p| matches!(&p.body, PartBody::Agent { text, .. } if !text.trim().is_empty()));
-    out.extend(lay_out(s, t, book, r, &w, tail, None, tail_last));
-    // A Cattain's own runs change only its own files, which keep their own previous version (Files): no change line, no Review.
-    if !task.cattain {
-        out.extend(turn::change_line(t, r, &offer, own_changes(r), task.subagent.is_some()));
+    // The answer, cut where steered words fell inside it; words read during the folded work stand after the fold, before the answer
+    // they led to.
+    let first_tail = tail.first().map(|p| p.seq);
+    let (before, inside): (Vec<&Part>, Vec<&Part>) = steered.iter().copied().partition(|p| first_tail.is_none_or(|f| p.seq < f));
+    let mut chunks: Vec<Vec<El>> = vec![out];
+    for _ in &before {
+        chunks.push(Vec::new());
     }
-    out.into_iter().fold(turn, Message::child).build(t)
+    let tail_pieces = pieces(tail, &inside);
+    let last_words = tail.iter().rposition(|p| matches!(&p.body, PartBody::Agent { text, .. } if !text.trim().is_empty())).map(|i| tail[i].seq);
+    for (i, piece) in tail_pieces.iter().enumerate() {
+        let at = last_words.and_then(|seq| piece.iter().position(|p| p.seq == seq));
+        let els = lay_out(s, t, book, r, &w, piece, None, at);
+        if i == 0 {
+            if let Some(c) = chunks.last_mut() {
+                c.extend(els);
+            }
+        } else {
+            chunks.push(els);
+        }
+    }
+    // A Cattain's own runs change only its own files, which keep their own previous version (Files): no change line, no Review.
+    if !task.cattain
+        && let Some(line) = turn::change_line(t, r, &offer, own_changes(r), task.subagent.is_some())
+        && let Some(c) = chunks.last_mut()
+    {
+        c.push(line);
+    }
+    assemble(chunks)
 }
 
 /// Whether a part of a finished run is in the run's closed fold: words before the run's last step are interim and fold with the steps;
@@ -642,13 +731,13 @@ fn items_of(s: &App, t: &Theme, task: &Task, book: &Book) -> Vec<El> {
                 None => turn::person(s, t, &format!("part-{}", p.seq), &format!("part-{}-words", p.seq), p.body.text()),
             }),
             Block::Loose(p) => items.extend(
-                notice(t, p).or_else(|| rules_changed(t, p)).or_else(|| crate::subagents_view::wake_note(s, t, p)).or_else(|| crate::crew_view::wake_note(s, t, p)).or_else(|| crate::subagents_view::card_stack(s, t, &[p])),
+                notice(t, p).or_else(|| rules_changed(t, p)).or_else(|| crate::subagents_view::wake_note(s, t, p)).or_else(|| crate::crew_view::wake_note(s, t, p)).or_else(|| crate::waits::wake_note(s, t, p)).or_else(|| crate::waits::round_message(s, t, p)).or_else(|| crate::subagents_view::card_stack(s, t, &[p])),
             ),
-            Block::Run(r, parts) => items.push(run_block(s, t, book, r, &parts, task)),
+            Block::Run(r, parts) => items.extend(run_block(s, t, book, r, &parts, task)),
         }
     }
     // A thread resting on its subagents ends on what it waits for (a Cattain, on its crew); one that asked, on its question.
-    items.extend(crate::crew_view::waiting_line(s, t, task).or_else(|| crate::subagents_view::waiting_line(s, t, task)));
+    items.extend(crate::crew_view::waiting_line(s, t, task).or_else(|| crate::subagents_view::waiting_line(s, t, task)).or_else(|| crate::waits::waiting_line(s, t, task)));
     items.extend(crate::subagents_view::question_block(s, t, task, book.runs.last()));
     items
 }

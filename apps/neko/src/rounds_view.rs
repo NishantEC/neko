@@ -1,6 +1,7 @@
-//! The Rounds page (⌘3) and the New round / Edit panel (docs/knowledge/rounds.md): every round as a raised card led by its cat's
-//! portrait, with its schedule in words, when it runs next or why it does not, how it last went, a switch, Run now and a menu; a
-//! Pause all control; and a panel that says when the first run will be before the round is saved.
+//! The Rounds page (⌘3) and the New round / Edit panel (docs/knowledge/rounds.md): every round as a raised card led by its Cattain's
+//! face (or the Rounds mark for a round of nobody's), with its schedule in words, when it runs next or why it does not, how it last
+//! went, a switch, Run now and a menu; Pause automatic work (rounds, timers and watches); and a panel that says when the first run
+//! will be before the round is saved.
 
 use neko_protocol::{GENERAL, Round, RoundStatus, TaskStatus};
 use rune::{El, col, el, row, text};
@@ -54,7 +55,12 @@ fn last_line(s: &App, t: &Theme, r: &Round) -> Option<El> {
     let mut line = row().key(format!("round-{}-last", r.id)).w_full().gap(t.space.at(2.0)).center_y().min_w(0.0);
     line = line.child(text(last_words(l, status, s.now_ms, &*zone)).key(format!("round-{}-last-words", r.id)).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0).shrink());
     if let Some(id) = l.task.clone().filter(|id| s.tasks.iter().any(|x| &x.id == id)) {
-        line = line.child(Button::new(format!("round-{}-open", r.id), "Open thread").variant(ButtonVariant::Link).size(Size::Sm).on_press(move |s: &mut App| s.open_task_id(&id)).build(t));
+        // A standing round's line is its Cattain's own thread.
+        let open = match r.cat.as_deref().and_then(|c| s.cat(c)).filter(|_| r.standing) {
+            Some(c) => format!("Open {}'s thread", c.name),
+            None => "Open thread".to_owned(),
+        };
+        line = line.child(Button::new(format!("round-{}-open", r.id), open).variant(ButtonVariant::Link).size(Size::Sm).on_press(move |s: &mut App| s.open_task_id(&id)).build(t));
     }
     Some(line)
 }
@@ -87,10 +93,31 @@ fn history(s: &App, t: &Theme, r: &Round) -> El {
     FoldLine::<App>::new(format!("round-{}-history", r.id), "History", open).lead(lead).on_toggle(move |s: &mut App| s.toggle_round_history(&id)).build(t, body)
 }
 
-/// One round: the cat's portrait, the name, its schedule and next time, how it last went, and its controls.
+/// Who a round is and where it goes, in a few words: "miso · in its own thread · Weekdays at 09:00", "Weekdays at 09:00" for a round of
+/// nobody's.
+pub fn who_words(s: &App, r: &Round) -> String {
+    let cat = r.cat.as_deref().and_then(|c| s.cat(c)).map(|c| c.name.clone());
+    match (cat, r.standing) {
+        (Some(c), true) => format!("{c} · in its own thread · {}", schedule_words(&r.schedule)),
+        (Some(c), false) => format!("{c} · {}", schedule_words(&r.schedule)),
+        (None, _) => schedule_words(&r.schedule),
+    }
+}
+
+/// What leads a round's card: its Cattain's face, or the Rounds mark in the same round well for a round of nobody's.
+fn lead(s: &App, t: &Theme, r: &Round) -> El {
+    let key = format!("round-{}-face", r.id);
+    match r.cat.as_deref().filter(|c| s.cat(c).is_some()) {
+        Some(c) => crate::faces::portrait_in(t, &key, s.cat_face(c), 44.0, None, crate::view::raised_fill(t)),
+        // The same room and corner as a face's tile, so the cards' words line up.
+        None => el().key(key).size(crate::faces::ringed(44.0), crate::faces::ringed(44.0)).center().a11y_hidden().child(
+            el().size(44.0, 44.0).radius(crate::faces::radius(44.0)).round_as(t).fill(t.c.accent.bg).center().child(glyph(&crate::icons::ROUNDS, 20.0, t.c.accent.fg)),
+        ),
+    }
+}
+
+/// One round: its Cattain's face (or the Rounds mark), the name, its schedule and next time, how it last went, and its controls.
 fn card(s: &App, t: &Theme, r: &Round, i: usize, n: usize, layer: &mut Vec<El>) -> El {
-    let face = s.cat_face(&r.cat).to_owned();
-    let cat = s.cat(&r.cat).map_or_else(String::new, |c| c.name.clone());
     let id = r.id.clone();
     let on_label = format!("{} is {}", r.name, if r.on { "on" } else { "off" });
     let switch = {
@@ -136,7 +163,7 @@ fn card(s: &App, t: &Theme, r: &Round, i: usize, n: usize, layer: &mut Vec<El>) 
         .center_y()
         .child(text(r.name.clone()).key(format!("round-{id}-name")).role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0).shrink().grow(1.0))
         .child(controls);
-    let who = text(format!("{cat} · {}", schedule_words(&r.schedule))).key(format!("round-{id}-schedule")).font(t.ty.base).color(t.ink_muted()).truncate().min_w(0.0);
+    let who = text(who_words(s, r)).key(format!("round-{id}-schedule")).font(t.ty.base).color(t.ink_muted()).truncate().min_w(0.0);
     let mut body = col().grow(1.0).min_w(0.0).gap(t.space.at(1.0)).child(head).child(who);
     if let Some(next) = next_line(s, t, r) {
         body = body.child(next);
@@ -151,14 +178,13 @@ fn card(s: &App, t: &Theme, r: &Round, i: usize, n: usize, layer: &mut Vec<El>) 
     let shell = col()
         .key(format!("round-{id}"))
         .role("listitem")
-        .label(format!("{}: {cat}, {}", r.name, schedule_words(&r.schedule)))
+        .label(format!("{}: {}", r.name, who_words(s, r).replace(" · ", ", ")))
         .position_in_set(i + 1, n)
         .w_full()
         .padding(t.space.at(4.0))
         .radius(t.radius.xl + 4.0)
         .round_as(t);
-    let lead = crate::faces::portrait_in(t, &format!("round-{id}-face"), &face, 44.0, None, crate::view::raised_fill(t));
-    raised(t, shell).child(row().w_full().gap(t.space.at(4.0)).items_start().child(lead).child(body))
+    raised(t, shell).child(row().w_full().gap(t.space.at(4.0)).items_start().child(lead(s, t, r)).child(body))
 }
 
 /// The rounds as cards (the page's, and a cat's page's), led by `label` for assistive technology.
@@ -183,7 +209,7 @@ pub fn rounds_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     head = head.child(el().grow(1.0));
     if n > 0 {
         let paused = s.rounds_paused;
-        let b = Button::new("rounds-pause", if paused { "Resume rounds" } else { "Pause all rounds" })
+        let b = Button::new("rounds-pause", if paused { "Resume automatic work" } else { "Pause automatic work" })
             .variant(if paused { ButtonVariant::Default } else { ButtonVariant::Secondary })
             .size(Size::Sm)
             .on_press(move |s: &mut App| s.set_rounds_paused(!paused))
@@ -194,7 +220,7 @@ pub fn rounds_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
     if n == 0 {
         let action = Button::new("rounds-new-empty", "New round…").on_press(|s: &mut App| s.start_new_round(None)).build(t);
         let empty = Empty::new("rounds-empty", &crate::icons::ROUNDS, "No rounds yet")
-            .description("A round is a cat's standing work that starts by itself, like “every weekday at 09:00, mochi checks the docs for broken links”. Each time is an ordinary thread you can follow, stop and undo.")
+            .description("A round is work that starts by itself at its times, like “every weekday at 09:00, check the docs for broken links”. Each time is an ordinary thread you can follow, stop and undo, or a message in a Cattain's own thread.")
             .action(action)
             .build(t);
         return wrap(t, page.child(empty).child(honest_note(t)));
@@ -204,7 +230,7 @@ pub fn rounds_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
             row()
                 .key("rounds-paused")
                 .role("status")
-                .label("Every round is paused. Nothing starts by itself until you resume.")
+                .label(PAUSED_WORDS)
                 .w_full()
                 .padding(t.space.at(3.0))
                 .gap(t.space.at(3.0))
@@ -213,13 +239,16 @@ pub fn rounds_view(s: &App, t: &Theme, layer: &mut Vec<El>) -> El {
                 .round_as(t)
                 .fill(t.c.warning.bg)
                 .child(glyph(&crate::ui::icons::WARNING, t.control.icon, t.c.warning.fg))
-                .child(text("Every round is paused. Nothing starts by itself until you resume.").font(weight(t.ty.sm, t.ty.medium)).color(t.c.warning.fg).wrap().min_w(0.0).shrink().a11y_hidden()),
+                .child(text(PAUSED_WORDS).font(weight(t.ty.sm, t.ty.medium)).color(t.c.warning.fg).wrap().min_w(0.0).shrink().a11y_hidden()),
         );
     }
     let all: Vec<&Round> = s.rounds.iter().collect();
     page = page.child(cards(s, t, "rounds-list", "Rounds", &all, layer)).child(honest_note(t));
     wrap(t, page)
 }
+
+/// What the paused band says: everything that starts by itself waits.
+pub const PAUSED_WORDS: &str = "Automatic work is paused. No round starts, and no timer or watch wakes a thread, until you resume.";
 
 fn honest_note(t: &Theme) -> El {
     text("Rounds run while Neko is running and this Mac is awake. A time that passes while it sleeps runs once when it wakes, if it was at most a day ago.")
@@ -251,13 +280,20 @@ fn picker(s: &App, t: &Theme, menus: &mut Vec<El>, key: &str, name: &str, face: 
 
 fn pickers(s: &App, t: &Theme, f: &RoundForm, menus: &mut Vec<El>) -> El {
     let cat = s.cat(&f.cat);
-    let cat_name = cat.map_or_else(|| "Choose a cat".to_owned(), |c| c.name.clone());
-    let mut cat_chip = chip(t, "round-cat", None).role("button").label(format!("Cat: {cat_name}"));
-    if let Some(c) = cat {
-        cat_chip = cat_chip.child(crate::faces::portrait(t, "round-cat-face", &c.face, 20.0));
+    let cat_name = cat.map_or_else(|| "No Cattain".to_owned(), |c| c.name.clone());
+    let mut cat_chip = chip(t, "round-cat", None).role("button").label(format!("Cattain: {cat_name}"));
+    match cat {
+        Some(c) => cat_chip = cat_chip.child(crate::faces::portrait(t, "round-cat-face", &c.face, 20.0)),
+        None => cat_chip = cat_chip.child(glyph(&crate::icons::ROUNDS, t.control.icon_sm, t.ink_muted())),
     }
     cat_chip = cat_chip.child(text(cat_name).font(t.ty.sm).color(t.ink()).truncate().max_w(160.0).min_w(0.0).a11y_hidden());
-    let mut cat_menu = DropdownMenu::new("round-cat-menu").min_width(200.0).label("Cat");
+    let mut cat_menu = DropdownMenu::new("round-cat-menu").min_width(200.0).label("Cattain");
+    cat_menu = cat_menu.item(DropdownMenuItem::new("No Cattain").checked(f.cat.is_empty()).on_select(|s: &mut App| {
+        let f = s.form_mut();
+        f.cat.clear();
+        f.standing = false;
+        s.menu_open = None;
+    }));
     for c in s.active_cats() {
         let id = c.id.clone();
         cat_menu = cat_menu.item(DropdownMenuItem::new(c.name.clone()).checked(c.id == f.cat).on_select(move |s: &mut App| {
@@ -279,12 +315,28 @@ fn pickers(s: &App, t: &Theme, f: &RoundForm, menus: &mut Vec<El>) -> El {
             s.menu_open = None;
         }));
     }
-    row()
-        .w_full()
-        .gap(t.space.at(2.0))
-        .center_y()
-        .child(picker(s, t, menus, "round-cat-menu", "Cats", cat_chip, cat_menu))
-        .child(picker(s, t, menus, "round-workspace-menu", "Projects", ws_chip, ws_menu))
+    let mut chips = row().w_full().gap(t.space.at(2.0)).center_y().child(picker(s, t, menus, "round-cat-menu", "Cattains", cat_chip, cat_menu));
+    // A standing round posts into the Cattain's own thread, which has its own folder: no project to choose.
+    if !f.standing {
+        chips = chips.child(picker(s, t, menus, "round-workspace-menu", "Projects", ws_chip, ws_menu));
+    }
+    let mut out = col().w_full().gap(t.space.at(2.5)).child(chips);
+    if let Some(c) = cat {
+        let on = f.standing;
+        let label = format!("Post in {}'s own thread", c.name);
+        let sw = Switch::<App>::new("round-standing", label.clone(), on).on_toggle(move |s: &mut App| s.form_mut().standing = !on).build(t);
+        let words = if on { format!("Each time, the words go to {} as a message in its own thread.", c.name) } else { "Each time starts a thread of its own.".to_owned() };
+        out = out.child(
+            row()
+                .key("round-standing-row")
+                .w_full()
+                .gap(t.space.at(2.5))
+                .center_y()
+                .child(sw)
+                .child(col().min_w(0.0).shrink().gap(t.space.at(0.5)).child(text(label).font(t.ty.sm).color(t.ink()).a11y_hidden()).child(text(words).key("round-standing-words").font(t.ty.xs).color(t.ink_muted()).wrap().min_w(0.0))),
+        );
+    }
+    out
 }
 
 fn schedule_fields(s: &App, t: &Theme, f: &RoundForm) -> El {
@@ -344,7 +396,7 @@ pub fn dialog(s: &App, t: &Theme, layer: &mut Vec<El>) {
     };
     let _ = GENERAL;
     Dialog::new("round", if editing { "Edit round" } else { "New round" })
-        .description("A cat's standing work that starts by itself.")
+        .description("Work that starts by itself at its times.")
         .child(body)
         .footer(vec![cancel, save])
         .width(540.0)

@@ -64,9 +64,9 @@ fn the_reasons_a_round_does_not_run_are_said_on_its_card() {
         assert!(all.contains(words), "{words}: {all}");
     }
     let rt = runtime((1200.0, 800.0), false, scene("rounds-paused"));
-    assert!(texts(&rt).contains("Every round is paused"));
+    assert!(texts(&rt).contains("Automatic work is paused. No round starts, and no timer or watch wakes a thread"));
     assert!(has_key(&rt, "rounds-paused"));
-    assert!(texts(&rt).contains("Resume rounds"), "the control says what it will do");
+    assert!(texts(&rt).contains("Resume automatic work"), "the control says what it will do, now for rounds, timers and watches");
     assert!(rt.state.rounds.iter().filter(|r| r.on && r.schedule.is_automatic()).all(|r| r.status == RoundStatus::Paused));
 }
 
@@ -168,12 +168,12 @@ fn the_daemons_events_keep_the_list_and_the_pause_current() {
     let heard = round.clone();
     rt.update(move |s, _| s.change(Change::RoundUpdated { round: heard }));
     settle(&mut rt);
-    assert_eq!(rt.state.rounds.len(), 3);
+    assert_eq!(rt.state.rounds.len(), 4);
     assert_eq!(rt.state.rounds[0].name, "Docs links");
     assert!(texts(&rt).contains("Off"));
     let gone = round.id.clone();
     rt.update(move |s, _| s.change(Change::RoundRemoved { round: gone }));
-    assert_eq!(rt.state.rounds.len(), 2);
+    assert_eq!(rt.state.rounds.len(), 3);
     rt.update(|s, _| s.change(Change::RoundsPaused { paused: true }));
     assert!(rt.state.rounds_paused);
     // A reply to the panel's Save closes it; a refusal leaves it open with the words.
