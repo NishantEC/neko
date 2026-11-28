@@ -142,10 +142,20 @@ yesterday 18:00") and the headline under it at the lg step in the second ink. Th
 headed at the base step with its count (amber for Needs you, the identity teal for Still working, faint otherwise):
 
 - **Needs you** is the Needs you card itself: raised, led by a small amber or red dot.
+- **Cattains** (after Needs you) is a well like the lists below it: a block per Cattain whose digest changed, led by its 24 point
+  face (the only faces on the page: a face means a Cattain), its name md semibold, "· wrote today 07:42" sm faint, and Open digest
+  as a ghost button at the right. Under it, a small label at the xs step ("Needs you" in the warning ink, "New" in the second ink)
+  over the digest's own lines at the base step, one per line and wrapped, never cut: the Needs you lines in the first ink, the New
+  lines in the second, so what waits on the person reads first. "and 1 more in its digest" in sm faint. A Cattain made by asking is
+  one row: its face, "New Cattain: yuzu (iOS work)" base medium, the time, Open thread; one that also wrote has "· New Cattain" in its
+  block's head instead.
 - **Finished** and **Rounds** and **Still working** are *wells* (the pressed-in surface), one per section, rows
-  separated by a hairline: calmer than the cards, because nothing in them must be done. A round line is led by a 24 point
-  portrait; a finished or working row of a thread has no portrait or name. How it ended ("Finished", "Could not finish", "Stopped", "Interrupted") is the sm step in the second ink with the time in tabular
-  figures; the title is md semibold; the sentence base in the second ink; the files, branch and "Undone" in sm. "Open task" is a ghost
+  separated by a hairline: calmer than the cards, because nothing in them must be done. Every row is led by its thread's **status
+  mark** (`status_mark.rs`: the red dot for a thread that could not finish and was not opened since, the working ring, nothing for
+  one at rest), centred in a 24 point lead, the width of a Cattain's face, so the words of every list on the page start at one edge;
+  a finished row's mark sits on its title's line. No row of a thread has a portrait or a cat's name; a crew thread's who line ends
+  "· miso's crew" in the faint ink. How it ended ("Finished", "Could not finish", "Stopped", "Interrupted") is the sm step in the second ink with the time in tabular
+  figures; the title is md semibold; the sentence base in the second ink; the files, branch and "Undone" in sm. "Open thread" is a ghost
   button at the right of the who line on every row, so every row has the same way in; Review and Undo are secondary buttons on the
   row's last line, only when the run offers them. Red is only for "could not finish" and a round that turned itself off.
 - The totals are one quiet sm line, the cost note under it in xs; **Mark as read** is the one primary button, with its key in a

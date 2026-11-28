@@ -1,4 +1,4 @@
-# Needs you (2026-11-26)
+# Needs you (2026-11-28)
 
 One place that lists what waits for the person, and a Mac notification when something starts waiting. Protocol 6.
 
@@ -91,16 +91,23 @@ the system.
 When each is posted:
 
 - An item the app has not seen before, while "When a task needs you" is on, unless Neko is in front and the person is in that task
-  or in the list. Title: the thread's title. Body: "Needs you: " and what is asked, at most 140 characters.
+  or in the list. Title: the thread's title ("Fix login"; for a thread in a Cattain's crew "Fix login (miso's crew)"). Body: "Needs
+  you: " and what is asked, at most 140 characters. **No cat is named**, with one exception: a Cattain asking in its own thread (its
+  `ask_person`, a turn that ended asking, or its own request) is titled "miso asks", and what it asks is the whole body ("Merge
+  acme#12?", "Run a command: cargo test"), with the same reply field or answers. A kitten's request in a Cattain's thread stays the
+  thread's ("miso", "Needs you: Kitten 1 asks: …"). Why: a face and a name now mean a Cattain, and a Cattain tags the person only
+  for what is theirs (`cats.md`), so its name on a banner says who wants the person.
   - A request: "Needs you: Run a command: cargo test" (a subagent's: "Needs you: Kitten 1 asks: …"), with Allow once (first), Always allow and Deny as actions. A destructive request has no
     actions: its notification only opens the task.
   - A question: "Needs you: " and the question, with a reply field ("Your answer", Send). A kitten's passed-up question: "Needs you:
     Kitten 1 asks (via the agent): …". The row's second line says "Needs you: a question from Kitten 1".
   - A failure: "Failed: " and its words. No actions.
 - A run that finished done (status from working to done), while "When a task finishes" is on, unless Neko is in front on that task:
-  title the thread's title, body "Done" or "Done: " and the first line of the answer. Not for a crew thread whose Cattain hears it, and
-  not for a Cattain's turn its crew woke: that news is the Cattain's, and it keeps it in its digest (`cats.md`, "The crew"). A crew
-  thread's request, question or failure still posts as above.
+  title the thread's title, body "Done" or "Done: " and the first line of the answer. Not for a crew thread whose Cattain hears it:
+  that news is the Cattain's, and it keeps it in its digest (`cats.md`, "The crew"); a crew thread nobody hears (its Cattain has not
+  run yet, or is retired) posts "Fix login (miso's crew)", "Done". **Never for a Cattain's own thread**: nothing of a Cattain's
+  notifies but its asking (a turn that starts crew threads ends Done for a moment before it is Waiting, and posted "miso", "Done"
+  before this). A crew thread's request, question or failure still posts as above. A subagent finishing, a wake and a timer never post.
 - A stale action or reply: "That was already answered."
 
 Rules:
@@ -156,7 +163,9 @@ Phone push, quiet hours, dismissing an item without answering it, per-workspace 
 - `crates/neko-daemon/tests/needs.rs`: the list and its pushes, answering a request and a question once, a stale answer refused, a
   failure kept across a restart, a folder gone before the run.
 - `apps/neko/src/notify.rs`: which notifications each change posts, their actions, withdrawal, the front and other-task rule, the
-  switches, reading a click.
+  switches, reading a click, the words ("miso asks" for a Cattain's own question and request only, "(miso's crew)" for a crew thread).
+- `apps/neko/tests/briefing.rs`: no Done for a Cattain's own turn; a crew thread finishing posts nothing while its Cattain hears it.
+- QA `notify-words`: a crew thread finishing posts nothing and miso's `ask_person` posts once, "miso asks" (`qa.md`).
 - `apps/neko/tests/needs_you.rs`: the list's keys and structure, the counts and the badge, the link, and the whole flow against a
   real daemon with the fake CLI, notifications recorded.
 - `crates/neko-protocol/tests/round_trip.rs` pins the shapes.

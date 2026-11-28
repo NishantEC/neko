@@ -79,7 +79,7 @@ runs across the daemon), batches wakes over 2 seconds and holds back while the a
 ## The Briefing
 
 What happened while the person was away is derived by the daemon from the records above, never written by a model and never stored apart from where the
-person last read it. It is pushed like Needs you, and the rounds scheduler's thread also decides the morning notification, which
+person last read it; it reads the digests the Cattains wrote (their DIGEST.md as the store last saw it). It is pushed like Needs you, and the rounds scheduler's thread also decides the morning notification, which
 the app posts. See `docs/knowledge/briefing.md`.
 
 ## Plugins

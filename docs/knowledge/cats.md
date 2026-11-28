@@ -3,7 +3,8 @@
 A cat is a named agent with a face. Every cat is a **Cattain**: it has a thread of its own that the person talks to, its own folder
 of four files, an optional project, a model and an access mode, and a **crew** of threads that read its CREW.md. Protocol 23,
 store 19 (cats came in protocol 8, store 6; threads lost their cat in protocol 14, store 11; Cattains came in protocol 21, store 17;
-making one by asking in protocol 22, store 18; running its crew in protocol 23, store 19).
+making one by asking in protocol 22, store 18; running its crew in protocol 23, store 19; the Briefing reading its digest in protocol
+24, no store change).
 
 ## The model
 
@@ -34,8 +35,9 @@ making one by asking in protocol 22, store 18; running its crew in protocol 23, 
 - Under "Ask before risky steps", editing in its own folder goes ahead (the folder is the thread's own, as a scratch folder is),
   **reading** in its project goes ahead (`policy::Context::read_too`) and **editing** in the project asks.
 - It is not a row under Threads, it is not in Search's threads (Search finds the Cattain), and it cannot be removed, settled or
-  archived ("Retire the Cattain in its Profile instead"); the week's auto-settle skips it. Needs you, notifications and the Briefing
-  treat it as any thread; a Cattain's thread that was never written in is not "working" in the Briefing.
+  archived ("Retire the Cattain in its Profile instead"); the week's auto-settle skips it. Needs you treats it as any thread. Its
+  notifications are its asking alone ("miso asks", below); in the Briefing its digest tells its turns (a Cattain's thread that was
+  never written in is not "working" there).
 - Its runs change only its own files, so its turns have no change line (no Review, no Undo): its files keep their own previous
   version.
 
@@ -114,9 +116,13 @@ server"); every other run is not offered them, and Neko refuses them in words if
   then Full access); a Cattain with no access of its own leaves Settings'. The same holds for a kitten of the Cattain's own thread or of a
   crew thread. Merging only when the person asked is told to the Cattain (its block and every crew wake), as prose: in "Ask before risky
   steps" a merge is a command and asks the person anyway.
-- **No noise.** A crew thread finishing posts no notification when its Cattain hears it, and nor does the Cattain's turn its crew woke
-  (the app sees the crew wake note in that run). What needs the person (a request, a question, a failure to act on) still reaches Needs
-  you and notifies as before.
+- **No noise.** A crew thread finishing posts no notification when its Cattain hears it, and no turn of the Cattain's own thread posts
+  "Done". What needs the person (a request, a question, a failure to act on) still reaches Needs you and notifies: a crew thread's as
+  "Fix login (miso's crew)", the Cattain's own question or request as **"miso asks"** with what it asks (`needs-you.md`,
+  "Notifications"): the only notification that names a cat.
+- **Its digest in the Briefing.** When its DIGEST.md changed since the person last read the Briefing, the Briefing's Cattains section
+  quotes its Needs you and New lines, three of each at most, as it wrote them, with Open digest (`briefing.md`). A Cattain made by
+  asking has a "New Cattain: yuzu (iOS work)" line there once, in the window it was made.
 - **A restart.** Crew news stored before a stop is delivered after it. A crew run the stop interrupted leaves no news (it was not a turn
   end); the next run's end does.
 
@@ -307,15 +313,15 @@ How it looks is in `design.md` ("A Cattain").
   ends on the waiting line. The steps read "Started a crew thread · Fix login", "Looked at the crew", "Read Fix login", "Wrote to Fix
   login" and "Could not write to Fix login". The Digest tab follows DIGEST.md as the Cattain rewrites it (`cattain_file_changed`).
 - A thread has no head: an ordinary thread's turns have no portrait or name, its requests say "The agent asks". Notifications carry
-  the thread's title and no cat name (`needs-you.md`).
+  the thread's title and no cat name, but "(miso's crew)" for a crew thread and "miso asks" for a Cattain's own asking
+  (`needs-you.md`). The Briefing's rows are led by status marks; a face there means a Cattain's digest or a new Cattain.
 
 ## Not here yet, on purpose
 
-Promote to Cattain (a thread's history becoming a Cattain's thread) and the Briefing's "New Cattain" line; a Cattain made by asking
+Promote to Cattain (a thread's history becoming a Cattain's thread); a Cattain made by asking
 starting at once with the asking thread's request (it waits for the person instead: nothing runs by itself); `adopt_thread` and
 `release_thread` (moving a thread in or out of a crew, by tool or by dragging a row onto a Cattain); a per-thread model for a crew thread
-(S15); the notification "miso asks: …" worded for a Cattain's own `ask_person` (it notifies as any thread's question does, S14 rewords
-it); rounds that post into a Cattain's thread or wake it (S13); the Briefing reading digests (S14); a crew thread's line in Threads led
+(S15); rounds that post into a Cattain's thread or wake it (S13); a crew thread's line in Threads led
 by its Cattain's face; the Needs you page filtered to one Cattain ("n more" opens it whole).
 
 ## Tests
@@ -346,5 +352,6 @@ by its Cattain's face; the Needs you page filtered to one Cattain ("n more" open
   `crates/neko-daemon/src/mcp_server.rs` (the tools listed), `apps/neko/src/crew_view.rs` (the words, the brief and messages never the
   person's, the waiting line), the scenes `crew-*`.
 - QA: `cattain-thread`, `cattain-files`, `cattain-migrate`, `cats`, `cat-rules-cannot-skip-checks`, `no-cat`, `make-cattain`,
-  `make-cattain-undo`, `make-cattain-limit`, `crew-three`, `crew-needs-you`, `crew-merge-only-when-asked` (`qa.md`).
+  `make-cattain-undo`, `make-cattain-limit`, `crew-three`, `crew-needs-you`, `crew-merge-only-when-asked`, `briefing-digest`, `notify-words`
+  (`qa.md`).
 - `crates/neko-protocol/tests/round_trip.rs` pins the shapes.

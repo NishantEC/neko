@@ -32,6 +32,15 @@ daemon started with that variable; a release daemon refuses it (`rounds.md`).
 
 `briefing` makes a round (every day, a minute from now, so the daemon is started with `TZ=UTC` and the step's words say `{{utc+1}}`, the UTC time N minutes from now), a task that finishes and one that waits on a request (ask mode), waits for the round to start by itself, opens the Briefing (⌘4) and checks its sections and the first sentence of each answer, answers the request from the page, marks it read with ⌘↩, checks "You're caught up" and that New thread's Briefing line is gone, then finishes a new task and checks the line comes back. `briefing-morning` sets the morning time three hours ahead in Settings ▸ Briefing, moves the scheduler's clock past it (`clock`) and checks one notification, "Your briefing: 1 finished, 1 needs you", in the notification log, none more when the clock moves on the same day, and the same counts on the page. Headless runs have no system to post to: the driver gives the app a poster that writes to the run's `notify.jsonl` in the form the window runs' log has, so `notified`, `withdrawn` and `posts` (`{max, titled}`: only the posts whose title starts so) are checked the same way in both.
 
+`briefing-digest` (S14, headless, 1300 × 860): miso and mochi each write their DIGEST.md in their own threads (the fake CLI's `write`
+step; `\n` in its text is a new line); the Briefing's Cattains section has both blocks, each led by its face, quotes miso's Needs you
+and New lines, leaves mochi's "Nothing." out, and has no finished row for either Cattain's turn. After Mark as read only miso writes
+again: the Briefing shows miso's block alone, with its new lines, and nothing of mochi's.
+
+`notify-words` (S14, headless, with `NEKO_FAKE_ON_CREW` set to an `ask_person` step): miso starts one crew thread, which finishes; miso
+hears it, rewrites its digest and tags the person. The notification log has exactly one post, "miso asks" with "Merge acme#12?" and a
+reply field, and none titled "Fix login": a crew thread finishing posts nothing, and miso's own turns post no Done.
+
 ## The sidebar scenarios
 
 The driver has no window to focus, so Neko is never "in front" there; it sets `App::read_unfronted` so the thread in view is read as its words arrive, as it is in a real window that is in front. A real window behind another app leaves what arrives unread (`tests/threads.rs`). The driver also reads the saved grouping, as the real window does.
