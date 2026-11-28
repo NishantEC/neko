@@ -87,8 +87,8 @@ fn a_full_morning_says_its_sections_in_order_each_in_its_words() {
     ] {
         assert!(all.contains(line), "missing {line:?} in:\n{all}");
     }
-    // The order a person reads: what waits, what finished, the rounds, what works, the totals, then the one thing to do.
-    let order = ["briefing-needs", "briefing-finished", "briefing-rounds", "briefing-working", "briefing-totals", "briefing-read-row"];
+    // The order a person reads: what waits, what the Cattains wrote, what finished, the rounds, what works, the totals, then the one thing to do.
+    let order = ["briefing-needs", "briefing-cattains", "briefing-finished", "briefing-rounds", "briefing-working", "briefing-totals", "briefing-read-row"];
     let ys: Vec<f32> = order.iter().map(|k| y_of(&rt, k)).collect();
     assert!(ys.windows(2).all(|w| w[0] < w[1]), "{order:?} are at {ys:?}");
     assert_eq!(rt.state.window_title(), "Briefing");
@@ -139,12 +139,13 @@ fn tab_goes_through_the_page_in_reading_order_and_ends_on_mark_as_read() {
     let last = |p: &dyn Fn(&str) -> bool| seen.iter().rposition(|k| p(k)).unwrap_or_else(|| panic!("no stop matches in {seen:?}"));
     let need = at(&|k| k.starts_with("need-"));
     let need_end = last(&|k| k.starts_with("need-"));
+    let digest = at(&|k| k.starts_with("briefing-digest-"));
     let fin = at(&|k| k.starts_with("briefing-task-"));
     let fin_end = last(&|k| k.starts_with("briefing-task-"));
     let round = at(&|k| k.starts_with("briefing-round-"));
     let working = at(&|k| k.starts_with("briefing-working-"));
     let read = at(&|k| k == "briefing-read");
-    assert!(need < need_end && need_end < fin && fin_end < round && round < working && working < read, "reading order: {seen:?}");
+    assert!(need < need_end && need_end < digest && digest < fin && fin_end < round && round < working && working < read, "reading order: {seen:?}");
     assert_eq!(seen.iter().filter(|k| *k == "briefing-read").count(), 1, "once round");
     // The sidebar's row for it is a stop of its own, right after Needs you.
     let needs = at(&|k| k == "needs-you");
@@ -170,6 +171,57 @@ fn the_arrows_move_between_finished_rows_and_return_opens_the_task() {
     press(&mut rt, Key::Enter, Mods::default());
     assert_eq!(rt.state.open.as_ref(), Some(&first.task), "Return opens its thread");
     assert!(!rt.state.briefing_open);
+}
+
+#[test]
+fn the_cattains_section_quotes_each_changed_digest_and_only_cattains_have_faces() {
+    let mut rt = runtime((1200.0, 1500.0), false, scene("briefing-cattains"));
+    let all = texts(&rt);
+    for line in [
+        "miso's digest",
+        "Merge the three flaky-test branches? Each one is green on its own, and together they pass twice in a row.",
+        "Fix test one: done. The clock is handed in now, so it no longer waits on the wall clock.",
+        "Fix test three: done, with a retry left out on purpose.",
+        "and 1 more in its digest",
+        "mochi's digest",
+        "The install guide's two broken links are fixed.",
+        "New Cattain: yuzu (iOS work)",
+    ] {
+        assert!(all.contains(line), "missing {line:?} in:\n{all}");
+    }
+    assert!(y_of(&rt, "briefing-cattains") < y_of(&rt, "briefing-finished"), "the Cattains come before what finished");
+    // A face means a Cattain: the Cattains section has them, and no finished row is led by one; each is led by its status mark.
+    let keys: Vec<String> = rt.elements().iter().filter_map(|e| e.key.clone()).collect();
+    let faces: Vec<&String> = keys.iter().filter(|k| k.starts_with("briefing-") && k.ends_with("-face")).collect();
+    assert!(!faces.is_empty() && faces.iter().all(|k| k.starts_with("briefing-digest-") || k.starts_with("briefing-new-cattain-")), "{faces:?}");
+    let b = rt.state.briefing.clone().unwrap();
+    for f in &b.finished {
+        assert!(has_key(&rt, &format!("briefing-task-{}-mark", f.task.0)), "{} is led by its mark", f.title);
+    }
+    // A crew thread says whose crew it is in; a thread of the person's does not.
+    let crew: Vec<&neko_protocol::briefing::BriefingTask> = b.finished.iter().filter(|f| f.cat == "cat_miso").collect();
+    assert!(!crew.is_empty() && crew.iter().all(|f| has_key(&rt, &format!("briefing-task-{}-crew", f.task.0))), "each crew thread says miso's crew");
+    let mine = b.finished.iter().find(|f| f.cat.is_empty()).unwrap();
+    assert!(!has_key(&rt, &format!("briefing-task-{}-crew", mine.task.0)));
+    // The keyboard: the page opens on miso's block; Down goes to mochi's, then yuzu's line; Return on a block opens its digest.
+    assert_eq!(focus(&rt).as_deref(), Some("briefing-digest-cat_miso"), "nothing waits: the first digest has the keyboard");
+    press(&mut rt, Key::Down, Mods::default());
+    assert_eq!(focus(&rt).as_deref(), Some("briefing-digest-cat_mochi"));
+    press(&mut rt, Key::Down, Mods::default());
+    assert_eq!(focus(&rt).as_deref(), Some("briefing-new-cattain-cat_yuzu"));
+    press(&mut rt, Key::Up, Mods::default());
+    press(&mut rt, Key::Enter, Mods::default());
+    assert!(!rt.state.briefing_open, "Return opens mochi's thread");
+    assert_eq!(rt.state.open_cattain_cat().map(|c| c.id.as_str()), Some("cat_mochi"));
+    let open = rt.state.open.clone().unwrap();
+    assert_eq!(rt.state.pane.tab.get(&open), Some(&neko_app::pane::Tab::Digest), "on its Digest tab");
+}
+
+#[test]
+fn a_digest_with_nothing_under_needs_you_or_new_still_shows_it_changed_in_one_quiet_line() {
+    let rt = runtime((1200.0, 800.0), false, scene("briefing-cattains-quiet"));
+    assert!(has_key(&rt, "briefing-digest-cat_mochi-quiet") && texts(&rt).contains("Nothing under Needs you or New."));
+    assert!(!has_key(&rt, "briefing-digest-cat_mochi-new"));
 }
 
 #[test]
@@ -231,7 +283,7 @@ fn settings_has_a_briefing_page_with_the_morning_switch_and_time() {
 
 #[test]
 fn nothing_is_clipped_at_the_smallest_window_and_every_control_has_a_name() {
-    for name in ["briefing", "briefing-many", "briefing-finished", "briefing-caught-up", "briefing-caught-up-waiting", "briefing-empty", "home-briefing", "settings-briefing"] {
+    for name in ["briefing", "briefing-many", "briefing-cattains", "briefing-cattains-quiet", "briefing-finished", "briefing-caught-up", "briefing-caught-up-waiting", "briefing-empty", "home-briefing", "settings-briefing"] {
         let rt = runtime((760.0, 560.0), false, scene(name));
         for e in rt.elements() {
             if let Some(k) = e.key.as_deref().filter(|k| k.starts_with("briefing-") || k.starts_with("home-briefing")) {

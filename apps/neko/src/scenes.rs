@@ -164,6 +164,8 @@ pub const SCENES: &[Scene] = &[
     ("briefing-caught-up-waiting", |s| { briefing::briefing_caught_up_waiting(s); finish(s) }),
     ("briefing-many", |s| { briefing::briefing_many(s); finish(s) }),
     ("briefing-morning-off", |s| { briefing::briefing_morning_off(s); finish(s) }),
+    ("briefing-cattains", |s| { briefing::briefing_cattains(s); finish(s) }),
+    ("briefing-cattains-quiet", |s| { briefing::briefing_cattains_quiet(s); finish(s) }),
     ("home-briefing", |s| { briefing::home_briefing(s); finish(s) }),
     ("settings-briefing", |s| { briefing::settings_briefing(s); finish(s) }),
     ("settings-briefing-invalid", |s| { briefing::settings_briefing_invalid(s); finish(s) }),

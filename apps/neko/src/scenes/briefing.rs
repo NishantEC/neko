@@ -1,7 +1,7 @@
 //! The Briefing's scenes (docs/knowledge/briefing.md): a full morning, only finished work, an empty window, caught up, many
 //! workspaces, the Home line, and Settings ▸ Briefing. Placeholder data only.
 
-use neko_protocol::briefing::{Briefing, BriefingRound, BriefingTask, BriefingTotals, BriefingWorking, FinishedEnd, RoundOutcome};
+use neko_protocol::briefing::{Briefing, BriefingCattain, BriefingNewCattain, BriefingRound, BriefingTask, BriefingTotals, BriefingWorking, FinishedEnd, RoundOutcome};
 use neko_protocol::undo::{Action, Offer};
 use neko_protocol::{BriefingSettings, Changes, GENERAL, Need, NeedsItem, RunId, Task, TaskStatus};
 use rune::TextEdit;
@@ -65,6 +65,10 @@ fn finished(s: &App, d: Done<'_>) -> (Task, BriefingTask) {
         FinishedEnd::Stopped => TaskStatus::Stopped,
         FinishedEnd::Interrupted => TaskStatus::Interrupted,
     };
+    // A thread that could not finish overnight has not been opened since: its mark is the red dot until it is.
+    if d.end == FinishedEnd::Failed {
+        t.last_read_ms = t.activity_ms - 1;
+    }
     let item = BriefingTask {
         task: t.id.clone(),
         workspace: d.ws.into(),
@@ -173,9 +177,10 @@ fn full_morning(s: &mut App, workspaces: bool) {
         s,
         Done { n: 55, cat: "", ws: a, title: "Compress the case study images", end: FinishedEnd::Interrupted, ended: at_time(s, 0, 3, 0), answer: Some("Neko stopped while this ran."), changes: None, branch: None, offer: offer(false, None, false) },
     );
+    // A thread in miso's crew: its row says so, and is led by its status mark as any thread's is.
     let (t6, f6) = finished(
         s,
-        done(56, "", w, "Write the pricing page copy", at_time(s, -1, 19, 30), "Drafted three versions of the copy and put the shortest one first.", ch(2, 30, 4), Some("neko/pricing-copy"), offer(true, Some((Action::Redo, true)), true)),
+        done(56, "cat_miso", w, "Write the pricing page copy", at_time(s, -1, 19, 30), "Drafted three versions of the copy and put the shortest one first.", ch(2, 30, 4), Some("neko/pricing-copy"), offer(true, Some((Action::Redo, true)), true)),
     );
     let (working, wk) = working_task(s, 57, "", a, "Port the backup script to the new server", 14);
     let docs = round_line(s, "docs", "Docs check", w, "cat_mochi", RoundOutcome::Ran, Some(at_time(s, 0, 6, 0)), at_time(s, 0, 6, 0), Some(&t2), None);
@@ -213,10 +218,80 @@ fn full_morning(s: &mut App, workspaces: bool) {
     b.working = vec![wk];
     b.needs = needs.clone();
     b.totals = BriefingTotals { finished: 6, files: 4, added: 44, removed: 9, cost_usd: Some(1.84), api_equivalent: true };
+    b.cattains = vec![miso_digest(s)];
     s.needs = needs;
     s.needs_loaded = true;
     s.briefing = Some(b);
     s.open_briefing();
+}
+
+/// miso's digest as it wrote it at 07:42: one thing for the person, four done, three of them quoted.
+fn miso_digest(s: &App) -> BriefingCattain {
+    BriefingCattain {
+        cat: "cat_miso".into(),
+        name: "miso".into(),
+        changed_ms: at_time(s, 0, 7, 42),
+        needs: vec!["Merge the three flaky-test branches? Each one is green on its own, and together they pass twice in a row.".into()],
+        needs_more: 0,
+        new: vec!["Fix test one: done. The clock is handed in now, so it no longer waits on the wall clock.".into(), "Fix test two: done.".into(), "Fix test three: done, with a retry left out on purpose.".into()],
+        new_more: 1,
+    }
+}
+
+/// yuzu, made by asking last night in the thread about the iOS beta.
+fn yuzu(s: &mut App, made_in: &Task) -> BriefingNewCattain {
+    let made_ms = at_time(s, -1, 21, 12);
+    let mut c = s.cats[0].clone();
+    (c.id, c.name, c.face, c.purpose, c.created_ms, c.made_in) = ("cat_yuzu".into(), "yuzu".into(), "siamese".into(), Some("iOS work".into()), made_ms, Some(made_in.id.clone()));
+    s.cats.push(c);
+    BriefingNewCattain { cat: "cat_yuzu".into(), name: "yuzu".into(), purpose: Some("iOS work".into()), made_ms, made_in: made_in.id.clone() }
+}
+
+/// The Cattains' morning: miso's digest asks for a decision and lists what is done, mochi's lists only what is new, yuzu was made by
+/// asking; two of miso's crew finished, each led by its status mark and saying whose crew it is in.
+pub fn briefing_cattains(s: &mut App) {
+    quiet_morning(s);
+    s.tasks.clear();
+    let a = "ws_acme";
+    let ok = |n, cat, title, ended, answer| Done { n, cat, ws: a, title, end: FinishedEnd::Done, ended, answer: Some(answer), changes: None, branch: None, offer: offer(false, None, false) };
+    let (t1, f1) = finished(s, ok(61, "cat_miso", "Fix test one: the clock in the retry test", at_time(s, 0, 7, 30), "The retry test now takes its clock from the test, so it passes without waiting."));
+    let (t2, f2) = finished(s, Done { end: FinishedEnd::Failed, ..ok(62, "cat_miso", "Fix test four: the flaky upload test", at_time(s, 0, 7, 38), "The upload server did not answer within 30 seconds.") });
+    let (t3, f3) = finished(s, ok(63, "", "Ask for a Cattain for the iOS beta", at_time(s, -1, 21, 13), "I made yuzu, a Cattain for the iOS work in acme-ios."));
+    let made = yuzu(s, &t3);
+    s.tasks.extend([t1, t2, t3]);
+    // miso's and mochi's own threads, which Open digest opens (a Cattain's own thread is no row under Threads).
+    for (n, cat) in [(64, "cat_miso"), (65, "cat_mochi")] {
+        let mut own = task(n, cat.trim_start_matches("cat_"), 600);
+        (own.title, own.cat, own.cattain, own.status) = (cat.trim_start_matches("cat_").to_owned(), Some(cat.to_owned()), true, TaskStatus::Done);
+        if let Some(c) = s.cats.iter_mut().find(|c| c.id == cat) {
+            c.thread = Some(own.id.clone());
+        }
+        s.tasks.push(own);
+    }
+    let mut b = empty_briefing(s);
+    let mochi = BriefingCattain {
+        cat: "cat_mochi".into(),
+        name: "mochi".into(),
+        changed_ms: at_time(s, 0, 6, 5),
+        needs: Vec::new(),
+        needs_more: 0,
+        new: vec!["The install guide's two broken links are fixed.".into(), "The changelog has the 0.2 entries.".into()],
+        new_more: 0,
+    };
+    b.cattains = vec![miso_digest(s), mochi];
+    b.new_cattains = vec![made];
+    b.finished = vec![f2, f1, f3];
+    b.totals = BriefingTotals { finished: 3, files: 0, added: 0, removed: 0, cost_usd: Some(0.41), api_equivalent: true };
+    s.briefing = Some(b);
+    s.open_briefing();
+}
+
+/// The same, but mochi's digest changed with nothing under Needs you or New: its block says so in one quiet line.
+pub fn briefing_cattains_quiet(s: &mut App) {
+    briefing_cattains(s);
+    if let Some(b) = &mut s.briefing {
+        b.cattains[1].new.clear();
+    }
 }
 
 /// The sparse house's morning: one finished task, nothing waiting, nothing working.
@@ -251,6 +326,7 @@ pub fn briefing_finished(s: &mut App) {
     s.tasks.retain(|t| !matches!(t.status, TaskStatus::Working | TaskStatus::Asked | TaskStatus::NeedsYou));
     if let Some(b) = &mut s.briefing {
         b.needs.clear();
+        b.cattains.clear();
         b.rounds.clear();
         b.rounds_ran = 0;
         b.rounds_not_run = 0;
@@ -286,6 +362,7 @@ pub fn briefing_caught_up_waiting(s: &mut App) {
     let from = s.now_ms - 4 * 60_000;
     if let Some(b) = &mut s.briefing {
         b.finished.clear();
+        b.cattains.clear();
         b.rounds.clear();
         b.rounds_ran = 0;
         b.rounds_not_run = 0;

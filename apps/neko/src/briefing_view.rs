@@ -1,19 +1,20 @@
 //! The Briefing page (docs/knowledge/briefing.md, ⌘4): what happened while the person was away, read in five seconds. Needs you comes
-//! first, with the very cards Needs you has (answered where they are), then what finished (each led by its cat, with the first
+//! first, with the very cards Needs you has (answered where they are), then the Cattains whose digest changed (each led by its face, with
+//! its Needs you and New lines in its own words) and those made by asking, then what finished (each led by its status mark, with the first
 //! sentence of its answer, its files, and Review and Undo where Neko already offers them), what the rounds did, what is still
 //! working, a totals line, and "Mark as read". After that the page says the person is caught up and when the next briefing is.
 //!
 //! Keys: Up and Down move between the rows of a list, Return opens a row's task, Escape goes back, ⌘↩ marks it read. Tab reaches each
 //! row's own controls, in reading order, ending on "Mark as read".
 
-use neko_protocol::briefing::{BriefingRound, BriefingTask, BriefingWorking, FinishedEnd, RoundOutcome};
+use neko_protocol::briefing::{BriefingCattain, BriefingNewCattain, BriefingRound, BriefingTask, BriefingWorking, FinishedEnd, RoundOutcome};
 use neko_protocol::undo::Action;
 use neko_protocol::{Briefing, TaskStatus};
 use rune::{El, Key, KeyEvent, Tx, col, el, row, text};
 use rune_ui_style::{ButtonVariant, Size, tabular, weight};
 
 use crate::briefing::{self as words, active_workspaces, group_by, task_key};
-use crate::faces::{portrait, portrait_in};
+use crate::faces::portrait_in;
 use crate::state::App;
 use crate::ui::base::{Shape, States, Theme, paint_state};
 use crate::ui::button::Button;
@@ -24,6 +25,11 @@ use crate::view::{COLUMN, well};
 
 /// The sidebar row's and the page's key.
 pub const KEY: &str = "briefing";
+
+/// How far down a finished row its mark sits: on the title's line, under the line that says how it ended.
+const MARK_TOP: f32 = 33.0;
+/// Every row's lead is this wide (a Cattain's 24 point face, a thread's mark centred in the same room): each list's words line up.
+const LEAD: f32 = 24.0;
 
 /// A section's head: its title and how many, the count in the section's own ink.
 fn head(t: &Theme, key: &str, title: &str, count: usize, ink: rune::Color) -> El {
@@ -73,6 +79,138 @@ fn row_keys(s: &mut App, ev: &KeyEvent, tx: &mut Tx, task: &neko_protocol::TaskI
     }
 }
 
+/// A row's lead: the thread's status mark in its 16 point slot, `top` down so it sits on the row's title line (a face now means a
+/// Cattain, so no thread is led by one). A thread the window does not know (it was removed since) keeps the slot, with the red dot
+/// when it could not finish.
+fn mark_lead(s: &App, t: &Theme, key: &str, task: &neko_protocol::TaskId, failed: bool, top: f32) -> El {
+    let under = t.c.input.bg;
+    let mark = match s.tasks.iter().find(|x| &x.id == task) {
+        Some(task) => crate::status_mark::bare_mark(t, key, task, under, crate::status_mark::SLOT),
+        None => {
+            let slot = el().key(key.to_owned()).size(crate::status_mark::SLOT, crate::status_mark::SLOT).center().a11y_hidden();
+            if failed { slot.child(el().size(8.0, 8.0).radius(4.0).fill(crate::status_mark::ink(t, crate::status_mark::Mark::Failed, under).unwrap_or(t.c.danger.fg))) } else { slot }
+        }
+    };
+    col().w(LEAD).min_w(LEAD).items_center().child(mark.mt(top)).a11y_hidden()
+}
+
+/// A Cattain's 24 point face as a row's lead, in the same room a thread's mark has.
+fn face_lead(t: &Theme, key: &str, face: &str) -> El {
+    col().w(LEAD).min_w(LEAD).items_center().child(portrait_in(t, key, face, LEAD, None, t.c.input.bg))
+}
+
+/// "miso's crew" for a thread in a Cattain's crew, else nothing.
+fn crew_words(s: &App, task: &neko_protocol::TaskId) -> Option<String> {
+    match s.whose(task) {
+        crate::notify::Whose::Crew(name) => Some(format!("{name}'s crew")),
+        _ => None,
+    }
+}
+
+/// Up and Down between the Cattains section's rows, Return does the row's press, Escape goes back.
+fn cattain_row_keys(s: &mut App, ev: &KeyEvent, tx: &mut Tx, open: &dyn Fn(&mut App), before: Option<&str>, after: Option<&str>) -> bool {
+    if ev.mods.cmd || ev.mods.alt || ev.mods.ctrl || ev.mods.shift {
+        return false;
+    }
+    match ev.key {
+        Key::Up | Key::Down => {
+            if let Some(k) = if ev.key == Key::Up { before } else { after } {
+                tx.focus(k.to_owned(), true);
+            }
+            true
+        }
+        Key::Enter => {
+            open(s);
+            true
+        }
+        Key::Escape => {
+            s.leave_briefing();
+            true
+        }
+        _ => false,
+    }
+}
+
+/// A label over a part of a Cattain's block ("Needs you", "New"), and its lines in the Cattain's own words.
+fn digest_part(t: &Theme, key: &str, label: &str, ink: rune::Color, line_ink: rune::Color, lines: &[String], more: u32) -> El {
+    let mut part = col().key(key.to_owned()).role("list").label(format!("{label}, in its digest")).w_full().gap(t.space.at(1.0));
+    part = part.child(text(label.to_owned()).key(format!("{key}-label")).font(weight(t.ty.xs, t.ty.semibold)).color(ink).a11y_hidden());
+    for (i, l) in lines.iter().enumerate() {
+        part = part.child(text(l.clone()).key(format!("{key}-{i}")).role("listitem").label(l.clone()).font(t.ty.base).color(line_ink).wrap().min_w(0.0));
+    }
+    if let Some(m) = words::more_words(more) {
+        part = part.child(text(m).key(format!("{key}-more")).font(t.ty.sm).color(t.ink_faint()));
+    }
+    part
+}
+
+/// One Cattain whose digest changed: its face and name, when it wrote, its digest's Needs you and New lines quoted as it wrote them,
+/// and Open digest (its thread on the Digest tab). A Cattain made by asking in the window says so here instead of on a line of its own.
+#[allow(clippy::too_many_arguments)]
+fn digest_block(s: &App, t: &Theme, c: &BriefingCattain, made: Option<&BriefingNewCattain>, pos: usize, n: usize, before: Option<String>, after: Option<String>) -> El {
+    let key = words::digest_key(&c.cat);
+    let zone = s.zone();
+    let when = words::when(c.changed_ms, s.now_ms, &*zone);
+    let cat = c.cat.clone();
+    let open_digest = move |s: &mut App| s.open_cattain_on(&cat, crate::pane::Tab::Digest);
+    let open = {
+        let open_digest = open_digest.clone();
+        Button::new(format!("{key}-open"), "Open digest").variant(ButtonVariant::Ghost).size(Size::Sm).on_press(open_digest).build(t)
+    };
+    let mut who = row().key(format!("{key}-who")).w_full().gap(t.space.at(1.5)).center_y().child(text(c.name.clone()).key(format!("{key}-name")).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0).shrink().a11y_hidden());
+    if made.is_some() {
+        who = who.child(text("·").font(t.ty.sm).color(t.ink_faint()).a11y_hidden()).child(text("New Cattain").key(format!("{key}-made")).font(t.ty.sm).color(t.ink_muted()).a11y_hidden());
+    }
+    who = who
+        .child(text("·").font(t.ty.sm).color(t.ink_faint()).a11y_hidden())
+        .child(text(format!("wrote {when}")).key(format!("{key}-when")).font(tabular(t.ty.sm)).color(t.ink_faint()).truncate().min_w(0.0).shrink().a11y_hidden())
+        .child(el().grow(1.0))
+        .child(open);
+    let mut body = col().grow(1.0).min_w(0.0).gap(t.space.at(2.5)).child(who.mt(-t.space.at(0.5)).mb(-t.space.at(1.0)));
+    if !c.needs.is_empty() {
+        body = body.child(digest_part(t, &format!("{key}-needs"), "Needs you", t.c.warning.fg, t.ink(), &c.needs, c.needs_more));
+    }
+    if !c.new.is_empty() {
+        body = body.child(digest_part(t, &format!("{key}-new"), "New", t.ink_muted(), t.ink_muted(), &c.new, c.new_more));
+    }
+    if c.needs.is_empty() && c.new.is_empty() {
+        body = body.child(text("Nothing under Needs you or New.").key(format!("{key}-quiet")).font(t.ty.base).color(t.ink_muted()).wrap().min_w(0.0));
+    }
+    let mut label = format!("{}'s digest", c.name);
+    if made.is_some() {
+        label = format!("{label}, a new Cattain");
+    }
+    let says = |what: &str, v: &[String]| (!v.is_empty()).then(|| format!("{what}: {}", v.join("; ")));
+    let desc = [says("Needs you", &c.needs), says("New", &c.new), Some(format!("written {when}"))].into_iter().flatten().collect::<Vec<_>>().join(". ");
+    let r = row().key(key.clone()).role("listitem").label(label).description(desc).position_in_set(pos, n).focusable(true).w_full().px(t.space.at(4.0)).py(t.space.at(3.5)).gap(t.space.at(3.5)).items_start();
+    paint_state(r, &t.mat.row, States::default())
+        .child(face_lead(t, &format!("{key}-face"), s.cat_face(&c.cat)))
+        .child(body)
+        .on_key(move |s: &mut App, ev: &KeyEvent, tx: &mut Tx| cattain_row_keys(s, ev, tx, &open_digest, before.as_deref(), after.as_deref()))
+}
+
+/// "New Cattain: yuzu (iOS work)", led by its face, with Open thread (its own thread), once in the window it was made.
+fn new_cattain_row(s: &App, t: &Theme, m: &BriefingNewCattain, pos: usize, n: usize, before: Option<String>, after: Option<String>) -> El {
+    let key = words::new_cattain_key(&m.cat);
+    let zone = s.zone();
+    let when = words::when(m.made_ms, s.now_ms, &*zone);
+    let cat = m.cat.clone();
+    let open_it = move |s: &mut App| s.open_cattain(&cat);
+    let open = {
+        let open_it = open_it.clone();
+        Button::new(format!("{key}-open"), "Open thread").variant(ButtonVariant::Ghost).size(Size::Sm).on_press(open_it).build(t)
+    };
+    let line = words::new_cattain_words(m);
+    let r = row().key(key.clone()).role("listitem").label(line.clone()).description(format!("made by asking {when}")).position_in_set(pos, n).focusable(true).w_full().px(t.space.at(4.0)).py(t.space.at(2.5)).gap(t.space.at(3.5)).center_y();
+    paint_state(r, &t.mat.row, States::default())
+        .child(face_lead(t, &format!("{key}-face"), s.cat_face(&m.cat)))
+        .child(text(line).key(format!("{key}-words")).font(weight(t.ty.base, t.ty.medium)).color(t.ink()).truncate().min_w(0.0).shrink().a11y_hidden())
+        .child(text(when).key(format!("{key}-when")).font(tabular(t.ty.sm)).color(t.ink_faint()).a11y_hidden())
+        .child(el().grow(1.0))
+        .child(open)
+        .on_key(move |s: &mut App, ev: &KeyEvent, tx: &mut Tx| cattain_row_keys(s, ev, tx, &open_it, before.as_deref(), after.as_deref()))
+}
+
 /// What a finished task's second line says about its changes: "3 files" with its figures. The branch is the task's detail, not
 /// the Briefing's: it shows in the task.
 fn facts(t: &Theme, key: &str, item: &BriefingTask) -> Option<El> {
@@ -104,17 +242,20 @@ fn finished_row(s: &App, t: &Theme, item: &BriefingTask, pos: usize, n: usize, b
         let task = task.clone();
         Button::new(format!("{key}-open"), "Open thread").variant(ButtonVariant::Ghost).size(Size::Sm).on_press(move |s: &mut App| s.open_task_id(&task)).build(t)
     };
-    // Who and when on the left; the way into the task at the right, on the same line for every row.
-    let who = row()
+    // How and when on the left (and whose crew, for a crew thread); the way into the task at the right, on the same line for every row.
+    let crew = crew_words(s, &item.task);
+    let mut who = row()
         .key(format!("{key}-who"))
         .w_full()
         .gap(t.space.at(1.5))
         .center_y()
         .child(text(says.clone()).font(weight(t.ty.sm, t.ty.semibold)).color(if failed { t.c.danger.fg } else { t.ink_muted() }).truncate().min_w(0.0).shrink().a11y_hidden())
         .child(text("·").font(t.ty.sm).color(t.ink_faint()).a11y_hidden())
-        .child(text(when.clone()).key(format!("{key}-when")).font(tabular(t.ty.sm)).color(t.ink_faint()).a11y_hidden())
-        .child(el().grow(1.0))
-        .child(open);
+        .child(text(when.clone()).key(format!("{key}-when")).font(tabular(t.ty.sm)).color(t.ink_faint()).a11y_hidden());
+    if let Some(c) = &crew {
+        who = who.child(text("·").font(t.ty.sm).color(t.ink_faint()).a11y_hidden()).child(text(c.clone()).key(format!("{key}-crew")).font(t.ty.sm).color(t.ink_faint()).truncate().min_w(0.0).shrink().a11y_hidden());
+    }
+    let who = who.child(el().grow(1.0)).child(open);
     let title = text(item.title.clone()).key(format!("{key}-title")).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()).truncate().min_w(0.0);
     let mut body = col().grow(1.0).min_w(0.0).gap(t.space.at(1.0)).child(who.mt(-t.space.at(1.0)).mb(-t.space.at(0.5))).child(title);
     if let Some(a) = &item.answer {
@@ -149,16 +290,19 @@ fn finished_row(s: &App, t: &Theme, item: &BriefingTask, pos: usize, n: usize, b
         label = format!("{label}. {a}");
     }
     let id = item.task.clone();
-    let r = row().key(key.clone()).role("listitem").label(label).description(when).position_in_set(pos, n).focusable(true).w_full().px(t.space.at(4.0)).py(t.space.at(3.5)).gap(t.space.at(3.5)).items_start();
-    // A thread has no cat to lead it; one a cat was given before (or a round made) keeps the cat's face.
-    let lead = (!item.cat.is_empty()).then(|| portrait(t, &format!("{key}-face"), s.cat_face(&item.cat), 40.0));
+    let description = match &crew {
+        Some(c) => format!("{when}, {c}"),
+        None => when,
+    };
+    let r = row().key(key.clone()).role("listitem").label(label).description(description).position_in_set(pos, n).focusable(true).w_full().px(t.space.at(4.0)).py(t.space.at(3.5)).gap(t.space.at(3.5)).items_start();
+    // Led by the thread's status mark, on the title's line: no thread is led by a face, not even a crew thread.
     paint_state(r, &t.mat.row, States::default())
-        .children(lead)
+        .child(mark_lead(s, t, &format!("{key}-mark"), &item.task, failed, MARK_TOP))
         .child(body)
         .on_key(move |s: &mut App, ev: &KeyEvent, tx: &mut Tx| row_keys(s, ev, tx, &id, before.as_deref(), after.as_deref()))
 }
 
-/// One line of what a round did: its cat's small portrait, "Docs check ran", what came of it, when. A line with a task opens it.
+/// One line of what a round did: its thread's status mark, "Docs check ran", what came of it, when. A line with a task opens it.
 fn round_row(s: &App, t: &Theme, l: &BriefingRound, i: usize, n: usize) -> El {
     let (what, after) = words::round_line(l);
     let zone = s.zone();
@@ -173,9 +317,14 @@ fn round_row(s: &App, t: &Theme, l: &BriefingRound, i: usize, n: usize) -> El {
         Some(a) => format!("{what}: {a}"),
         None => what.clone(),
     };
-    let mut r = row().key(key.clone()).role("listitem").label(label).description(format!("{}, {when}", l.cat_name)).position_in_set(i, n).w_full().px(t.space.at(4.0)).py(t.space.at(2.5)).gap(t.space.at(3.0)).center_y();
+    let desc = if l.cat_name.is_empty() { when.clone() } else { format!("{}'s round, {when}", l.cat_name) };
+    let mut r = row().key(key.clone()).role("listitem").label(label).description(desc).position_in_set(i, n).w_full().px(t.space.at(4.0)).py(t.space.at(2.5)).gap(t.space.at(3.5)).center_y();
+    let mark = match &l.task {
+        Some(task) => mark_lead(s, t, &format!("{key}-mark"), task, false, 0.0),
+        None => mark_lead(s, t, &format!("{key}-mark"), &neko_protocol::TaskId(String::new()), bad, 0.0),
+    };
     r = r
-        .child(portrait(t, &format!("{key}-face"), s.cat_face(&l.cat), 24.0))
+        .child(mark)
         .child(line.grow(1.0))
         .child(text(when).font(tabular(t.ty.sm)).color(t.ink_faint()).a11y_hidden());
     match l.task.clone().filter(|id| s.tasks.iter().any(|x| &x.id == id)) {
@@ -184,7 +333,7 @@ fn round_row(s: &App, t: &Theme, l: &BriefingRound, i: usize, n: usize) -> El {
     }
 }
 
-/// A task still working: its cat's ring, the title, the cat and how long.
+/// A task still working: its status mark (the working ring), the title, and how long (and whose crew).
 fn working_row(s: &App, t: &Theme, w: &BriefingWorking, i: usize, n: usize) -> El {
     let key = format!("briefing-working-{}", w.task.0);
     let id = w.task.clone();
@@ -199,13 +348,17 @@ fn working_row(s: &App, t: &Theme, w: &BriefingWorking, i: usize, n: usize) -> E
         .w_full()
         .px(t.space.at(4.0))
         .py(t.space.at(2.5))
-        .gap(t.space.at(3.0))
+        .gap(t.space.at(3.5))
         .center_y();
-    let lead = if w.cat.is_empty() {
-        row().key(format!("{key}-face")).size(20.0, 20.0).center().child(crate::ui::base::spinner_in(t, 14.0, t.c.accent.fg, "").a11y_hidden())
-    } else {
-        portrait_in(t, &format!("{key}-face"), s.cat_face(&w.cat), 32.0, Some(TaskStatus::Working), t.c.input.bg)
+    // The working ring, as the sidebar draws it; a thread the window does not know yet still turns.
+    let lead = match s.tasks.iter().find(|x| x.id == w.task) {
+        Some(_) => mark_lead(s, t, &format!("{key}-mark"), &w.task, false, 0.0),
+        None => col().w(LEAD).min_w(LEAD).items_center().child(row().key(format!("{key}-mark")).size(crate::status_mark::SLOT, crate::status_mark::SLOT).center().child(crate::ui::base::spinner_in(t, crate::status_mark::MARK, t.c.accent.fg, "").a11y_hidden())).a11y_hidden(),
     };
+    let mut second = format!("Working for {}", crate::needs_view::waited(w.since_ms, s.now_ms));
+    if let Some(c) = crew_words(s, &w.task) {
+        second = format!("{second} \u{b7} {c}");
+    }
     paint_state(r, &t.mat.row, States::default())
         .child(lead)
         .child(
@@ -214,7 +367,7 @@ fn working_row(s: &App, t: &Theme, w: &BriefingWorking, i: usize, n: usize) -> E
                 .min_w(0.0)
                 .gap(2.0)
                 .child(text(w.title.clone()).font(weight(t.ty.base, t.ty.medium)).color(t.ink()).truncate().min_w(0.0).a11y_hidden())
-                .child(text(format!("Working for {}", crate::needs_view::waited(w.since_ms, s.now_ms))).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0).a11y_hidden()),
+                .child(text(second).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0).a11y_hidden()),
         )
         .on_press(move |s: &mut App| s.open_task_id(&id))
 }
@@ -319,6 +472,27 @@ pub fn briefing_view(s: &App, t: &Theme) -> El {
             }
             sec = sec.child(cards);
         }
+        page = page.child(sec);
+    }
+
+    // Cattains: each whose digest changed, in its own words, and each made by asking (a face means a Cattain: these alone have one).
+    let ckeys = words::cattain_keys(b);
+    if !ckeys.is_empty() {
+        let mut sec = col().key("briefing-cattains").w_full().gap(t.space.at(3.0)).child(head(t, "briefing-cattains", "Cattains", ckeys.len(), t.ink_faint()));
+        let n = ckeys.len();
+        let around = |i: usize| (i.checked_sub(1).map(|b| ckeys[b].clone()), ckeys.get(i + 1).cloned());
+        let mut rows: Vec<El> = Vec::new();
+        for c in &b.cattains {
+            let i = rows.len();
+            let (before, after) = around(i);
+            rows.push(digest_block(s, t, c, b.new_cattains.iter().find(|m| m.cat == c.cat), i + 1, n, before, after));
+        }
+        for m in b.new_cattains.iter().filter(|m| !b.cattains.iter().any(|c| c.cat == m.cat)) {
+            let i = rows.len();
+            let (before, after) = around(i);
+            rows.push(new_cattain_row(s, t, m, i + 1, n, before, after));
+        }
+        sec = sec.child(rows_well(t, "briefing-cattains-list", "Cattains", rows));
         page = page.child(sec);
     }
 
