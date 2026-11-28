@@ -94,7 +94,9 @@ fn a_store_from_before_search_is_indexed_when_it_opens() {
     let path = d.0.join("neko.sqlite3");
     let mut old = Store::open_at(&path, 13).unwrap();
     old.ensure_default_workspace(T0).unwrap();
-    let task = old.create_task(&TaskId("task_old".into()), "default", "Plan the harvest", None, None, &Default::default(), T0).map(|t| t.0).unwrap();
+    // A store of that time has none of the columns later migrations added, so its task is written as it was then.
+    old.connection().execute("INSERT INTO tasks (id, workspace_id, words, title, status, created_ms) VALUES ('task_old', 'default', 'Plan the harvest', 'Plan the harvest', 'done', ?1)", [T0]).unwrap();
+    let task = neko_protocol::Task::blank(TaskId("task_old".into()), "default", "Plan the harvest", "Plan the harvest", T0, None);
     old.insert_part(&part(&task.id, 1, PartBody::Agent { text: "Carrots first, then the turnips.".into(), done: true }), T0).unwrap();
     old.insert_part(&part(&task.id, 2, PartBody::Notice { tone: neko_protocol::Tone::Info, text: "turnips are a notice".into(), next: None, failure: None }), T0).unwrap();
     assert_eq!(old.version().unwrap(), 13);
