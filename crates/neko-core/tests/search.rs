@@ -154,7 +154,7 @@ fn nothing_typed_lists_the_recent_threads_and_leaves_out_what_is_put_away() {
         core.store.connection().execute("UPDATE tasks SET activity_ms = ?2 WHERE id = ?1", rusqlite::params![t.id.0, T0 + i as i64 * 1000]).unwrap();
         made.push(t);
     }
-    let (k, _) = core.create_subagent(&made[0].id, "Check links", "Look.").unwrap();
+    let (k, _) = core.create_subagent(&made[0].id, "Check links", "Look.", Default::default()).unwrap();
     core.store.connection().execute("UPDATE tasks SET activity_ms = ?2 WHERE id = ?1", rusqlite::params![k.id.0, T0 + 99_000]).unwrap();
     core.store.set_shelf(&made[2].id, Shelf::Settle, true, T0 + 5000).unwrap();
     core.store.set_shelf(&made[3].id, Shelf::Archive, true, T0 + 5000).unwrap();
@@ -175,7 +175,7 @@ fn a_kitten_is_found_as_a_kitten_and_never_crowds_the_threads_out() {
     let (parent, _) = core.create_task("Ship the release").unwrap();
     let mut kittens = Vec::new();
     for i in 0..6 {
-        let (k, _) = core.create_subagent(&parent.id, &format!("Release check {i}"), "Look.").unwrap();
+        let (k, _) = core.create_subagent(&parent.id, &format!("Release check {i}"), "Look.", Default::default()).unwrap();
         kittens.push(k.id);
     }
     let (found, _) = core.store.search("release", 12, T0).unwrap();

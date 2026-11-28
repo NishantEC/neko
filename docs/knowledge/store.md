@@ -1,6 +1,6 @@
 # The store (S1, 2026-11-26)
 
-`crates/neko-core`. (Version 14 is search; version 13 is pin, settle and archive.) (The right pane, protocol 15, changed nothing here: the pane's open state is the app's prefs, its overview is derived from checkpoints.) SQLite through `rusqlite` with the `bundled` feature, at `<data>/neko.sqlite3`.
+`crates/neko-core`. (Version 15 is kittens' place, order and drafts; version 14 is search; version 13 is pin, settle and archive.) (The right pane, protocol 15, changed nothing here: the pane's open state is the app's prefs, its overview is derived from checkpoints.) SQLite through `rusqlite` with the `bundled` feature, at `<data>/neko.sqlite3`.
 
 ## Records
 

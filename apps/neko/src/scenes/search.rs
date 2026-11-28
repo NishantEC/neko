@@ -44,7 +44,7 @@ fn kitten(s: &mut App, of: &str, number: &str, title: &str, minutes: i64, status
     k.workspace = parent.workspace.clone();
     k.folder = parent.folder.clone();
     k.status = status;
-    k.subagent = Some(SubagentOf { parent: parent.id.clone(), number: number.into(), root: parent.id.clone() });
+    k.subagent = Some(SubagentOf::new(parent.id.clone(), number, parent.id.clone()));
     let id = k.id.clone();
     s.tasks.push(k);
     s.tasks.sort_by_key(|t| std::cmp::Reverse(t.created_ms));
