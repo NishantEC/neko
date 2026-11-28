@@ -1,0 +1,33 @@
+{
+  "name": "real-steer",
+  "title": "A real run is steered mid-turn and reads the steer",
+  "about": "Real model calls (the cheapest model). A thread runs a slow shell loop; while it works the person steers it (Return) with an extra instruction. The real Claude Code must read the steered message in the same run and the run must end normally (not stall until the silence limit). This is what only the real CLI can prove about steering.",
+  "cli": [
+    "real"
+  ],
+  "setup": {
+    "files": {
+      "scratch": {
+        "files": {
+          "a.txt": "1"
+        }
+      }
+    }
+  },
+  "steps": [
+    {"do": "key", "key": "cmd+n"},
+    {"do": "choose-folder", "path": "$files/scratch"},
+    {"do": "sleep", "secs": 3},
+    {"do": "click", "on": {"key": "composer-input"}},
+    {"do": "type", "text": "Run this exact shell command and wait for it: for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do echo $i; sleep 1; done . Then reply with one short line saying you are done."},
+    {"do": "key", "key": "return"},
+    {"do": "allow-until", "until": {"see": {"key": "run-*-working"}}, "within": 120, "snap_first": true, "expect": "The run is working"},
+    {"do": "sleep", "secs": 4},
+    {"do": "click", "on": {"key": "reply-input"}},
+    {"do": "type", "text": "Also: end your final line with the word meow."},
+    {"do": "key", "key": "return"},
+    {"do": "snap", "name": "steered", "expect": "The steered message waits to be read"},
+    {"do": "allow-until", "until": {"all": [{"see": {"text": "meow", "in": {"key": "turn-*"}}}, {"gone": {"key": "run-*-working"}}]}, "within": 240, "expect": "The real run reads the steer in the same run and ends normally"},
+    {"do": "snap", "name": "steer-read", "expect": "The answer ends with meow"}
+  ]
+}
