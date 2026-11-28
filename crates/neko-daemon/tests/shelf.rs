@@ -133,13 +133,13 @@ fn a_message_wakes_an_archived_thread_and_brings_a_settled_one_back() {
     let mut c = screen(&d);
     let t = finished(&mut c, "Fix the build [fake:plain]");
     assert!(settle(&mut c, &t.id, true).settled);
-    let Reply::Ok = c.request(Request::FollowUp { task: t.id.clone(), words: "And the tests [fake:plain]".into(), answering: None }).unwrap() else { panic!("follow-up") };
+    let Reply::Ok = c.request(Request::FollowUp { task: t.id.clone(), words: "And the tests [fake:plain]".into(), answering: None, mode: None }).unwrap() else { panic!("follow-up") };
     let woken = heard(&mut c, &t.id, "the run to bring it back", |t| !t.settled);
     assert!(!woken.archived);
     heard(&mut c, &t.id, "it to finish again", |t| t.status == TaskStatus::Done);
 
     assert!(archive(&mut c, &t.id, true).archived);
-    let Reply::Ok = c.request(Request::FollowUp { task: t.id.clone(), words: "One more thing [fake:plain]".into(), answering: None }).unwrap() else { panic!("follow-up") };
+    let Reply::Ok = c.request(Request::FollowUp { task: t.id.clone(), words: "One more thing [fake:plain]".into(), answering: None, mode: None }).unwrap() else { panic!("follow-up") };
     let woken = heard(&mut c, &t.id, "the message to wake it", |t| !t.archived);
     assert_eq!(woken.status, TaskStatus::Working, "it runs");
     heard(&mut c, &t.id, "it to finish", |t| t.status == TaskStatus::Done);
