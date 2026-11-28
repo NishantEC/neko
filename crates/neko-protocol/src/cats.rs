@@ -1,4 +1,4 @@
-//! Cats (docs/knowledge/cats.md): named agents with a face. Since version 20 every cat is a **Cattain**: it has its own thread to talk
+//! Cats (docs/knowledge/cats.md): named agents with a face. Since version 21 every cat is a **Cattain**: it has its own thread to talk
 //! to, its own folder of four files (RULES.md, CREW.md, NOTES.md, DIGEST.md), an optional project, a model and an access mode. The
 //! daemon keeps them; a screen lists and changes them through requests.
 
@@ -42,7 +42,7 @@ pub const FACES: &[&str] = &["tabby", "ginger", "tuxedo", "calico", "siamese", "
 /// The three cats a new install starts with: their fixed ids, names and faces. Ordinary cats: they can be renamed or retired.
 pub const STARTERS: &[(&str, &str, &str)] = &[("cat_miso", "miso", "ginger"), ("cat_mochi", "mochi", "snow"), ("cat_tofu", "tofu", "calico")];
 
-/// A named agent with a face, its own thread and its own files: a Cattain (version 20).
+/// A named agent with a face, its own thread and its own files: a Cattain (version 21).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cat {
     /// `cat_` and a name for a starter cat, else `cat_` and 26 letters and digits.
@@ -58,7 +58,7 @@ pub struct Cat {
     /// thread started from it is made there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
-    /// Its own thread (version 20): the conversation the person has with it. Every cat has one once the daemon has opened its store.
+    /// Its own thread (version 21): the conversation the person has with it. Every cat has one once the daemon has opened its store.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<crate::TaskId>,
     /// The model its own thread asks for (`--model`: an alias such as `sonnet`, or a full name). None: the CLI's default.

@@ -323,7 +323,7 @@ fn the_migration_to_store_sixteen_gives_each_report_its_run_so_none_is_made_twic
     }
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch("ALTER TABLE runs DROP COLUMN ask; ALTER TABLE wakes DROP COLUMN run_id; ALTER TABLE wakes DROP COLUMN question; ALTER TABLE wakes DROP COLUMN question_chain; PRAGMA user_version = 15;").unwrap();
+        conn.execute_batch("DELETE FROM tasks WHERE cattain = 1; DROP TABLE cattain_files; ALTER TABLE cats DROP COLUMN thread_id; ALTER TABLE cats DROP COLUMN model; ALTER TABLE cats DROP COLUMN access; ALTER TABLE tasks DROP COLUMN cattain; ALTER TABLE runs DROP COLUMN ask; ALTER TABLE wakes DROP COLUMN run_id; ALTER TABLE wakes DROP COLUMN question; ALTER TABLE wakes DROP COLUMN question_chain; PRAGMA user_version = 15;").unwrap();
     }
     let core = open(&d);
     assert_eq!(core.store.version().unwrap(), SCHEMA_VERSION);

@@ -128,7 +128,7 @@ impl Core {
         store.ensure_starter_cats(now)?;
         let data_dir = path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
         let mut core = Core { store, clock, ids, data_dir };
-        // Every cat is a Cattain with its folder and files (store 16).
+        // Every cat is a Cattain with its folder and files (store 17).
         core.ensure_cattains().map_err(|e| StoreError::Files(e.to_string()))?;
         Ok(core)
     }
