@@ -318,6 +318,10 @@ pub struct App {
     pub briefing_back: Option<TaskId>,
     /// The subagents whose own transcript was asked for (once each), so a card has its live line after a restart.
     pub sub_asked: HashSet<TaskId>,
+    /// The prompt of each draft kitten as the person is editing it (the daemon has it too: it is saved a moment after a change).
+    pub draft_edits: HashMap<TaskId, TextEdit>,
+    /// The prompt last sent for a draft and when (seconds of the window's clock), so a change is saved once and never in a burst.
+    pub draft_saved: HashMap<TaskId, (String, f64)>,
     /// The morning time and whether its notification is posted, as the daemon last said.
     pub briefing_settings: Option<BriefingSettings>,
     /// The morning time being typed in Settings ▸ Briefing.
@@ -562,6 +566,8 @@ impl Default for App {
             briefing_open: false,
             briefing_back: None,
             sub_asked: HashSet::new(),
+            draft_edits: HashMap::new(),
+            draft_saved: HashMap::new(),
             briefing_settings: None,
             briefing_time: TextEdit::default(),
             palette: Default::default(),
@@ -1526,6 +1532,7 @@ impl App {
             self.sort_hold.remove(&task.id);
         }
         self.tasks.retain(|t| t.id != task.id);
+        self.draft_follows(&task);
         let at = self.tasks.iter().position(|t| (t.created_ms, &t.id) < (task.created_ms, &task.id)).unwrap_or(self.tasks.len());
         self.tasks.insert(at, task);
     }
@@ -1608,6 +1615,8 @@ impl App {
             }
             Change::TaskRemoved { task } => {
                 self.tasks.retain(|t| t.id != task);
+                self.draft_edits.remove(&task);
+                self.draft_saved.remove(&task);
                 self.books.remove(&task);
                 self.replies.remove(&task);
                 if self.open.as_ref() == Some(&task) {

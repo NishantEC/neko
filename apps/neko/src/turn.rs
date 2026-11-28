@@ -58,7 +58,7 @@ fn mark(t: &Theme, st: ToolState) -> El {
 /// A tool call on the rail: the phrase, its time or its note, folding to its input and output.
 pub fn step(s: &App, t: &Theme, key: &str, p: &Part, workdir: &str) -> Option<El> {
     let PartBody::Tool { name, summary, input, output, state, exit, .. } = &p.body else { return None };
-    let label = crate::task_view::phrase(name, summary, input, *state == ToolState::Running, workdir, s.home.as_deref());
+    let label = crate::task_view::step_phrase(name, summary, input, output.as_deref(), *state == ToolState::Running, workdir, s.home.as_deref());
     let open = s.is_open(key);
     let k = key.to_owned();
     let mut line = FoldLine::<App>::new(key.to_owned(), label, open).lead(mark(t, *state)).truncate_middle(true).on_toggle(move |s: &mut App| s.flip(&k));

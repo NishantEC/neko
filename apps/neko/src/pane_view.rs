@@ -15,7 +15,7 @@ use rune_ui_style::{ButtonVariant, tabular, weight};
 
 use crate::pane::Tab;
 use crate::state::App;
-use crate::subagents::{card_word, name};
+use crate::subagents::{kitten_word, name, order_words, place_words};
 use crate::subagents_view::{still_ring, status_glyph};
 use crate::ui::agent::{PressTx, icon_button, mono};
 use crate::ui::base::{Shape, Size, States, Theme, glyph, paint_state};
@@ -106,16 +106,24 @@ fn kittens(s: &App, t: &Theme, root: &TaskId) -> Option<El> {
     for k in &list {
         let Some(of) = &k.subagent else { continue };
         let who = name(&of.number);
-        let word = card_word(k.status);
+        let word = kitten_word(k);
         let depth = of.number.matches('.').count() as f32;
         // The model the run reported (the one that did most of its work, else the one it began on); nothing while that is not known.
         let model = s.books.get(&k.id).and_then(|b| b.runs.last()).and_then(|r| r.usage.as_ref().and_then(|u| u.model.clone()).or_else(|| r.model.clone())).filter(|m| !m.trim().is_empty());
+        // Where it works and where it stands in line come first: they are what the person came for, and the model is what gives way
+        // when the line is cut.
         let mut facts: Vec<String> = Vec::new();
-        facts.extend(model);
-        facts.push("Shared folder".to_owned());
+        facts.push(place_words(k).replace("\u{b7} branch ", "\u{b7} "));
+        let order = order_words(k);
+        // A kitten that waits its turn has not run: its line is where it works and whom it follows.
+        let waiting_in_line = order.is_some();
+        facts.extend(order);
+        if !waiting_in_line {
+            facts.extend(model);
+        }
         let key = format!("pane-kitten-{}", of.number);
         let label = format!("{who}: {}, {word}, {}", k.title, age(s, k.created_ms));
-        let live = crate::subagents::is_live(k.status);
+        let live = k.is_live_subagent();
         let id = k.id.clone();
         let mut line = press_row(t, key.clone(), label, t.control.lg + 8.0).grow(1.0).min_w(0.0);
         line = line.child(status_glyph(t, k.status, t.control.icon - 2.0));
@@ -324,8 +332,8 @@ fn overview_body(s: &App, t: &Theme, root: &TaskId) -> El {
 fn kitten_body(s: &App, t: &Theme, kitten: &TaskId, layer: &mut Vec<El>) -> El {
     let Some(task) = s.tasks.iter().find(|x| &x.id == kitten) else { return el() };
     let who = task.subagent_name().unwrap_or_default();
-    let live = crate::subagents::is_live(task.status);
-    let word = card_word(task.status);
+    let live = task.is_live_subagent();
+    let word = kitten_word(task);
     let mut top = col().key("pane-kitten-top").w_full().gap(t.space.at(2.0)).px(t.space.at(4.0)).pt(t.space.at(2.0)).pb(t.space.at(2.0));
     let head = row()
         .w_full()

@@ -403,12 +403,8 @@ fn fold_row(t: &Theme, count: usize, open: bool, rule: bool) -> El {
 }
 
 /// What is running for the thread, besides the words: its kittens and its long commands, in a sentence.
-fn summary(kittens: usize, commands: usize) -> String {
-    let k = match kittens {
-        0 => None,
-        1 => Some("1 kitten working".to_owned()),
-        n => Some(format!("{n} kittens working")),
-    };
+fn summary(working: usize, queued: usize, commands: usize) -> String {
+    let k = crate::subagents::crowd_words(working, queued);
     let c = match commands {
         0 => None,
         1 => Some("1 command running".to_owned()),
@@ -427,7 +423,8 @@ pub fn activity_bar(s: &App, t: &Theme) -> Option<El> {
     if kittens.is_empty() && commands.is_empty() {
         return None;
     }
-    let said = summary(kittens.len(), commands.len());
+    let (working, queued) = s.kitten_counts(&task.id);
+    let said = summary(working, queued, commands.len());
     let open = s.composer.activity_open;
     let face = row()
         .key("activity-bar")
@@ -563,8 +560,12 @@ mod tests {
 
     #[test]
     fn the_summary_counts_what_runs() {
-        assert_eq!(summary(2, 1), "2 kittens working · 1 command running");
-        assert_eq!(summary(1, 0), "1 kitten working");
-        assert_eq!(summary(0, 3), "3 commands running");
+        assert_eq!(summary(2, 0, 1), "2 kittens working · 1 command running");
+        assert_eq!(summary(1, 0, 0), "1 kitten working");
+        assert_eq!(summary(0, 0, 3), "3 commands running");
+        // A kitten that waits its turn is not "working": the sentence says how many of each.
+        assert_eq!(summary(1, 1, 0), "1 kitten working, 1 waiting its turn");
+        assert_eq!(summary(2, 3, 1), "2 kittens working, 3 waiting their turn \u{b7} 1 command running");
+        assert_eq!(summary(0, 2, 0), "2 kittens waiting their turn");
     }
 }

@@ -412,6 +412,9 @@ pub fn summary(name: &str, input: &Value, workdir: &str) -> String {
         "WebSearch" => field(input, &["query"]).map(|q| first_line(q, 60)).unwrap_or_default(),
         "Task" | "Agent" => field(input, &["description"]).map(|d| first_line(d, 60)).unwrap_or_default(),
         "TodoWrite" => "the plan".to_owned(),
+        // Neko's own tools name what they act on (the app words them: docs/knowledge/subagents.md).
+        "mcp__neko__start_subagent" => field(input, &["title"]).map(|d| first_line(d, 60)).unwrap_or_default(),
+        "mcp__neko__stop_subagent" | "mcp__neko__subagents" => field(input, &["id"]).unwrap_or("").to_owned(),
         _ => input.as_object().and_then(|o| o.values().find_map(s)).map(|v| first_line(v, 60)).unwrap_or_default(),
     }
 }

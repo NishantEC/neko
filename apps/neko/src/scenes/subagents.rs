@@ -2,7 +2,7 @@
 //! queued; a thread woken by their reports, the note closed and open; a thread that waits on them, with its sidebar row; a subagent
 //! opened on its own, read-only, and one asking for a permission; and Needs you with a subagent's request. Placeholder data only.
 
-use neko_protocol::{PartBody, PermissionState, RunStatus, SubagentOf, Task, TaskStatus, ToolState};
+use neko_protocol::{PartBody, PermissionState, RunStatus, SubPlace, SubagentOf, Task, TaskStatus, ToolState};
 
 use super::{Script, cat_name, diff_file, permission_item, run, start, task, with_workspaces};
 use crate::state::{App, Book};
@@ -40,8 +40,10 @@ fn stage(s: &mut App, thread: Task, subs: Vec<Task>) {
     s.open = Some(thread.id);
 }
 
-fn start_tool(sc: &mut Script, title: &str, secs: i64) {
-    sc.tool("mcp__neko__start_subagent", title, &format!("{{\n  \"title\": \"{title}\"\n}}"), "Started.", ToolState::Done, secs);
+/// The agent's call that started a kitten, with the words the tool answered it (the number is in them).
+fn start_tool(sc: &mut Script, number: &str, title: &str, secs: i64) {
+    let said = format!("Subagent {number} (\"{title}\") is started. It is working now. Neko wakes you with its report when it ends. Do not poll or wait. If you have nothing else to do, end your turn now.");
+    sc.tool("mcp__neko__start_subagent", title, &format!("{{\n  \"title\": \"{title}\"\n}}"), &said, ToolState::Done, secs);
 }
 
 fn card(sc: &mut Script, of: &Task, number: &str) {
@@ -81,9 +83,9 @@ fn images_work(sc: &mut Script) {
 fn first_turn(sc: &mut Script, subs: &[&Task], ended: bool) {
     sc.tool("Read", "src/auth.rs", "{\n  \"file_path\": \"src/auth.rs\"\n}", "pub fn sign_in() {}", ToolState::Done, 1);
     sc.say("The handler checks the session before it checks the password. I will have two helpers check the page's links and images while I fix the order.", true);
-    start_tool(sc, "Check links", 1);
+    start_tool(sc, "1", "Check links", 1);
     card(sc, subs[0], "1");
-    start_tool(sc, "Check images", 1);
+    start_tool(sc, "2", "Check images", 1);
     card(sc, subs[1], "2");
     if ended {
         sc.say("Both are started. I will pick this up when their reports arrive.", true);
@@ -298,4 +300,140 @@ pub fn pane_kitten_done(s: &mut App) {
     sub_book(s, &b, RunStatus::Done, images_work);
     s.pane.kittens.insert(th.id.clone(), vec![a.id.clone(), b.id.clone()]);
     open_pane(s, &th, crate::pane::Tab::Kitten(a.id.clone()));
+}
+
+// ---- Own copy, stacking, drafts, depth, limits (S6) ---------------------------------------------------------------------------------------
+
+/// `t` works in a copy of its own on `branch`.
+fn in_copy(mut t: Task, branch: &str) -> Task {
+    if let Some(o) = &mut t.subagent {
+        o.placement = SubPlace::OwnCopy;
+        o.branch = Some(branch.into());
+    }
+    t
+}
+
+/// `t` starts after the kitten numbered `n`.
+fn after(mut t: Task, n: &str) -> Task {
+    if let Some(o) = &mut t.subagent {
+        o.after = Some(n.into());
+    }
+    t
+}
+
+/// `t` is written down for the person to start.
+fn as_draft(mut t: Task) -> Task {
+    if let Some(o) = &mut t.subagent {
+        o.draft = true;
+    }
+    t
+}
+
+const MIGRATION: &str = "Write the migration that adds the sessions table: id, user, expires_at, and an index on expires_at. Follow the style of the existing migrations, and commit it on your branch.";
+const TESTS: &str = "Update the sign-in tests for the new sessions table. Start from the migration on the branch you follow. Commit on your branch.";
+
+/// A thread that split its work three ways: two writers each in a copy of their own, the second stacked on the first, and a reader in
+/// the shared folder.
+pub fn kittens_placement(s: &mut App) {
+    let th = thread(TaskStatus::Working);
+    let a = in_copy(sub(1, &th, "1", "Write the migration", MIGRATION, TaskStatus::Working, 8), "neko/4f2a-1");
+    let b = after(in_copy(sub(2, &th, "2", "Update the tests", TESTS, TaskStatus::New, 8), "neko/4f2a-2"), "1");
+    let c = sub(3, &th, "3", "Read the docs", "Read the docs folder and list every page that mentions sessions.", TaskStatus::Working, 8);
+    stage(s, th.clone(), vec![a.clone(), b.clone(), c.clone()]);
+    let mut sc = Script::new(&th, "run_1", start(s));
+    sc.tool("Read", "src/auth.rs", "{\n  \"file_path\": \"src/auth.rs\"\n}", "pub fn sign_in() {}", ToolState::Done, 1);
+    sc.say("The sign-in needs a sessions table. The migration and the tests that follow it write files, so each gets a copy of the project of its own; the docs only need reading.", true);
+    start_tool(&mut sc, "1", "Write the migration", 1);
+    card(&mut sc, &a, "1");
+    start_tool(&mut sc, "2", "Update the tests", 1);
+    card(&mut sc, &b, "2");
+    start_tool(&mut sc, "3", "Read the docs", 1);
+    card(&mut sc, &c, "3");
+    sc.tool("Edit", "src/auth.rs", "{\n  \"file_path\": \"src/auth.rs\"\n}", "", ToolState::Running, 0);
+    let r = run("run_1", &th, RunStatus::Running, start(s), 0);
+    open_thread(s, &th, vec![r], vec![sc]);
+    sub_book(s, &a, RunStatus::Running, |sc| {
+        sc.tool("Write", "migrations/0004_sessions.sql", "{\n  \"file_path\": \"migrations/0004_sessions.sql\"\n}", "", ToolState::Running, 0);
+    });
+    sub_book(s, &c, RunStatus::Running, |sc| {
+        sc.tool("Grep", "sessions", "{\n  \"pattern\": \"sessions\"\n}", "docs/auth.md:12", ToolState::Done, 2);
+    });
+}
+
+/// The thread ended its turn after writing two drafts: nothing waits on them, and each has its prompt to change, Start and Discard.
+pub fn kittens_drafts(s: &mut App) {
+    let th = thread(TaskStatus::Done);
+    let a = as_draft(in_copy(sub(1, &th, "1", "Write the migration", MIGRATION, TaskStatus::New, 8), "neko/4f2a-1"));
+    let b = as_draft(after(in_copy(sub(2, &th, "2", "Update the tests", TESTS, TaskStatus::New, 8), "neko/4f2a-2"), "1"));
+    stage(s, th.clone(), vec![a.clone(), b.clone()]);
+    s.draft_follows(&a);
+    s.draft_follows(&b);
+    let mut sc = Script::new(&th, "run_1", start(s));
+    sc.tool("Read", "src/auth.rs", "{\n  \"file_path\": \"src/auth.rs\"\n}", "pub fn sign_in() {}", ToolState::Done, 1);
+    sc.say("The sign-in needs a sessions table. I wrote down two kittens for it and left them as drafts, so you can read what each will be told before anything starts.", true);
+    sc.tool("mcp__neko__start_subagent", "Write the migration", "{\n  \"draft\": true,\n  \"title\": \"Write the migration\"\n}", "Subagent 1 (\"Write the migration\") is saved as a draft. It does not run until the person starts it or you call start_drafts.", ToolState::Done, 1);
+    card(&mut sc, &a, "1");
+    sc.tool("mcp__neko__start_subagent", "Update the tests", "{\n  \"draft\": true,\n  \"title\": \"Update the tests\"\n}", "Subagent 2 (\"Update the tests\") is saved as a draft. It does not run until the person starts it or you call start_drafts.", ToolState::Done, 1);
+    card(&mut sc, &b, "2");
+    sc.say("Start the first one when you are ready; the second follows it.", true);
+    let mut r = run("run_1", &th, RunStatus::Done, start(s), 31);
+    r.changes = None;
+    open_thread(s, &th, vec![r], vec![sc]);
+}
+
+/// A thread that waits on five kittens: three work, two wait their turn. The sidebar row, the activity bar (open) and the cards say so.
+pub fn kittens_limits(s: &mut App) {
+    let th = thread(TaskStatus::Waiting);
+    let mk = |n: u32, title: &str, st: TaskStatus| sub(n, &th, &n.to_string(), title, "Check one section of the docs site and say what is wrong.", st, 8);
+    let ks = vec![mk(1, "Check setup", TaskStatus::Working), mk(2, "Check faq", TaskStatus::Working), mk(3, "Check pricing", TaskStatus::Working), mk(4, "Check blog", TaskStatus::New), mk(5, "Check changelog", TaskStatus::New)];
+    stage(s, th.clone(), ks.clone());
+    let mut sc = Script::new(&th, "run_1", start(s));
+    sc.tool("Read", "docs/index.md", "{\n  \"file_path\": \"docs/index.md\"\n}", "# Docs", ToolState::Done, 1);
+    sc.say("Five sections to check, and they do not depend on each other. I will start one kitten for each.", true);
+    for (i, k) in ks.iter().enumerate() {
+        start_tool(&mut sc, &(i + 1).to_string(), &k.title, 1);
+        card(&mut sc, k, &(i + 1).to_string());
+    }
+    sc.say("All five are started. I will pick this up when their reports arrive.", true);
+    let mut r = run("run_1", &th, RunStatus::Done, start(s), 31);
+    r.changes = None;
+    open_thread(s, &th, vec![r], vec![sc]);
+    for k in ks.iter().filter(|k| k.status == TaskStatus::Working) {
+        sub_book(s, k, RunStatus::Running, |sc| {
+            sc.tool("Grep", "href=", "{\n  \"pattern\": \"href=\"\n}", "docs/a.md:4", ToolState::Done, 2);
+        });
+    }
+    s.composer.activity_open = true;
+}
+
+/// The right pane's Overview with kittens three levels deep (1, 1.1, 1.1.1, 1.2), one in the shared folder, one stacked and queued, one
+/// draft, and the thread waiting on them.
+pub fn pane_kittens_deep(s: &mut App) {
+    let th = thread(TaskStatus::Waiting);
+    let a = in_copy(sub(1, &th, "1", "Write the migration", MIGRATION, TaskStatus::Waiting, 8), "neko/4f2a-1");
+    let mut b = in_copy(sub(2, &th, "1.1", "Seed the table", "Write the seed data the tests need.", TaskStatus::Waiting, 7), "neko/4f2a-1-1");
+    let mut c = sub(3, &th, "1.1.1", "List the columns", "Read the schema and list every column of the users table.", TaskStatus::Working, 6);
+    let mut d = after(in_copy(sub(4, &th, "1.2", "Index the table", "Add the index.", TaskStatus::New, 6), "neko/4f2a-1-2"), "1.1");
+    let e = sub(5, &th, "2", "Read the docs", "Read the docs folder and list every page that mentions sessions.", TaskStatus::Done, 8);
+    let f = as_draft(in_copy(sub(6, &th, "3", "Write the changelog", "Add a changelog entry for the sessions table.", TaskStatus::New, 4), "neko/4f2a-3"));
+    let (aid, bid) = (a.id.clone(), b.id.clone());
+    for (t, parent) in [(&mut b, aid.clone()), (&mut c, bid), (&mut d, aid)] {
+        if let Some(o) = &mut t.subagent {
+            o.parent = parent;
+        }
+    }
+    stage(s, th.clone(), vec![a.clone(), b.clone(), c.clone(), d.clone(), e.clone(), f.clone()]);
+    s.draft_follows(&f);
+    let mut sc = Script::new(&th, "run_1", start(s));
+    sc.tool("Read", "src/auth.rs", "{\n  \"file_path\": \"src/auth.rs\"\n}", "pub fn sign_in() {}", ToolState::Done, 1);
+    sc.say("Three parts. I will start them and pick this up when they report.", true);
+    start_tool(&mut sc, "1", "Write the migration", 1);
+    card(&mut sc, &a, "1");
+    let mut r = run("run_1", &th, RunStatus::Done, start(s), 31);
+    r.changes = None;
+    open_thread(s, &th, vec![r], vec![sc]);
+    for k in [&a, &b, &c, &e] {
+        sub_book(s, k, if k.status == TaskStatus::Done { RunStatus::Done } else { RunStatus::Running }, |_| {});
+    }
+    open_pane(s, &th, crate::pane::Tab::Overview);
 }

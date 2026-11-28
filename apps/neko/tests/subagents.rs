@@ -398,6 +398,7 @@ fn the_switch_sends_set_settings_with_own_mcp_and_keeps_the_other_fields() {
     // SAFETY: set before any thread of this test reads the environment; this is the one test in this binary that starts a daemon.
     unsafe {
         std::env::set_var("NEKO_CLAUDE_BIN", bin.with_file_name("neko-fake-claude"));
+        std::env::set_var("NEKO_HEAT", "ok");
         std::env::set_var("HOME", &home);
     }
     let mut rt = runtime((1200.0, 800.0), false, |_| {});

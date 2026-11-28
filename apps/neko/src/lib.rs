@@ -303,6 +303,7 @@ pub fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     let mut changed = s.drain_link();
     s.pane_sync();
     s.palette_poll();
+    s.save_drafts(t, None);
     for e in std::mem::take(&mut s.effects) {
         match e {
             state::Effect::Reveal(path) => {

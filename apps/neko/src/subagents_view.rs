@@ -5,16 +5,17 @@
 use std::rc::Rc;
 
 use neko_protocol::{Part, PartBody, Task, TaskId, TaskStatus};
-use rune::{El, Tx, col, el, row, text};
+use rune::{El, TextEdit, Tx, col, el, row, text};
 use rune_ui_style::{ButtonVariant, weight};
 
 use crate::state::App;
-use crate::subagents::{card_word, name, names_sentence, wake_line};
+use crate::subagents::{kitten_word, name, names_sentence, order_words, place_words, wake_line};
 use crate::ui::agent::{FoldLine, Marks, PressTx, mark_with, mono};
 use crate::ui::base::{Shape, SizeExt, Theme, glyph, hit_area, paint_state, recipes, states};
 use crate::ui::button::Button;
 use crate::ui::icons;
 use crate::ui::response::Response;
+use crate::ui::textarea::Textarea;
 use crate::view::{COLUMN, raised};
 
 /// A card row's height: two lines and air.
@@ -54,9 +55,9 @@ fn word_ink(t: &Theme, st: TaskStatus) -> rune::Color {
 }
 
 /// A secondary button whose visible words are short and whose name for assistive technology says more ("Open", "Open Kitten 1").
-fn named_button(t: &Theme, key: &str, words: &str, name: &str, press: PressTx<App>) -> El {
+fn named_button(t: &Theme, variant: ButtonVariant, key: &str, words: &str, name: &str, press: PressTx<App>) -> El {
     let size = crate::ui::base::Size::Sm;
-    let parts = recipes::button(t, ButtonVariant::Secondary);
+    let parts = recipes::button(t, variant);
     let st = states(None, false, false);
     let ink = parts.label.resolve(st);
     let pad = size.pad(t);
@@ -76,37 +77,56 @@ struct Row<'a> {
     id: &'a TaskId,
 }
 
-/// One row of a card: `Kitten 1`, its title, its state at the right; "Shared folder" and its last line under; Open.
+/// What a card's second line says before the kitten's own last words: where it works, and where it stands in line.
+fn under_words(task: Option<&Task>) -> String {
+    let Some(task) = task else { return "Shared folder".to_owned() };
+    match order_words(task) {
+        Some(after) => format!("{} \u{b7} {after}", place_words(task)),
+        None => place_words(task),
+    }
+}
+
+/// One row of a card: `Kitten 1`, its title, its state at the right; where it works (and "After Kitten 1") and its last line under;
+/// Open. A draft is a different row: its prompt to edit, Start and Discard.
 fn card_row(s: &App, t: &Theme, r: &Row, first: bool) -> El {
     let task = s.tasks.iter().find(|x| &x.id == r.id);
+    if task.is_some_and(|x| x.subagent.as_ref().is_some_and(|o| o.draft)) {
+        return draft_row(s, t, r, first, task);
+    }
     let st = task.map_or(TaskStatus::New, |x| x.status);
     let who = name(r.number);
-    let word = card_word(st);
-    let last = s.subagent_line(r.id);
+    let word = task.map_or_else(|| crate::subagents::card_word(st), kitten_word);
+    let discarded = task.and_then(|x| x.subagent.as_ref()).is_some_and(|o| o.discarded);
+    let last = if discarded { None } else { s.subagent_line(r.id) };
+    let place = under_words(task);
     let head = row()
         .w_full()
         .gap(t.space.at(2.0))
         .center_y()
         .child(text(who.clone()).font(weight(t.ty.base, t.ty.semibold)).color(t.ink()).a11y_hidden())
         .child(text(r.title.to_owned()).font(t.ty.base).color(t.ink_muted()).truncate().min_w(0.0).grow(1.0).a11y_hidden())
-        .child(status_glyph(t, st, t.control.icon - 2.0))
+        .child(if discarded { el().size(0.0, 0.0) } else { status_glyph(t, st, t.control.icon - 2.0) })
         .child(text(word).font(weight(t.ty.sm, t.ty.medium)).color(word_ink(t, st)).a11y_hidden());
-    let mut under = row().w_full().gap(t.space.at(1.5)).center_y().child(text("Shared folder").font(t.ty.sm).color(t.ink_muted()).a11y_hidden());
+    let mut under = row().w_full().gap(t.space.at(1.5)).center_y().child(text(place.clone()).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0).shrink().a11y_hidden());
     if let Some(l) = &last {
-        under = under.child(text("·").font(t.ty.sm).color(t.ink_faint()).a11y_hidden()).child(text(l.clone()).key(format!("subagent-line-{}", r.number)).font(t.ty.sm).color(t.ink_faint()).truncate().min_w(0.0).shrink().a11y_hidden());
+        under = under.child(text("\u{b7}").font(t.ty.sm).color(t.ink_faint()).a11y_hidden()).child(text(l.clone()).key(format!("subagent-line-{}", r.number)).font(t.ty.sm).color(t.ink_faint()).truncate().min_w(0.0).shrink().a11y_hidden());
     }
     let id = r.id.clone();
-    // Open puts its conversation in the right pane as a tab; with Command held it takes the main view.
-    let open = named_button(
-        t,
-        &format!("subagent-open-{}", r.number),
-        "Open",
-        &format!("Open {who}"),
-        Rc::new(move |s: &mut App, tx: &mut Tx| if tx.mods().cmd { s.open_kitten_main(&id) } else { s.open_kitten_tab(&id) }),
-    );
+    // Open puts its conversation in the right pane as a tab; with Command held it takes the main view. A discarded draft never ran: it
+    // has nothing to open.
+    let open = (!discarded).then(|| {
+        named_button(
+            t,
+            ButtonVariant::Secondary,
+            &format!("subagent-open-{}", r.number),
+            "Open",
+            &format!("Open {who}"),
+            Rc::new(move |s: &mut App, tx: &mut Tx| if tx.mods().cmd { s.open_kitten_main(&id) } else { s.open_kitten_tab(&id) }),
+        )
+    });
     let said = match &last {
-        Some(l) => format!("{who}: {}, {word}. Shared folder. {l}", r.title),
-        None => format!("{who}: {}, {word}. Shared folder.", r.title),
+        Some(l) => format!("{who}: {}, {word}. {place}. {l}", r.title),
+        None => format!("{who}: {}, {word}. {place}.", r.title),
     };
     let mut line = row()
         .key(format!("subagent-card-{}", r.number))
@@ -117,8 +137,49 @@ fn card_row(s: &App, t: &Theme, r: &Row, first: bool) -> El {
         .px(t.space.at(3.0))
         .gap(t.space.at(3.0))
         .center_y()
-        .child(col().grow(1.0).min_w(0.0).gap(2.0).child(head).child(under))
-        .child(open);
+        .child(col().grow(1.0).min_w(0.0).gap(2.0).child(head).child(under));
+    if let Some(o) = open {
+        line = line.child(o);
+    }
+    if !first {
+        line = line.border_sides([0.5, 0.0, 0.0, 0.0], t.c.line);
+    }
+    line
+}
+
+/// A draft kitten's row: the thread wrote it down and the person starts it. Its prompt is theirs to change, in a text box of its own;
+/// Start sends it as it stands; Discard throws it away. It is not waited on and it has nothing to open yet.
+fn draft_row(s: &App, t: &Theme, r: &Row, first: bool, task: Option<&Task>) -> El {
+    let who = name(r.number);
+    let place = under_words(task);
+    let head = row()
+        .w_full()
+        .gap(t.space.at(2.0))
+        .center_y()
+        .child(text(who.clone()).font(weight(t.ty.base, t.ty.semibold)).color(t.ink()).a11y_hidden())
+        .child(text(r.title.to_owned()).font(t.ty.base).color(t.ink_muted()).truncate().min_w(0.0).grow(1.0).a11y_hidden())
+        .child(text("Draft").font(weight(t.ty.sm, t.ty.medium)).color(t.ink_muted()).a11y_hidden());
+    let under = text(place.clone()).font(t.ty.sm).color(t.ink_muted()).truncate().min_w(0.0).a11y_hidden();
+    let id = r.id.clone();
+    let fallback = TextEdit::new(task.map_or("", |x| x.words.as_str()));
+    let edit = s.draft_edits.get(r.id).unwrap_or(&fallback);
+    let eid = id.clone();
+    let prompt = Textarea::new(format!("draft-prompt-{}", r.number), edit, move |s: &mut App| s.draft_edit(&eid)).name(format!("Prompt for {who}")).placeholder("What it should do, in full: it sees nothing else.").rows(2, 6).build(t);
+    let (sid, did) = (id.clone(), id.clone());
+    let start = named_button(t, ButtonVariant::Secondary, &format!("draft-start-{}", r.number), "Start", &format!("Start {who}"), Rc::new(move |s: &mut App, _: &mut Tx| s.start_draft(&sid)));
+    let discard = named_button(t, ButtonVariant::Ghost, &format!("draft-discard-{}", r.number), "Discard", &format!("Discard {who}"), Rc::new(move |s: &mut App, _: &mut Tx| s.discard_draft(&did)));
+    let buttons = row().w_full().gap(t.space.at(2.0)).center_y().justify_end().child(discard).child(start);
+    let mut line = col()
+        .key(format!("subagent-card-{}", r.number))
+        .role("listitem")
+        .label(format!("{who}: {}, Draft. {place}.", r.title))
+        .w_full()
+        .px(t.space.at(3.0))
+        .py(t.space.at(2.5))
+        .gap(t.space.at(2.0))
+        .child(col().w_full().gap(2.0).child(head).child(under))
+        .child(prompt)
+        .child(buttons);
     if !first {
         line = line.border_sides([0.5, 0.0, 0.0, 0.0], t.c.line);
     }
@@ -142,6 +203,42 @@ pub fn card_stack(s: &App, t: &Theme, parts: &[&Part]) -> Option<El> {
     }
     // A little air above and below: the card is the one raised thing between lines of steps and words.
     Some(crate::turn::settling(raised(t, card)).my(t.space.at(1.0)))
+}
+
+/// Settings ▸ Agents ▸ Kittens: the one choice (ask before a thread's first kitten) and the limits, said plainly.
+pub fn settings_section(s: &App, t: &Theme) -> Option<El> {
+    let (_, settings) = s.runtimes.as_ref()?;
+    let on = settings.ask_first_subagent;
+    let limits = format!(
+        "Up to {} kittens of a thread work at once and {} across Neko; the rest wait their turn. Kittens can start kittens, {} levels deep. When this Mac is warm, new kittens wait until it cools. A kitten that writes works in a copy of the project of its own.",
+        neko_protocol::SUBAGENTS_PER_THREAD,
+        neko_protocol::RUNS_ACROSS_NEKO,
+        neko_protocol::SUBAGENT_DEPTH
+    );
+    Some(
+        col()
+            .key("settings-kittens")
+            .w_full()
+            .gap(t.space.at(3.0))
+            .child(text("Kittens").role("heading").level(2).font(weight(t.ty.md, t.ty.semibold)).color(t.ink()))
+            .child(
+                crate::ui::switch::Switch::<App>::new("settings-ask-first-kitten", "Ask before a thread's first kitten", on)
+                    .help("The first kitten a thread starts waits as a draft until you press Start.")
+                    .on_toggle(move |s: &mut App| s.set_ask_first_subagent(!on))
+                    .build(t),
+            )
+            .child(text(limits).key("settings-kitten-limits").font(t.ty.sm).color(t.ink_faint()).wrap().min_w(0.0)),
+    )
+}
+
+impl App {
+    /// Settings: ask before a thread's first kitten.
+    pub fn set_ask_first_subagent(&mut self, on: bool) {
+        if let Some((_, s)) = &self.runtimes {
+            let settings = neko_protocol::Settings { ask_first_subagent: on, ..s.clone() };
+            self.send(neko_protocol::Request::SetSettings { settings });
+        }
+    }
 }
 
 /// The note where a subagent's report woke the thread: a centred line with a hairline each side, and under it the report, folded.

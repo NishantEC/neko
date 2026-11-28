@@ -111,6 +111,47 @@ pub fn phrase(name: &str, summary: &str, input: &str, running: bool, workdir: &s
     cut_middle(words.trim(), LINE_CHARS)
 }
 
+/// Neko's own tools in a person's words: "Started Kitten 1 \u{b7} Check links", "Asked about kittens", "Stopped Kitten 2". None for
+/// any other tool (and for a Neko tool this app has no words for).
+fn neko_phrase(name: &str, summary: &str, input: &str, output: Option<&str>, running: bool) -> Option<String> {
+    let tool = name.strip_prefix("mcp__neko__")?;
+    let v: serde_json::Value = serde_json::from_str(input).unwrap_or_default();
+    // The input may have been cut for the fold, so the summary the daemon made stands in.
+    let title = v["title"].as_str().map(str::to_owned).unwrap_or_else(|| if tool == "start_subagent" { summary.to_owned() } else { String::new() });
+    let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    let id = v["id"].as_str().map(str::to_owned).unwrap_or_else(|| summary.to_owned());
+    let id = id.trim().trim_start_matches("Subagent").trim_start_matches("Kitten").trim().to_owned();
+    let with = |head: String| if title.is_empty() { head } else { format!("{head} \u{b7} {title}") };
+    Some(match tool {
+        "start_subagent" => {
+            let draft = v["draft"].as_bool().unwrap_or(false);
+            // The number the answer gave it ("Subagent 1 (...) is started").
+            let number = output.and_then(|o| o.strip_prefix("Subagent ")).and_then(|r| r.split_whitespace().next()).filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit() || c == '.')).map(str::to_owned);
+            match (running, number) {
+                (true, _) => with(if draft { "Saving a kitten as a draft" } else { "Starting a kitten" }.to_owned()),
+                (false, Some(n)) if draft => with(format!("Saved Kitten {n} as a draft")),
+                (false, Some(n)) => with(format!("Started Kitten {n}")),
+                (false, None) if output.is_some_and(|o| !o.is_empty()) => with("Could not start a kitten".to_owned()),
+                (false, None) => with(if draft { "Saved a kitten as a draft" } else { "Started a kitten" }.to_owned()),
+            }
+        }
+        "start_drafts" => if running { "Starting the drafts" } else { "Started the drafts" }.to_owned(),
+        "subagents" if !id.is_empty() => if running { format!("Reading Kitten {id}'s report") } else { format!("Read Kitten {id}'s report") },
+        "subagents" => if running { "Asking about kittens" } else { "Asked about kittens" }.to_owned(),
+        "stop_subagent" if !id.is_empty() => if running { format!("Stopping Kitten {id}") } else { format!("Stopped Kitten {id}") },
+        "stop_subagent" => if running { "Stopping a kitten" } else { "Stopped a kitten" }.to_owned(),
+        _ => return None,
+    })
+}
+
+/// [`phrase`] for a tool part: Neko's own tools read as a person would say them, every other tool as [`phrase`] does.
+pub fn step_phrase(name: &str, summary: &str, input: &str, output: Option<&str>, running: bool, workdir: &str, home: Option<&str>) -> String {
+    match neko_phrase(name, summary, input, output, running) {
+        Some(p) => cut_middle(p.trim(), LINE_CHARS),
+        None => phrase(name, summary, input, running, workdir, home),
+    }
+}
+
 /// A notice: what happened, and what to do next.
 fn notice(t: &Theme, p: &Part) -> Option<El> {
     let PartBody::Notice { tone, text: words, next, .. } = &p.body else { return None };
@@ -656,6 +697,20 @@ mod tests {
         assert_eq!(phrase("mcp__acme__find_issue", "ENG-123", "{}", false, w, home), "acme · find issue ENG-123");
         assert_eq!(phrase("mcp__acme-docs__search", "", "{}", false, w, home), "acme-docs · search");
         assert_eq!(show_path("/Users/examplex/a", w, home), "/Users/examplex/a", "a sibling of home is not home");
+        // Neko's own tools read as words, not as a server and a tool name.
+        let start = "{\n  \"title\": \"Check links\"\n}";
+        let said = "Subagent 1 (\"Check links\") is started. It is working now.";
+        assert_eq!(step_phrase("mcp__neko__start_subagent", "Check links", start, Some(said), false, w, home), "Started Kitten 1 \u{b7} Check links");
+        assert_eq!(step_phrase("mcp__neko__start_subagent", "Check links", start, None, true, w, home), "Starting a kitten \u{b7} Check links");
+        assert_eq!(step_phrase("mcp__neko__start_subagent", "Check links", "{\n  \"prompt\": \"A long brief that was cut", Some("Subagent 1.2 (\"Check links\") is started."), false, w, home), "Started Kitten 1.2 \u{b7} Check links", "a cut input: the summary stands in");
+        let draft = "{\"draft\": true, \"title\": \"Later\"}";
+        assert_eq!(step_phrase("mcp__neko__start_subagent", "Later", draft, Some("Subagent 3 (\"Later\") is saved as a draft."), false, w, home), "Saved Kitten 3 as a draft \u{b7} Later");
+        assert_eq!(step_phrase("mcp__neko__start_subagent", "Later", "{}", Some("Placement own_copy needs the project to be a git repository."), false, w, home), "Could not start a kitten \u{b7} Later");
+        assert_eq!(step_phrase("mcp__neko__subagents", "", "{}", Some("Subagent 1 \u{b7} x"), false, w, home), "Asked about kittens");
+        assert_eq!(step_phrase("mcp__neko__subagents", "2", "{\"id\": \"2\"}", None, false, w, home), "Read Kitten 2's report");
+        assert_eq!(step_phrase("mcp__neko__stop_subagent", "2", "{\"id\": \"Subagent 2\"}", None, false, w, home), "Stopped Kitten 2");
+        assert_eq!(step_phrase("mcp__neko__start_drafts", "", "{}", None, false, w, home), "Started the drafts");
+        assert_eq!(step_phrase("mcp__acme__find_issue", "ENG-123", "{}", None, false, w, home), "acme \u{b7} find issue ENG-123", "a plugin keeps its own reading");
         let long = phrase("Bash", "", &format!("git status --short && git log --oneline -5 --decorate && {}", "x ".repeat(40)), false, w, home);
         assert_eq!(long.chars().count(), LINE_CHARS);
         assert!(long.starts_with("git status --short") && long.contains('…'), "{long}");

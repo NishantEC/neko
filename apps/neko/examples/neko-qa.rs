@@ -166,7 +166,8 @@ impl Run {
             c.env_clear();
             c.env("HOME", &self.places.home).env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin").env("LANG", "en_US.UTF-8").env("TMPDIR", self.places.work.join("tmp"));
             if let Some(f) = &self.o.fake {
-                c.env("NEKO_CLAUDE_BIN", f);
+                // A fake run is about the app, not about this Mac's heat: a scenario that wants a warm one says so in `daemon_env`.
+                c.env("NEKO_CLAUDE_BIN", f).env("NEKO_HEAT", "ok");
             }
         }
         for (k, v) in &self.s.daemon_env {

@@ -5,7 +5,8 @@
 //! A subagent is a task, but not a thread: it is never listed in the sidebar, Home or the Briefing and never notified about; it is
 //! opened from its card or from the thread's waiting line, and read there.
 
-use neko_protocol::{Part, PartBody, Request, Task, TaskId, TaskStatus};
+use neko_protocol::{Part, PartBody, Request, SubPlace, Task, TaskId, TaskStatus};
+use rune::TextEdit;
 
 use crate::state::App;
 
@@ -50,6 +51,47 @@ pub fn wake_line(number: &str, status: &str) -> String {
     format!("Woken by {} · {}", name(number), wake_word(status))
 }
 
+/// The word on a kitten's card and in Overview: its status, or Draft (written, not started) or Discarded (a draft thrown away).
+pub fn kitten_word(t: &Task) -> &'static str {
+    match t.subagent.as_ref() {
+        Some(s) if s.draft => "Draft",
+        Some(s) if s.discarded => "Discarded",
+        _ => card_word(t.status),
+    }
+}
+
+/// Where a kitten works, as its card says it: "Shared folder", or "Own copy · branch neko/4f2a-1".
+pub fn place_words(t: &Task) -> String {
+    match t.subagent.as_ref() {
+        Some(s) if s.placement == SubPlace::OwnCopy => match &s.branch {
+            Some(b) => format!("Own copy \u{b7} branch {b}"),
+            None => "Own copy".to_owned(),
+        },
+        _ => "Shared folder".to_owned(),
+    }
+}
+
+/// Where it stands in line: "After Kitten 1" for a stacked kitten that has not started (None otherwise).
+pub fn order_words(t: &Task) -> Option<String> {
+    let s = t.subagent.as_ref()?;
+    let after = s.after.as_ref()?;
+    (t.status == TaskStatus::New && !s.discarded).then(|| format!("After {}", name(after)))
+}
+
+/// How many kittens work and how many wait their turn, in a sentence that does not claim more than is true: "2 kittens working",
+/// "1 kitten working, 1 waiting its turn", "2 kittens waiting their turn". None when there are none.
+pub fn crowd_words(working: usize, queued: usize) -> Option<String> {
+    let kittens = |n: usize| if n == 1 { "1 kitten".to_owned() } else { format!("{n} kittens") };
+    match (working, queued) {
+        (0, 0) => None,
+        (w, 0) => Some(format!("{} working", kittens(w))),
+        (0, 1) => Some("1 kitten waiting its turn".to_owned()),
+        (0, q) => Some(format!("{q} kittens waiting their turn")),
+        (w, 1) => Some(format!("{} working, 1 waiting its turn", kittens(w))),
+        (w, q) => Some(format!("{} working, {q} waiting their turn", kittens(w))),
+    }
+}
+
 /// The names a waiting line lists, as a sentence: "Kitten 1", "Kitten 1 and Kitten 2", "Kitten 1, Kitten 2 and Kitten 3".
 pub fn names_sentence(names: &[String]) -> String {
     match names {
@@ -78,8 +120,8 @@ pub fn line_of(parts: &[Part], workdir: &str, home: Option<&str>) -> Option<Stri
     });
     said.or_else(|| {
         parts.iter().rev().find_map(|p| match &p.body {
-            PartBody::Tool { name, summary, input, state, .. } => {
-                Some(crate::task_view::phrase(name, summary, input, *state == neko_protocol::ToolState::Running, workdir, home))
+            PartBody::Tool { name, summary, input, output, state, .. } => {
+                Some(crate::task_view::step_phrase(name, summary, input, output.as_deref(), *state == neko_protocol::ToolState::Running, workdir, home))
             }
             _ => None,
         })
@@ -94,25 +136,89 @@ impl App {
         v
     }
 
-    /// The ones still going.
+    /// The ones still going (a draft is not: it waits for the person, not the thread).
     pub fn live_subagents(&self, parent: &TaskId) -> Vec<&Task> {
-        self.subagents_of(parent).into_iter().filter(|t| is_live(t.status)).collect()
+        self.subagents_of(parent).into_iter().filter(|t| t.is_live_subagent()).collect()
     }
 
-    /// The thread's row's second line while it waits on, or has, live subagents (None when it has no use for one).
+    /// The drafts a thread wrote and the person has not started or thrown away.
+    pub fn draft_subagents(&self, parent: &TaskId) -> Vec<&Task> {
+        self.subagents_of(parent).into_iter().filter(|t| t.subagent.as_ref().is_some_and(|s| s.draft)).collect()
+    }
+
+    /// How many of the live ones work and how many wait their turn (queued, or after another).
+    pub fn kitten_counts(&self, parent: &TaskId) -> (usize, usize) {
+        let live = self.live_subagents(parent);
+        let queued = live.iter().filter(|t| t.status == TaskStatus::New).count();
+        (live.len() - queued, queued)
+    }
+
+    /// A task came in: a draft kitten gets a place to edit its prompt (kept as the person typed it), anything else loses it.
+    pub(crate) fn draft_follows(&mut self, task: &Task) {
+        if task.subagent.as_ref().is_some_and(|s| s.draft) {
+            self.draft_edits.entry(task.id.clone()).or_insert_with(|| TextEdit::new(&task.words));
+        } else {
+            self.draft_edits.remove(&task.id);
+            self.draft_saved.remove(&task.id);
+        }
+    }
+
+    /// The prompt being typed in a draft's card (made from the draft's words if the window has none yet).
+    pub fn draft_edit(&mut self, id: &TaskId) -> &mut TextEdit {
+        let words = self.tasks.iter().find(|t| &t.id == id).map(|t| t.words.clone()).unwrap_or_default();
+        self.draft_edits.entry(id.clone()).or_insert_with(|| TextEdit::new(&words))
+    }
+
+    /// Sends the prompt of a draft when it has changed from what the daemon has, at most about once a second for each.
+    pub fn save_drafts(&mut self, now: f64, force: Option<&TaskId>) {
+        let wanted: Vec<(TaskId, String)> = self
+            .draft_edits
+            .iter()
+            .filter_map(|(id, e)| {
+                let task = self.tasks.iter().find(|t| &t.id == id)?;
+                let (sent, at) = self.draft_saved.get(id).cloned().unwrap_or_else(|| (task.words.clone(), f64::MIN));
+                let due = force == Some(id) || now - at >= 0.8;
+                (e.text != sent && !e.text.trim().is_empty() && due).then(|| (id.clone(), e.text.clone()))
+            })
+            .collect();
+        for (id, prompt) in wanted {
+            if self.send(Request::EditDraft { task: id.clone(), prompt: prompt.clone() }).is_some() {
+                self.draft_saved.insert(id, (prompt, now));
+            }
+        }
+    }
+
+    /// Start on a draft's card: its prompt as it stands first, then the start.
+    pub fn start_draft(&mut self, id: &TaskId) {
+        self.save_drafts(0.0, Some(id));
+        self.send(Request::StartDraft { task: id.clone() });
+    }
+
+    /// Discard on a draft's card.
+    pub fn discard_draft(&mut self, id: &TaskId) {
+        self.send(Request::DiscardDraft { task: id.clone() });
+    }
+
+    /// The thread's row's second line while it waits on, or has, live kittens (None when it has no use for one). Never says more are
+    /// working than are: a kitten that waits its turn is counted so.
     pub fn thread_line(&self, task: &Task) -> Option<String> {
         if !task.is_thread() {
             return None;
         }
         let live = self.live_subagents(&task.id);
         let waiting = task.status == TaskStatus::Waiting;
+        let (working, queued) = self.kitten_counts(&task.id);
         let first = live.first().and_then(|t| t.subagent_name());
         match (live.len(), first, waiting) {
             (0, _, true) => Some("Reading the reports".to_owned()),
-            (0, ..) => None,
-            (1, Some(n), true) => Some(format!("Waiting on {n}")),
-            (1, Some(n), false) => Some(format!("{n} working")),
-            (n, ..) => Some(format!("{n} kittens working")),
+            (0, ..) => {
+                let drafts = self.draft_subagents(&task.id).len();
+                (drafts > 0).then(|| if drafts == 1 { "1 draft kitten".to_owned() } else { format!("{drafts} draft kittens") })
+            }
+            (1, Some(n), true) if queued == 0 => Some(format!("Waiting on {n}")),
+            (1, Some(n), false) if queued == 0 => Some(format!("{n} working")),
+            (1, Some(n), true) => Some(format!("{n} waiting its turn")),
+            _ => crowd_words(working, queued),
         }
     }
 
@@ -205,5 +311,16 @@ mod tests {
         assert_eq!(names_sentence(&["Kitten 1".into(), "Kitten 2".into()]), "Kitten 1 and Kitten 2");
         assert_eq!(names_sentence(&["Kitten 1".into(), "Kitten 2".into(), "Kitten 3".into()]), "Kitten 1, Kitten 2 and Kitten 3");
         assert!(order_of("1.10") > order_of("1.2"));
+    }
+
+    #[test]
+    fn a_crowd_is_said_as_it_is() {
+        assert_eq!(crowd_words(0, 0), None);
+        assert_eq!(crowd_words(1, 0).as_deref(), Some("1 kitten working"));
+        assert_eq!(crowd_words(2, 0).as_deref(), Some("2 kittens working"));
+        assert_eq!(crowd_words(1, 1).as_deref(), Some("1 kitten working, 1 waiting its turn"));
+        assert_eq!(crowd_words(3, 2).as_deref(), Some("3 kittens working, 2 waiting their turn"));
+        assert_eq!(crowd_words(0, 1).as_deref(), Some("1 kitten waiting its turn"));
+        assert_eq!(crowd_words(0, 3).as_deref(), Some("3 kittens waiting their turn"));
     }
 }
