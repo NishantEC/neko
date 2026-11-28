@@ -69,7 +69,7 @@ fn a_subagent_at_the_last_level_may_not_start_more_and_a_thread_has_a_ceiling() 
 }
 
 fn wake(core: &mut Core, thread: &TaskId, sub: &Task, status: &str, summary: &str) -> WakeRow {
-    WakeRow { id: core.new_id("wake"), task: thread.clone(), subagent: sub.id.clone(), number: number(sub), title: sub.title.clone(), status: status.into(), summary: summary.into(), files: vec!["src/a.rs +1 -0".into()], branch: Some("neko/x".into()), created_ms: core.now() }
+    WakeRow { id: core.new_id("wake"), task: thread.clone(), subagent: sub.id.clone(), number: number(sub), title: sub.title.clone(), status: status.into(), summary: summary.into(), files: vec!["src/a.rs +1 -0".into()], branch: Some("neko/x".into()), created_ms: core.now(), run: None, question: None, chain: vec![] }
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn the_migration_from_store_nine_adds_subagents_and_changes_nothing_else() {
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch(
-            "DROP INDEX tasks_by_activity; DROP TRIGGER find_titles_insert; DROP TRIGGER find_titles_update; DROP TRIGGER find_titles_delete; DROP TRIGGER find_words_insert; DROP TRIGGER find_words_update; DROP TRIGGER find_words_delete; DROP TABLE find_titles; DROP TABLE find_words; ALTER TABLE tasks DROP COLUMN sub_placement; ALTER TABLE tasks DROP COLUMN sub_after; ALTER TABLE tasks DROP COLUMN sub_draft; ALTER TABLE tasks DROP COLUMN sub_branch; ALTER TABLE tasks DROP COLUMN pinned_ms; ALTER TABLE tasks DROP COLUMN settled_ms; ALTER TABLE tasks DROP COLUMN archived_ms; ALTER TABLE tasks DROP COLUMN in_folder; ALTER TABLE tasks DROP COLUMN from_branch; DROP TABLE queued; DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; \
+            "ALTER TABLE runs DROP COLUMN ask; ALTER TABLE wakes DROP COLUMN run_id; ALTER TABLE wakes DROP COLUMN question; ALTER TABLE wakes DROP COLUMN question_chain; DROP INDEX tasks_by_activity; DROP TRIGGER find_titles_insert; DROP TRIGGER find_titles_update; DROP TRIGGER find_titles_delete; DROP TRIGGER find_words_insert; DROP TRIGGER find_words_update; DROP TRIGGER find_words_delete; DROP TABLE find_titles; DROP TABLE find_words; ALTER TABLE tasks DROP COLUMN sub_placement; ALTER TABLE tasks DROP COLUMN sub_after; ALTER TABLE tasks DROP COLUMN sub_draft; ALTER TABLE tasks DROP COLUMN sub_branch; ALTER TABLE tasks DROP COLUMN pinned_ms; ALTER TABLE tasks DROP COLUMN settled_ms; ALTER TABLE tasks DROP COLUMN archived_ms; ALTER TABLE tasks DROP COLUMN in_folder; ALTER TABLE tasks DROP COLUMN from_branch; DROP TABLE queued; DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; \
              ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN sub_number; ALTER TABLE tasks DROP COLUMN root_id; PRAGMA user_version = 9;",
         )
         .unwrap();
@@ -237,4 +237,96 @@ fn a_draft_is_edited_started_or_discarded_and_only_while_it_is_a_draft() {
     drop(core);
     let core = open(&d);
     assert!(core.store.get_task(&two.id).unwrap().unwrap().subagent.unwrap().discarded);
+}
+
+// ---- Questions go up (store 16) ---------------------------------------------------------------------------------------------------
+
+fn who_runs() -> Who {
+    Who { id: "claude".into(), name: "Claude Code".into(), sign_in: String::new(), install: String::new(), pricing: Pricing::ApiEquivalent }
+}
+
+/// One finished run of `task`, saying `words`; `ask` is the question it put with Neko's tools.
+fn one_run(core: &mut Core, d: &Temp, task: &TaskId, words: &str, ask: Option<neko_protocol::RunAsk>) -> neko_protocol::RunId {
+    let place = Place { workdir: d.0.to_string_lossy().into_owned(), ..Place::default() };
+    let (mut book, _) = RunBook::begin(core, task, who_runs(), place, PermissionMode::Follow, None, None, None).unwrap();
+    let now = core.now();
+    book.on(core, AgentEvent::TextDelta(words.into()), now).unwrap();
+    let now = core.now();
+    book.on(core, AgentEvent::TextDone, now).unwrap();
+    if let Some(a) = ask {
+        let now = core.now();
+        book.set_ask(core, a, now).unwrap();
+    }
+    let now = core.now();
+    book.finish(core, Outcome::Done, None, now).unwrap();
+    book.run.id.clone()
+}
+
+#[test]
+fn a_report_is_for_one_run_so_a_kitten_resumed_with_an_answer_reports_again() {
+    let d = Temp::new("sub-per-run");
+    let mut core = open(&d);
+    let (thread, _) = core.create_task("Plan the migration").unwrap();
+    let (a, _) = core.create_subagent(&thread.id, "Check the schema", "Look.", Default::default()).unwrap();
+    let first = one_run(&mut core, &d, &a.id, "Done looking.", None);
+    assert_eq!(core.store.ended_without_wake().unwrap().len(), 1);
+    let mut w = wake(&mut core, &thread.id, &a, "done", "Done looking.");
+    w.run = Some(first);
+    core.store.insert_wake(&w, "delivered", 6).unwrap();
+    assert!(core.store.ended_without_wake().unwrap().is_empty(), "its run has its report");
+    one_run(&mut core, &d, &a.id, "Done again.", None);
+    assert_eq!(core.store.ended_without_wake().unwrap().iter().map(number).collect::<Vec<_>>(), ["1"], "a newer run, a new report");
+}
+
+#[test]
+fn a_question_put_with_the_tool_makes_the_run_asked_and_the_kitten_says_who_has_it() {
+    use neko_protocol::{AskTo, QuestionWith, RunAsk};
+    let d = Temp::new("sub-question");
+    let mut core = open(&d);
+    let (thread, _) = core.create_task("Plan the migration").unwrap();
+    let (a, _) = core.create_subagent(&thread.id, "Check the schema", "Look.", Default::default()).unwrap();
+    // Its last words are no question: the tool's question is what counts.
+    one_run(&mut core, &d, &a.id, "I have asked.", Some(RunAsk { to: AskTo::Parent, text: "Which database?".into(), chain: vec![], unanswered: false }));
+    let k = core.store.get_task(&a.id).unwrap().unwrap();
+    assert_eq!(k.status, TaskStatus::Asked);
+    let q = k.subagent.unwrap().question.unwrap();
+    assert_eq!((q.text.as_str(), q.with, q.chain.len()), ("Which database?", QuestionWith::Parent, 0));
+    assert_eq!(core.store.question_of(&a.id).unwrap().as_deref(), Some("Which database?"));
+    assert!(derive(&core.store).unwrap().is_empty(), "a kitten's question is not the person's");
+    // The thread passes it to the person, naming the kitten: the kitten's card says the person has it, and Needs you says whose it is.
+    one_run(&mut core, &d, &thread.id, "Asking you.", Some(RunAsk { to: AskTo::Person, text: "Which database should it use?".into(), chain: vec!["1".into()], unanswered: false }));
+    assert_eq!(core.store.get_task(&a.id).unwrap().unwrap().subagent.unwrap().question.unwrap().with, QuestionWith::Person);
+    let items = derive(&core.store).unwrap();
+    assert_eq!(items.len(), 1);
+    match &items[0].need {
+        Need::Question { question, kitten, via, unanswered, .. } => assert_eq!((question.as_str(), kitten.as_deref(), via.len(), *unanswered), ("Which database should it use?", Some("1"), 0, false)),
+        n => panic!("{n:?}"),
+    }
+    assert_eq!(items[0].task, thread.id, "the thread's to answer");
+    // A kitten that only ended with a question asks with its last words.
+    let (b, _) = core.create_subagent(&thread.id, "Check the tests", "Look.", Default::default()).unwrap();
+    one_run(&mut core, &d, &b.id, "I found two.\n\nShall I fix both?", None);
+    assert_eq!(core.store.get_task(&b.id).unwrap().unwrap().subagent.unwrap().question.unwrap().text, "Shall I fix both?");
+}
+
+#[test]
+fn the_migration_to_store_sixteen_gives_each_report_its_run_so_none_is_made_twice() {
+    let d = Temp::new("sub-migrate-16");
+    let path = d.0.join("neko.sqlite3");
+    {
+        let mut core = open(&d);
+        let (thread, _) = core.create_task("Plan the migration").unwrap();
+        let (a, _) = core.create_subagent(&thread.id, "Check the schema", "Look.", Default::default()).unwrap();
+        one_run(&mut core, &d, &a.id, "Done.", None);
+        let w = wake(&mut core, &thread.id, &a, "done", "Done.");
+        core.store.insert_wake(&w, "delivered", 6).unwrap();
+    }
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("ALTER TABLE runs DROP COLUMN ask; ALTER TABLE wakes DROP COLUMN run_id; ALTER TABLE wakes DROP COLUMN question; ALTER TABLE wakes DROP COLUMN question_chain; PRAGMA user_version = 15;").unwrap();
+    }
+    let core = open(&d);
+    assert_eq!(core.store.version().unwrap(), SCHEMA_VERSION);
+    assert!(core.store.ended_without_wake().unwrap().is_empty(), "the report made before is the one for its run");
+    assert!(core.store.all_tasks().unwrap().iter().all(|t| t.subagent.as_ref().is_none_or(|s| s.question.is_none())));
 }

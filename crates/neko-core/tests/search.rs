@@ -102,7 +102,7 @@ fn a_store_from_before_search_is_indexed_when_it_opens() {
     assert_eq!(old.version().unwrap(), 13);
     drop(old);
     let s = Store::open(&path).unwrap();
-    assert_eq!(s.version().unwrap(), 15);
+    assert_eq!(s.version().unwrap(), 16);
     let (found, _) = s.search("turnip", 12, T0).unwrap();
     assert_eq!((ids(&found), found[0].by), (vec!["task_old"], FoundBy::Message), "the words of a thread made before search are found, a notice is not");
     assert_eq!(ids(&s.search("harvest", 12, T0).unwrap().0), ["task_old"]);

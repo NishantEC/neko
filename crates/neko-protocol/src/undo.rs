@@ -287,6 +287,7 @@ mod tests {
             undo,
             cat: None,
             rules_hash: None,
+            ask: None,
         }
     }
 

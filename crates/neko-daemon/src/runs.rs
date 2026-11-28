@@ -335,6 +335,8 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
         let id = core.store.get_task(&task.id).ok().flatten().map_or_else(|| task.cat.clone(), |t| t.cat);
         id.and_then(|id| core.store.get_cat(&id).ok().flatten())
     };
+    // A question it had put is answered by this run's words: the kittens it came up from are told who has it now.
+    let asked_before = lock(&shared.core).store.newest_ask(&task.id).ok().flatten().map(|a| a.chain).unwrap_or_default();
     let begun = {
         let mut core = lock(&shared.core);
         let r = RunBook::begin(&mut core, &task.id, who.clone(), place.clone(), settings.permission_mode, resume.clone(), words.as_deref(), cat.as_ref());
@@ -351,6 +353,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
         release(shared, &task.id, cancelled);
         return fail_before_run(shared, task, "Neko could not write to its store.".into(), None, None);
     };
+    crate::subagents::touch_chain(shared, task, &asked_before);
     let book = Arc::new(Mutex::new(book));
     let run_id = lock(&book).run.id.clone();
     let finish = |outcome: Outcome| {
@@ -392,7 +395,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
     let told = crate::undo::before_run(shared, &task.id);
     crate::undo::at_start(shared, &task.id, &owner, &run_id, &place);
     let said = match &wake {
-        Some(wakes) => neko_core::subagents::wake_message(wakes),
+        Some(wakes) => neko_core::subagents::wake_message(wakes, task.subagent.is_some()),
         None => words.clone().unwrap_or_else(|| task.words.clone()),
     };
     let said = match told {

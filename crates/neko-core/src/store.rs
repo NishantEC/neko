@@ -326,6 +326,15 @@ const MIGRATIONS: &[Migration] = &[
     ALTER TABLE tasks ADD COLUMN sub_after TEXT;
     ALTER TABLE tasks ADD COLUMN sub_draft INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE tasks ADD COLUMN sub_branch TEXT;"),
+    // 16: questions go up (docs/knowledge/subagents.md). The question a run asked with Neko's tools (JSON: to, text, chain), and for each
+    // report the run it reports on (a kitten resumed with an answer reports again), the question it carries and the kittens that
+    // question came up from. A report already made
+    // is the one for its kitten's newest run, so none is made twice.
+    Migration::Sql("ALTER TABLE runs ADD COLUMN ask TEXT;
+    ALTER TABLE wakes ADD COLUMN run_id TEXT;
+    ALTER TABLE wakes ADD COLUMN question TEXT;
+    ALTER TABLE wakes ADD COLUMN question_chain TEXT;
+    UPDATE wakes SET run_id = (SELECT r.id FROM runs r WHERE r.task_id = wakes.subagent_id ORDER BY r.started_ms DESC, r.id DESC LIMIT 1);"),
 ];
 
 /// Migration 9's step: each task's `latest_line` from its newest agent words.
@@ -562,6 +571,13 @@ impl Store {
         t.thread_status = crate::thread::thread_status(t.status, t.last_read_ms, t.activity_ms);
         let subagent_asks = t.subagent.is_none() && self.conn.query_row("SELECT 1 FROM permissions p JOIN tasks s ON s.id = p.task_id WHERE s.root_id = ?1 AND p.state = 'pending' LIMIT 1", [&t.id.0], |_| Ok(())).optional()?.is_some();
         t.needs_you = !t.archived && crate::thread::needs_you(t.status, actionable, subagent_asks);
+        // A kitten that ended with a question says it, and who has it now (docs/knowledge/subagents.md, "Questions go up").
+        if t.status == TaskStatus::Asked && t.subagent.is_some() {
+            let q = self.kitten_question(&t)?;
+            if let Some(s) = t.subagent.as_mut() {
+                s.question = q;
+            }
+        }
         Ok(t)
     }
 

@@ -153,12 +153,13 @@ pub fn wake(s: &mut App) {
             summary: "Two links are dead: `docs/setup.md` line 14 and `docs/faq.md` line 3. Both pointed at the old site, and I changed them to the new addresses.\n\n- The setup page now links to the new install guide\n- The FAQ now links to the new pricing page".into(),
             files: vec!["docs/setup.md +1 -1".into(), "docs/faq.md +1 -1".into()],
             branch: Some("neko/k3x9p1".into()),
+            question: None,
         },
         0,
         true,
     );
     sc2.part(
-        PartBody::Wake { number: "2".into(), title: "Check images".into(), status: "done".into(), summary: "Every image has alt text. Two of them are over 400 KB: the hero and the team photo.".into(), files: Vec::new(), branch: None },
+        PartBody::Wake { number: "2".into(), title: "Check images".into(), status: "done".into(), summary: "Every image has alt text. Two of them are over 400 KB: the hero and the team photo.".into(), files: Vec::new(), branch: None, question: None },
         0,
         true,
     );

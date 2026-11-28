@@ -133,6 +133,7 @@ impl RunBook {
             undo: None,
             cat: cat.map(|c| c.id.clone()),
             rules_hash: cat.map(|c| c.rules_hash.clone()),
+            ask: None,
         };
         let mut out = Vec::new();
         let last_line = core.store.get_task(task)?.map(|t| t.latest_line).unwrap_or_default();
@@ -155,6 +156,19 @@ impl RunBook {
     pub fn subagent_card(&mut self, core: &mut Core, sub: &Task, now: i64) -> Result<Vec<Out>, StoreError> {
         let Some(of) = &sub.subagent else { return Ok(Vec::new()) };
         self.new_part(core, PartBody::Subagent { subagent: sub.id.clone(), number: of.number.clone(), title: sub.title.clone() }, now, true)
+    }
+
+    /// The agent asked a question with Neko's tools (`ask_parent`, `ask_person`): the run carries it, and ends `asked` whatever its last
+    /// words are. A second question in the same run replaces the first.
+    pub fn set_ask(&mut self, core: &mut Core, ask: neko_protocol::RunAsk, now: i64) -> Result<Vec<Out>, StoreError> {
+        self.run.ask = Some(ask);
+        let rev = self.write_run(core, now)?;
+        Ok(vec![Out::Change(rev, Change::RunChanged { run: self.run.clone() })])
+    }
+
+    /// The quiet note that this run's agent wrote to one of its kittens (`message_subagent`); `answer` when it was waiting on a question.
+    pub fn to_subagent_note(&mut self, core: &mut Core, number: &str, text: &str, answer: bool, now: i64) -> Result<Vec<Out>, StoreError> {
+        self.new_part(core, PartBody::ToSubagent { number: number.to_owned(), text: text.to_owned(), answer }, now, true)
     }
 
     /// The plugins this run's agent was given: a request for one of their tools says it is a plugin.
@@ -489,7 +503,8 @@ impl RunBook {
         }
         self.hook_calls.clear();
         let (status, task_status) = match &outcome {
-            Outcome::Done if ends_with_question(&core.store.parts_of(&self.task)?, &self.run.id) => (RunStatus::Done, TaskStatus::Asked),
+            // A question put with Neko's tools, or last words that end with one.
+            Outcome::Done if self.run.ask.is_some() || ends_with_question(&core.store.parts_of(&self.task)?, &self.run.id) => (RunStatus::Done, TaskStatus::Asked),
             Outcome::Done => (RunStatus::Done, TaskStatus::Done),
             Outcome::Stopped => (RunStatus::Stopped, TaskStatus::Stopped),
             Outcome::Interrupted => (RunStatus::Interrupted, TaskStatus::Interrupted),
@@ -581,7 +596,7 @@ pub fn wake_notes(core: &mut Core, task: &TaskId, run: Option<&RunId>, wakes: &[
     let mut out = Vec::new();
     for w in wakes {
         let now = core.now();
-        let body = PartBody::Wake { number: w.number.clone(), title: w.title.clone(), status: w.status.clone(), summary: w.summary.clone(), files: w.files.clone(), branch: w.branch.clone() };
+        let body = PartBody::Wake { number: w.number.clone(), title: w.title.clone(), status: w.status.clone(), summary: w.summary.clone(), files: w.files.clone(), branch: w.branch.clone(), question: w.question.clone().filter(|_| w.status == "asked") };
         let part = Part { id: PartId(core.new_id("part")), task: task.clone(), run: run.cloned(), seq: core.store.next_part_seq(task)?, at_ms: now, ended_ms: Some(now), body };
         let rev = core.store.insert_part(&part, now)?;
         out.push(Out::Change(rev, Change::PartChanged { part }));

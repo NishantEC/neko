@@ -3,7 +3,7 @@
 //! text the agent is told, the tools Neko's own MCP server offers and the message that wakes a thread. Nothing here starts a
 //! process; the daemon does that (`crates/neko-daemon/src/subagents.rs`).
 
-use neko_protocol::{SubPlace, SubagentOf, Task, TaskId, TaskStatus};
+use neko_protocol::{AskTo, KittenQuestion, QuestionWith, RunAsk, RunId, SubPlace, SubagentOf, Task, TaskId, TaskStatus};
 use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};
 
@@ -85,7 +85,15 @@ pub struct WakeRow {
     pub files: Vec<String>,
     pub branch: Option<String>,
     pub created_ms: i64,
+    /// The subagent's run it reports on (None for one that never ran): a kitten resumed with an answer reports once more.
+    pub run: Option<RunId>,
+    /// Its question, when it ended `asked`, and the kittens below it that question came up from (the first asked first).
+    pub question: Option<String>,
+    pub chain: Vec<String>,
 }
+
+/// The longest question Neko's tools take, in characters.
+pub const QUESTION_CHARS: usize = 2_000;
 
 impl Store {
     /// The subagents a task started directly, oldest first.
@@ -167,8 +175,8 @@ impl Store {
     pub fn insert_wake(&mut self, w: &WakeRow, state: &str, now_ms: i64) -> Result<u64, StoreError> {
         let tx = self.conn.transaction()?;
         tx.execute(
-            "INSERT INTO wakes (id, task_id, subagent_id, status, summary, files, branch, state, created_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![w.id, w.task.0, w.subagent.0, w.status, w.summary, serde_json::to_string(&w.files).unwrap_or_else(|_| "[]".into()), w.branch, state, w.created_ms],
+            "INSERT INTO wakes (id, task_id, subagent_id, status, summary, files, branch, state, created_ms, run_id, question, question_chain) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![w.id, w.task.0, w.subagent.0, w.status, w.summary, serde_json::to_string(&w.files).unwrap_or_else(|_| "[]".into()), w.branch, state, w.created_ms, w.run.as_ref().map(|r| r.0.clone()), w.question, (!w.chain.is_empty()).then(|| serde_json::to_string(&w.chain).unwrap_or_default())],
         )?;
         let seq = log_event(&tx, now_ms, &w.subagent.0, "wake_created", json!({ "task": w.task.0, "status": w.status, "state": state }))?;
         tx.commit()?;
@@ -178,7 +186,7 @@ impl Store {
     /// Every report not read yet, oldest first, with its subagent's number and title.
     pub fn pending_wakes(&self) -> Result<Vec<WakeRow>, StoreError> {
         let mut st = self.conn.prepare_cached(
-            "SELECT w.id, w.task_id, w.subagent_id, t.sub_number, t.title, w.status, w.summary, w.files, w.branch, w.created_ms \
+            "SELECT w.id, w.task_id, w.subagent_id, t.sub_number, t.title, w.status, w.summary, w.files, w.branch, w.created_ms, w.run_id, w.question, w.question_chain \
              FROM wakes w JOIN tasks t ON t.id = w.subagent_id WHERE w.state = 'pending' ORDER BY w.created_ms, w.id",
         )?;
         let rows = st.query_map([], |r| {
@@ -193,6 +201,9 @@ impl Store {
                 files: serde_json::from_str(&r.get::<_, String>(7)?).unwrap_or_default(),
                 branch: r.get(8)?,
                 created_ms: r.get(9)?,
+                run: r.get::<_, Option<String>>(10)?.map(RunId),
+                question: r.get(11)?,
+                chain: r.get::<_, Option<String>>(12)?.and_then(|c| serde_json::from_str(&c).ok()).unwrap_or_default(),
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -226,11 +237,13 @@ impl Store {
         Ok(())
     }
 
-    /// Subagents that ended with no report made: the daemon was cut off before it could.
+    /// Subagents whose newest run ended with no report made for it (or that ended without ever running and have none): the daemon
+    /// was cut off before it could. A kitten resumed with an answer has a newer run, so it reports again.
     pub fn ended_without_wake(&self) -> Result<Vec<Task>, StoreError> {
         let mut st = self.conn.prepare_cached(&format!(
             "SELECT {} FROM tasks WHERE parent_id IS NOT NULL AND status IN ('done', 'failed', 'stopped', 'interrupted', 'asked') \
-             AND sub_draft != 2 AND NOT EXISTS (SELECT 1 FROM wakes w WHERE w.subagent_id = tasks.id) ORDER BY created_ms, id",
+             AND sub_draft != 2 AND NOT EXISTS (SELECT 1 FROM wakes w WHERE w.subagent_id = tasks.id AND w.run_id IS \
+             (SELECT r.id FROM runs r WHERE r.task_id = tasks.id ORDER BY r.started_ms DESC, r.id DESC LIMIT 1)) ORDER BY created_ms, id",
             crate::store::TASK_COLUMNS
         ))?;
         let rows = st.query_map([], crate::store::task_of)?;
@@ -241,6 +254,79 @@ impl Store {
     pub fn delete_wakes_of_task(&mut self, task: &TaskId) -> Result<(), StoreError> {
         self.conn.execute("DELETE FROM wakes WHERE task_id = ?1 OR subagent_id = ?1", [&task.0])?;
         Ok(())
+    }
+
+    /// The question a run asked with Neko's tools, as stored.
+    pub fn newest_ask(&self, task: &TaskId) -> Result<Option<RunAsk>, StoreError> {
+        let a: Option<Option<String>> = self.conn.query_row("SELECT ask FROM runs WHERE task_id = ?1 ORDER BY started_ms DESC, id DESC LIMIT 1", [&task.0], |r| r.get(0)).optional()?;
+        Ok(a.flatten().and_then(|a| serde_json::from_str(&a).ok()))
+    }
+
+    /// Writes the question a run asked (Neko passing an unanswered one up writes it on a run that has ended), with its event.
+    pub fn set_run_ask(&mut self, run: &RunId, ask: &RunAsk, now_ms: i64) -> Result<u64, StoreError> {
+        let tx = self.conn.transaction()?;
+        tx.execute("UPDATE runs SET ask = ?2 WHERE id = ?1", params![run.0, serde_json::to_string(ask).unwrap_or_default()])?;
+        let seq = log_event(&tx, now_ms, &run.0, "run_asked", json!({ "to": ask.to, "chain": ask.chain, "unanswered": ask.unanswered }))?;
+        tx.commit()?;
+        Ok(seq)
+    }
+
+    /// Whether the report on this run of a subagent has been put in front of its parent.
+    pub fn wake_delivered(&self, subagent: &TaskId, run: &RunId) -> Result<bool, StoreError> {
+        Ok(self.conn.query_row("SELECT 1 FROM wakes WHERE subagent_id = ?1 AND run_id = ?2 AND state = 'delivered' LIMIT 1", params![subagent.0, run.0], |_| Ok(())).optional()?.is_some())
+    }
+
+    /// What a kitten that ended with a question asks, and who has it now; None unless it is `asked`. Its question is the one it put
+    /// with `ask_parent`, else the end of its last words. It is with its parent until that parent passed it on (asked on, naming it):
+    /// then up the line, or with the person once a thread asked them.
+    pub(crate) fn kitten_question(&self, t: &Task) -> Result<Option<KittenQuestion>, StoreError> {
+        let Some(of) = &t.subagent else { return Ok(None) };
+        if t.status != TaskStatus::Asked {
+            return Ok(None);
+        }
+        let (text, chain) = match self.newest_ask(&t.id)? {
+            Some(a) => (a.text, a.chain),
+            None => {
+                let words = self.final_words(&t.id)?;
+                if words.is_empty() {
+                    return Ok(None);
+                }
+                (crate::needs::question_of(&words), Vec::new())
+            }
+        };
+        let mut with = QuestionWith::Parent;
+        let mut at = of.parent.clone();
+        for _ in 0..=MAX_DEPTH {
+            let row: Option<(String, Option<String>)> = self.conn.query_row("SELECT status, parent_id FROM tasks WHERE id = ?1", [&at.0], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+            let Some((status, parent)) = row else { break };
+            if status != "asked" {
+                break;
+            }
+            match self.newest_ask(&at)? {
+                Some(a) if a.chain.contains(&of.number) => {
+                    if a.to == AskTo::Person {
+                        with = QuestionWith::Person;
+                        break;
+                    }
+                    with = QuestionWith::Up;
+                    match parent {
+                        Some(p) => at = TaskId(p),
+                        None => break,
+                    }
+                }
+                _ => break,
+            }
+        }
+        Ok(Some(KittenQuestion { text, chain, with }))
+    }
+
+    /// The question a subagent that ended `asked` asks: the one it put with `ask_parent`, else the end of its final words.
+    pub fn question_of(&self, task: &TaskId) -> Result<Option<String>, StoreError> {
+        if let Some(a) = self.newest_ask(task)? {
+            return Ok(Some(a.text));
+        }
+        let words = self.final_words(task)?;
+        Ok((!words.is_empty()).then(|| crate::needs::question_of(&words)))
     }
 
     /// A subagent's final words in its newest run (what it reports), at most `limit` bytes.
@@ -310,7 +396,10 @@ One that writes should have a copy of its own (placement own_copy): a worktree o
 A subagent that must build on another's work starts after it (after: that one's number) and begins from its branch. Merge a subagent's branch into yours yourself (with a merge, after you commit \
 your own changes) and say that you did; a stacked subagent's branch already holds the one before it. With draft true a subagent is only written down: the person starts it, or you call \
 start_drafts. Your own Agent tool is still fine for a quick read-only search inside one run. Neko's app shows subagents to the person as kittens (Subagent 1 is Kitten 1), so you may use \
-either word when you write to them.";
+either word when you write to them. A subagent that needs an answer asks you, and Neko wakes you with its question (kind=\"question\"). Answer it with mcp__neko__message_subagent when the \
+answer follows from the work or from what the person said. When only the person can answer (a password, key or other secret; a choice that deletes, publishes, pays or cannot be \
+undone; what the person wants), pass it up with mcp__neko__ask_person naming the subagent (a subagent passes it to its own parent with mcp__neko__ask_parent), then end your turn. \
+Never make up such an answer. Your answer approves no step: the subagent still asks the person before risky steps.";
 
 /// What a subagent is told about itself, after the paragraph. The same bytes on every run of that subagent. `branch` is the branch of
 /// its own copy, when it works in one.
@@ -321,7 +410,8 @@ pub fn subagent_block(number: &str, thread_title: &str, branch: Option<&str>) ->
     };
     format!(
         "You are Subagent {number} of \"{thread_title}\". The agent that started you gave you this work and nothing else. Your final message is your report: what you did, the files you changed, and \
-anything it must know. It is read by the agent that started you, not by the person. If you are stuck, say so in your final message instead of guessing.{place}"
+anything it must know. It is read by the agent that started you, not by the person. If you cannot go on without an answer, do not guess: ask with mcp__neko__ask_parent and end your \
+turn. The agent that started you answers, or asks the person, and Neko resumes you with the answer as your next message.{place}"
     )
 }
 
@@ -344,7 +434,7 @@ pub fn instructions(cat_block: Option<&str>, subagent: Option<Of<'_>>) -> String
 /// What `initialize` says about Neko's server. It did not visibly reach the model in a real run (docs/knowledge/subagents.md), so the
 /// same guidance is in the paragraph above and in each tool's result.
 pub const SERVER_INSTRUCTIONS: &str = "Neko's own tools. start_subagent runs a numbered subagent and returns at once; end your turn afterwards and Neko wakes you with its report. \
-subagents lists them and never waits: do not call it to wait.";
+subagents lists them and never waits: do not call it to wait. A subagent asks its parent with ask_parent; the parent answers with message_subagent or asks the person with ask_person.";
 
 /// How a subagent just made stands, for the answer to `start_subagent`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -388,9 +478,20 @@ fn escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;")
 }
 
+/// What a question's wake tells the agent to do with it, by where the agent stands: a thread asks the person, a subagent its parent.
+pub fn question_cue(number: &str, in_subagent: bool) -> String {
+    let up = if in_subagent { "mcp__neko__ask_parent" } else { "mcp__neko__ask_person" };
+    format!(
+        "Subagent {number} waits for your answer. Answer it with mcp__neko__message_subagent (id \"{number}\") when the answer follows from the work or from what the person said. \
+If only the person can answer (a secret, a choice that cannot be undone, what they want), pass it up with {up} (subagent \"{number}\") and end your turn. Never make up such an answer."
+    )
+}
+
 /// The message that wakes a thread: one `<neko-wake>` for each report, a blank line between. A report's words past
-/// [`SUMMARY_LIMIT`] are cut, with where to read the rest.
-pub fn wake_message(wakes: &[WakeRow]) -> String {
+/// [`SUMMARY_LIMIT`] are cut, with where to read the rest. A report that is a question is `kind="question"`: the question, what it
+/// came up through (`from`, the kitten that first asked, when it is not this one), its last words and what to do. `in_subagent`: the
+/// agent woken is a subagent itself (it passes a question up to its own parent).
+pub fn wake_message(wakes: &[WakeRow], in_subagent: bool) -> String {
     wakes
         .iter()
         .map(|w| {
@@ -398,7 +499,21 @@ pub fn wake_message(wakes: &[WakeRow]) -> String {
             if summary.len() < w.summary.len() {
                 summary.push_str("\n… Call mcp__neko__subagents with this id to read the rest.");
             }
-            let mut m = format!("<neko-wake kind=\"subagent\" id=\"{}\" status=\"{}\" title=\"{}\">\n<summary>{}</summary>\n", w.number, w.status, escape(&w.title).replace('"', "&quot;"), escape(&summary));
+            let title = escape(&w.title).replace('"', "&quot;");
+            if let Some(q) = w.question.as_deref().filter(|_| w.status == "asked") {
+                let from = w.chain.first().map(|f| format!(" from=\"{f}\"")).unwrap_or_default();
+                let mut m = format!("<neko-wake kind=\"question\" id=\"{}\"{from} title=\"{title}\">\n<question>{}</question>\n", w.number, escape(q));
+                if let Some(f) = w.chain.first() {
+                    m.push_str(&format!("Subagent {} passed up this question of Subagent {f}'s.\n", w.number));
+                }
+                if summary.trim() != q.trim() && !summary.trim().is_empty() {
+                    m.push_str(&format!("<summary>{}</summary>\n", escape(&summary)));
+                }
+                m.push_str(&question_cue(&w.number, in_subagent));
+                m.push_str("\n</neko-wake>");
+                return m;
+            }
+            let mut m = format!("<neko-wake kind=\"subagent\" id=\"{}\" status=\"{}\" title=\"{title}\">\n<summary>{}</summary>\n", w.number, w.status, escape(&summary));
             if !w.files.is_empty() {
                 m.push_str(&format!("<files>{}</files>\n", escape(&w.files.join("; "))));
             }
@@ -452,6 +567,21 @@ With after, it starts when that subagent is done, from its branch. With draft tr
         }
     }));
     list.push(json!({
+        "name": "message_subagent",
+        "description": "Writes to a subagent you started: the answer to its question, or more to do. Returns at once. A subagent at rest (it asked, or it is done) starts again with your words; \
+one that works reads them at its next step (steer), after its turn (queue) or at once, its turn cut short (interrupt). Your words approve no step: it still asks the person before risky ones.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "The subagent's number."},
+                "text": {"type": "string", "description": "What you tell it, in full."},
+                "mode": {"type": "string", "enum": ["steer", "queue", "interrupt"], "description": "For a subagent that is working: when it reads your words. Default steer."}
+            },
+            "required": ["id", "text"],
+            "additionalProperties": false
+        }
+    }));
+    list.push(json!({
         "name": "stop_subagent",
         "description": "Stops a subagent you started, and any it started. You are woken with its report, which says it was stopped.",
         "inputSchema": {
@@ -461,7 +591,43 @@ With after, it starts when that subagent is done, from its branch. With draft tr
             "additionalProperties": false
         }
     }));
+    let subagent = json!({"type": "string", "description": "When you pass up a subagent's question: that subagent's number."});
+    if depth == 0 {
+        list.push(json!({
+            "name": "ask_person",
+            "description": "Puts a question to the person in Neko's Needs you, for what only they can answer: a secret, a choice that cannot be undone, what they want. Returns at once. \
+Then end your turn: their answer is your next message. To pass up a subagent's question, name the subagent, then give it the answer with message_subagent.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "question": {"type": "string", "description": "The question, in full, as the person should read it."}, "subagent": subagent },
+                "required": ["question"],
+                "additionalProperties": false
+            }
+        }));
+    } else {
+        list.push(json!({
+            "name": "ask_parent",
+            "description": "Asks the agent that started you a question you cannot go on without. Returns at once. Then end your turn: it answers, or asks the person, and Neko \
+resumes you with the answer as your next message. Do not guess instead. To pass up a question of one of your own subagents, name that subagent.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "question": {"type": "string", "description": "The question, in full: it reads nothing else of yours."}, "subagent": subagent },
+                "required": ["question"],
+                "additionalProperties": false
+            }
+        }));
+    }
     list
+}
+
+/// What `ask_parent` and `ask_person` answer: the cue to end the turn.
+pub fn asked_text(to: AskTo, passing: Option<&str>) -> String {
+    match (to, passing) {
+        (AskTo::Parent, None) => "Your question is with the agent that started you. End your turn now: Neko resumes you with the answer as your next message. Do not guess it or go on without it.".to_owned(),
+        (AskTo::Parent, Some(n)) => format!("Subagent {n}'s question is with the agent that started you. End your turn now: Neko resumes you with the answer, and then you pass it on to Subagent {n} with message_subagent."),
+        (AskTo::Person, None) => "The person has your question in Needs you. End your turn now: their answer is your next message.".to_owned(),
+        (AskTo::Person, Some(n)) => format!("The person has Subagent {n}'s question in Needs you. End your turn now: their answer is your next message. Then pass it on to Subagent {n} with message_subagent."),
+    }
 }
 
 #[cfg(test)]
@@ -469,7 +635,7 @@ mod tests {
     use super::*;
 
     fn wake(n: &str, status: &str, summary: &str) -> WakeRow {
-        WakeRow { id: format!("w{n}"), task: TaskId("t".into()), subagent: TaskId(format!("s{n}")), number: n.into(), title: "Check links".into(), status: status.into(), summary: summary.into(), files: vec![], branch: None, created_ms: 0 }
+        WakeRow { id: format!("w{n}"), task: TaskId("t".into()), subagent: TaskId(format!("s{n}")), number: n.into(), title: "Check links".into(), status: status.into(), summary: summary.into(), files: vec![], branch: None, created_ms: 0, run: None, question: None, chain: vec![] }
     }
 
     #[test]
@@ -477,14 +643,14 @@ mod tests {
         let mut a = wake("1", "done", "Fixed 2 links <fast>.");
         a.files = vec!["src/auth.rs +12 -3".into()];
         a.branch = Some("neko/4f2a".into());
-        let m = wake_message(&[a, wake("2", "failed", "Could not run the tests.")]);
+        let m = wake_message(&[a, wake("2", "failed", "Could not run the tests.")], false);
         assert!(m.starts_with("<neko-wake kind=\"subagent\" id=\"1\" status=\"done\" title=\"Check links\">\n<summary>Fixed 2 links &lt;fast>.</summary>\n<files>src/auth.rs +12 -3</files>\n<branch>neko/4f2a</branch>\n</neko-wake>\n\n<neko-wake"), "{m}");
         assert!(m.contains("id=\"2\" status=\"failed\""));
     }
 
     #[test]
     fn a_long_report_is_cut_with_where_to_read_the_rest() {
-        let m = wake_message(&[wake("1", "done", &"x".repeat(SUMMARY_LIMIT + 50))]);
+        let m = wake_message(&[wake("1", "done", &"x".repeat(SUMMARY_LIMIT + 50))], false);
         assert!(m.contains("Call mcp__neko__subagents with this id"));
         assert!(m.len() < SUMMARY_LIMIT + 400);
     }
@@ -498,9 +664,38 @@ mod tests {
     #[test]
     fn a_subagent_at_the_last_level_is_not_offered_the_tool_to_start_more() {
         let names = |d| tools(d).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
-        assert_eq!(names(0), ["start_subagent", "start_drafts", "subagents", "stop_subagent"]);
-        assert_eq!(names(MAX_DEPTH - 1), ["start_subagent", "start_drafts", "subagents", "stop_subagent"]);
-        assert_eq!(names(MAX_DEPTH), ["subagents", "stop_subagent"]);
+        assert_eq!(names(0), ["start_subagent", "start_drafts", "subagents", "message_subagent", "stop_subagent", "ask_person"]);
+        assert_eq!(names(MAX_DEPTH - 1), ["start_subagent", "start_drafts", "subagents", "message_subagent", "stop_subagent", "ask_parent"]);
+        assert_eq!(names(MAX_DEPTH), ["subagents", "message_subagent", "stop_subagent", "ask_parent"]);
+    }
+
+    #[test]
+    fn a_question_wakes_with_the_question_and_what_to_do() {
+        let mut q = wake("1", "asked", "I looked at the schema.\n\nWhich database should the migration target?");
+        q.question = Some("Which database should the migration target?".into());
+        let m = wake_message(&[q.clone()], false);
+        assert!(m.starts_with("<neko-wake kind=\"question\" id=\"1\" title=\"Check links\">\n<question>Which database should the migration target?</question>\n<summary>"), "{m}");
+        assert!(m.contains("mcp__neko__message_subagent (id \"1\")") && m.contains("mcp__neko__ask_person") && m.contains("Never make up"), "{m}");
+        assert!(!m.contains("status="), "a question is not a report of an end");
+        // A subagent woken by its own subagent's question passes it to its parent, and a passed-up one says where it came from.
+        q.number = "1.2".into();
+        assert!(wake_message(&[q.clone()], true).contains("mcp__neko__ask_parent (subagent \"1.2\")"));
+        q.number = "1".into();
+        q.chain = vec!["1.2".into()];
+        let up = wake_message(&[q], false);
+        assert!(up.contains("id=\"1\" from=\"1.2\"") && up.contains("Subagent 1 passed up this question of Subagent 1.2's."), "{up}");
+        // Its words that are only the question are not said twice.
+        let mut same = wake("2", "asked", "Which one?");
+        same.question = Some("Which one?".into());
+        assert!(!wake_message(&[same], false).contains("<summary>"));
+    }
+
+    #[test]
+    fn the_question_tools_tell_the_agent_to_end_its_turn() {
+        assert!(asked_text(AskTo::Parent, None).contains("End your turn now"));
+        assert!(asked_text(AskTo::Person, Some("1")).contains("pass it on to Subagent 1 with message_subagent"));
+        assert!(instructions(None, Some(("1", "Fix login", None))).contains("mcp__neko__ask_parent"));
+        assert!(PARAGRAPH.contains("Never make up such an answer") && PARAGRAPH.contains("approves no step"));
     }
 
     #[test]

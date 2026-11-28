@@ -16,7 +16,7 @@ use neko_core::Core;
 use neko_core::conductor;
 use neko_core::subagents::{self as rules, DraftChange, NewSubagent, Standing, WakeRow};
 use neko_core::workplace::{self, PlaceError};
-use neko_protocol::{Change, DiffFile, ErrorCode, FileStatus, Reply, ServerMessage, SubPlace, SubagentOf, Task, TaskId, TaskStatus};
+use neko_protocol::{AskTo, Change, DiffFile, ErrorCode, FileStatus, Reply, RunAsk, SendMode, ServerMessage, SubPlace, SubagentOf, Task, TaskId, TaskStatus};
 use serde_json::{Value, json};
 
 use crate::heat::{self, Heat};
@@ -171,15 +171,15 @@ fn turn_of(shared: &Arc<Shared>, sub: &Task) -> Turn {
     let pred = lock(&shared.core).store.children_of(&of.parent).unwrap_or_default().into_iter().find(|c| c.subagent.as_ref().is_some_and(|s| &s.number == after));
     match pred {
         None => Turn::Cancel(format!("Subagent {after}, which it follows, is gone, so Subagent {} was not started.", of.number)),
-        Some(p) if p.subagent.as_ref().is_some_and(|s| s.draft) || p.is_live_subagent() => Turn::Wait,
+        // One that asked waits for its answer, and may still finish.
+        Some(p) if p.subagent.as_ref().is_some_and(|s| s.draft) || p.is_live_subagent() || p.status == TaskStatus::Asked => Turn::Wait,
         Some(p) if p.status == TaskStatus::Done => Turn::Go,
         Some(p) => {
             let how = match p.status {
                 TaskStatus::Failed => "failed",
                 TaskStatus::Stopped if p.subagent.as_ref().is_some_and(|s| s.discarded) => "was discarded",
                 TaskStatus::Stopped => "was stopped",
-                TaskStatus::Interrupted => "was interrupted",
-                _ => "ended with a question",
+                _ => "was interrupted",
             };
             Turn::Cancel(format!("Subagent {after}, which it follows, {how}, so Subagent {} was not started. Start it again yourself once you have dealt with Subagent {after}.", of.number))
         }
@@ -258,11 +258,17 @@ fn deliver_wakes(shared: &Arc<Shared>) {
             let _ = core.store.settle_wakes(&ids, "discarded", now);
             continue;
         };
+        // It asked with Neko's tools and waits for the answer: the reports wait for it too, kept, and go once it runs again (its answer
+        // starts a run, which they are steered into). Nothing is lost, and the question stays the one thing in front of whoever answers.
+        if waits_for_answer(shared, &task) {
+            continue;
+        }
+        let in_subagent = task.subagent.is_some();
         let running = lock(&shared.runs.active).get(&task_id).map(|a| (a.control.clone(), a.book.clone()));
         match running {
             // Its run is going: the report is steered in, as one more message to it.
             Some((Some(control), book)) => {
-                if control.steer(&rules::wake_message(&wakes)).is_ok() {
+                if control.steer(&rules::wake_message(&wakes, in_subagent)).is_ok() {
                     let run = book.as_ref().map(|b| lock(b).run.id.clone());
                     delivered(shared, &task, run.as_ref(), &wakes);
                 }
@@ -315,11 +321,24 @@ pub fn ended(shared: &Arc<Shared>, id: &TaskId) {
         return;
     }
     let Some(task) = lock(&shared.core).store.get_task(id).ok().flatten() else { return };
-    // Waiting: no run, and its subagents are not all reported.
-    if matches!(task.status, TaskStatus::Done | TaskStatus::Asked) && has_live_children(shared, &task) {
+    // A kitten's question it read and neither answered nor passed on goes up by itself: no question is left to sit. (Last words that
+    // only end with a question of the agent's own do not answer it either.)
+    if matches!(task.status, TaskStatus::Done | TaskStatus::Asked) {
+        pass_up_unanswered(shared, &task);
+    }
+    let task = lock(&shared.core).store.get_task(id).ok().flatten().unwrap_or(task);
+    // Waiting: no run, and its subagents are not all reported. Not while it waits for the answer to a question it put: that is the
+    // person's (or its parent's) turn, and the reports wait for the answer.
+    let waits = waits_for_answer(shared, &task);
+    if matches!(task.status, TaskStatus::Done | TaskStatus::Asked) && !waits && has_live_children(shared, &task) {
         set_status(shared, &task, TaskStatus::Waiting);
     }
     let task = lock(&shared.core).store.get_task(id).ok().flatten().unwrap_or(task);
+    // The kittens whose question it passed up now say who has it.
+    if waits {
+        let chain = lock(&shared.core).store.newest_ask(&task.id).ok().flatten().map(|a| a.chain).unwrap_or_default();
+        touch_chain(shared, &task, &chain);
+    }
     if task.subagent.is_some() && matches!(task.status, TaskStatus::Done | TaskStatus::Failed | TaskStatus::Stopped | TaskStatus::Interrupted | TaskStatus::Asked) {
         report(shared, &task, None);
     }
@@ -330,6 +349,66 @@ pub fn ended(shared: &Arc<Shared>, id: &TaskId) {
 pub fn has_live_subagents(shared: &Shared, task: &TaskId) -> bool {
     let core = lock(&shared.core);
     core.store.subagents_of(task).unwrap_or_default().iter().any(Task::is_live_subagent) || core.store.has_pending_wake(task).unwrap_or(false)
+}
+
+/// Whether a task asked a question with Neko's tools and waits for its answer (its newest run carries the question).
+pub fn waits_for_answer(shared: &Shared, task: &Task) -> bool {
+    task.status == TaskStatus::Asked && lock(&shared.core).store.newest_ask(&task.id).ok().flatten().is_some()
+}
+
+/// Screens hear again about the kittens a question came up from (who has it changed). `chain` holds their numbers under `task`'s
+/// thread.
+pub fn touch_chain(shared: &Shared, task: &Task, chain: &[String]) {
+    if chain.is_empty() {
+        return;
+    }
+    let root = task.subagent.as_ref().map_or_else(|| task.id.clone(), |s| s.root.clone());
+    let core = lock(&shared.core);
+    let Ok(rev) = core.store.revision() else { return };
+    for t in core.store.subagents_of(&root).unwrap_or_default() {
+        if t.subagent.as_ref().is_some_and(|s| chain.contains(&s.number))
+            && let Ok(Some(t)) = core.store.get_task(&t.id)
+        {
+            shared.broadcast(&ServerMessage::Event { revision: rev, change: Change::TaskUpdated { task: t } });
+        }
+    }
+}
+
+/// The agent's turn ended and a question one of its kittens put with `ask_parent` was in front of it, unanswered and not passed on: Neko
+/// passes it up itself, as this task's question (to the person for a thread, to its parent for a kitten), marked unanswered. One at a
+/// time: the next goes up when this one is answered and the agent's turn ends again.
+fn pass_up_unanswered(shared: &Shared, task: &Task) {
+    let mut core = lock(&shared.core);
+    let kids = core.store.children_of(&task.id).unwrap_or_default();
+    for c in kids.iter().filter(|c| c.status == TaskStatus::Asked) {
+        let Some(number) = c.subagent.as_ref().map(|s| s.number.clone()) else { continue };
+        let Ok(Some(theirs)) = core.store.newest_ask(&c.id) else { continue };
+        let Some(their_run) = core.store.runs_of(&c.id).ok().and_then(|mut r| r.pop()) else { continue };
+        if !core.store.wake_delivered(&c.id, &their_run.id).unwrap_or(false) {
+            continue;
+        }
+        let Some(mine) = core.store.runs_of(&task.id).ok().and_then(|mut r| r.pop()) else { return };
+        if mine.ask.is_some() {
+            return;
+        }
+        let mut chain = theirs.chain.clone();
+        chain.push(number);
+        let to = if task.subagent.is_some() { AskTo::Parent } else { AskTo::Person };
+        let ask = RunAsk { to, text: theirs.text, chain, unanswered: true };
+        let now = core.now();
+        if core.store.set_run_ask(&mine.id, &ask, now).is_err() {
+            return;
+        }
+        if let Ok(Some(run)) = core.store.get_run(&mine.id)
+            && let Ok(rev) = core.store.revision()
+        {
+            shared.broadcast(&ServerMessage::Event { revision: rev, change: Change::RunChanged { run } });
+        }
+        if let Ok((t, rev)) = core.store.set_task_status(&task.id, TaskStatus::Asked, now) {
+            shared.broadcast(&ServerMessage::Event { revision: rev, change: Change::TaskUpdated { task: t } });
+        }
+        return;
+    }
 }
 
 fn has_live_children(shared: &Shared, task: &Task) -> bool {
@@ -403,6 +482,14 @@ fn report(shared: &Arc<Shared>, task: &Task, said: Option<&str>) {
         return;
     }
     let silenced = lock(&shared.subagents.state).silenced.remove(&task.id);
+    let (run, question, chain) = {
+        let core = lock(&shared.core);
+        let run = core.store.runs_of(&task.id).ok().and_then(|mut r| r.pop()).map(|r| r.id);
+        let asked = task.status == TaskStatus::Asked;
+        let question = if asked { core.store.question_of(&task.id).ok().flatten() } else { None };
+        let chain = if asked { core.store.newest_ask(&task.id).ok().flatten().map(|a| a.chain).unwrap_or_default() } else { Vec::new() };
+        (run, question, chain)
+    };
     let files = if silenced || said.is_some() { Vec::new() } else { files_of(shared, task) };
     let (branch, note) = if said.is_some() { (None, String::new()) } else { copy_facts(shared, task) };
     let mut core = lock(&shared.core);
@@ -428,6 +515,9 @@ fn report(shared: &Arc<Shared>, task: &Task, said: Option<&str>) {
         files,
         branch,
         created_ms: now,
+        run,
+        question,
+        chain,
     };
     let _ = core.store.insert_wake(&w, if silenced { "discarded" } else { "pending" }, now);
 }
@@ -481,7 +571,12 @@ pub fn stop_tree(shared: &Arc<Shared>, id: &TaskId) {
                 if now.as_ref().and_then(|x| x.subagent.as_ref()).is_some_and(|s| s.draft) {
                     // Never started: it is thrown away, and no report wakes anyone.
                     discard(shared, &t.id);
-                } else if matches!(now_status, Some(TaskStatus::New | TaskStatus::Waiting)) && (t.subagent.is_some() || now_status == Some(TaskStatus::Waiting)) {
+                } else if matches!(now_status, Some(TaskStatus::New | TaskStatus::Waiting | TaskStatus::Asked))
+                    && (t.subagent.is_some() || now_status == Some(TaskStatus::Waiting) || now.as_ref().is_some_and(|x| waits_for_answer(shared, x)))
+                {
+                    // A kitten waiting on an answer to its question is stopped too, and so is a thread waiting on the person's answer
+                    // to one it put with Neko's tools: the question goes with it. (A thread whose last words only ended with a question
+                    // has nothing to stop: it stays as it is, as before.)
                     set_status(shared, t, TaskStatus::Stopped);
                     ended(shared, &t.id);
                 }
@@ -506,7 +601,11 @@ pub fn recover(core: &mut Core) {
         }
         let status = rules::status_word(task.status).to_owned();
         let branch = (of.placement == SubPlace::OwnCopy).then(|| of.branch.clone()).flatten();
-        let w = WakeRow { id: core.new_id("wake"), task: of.parent.clone(), subagent: task.id.clone(), number: of.number.clone(), title: task.title.clone(), status, summary, files: Vec::new(), branch, created_ms: now };
+        let run = core.store.runs_of(&task.id).ok().and_then(|mut r| r.pop()).map(|r| r.id);
+        let asked = task.status == TaskStatus::Asked;
+        let question = if asked { core.store.question_of(&task.id).ok().flatten() } else { None };
+        let chain = if asked { core.store.newest_ask(&task.id).ok().flatten().map(|a| a.chain).unwrap_or_default() } else { Vec::new() };
+        let w = WakeRow { id: core.new_id("wake"), task: of.parent.clone(), subagent: task.id.clone(), number: of.number.clone(), title: task.title.clone(), status, summary, files: Vec::new(), branch, created_ms: now, run, question, chain };
         let _ = core.store.insert_wake(&w, "pending", now);
     }
 }
@@ -529,6 +628,9 @@ pub fn handle(shared: &Arc<Shared>, run: &McpRun, body: &Value) -> Value {
         "start_drafts" => start_drafts_tool(shared, run),
         "subagents" => list(shared, run, args),
         "stop_subagent" => stop_one(shared, run, args),
+        "message_subagent" => message(shared, run, args),
+        "ask_parent" => ask(shared, run, args, AskTo::Parent),
+        "ask_person" => ask(shared, run, args, AskTo::Person),
         other => answer(format!("Neko has no tool called {other}."), true),
     }
 }
@@ -657,6 +759,7 @@ pub fn start_draft(shared: &Arc<Shared>, id: &TaskId) -> Reply {
         let parent = lock(&shared.core).store.get_task(&of.parent).ok().flatten();
         if let Some(p) = parent
             && matches!(p.status, TaskStatus::Done | TaskStatus::Asked)
+            && !waits_for_answer(shared, &p)
             && !lock(&shared.runs.active).contains_key(&p.id)
         {
             set_status(shared, &p, TaskStatus::Waiting);
@@ -760,8 +863,11 @@ pub fn copy_place(shared: &Shared, task: &Task) -> Result<neko_core::records::Pl
 
 /// A subagent of this run's task by the number the agent names (`1`, `1.2`, or "Subagent 1").
 fn child(shared: &Shared, run: &McpRun, id: &str) -> Option<Task> {
-    let want = id.trim().trim_start_matches("Subagent").trim();
-    lock(&shared.core).store.children_of(&run.task).ok()?.into_iter().find(|c| c.subagent.as_ref().is_some_and(|s| s.number == want))
+    let want = id.trim().trim_start_matches("Subagent").trim_start_matches("Kitten").trim();
+    let core = lock(&shared.core);
+    let found = core.store.children_of(&run.task).ok()?.into_iter().find(|c| c.subagent.as_ref().is_some_and(|s| s.number == want))?;
+    // As screens see it: with its question, when it asked one.
+    core.store.get_task(&found.id).ok().flatten()
 }
 
 fn state_words(t: &Task) -> &'static str {
@@ -775,7 +881,7 @@ fn state_words(t: &Task) -> &'static str {
         TaskStatus::Stopped if t.subagent.as_ref().is_some_and(|s| s.discarded) => "discarded by the person before it ran",
         TaskStatus::Stopped => "stopped",
         TaskStatus::Interrupted => "interrupted",
-        TaskStatus::Asked => "ended with a question",
+        TaskStatus::Asked => "asked you a question and waits for your answer (message_subagent)",
     }
 }
 
@@ -816,9 +922,117 @@ fn list(shared: &Arc<Shared>, run: &McpRun, args: &Value) -> Value {
 fn stop_one(shared: &Arc<Shared>, run: &McpRun, args: &Value) -> Value {
     let Some(id) = args["id"].as_str() else { return answer("stop_subagent needs the subagent's number.", true) };
     let Some(c) = child(shared, run, id) else { return answer(format!("You have no subagent {id}."), true) };
+    if c.status == TaskStatus::Asked {
+        // It waits on your answer: stopping it takes its question back. Its report was the question, so nothing more wakes you.
+        stop_tree(shared, &c.id);
+        return answer(format!("Subagent {id} is stopped, and its question with it. Nothing more comes from it."), false);
+    }
     if !rules::is_live(c.status) || c.subagent.as_ref().is_some_and(|s| s.discarded) {
         return answer(format!("Subagent {id} has already ended."), false);
     }
     stop_tree(shared, &c.id);
     answer(format!("Subagent {id} is stopped. You are woken with its report."), false)
+}
+
+// ---- Questions go up ----------------------------------------------------------------------------------------------------------------
+
+/// `message_subagent {id, text, mode?}`: the agent writes to a kitten it started. At rest (it asked, or it ended) the kitten starts
+/// again with the words (an answer starts at once: it was counted when it began, and it is the thing the kitten waits for); while it
+/// works, the words are steered in, queued for its next turn or sent as an interrupt, as the person's are to a thread. A note in the
+/// agent's own conversation says so. The words approve nothing: the kitten's risky steps still go to the person.
+fn message(shared: &Arc<Shared>, run: &McpRun, args: &Value) -> Value {
+    let (Some(id), Some(text)) = (args["id"].as_str(), args["text"].as_str()) else { return answer("message_subagent needs the subagent's number and the text.", true) };
+    let text = text.trim();
+    if text.is_empty() {
+        return answer("message_subagent needs words to send.", true);
+    }
+    if text.len() > neko_protocol::MAX_WORDS_BYTES {
+        return answer("That message is too long. Put the long part in a file and name the file.", true);
+    }
+    let mode = match args["mode"].as_str() {
+        None | Some("steer") => SendMode::Steer,
+        Some("queue") => SendMode::Queue,
+        Some("interrupt") => SendMode::Interrupt,
+        Some(other) => return answer(format!("Mode {other} is not one of steer, queue and interrupt."), true),
+    };
+    if lock(&shared.runs.active).get(&run.task).is_some_and(|a| a.cancelled.load(Ordering::SeqCst)) {
+        return answer("The person stopped this thread, so nothing was sent.", true);
+    }
+    let Some(c) = child(shared, run, id) else { return answer(format!("You have no subagent {id}."), true) };
+    let Some(of) = c.subagent.clone() else { return answer(format!("You have no subagent {id}."), true) };
+    let n = of.number.clone();
+    if of.discarded {
+        return answer(format!("Subagent {n} was discarded by the person before it ran."), true);
+    }
+    if of.draft {
+        return answer(format!("Subagent {n} is a draft: nothing runs it yet. Start it with start_drafts first."), true);
+    }
+    if c.status == TaskStatus::New {
+        return answer(format!("Subagent {n} has not started yet: it reads its prompt first. Write to it once it works."), true);
+    }
+    let answering = c.status == TaskStatus::Asked;
+    let running = lock(&shared.runs.active).contains_key(&c.id);
+    if let Reply::Error { message, .. } = crate::queue::send(shared, c, text.to_owned(), mode) {
+        return answer(format!("Neko could not write to Subagent {n}: {message}"), true);
+    }
+    {
+        let mut b = lock(&run.book);
+        let mut core = lock(&shared.core);
+        let now = core.now();
+        if let Ok(outs) = b.to_subagent_note(&mut core, &n, text, answering, now) {
+            runs::push(shared, &run.task, outs, run.control.as_ref());
+        }
+    }
+    poke(shared);
+    let end = " Neko wakes you with its report when it ends. Do not poll or wait. If you have nothing else to do, end your turn now.";
+    let said = match (answering, running, mode) {
+        (true, _, _) => format!("Subagent {n} has your answer and is working again.{end}"),
+        (false, false, _) => format!("Subagent {n} is working again with your message.{end}"),
+        (false, true, SendMode::Steer) => format!("Subagent {n} reads your message at its next step.{end}"),
+        (false, true, SendMode::Queue) => format!("Subagent {n} gets your message when its turn ends.{end}"),
+        (false, true, SendMode::Interrupt) => format!("Subagent {n}'s turn is cut short, and it starts again with your message.{end}"),
+    };
+    answer(said, false)
+}
+
+/// `ask_parent {question, subagent?}` (a kitten) and `ask_person {question, subagent?}` (a thread): the run carries the question and
+/// ends `asked`. Naming a kitten passes its question up one level: the chain says whose it was. A kitten's question reaches the person
+/// only through each agent above it, one level at a time.
+fn ask(shared: &Arc<Shared>, run: &McpRun, args: &Value, to: AskTo) -> Value {
+    let tool = if to == AskTo::Parent { "ask_parent" } else { "ask_person" };
+    let Some(question) = args["question"].as_str().map(str::trim).filter(|q| !q.is_empty()) else { return answer(format!("{tool} needs the question, in words."), true) };
+    if question.chars().count() > rules::QUESTION_CHARS {
+        return answer("That question is too long. Put the detail in a file, name the file, and ask in a few lines.", true);
+    }
+    let Some(me) = lock(&shared.core).store.get_task(&run.task).ok().flatten() else { return answer("This thread is gone.", true) };
+    match (to, me.subagent.is_some()) {
+        (AskTo::Person, true) => return answer("You are a subagent: put your question to the agent that started you with ask_parent.", true),
+        (AskTo::Parent, false) => return answer("You are not a subagent, so there is no agent above you to ask: ask the person with ask_person.", true),
+        _ => {}
+    }
+    if lock(&shared.runs.active).get(&run.task).is_some_and(|a| a.cancelled.load(Ordering::SeqCst)) {
+        return answer("The person stopped this thread, so nothing was asked.", true);
+    }
+    let mut chain = Vec::new();
+    let mut passing = None;
+    if let Some(n) = args["subagent"].as_str().map(str::trim).filter(|n| !n.is_empty()) {
+        let Some(c) = child(shared, run, n) else { return answer(format!("You have no subagent {n}."), true) };
+        let Some(q) = c.subagent.as_ref().and_then(|s| s.question.clone()) else {
+            return answer(format!("Subagent {n} has not asked anything, so there is nothing to pass up. Leave out subagent to ask a question of your own."), true);
+        };
+        let number = c.subagent.as_ref().map(|s| s.number.clone()).unwrap_or_default();
+        chain = q.chain;
+        chain.push(number.clone());
+        passing = Some(number);
+    }
+    {
+        let mut b = lock(&run.book);
+        let mut core = lock(&shared.core);
+        let now = core.now();
+        match b.set_ask(&mut core, RunAsk { to, text: question.to_owned(), chain, unanswered: false }, now) {
+            Ok(outs) => runs::push(shared, &run.task, outs, run.control.as_ref()),
+            Err(e) => return answer(format!("Neko could not keep the question: {e}"), true),
+        }
+    }
+    answer(rules::asked_text(to, passing.as_deref()), false)
 }

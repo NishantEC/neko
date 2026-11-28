@@ -89,7 +89,7 @@ fn a_question_waits_until_a_follow_up_starts_a_new_run() {
     finish(&mut core, &mut b, Outcome::Done);
     let items = derive(&core.store).unwrap();
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0].need, Need::Question { run: b.run.id.clone(), question: "Should I rename all four, or keep Settings?".into() });
+    assert_eq!(items[0].need, Need::Question { run: b.run.id.clone(), question: "Should I rename all four, or keep Settings?".into(), kitten: None, via: vec![], unanswered: false });
     assert_eq!(items[0].since_ms, b.run.ended_ms.unwrap(), "it has waited since the run ended");
     // The answer is a follow-up: a new run, working, then done.
     let mut next = begin(&mut core, &d, &task.id);
@@ -147,7 +147,7 @@ fn only_a_failure_the_person_can_act_on_needs_them() {
 }
 
 fn item(id: &str, ws: &str, since: i64) -> NeedsItem {
-    NeedsItem { id: id.into(), task: TaskId(format!("task_{id}")), workspace: ws.into(), title: id.into(), cat: "cat_miso".into(), cat_name: "miso".into(), since_ms: since, need: Need::Question { run: neko_protocol::RunId("r".into()), question: "?".into() }, subagent: None }
+    NeedsItem { id: id.into(), task: TaskId(format!("task_{id}")), workspace: ws.into(), title: id.into(), cat: "cat_miso".into(), cat_name: "miso".into(), since_ms: since, need: Need::Question { run: neko_protocol::RunId("r".into()), question: "?".into(), kitten: None, via: vec![], unanswered: false }, subagent: None }
 }
 
 #[test]

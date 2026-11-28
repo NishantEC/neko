@@ -51,7 +51,10 @@ pub use undo::{DiffFile, DiffPatch, DiffSource, DiffSummary, FileStatus, Offer, 
 /// 19: kittens get a place, an order and a draft (a subagent says whether it works in the shared folder or in a copy of its own, which
 /// branch, which kitten it follows, whether it is a draft or was discarded; `start_draft`, `edit_draft`, `discard_draft`; a setting asks
 /// before a thread's first kitten).
-pub const PROTOCOL_VERSION: u32 = 19;
+/// 20: questions go up (a run may carry the question it asked with Neko's tools, to its parent or to the person; a kitten says the
+/// question it waits on and where it stands; a wake can be a question; a note says the agent answered or wrote to a kitten; a "Needs
+/// you" question says which kitten it came from and through whom).
+pub const PROTOCOL_VERSION: u32 = 20;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -287,6 +290,56 @@ pub struct SubagentOf {
     /// The branch its own copy works on (`neko/4f2a-1`), known from the start so a card can say it before the copy exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    /// The question it waits on, while it has ended with one (version 20): derived by the daemon from its newest run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<KittenQuestion>,
+}
+
+/// A kitten's question to the agent that started it (docs/knowledge/subagents.md, "Questions go up").
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KittenQuestion {
+    pub text: String,
+    /// The kittens below it that the question came up from, the one that first asked first ("1.2.1", "1.2"); empty when it is its own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chain: Vec<String>,
+    /// Where it stands now.
+    pub with: QuestionWith,
+}
+
+/// Who has a kitten's question now.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuestionWith {
+    /// The agent that started it, to answer or pass up.
+    #[default]
+    Parent,
+    /// Its parent passed it up to the agent above (a kitten's own parent is a kitten).
+    Up,
+    /// It reached the person, in Needs you.
+    Person,
+}
+
+/// Whom a run's question is for (version 20).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AskTo {
+    /// A kitten asked the agent that started it (`ask_parent`).
+    Parent,
+    /// A thread's agent asked the person (`ask_person`).
+    Person,
+}
+
+/// A question a run put with Neko's own tools (version 20). The run ends as `asked` whatever its last words are.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunAsk {
+    pub to: AskTo,
+    pub text: String,
+    /// The kittens it came up from, the one that first asked first ("1.2", "1"); empty when it is the asker's own question.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chain: Vec<String>,
+    /// Neko passed it up because the agent that read it ended its turn without answering it or passing it on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unanswered: bool,
 }
 
 /// Where a subagent works (docs/knowledge/subagents.md, "Where a kitten works").
@@ -316,7 +369,7 @@ pub const SUBAGENT_DEPTH: usize = 3;
 impl SubagentOf {
     /// A subagent in its parent's folder, not a draft, after no one.
     pub fn new(parent: TaskId, number: impl Into<String>, root: TaskId) -> SubagentOf {
-        SubagentOf { parent, number: number.into(), root, placement: SubPlace::Shared, after: None, draft: false, discarded: false, branch: None }
+        SubagentOf { parent, number: number.into(), root, placement: SubPlace::Shared, after: None, draft: false, discarded: false, branch: None, question: None }
     }
 
     /// How deep it is: `1` is 1, `1.2` is 2.
@@ -435,6 +488,9 @@ pub struct Run {
     /// The version of the cat's rules it used ([`cats::rules_hash`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rules_hash: Option<String>,
+    /// The question it asked with Neko's tools, if it did (version 20).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask: Option<RunAsk>,
 }
 
 /// A tool call's state.
@@ -510,7 +566,13 @@ pub enum PartBody {
         files: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         branch: Option<String>,
+        /// Its question, when it ended `asked` (version 20).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        question: Option<String>,
     },
+    /// The agent wrote to one of its kittens with `message_subagent` (version 20): the quiet note in its own conversation. `answer`: the
+    /// kitten was waiting on a question, so these words are the answer.
+    ToSubagent { number: String, text: String, answer: bool },
 }
 
 /// A failure the person can do something about (docs/knowledge/needs-you.md). Every other failure is a notice only.
@@ -531,8 +593,19 @@ pub enum FailureKind {
 pub enum Need {
     /// A pending permission request, whole.
     Permission { permission: Permission },
-    /// The run ended with a question: its last words, shortened to a line or two. A follow-up that names this run answers it.
-    Question { run: RunId, question: String },
+    /// The run ended with a question: its last words, shortened to a line or two (or what the agent asked with `ask_person`). A
+    /// follow-up that names this run answers it. `kitten`: the kitten whose question the agent passed up, `via` the kittens it came
+    /// through on the way (version 20); `unanswered`: Neko passed it up because the agent did not answer it.
+    Question {
+        run: RunId,
+        question: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kitten: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        via: Vec<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        unanswered: bool,
+    },
     /// The run failed for a reason the person can act on: the notice's words, what to do next, and the one line to copy (a
     /// sign-in or install command) when there is one.
     Failure {
@@ -1254,6 +1327,7 @@ impl PartBody {
             PartBody::Tool { summary, .. } => summary,
             PartBody::Wake { summary, .. } => summary,
             PartBody::Subagent { title, .. } => title,
+            PartBody::ToSubagent { text, .. } => text,
             PartBody::Permission { .. } | PartBody::RulesChanged { .. } => "",
         }
     }

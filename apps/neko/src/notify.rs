@@ -400,7 +400,7 @@ pub fn note_for(item: &NeedsItem) -> Note {
                 (body, b)
             }
         }
-        Need::Question { run, question } => {
+        Need::Question { run, question, .. } => {
             info.push(("run".into(), run.0.clone()));
             (short(&format!("Needs you: {question}"), BODY_CHARS), vec![Button::Reply { id: REPLY, placeholder: "Your answer", label: "Send" }])
         }
@@ -558,7 +558,7 @@ mod tests {
     }
 
     fn question(task: &str) -> NeedsItem {
-        NeedsItem { id: format!("question:{task}"), task: TaskId(task.into()), workspace: "default".into(), title: "Rename the button".into(), cat: "cat_mochi".into(), cat_name: "mochi".into(), since_ms: 2, need: Need::Question { run: RunId("run_2".into()), question: "Should I rename all four?".into() }, subagent: None }
+        NeedsItem { id: format!("question:{task}"), task: TaskId(task.into()), workspace: "default".into(), title: "Rename the button".into(), cat: "cat_mochi".into(), cat_name: "mochi".into(), since_ms: 2, need: Need::Question { run: RunId("run_2".into()), question: "Should I rename all four?".into(), kitten: None, via: Vec::new(), unanswered: false }, subagent: None }
     }
 
     fn failure(task: &str) -> NeedsItem {

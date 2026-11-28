@@ -38,7 +38,7 @@ fn log(tx: &Transaction<'_>, now_ms: i64, subject: &str, kind: &str, data: serde
 
 const RUN_COLUMNS: &str = "r.id, r.task_id, r.runtime, r.model, r.status, r.started_ms, r.ended_ms, r.session, r.workdir, r.branch, r.reason, r.files, r.added, r.removed, \
     u.input_tokens, u.output_tokens, u.cached_tokens, u.cost_usd, u.model, u.pricing, u.reported_by, u.context_tokens, u.context_window, \
-    r.undo_state, r.undo_why, r.undo_files, r.undo_added, r.undo_removed, r.undo_committed, r.cat_id, r.rules_hash";
+    r.undo_state, r.undo_why, r.undo_files, r.undo_added, r.undo_removed, r.undo_committed, r.cat_id, r.rules_hash, r.ask";
 
 fn run_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Run> {
     let changes = match (row.get::<_, Option<u32>>(11)?, row.get::<_, Option<u32>>(12)?, row.get::<_, Option<u32>>(13)?) {
@@ -76,6 +76,7 @@ fn run_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Run> {
         undo: crate::history::undo_of(row, 23)?,
         cat: row.get(29)?,
         rules_hash: row.get(30)?,
+        ask: row.get::<_, Option<String>>(31)?.and_then(|a| serde_json::from_str(&a).ok()),
     })
 }
 
@@ -118,6 +119,7 @@ fn kind_of(b: &PartBody) -> &'static str {
         PartBody::RulesChanged { .. } => "rules_changed",
         PartBody::Subagent { .. } => "subagent",
         PartBody::Wake { .. } => "wake",
+        PartBody::ToSubagent { .. } => "to_subagent",
     }
 }
 
@@ -227,8 +229,8 @@ impl Store {
         let tx = self.conn.transaction()?;
         let (files, added, removed) = r.changes.map_or((None, None, None), |c| (Some(c.files), Some(c.added), Some(c.removed)));
         tx.execute(
-            "UPDATE runs SET model = ?2, status = ?3, ended_ms = ?4, session = ?5, reason = ?6, files = ?7, added = ?8, removed = ?9 WHERE id = ?1",
-            params![r.id.0, r.model, status_name(r.status), r.ended_ms, r.session, r.reason, files, added, removed],
+            "UPDATE runs SET model = ?2, status = ?3, ended_ms = ?4, session = ?5, reason = ?6, files = ?7, added = ?8, removed = ?9, ask = ?10 WHERE id = ?1",
+            params![r.id.0, r.model, status_name(r.status), r.ended_ms, r.session, r.reason, files, added, removed, r.ask.as_ref().and_then(|a| serde_json::to_string(a).ok())],
         )?;
         if let Some(u) = &r.usage {
             tx.execute(

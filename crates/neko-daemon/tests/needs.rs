@@ -73,7 +73,7 @@ fn a_question_is_answered_from_the_list_once() {
     let mut c = watcher(&d);
     let task = create(&mut c, "Rename the button [fake:question]");
     let items = needs_until(&mut c, "the question", |i| !i.is_empty());
-    let Need::Question { run, question } = items[0].need.clone() else { panic!("{items:?}") };
+    let Need::Question { run, question, .. } = items[0].need.clone() else { panic!("{items:?}") };
     assert_eq!(question, "Should I rename all four to Preferences, or keep Settings?");
     let answer = |c: &mut Client, run: &RunId| c.request(Request::FollowUp { task: task.id.clone(), words: "All four.".into(), answering: Some(run.clone()), mode: None }).unwrap();
     assert_eq!(code(answer(&mut c, &RunId("run_another".into()))), Some(ErrorCode::AlreadyAnswered), "an answer to another run's question is stale");

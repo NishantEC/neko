@@ -538,7 +538,7 @@ fn needs_you(s: &mut App) {
             cat: notes.cat.clone().unwrap_or_default(),
             cat_name: cat_name(s, &notes.cat),
             since_ms: ago(s, 12),
-            need: Need::Question { run: RunId(format!("run_{}", notes.id.0)), question: "The notes cover the sidebar and the composer. Should I also mention the new keyboard shortcuts, or keep them for 0.3?".into() }, subagent: None
+            need: Need::Question { run: RunId(format!("run_{}", notes.id.0)), question: "The notes cover the sidebar and the composer. Should I also mention the new keyboard shortcuts, or keep them for 0.3?".into(), kitten: None, via: Vec::new(), unanswered: false }, subagent: None
         },
         failure(s, &nightly, FailureKind::UsageLimit, "Claude Code has reached its usage limit.", "It resets at 17:00. Send a follow-up then to carry on.", None, 2 * 60),
         permission_item(s, &retry, "Run a command", "cargo test --package acme-api retry", false, 30),
@@ -1007,6 +1007,7 @@ fn run(id: &str, task: &Task, status: RunStatus, started: i64, secs: i64) -> Run
         undo: None,
         cat: task.cat.clone(),
         rules_hash: Some(neko_protocol::cats::rules_hash("")),
+        ask: None,
     }
 }
 

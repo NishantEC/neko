@@ -214,6 +214,7 @@ fn run() -> Run {
         undo: None,
         cat: None,
         rules_hash: None,
+        ask: None,
     }
 }
 
@@ -316,7 +317,7 @@ fn needs_you_round_trips() {
     let p = r#"{"id":"perm_1","task":"task_1","run":"run_1","tool":"Bash","title":"Run a command","why":"Commands can change anything on this Mac.","detail":"cargo test","destructive":false,"state":"pending","asked_ms":3}"#;
     pinned(item("perm:perm_1", Need::Permission { permission: perm() }), &format!(r#"{}{{"kind":"permission","permission":{p}}}}}"#, head("perm:perm_1")));
     pinned(
-        item("question:run_1", Need::Question { run: RunId("run_1".into()), question: "Which branch should it go on?".into() }),
+        item("question:run_1", Need::Question { run: RunId("run_1".into()), question: "Which branch should it go on?".into(), kitten: None, via: vec![], unanswered: false }),
         &format!(r#"{}{{"kind":"question","run":"run_1","question":"Which branch should it go on?"}}}}"#, head("question:run_1")),
     );
     let failure = Need::Failure { failure: FailureKind::NotSignedIn, text: "Claude Code is not signed in.".into(), next: Some("Run `claude auth login` in Terminal.".into()), command: Some("claude auth login".into()) };
@@ -329,7 +330,7 @@ fn needs_you_round_trips() {
     }
     pinned(ServerMessage::Reply { id: 1, reply: Reply::Needs { items: Vec::new() } }, r#"{"kind":"reply","id":1,"reply":{"type":"needs","items":[]}}"#);
     pinned(
-        ServerMessage::Event { revision: 12, change: Change::NeedsChanged { items: vec![item("question:run_1", Need::Question { run: RunId("run_1".into()), question: "Shall I?".into() })] } },
+        ServerMessage::Event { revision: 12, change: Change::NeedsChanged { items: vec![item("question:run_1", Need::Question { run: RunId("run_1".into()), question: "Shall I?".into(), kitten: None, via: vec![], unanswered: false })] } },
         &format!(r#"{{"kind":"event","revision":12,"change":{{"type":"needs_changed","items":[{}{{"kind":"question","run":"run_1","question":"Shall I?"}}}}]}}}}"#, head("question:run_1")),
     );
 }
@@ -442,7 +443,7 @@ fn cats_round_trip() {
     let json = serde_json::to_string(&r).unwrap();
     assert!(json.ends_with(r#""cat":"cat_miso","rules_hash":"cbf29ce484222325"}"#), "{json}");
     pinned(PartBody::RulesChanged { cat: c(), name: "miso".into() }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso"}"#);
-    assert_eq!(PROTOCOL_VERSION, 19);
+    assert_eq!(PROTOCOL_VERSION, 20);
     // A thread with no cat writes none; one that chose its place writes the choice; an old screen's task (a cat, no choice) still reads.
     let mut t = task();
     t.cat = None;
@@ -467,13 +468,32 @@ fn subagents_have_their_own_shapes_and_the_old_ones_do_not_change() {
     let back: Task = serde_json::from_str(&json).unwrap();
     assert_eq!((back.subagent.as_ref().unwrap().depth(), back.subagent_name().as_deref(), back.is_thread()), (2, Some("Kitten 1.2"), false));
     assert_eq!(SubagentOf::new(TaskId("p".into()), "1", TaskId("p".into())).depth(), 1);
+    // Questions go up (20): a run's question, a kitten's, a question's wake, the note that the agent answered, a passed-up item.
+    pinned(RunAsk { to: AskTo::Parent, text: "Which database?".into(), chain: vec![], unanswered: false }, r#"{"to":"parent","text":"Which database?"}"#);
+    pinned(RunAsk { to: AskTo::Person, text: "Which database?".into(), chain: vec!["1.2".into(), "1".into()], unanswered: true }, r#"{"to":"person","text":"Which database?","chain":["1.2","1"],"unanswered":true}"#);
+    let mut asked = run();
+    asked.ask = Some(RunAsk { to: AskTo::Person, text: "Shall I?".into(), chain: vec!["1".into()], unanswered: false });
+    assert!(serde_json::to_string(&asked).unwrap().ends_with(r#""ask":{"to":"person","text":"Shall I?","chain":["1"]}}"#));
+    let mut of = SubagentOf::new(TaskId("p".into()), "1", TaskId("p".into()));
+    of.question = Some(KittenQuestion { text: "Which database?".into(), chain: vec![], with: QuestionWith::Person });
+    pinned(of, r#"{"parent":"p","number":"1","root":"p","question":{"text":"Which database?","with":"person"}}"#);
+    pinned(QuestionWith::Up, "\"up\"");
+    pinned(
+        PartBody::Wake { number: "1".into(), title: "Migrate".into(), status: "asked".into(), summary: "Which one?".into(), files: vec![], branch: None, question: Some("Which one?".into()) },
+        r#"{"kind":"wake","number":"1","title":"Migrate","status":"asked","summary":"Which one?","question":"Which one?"}"#,
+    );
+    pinned(PartBody::ToSubagent { number: "1".into(), text: "Use SQLite.".into(), answer: true }, r#"{"kind":"to_subagent","number":"1","text":"Use SQLite.","answer":true}"#);
+    pinned(
+        Need::Question { run: RunId("run_1".into()), question: "Which database?".into(), kitten: Some("1.2".into()), via: vec!["1".into()], unanswered: false },
+        r#"{"kind":"question","run":"run_1","question":"Which database?","kitten":"1.2","via":["1"]}"#,
+    );
     pinned(TaskStatus::Waiting, "\"waiting\"");
     pinned(PartBody::Subagent { subagent: TaskId("task_2".into()), number: "1".into(), title: "Check links".into() }, r#"{"kind":"subagent","subagent":"task_2","number":"1","title":"Check links"}"#);
     pinned(
-        PartBody::Wake { number: "1".into(), title: "Check links".into(), status: "done".into(), summary: "Fixed 2.".into(), files: vec!["a.rs +1 -0".into()], branch: Some("neko/x".into()) },
+        PartBody::Wake { number: "1".into(), title: "Check links".into(), status: "done".into(), summary: "Fixed 2.".into(), files: vec!["a.rs +1 -0".into()], branch: Some("neko/x".into()), question: None },
         r#"{"kind":"wake","number":"1","title":"Check links","status":"done","summary":"Fixed 2.","files":["a.rs +1 -0"],"branch":"neko/x"}"#,
     );
-    pinned(PartBody::Wake { number: "2".into(), title: "T".into(), status: "failed".into(), summary: String::new(), files: vec![], branch: None }, r#"{"kind":"wake","number":"2","title":"T","status":"failed","summary":""}"#);
+    pinned(PartBody::Wake { number: "2".into(), title: "T".into(), status: "failed".into(), summary: String::new(), files: vec![], branch: None, question: None }, r#"{"kind":"wake","number":"2","title":"T","status":"failed","summary":""}"#);
     // The setting that gives runs the person's own MCP servers is written only when it is on.
     pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: false, ask_first_subagent: false }, r#"{"runtime":"claude","permission_mode":"follow"}"#);
     pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: true, queue_first: false, ask_first_subagent: false }, r#"{"runtime":"claude","permission_mode":"follow","own_mcp":true}"#);

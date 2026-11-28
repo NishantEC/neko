@@ -71,16 +71,16 @@ fn migrations_run_once_from_version_one_and_a_newer_store_is_left_alone() {
     let (path, _g) = temp();
     let s = Store::open(&path).unwrap();
     assert_eq!(s.version().unwrap(), SCHEMA_VERSION);
-    assert_eq!(SCHEMA_VERSION, 15);
+    assert_eq!(SCHEMA_VERSION, 16);
     let mode: String = s.connection().query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
     assert_eq!(mode, "wal");
     drop(s);
     let s = Store::open(&path).unwrap();
-    assert_eq!(s.version().unwrap(), 15, "opening again changes nothing");
+    assert_eq!(s.version().unwrap(), 16, "opening again changes nothing");
     s.connection().pragma_update(None, "user_version", 99).unwrap();
     drop(s);
     match Store::open(&path) {
-        Err(StoreError::Newer { found: 99, known: 15 }) => {}
+        Err(StoreError::Newer { found: 99, known: 16 }) => {}
         Err(e) => panic!("wrong error: {e}"),
         Ok(_) => panic!("a store from a newer Neko must not be opened"),
     }

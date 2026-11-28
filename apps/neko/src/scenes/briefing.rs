@@ -192,7 +192,7 @@ fn full_morning(s: &mut App, workspaces: bool) {
         cat: "".into(),
         cat_name: cat_name(s, ""),
         since_ms: at_time(s, 0, 3, 10),
-        need: Need::Question { run: RunId(format!("run_{}", q_task.id.0)), question: "The notes cover the sidebar and the composer. Should I also mention the new keyboard shortcuts, or keep them for 0.3?".into() }, subagent: None
+        need: Need::Question { run: RunId(format!("run_{}", q_task.id.0)), question: "The notes cover the sidebar and the composer. Should I also mention the new keyboard shortcuts, or keep them for 0.3?".into(), kitten: None, via: Vec::new(), unanswered: false }, subagent: None
     };
     let mut p_task = task(59, "Answer the question about the retry limit before the release goes out", 300);
     p_task.workspace = w.into();

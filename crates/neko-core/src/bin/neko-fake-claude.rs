@@ -27,7 +27,7 @@
 //! | `hook-destructive` | Runs `git reset --hard HEAD~1`. |
 //! | `real` | The shapes a real run showed: empty thinking, several words between tools, a long absolute path, a check that exits 1. |
 //! | `plugin-tool:SERVER:TOOL` | Calls the tool `mcp__SERVER__TOOL` (asking, as Claude Code would about an MCP tool), then says whether it ran. When `--mcp-config` did not give a server called SERVER there is no such tool: the call fails at once, asking nothing. |
-//! | `mcp` (or `delegate`, or `steps`) | Plays the lines after the tag through the MCP servers `--mcp-config` gave, really started (stdio, with this process's environment): `mcp SERVER TOOL {json}` calls `mcp__SERVER__TOOL` (asking first, as Claude Code does) and reads the server's answer, `poll N` calls `mcp__neko__subagents` N times, `stay N` keeps streaming N seconds, `write NAME TEXT` writes a file in its folder, `sh COMMAND` runs a shell command there, `tools LABEL` records the tools Neko's server offered (`{"neko_tools": "a,b", "label": LABEL}` in the record). Steps are one per line, or several on one line apart by ` ; ` (what stands before the tag is the person's words). `steps` is the same script for a prompt that sits inside another script's step (a subagent's), where a second `mcp` tag would cut that step: its steps must be on lines of their own. Then it ends its turn. A message that begins `<neko-wake` is answered by saying which reports it read; with `NEKO_FAKE_WAKE_SH` set it first runs that shell command in its folder for each report that names a branch (`{branch}` is replaced), as a thread that merges would. |
+//! | `mcp` (or `delegate`, or `steps`) | Plays the lines after the tag through the MCP servers `--mcp-config` gave, really started (stdio, with this process's environment): `mcp SERVER TOOL {json}` calls `mcp__SERVER__TOOL` (asking first, as Claude Code does) and reads the server's answer, `poll N` calls `mcp__neko__subagents` N times, `stay N` keeps streaming N seconds, `write NAME TEXT` writes a file in its folder, `sh COMMAND` runs a shell command there, `tools LABEL` records the tools Neko's server offered (`{"neko_tools": "a,b", "label": LABEL}` in the record). Steps are one per line, or several on one line apart by ` ; ` (what stands before the tag is the person's words). `steps` is the same script for a prompt that sits inside another script's step (a subagent's), where a second `mcp` tag would cut that step: its steps must be on lines of their own. Then it ends its turn. A message that begins `<neko-wake` is answered by saying which reports it read; with `NEKO_FAKE_WAKE_SH` set it first runs that shell command in its folder for each report that names a branch (`{branch}` is replaced), as a thread that merges would. A `kind="question"` wake (a kitten asks) is handled as `NEKO_FAKE_ON_QUESTION` says, rules apart by `|`, by the kitten's number: `1=answer:TEXT` answers it with `message_subagent`, `1=up` passes it up (`ask_person` in a thread, `ask_parent` in a kitten); with no rule it is read and left. |
 //! | `hook-no-verdict` | Says a hook gave no usable answer for `cargo test`, then runs it anyway, as Claude Code does (it fails open). |
 //!
 //! `NEKO_FAKE_RECORD` names a file it appends what it was given to, one JSON line each: `{"argv": [...]}` when it starts, then
@@ -737,6 +737,27 @@ impl Fake {
                 for chunk in words.split("<neko-wake").skip(1) {
                     let attr = |k: &str| chunk.split(&format!("{k}=\"")).nth(1).and_then(|r| r.split('"').next()).unwrap_or("?").to_owned();
                     let first = chunk.split("<summary>").nth(1).and_then(|s| s.lines().next()).unwrap_or("").trim().to_owned();
+                    if chunk.starts_with(" kind=\"question\"") {
+                        // A kitten's question: `NEKO_FAKE_ON_QUESTION` says what this agent does with it, by the kitten's number.
+                        let id = attr("id");
+                        let q = chunk.split("<question>").nth(1).and_then(|r| r.split("</question>").next()).unwrap_or("").replace("&lt;", "<").replace("&amp;", "&");
+                        seen.push(format!("Subagent {id} asked: {q}"));
+                        let rule = std::env::var("NEKO_FAKE_ON_QUESTION").unwrap_or_default();
+                        let mine = rule.split('|').find_map(|r| r.split_once('=').filter(|(k, _)| k.trim() == id).map(|(_, v)| v.trim().to_owned()));
+                        match mine.as_deref() {
+                            Some(v) if v.starts_with("answer:") => {
+                                let text = v.trim_start_matches("answer:");
+                                seen.push(self.mcp_call("neko", "message_subagent", json!({"id": id, "text": text})).unwrap_or_default());
+                            }
+                            Some("up") => {
+                                // A thread asks the person; a kitten asks its own parent.
+                                let tool = if self.server("neko").is_some_and(|s| s.tools.iter().any(|t| t == "ask_person")) { "ask_person" } else { "ask_parent" };
+                                seen.push(self.mcp_call("neko", tool, json!({"question": q, "subagent": id})).unwrap_or_default());
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
                     seen.push(format!("Subagent {} {}: {}", attr("id"), attr("status"), first));
                     // `NEKO_FAKE_WAKE_SH`: what a thread that merges does with each branch a report names (`{branch}` is replaced).
                     if let (Ok(template), Some(branch)) = (std::env::var("NEKO_FAKE_WAKE_SH"), chunk.split("<branch>").nth(1).and_then(|r| r.split("</branch>").next())) {

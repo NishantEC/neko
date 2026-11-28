@@ -41,6 +41,17 @@ pub fn derive(store: &Store) -> Result<Vec<NeedsItem>, StoreError> {
         match t.status {
             TaskStatus::Asked => {
                 let Some(run) = store.runs_of(&t.id)?.pop().filter(|r| r.status == RunStatus::Done) else { continue };
+                // A question the agent put with `ask_person` (its own, or a kitten's it passed up): the words it asked, and whose.
+                if let Some(a) = run.ask.clone().filter(|a| a.to == neko_protocol::AskTo::Person) {
+                    let since = run.ended_ms.unwrap_or(run.started_ms);
+                    let (kitten, via) = match a.chain.split_first() {
+                        Some((first, rest)) => (Some(first.clone()), rest.to_vec()),
+                        None => (None, Vec::new()),
+                    };
+                    let question = Need::Question { run: run.id.clone(), question: cut_question(&a.text), kitten, via, unanswered: a.unanswered };
+                    items.push(NeedsItem { id: format!("question:{}", run.id.0), task: t.id.clone(), workspace: t.workspace.clone(), title: t.title.clone(), cat: cat_id(t), cat_name: cat_name(t), since_ms: since, need: question, subagent: None });
+                    continue;
+                }
                 let parts = store.parts_of(&t.id)?;
                 let Some(words) = parts.iter().rev().find_map(|p| match &p.body {
                     PartBody::Agent { text, .. } if p.run.as_ref() == Some(&run.id) && !text.trim().is_empty() => Some(text.as_str()),
@@ -49,7 +60,7 @@ pub fn derive(store: &Store) -> Result<Vec<NeedsItem>, StoreError> {
                     continue;
                 };
                 let since = run.ended_ms.unwrap_or(run.started_ms);
-                items.push(NeedsItem { id: format!("question:{}", run.id.0), task: t.id.clone(), workspace: t.workspace.clone(), title: t.title.clone(), cat: cat_id(t), cat_name: cat_name(t), since_ms: since, need: Need::Question { run: run.id, question: question_of(words) }, subagent: None });
+                items.push(NeedsItem { id: format!("question:{}", run.id.0), task: t.id.clone(), workspace: t.workspace.clone(), title: t.title.clone(), cat: cat_id(t), cat_name: cat_name(t), since_ms: since, need: Need::Question { run: run.id, question: question_of(words), kitten: None, via: Vec::new(), unanswered: false }, subagent: None });
             }
             TaskStatus::Failed => {
                 // The newest error notice says why the last attempt failed.
@@ -125,6 +136,15 @@ pub fn question_of(words: &str) -> String {
         Some(s) => chars[s..].iter().collect(),
         None => format!("…{}", chars[chars.len() - (QUESTION_CHARS - 1)..].iter().collect::<String>()),
     }
+}
+
+/// A question the agent put in words of its own, in one line, cut at [`QUESTION_CHARS`] like [`question_of`].
+fn cut_question(text: &str) -> String {
+    let line = text.split_whitespace().collect::<Vec<_>>().join(" ").replace("**", "").replace('`', "");
+    if line.chars().count() <= QUESTION_CHARS {
+        return line;
+    }
+    format!("{}…", line.chars().take(QUESTION_CHARS - 1).collect::<String>().trim_end())
 }
 
 /// The one line to copy in what to do next: its first `code` span ("Run `claude auth login` in Terminal").
