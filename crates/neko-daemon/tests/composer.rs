@@ -111,6 +111,47 @@ fn steer_reaches_the_running_cli_and_the_row_clears_when_the_next_step_reads_it(
     assert_eq!(argvs(&rec).len(), 1, "one process: a steer starts no run");
 }
 
+/// The real Claude Code often folds a steer into the turn already running and ends with one result for both. The run must end on that
+/// result (docs/knowledge/runtimes.md), not sit at "Working" until the silence limit fails it: here the limit is 25 seconds and the
+/// run must be done long before it.
+#[test]
+fn a_steer_folded_into_the_running_turn_ends_the_run_promptly_with_the_words_in_the_turn() {
+    let (d, rec) = start("steer-fold", &[("NEKO_RUN_STALL_MS", "25000")]);
+    let mut c = watcher(&d);
+    let task = create(&mut c, "Do the work [fake:work:4:step=300]");
+    working(&mut c, &task.id);
+    let steered = Instant::now();
+    assert_eq!(send(&mut c, &task.id, "Also end with the word meow", Some(SendMode::Steer)), Reply::Ok);
+    let t = finished(&mut c, &task.id, 1);
+    assert!(steered.elapsed() < Duration::from_secs(15), "the run ended on the one result, not on the silence limit ({:?})", steered.elapsed());
+    assert_eq!(t.task.status, TaskStatus::Done, "ended well, not failed by the stall limit");
+    assert_eq!(t.runs[0].status, RunStatus::Done);
+    assert!(agent_words(&t).contains("Reading your message: Also end with the word meow"), "the steer was obeyed inside the turn: {:?}", agent_words(&t));
+    // The person's words stand once: the CLI's echo of them is not a second message.
+    assert_eq!(t.parts.iter().filter(|p| matches!(&p.body, PartBody::Person { text } if text == "Also end with the word meow")).count(), 1);
+    assert!(t.queued.is_empty());
+    assert_eq!(user_messages(&rec).len(), 2);
+    assert_eq!(argvs(&rec).len(), 1, "one process took both");
+    assert!(argvs(&rec)[0].iter().any(|a| a == "--replay-user-messages"), "the CLI is asked to say which messages it consumed");
+}
+
+/// A CLI that does not fold: the steer waits for a turn of its own, and the run waits for that turn's result too.
+#[test]
+fn a_steer_the_cli_answers_in_a_turn_of_its_own_keeps_the_run_going_until_that_result() {
+    let (d, rec) = start("steer-separate", &[("NEKO_RUN_STALL_MS", "25000")]);
+    let mut c = watcher(&d);
+    let task = create(&mut c, "Do the work [fake:work:3:step=300:separate]");
+    working(&mut c, &task.id);
+    assert_eq!(send(&mut c, &task.id, "Also end with the word meow", Some(SendMode::Steer)), Reply::Ok);
+    let t = finished(&mut c, &task.id, 1);
+    assert_eq!(t.task.status, TaskStatus::Done);
+    let said = agent_words(&t);
+    assert!(said.contains("The work is finished.") && said.contains("Hello from the fake"), "both turns were answered in the one run: {said:?}");
+    assert!(!said.contains("Reading your message"), "not read inside the first turn: {said:?}");
+    assert_eq!(argvs(&rec).len(), 1, "still one process");
+    assert_eq!(user_messages(&rec).len(), 2);
+}
+
 #[test]
 fn steered_messages_show_as_steered_until_read() {
     let (d, _rec) = start("steered-row", &[]);
