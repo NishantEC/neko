@@ -18,8 +18,9 @@ pub fn page(s: &App, t: &Theme, f: &Found) -> El {
         .w_full()
         .gap(t.space.at(8.0))
         .child(f.lit(t, "settings-rounds-pause", automatic(s, t)))
-        .child(f.lit(t, "settings-waits", waits(t)))
         .child(f.lit(t, "settings-briefing", briefing(s, t)))
+        // Facts, no control: last, so the morning time stays in sight in the default window.
+        .child(f.lit(t, "settings-waits", waits(t)))
 }
 
 /// "Timers and watches": what a thread's agent may set, said plainly (the limits are the daemon's, `neko_protocol::waits`).
