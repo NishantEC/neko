@@ -108,7 +108,7 @@ fn create(c: &mut Client, words: &str) -> Task {
 }
 
 fn set_mode(c: &mut Client, m: PermissionMode) {
-    let s = Settings { runtime: "claude".into(), permission_mode: m, own_mcp: false, queue_first: false };
+    let s = Settings { runtime: "claude".into(), permission_mode: m, own_mcp: false, queue_first: false, ask_first_subagent: false };
     assert_eq!(c.request(Request::SetSettings { settings: s.clone() }).unwrap(), Reply::Settings { settings: s });
 }
 
@@ -318,20 +318,20 @@ fn three_subagents_of_a_thread_run_at_once_and_the_rest_queue() {
 }
 
 #[test]
-fn only_four_runs_work_at_once_across_the_daemon() {
+fn only_eight_runs_work_at_once_across_the_daemon() {
+    // Three threads of three kittens: 3 per thread is the first limit, 8 across Neko the second, so the ninth waits its turn.
     let r = rig("cap", &[]);
     let mut c = r.client();
-    let a = create(&mut c, &delegate(&[("A1", "Count [fake:slow]"), ("A2", "Count [fake:slow]"), ("A3", "Count [fake:slow]")], &[]));
-    let b = create(&mut c, &delegate(&[("B1", "Count [fake:slow]"), ("B2", "Count [fake:slow]"), ("B3", "Count [fake:slow]")], &[]));
-    until("six subagents made", || subagents(&mut c, &a.id).len() == 3 && subagents(&mut c, &b.id).len() == 3);
-    until("four working and two queued", || {
+    let threads: Vec<Task> = ["A", "B", "C"].iter().map(|n| create(&mut c, &delegate(&[(&format!("{n}1"), "Count [fake:slow]"), (&format!("{n}2"), "Count [fake:slow]"), (&format!("{n}3"), "Count [fake:slow]")], &[]))).collect();
+    until("nine subagents made", || threads.iter().all(|t| subagents(&mut c, &t.id).len() == 3));
+    until("eight working and one queued", || {
         let all: Vec<Task> = tasks(&mut c).into_iter().filter(|t| t.subagent.is_some()).collect();
-        all.iter().filter(|x| x.status == TaskStatus::Working).count() == 4 && all.iter().filter(|x| x.status == TaskStatus::New).count() == 2
+        all.iter().filter(|x| x.status == TaskStatus::Working).count() == 8 && all.iter().filter(|x| x.status == TaskStatus::New).count() == 1
     });
     std::thread::sleep(Duration::from_millis(600));
     let all: Vec<Task> = tasks(&mut c).into_iter().filter(|t| t.subagent.is_some()).collect();
-    assert_eq!(all.iter().filter(|x| x.status == TaskStatus::Working).count(), 4, "never a fifth");
-    for t in [&a, &b] {
+    assert_eq!(all.iter().filter(|x| x.status == TaskStatus::Working).count(), 8, "never a ninth");
+    for t in &threads {
         assert_eq!(c.request(Request::StopTask { task: t.id.clone() }).unwrap(), Reply::Ok);
     }
     until("no process left", || processes_of(&r.d).is_empty());
@@ -424,7 +424,7 @@ fn a_reached_limit_holds_back_the_wake_until_it_resets() {
 fn the_user_can_have_runs_keep_their_own_mcp_servers() {
     let r = rig("own-mcp", &[]);
     let mut c = r.client();
-    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: true, queue_first: false };
+    let s = Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: true, queue_first: false, ask_first_subagent: false };
     assert_eq!(c.request(Request::SetSettings { settings: s.clone() }).unwrap(), Reply::Settings { settings: s });
     let t = create(&mut c, "Hello [fake:plain]");
     until("done", || task(&mut c, &t.id).status == TaskStatus::Done);

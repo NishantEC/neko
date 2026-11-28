@@ -55,7 +55,7 @@ fn what_cannot_be_done_now_is_refused_in_words_and_taking_back_never_is() {
     let d = Temp::new("shelf-refusals");
     let mut core = open(&d);
     let (thread, _) = core.create_task("Fix login").unwrap();
-    let (kitten, _) = core.create_subagent(&thread.id, "Check links", "Look.").unwrap();
+    let (kitten, _) = core.create_subagent(&thread.id, "Check links", "Look.", Default::default()).unwrap();
     assert!(refusal(&kitten, Shelf::Pin, true).unwrap().contains("kitten"), "a subagent is not a thread");
     assert!(refusal(&kitten, Shelf::Pin, false).unwrap().contains("kitten"));
     let mut t = thread;

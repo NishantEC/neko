@@ -273,14 +273,17 @@ fn release(shared: &Shared, task: &TaskId, mine: &Arc<AtomicBool>) {
 }
 
 fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Vec<neko_core::subagents::WakeRow>>, cancelled: &Arc<AtomicBool>) {
-    // Where it works: prepared once, then the same for every follow-up. A subagent works where its thread works (the thread's own
-    // folder, which that thread made and keeps): `owner` is the task whose folder it is.
-    let owner = task.subagent.as_ref().map_or_else(|| task.id.clone(), |s| s.root.clone());
+    // Where it works: prepared once, then the same for every follow-up. A subagent in the shared folder works where its parent works
+    // (a folder that parent made and keeps); one with a copy of its own has a worktree made for it when it first runs. `owner` is the
+    // task whose folder it is.
+    let owner = crate::subagents::folder_task(shared, &task.id);
+    let own_copy = task.subagent.as_ref().is_some_and(|s| s.placement == neko_protocol::SubPlace::OwnCopy);
     let stored = lock(&shared.core).store.place(&owner);
     let place = match stored {
         // Its folder may have been tidied away after the last run: it comes back first.
         Ok(Some(p)) => workplace::reopen(&shared.runs.data_dir, &owner, &p).map(|()| p),
-        _ if task.subagent.is_some() => Err(PlaceError::Other("The thread this subagent belongs to has no folder to work in.".into())),
+        _ if own_copy => crate::subagents::copy_place(shared, task),
+        _ if task.subagent.is_some() => Err(PlaceError::Other("The agent this subagent belongs to has no folder to work in.".into())),
         _ => workplace::prepare(&shared.runs.data_dir, &task.id, task.folder.as_deref(), &workplace::Placement { in_folder: task.in_folder, from_branch: task.from_branch.clone() }),
     };
     let place: Place = match place {
@@ -302,7 +305,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
         let now = core.now();
         let _ = core.store.set_place(&task.id, &place, now);
     }
-    let settings = lock(&shared.core).store.settings().unwrap_or(neko_protocol::Settings { runtime: "claude".into(), permission_mode: Default::default(), own_mcp: false, queue_first: false });
+    let settings = lock(&shared.core).store.settings().unwrap_or(neko_protocol::Settings { runtime: "claude".into(), permission_mode: Default::default(), own_mcp: false, queue_first: false, ask_first_subagent: false });
     let Some(runtime) = shared.runs.runtimes.iter().find(|r| r.id() == settings.runtime).cloned() else {
         if let Some(w) = &words {
             person(shared, &task.id, w);
@@ -356,7 +359,8 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
         crate::undo::at_end(shared, &task.id, &run_id);
         // A worktree or scratch folder with nothing in it goes now, before a follow-up can start (it makes it again). Not while a
         // subagent still works in it, and never a subagent's: the folder is its thread's.
-        let tidied = if task.subagent.is_some() || crate::subagents::has_live_subagents(shared, &task.id) { workplace::Tidied::Kept } else { workplace::tidy(&shared.runs.data_dir, &task.id, &place) };
+        let shares = task.subagent.as_ref().is_some_and(|s| s.placement == neko_protocol::SubPlace::Shared);
+        let tidied = if shares || crate::subagents::has_live_subagents(shared, &task.id) { workplace::Tidied::Kept } else { workplace::tidy(&shared.runs.data_dir, &task.id, &place) };
         crate::undo::after_run(shared, &task.id, matches!(tidied, workplace::Tidied::Removed { .. }) && place.branch.is_some());
         release(shared, &task.id, cancelled);
         let mut b = lock(&book);
@@ -386,7 +390,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
     // Undo (docs/knowledge/undo.md): runs the person undid cannot be redone after this one starts, and the agent hears first that
     // they were undone. Then the start checkpoint, before the agent can touch anything.
     let told = crate::undo::before_run(shared, &task.id);
-    crate::undo::at_start(shared, &task.id, &run_id, &place);
+    crate::undo::at_start(shared, &task.id, &owner, &run_id, &place);
     let said = match &wake {
         Some(wakes) => neko_core::subagents::wake_message(wakes),
         None => words.clone().unwrap_or_else(|| task.words.clone()),
@@ -399,7 +403,7 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
     // every agent about subagents, and a subagent's own few lines (docs/knowledge/subagents.md).
     let cat_block = cat.as_ref().map(neko_core::cats::block);
     let thread_title = task.subagent.as_ref().and_then(|s| lock(&shared.core).store.get_task(&s.root).ok().flatten()).map(|t| t.title);
-    let instructions = Some(neko_core::subagents::instructions(cat_block.as_deref(), task.subagent.as_ref().zip(thread_title.as_deref()).map(|(s, t)| (s.number.as_str(), t))));
+    let instructions = Some(neko_core::subagents::instructions(cat_block.as_deref(), task.subagent.as_ref().zip(thread_title.as_deref()).map(|(s, t)| (s.number.as_str(), t, s.branch.as_deref()))));
     // This run's own MCP server finds the daemon with a secret made for this run alone.
     let mcp_helper = std::env::var_os("NEKO_MCP_HELPER").filter(|h| !h.is_empty()).map(PathBuf::from).or_else(|| std::env::current_exe().ok()).unwrap_or_default();
     let Some(mcp_secret) = crate::files::random_hex(32).ok() else {
@@ -587,8 +591,18 @@ pub fn remove_task(shared: &Shared, task: &TaskId) -> Reply {
     }
     // Its subagents go with it, once none of them works (their folder is the thread's).
     let below = lock(&shared.core).store.subagents_of(task).unwrap_or_default();
-    if below.iter().any(|t| lock(&shared.runs.active).contains_key(&t.id) || neko_core::subagents::is_live(t.status) && t.status != TaskStatus::Waiting) {
+    if below.iter().any(|t| lock(&shared.runs.active).contains_key(&t.id) || t.is_live_subagent() && t.status != TaskStatus::Waiting) {
         return Reply::error(ErrorCode::Busy, "A kitten of this thread is still working. Stop the thread first.");
+    }
+    // A kitten's own copy goes with it when nothing in it is unsaved; a copy with uncommitted work stops the removal (nothing is
+    // deleted then), and its branch keeps its commits in the repository.
+    for t in below.iter().filter(|t| t.subagent.as_ref().is_some_and(|s| s.placement == neko_protocol::SubPlace::OwnCopy)) {
+        let place = lock(&shared.core).store.place(&t.id).ok().flatten();
+        if let Some(p) = &place
+            && let Err(why) = workplace::remove_place(&shared.runs.data_dir, &t.id, p)
+        {
+            return Reply::error(ErrorCode::UnsavedWork, format!("{} has work that is not saved. {why}", t.subagent_name().unwrap_or_default()));
+        }
     }
     for t in &below {
         crate::undo::forget_task(shared, &t.id, None);

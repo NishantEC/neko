@@ -96,8 +96,9 @@ pub fn before_run(shared: &Shared, task: &TaskId) -> Option<String> {
 
 /// The start checkpoint, taken before the agent starts (so it is of the folder before the run), within the limits' time. When it
 /// cannot be taken the run goes ahead and its card says why undo is not available.
-pub fn at_start(shared: &Shared, task: &TaskId, run: &RunId, place: &Place) {
-    let done = checkpoint::folder_for(&shared.runs.data_dir, task, place).and_then(|f| save(shared, &f, task, run, history::START, refname(task, run, history::START)));
+pub fn at_start(shared: &Shared, task: &TaskId, folder_of_task: &TaskId, run: &RunId, place: &Place) {
+    // A subagent in the shared folder takes its checkpoints of its parent's folder (`folder_of_task` is the task that made it).
+    let done = checkpoint::folder_for(&shared.runs.data_dir, folder_of_task, place).and_then(|f| save(shared, &f, task, run, history::START, refname(task, run, history::START)));
     let u = match done {
         Ok(_) => RunUndo { state: UndoState::Taking, why: None, changes: None, committed: false },
         Err(e) => unavailable(&e),
@@ -242,7 +243,7 @@ fn uncommitted_ends(shared: &Shared, task: &TaskId) -> Result<(String, String, F
     let place = lock(&shared.core).store.place(task).ok().flatten();
     let Some(place) = place else { return Err(refused("There is no folder for this thread yet.")) };
     let f = if place.branch.is_some() && place.repo.is_some() {
-        Folder { kind: Kind::Repo, work: neko_core::workplace::worktree_root(&shared.runs.data_dir, task), shadow: None }
+        Folder { kind: Kind::Repo, work: neko_core::workplace::worktree_root(&shared.runs.data_dir, &crate::subagents::folder_task(shared, task)), shadow: None }
     } else {
         Folder { kind: Kind::Repo, work: PathBuf::from(&place.workdir), shadow: None }
     };

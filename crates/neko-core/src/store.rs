@@ -319,6 +319,13 @@ const MIGRATIONS: &[Migration] = &[
         DELETE FROM find_words WHERE rowid = old.rowid;
     END;
     CREATE INDEX tasks_by_activity ON tasks(activity_ms DESC);"),
+    // 15: own copy, stacking, drafts (docs/knowledge/subagents.md). Where a subagent works ('own_copy', else shared), the sibling it
+    // follows, whether it is a draft (1) or a discarded one (2), and the branch its copy works on. Every subagent that exists works
+    // in its parent's folder, as before.
+    Migration::Sql("ALTER TABLE tasks ADD COLUMN sub_placement TEXT;
+    ALTER TABLE tasks ADD COLUMN sub_after TEXT;
+    ALTER TABLE tasks ADD COLUMN sub_draft INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE tasks ADD COLUMN sub_branch TEXT;"),
 ];
 
 /// Migration 9's step: each task's `latest_line` from its newest agent words.
@@ -404,21 +411,31 @@ pub(crate) fn task_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         settled: row.get::<_, Option<i64>>(20)?.is_some(),
         archived: row.get::<_, Option<i64>>(21)?.is_some(),
         subagent: match (row.get::<_, Option<String>>(14)?, row.get::<_, Option<String>>(15)?, row.get::<_, Option<String>>(16)?) {
-            (Some(parent), Some(number), Some(root)) => Some(SubagentOf { parent: TaskId(parent), number, root: TaskId(root) }),
+            (Some(parent), Some(number), Some(root)) => {
+                let draft = row.get::<_, i64>(23)?;
+                Some(SubagentOf {
+                    placement: if row.get::<_, Option<String>>(22)?.as_deref() == Some("own_copy") { neko_protocol::SubPlace::OwnCopy } else { neko_protocol::SubPlace::Shared },
+                    after: row.get(24)?,
+                    draft: draft == 1,
+                    discarded: draft == 2,
+                    branch: row.get(25)?,
+                    ..SubagentOf::new(TaskId(parent), number, TaskId(root))
+                })
+            }
             _ => None,
         },
     })
 }
 
 /// What a new task row writes (the rest of the columns begin empty).
-const INSERT_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name, last_read_ms, activity_ms, latest_line, parent_id, sub_number, root_id, in_folder, from_branch";
+const INSERT_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name, last_read_ms, activity_ms, latest_line, parent_id, sub_number, root_id, in_folder, from_branch, sub_placement, sub_draft, sub_after, sub_branch";
 /// What a task is read from, in the order [`task_of`] takes it.
-pub(crate) const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name, last_read_ms, activity_ms, latest_line, parent_id, sub_number, root_id, in_folder, from_branch, pinned_ms, settled_ms, archived_ms";
+pub(crate) const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name, last_read_ms, activity_ms, latest_line, parent_id, sub_number, root_id, in_folder, from_branch, pinned_ms, settled_ms, archived_ms, sub_placement, sub_draft, sub_after, sub_branch";
 
 /// Writes a new task and its `task_created` event inside `tx`. Returns the event's sequence number.
 pub(crate) fn insert_task(tx: &rusqlite::Transaction<'_>, task: &Task) -> Result<u64, StoreError> {
     tx.execute(
-        &format!("INSERT INTO tasks ({INSERT_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)"),
+        &format!("INSERT INTO tasks ({INSERT_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)"),
         params![
             task.id.0,
             task.workspace,
@@ -438,7 +455,11 @@ pub(crate) fn insert_task(tx: &rusqlite::Transaction<'_>, task: &Task) -> Result
             task.subagent.as_ref().map(|s| &s.number),
             task.subagent.as_ref().map(|s| &s.root.0),
             task.in_folder as i64,
-            task.from_branch
+            task.from_branch,
+            task.subagent.as_ref().filter(|s| s.placement == neko_protocol::SubPlace::OwnCopy).map(|_| "own_copy"),
+            task.subagent.as_ref().map_or(0, |s| if s.draft { 1 } else if s.discarded { 2 } else { 0 }),
+            task.subagent.as_ref().and_then(|s| s.after.clone()),
+            task.subagent.as_ref().and_then(|s| s.branch.clone())
         ],
     )?;
     let data = serde_json::json!({ "title": task.title, "cat": task.cat, "round": task.round.as_ref().map(|r| &r.id), "subagent": task.subagent.as_ref().map(|s| &s.number) }).to_string();

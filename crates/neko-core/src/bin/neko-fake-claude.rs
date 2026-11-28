@@ -27,7 +27,7 @@
 //! | `hook-destructive` | Runs `git reset --hard HEAD~1`. |
 //! | `real` | The shapes a real run showed: empty thinking, several words between tools, a long absolute path, a check that exits 1. |
 //! | `plugin-tool:SERVER:TOOL` | Calls the tool `mcp__SERVER__TOOL` (asking, as Claude Code would about an MCP tool), then says whether it ran. When `--mcp-config` did not give a server called SERVER there is no such tool: the call fails at once, asking nothing. |
-//! | `mcp` (or `delegate`) | Plays the lines after the tag through the MCP servers `--mcp-config` gave, really started (stdio, with this process's environment): `mcp SERVER TOOL {json}` calls `mcp__SERVER__TOOL` (asking first, as Claude Code does) and reads the server's answer, `poll N` calls `mcp__neko__subagents` N times, `stay N` keeps streaming N seconds. Steps are one per line, or several on one line apart by ` ; ` (what stands before the tag is the person's words). Then it ends its turn. A message that begins `<neko-wake` is answered by saying which reports it read. |
+//! | `mcp` (or `delegate`, or `steps`) | Plays the lines after the tag through the MCP servers `--mcp-config` gave, really started (stdio, with this process's environment): `mcp SERVER TOOL {json}` calls `mcp__SERVER__TOOL` (asking first, as Claude Code does) and reads the server's answer, `poll N` calls `mcp__neko__subagents` N times, `stay N` keeps streaming N seconds, `write NAME TEXT` writes a file in its folder, `sh COMMAND` runs a shell command there, `tools LABEL` records the tools Neko's server offered (`{"neko_tools": "a,b", "label": LABEL}` in the record). Steps are one per line, or several on one line apart by ` ; ` (what stands before the tag is the person's words). `steps` is the same script for a prompt that sits inside another script's step (a subagent's), where a second `mcp` tag would cut that step: its steps must be on lines of their own. Then it ends its turn. A message that begins `<neko-wake` is answered by saying which reports it read; with `NEKO_FAKE_WAKE_SH` set it first runs that shell command in its folder for each report that names a branch (`{branch}` is replaced), as a thread that merges would. |
 //! | `hook-no-verdict` | Says a hook gave no usable answer for `cargo test`, then runs it anyway, as Claude Code does (it fails open). |
 //!
 //! `NEKO_FAKE_RECORD` names a file it appends what it was given to, one JSON line each: `{"argv": [...]}` when it starts, then
@@ -675,7 +675,7 @@ impl Fake {
                 self.say(&words, 2, Duration::from_millis(10));
                 self.result(&words, false);
             }
-            "mcp" | "delegate" => {
+            "mcp" | "delegate" | "steps" => {
                 let mut reports = Vec::new();
                 let mut stay = 0u64;
                 for line in steps_of(words) {
@@ -696,6 +696,24 @@ impl Fake {
                         reports.push(format!("polled {n} times, slowest {slowest} ms"));
                     } else if let Some(n) = line.strip_prefix("stay ") {
                         stay = n.trim().parse().unwrap_or(0);
+                    } else if let Some(rest) = line.strip_prefix("write ") {
+                        // `write NAME TEXT`: a file in the folder it works in, as an agent's edit would make it.
+                        let (name, text) = rest.split_once(' ').unwrap_or((rest, ""));
+                        let path = format!("{}/{name}", self.cwd);
+                        let _ = std::fs::write(&path, format!("{text}\n"));
+                        self.tool("Write", json!({"file_path": path, "content": text}), false, "Wrote the file.");
+                        reports.push(format!("wrote {name}"));
+                    } else if let Some(cmd) = line.strip_prefix("sh ") {
+                        // `sh COMMAND`: a shell command in the folder it works in (git add, commit, merge), its output is the result.
+                        let done = std::process::Command::new("/bin/sh").arg("-c").arg(cmd).current_dir(&self.cwd).stdin(std::process::Stdio::null()).output();
+                        let text = done.map(|o| format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))).unwrap_or_default();
+                        self.tool("Bash", json!({"command": cmd}), false, text.trim());
+                        reports.push(format!("ran {cmd}"));
+                    } else if line == "tools" || line.starts_with("tools ") {
+                        // The tools Neko's own server offered this run, as the CLI would list them.
+                        let names = self.server("neko").map(|s| s.tools.join(",")).unwrap_or_default();
+                        keep(&json!({"neko_tools": names, "label": line.trim_start_matches("tools").trim()}));
+                        reports.push(format!("tools {names}"));
                     }
                 }
                 let until = Instant::now() + Duration::from_secs(stay);
@@ -714,6 +732,13 @@ impl Fake {
                     let attr = |k: &str| chunk.split(&format!("{k}=\"")).nth(1).and_then(|r| r.split('"').next()).unwrap_or("?").to_owned();
                     let first = chunk.split("<summary>").nth(1).and_then(|s| s.lines().next()).unwrap_or("").trim().to_owned();
                     seen.push(format!("Subagent {} {}: {}", attr("id"), attr("status"), first));
+                    // `NEKO_FAKE_WAKE_SH`: what a thread that merges does with each branch a report names (`{branch}` is replaced).
+                    if let (Ok(template), Some(branch)) = (std::env::var("NEKO_FAKE_WAKE_SH"), chunk.split("<branch>").nth(1).and_then(|r| r.split("</branch>").next())) {
+                        let cmd = template.replace("{branch}", branch);
+                        let done = std::process::Command::new("/bin/sh").arg("-c").arg(&cmd).current_dir(&self.cwd).stdin(std::process::Stdio::null()).output();
+                        let text = done.map(|o| format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))).unwrap_or_default();
+                        self.tool("Bash", json!({"command": cmd}), false, text.trim());
+                    }
                 }
                 let text = format!("I read {n} report(s). {}", seen.join(" | "));
                 self.say(&text, 3, Duration::from_millis(10));

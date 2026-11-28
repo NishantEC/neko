@@ -48,7 +48,10 @@ pub use undo::{DiffFile, DiffPatch, DiffSource, DiffSummary, FileStatus, Offer, 
 /// 16: steer, queue, interrupt (`follow_up` takes a `mode`; the messages waiting above a composer are a list the daemon keeps, in the transcript and in `queue_changed`; `send_queued_now`, `discard_queued`; a setting swaps Return and Option-Return).
 /// 17: a thread can be pinned, settled or archived (`pin_task`, `settle_task`, `archive_task`; a task says which it is).
 /// 18: search (`search` finds threads and kittens by title and by what was said in them; filters in the query).
-pub const PROTOCOL_VERSION: u32 = 18;
+/// 19: kittens get a place, an order and a draft (a subagent says whether it works in the shared folder or in a copy of its own, which
+/// branch, which kitten it follows, whether it is a draft or was discarded; `start_draft`, `edit_draft`, `discard_draft`; a setting asks
+/// before a thread's first kitten).
+pub const PROTOCOL_VERSION: u32 = 19;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -269,9 +272,53 @@ pub struct SubagentOf {
     pub number: String,
     /// The top-level thread it belongs to.
     pub root: TaskId,
+    /// Where it works (version 19): in its parent's folder, or in a copy of its own (a git worktree on its own branch).
+    #[serde(default, skip_serializing_if = "SubPlace::is_shared")]
+    pub placement: SubPlace,
+    /// The sibling it starts after, from its branch (version 19): `1` for "After Kitten 1". It stays queued until that one is done.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
+    /// Written but not started (version 19): it waits for the person's Start (or the agent's `start_drafts`). A draft is not waited on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub draft: bool,
+    /// A draft the person threw away (version 19). It never ran; its card says so.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub discarded: bool,
+    /// The branch its own copy works on (`neko/4f2a-1`), known from the start so a card can say it before the copy exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
+/// Where a subagent works (docs/knowledge/subagents.md, "Where a kitten works").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubPlace {
+    /// In its parent's folder, on its parent's branch: for reading, or for work that touches different files.
+    #[default]
+    Shared,
+    /// In a git worktree of its own, on its own branch, started from the parent's folder as it was (uncommitted changes included).
+    OwnCopy,
+}
+
+impl SubPlace {
+    pub fn is_shared(&self) -> bool {
+        *self == SubPlace::Shared
+    }
+}
+
+/// How many subagents of one thread run at once; more wait their turn (docs/knowledge/subagents.md).
+pub const SUBAGENTS_PER_THREAD: usize = 3;
+/// How many runs go at once across Neko that Neko starts by itself; more wait.
+pub const RUNS_ACROSS_NEKO: usize = 8;
+/// How many levels subagents nest.
+pub const SUBAGENT_DEPTH: usize = 3;
+
 impl SubagentOf {
+    /// A subagent in its parent's folder, not a draft, after no one.
+    pub fn new(parent: TaskId, number: impl Into<String>, root: TaskId) -> SubagentOf {
+        SubagentOf { parent, number: number.into(), root, placement: SubPlace::Shared, after: None, draft: false, discarded: false, branch: None }
+    }
+
     /// How deep it is: `1` is 1, `1.2` is 2.
     pub fn depth(&self) -> usize {
         self.number.split('.').count()
@@ -282,6 +329,11 @@ impl Task {
     /// Whether it is a thread of its own (the sidebar lists these), not a subagent.
     pub fn is_thread(&self) -> bool {
         self.subagent.is_none()
+    }
+
+    /// A subagent that has not ended and is not a draft: its thread waits on it (a draft waits on the person).
+    pub fn is_live_subagent(&self) -> bool {
+        self.subagent.as_ref().is_some_and(|s| !s.draft) && matches!(self.status, TaskStatus::New | TaskStatus::Working | TaskStatus::NeedsYou | TaskStatus::Waiting)
     }
 
     /// "Kitten 1.2" for a subagent.
@@ -607,6 +659,9 @@ pub struct Settings {
     /// screen reads it to choose the mode it sends; the daemon never reads it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub queue_first: bool,
+    /// Ask before a thread's first kitten (version 19): it is made a draft the person Starts. Off: kittens start by themselves.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ask_first_subagent: bool,
 }
 
 /// An agent CLI Neko knows, as found on this Mac.
@@ -887,6 +942,12 @@ pub enum Request {
     /// Put the thread in its group's Settled fold, or bring it back (version 16). Settling unpins; a thread that is working is
     /// refused (`refused`). Replies `task`.
     SettleTask { task: TaskId, settled: bool },
+    /// Start a draft kitten (version 19): it runs when there is room. Replies `task`; a kitten that is not a draft is refused.
+    StartDraft { task: TaskId },
+    /// Change a draft kitten's prompt (version 19). Replies `task`; a kitten that is not a draft is refused.
+    EditDraft { task: TaskId, prompt: String },
+    /// Throw a draft kitten away (version 19): it never runs and its card says so. Replies `task`.
+    DiscardDraft { task: TaskId },
     /// Archive the thread, or restore it without a run (version 16). A thread that is working or waits on its subagents is refused. A
     /// message to an archived thread wakes it. Replies `task`.
     ArchiveTask { task: TaskId, archived: bool },

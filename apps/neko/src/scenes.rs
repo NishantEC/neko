@@ -1184,7 +1184,7 @@ fn agents(signed_in: bool, mode: PermissionMode) -> (Vec<RuntimeInfo>, Settings)
                 rules: None,
             },
         ],
-        Settings { runtime: "claude".into(), permission_mode: mode, own_mcp: false, queue_first: false },
+        Settings { runtime: "claude".into(), permission_mode: mode, own_mcp: false, queue_first: false, ask_first_subagent: false },
     )
 }
 

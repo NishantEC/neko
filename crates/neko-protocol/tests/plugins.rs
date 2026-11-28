@@ -232,6 +232,6 @@ fn the_shapes_on_the_wire_are_pinned() {
     let need = Need::Plugin { ask };
     assert_eq!(serde_json::to_string(&need).unwrap(), r#"{"kind":"plugin","ask":{"plugin":"plugin_1","name":"acme-docs","version":"1","digest":"sha256:ab","runs":"node server.js","remote":false,"passes":["ACME_TOKEN"]}}"#);
     assert_eq!(serde_json::from_str::<Need>(&serde_json::to_string(&need).unwrap()).unwrap(), need);
-    assert_eq!(PROTOCOL_VERSION, 18);
+    assert_eq!(PROTOCOL_VERSION, 19);
     assert_eq!(serde_json::to_string(&Reply::error(ErrorCode::InvalidPlugin, "no")).unwrap(), r#"{"type":"error","code":"invalid_plugin","message":"no"}"#);
 }

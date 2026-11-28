@@ -7,6 +7,7 @@
 mod briefing;
 mod files;
 mod folders;
+mod heat;
 mod hook;
 mod http;
 mod mcp_server;

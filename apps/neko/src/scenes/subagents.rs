@@ -27,7 +27,7 @@ fn sub(n: u32, of: &Task, number: &str, title: &str, words: &str, status: TaskSt
     t.folder = of.folder.clone();
     t.cat = of.cat.clone();
     t.status = status;
-    t.subagent = Some(SubagentOf { parent: of.id.clone(), number: number.into(), root: of.id.clone() });
+    t.subagent = Some(SubagentOf::new(of.id.clone(), number, of.id.clone()));
     t
 }
 

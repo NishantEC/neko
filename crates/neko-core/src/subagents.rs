@@ -3,7 +3,7 @@
 //! text the agent is told, the tools Neko's own MCP server offers and the message that wakes a thread. Nothing here starts a
 //! process; the daemon does that (`crates/neko-daemon/src/subagents.rs`).
 
-use neko_protocol::{SubagentOf, Task, TaskId, TaskStatus};
+use neko_protocol::{SubPlace, SubagentOf, Task, TaskId, TaskStatus};
 use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};
 
@@ -12,12 +12,12 @@ use crate::store::{Store, StoreError, insert_task};
 use crate::Core;
 
 /// Subagents of one thread running at once; the rest wait their turn.
-pub const MAX_RUNNING_PER_THREAD: usize = 3;
+pub const MAX_RUNNING_PER_THREAD: usize = neko_protocol::SUBAGENTS_PER_THREAD;
 /// Runs at once across the daemon that Neko starts by itself (a subagent's start, a wake); more wait. A run the person starts is
 /// never held back, but it counts.
-pub const MAX_RUNS: usize = 4;
+pub const MAX_RUNS: usize = neko_protocol::RUNS_ACROSS_NEKO;
 /// How deep subagents nest: Subagent 1.2.3 is the last that may not start more.
-pub const MAX_DEPTH: usize = 3;
+pub const MAX_DEPTH: usize = neko_protocol::SUBAGENT_DEPTH;
 /// The most subagents of one thread that may be waiting, running or unread at once. A guard against a loop, not a plan.
 pub const MAX_LIVE_PER_THREAD: usize = 24;
 /// The most of a report's words a wake carries (bytes).
@@ -43,6 +43,30 @@ pub fn status_word(s: TaskStatus) -> &'static str {
         TaskStatus::Asked => "asked",
         _ => "done",
     }
+}
+
+/// How a new subagent is placed (what `start_subagent` was told).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NewSubagent {
+    pub placement: SubPlace,
+    /// The number of the sibling it starts after, from its branch.
+    pub after: Option<String>,
+    /// Written, not started.
+    pub draft: bool,
+}
+
+/// What may be done to a draft.
+#[derive(Clone, Copy, Debug)]
+pub enum DraftChange<'a> {
+    Start,
+    Discard,
+    Prompt(&'a str),
+}
+
+/// The branch a subagent's own copy works on: `neko/<the thread's short id>-<number, dots as dashes>`, so Kitten 1.2 of thread
+/// `…4f2a` is `neko/4f2a-1-2`.
+pub fn branch_name(root: &TaskId, number: &str) -> String {
+    format!("neko/{}-{}", crate::workplace::short_id(root), number.replace('.', "-"))
 }
 
 /// One report that wakes a thread.
@@ -78,9 +102,9 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    /// Every subagent not yet started, oldest first.
+    /// Every subagent not yet started and meant to be (a draft is not), oldest first.
     pub fn queued_subagents(&self) -> Result<Vec<Task>, StoreError> {
-        let mut st = self.conn.prepare_cached(&format!("SELECT {} FROM tasks WHERE parent_id IS NOT NULL AND status = 'new' ORDER BY created_ms, id", crate::store::TASK_COLUMNS))?;
+        let mut st = self.conn.prepare_cached(&format!("SELECT {} FROM tasks WHERE parent_id IS NOT NULL AND status = 'new' AND sub_draft = 0 ORDER BY created_ms, id", crate::store::TASK_COLUMNS))?;
         let rows = st.query_map([], crate::store::task_of)?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
@@ -97,12 +121,42 @@ impl Store {
         Ok(format!("{prefix}{}", last + 1))
     }
 
+    /// The drafts a task wrote (direct subagents it has not started), oldest first.
+    pub fn drafts_of(&self, parent: &TaskId) -> Result<Vec<Task>, StoreError> {
+        Ok(self.children_of(parent)?.into_iter().filter(|t| t.subagent.as_ref().is_some_and(|s| s.draft)).collect())
+    }
+
+    /// A draft starts (`draft` false), becomes a discarded one (`discarded`), or its prompt is rewritten (`prompt`): one change, with its
+    /// event. Returns the task whole.
+    pub fn change_draft(&mut self, id: &TaskId, change: DraftChange<'_>, now_ms: i64) -> Result<(Task, u64), StoreError> {
+        let tx = self.conn.transaction()?;
+        let kind = match change {
+            DraftChange::Start => {
+                tx.execute("UPDATE tasks SET sub_draft = 0 WHERE id = ?1 AND sub_draft = 1", [&id.0])?;
+                "draft_started"
+            }
+            DraftChange::Discard => {
+                tx.execute("UPDATE tasks SET sub_draft = 2, status = 'stopped' WHERE id = ?1 AND sub_draft = 1", [&id.0])?;
+                "draft_discarded"
+            }
+            DraftChange::Prompt(words) => {
+                tx.execute("UPDATE tasks SET words = ?2 WHERE id = ?1 AND sub_draft = 1", params![id.0, words])?;
+                "draft_edited"
+            }
+        };
+        let seq = log_event(&tx, now_ms, &id.0, kind, json!({}))?;
+        tx.commit()?;
+        let task = self.get_task(id)?.ok_or(StoreError::Sqlite(rusqlite::Error::QueryReturnedNoRows))?;
+        Ok((task, seq))
+    }
+
     /// A subagent's own row: the thread's workspace, folder and cat, the prompt as its words, not yet started.
-    pub fn insert_subagent(&mut self, id: &TaskId, parent: &Task, number: &str, title: &str, prompt: &str, now_ms: i64) -> Result<(Task, u64), StoreError> {
+    pub fn insert_subagent(&mut self, id: &TaskId, parent: &Task, number: &str, title: &str, prompt: &str, now_ms: i64, how: &NewSubagent) -> Result<(Task, u64), StoreError> {
         let root = parent.subagent.as_ref().map_or_else(|| parent.id.clone(), |s| s.root.clone());
         let mut task = Task::blank(id.clone(), &parent.workspace, prompt, title, now_ms, parent.cat.as_deref());
         task.folder = parent.folder.clone();
-        task.subagent = Some(SubagentOf { parent: parent.id.clone(), number: number.to_owned(), root });
+        let branch = (how.placement == SubPlace::OwnCopy).then(|| branch_name(&root, number));
+        task.subagent = Some(SubagentOf { placement: how.placement, after: how.after.clone(), draft: how.draft, branch, ..SubagentOf::new(parent.id.clone(), number, root) });
         let tx = self.conn.transaction()?;
         let seq = insert_task(&tx, &task)?;
         tx.commit()?;
@@ -176,7 +230,7 @@ impl Store {
     pub fn ended_without_wake(&self) -> Result<Vec<Task>, StoreError> {
         let mut st = self.conn.prepare_cached(&format!(
             "SELECT {} FROM tasks WHERE parent_id IS NOT NULL AND status IN ('done', 'failed', 'stopped', 'interrupted', 'asked') \
-             AND NOT EXISTS (SELECT 1 FROM wakes w WHERE w.subagent_id = tasks.id) ORDER BY created_ms, id",
+             AND sub_draft != 2 AND NOT EXISTS (SELECT 1 FROM wakes w WHERE w.subagent_id = tasks.id) ORDER BY created_ms, id",
             crate::store::TASK_COLUMNS
         ))?;
         let rows = st.query_map([], crate::store::task_of)?;
@@ -204,7 +258,7 @@ impl Store {
 impl Core {
     /// Makes the subagent `title` with `prompt` under `parent`: numbered, not started. Refused past the depth and live limits, with
     /// words the agent reads.
-    pub fn create_subagent(&mut self, parent: &TaskId, title: &str, prompt: &str) -> Result<(Task, u64), String> {
+    pub fn create_subagent(&mut self, parent: &TaskId, title: &str, prompt: &str, how: NewSubagent) -> Result<(Task, u64), String> {
         let Some(p) = self.store.get_task(parent).map_err(|e| e.to_string())? else { return Err("This thread is gone.".into()) };
         let depth = p.subagent.as_ref().map_or(0, SubagentOf::depth);
         if depth >= MAX_DEPTH {
@@ -225,10 +279,22 @@ impl Core {
         if live >= MAX_LIVE_PER_THREAD {
             return Err(format!("{live} subagents of this thread have not finished. Wait for their reports before starting more."));
         }
+        let mut how = how;
+        if let Some(after) = how.after.take() {
+            let want = after.trim().trim_start_matches("Subagent").trim_start_matches("Kitten").trim();
+            let siblings = self.store.children_of(&p.id).map_err(|e| e.to_string())?;
+            let Some(sib) = siblings.iter().find(|c| c.subagent.as_ref().is_some_and(|s| s.number == want)) else {
+                return Err(format!("You have no subagent {want} to start after. Use the number a start_subagent answer gave you (one you started yourself)."));
+            };
+            if sib.subagent.as_ref().is_some_and(|s| s.discarded) {
+                return Err(format!("Subagent {want} was discarded by the person, so nothing can follow it."));
+            }
+            how.after = Some(want.to_owned());
+        }
         let number = self.store.next_subagent_number(&p).map_err(|e| e.to_string())?;
         let now = self.now();
         let id = TaskId(self.new_id("task"));
-        self.store.insert_subagent(&id, &p, &number, &title, prompt, now).map_err(|e| e.to_string())
+        self.store.insert_subagent(&id, &p, &number, &title, prompt, now, &how).map_err(|e| e.to_string())
     }
 }
 
@@ -239,26 +305,38 @@ impl Core {
 pub const PARAGRAPH: &str = "Neko can run parts of your work as subagents: separate agents, each with its own context. Most work needs none, so do it yourself. \
 Split a part off only when it is independent of the rest and can be told in full, because a subagent sees nothing but the prompt you write. \
 Start each one with the mcp__neko__start_subagent tool. After starting them, end your turn when you have nothing else to do. Do not poll or wait: Neko wakes you with each report as a \
-message that begins with <neko-wake>. You cannot approve a subagent's steps, because it asks the person itself. Subagents work in your folder and on your branch, so give two of them \
-different files, or start the second one after the first reports. Your own Agent tool is still fine for a quick read-only search inside one run. Neko's app shows subagents to the person as kittens (Subagent 1 is Kitten 1), so you may use either word when you write to them.";
+message that begins with <neko-wake>. You cannot approve a subagent's steps, because it asks the person itself. A subagent that only reads can work in your folder (placement shared). \
+One that writes should have a copy of its own (placement own_copy): a worktree on its own branch, started from your folder as it is now, uncommitted changes included. \
+A subagent that must build on another's work starts after it (after: that one's number) and begins from its branch. Merge a subagent's branch into yours yourself (with a merge, after you commit \
+your own changes) and say that you did; a stacked subagent's branch already holds the one before it. With draft true a subagent is only written down: the person starts it, or you call \
+start_drafts. Your own Agent tool is still fine for a quick read-only search inside one run. Neko's app shows subagents to the person as kittens (Subagent 1 is Kitten 1), so you may use \
+either word when you write to them.";
 
-/// What a subagent is told about itself, after the paragraph. The same bytes on every run of that subagent.
-pub fn subagent_block(number: &str, thread_title: &str) -> String {
+/// What a subagent is told about itself, after the paragraph. The same bytes on every run of that subagent. `branch` is the branch of
+/// its own copy, when it works in one.
+pub fn subagent_block(number: &str, thread_title: &str, branch: Option<&str>) -> String {
+    let place = match branch {
+        Some(b) => format!(" You work in a copy of the project of your own, on the branch {b}. Commit your work there (add everything, then commit) before you finish: the agent that started you merges the branch, and only committed work is on it."),
+        None => " You work in the same folder as the agent that started you.".to_owned(),
+    };
     format!(
         "You are Subagent {number} of \"{thread_title}\". The agent that started you gave you this work and nothing else. Your final message is your report: what you did, the files you changed, and \
-anything it must know. It is read by the agent that started you, not by the person. If you are stuck, say so in your final message instead of guessing."
+anything it must know. It is read by the agent that started you, not by the person. If you are stuck, say so in your final message instead of guessing.{place}"
     )
 }
 
+/// Who a subagent is, for its own few lines: its number, its thread's title and the branch of its own copy.
+pub type Of<'a> = (&'a str, &'a str, Option<&'a str>);
+
 /// The whole text added to a run's system text for a task: the cat's own block, then the paragraph, then (for a subagent) its own.
-pub fn instructions(cat_block: Option<&str>, subagent: Option<(&str, &str)>) -> String {
+pub fn instructions(cat_block: Option<&str>, subagent: Option<Of<'_>>) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(b) = cat_block.filter(|b| !b.is_empty()) {
         parts.push(b.to_owned());
     }
     parts.push(PARAGRAPH.to_owned());
-    if let Some((number, thread)) = subagent {
-        parts.push(subagent_block(number, thread));
+    if let Some((number, thread, branch)) = subagent {
+        parts.push(subagent_block(number, thread, branch));
     }
     parts.join("\n\n")
 }
@@ -268,12 +346,31 @@ pub fn instructions(cat_block: Option<&str>, subagent: Option<(&str, &str)>) -> 
 pub const SERVER_INSTRUCTIONS: &str = "Neko's own tools. start_subagent runs a numbered subagent and returns at once; end your turn afterwards and Neko wakes you with its report. \
 subagents lists them and never waits: do not call it to wait.";
 
-/// What `start_subagent` answers: the agent's cue to end its turn.
-pub fn started_text(number: &str, title: &str, queued: bool) -> String {
-    let state = if queued { "It is queued behind other work and starts when there is room." } else { "It is working now." };
-    format!(
-        "Subagent {number} (\"{title}\") is started. {state} Neko wakes you with its report when it ends. Do not poll or wait. If you have nothing else to do, end your turn now."
-    )
+/// How a subagent just made stands, for the answer to `start_subagent`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Standing {
+    /// Working now.
+    Started,
+    /// Waiting for room (the limits, or the Mac being warm).
+    Queued,
+    /// Waiting for the sibling it follows.
+    After(String),
+    /// Written down for the person to start (their choice, or the agent's).
+    Draft { asked: bool },
+}
+
+/// What `start_subagent` answers: the agent's cue to end its turn. `branch` is given when it works in a copy of its own.
+pub fn started_text(number: &str, title: &str, standing: &Standing, branch: Option<&str>) -> String {
+    let place = branch.map(|b| format!(" It works in a copy of its own on the branch {b}.")).unwrap_or_default();
+    let wake = " Neko wakes you with its report when it ends. Do not poll or wait. If you have nothing else to do, end your turn now.";
+    let (state, end) = match standing {
+        Standing::Started => ("is started. It is working now.".to_owned(), wake),
+        Standing::Queued => ("is queued behind other work and starts when there is room.".to_owned(), wake),
+        Standing::After(n) => (format!("is queued: it starts when Subagent {n} is done, from its branch."), wake),
+        Standing::Draft { asked: true } => ("is saved as a draft: the person asked to approve the first subagent of a thread. It runs when they press Start.".to_owned(), " Tell them what it is for, then end your turn; you are woken with its report once it has run."),
+        Standing::Draft { asked: false } => ("is saved as a draft. It does not run until the person starts it or you call start_drafts.".to_owned(), " Nothing waits on a draft, so say what it is for and end your turn, or call start_drafts when you are ready."),
+    };
+    format!("Subagent {number} (\"{title}\") {state}{place}{end}")
 }
 
 fn cap(s: &str, n: usize) -> String {
@@ -322,18 +419,27 @@ pub fn tools(depth: usize) -> Vec<Value> {
     if depth < MAX_DEPTH {
         list.push(json!({
             "name": "start_subagent",
-            "description": "Run part of your work as a numbered subagent: a separate agent with its own context, working in your folder. It sees only the prompt, so write it in full. \
-Returns at once. After starting subagents, end your turn when you have nothing else to do: Neko wakes you with each report. Do not poll. Most work needs no subagent.",
+            "description": "Run part of your work as a numbered subagent: a separate agent with its own context. It sees only the prompt, so write it in full. \
+Returns at once. After starting subagents, end your turn when you have nothing else to do: Neko wakes you with each report. Do not poll. Most work needs no subagent. \
+Use placement own_copy for anything that writes (a worktree on its own branch, started from your folder as it is now), and shared only to read. \
+With after, it starts when that subagent is done, from its branch. With draft true it is only written down for the person to start.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "title": {"type": "string", "description": "A few words naming the work."},
                     "prompt": {"type": "string", "description": "Everything the subagent needs, in full."},
-                    "placement": {"type": "string", "enum": ["shared"], "description": "Where it works. Only the shared folder is available."}
+                    "placement": {"type": "string", "enum": ["shared", "own_copy"], "description": "Where it works: shared (your folder, to read) or own_copy (a worktree of its own, to write). Default shared."},
+                    "after": {"type": "string", "description": "The number of a subagent you started: this one waits for it and starts from its branch."},
+                    "draft": {"type": "boolean", "description": "Only write it down: the person starts it, or you call start_drafts."}
                 },
                 "required": ["title", "prompt"],
                 "additionalProperties": false
             }
+        }));
+        list.push(json!({
+            "name": "start_drafts",
+            "description": "Starts the drafts you wrote with start_subagent (draft true). Returns their numbers at once. Then end your turn: Neko wakes you with each report.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
         }));
     }
     list.push(json!({
@@ -384,23 +490,36 @@ mod tests {
     }
 
     #[test]
+    fn a_branch_is_the_threads_short_id_and_the_number() {
+        assert_eq!(branch_name(&TaskId("task_01KAB0000000000000ABCDWXYZ".into()), "1"), "neko/abcdwxyz-1");
+        assert_eq!(branch_name(&TaskId("task_01KAB0000000000000ABCDWXYZ".into()), "1.2"), "neko/abcdwxyz-1-2");
+    }
+
+    #[test]
     fn a_subagent_at_the_last_level_is_not_offered_the_tool_to_start_more() {
         let names = |d| tools(d).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
-        assert_eq!(names(0), ["start_subagent", "subagents", "stop_subagent"]);
+        assert_eq!(names(0), ["start_subagent", "start_drafts", "subagents", "stop_subagent"]);
+        assert_eq!(names(MAX_DEPTH - 1), ["start_subagent", "start_drafts", "subagents", "stop_subagent"]);
         assert_eq!(names(MAX_DEPTH), ["subagents", "stop_subagent"]);
     }
 
     #[test]
     fn the_text_is_the_same_bytes_every_time() {
-        assert_eq!(instructions(Some("Rules."), Some(("1.2", "Fix login"))), instructions(Some("Rules."), Some(("1.2", "Fix login"))));
+        assert_eq!(instructions(Some("Rules."), Some(("1.2", "Fix login", None))), instructions(Some("Rules."), Some(("1.2", "Fix login", None))));
         assert!(instructions(None, None).starts_with("Neko can run parts of your work"));
         assert!(instructions(Some("Rules."), None).starts_with("Rules.\n\nNeko can run"));
-        assert!(instructions(None, Some(("1", "Fix login"))).ends_with("instead of guessing."));
+        assert!(instructions(None, Some(("1", "Fix login", None))).ends_with("the same folder as the agent that started you."));
+        let own = instructions(None, Some(("1", "Fix login", Some("neko/4f2a-1"))));
+        assert!(own.contains("on the branch neko/4f2a-1") && own.contains("Commit your work there"));
     }
 
     #[test]
     fn the_result_of_starting_tells_the_agent_to_end_its_turn() {
-        assert!(started_text("1", "Check links", false).contains("end your turn now"));
-        assert!(started_text("1", "Check links", true).contains("queued"));
+        assert!(started_text("1", "Check links", &Standing::Started, None).contains("end your turn now"));
+        assert!(started_text("1", "Check links", &Standing::Queued, None).contains("queued"));
+        let own = started_text("2", "Write tests", &Standing::After("1".into()), Some("neko/4f2a-2"));
+        assert!(own.contains("starts when Subagent 1 is done") && own.contains("on the branch neko/4f2a-2"), "{own}");
+        assert!(started_text("3", "Later", &Standing::Draft { asked: false }, None).contains("start_drafts"));
+        assert!(started_text("1", "First", &Standing::Draft { asked: true }, None).contains("press Start"));
     }
 }

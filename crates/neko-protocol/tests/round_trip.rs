@@ -183,7 +183,7 @@ fn the_requests_that_run_a_task_round_trip() {
     pinned(ClientMessage { id: 9, request: Request::WatchTask { task: None } }, r#"{"id":9,"type":"watch_task"}"#);
     pinned(ClientMessage { id: 10, request: Request::ListRuntimes }, r#"{"id":10,"type":"list_runtimes"}"#);
     pinned(
-        ClientMessage { id: 11, request: Request::SetSettings { settings: Settings { runtime: "claude".into(), permission_mode: PermissionMode::Full, own_mcp: false, queue_first: false } } },
+        ClientMessage { id: 11, request: Request::SetSettings { settings: Settings { runtime: "claude".into(), permission_mode: PermissionMode::Full, own_mcp: false, queue_first: false, ask_first_subagent: false } } },
         r#"{"id":11,"type":"set_settings","settings":{"runtime":"claude","permission_mode":"full"}}"#,
     );
     for (m, name) in [(PermissionMode::Follow, "follow"), (PermissionMode::Ask, "ask"), (PermissionMode::Full, "full")] {
@@ -442,7 +442,7 @@ fn cats_round_trip() {
     let json = serde_json::to_string(&r).unwrap();
     assert!(json.ends_with(r#""cat":"cat_miso","rules_hash":"cbf29ce484222325"}"#), "{json}");
     pinned(PartBody::RulesChanged { cat: c(), name: "miso".into() }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso"}"#);
-    assert_eq!(PROTOCOL_VERSION, 18);
+    assert_eq!(PROTOCOL_VERSION, 19);
     // A thread with no cat writes none; one that chose its place writes the choice; an old screen's task (a cat, no choice) still reads.
     let mut t = task();
     t.cat = None;
@@ -461,12 +461,12 @@ fn subagents_have_their_own_shapes_and_the_old_ones_do_not_change() {
     let t = task();
     assert!(!serde_json::to_string(&t).unwrap().contains("subagent"));
     let mut s = task();
-    s.subagent = Some(SubagentOf { parent: TaskId("task_1".into()), number: "1.2".into(), root: TaskId("task_0".into()) });
+    s.subagent = Some(SubagentOf::new(TaskId("task_1".into()), "1.2", TaskId("task_0".into())));
     let json = serde_json::to_string(&s).unwrap();
     assert!(json.ends_with(r#""subagent":{"parent":"task_1","number":"1.2","root":"task_0"}}"#), "{json}");
     let back: Task = serde_json::from_str(&json).unwrap();
     assert_eq!((back.subagent.as_ref().unwrap().depth(), back.subagent_name().as_deref(), back.is_thread()), (2, Some("Kitten 1.2"), false));
-    assert_eq!(SubagentOf { parent: TaskId("p".into()), number: "1".into(), root: TaskId("p".into()) }.depth(), 1);
+    assert_eq!(SubagentOf::new(TaskId("p".into()), "1", TaskId("p".into())).depth(), 1);
     pinned(TaskStatus::Waiting, "\"waiting\"");
     pinned(PartBody::Subagent { subagent: TaskId("task_2".into()), number: "1".into(), title: "Check links".into() }, r#"{"kind":"subagent","subagent":"task_2","number":"1","title":"Check links"}"#);
     pinned(
@@ -475,8 +475,8 @@ fn subagents_have_their_own_shapes_and_the_old_ones_do_not_change() {
     );
     pinned(PartBody::Wake { number: "2".into(), title: "T".into(), status: "failed".into(), summary: String::new(), files: vec![], branch: None }, r#"{"kind":"wake","number":"2","title":"T","status":"failed","summary":""}"#);
     // The setting that gives runs the person's own MCP servers is written only when it is on.
-    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: false }, r#"{"runtime":"claude","permission_mode":"follow"}"#);
-    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: true, queue_first: false }, r#"{"runtime":"claude","permission_mode":"follow","own_mcp":true}"#);
+    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: false, ask_first_subagent: false }, r#"{"runtime":"claude","permission_mode":"follow"}"#);
+    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: true, queue_first: false, ask_first_subagent: false }, r#"{"runtime":"claude","permission_mode":"follow","own_mcp":true}"#);
     let old: Settings = serde_json::from_str(r#"{"runtime":"claude","permission_mode":"ask"}"#).unwrap();
     assert!(!old.own_mcp, "a screen from before the setting sends none");
 }
@@ -495,7 +495,7 @@ fn steer_queue_and_interrupt_round_trip() {
         r#"{"kind":"event","revision":3,"change":{"type":"queue_changed","task":"task_1","queued":[{"id":"queued_1","task":"task_1","words":"Next","kind":"steered","at_ms":5}]}}"#,
     );
     // Queue-first is written only when on, and a screen from before it sends none.
-    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: true }, r#"{"runtime":"claude","permission_mode":"follow","queue_first":true}"#);
+    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: true, ask_first_subagent: false }, r#"{"runtime":"claude","permission_mode":"follow","queue_first":true}"#);
     pinned(QueuedKind::Interrupting, "\"interrupting\"");
 }
 
@@ -531,4 +531,33 @@ fn a_search_asks_with_its_text_and_is_answered_with_why_each_thread_is_there() {
         ServerMessage::Reply { id: 9, reply: Reply::Found { query: "status:x".into(), hits: Vec::new(), problem: Some("“x” is not a status.".into()), took_ms: 0 } },
         r#"{"kind":"reply","id":9,"reply":{"type":"found","query":"status:x","hits":[],"problem":"“x” is not a status.","took_ms":0}}"#,
     );
+}
+
+#[test]
+fn a_kitten_says_where_it_works_what_it_follows_and_whether_it_is_a_draft() {
+    // The old shape is unchanged: a kitten in the shared folder writes none of the new fields.
+    let mut t = task();
+    t.subagent = Some(SubagentOf::new(TaskId("task_1".into()), "1", TaskId("task_1".into())));
+    assert!(serde_json::to_string(&t).unwrap().ends_with(r#""subagent":{"parent":"task_1","number":"1","root":"task_1"}}"#));
+    // A kitten from a daemon of version 17 reads as in the shared folder, not a draft.
+    let old: Task = serde_json::from_str(r#"{"id":"task_2","workspace":"default","words":"w","title":"t","created_ms":1,"status":"new","subagent":{"parent":"task_1","number":"1","root":"task_1"}}"#).unwrap();
+    let of = old.subagent.unwrap();
+    assert_eq!((of.placement, of.after, of.draft, of.discarded, of.branch), (SubPlace::Shared, None, false, false, None));
+    // A stacked draft in a copy of its own.
+    let mut of = SubagentOf::new(TaskId("task_1".into()), "2", TaskId("task_1".into()));
+    of.placement = SubPlace::OwnCopy;
+    of.after = Some("1".into());
+    of.draft = true;
+    of.branch = Some("neko/4f2a-2".into());
+    t.subagent = Some(of);
+    let json = serde_json::to_string(&t).unwrap();
+    assert!(json.ends_with(r#""subagent":{"parent":"task_1","number":"2","root":"task_1","placement":"own_copy","after":"1","draft":true,"branch":"neko/4f2a-2"}}"#), "{json}");
+    assert_eq!(serde_json::from_str::<Task>(&json).unwrap(), t);
+    assert!(t.subagent.as_ref().is_some_and(|s| s.draft) && !t.is_live_subagent(), "a draft is not waited on");
+    pinned(ClientMessage { id: 5, request: Request::StartDraft { task: TaskId("task_2".into()) } }, r#"{"id":5,"type":"start_draft","task":"task_2"}"#);
+    pinned(ClientMessage { id: 6, request: Request::EditDraft { task: TaskId("task_2".into()), prompt: "Read the docs".into() } }, r#"{"id":6,"type":"edit_draft","task":"task_2","prompt":"Read the docs"}"#);
+    pinned(ClientMessage { id: 7, request: Request::DiscardDraft { task: TaskId("task_2".into()) } }, r#"{"id":7,"type":"discard_draft","task":"task_2"}"#);
+    pinned(Settings { runtime: "claude".into(), permission_mode: PermissionMode::Follow, own_mcp: false, queue_first: false, ask_first_subagent: true }, r#"{"runtime":"claude","permission_mode":"follow","ask_first_subagent":true}"#);
+    let old: Settings = serde_json::from_str(r#"{"runtime":"claude","permission_mode":"ask"}"#).unwrap();
+    assert!(!old.ask_first_subagent);
 }

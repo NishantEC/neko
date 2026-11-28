@@ -63,7 +63,7 @@ fn pending(changes: &[Change]) -> Permission {
 }
 
 fn set_mode(c: &mut Client, m: PermissionMode) {
-    let s = Settings { runtime: "claude".into(), permission_mode: m, own_mcp: false, queue_first: false };
+    let s = Settings { runtime: "claude".into(), permission_mode: m, own_mcp: false, queue_first: false, ask_first_subagent: false };
     assert_eq!(c.request(Request::SetSettings { settings: s.clone() }).unwrap(), Reply::Settings { settings: s });
 }
 

@@ -710,6 +710,9 @@ fn answer(text: &str, conn: u64, said_hello: &mut bool, shared: &Arc<Shared>) ->
         Request::PinTask { task, pinned } => shelve(shared, &task, Shelf::Pin, pinned),
         Request::SettleTask { task, settled } => shelve(shared, &task, Shelf::Settle, settled),
         Request::ArchiveTask { task, archived } => shelve(shared, &task, Shelf::Archive, archived),
+        Request::StartDraft { task } => crate::subagents::start_draft(shared, &task),
+        Request::EditDraft { task, prompt } => crate::subagents::edit_draft(shared, &task, &prompt),
+        Request::DiscardDraft { task } => crate::subagents::discard_draft(shared, &task),
         Request::AnswerPermission { permission, decision } => runs::answer(shared, &permission, decision),
         Request::WatchTask { task } => {
             if let Some(c) = lock(&shared.conns).get_mut(&conn) {

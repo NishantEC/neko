@@ -14,10 +14,12 @@ use std::time::{Duration, Instant};
 
 use neko_core::Core;
 use neko_core::conductor;
-use neko_core::subagents::{self as rules, WakeRow};
-use neko_protocol::{Change, DiffFile, FileStatus, Reply, ServerMessage, SubagentOf, Task, TaskId, TaskStatus};
+use neko_core::subagents::{self as rules, DraftChange, NewSubagent, Standing, WakeRow};
+use neko_core::workplace::{self, PlaceError};
+use neko_protocol::{Change, DiffFile, ErrorCode, FileStatus, Reply, ServerMessage, SubPlace, SubagentOf, Task, TaskId, TaskStatus};
 use serde_json::{Value, json};
 
+use crate::heat::{self, Heat};
 use crate::runs::{self, McpRun};
 use crate::server::{Shared, lock};
 
@@ -153,13 +155,63 @@ pub fn pass(shared: &Arc<Shared>) {
     deliver_wakes(shared);
 }
 
+/// Where a stacked kitten stands against the sibling it follows.
+enum Turn {
+    /// It may start: it follows no one, or the one it follows is done.
+    Go,
+    /// The one it follows has not ended (or is a draft the person has not started).
+    Wait,
+    /// The one it follows ended without finishing: it will not start, and why.
+    Cancel(String),
+}
+
+fn turn_of(shared: &Arc<Shared>, sub: &Task) -> Turn {
+    let Some(of) = &sub.subagent else { return Turn::Go };
+    let Some(after) = &of.after else { return Turn::Go };
+    let pred = lock(&shared.core).store.children_of(&of.parent).unwrap_or_default().into_iter().find(|c| c.subagent.as_ref().is_some_and(|s| &s.number == after));
+    match pred {
+        None => Turn::Cancel(format!("Subagent {after}, which it follows, is gone, so Subagent {} was not started.", of.number)),
+        Some(p) if p.subagent.as_ref().is_some_and(|s| s.draft) || p.is_live_subagent() => Turn::Wait,
+        Some(p) if p.status == TaskStatus::Done => Turn::Go,
+        Some(p) => {
+            let how = match p.status {
+                TaskStatus::Failed => "failed",
+                TaskStatus::Stopped if p.subagent.as_ref().is_some_and(|s| s.discarded) => "was discarded",
+                TaskStatus::Stopped => "was stopped",
+                TaskStatus::Interrupted => "was interrupted",
+                _ => "ended with a question",
+            };
+            Turn::Cancel(format!("Subagent {after}, which it follows, {how}, so Subagent {} was not started. Start it again yourself once you have dealt with Subagent {after}.", of.number))
+        }
+    }
+}
+
+/// A stacked kitten that will not start: it ends stopped, and leaves a report that says why, so its thread is woken and decides.
+fn cancel(shared: &Arc<Shared>, sub: &Task, why: &str) {
+    set_status(shared, sub, TaskStatus::Stopped);
+    let now_task = lock(&shared.core).store.get_task(&sub.id).ok().flatten().unwrap_or_else(|| sub.clone());
+    report(shared, &now_task, Some(why));
+    poke(shared);
+}
+
 fn start_queued(shared: &Arc<Shared>) {
     let queued = lock(&shared.core).store.queued_subagents().unwrap_or_default();
+    // Whether the Mac lets Neko start more by itself: read only when a kitten could start, then again after a while.
+    let mut heat: Option<Heat> = None;
+    let mut held = false;
     for sub in queued {
         if paused(shared) {
             return;
         }
         let Some(of) = &sub.subagent else { continue };
+        match turn_of(shared, &sub) {
+            Turn::Wait => continue,
+            Turn::Cancel(why) => {
+                cancel(shared, &sub, &why);
+                continue;
+            }
+            Turn::Go => {}
+        }
         let (total, mine) = {
             let active: Vec<TaskId> = lock(&shared.runs.active).keys().cloned().collect();
             if active.contains(&sub.id) {
@@ -172,8 +224,18 @@ fn start_queued(shared: &Arc<Shared>) {
         if total >= max_runs() || mine >= rules::MAX_RUNNING_PER_THREAD {
             continue;
         }
+        if *heat.get_or_insert_with(heat::level) != Heat::Ok {
+            held = true;
+            continue;
+        }
         // The thread's own run must not be undone or gone: `start` checks the rest.
         let _ = runs::start(shared, sub, None);
+    }
+    if held {
+        // Something waits for the Mac to cool: look again after a while (the only timer this hub ever sets for it).
+        let at = Instant::now() + heat::recheck();
+        let mut st = lock(&shared.subagents.state);
+        st.next = Some(st.next.map_or(at, |n| n.min(at)));
     }
 }
 
@@ -217,7 +279,12 @@ fn deliver_wakes(shared: &Arc<Shared>) {
                     }
                     due
                 };
-                if due > Instant::now() || paused(shared) || lock(&shared.runs.active).len() >= max_runs() {
+                if due > Instant::now() || paused(shared) || lock(&shared.runs.active).len() >= max_runs() || heat::level() == Heat::Wait {
+                    if heat::level() == Heat::Wait {
+                        let at = Instant::now() + heat::recheck();
+                        let mut st = lock(&shared.subagents.state);
+                        st.next = Some(st.next.map_or(at, |n| n.min(at)));
+                    }
                     continue;
                 }
                 if runs::start_wake(shared, task, wakes).is_ok() {
@@ -254,7 +321,7 @@ pub fn ended(shared: &Arc<Shared>, id: &TaskId) {
     }
     let task = lock(&shared.core).store.get_task(id).ok().flatten().unwrap_or(task);
     if task.subagent.is_some() && matches!(task.status, TaskStatus::Done | TaskStatus::Failed | TaskStatus::Stopped | TaskStatus::Interrupted | TaskStatus::Asked) {
-        report(shared, &task);
+        report(shared, &task, None);
     }
     poke(shared);
 }
@@ -262,12 +329,12 @@ pub fn ended(shared: &Arc<Shared>, id: &TaskId) {
 /// Whether any subagent under this thread has not ended, or a report for it is unread: its folder is still in use.
 pub fn has_live_subagents(shared: &Shared, task: &TaskId) -> bool {
     let core = lock(&shared.core);
-    core.store.subagents_of(task).unwrap_or_default().iter().any(|c| rules::is_live(c.status)) || core.store.has_pending_wake(task).unwrap_or(false)
+    core.store.subagents_of(task).unwrap_or_default().iter().any(Task::is_live_subagent) || core.store.has_pending_wake(task).unwrap_or(false)
 }
 
 fn has_live_children(shared: &Shared, task: &Task) -> bool {
     let core = lock(&shared.core);
-    core.store.children_of(&task.id).unwrap_or_default().iter().any(|c| rules::is_live(c.status)) || core.store.has_pending_wake(&task.id).unwrap_or(false)
+    core.store.children_of(&task.id).unwrap_or_default().iter().any(Task::is_live_subagent) || core.store.has_pending_wake(&task.id).unwrap_or(false)
 }
 
 fn set_status(shared: &Shared, task: &Task, status: TaskStatus) {
@@ -302,17 +369,45 @@ fn file_line(f: &DiffFile) -> String {
     }
 }
 
-/// Stores the report of a subagent that ended, once.
-fn report(shared: &Arc<Shared>, task: &Task) {
+/// The branch an own copy left, when it is still there, and the note about work it did not commit (the agent merges a branch, so
+/// only committed work is on it).
+fn copy_facts(shared: &Arc<Shared>, task: &Task) -> (Option<String>, String) {
+    let Some(of) = &task.subagent else { return (None, String::new()) };
+    if of.placement != SubPlace::OwnCopy {
+        return (None, String::new());
+    }
+    let place = lock(&shared.core).store.place(&task.id).ok().flatten();
+    let (Some(place), Some(branch)) = (place, of.branch.clone()) else { return (None, String::new()) };
+    let repo = place.repo.clone().map(std::path::PathBuf::from);
+    let exists = repo.as_deref().is_some_and(|r| workplace::branch_exists(r, &branch));
+    let mut note = String::new();
+    let tree = workplace::worktree_root(&shared.runs.data_dir, &task.id);
+    if exists
+        && tree.exists()
+        && let Some(base) = &place.base_commit
+        && let Some(st) = workplace::tree_state(&tree, &branch, base)
+        && st.uncommitted
+    {
+        note = format!("\n\nNote: it left changes in its copy that are not committed, so they are not on the branch {branch}. Its copy is {}. Commit them there before you merge.", place.workdir);
+    }
+    (exists.then_some(branch), note)
+}
+
+/// Stores the report of a subagent that ended, once. `said` stands in for its words (a kitten that never started).
+fn report(shared: &Arc<Shared>, task: &Task, said: Option<&str>) {
     let Some(of) = &task.subagent else { return };
+    if of.draft || of.discarded {
+        return;
+    }
     if lock(&shared.core).store.ended_without_wake().map_or(true, |t| !t.iter().any(|x| x.id == task.id)) {
         return;
     }
     let silenced = lock(&shared.subagents.state).silenced.remove(&task.id);
-    let files = if silenced { Vec::new() } else { files_of(shared, task) };
+    let files = if silenced || said.is_some() { Vec::new() } else { files_of(shared, task) };
+    let (branch, note) = if said.is_some() { (None, String::new()) } else { copy_facts(shared, task) };
     let mut core = lock(&shared.core);
     let now = core.now();
-    let mut summary = core.store.final_words(&task.id).unwrap_or_default();
+    let mut summary = said.map(str::to_owned).unwrap_or_else(|| core.store.final_words(&task.id).unwrap_or_default());
     if summary.is_empty() {
         let reason = core.store.runs_of(&task.id).ok().and_then(|mut r| r.pop()).and_then(|r| r.reason);
         summary = match (task.status, reason) {
@@ -321,7 +416,7 @@ fn report(shared: &Arc<Shared>, task: &Task) {
             _ => "It ended without saying anything.".to_owned(),
         };
     }
-    let branch = core.store.place(&task.id).ok().flatten().and_then(|p| p.branch);
+    summary.push_str(&note);
     let w = WakeRow {
         id: core.new_id("wake"),
         task: of.parent.clone(),
@@ -381,8 +476,12 @@ pub fn stop_tree(shared: &Arc<Shared>, id: &TaskId) {
             Some(None) => {}
             // Nothing runs for it: a subagent not started yet, or a thread that waits. It is stopped here.
             None => {
-                let now_status = lock(&shared.core).store.get_task(&t.id).ok().flatten().map(|x| x.status);
-                if matches!(now_status, Some(TaskStatus::New | TaskStatus::Waiting)) && (t.subagent.is_some() || now_status == Some(TaskStatus::Waiting)) {
+                let now = lock(&shared.core).store.get_task(&t.id).ok().flatten();
+                let now_status = now.as_ref().map(|x| x.status);
+                if now.as_ref().and_then(|x| x.subagent.as_ref()).is_some_and(|s| s.draft) {
+                    // Never started: it is thrown away, and no report wakes anyone.
+                    discard(shared, &t.id);
+                } else if matches!(now_status, Some(TaskStatus::New | TaskStatus::Waiting)) && (t.subagent.is_some() || now_status == Some(TaskStatus::Waiting)) {
                     set_status(shared, t, TaskStatus::Stopped);
                     ended(shared, &t.id);
                 }
@@ -406,7 +505,8 @@ pub fn recover(core: &mut Core) {
             summary = "Neko stopped while it worked, before it said anything.".to_owned();
         }
         let status = rules::status_word(task.status).to_owned();
-        let w = WakeRow { id: core.new_id("wake"), task: of.parent.clone(), subagent: task.id.clone(), number: of.number.clone(), title: task.title.clone(), status, summary, files: Vec::new(), branch: None, created_ms: now };
+        let branch = (of.placement == SubPlace::OwnCopy).then(|| of.branch.clone()).flatten();
+        let w = WakeRow { id: core.new_id("wake"), task: of.parent.clone(), subagent: task.id.clone(), number: of.number.clone(), title: task.title.clone(), status, summary, files: Vec::new(), branch, created_ms: now };
         let _ = core.store.insert_wake(&w, "pending", now);
     }
 }
@@ -426,6 +526,7 @@ pub fn handle(shared: &Arc<Shared>, run: &McpRun, body: &Value) -> Value {
     let args = &body["arguments"];
     match body["tool"].as_str().unwrap_or("") {
         "start_subagent" => start(shared, run, args),
+        "start_drafts" => start_drafts_tool(shared, run),
         "subagents" => list(shared, run, args),
         "stop_subagent" => stop_one(shared, run, args),
         other => answer(format!("Neko has no tool called {other}."), true),
@@ -434,19 +535,37 @@ pub fn handle(shared: &Arc<Shared>, run: &McpRun, body: &Value) -> Value {
 
 fn start(shared: &Arc<Shared>, run: &McpRun, args: &Value) -> Value {
     let (Some(title), Some(prompt)) = (args["title"].as_str(), args["prompt"].as_str()) else { return answer("start_subagent needs a title and a prompt, both text.", true) };
-    match args["placement"].as_str() {
-        None | Some("shared") => {}
-        Some(other) => return answer(format!("Placement {other} is not available yet. Use shared: the subagent works in your folder."), true),
-    }
+    let placement = match args["placement"].as_str() {
+        None | Some("shared") => SubPlace::Shared,
+        Some("own_copy") => SubPlace::OwnCopy,
+        Some(other) => return answer(format!("Placement {other} is not one of shared and own_copy."), true),
+    };
+    let after = args["after"].as_str().filter(|a| !a.trim().is_empty()).map(str::to_owned);
+    let mut draft = args["draft"].as_bool().unwrap_or(false);
     if shared.stopping.load(Ordering::SeqCst) {
         return answer("Neko is stopping.", true);
     }
     if lock(&shared.runs.active).get(&run.task).is_some_and(|a| a.cancelled.load(Ordering::SeqCst)) {
         return answer("The person stopped this thread, so no subagent was started.", true);
     }
+    if placement == SubPlace::OwnCopy {
+        // A copy is a git worktree: the folder this agent works in must be in a repository that has a commit.
+        let here = lock(&shared.core).store.place(&run.task).ok().flatten().map(|p| std::path::PathBuf::from(p.workdir));
+        if here.as_deref().and_then(workplace::copy_source).is_none() {
+            return answer("Placement own_copy needs the project to be a git repository with a commit, and this folder is not one. Use shared (it works in your folder), or do this part yourself.", true);
+        }
+    }
+    let (settings, first) = {
+        let core = lock(&shared.core);
+        let first = core.store.get_task(&run.task).ok().flatten().is_some_and(|t| t.subagent.is_none()) && core.store.subagents_of(&run.task).map_or(false, |v| v.is_empty());
+        (core.store.settings().ok(), first)
+    };
+    // "Ask before a thread's first kitten": the first one is written down as a draft, and the person starts it.
+    let asked = !draft && first && settings.is_some_and(|s| s.ask_first_subagent);
+    draft |= asked;
     let sub = {
         let mut core = lock(&shared.core);
-        match core.create_subagent(&run.task, title, prompt) {
+        match core.create_subagent(&run.task, title, prompt, NewSubagent { placement, after, draft }) {
             Ok((sub, rev)) => {
                 shared.broadcast(&ServerMessage::Event { revision: rev, change: Change::TaskCreated { task: sub.clone() } });
                 sub
@@ -462,11 +581,181 @@ fn start(shared: &Arc<Shared>, run: &McpRun, args: &Value) -> Value {
             runs::push(shared, &run.task, outs, run.control.as_ref());
         }
     }
-    // Start it now when there is room, so the answer is true; otherwise it is queued and the next pass takes it.
+    let of = sub.subagent.clone().unwrap_or_else(|| SubagentOf::new(run.task.clone(), "", run.task.clone()));
+    let standing = if draft {
+        Standing::Draft { asked }
+    } else {
+        // Start it now when there is room, so the answer is true; otherwise it is queued and the next pass takes it.
+        pass(shared);
+        if lock(&shared.runs.active).contains_key(&sub.id) {
+            Standing::Started
+        } else {
+            match of.after.clone() {
+                Some(n) if matches!(turn_of(shared, &sub), Turn::Wait) => Standing::After(n),
+                _ => Standing::Queued,
+            }
+        }
+    };
+    answer(rules::started_text(&of.number, &sub.title, &standing, of.branch.as_deref()), false)
+}
+
+/// `start_drafts`: starts the drafts this run's task wrote.
+fn start_drafts_tool(shared: &Arc<Shared>, run: &McpRun) -> Value {
+    let drafts = lock(&shared.core).store.drafts_of(&run.task).unwrap_or_default();
+    if drafts.is_empty() {
+        return answer("You have no drafts to start.", false);
+    }
+    let mut numbers = Vec::new();
+    for d in &drafts {
+        if let Some(t) = release_draft(shared, d) {
+            numbers.push(t.subagent.as_ref().map(|s| s.number.clone()).unwrap_or_default());
+        }
+    }
     pass(shared);
-    let number = sub.subagent.as_ref().map(|s| s.number.clone()).unwrap_or_default();
-    let started = lock(&shared.runs.active).contains_key(&sub.id);
-    answer(rules::started_text(&number, &sub.title, !started), false)
+    answer(
+        format!("Started Subagent {}. Neko wakes you with each report. Do not poll or wait. If you have nothing else to do, end your turn now.", numbers.join(", Subagent ")),
+        false,
+    )
+}
+
+/// A draft becomes a kitten that waits its turn (or runs): the draft flag goes, with its event, and screens are told.
+fn release_draft(shared: &Arc<Shared>, draft: &Task) -> Option<Task> {
+    let mut core = lock(&shared.core);
+    let now = core.now();
+    let (t, rev) = core.store.change_draft(&draft.id, DraftChange::Start, now).ok()?;
+    shared.broadcast(&ServerMessage::Event { revision: rev, change: Change::TaskUpdated { task: t.clone() } });
+    Some(t)
+}
+
+/// A draft is thrown away: it never ran, and nothing is woken.
+fn discard(shared: &Arc<Shared>, id: &TaskId) -> Option<Task> {
+    let mut core = lock(&shared.core);
+    let now = core.now();
+    let (t, rev) = core.store.change_draft(id, DraftChange::Discard, now).ok()?;
+    shared.broadcast(&ServerMessage::Event { revision: rev, change: Change::TaskUpdated { task: t.clone() } });
+    Some(t)
+}
+
+fn draft_of(shared: &Arc<Shared>, id: &TaskId) -> Result<Task, Reply> {
+    match lock(&shared.core).store.get_task(id) {
+        Ok(Some(t)) if t.subagent.as_ref().is_some_and(|s| s.draft) => Ok(t),
+        Ok(Some(_)) => Err(Reply::error(ErrorCode::Refused, "That kitten is not a draft.")),
+        Ok(None) => Err(Reply::error(ErrorCode::NotFound, "There is no such kitten.")),
+        Err(e) => Err(Reply::error(ErrorCode::Internal, e.to_string())),
+    }
+}
+
+/// The person's Start on a draft card: it runs when there is room, and its thread (resting, with nothing else going) waits on it.
+pub fn start_draft(shared: &Arc<Shared>, id: &TaskId) -> Reply {
+    let draft = match draft_of(shared, id) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
+    let Some(t) = release_draft(shared, &draft) else { return Reply::error(ErrorCode::Internal, "Neko could not start the draft.") };
+    // The thread rests with nothing going: it is Waiting on this kitten now (a thread whose run is going gets there when the run ends).
+    if let Some(of) = &t.subagent {
+        let parent = lock(&shared.core).store.get_task(&of.parent).ok().flatten();
+        if let Some(p) = parent
+            && matches!(p.status, TaskStatus::Done | TaskStatus::Asked)
+            && !lock(&shared.runs.active).contains_key(&p.id)
+        {
+            set_status(shared, &p, TaskStatus::Waiting);
+        }
+    }
+    pass(shared);
+    poke(shared);
+    Reply::Task { task: lock(&shared.core).store.get_task(id).ok().flatten().unwrap_or(t) }
+}
+
+/// The person changes a draft's prompt, in the card.
+pub fn edit_draft(shared: &Arc<Shared>, id: &TaskId, prompt: &str) -> Reply {
+    if let Err(r) = draft_of(shared, id) {
+        return r;
+    }
+    if prompt.trim().is_empty() {
+        return Reply::error(ErrorCode::BadRequest, "A kitten needs a prompt: it sees nothing else.");
+    }
+    if prompt.len() > neko_protocol::MAX_WORDS_BYTES {
+        return Reply::error(ErrorCode::BadRequest, "That prompt is too long. Put the long part in a file and name the file.");
+    }
+    let mut core = lock(&shared.core);
+    let now = core.now();
+    match core.store.change_draft(id, DraftChange::Prompt(prompt.trim_end()), now) {
+        Ok((task, rev)) => {
+            shared.broadcast(&ServerMessage::Event { revision: rev, change: Change::TaskUpdated { task: task.clone() } });
+            Reply::Task { task }
+        }
+        Err(e) => Reply::error(ErrorCode::Internal, e.to_string()),
+    }
+}
+
+/// The person's Discard on a draft card.
+pub fn discard_draft(shared: &Arc<Shared>, id: &TaskId) -> Reply {
+    if let Err(r) = draft_of(shared, id) {
+        return r;
+    }
+    match discard(shared, id) {
+        Some(task) => {
+            poke(shared);
+            Reply::Task { task }
+        }
+        None => Reply::error(ErrorCode::Internal, "Neko could not discard the draft."),
+    }
+}
+
+// ---- Where a kitten works ---------------------------------------------------------------------------------------------------------
+
+/// The task whose folder `task` works in: itself, or (a kitten in its parent's folder) the nearest one above it that has a folder of its
+/// own: the thread, or a kitten in a copy.
+pub fn folder_task(shared: &Shared, task: &TaskId) -> TaskId {
+    let core = lock(&shared.core);
+    let mut at = task.clone();
+    for _ in 0..8 {
+        let Some(t) = core.store.get_task(&at).ok().flatten() else { break };
+        match &t.subagent {
+            Some(of) if of.placement == SubPlace::Shared => at = of.parent.clone(),
+            _ => break,
+        }
+    }
+    at
+}
+
+/// Makes an own copy for a kitten about to run: a worktree on its own branch from the folder it follows, uncommitted changes included
+/// (what a stacked kitten follows is the copy of the one before it, when that one has one still).
+pub fn copy_place(shared: &Shared, task: &Task) -> Result<neko_core::records::Place, PlaceError> {
+    let Some(of) = &task.subagent else { return Err(PlaceError::Other("Only a subagent has a copy.".into())) };
+    let branch = of.branch.clone().unwrap_or_else(|| rules::branch_name(&of.root, &of.number));
+    let data = &shared.runs.data_dir;
+    // What it copies: the copy of the kitten it follows (when that is one and still there), else the folder its parent works in.
+    let (source, repo) = {
+        let core = lock(&shared.core);
+        let before = of
+            .after
+            .as_ref()
+            .and_then(|n| core.store.children_of(&of.parent).ok()?.into_iter().find(|c| c.subagent.as_ref().is_some_and(|s| &s.number == n && s.placement == SubPlace::OwnCopy)))
+            .and_then(|c| core.store.place(&c.id).ok().flatten())
+            .filter(|p| std::path::Path::new(&p.workdir).is_dir());
+        match before {
+            Some(p) => (Some(p), None),
+            None => (None, Some(of.parent.clone())),
+        }
+    };
+    let place = match (source, repo) {
+        (Some(p), _) => p,
+        (None, Some(parent)) => {
+            // The parent's folder, made again first when it was tidied away while nothing worked in it.
+            let owner = folder_task(shared, &parent);
+            let p = lock(&shared.core).store.place(&parent).ok().flatten().ok_or_else(|| PlaceError::Other("The agent that started this subagent has no folder to copy.".into()))?;
+            let stored = lock(&shared.core).store.place(&owner).ok().flatten().unwrap_or_else(|| p.clone());
+            workplace::reopen(data, &owner, &stored)?;
+            stored
+        }
+        (None, None) => return Err(PlaceError::Other("There is nothing to copy.".into())),
+    };
+    let from = std::path::PathBuf::from(&place.workdir);
+    let Some(root) = workplace::copy_source(&from) else { return Err(PlaceError::Other("The folder this subagent copies is not a git repository with a commit.".into())) };
+    let base = workplace::copy_base(data, &root, &shared.runs.undo_limits).map_err(|why| PlaceError::Other(format!("Neko could not copy the project for this subagent: {why}.")))?;
+    workplace::prepare_copy(data, &task.id, &branch, &from, &base, place.repo.as_deref())
 }
 
 /// A subagent of this run's task by the number the agent names (`1`, `1.2`, or "Subagent 1").
@@ -477,14 +766,24 @@ fn child(shared: &Shared, run: &McpRun, id: &str) -> Option<Task> {
 
 fn state_words(t: &Task) -> &'static str {
     match t.status {
+        TaskStatus::New if t.subagent.as_ref().is_some_and(|s| s.draft) => "a draft: waiting for the person to start it",
         TaskStatus::New => "queued",
         TaskStatus::Working | TaskStatus::NeedsYou => "working",
         TaskStatus::Waiting => "waiting on its own subagents",
         TaskStatus::Done => "done",
         TaskStatus::Failed => "failed",
+        TaskStatus::Stopped if t.subagent.as_ref().is_some_and(|s| s.discarded) => "discarded by the person before it ran",
         TaskStatus::Stopped => "stopped",
         TaskStatus::Interrupted => "interrupted",
         TaskStatus::Asked => "ended with a question",
+    }
+}
+
+/// Where it works, for the agent: "own copy neko/4f2a-1" or "shared folder".
+fn place_words(t: &Task) -> String {
+    match t.subagent.as_ref() {
+        Some(s) if s.placement == SubPlace::OwnCopy => format!("own copy {}", s.branch.as_deref().unwrap_or("")).trim().to_owned(),
+        _ => "shared folder".to_owned(),
     }
 }
 
@@ -494,7 +793,7 @@ fn list(shared: &Arc<Shared>, run: &McpRun, args: &Value) -> Value {
         let words = lock(&shared.core).store.final_words(&c.id).unwrap_or_default();
         let number = c.subagent.as_ref().map(|s| s.number.clone()).unwrap_or_default();
         let body = if words.is_empty() { "It has not said anything yet.".to_owned() } else { words };
-        return answer(format!("Subagent {number} (\"{}\"), {}:\n\n{body}", c.title, state_words(&c)), false);
+        return answer(format!("Subagent {number} (\"{}\"), {}, {}:\n\n{body}", c.title, state_words(&c), place_words(&c)), false);
     }
     let kids = lock(&shared.core).store.children_of(&run.task).unwrap_or_default();
     if kids.is_empty() {
@@ -506,7 +805,9 @@ fn list(shared: &Arc<Shared>, run: &McpRun, args: &Value) -> Value {
             let number = c.subagent.as_ref().map(|s| s.number.clone()).unwrap_or_default();
             let last = lock(&shared.core).store.final_words(&c.id).unwrap_or_default();
             let last = last.lines().rev().find(|l| !l.trim().is_empty()).map(|l| l.chars().take(100).collect::<String>()).unwrap_or_default();
-            if last.is_empty() { format!("Subagent {number} · {} · {}", c.title, state_words(c)) } else { format!("Subagent {number} · {} · {} · {last}", c.title, state_words(c)) }
+            let place = place_words(c);
+            let after = c.subagent.as_ref().and_then(|s| s.after.as_ref()).map(|a| format!(" · after Subagent {a}")).unwrap_or_default();
+            if last.is_empty() { format!("Subagent {number} · {} · {} · {place}{after}", c.title, state_words(c)) } else { format!("Subagent {number} · {} · {} · {place}{after} · {last}", c.title, state_words(c)) }
         })
         .collect();
     answer(format!("{}\n\nDo not call this to wait: Neko wakes you with each report.", lines.join("\n")), false)
@@ -515,7 +816,7 @@ fn list(shared: &Arc<Shared>, run: &McpRun, args: &Value) -> Value {
 fn stop_one(shared: &Arc<Shared>, run: &McpRun, args: &Value) -> Value {
     let Some(id) = args["id"].as_str() else { return answer("stop_subagent needs the subagent's number.", true) };
     let Some(c) = child(shared, run, id) else { return answer(format!("You have no subagent {id}."), true) };
-    if !rules::is_live(c.status) {
+    if !rules::is_live(c.status) || c.subagent.as_ref().is_some_and(|s| s.discarded) {
         return answer(format!("Subagent {id} has already ended."), false);
     }
     stop_tree(shared, &c.id);

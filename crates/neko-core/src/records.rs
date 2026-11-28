@@ -362,15 +362,16 @@ impl Store {
         let permission_mode = get("permission_mode")?.and_then(|m| status_of::<PermissionMode>(&m).ok()).unwrap_or_default();
         let own_mcp = get("own_mcp")?.is_some_and(|v| v == "yes");
         let queue_first = get("queue_first")?.is_some_and(|v| v == "yes");
-        Ok(Settings { runtime, permission_mode, own_mcp, queue_first })
+        let ask_first_subagent = get("ask_first_subagent")?.is_some_and(|v| v == "yes");
+        Ok(Settings { runtime, permission_mode, own_mcp, queue_first, ask_first_subagent })
     }
 
     pub fn set_settings(&mut self, s: &Settings, now_ms: i64) -> Result<u64, StoreError> {
         let tx = self.conn.transaction()?;
-        for (k, v) in [("runtime", s.runtime.clone()), ("permission_mode", status_name(s.permission_mode)), ("own_mcp", if s.own_mcp { "yes" } else { "no" }.to_owned()), ("queue_first", if s.queue_first { "yes" } else { "no" }.to_owned())] {
+        for (k, v) in [("runtime", s.runtime.clone()), ("permission_mode", status_name(s.permission_mode)), ("own_mcp", if s.own_mcp { "yes" } else { "no" }.to_owned()), ("queue_first", if s.queue_first { "yes" } else { "no" }.to_owned()), ("ask_first_subagent", if s.ask_first_subagent { "yes" } else { "no" }.to_owned())] {
             tx.execute("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2", params![k, v])?;
         }
-        let seq = log(&tx, now_ms, "settings", "settings_changed", serde_json::json!({ "runtime": s.runtime, "permission_mode": status_name(s.permission_mode), "own_mcp": s.own_mcp, "queue_first": s.queue_first }))?;
+        let seq = log(&tx, now_ms, "settings", "settings_changed", serde_json::json!({ "runtime": s.runtime, "permission_mode": status_name(s.permission_mode), "own_mcp": s.own_mcp, "queue_first": s.queue_first, "ask_first_subagent": s.ask_first_subagent }))?;
         tx.commit()?;
         Ok(seq)
     }

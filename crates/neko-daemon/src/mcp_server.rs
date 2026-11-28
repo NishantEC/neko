@@ -117,7 +117,7 @@ mod tests {
         assert_eq!(init["result"]["protocolVersion"], "2025-11-25");
         let list = handle(&json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}), &ask_ok, &|| 0).unwrap();
         let names: Vec<&str> = list["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
-        assert_eq!(names, ["start_subagent", "subagents", "stop_subagent"]);
+        assert_eq!(names, ["start_subagent", "start_drafts", "subagents", "stop_subagent"]);
         let deep = handle(&json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}), &ask_ok, &|| 3).unwrap();
         assert_eq!(deep["result"]["tools"].as_array().unwrap().len(), 2, "no tool to start more at the last level");
     }

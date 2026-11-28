@@ -74,7 +74,7 @@ fn code(r: Reply) -> Option<ErrorCode> {
 }
 
 fn mode(c: &mut Client, m: PermissionMode) {
-    assert!(matches!(c.request(Request::SetSettings { settings: Settings { runtime: "claude".into(), permission_mode: m, own_mcp: false, queue_first: false } }).unwrap(), Reply::Settings { .. }));
+    assert!(matches!(c.request(Request::SetSettings { settings: Settings { runtime: "claude".into(), permission_mode: m, own_mcp: false, queue_first: false, ask_first_subagent: false } }).unwrap(), Reply::Settings { .. }));
 }
 
 #[test]

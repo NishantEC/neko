@@ -137,6 +137,58 @@ pub fn prepare(data_dir: &Path, task: &TaskId, folder: Option<&str>, how: &Place
     Ok(Place { workdir: workdir.to_string_lossy().into_owned(), branch: Some(branch), base_commit: Some(base), repo: Some(root.to_string_lossy().into_owned()), plain: false })
 }
 
+/// The top folder of the repository `dir` is in (a worktree's own top folder inside one), when it has a commit: the only place a
+/// subagent may be given a copy of.
+pub fn copy_source(dir: &Path) -> Option<PathBuf> {
+    if !dir.is_dir() || git_out(dir, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]).is_none() {
+        return None;
+    }
+    git_out(dir, &["rev-parse", "--show-toplevel"]).filter(|t| !t.is_empty()).map(PathBuf::from)
+}
+
+/// The commit an own copy starts from: what `root` (a repository's top folder or a worktree's) is now. When nothing there is uncommitted
+/// that is its HEAD; otherwise a snapshot commit (HEAD plus every uncommitted and new file) that the copy's branch then holds, so
+/// the copy starts from the folder as it is, as an agent would want. Nothing in `root` is touched (docs/knowledge/undo.md, "A checkpoint").
+pub fn copy_base(data_dir: &Path, root: &Path, limits: &crate::checkpoint::Limits) -> Result<String, String> {
+    let f = crate::checkpoint::Folder { kind: crate::checkpoint::Kind::Repo, work: root.to_path_buf(), shadow: None };
+    let snap = crate::checkpoint::take(&f, &crate::checkpoint::tmp_dir(data_dir), "Neko: the start of an own copy", limits).map_err(|e| e.to_string())?;
+    let head_tree = git_out(root, &["rev-parse", "--verify", "HEAD^{tree}"]);
+    match (&snap.head, head_tree) {
+        (Some(head), Some(t)) if t == snap.tree => Ok(head.clone()),
+        _ => Ok(snap.commit),
+    }
+}
+
+/// Makes an own copy: a worktree on `branch` from `base`, in the folder Neko keeps for `kitten`. `source` is the folder it copies (it
+/// may be inside the repository; the copy's working folder is the same place inside the new tree), `repo` the person's repository
+/// when `source` is one of Neko's worktrees of it.
+pub fn prepare_copy(data_dir: &Path, kitten: &TaskId, branch: &str, source: &Path, base: &str, repo: Option<&str>) -> Result<Place, PlaceError> {
+    if !branch_name_ok(branch) {
+        return Err(PlaceError::Other("Neko could not name a branch for this copy.".into()));
+    }
+    let Some(root) = copy_source(source) else { return Err(PlaceError::Other("This folder is not a git repository with a commit, so it cannot be copied.".into())) };
+    let tree = worktree_root(data_dir, kitten);
+    if !tree.join(".git").exists() {
+        if let Some(parent) = tree.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| PlaceError::Other(e.to_string()))?;
+        }
+        let t = tree.to_string_lossy().into_owned();
+        let made = git_out(&root, &["worktree", "add", "-b", branch, &t, base]).is_some() || git_out(&root, &["worktree", "add", &t, branch]).is_some();
+        if !made {
+            return Err(PlaceError::Other("Neko could not make a copy of the project for this subagent.".into()));
+        }
+    }
+    let canon_root = root.canonicalize().unwrap_or(root.clone());
+    let canon_source = source.canonicalize().unwrap_or(source.to_path_buf());
+    let inner = canon_source.strip_prefix(&canon_root).map(Path::to_path_buf).unwrap_or_default();
+    Ok(Place { workdir: tree.join(inner).to_string_lossy().into_owned(), branch: Some(branch.to_owned()), base_commit: Some(base.to_owned()), repo: Some(repo.map_or_else(|| root.to_string_lossy().into_owned(), str::to_owned)), plain: false })
+}
+
+/// Whether the local branch `branch` exists in `repo`.
+pub fn branch_exists(repo: &Path, branch: &str) -> bool {
+    branch_name_ok(branch) && git_out(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).is_some()
+}
+
 /// The folder of a task's worktree (the place's working folder may be inside it).
 pub fn worktree_root(data_dir: &Path, task: &TaskId) -> PathBuf {
     data_dir.join(files::WORKTREES).join(short_id(task))
