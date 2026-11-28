@@ -1,0 +1,117 @@
+{
+  "name": "search-new-thread",
+  "title": "Search (⌘K): Tab turns the typed text into a new thread, in the project a filter names",
+  "about": "With a project added, ⌘K and the words \"tidy the garden shed project:acme\", then Tab: the palette closes, New thread is showing with the words (not the filter) in its composer and the acme-api project chosen. Return starts the thread, and it runs in acme-api.",
+  "cli": [
+    "fake"
+  ],
+  "window": false,
+  "setup": {
+    "files": {
+      "acme-api": {
+        "files": {
+          "README.md": "# Acme\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "add-workspace",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "button",
+          "label_is": "acme-api"
+        }
+      },
+      "expect": "The project is in the sidebar"
+    },
+    {
+      "do": "key",
+      "key": "cmd+k"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "palette-input"
+        }
+      },
+      "within": 10,
+      "expect": "The palette opens"
+    },
+    {
+      "do": "type",
+      "text": "tidy the garden shed [fake:plain] project:acme"
+    },
+    {
+      "do": "key",
+      "key": "tab"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "gone": {
+              "key": "palette"
+            }
+          },
+          {
+            "see": {
+              "key": "new-thread-headline",
+              "text": "acme-api"
+            }
+          },
+          {
+            "see": {
+              "key": "composer-input",
+              "text": "tidy the garden shed [fake:plain]"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "Tab closed the palette and filled New thread with the words, in the project the filter named"
+    },
+    {
+      "do": "snap",
+      "name": "filled",
+      "expect": "New thread filled from the palette"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "tidy the garden shed"
+            }
+          },
+          {
+            "see": {
+              "key": "task-workspace",
+              "text": "acme-api"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "within": 25,
+      "expect": "The thread started in acme-api and ran"
+    }
+  ]
+}

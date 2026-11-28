@@ -1,0 +1,273 @@
+{
+  "name": "search-filters",
+  "title": "Search (⌘K) filters: status:needs, project: and a filter that cannot be read",
+  "about": "Two projects (acme-api and mochi-notes). A thread finishes in acme-api; a thread in mochi-notes ends with a question for the person (it needs them). In the palette, status:needs lists only the thread that needs the person, found by the filter alone (no words); project:acme lists only the thread in acme-api; project:mochi status:needs finds the question again; and status:sleepy says it is not a status and finds nothing.",
+  "cli": [
+    "fake"
+  ],
+  "window": false,
+  "setup": {
+    "files": {
+      "acme-api": {
+        "files": {
+          "README.md": "# Acme\n"
+        }
+      },
+      "mochi-notes": {
+        "files": {
+          "notes.md": "Notes\n"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "add-workspace",
+      "path": "$files/acme-api"
+    },
+    {
+      "do": "add-workspace",
+      "path": "$files/mochi-notes"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "button",
+              "label_is": "acme-api"
+            }
+          },
+          {
+            "see": {
+              "role": "button",
+              "label_is": "mochi-notes"
+            }
+          }
+        ]
+      },
+      "expect": "Both projects are in the sidebar"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "New thread in acme-api"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Check the API [fake:plain]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Check the API"
+            }
+          },
+          {
+            "see": {
+              "name": "Worked for"
+            }
+          }
+        ]
+      },
+      "within": 25,
+      "expect": "A thread finishes in acme-api"
+    },
+    {
+      "do": "click",
+      "on": {
+        "role": "button",
+        "label_is": "New thread in mochi-notes"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Sort the notes [fake:question]"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Sort the notes",
+          "name": "Needs you"
+        }
+      },
+      "within": 25,
+      "expect": "The thread in mochi-notes ends with a question: it needs the person"
+    },
+    {
+      "do": "key",
+      "key": "cmd+k"
+    },
+    {
+      "do": "type",
+      "text": "status:needs"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "option",
+              "label": "Sort the notes",
+              "in": {
+                "key": "palette"
+              }
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Check the API",
+              "in": {
+                "key": "palette"
+              }
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "status:needs lists only the thread that needs the person"
+    },
+    {
+      "do": "snap",
+      "name": "needs",
+      "expect": "The palette with status:needs"
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "key",
+      "key": "cmd+k"
+    },
+    {
+      "do": "type",
+      "text": "project:acme"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "option",
+              "label": "Check the API",
+              "in": {
+                "key": "palette"
+              }
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Sort the notes",
+              "in": {
+                "key": "palette"
+              }
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "project:acme lists only the thread in acme-api"
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "key",
+      "key": "cmd+k"
+    },
+    {
+      "do": "type",
+      "text": "project:mochi status:needs"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "option",
+              "label": "Sort the notes",
+              "in": {
+                "key": "palette"
+              }
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Check the API",
+              "in": {
+                "key": "palette"
+              }
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "The two filters together keep the question"
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "key",
+      "key": "cmd+k"
+    },
+    {
+      "do": "type",
+      "text": "status:sleepy"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "text": "is not a status"
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Sort the notes",
+              "in": {
+                "key": "palette"
+              }
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "A filter that cannot be read says why and finds nothing"
+    },
+    {
+      "do": "snap",
+      "name": "problem",
+      "expect": "The palette saying sleepy is not a status"
+    }
+  ]
+}

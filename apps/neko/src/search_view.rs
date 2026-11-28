@@ -6,7 +6,7 @@
 //! snippet, and filters Cattains, projects and actions as the text is typed.
 
 use neko_protocol::{FoundBy, Task};
-use rune::El;
+use rune::{El, Key, KeyEvent, Tx, col, el};
 
 use crate::search::{ACTIONS, LIMIT, Row};
 use crate::state::App;
@@ -139,7 +139,7 @@ pub fn palette(s: &App, t: &Theme, window_height: f32, layer: &mut Vec<El>) {
     }
     let (items, recents) = items(s, t);
     let empty = s.palette.problem.clone().filter(|_| !s.palette_loading()).unwrap_or_else(|| "No results".to_owned());
-    Command::<App>::new("palette", &s.palette.query, |s: &mut App| &mut s.palette.query)
+    let panel = Command::<App>::new("palette", &s.palette.query, |s: &mut App| &mut s.palette.query)
         .items(&items)
         .placeholder("Search threads, kittens, Cattains and actions")
         .highlight(s.palette.at)
@@ -157,5 +157,19 @@ pub fn palette(s: &App, t: &Theme, window_height: f32, layer: &mut Vec<El>) {
         .on_highlight(|s: &mut App, i| s.palette.at = i)
         .on_select(|s: &mut App, key: &str| s.palette_choose(key, false))
         .on_alt(|s: &mut App, key: &str| s.palette_choose(key, true))
-        .dialog(t, true, "content", |s: &mut App| s.close_palette(), layer);
+        .build(t);
+    // Tab turns the text into a new thread. The field would otherwise pass it on as a move of focus, so it is taken before it gets there;
+    // the rest is Command's own `dialog` (a scrim, the sheet placed from the top, focus trapped, Escape and a press outside close it).
+    let panel = panel.on_key_preview(|s: &mut App, k: &KeyEvent, tx: &mut Tx| {
+        let plain = !(k.mods.cmd || k.mods.shift || k.mods.alt || k.mods.ctrl);
+        if k.key == Key::Tab && plain {
+            s.palette_new_thread();
+            tx.instant();
+            return true;
+        }
+        false
+    });
+    let panel = panel.focus_return("content").modal(true, |s: &mut App| s.close_palette());
+    layer.push(el().key("palette-scrim").absolute(0.0, 0.0).w_full().h_full().fill(t.scrim_soft()).a11y_hidden());
+    layer.push(col().key("palette-layer").absolute(0.0, 0.0).w_full().h_full().pt(top(window_height)).items_center().child(panel));
 }

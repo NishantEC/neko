@@ -199,9 +199,10 @@ fn fts_expression(words: &[Word]) -> String {
         .join(" ")
 }
 
-/// A line of `words`: its newlines and runs of spaces as single spaces.
+/// A line of `words`: its newlines and runs of spaces as single spaces, and the marks of Markdown's emphasis and code (`**`, `` ` ``)
+/// left out, since a snippet is read as plain words.
 fn one_line(words: &str) -> String {
-    words.split_whitespace().collect::<Vec<_>>().join(" ")
+    words.replace(['*', '`'], "").split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 struct Candidate {
@@ -363,6 +364,11 @@ mod tests {
         assert!(parse("since:soon").problem.unwrap().contains("since:2d"));
         // Punctuation alone is not a word; a colon in an ordinary word stays one.
         assert_eq!(parse("?! :: note:this").words, [Word::Bare("note:this".into())]);
+    }
+
+    #[test]
+    fn a_snippet_is_one_line_of_plain_words() {
+        assert_eq!(one_line("Hello from **Claude Code**.\n  Run `cargo test`  now"), "Hello from Claude Code. Run cargo test now");
     }
 
     #[test]

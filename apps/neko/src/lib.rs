@@ -153,14 +153,9 @@ fn chord(ev: &KeyEvent, tx: &Tx, ch: char, code: rune::PhysicalKeyCode) -> bool 
 /// Keys no control took.
 pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     let m = ev.mods;
-    // Search: ⌘K opens it, and closes it again; with it open, Tab turns the text into a new thread (the field takes no Tab itself).
+    // Search: ⌘K opens it, and closes it again. (Tab, with it open, is taken by the palette itself: `search_view`.)
     if ev.is_command('k') && !(m.shift || m.alt || m.ctrl) {
         s.toggle_palette();
-        tx.instant();
-        return true;
-    }
-    if s.palette.open && ev.key == Key::Tab && !(m.cmd || m.shift || m.alt || m.ctrl) {
-        s.palette_new_thread();
         tx.instant();
         return true;
     }

@@ -1,0 +1,259 @@
+{
+  "name": "search-words",
+  "title": "Search (⌘K) finds a thread by a word only the agent said, shows the words around it, and opens it",
+  "about": "Two threads finish in No project. ⌘K opens the palette: with nothing typed it lists both under Recent, then the actions. Typing a word that only the fake agent said (\"nothing\") lists both threads, each with the words around the match, answered by the real daemon from its stored transcripts (the app asks as the text changes and never waits). Down and Return open the older one: the palette closes and the thread shows the agent's words. A word of a title alone finds the thread by its title and leaves the other out. Escape closes the palette.",
+  "cli": [
+    "fake"
+  ],
+  "window": false,
+  "steps": [
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_task",
+        "words": "Garden plan [fake:plain]"
+      },
+      "save_as": "garden"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Garden plan",
+          "name": "unread"
+        }
+      },
+      "within": 20,
+      "expect": "The first thread finishes"
+    },
+    {
+      "do": "sleep",
+      "secs": 1.2
+    },
+    {
+      "do": "daemon",
+      "request": {
+        "type": "create_task",
+        "words": "Boat repairs [fake:plain]"
+      },
+      "save_as": "boat"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "role": "option",
+          "label": "Boat repairs",
+          "name": "unread"
+        }
+      },
+      "within": 20,
+      "expect": "The second thread finishes"
+    },
+    {
+      "do": "key",
+      "key": "cmd+k"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "palette-input"
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Boat repairs",
+              "in": {
+                "key": "palette"
+              }
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Garden plan",
+              "in": {
+                "key": "palette"
+              }
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "New thread",
+              "in": {
+                "key": "palette"
+              }
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "⌘K opens the palette: both threads under Recent (the daemon answered the empty text), then the actions"
+    },
+    {
+      "do": "snap",
+      "name": "empty",
+      "expect": "The palette with nothing typed"
+    },
+    {
+      "do": "type",
+      "text": "nothing"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "option",
+              "label": "Boat repairs",
+              "name": "Nothing was changed",
+              "in": {
+                "key": "palette"
+              }
+            }
+          },
+          {
+            "see": {
+              "role": "option",
+              "label": "Garden plan",
+              "name": "Nothing was changed",
+              "in": {
+                "key": "palette"
+              }
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "Both threads are found by words only the agent said, each showing the words around the match"
+    },
+    {
+      "do": "snap",
+      "name": "found-by-words",
+      "expect": "Two threads found by what the agent said"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "count": {
+          "of": {
+            "role": "option",
+            "in": {
+              "key": "palette"
+            }
+          },
+          "is": 2
+        }
+      },
+      "expect": "Exactly the two threads are listed (no action matches the word)"
+    },
+    {
+      "do": "key",
+      "key": "down"
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "Garden plan"
+            }
+          },
+          {
+            "see": {
+              "name": "Nothing was changed"
+            }
+          },
+          {
+            "gone": {
+              "key": "palette"
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "Return opened the older thread and closed the palette"
+    },
+    {
+      "do": "sleep",
+      "secs": 0.6
+    },
+    {
+      "do": "snap",
+      "name": "opened",
+      "expect": "The thread open, at what was found"
+    },
+    {
+      "do": "key",
+      "key": "cmd+k"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "palette-input"
+        }
+      },
+      "within": 10,
+      "expect": "The palette opens again, empty"
+    },
+    {
+      "do": "type",
+      "text": "garden"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "role": "option",
+              "label": "Garden plan",
+              "in": {
+                "key": "palette"
+              }
+            }
+          },
+          {
+            "gone": {
+              "role": "option",
+              "label": "Boat repairs",
+              "in": {
+                "key": "palette"
+              }
+            }
+          }
+        ]
+      },
+      "within": 15,
+      "expect": "A word of the title finds the thread by its title, and the other thread is not listed"
+    },
+    {
+      "do": "key",
+      "key": "escape"
+    },
+    {
+      "do": "wait",
+      "until": {
+        "gone": {
+          "key": "palette"
+        }
+      },
+      "within": 10,
+      "expect": "Escape closes the palette"
+    }
+  ]
+}
