@@ -96,14 +96,14 @@ pub fn start_tool(shared: &Arc<Shared>, run: &McpRun, args: &Value) -> Value {
     answer(rules::started_text(&task, project_of(shared, &task).as_deref(), started), false)
 }
 
-/// A crew thread of this Cattain by the id the agent names: the whole id, or its last part.
+/// A crew thread of this Cattain by the id the agent names: the whole id, its last part, or (newest first) its exact title.
 fn member(shared: &Shared, cat: &Cat, id: &str) -> Option<Task> {
     let want = id.trim().trim_matches('"').to_lowercase();
     if want.is_empty() {
         return None;
     }
     let all = lock(&shared.core).store.crew_of(&cat.id).unwrap_or_default();
-    all.into_iter().find(|t| t.id.0.to_lowercase() == want || (want.len() >= 6 && t.id.0.to_lowercase().ends_with(&want)))
+    all.iter().find(|t| t.id.0.to_lowercase() == want || (want.len() >= 6 && t.id.0.to_lowercase().ends_with(&want))).or_else(|| all.iter().find(|t| t.title.to_lowercase() == want)).cloned()
 }
 
 /// `crew {id?}`: the Cattain's crew, a line each (newest first), or one thread's last words in full. Read-only.

@@ -220,7 +220,7 @@ one that works reads them at its next step (steer), after its turn (queue) or at
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "id": {"type": "string", "description": "The crew thread's id."},
+                    "id": {"type": "string", "description": "The crew thread's id (or its exact title)."},
                     "text": {"type": "string", "description": "What you tell it, in full."},
                     "mode": {"type": "string", "enum": ["steer", "queue", "interrupt"], "description": "For a thread that is working: when it reads your words. Default steer."}
                 },
