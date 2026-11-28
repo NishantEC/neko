@@ -1,0 +1,153 @@
+{
+  "name": "real-cattain",
+  "title": "A real run in a Cattain's own thread follows its RULES.md and keeps its digest",
+  "about": "Real model calls (the cheapest model). miso's RULES.md gets one line of rules; a message to miso in its own thread runs the real Claude Code in miso's folder with --add-dir for its project; the answer follows the rule, and miso writes its DIGEST.md. Only the real CLI can show the rules reach it and the files are written there.",
+  "cli": [
+    "real"
+  ],
+  "setup": {
+    "files": {}
+  },
+  "steps": [
+    {
+      "do": "key",
+      "key": "cmd+,"
+    },
+    {
+      "do": "click",
+      "on": {
+        "name": "Cattains",
+        "in": {
+          "key": "settings-page"
+        }
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "settings-cat-cat_miso-open"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "settings-cat-cat_miso-open"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "key": "band-title",
+              "text": "miso"
+            }
+          },
+          {
+            "see": {
+              "key": "reply-input"
+            }
+          }
+        ]
+      },
+      "within": 10,
+      "expect": "miso's own thread opens"
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-file-chip-rules"
+      }
+    },
+    {
+      "do": "wait",
+      "until": {
+        "see": {
+          "key": "cattain-file-input"
+        }
+      },
+      "within": 10
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-file-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "End every answer with the word meow."
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "cattain-file-save"
+      }
+    },
+    {
+      "do": "sleep",
+      "secs": 1
+    },
+    {
+      "do": "click",
+      "on": {
+        "key": "reply-input"
+      }
+    },
+    {
+      "do": "type",
+      "text": "Write one line into your DIGEST.md saying: Digest checked. Then reply with one short line."
+    },
+    {
+      "do": "key",
+      "key": "return"
+    },
+    {
+      "do": "allow-until",
+      "until": {
+        "all": [
+          {
+            "see": {
+              "text": "meow",
+              "in": {
+                "key": "turn-*"
+              }
+            }
+          },
+          {
+            "gone": {
+              "key": "run-*-working"
+            }
+          }
+        ]
+      },
+      "within": 240,
+      "snap_first": true,
+      "expect": "The real answer follows miso's RULES.md"
+    },
+    {
+      "do": "assert",
+      "that": {
+        "sh": {
+          "run": "cat $data/cattains/cat_miso/DIGEST.md",
+          "has": "Digest checked"
+        }
+      },
+      "expect": "miso wrote its own DIGEST.md, in its own folder"
+    },
+    {
+      "do": "snap",
+      "name": "miso-done",
+      "expect": "miso's thread after the run"
+    }
+  ],
+  "size": [
+    1300,
+    860
+  ],
+  "window": false
+}
