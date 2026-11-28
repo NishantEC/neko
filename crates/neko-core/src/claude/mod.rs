@@ -4,7 +4,7 @@
 //! The command line:
 //!
 //! ```text
-//! claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages
+//! claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --replay-user-messages
 //!        --permission-prompt-tool stdio [--permission-mode default] [--settings <hook>]
 //!        [--append-system-prompt <the cat's block> --system-prompt-snapshot off] [--resume <session>] [--model <name>]
 //! ```
@@ -18,8 +18,15 @@
 //!
 //! The person's words go in as a `user` message on stdin. With `--permission-prompt-tool stdio`, every step Claude Code would ask
 //! about arrives as a `can_use_tool` control request on stdout and waits for Neko's `control_response`; Neko's policy decides it or
-//! asks the person in the task. Once every message sent has its `result`, stdin closes and the CLI ends. A follow-up after that is a
-//! new run with `--resume` and the conversation id the first one reported.
+//! asks the person in the task. A follow-up after the run ends is a new run with `--resume` and the conversation id the first one
+//! reported.
+//!
+//! When the run ends: a steer (one more `user` line while a turn goes) may be folded by Claude Code into the turn already running,
+//! which then ends with ONE `result` for both messages, or may start a turn of its own with another `result`. A count of results cannot
+//! tell them apart. `--replay-user-messages` makes the CLI echo each `user` line from stdin on stdout when it *consumes* it
+//! (`{"type":"user","isReplay":true,...}`), so Neko counts messages sent and messages consumed. At each `result`, stdin closes (the CLI
+//! ends, the run is over) when every message sent has been consumed, or when the turn was interrupted; otherwise stdin stays open
+//! because the CLI will take the waiting message in a turn of its own and send another `result` (docs/knowledge/runtimes.md).
 //!
 //! The permission mode (docs/knowledge/permissions.md): following Claude Code's own rules, Neko passes no `--permission-mode` and
 //! no settings, so the person's own default mode and rules apply as in the terminal. Asking before risky steps, it passes
@@ -102,7 +109,7 @@ pub fn hook_settings(helper: &Path) -> String {
 /// The arguments for a run (after the program). `hook` is the hook helper's path, in "Ask before risky steps". `instructions` (the
 /// cat's block) is one argument's value, whatever it says.
 pub fn arguments(resume: Option<&str>, mode: PermissionMode, hook: Option<&Path>, instructions: Option<&str>, mcp_config: Option<&Path>, own_mcp: bool) -> Vec<String> {
-    let mut a: Vec<String> = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio"]
+    let mut a: Vec<String> = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--replay-user-messages", "--permission-prompt-tool", "stdio"]
         .iter()
         .map(|s| (*s).to_owned())
         .collect();
@@ -233,7 +240,7 @@ impl Runtime for ClaudeRuntime {
             let _ = child.wait();
             return Err(Failure::Crashed { code: None, words: "Claude Code started without its pipes.".into() });
         };
-        let session = Arc::new(Session { stdin: Mutex::new(Some(stdin)), stopper, stopped: AtomicBool::new(false), interrupted: AtomicBool::new(false), sent: AtomicU32::new(0), asks: Mutex::new(Default::default()) });
+        let session = Arc::new(Session { stdin: Mutex::new(Some(stdin)), stopper, stopped: AtomicBool::new(false), interrupted: AtomicBool::new(false), sent: AtomicU32::new(0), consumed: AtomicU32::new(0), asks: Mutex::new(Default::default()) });
         let (tx, rx) = mpsc::channel();
         // The first line asks the CLI to set up its control channel, as the Agent SDK does; then the words.
         let _ = session.write(&json!({"type": "control_request", "request_id": "neko-init", "request": {"subtype": "initialize", "hooks": {}}}));
@@ -318,8 +325,11 @@ struct Session {
     stopped: AtomicBool,
     /// The person interrupted the turn: its result is not a failure, and stdin closes right after it.
     interrupted: AtomicBool,
-    /// User messages sent; when every one has its result, stdin closes and the CLI ends.
+    /// User messages written to the CLI.
     sent: AtomicU32,
+    /// User messages the CLI said it consumed (`--replay-user-messages`). At a `result`, stdin closes when this has caught up with
+    /// `sent`: nothing waits for a turn of its own.
+    consumed: AtomicU32,
     /// Requests waiting for an answer: their input and tool-use id.
     asks: Mutex<std::collections::HashMap<String, (Value, Option<String>)>>,
 }
@@ -353,23 +363,39 @@ impl Session {
             Said::Unsupported { request, subtype } => {
                 let _ = self.write(&json!({"type": "control_response", "response": {"subtype": "error", "request_id": request, "error": format!("Neko does not handle {subtype}")}}));
             }
+            Said::Consumed => {
+                self.consumed.fetch_add(1, Ordering::SeqCst);
+            }
             Said::TurnEnded { .. } => {
-                // Every message sent has had its answer: the CLI may end. An interrupted turn ends the run whatever else was sent
-                // (the words that interrupted it start a run of their own).
-                if self.sent.fetch_sub(1, Ordering::SeqCst) <= 1 || self.interrupted.load(Ordering::SeqCst) {
-                    self.sent.store(0, Ordering::SeqCst);
+                if self.run_is_over() {
                     self.close_stdin();
                 }
             }
         }
     }
+
+    /// At a `result`: the run is over when every message sent has been consumed (a steer folded into the turn that just ended is
+    /// consumed too, so one `result` covers both), or when the person interrupted the turn (the words that interrupted it start a run
+    /// of their own). Otherwise the CLI still holds a message for a turn of its own, and its `result` is still to come.
+    fn run_is_over(&self) -> bool {
+        run_is_over(self.sent.load(Ordering::SeqCst), self.consumed.load(Ordering::SeqCst), self.interrupted.load(Ordering::SeqCst))
+    }
+}
+
+/// The rule for when a `result` ends the run (see [`Session::run_is_over`]).
+fn run_is_over(sent: u32, consumed: u32, interrupted: bool) -> bool {
+    consumed >= sent || interrupted
 }
 
 impl Control for Session {
     fn steer(&self, words: &str) -> Result<(), ControlError> {
-        self.write(&json!({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": words}]}, "parent_tool_use_id": null, "session_id": ""}))?;
+        // Counted before it is written: a `result` that arrives between the two must not find the message missing.
         self.sent.fetch_add(1, Ordering::SeqCst);
-        Ok(())
+        let written = self.write(&json!({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": words}]}, "parent_tool_use_id": null, "session_id": ""}));
+        if written.is_err() {
+            self.sent.fetch_sub(1, Ordering::SeqCst);
+        }
+        written
     }
 
     fn answer(&self, id: &str, answer: Answer) -> Result<(), ControlError> {
@@ -490,6 +516,27 @@ mod tests {
             let mut rest = strict.clone();
             rest.retain(|a| a != "--strict-mcp-config");
             assert_eq!(rest, own, "the flag is the only difference ({mode:?})");
+        }
+    }
+
+    #[test]
+    fn a_result_ends_the_run_only_when_nothing_sent_waits_unread() {
+        // Folded: the steer was read inside the turn, so the one result covers both messages.
+        assert!(run_is_over(2, 2, false));
+        // Separate: the steer waits for a turn of its own, whose result is still to come.
+        assert!(!run_is_over(2, 1, false));
+        // One message, read: the ordinary case.
+        assert!(run_is_over(1, 1, false));
+        // Interrupted: the run ends whatever waits (the words that interrupted it start a run of their own).
+        assert!(run_is_over(2, 1, true));
+        assert!(run_is_over(3, 3, false) && !run_is_over(3, 2, false));
+    }
+
+    #[test]
+    fn the_cli_is_asked_to_replay_the_messages_it_consumes() {
+        for mode in [PermissionMode::Follow, PermissionMode::Ask, PermissionMode::Full] {
+            let a = arguments(None, mode, None, None, None, true);
+            assert_eq!(a.iter().filter(|x| x.as_str() == "--replay-user-messages").count(), 1, "{mode:?}");
         }
     }
 

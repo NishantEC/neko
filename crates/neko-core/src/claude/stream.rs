@@ -37,6 +37,9 @@ pub enum Said {
     Ask { request: String, tool: String, input: Value, tool_use: Option<String> },
     /// A control request Neko does not serve: answer it with an error so the CLI does not wait.
     Unsupported { request: String, subtype: String },
+    /// The CLI consumed one of the `user` messages Neko wrote to its stdin (`--replay-user-messages` echoes it): it is read, in this
+    /// turn or the next. Never drawn: Neko stored the person's words when they were sent.
+    Consumed,
     /// The turn ended.
     TurnEnded { ok: bool },
 }
@@ -279,6 +282,11 @@ impl Mapper {
         if !v["parent_tool_use_id"].is_null() {
             return;
         }
+        // The echo of a message from stdin (`--replay-user-messages`): counted, never a part. Ordinary tool results carry no flag.
+        if v["isReplay"].as_bool() == Some(true) {
+            out.push(Said::Consumed);
+            return;
+        }
         for block in v["message"]["content"].as_array().into_iter().flatten() {
             if s(&block["type"]) != Some("tool_result") {
                 continue;
@@ -493,6 +501,27 @@ mod tests {
         feed(&mut m, &[r#"{"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/w/src/a.rs"}}]},"parent_tool_use_id":null}"#]);
         let said = feed(&mut m, &[r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":[{"type":"text","text":"no such file"}]}]},"parent_tool_use_id":null}"#]);
         assert_eq!(events(&said), vec![AgentEvent::ToolFinished { id: "t1".into(), ok: false, output: "no such file".into(), exit: None }]);
+    }
+
+    #[test]
+    fn a_replayed_user_message_is_counted_and_never_drawn() {
+        let mut m = Mapper::new();
+        feed(&mut m, &[r#"{"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"sleep 1"}}]},"parent_tool_use_id":null}"#]);
+        // An ordinary tool result carries no flag and still finishes its call; the echo of the person's words is only counted.
+        let said = feed(&mut m, &[
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":false,"content":"ok"}]},"parent_tool_use_id":null}"#,
+            r#"{"type":"user","isReplay":true,"message":{"role":"user","content":[{"type":"text","text":"Also: end with meow."}]},"parent_tool_use_id":null,"session_id":"s"}"#,
+            r#"{"type":"user","isReplay":true,"message":{"role":"user","content":"a plain string message"},"parent_tool_use_id":null}"#,
+        ]);
+        assert_eq!(events(&said), vec![AgentEvent::ToolFinished { id: "t1".into(), ok: true, output: "ok".into(), exit: None }]);
+        assert_eq!(said.iter().filter(|s| matches!(s, Said::Consumed)).count(), 2);
+        assert_eq!(said.len(), 3, "nothing else comes of a replay: {said:?}");
+        // A flag that is false, or a subagent's own line, is not the person's message.
+        let said = feed(&mut m, &[
+            r#"{"type":"user","isReplay":false,"message":{"content":[{"type":"text","text":"x"}]},"parent_tool_use_id":null}"#,
+            r#"{"type":"user","isReplay":true,"message":{"content":[{"type":"text","text":"x"}]},"parent_tool_use_id":"toolu_sub"}"#,
+        ]);
+        assert!(said.is_empty(), "{said:?}");
     }
 
     #[test]

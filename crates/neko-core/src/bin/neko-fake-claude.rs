@@ -13,7 +13,7 @@
 //! | `destructive` | Asks to run `rm -rf build`. |
 //! | `outside` | Asks to read `/etc/hosts`. |
 //! | `slow` | A word every 200 ms for ten minutes (to be stopped). |
-//! | `work:SECS[:step=MS][:deaf]` | SECS seconds (default 6) of steps, each its own message, MS apart (default 250). A user message that arrives meanwhile is read at the next step ("Reading your message: …") and, like every message sent to the CLI, gets a result of its own at the end. A `control_request` `interrupt` ends the turn at once with the CLI's interrupted result; `deaf` does not hear it. |
+//! | `work:SECS[:step=MS][:deaf][:separate]` | SECS seconds (default 6) of steps, each its own message, MS apart (default 250). A user message that arrives meanwhile is **folded into the running turn**, as the real CLI does: it is read at the next step ("Reading your message: …") and the one `result` at the end covers both. With `separate` it is not: the turn ends with its own `result`, and the waiting message gets a turn and a `result` of its own, as a CLI that does not fold would. A `control_request` `interrupt` ends the turn at once with the CLI's interrupted result; `deaf` does not hear it. |
 //! | `spawn:PIDFILE` | Starts a grandchild in its own process group (`sleep 600`), writes its pid to PIDFILE, answers, ends. |
 //! | `spawn-stay:PIDFILE` | The same, then keeps streaming until stopped. |
 //! | `crash` | Says something on stderr and exits with code 3. |
@@ -34,6 +34,10 @@
 //! `{"mcp_config": {"path": ..., "content": ...}}` for each file named by `--mcp-config` (read now, so a test sees exactly what the run
 //! was given even though Neko removes the file when the run ends), then `{"stdin": <line>}` for every line it reads. Tests read it to
 //! see exactly what reached the CLI.
+//!
+//! With `--replay-user-messages` (and only then) it echoes each user message from stdin on stdout when it consumes it, as the real
+//! CLI does: `{"type":"user","isReplay":true,"message":{...}}`. A message waiting for a turn of its own is echoed when that turn
+//! starts; one folded into a running turn, when the turn reads it. Ordinary tool results (no `isReplay`) are not echoes.
 //!
 //! With `--resume ID` it continues conversation ID and says so. `--version` and `auth status --json` answer like the real CLI
 //! (`NEKO_FAKE_AUTH=out` makes it signed out). It also serves as the run guard in tests (`--neko-run-guard`). With `--model NAME`
@@ -260,6 +264,8 @@ struct Fake {
     queued: Vec<Value>,
     /// Words the person sent while a script was working: the next step reads them (`work`).
     steered: Vec<String>,
+    /// `--replay-user-messages` was given: echo each user message when it is consumed.
+    replay: bool,
     n: u32,
     /// The names of the MCP servers `--mcp-config` gave.
     mcp: Vec<String>,
@@ -414,6 +420,13 @@ impl Fake {
         }
     }
 
+    /// A user message was consumed: with `--replay-user-messages` the CLI says so on stdout, then goes on.
+    fn consumed(&self, words: &str) {
+        if self.replay {
+            out(json!({"type":"user","isReplay":true,"message":{"role":"user","content":[{"type":"text","text":words}]},"parent_tool_use_id":null,"session_id":self.session}));
+        }
+    }
+
     fn result(&mut self, words: &str, error: bool) {
         out(json!({
             "type":"result","subtype":"success","is_error":error,"duration_ms":1200,"duration_api_ms":1000,"num_turns":1,"result":words,
@@ -480,47 +493,52 @@ impl Fake {
                 self.result("(long)", false);
             }
             "work" => {
-                // `work:SECS` (default 6): a step every quarter second, each its own message. A message the person sends meanwhile is read
-                // at the next step ("Reading your message: …") and gets its own result at the end, as a message sent to the CLI does. An
-                // interrupt ends the turn at once; `work:SECS:deaf` does not hear it.
+                // `work:SECS` (default 6): a step every quarter second, each its own message. A message the person sends meanwhile is
+                // folded into the turn, as the real CLI does: read at the next step ("Reading your message: …") and echoed then
+                // (`--replay-user-messages`); the one result at the end covers both. `work:SECS:separate` leaves it waiting instead: it
+                // gets a turn and a result of its own, after this one's (the main loop plays it). An interrupt ends the turn at once;
+                // `work:SECS:deaf` does not hear it.
                 // `work:SECS:step=MS` makes the quiet between steps MS long (250 by default): time to see what waits.
                 let mut parts = arg.split(':');
                 let secs = parts.next().and_then(|n| n.parse::<u64>().ok()).unwrap_or(6);
-                let (mut deaf, mut step_ms) = (false, 250u64);
+                let (mut deaf, mut separate, mut step_ms) = (false, false, 250u64);
                 for p in parts {
                     match p.strip_prefix("step=") {
                         Some(ms) => step_ms = ms.parse().unwrap_or(250),
-                        None => deaf = deaf || p == "deaf",
+                        None => {
+                            deaf = deaf || p == "deaf";
+                            separate = separate || p == "separate";
+                        }
                     }
                 }
                 let until = Instant::now() + Duration::from_secs(secs);
-                let mut read = 0usize;
                 let mut i = 0u32;
                 while Instant::now() < until {
                     i += 1;
-                    if self.listen(true, deaf) {
+                    if self.listen(!separate, deaf) {
                         return self.interrupted();
                     }
                     let taken = std::mem::take(&mut self.steered);
-                    read += taken.len();
+                    for w in &taken {
+                        self.consumed(w);
+                    }
                     let text = if taken.is_empty() { format!("Step {i} of the work. ") } else { format!("Reading your message: {} ", taken.join(" | ")) };
                     self.say(&text, 1, Duration::from_millis(0));
                     for _ in 0..(step_ms / 50).max(1) {
                         std::thread::sleep(Duration::from_millis(50));
-                        if self.listen(true, deaf) {
+                        if self.listen(!separate, deaf) {
                             return self.interrupted();
                         }
                     }
                 }
-                // What came in during the last quarter second is read now.
+                // What came in during the last quarter second is read now (folded) or waits for its own turn (separate).
                 let taken = std::mem::take(&mut self.steered);
-                read += taken.len();
+                for w in &taken {
+                    self.consumed(w);
+                }
                 let text = if taken.is_empty() { "The work is finished.".to_owned() } else { format!("Reading your message: {} The work is finished.", taken.join(" | ")) };
                 self.say(&text, 1, Duration::from_millis(0));
                 self.result(&text, false);
-                for _ in 0..read {
-                    self.result("(your message)", false);
-                }
             }
             "thinking" => {
                 self.think("The person wants a short answer. I will check the folder first and keep it brief.");
@@ -851,7 +869,7 @@ fn main() {
     });
     let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
     let session = resume.clone().unwrap_or_else(|| format!("fake-{}-{}", std::process::id(), now_s()));
-    let mut fake = Fake { hooks: hooks_from(settings.as_deref()), allowed: allowed_by_settings(), session: session.clone(), resumed: resume.is_some(), cwd: cwd.clone(), input: rx, queued: Vec::new(), steered: Vec::new(), n: 0, mcp, mcp_specs, servers: Default::default() };
+    let mut fake = Fake { hooks: hooks_from(settings.as_deref()), allowed: allowed_by_settings(), session: session.clone(), resumed: resume.is_some(), cwd: cwd.clone(), input: rx, queued: Vec::new(), steered: Vec::new(), replay: args.iter().any(|a| a == "--replay-user-messages"), n: 0, mcp, mcp_specs, servers: Default::default() };
     let mut started = false;
     loop {
         let v = if fake.queued.is_empty() {
@@ -885,6 +903,8 @@ fn main() {
                     Value::Array(a) => a.iter().filter_map(|p| p["text"].as_str()).collect(),
                     _ => String::new(),
                 };
+                // This message is consumed now: the CLI starts a turn on it.
+                fake.consumed(&words);
                 fake.play(&words);
             }
             _ => {}

@@ -112,3 +112,59 @@ fn a_follow_up_while_it_runs_is_answered_in_the_same_run() {
     assert!(text.contains("after some thought") && text.contains("Hello from the fake"), "both messages answered: {text}");
     assert_eq!(finished(&ev), &Outcome::Done);
 }
+
+/// Starts a `work` run on the fake CLI, waits for its first step, then steers it. Returns every event up to the end of the run and
+/// how long it took after the steer.
+fn steer_a_working_run(script: &str, name: &str) -> (Vec<AgentEvent>, Duration) {
+    let dir = Temp::new(name);
+    let s = claude_on_fake().start(spec(script, &dir.0)).unwrap();
+    let mut seen = Vec::new();
+    let end = std::time::Instant::now() + T;
+    while !text_of(&seen).contains("Step 1") {
+        assert!(std::time::Instant::now() < end, "no first step; it said {seen:?}");
+        if let Ok(e) = s.events.recv_timeout(Duration::from_millis(50)) {
+            seen.push(e);
+        }
+    }
+    let steered_at = std::time::Instant::now();
+    s.control.steer("Also end with the word meow").unwrap();
+    // The run must end by itself: a run that waits for a result that never comes is the bug this guards.
+    seen.extend(drain(&s, T, |_, _| None));
+    (seen, steered_at.elapsed())
+}
+
+fn results(ev: &[AgentEvent]) -> usize {
+    ev.iter().filter(|e| matches!(e, AgentEvent::Usage(_))).count()
+}
+
+#[test]
+fn a_steer_the_cli_folds_into_the_running_turn_ends_the_run_with_its_one_result() {
+    let (ev, took) = steer_a_working_run("Do the work [fake:work:4:step=400]", "steer-fold");
+    assert_eq!(finished(&ev), &Outcome::Done);
+    assert_eq!(results(&ev), 1, "the CLI answered both messages with one result: {ev:?}");
+    let text = text_of(&ev);
+    assert_eq!(text.matches("Reading your message: Also end with the word meow").count(), 1, "the steer was obeyed in the turn, and its echo drew nothing: {text}");
+    assert!(took < Duration::from_secs(10), "the run ended on that one result, not after a second that never came ({took:?})");
+}
+
+#[test]
+fn a_steer_the_cli_answers_in_a_turn_of_its_own_keeps_the_run_open_for_its_result() {
+    let (ev, _) = steer_a_working_run("Do the work [fake:work:3:step=400:separate]", "steer-separate");
+    assert_eq!(finished(&ev), &Outcome::Done);
+    assert_eq!(results(&ev), 2, "the run waited for the second turn's result: {ev:?}");
+    let text = text_of(&ev);
+    assert!(text.contains("The work is finished."), "{text}");
+    assert!(text.contains("Hello from the fake"), "the steer got a turn of its own: {text}");
+    assert!(!text.contains("Reading your message"), "it was not read inside the first turn: {text}");
+}
+
+#[test]
+fn an_interrupted_turn_ends_the_run_whatever_waits_unread() {
+    let dir = Temp::new("steer-interrupt");
+    let s = claude_on_fake().start(spec("A long job [fake:work:60:separate]", &dir.0)).unwrap();
+    until("the first step", T, || s.events.recv_timeout(Duration::from_millis(50)).is_ok_and(|e| matches!(e, AgentEvent::TextDelta(t) if t.contains("Step 1"))));
+    s.control.steer("Words that wait").unwrap();
+    s.control.interrupt();
+    let ev = drain(&s, T, |_, _| None);
+    assert_eq!(finished(&ev), &Outcome::Stopped, "an interrupted run is not a failure and ends on its own result: {ev:?}");
+}
