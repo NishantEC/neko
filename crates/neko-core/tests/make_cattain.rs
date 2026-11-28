@@ -160,6 +160,6 @@ fn a_version_17_store_opens_with_every_cat_made_by_hand() {
         s.connection().execute("INSERT INTO cats (id, name, name_key, face, rules, created_ms) VALUES ('cat_pip', 'pip', 'pip', 'void', '', 1)", []).unwrap();
     }
     let c = open(&d);
-    assert_eq!((c.store.version().unwrap(), SCHEMA_VERSION), (18, 18));
+    assert_eq!((c.store.version().unwrap(), SCHEMA_VERSION), (19, 19));
     assert!(c.cats().unwrap().iter().all(|c| c.made_in.is_none()));
 }

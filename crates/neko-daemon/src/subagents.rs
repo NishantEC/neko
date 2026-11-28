@@ -59,7 +59,7 @@ fn batch() -> Duration {
     Duration::from_millis(std::env::var("NEKO_WAKE_BATCH_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(rules::BATCH_MS))
 }
 
-fn max_runs() -> usize {
+pub(crate) fn max_runs() -> usize {
     std::env::var("NEKO_MAX_RUNS").ok().and_then(|v| v.parse().ok()).unwrap_or(rules::MAX_RUNS)
 }
 
@@ -131,7 +131,7 @@ pub fn rate_limit(shared: &Shared, status: &str, resets_at: Option<i64>) {
 }
 
 /// Whether the daemon holds back what it starts by itself.
-fn paused(shared: &Shared) -> bool {
+pub(crate) fn paused(shared: &Shared) -> bool {
     let mut st = lock(&shared.subagents.state);
     match st.paused_until {
         Some(at) if at > Instant::now() => true,
@@ -152,6 +152,12 @@ pub fn pass(shared: &Arc<Shared>) {
         return;
     }
     start_queued(shared);
+    // A Cattain's crew (crew.rs): requests that wait on the person become its news, and crew threads made with no room start.
+    if crate::crew::pass(shared) {
+        let at = Instant::now() + heat::recheck();
+        let mut st = lock(&shared.subagents.state);
+        st.next = Some(st.next.map_or(at, |n| n.min(at)));
+    }
     deliver_wakes(shared);
 }
 
@@ -276,10 +282,18 @@ fn deliver_wakes(shared: &Arc<Shared>) {
             // Starting up: the next pass looks again (its run ending pokes).
             Some((None, _)) => {}
             None => {
+                // A Cattain's crew news alone waits longer for more (crew threads end minutes apart), and no more often than an hour
+                // allows; a kitten's report among it goes at once.
+                let crew_only = wakes.iter().all(|w| w.crew);
+                if crew_only && let Some(again) = crate::crew::over_budget(shared, &task_id) {
+                    let mut st = lock(&shared.subagents.state);
+                    st.next = Some(st.next.map_or(again, |n| n.min(again)));
+                    continue;
+                }
                 let due = {
                     let mut st = lock(&shared.subagents.state);
                     let first = *st.seen.entry(task_id.clone()).or_insert_with(Instant::now);
-                    let due = first + batch();
+                    let due = first + if crew_only { crate::crew::batch() } else { batch() };
                     if due > Instant::now() {
                         st.next = Some(st.next.map_or(due, |n| n.min(due)));
                     }
@@ -341,6 +355,10 @@ pub fn ended(shared: &Arc<Shared>, id: &TaskId) {
     }
     if task.subagent.is_some() && matches!(task.status, TaskStatus::Done | TaskStatus::Failed | TaskStatus::Stopped | TaskStatus::Interrupted | TaskStatus::Asked) {
         report(shared, &task, None);
+    }
+    // A thread of a Cattain's crew ended its turn: the Cattain hears it (docs/knowledge/cats.md, "The crew").
+    if task.subagent.is_none() {
+        crate::crew::turn_ended(shared, &task);
     }
     poke(shared);
 }
@@ -413,7 +431,7 @@ fn pass_up_unanswered(shared: &Shared, task: &Task) {
 
 fn has_live_children(shared: &Shared, task: &Task) -> bool {
     let core = lock(&shared.core);
-    core.store.children_of(&task.id).unwrap_or_default().iter().any(Task::is_live_subagent) || core.store.has_pending_wake(&task.id).unwrap_or(false)
+    core.store.children_of(&task.id).unwrap_or_default().iter().any(Task::is_live_subagent) || core.store.has_pending_wake(&task.id).unwrap_or(false) || crate::crew::has_live_crew(&core, task)
 }
 
 fn set_status(shared: &Shared, task: &Task, status: TaskStatus) {
@@ -425,7 +443,7 @@ fn set_status(shared: &Shared, task: &Task, status: TaskStatus) {
 }
 
 /// The files a subagent's newest run changed, with counts, for its report.
-fn files_of(shared: &Arc<Shared>, task: &Task) -> Vec<String> {
+pub(crate) fn files_of(shared: &Arc<Shared>, task: &Task) -> Vec<String> {
     let run = lock(&shared.core).store.runs_of(&task.id).ok().and_then(|mut r| r.pop()).map(|r| r.id);
     let Some(run) = run else { return Vec::new() };
     match crate::undo::diff(shared, &task.id, Some(run), neko_protocol::DiffSource::Run) {
@@ -518,6 +536,8 @@ fn report(shared: &Arc<Shared>, task: &Task, said: Option<&str>) {
         run,
         question,
         chain,
+        crew: false,
+        about: None,
     };
     let _ = core.store.insert_wake(&w, if silenced { "discarded" } else { "pending" }, now);
 }
@@ -605,7 +625,7 @@ pub fn recover(core: &mut Core) {
         let asked = task.status == TaskStatus::Asked;
         let question = if asked { core.store.question_of(&task.id).ok().flatten() } else { None };
         let chain = if asked { core.store.newest_ask(&task.id).ok().flatten().map(|a| a.chain).unwrap_or_default() } else { Vec::new() };
-        let w = WakeRow { id: core.new_id("wake"), task: of.parent.clone(), subagent: task.id.clone(), number: of.number.clone(), title: task.title.clone(), status, summary, files: Vec::new(), branch, created_ms: now, run, question, chain };
+        let w = WakeRow { id: core.new_id("wake"), task: of.parent.clone(), subagent: task.id.clone(), number: of.number.clone(), title: task.title.clone(), status, summary, files: Vec::new(), branch, created_ms: now, run, question, chain, crew: false, about: None };
         let _ = core.store.insert_wake(&w, "pending", now);
     }
 }
@@ -621,7 +641,7 @@ pub fn handle(shared: &Arc<Shared>, run: &McpRun, body: &Value) -> Value {
     if body["op"] == "info" {
         let core = lock(&shared.core);
         let depth = core.store.get_task(&run.task).ok().flatten().and_then(|t| t.subagent).map_or(0, |s| SubagentOf::depth(&s));
-        return json!({"depth": depth, "cattains": crate::cattains::may_make(&core, &run.task)});
+        return json!({"depth": depth, "cattains": crate::cattains::may_make(&core, &run.task), "crew": crate::crew::may_run_crew(&core, &run.task)});
     }
     let args = &body["arguments"];
     match body["tool"].as_str().unwrap_or("") {
@@ -634,6 +654,9 @@ pub fn handle(shared: &Arc<Shared>, run: &McpRun, body: &Value) -> Value {
         "ask_person" => ask(shared, run, args, AskTo::Person),
         "make_cattain" => crate::cattains::make_tool(shared, run, args),
         "list_cattains" => crate::cattains::list_tool(shared, run),
+        "start_crew_thread" => crate::crew::start_tool(shared, run, args),
+        "crew" => crate::crew::list_tool(shared, run, args),
+        "message_crew" => crate::crew::message_tool(shared, run, args),
         other => answer(format!("Neko has no tool called {other}."), true),
     }
 }

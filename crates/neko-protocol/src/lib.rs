@@ -59,7 +59,9 @@ pub use undo::{DiffFile, DiffPatch, DiffSource, DiffSummary, FileStatus, Offer, 
 /// a task says whether it is a Cattain's own thread; the rules requests are gone, the rules being RULES.md).
 /// 22: a thread's agent can make a Cattain (Neko's `make_cattain` tool: a cat says the thread that made it, `made_in`; the note
 /// `cattain_made` in that thread; `undo_make_cattain` retires one that has no work yet; a setting keeps Cattains made by hand only).
-pub const PROTOCOL_VERSION: u32 = 22;
+/// 23: a Cattain runs its crew (a thread says the Cattain whose agent started it, `started_by`; the note `crew_wake` in a Cattain's
+/// thread says which crew thread's turn end or request woke it).
+pub const PROTOCOL_VERSION: u32 = 23;
 
 /// The WebSocket path, versioned with the contract.
 pub const WS_PATH: &str = "/v1/ws";
@@ -220,6 +222,10 @@ pub struct Task {
     /// not listed under Threads; the Cattain is.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cattain: bool,
+    /// The Cattain (a [`Cat`]'s id) whose agent started this thread in its crew with Neko's `start_crew_thread` (version 23). Its
+    /// words are that Cattain's brief, not the person's. None for a thread the person started, in a crew or not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_by: Option<String>,
 }
 
 /// The longest a thread's `latest_line` is, in characters.
@@ -267,6 +273,7 @@ impl Task {
             settled: false,
             archived: false,
             cattain: false,
+            started_by: None,
         }
     }
 
@@ -607,6 +614,19 @@ pub enum PartBody {
         name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         purpose: Option<String>,
+    },
+    /// A Cattain's thread was woken by a thread of its crew (version 23): the centred note before the run that read it. `status` is
+    /// how its turn ended (`done`, `failed`, `stopped`, `interrupted`, `asked`) or `needs_you` for a request waiting on the person;
+    /// `summary` its last words (or the request), shortened to 16 KB; `question` what it asked, when it asked.
+    CrewWake {
+        thread: TaskId,
+        title: String,
+        status: String,
+        summary: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        files: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        question: Option<String>,
     },
 }
 
@@ -1395,7 +1415,7 @@ impl PartBody {
         match self {
             PartBody::Person { text } | PartBody::Agent { text, .. } | PartBody::Thinking { text, .. } | PartBody::Notice { text, .. } => text,
             PartBody::Tool { summary, .. } => summary,
-            PartBody::Wake { summary, .. } => summary,
+            PartBody::Wake { summary, .. } | PartBody::CrewWake { summary, .. } => summary,
             PartBody::Subagent { title, .. } => title,
             PartBody::ToSubagent { text, .. } => text,
             PartBody::CattainMade { name, .. } => name,

@@ -69,7 +69,7 @@ fn a_subagent_at_the_last_level_may_not_start_more_and_a_thread_has_a_ceiling() 
 }
 
 fn wake(core: &mut Core, thread: &TaskId, sub: &Task, status: &str, summary: &str) -> WakeRow {
-    WakeRow { id: core.new_id("wake"), task: thread.clone(), subagent: sub.id.clone(), number: number(sub), title: sub.title.clone(), status: status.into(), summary: summary.into(), files: vec!["src/a.rs +1 -0".into()], branch: Some("neko/x".into()), created_ms: core.now(), run: None, question: None, chain: vec![] }
+    WakeRow { id: core.new_id("wake"), task: thread.clone(), subagent: sub.id.clone(), number: number(sub), title: sub.title.clone(), status: status.into(), summary: summary.into(), files: vec!["src/a.rs +1 -0".into()], branch: Some("neko/x".into()), created_ms: core.now(), run: None, question: None, chain: vec![], crew: false, about: None }
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn the_migration_from_store_nine_adds_subagents_and_changes_nothing_else() {
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch(
-            "ALTER TABLE cats DROP COLUMN made_in; DELETE FROM tasks WHERE cattain = 1; DROP TABLE cattain_files; ALTER TABLE cats DROP COLUMN thread_id; ALTER TABLE cats DROP COLUMN model; ALTER TABLE cats DROP COLUMN access; ALTER TABLE tasks DROP COLUMN cattain; ALTER TABLE runs DROP COLUMN ask; ALTER TABLE wakes DROP COLUMN run_id; ALTER TABLE wakes DROP COLUMN question; ALTER TABLE wakes DROP COLUMN question_chain; DROP INDEX tasks_by_activity; DROP TRIGGER find_titles_insert; DROP TRIGGER find_titles_update; DROP TRIGGER find_titles_delete; DROP TRIGGER find_words_insert; DROP TRIGGER find_words_update; DROP TRIGGER find_words_delete; DROP TABLE find_titles; DROP TABLE find_words; ALTER TABLE tasks DROP COLUMN sub_placement; ALTER TABLE tasks DROP COLUMN sub_after; ALTER TABLE tasks DROP COLUMN sub_draft; ALTER TABLE tasks DROP COLUMN sub_branch; ALTER TABLE tasks DROP COLUMN pinned_ms; ALTER TABLE tasks DROP COLUMN settled_ms; ALTER TABLE tasks DROP COLUMN archived_ms; ALTER TABLE tasks DROP COLUMN in_folder; ALTER TABLE tasks DROP COLUMN from_branch; DROP TABLE queued; DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; \
+            "ALTER TABLE tasks DROP COLUMN started_by; ALTER TABLE wakes DROP COLUMN kind; ALTER TABLE wakes DROP COLUMN about; ALTER TABLE cats DROP COLUMN made_in; DELETE FROM tasks WHERE cattain = 1; DROP TABLE cattain_files; ALTER TABLE cats DROP COLUMN thread_id; ALTER TABLE cats DROP COLUMN model; ALTER TABLE cats DROP COLUMN access; ALTER TABLE tasks DROP COLUMN cattain; ALTER TABLE runs DROP COLUMN ask; ALTER TABLE wakes DROP COLUMN run_id; ALTER TABLE wakes DROP COLUMN question; ALTER TABLE wakes DROP COLUMN question_chain; DROP INDEX tasks_by_activity; DROP TRIGGER find_titles_insert; DROP TRIGGER find_titles_update; DROP TRIGGER find_titles_delete; DROP TRIGGER find_words_insert; DROP TRIGGER find_words_update; DROP TRIGGER find_words_delete; DROP TABLE find_titles; DROP TABLE find_words; ALTER TABLE tasks DROP COLUMN sub_placement; ALTER TABLE tasks DROP COLUMN sub_after; ALTER TABLE tasks DROP COLUMN sub_draft; ALTER TABLE tasks DROP COLUMN sub_branch; ALTER TABLE tasks DROP COLUMN pinned_ms; ALTER TABLE tasks DROP COLUMN settled_ms; ALTER TABLE tasks DROP COLUMN archived_ms; ALTER TABLE tasks DROP COLUMN in_folder; ALTER TABLE tasks DROP COLUMN from_branch; DROP TABLE queued; DROP TABLE wakes; DROP INDEX tasks_by_parent; DROP INDEX tasks_by_root; \
              ALTER TABLE tasks DROP COLUMN parent_id; ALTER TABLE tasks DROP COLUMN sub_number; ALTER TABLE tasks DROP COLUMN root_id; PRAGMA user_version = 9;",
         )
         .unwrap();
@@ -323,7 +323,7 @@ fn the_migration_to_store_sixteen_gives_each_report_its_run_so_none_is_made_twic
     }
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch("ALTER TABLE cats DROP COLUMN made_in; DELETE FROM tasks WHERE cattain = 1; DROP TABLE cattain_files; ALTER TABLE cats DROP COLUMN thread_id; ALTER TABLE cats DROP COLUMN model; ALTER TABLE cats DROP COLUMN access; ALTER TABLE tasks DROP COLUMN cattain; ALTER TABLE runs DROP COLUMN ask; ALTER TABLE wakes DROP COLUMN run_id; ALTER TABLE wakes DROP COLUMN question; ALTER TABLE wakes DROP COLUMN question_chain; PRAGMA user_version = 15;").unwrap();
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN started_by; ALTER TABLE wakes DROP COLUMN kind; ALTER TABLE wakes DROP COLUMN about; ALTER TABLE cats DROP COLUMN made_in; DELETE FROM tasks WHERE cattain = 1; DROP TABLE cattain_files; ALTER TABLE cats DROP COLUMN thread_id; ALTER TABLE cats DROP COLUMN model; ALTER TABLE cats DROP COLUMN access; ALTER TABLE tasks DROP COLUMN cattain; ALTER TABLE runs DROP COLUMN ask; ALTER TABLE wakes DROP COLUMN run_id; ALTER TABLE wakes DROP COLUMN question; ALTER TABLE wakes DROP COLUMN question_chain; PRAGMA user_version = 15;").unwrap();
     }
     let core = open(&d);
     assert_eq!(core.store.version().unwrap(), SCHEMA_VERSION);

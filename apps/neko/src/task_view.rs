@@ -358,7 +358,7 @@ fn part_el(s: &App, t: &Theme, book: &Book, r: &Run, w: &Who, p: &Part, streamin
         PartBody::Notice { .. } => notice(t, p),
         PartBody::ToSubagent { .. } => crate::subagents_view::to_kitten_note(s, t, p, &w.subject()),
         PartBody::CattainMade { .. } => crate::cattain_view::made_note(s, t, p),
-        PartBody::Person { .. } | PartBody::RulesChanged { .. } | PartBody::Subagent { .. } | PartBody::Wake { .. } => None,
+        PartBody::Person { .. } | PartBody::RulesChanged { .. } | PartBody::Subagent { .. } | PartBody::Wake { .. } | PartBody::CrewWake { .. } => None,
     }
 }
 

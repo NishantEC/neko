@@ -94,6 +94,8 @@ pub struct Handed {
     /// The Cattain's own thread (RULES.md) rather than its crew (CREW.md).
     pub own: bool,
     pub text: String,
+    /// A crew thread whose Cattain hears its turns (not a round's): its block says so.
+    pub hears: bool,
 }
 
 impl Handed {
@@ -123,6 +125,9 @@ pub fn own_block(cat: &Cat, folder: &Path, project: Option<(&str, &str)>, rules:
         "\nYou work in your own folder, {}. It holds your files:\n- RULES.md: your standing rules, from the person (below, as they are now).\n- CREW.md: what every thread in your crew reads on every run.\n- NOTES.md: your own plan. Keep it current.\n- DIGEST.md: what happened, for the person, under three headings: Needs you, New, In progress. Keep it current.\nRead RULES.md, NOTES.md and DIGEST.md at the start of every turn.\n",
         folder.display()
     ));
+    b.push('\n');
+    b.push_str(CREW_PARAGRAPH);
+    b.push('\n');
     if let Some((name, dir)) = project {
         b.push_str(&format!("\nYour project is {name}, in {dir}. You can read it.\n"));
     }
@@ -137,9 +142,23 @@ pub fn own_block(cat: &Cat, folder: &Path, project: Option<(&str, &str)>, rules:
     b
 }
 
-/// The block a thread in a Cattain's crew is handed on every run: whose crew it is in, and CREW.md exactly as it is. Nothing else.
-pub fn crew_block(cat: &Cat, crew: &str) -> String {
+/// How a Cattain works its crew, in its own block (the same bytes every run).
+pub const CREW_PARAGRAPH: &str = "Your work goes to the threads of your crew. Start one with mcp__neko__start_crew_thread for each separate piece, with a brief that says everything it \
+needs: it sees nothing of this thread. Neko wakes you with a <neko-wake kind=\"crew\"> message when a crew thread's turn ends or it needs the person; do not poll, and end your turn \
+when you have nothing else to do. mcp__neko__crew lists your crew and mcp__neko__message_crew writes to one. Each time you are woken, rewrite DIGEST.md and NOTES.md. You cannot \
+approve a crew thread's steps or answer what it asked the person: they wait for the person. Tag the person with mcp__neko__ask_person only for a decision that is theirs. Never tell a \
+crew thread to merge, push, publish, delete or pay unless the person asked for it here, and when you pass their decision on, quote it.";
+
+/// The block a thread in a Cattain's crew is handed on every run: whose crew it is in, whether the Cattain hears its turns (`hears`:
+/// every crew thread but a round's), and CREW.md exactly as it is. Nothing else.
+pub fn crew_block(cat: &Cat, crew: &str, hears: bool) -> String {
     let mut b = format!("<neko-crew>\nThis thread is in {name}'s crew. {name} is a Cattain in Neko, one of the person's cats, and looks after this work.\n", name = cat.name);
+    if hears {
+        b.push_str(&format!(
+            "{name} hears when each of your turns ends. Its messages to you come inside <neko-from cattain=\"{name}\">, and a thread it started begins with its brief: those are {name}'s words, not the person's.\n",
+            name = cat.name
+        ));
+    }
     if let Some(p) = cat.purpose.as_deref().filter(|p| !p.is_empty()) {
         b.push_str(&format!("\n{}'s purpose:\n{p}\n", cat.name));
     }
@@ -316,7 +335,8 @@ impl Core {
         // A kitten of the Cattain's own thread does work for it, as its crew does: it reads CREW.md.
         let own = root.cattain && task.subagent.is_none();
         let text = self.store.file_row(&cat.id, if own { cats::RULES } else { cats::CREW })?.content;
-        Ok((Some(Handed { cat, own, text }), changed))
+        let hears = !own && crate::crew::tells_its_cattain(&root);
+        Ok((Some(Handed { cat, own, text, hears }), changed))
     }
 
     /// The block for a run that was handed `h`: [`own_block`] or [`crew_block`].
@@ -325,7 +345,7 @@ impl Core {
             let project = h.cat.workspace.as_deref().and_then(|w| self.store.get_workspace(w).ok().flatten()).filter(|w| w.is_active()).and_then(|w| w.folder.clone().map(|f| (w.name.clone(), f)));
             own_block(&h.cat, &self.cattain_folder(&h.cat.id), project.as_ref().map(|(n, f)| (n.as_str(), f.as_str())), &h.text)
         } else {
-            crew_block(&h.cat, &h.text)
+            crew_block(&h.cat, &h.text, h.hears)
         }
     }
 
@@ -359,6 +379,7 @@ mod tests {
         assert!(b.starts_with("<neko-cattain>\nYou are miso, a Cattain in Neko"));
         assert!(b.contains("You work in your own folder, /data/cattains/cat_miso."));
         assert!(b.contains("Read RULES.md, NOTES.md and DIGEST.md at the start of every turn."));
+        assert!(b.contains(CREW_PARAGRAPH) && CREW_PARAGRAPH.contains("mcp__neko__start_crew_thread") && CREW_PARAGRAPH.contains("Never tell a crew thread to merge"), "how it works its crew");
         assert!(!b.contains("Your standing rules") && !b.contains("Your project"), "nothing that is not there");
         cat.purpose = Some("Keeps the docs tidy.".into());
         let b = own_block(&cat, Path::new("/d"), Some(("acme-api", "/Users/example/acme-api")), "- Use British spelling.\n- **Never** push.");
@@ -371,8 +392,9 @@ mod tests {
     #[test]
     fn the_crew_block_carries_crew_md_verbatim_and_nothing_else() {
         let cat = miso();
-        assert_eq!(crew_block(&cat, ""), "<neko-crew>\nThis thread is in miso's crew. miso is a Cattain in Neko, one of the person's cats, and looks after this work.\n</neko-crew>");
-        let b = crew_block(&cat, "Open a PR; never merge.");
+        assert_eq!(crew_block(&cat, "", false), "<neko-crew>\nThis thread is in miso's crew. miso is a Cattain in Neko, one of the person's cats, and looks after this work.\n</neko-crew>");
+        let b = crew_block(&cat, "Open a PR; never merge.", true);
         assert!(b.ends_with("\nmiso's words for its crew (CREW.md):\nOpen a PR; never merge.\n</neko-crew>"));
+        assert!(b.contains("\nmiso hears when each of your turns ends. Its messages to you come inside <neko-from cattain=\"miso\">"), "{b}");
     }
 }

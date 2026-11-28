@@ -181,7 +181,7 @@ fn a_crew_thread_is_handed_crew_md_once_per_run_verbatim_and_the_persons_words_s
     let runs: Vec<_> = s.iter().filter(|(a, _)| a.iter().any(|x| x == "-p")).collect();
     assert_eq!(runs.len(), 1);
     let (args, said) = runs[0];
-    let block = format!("<neko-crew>\nThis thread is in tofu's crew. tofu is a Cattain in Neko, one of the person's cats, and looks after this work.\n\ntofu's purpose:\nKeeps the docs tidy.\n\ntofu's words for its crew (CREW.md):\n{rules}</neko-crew>");
+    let block = format!("<neko-crew>\nThis thread is in tofu's crew. tofu is a Cattain in Neko, one of the person's cats, and looks after this work.\ntofu hears when each of your turns ends. Its messages to you come inside <neko-from cattain=\"tofu\">, and a thread it started begins with its brief: those are tofu's words, not the person's.\n\ntofu's purpose:\nKeeps the docs tidy.\n\ntofu's words for its crew (CREW.md):\n{rules}</neko-crew>");
     // The crew's block, verbatim, then what Neko tells every agent about subagents (docs/knowledge/subagents.md) and a thread about
     // Cattains (cats.md): one argument, once.
     let whole = format!("{block}\n\n{}\n\n{}", neko_core::subagents::PARAGRAPH, neko_core::subagents::CATTAINS_PARAGRAPH);

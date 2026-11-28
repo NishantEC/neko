@@ -90,6 +90,10 @@ pub struct WakeRow {
     /// Its question, when it ended `asked`, and the kittens below it that question came up from (the first asked first).
     pub question: Option<String>,
     pub chain: Vec<String>,
+    /// A crew thread's turn end or request, waking its Cattain (version 19): `subagent` is then the crew thread, `number` empty.
+    pub crew: bool,
+    /// The request a crew wake is about (a permission waiting on the person), so each wakes its Cattain once.
+    pub about: Option<String>,
 }
 
 /// The longest question Neko's tools take, in characters.
@@ -175,10 +179,10 @@ impl Store {
     pub fn insert_wake(&mut self, w: &WakeRow, state: &str, now_ms: i64) -> Result<u64, StoreError> {
         let tx = self.conn.transaction()?;
         tx.execute(
-            "INSERT INTO wakes (id, task_id, subagent_id, status, summary, files, branch, state, created_ms, run_id, question, question_chain) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            params![w.id, w.task.0, w.subagent.0, w.status, w.summary, serde_json::to_string(&w.files).unwrap_or_else(|_| "[]".into()), w.branch, state, w.created_ms, w.run.as_ref().map(|r| r.0.clone()), w.question, (!w.chain.is_empty()).then(|| serde_json::to_string(&w.chain).unwrap_or_default())],
+            "INSERT INTO wakes (id, task_id, subagent_id, status, summary, files, branch, state, created_ms, run_id, question, question_chain, kind, about) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            params![w.id, w.task.0, w.subagent.0, w.status, w.summary, serde_json::to_string(&w.files).unwrap_or_else(|_| "[]".into()), w.branch, state, w.created_ms, w.run.as_ref().map(|r| r.0.clone()), w.question, (!w.chain.is_empty()).then(|| serde_json::to_string(&w.chain).unwrap_or_default()), if w.crew { "crew" } else { "subagent" }, w.about],
         )?;
-        let seq = log_event(&tx, now_ms, &w.subagent.0, "wake_created", json!({ "task": w.task.0, "status": w.status, "state": state }))?;
+        let seq = log_event(&tx, now_ms, &w.subagent.0, if w.crew { "crew_wake_created" } else { "wake_created" }, json!({ "task": w.task.0, "status": w.status, "state": state }))?;
         tx.commit()?;
         Ok(seq)
     }
@@ -186,7 +190,7 @@ impl Store {
     /// Every report not read yet, oldest first, with its subagent's number and title.
     pub fn pending_wakes(&self) -> Result<Vec<WakeRow>, StoreError> {
         let mut st = self.conn.prepare_cached(
-            "SELECT w.id, w.task_id, w.subagent_id, t.sub_number, t.title, w.status, w.summary, w.files, w.branch, w.created_ms, w.run_id, w.question, w.question_chain \
+            "SELECT w.id, w.task_id, w.subagent_id, t.sub_number, t.title, w.status, w.summary, w.files, w.branch, w.created_ms, w.run_id, w.question, w.question_chain, w.kind, w.about \
              FROM wakes w JOIN tasks t ON t.id = w.subagent_id WHERE w.state = 'pending' ORDER BY w.created_ms, w.id",
         )?;
         let rows = st.query_map([], |r| {
@@ -204,6 +208,8 @@ impl Store {
                 run: r.get::<_, Option<String>>(10)?.map(RunId),
                 question: r.get(11)?,
                 chain: r.get::<_, Option<String>>(12)?.and_then(|c| serde_json::from_str(&c).ok()).unwrap_or_default(),
+                crew: r.get::<_, String>(13)? == "crew",
+                about: r.get(14)?,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -502,14 +508,17 @@ If only the person can answer (a secret, a choice that cannot be undone, what th
 /// came up through (`from`, the kitten that first asked, when it is not this one), its last words and what to do. `in_subagent`: the
 /// agent woken is a subagent itself (it passes a question up to its own parent).
 pub fn wake_message(wakes: &[WakeRow], in_subagent: bool) -> String {
-    wakes
+    let mut m = wakes
         .iter()
         .map(|w| {
             let mut summary = cap(&w.summary, SUMMARY_LIMIT);
             if summary.len() < w.summary.len() {
-                summary.push_str("\n… Call mcp__neko__subagents with this id to read the rest.");
+                summary.push_str(if w.crew { "\n… Call mcp__neko__crew with this id to read the rest." } else { "\n… Call mcp__neko__subagents with this id to read the rest." });
             }
             let title = escape(&w.title).replace('"', "&quot;");
+            if w.crew {
+                return crew_element(w, &title, &summary);
+            }
             if let Some(q) = w.question.as_deref().filter(|_| w.status == "asked") {
                 let from = w.chain.first().map(|f| format!(" from=\"{f}\"")).unwrap_or_default();
                 let mut m = format!("<neko-wake kind=\"question\" id=\"{}\"{from} title=\"{title}\">\n<question>{}</question>\n", w.number, escape(q));
@@ -534,7 +543,38 @@ pub fn wake_message(wakes: &[WakeRow], in_subagent: bool) -> String {
             m
         })
         .collect::<Vec<_>>()
-        .join("\n\n")
+        .join("\n\n");
+    if wakes.iter().any(|w| w.crew) {
+        m.push_str("\n\n");
+        m.push_str(crate::crew::WAKE_CUE);
+    }
+    m
+}
+
+/// One crew thread's news for its Cattain: how its turn ended (or the request it waits on), its last words, the files its run
+/// changed, and what it asked the person.
+fn crew_element(w: &WakeRow, title: &str, summary: &str) -> String {
+    let mut m = format!("<neko-wake kind=\"crew\" thread=\"{}\" status=\"{}\" title=\"{title}\">\n", escape(&w.subagent.0), escape(&w.status));
+    match w.status.as_str() {
+        "needs_you" => {
+            m.push_str(&format!("<request>{}</request>\n", escape(summary)));
+            m.push_str("It waits for the person to allow or deny this step. You cannot approve it; put it under Needs you in DIGEST.md.\n");
+        }
+        _ => {
+            if !summary.trim().is_empty() {
+                m.push_str(&format!("<summary>{}</summary>\n", escape(summary)));
+            }
+            if !w.files.is_empty() {
+                m.push_str(&format!("<files>{}</files>\n", escape(&w.files.join("; "))));
+            }
+            if let Some(q) = w.question.as_deref().filter(|_| w.status == "asked") {
+                m.push_str(&format!("<question>{}</question>\n", escape(q)));
+                m.push_str("It asked the person and waits for their answer, not yours: you cannot answer it with mcp__neko__message_crew. Put it under Needs you in DIGEST.md.\n");
+            }
+        }
+    }
+    m.push_str("</neko-wake>");
+    m
 }
 
 /// The tools of Neko's own server, as MCP's `tools/list` gives them. `depth` is how deep the asking run is: at the last level a
@@ -671,7 +711,7 @@ mod tests {
     use super::*;
 
     fn wake(n: &str, status: &str, summary: &str) -> WakeRow {
-        WakeRow { id: format!("w{n}"), task: TaskId("t".into()), subagent: TaskId(format!("s{n}")), number: n.into(), title: "Check links".into(), status: status.into(), summary: summary.into(), files: vec![], branch: None, created_ms: 0, run: None, question: None, chain: vec![] }
+        WakeRow { id: format!("w{n}"), task: TaskId("t".into()), subagent: TaskId(format!("s{n}")), number: n.into(), title: "Check links".into(), status: status.into(), summary: summary.into(), files: vec![], branch: None, created_ms: 0, run: None, question: None, chain: vec![], crew: false, about: None }
     }
 
     #[test]
@@ -716,6 +756,28 @@ mod tests {
         assert!(!instructions(None, None, false).contains("make_cattain"), "the setting off: not a word of it");
         let make = &tools(0, true)[6];
         assert_eq!(make["inputSchema"]["required"], json!(["purpose"]));
+    }
+
+    #[test]
+    fn a_crew_wake_says_which_thread_how_it_ended_and_what_to_do() {
+        let mut done = wake("", "done", "Fixed the flaky test <retry>.");
+        done.crew = true;
+        done.subagent = TaskId("task_01".into());
+        done.title = "Fix \"login\"".into();
+        done.files = vec!["src/login.rs +3 -1".into()];
+        let mut asked = done.clone();
+        asked.status = "asked".into();
+        asked.question = Some("Which branch?".into());
+        let mut needs = done.clone();
+        needs.status = "needs_you".into();
+        needs.summary = "Run npm test".into();
+        let m = wake_message(&[done, asked, needs], false);
+        assert!(m.starts_with("<neko-wake kind=\"crew\" thread=\"task_01\" status=\"done\" title=\"Fix &quot;login&quot;\">\n<summary>Fixed the flaky test &lt;retry>.</summary>\n<files>src/login.rs +3 -1</files>\n</neko-wake>"), "{m}");
+        assert!(m.contains("<question>Which branch?</question>\nIt asked the person and waits for their answer, not yours"), "{m}");
+        assert!(m.contains("status=\"needs_you\" title=\"Fix &quot;login&quot;\">\n<request>Run npm test</request>\nIt waits for the person to allow or deny this step. You cannot approve it"), "{m}");
+        assert!(m.ends_with(crate::crew::WAKE_CUE), "one cue at the end");
+        assert_eq!(m.matches(crate::crew::WAKE_CUE).count(), 1);
+        assert!(!wake_message(&[wake("1", "done", "x")], false).contains("DIGEST.md"), "a kitten's report has no crew cue");
     }
 
     #[test]

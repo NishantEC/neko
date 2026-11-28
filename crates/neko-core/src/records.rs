@@ -121,6 +121,7 @@ fn kind_of(b: &PartBody) -> &'static str {
         PartBody::Wake { .. } => "wake",
         PartBody::ToSubagent { .. } => "to_subagent",
         PartBody::CattainMade { .. } => "cattain_made",
+        PartBody::CrewWake { .. } => "crew_wake",
     }
 }
 

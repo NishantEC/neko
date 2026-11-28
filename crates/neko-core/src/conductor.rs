@@ -607,7 +607,11 @@ pub fn wake_notes(core: &mut Core, task: &TaskId, run: Option<&RunId>, wakes: &[
     let mut out = Vec::new();
     for w in wakes {
         let now = core.now();
-        let body = PartBody::Wake { number: w.number.clone(), title: w.title.clone(), status: w.status.clone(), summary: w.summary.clone(), files: w.files.clone(), branch: w.branch.clone(), question: w.question.clone().filter(|_| w.status == "asked") };
+        let body = if w.crew {
+            PartBody::CrewWake { thread: w.subagent.clone(), title: w.title.clone(), status: w.status.clone(), summary: w.summary.clone(), files: w.files.clone(), question: w.question.clone().filter(|_| w.status == "asked") }
+        } else {
+            PartBody::Wake { number: w.number.clone(), title: w.title.clone(), status: w.status.clone(), summary: w.summary.clone(), files: w.files.clone(), branch: w.branch.clone(), question: w.question.clone().filter(|_| w.status == "asked") }
+        };
         let part = Part { id: PartId(core.new_id("part")), task: task.clone(), run: run.cloned(), seq: core.store.next_part_seq(task)?, at_ms: now, ended_ms: Some(now), body };
         let rev = core.store.insert_part(&part, now)?;
         out.push(Out::Change(rev, Change::PartChanged { part }));

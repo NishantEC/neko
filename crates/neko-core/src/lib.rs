@@ -10,6 +10,7 @@ pub mod checkpoint;
 pub mod claude;
 pub mod clock;
 pub mod conductor;
+pub mod crew;
 pub mod find;
 pub mod guard;
 pub mod history;

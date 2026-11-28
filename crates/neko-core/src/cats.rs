@@ -442,7 +442,7 @@ impl Core {
 
     /// The project `make_cattain` named: an active project (not General) by its name, its folder or its folder's last part, without
     /// case. Refused in words with the projects there are.
-    fn project_named(&self, named: &str) -> Result<String, CatError> {
+    pub(crate) fn project_named(&self, named: &str) -> Result<String, CatError> {
         let named = named.trim().trim_end_matches('/');
         let all: Vec<_> = self.workspaces()?.into_iter().filter(|w| w.is_active() && !w.is_general()).collect();
         let hit = all.iter().find(|w| {

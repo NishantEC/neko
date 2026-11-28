@@ -496,6 +496,7 @@ impl Core {
             settled: false,
             archived: false,
             cattain: false,
+            started_by: None,
         })
     }
 

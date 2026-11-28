@@ -6,6 +6,7 @@
 
 mod briefing;
 mod cattains;
+mod crew;
 mod files;
 mod folders;
 mod heat;

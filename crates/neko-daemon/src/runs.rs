@@ -189,7 +189,14 @@ fn vendor(id: &str) -> &'static str {
 pub fn push(shared: &Shared, task: &TaskId, outs: Vec<Out>, control: Option<&Arc<dyn Control>>) {
     for o in outs {
         match o {
-            Out::Change(revision, change) => shared.broadcast(&ServerMessage::Event { revision, change }),
+            Out::Change(revision, change) => {
+                // A request waiting on the person: a crew thread's tells its Cattain (crew.rs), in the hub's next pass.
+                let asks = matches!(&change, Change::PermissionChanged { permission } if permission.state == neko_protocol::PermissionState::Pending);
+                shared.broadcast(&ServerMessage::Event { revision, change });
+                if asks {
+                    crate::subagents::poke(shared);
+                }
+            }
             Out::Delta { part, text } => shared.stream(task, &ServerMessage::Event { revision: 0, change: Change::PartDelta { task: task.clone(), part, text } }),
             Out::Answer { request, answer } => {
                 if let Some(c) = control {
@@ -344,7 +351,12 @@ fn run(shared: &Arc<Shared>, task: &Task, words: Option<String>, wake: Option<Ve
     // A question it had put is answered by this run's words: the kittens it came up from are told who has it now.
     let asked_before = lock(&shared.core).store.newest_ask(&task.id).ok().flatten().map(|a| a.chain).unwrap_or_default();
     let own = handed.as_ref().filter(|h| h.own);
-    let mode = own.and_then(|h| h.cat.access).unwrap_or(settings.permission_mode);
+    // Everything else a Cattain hands (its crew, and kittens working for it or its crew) never has more access than the Cattain.
+    let mode = match handed.as_ref() {
+        Some(h) if h.own => h.cat.access.unwrap_or(settings.permission_mode),
+        Some(h) => neko_core::crew::crew_mode(settings.permission_mode, h.cat.access),
+        None => settings.permission_mode,
+    };
     let model = own.and_then(|h| h.cat.model.clone());
     let read_too = handed.as_ref().map(|h| lock(&shared.core).read_too(h)).unwrap_or_default();
     let begun = {

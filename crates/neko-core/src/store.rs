@@ -358,6 +358,13 @@ const MIGRATIONS: &[Migration] = &[
     // 18: a Cattain made by asking (docs/knowledge/cats.md). The thread whose agent made it with Neko's `make_cattain`; every cat that
     // exists was made by hand or is a starter, so none has one.
     Migration::Sql("ALTER TABLE cats ADD COLUMN made_in TEXT;"),
+    // 19: a Cattain runs its crew (docs/knowledge/cats.md, "The crew"). The Cattain whose agent started a thread with Neko's
+    // `start_crew_thread`, and for each wake whether it is a kitten's report or a crew thread's turn end (`crew`), and the request it is
+    // about (a crew thread's permission waiting on the person), so each wakes its Cattain once. Every thread that exists was started by
+    // the person or a round, and every wake is a kitten's.
+    Migration::Sql("ALTER TABLE tasks ADD COLUMN started_by TEXT;
+    ALTER TABLE wakes ADD COLUMN kind TEXT NOT NULL DEFAULT 'subagent';
+    ALTER TABLE wakes ADD COLUMN about TEXT;"),
 ];
 
 /// Migration 9's step: each task's `latest_line` from its newest agent words.
@@ -446,6 +453,7 @@ pub(crate) fn task_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         settled: row.get::<_, Option<i64>>(20)?.is_some(),
         archived: row.get::<_, Option<i64>>(21)?.is_some(),
         cattain: row.get::<_, i64>(26)? != 0,
+        started_by: row.get::<_, Option<String>>(27)?.filter(|c| !c.is_empty()),
         subagent: match (row.get::<_, Option<String>>(14)?, row.get::<_, Option<String>>(15)?, row.get::<_, Option<String>>(16)?) {
             (Some(parent), Some(number), Some(root)) => {
                 let draft = row.get::<_, i64>(23)?;
@@ -464,14 +472,14 @@ pub(crate) fn task_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
 }
 
 /// What a new task row writes (the rest of the columns begin empty).
-const INSERT_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name, last_read_ms, activity_ms, latest_line, parent_id, sub_number, root_id, in_folder, from_branch, sub_placement, sub_draft, sub_after, sub_branch, cattain";
+const INSERT_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name, last_read_ms, activity_ms, latest_line, parent_id, sub_number, root_id, in_folder, from_branch, sub_placement, sub_draft, sub_after, sub_branch, cattain, started_by";
 /// What a task is read from, in the order [`task_of`] takes it.
-pub(crate) const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name, last_read_ms, activity_ms, latest_line, parent_id, sub_number, root_id, in_folder, from_branch, pinned_ms, settled_ms, archived_ms, sub_placement, sub_draft, sub_after, sub_branch, cattain";
+pub(crate) const TASK_COLUMNS: &str = "id, workspace_id, words, title, status, created_ms, folder, cat_id, round_id, round_due_ms, round_name, last_read_ms, activity_ms, latest_line, parent_id, sub_number, root_id, in_folder, from_branch, pinned_ms, settled_ms, archived_ms, sub_placement, sub_draft, sub_after, sub_branch, cattain, started_by";
 
 /// Writes a new task and its `task_created` event inside `tx`. Returns the event's sequence number.
 pub(crate) fn insert_task(tx: &rusqlite::Transaction<'_>, task: &Task) -> Result<u64, StoreError> {
     tx.execute(
-        &format!("INSERT INTO tasks ({INSERT_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)"),
+        &format!("INSERT INTO tasks ({INSERT_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)"),
         params![
             task.id.0,
             task.workspace,
@@ -496,7 +504,8 @@ pub(crate) fn insert_task(tx: &rusqlite::Transaction<'_>, task: &Task) -> Result
             task.subagent.as_ref().map_or(0, |s| if s.draft { 1 } else if s.discarded { 2 } else { 0 }),
             task.subagent.as_ref().and_then(|s| s.after.clone()),
             task.subagent.as_ref().and_then(|s| s.branch.clone()),
-            task.cattain as i64
+            task.cattain as i64,
+            task.started_by
         ],
     )?;
     let data = serde_json::json!({ "title": task.title, "cat": task.cat, "round": task.round.as_ref().map(|r| &r.id), "subagent": task.subagent.as_ref().map(|s| &s.number) }).to_string();
@@ -557,7 +566,7 @@ impl Store {
     /// Stores a task (for `cat` when it has one) and its `task_created` event in one transaction. Returns the task and the event's
     /// sequence number.
     pub fn create_task(&mut self, id: &TaskId, workspace: &str, words: &str, folder: Option<&str>, cat: Option<&str>, how: &crate::workplace::Placement, now_ms: i64) -> Result<(Task, u64), StoreError> {
-        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New, folder: folder.map(str::to_owned), cat: cat.map(str::to_owned), in_folder: how.in_folder, from_branch: how.from_branch.clone(), round: None, last_read_ms: now_ms, activity_ms: now_ms, latest_line: String::new(), failure_line: String::new(), thread_status: neko_protocol::ThreadStatus::Idle, needs_you: false, subagent: None, pinned: false, settled: false, archived: false, cattain: false };
+        let task = Task { id: id.clone(), workspace: workspace.to_owned(), words: words.to_owned(), title: title(words), created_ms: now_ms, status: TaskStatus::New, folder: folder.map(str::to_owned), cat: cat.map(str::to_owned), in_folder: how.in_folder, from_branch: how.from_branch.clone(), round: None, last_read_ms: now_ms, activity_ms: now_ms, latest_line: String::new(), failure_line: String::new(), thread_status: neko_protocol::ThreadStatus::Idle, needs_you: false, subagent: None, pinned: false, settled: false, archived: false, cattain: false, started_by: None };
         let tx = self.conn.transaction()?;
         let seq = insert_task(&tx, &task)?;
         tx.commit()?;

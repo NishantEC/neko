@@ -27,7 +27,7 @@
 //! | `hook-destructive` | Runs `git reset --hard HEAD~1`. |
 //! | `real` | The shapes a real run showed: empty thinking, several words between tools, a long absolute path, a check that exits 1. |
 //! | `plugin-tool:SERVER:TOOL` | Calls the tool `mcp__SERVER__TOOL` (asking, as Claude Code would about an MCP tool), then says whether it ran. When `--mcp-config` did not give a server called SERVER there is no such tool: the call fails at once, asking nothing. |
-//! | `mcp` (or `delegate`, or `steps`) | Plays the lines after the tag through the MCP servers `--mcp-config` gave, really started (stdio, with this process's environment): `mcp SERVER TOOL {json}` calls `mcp__SERVER__TOOL` (asking first, as Claude Code does) and reads the server's answer, `poll N` calls `mcp__neko__subagents` N times, `stay N` keeps streaming N seconds, `write NAME TEXT` writes a file in its folder, `sh COMMAND` runs a shell command there, `tools LABEL` records the tools Neko's server offered (`{"neko_tools": "a,b", "label": LABEL}` in the record). Steps are one per line, or several on one line apart by ` ; ` (what stands before the tag is the person's words). `steps` is the same script for a prompt that sits inside another script's step (a subagent's), where a second `mcp` tag would cut that step: its steps must be on lines of their own. Then it ends its turn. A message that begins `<neko-wake` is answered by saying which reports it read; with `NEKO_FAKE_WAKE_SH` set it first runs that shell command in its folder for each report that names a branch (`{branch}` is replaced), as a thread that merges would. A `kind="question"` wake (a kitten asks) is handled as `NEKO_FAKE_ON_QUESTION` says, rules apart by `|`, by the kitten's number: `1=answer:TEXT` answers it with `message_subagent`, `1=up` passes it up (`ask_person` in a thread, `ask_parent` in a kitten); with no rule it is read and left. |
+//! | `mcp` (or `delegate`, or `steps`) | Plays the lines after the tag through the MCP servers `--mcp-config` gave, really started (stdio, with this process's environment): `mcp SERVER TOOL {json}` calls `mcp__SERVER__TOOL` (asking first, as Claude Code does) and reads the server's answer, `poll N` calls `mcp__neko__subagents` N times, `stay N` keeps streaming N seconds, `write NAME TEXT` writes a file in its folder, `sh COMMAND` runs a shell command there, `tools LABEL` records the tools Neko's server offered (`{"neko_tools": "a,b", "label": LABEL}` in the record). Steps are one per line, or several on one line apart by ` ; ` (what stands before the tag is the person's words). `steps` is the same script for a prompt that sits inside another script's step (a subagent's), where a second `mcp` tag would cut that step: its steps must be on lines of their own. Then it ends its turn. A message that begins `<neko-wake` is answered by saying which reports it read; with `NEKO_FAKE_WAKE_SH` set it first runs that shell command in its folder for each report that names a branch (`{branch}` is replaced), as a thread that merges would. A `kind="question"` wake (a kitten asks) is handled as `NEKO_FAKE_ON_QUESTION` says, rules apart by `|`, by the kitten's number: `1=answer:TEXT` answers it with `message_subagent`, `1=up` passes it up (`ask_person` in a thread, `ask_parent` in a kitten); with no rule it is read and left. A `kind="crew"` wake (a Cattain hears its crew) is read, then the Cattain calls `mcp__neko__crew` and rewrites DIGEST.md (Needs you, New, In progress) and NOTES.md in its folder, recording `{"digest": ...}`; `NEKO_FAKE_ON_CREW` adds script steps apart by ` ; ` that it plays next (`mcp neko message_crew {...}`). |
 //! | `cattain-notes` | Writes NOTES.md and DIGEST.md in its folder, as a Cattain keeps them, then answers. |
 //! | `hook-no-verdict` | Says a hook gave no usable answer for `cargo test`, then runs it anyway, as Claude Code does (it fails open). |
 //!
@@ -472,6 +472,76 @@ impl Fake {
         }));
     }
 
+    /// Plays script steps (`mcp`, `poll`, `stay`, `write`, `sh`, `tools`; see the table above): what each did, and how long `stay` asked for.
+    fn steps(&mut self, lines: &[String]) -> (Vec<String>, u64) {
+        let mut reports = Vec::new();
+        let mut stay = 0u64;
+        for line in lines {
+            let line = line.as_str();
+            if let Some(rest) = line.strip_prefix("mcp ") {
+                let mut p = rest.splitn(3, ' ');
+                let (Some(server), Some(tool)) = (p.next(), p.next()) else { continue };
+                let args = serde_json::from_str::<Value>(p.next().unwrap_or("{}")).unwrap_or(json!({}));
+                reports.push(self.mcp_call(server, tool, args).unwrap_or_else(|| "(did not run)".to_owned()));
+            } else if let Some(n) = line.strip_prefix("poll ") {
+                let n: u32 = n.trim().parse().unwrap_or(10);
+                let mut slowest = 0u128;
+                for _ in 0..n {
+                    let began = Instant::now();
+                    self.mcp_call("neko", "subagents", json!({}));
+                    slowest = slowest.max(began.elapsed().as_millis());
+                }
+                reports.push(format!("polled {n} times, slowest {slowest} ms"));
+            } else if let Some(n) = line.strip_prefix("stay ") {
+                stay = n.trim().parse().unwrap_or(0);
+            } else if let Some(rest) = line.strip_prefix("write ") {
+                // `write NAME TEXT`: a file in the folder it works in, as an agent's edit would make it.
+                let (name, text) = rest.split_once(' ').unwrap_or((rest, ""));
+                let path = format!("{}/{name}", self.cwd);
+                let _ = std::fs::write(&path, format!("{text}\n"));
+                self.tool("Write", json!({"file_path": path, "content": text}), false, "Wrote the file.");
+                reports.push(format!("wrote {name}"));
+            } else if let Some(cmd) = line.strip_prefix("sh ") {
+                // `sh COMMAND`: a shell command in the folder it works in (git add, commit, merge), its output is the result.
+                let done = std::process::Command::new("/bin/sh").arg("-c").arg(cmd).current_dir(&self.cwd).stdin(std::process::Stdio::null()).output();
+                let text = done.map(|o| format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))).unwrap_or_default();
+                self.tool("Bash", json!({"command": cmd}), false, text.trim());
+                reports.push(format!("ran {cmd}"));
+            } else if line == "tools" || line.starts_with("tools ") {
+                // The tools Neko's own server offered this run, as the CLI would list them.
+                let names = self.server("neko").map(|s| s.tools.join(",")).unwrap_or_default();
+                keep(&json!({"neko_tools": names, "label": line.trim_start_matches("tools").trim()}));
+                reports.push(format!("tools {names}"));
+            }
+        }
+        (reports, stay)
+    }
+
+    /// A Cattain woken by its crew keeps its digest: it asks Neko for its crew (`mcp__neko__crew`, the real hop) and rewrites DIGEST.md
+    /// in its folder under the three headings, each crew thread where its state puts it, and NOTES.md with how many it has.
+    fn keep_digest(&mut self) {
+        let listed = self.mcp_call("neko", "crew", json!({})).unwrap_or_default();
+        let (mut needs, mut new, mut going) = (Vec::new(), Vec::new(), Vec::new());
+        for line in listed.lines() {
+            let f: Vec<&str> = line.split(" · ").collect();
+            let (Some(title), Some(state)) = (f.get(1), f.get(2)) else { continue };
+            if state.starts_with("asked") || state.contains("waiting on the person") {
+                needs.push(format!("- {title}: it waits for you."));
+            } else if state.starts_with("working") || state.starts_with("queued") || state.starts_with("waiting") {
+                going.push(format!("- {title}."));
+            } else {
+                new.push(format!("- {title}: {state}."));
+            }
+        }
+        let part = |v: &Vec<String>| if v.is_empty() { "- Nothing.".to_owned() } else { v.join("\n") };
+        let digest = format!("## Needs you\n\n{}\n\n## New\n\n{}\n\n## In progress\n\n{}\n", part(&needs), part(&new), part(&going));
+        let path = format!("{}/DIGEST.md", self.cwd);
+        let _ = std::fs::write(&path, &digest);
+        self.tool("Write", json!({"file_path": path}), false, "Wrote the file.");
+        let _ = std::fs::write(format!("{}/NOTES.md", self.cwd), format!("# Plan\n\n- {} threads in my crew.\n", needs.len() + new.len() + going.len()));
+        keep(&json!({"digest": digest}));
+    }
+
     fn play(&mut self, words: &str) {
         let (script, arg) = if words.trim_start().starts_with("<neko-wake") { ("woken".to_owned(), String::new()) } else { pick(words) };
         let cwd = self.cwd.clone();
@@ -688,46 +758,7 @@ impl Fake {
                 self.result(&words, false);
             }
             "mcp" | "delegate" | "steps" => {
-                let mut reports = Vec::new();
-                let mut stay = 0u64;
-                for line in steps_of(words) {
-                    let line = line.as_str();
-                    if let Some(rest) = line.strip_prefix("mcp ") {
-                        let mut p = rest.splitn(3, ' ');
-                        let (Some(server), Some(tool)) = (p.next(), p.next()) else { continue };
-                        let args = serde_json::from_str::<Value>(p.next().unwrap_or("{}")).unwrap_or(json!({}));
-                        reports.push(self.mcp_call(server, tool, args).unwrap_or_else(|| "(did not run)".to_owned()));
-                    } else if let Some(n) = line.strip_prefix("poll ") {
-                        let n: u32 = n.trim().parse().unwrap_or(10);
-                        let mut slowest = 0u128;
-                        for _ in 0..n {
-                            let began = Instant::now();
-                            self.mcp_call("neko", "subagents", json!({}));
-                            slowest = slowest.max(began.elapsed().as_millis());
-                        }
-                        reports.push(format!("polled {n} times, slowest {slowest} ms"));
-                    } else if let Some(n) = line.strip_prefix("stay ") {
-                        stay = n.trim().parse().unwrap_or(0);
-                    } else if let Some(rest) = line.strip_prefix("write ") {
-                        // `write NAME TEXT`: a file in the folder it works in, as an agent's edit would make it.
-                        let (name, text) = rest.split_once(' ').unwrap_or((rest, ""));
-                        let path = format!("{}/{name}", self.cwd);
-                        let _ = std::fs::write(&path, format!("{text}\n"));
-                        self.tool("Write", json!({"file_path": path, "content": text}), false, "Wrote the file.");
-                        reports.push(format!("wrote {name}"));
-                    } else if let Some(cmd) = line.strip_prefix("sh ") {
-                        // `sh COMMAND`: a shell command in the folder it works in (git add, commit, merge), its output is the result.
-                        let done = std::process::Command::new("/bin/sh").arg("-c").arg(cmd).current_dir(&self.cwd).stdin(std::process::Stdio::null()).output();
-                        let text = done.map(|o| format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))).unwrap_or_default();
-                        self.tool("Bash", json!({"command": cmd}), false, text.trim());
-                        reports.push(format!("ran {cmd}"));
-                    } else if line == "tools" || line.starts_with("tools ") {
-                        // The tools Neko's own server offered this run, as the CLI would list them.
-                        let names = self.server("neko").map(|s| s.tools.join(",")).unwrap_or_default();
-                        keep(&json!({"neko_tools": names, "label": line.trim_start_matches("tools").trim()}));
-                        reports.push(format!("tools {names}"));
-                    }
-                }
+                let (reports, stay) = self.steps(&steps_of(words));
                 // `stay N` keeps working up to N seconds, and ends early when a message of the person's (or Neko's: a report) arrives, so
                 // a test waits on that event and not on a guess of how long a loaded machine takes.
                 let until = Instant::now() + Duration::from_secs(stay);
@@ -746,9 +777,17 @@ impl Fake {
             "woken" => {
                 let n = words.matches("<neko-wake").count();
                 let mut seen = Vec::new();
+                let mut crew = 0usize;
                 for chunk in words.split("<neko-wake").skip(1) {
                     let attr = |k: &str| chunk.split(&format!("{k}=\"")).nth(1).and_then(|r| r.split('"').next()).unwrap_or("?").to_owned();
                     let first = chunk.split("<summary>").nth(1).and_then(|s| s.lines().next()).unwrap_or("").trim().to_owned();
+                    if chunk.starts_with(" kind=\"crew\"") {
+                        // A crew thread's news, for a Cattain: what it read, and the Cattain keeps its digest after the loop.
+                        let detail = chunk.split("<request>").nth(1).or_else(|| chunk.split("<question>").nth(1)).and_then(|r| r.split('<').next()).map(str::to_owned).unwrap_or(first.clone());
+                        seen.push(format!("Crew {} {}: {}", attr("title"), attr("status"), detail));
+                        crew += 1;
+                        continue;
+                    }
                     if chunk.starts_with(" kind=\"question\"") {
                         // A kitten's question: `NEKO_FAKE_ON_QUESTION` says what this agent does with it, by the kitten's number.
                         let id = attr("id");
@@ -777,6 +816,15 @@ impl Fake {
                         let done = std::process::Command::new("/bin/sh").arg("-c").arg(&cmd).current_dir(&self.cwd).stdin(std::process::Stdio::null()).output();
                         let text = done.map(|o| format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))).unwrap_or_default();
                         self.tool("Bash", json!({"command": cmd}), false, text.trim());
+                    }
+                }
+                if crew > 0 {
+                    self.keep_digest();
+                    // `NEKO_FAKE_ON_CREW`: what this Cattain does next, as script steps apart by ` ; ` (`mcp neko message_crew {...}`).
+                    if let Ok(more) = std::env::var("NEKO_FAKE_ON_CREW") {
+                        let lines: Vec<String> = more.split(" ; ").map(|l| l.trim().to_owned()).filter(|l| !l.is_empty()).collect();
+                        let (did, _) = self.steps(&lines);
+                        seen.extend(did);
                     }
                 }
                 let text = format!("I read {n} report(s). {}", seen.join(" | "));

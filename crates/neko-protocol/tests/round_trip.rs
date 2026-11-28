@@ -28,6 +28,7 @@ fn task() -> Task {
         settled: false,
         archived: false,
         cattain: false,
+        started_by: None,
     }
 }
 
@@ -457,7 +458,7 @@ fn cats_round_trip() {
     assert!(json.ends_with(r#""cat":"cat_miso","rules_hash":"cbf29ce484222325"}"#), "{json}");
     pinned(PartBody::RulesChanged { cat: c(), name: "miso".into(), file: None }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso"}"#);
     pinned(PartBody::RulesChanged { cat: c(), name: "miso".into(), file: Some("CREW.md".into()) }, r#"{"kind":"rules_changed","cat":"cat_miso","name":"miso","file":"CREW.md"}"#);
-    assert_eq!(PROTOCOL_VERSION, 22);
+    assert_eq!(PROTOCOL_VERSION, 23);
     // A Cattain's own thread says so; any other thread writes nothing.
     let mut own = task();
     own.cattain = true;
@@ -619,5 +620,25 @@ fn a_cattain_made_by_asking_round_trips() {
     assert!(!old.cattains_by_hand, "agents may make Cattains unless the person said otherwise");
     let pool = neko_protocol::cats::NAME_POOL;
     assert!(pool.len() > neko_protocol::cats::MAX_ACTIVE && !pool.iter().any(|n| neko_protocol::cats::STARTERS.iter().any(|s| s.1 == *n)));
-    assert_eq!(PROTOCOL_VERSION, 22);
+    assert_eq!(PROTOCOL_VERSION, 23);
+}
+
+#[test]
+fn a_crew_round_trips() {
+    // A thread a Cattain's agent started says so; one the person started writes nothing.
+    let mut t = task();
+    assert!(!serde_json::to_string(&t).unwrap().contains("started_by"));
+    t.started_by = Some("cat_miso".into());
+    let json = serde_json::to_string(&t).unwrap();
+    assert!(json.contains(r#""started_by":"cat_miso""#), "{json}");
+    assert_eq!(serde_json::from_str::<Task>(&json).unwrap(), t);
+    pinned(
+        PartBody::CrewWake { thread: TaskId("task_2".into()), title: "Fix login".into(), status: "done".into(), summary: "Fixed.".into(), files: vec!["a.rs +1 -0".into()], question: None },
+        r#"{"kind":"crew_wake","thread":"task_2","title":"Fix login","status":"done","summary":"Fixed.","files":["a.rs +1 -0"]}"#,
+    );
+    pinned(
+        PartBody::CrewWake { thread: TaskId("task_2".into()), title: "Fix login".into(), status: "asked".into(), summary: "Which?".into(), files: vec![], question: Some("Which?".into()) },
+        r#"{"kind":"crew_wake","thread":"task_2","title":"Fix login","status":"asked","summary":"Which?","question":"Which?"}"#,
+    );
+    assert_eq!(PROTOCOL_VERSION, 23);
 }
